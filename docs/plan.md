@@ -1871,13 +1871,61 @@ sandbox that reaches tools needs a broker that keeps every right and every
     Qwen3.8-27B 10/10 as code, 6/10 both, 4/10 direct; Qwen3-4B 1/10 either
     way. The graph questions wait for a measured person with GitLab rights.
 
-### v7.3 — A model of your own
+### v7.3 — A model of your own, and a science lab
 
-1. **Model lab.** Teach a small model the company's words on the local GPU
+The person asked (2026-10-26, after v7.2.0) for four Code Arena IDE fixes in
+this release, and for a science lab "where mathematics and chemistry etc
+models live and work". The IDE fixes first:
+
+- Panes moved and rearranged (drag a view to another side, the panel to the
+  right or the bottom, views side by side), kept with the layout.
+- Files changed by hand show in the IDE and in Changes (done: DiskWatch, Your
+  changes).
+- Changes' right-click menu adds to the chat, explains and fixes (done; the
+  compare's "now" side too).
+- The editor's right-click menu had no background (done: Monaco's colours
+  reach it).
+
+The science lab: specialised models and the tools they need, working together
+on a problem, with what they did checkable. Every download asked first
+(models, packages); licences checked against [v7.4's list](#v74--security-vulnerabilities-known-found-and-fixed)
+of those to avoid.
+
+1. **The lab, a place of its own.** Science lab in the sidebar: a problem
+   (an equation, a proof, a molecule, a reaction, a data set) worked on by a
+   team of models and tools, as Panel's experts are, each step shown and its
+   result checked by a tool rather than taken on trust; saved as a notebook
+   (text, maths, code, structures, plots) the person opens, edits and runs
+   again, and shares like a chat.
+2. **Mathematics.** A maths model (Qwen2.5-Math or DeepSeek-Math class,
+   chosen by measurement) beside the chat's; SymPy for exact algebra and
+   calculus, Lean 4 with Mathlib to check a proof (a proof is "checked" only
+   when Lean says so), plots; LaTeX rendered in the answer and the notebook.
+   The measured question: what share of a test set of problems each gets right
+   alone and with the tools.
+3. **Chemistry.** RDKit (molecules from SMILES, properties, similarity,
+   reactions), molecules drawn in 2D and turned in 3D in the page, the
+   periodic table and units checked by a tool; a chemistry-trained model where
+   one measures better than the general one; PubChem-style lookups only from a
+   pack loaded here (no network from the sandbox).
+4. **Physics, biology and the rest, as tools.** Units and constants (Pint),
+   numerical simulation (SciPy), sequences and structures (Biopython, a
+   protein viewer); each a group of the lab's tools that a model calls from
+   code (v7.2's tools as code), so a new science is a tool pack, not a release.
+5. **Models that live there.** The lab's models are ordinary models (Admin →
+   Models, who may use them, their GPU place): a lab team names which model
+   does what, and a model kept for the lab loads when a lab problem needs it.
+6. **Measured.** Each science's test set (problems with their answers taken
+   from a source, not written from memory, as evals/README.md says) run with
+   and without the lab's tools; the release says the numbers.
+
+The model of your own:
+
+7. **Model lab.** Teach a small model the company's words on the local GPU
    (a LoRA from chosen knowledge sources, prompts and good answers), then
    compare it with the model it came from in blind battles, and give it to
    people with one click. Needs a yes: the training libraries.
-2. **Evals.** Test sets for assistants, prompts and models, run on every
+8. **Evals.** Test sets for assistants, prompts and models, run on every
    change (a new model, a new prompt), scored by rules or a judge model,
    with what got worse shown first.
 
