@@ -258,7 +258,10 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   (with a count of the files), Problems (with a count of the errors) and Chat
   switch the side bar; the one shown hides it.
   At its foot: the terminal panel, the theme (light, dark or the system's:
-  kept in the person's `settings.json`, below), Help and About.
+  kept in the person's `settings.json`, below), **Manage** (the gear:
+  Settings, Keyboard Shortcuts, Color Theme, Extensions and the Command
+  Palette one click away, and the model's tools: as Arena says, direct, as
+  code or both, kept in config.json), Help and About.
 - **moving the parts**: drag a view's icon to another place in the activity
   bar, or onto the panel's tabs to move the view into the panel (a tab
   there; drag it back onto the activity bar to return it); drag the panel's
@@ -1650,7 +1653,8 @@ it (Admin → Models → **Tools**, in Arena's chat config): **direct** leaves
 servers') only as functions for a program, named in Code Arena's note under
 "Tools as code", while the files, search, git and shell tools stay as they
 are; **both** (also without a word from Arena) sends all. `"toolMode":
-"direct" | "code" | "both"` in the config file has the last word.
+"direct" | "code" | "both"` in the config file has the last word; the IDE's
+gear (Manage) sets it, or takes it away to follow Arena again.
 
 ## Sessions and the model's window
 

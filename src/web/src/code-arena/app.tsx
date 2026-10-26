@@ -19,6 +19,7 @@ import { useCommands, type Command } from './commands'
 import { completion } from './completion'
 import { CommandPalette, recentLimit, type PaletteCommand } from './palette'
 import { MemoryPanel } from './memory-panel'
+import { ManageMenu } from './manage-menu'
 import { PlanPanel } from './plan-panel'
 import { ProblemsPanel } from './problems'
 import { ReviewPanel } from './review'
@@ -1220,6 +1221,7 @@ function Workbench({
       <div className="grid place-items-center pb-1">
         <ThemeMenu side={left ? 'right' : 'left'} align="end" />
       </div>
+      <ManageMenu state={state} edge={layout.sideAt} />
       <ActivityButton label="Help" edge={layout.sideAt} onClick={() => openHelp?.()}>
         <CircleHelp aria-hidden="true" />
       </ActivityButton>

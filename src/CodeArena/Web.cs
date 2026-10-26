@@ -641,6 +641,10 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             ["contextUsed"] = Current() is null ? _lastUsed = _rt.Agent.Estimate() : _lastUsed,
             // A newer Code Arena on the Arena (the status bar offers it), and whether this one was replaced already.
             ["update"] = _updated ?? _rt.UpdateNotice,
+            // How the model is given its tools now, whether that is the person's choice, and Arena's word for the model.
+            ["toolMode"] = _rt.ToolMode,
+            ["toolModeSet"] = _rt.Config.ToolMode is not null,
+            ["toolModeArena"] = _rt.ArenaToolMode,
             ["compactAt"] = _rt.Compaction.At,
             ["compactTarget"] = _rt.Compaction.Target,
             // Where the threshold comes from (flag, config, account, arena, default), and the Arena account's (null: not said).
@@ -1556,6 +1560,13 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             }
             toolsOn = [.. list.Select(t => t!.GetValue<string>())];
         }
+        // How the model is given its tools: direct, code or both, kept in config.json; null follows Arena's word again.
+        var toolModeSent = body.ContainsKey("toolMode");
+        if (toolModeSent && body.Str("toolMode") is { } asked && !ToolBox.Modes.Contains(asked))
+        {
+            await res.ErrorAsync(400, "invalid", $"Tools are direct, code or both (or null, to follow Arena's word for the model), not {asked}.", ct);
+            return;
+        }
         var thinking = body.ContainsKey("thinking") ? body.Str("thinking") ?? "default" : null;
         if (thinking is not null && thinking != "default" && !ModelState.Levels.Contains(thinking))
         {
@@ -1581,6 +1592,11 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         if (thinking is not null)
         {
             _rt.Model.Thinking = thinking == "default" ? null : thinking;
+        }
+        if (toolModeSent && _rt.SetToolMode(body.Str("toolMode")) is { } notKept)
+        {
+            // This run has it; only config.json could not keep it.
+            _rt.Ui.Warn(notKept);
         }
         if (toolsOn is not null)
         {

@@ -23,6 +23,10 @@ export interface CodeState {
   /** When the session compacts itself, in percent of the window (0: only when a request would not fit), and what the recent part may keep whole. */
   compactAt: number
   compactTarget: number
+  /** How the model is given its tools now (direct, code, both); whether that is the person's own choice; Arena's word for the model (null: none). */
+  toolMode?: 'direct' | 'code' | 'both'
+  toolModeSet?: boolean
+  toolModeArena?: 'direct' | 'code' | 'both' | null
   /** Where the threshold comes from: --compact-at, config.json, the person's Arena account, Arena's default, or the built-in default. */
   compactAtSource?: 'flag' | 'config' | 'account' | 'arena' | 'default'
   /** The threshold the Arena account gives (the person's own, else Arena's default); null when Arena did not say. */
@@ -276,7 +280,16 @@ export const historyQuery = {
 }
 
 /** compactAt: 0 compacts only when a request would not fit; null follows the Arena account's again. */
-export const changeSettings = (body: { mode?: Mode; model?: string; thinking?: string | null; compactAt?: number | null; compactTarget?: number; tools?: string[] }) =>
+export const changeSettings = (body: {
+  mode?: Mode
+  model?: string
+  thinking?: string | null
+  compactAt?: number | null
+  compactTarget?: number
+  tools?: string[]
+  /** How the model is given its tools, kept in config.json; null follows Arena's word for the model again. */
+  toolMode?: 'direct' | 'code' | 'both' | null
+}) =>
   api<CodeState>('/api/settings', { body })
 
 /** Where the session's threshold comes from, as the gauge and the Context dialog say it. */

@@ -798,7 +798,7 @@ describe('Code Arena, the IDE', () => {
     const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
     // The agent's changes are counted on their button.
     expect(await within(bar).findByRole('button', { name: 'Agent changes (1)' })).toBeInTheDocument()
-    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Plan', 'Memory', 'Chat', 'Terminal', 'Theme', 'Help', 'About Code Arena'])
+    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Plan', 'Memory', 'Chat', 'Terminal', 'Theme', 'Manage', 'Help', 'About Code Arena'])
     expect(within(bar).getByRole('button', { name: 'Explorer' })).toHaveAttribute('aria-pressed', 'true')
     expect(await screen.findByRole('tree', { name: 'Files' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'No file is open' })).toBeInTheDocument()
@@ -1096,6 +1096,29 @@ describe('Code Arena, the IDE', () => {
     await waitFor(() =>
       expect(now.preferences.layout).toMatchObject({ sideAt: 'right', panelAt: 'right', order: ['search', 'problems', 'explorer', 'git', 'debug', 'extensions', 'changes', 'review', 'plan', 'memory', 'chat'] }),
     )
+  })
+
+  it("has a gear for its settings, keys and theme, and the model's tools: as Arena says, or the person's own", async () => {
+    const { calls } = backend({
+      'POST /api/settings': (body) => ({ json: { ...state, toolMode: (body as { toolMode: string | null }).toolMode ?? 'code', toolModeSet: (body as { toolMode: string | null }).toolMode !== null, toolModeArena: 'code' } }),
+    })
+    renderIde()
+    const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
+    await userEvent.click(within(bar).getByRole('button', { name: 'Manage' }))
+    let menu = await screen.findByRole('menu')
+    expect(within(menu).getAllByRole('menuitem').map((i) => i.textContent?.replace(/Ctrl.*$/, '').trim())).toEqual(['Settings', 'Keyboard Shortcuts', 'Color Theme', 'Extensions', 'Command Palette'])
+    // Settings, one click away.
+    await userEvent.click(within(menu).getByRole('menuitem', { name: /^Settings/ }))
+    expect(await screen.findByRole('region', { name: 'Settings' })).toBeInTheDocument()
+
+    // The model's tools: as code, kept in config.json by code-arena.
+    await userEvent.click(within(bar).getByRole('button', { name: 'Manage' }))
+    menu = await screen.findByRole('menu')
+    expect(within(menu).getByRole('menuitemradio', { name: /As Arena says/ })).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(within(menu).getByRole('menuitemradio', { name: 'As code' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/settings')?.body).toEqual({ toolMode: 'code' }))
+    await userEvent.click(within(bar).getByRole('button', { name: 'Manage' }))
+    expect(within(await screen.findByRole('menu')).getByRole('menuitemradio', { name: 'As code' })).toHaveAttribute('aria-checked', 'true')
   })
 
   it('accepts a change from the diff tab, and all of them from the list', async () => {

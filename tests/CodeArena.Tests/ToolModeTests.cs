@@ -78,6 +78,32 @@ public sealed class ToolModeTests : IDisposable
     }
 
     [Fact]
+    public async Task The_ide_s_gear_chooses_the_tools_kept_in_config_json_and_none_follows_Arena_again()
+    {
+        ArenaSays("code", "direct");
+        _gateway.Answer = _ => Reply.Say("ok");
+        using var h = new Harness(_gateway, _mcp);
+        await using var web = await WebRun.StartAsync(h);
+        await ReadyAsync(web);
+        var state = await web.GetJsonAsync("/api/state");
+        Assert.Equal(("code", false, "code"), (state["toolMode"]!.GetValue<string>(), state["toolModeSet"]!.GetValue<bool>(), state["toolModeArena"]!.GetValue<string>()));
+
+        // Direct: this run's requests at once, and config.json keeps it for the next.
+        var chosen = JsonNode.Parse(await (await web.PostAsync("/api/settings", new JsonObject { ["toolMode"] = "direct" })).Content.ReadAsStringAsync())!;
+        Assert.Equal(("direct", true), (chosen["toolMode"]!.GetValue<string>(), chosen["toolModeSet"]!.GetValue<bool>()));
+        Assert.Equal("direct", JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(h.Paths.ConfigDir, "config.json")))!["toolMode"]!.GetValue<string>());
+        await (await web.SendAsync("hello")).RestAsync();
+        Assert.DoesNotContain("run_code", FakeGateway.ToolNames(_gateway.Requests[^1]));
+
+        // None: Arena's word for the model again, and config.json says nothing of it.
+        var back = JsonNode.Parse(await (await web.PostAsync("/api/settings", new JsonObject { ["toolMode"] = null })).Content.ReadAsStringAsync())!;
+        Assert.Equal(("code", false), (back["toolMode"]!.GetValue<string>(), back["toolModeSet"]!.GetValue<bool>()));
+        Assert.Null(JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(h.Paths.ConfigDir, "config.json")))!["toolMode"]);
+        // A word that is none is refused.
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, (await web.PostAsync("/api/settings", new JsonObject { ["toolMode"] = "sometimes" })).StatusCode);
+    }
+
+    [Fact]
     public async Task Config_json_s_tool_mode_has_the_last_word_and_without_any_word_both_go()
     {
         ArenaSays("code", "code");

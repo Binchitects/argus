@@ -50,7 +50,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   activity: {
     name: 'Activity bar',
-    text: 'The icons down the side bar\'s edge. **Explorer**, **Search**, **Source control**, **Run and Debug**, **Extensions**, **Agent changes** (with the number of files), **Problems** and **Chat** switch the side bar; pressing the one shown hides it. Drag an icon to put it elsewhere in the bar, or onto the panel\'s tabs to move its view there (drag the tab back to return it); its right-click menu has the same moves, puts the side bar on the other side (the chat goes opposite) and resets them. At its foot: **Terminal**, the theme, **Help** and **About Code Arena**.',
+    text: 'The icons down the side bar\'s edge. **Explorer**, **Search**, **Source control**, **Run and Debug**, **Extensions**, **Agent changes** (with the number of files), **Problems** and **Chat** switch the side bar; pressing the one shown hides it. Drag an icon to put it elsewhere in the bar, or onto the panel\'s tabs to move its view there (drag the tab back to return it); its right-click menu has the same moves, puts the side bar on the other side (the chat goes opposite) and resets them. At its foot: **Terminal**, the theme, **Manage** (the gear: Settings, Keyboard Shortcuts, Color Theme, Extensions, the palette, and how the model gets its tools), **Help** and **About Code Arena**.',
     manual: 'the-ide',
   },
   explorer: {

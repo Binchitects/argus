@@ -145,9 +145,7 @@ internal sealed partial class Runtime : IAsyncDisposable
     /// How the model is given its tools now (it follows the model): config.json's toolMode, else Arena's word for the model
     /// (Admin → Models → Tools, in its chat config), else both.
     /// </summary>
-    public string ToolMode => Config.ToolMode
-        ?? ((ArenaChat?["models"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(m => m.Str("name") == Model?.Info.Id)?.Str("toolMode") is { } said
-            && ToolBox.Modes.Contains(said) ? said : "both");
+    public string ToolMode => Config.ToolMode ?? ArenaToolMode ?? "both";
 
     /// <summary>Arena's word on one of its tools (title, description, icon), from its chat config; null when it has not said.</summary>
     private JsonObject? ArenaTool(string group) => (ArenaChat?["tools"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(t => t.Str("id") == group);
@@ -1319,6 +1317,35 @@ internal sealed partial class Runtime : IAsyncDisposable
     /// fit; null keeps the current) and keeps it in config.json for the next sessions; <paramref name="follow"/>: the
     /// threshold is the Arena account's again (else 80%), and out of config.json. Null when done, else why not.
     /// </summary>
+    /// <summary>
+    /// How the model is given its tools, chosen in the IDE (its gear's Tools) or config.json: direct, code or both; null
+    /// follows Arena's word for the model again. Kept in config.json as the person's own. An error's words, or null.
+    /// </summary>
+    public string? SetToolMode(string? mode)
+    {
+        if (mode is not null && !ToolBox.Modes.Contains(mode))
+        {
+            return $"Tools are direct, code or both (or none, to follow Arena's word for the model), not {mode}.";
+        }
+        Config.ToolMode = mode;
+        try
+        {
+            var file = Config.Load(Env.Paths.ConfigFile);
+            file.ToolMode = mode;
+            file.Save(Env.Paths.ConfigFile);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            return $"Changed for this run, but config.json could not be written: {e.Message}";
+        }
+        return null;
+    }
+
+    /// <summary>What Arena says of the model's tools (Admin → Models → Tools), or null when it has not said.</summary>
+    public string? ArenaToolMode =>
+        (ArenaChat?["models"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(m => m.Str("name") == Model?.Info.Id)?.Str("toolMode") is { } said
+        && ToolBox.Modes.Contains(said) ? said : null;
+
     public string? SetCompaction(int? at, int? target, bool follow = false)
     {
         if (follow)
