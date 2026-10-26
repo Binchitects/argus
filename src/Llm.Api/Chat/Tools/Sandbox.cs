@@ -81,7 +81,36 @@ public abstract class JobRunner(Func<string> dir, string name, string howToStart
         }
     }
 
-    public async Task<SandboxResult> RunAsync(string code, IReadOnlyList<SandboxFile> files, int timeoutSeconds, CancellationToken ct)
+    /// <summary>The program's calls the runner left, from the one after <paramref name="answered"/>, each answered in turn; how many are now.</summary>
+    private async Task<int> AnswerCallsAsync(string id, int answered, Func<string, JsonObject, CancellationToken, Task<JsonObject>> calls, CancellationToken ct)
+    {
+        var dir = Path.Combine(Dir, "calls", id);
+        for (var n = answered + 1; File.Exists(Path.Combine(dir, $"{n}.json")); n++)
+        {
+            JsonObject answer;
+            try
+            {
+                var asked = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(dir, $"{n}.json"), ct))!.AsObject();
+                answer = await calls(asked["name"]?.GetValue<string>() ?? "", asked["args"] as JsonObject ?? [], ct);
+            }
+            catch (JsonException)
+            {
+                answer = new JsonObject { ["ok"] = false, ["error"] = "The call was not JSON." };
+            }
+            var tmp = Path.Combine(dir, $".tmp-{n}.out.json");
+            await File.WriteAllTextAsync(tmp, answer.ToJsonString(), ct);
+            File.Move(tmp, Path.Combine(dir, $"{n}.out.json"), overwrite: true);
+            answered = n;
+        }
+        return answered;
+    }
+
+    /// <summary>
+    /// Runs a job. With <paramref name="calls"/>, its program may call the chat's tools (arena, run_code): each call the
+    /// runner relays (calls/&lt;id&gt;/&lt;n&gt;.json) is answered here, one at a time, while the job runs.
+    /// </summary>
+    public async Task<SandboxResult> RunAsync(string code, IReadOnlyList<SandboxFile> files, int timeoutSeconds, CancellationToken ct,
+        Func<string, JsonObject, CancellationToken, Task<JsonObject>>? calls = null)
     {
         var id = Guid.CreateVersion7().ToString("N");
         var draft = Path.Combine(Dir, "in", ".tmp-" + id);
@@ -93,7 +122,7 @@ public abstract class JobRunner(Func<string> dir, string name, string howToStart
             names.Add(f.Name);
         }
         await File.WriteAllTextAsync(Path.Combine(draft, "job.json"),
-            new JsonObject { ["code"] = code, ["timeout"] = timeoutSeconds, ["files"] = new JsonArray([.. names.Select(n => (JsonNode)n)]) }.ToJsonString(), ct);
+            new JsonObject { ["code"] = code, ["timeout"] = timeoutSeconds, ["files"] = new JsonArray([.. names.Select(n => (JsonNode)n)]), ["calls"] = calls is null ? null : true }.ToJsonString(), ct);
         var queued = Path.Combine(Dir, "in", id);
         Directory.Move(draft, queued);
 
@@ -101,6 +130,7 @@ public abstract class JobRunner(Func<string> dir, string name, string howToStart
         var deadline = clock.GetUtcNow() + TimeSpan.FromSeconds(timeoutSeconds) + QueueAllowance;
         try
         {
+            var answered = 0;
             while (!Directory.Exists(done))
             {
                 if (clock.GetUtcNow() > deadline)
@@ -108,7 +138,11 @@ public abstract class JobRunner(Func<string> dir, string name, string howToStart
                     TryDelete(queued);
                     throw new SandboxException("The sandbox did not answer in time: it may be busy. Try again in a minute.");
                 }
-                await Task.Delay(100, ct);
+                if (calls is not null)
+                {
+                    answered = await AnswerCallsAsync(id, answered, calls, ct);
+                }
+                await Task.Delay(calls is null ? 100 : 20, ct);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

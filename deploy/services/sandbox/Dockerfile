@@ -65,8 +65,10 @@ RUN ln -s soffice /usr/local/bin/libreoffice
 # The tools the chat calls by name (Math, Date and time, Data, Convert,
 # Diagrams): Python functions run here, like any other job.
 COPY sandbox_tools /opt/toolbox/sandbox_tools
+# The chat's tools as functions, for a program run_code runs (its calls go to the chat through the runner).
+COPY arena /opt/toolbox/arena
 RUN echo /opt/toolbox > "$(python -c 'import site; print(site.getsitepackages()[0])')/sandbox-tools.pth" \
- && python -c "import sandbox_tools"
+ && python -c "import sandbox_tools, arena"
 
 COPY runner.py /runner.py
 ENTRYPOINT ["python", "-I", "-u", "/runner.py"]

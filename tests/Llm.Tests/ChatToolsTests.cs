@@ -783,6 +783,41 @@ public sealed class ChatToolsTests(AppFixture app)
 
     [Fact]
     [Trait("Control", "OPS-02")]
+    public async Task A_program_calls_the_chats_tools_as_the_person_through_the_sandbox_and_only_what_it_prints_comes_back()
+    {
+        await using var sandbox = new FakeSandbox();
+        await using var f = NewApp(settings: new() { ["Sandbox:Dir"] = sandbox.Dir });
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        // A tool that asks first is called directly, never from code.
+        await StatusAssert.Is(HttpStatusCode.NoContent, await SetToolAsync(admin, "time", new { enabled = true, audience = "Everyone", groups = Array.Empty<Guid>(), onByDefault = false, askFirst = true }));
+        var (b, _, email) = await PersonAsync(f);
+        Assert.Contains("code", await ToolsInConfigAsync(b));
+        var id = await NewChatAsync(b, new { tools = new[] { "code", "calculator", "time" } });
+        var res = await b.PostAsync($"/api/chat/conversations/{id}/messages", new
+        {
+            content = "Sum it [call run_code {\"code\":\"# call calculate {\\\"expression\\\": \\\"6*7\\\"}\\n# call current_time {}\\n# call nothing_here {}\"}]",
+        });
+        var events = (await res.Content.ReadAsStringAsync()).Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+            .Where(l => l.StartsWith("data: ", StringComparison.Ordinal)).Select(l => JsonDocument.Parse(l[6..]).RootElement).ToList();
+        var result = Event(events, "tool_result");
+        Assert.False(result.GetProperty("isError").GetBoolean(), result.GetProperty("text").GetString());
+        var output = JsonDocument.Parse(result.GetProperty("text").GetString()!).RootElement;
+        var lines = output.GetProperty("stdout").GetString()!.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        // The functions it may call: the calculator's, not the time tool's (it asks first), nor its own.
+        Assert.Equal("functions: calculate", lines[0]);
+        Assert.Contains("\"ok\":true", lines[1], StringComparison.Ordinal);
+        Assert.Contains("42", lines[1], StringComparison.Ordinal);
+        Assert.Contains("There is no function current_time to call from code", lines[2], StringComparison.Ordinal);
+        Assert.Contains("There is no function nothing_here", lines[3], StringComparison.Ordinal);
+        Assert.Equal("calculate", output.GetProperty("calls").GetString());
+        // The calls' results stayed in the program: the model reads only what it printed.
+        Assert.Single(sandbox.Jobs, j => j["calls"]?.GetValue<bool>() == true);
+        Assert.Contains(events, e => e.GetProperty("type").GetString() == "tool_progress" && e.GetProperty("message").GetString() == "call 1: calculate");
+        Assert.Contains("run_code", FunctionsSentFor(email));
+    }
+
+    [Fact]
+    [Trait("Control", "OPS-02")]
     public async Task Python_runs_in_the_sandbox_with_the_chats_files_and_what_it_writes_comes_back()
     {
         await using var sandbox = new FakeSandbox();

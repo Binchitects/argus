@@ -320,6 +320,20 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     open or download, and a plotly chart saved as HTML opens running. Each run
     starts afresh, has one CPU and no network, and stops at its time limit (60 s
     unless changed).
+  - **Tools as code** (`run_code`): instead of calling tools one by one, each
+    result filling the model's window, the model writes a short Python program
+    in the same sandbox that calls the chat's other tools as functions
+    (`import arena`; `arena.tools.search("…")` finds them,
+    `help(arena.argus.find_symbol)` says one's parameters), loops, filters
+    and joins their results, and only what it prints comes back. For research
+    over many results: every caller of a symbol and what each does, several
+    searches joined. Each call goes through the runner's socket (the sandbox
+    has no network) to the chat, which runs it as you, as a direct call would
+    be: your rights, the safeguards on what it sends and brings back, the
+    record of tool calls. At most 100 calls a program; the tool card counts
+    them as they go and lists them. A tool that asks you first, Python
+    itself, vector pictures and plugins that run in the sandbox are not
+    callable from code. It needs **Python**'s permission.
   - **Canvas**: documents and code beside the chat, which you and the model
     both edit (see **Canvas** below).
   - **Reading files**: a long attachment goes into the question only up to a

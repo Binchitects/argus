@@ -164,13 +164,48 @@ public sealed partial class ChatService(
         var (agentModel, agentThinking) = helper is { Tools: true } ? (helper.Name, SmallModel.NoThinking(helper)) : (modelName, model?.Thinking == false ? null : thinking);
         var kit = new AgentKit(agentModel, agentThinking, email, runs, tools, instructions, progress, emit, user, conversation);
 
+        // What a program may call (run_code): this answer's functions, but those that ask the person first, the program's own,
+        // and those that hand work on (sub-agents, deep research) or need the sandbox the program holds a place in.
+        IReadOnlyList<CodeFunction> CodeFunctions() =>
+        [
+            .. runs.Where(r => r.Value.Choice.Tool.Id is not (CodeTool.ToolId or "python" or ResearchTool.ToolId or VectorTool.ToolId) && r.Value.Choice.Tool is not SandboxServerTool
+                    && r.Key is not (AgentsTool.Function or OnDemandTools.Function)
+                    && !r.Value.Choice.Setting.AskFirst && !r.Value.Run.AsksFirst(r.Key))
+                .Select(r => r.Value.Run.Functions.OfType<JsonObject>().FirstOrDefault(f => f["function"]?["name"]?.GetValue<string>() == r.Key)?["function"] is JsonObject f
+                    ? new CodeFunction(r.Key, r.Value.Choice.Tool.Id, f["description"]?.GetValue<string>(), f["parameters"] as JsonObject)
+                    : new CodeFunction(r.Key, r.Value.Choice.Tool.Id, null, null)),
+        ];
+
+        // A program's call (run_code), as the answer's own would be: the rules on what it sends and brings back, the audit.
+        async Task<ToolResult> CallFromCodeAsync(string name, JsonObject args, CancellationToken token)
+        {
+            if (!runs.TryGetValue(name, out var target))
+            {
+                return new ToolResult($"There is no tool named {name}.", IsError: true);
+            }
+            var raw = args.ToJsonString();
+            var (refusedCall, guardedArgs) = await safeguards.CheckToolAsync("tool_call", user, modelName, conversation.Id, name, raw, token);
+            var outcome = refusedCall is not null ? new ToolResult(refusedCall + " Do not try it again.", IsError: true) : await target.Run.CallAsync(name, guardedArgs == raw ? args : Arguments(guardedArgs), token);
+            if (refusedCall is null && !outcome.IsError && await safeguards.CheckToolAsync("tool_result", user, modelName, conversation.Id, name, outcome.Text, token) is var (resultRefused, resultText))
+            {
+                outcome = resultRefused is not null ? outcome with { Text = $"[{resultRefused}]", IsError = true } : outcome with { Text = resultText };
+            }
+            await AuditPluginAsync(target.Choice.Tool, name, outcome, user, false);
+            return outcome;
+        }
+
         // A tool made ready for this answer: its functions offered and its notes kept. One whose server cannot be reached says so.
         async Task StartToolAsync(ToolChoice choice)
         {
             IToolRun run;
             try
             {
-                run = await registry.StartAsync(choice, new ToolContext(user, email, conversation, progress) { Agents = (parts, token) => AgentsAsync(parts, kit, token) }, ct);
+                run = await registry.StartAsync(choice, new ToolContext(user, email, conversation, progress)
+                {
+                    Agents = (parts, token) => AgentsAsync(parts, kit, token),
+                    CodeFunctions = choice.Tool.Id == CodeTool.ToolId ? CodeFunctions : null,
+                    CallFromCode = choice.Tool.Id == CodeTool.ToolId ? CallFromCodeAsync : null,
+                }, ct);
             }
             catch (McpException ex)
             {

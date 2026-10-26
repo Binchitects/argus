@@ -19,6 +19,9 @@ The protocol, all in /jobs (owned by the app's user, 0700):
   in/<id>/files/...   the chat's files
   cancel/<id>         stop that job
   out/<id>/result.json, out/<id>/files/...
+  calls/<id>/<n>.json, <n>.out.json   a job with "calls": its program's calls of
+                      the chat's tools (arena), relayed by the runner from a socket
+                      in the job's directory; the app answers each as the person
   heartbeat           {"at": epoch seconds, "slots": n, "busy": n}; the app
                       treats the sandbox as down when it is stale
 
@@ -31,13 +34,17 @@ import os
 import queue
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
 import time
 
 JOBS = "/jobs"
-IN, RUN, OUT, CANCEL = (os.path.join(JOBS, d) for d in ("in", "run", "out", "cancel"))
+IN, RUN, OUT, CANCEL, CALLS = (os.path.join(JOBS, d) for d in ("in", "run", "out", "cancel", "calls"))
+# A program's calls of the chat's tools: at most so many a run, each waited for at most so long.
+MOST_CALLS = int(os.environ.get("SANDBOX_MOST_CALLS", "200"))
+CALL_WAIT = 120
 WORK = "/work"
 PRIVATE = "/tmp/runner"
 
@@ -135,9 +142,11 @@ def prepare():
     os.makedirs(WORK, exist_ok=True)
     os.chmod(WORK, 0o711)
     owned(JOBS, 0o700)
-    for d in (IN, OUT, CANCEL):
+    for d in (IN, OUT, CANCEL, CALLS):
         os.makedirs(d, exist_ok=True)
         owned(d, 0o700)
+    for stale in os.listdir(CALLS):
+        shutil.rmtree(os.path.join(CALLS, stale), ignore_errors=True)
     os.makedirs(RUN, exist_ok=True)
     os.chmod(RUN, 0o700)
     # A job that was running when the sandbox stopped is not run again.
@@ -164,6 +173,76 @@ def read_stream(path):
     return text, size > MAX_STREAM
 
 
+class Relay:
+    """The job's way to the chat's tools: a socket in its directory, one JSON line a call each way. Each call is left in
+    calls/<id>/<n>.json for the app, which answers it as the person in <n>.out.json; the program gets that answer. The
+    socket is the job user's only; the job has no network."""
+
+    def __init__(self, job_id, work, uid):
+        self.dir = os.path.join(CALLS, job_id)
+        os.makedirs(self.dir, exist_ok=True)
+        owned(self.dir, 0o700)
+        self.path = os.path.join(work, ".arena.sock")
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.bind(self.path)
+        os.chown(self.path, uid, uid)
+        os.chmod(self.path, 0o600)
+        self.sock.listen(4)
+        self.sock.settimeout(0.2)
+        self.count = 0
+        self.done = threading.Event()
+        self.thread = threading.Thread(target=self.serve, daemon=True)
+        self.thread.start()
+
+    def serve(self):
+        while not self.done.is_set():
+            try:
+                conn, _ = self.sock.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            threading.Thread(target=self.talk, args=(conn,), daemon=True).start()
+
+    def talk(self, conn):
+        with conn, conn.makefile("rwb") as f:
+            for line in f:
+                f.write((json.dumps(self.call(line)) + "\n").encode("utf-8"))
+                f.flush()
+
+    def call(self, line):
+        try:
+            asked = json.loads(line)
+            if not isinstance(asked, dict) or not isinstance(asked.get("name"), str):
+                return {"ok": False, "error": "A call is {\"name\": ..., \"args\": {...}}."}
+        except ValueError:
+            return {"ok": False, "error": "A call is one line of JSON."}
+        if self.count >= MOST_CALLS:
+            return {"ok": False, "error": f"A program makes at most {MOST_CALLS} calls of the chat's tools."}
+        self.count += 1
+        n = self.count
+        tmp, path, answer = (os.path.join(self.dir, x) for x in (f".tmp-{n}.json", f"{n}.json", f"{n}.out.json"))
+        with open(tmp, "w", encoding="utf-8") as out:
+            json.dump({"name": asked["name"], "args": asked.get("args") or {}}, out)
+        os.chown(tmp, OWNER_UID, OWNER_GID)
+        os.rename(tmp, path)
+        until = time.monotonic() + CALL_WAIT
+        while not os.path.exists(answer):
+            if self.done.is_set() or time.monotonic() > until:
+                return {"ok": False, "error": "The chat did not answer this call in time."}
+            time.sleep(0.02)
+        with open(answer, encoding="utf-8") as f:
+            return json.load(f)
+
+    def close(self):
+        self.done.set()
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+
 def run_job(slot, job_id):
     src = os.path.join(RUN, job_id)
     uid = FIRST_UID + slot
@@ -171,6 +250,7 @@ def run_job(slot, job_id):
     tmp_out = os.path.join(OUT, f".tmp-{job_id}")
     result = {"exit_code": None, "timed_out": False, "cancelled": False, "stdout": "", "stderr": "", "files": [], "skipped_files": []}
     started = time.monotonic()
+    relay = None
     try:
         with open(os.path.join(src, "job.json"), encoding="utf-8") as f:
             job = json.load(f)
@@ -180,7 +260,8 @@ def run_job(slot, job_id):
         os.makedirs(os.path.join(work, ".tmp"), 0o700)
         given = {}
         for name in job.get("files", []):
-            safe = safe_name(name)
+            # The chat's tools for a program that calls them (arena reads them): the one dot file a job is given.
+            safe = ".arena-tools.json" if name == ".arena-tools.json" and job.get("calls") else safe_name(name)
             if safe is None or not os.path.isfile(os.path.join(src, "files", name)):
                 continue
             target = os.path.join(work, safe)
@@ -189,6 +270,9 @@ def run_job(slot, job_id):
         for root, dirs, files in os.walk(work):
             for p in [root] + [os.path.join(root, x) for x in dirs + files]:
                 os.chown(p, uid, uid)
+        if job.get("calls"):
+            # Its program calls the chat's tools (arena): through a socket here, relayed to the app.
+            relay = Relay(job_id, work, uid)
 
         env = {
             "PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": work, "TMPDIR": os.path.join(work, ".tmp"), "LANG": "C.UTF-8",
@@ -199,6 +283,8 @@ def run_job(slot, job_id):
             "POLARS_MAX_THREADS": "1", "RAYON_NUM_THREADS": "1", "NUMBA_NUM_THREADS": "1", "OPENCV_FOR_THREADS_NUM": "1",
             "MALLOC_ARENA_MAX": "2",
         }
+        if relay is not None:
+            env["ARENA_SOCKET"] = relay.path
         out_path, err_path = os.path.join(PRIVATE, f"{slot}.out"), os.path.join(PRIVATE, f"{slot}.err")
         # The streams are files in the runner's own directory, handed to the child open.
         with open(out_path, "wb") as out, open(err_path, "wb") as err:
@@ -263,6 +349,9 @@ def run_job(slot, job_id):
         result["error"] = f"The sandbox could not run this: {type(ex).__name__}: {ex}"
         log("job", job_id, "failed:", repr(ex))
     finally:
+        if relay is not None:
+            relay.close()
+            result["calls"] = relay.count
         try:
             kill_user(uid)
         except Exception as ex:

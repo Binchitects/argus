@@ -52,10 +52,17 @@ CLIENT = textwrap.dedent(r"""
         time.sleep(2)
         open(f"/sandbox/cancel/{jid}", "w").close()
     out = f"/sandbox/out/{jid}"
+    calls, answered = f"/sandbox/calls/{jid}", 0
     for _ in range(3000):
         if os.path.isdir(out):
             break
-        time.sleep(0.1)
+        # A program's calls of the chat's tools (run_code): answered as the app would, with what was asked.
+        while os.path.exists(f"{calls}/{answered + 1}.json"):
+            answered += 1
+            asked = json.load(open(f"{calls}/{answered}.json"))
+            json.dump({"ok": True, "result": json.dumps({"called": asked["name"], "with": asked["args"]})}, open(f"{calls}/.tmp-{answered}", "w"))
+            os.rename(f"{calls}/.tmp-{answered}", f"{calls}/{answered}.out.json")
+        time.sleep(0.05 if job.get("calls") else 0.1)
     else:
         print(json.dumps({"error": "no result"})); sys.exit()
     result = json.load(open(out + "/result.json"))
@@ -65,8 +72,10 @@ CLIENT = textwrap.dedent(r"""
 """)
 
 
-def run(code, timeout=20, inputs=None, cancel_after=False):
+def run(code, timeout=20, inputs=None, cancel_after=False, calls=False):
     job = {"id": uuid.uuid4().hex, "code": textwrap.dedent(code), "timeout": timeout, "inputs": inputs or {}, "cancel_after": cancel_after}
+    if calls:
+        job["calls"] = True
     # The sandbox's own image, with python itself as the entrypoint: the client, not the runner.
     p = subprocess.run(["docker", "run", "--rm", "-i", "--network", "none", "--user", f"{UID}:{GID}", "-v", f"{VOLUME}:/sandbox",
                         "--entrypoint", "python", "arena-sandbox:latest", "-c", CLIENT], input=json.dumps(job), capture_output=True, text=True,
@@ -238,6 +247,16 @@ def main():
 
     r = run("import time\nfor i in range(100): print(i, flush=True); time.sleep(1)", timeout=60, cancel_after=True)
     rec("a stop request stops the run", r.get("cancelled") is True and r.get("duration_ms", 99999) < 10000, f"{r.get('duration_ms')} ms")
+
+    tools = json.dumps([{"name": "find_symbol", "group": "argus", "description": "Find a symbol.", "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}}])
+    r = run("""
+        import arena
+        print(arena.tools.search("symbol"))
+        print(arena.argus.find_symbol(name="DecodeFrame"))
+        """, inputs={".arena-tools.json": tools}, calls=True)
+    rec("a program calls the chat's tools through the runner, one line each way, and no other way out",
+        "arena.argus.find_symbol" in r.get("stdout", "") and "'called': 'find_symbol', 'with': {'name': 'DecodeFrame'}" in r.get("stdout", "") and r.get("calls") == 1,
+        (r.get("stdout", "") + r.get("stderr", ""))[-200:].strip())
 
     r = run("raise ValueError('bad input')")
     rec("an error comes back as its traceback, from main.py", r.get("exit_code") == 1 and 'File "main.py", line 1' in r.get("stderr", "") and "ValueError: bad input" in r.get("stderr", ""))

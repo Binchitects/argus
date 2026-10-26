@@ -155,7 +155,7 @@ public sealed class FakeSandbox : IAsyncDisposable
             await File.WriteAllBytesAsync(Path.Combine(draft, "files", "story.mp4"), [0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6F, 0x6D]);
             cutReport = $"{{\"seconds\": {shots * 3}.0, \"starts\": [], \"error\": null}}\n";
         }
-        var served = await ServeMcpAsync(code, job);
+        var served = await ServeMcpAsync(code, job) ?? await CallToolsAsync(spec, code, id, given);
         var fail = code.Contains("# fail", StringComparison.Ordinal);
         await File.WriteAllTextAsync(Path.Combine(draft, "result.json"), new JsonObject
         {
@@ -168,6 +168,43 @@ public sealed class FakeSandbox : IAsyncDisposable
         }.ToJsonString());
         Directory.Delete(job, recursive: true);
         Directory.Move(draft, Path.Combine(Dir, "out", id));
+    }
+
+    /// <summary>
+    /// A run_code program (a job with calls): each "# call NAME {json}" line is a call of the chat's tools, relayed as the
+    /// runner does (calls/&lt;id&gt;/&lt;n&gt;.json, answered in &lt;n&gt;.out.json); what it prints is each answer, a line each,
+    /// after the functions it was given (.arena-tools.json). Null for any other job.
+    /// </summary>
+    private async Task<string?> CallToolsAsync(JsonObject spec, string code, string id, List<string?> given)
+    {
+        if (spec["calls"]?.GetValue<bool>() != true)
+        {
+            return null;
+        }
+        var job = Path.Combine(Dir, "in", id);
+        var names = given.Contains(".arena-tools.json")
+            ? JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(job, "files", ".arena-tools.json")))!.AsArray().Select(d => d!["name"]!.GetValue<string>()).ToList()
+            : [];
+        var calls = Path.Combine(Dir, "calls", id);
+        Directory.CreateDirectory(calls);
+        var said = new System.Text.StringBuilder($"functions: {string.Join(",", names)}\n");
+        var n = 0;
+        foreach (var line in code.Split('\n').Where(l => l.StartsWith("# call ", StringComparison.Ordinal)))
+        {
+            var rest = line["# call ".Length..];
+            var at = rest.IndexOf(' ');
+            var (name, args) = at < 0 ? (rest, "{}") : (rest[..at], rest[(at + 1)..]);
+            n++;
+            await File.WriteAllTextAsync(Path.Combine(calls, $"{n}.json"), new JsonObject { ["name"] = name, ["args"] = JsonNode.Parse(args) }.ToJsonString());
+            var answer = Path.Combine(calls, $"{n}.out.json");
+            for (var i = 0; i < 400 && !File.Exists(answer); i++)
+            {
+                await Task.Delay(25);
+            }
+            said.Append(File.Exists(answer) ? await File.ReadAllTextAsync(answer) : "{\"ok\":false,\"error\":\"not answered\"}").Append('\n');
+        }
+        Directory.Delete(calls, recursive: true);
+        return said.ToString();
     }
 
     /// <summary>A grey PNG of this size (RGB, unfiltered), as resvg would draw one.</summary>

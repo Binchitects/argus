@@ -549,6 +549,7 @@ Python, documents and a plugin's own server run in the sandbox: no network, a re
 **Proved by**
 
 - `Llm.Tests/ChatToolsTests.Python_runs_in_the_sandbox_with_the_chats_files_and_what_it_writes_comes_back`
+- `Llm.Tests/ChatToolsTests.A_program_calls_the_chats_tools_as_the_person_through_the_sandbox_and_only_what_it_prints_comes_back`
 - `Llm.Tests/PluginTests.A_plugins_own_server_runs_in_the_sandbox_with_its_settings_one_job_a_call`
 
 **The company's part** Keep the sandbox's host patched.

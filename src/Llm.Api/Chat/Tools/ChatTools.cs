@@ -19,7 +19,16 @@ public sealed record ToolContext(AppUser User, string Email, Conversation Conver
 
     /// <summary>Why deep research cannot run here; the tool is then not offered, and this says why.</summary>
     public string? NoResearch { get; init; }
+
+    /// <summary>The functions of this answer's other tools a program may call (run_code): those that ask first are not among them.</summary>
+    public Func<IReadOnlyList<CodeFunction>>? CodeFunctions { get; init; }
+
+    /// <summary>Calls one of them for a program (run_code), as the person: the safeguards on what it sends and brings back, the audit.</summary>
+    public Func<string, JsonObject, CancellationToken, Task<ToolResult>>? CallFromCode { get; init; }
 }
+
+/// <summary>A function a program may call (run_code): its name, the tool it is of (its group in Python), what it does, its parameters.</summary>
+public sealed record CodeFunction(string Name, string Group, string? Description, JsonObject? Parameters);
 
 /// <summary>
 /// Where a long tool call says how far it is (MCP progress notifications): the chat
