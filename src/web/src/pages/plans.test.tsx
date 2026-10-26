@@ -6,7 +6,7 @@ import { fakeApi, member, renderApp } from '@/test/utils'
 const none = { check: null, files: [], checkResult: null, checkOutput: null, checkedAt: null }
 
 const plan = {
-  id: 'p1', title: 'Launch', goal: 'Live by December', conversationId: 'c1', source: 'chat', place: null, updatedAt: '', done: 0,
+  id: 'p1', title: 'Launch', goal: 'Live by December', conversationId: 'c1', source: 'chat', place: null, review: null, updatedAt: '', done: 0,
   warnings: ['Step 2 starts 2026-11-05, before step 1 it waits for is due (2026-11-10).'],
   steps: [
     { number: 1, title: 'Design', notes: null, owner: 'Ann', status: 'todo', start: '2026-11-01', due: '2026-11-10', dependsOn: [], ...none },
@@ -15,7 +15,7 @@ const plan = {
 }
 
 const codePlan = {
-  id: 'p2', title: 'Rename the parser', goal: 'parse_frame everywhere', conversationId: 'c2', source: 'code', place: 'codec', updatedAt: '', done: 1, warnings: [],
+  id: 'p2', title: 'Rename the parser', goal: 'parse_frame everywhere', conversationId: 'c2', source: 'code', place: 'codec', review: null, updatedAt: '', done: 1, warnings: [],
   steps: [
     { number: 1, title: 'Find the callers', notes: null, owner: null, status: 'done', start: null, due: null, dependsOn: [], ...none, check: 'grep -rn parse src', checkResult: 'passed', checkOutput: '0 matches' },
     { number: 2, title: 'Rename it', notes: 'four callers', owner: null, status: 'doing', start: null, due: null, dependsOn: [1], ...none, check: 'make test', files: ['src/parse.c', 'src/parse.h'], checkResult: 'failed', checkOutput: '1 failed' },
@@ -53,5 +53,12 @@ describe('plans', () => {
     expect(within(doing).queryByRole('button', { name: 'Done' })).not.toBeInTheDocument()
     expect(screen.queryByRole('textbox', { name: 'A new step' })).not.toBeInTheDocument()
     expect(calls.some((c) => c.method !== 'GET')).toBe(false)
+  })
+
+  it("says a plan Code Arena's agent proposed waits for its review there", async () => {
+    fakeApi(member, { 'GET /api/plans/p2': () => ({ json: { ...codePlan, review: 'proposed' } }) })
+    renderApp('/plans/p2')
+    expect(await screen.findByText('Proposed: waiting for its review in Code Arena')).toBeInTheDocument()
+    expect(screen.getByText(/approve it to carry it out/)).toBeInTheDocument()
   })
 })

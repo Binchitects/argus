@@ -484,7 +484,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         Context = new ToolContext
         {
             Workspace = Workspace, Ui = Ui, Shell = Config.Shell, Jobs = Jobs, Memory = Memory, SessionsDir = Env.Paths.SessionsDir, Sandbox = Sandbox,
-            BeforeWrite = Checkpoints.BeforeWrite,
+            BeforeWrite = Checkpoints.BeforeWrite, Planning = () => Permissions.Mode == Mode.Plan,
         };
         // Whatever the agent commits is by Code Arena (its author), the person staying the committer.
         var harness = CommitIdentity.From(Config);
@@ -1133,6 +1133,56 @@ internal sealed partial class Runtime : IAsyncDisposable
         Demand.Restore([], []);
         Context.PlanChanged = plan => Session.Plan(plan);
         StartSync();
+    }
+
+    /// <summary>The ways the person answers a proposed plan (the terminal's /plan, the IDE's Plan view).</summary>
+    public static readonly string[] Reviews = ["approve", "approve-ask", "change", "another", "reject"];
+
+    /// <summary>
+    /// The person's review of the plan the agent proposed in plan mode: approved (to carry out with edits running, or
+    /// asking before each), a step to change, another way, or rejected. The plan and the mode change here; what comes back
+    /// is said to the agent as the person's next message.
+    /// </summary>
+    public string ReviewPlan(string action, int? step = null, string? text = null)
+    {
+        var plan = Context.Plan;
+        if (plan.Review != WorkPlan.Proposed || plan.IsEmpty)
+        {
+            throw new PlanError("There is no plan waiting for its review: in plan mode (/mode plan) the agent proposes one.");
+        }
+        text = text?.Trim() is { Length: > 0 } t ? t : null;
+        // The person's words, as a sentence of their own.
+        var why = text is null ? "." : ": " + text + (text[^1] is '.' or '!' or '?' ? "" : ".");
+        switch (action)
+        {
+            case "approve" or "approve-ask":
+                Permissions.Mode = action == "approve" ? Mode.AutoEdit : Mode.Ask;
+                SetPlan(plan with { Review = WorkPlan.Approved });
+                return "I approve the plan. Carry it out now, step by step: mark a step doing as you start it, run its check when it is done, "
+                    + "mark it done only once the check passed, and change the plan (saying why) when something turns out otherwise."
+                    + (text is null ? "" : $"\n\n{text}");
+            case "change":
+                if (step is not { } n || plan.Steps.All(s => s.Number != n))
+                {
+                    throw new PlanError($"Say which step to change: one of {string.Join(", ", plan.Steps.Select(s => s.Number))}.");
+                }
+                return text is null
+                    ? throw new PlanError($"Say what should change in step {n}.")
+                    : $"Change step {n} of the plan ({plan.Steps.First(s => s.Number == n).Title}): {text}\n\nThen propose the plan again.";
+            case "another":
+                return "Propose another way to do this" + why + " Make the plan again with the plan tool.";
+            case "reject":
+                SetPlan(WorkPlan.None);
+                return "I reject the plan" + why + " Do not carry it out; I will say what to do next.";
+            default:
+                throw new PlanError($"A plan's review is one of {string.Join(", ", Reviews)}.");
+        }
+    }
+
+    private void SetPlan(WorkPlan plan)
+    {
+        Context.Plan = plan;
+        Context.PlanChanged?.Invoke(plan);
     }
 
     /// <summary>Switches to a saved session (/resume).</summary>

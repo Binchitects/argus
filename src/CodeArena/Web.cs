@@ -413,6 +413,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 // The agent's plan as it stands (the IDE's Plan view), and where Arena shows it.
                 var plan = _rt.Context.Plan.ToJson();
                 plan["chat"] = _rt.Sync?.Conversation;
+                plan["mode"] = _rt.Permissions.Mode.Name();
                 await res.JsonAsync(200, plan, ct);
                 return;
             case ("GET", "/api/history"):
@@ -430,6 +431,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 return;
             case ("POST", "/api/messages"):
                 await MessageAsync(req, res, ct);
+                return;
+            case ("POST", "/api/plan/review"):
+                await ReviewPlanAsync(req, res, ct);
                 return;
             case ("POST", "/api/queue"):
                 await QueueAsync(req, res, ct);
@@ -975,6 +979,38 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             ["turn"] = Volatile.Read(ref _turns),
             ["usage"] = new JsonObject { ["prompt"] = data.Prompt, ["cached"] = data.Cached, ["completion"] = data.Completion },
         };
+    }
+
+    /// <summary>
+    /// POST /api/plan/review: the person's answer to the plan the agent proposed (approve, approve-ask, change with a
+    /// step, another, reject; text: what to change, or why), said to the agent as their next message, answered as a stream.
+    /// </summary>
+    private async Task ReviewPlanAsync(HttpRequest req, HttpResponse res, CancellationToken ct)
+    {
+        var body = req.Json();
+        await SettleAsync(ct);
+        if (Busy())
+        {
+            await res.ErrorAsync(409, "busy", "An answer is being written: review the plan once it ends.", ct);
+            return;
+        }
+        string said;
+        try
+        {
+            said = _rt.ReviewPlan(body?.Str("action") ?? "", body?.Int("step"), body?.Str("text"));
+        }
+        catch (PlanError e)
+        {
+            await res.ErrorAsync(400, "plan", e.Message, ct);
+            return;
+        }
+        if (Begin("answer") is not { } job)
+        {
+            await res.ErrorAsync(409, "busy", "An answer is being written: review the plan once it ends.", ct);
+            return;
+        }
+        job.Running = Task.Run(() => RunTurnAsync(job, said));
+        await StreamAsync(job, res, ct);
     }
 
     private async Task MessageAsync(HttpRequest req, HttpResponse res, CancellationToken ct)

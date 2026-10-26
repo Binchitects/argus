@@ -808,6 +808,11 @@ internal static class LocalTools
         {
             return Task.FromResult(new ToolResult($"The plan is as it was: {e.Message}", Error: true));
         }
+        if (c.Planning?.Invoke() == true && !plan.IsEmpty)
+        {
+            // Made in plan mode: the person reviews it when the turn ends.
+            plan = plan with { Review = WorkPlan.Proposed };
+        }
         c.Plan = plan;
         c.PlanChanged?.Invoke(plan);
         return Task.FromResult(new ToolResult(plan.Text()) { Display = plan.Render(c.Ui) });

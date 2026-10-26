@@ -56,7 +56,18 @@ public sealed class PlanTests(AppFixture app)
         var circle = await CallAsync(owner, room, """@Arena fix [call plan_change {"steps": [{"number": 1, "depends_on": [2]}]}]""");
         Assert.True(circle.GetProperty("isError").GetBoolean());
         Assert.Contains("in a circle", circle.GetProperty("text").GetString(), StringComparison.Ordinal);
+        // Refused, nothing of it is kept.
+        Assert.Empty((await owner.JsonAsync(await owner.GetAsync($"/api/plans/{id}"))).GetProperty("steps")[0].GetProperty("dependsOn").EnumerateArray());
         await StatusAssert.Is(HttpStatusCode.BadRequest, await other.Http.PatchAsJsonAsync(new Uri($"/api/plans/{id}/steps/2", UriKind.Relative), new { due = "2026-10-01" }));
+
+        // A step added to the plan as it is kept, on the board and by the chat.
+        var added = await other.PostAsync($"/api/plans/{id}/steps", new { title = "Launch party" });
+        await StatusAssert.Is(HttpStatusCode.OK, added);
+        Assert.Equal([1, 2, 3], (await other.JsonAsync(added)).GetProperty("steps").EnumerateArray().Select(x => x.GetProperty("number").GetInt32()));
+        var more = await CallAsync(owner, room, """@Arena add it [call plan_change {"steps": [{"title": "Press release", "check": "Published on the site", "depends_on": [3]}]}]""");
+        Assert.False(more.GetProperty("isError").GetBoolean(), more.GetProperty("text").GetString());
+        var four = (await owner.JsonAsync(await owner.GetAsync($"/api/plans/{id}"))).GetProperty("steps")[3];
+        Assert.Equal(("Press release", "Published on the site"), (four.GetProperty("title").GetString(), four.GetProperty("check").GetString()));
     }
 
     [Fact]

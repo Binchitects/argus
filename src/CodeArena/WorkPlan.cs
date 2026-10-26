@@ -29,7 +29,15 @@ internal sealed class PlanError(string message) : Exception(message);
 /// </summary>
 internal sealed record WorkPlan(string Title, string? Goal, IReadOnlyList<WorkStep> Steps)
 {
+    /// <summary>Made in plan mode: the person reviews it (approve, change a step, another way, reject) before it is carried out.</summary>
+    public const string Proposed = "proposed";
+    /// <summary>The person approved it: the agent carries it out.</summary>
+    public const string Approved = "approved";
+
     public const int MostSteps = 200;
+
+    /// <summary>Where its review stands: <see cref="Proposed"/>, <see cref="Approved"/>, or null (made outside plan mode).</summary>
+    public string? Review { get; init; }
     public const int MostFiles = 50;
 
     public static readonly WorkPlan None = new("", null, []);
@@ -115,7 +123,7 @@ internal sealed record WorkPlan(string Title, string? Goal, IReadOnlyList<WorkSt
                 steps.Add(step);
             }
         }
-        var made = new WorkPlan(title.Length == 0 && steps.Count > 0 ? "Plan" : title, goal, steps);
+        var made = new WorkPlan(title.Length == 0 && steps.Count > 0 ? "Plan" : title, goal, steps) { Review = plan.Review };
         made.Validate();
         return made;
     }
@@ -182,7 +190,8 @@ internal sealed record WorkPlan(string Title, string? Goal, IReadOnlyList<WorkSt
         {
             return "No plan.";
         }
-        var lines = new List<string> { $"Plan: {Title}" + (Goal is null ? "" : $"\nGoal: {Goal}") };
+        var lines = new List<string> { $"Plan: {Title}" + (Review switch { Proposed => " (proposed: the person reviews it before it is carried out)", Approved => " (approved)", _ => "" })
+            + (Goal is null ? "" : $"\nGoal: {Goal}") };
         foreach (var s in Steps)
         {
             var line = $"{s.Number}. [{s.Status}] {s.Title}";
@@ -216,7 +225,7 @@ internal sealed record WorkPlan(string Title, string? Goal, IReadOnlyList<WorkSt
         {
             return ui.Dim("(no plan)");
         }
-        var lines = new List<string> { ui.Bold(Title) + ui.Dim($"  {Steps.Count(s => s.Status == WorkStep.Done)}/{Steps.Count} done") };
+        var lines = new List<string> { ui.Bold(Title) + ui.Dim($"  {Steps.Count(s => s.Status == WorkStep.Done)}/{Steps.Count} done") + (Review == Proposed ? ui.Yellow("  proposed") : "") };
         if (Goal is not null)
         {
             lines.Add(ui.Dim(Goal));
@@ -246,6 +255,7 @@ internal sealed record WorkPlan(string Title, string? Goal, IReadOnlyList<WorkSt
     {
         ["title"] = Title,
         ["goal"] = Goal,
+        ["review"] = Review,
         ["steps"] = new JsonArray([.. Steps.Select(s => (JsonNode)new JsonObject
         {
             ["number"] = s.Number, ["title"] = s.Title, ["status"] = s.Status, ["check"] = s.Check,
@@ -258,7 +268,10 @@ internal sealed record WorkPlan(string Title, string? Goal, IReadOnlyList<WorkSt
         [.. (o["steps"] as JsonArray ?? []).OfType<JsonObject>().Select(s => new WorkStep(s.Int("number") ?? 0, s.Str("title") ?? "", s.Str("status") ?? WorkStep.Todo,
             s.Str("check"), [.. (s["files"] as JsonArray ?? []).OfType<JsonValue>().Select(f => f.ToString())],
             [.. (s["dependsOn"] as JsonArray ?? []).OfType<JsonValue>().Select(d => d.TryGetValue<int>(out var x) ? x : 0)],
-            s.Str("notes"), s.Str("checkResult"), s.Str("checkOutput"), DateTimeOffset.TryParse(s.Str("checkedAt"), out var at) ? at : null))]);
+            s.Str("notes"), s.Str("checkResult"), s.Str("checkOutput"), DateTimeOffset.TryParse(s.Str("checkedAt"), out var at) ? at : null))])
+    {
+        Review = o.Str("review") is Proposed or Approved ? o.Str("review") : null,
+    };
 
     private static string Cut(string s, int max) => s.Length <= max ? s : s[..max];
 

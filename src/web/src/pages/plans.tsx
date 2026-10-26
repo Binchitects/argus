@@ -44,6 +44,8 @@ export interface Plan {
   source: 'chat' | 'code'
   /** Code Arena's: the project it works in. */
   place: string | null
+  /** Code Arena's, made in plan mode: proposed (waiting for its review there) or approved. */
+  review: 'proposed' | 'approved' | null
   updatedAt: string
   steps: PlanStep[]
   warnings: string[]
@@ -187,9 +189,15 @@ export function PlanPage() {
         }
       />
       {kept && (
-        <Alert className="mb-4" title="Code Arena's working plan">
-          Its agent keeps this plan{p.place ? ` in ${p.place}` : ''} and changes it as it works: it shows here as it goes. To change it, ask the agent.
-        </Alert>
+        p.review === 'proposed' ? (
+          <Alert className="mb-4" variant="warning" title="Proposed: waiting for its review in Code Arena">
+            The agent proposed this plan{p.place ? ` in ${p.place}` : ''} in plan mode. Review it there: approve it to carry it out, change a step, ask for another way or reject it (the Plan view, or /plan).
+          </Alert>
+        ) : (
+          <Alert className="mb-4" title="Code Arena's working plan">
+            Its agent keeps this plan{p.place ? ` in ${p.place}` : ''} and changes it as it works: it shows here as it goes. To change it, ask the agent.
+          </Alert>
+        )
       )}
       {p.warnings.length > 0 && (
         <Alert className="mb-4">

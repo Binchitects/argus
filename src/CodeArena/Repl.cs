@@ -30,7 +30,7 @@ internal sealed class Repl(Runtime rt)
         ("/mode [mode]", "show or switch the mode: ask, auto-edit, plan, yolo"),
         ("/thinking [level]", "show or set thinking: default, off, low, medium, high, xhigh"),
         ("/tools [on|off NAME]", "the tools this session has; turn a group of Arena's or a server's tools on or off in it"),
-        ("/plan", "the plan, as it stands"),
+        ("/plan", "the plan, as it stands; a proposed one: approve [ask], change N what, another why, reject why"),
         ("/agent [NAME TASK]", "your own coding agents (Claude Code, Codex, Gemini CLI: your subscriptions), or hand one a task"),
         ("/review [BASE]", "review the changes not yet committed, or this branch's over BASE (main...): findings by file and line, and a verdict"),
         ("/compact", "summarize the conversation to free the model's window"),
@@ -387,6 +387,7 @@ internal sealed class Repl(Runtime rt)
         }
         var turn = new Spend();
         rt.Turn = turn;
+        var planBefore = rt.Context.Plan;
         using var key = rt.Env.Cancel.BeginTurn();
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, key.Token);
         _turnStop = linked.Token;
@@ -432,6 +433,45 @@ internal sealed class Repl(Runtime rt)
         {
             Ui.Info(turn.Describe(Ui) + " · " + ContextUse());
         }
+        if (rt.Context.Plan.Review == WorkPlan.Proposed && !ReferenceEquals(rt.Context.Plan, planBefore))
+        {
+            // The agent proposed its plan (plan mode): the person reviews it.
+            Ui.Line();
+            Ui.Line(rt.Context.Plan.Render(Ui));
+            Ui.Info("Review the plan: /plan approve (carry it out, edits run) · /plan approve ask (asking before each change) · "
+                + "/plan change N what · /plan another why · /plan reject why · or say more.");
+        }
+    }
+
+    /// <summary>/plan approve | approve ask | change N what | another why | reject why: the person's review of a proposed plan.</summary>
+    private async Task ReviewPlanAsync(string arg, CancellationToken ct)
+    {
+        var (word, rest) = arg.IndexOf(' ') is var at and > 0 ? (arg[..at].ToLowerInvariant(), arg[(at + 1)..].Trim()) : (arg.ToLowerInvariant(), "");
+        int? step = null;
+        if (word == "approve" && rest.Equals("ask", StringComparison.OrdinalIgnoreCase))
+        {
+            (word, rest) = ("approve-ask", "");
+        }
+        else if (word == "change" && rest.Split(' ', 2) is [var n, ..] && int.TryParse(n.TrimStart('#'), out var number))
+        {
+            step = number;
+            rest = rest.Length > n.Length ? rest[(n.Length + 1)..].Trim() : "";
+        }
+        string said;
+        try
+        {
+            said = rt.ReviewPlan(word, step, rest);
+        }
+        catch (PlanError e)
+        {
+            Ui.Error(e.Message);
+            return;
+        }
+        if (word.StartsWith("approve", StringComparison.Ordinal))
+        {
+            Ui.Line($"Mode: {ModeLabel(rt.Permissions.Mode)} — {rt.Permissions.Mode.Describe()}");
+        }
+        await TurnAsync(said, ct);
     }
 
     /// <summary>/jobs: the commands with no time limit and how each is; /jobs stop N stops one.</summary>
@@ -609,6 +649,9 @@ internal sealed class Repl(Runtime rt)
                 break;
             case "/plan" when arg.Length == 0:
                 Ui.Line(rt.Context.Plan.Render(Ui));
+                break;
+            case "/plan":
+                await ReviewPlanAsync(arg, ct);
                 break;
             case "/agent":
                 await AgentCommandAsync(arg, ct);

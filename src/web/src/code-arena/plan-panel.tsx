@@ -1,8 +1,13 @@
-import { useQuery } from '@tanstack/react-query'
-import { CircleCheck, CircleDashed, CircleDot, CircleSlash, ExternalLink, FileCode } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Check, CircleCheck, CircleDashed, CircleDot, CircleSlash, ExternalLink, FileCode, PencilLine, Shuffle, X } from 'lucide-react'
+import { useState } from 'react'
+import { toast } from '@/components/ui/toaster'
+import { errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { streamChat } from '@/pages/chat/api'
 import { planQuery, type CodePlanStep } from './api'
 import { useEditor } from './editor-state'
+import { ideUrl } from './http'
 
 const marks: Record<CodePlanStep['status'], { icon: typeof CircleCheck; label: string; className: string }> = {
   done: { icon: CircleCheck, label: 'Done', className: 'text-success' },
@@ -17,8 +22,29 @@ const marks: Record<CodePlanStep['status'], { icon: typeof CircleCheck; label: s
  */
 export function PlanPanel({ arena }: { arena: string | null }) {
   const plan = useQuery(planQuery)
+  const queryClient = useQueryClient()
   const editor = useEditor()
+  // A review's words: what to change in a step (its number), another way's why, or a rejection's.
+  const [writing, setWriting] = useState<{ action: 'change' | 'another' | 'reject'; step?: number } | null>(null)
+  const [text, setText] = useState('')
+  const [sending, setSending] = useState(false)
   const p = plan.data
+  const proposed = p?.review === 'proposed'
+  /** The review goes to the agent as the person's next message: the chat shows the turn it starts. */
+  const review = async (action: string, step?: number, words?: string) => {
+    setSending(true)
+    const stop = new AbortController()
+    try {
+      await streamChat(ideUrl('/api/plan/review'), { action, step, text: words }, () => stop.abort(), stop.signal)
+    } catch (e) {
+      if (!stop.signal.aborted) toast.error(errorMessage(e))
+    } finally {
+      setSending(false)
+      setWriting(null)
+      setText('')
+      await queryClient.invalidateQueries({ queryKey: planQuery.queryKey })
+    }
+  }
   const done = p?.steps.filter((s) => s.status === 'done').length ?? 0
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -36,6 +62,53 @@ export function PlanPanel({ arena }: { arena: string | null }) {
         <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
           <p className="text-sm font-medium">{p.title}</p>
           {p.goal && <p className="mt-0.5 text-xs text-muted-foreground">{p.goal}</p>}
+          {proposed && (
+            <section aria-label="Review the plan" className="mt-2 grid gap-1.5 rounded border border-warning/40 bg-warning/8 p-2 text-xs">
+              <p>The agent proposes this plan. Approve it to carry it out, change a step, ask for another way, or reject it.</p>
+              <div className="flex flex-wrap gap-1">
+                <button type="button" disabled={sending} onClick={() => void review('approve')} className="flex h-6 items-center gap-1 rounded bg-primary px-2 text-primary-foreground disabled:opacity-50">
+                  <Check className="size-3.5" aria-hidden="true" /> Approve
+                </button>
+                <button type="button" disabled={sending} onClick={() => void review('approve-ask')} className="flex h-6 items-center gap-1 rounded border px-2 hover:bg-accent disabled:opacity-50">
+                  Approve, asking before each change
+                </button>
+                <button type="button" disabled={sending} onClick={() => setWriting({ action: 'another' })} className="flex h-6 items-center gap-1 rounded border px-2 hover:bg-accent disabled:opacity-50">
+                  <Shuffle className="size-3.5" aria-hidden="true" /> Another way
+                </button>
+                <button type="button" disabled={sending} onClick={() => setWriting({ action: 'reject' })} className="flex h-6 items-center gap-1 rounded border px-2 hover:bg-accent disabled:opacity-50">
+                  <X className="size-3.5" aria-hidden="true" /> Reject
+                </button>
+              </div>
+              {writing && (
+                <form
+                  className="grid gap-1"
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    if (writing.action === 'change' && !text.trim()) return
+                    void review(writing.action, writing.step, text.trim() || undefined)
+                  }}
+                >
+                  <textarea
+                    autoFocus
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                    rows={2}
+                    aria-label={writing.action === 'change' ? `What should change in step ${writing.step}` : writing.action === 'another' ? 'Why another way' : 'Why reject it'}
+                    placeholder={writing.action === 'change' ? `What should change in step ${writing.step}?` : writing.action === 'another' ? 'Why another way? (optional)' : 'Why? (optional)'}
+                    className="resize-none rounded border bg-background px-2 py-1 outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  />
+                  <div className="flex gap-1">
+                    <button type="submit" disabled={sending || (writing.action === 'change' && !text.trim())} className="h-6 rounded bg-primary px-2 text-primary-foreground disabled:opacity-50">
+                      Send
+                    </button>
+                    <button type="button" onClick={() => setWriting(null)} className="h-6 rounded border px-2 hover:bg-accent">
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              )}
+            </section>
+          )}
           {arena && p.chat && (
             <a href={`${arena.replace(/\/$/, '')}/chat/${p.chat}`} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
               In Arena, with its chat <ExternalLink className="size-3" aria-hidden="true" />
@@ -77,6 +150,11 @@ export function PlanPanel({ arena }: { arena: string | null }) {
                     </ul>
                   )}
                   {s.notes && <p className="ms-5 whitespace-pre-wrap text-muted-foreground">{s.notes}</p>}
+                  {proposed && (
+                    <button type="button" disabled={sending} onClick={() => setWriting({ action: 'change', step: s.number })} className="ms-5 flex w-fit items-center gap-1 text-muted-foreground hover:text-foreground disabled:opacity-50">
+                      <PencilLine className="size-3" aria-hidden="true" /> Change step {s.number}
+                    </button>
+                  )}
                 </li>
               )
             })}

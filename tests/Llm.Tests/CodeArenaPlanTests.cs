@@ -66,6 +66,11 @@ public sealed class CodeArenaPlanTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.Conflict, moved);
         Assert.Contains("Code Arena", await moved.Content.ReadAsStringAsync(), StringComparison.Ordinal);
 
+        // Proposed in plan mode: the board says it waits for its review in Code Arena.
+        var proposed = await arena.PutAsJsonAsync($"/api/code-arena/chats/{chat}/plan", new { title = "Rename the parser", review = "proposed", steps = new[] { new { number = 1, title = "Find every caller" } } });
+        Assert.Equal("proposed", (await Json(proposed)).GetProperty("review").GetString());
+        Assert.Equal("proposed", (await person.JsonAsync(await person.GetAsync($"/api/plans/{id}"))).GetProperty("review").GetString());
+
         // Sent again whole: the same plan, its steps as Code Arena has them now.
         var againRes = await arena.PutAsJsonAsync($"/api/code-arena/chats/{chat}/plan", Plan(
             new { number = 1, title = "Find every caller", status = "done" },
@@ -73,6 +78,7 @@ public sealed class CodeArenaPlanTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.OK, againRes);
         var again = await Json(againRes);
         Assert.Equal(id, again.GetProperty("id").GetGuid());
+        Assert.Equal(JsonValueKind.Null, again.GetProperty("review").ValueKind);
         Assert.Equal([1, 3], again.GetProperty("steps").EnumerateArray().Select(s => s.GetProperty("number").GetInt32()));
         var read = await Json(await arena.GetAsync($"/api/code-arena/chats/{chat}/plan"));
         Assert.Equal("failed", read.GetProperty("steps")[1].GetProperty("checkResult").GetString());

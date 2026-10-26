@@ -1271,8 +1271,9 @@ A question takes **y** (yes), **n** (no: the model is told, and asked to find
 another way) or **a** (always, for this session: every file edit; a command by
 its first two words, `npm test …`; an MCP tool by name). `plan` refuses every
 tool that changes something when the model calls it (the model is offered the
-same tools in every mode, so the start of its requests stays cached), and asks
-it for a plan to approve.
+same tools in every mode, so the start of its requests stays cached): the
+agent investigates, then proposes its plan, which you review
+([below](#reviewing-a-proposed-plan)).
 `yolo` warns when it starts: use it in a folder you can throw away. Set the
 mode with `--mode`, `/mode`, or `"mode"` in the config file.
 
@@ -1526,6 +1527,24 @@ however long the work goes on. While the session is kept in step with a chat
 in Arena, the plan goes there too, once the messages that changed it have:
 it shows under **Plans** in the web, with the session's project, as the
 agent keeps it ([chat.md](chat.md#plans)).
+
+### Reviewing a proposed plan
+
+In plan mode the agent makes its plan with the `plan` tool as a proposal: when
+the turn ends the terminal shows it, and the IDE's Plan view offers the same
+choices. Each is said to the agent as your next message:
+
+| terminal | IDE | what happens |
+|---|---|---|
+| `/plan approve` | **Approve** | the mode becomes `auto-edit` and the agent carries the plan out, step by step: each step doing as it starts, its check run when it is done, done only once the check passed |
+| `/plan approve ask` | **Approve, asking before each change** | the same, in `ask` mode |
+| `/plan change N what` | **Change step N** | the agent changes that step as you say and proposes the plan again |
+| `/plan another why` | **Another way** | the agent proposes a different plan |
+| `/plan reject why` | **Reject** | the plan goes, and the agent is told not to carry it out |
+
+Saying anything else keeps the conversation going in plan mode. On the
+Plans board in the web, a proposed plan says it waits for its review in
+Code Arena.
 
 ## Sessions and the model's window
 

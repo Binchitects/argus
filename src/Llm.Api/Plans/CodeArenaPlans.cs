@@ -13,7 +13,7 @@ public sealed record CodePlanStep(int Number, string Title, string? Status = nul
     string? Notes = null, string? CheckResult = null, string? CheckOutput = null, DateTimeOffset? CheckedAt = null);
 
 /// <summary>Code Arena's plan, whole: it alone changes it, and sends it each time it does.</summary>
-public sealed record CodePlan(string? Title, string? Goal, string? Place, IReadOnlyList<CodePlanStep> Steps);
+public sealed record CodePlan(string? Title, string? Goal, string? Place, IReadOnlyList<CodePlanStep> Steps, string? Review = null);
 
 /// <summary>
 /// Code Arena's working plan, kept with the chat its session syncs to: on the Plans board beside the chat's own plans, and
@@ -75,6 +75,7 @@ public static class CodeArenaPlans
         plan.Title = Cut(body.Title?.Trim(), 200) is { Length: > 0 } t ? t : "Plan";
         plan.Goal = Cut(body.Goal?.Trim(), 4000) is { Length: > 0 } g ? g : null;
         plan.Place = Cut(body.Place?.Trim(), 200) is { Length: > 0 } where ? where : null;
+        plan.Review = body.Review is "proposed" or "approved" ? body.Review : null;
         try
         {
             if (body.Steps.GroupBy(s => s.Number).FirstOrDefault(n => n.Count() > 1 || n.Key < 1) is { } twice)

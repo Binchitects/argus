@@ -3068,6 +3068,28 @@ describe('quick open ranking', () => {
     expect(await screen.findByRole('tab', { name: /parse\.c/ })).toBeInTheDocument()
   })
 
+  it('reviews a plan the agent proposed in plan mode: approved, or a step changed with what should change', async () => {
+    const plan: CodePlan = {
+      title: 'Fix the parser', goal: null, chat: null, review: 'proposed', mode: 'plan',
+      steps: [{ number: 1, title: 'Read parse.c', status: 'todo', check: null, files: [], dependsOn: [], notes: null, checkResult: null, checkOutput: null }],
+    }
+    const { calls } = backend({
+      'GET /api/plan': () => ({ json: plan }),
+      'POST /api/plan/review': () => ({ events: [{ type: 'text', text: 'On it.' }] }),
+    })
+    renderIde()
+    await openApp()
+    await userEvent.click(screen.getByRole('button', { name: 'Plan' }))
+    const panel = await screen.findByRole('complementary', { name: 'Plan' })
+    const review = await within(panel).findByRole('region', { name: 'Review the plan' })
+    await userEvent.click(within(panel).getByRole('button', { name: 'Change step 1' }))
+    await userEvent.type(within(review).getByRole('textbox', { name: 'What should change in step 1' }), 'read the header too')
+    await userEvent.click(within(review).getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/plan/review')?.body).toEqual({ action: 'change', step: 1, text: 'read the header too' }))
+    await userEvent.click(within(review).getByRole('button', { name: 'Approve' }))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/plan/review').at(-1)?.body).toEqual({ action: 'approve' }))
+  })
+
   it('ranks by letters in order, the file name and runs first', () => {
     const files = ['src/components/cart-item.tsx', 'src/cart.ts', 'docs/architecture.md', 'tests/cart.test.ts', 'src/app.ts']
     // In the name first (the shorter path first when they score alike), then anywhere in the path.

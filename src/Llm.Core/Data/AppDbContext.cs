@@ -263,6 +263,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Goal).HasMaxLength(4000);
             e.Property(x => x.Source).HasMaxLength(8).HasDefaultValue(Llm.Core.Plans.Plan.FromChat);
             e.Property(x => x.Place).HasMaxLength(200);
+            e.Property(x => x.Review).HasMaxLength(16);
             e.HasIndex(x => new { x.UserId, x.UpdatedAt });
             e.HasIndex(x => x.ConversationId);
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
@@ -272,6 +273,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
         builder.Entity<Plans.PlanStep>(e =>
         {
             e.ToTable("plan_steps");
+            // Made here (a version 7 Guid): a step added to a plan already kept is added, not taken for one stored.
+            e.Property(x => x.Id).ValueGeneratedNever();
             e.Property(x => x.Title).HasMaxLength(300);
             e.Property(x => x.Notes).HasMaxLength(4000);
             e.Property(x => x.Owner).HasMaxLength(120);

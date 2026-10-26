@@ -232,6 +232,10 @@ export interface CodePlan {
   goal: string | null
   steps: CodePlanStep[]
   chat: string | null
+  /** proposed: made in plan mode, waiting for the person's review; approved: being carried out. */
+  review?: 'proposed' | 'approved' | null
+  /** The session's mode now. */
+  mode?: string
 }
 
 export const planQuery = {

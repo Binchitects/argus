@@ -51,8 +51,28 @@ public static class PlanBook
             ? d : throw new PlanException($"{what} is a date as 2026-11-30, not \"{text}\".");
     }
 
-    /// <summary>Applies changes to a plan's steps: a change with a number changes (or removes) that step, without adds one; then checks it whole.</summary>
+    /// <summary>
+    /// Applies changes to a plan's steps: a change with a number changes (or removes) that step, without adds one; then
+    /// checks it whole. Tried on a copy first: refused, the plan is as it was (what tracks it saves nothing of the change).
+    /// </summary>
     public static void Apply(Plan plan, IEnumerable<StepChange> changes)
+    {
+        var all = changes.ToList();
+        ApplyTo(Copy(plan), all);
+        ApplyTo(plan, all);
+    }
+
+    private static Plan Copy(Plan p) => new()
+    {
+        Id = p.Id, UserId = p.UserId, ConversationId = p.ConversationId, Title = p.Title, Goal = p.Goal, Source = p.Source, Place = p.Place, Review = p.Review,
+        Steps = [.. p.Steps.Select(s => new PlanStep
+        {
+            Id = s.Id, PlanId = s.PlanId, Number = s.Number, Title = s.Title, Notes = s.Notes, Owner = s.Owner, Status = s.Status, Start = s.Start, Due = s.Due,
+            DependsOn = [.. s.DependsOn], Check = s.Check, Files = [.. s.Files], CheckResult = s.CheckResult, CheckOutput = s.CheckOutput, CheckedAt = s.CheckedAt,
+        })],
+    };
+
+    private static void ApplyTo(Plan plan, List<StepChange> changes)
     {
         foreach (var c in changes)
         {
@@ -198,7 +218,7 @@ public static class PlanBook
 
     public static object Shape(Plan p, DateOnly today) => new
     {
-        p.Id, p.Title, p.Goal, p.ConversationId, p.Source, p.Place, p.CreatedAt, p.UpdatedAt,
+        p.Id, p.Title, p.Goal, p.ConversationId, p.Source, p.Place, p.Review, p.CreatedAt, p.UpdatedAt,
         steps = p.Steps.OrderBy(s => s.Number).Select(s => new
         {
             s.Number, s.Title, s.Notes, s.Owner, s.Status,

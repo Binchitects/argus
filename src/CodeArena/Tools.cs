@@ -82,6 +82,8 @@ internal sealed class ToolContext
     public WorkPlan Plan { get; set; } = WorkPlan.None;
     /// <summary>Runs a sub-agent (description, prompt, which of the person's own if any) and returns its report.</summary>
     public Func<string, string, string?, CancellationToken, Task<string>>? SubAgent { get; set; }
+    /// <summary>Whether the session is in plan mode: a plan made then is proposed, for the person to review.</summary>
+    public Func<bool>? Planning { get; set; }
     /// <summary>Called when the plan changes, so the session keeps it (and Arena, with the session's chat).</summary>
     public Action<WorkPlan>? PlanChanged { get; set; }
     /// <summary>What the agent remembers (the remember tool); null: not kept here.</summary>

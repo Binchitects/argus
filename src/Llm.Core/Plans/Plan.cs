@@ -23,6 +23,8 @@ public sealed class Plan
     public string Source { get; set; } = FromChat;
     /// <summary>Code Arena's: where it works (the project's folder name).</summary>
     public string? Place { get; set; }
+    /// <summary>Code Arena's, made in plan mode: proposed (the person reviews it there) or approved; null otherwise.</summary>
+    public string? Review { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<PlanStep> Steps { get; set; } = [];
