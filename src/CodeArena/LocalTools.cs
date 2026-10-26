@@ -191,6 +191,31 @@ internal static class LocalTools
         },
     ];
 
+    /// <summary>run_steps: steps of the plan that wait for nothing not done, run at once.</summary>
+    public static ToolDef RunStepsTool() => new()
+    {
+        Name = "run_steps",
+        Kind = ToolKind.Agent,
+        Description = "Run 2 to 4 steps of the plan at once, when none waits for another not done. A step with no files (research) goes to a read-only " +
+            "sub-agent; one with files goes to a worker in a git worktree of its own (auto-edit or yolo mode): it edits there and runs only its " +
+            "step's check, and its change is merged into the project once the check passed. Each step ends done or blocked (why in its notes); " +
+            "you get each one's report.",
+        Parameters = Schema("""
+            {"type":"object","properties":{"steps":{"type":"array","items":{"type":"integer"},"description":"The steps' numbers"}},"required":["steps"]}
+            """),
+        Summary = a => "steps " + string.Join(", ", (a["steps"] as JsonArray ?? []).Select(n => n?.ToString())),
+        Run = async (a, c, ct) =>
+        {
+            if (c.RunSteps is null)
+            {
+                throw new ToolError("Steps run at once only in the main conversation.");
+            }
+            var numbers = (a["steps"] as JsonArray ?? []).OfType<JsonValue>().Select(n => n.TryGetValue<int>(out var x) ? x : 0).ToList();
+            var report = await c.RunSteps(numbers, ct);
+            return new ToolResult(report) { Display = c.Plan.Render(c.Ui) };
+        },
+    };
+
     /// <summary>The sub-agent tool: a fresh context with read-only tools, for research that would crowd the main one.</summary>
     public static ToolDef SubAgentTool() => new()
     {

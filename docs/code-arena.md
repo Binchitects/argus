@@ -1362,6 +1362,7 @@ On the person's machine:
 | `ask_agent` | hands a task to one of the person's own coding agents (below), which runs it in the working directory; what it prints comes back. Offered when one is installed; it asks first, as a command does |
 | `plan` | the working plan the person sees (`/plan`), kept in Arena with the session's chat ([below](#the-plan)) |
 | `task` | a sub-agent (below) |
+| `run_steps` | 2 to 4 steps of the plan that wait for nothing not done, at once ([below](#steps-at-once)) |
 
 **Your own subscriptions.** Claude Code (`claude`, a Claude Pro or Max
 subscription), Codex CLI (`codex`, ChatGPT Plus or Pro) and Gemini CLI
@@ -1544,6 +1545,22 @@ unattended, so the system's scheduler can carry a long task on, a turn at a
 time, for example nightly: `code-arena --plan -p "Carry on with the plan"`
 (a session that finds no plan in progress says so and goes on). Code
 Arena's plans in progress are first on the web's **Plans** page.
+
+### Steps at once
+
+Steps that wait for nothing not done can run together: the agent calls
+`run_steps` with 2 to 4 of them. A step that changes no file (research) goes
+to a read-only sub-agent, whose report becomes the step's. A step that
+changes files goes to a worker in a **git worktree of its own**, made from
+the project as it is now (what is changed and not committed included) in the
+system's temporary folder: it edits there freely and runs no command but its
+step's check (anything else is declined); its check runs there once more on
+what it left, and once it passed the change is merged into the project (`git
+apply --3way`), each file kept for `/rewind`. A step whose check failed, or
+whose change does not merge, is blocked with why in its notes, and its
+worktree is kept for you to look at (`git worktree list`). Steps that change
+files run at once only in `auto-edit` or `yolo` mode, where edits run
+without asking.
 
 The terminal shows the plan each time it changes, and `/plan` shows it as it
 stands. It is kept with the session (`--continue` and `/resume` bring it

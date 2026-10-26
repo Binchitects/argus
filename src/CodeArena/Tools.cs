@@ -80,6 +80,8 @@ internal sealed class ToolContext
     public CommandJobs? Jobs { get; init; }
     /// <summary>The agent's working plan (the plan tool).</summary>
     public WorkPlan Plan { get; set; } = WorkPlan.None;
+    /// <summary>Runs steps of the plan at once (run_steps); null where none may (a sub-agent).</summary>
+    public Func<IReadOnlyList<int>, CancellationToken, Task<string>>? RunSteps { get; set; }
     /// <summary>Runs a sub-agent (description, prompt, which of the person's own if any) and returns its report.</summary>
     public Func<string, string, string?, CancellationToken, Task<string>>? SubAgent { get; set; }
     /// <summary>Whether a step's check is a command to run before the step is done (its first word a program here); null: none is.</summary>

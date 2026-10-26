@@ -362,6 +362,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         Jobs.Ended += printer.Ended;
         var tools = LocalTools.All(Config.Shell);
         tools.Add(LocalTools.SubAgentTool());
+        tools.Add(LocalTools.RunStepsTool());
         tools.Add(Screenshots.Tool(Env.Env));
         if (ProviderAgents.Tool(Config, Env.Env) is { } agents)
         {
@@ -525,6 +526,7 @@ internal sealed partial class Runtime : IAsyncDisposable
                 (Config.ProjectMemory ? "; a lasting fact about this project, with remember_project." : "."),
         };
         Context.SubAgent = (description, prompt, agent, token) => RunSubAgentAsync(inputs, description, prompt, agent, token);
+        Context.RunSteps = RunStepsAsync;
         Agent.Critique = Config.PlanCritique ? (plan, token) => CritiqueAsync(inputs, plan, token) : null;
         Agent.Ground = GroundAsync;
         _inputs = inputs;

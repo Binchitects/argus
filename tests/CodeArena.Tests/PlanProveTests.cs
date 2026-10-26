@@ -130,3 +130,105 @@ public sealed class PlanResumeTests : IDisposable
         Assert.DoesNotContain("plan is in progress here", done.Out, StringComparison.Ordinal);
     }
 }
+
+/// <summary>Steps at once: research by read-only sub-agents, changes in worktrees of their own, merged back once their checks passed.</summary>
+public sealed class RunStepsTests : IDisposable
+{
+    private readonly FakeGateway _gateway = new();
+    private readonly FakeMcp _mcp = new();
+
+    public void Dispose()
+    {
+        _gateway.Dispose();
+        _mcp.Dispose();
+    }
+
+    private static string Git(string dir, params string[] args)
+    {
+        using var git = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("git", args) { WorkingDirectory = dir, RedirectStandardOutput = true, RedirectStandardError = true })!;
+        var output = git.StandardOutput.ReadToEnd() + git.StandardError.ReadToEnd();
+        git.WaitForExit();
+        Assert.True(git.ExitCode == 0, output);
+        return output;
+    }
+
+    /// <summary>What a conversation was started with: the main one's question, or a step's task.</summary>
+    private static string Started(JsonObject req) =>
+        FakeGateway.History(req).First(m => m["role"]!.GetValue<string>() == "user")["content"]!.ToString();
+
+    private static int Results(JsonObject req) => FakeGateway.History(req).Count(m => m["role"]!.GetValue<string>() == "tool");
+
+    [Fact]
+    public async Task Steps_that_wait_for_nothing_run_at_once_research_reports_a_change_merges_once_its_check_passed_and_a_failed_one_is_blocked_and_kept()
+    {
+        _gateway.Answer = req =>
+        {
+            var start = Started(req);
+            var results = Results(req);
+            if (start.StartsWith("Carry out step 1 ", StringComparison.Ordinal))
+            {
+                // Research: no tool that changes anything is offered.
+                Assert.DoesNotContain(req["tools"]!.AsArray(), t => t!["function"]!["name"]!.GetValue<string>() is "write_file" or "edit_file" or "run_shell");
+                return Reply.Say("The parser is in a.txt, line 1.");
+            }
+            if (start.StartsWith("Carry out step 2 ", StringComparison.Ordinal))
+            {
+                return results switch
+                {
+                    0 => Reply.Call(("write_file", """{"path":"a.txt","content":"ONE\n"}""")),
+                    1 => Reply.Call(("run_shell", """{"command":"rm -rf ."}""")),
+                    2 => Reply.Call(("run_shell", """{"command":"true"}""")),
+                    _ => Reply.Say("Changed a.txt; its check passed."),
+                };
+            }
+            if (start.StartsWith("Carry out step 3 ", StringComparison.Ordinal))
+            {
+                return results == 0 ? Reply.Call(("write_file", """{"path":"b.txt","content":"TWO\n"}""")) : Reply.Say("Changed b.txt.");
+            }
+            return start == "go" && results == 0
+                ? Reply.Call(("plan", """{"title":"Three at once","steps":[{"title":"Find the parser"},{"title":"Capitalise a","files":["a.txt"],"check":"true"},{"title":"Capitalise b","files":["b.txt"],"check":"false"}]}"""))
+                : start == "go" && results == 1 ? Reply.Call(("run_steps", """{"steps":[1,2,3]}""")) : Reply.Say("ok");
+        };
+        using var h = new Harness(_gateway, _mcp, c => c["autoCommit"] = false);
+        File.WriteAllText(Path.Combine(h.Work, "a.txt"), "one\n");
+        File.WriteAllText(Path.Combine(h.Work, "b.txt"), "two\n");
+        Git(h.Work, "init", "-q");
+        Git(h.Work, "-c", "user.name=t", "-c", "user.email=t@example.test", "add", "-A");
+        Git(h.Work, "-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-qm", "start");
+        Assert.Equal(0, await h.Run("go\n/plan\n/exit\n", "chat", "--mode", "auto-edit"));
+
+        // Step 2's change merged; step 3's check failed, so its change stays in its worktree.
+        Assert.Equal("ONE\n", File.ReadAllText(Path.Combine(h.Work, "a.txt")));
+        Assert.Equal("two\n", File.ReadAllText(Path.Combine(h.Work, "b.txt")));
+        var report = FakeGateway.History(_gateway.Requests.Last(r => Started(r) == "go" && Results(r) == 2)).Last(m => m["role"]!.GetValue<string>() == "tool")["content"]!.ToString();
+        Assert.Contains("Step 1 (Find the parser): done. Found out by a sub-agent: its report is below.\nThe parser is in a.txt, line 1.", report, StringComparison.Ordinal);
+        Assert.Contains("Step 2 (Capitalise a): done. Changed in its worktree, its check `true` passed, and merged into the project.", report, StringComparison.Ordinal);
+        Assert.Contains("Step 3 (Capitalise b): blocked. Its check `false` failed in its worktree", report, StringComparison.Ordinal);
+        // The worker ran no command but its check: rm -rf was declined.
+        var worker = _gateway.Requests.Last(r => Started(r).StartsWith("Carry out step 2 ", StringComparison.Ordinal));
+        Assert.Contains(FakeGateway.History(worker), m => m["role"]!.GetValue<string>() == "tool" && m["content"]!.ToString().Contains("needs the person's approval", StringComparison.Ordinal) || m["content"]!.ToString().Contains("declined", StringComparison.Ordinal));
+        Assert.Contains("☒ 2. Capitalise a", h.Out, StringComparison.Ordinal);
+        Assert.Contains("⊘ 3. Capitalise b", h.Out, StringComparison.Ordinal);
+        // Step 2's worktree is gone; step 3's is kept for the person.
+        var trees = Git(h.Work, "worktree", "list");
+        Assert.Contains("step-3-", trees, StringComparison.Ordinal);
+        Assert.DoesNotContain("step-2-", trees, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Steps_that_wait_for_one_not_done_or_change_files_in_ask_mode_are_not_run_at_once()
+    {
+        _gateway.Answer = req => (Started(req), Results(req)) switch
+        {
+            ("go", 0) => Reply.Call(("plan", """{"title":"T","steps":[{"title":"A","files":["a.txt"]},{"title":"B","files":["b.txt"],"depends_on":[1]},{"title":"C","files":["c.txt"]}]}""")),
+            ("go", 1) => Reply.Call(("run_steps", """{"steps":[1,2]}""")),
+            ("go", 2) => Reply.Call(("run_steps", """{"steps":[1,3]}""")),
+            _ => Reply.Say("ok"),
+        };
+        using var h = new Harness(_gateway, _mcp);
+        Assert.Equal(0, await h.Run("go\n/exit\n", "chat"));
+        var said = FakeGateway.History(_gateway.Requests[^1]).Where(m => m["role"]!.GetValue<string>() == "tool").Select(m => m["content"]!.ToString()).ToList();
+        Assert.Contains(said, s => s.Contains("Step 2 waits for step 1, which is not done", StringComparison.Ordinal));
+        Assert.Contains(said, s => s.Contains("run at once only in auto-edit or yolo mode", StringComparison.Ordinal));
+    }
+}
