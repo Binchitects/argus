@@ -79,7 +79,7 @@ public sealed partial class MemoryGarden(IServiceScopeFactory scopes, Operations
         }
         var before = clock.GetUtcNow() - Again;
         var people = await db.Users
-            .Where(u => !u.MemoryOff && (u.MemoryTidiedAt == null || u.MemoryTidiedAt < before)
+            .Where(u => !u.MemoryOff && u.ProcessingRestrictedAt == null && (u.MemoryTidiedAt == null || u.MemoryTidiedAt < before)
                 && db.Memories.Count(m => m.UserId == u.Id && m.Scope != Memory.Company && !m.Proposed) >= Fewest)
             .OrderBy(u => u.MemoryTidiedAt).Select(u => u.Id).Take(MostPeople).ToListAsync(ct);
         var changes = 0;

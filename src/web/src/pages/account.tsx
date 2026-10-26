@@ -26,7 +26,7 @@ import { ago } from '@/lib/format'
 import { useTheme, type ThemePreference } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import { setWidth, useWidth, type WidthPreference } from '@/lib/width'
-import { YourData } from './account-data'
+import { DataRights, YourData } from './account-data'
 import { AskForAccess } from './account-access'
 import { CodeHosts } from './account-code-hosts'
 import { VoiceSection } from './account-voice'
@@ -45,6 +45,7 @@ export function AccountPage() {
           <Memory />
           <Appearance />
           <YourData />
+          <DataRights />
         </div>
         <div className="grid content-start gap-6">
           <Connections />

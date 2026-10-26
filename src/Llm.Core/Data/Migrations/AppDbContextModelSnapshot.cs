@@ -3319,6 +3319,72 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("compliance_attestations", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Compliance.DataRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Certificate")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Details")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<DateTimeOffset?>("DoneAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DoneBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTimeOffset>("DueAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Outcome")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<string>("Person")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTimeOffset>("ReceivedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ReceivedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("Status", "DueAt");
+
+                    b.ToTable("data_requests", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Data.Setting", b =>
                 {
                     b.Property<string>("Key")
@@ -3614,6 +3680,9 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<decimal?>("PictureCredit")
                         .HasColumnType("numeric");
+
+                    b.Property<DateTimeOffset?>("ProcessingRestrictedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<int?>("RequestsPerMinute")
                         .HasColumnType("integer");

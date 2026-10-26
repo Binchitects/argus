@@ -21,6 +21,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, errorMessage, type Me } from '@/lib/api'
 import { ago, money, when } from '@/lib/format'
 import { maxRequests, maxTokens, parseLimit, type KeyLimits } from '@/lib/rate-limits'
+import { PersonDataRequests } from './data-requests'
 import { LegalHoldCard } from './legal-hold'
 import { CreditMeter, PersonBadges } from './person-badges'
 import { creditKinds, parseCredit, personQuery, type CreditKind, type Person, type PersonDetail, type Standing } from './people-api'
@@ -89,6 +90,7 @@ export function PersonPage() {
         <div className="grid content-start gap-6">
           <Access p={p} self={self} onSecret={setSecret} />
           <LegalHoldCard p={p} />
+          {(me.isAdmin || me.permissions?.includes('privacy.manage')) && <PersonDataRequests person={p} />}
           {!self && <Danger p={p} />}
         </div>
       </div>

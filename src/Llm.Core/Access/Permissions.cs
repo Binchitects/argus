@@ -35,6 +35,7 @@ public static class Permissions
     public const string AuditRead = "audit.read";
     public const string ComplianceRead = "compliance.read";
     public const string ComplianceManage = "compliance.manage";
+    public const string PrivacyManage = "privacy.manage";
     public const string LogsRead = "logs.read";
     public const string MonitoringRead = "monitoring.read";
     public const string AlertsManage = "alerts.manage";
@@ -172,6 +173,7 @@ public static class Permissions
         new(AuditRead, "Oversight", "Read the audit log.", true),
         new(ComplianceRead, "Oversight", "See the Compliance center: each control, its checks and the evidence.", true),
         new(ComplianceManage, "Oversight", "Attest the company's part of the controls and run access reviews.", true),
+        new(PrivacyManage, "Data", "Answer people's requests about their data: a copy, a correction, restriction, objection and erasure.", true),
         new(LogsRead, "Oversight", "Read the stack's logs and the answers' traces.", true),
         new(MonitoringRead, "Oversight", "See the monitoring dashboards, the quality reports and the stack's state.", true),
         new(AlertsManage, "Oversight", "Set alert rules and where they go.", true),
@@ -349,8 +351,8 @@ public static class BuiltInRoles
             [Permissions.MonitoringRead, Permissions.LogsRead, Permissions.AlertsManage, Permissions.ModelsRead, Permissions.ModelsLoad, Permissions.StorageManage]),
         new(SafetyOfficer, "Safety officer", "The safeguards: their rules, what they did, and people's requests to review a refusal; reads the audit log.",
             [Permissions.SafeguardsRead, Permissions.SafeguardsManage, Permissions.AuditRead]),
-        new(ComplianceOfficer, "Compliance officer", "The Compliance center: the controls and their checks, the company's part attested, access reviews and the evidence; reads the audit log.",
-            [Permissions.ComplianceRead, Permissions.ComplianceManage, Permissions.AuditRead]),
+        new(ComplianceOfficer, "Compliance officer", "The Compliance center: the controls and their checks, the company's part attested, access reviews, people's data requests and the evidence; reads the audit log.",
+            [Permissions.ComplianceRead, Permissions.ComplianceManage, Permissions.PrivacyManage, Permissions.AuditRead]),
         new(Member, "Member", "The features everyone has: held by everyone.", [.. Permissions.FeatureKeys]),
     ];
 

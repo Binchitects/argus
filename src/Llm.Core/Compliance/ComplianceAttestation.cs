@@ -58,3 +58,38 @@ public sealed class AccessReviewItem
     /// <summary>What revoking did ("the role was taken away"), or why it could not be done here ("remove them in the directory").</summary>
     public string? Outcome { get; set; }
 }
+
+/// <summary>
+/// A person's request about their data (GDPR Articles 15–22): taken in from them or by an admin for them, answered within its
+/// month. Kept with its outcome after they are gone (an erasure's certificate with it), naming them as they were.
+/// </summary>
+public sealed class DataRequest
+{
+    public const string Access = "access", Portability = "portability", Rectification = "rectification", Restriction = "restriction",
+        Objection = "objection", Erasure = "erasure";
+
+    public static readonly IReadOnlyList<string> Kinds = [Access, Portability, Rectification, Restriction, Objection, Erasure];
+
+    public const string Open = "open", Done = "done", Refused = "refused";
+
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    /// <summary>The person; null once they are erased.</summary>
+    public Guid? UserId { get; set; }
+    public required string Person { get; set; }
+    public string? Email { get; set; }
+    public required string Kind { get; set; }
+    /// <summary>What they asked, in their words.</summary>
+    public string? Details { get; set; }
+    public string Status { get; set; } = Open;
+    public DateTimeOffset ReceivedAt { get; set; } = DateTimeOffset.UtcNow;
+    /// <summary>A month after it came in (Article 12(3)).</summary>
+    public DateTimeOffset DueAt { get; set; }
+    /// <summary>"themselves", or the admin who took it in for them.</summary>
+    public required string ReceivedBy { get; set; }
+    public DateTimeOffset? DoneAt { get; set; }
+    public string? DoneBy { get; set; }
+    /// <summary>What was done, or why it was refused.</summary>
+    public string? Outcome { get; set; }
+    /// <summary>An erasure's certificate (JSON): what was erased, what is kept and why, and when backups let go of the rest.</summary>
+    public string? Certificate { get; set; }
+}

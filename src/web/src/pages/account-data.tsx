@@ -1,10 +1,18 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download } from 'lucide-react'
+import { useState } from 'react'
+import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { api } from '@/lib/api'
-import { formatValue } from '@/lib/format'
+import { Field } from '@/components/ui/field'
+import { Textarea } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { toast } from '@/components/ui/toaster'
+import { api, errorMessage } from '@/lib/api'
+import { formatValue, when } from '@/lib/format'
 import { cn } from '@/lib/utils'
+import { DATA_REQUEST_KINDS, dataRequestLabel, type DataRequest, type DataRequestKind } from './admin/compliance-api'
+import { RequestStatus } from './admin/data-requests'
 
 interface AccountData {
   retentionDays: number | null
@@ -49,6 +57,89 @@ export function YourData() {
             </a>
           </Button>
         </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+/**
+ * The person's rights over their data (GDPR 15–22): what they asked, and asking for a copy, a correction, restriction,
+ * objection or erasure. Each is answered by people within a month; they are told in their bell.
+ */
+export function DataRights() {
+  const queryClient = useQueryClient()
+  const mine = useQuery({
+    queryKey: ['account', 'data-requests'],
+    queryFn: ({ signal }) => api<{ restrictedAt: string | null; requests: DataRequest[] }>('/api/account/data-requests', { signal }),
+  })
+  const [kind, setKind] = useState<DataRequestKind>('access')
+  const [details, setDetails] = useState('')
+  const ask = useMutation({
+    mutationFn: () => api<DataRequest>('/api/account/data-requests', { method: 'POST', body: { kind, details } }),
+    onSuccess: (r) => {
+      toast.success('Sent', { description: `It is answered by ${new Date(r.dueAt).toLocaleDateString()} at the latest; you are told here and in your bell.` })
+      setDetails('')
+      void queryClient.invalidateQueries({ queryKey: ['account', 'data-requests'] })
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  const about = DATA_REQUEST_KINDS.find((k) => k.kind === kind)?.about
+  return (
+    <Card id="your-data-rights">
+      <CardHeader>
+        <CardTitle>Your data rights</CardTitle>
+        <CardDescription>Ask for a copy of your data, a correction, its use restricted or objected to, or its erasure. The people who run this answer within a month.</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        {mine.data?.restrictedAt && (
+          <Alert variant="info">Since {new Date(mine.data.restrictedAt).toLocaleDateString()}, nothing learns from your data: no memories, digests or skills from your work.</Alert>
+        )}
+        {(mine.data?.requests.length ?? 0) > 0 && (
+          <ul className="divide-y rounded-lg border text-sm">
+            {mine.data!.requests.map((r) => (
+              <li key={r.id} className="grid gap-1 p-3">
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">{dataRequestLabel(r.kind)}</span>
+                  <RequestStatus r={r} />
+                  <time dateTime={r.receivedAt} title={when(r.receivedAt)} className="text-xs text-muted-foreground">
+                    asked {new Date(r.receivedAt).toLocaleDateString()}
+                  </time>
+                </span>
+                {r.outcome && <span className="text-muted-foreground">{r.outcome}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+        <form
+          className="grid gap-3"
+          onSubmit={(e) => {
+            e.preventDefault()
+            ask.mutate()
+          }}
+        >
+          <Field label="What you ask for" hint={about}>
+            <Select value={kind} onValueChange={(v) => setKind(v as DataRequestKind)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {DATA_REQUEST_KINDS.map((k) => (
+                  <SelectItem key={k.kind} value={k.kind}>
+                    {k.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field label="Anything to add (optional)">
+            <Textarea value={details} onChange={(e) => setDetails(e.target.value)} rows={3} maxLength={4000} />
+          </Field>
+          <div>
+            <Button type="submit" variant="outline" loading={ask.isPending}>
+              Send the request
+            </Button>
+          </div>
+        </form>
       </CardContent>
     </Card>
   )

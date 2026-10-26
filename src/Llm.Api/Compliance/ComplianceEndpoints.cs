@@ -30,6 +30,16 @@ public sealed record ComplianceView(IReadOnlyDictionary<string, string> Framewor
 
 public sealed record AttestRequest(string? Note);
 
+/// <param name="UserId">For an admin taking one in: whose.</param>
+public sealed record TakeRequest(string? Kind, string? Details, Guid UserId = default);
+
+public sealed record OutcomeRequest(string? Outcome);
+
+public sealed record RestrictionRequest(bool Restricted, string? Why);
+
+public sealed record DataRequestView(Guid Id, Guid? UserId, string Person, string? Email, string Kind, string? Details, string Status, DateTimeOffset ReceivedAt,
+    DateTimeOffset DueAt, string ReceivedBy, DateTimeOffset? DoneAt, string? DoneBy, string? Outcome, bool Certificate);
+
 /// <param name="Decision">keep or revoke.</param>
 public sealed record DecideRequest(string? Decision, string? Note);
 
@@ -46,6 +56,7 @@ public static class ComplianceEndpoints
         services.AddScoped<ComplianceChecks>();
         services.Configure<ComplianceOptions>(config.GetSection("Compliance"));
         services.AddScoped<AccessReviews>();
+        services.AddScoped<DataRequests>();
         services.AddHostedService<AccessReviewSchedule>();
     }
 
@@ -75,6 +86,57 @@ public static class ComplianceEndpoints
             CancellationToken ct) => await ReviewAsync(async () => await reviews.DecideAsync(id, item, body.Decision ?? "", body.Note, (await users.GetUserAsync(p))!, ct)));
         g.MapPost("/reviews/{id:guid}/close", async (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AccessReviews reviews, CancellationToken ct) =>
             await ReviewAsync(async () => await reviews.CloseAsync(id, (await users.GetUserAsync(p))!, ct)));
+        // People's data requests: taken in, answered within a month, each step audited.
+        var privacy = app.MapGroup("/api/admin/compliance/data-requests").RequirePermissions(Permissions.ComplianceRead, Permissions.PrivacyManage);
+        privacy.MapGet("", async (AppDbContext db, CancellationToken ct) =>
+            Results.Ok(await db.DataRequests.AsNoTracking().OrderBy(r => r.Status == DataRequest.Open ? 0 : 1).ThenBy(r => r.DueAt).Select(Shaped).ToListAsync(ct)));
+        privacy.MapPost("", async (TakeRequest body, ClaimsPrincipal p, UserManager<AppUser> users, DataRequests requests, CancellationToken ct) =>
+            await users.FindByIdAsync(body.UserId.ToString()) is not { } person ? Results.NotFound()
+                : await PrivacyAsync(async () => Shape(await requests.TakeAsync(person, body.Kind ?? "", body.Details, (await users.GetUserAsync(p))!.UserName!, ct))));
+        privacy.MapPost("/{id:guid}/complete", async (Guid id, OutcomeRequest body, ClaimsPrincipal p, UserManager<AppUser> users, DataRequests requests, CancellationToken ct) =>
+            await PrivacyAsync(async () => Shape(await requests.CompleteAsync(id, body.Outcome, (await users.GetUserAsync(p))!, ct))));
+        privacy.MapPost("/{id:guid}/refuse", async (Guid id, OutcomeRequest body, ClaimsPrincipal p, UserManager<AppUser> users, DataRequests requests, CancellationToken ct) =>
+            await PrivacyAsync(async () => Shape(await requests.RefuseAsync(id, body.Outcome, (await users.GetUserAsync(p))!, ct))));
+        privacy.MapPost("/{id:guid}/restrict", async (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, DataRequests requests, CancellationToken ct) =>
+            await PrivacyAsync(async () => Shape(await requests.RestrictAsync(id, (await users.GetUserAsync(p))!, ct))));
+        privacy.MapPost("/{id:guid}/erase", async (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, DataRequests requests, CancellationToken ct) =>
+            await PrivacyAsync(async () => Shape(await requests.EraseAsync(id, (await users.GetUserAsync(p))!, ct))));
+        privacy.MapGet("/{id:guid}/certificate", async (Guid id, AppDbContext db, CancellationToken ct) =>
+            await db.DataRequests.AsNoTracking().SingleOrDefaultAsync(r => r.Id == id, ct) is { Certificate: { } c }
+                ? Results.Text(DataRequests.CertificateText(JsonSerializer.Deserialize<ErasureCertificate>(c, JsonSerializerOptions.Web)!), "text/markdown; charset=utf-8")
+                : Results.NotFound());
+        // Lifting a restriction (or restricting without a request): on the person, audited.
+        privacy.MapPut("/restriction/{userId:guid}", async (Guid userId, RestrictionRequest body, UserManager<AppUser> users, DataRequests requests, CancellationToken ct) =>
+        {
+            if (await users.FindByIdAsync(userId.ToString()) is not { } person)
+            {
+                return Results.NotFound();
+            }
+            await requests.SetRestrictedAsync(person, body.Restricted, string.IsNullOrWhiteSpace(body.Why) ? "an admin" : body.Why.Trim(), ct);
+            return Results.Ok(new { restrictedAt = person.ProcessingRestrictedAt });
+        });
+
+        // The person's own: what they asked, and asking.
+        var mine = app.MapGroup("/api/account/data-requests").PersonOnly();
+        mine.MapGet("", async (ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct) =>
+        {
+            var me = (await users.GetUserAsync(p))!;
+            return Results.Ok(new
+            {
+                restrictedAt = me.ProcessingRestrictedAt,
+                requests = await db.DataRequests.AsNoTracking().Where(r => r.UserId == me.Id).OrderByDescending(r => r.ReceivedAt).Select(Shaped).ToListAsync(ct),
+            });
+        });
+        mine.MapPost("", async (TakeRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, DataRequests requests, CancellationToken ct) =>
+        {
+            var me = (await users.GetUserAsync(p))!;
+            // A few at a time: each one is answered by people.
+            if (await db.DataRequests.CountAsync(r => r.UserId == me.Id && r.Status == DataRequest.Open, ct) >= 5)
+            {
+                return AuthEndpoints.Problem(429, "too_many", "You have five requests waiting already: they are answered within a month.");
+            }
+            return await PrivacyAsync(async () => Shape(await requests.TakeAsync(me, body.Kind ?? "", body.Details, "themselves", ct)));
+        });
         g.MapPost("/audit-chain/anchor", async (AuditWatch watch, AuditChainState state, Audit audit, CancellationToken ct) =>
         {
             var report = await watch.WalkAsync(anchor: true, ct);
@@ -84,6 +146,29 @@ public static class ComplianceEndpoints
             }
             return Results.Ok(new { report, anchor = report.Holds ? state.LastAnchor : null });
         });
+    }
+
+    private static readonly System.Linq.Expressions.Expression<Func<DataRequest, DataRequestView>> Shaped = r =>
+        new DataRequestView(r.Id, r.UserId, r.Person, r.Email, r.Kind, r.Details, r.Status, r.ReceivedAt, r.DueAt, r.ReceivedBy, r.DoneAt, r.DoneBy, r.Outcome, r.Certificate != null);
+
+    private static readonly Func<DataRequest, DataRequestView> ShapeOne = Shaped.Compile();
+
+    private static DataRequestView Shape(DataRequest r) => ShapeOne(r);
+
+    private static async Task<IResult> PrivacyAsync<T>(Func<Task<T>> work)
+    {
+        try
+        {
+            return Results.Ok(await work());
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound();
+        }
+        catch (Exception ex) when (ex is DataRequestException or PeopleException)
+        {
+            return AuthEndpoints.Problem(400, "request", ex.Message);
+        }
     }
 
     private static async Task<IResult> ReviewAsync<T>(Func<Task<T>> work)

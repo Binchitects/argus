@@ -40,6 +40,12 @@ public sealed class AppUser : IdentityUser<Guid>
     public string? DisabledReason { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastSignInAt { get; set; }
+
+    /// <summary>
+    /// Since when the processing of their data is restricted at their request (GDPR Articles 18 and 21): kept, but nothing learns
+    /// from it (no memory, digests, reflection or skills learned) until it is lifted. Null: not restricted.
+    /// </summary>
+    public DateTimeOffset? ProcessingRestrictedAt { get; set; }
     /// <summary>For directory and company sign-in people: the groups the directory or the identity provider lists, as of the last sign-in or sync.</summary>
     public List<string> DirectoryGroups { get; set; } = [];
     /// <summary>How long answers should be: "short", "thorough", or null for the model's own judgement.</summary>

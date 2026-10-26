@@ -92,6 +92,36 @@ unused accounts** disables accounts unused that long every day, never the
 first admin. The check **Privileged access was reviewed** is green while the
 last review was closed within the period.
 
+## People's data requests
+
+A person asks from **Your account → Your data** for one of: a copy of their
+data, their data to take elsewhere, a correction, their data's processing
+restricted, an objection to its processing, or their data erased; an admin with
+`privacy.manage` (the Compliance officer role has it) can take one in for them
+from Admin → Compliance. Each request is due a month after it comes in (GDPR
+Article 12(3)); the admins are told when one comes in, the person when it is
+answered, and every step is in the audit log (`privacy.*`). The check
+**People's data requests answered in time** is red while one is past its month.
+
+- **A copy, or to take elsewhere**: their export (Your account → Your data, or
+  the admin's export on their page) is everything of theirs, as JSON and
+  Markdown, with their files. The admin says what was given, and answers it.
+- **A correction**: made on their profile (Admin → People), then answered.
+- **Restriction or objection**: **Restrict** keeps their data but stops
+  everything that learns from it: their memories, chat digests, reflection and
+  skills learned from their work (in the chat and from Code Arena), until it is
+  lifted.
+- **Erasure**: **Erase everything** removes the person and everything of theirs
+  (chats with every message and digest, files, memories, skills, meetings,
+  media, apps, decks, workflows, tasks, plans, tool calls, connected accounts,
+  ...), erases their words from other people's rooms (keeping the place), takes
+  their name off others' meeting actions, and clears them out of the gateway's
+  request log (its totals stay, no longer theirs). It is refused while they are
+  on legal hold. The **certificate** lists what was erased and how much, what is
+  kept and why (the audit log's entries naming them: the law requires them and
+  the chain forbids changing them), and when the backups taken before let go of
+  the rest.
+
 ## The audit log as a chain
 
 Each entry of the audit log carries a SHA-256 hash of its fields and of the

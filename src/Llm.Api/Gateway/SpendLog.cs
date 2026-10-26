@@ -27,6 +27,23 @@ public sealed partial class SpendLog(IOptions<DashboardOptions> options, IConfig
         ApplicationName = "llm-app spend",
     }.ConnectionString;
 
+    /// <summary>
+    /// A person erased (GDPR Article 17): their requests stay in the gateway's totals, no longer theirs. Who, their address, their
+    /// session and what was sent and answered are cleared; the cost, tokens and model stay. Returns the rows changed.
+    /// </summary>
+    public async Task<int> ForgetAsync(string email, CancellationToken ct)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync(ct);
+        await using var update = new NpgsqlCommand("""
+            update "LiteLLM_SpendLogs" set "user" = 'erased', end_user = null, requester_ip_address = null, session_id = null,
+                messages = null, response = null, proxy_server_request = null, metadata = '{}'::jsonb
+            where "user" = @email
+            """, conn);
+        update.Parameters.AddWithValue("email", email);
+        return await update.ExecuteNonQueryAsync(ct);
+    }
+
     /// <summary>The call type of a picture the app booked (LiteLLM's own name for image generation).</summary>
     public const string PictureCall = "aimage_generation";
 

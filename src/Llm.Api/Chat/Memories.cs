@@ -72,7 +72,8 @@ public sealed partial class Memories(AppDbContext db, IOptionsMonitor<MemoryOpti
     public bool Enabled => options.CurrentValue.Enabled;
 
     /// <summary>Memory is on for this person: on for everyone, and not turned off by them.</summary>
-    public bool On(AppUser user) => Enabled && !user.MemoryOff;
+    /// <summary>Whether memory works for them: on for the company, not turned off by them, and their processing not restricted (GDPR 18, 21).</summary>
+    public bool On(AppUser user) => Enabled && !user.MemoryOff && user.ProcessingRestrictedAt == null;
 
     /// <summary>What this person's answers may read: their own (and their project's, when one is given) and the company's; none replaced.</summary>
     public IQueryable<Memory> Readable(Guid userId, string? project) =>

@@ -891,7 +891,9 @@ export const topics = {
       { name: 'Checks now', text: 'What the app checks on itself: passwords and lockout, sessions, admins\' second factor, the audit log, how long chats and logs are kept, the newest backup, the certificate and secrets encrypted at rest. Amber says what to change.' },
       { name: 'Controls', text: 'Each control: what meets it in Arena, the clauses it serves, its checks, where it is documented, the tests that prove it in every release, and the company\'s part.' },
       { name: 'Attest', text: 'Says the company\'s part is done, with what and where its proof is. Kept with your name and the date, and in the audit log; it counts for a year. Needs the Compliance officer role (or Owner).' },
-      { name: 'Download evidence', text: 'One zip: the controls, every check\'s result, the attestations, the settings (no secret), who holds an administrative permission, and the audit log\'s last 90 days by action. Each download is audited.' },
+      { name: 'Access reviews', text: 'Who holds privileged access and the accounts unused for long, each kept or revoked; a new one starts by itself every quarter. **Start a review** starts one now.' },
+      { name: 'Data requests', text: 'People\'s requests about their data (a copy, a correction, restriction, objection, erasure), each due within a month: answer it, restrict their processing, erase everything (with a certificate), or refuse with the reason.' },
+      { name: 'Download evidence', text: 'One zip: the controls, every check\'s result, the attestations, the settings (no secret), who holds an administrative permission, the access reviews, the audit log\'s chain and its last 90 days by action. Each download is audited.' },
     ],
     tasks: [
       { title: 'Prepare for an audit', steps: ['Fix what is red or amber under **Checks now**: each says what to change.', 'For each control, do the company\'s part and **Attest** it with where its proof is.', 'Run `python3 deploy/scripts/compliance-check.py` on the host for the checks from outside.', '**Download evidence** and give it to the auditor with your policies.'] },

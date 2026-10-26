@@ -60,6 +60,10 @@ public static class CodeArenaMemory
             return refusal!;
         }
         var ct = http.RequestAborted;
+        if (me.ProcessingRestrictedAt is not null)
+        {
+            return Results.Ok(new { text = "Nothing is learned from this person's work: they asked for its processing to be restricted.", error = true });
+        }
         var name = body.Name?.Trim().TrimStart('/') ?? "";
         var why = string.IsNullOrWhiteSpace(body.Why) ? "Worked out in a Code Arena session" : body.Why.Trim()[..Math.Min(400, body.Why.Trim().Length)];
         var keep = me.MemoryAuto;

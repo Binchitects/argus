@@ -17,6 +17,7 @@ import { api, errorMessage, type Me } from '@/lib/api'
 import { ago, when } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { attestedNow, complianceQuery, FRAMEWORKS, manualLink, reviewsQuery, reviewState, tally, type Attestation, type CheckResult, type Control, type Framework, type State } from './compliance-api'
+import { DataRequestsSection } from './data-requests'
 
 const AREAS: Record<string, string> = {
   IAM: 'People and access',
@@ -336,6 +337,8 @@ export function CompliancePage() {
           </section>
 
           <AccessReviews mayStart={mayAttest} />
+
+          <DataRequestsSection mayAnswer={!!me.isAdmin || !!me.permissions?.includes('privacy.manage')} />
 
           <section aria-labelledby="controls" className="grid gap-4">
             <div className="flex flex-wrap items-center justify-between gap-2">

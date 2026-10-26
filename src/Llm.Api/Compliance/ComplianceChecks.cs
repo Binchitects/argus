@@ -41,6 +41,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         ("certificate", "The site's certificate"),
         ("data-key", "Secrets encrypted at rest"),
         ("access-review", "Privileged access was reviewed"),
+        ("data-requests", "People's data requests answered in time"),
     ];
 
     /// <summary>A newest backup older than this is amber; one older than <see cref="BackupStale"/> is red.</summary>
@@ -65,6 +66,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
                 "certificate" => await CertificateAsync(ct),
                 "data-key" => DataKey(),
                 "access-review" => await AccessReviewAsync(ct),
+                "data-requests" => await DataRequestsAsync(ct),
                 _ => (Unknown, "No such check."),
             };
             results.Add(new CheckResult(id, title, state, detail));
@@ -254,6 +256,25 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         return open is not null
             ? (Warn, $"\"{open.Title}\" is under way, due {open.DueAt:yyyy-MM-dd}; none was closed in the last {every} days.")
             : (Warn, closed is null ? "Access was never reviewed: start a review under Admin → Compliance." : $"The last review was closed {closed:yyyy-MM-dd}, over {every} days ago.");
+    }
+
+    /// <summary>None open past its month (GDPR 12(3)); amber when one is due within a week.</summary>
+    private async Task<(string, string)> DataRequestsAsync(CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var open = await db.DataRequests.AsNoTracking().Where(r => r.Status == Llm.Core.Compliance.DataRequest.Open).OrderBy(r => r.DueAt).ToListAsync(ct);
+        var answered = await db.DataRequests.CountAsync(r => r.Status != Llm.Core.Compliance.DataRequest.Open, ct);
+        var late = open.Where(r => r.DueAt < now).ToList();
+        if (late.Count > 0)
+        {
+            return (Fail, $"{late.Count} past {(late.Count == 1 ? "its" : "their")} month: {string.Join(", ", late.Take(5).Select(r => $"{r.Person}'s {r.Kind} (due {r.DueAt:yyyy-MM-dd})"))}.");
+        }
+        var soon = open.Where(r => r.DueAt < now.AddDays(7)).ToList();
+        if (soon.Count > 0)
+        {
+            return (Warn, $"{soon.Count} due within a week, the first {soon[0].Person}'s {soon[0].Kind} by {soon[0].DueAt:yyyy-MM-dd}.");
+        }
+        return (Ok, open.Count == 0 ? $"None waiting; {answered} answered." : $"{open.Count} waiting, the first due {open[0].DueAt:yyyy-MM-dd}; {answered} answered.");
     }
 
     private (string, string) DataKey() => string.IsNullOrEmpty(auth.CurrentValue.DataKey)

@@ -95,6 +95,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<SkillChange> SkillChanges => Set<SkillChange>();
     public DbSet<Compliance.ComplianceAttestation> ComplianceAttestations => Set<Compliance.ComplianceAttestation>();
     public DbSet<Compliance.AccessReview> AccessReviews => Set<Compliance.AccessReview>();
+    public DbSet<Compliance.DataRequest> DataRequests => Set<Compliance.DataRequest>();
     public DbSet<Compliance.AccessReviewItem> AccessReviewItems => Set<Compliance.AccessReviewItem>();
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<KnowledgeSource> KnowledgeSources => Set<KnowledgeSource>();
@@ -936,6 +937,20 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(c => c.After).HasMaxLength(500);
             e.HasIndex(c => new { c.UserId, c.At });
             e.HasOne<AppUser>().WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Compliance.DataRequest>(e =>
+        {
+            e.ToTable("data_requests");
+            e.Property(r => r.Person).HasMaxLength(256);
+            e.Property(r => r.Email).HasMaxLength(256);
+            e.Property(r => r.Kind).HasMaxLength(16);
+            e.Property(r => r.Details).HasMaxLength(4000);
+            e.Property(r => r.Status).HasMaxLength(16);
+            e.Property(r => r.ReceivedBy).HasMaxLength(256);
+            e.Property(r => r.DoneBy).HasMaxLength(256);
+            e.Property(r => r.Outcome).HasMaxLength(4000);
+            e.HasIndex(r => new { r.Status, r.DueAt });
+            e.HasIndex(r => r.UserId);
         });
         builder.Entity<Compliance.AccessReview>(e =>
         {

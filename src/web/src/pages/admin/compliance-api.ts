@@ -124,3 +124,41 @@ export function reviewState(r: { closedAt: string | null; dueAt: string }, now: 
   if (r.closedAt) return 'closed'
   return new Date(r.dueAt) < now ? 'late' : 'open'
 }
+
+export type DataRequestKind = 'access' | 'portability' | 'rectification' | 'restriction' | 'objection' | 'erasure'
+
+export interface DataRequest {
+  id: string
+  /** Null once they were erased. */
+  userId: string | null
+  person: string
+  email: string | null
+  kind: DataRequestKind
+  details: string | null
+  status: 'open' | 'done' | 'refused'
+  receivedAt: string
+  dueAt: string
+  receivedBy: string
+  doneAt: string | null
+  doneBy: string | null
+  outcome: string | null
+  /** An erasure's certificate is there to download. */
+  certificate: boolean
+}
+
+/** Each kind as people ask for it, and what it means. */
+export const DATA_REQUEST_KINDS: { kind: DataRequestKind; label: string; about: string }[] = [
+  { kind: 'access', label: 'A copy of my data', about: 'Everything kept about you, and how it is used.' },
+  { kind: 'portability', label: 'My data to take elsewhere', about: 'Your data in a form another service can read.' },
+  { kind: 'rectification', label: 'A correction', about: 'Something kept about you is wrong: say what.' },
+  { kind: 'restriction', label: 'Restrict its use', about: 'Keep your data, but learn nothing more from it (memory, digests, skills).' },
+  { kind: 'objection', label: 'Object to its use', about: 'Stop using your data for what you object to: say what.' },
+  { kind: 'erasure', label: 'Erase my data', about: 'Everything of yours deleted: your account too.' },
+]
+
+export const dataRequestLabel = (kind: DataRequestKind) => DATA_REQUEST_KINDS.find((k) => k.kind === kind)?.label ?? kind
+
+export const dataRequestsQuery = {
+  queryKey: ['admin', 'compliance', 'data-requests'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<DataRequest[]>('/api/admin/compliance/data-requests', { signal }),
+}
