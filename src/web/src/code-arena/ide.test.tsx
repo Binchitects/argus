@@ -3198,6 +3198,8 @@ describe('Code Arena, the help', () => {
     await userEvent.click(within(bar).getByRole('button', { name: 'Chat' }))
     await at('Help: Sessions', 'Sessions', 'sessions-and-the-models-window')
     await userEvent.click(within(bar).getByRole('button', { name: 'Terminal' }))
+    // The panel's code loads on demand (only an earlier test's terminal had it loaded already): its ? is there once the panel is.
+    await screen.findByRole('region', { name: 'Terminal' })
     await at('Help: Terminal', 'Terminal', 'terminals')
   })
 })
