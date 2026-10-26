@@ -42,6 +42,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         ("certificate", "The site's certificate"),
         ("data-key", "Secrets encrypted at rest"),
         ("files-sealed", "People's files encrypted at rest"),
+        ("personal-data", "Personal and health data kept from cloud models"),
         ("access-review", "Privileged access was reviewed"),
         ("data-requests", "People's data requests answered in time"),
     ];
@@ -69,6 +70,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
                 "certificate" => await CertificateAsync(ct),
                 "data-key" => DataKey(),
                 "files-sealed" => await FilesSealedAsync(ct),
+                "personal-data" => await PersonalDataAsync(ct),
                 "access-review" => await AccessReviewAsync(ct),
                 "data-requests" => await DataRequestsAsync(ct),
                 _ => (Unknown, "No such check."),
@@ -312,6 +314,22 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         return left == 0
             ? (Ok, "Every file, its sound and its drawn pages are encrypted with AES-256-GCM under a key from APP_KEY.")
             : (Warn, $"{left} files stored before are not sealed yet: the sealing job seals them within the hour.");
+    }
+
+    /// <summary>A safeguard rule that masks or blocks personal data in questions before models on other providers, the health identifiers among it.</summary>
+    private async Task<(string, string)> PersonalDataAsync(CancellationToken ct)
+    {
+        var rules = await db.SafeguardRules.AsNoTracking()
+            .Where(r => r.Enabled && !r.Monitor && r.Detector == "pii" && (r.Action == "mask" || r.Action == "block")).ToListAsync(ct);
+        var toCloud = rules.Where(r => r.Stages.Contains("question") && (r.Models.Count == 0 || r.Models.Contains("@external"))).ToList();
+        if (toCloud.Count == 0)
+        {
+            return (Warn, "No safeguard rule keeps personal data from models on other providers: add \"Personal data to cloud models\" and \"Health and identity data to cloud models\" (Admin → Safeguards → Start from a template).");
+        }
+        var health = Safeguards.Pii.HealthKinds.Where(k => !toCloud.Any(r => r.Kinds.Count == 0 || r.Kinds.Contains(k))).ToList();
+        return health.Count == 0
+            ? (Ok, $"{string.Join(", ", toCloud.Select(r => $"\"{r.Name}\" ({r.Action})"))} keep personal and health data from models on other providers.")
+            : (Warn, $"{string.Join(", ", toCloud.Select(r => $"\"{r.Name}\""))} leave out {string.Join(", ", health.Select(Safeguards.Pii.Named))}: add \"Health and identity data to cloud models\".");
     }
 
     private (string, string) DataKey() => string.IsNullOrEmpty(auth.CurrentValue.DataKey)

@@ -48,21 +48,30 @@ public static class Findings
     }
 }
 
-/// <summary>Personal data in text: e-mail addresses, phone numbers, card numbers (Luhn-checked), IBANs, IP addresses, US social security numbers.</summary>
+/// <summary>
+/// Personal and health data in text: e-mail addresses, phone numbers, card numbers (Luhn-checked), IBANs, IP addresses, US social
+/// security numbers; dates of birth and medical record numbers (by the words that name them), NHS numbers and Iranian national codes
+/// (named, and their check digit right), and US Medicare numbers (MBI, by their shape).
+/// </summary>
 public static partial class Pii
 {
-    public static readonly string[] AllKinds = ["email", "phone", "card", "iban", "ip", "ssn"];
+    public static readonly string[] AllKinds = ["email", "phone", "card", "iban", "ip", "ssn", "dob", "mrn", "nhs", "national_id", "medicare"];
+
+    /// <summary>The kinds that are health data or identify a patient (HIPAA's identifiers among them).</summary>
+    public static readonly string[] HealthKinds = ["dob", "mrn", "nhs", "national_id", "medicare", "ssn"];
 
     private static readonly Dictionary<string, string> Markers = new(StringComparer.Ordinal)
     {
         ["email"] = "[email]", ["phone"] = "[phone]", ["card"] = "[card number]", ["iban"] = "[iban]", ["ip"] = "[ip address]", ["ssn"] = "[ssn]",
+        ["dob"] = "[date of birth]", ["mrn"] = "[medical record number]", ["nhs"] = "[nhs number]", ["national_id"] = "[national id]", ["medicare"] = "[medicare number]",
     };
 
     /// <summary>The kinds' names for a person: "email" is "an email address".</summary>
     public static string Named(string kind) => kind switch
     {
         "email" => "an email address", "phone" => "a phone number", "card" => "a card number", "iban" => "an IBAN", "ip" => "an IP address",
-        "ssn" => "a social security number", _ => kind,
+        "ssn" => "a social security number", "dob" => "a date of birth", "mrn" => "a medical record number", "nhs" => "an NHS number",
+        "national_id" => "a national code", "medicare" => "a Medicare number", _ => kind,
     };
 
     public static List<Finding> Find(string text, IReadOnlyCollection<string>? kinds = null)
@@ -86,6 +95,26 @@ public static partial class Pii
             if (On("ssn"))
             {
                 found.AddRange(Ssn().Matches(text).Select(m => new Finding("ssn", m.Index, m.Length)));
+            }
+            if (On("dob"))
+            {
+                found.AddRange(Birth().Matches(text).Select(m => new Finding("dob", m.Groups["v"].Index, m.Groups["v"].Length)));
+            }
+            if (On("mrn"))
+            {
+                found.AddRange(Record().Matches(text).Select(m => new Finding("mrn", m.Groups["v"].Index, m.Groups["v"].Length)));
+            }
+            if (On("nhs"))
+            {
+                found.AddRange(Nhs().Matches(text).Where(m => NhsValid(Digits(m.Groups["v"].Value))).Select(m => new Finding("nhs", m.Groups["v"].Index, m.Groups["v"].Length)));
+            }
+            if (On("national_id"))
+            {
+                found.AddRange(NationalCode().Matches(text).Where(m => IranianCodeValid(Digits(m.Groups["v"].Value))).Select(m => new Finding("national_id", m.Groups["v"].Index, m.Groups["v"].Length)));
+            }
+            if (On("medicare"))
+            {
+                found.AddRange(Medicare().Matches(text).Select(m => new Finding("medicare", m.Index, m.Length)));
             }
             if (On("ip"))
             {
@@ -117,6 +146,41 @@ public static partial class Pii
 
     public static string Mask(string text, IReadOnlyCollection<string>? kinds) => Findings.Mask(text, Find(text, kinds), f => Markers.GetValueOrDefault(f.Kind, "[personal data]"));
 
+    private static string Digits(string s) => new([.. s.Where(char.IsAsciiDigit)]);
+
+    /// <summary>An NHS number's tenth digit: 11 less the weighted sum (10 down to 2) of the nine before, mod 11; 10 is never one.</summary>
+    internal static bool NhsValid(string d)
+    {
+        if (d.Length != 10)
+        {
+            return false;
+        }
+        var sum = 0;
+        for (var i = 0; i < 9; i++)
+        {
+            sum += (d[i] - '0') * (10 - i);
+        }
+        var check = 11 - sum % 11;
+        check = check == 11 ? 0 : check;
+        return check != 10 && check == d[9] - '0';
+    }
+
+    /// <summary>An Iranian national code's last digit: the weighted sum (10 down to 2) of the nine before, mod 11, under 2 itself, else 11 less it.</summary>
+    internal static bool IranianCodeValid(string d)
+    {
+        if (d.Length != 10 || d.Distinct().Count() == 1)
+        {
+            return false;
+        }
+        var sum = 0;
+        for (var i = 0; i < 9; i++)
+        {
+            sum += (d[i] - '0') * (10 - i);
+        }
+        var r = sum % 11;
+        return d[9] - '0' == (r < 2 ? r : 11 - r);
+    }
+
     private static bool Luhn(string digits)
     {
         if (digits.Length is < 13 or > 19)
@@ -144,10 +208,28 @@ public static partial class Pii
     [GeneratedRegex(@"\b(?!000|666|9\d\d)\d{3}-(?!00)\d{2}-(?!0000)\d{4}\b", RegexOptions.CultureInvariant, 1000)]
     private static partial Regex Ssn();
 
+    private const string Date = @"(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[./-]\d{1,2}[./-]\d{2,4}|\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{4}|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})";
+
+    [GeneratedRegex(@"\b(?:dob|d\.o\.b\.?|date of birth|birth ?date|born(?: on)?|geboren(?: am)?|né(?:e)? le|تاریخ تولد)(?:\s+(?:is|was|of))?\s*[:\-=]?\s*(?<v>" + Date + ")", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase, 1000)]
+    private static partial Regex Birth();
+
+    [GeneratedRegex(@"\b(?:mrn|medical record(?: number| no\.?| #)?|patient (?:id|number|no\.?))(?:\s+(?:is|was|of))?\s*[:#=]?\s*(?<v>(?=[A-Z-]*\d)[A-Z0-9][A-Z0-9-]{4,14})\b", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase, 1000)]
+    private static partial Regex Record();
+
+    [GeneratedRegex(@"\bNHS(?: number| no\.?| #)?(?:\s+(?:is|was|of))?\s*[:#=]?\s*(?<v>\d{3}[ -]?\d{3}[ -]?\d{4})\b", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase, 1000)]
+    private static partial Regex Nhs();
+
+    [GeneratedRegex(@"(?:\bnational (?:code|id|number)|\bmelli code|کد ?ملی|شماره ملی)(?:\s+(?:is|was|of))?\s*[:#=]?\s*(?<v>\d{3}-?\d{6}-?\d)\b", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase, 1000)]
+    private static partial Regex NationalCode();
+
+    /// <summary>A Medicare Beneficiary Identifier: 11 characters in its fixed shape (no S, L, O, I, B or Z), dashes allowed after the 4th and 7th.</summary>
+    [GeneratedRegex(@"\b[1-9][AC-HJKMNP-RT-Y][AC-HJKMNP-RT-Y0-9]\d-?[AC-HJKMNP-RT-Y][AC-HJKMNP-RT-Y0-9]\d-?[AC-HJKMNP-RT-Y]{2}\d{2}\b", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex Medicare();
+
     [GeneratedRegex(@"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])", RegexOptions.CultureInvariant, 1000)]
     private static partial Regex Ip();
 
-    [GeneratedRegex(@"(?<!\w)(?:\+\d{1,3}[ -]?)?(?:\(\d{2,4}\)[ -]?)?\d{3,4}[ -]\d{3,4}(?:[ -]\d{2,4})?(?!\w)", RegexOptions.CultureInvariant, 1000)]
+    [GeneratedRegex(@"(?<!\w)(?:\+\d{1,3}[ -]?)?(?:\(\d{2,4}\)[ -]?)?\d{3,5}[ -]\d{3,6}(?:[ -]\d{2,4})?(?!\w)", RegexOptions.CultureInvariant, 1000)]
     private static partial Regex Phone();
 }
 

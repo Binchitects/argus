@@ -426,6 +426,37 @@ controls:
     checks: [app:records-retention, app:log-retention]
     operator: Decide the periods, write them in the retention policy, and keep backups as long as it says.
 
+  - id: DAT-08
+    title: Personal and health data kept in bounds
+    meets: >-
+      The safeguards find e-mail addresses, phone, card, IBAN and social
+      security numbers, and health and identity data: dates of birth and
+      medical record numbers by the words that name them, NHS numbers and
+      Iranian national codes with their check digits right, and US Medicare
+      numbers by their shape; a rule warns, masks or blocks them before a
+      question reaches a model, stricter for models on other providers (the
+      template "Health and identity data to cloud models" blocks them there).
+      The app's log lines carry no personal data: it is masked before a line
+      is written (IP addresses stay, as security needs them); answers' traces
+      hold times, tokens and tool names only, and the gateway's request log no
+      prompts.
+    frameworks:
+      iso27001: [A.5.34, A.8.11, A.8.12]
+      soc2: [C1.1, CC6.7, P4.1]
+      hipaa: [164.502(b), 164.514(b)]
+      gdpr: [Art.5(1)(c), Art.9, Art.25, Art.32(1)(a)]
+    docs: [compliance/README.md#personal-and-health-data]
+    tests:
+      - Llm.Tests/PersonalDataTests.Health_and_identity_data_are_found_by_what_names_them_and_their_check_digits
+      - Llm.Tests/PersonalDataTests.A_wrong_check_digit_or_a_number_nothing_names_is_not_taken_for_one
+      - Llm.Tests/PersonalDataTests.The_apps_log_lines_carry_no_personal_data_but_keep_the_addresses_security_needs
+      - Llm.Tests/PersonalDataTests.The_compliance_check_wants_a_rule_keeping_health_data_from_cloud_models_and_the_templates_give_one
+    checks: [app:personal-data]
+    operator: >-
+      Decide which models may see which data (a HIPAA BAA, a GDPR processing
+      agreement with any provider outside the company), add the templates, and
+      add the company's own identifiers as words or patterns.
+
   - id: NET-01
     title: Encrypted in transit, one way in
     meets: >-

@@ -61,6 +61,10 @@ public static class SafeguardEndpoints
         Template("Secrets in answers", "A secret the model repeats (from a file or a tool) is masked in its answer.", "secrets", ["answer", "tool_result"], "mask"),
         Template("Personal data to cloud models", "Personal data reaches models on other providers masked; the company's own models see it.", "pii", ["question", "api"], "mask", models: ["@external"]),
         Template("Personal data in answers", "E-mail addresses, phone and card numbers in answers masked.", "pii", ["answer"], "mask"),
+        Template("Health and identity data to cloud models", "Dates of birth, medical record, NHS, national, social security and Medicare numbers never reach models on other providers: the question is refused (HIPAA, the GDPR's special categories).",
+            "pii", ["question", "file", "api"], "block", models: ["@external"], kinds: Pii.HealthKinds),
+        Template("Health and identity data masked", "The same identifiers reach the company's own models masked, and are masked in answers.", "pii", ["question", "file", "api", "answer", "tool_result"], "mask",
+            kinds: Pii.HealthKinds),
         Template("Classification labels", "Documents marked confidential do not go to models on other providers.", "words", ["question", "file", "api"], "block", models: ["@external"],
             patterns: "CONFIDENTIAL; STRICTLY CONFIDENTIAL; INTERNAL ONLY; TOP SECRET; re:\\bRESTRICTED\\b"),
         Template("Harmful requests", "The model reads each message and refuses one asking for harm.", "topic", ["question", "api"], "block", strike: true, categories: [.. Safeguards.Categories.Keys]),
@@ -75,8 +79,8 @@ public static class SafeguardEndpoints
     ];
 
     private static object Template(string name, string description, string detector, string[] stages, string action, string[]? models = null, string? patterns = null,
-        bool strike = false, string[]? categories = null, string? topics = null, bool modelCheck = false, string[]? domains = null, string[]? extensions = null) =>
-        new { name, description, detector, stages, action, models = models ?? [], patterns, strike, categories = categories ?? [], topics, modelCheck, domains = domains ?? [], extensions = extensions ?? [] };
+        bool strike = false, string[]? categories = null, string? topics = null, bool modelCheck = false, string[]? domains = null, string[]? extensions = null, string[]? kinds = null) =>
+        new { name, description, detector, stages, action, models = models ?? [], patterns, strike, categories = categories ?? [], topics, modelCheck, domains = domains ?? [], extensions = extensions ?? [], kinds = kinds ?? [] };
 
     private static object Shape(SafeguardRule r) => new
     {

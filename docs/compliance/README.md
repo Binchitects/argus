@@ -137,6 +137,37 @@ Chat messages and memories are not sealed one by one (search reads them in the
 database): the host's disk encryption covers them, as it covers the database's
 own files.
 
+## Personal and health data
+
+The safeguards (Admin → Safeguards) find, in what people send, attach, what
+tools bring back and what the model answers: e-mail addresses, phone, card
+(Luhn-checked), IBAN, IP addresses and US social security numbers, and health
+and identity data:
+
+| Kind | Found by |
+|---|---|
+| `dob` date of birth | a date after "DOB", "date of birth", "born (on)" (and German, French and Persian) |
+| `mrn` medical record number | a number after "MRN", "medical record (number)", "patient ID" |
+| `nhs` NHS number | ten digits after "NHS (number)", their check digit right (mod 11) |
+| `national_id` national code | ten digits after "national code/ID", "کد ملی", their check digit right |
+| `medicare` US Medicare number | the MBI's own shape (11 characters, never S, L, O, I, B or Z) |
+
+A rule warns, masks or blocks them before a question reaches a model, for
+everyone or some groups, and for all models or those on other providers
+(`@external`). Two templates set what HIPAA and the GDPR's special categories
+ask: **Health and identity data to cloud models** refuses a question holding
+them before a model on another provider, and **Health and identity data
+masked** masks them for the company's own models and in answers. The check
+**Personal and health data kept from cloud models** is amber until a rule does
+so.
+
+The app's log lines carry no personal data: e-mail addresses, phone, card,
+IBAN, social security, NHS, national and Medicare numbers, dates of birth and
+medical record numbers are masked in each line's message, its values and an
+exception's text before it is written (IP addresses stay, as the audit log
+keeps them for security). Answers' traces hold times, tokens and tool names
+only; the gateway's request log keeps no prompts or answers.
+
 ## How long things are kept
 
 Admin → Compliance lists how long each kind of data and record is kept, and

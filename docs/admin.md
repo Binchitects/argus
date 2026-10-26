@@ -229,7 +229,9 @@ what comes back. Each rule:
 
 - **looks for** one thing: secrets (private keys, cloud and service tokens,
   passwords; some kinds or all), personal data (e-mail addresses, phone and
-  card numbers, IBANs, IP addresses, social security numbers), words and
+  card numbers, IBANs, IP addresses, social security numbers, and health and
+  identity data: dates of birth, medical record, NHS, national and Medicare
+  numbers: [compliance](compliance/README.md#personal-and-health-data)), words and
   patterns, topics the model judges (built-in harms, or topics you describe:
   "legal advice: what someone should do in their own legal matter"), prompt
   injection (its usual signs and hidden text, and the model's reading if you

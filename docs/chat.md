@@ -1613,8 +1613,9 @@ question to another model, or allows. The app starts with these:
   never the secret. A refused secret is not a strike: it is an accident, not
   abuse.
 - **Personal data to the model** (off): e-mail addresses, phone and card
-  numbers (Luhn-checked), IBANs, IP addresses and social security numbers
-  reach the model masked; the chat keeps them as written.
+  numbers (Luhn-checked), IBANs, IP addresses, social security numbers, dates
+  of birth and medical record, NHS, national and Medicare numbers reach the
+  model masked; the chat keeps them as written.
 - **Blocked words** (off until it has words): phrases matched as whole words,
   ignoring case, or regular expressions (`re:`).
 - **Harmful requests** (off): the model reads the message first and refuses
