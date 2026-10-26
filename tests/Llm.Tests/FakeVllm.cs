@@ -35,7 +35,8 @@ public sealed class FakeVllm(string config, string status) : HttpMessageHandler
         Directory.CreateDirectory(status);
         if (Running)
         {
-            File.WriteAllText(Path.Combine(status, "supervisor.json"), $$"""{"at":{{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}}}""");
+            File.WriteAllText(Path.Combine(status, "supervisor.json.tmp"), $$"""{"at":{{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}}}""");
+            File.Move(Path.Combine(status, "supervisor.json.tmp"), Path.Combine(status, "supervisor.json"), overwrite: true);
         }
         var path = Path.Combine(config, "models.json");
         var desired = File.Exists(path) && JsonNode.Parse(File.ReadAllText(path))?["models"] is JsonArray list ? list.OfType<JsonObject>().ToList() : [];
@@ -66,8 +67,13 @@ public sealed class FakeVllm(string config, string status) : HttpMessageHandler
         return File.Exists(path) ? JsonNode.Parse(File.ReadAllText(path))?["phase"]?.GetValue<string>() : null;
     }
 
-    private void Write(string name, string phase, int port) =>
-        File.WriteAllText(Path.Combine(status, name + ".json"), new JsonObject { ["name"] = name, ["phase"] = phase, ["port"] = port, ["log"] = new JsonArray() }.ToJsonString());
+    /// <summary>Written whole, as the supervisor does (a temporary file renamed): a reader never sees it half written.</summary>
+    private void Write(string name, string phase, int port)
+    {
+        var path = Path.Combine(status, name + ".json");
+        File.WriteAllText(path + ".tmp", new JsonObject { ["name"] = name, ["phase"] = phase, ["port"] = port, ["log"] = new JsonArray() }.ToJsonString());
+        File.Move(path + ".tmp", path, overwrite: true);
+    }
 
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {

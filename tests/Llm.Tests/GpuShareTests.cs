@@ -111,12 +111,19 @@ public sealed class GpuShareTests(AppFixture app) : IDisposable
         public EngineState State => App.Services.GetRequiredService<EngineState>();
         public EngineRoute Route => App.Services.GetRequiredService<EngineRoute>();
 
+        /// <summary>The app goes whatever the ticking did: one left running would load models on the next test's engine.</summary>
         public async ValueTask DisposeAsync()
         {
             await Running.CancelAsync();
-            await Ticking;
-            await App.DisposeAsync();
-            Running.Dispose();
+            try
+            {
+                await Ticking;
+            }
+            finally
+            {
+                await App.DisposeAsync();
+                Running.Dispose();
+            }
         }
     }
 

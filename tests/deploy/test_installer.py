@@ -756,7 +756,7 @@ class InstallerTests(unittest.TestCase):
         out = r.stdout
         self.assertIn("would  stop it but postgres, back up the data as it is, put back 5.2.0's images", out)
         self.assertIn("would  take out what the upgrade added: config/added.yml config/edited.yml.new-9.9.9", out)
-        self.assertIn("would  put back as 5.2.0 had them: config/dropped.yml docker-compose.yml .env.example", out)
+        self.assertIn("would  put back as 5.2.0 had them: .env.example config/dropped.yml docker-compose.yml", out)
         self.assertIn("would  put back .env as 5.2.0 had it (it is as the upgrade left it: only the keys it added go)", out)
         self.assertIn("the certificates, the override and your other files stay as they are", out)
         self.assertFalse((snap / "old-deploy").exists())

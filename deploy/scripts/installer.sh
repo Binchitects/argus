@@ -86,6 +86,9 @@
 #      cause is put right; the steps by hand are printed
 #   6  checksums do not match: the bundle, or the installed files, are damaged
 set -uo pipefail
+# Lists sorted the same on every host (en_US puts .env.example last, C first); LC_ALL would override it.
+unset LC_ALL
+export LC_COLLATE=C
 # Deploy files are read by the containers' users; .env, the state and the logs are made 0600/0700.
 umask 022
 
