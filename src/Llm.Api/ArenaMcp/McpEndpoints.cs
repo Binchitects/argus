@@ -57,11 +57,16 @@ public sealed class McpCalls
 /// outside agent (Code Arena, Claude Code, Qwen Code, Continue...) the person's chat tools, signed
 /// in with their own API key. Stateless: every request carries the key, a list is kept a minute,
 /// and a session id is only a label (for cancelling a call). Requests answer as JSON; a tool call
-/// answers as server-sent events, with its progress and a comment line while it runs.
+/// answers as server-sent events, with its progress and a comment line while it runs. At
+/// /mcp/code the same tools are served as code: search_tools and run_code in place of every
+/// definition (McpTools.CodeCatalogAsync), the agent's choice by the address it is given.
 /// </summary>
 public static class McpEndpoints
 {
     public const string Path = "/mcp";
+
+    /// <summary>Tools as code: the address an agent is given to call the person's tools from a program.</summary>
+    public const string CodePath = Path + "/code";
 
     /// <summary>The protocol versions served, newest first.</summary>
     public static readonly string[] Versions = ["2025-06-18", "2025-03-26", "2024-11-05"];
@@ -82,13 +87,16 @@ public static class McpEndpoints
 
     public static void MapArenaMcp(this IEndpointRouteBuilder app)
     {
-        app.MapPost(Path, PostAsync).AllowAnonymous("Arena MCP: the person's API key or token is checked on each call.");
-        // No stream of the server's own (it sends nothing unasked) and no sessions to end.
-        app.MapMethods(Path, ["GET", "DELETE"], (HttpContext http) =>
+        foreach (var path in new[] { Path, CodePath })
         {
-            http.Response.Headers.Allow = "POST";
-            return Results.StatusCode(StatusCodes.Status405MethodNotAllowed);
-        }).AllowAnonymous("Says only that MCP takes POST.");
+            app.MapPost(path, PostAsync).AllowAnonymous("Arena MCP: the person's API key or token is checked on each call.");
+            // No stream of the server's own (it sends nothing unasked) and no sessions to end.
+            app.MapMethods(path, ["GET", "DELETE"], (HttpContext http) =>
+            {
+                http.Response.Headers.Allow = "POST";
+                return Results.StatusCode(StatusCodes.Status405MethodNotAllowed);
+            }).AllowAnonymous("Says only that MCP takes POST.");
+        }
         app.MapGet("/.well-known/mcp", Discovery).AllowAnonymous("MCP discovery: where the server is, nothing private.");
         app.MapGet("/api/account/mcp", InfoAsync).PersonOnly();
     }
@@ -101,6 +109,7 @@ public static class McpEndpoints
             title = Product(branding),
             version = AppInfo.Current.Version,
             url = auth.Value.Origin + Path,
+            codeUrl = auth.Value.Origin + CodePath,
             transport = "streamable-http",
             protocolVersions = Versions,
             authentication = new { type = "bearer", header = "Authorization: Bearer <your API key>", key = "Your API key (sk-…), from Your account → API key." },
@@ -108,8 +117,9 @@ public static class McpEndpoints
         });
 
     /// <summary>
-    /// For the person's Connect your tools page: whether it is on, its address, the tools it serves them,
-    /// and theirs it cannot serve now, with why (deep research while the web asks before each call).
+    /// For the person's Connect your tools page: whether it is on, its address (and the one serving the tools as
+    /// code, while Tools as code is theirs), the tools it serves them, and theirs it cannot serve now, with why (deep
+    /// research while the web asks before each call).
     /// </summary>
     private static async Task<IResult> InfoAsync(ClaimsPrincipal p, UserManager<AppUser> users, McpTools tools, IOptionsMonitor<McpOptions> options, IOptions<AuthOptions> auth,
         CancellationToken ct)
@@ -122,6 +132,7 @@ public static class McpEndpoints
         {
             enabled,
             url = auth.Value.Origin + Path,
+            codeUrl = served.Any(t => t.Tool.Id == CodeTool.ToolId) ? auth.Value.Origin + CodePath : null,
             tools = served.Where(t => noResearch is null || t.Tool.Id != ResearchTool.ToolId).Select(t => new { id = t.Tool.Id, title = t.Tool.Title, askFirst = t.Setting.AskFirst }),
             notServed = served.Where(t => noResearch is not null && t.Tool.Id == ResearchTool.ToolId).Select(t => new { id = t.Tool.Id, title = t.Tool.Title, why = noResearch }),
         });
@@ -183,7 +194,8 @@ public static class McpEndpoints
         }
         // The model a new chat of theirs starts with: an agent with no model of its own takes it (Code Arena).
         async Task<string?> DefaultModelAsync(CancellationToken token) => (await policy.ForAsync(user, await models.ListAsync(token), token)).Default?.Name ?? models.DefaultName;
-        var handler = new Handler(user, protocol, session, tools, prompts, calls, Product(branding), DefaultModelAsync);
+        var code = http.Request.Path.Equals(CodePath, StringComparison.OrdinalIgnoreCase);
+        var handler = new Handler(user, protocol, session, code, tools, prompts, calls, Product(branding), DefaultModelAsync);
 
         // A batch (2025-03-26 allows them): each answered, together, as JSON.
         if (kind == JsonValueKind.Array)
@@ -299,10 +311,12 @@ public static class McpEndpoints
         }
     }
 
-    /// <summary>One person's requests, as JSON-RPC.</summary>
-    private sealed class Handler(AppUser user, string protocol, string session, McpTools tools, McpPrompts prompts, McpCalls calls, string product,
+    /// <summary>One person's requests, as JSON-RPC; with <paramref name="code"/>, their tools served as code.</summary>
+    private sealed class Handler(AppUser user, string protocol, string session, bool code, McpTools tools, McpPrompts prompts, McpCalls calls, string product,
         Func<CancellationToken, Task<string?>> defaultModel)
     {
+        private Task<McpCatalog> CatalogAsync(bool fresh, CancellationToken ct) => code ? tools.CodeCatalogAsync(user, fresh, ct) : tools.CatalogAsync(user, fresh, ct);
+
         /// <summary>A notification: a cancelled call is stopped; the rest need nothing.</summary>
         public void Notice(JsonObject message)
         {
@@ -322,7 +336,7 @@ public static class McpEndpoints
             {
                 "initialize" => Result(id, await InitializeAsync(@params, ct)),
                 "ping" => Result(id, []),
-                "tools/list" => Result(id, new JsonObject { ["tools"] = (await tools.CatalogAsync(user, fresh: false, ct)).Tools.DeepClone() }),
+                "tools/list" => Result(id, new JsonObject { ["tools"] = (await CatalogAsync(fresh: false, ct)).Tools.DeepClone() }),
                 "tools/call" => await CallAsync(id, @params, notify, ct),
                 "prompts/list" => Result(id, new JsonObject { ["prompts"] = await prompts.ListAsync(user, ct) }),
                 "prompts/get" => await prompts.GetAsync(user, Str(@params, "name") ?? "", @params["arguments"]?.DeepClone() as JsonObject ?? [], ct) is { } prompt
@@ -340,7 +354,7 @@ public static class McpEndpoints
         private async Task<JsonObject> InitializeAsync(JsonObject @params, CancellationToken ct)
         {
             var asked = Str(@params, "protocolVersion");
-            var catalog = await tools.CatalogAsync(user, fresh: true, ct);
+            var catalog = await CatalogAsync(fresh: true, ct);
             return new JsonObject
             {
                 ["protocolVersion"] = asked is not null && Versions.Contains(asked) ? asked : Versions[0],
@@ -387,7 +401,9 @@ public static class McpEndpoints
             ToolResult? result;
             try
             {
-                result = await tools.CallAsync(user, name, arguments, progress, call.Token);
+                result = code && name == McpTools.SearchFunction
+                    ? await tools.SearchAsync(user, arguments, call.Token)
+                    : await tools.CallAsync(user, name, arguments, progress, call.Token);
             }
             catch (OperationCanceledException) when (call.IsCancellationRequested && !ct.IsCancellationRequested)
             {

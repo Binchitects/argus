@@ -18,6 +18,9 @@ public sealed class ArenaMcpTests(AppFixture app)
 {
     private static readonly Uri Endpoint = new($"https://{AppFixture.Domain}/mcp");
 
+    /// <summary>The same tools served as code: search_tools and run_code.</summary>
+    private static readonly Uri CodeEndpoint = new($"https://{AppFixture.Domain}/mcp/code");
+
     /// <summary>Its own app and database: tool settings and keys must not leak into other tests.</summary>
     private WebApplicationFactory<Program> NewApp(FakeGateway? gateway = null, Dictionary<string, string?>? settings = null) =>
         app.Create(app.ConnectionStringFor("mcp_" + Guid.NewGuid().ToString("N")[..8]), gateway ?? new FakeGateway(),
@@ -50,8 +53,8 @@ public sealed class ArenaMcpTests(AppFixture app)
     }
 
     /// <summary>The app's own MCP client (the one the chat uses for admins' servers), as an agent would connect.</summary>
-    private static Task<McpSession> ConnectAsync(WebApplicationFactory<Program> f, string key) =>
-        Mcp.ConnectAsync(Agent(f, null, protocol: null), Endpoint, new Dictionary<string, string> { ["Authorization"] = "Bearer " + key }, "Arena", CancellationToken.None);
+    private static Task<McpSession> ConnectAsync(WebApplicationFactory<Program> f, string key, Uri? endpoint = null) =>
+        Mcp.ConnectAsync(Agent(f, null, protocol: null), endpoint ?? Endpoint, new Dictionary<string, string> { ["Authorization"] = "Bearer " + key }, "Arena", CancellationToken.None);
 
     /// <summary>One JSON-RPC request; its answer read from JSON or from the events, with the notifications before it.</summary>
     private static async Task<(HttpResponseMessage Response, JsonElement Answer, List<JsonElement> Notes)> RpcAsync(HttpClient http, string method, object? @params = null, object? id = null)
@@ -284,6 +287,79 @@ public sealed class ArenaMcpTests(AppFixture app)
         // The canvas is the person's in the chat, not here: its document is kept with a chat, and a call here has none.
         Assert.Contains((await b.JsonAsync(await b.GetAsync("/api/chat/config"))).GetProperty("tools").EnumerateArray(), t => t.GetProperty("id").GetString() == "canvas");
         Assert.DoesNotContain(Names(tools), n => n.StartsWith("canvas_", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Control", "LOG-01")]
+    public async Task At_its_code_address_an_agent_gets_search_tools_and_run_code_whose_program_calls_the_tools_as_the_person()
+    {
+        await using var sandbox = new FakeSandbox();
+        await using var f = NewApp(settings: new() { ["Sandbox:Dir"] = sandbox.Dir });
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        // A tool that asks first is called directly, never from code.
+        await StatusAssert.Is(HttpStatusCode.NoContent, await SetToolAsync(admin, "time", new { enabled = true, audience = "Everyone", onByDefault = false, askFirst = true }));
+        var (b, _, _, key) = await PersonAsync(f);
+
+        var session = await ConnectAsync(f, key, CodeEndpoint);
+        Assert.StartsWith("Tools as code:", session.Instructions, StringComparison.Ordinal);
+        var names = Names(await session.ToolsAsync(CancellationToken.None));
+        Assert.Contains("search_tools", names);
+        Assert.Contains("run_code", names);
+        // Those a program cannot call are listed as they are: one that asks first, Python (it needs the program's sandbox).
+        Assert.Contains("current_time", names);
+        Assert.Contains("run_python", names);
+        Assert.DoesNotContain("calculate", names);
+        Assert.DoesNotContain("find_symbol", names);
+        // At the usual address, every tool as before.
+        Assert.Contains("calculate", Names(await (await ConnectAsync(f, key)).ToolsAsync(CancellationToken.None)));
+
+        // search_tools finds a function by what it does, with its name in Python and its parameters.
+        var (text, isError) = await session.CallAsync("search_tools", new JsonObject { ["query"] = "calculate an expression" }, null, CancellationToken.None);
+        Assert.False(isError, text);
+        var found = JsonNode.Parse(text)!.AsArray();
+        Assert.Equal("arena.calculator.calculate", found[0]!["call"]!.GetValue<string>());
+        Assert.Equal(["expression"], found[0]!["parameters"]!["required"]!.AsArray().Select(r => r!.GetValue<string>()));
+        Assert.DoesNotContain(found, x => x!["call"]!.GetValue<string>().EndsWith(".current_time", StringComparison.Ordinal));
+        (text, _) = await session.CallAsync("search_tools", new JsonObject(), null, CancellationToken.None);
+        Assert.Contains("arena.argus.find_symbol: ", text, StringComparison.Ordinal);
+
+        // The program calls them, each as the person: what it may call, the result, a refusal for the one that asks first.
+        (text, isError) = await session.CallAsync("run_code", new JsonObject
+        {
+            ["code"] = "# call calculate {\"expression\": \"6*7\"}\n# call current_time {}",
+        }, null, CancellationToken.None);
+        Assert.False(isError, text);
+        var output = JsonNode.Parse(text)!;
+        var lines = output["stdout"]!.GetValue<string>().Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        Assert.Contains("calculate", lines[0].Split(' ')[1].Split(','));
+        Assert.DoesNotContain("current_time", lines[0].Split(' ')[1].Split(','));
+        Assert.DoesNotContain("run_code", lines[0].Split(' ')[1].Split(','));
+        Assert.Contains("\"ok\":true", lines[1], StringComparison.Ordinal);
+        Assert.Contains("42", lines[1], StringComparison.Ordinal);
+        Assert.Contains("There is no function current_time to call from code", lines[2], StringComparison.Ordinal);
+        Assert.Equal("calculate", output["calls"]!.GetValue<string>());
+
+        // Audited as the agent's own calls would be: the program, and the call it made.
+        var audit = (await AuditAsync(f)).Where(e => e.GetProperty("action").GetString() == "mcp.call").Select(e => (e.GetProperty("target").GetString(), e.GetProperty("detail").GetString())).ToList();
+        Assert.Contains(("code", "run_code"), audit);
+        Assert.Contains(("calculator", "calculate"), audit);
+
+        // The setup page gives both addresses.
+        var info = await b.JsonAsync(await b.GetAsync("/api/account/mcp"));
+        Assert.Equal("https://llm.test/mcp/code", info.GetProperty("codeUrl").GetString());
+    }
+
+    [Fact]
+    public async Task Without_tools_as_code_its_code_address_lists_every_tool_and_says_why()
+    {
+        await using var f = NewApp();
+        var (b, _, _, key) = await PersonAsync(f);
+        var session = await ConnectAsync(f, key, CodeEndpoint);
+        Assert.StartsWith("Tools as code is not on for you here", session.Instructions, StringComparison.Ordinal);
+        var names = Names(await session.ToolsAsync(CancellationToken.None));
+        Assert.Contains("calculate", names);
+        Assert.DoesNotContain("search_tools", names);
+        Assert.Equal(JsonValueKind.Null, (await b.JsonAsync(await b.GetAsync("/api/account/mcp"))).GetProperty("codeUrl").ValueKind);
     }
 
     [Fact]

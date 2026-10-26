@@ -17,10 +17,11 @@ using Microsoft.Extensions.Options;
 namespace Llm.Api.ArenaMcp;
 
 /// <summary>
-/// What a person's tools serve at the moment: the MCP tool list, the notes for the agent, and
-/// which tool has each function (so a call starts only that one).
+/// What a person's tools serve at the moment: the MCP tool list, the notes for the agent, which
+/// tool has each function (so a call starts only that one), and the functions a program may call
+/// (run_code: not those that ask first, nor the program's own or those needing its sandbox).
 /// </summary>
-public sealed record McpCatalog(JsonArray Tools, string Instructions, IReadOnlyDictionary<string, string> Owners);
+public sealed record McpCatalog(JsonArray Tools, string Instructions, IReadOnlyDictionary<string, string> Owners, IReadOnlySet<string> FromCode);
 
 /// <summary>
 /// The person's chat tools, served to outside agents: exactly those they may use in the chat
@@ -53,6 +54,9 @@ public sealed partial class McpTools(
     {
         ["generate_image"] = Llm.Core.Access.CreditKind.Pictures, ["generate_video"] = Llm.Core.Access.CreditKind.Video, ["speak"] = Llm.Core.Access.CreditKind.Speech,
     };
+
+    /// <summary>Tools as code (Arena MCP's /mcp/code): the function that finds the others, beside run_code.</summary>
+    public const string SearchFunction = "search_tools";
 
     internal const string AskFirstNote =
         " Ask the person before each call and wait for their yes: in the chat this tool asks them first, and this server cannot ask them itself.";
@@ -92,6 +96,7 @@ public sealed partial class McpTools(
         var context = Context(user, null, served);
         var tools = new JsonArray();
         var owners = new Dictionary<string, string>(StringComparer.Ordinal);
+        var fromCode = new HashSet<string>(StringComparer.Ordinal);
         var notes = new List<string>();
         var unavailable = new List<string>();
         var wait = TimeSpan.FromSeconds(Math.Max(1, options.CurrentValue.ListWaitSeconds));
@@ -141,7 +146,12 @@ public sealed partial class McpTools(
                             continue;
                         }
                     }
-                    tools.Add(Definition(fn, name, choice.Tool.Id, choice.Setting.AskFirst || run.AsksFirst(name)));
+                    var asksFirst = choice.Setting.AskFirst || run.AsksFirst(name);
+                    tools.Add(Definition(fn, name, choice.Tool.Id, asksFirst));
+                    if (!asksFirst && CodeTool.Callable(choice.Tool))
+                    {
+                        fromCode.Add(name);
+                    }
                 }
             }
             if (!string.IsNullOrWhiteSpace(run.Instructions))
@@ -149,10 +159,113 @@ public sealed partial class McpTools(
                 notes.Add($"## {choice.Tool.Title}\n{run.Instructions.Trim()}");
             }
         }
-        var catalog = new McpCatalog(tools, Instructions(user, notes, unavailable), owners);
+        var catalog = new McpCatalog(tools, Instructions(user, notes, unavailable), owners, fromCode);
         // Without a slow one's tools, kept briefly: the next list asks it again.
         cache.Set(CatalogKey(user), catalog, slow ? TimeSpan.FromSeconds(10) : Fresh);
         return catalog;
+    }
+
+    /// <summary>
+    /// Tools as code (/mcp/code): in place of every function, search_tools and run_code, so an agent reads a few
+    /// definitions and writes one program for many calls; those a program may not call (that ask first, deep research,
+    /// Python...) are listed as they are. Without run_code for the person (the Tools as code tool off, or no sandbox),
+    /// every function is listed, and the notes say why.
+    /// </summary>
+    public async Task<McpCatalog> CodeCatalogAsync(AppUser user, bool fresh, CancellationToken ct)
+    {
+        var all = await CatalogAsync(user, fresh, ct);
+        if (!all.Owners.ContainsKey(CodeTool.Function))
+        {
+            return all with
+            {
+                Instructions = "Tools as code is not on for you here (an admin turns on its tool, Tools as code, with the sandbox): every tool is listed as it is.\n\n" + all.Instructions,
+            };
+        }
+        var tools = new JsonArray(SearchDefinition());
+        foreach (var tool in all.Tools.OfType<JsonObject>().Where(t => !all.FromCode.Contains(Name(t))))
+        {
+            tools.Add(tool.DeepClone());
+        }
+        return all with
+        {
+            Tools = tools,
+            Instructions =
+                $"Tools as code: only a few tools are listed. {SearchFunction} finds the others by what they do, with their parameters; {CodeTool.Function} runs a " +
+                "Python program that calls them as functions (arena.argus.find_symbol(name=...)), so many calls, loops and filtering stay in the program and only " +
+                "what it prints comes back to you. The tools that ask the person first, and those a program cannot call, are listed as they are.\n\n" + all.Instructions,
+        };
+    }
+
+    /// <summary>
+    /// search_tools: the functions a program may call that match the words (all of them, a line each, without words),
+    /// each by the name it has in Python, with what it does and its parameters.
+    /// </summary>
+    public async Task<ToolResult> SearchAsync(AppUser user, JsonObject arguments, CancellationToken ct)
+    {
+        var functions = CodeFunctions(await CatalogAsync(user, fresh: false, ct));
+        var query = arguments["query"] is JsonValue q && q.TryGetValue<string>(out var said) ? said : "";
+        var most = arguments["most"] is JsonValue m && m.TryGetValue<int>(out var n) ? Math.Clamp(n, 1, 30) : 8;
+        var words = Words().Matches(query.ToLowerInvariant()).Select(w => w.Value).Where(w => w.Length > 2).Distinct().ToList();
+        if (words.Count == 0)
+        {
+            return new ToolResult(string.Join('\n', functions.Select(f => $"{CodeTool.PythonName(f.Group, f.Name)}: {FirstLine(f.Description)}")));
+        }
+        var found = functions
+            .Select(f => (Function: f, Score: words.Sum(w => Occurrences($"{f.Name} {f.Group} {f.Description}".ToLowerInvariant(), w))))
+            .Where(x => x.Score > 0).OrderByDescending(x => x.Score).Take(most).ToList();
+        if (found.Count == 0)
+        {
+            return new ToolResult($"No function matches \"{query}\". Search with other words, or with none for the whole list.");
+        }
+        return new ToolResult(new JsonArray([.. found.Select(x => (JsonNode)new JsonObject
+        {
+            ["call"] = CodeTool.PythonName(x.Function.Group, x.Function.Name),
+            ["description"] = x.Function.Description,
+            ["parameters"] = x.Function.Parameters?.DeepClone(),
+        })]).ToJsonString(Mcp.Plain));
+    }
+
+    /// <summary>The functions of a list a program may call, as the chat gives them to one.</summary>
+    private static List<CodeFunction> CodeFunctions(McpCatalog catalog) =>
+    [
+        .. catalog.Tools.OfType<JsonObject>().Where(t => catalog.FromCode.Contains(Name(t))).Select(t => new CodeFunction(
+            Name(t), t["_meta"]?["arena/tool"]?.GetValue<string>() ?? "tools", t["description"]?.GetValue<string>(), t["inputSchema"] as JsonObject)),
+    ];
+
+    private static JsonObject SearchDefinition() => new()
+    {
+        ["name"] = SearchFunction,
+        ["description"] =
+            $"Finds the functions a {CodeTool.Function} program can call, by what they do: each as arena.<group>.<function>, with what it does and its parameters " +
+            "(keyword arguments). Without words, the whole list, a line each.",
+        ["inputSchema"] = new JsonObject
+        {
+            ["type"] = "object",
+            ["properties"] = new JsonObject
+            {
+                ["query"] = new JsonObject { ["type"] = "string", ["description"] = "What the function should do, in a few words (\"find a symbol's callers\")." },
+                ["most"] = new JsonObject { ["type"] = "integer", ["description"] = "How many to give at most (8 unless said; up to 30)." },
+            },
+        },
+        ["annotations"] = new JsonObject { ["readOnlyHint"] = true },
+    };
+
+    private static string Name(JsonObject tool) => tool["name"]!.GetValue<string>();
+
+    private static string FirstLine(string? text)
+    {
+        var line = (text ?? "").Split('\n')[0];
+        return line.Length > 120 ? line[..120] : line;
+    }
+
+    private static int Occurrences(string text, string word)
+    {
+        var count = 0;
+        for (var at = text.IndexOf(word, StringComparison.Ordinal); at >= 0; at = text.IndexOf(word, at + word.Length, StringComparison.Ordinal))
+        {
+            count++;
+        }
+        return count;
     }
 
     private static string Slow(TimeSpan wait) => $"it did not answer within {Mcp.Describe(wait)}";
@@ -188,7 +301,8 @@ public sealed partial class McpTools(
     public async Task<ToolResult?> CallAsync(AppUser user, string function, JsonObject arguments, Func<McpProgress, Task>? progress, CancellationToken ct)
     {
         var served = await ServedAsync(user, ct);
-        var context = Context(user, progress, served);
+        // A program (run_code) calls the functions of the list, each as a call of its own would be made.
+        var context = Context(user, progress, served, function == CodeTool.Function ? await CatalogAsync(user, fresh: false, ct) : null);
         var (owner, failure) = await OwnerAsync(user, served, function, context, ct);
         if (owner is not { } found)
         {
@@ -346,11 +460,18 @@ public sealed partial class McpTools(
     /// call here belongs to no chat: a chat of none, never saved (Python finds no files in it). Deep
     /// research runs in a chat of its own (McpResearch), or says why it cannot here.
     /// </summary>
-    private ToolContext Context(AppUser user, Func<McpProgress, Task>? progress, IReadOnlyList<ToolChoice> served) =>
+    /// <remarks>
+    /// With <paramref name="catalog"/>, a program run_code runs calls its functions: each as a call of the agent's own (the audit,
+    /// the requests a minute), its progress being the program's.
+    /// </remarks>
+    private ToolContext Context(AppUser user, Func<McpProgress, Task>? progress, IReadOnlyList<ToolChoice> served, McpCatalog? catalog = null) =>
         new(user, user.Email!.ToLowerInvariant(), new Conversation { UserId = user.Id, Title = "Arena MCP" }, progress is null ? null : Reporter(progress))
         {
             Research = (question, token) => research.RunAsync(user, question, progress, token),
             NoResearch = McpResearch.Refusal(served),
+            CodeFunctions = catalog is null ? null : () => CodeFunctions(catalog),
+            CallFromCode = catalog is null ? null : async (name, args, token) =>
+                await CallAsync(user, name, args, null, token) ?? new ToolResult($"There is no tool named {name}.", IsError: true),
         };
 
     /// <summary>The chat's progress reports (an event for the page), passed on as MCP progress.</summary>
@@ -410,6 +531,9 @@ public sealed partial class McpTools(
 
     [GeneratedRegex("/api/chat/attachments/([0-9a-fA-F-]{36})/content$")]
     private static partial Regex FileLink();
+
+    [GeneratedRegex(@"\w+")]
+    private static partial Regex Words();
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Arena MCP: the tool {Tool} failed to start")]
     private static partial void LogStartFailed(ILogger logger, string tool, Exception ex);

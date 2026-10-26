@@ -1846,6 +1846,9 @@ sandbox that reaches tools needs a broker that keeps every right and every
 12. **Arena MCP in code mode.** For agents that connect to Arena MCP (Claude
     Code, Qwen Code, Codex...): two tools, `search_tools` and `run_code`, in
     place of every definition, chosen per key on Connect your tools.
+    *As built:* at `/mcp/code`, chosen per agent by its address (a person has one
+    key, and may want two agents each its own way): a switch on Connect your
+    tools puts it in the setups ([mcp.md](mcp.md#tools-as-code)).
 13. **When to use which.** Per model (Models: tools direct, as code, or both):
     both for the strong models, direct for the small ones; the system
     prompt teaches the pattern when code is on. Direct calls stay for one or

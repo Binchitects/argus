@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using Llm.Core.Data;
 using Microsoft.Extensions.Options;
 
@@ -11,13 +12,41 @@ namespace Llm.Api.Chat.Tools;
 /// the program prints (and the files it writes) comes back to the window. It runs in the sandbox (no network); its calls
 /// go through the runner's socket to the chat, which runs each as the person, as a direct call would be.
 /// </summary>
-public sealed class CodeTool(SandboxClient sandbox, PythonTool files, AppDbContext db, IOptionsMonitor<SandboxOptions> options) : IChatTool
+public sealed partial class CodeTool(SandboxClient sandbox, PythonTool files, AppDbContext db, IOptionsMonitor<SandboxOptions> options) : IChatTool
 {
     public const string ToolId = "code";
     public const string Function = "run_code";
 
     /// <summary>The most calls of the chat's tools one program makes.</summary>
     public const int MostCalls = 100;
+
+    /// <summary>
+    /// Whether a program may call this tool's functions: not its own, nor those that hand work on (deep research) or need the
+    /// sandbox the program holds a place in (Python, vector, an admin's sandboxed server). Those that ask first are left out too.
+    /// </summary>
+    public static bool Callable(IChatTool tool) => tool.Id is not (ToolId or "python" or ResearchTool.ToolId or VectorTool.ToolId) && tool is not SandboxServerTool;
+
+    /// <summary>Python's keywords: a name that is one gets a _ after it, as the arena module names it.</summary>
+    private static readonly HashSet<string> Keywords =
+    [
+        "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class", "continue", "def", "del", "elif", "else", "except",
+        "finally", "for", "from", "global", "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try",
+        "while", "with", "yield",
+    ];
+
+    /// <summary>A function as a program calls it, arena.&lt;group&gt;.&lt;function&gt;: the names the arena module gives them (arena/__init__.py).</summary>
+    public static string PythonName(string group, string function)
+    {
+        var g = Identifier(group);
+        return $"arena.{(g is "tools" or "call" or "ToolError" ? g + "_" : g)}.{Identifier(function)}";
+    }
+
+    private static string Identifier(string name)
+    {
+        var clean = NotWord().Replace(name, "_").Trim('_');
+        clean = clean.Length == 0 ? "tool" : char.IsDigit(clean[0]) ? "_" + clean : clean;
+        return Keywords.Contains(clean) ? clean + "_" : clean;
+    }
 
     public string Id => ToolId;
     public string Title => "Tools as code";
@@ -99,4 +128,7 @@ public sealed class CodeTool(SandboxClient sandbox, PythonTool files, AppDbConte
                 ["seconds"] = Math.Round(result.DurationMs / 1000.0, 1),
             }.ToJsonString(Mcp.Plain), failed, kept);
         }));
+
+    [GeneratedRegex(@"\W")]
+    private static partial Regex NotWord();
 }

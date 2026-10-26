@@ -185,6 +185,7 @@ The audit log keeps every sign-in, every change to people, groups, roles, settin
 
 - `Llm.Tests/IdentityTests.Everything_is_in_the_audit_log`
 - `Llm.Tests/ArenaMcpTests.An_agent_signs_in_with_the_persons_key_gets_their_chat_tools_and_each_call_is_audited`
+- `Llm.Tests/ArenaMcpTests.At_its_code_address_an_agent_gets_search_tools_and_run_code_whose_program_calls_the_tools_as_the_person`
 - `Llm.Tests/ShareTests.A_shared_chat_opens_for_a_colleague_and_not_for_someone_outside_the_group_and_revoking_stops_it`
 
 **Watched by** `app:audit-log` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)

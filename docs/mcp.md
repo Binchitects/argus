@@ -35,7 +35,34 @@ Other clients (streamable HTTP):
   `NODE_EXTRA_CA_CERTS=deploy/config/traefik/certs/ca.crt` (see
   [clients/README.md](../clients/README.md)).
 - `GET https://DOMAIN/.well-known/mcp` says where the server is and how to sign
-  in, for clients that look.
+  in, for clients that look (`url`, and `codeUrl` for the tools as code).
+
+## Tools as code
+
+At `https://DOMAIN/mcp/code` the same tools are served as code: in place of
+every definition, two tools.
+
+- **`search_tools`** (`query`, `most`, 8 unless said, up to 30) finds the
+  functions a program may call by what they do: each as Python calls it
+  (`arena.argus.find_symbol`), with its description and its parameters.
+  Without words, the whole list, a line each.
+- **`run_code`** (`code`) runs a Python program in Arena's sandbox, as the
+  chat's **Tools as code** does ([chat.md](chat.md)): `import arena`, then
+  `arena.argus.find_symbol(name="DecodeFrame")`. Each call goes to Arena MCP
+  as a call of the agent's own would: as the person, audited (`mcp.call`, the
+  program as `code` and each call it made), counted against their requests a
+  minute. Only what it prints comes back; at most 100 calls a program.
+- **Listed as they are**: the tools that ask first (the agent asks the person
+  before each, as at `/mcp`), and those a program cannot call: Python, vector,
+  deep research and the admins' sandboxed servers.
+
+The agent chooses by its address: **Connect your tools** has a switch, **Tools
+as code**, that puts `/mcp/code` in the setups (one key can serve two agents,
+each its own way). It is there while the person has the **Tools as code** tool
+(Admin → Tools, with the sandbox); without it, `/mcp/code` lists every tool, and
+the notes for the agent say why. Code suits strong models and many tools (two
+short definitions read, one program for many calls); small models do better
+with the tools direct at `/mcp`.
 
 ## What it serves
 
@@ -157,8 +184,8 @@ leaves it out. **Wait for a slow tool server** (`Mcp:ListWaitSeconds`, 10
 seconds, applies at once) is how long connecting waits for Argus, the MCP
 servers and the plugins (above).
 
-Traefik sends `/mcp` on `DOMAIN` to the app, beside `/api`, `/connect` and
-`/.well-known` (`deploy/config/traefik/routes.yml`).
+Traefik sends `/mcp` and `/mcp/code` on `DOMAIN` to the app, beside `/api`,
+`/connect` and `/.well-known` (`deploy/config/traefik/routes.yml`).
 
 ## How it is tested
 
@@ -170,7 +197,10 @@ a tool that asks first marked; an Argus call made as the person (their email at
 Argus); an admin's MCP server proxied with its progress; a call cancelled; a
 picture inline and as a link that `resources/read` reads and the person opens;
 a server that never answers listed as not available within the wait, and
-asked again on the next list, a plugin with a person's own sign-in too.
+asked again on the next list, a plugin with a person's own sign-in too; at
+`/mcp/code`, `search_tools` and `run_code` with the tools that ask first listed
+as they are, a search finding a function with its parameters, a program's calls
+made as the person and audited, and without Tools as code every tool listed.
 `tests/Llm.Tests/DeepResearchTests.cs` runs `deep_research` for an agent: a
 chat of the person's own does it, its steps come as progress and the report as
 the result; not served, saying why (in the agent's notes and on Connect your

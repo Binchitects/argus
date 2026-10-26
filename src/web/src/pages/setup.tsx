@@ -23,10 +23,14 @@ interface ChatConfig {
   argus: boolean
 }
 
-/** Arena MCP for this person: whether it is on, its address, the tools it serves them, and theirs it cannot serve now (with why). */
+/**
+ * Arena MCP for this person: whether it is on, its address (and the one serving the tools as code, while Tools as code is
+ * theirs), the tools it serves them, and theirs it cannot serve now (with why).
+ */
 interface McpInfo {
   enabled: boolean
   url: string
+  codeUrl?: string | null
   tools: { id: string; title: string; askFirst: boolean }[]
   notServed?: { id: string; title: string; why: string }[]
 }
@@ -300,8 +304,13 @@ function TrustCertificate({ certificate, os }: { certificate: SiteCertificate; o
   )
 }
 
-/** Arena MCP: every chat tool of the person's, for their agent, at one address with their API key. */
+/**
+ * Arena MCP: every chat tool of the person's, for their agent, at one address with their API key; or, as code, two tools
+ * (search_tools, run_code) in place of every definition, at the other.
+ */
 function ArenaMcp({ info, os }: { info: McpInfo; os: System }) {
+  const [asCode, setAsCode] = useState(false)
+  const url = asCode && info.codeUrl ? info.codeUrl : info.url
   return (
     <Card>
       <CardHeader>
@@ -312,7 +321,18 @@ function ArenaMcp({ info, os }: { info: McpInfo; os: System }) {
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4">
-        <CodeBlock code={info.url} label="Arena MCP's address" />
+        {info.codeUrl && (
+          <div className="grid gap-1">
+            <Label className="flex items-center gap-3 font-normal">
+              <Switch checked={asCode} onCheckedChange={setAsCode} /> Tools as code: search_tools and run_code in place of every tool
+            </Label>
+            <p className="text-sm text-muted-foreground">
+              Your agent reads two short definitions and writes a Python program that calls your tools as functions: many calls, filtered in the
+              program, with only what it prints coming back. Best for strong models and many tools; tools that ask first stay as they are.
+            </p>
+          </div>
+        )}
+        <CodeBlock code={url} label="Arena MCP's address" />
         {info.tools.length > 0 ? (
           <ul aria-label="Tools it serves you" className="flex flex-wrap gap-1.5">
             {info.tools.map((t) => (
@@ -337,7 +357,7 @@ function ArenaMcp({ info, os }: { info: McpInfo; os: System }) {
             A tool that asks first in the chat is marked so your agent asks you before each call: let it ask, rather than trusting every tool.
           </p>
         )}
-        {arenaMcp(info.url, os).map((s) => (
+        {arenaMcp(url, os).map((s) => (
           <section key={s.title} aria-label={`Arena MCP in ${s.title}`} className="grid gap-1.5">
             <h3 className="text-sm font-medium">{s.title}</h3>
             <p className="text-sm text-muted-foreground">{s.text}</p>

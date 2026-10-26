@@ -168,8 +168,7 @@ public sealed partial class ChatService(
         // and those that hand work on (sub-agents, deep research) or need the sandbox the program holds a place in.
         IReadOnlyList<CodeFunction> CodeFunctions() =>
         [
-            .. runs.Where(r => r.Value.Choice.Tool.Id is not (CodeTool.ToolId or "python" or ResearchTool.ToolId or VectorTool.ToolId) && r.Value.Choice.Tool is not SandboxServerTool
-                    && r.Key is not (AgentsTool.Function or OnDemandTools.Function)
+            .. runs.Where(r => CodeTool.Callable(r.Value.Choice.Tool) && r.Key is not (AgentsTool.Function or OnDemandTools.Function)
                     && !r.Value.Choice.Setting.AskFirst && !r.Value.Run.AsksFirst(r.Key))
                 .Select(r => r.Value.Run.Functions.OfType<JsonObject>().FirstOrDefault(f => f["function"]?["name"]?.GetValue<string>() == r.Key)?["function"] is JsonObject f
                     ? new CodeFunction(r.Key, r.Value.Choice.Tool.Id, f["description"]?.GetValue<string>(), f["parameters"] as JsonObject)

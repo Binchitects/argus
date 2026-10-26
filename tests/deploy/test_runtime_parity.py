@@ -333,6 +333,8 @@ class SecretsAndRoutesTests(unittest.TestCase):
         ingress = (CHART / "templates" / "ingress.yaml").read_text()
         app_rule = re.search(r"^\s+app:\n\s+rule: (.*)$", routes, re.M).group(1)
         traefik_app = set(re.findall(r"Path(?:Prefix)?\(`([^`]+)`\)", app_rule))
+        # A path under another (/mcp/code under /mcp) is the Ingress's already: its Prefix matches by path element.
+        traefik_app = {p for p in traefik_app if not any(p.startswith(q + "/") for q in traefik_app)}
         lists = re.findall(r'range list ((?:"[^"]+" ?)+)', ingress)
         helm_app = set(re.findall(r'"([^"]+)"', lists[0]))
         self.assertEqual(traefik_app, helm_app)

@@ -35,7 +35,7 @@ export default defineConfig({
     },
   },
   server: {
-    proxy: { '/api': proxy, '/connect': proxy, '/.well-known': proxy, '^/mcp$': proxy, '/scim': proxy },
+    proxy: { '/api': proxy, '/connect': proxy, '/.well-known': proxy, '^/mcp(/code)?$': proxy, '/scim': proxy },
     fs: { allow: [searchForWorkspaceRoot(process.cwd()), docs] },
   },
   test: {

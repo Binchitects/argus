@@ -7,14 +7,14 @@
 {{ $hsts := env "HSTS_SECONDS" | default (ternary "31536000" "0" (ne $acme "")) }}
 http:
   routers:
-    # The web on the bare domain, except the app's paths (/mcp: Arena MCP, each person's tools for their agents).
+    # The web on the bare domain, except the app's paths (/mcp: Arena MCP, each person's tools for their agents; /mcp/code: the same as code).
     web:
       rule: Host(`{{ $domain }}`)
       service: web
       middlewares: [secure]
       tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}
     app:
-      rule: Host(`{{ $domain }}`) && (PathPrefix(`/api`) || PathPrefix(`/connect`) || PathPrefix(`/.well-known`) || Path(`/mcp`) || PathPrefix(`/scim`))
+      rule: Host(`{{ $domain }}`) && (PathPrefix(`/api`) || PathPrefix(`/connect`) || PathPrefix(`/.well-known`) || Path(`/mcp`) || Path(`/mcp/code`) || PathPrefix(`/scim`))
       service: app
       middlewares: [secure]
       tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}

@@ -97,6 +97,8 @@ describe('connect your tools', () => {
     renderApp('/setup')
     expect(await screen.findByText('Arena MCP (all your tools)')).toBeInTheDocument()
     expect(screen.getByText('https://llm.example.com/mcp')).toBeInTheDocument()
+    // Without Tools as code, one address.
+    expect(screen.queryByRole('switch', { name: /Tools as code/ })).not.toBeInTheDocument()
     const served = screen.getByRole('list', { name: 'Tools it serves you' })
     expect(within(served).getByText('Argus')).toBeInTheDocument()
     expect(within(served).getByText('Jira · asks first')).toBeInTheDocument()
@@ -111,6 +113,21 @@ describe('connect your tools', () => {
     expect(within(qwen).getByText(/qwen mcp add/)).not.toHaveTextContent('--trust')
     const other = JSON.parse(within(screen.getByRole('region', { name: 'Arena MCP in Other MCP clients' })).getByText(/mcpServers/).textContent!)
     expect(other.mcpServers.arena).toEqual({ type: 'http', url: 'https://llm.example.com/mcp', headers: { Authorization: 'Bearer <your API key>' } })
+  })
+
+  it('offers the tools as code at their own address while Tools as code is the person\'s', async () => {
+    fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config() }),
+      'GET /api/account/mcp': () => ({
+        json: { enabled: true, url: 'https://llm.example.com/mcp', codeUrl: 'https://llm.example.com/mcp/code', tools: [{ id: 'code', title: 'Tools as code', askFirst: false }] },
+      }),
+    })
+    renderApp('/setup')
+    const asCode = await screen.findByRole('switch', { name: /Tools as code: search_tools and run_code/ })
+    expect(screen.getByText('https://llm.example.com/mcp')).toBeInTheDocument()
+    await userEvent.click(asCode)
+    expect(screen.getByText('https://llm.example.com/mcp/code')).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Arena MCP in Claude Code' })).getByText(/claude mcp add/)).toHaveTextContent('arena https://llm.example.com/mcp/code')
   })
 
   it('says which of the person\'s tools Arena MCP cannot serve now, and why', async () => {
