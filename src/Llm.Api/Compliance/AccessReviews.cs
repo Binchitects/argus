@@ -250,7 +250,7 @@ public sealed partial class AccessReviewSchedule(IServiceScopeFactory scopes, IO
             {
                 await RunAsync(stoppingToken);
             }
-            catch (Exception ex) when (ex is DbUpdateException or InvalidOperationException or Npgsql.NpgsqlException && !stoppingToken.IsCancellationRequested)
+            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
             {
                 LogFailed(logger, ex.Message);
             }

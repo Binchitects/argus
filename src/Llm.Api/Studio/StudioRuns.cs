@@ -127,7 +127,7 @@ public sealed partial class StudioRuns(IServiceScopeFactory scopes, TimeProvider
                 await DueAsync(stoppingToken);
                 await AbandonedAsync(stoppingToken);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
             {
                 SweepFailed(logger, ex);
             }

@@ -22,7 +22,7 @@ public sealed partial class BoardRefresher(IServiceScopeFactory scopes, TimeProv
             {
                 await RunDueAsync(stoppingToken);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
             {
                 Failed(logger, ex);
             }

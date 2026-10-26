@@ -33,7 +33,7 @@ public sealed partial class FileSealingJob(IServiceScopeFactory scopes, TimeProv
                     LogSealed(logger, n);
                 }
             }
-            catch (Exception ex) when (ex is DbUpdateException or NpgsqlException or InvalidOperationException && !stoppingToken.IsCancellationRequested)
+            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
             {
                 LogFailed(logger, ex.Message);
             }

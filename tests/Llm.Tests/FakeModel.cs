@@ -67,8 +67,15 @@ public sealed class FakeModel : HttpMessageHandler
     /// <summary>A real 1x1 PNG.</summary>
     public static readonly byte[] Png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
 
+    /// <summary>While set, every request times out as HttpClient's own timeout does (a TaskCanceledException that is no one's cancelling).</summary>
+    public bool TimesOut { get; set; }
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
+        if (TimesOut)
+        {
+            throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout of 900 seconds elapsing.", new TimeoutException());
+        }
         if (request.Headers.Authorization?.Parameter is { } key && RevokedKeys.ContainsKey(key))
         {
             return new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("""{"error":{"message":"Authentication Error, Invalid proxy server token passed."}}""") };

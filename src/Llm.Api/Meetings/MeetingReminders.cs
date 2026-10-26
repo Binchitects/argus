@@ -27,7 +27,7 @@ public sealed partial class MeetingReminders(IServiceScopeFactory scopes, Operat
             {
                 await RemindAsync(stoppingToken);
             }
-            catch (Exception ex) when (ex is DbUpdateException or InvalidOperationException or Npgsql.NpgsqlException)
+            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
             {
                 LogFailed(logger, ex);
             }

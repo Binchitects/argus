@@ -54,8 +54,10 @@ public sealed partial class ChatDigests(IServiceScopeFactory scopes, Operations.
             {
                 await RunAsync(stoppingToken);
             }
-            catch (Exception ex) when (ex is DbUpdateException or InvalidOperationException or Npgsql.NpgsqlException)
+            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
             {
+                // Whatever went wrong (the database away, the model's answer timed out), the next pass tries again: one
+                // pass failing never stops the app (its host stops when a background service throws).
                 LogFailed(logger, ex);
             }
         }
@@ -97,9 +99,9 @@ public sealed partial class ChatDigests(IServiceScopeFactory scopes, Operations.
                 }
                 chat.DigestedSequence = last;
             }
-            catch (Exception ex) when (ex is ChatGatewayException or HttpRequestException)
+            catch (Exception ex) when (ex is ChatGatewayException or HttpRequestException || (ex is OperationCanceledException && !ct.IsCancellationRequested))
             {
-                // Digested at the next pass (the model was away).
+                // Digested at the next pass (the model was away, or too slow to answer).
                 LogChatFailed(logger, chat.Id, ex);
             }
         }

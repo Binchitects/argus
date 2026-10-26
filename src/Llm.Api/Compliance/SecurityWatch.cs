@@ -46,7 +46,7 @@ public sealed partial class SecurityWatch(IServiceScopeFactory scopes, IOptionsM
                     await RunAsync(stoppingToken);
                 }
             }
-            catch (Exception ex) when (ex is DbUpdateException or InvalidOperationException or Npgsql.NpgsqlException && !stoppingToken.IsCancellationRequested)
+            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
             {
                 LogFailed(logger, ex.Message);
             }

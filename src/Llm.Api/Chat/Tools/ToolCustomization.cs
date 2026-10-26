@@ -60,7 +60,7 @@ public sealed partial class ToolUsage(IServiceScopeFactory scopes, IOptionsMonit
             {
                 await WriteAsync(batch, stoppingToken);
             }
-            catch (Exception ex) when (ex is DbUpdateException or InvalidOperationException or TimeoutException)
+            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
             {
                 LogNotWritten(logger, batch.Count, ex.Message);
             }

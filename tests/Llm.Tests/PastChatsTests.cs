@@ -53,6 +53,29 @@ public sealed class PastChatsTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_digest_whose_model_times_out_is_made_at_the_next_pass_and_the_pass_goes_on()
+    {
+        var (f, clock) = NewApp();
+        await using var _f = f;
+        var (b, _, _) = await PersonAsync(f);
+        var chat = await SendAsync(b, null, "We chose Northwind Traders as the parts vendor.");
+        // The gateway's answer timed out (HttpClient's timeout, which is a cancelling no one asked for): on 2026-10-26 it
+        // escaped the pass and stopped the app.
+        app.Model.TimesOut = true;
+        try
+        {
+            Assert.Equal(0, await DigestAsync(f, clock));
+        }
+        finally
+        {
+            app.Model.TimesOut = false;
+        }
+        Assert.Equal(1, await DigestAsync(f, clock));
+        using var scope = f.Services.CreateScope();
+        Assert.NotNull((await scope.ServiceProvider.GetRequiredService<AppDbContext>().Conversations.SingleAsync(c => c.Id == chat)).Digest);
+    }
+
+    [Fact]
     public async Task Quiet_chats_get_a_digest_and_the_model_finds_and_reads_them_again_from_the_chat_and_from_Code_Arena()
     {
         var (f, clock) = NewApp();

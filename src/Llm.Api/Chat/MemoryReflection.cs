@@ -67,7 +67,7 @@ public sealed partial class MemoryReflection(IServiceScopeFactory scopes, Operat
             {
                 await RunAsync(stoppingToken);
             }
-            catch (Exception ex) when (ex is DbUpdateException or InvalidOperationException or Npgsql.NpgsqlException)
+            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
             {
                 LogFailed(logger, ex);
             }

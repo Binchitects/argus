@@ -26,7 +26,7 @@ public sealed partial class MemoryUpkeep(IServiceScopeFactory scopes, Operations
             {
                 await RunAsync(stoppingToken);
             }
-            catch (Exception ex) when (ex is DbUpdateException or InvalidOperationException or Npgsql.NpgsqlException)
+            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
             {
                 LogFailed(logger, ex);
             }
