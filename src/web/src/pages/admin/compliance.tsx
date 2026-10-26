@@ -281,7 +281,7 @@ export function CompliancePage() {
           ))}
         </div>
       ) : (
-        <div className="grid gap-8">
+        <div className="grid grid-cols-1 gap-8">
           <section aria-label="Frameworks" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             {FRAMEWORKS.map((f) => {
               const t = tally(data.controls, f.key, now)
@@ -362,7 +362,7 @@ export function CompliancePage() {
 
           <IncidentsSection mayManage={mayAttest} />
 
-          <section aria-labelledby="controls" className="grid gap-4">
+          <section aria-labelledby="controls" className="grid grid-cols-1 gap-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 id="controls" className="text-lg font-semibold">
                 Controls

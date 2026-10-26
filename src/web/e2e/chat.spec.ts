@@ -47,7 +47,7 @@ async function thinking(page: Page, label: string) {
   await page.getByRole('option', { name: label }).click()
 }
 
-const done = (page: Page) => expect(page.getByRole('button', { name: 'Send' })).toBeVisible({ timeout: 120_000 })
+const done = (page: Page) => expect(page.getByRole('button', { name: 'Send', exact: true })).toBeVisible({ timeout: 120_000 })
 
 /** On a phone the chat list is a panel behind "Chats" (it may be open already). */
 async function chatList(page: Page, isMobile: boolean) {
@@ -102,7 +102,8 @@ const argusChat = {
  * to read it again when it changed elsewhere) and its canvases (none).
  */
 async function serveChat(page: Page, chat: { id: string }) {
-  await page.route(`**/api/chat/conversations/${chat.id}`, (route) => route.fulfill({ json: chat }))
+  // Read with how many of its last messages (?last=): matched by its path alone.
+  await page.route((url) => url.pathname === `/api/chat/conversations/${chat.id}`, (route) => route.fulfill({ json: chat }))
   await page.route(`**/api/chat/conversations/${chat.id}/stamp`, (route) => route.fulfill({ json: { stamp: 'e2e', answering: false } }))
   await page.route(`**/api/chat/conversations/${chat.id}/canvases`, (route) => route.fulfill({ json: [] }))
 }
@@ -648,7 +649,7 @@ test.describe('chat with the model', () => {
     await page.getByRole('region', { name: 'You' }).last().hover()
     await page.getByRole('button', { name: 'Edit question' }).click()
     await page.getByRole('textbox', { name: 'Edit your question' }).fill('Reply with exactly the word: cherry')
-    await page.getByRole('region', { name: 'You' }).getByRole('button', { name: 'Send' }).click()
+    await page.getByRole('region', { name: 'You' }).getByRole('button', { name: 'Send', exact: true }).click()
     await expect(page.getByRole('region', { name: 'Answer' }).last()).toContainText(/cherry/i, { timeout: 120_000 })
     await done(page)
     await expect(page.getByRole('navigation', { name: 'Question versions' })).toHaveText(/2 \/ 2/)
@@ -1045,7 +1046,7 @@ test.describe('tools', () => {
       await expect(agents.getByRole('listitem').nth(1)).toBeVisible()
       await expect(agents.locator('.tool-name', { hasText: /Web search|Fetch page/ }).first()).toBeVisible({ timeout: 300_000 })
       await page.getByRole('button', { name: 'Stop' }).click()
-      await expect(page.getByRole('button', { name: 'Send' })).toBeVisible({ timeout: 60_000 })
+      await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeVisible({ timeout: 60_000 })
       expect((await page.request.delete(`/api/chat/conversations/${page.url().split('/').pop()}`, { headers: { 'X-Requested-With': 'e2e' } })).status()).toBe(204)
     } finally {
       await request.put('/api/admin/tools/web', { headers, data: { enabled: false, audience: 'Everyone', groups: [], onByDefault: false, askFirst: false } })

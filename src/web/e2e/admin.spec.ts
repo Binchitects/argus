@@ -262,6 +262,11 @@ test('members cannot open admin pages', async ({ browser, baseURL }) => {
   await page.getByLabel('Password').fill(password)
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page).not.toHaveURL(/\/login/)
+  // A new person is shown "What's new" over their first page, once.
+  const tour = page.getByRole('dialog')
+  await expect(tour).toContainText("What's new in Argus Arena")
+  await page.keyboard.press('Escape')
+  await expect(tour).toBeHidden()
   await expect(page.getByRole('button', { name: /Account menu/ })).toBeVisible()
   await expect(page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'People' })).toHaveCount(0)
   await page.goto('/admin/settings')
