@@ -8,18 +8,19 @@ using Microsoft.EntityFrameworkCore;
 namespace Llm.Api.Models;
 
 /// <summary>
-/// How each chat model is given its tools (Admin → Models → Tools): the admins' choice, else the automatic one. Small models
-/// write wrong programs more often than they make a wrong call, so they call tools directly; the others get both, run_code
-/// for many calls and a direct call for one or two. The chat and Code Arena (its config) follow it.
+/// How each chat model is given its tools (Admin → Models → Tools): the admins' choice, else the automatic one, as measured
+/// (docs/measurements/tool-modes.md): small models gain nothing from programs and spend more, so they call tools directly;
+/// the others get them as code, where a 27B model looked up what it would otherwise have answered from memory (10 of 10
+/// against 4 of 10 direct, 6 of 10 both). The chat and Code Arena (its config) follow it.
 /// </summary>
 public sealed partial class ToolModeBook(AppDbContext db, SmallModel small)
 {
     /// <summary>Models of this many billion parameters or fewer (by their names: Qwen3-4B, llama-3.1-8b) are small.</summary>
     public const double SmallBillions = 8;
 
-    /// <summary>The automatic choice: direct for the model for small steps and the small ones by their names, both for the rest.</summary>
+    /// <summary>The automatic choice: direct for the model for small steps and the small ones by their names, as code for the rest.</summary>
     public static string Automatic(string model, string? smallModel) =>
-        model == smallModel || Billions(model) is <= SmallBillions ? ToolModes.Direct : ToolModes.Both;
+        model == smallModel || Billions(model) is <= SmallBillions ? ToolModes.Direct : ToolModes.Code;
 
     /// <summary>The size a model's name says, in billions of parameters (the largest it says; 8x7B is 56, 135M is 0.135), or null when it says none.</summary>
     public static double? Billions(string model)

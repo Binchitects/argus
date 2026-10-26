@@ -793,8 +793,13 @@ public sealed class ChatToolsTests(AppFixture app)
         string SystemSent() => app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]![0]!["content"]!.GetValue<string>();
         var id = await NewChatAsync(b, new { tools = new[] { "code", "calculator" } });
 
-        // Automatic: its name says no small size, so both.
+        // Automatic: its name says no small size, so as code.
         await SendAsync(b, id, "hello");
+        Assert.Equal(["run_code"], FunctionsSentFor(email));
+
+        // Both: every tool and run_code.
+        await StatusAssert.Is(HttpStatusCode.OK, await SetModeAsync("both"));
+        await SendAsync(b, id, "both");
         Assert.Contains("run_code", FunctionsSentFor(email));
         Assert.Contains("calculate", FunctionsSentFor(email));
 
@@ -819,11 +824,11 @@ public sealed class ChatToolsTests(AppFixture app)
             .GetProperty("toolMode").GetString());
         JsonElement Row(JsonElement list) => list.GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == model).GetProperty("toolMode");
         var row = Row(await admin.JsonAsync(await admin.GetAsync("/api/admin/models")));
-        Assert.Equal(("code", true, "both"), (row.GetProperty("mode").GetString(), row.GetProperty("set").GetBoolean(), row.GetProperty("automatic").GetString()));
+        Assert.Equal(("code", true, "code"), (row.GetProperty("mode").GetString(), row.GetProperty("set").GetBoolean(), row.GetProperty("automatic").GetString()));
 
         // Back to the automatic choice; a mode that is none and a model that is not there are refused.
         var back = await admin.JsonAsync(await SetModeAsync(null));
-        Assert.Equal("both", back.GetProperty("toolMode").GetString());
+        Assert.Equal("code", back.GetProperty("toolMode").GetString());
         Assert.False(back.GetProperty("toolModeSet").GetBoolean());
         await StatusAssert.Is(HttpStatusCode.BadRequest, await SetModeAsync("sometimes"));
         await StatusAssert.Is(HttpStatusCode.NotFound, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/models/no-such-model/tools", UriKind.Relative), new { mode = "code" }));
@@ -831,16 +836,40 @@ public sealed class ChatToolsTests(AppFixture app)
             e => e.GetProperty("action").GetString() == "model.tools_mode" && e.GetProperty("detail").GetString() == "automatic");
     }
 
+    [Fact]
+    public async Task A_picture_a_program_makes_reaches_the_person_and_is_charged_and_tools_that_act_in_the_page_stay_direct()
+    {
+        await using var sandbox = new FakeSandbox();
+        var gateway = new FakeGateway();
+        gateway.Models.Add(new GatewayModel("FLUX.2-klein-4B", null, null, false, false, false, null, null, null, Mode: "image_generation"));
+        await using var f = NewApp(gateway, settings: new() { ["Sandbox:Dir"] = sandbox.Dir });
+        var (b, _, _) = await PersonAsync(f);
+        var id = await NewChatAsync(b, new { tools = new[] { "code", "image", "plans", "ask", "canvas" } });
+
+        var events = await SendAsync(b, id, "Draw [call run_code {\"code\":\"# call generate_image {\\\"prompt\\\": \\\"A red fox\\\"}\"}]");
+        var result = Event(events, "tool_result");
+        Assert.False(result.GetProperty("isError").GetBoolean(), result.GetProperty("text").GetString());
+        // A question to the person, a plan's card and the canvas act in the page: called directly, never from a program.
+        var functions = JsonDocument.Parse(result.GetProperty("text").GetString()!).RootElement.GetProperty("stdout").GetString()!.Split('\n')[0]["functions: ".Length..].Split(',');
+        Assert.Contains("generate_image", functions);
+        Assert.DoesNotContain(functions, n => n is "ask_user" or "plan_make" || n.StartsWith("canvas_", StringComparison.Ordinal));
+        // The picture is the person's, under the program's card, and costs what a direct one does.
+        var picture = result.GetProperty("attachments")[0];
+        Assert.Equal(("a-red-fox.png", "image"), (picture.GetProperty("fileName").GetString(), picture.GetProperty("kind").GetString()));
+        await StatusAssert.Is(HttpStatusCode.OK, await b.GetAsync($"/api/chat/attachments/{picture.GetProperty("id").GetGuid()}/content"));
+        Assert.Equal(0.01m, result.GetProperty("cost").GetDecimal());
+    }
+
     [Theory]
     [InlineData("Qwen3-4B-Instruct-2507", 4.0, "direct")]
     [InlineData("llama-3.1-8b-instruct", 8.0, "direct")]
     [InlineData("qwen2.5-coder-1.5b", 1.5, "direct")]
-    [InlineData("qwen3-30b-a3b", 30.0, "both")]
-    [InlineData("Mixtral-8x7B", 56.0, "both")]
-    [InlineData("gpt-oss-120b", 120.0, "both")]
+    [InlineData("qwen3-30b-a3b", 30.0, "code")]
+    [InlineData("Mixtral-8x7B", 56.0, "code")]
+    [InlineData("gpt-oss-120b", 120.0, "code")]
     [InlineData("SmolLM2-135M-Instruct-Q2_K", 0.135, "direct")]
-    [InlineData("Qwen3-Omni-30B-A3B", 30.0, "both")]
-    [InlineData("claude-sonnet-5-5", null, "both")]
+    [InlineData("Qwen3-Omni-30B-A3B", 30.0, "code")]
+    [InlineData("claude-sonnet-5-5", null, "code")]
     public void A_models_automatic_tools_follow_the_size_its_name_says(string model, double? billions, string mode)
     {
         Assert.Equal(billions, Llm.Api.Models.ToolModeBook.Billions(model));

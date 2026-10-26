@@ -336,8 +336,10 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     callable from code. It needs **Python**'s permission. How each model gets
     it is the admins' choice (Admin → Models → **Tools**): direct (no
     `run_code`, for small models), as code (`run_code`, even in a chat without
-    it, and the other tools named for it in place of their definitions), or
-    both.
+    it, and the other tools named for it in place of their definitions: the
+    automatic choice for larger models), or both. Questions to you, plans,
+    memory, the canvas and the browser are always called directly; a picture a
+    program makes comes to you under its card.
   - **Canvas**: documents and code beside the chat, which you and the model
     both edit (see **Canvas** below).
   - **Reading files**: a long attachment goes into the question only up to a

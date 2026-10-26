@@ -302,9 +302,15 @@ would be with them.
   git and shell stay direct. **Both**: every tool and `run_code`, a program for
   many calls and a direct call for one or two. **Automatic** (until an admin
   chooses) is direct for the model for small steps and for a model whose name
-  says 8B parameters or fewer (`Qwen3-4B`, `llama-3.1-8b`), both for the rest.
+  says 8B parameters or fewer (`Qwen3-4B`, `llama-3.1-8b`, `SmolLM2-135M`), as
+  code for the rest: measured, a 27B model passed 10 of 10 lookups as code, 6
+  both and 4 direct, and a 4B one 1 either way
+  ([measurements](measurements/tool-modes.md)).
   It applies from the next answer (Code Arena's next start) and is audited
-  (`model.tools_mode`). Deep research keeps its tools direct.
+  (`model.tools_mode`). Deep research keeps its tools direct, and so do the
+  tools that act in the chat's page (a question to the person, plans, memory,
+  the canvas, the browser); a picture or file a program's call makes is the
+  person's under the program's card, and costs what a direct one does.
 - **Loaded on request.** While a place is left beside the kept models, any other
   model loads when someone asks for it: a chat, an API key, a coding agent. Its
   first answer waits while it loads. At the limit, the app first unloads an

@@ -7,7 +7,7 @@ import { api, errorMessage } from '@/lib/api'
 
 export type ToolMode = 'direct' | 'code' | 'both'
 
-/** How a chat model is given its tools: the admins' choice (set), else the automatic one (small models direct, the rest both). */
+/** How a chat model is given its tools: the admins' choice (set), else the automatic one (small models direct, the rest as code). */
 export interface ModelTools {
   mode: ToolMode
   set: boolean
