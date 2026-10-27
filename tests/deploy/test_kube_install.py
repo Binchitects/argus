@@ -217,7 +217,7 @@ class KubeInstall(unittest.TestCase):
             self.assertIn(flag, upgrade)
         self.assertIn('existingSecret: "arena-secrets"', values)
         self.assertIn('cert-manager.io/cluster-issuer: "letsencrypt"', values)
-        self.assertIn('sharedStorageClass: "nfs"', values)
+        self.assertIn('sharedStorageClass: "nfs", sharedAccessMode: ReadWriteMany', values)
         self.assertNotIn("llamacpp: { enabled: false }", values, "a GPU node: the GPU servers stay on")
         self.assertIn("the app answers: Argus Arena 7.3.0", r.stdout)
         self.assertEqual(0o600, (self.keep / "arena-values.yaml").stat().st_mode & 0o777)
@@ -233,6 +233,7 @@ class KubeInstall(unittest.TestCase):
         for off in ("llamacpp", "imagegen", "videogen", "vllm", "studio"):
             self.assertIn(f"{off}: {{ enabled: false }}", values)
         self.assertIn('tlsSecret: "arena-tls"', values)
+        self.assertIn("sharedAccessMode: ReadWriteOnce", values, "one node: its own volumes")
 
     def test_An_installed_release_is_upgraded_not_installed_again_keeping_its_values(self):
         self.cluster(GOOD, installed=True, namespaces=["arena"], values={"domain": "arena.example.test"},

@@ -299,9 +299,10 @@ per namespace: the services keep the names the app reaches them by.
 you. `requirements` checks the cluster before anything is changed and says
 what each lack needs: kubectl 1.27 and helm 3.14 or newer, the cluster
 answering and your rights in the namespace, a default storage class (or
-`--storage-class`), one that shares volumes between nodes for more than one
-app replica (`--shared-storage-class`: NFS, CephFS, EFS, Azure Files,
-Filestore), an ingress controller, the TLS (`--tls-secret`, or cert-manager's
+`--storage-class`), one that shares volumes between nodes on more than one
+node (`--shared-storage-class`: NFS, CephFS, EFS, Azure Files, Filestore; the
+app, the sandbox and the tools share the model library and their jobs'
+volumes; on one node they are ReadWriteOnce), an ingress controller, the TLS (`--tls-secret`, or cert-manager's
 `--cluster-issuer`), GPUs (NVIDIA's GPU operator or device plugin; without
 them the chat engine, pictures and video are left out), room on the nodes (4
 CPUs and 12 GiB at least; 8 and 24 with the GPU servers), and the metrics

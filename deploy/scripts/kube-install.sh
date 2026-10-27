@@ -8,7 +8,7 @@
 #
 # Commands:
 #   requirements  what the cluster has and lacks: kubectl and helm, the cluster and the rights in the namespace,
-#                 storage (a default class; one that shares volumes between nodes for several app replicas), an
+#                 storage (a default class; one that shares volumes between nodes, on several), an
 #                 ingress controller, the TLS (a Secret, or cert-manager's issuer), GPUs (NVIDIA's device plugin or
 #                 GPU operator), the nodes' room (4 CPUs and 12 GiB; 8 and 24 with the GPU servers), and the
 #                 metrics server for --autoscale
@@ -31,8 +31,8 @@
 #   --database in-cluster|external   (default in-cluster) with, external: --db-host HOST [--db-port 5432]
 #                             [--db-user arena] [--db-ca-secret NAME] --db-password-file FILE (Postgres 16+)
 #   --storage-class NAME      volumes (default: the cluster's default class)
-#   --shared-storage-class NAME   the model library and what several replicas share: ReadWriteMany (NFS, CephFS,
-#                             EFS, Azure Files, Filestore...); needed for more than one app replica on several nodes
+#   --shared-storage-class NAME   the model library and the jobs' volumes the pods share: ReadWriteMany (NFS, CephFS,
+#                             EFS, Azure Files, Filestore...); needed on more than one node
 #   --gpu yes|no|auto         the GPU servers (chat engine, pictures, video); auto: when a node has GPUs
 #   --replicas N              the app's and the web's (default 2); the gateway's too with --valkey
 #   --valkey                  the gateway's replicas share their counts (rate limits)
@@ -187,9 +187,9 @@ check_requirements() {
   if [[ $CMD == upgrade ]]; then note "the release's storage stays as it was installed"
   elif [[ -n "$SHARED" ]]; then
     if printf '%s\n' "$classes" | cut -f1 | grep -qxF "$SHARED"; then ok "shared storage class $SHARED (it must give ReadWriteMany volumes)"; else need "storage class $SHARED is not in the cluster"; fi
-  elif [[ $REPLICAS -gt 1 && $NODES -gt 1 ]]; then
-    need "a storage class that shares volumes between nodes (ReadWriteMany: NFS, CephFS, EFS, Azure Files, Filestore) for $REPLICAS app replicas on $NODES nodes: --shared-storage-class NAME, or --replicas 1"
-  else note "one node, or one replica: the model library needs no shared storage"; fi
+  elif [[ $NODES -gt 1 ]]; then
+    need "a storage class that shares volumes between nodes (ReadWriteMany: NFS, CephFS, EFS, Azure Files, Filestore): the app, the sandbox and the tools share the model library and their jobs' volumes, on $NODES nodes: --shared-storage-class NAME"
+  else note "one node: the volumes the pods share are ReadWriteOnce, on it"; fi
 
   step "The way in"
   local ingress; ingress="$(K get ingressclass -o json 2>/dev/null | json 'print(" ".join(i["metadata"]["name"] for i in d["items"]))')"
@@ -286,7 +286,8 @@ write_values() {
     printf 'secrets: { existingSecret: "%s" }\n' "$SECRET"
     printf 'ingress:\n  tlsSecret: "%s"\n' "$tls"
     [[ -z "$ISSUER" ]] || printf '  annotations: { cert-manager.io/cluster-issuer: "%s" }\n' "$ISSUER"
-    printf 'persistence: { storageClass: "%s", sharedStorageClass: "%s" }\n' "$STORAGE" "$SHARED"
+    # No shared class (one node): the shared volumes are ReadWriteOnce, which every class gives.
+    printf 'persistence: { storageClass: "%s", sharedStorageClass: "%s", sharedAccessMode: %s }\n' "$STORAGE" "$SHARED" "$([[ -n "$SHARED" ]] && echo ReadWriteMany || echo ReadWriteOnce)"
     printf 'app: { replicas: %s }\nweb: { replicas: %s }\n' "$REPLICAS" "$REPLICAS"
     if [[ $VALKEY -eq 1 ]]; then printf 'valkey: { enabled: true }\nlitellm: { replicas: %s }\n' "$REPLICAS"; fi
     printf 'availability: { strictSpread: %s, autoscale: { enabled: %s } }\n' "$( ((STRICT)) && echo true || echo false)" "$( ((AUTOSCALE)) && echo true || echo false)"
