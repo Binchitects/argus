@@ -205,7 +205,13 @@ jobs:
           kind load docker-image arena-app:ci arena-web:ci --name arena
           kubectl label node arena-control-plane ingress-ready=true
           kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.12.1/deploy/static/provider/kind/deploy.yaml
-          kubectl -n ingress-nginx wait --for=condition=available deployment/ingress-nginx-controller --timeout=300s
+          kubectl -n ingress-nginx wait --for=condition=complete job --all --timeout=300s
+          kubectl -n ingress-nginx wait --for=condition=ready pod -l app.kubernetes.io/component=controller --timeout=300s
+          # Its admission webhook answers a little after the pod is ready: until an Ingress passes it (a dry run), wait.
+          printf '%s\n' 'apiVersion: networking.k8s.io/v1' 'kind: Ingress' 'metadata: { name: probe, namespace: default }' \
+            'spec: { ingressClassName: nginx, rules: [{ host: probe.localhost, http: { paths: [{ path: /, pathType: Prefix, backend: { service: { name: probe, port: { number: 80 } } } }] } }] }' > probe.yaml
+          for i in $(seq 1 60); do kubectl apply --dry-run=server -f probe.yaml >/dev/null 2>&1 && break; sleep 2; done
+          kubectl apply --dry-run=server -f probe.yaml
           openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=arena.localhost \
             -addext "subjectAltName=DNS:arena.localhost,DNS:*.arena.localhost" -keyout tls.key -out tls.crt
           kubectl create namespace arena
