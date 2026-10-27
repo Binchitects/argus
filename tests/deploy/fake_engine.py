@@ -235,6 +235,8 @@ def stateful(args: list[str]) -> int | None:
             key, value = f.split("=", 1)
             if key == "label" and value.startswith("com.docker.compose.project="):
                 rows = [c for c in rows if c["project"] == value.split("=", 1)[1]]
+            elif key == "label" and value.startswith("com.docker.compose.service="):
+                rows = [c for c in rows if c["service"] == value.split("=", 1)[1]]
             elif key == "ancestor":
                 rows = [c for c in rows if c["image_id"] == value.replace("sha256:", "")]
         if "-a" not in args and "-aq" not in args:

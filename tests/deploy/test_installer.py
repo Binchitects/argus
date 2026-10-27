@@ -33,11 +33,25 @@ COMPOSE = COMPOSE.replace("volumes:\n", "  embed:\n    image: ghcr.io/ggml-org/l
 COMPOSE = COMPOSE.replace("    container_name: litellm\n", "    container_name: litellm\n    volumes: [\"./config/litellm.yaml:/app/config.yaml:ro\"]\n", 1)
 COMPOSE_OLD = COMPOSE.replace("name: arena\n", "name: arena\n# 5.2.0\n")
 COMPOSE_NEW = COMPOSE.replace("    container_name: app\n", "    container_name: app\n    environment: { NEW_KEY: \"${NEW_KEY:?set NEW_KEY}\", APP_KEY: \"${APP_KEY:?}\" }\n")
+# This release's features: each optional service under its feature's profile (5.2.0 had none but Laya's).
+for svc, feature, after in (("argus", "argus", "    container_name: argus\n"), ("cpu-temp-exporter", "monitoring", "    container_name: cpu-temp-exporter\n"),
+                            ("embed", "knowledge", "    container_name: embed\n"), ("llamacpp", "chat-models", "  llamacpp:\n    image: ghcr.io/ggml-org/llama.cpp:server-cuda\n")):
+    assert COMPOSE_NEW.count(after) == 1, svc
+    COMPOSE_NEW = COMPOSE_NEW.replace(after, after + f"    profiles: [{feature}]\n")
+FEATURES = """# id | default | services | needs | requires | title
+chat-models | on  | llamacpp | gpu | - | Chat models on this host
+knowledge   | on  | embed | - | - | Search by meaning
+argus       | on  | argus | gitlab | - | Argus
+monitoring  | on  | cpu-temp-exporter | - | - | Monitoring
+laya        | off | laya | - | - | Laya
+meetings    | on  | - | - | knowledge | Meetings
+"""
+DEFAULT_FEATURES = "chat-models,knowledge,argus,monitoring,meetings"
 # And its data in DATA_DIR's folders, as volumes bound there (5.2.0's were in the engine's storage).
 COMPOSE_NEW = COMPOSE_NEW.replace("volumes:\n  postgres:\n  engine:\n", "volumes:\n" + "".join(
     f'  {v}:\n    driver_opts: {{ type: none, o: bind, device: "${{DATA_DIR:?set DATA_DIR}}/{v}" }}\n' for v in ("postgres", "engine")), 1)
 ENV_EXAMPLE_OLD = "DOMAIN=llm.localhost\nADMIN_EMAIL=admin@example.com\nMODELS_DIR=./models\nMODEL=org/repo:Q4\nADMIN_PASSWORD=\nAPP_KEY=\nDB_PASSWORD=\nGATEWAY_KEY=\nENGINE_KEY=\nARGUS_KEY=\n"
-ENV_EXAMPLE_NEW = ENV_EXAMPLE_OLD + "# A new setting\nNEW_SETTING=on\nNEW_KEY=\nDATA_DIR=\n# HTTP_PORT=8080\n"
+ENV_EXAMPLE_NEW = ENV_EXAMPLE_OLD + f"COMPOSE_PROFILES={DEFAULT_FEATURES}\n# A new setting\nNEW_SETTING=on\nNEW_KEY=\nDATA_DIR=\n# HTTP_PORT=8080\n"
 OLD_ENV = ("DOMAIN=old.example\nADMIN_EMAIL=me@old.example\nMODELS_DIR=./models\nMODEL=lib/model.gguf\nADMIN_PASSWORD=old-admin-pass\n"
            "APP_KEY=old-app-key\nDB_PASSWORD=old-db\nGATEWAY_KEY=sk-old\nENGINE_KEY=old-engine\nARGUS_KEY=old-argus\nOLD_THING=1\n")
 
@@ -53,6 +67,8 @@ class Release:
         self.s = s = Sandbox(curl=True)
         self.repo = s.repo
         s.write("docker-compose.yml", COMPOSE_OLD)
+        # 5.2.0 had no list of features.
+        (s.deploy / "features").unlink()
         s.write(".env.example", ENV_EXAMPLE_OLD)
         s.write("config/litellm.yaml", "model_list: []\n")
         s.write("config/traefik/routes.yml", "http: {}\n")
@@ -68,6 +84,7 @@ class Release:
         self.old = s.dir / "old-deploy"
         shutil.copytree(s.deploy, self.old)
         s.write("docker-compose.yml", COMPOSE_NEW)
+        s.write("features", FEATURES)
         s.write(".env.example", ENV_EXAMPLE_NEW)
         (s.deploy / "config" / "dropped.yml").unlink()
         s.write("config/edited.yml", "shipped: 2\n")
@@ -213,7 +230,7 @@ class LeaveOutTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # On the packing host every service is there, Laya when its profile is asked for.
-        cls.r = Release("--leave-out", "laya,llamacpp,embed", services=SERVICES + "llamacpp\nlaya\n")
+        cls.r = Release("--without", "laya,chat-models,knowledge", services=SERVICES + "llamacpp\nlaya\n")
 
     @classmethod
     def tearDownClass(cls):
@@ -227,10 +244,14 @@ class LeaveOutTests(unittest.TestCase):
         refs = [line.split("\t")[0] for line in (b / "images" / "IMAGES").read_text().splitlines()]
         self.assertFalse([ref for ref in refs if "laya" in ref or "llama.cpp" in ref], refs)
         self.assertIn("left-out: laya llamacpp embed\n", (b / "MANIFEST").read_text())
+        self.assertIn("features-left-out: laya chat-models knowledge\n", (b / "MANIFEST").read_text())
+        services = dict(line.split("\t") for line in (b / "images" / "SERVICES").read_text().splitlines())
+        self.assertNotIn("laya", services)
+        self.assertEqual("arena-argus:9.9.9", services["argus"])
         self.assertIn("embedding: left out\n", (b / "MANIFEST").read_text())
 
     def test_A_dry_run_finds_the_images_as_they_are_before_they_are_tagged(self):
-        r = self.r.s.run("make-installer.sh", "--dry-run", "--version", "9.9.10", "--leave-out", "laya,llamacpp,embed")
+        r = self.r.s.run("make-installer.sh", "--dry-run", "--version", "9.9.10", "--without", "laya,chat-models,knowledge")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("arena-app", r.stdout)
         self.assertNotIn("NOT ON THIS HOST", r.stdout)
@@ -250,7 +271,8 @@ class MakeInstallerArgumentTests(unittest.TestCase):
             (["--fast"], "unknown option"),
             (["--version", "five"], "not a version"),
             (["--version", "5.1.0"], "older than 5.2.0"),
-            (["--leave-out", "nope"], "--leave-out nope: no such service"),
+            (["--without", "nope"], "--without nope: no such feature"),
+            (["--without", "meetings"], "--without meetings: a part of the app"),
             (["--project", "Bad Name"], "--project"),
         ]:
             r = self.s.run("make-installer.sh", *args)
@@ -267,10 +289,10 @@ class MakeInstallerArgumentTests(unittest.TestCase):
         self.assertFalse((self.s.repo / "dist").exists() and any((self.s.repo / "dist").glob("*.run")))
 
     def test_A_dry_run_writes_and_saves_nothing(self):
-        r = self.s.run("make-installer.sh", "--dry-run", "--leave-out", "argus")
+        r = self.s.run("make-installer.sh", "--dry-run", "--without", "argus")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("Would make", r.stdout)
-        self.assertIn("left out: argus", r.stdout)
+        self.assertIn("features left out: argus (their services: argus)", r.stdout)
         # No git here, so no tag of 5.2.0: said in the plan, refused by the real run.
         self.assertIn("known/: NOT MADE: no git tag of 5.2.0", r.stdout)
         self.assertFalse((self.s.repo / "dist").exists())
@@ -375,9 +397,11 @@ class InstallerTests(unittest.TestCase):
         out = r.stdout
         self.assertIn("dry run: nothing is done", out)
         self.assertIn("the small ones: the rest is checked when it is unpacked", out)
-        self.assertIn("would  load 9 images", out)
-        self.assertIn("would  write docker-compose.override.yml: llamacpp argus left out\n", out)
-        self.assertIn("no GitLab given (--gitlab-url, --gitlab-token-file): Argus is left out", out)
+        # No GPU and no GitLab: the chat models and Argus are off, and so their images are not loaded.
+        self.assertIn("features: 3 on, off: chat-models argus laya", out)
+        self.assertIn("would  load the 7 images of the core and the features on", out)
+        self.assertIn("would  write docker-compose.override.yml\n", out)
+        self.assertIn("no GitLab given (--gitlab-url, --gitlab-token-file): Argus is off", out)
         self.assertFalse(self.dir.exists())
         mutating = {"load", "tag", "run", "rm", "rmi", "save"}
         self.assertFalse([c for c in self.r.calls() if c[1:2] and c[1] in mutating], self.r.calls())
@@ -500,9 +524,12 @@ class InstallerTests(unittest.TestCase):
             self.assertTrue((self.dir / "data" / v).is_dir(), v)
         self.assertIn(f"data in {self.dir}/data", r.stdout)
         self.assertIn("not printed, as this run has no terminal", r.stdout)
+        # No GPU (--cpu-only): the chat models are off, the rest of the defaults on.
+        self.assertEqual(values["COMPOSE_PROFILES"], "knowledge,argus,monitoring,meetings")
+        self.assertNotIn("llamacpp", [c["service"] for c in self.containers()])
+        self.assertIn("argus", [c["service"] for c in self.containers()])
         override = (deploy / "docker-compose.override.yml").read_text()
-        self.assertIn("  llamacpp: { profiles: !override [off] }", override)
-        self.assertNotIn("imagegen", override)  # not a service of this release
+        self.assertNotIn("llamacpp", override)
         # With a network an admin may download speech models later: the speech server is not kept offline.
         self.assertNotIn("HF_HUB_OFFLINE", override)
         self.assertTrue((deploy / "certs" / "tls.crt").is_file())
@@ -564,9 +591,10 @@ class InstallerTests(unittest.TestCase):
 
     def test_Without_a_GitLab_Argus_is_left_out_and_said_so(self):
         r = self.install(gitlab=False)
-        override = (self.dir / "deploy" / "docker-compose.override.yml").read_text()
-        self.assertIn("  argus: { profiles: !override [off] }", override)
-        self.assertIn("Argus is left out", r.stdout)
+        env = (self.dir / "deploy" / ".env").read_text()
+        self.assertIn("\nCOMPOSE_PROFILES=knowledge,monitoring,meetings\n", env)
+        self.assertIn("Argus is off", r.stdout)
+        self.assertIn("installer.sh repair --with argus", r.stdout)
         self.assertNotIn("argus", [c["service"] for c in self.containers()])
         r = self.r.run("install", "--dir", str(self.r.s.dir / "x"), "--yes", "--project", "other", "--gitlab-url", "https://gitlab.test")
         self.assertEqual(r.returncode, 3, self.output(r))
@@ -668,7 +696,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(app["image_id"], images["arena-app:9.9.9"])
         self.assertIn(old_app, [v for k, v in images.items() if k.startswith("arena-rollback:5.2.0-")])
         self.assertIn("Upgraded from 5.2.0 to 9.9.9", out)
-        self.assertIn(".env: 3 key(s) added (NEW_SETTING NEW_KEY DATA_DIR)\n", out)
+        self.assertIn(".env: 4 key(s) added (COMPOSE_PROFILES NEW_SETTING NEW_KEY DATA_DIR)\n", out)
         self.assertIn("version=9.9.9\n", (self.dir / ".arena-install" / "state").read_text())
         self.assertFalse((self.dir / ".arena-install" / "upgrade").exists())
         # Again: nothing to do.
@@ -702,7 +730,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, self.output(r))
         self.assertIn("ok     app: 9.9.9 (its own /api/info)", r.stdout)
         # .env had every key already: none added, the values kept.
-        self.assertIn("  .env: 1 key(s) added (DATA_DIR)\n", r.stdout)
+        self.assertIn("  .env: 2 key(s) added (COMPOSE_PROFILES DATA_DIR)\n", r.stdout)
         env = (deploy / ".env").read_text()
         # Theirs kept as they wrote them; only DATA_DIR, which this release adds, after them.
         self.assertIn("export NEW_SETTING=off\nNEW_KEY = mine\n", env)
@@ -820,7 +848,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, self.output(r))
         out = r.stdout
         self.assertIn("the upgrade changed these, and they were changed here since: .env.example", out)
-        self.assertIn("would  take out of .env the keys the upgrade added: DATA_DIR NEW_KEY NEW_SETTING", out)
+        self.assertIn("would  take out of .env the keys the upgrade added: COMPOSE_PROFILES DATA_DIR NEW_KEY NEW_SETTING", out)
         self.assertIn(".env: changed since the upgrade, and the data goes back to a backup taken with 5.2.0's: DB_PASSWORD", out)
         self.assertIn("would  put back 5.2.0's values in .env: DB_PASSWORD", out)
         self.assertIn(".env: left as they are now: DOMAIN MY_SETTING", out)
@@ -880,7 +908,8 @@ class InstallerTests(unittest.TestCase):
         r = self.r.run("remove", "--dir", str(self.dir), "--yes", extra=podman)
         self.assertEqual(r.returncode, 0, self.output(r))
         left = [ref for ref in self.r.store()["images"] if "arena-" in ref]
-        self.assertEqual(left, [], r.stdout)
+        # Laya is off: its image, there from the build, was never loaded or tagged by the installer.
+        self.assertEqual(left, ["arena-laya:latest"], r.stdout)
 
     def test_Beside_deploy_nothing_of_someone_elses_is_replaced(self):
         """deploy/ in a folder that holds other things (here, someone's own docs/)."""
@@ -929,7 +958,84 @@ class InstallerTests(unittest.TestCase):
         r = subprocess.run(["bash", str(copy / "installer.sh"), "upgrade", "--dir", str(self.dir), "--yes"], env=self.r.env(),
                            capture_output=True, text=True, stdin=subprocess.DEVNULL)
         self.assertEqual(r.returncode, 3, self.output(r))
-        self.assertIn("this bundle has no image for argus, which runs here", r.stderr)
+        self.assertIn("this bundle has no image for argus (made without it): --without argus", r.stderr)
+
+    # --------------------------------------------------------------- features
+
+    LAYA = {"FAKE_SERVICES": SERVICES + "laya\n"}
+
+    def env_values(self) -> dict[str, str]:
+        text = (self.dir / "deploy" / ".env").read_text()
+        return dict(line.split("=", 1) for line in text.splitlines() if "=" in line and not line.startswith("#"))
+
+    def test_Install_turns_on_and_off_the_features_asked_and_loads_only_their_images(self):
+        r = self.install("--with", "laya", "--without", "monitoring", extra_env=self.LAYA)
+        self.assertEqual(self.env_values()["COMPOSE_PROFILES"], "knowledge,argus,laya,meetings")
+        running = {c["service"] for c in self.containers()}
+        self.assertIn("laya", running)
+        self.assertNotIn("cpu-temp-exporter", running)
+        self.assertIn("loaded arena-laya:9.9.9", r.stdout)
+        # Monitoring's image is the helper backups read the volumes with: loaded all the same.
+        self.assertIn("loaded python:3.13-slim", r.stdout)
+        self.assertIn("features: 4 on, off: chat-models monitoring", r.stdout)
+
+    def test_A_feature_others_need_is_not_turned_off_without_them_and_names_are_checked(self):
+        for args, code, message in [
+            (["--without", "knowledge"], 3, "knowledge cannot be off while meetings needs it: turn those off too (--without knowledge,meetings)"),
+            (["--with", "nope"], 2, "no feature nope (installer.sh features lists them)"),
+            (["--with", "laya", "--without", "laya"], 2, "laya is both --with and --without"),
+            (["--with", "Bad"], 2, "--with and --without name features"),
+        ]:
+            r = self.r.run("install", "--dir", str(self.dir), "--yes", "--cpu-only", "--dry-run", *args)
+            self.assertEqual(r.returncode, code, (args, self.output(r)))
+            self.assertIn(message, r.stderr, args)
+        # Asked for, a feature brings those it requires.
+        r = self.r.run("install", "--dir", str(self.dir), "--yes", "--cpu-only", "--dry-run", "--without", "knowledge,meetings", "--with", "meetings")
+        self.assertEqual(r.returncode, 2, self.output(r))
+        r = self.r.run("install", "--dir", str(self.dir), "--yes", "--cpu-only", "--dry-run", "--without", "meetings,knowledge")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("features: 1 on, off: chat-models knowledge argus laya meetings", r.stdout)
+
+    def test_Repair_turns_a_feature_on_from_the_bundle_and_off_again_freeing_its_image(self):
+        self.install(extra_env=self.LAYA)
+        self.assertNotIn("laya", {c["service"] for c in self.containers()})
+        r = self.r.run("repair", "--dir", str(self.dir), "--yes", "--timeout", "5s", "--with", "laya", extra=self.LAYA)
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("done   features in .env (COMPOSE_PROFILES): 5 on, off: chat-models", r.stdout)
+        self.assertIn("loaded arena-laya:9.9.9", r.stdout)
+        self.assertIn("laya", {c["service"] for c in self.containers() if c["state"] == "running"})
+        self.assertIn("laya", self.env_values()["COMPOSE_PROFILES"].split(","))
+        # Off again, with its image kept.
+        r = self.r.run("repair", "--dir", str(self.dir), "--yes", "--timeout", "5s", "--without", "laya", "--keep-images", extra=self.LAYA)
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("stopped and removed the containers of features that are off: laya (their data stays until remove --purge)", r.stdout)
+        self.assertNotIn("laya", {c["service"] for c in self.containers()})
+        self.assertIn("kept (--keep-images): the images of features that are off", r.stdout)
+        self.assertIn("arena-laya:9.9.9", self.r.store()["images"])
+        # On and off again: its image goes, and nothing the stack runs.
+        self.assertEqual(self.r.run("repair", "--dir", str(self.dir), "--yes", "--timeout", "5s", "--with", "laya", extra=self.LAYA).returncode, 0)
+        r = self.r.run("repair", "--dir", str(self.dir), "--yes", "--timeout", "5s", "--without", "laya", extra=self.LAYA)
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("removed the images of features that are off", r.stdout)
+        images = self.r.store()["images"]
+        self.assertNotIn("arena-laya:9.9.9", images)
+        for kept in ("arena-app:9.9.9", "python:3.13-slim", "ghcr.io/ggml-org/llama.cpp:server-cuda"):
+            self.assertIn(kept, images)
+        self.assertEqual({c["state"] for c in self.containers()}, {"running"})
+
+    def test_The_features_command_lists_each_and_status_says_how_many_are_on(self):
+        r = self.r.run("features", "--dir", str(self.r.s.dir / "none-here"))
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("features: on as a new installation has them", r.stdout)
+        self.assertRegex(r.stdout, r"\n  on   argus +[0-9.]+ [KMG]?B  needs a gitlab +Argus\n")
+        self.assertRegex(r.stdout, r"\n  off  laya ")
+        self.assertRegex(r.stdout, r"\n  on   meetings +- +with knowledge +Meetings\n")
+        self.install()
+        r = self.r.run("status", "--dir", str(self.dir))
+        self.assertIn("4 on, off: chat-models laya", r.stdout)
+        r = self.r.run("features", "--dir", str(self.dir))
+        self.assertIn("on as .env has them", r.stdout)
+        self.assertRegex(r.stdout, r"\n  off  chat-models ")
 
     # ----------------------------------------------------------------- repair
 

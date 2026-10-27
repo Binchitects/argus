@@ -46,6 +46,12 @@ volumes:
   engine:
 """
 SERVICES = "traefik\nweb\napp\npostgres\nlitellm\nargus\ncpu-temp-exporter\n"
+# deploy/features for that compose file: its optional services, and a part of the app.
+FEATURES = """# The features (deploy/features): id | default | services | needs | requires | title
+argus      | on  | argus | gitlab | - | Argus
+monitoring | on  | cpu-temp-exporter | - | - | Monitoring
+meetings   | on  | - | - | - | Meetings
+"""
 
 
 class Sandbox:
@@ -58,6 +64,7 @@ class Sandbox:
             shutil.copy2(REPO / "deploy" / "scripts" / name, self.deploy / "scripts" / name)
         (self.repo / "VERSION").write_text("9.9.9\n")
         self.write("docker-compose.yml", COMPOSE)
+        self.write("features", FEATURES)
         self.write("podman.yml", "services: {}\n")
         self.bin = self.dir / "bin"
         self.bin.mkdir()

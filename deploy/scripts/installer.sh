@@ -32,8 +32,17 @@
 #   remove    stops and removes the stack's containers and images. The data stays (volumes,
 #             .env, backups, models, and python:3.13-slim, which backups read them with) unless
 #             --purge
-#   status    what is installed: the version each service runs, health, disk and GPU
+#   status    what is installed: the version each service runs, the features, health, disk and GPU
 #   verify    the bundle's checksums; with an installation, its files' too
+#   features  the features (deploy/features): each on or off here (or in a new installation), the
+#             disk its images take, what it needs and requires
+#
+# Features: COMPOSE_PROFILES in .env is the list of those on, and only they run. install, upgrade
+#   and repair take --with A,B and --without A,B, and on a terminal show the list to change; a
+#   feature brings those it requires, and one others need is not turned off without them. An
+#   upgrade keeps what was on and asks about a feature new in the release (unattended: left off,
+#   and named). repair turns them on (their images loaded from the bundle) and off (their
+#   containers removed, and their images unless --keep-images; their data stays until remove --purge).
 #
 # On Kubernetes, with Helm: COMMAND --kubernetes (requirements, install, upgrade, status, remove), as
 #   scripts/kube-install.sh says (installer.sh requirements --kubernetes --help).
@@ -65,13 +74,15 @@
 #                        token (read from the file, never from the command line). Without them
 #                        Argus, which cannot start without a GitLab, is left out until they are
 #                        in .env
-#   --cpu-only           no NVIDIA GPU: llamacpp, imagegen, videogen, gpu-exporter and
-#                        power-limits are left out (in docker-compose.override.yml)
-#   --leave-out A,B      more services to leave out
+#   --cpu-only           no NVIDIA GPU: the features that need one are off unless --with names them
+#   --with A,B  --without A,B   features on and off (install, upgrade and repair; installer.sh features)
 #   --make-cert          a certificate of the deployment's own (scripts/make-cert.sh)
 #   --hosts              the stack's names in /etc/hosts (scripts/setup-hosts.sh; needs root)
 #   --skip-requirements  go on when a requirement is not met
 #   --install-requirements  put the requirements right without asking (on a terminal it asks)
+# repair:
+#   --with A,B  --without A,B   features turned on and off
+#   --keep-images        the images of features turned off stay (else removed, to free the disk)
 # remove:
 #   --purge              also the data: the volumes, deploy/ with .env and certificates, what
 #                        the installer wrote beside it, the backups, and the models when they are
@@ -200,14 +211,14 @@ confirm() {   # confirm QUESTION: yes or no (default no)
 CMD="${1:-}"
 [[ $# -gt 0 ]] && shift
 case "$CMD" in
-  install|upgrade|repair|remove|status|verify|requirements) ;;
+  install|upgrade|repair|remove|status|verify|requirements|features) ;;
   help|-h|--help) usage ;;
-  "") usage_error "say what to do: requirements, install, upgrade, repair, remove, status or verify" ;;
+  "") usage_error "say what to do: requirements, install, upgrade, repair, remove, status, verify or features" ;;
   *) usage_error "unknown command: $CMD" ;;
 esac
 DIR="" BUNDLE_ARG="" ENGINE="" PROJECT_ARG="" YES=0 DRY=0 LOG_ARG="" TIMEOUT=15
 DOMAIN_ARG="" EMAIL_ARG="" MODELS_ARG="" DATA_ARG="" MODEL_ARG="" HTTP_ARG="" HTTPS_ARG="" ACME_ARG="" GITLAB_ARG="" GITLAB_TOKEN_FILE=""
-CPU_ONLY=0 LEAVE_ARG="" MAKE_CERT=0 HOSTS=0 SKIP_REQ=0 FIX_REQ=0 PURGE=0 CONFIRM_ARG="" FINAL_BACKUP="" ROLLBACK=0 DEFAULTS_ARG=""
+CPU_ONLY=0 WITH_ARG="" WITHOUT_ARG="" KEEP_IMAGES=0 MAKE_CERT=0 HOSTS=0 SKIP_REQ=0 FIX_REQ=0 PURGE=0 CONFIRM_ARG="" FINAL_BACKUP="" ROLLBACK=0 DEFAULTS_ARG=""
 only() { local c; for c in "${@:2}"; do [[ $CMD == "$c" ]] && return 0; done; usage_error "$1 is for ${*:2}"; }
 value() { [[ $2 -gt 1 ]] || usage_error "$1 needs a value"; }
 while [[ $# -gt 0 ]]; do
@@ -234,7 +245,9 @@ while [[ $# -gt 0 ]]; do
     --gitlab-url) only "$1" install; value "$1" $#; GITLAB_ARG="$2"; shift ;;
     --gitlab-token-file) only "$1" install; value "$1" $#; GITLAB_TOKEN_FILE="$2"; shift; [[ -r "$GITLAB_TOKEN_FILE" ]] || usage_error "cannot read $GITLAB_TOKEN_FILE" ;;
     --cpu-only) only "$1" install requirements; CPU_ONLY=1 ;;
-    --leave-out) only "$1" install; value "$1" $#; LEAVE_ARG="${LEAVE_ARG:+$LEAVE_ARG,}$2"; shift ;;
+    --with) only "$1" install upgrade repair; value "$1" $#; WITH_ARG="${WITH_ARG:+$WITH_ARG,}$2"; shift ;;
+    --without) only "$1" install upgrade repair; value "$1" $#; WITHOUT_ARG="${WITHOUT_ARG:+$WITHOUT_ARG,}$2"; shift ;;
+    --keep-images) only "$1" repair; KEEP_IMAGES=1 ;;
     --make-cert) only "$1" install; MAKE_CERT=1 ;;
     --hosts) only "$1" install; HOSTS=1 ;;
     --skip-requirements) only "$1" install; SKIP_REQ=1 ;;
@@ -252,7 +265,7 @@ done
 for p in "$HTTP_ARG" "$HTTPS_ARG"; do
   [[ -z "$p" || ( "$p" =~ ^[0-9]+$ && $p -ge 1 && $p -le 65535 ) ]] || usage_error "a port is a number from 1 to 65535: $p"
 done
-[[ -z "$LEAVE_ARG" || "$LEAVE_ARG" =~ ^[a-z0-9,-]+$ ]] || usage_error "--leave-out names services: a,b,c"
+for p in "$WITH_ARG" "$WITHOUT_ARG"; do [[ -z "$p" || "$p" =~ ^[a-z0-9,-]+$ ]] || usage_error "--with and --without name features: a,b,c (installer.sh features)"; done
 [[ -z "$DEFAULTS_ARG" || "$DEFAULTS_ARG" == download || "$DEFAULTS_ARG" == skip || -d "$DEFAULTS_ARG" ]] \
   || usage_error "--default-models is download, skip, or a folder that holds the models: $DEFAULTS_ARG"
 [[ -n "$CONFIRM_ARG" && $PURGE -eq 0 ]] && usage_error "--confirm is for --purge"
@@ -368,7 +381,8 @@ compose_files() {
 }
 dc() {
   local cf; cf="$(compose_files)"
-  (cd "$DEPLOY" && env COMPOSE_PROJECT_NAME="$PROJECT" ${cf:+COMPOSE_FILE="$cf"} "$ENGINE" compose "$@")
+  # The features on, as .env names them (said outright: the same list compose would read there).
+  (cd "$DEPLOY" && env COMPOSE_PROJECT_NAME="$PROJECT" COMPOSE_PROFILES="$(env_get COMPOSE_PROFILES)" ${cf:+COMPOSE_FILE="$cf"} "$ENGINE" compose "$@")
 }
 # Down, once more if the first fails (rootless Podman's network teardown sometimes does).
 dc_down() { dc down "$@" >/dev/null 2>&1 || { sleep 3; dc down "$@" >/dev/null 2>&1; }; }
@@ -594,7 +608,12 @@ gpu_ready() { nvidia_driver && toolkit_wired; }
 engine_root() {
   if [[ $ENGINE == podman ]]; then E info --format '{{.Store.GraphRoot}}' 2>/dev/null; else E info --format '{{.DockerRootDir}}' 2>/dev/null; fi
 }
-images_raw_kb() { bundle_images | awk -F'\t' '{ s += $5 } END { printf "%d", s / 1024 }'; }
+# What the images take unpacked: those the core and the features on need, once chosen; else all of them.
+images_raw_kb() {
+  local need=""
+  [[ ${#FEATURES_ON[@]} -gt 0 ]] && need=" $(needed_refs "${FEATURES_ON[@]}" | tr '\n' ' ') "
+  bundle_images | N="$need" awk -F'\t' 'ENVIRON["N"] == "" || index(ENVIRON["N"], " " $1 " ") { s += $5 } END { printf "%d", s / 1024 }'
+}
 
 # The system's family, from os-release (ARENA_OS_RELEASE for the tests).
 OS_ID="" OS_LIKE="" OS_VERSION="" OS_NAME="" PKG=""
@@ -809,7 +828,11 @@ check_requirements() {   # check_requirements fresh|upgrade
     else req_bad "Podman's socket is off"; req_fix "start the user's Podman socket, and keep it running without a session" fix_podman_socket; fi
   fi
   # The GPU: the card, its driver, the container toolkit wired into the engine.
-  if [[ $CPU_ONLY -eq 1 ]]; then note "GPU: none asked for (--cpu-only): $GPU_SERVICES left out"
+  local gpu_wanted=0 id
+  for id in ${FEATURES_ON[@]+"${FEATURES_ON[@]}"}; do [[ ${FEAT_NEEDS[$id]:-} == gpu ]] && gpu_wanted=1; done
+  [[ ${#FEATURES_ON[@]} -eq 0 ]] && gpu_wanted=1
+  if [[ $CPU_ONLY -eq 1 ]]; then note "GPU: none asked for (--cpu-only): the features that need one are off"
+  elif [[ $gpu_wanted -eq 0 ]]; then note "GPU: no feature on needs one"
   elif [[ $1 == upgrade ]]; then :
   elif gpu_ready; then ok "GPU: $(nvidia-smi -L 2>/dev/null | head -n1 | cut -d'(' -f1)$(n=$(nvidia-smi -L 2>/dev/null | grep -c '^GPU'); [[ $n -gt 1 ]] && echo " and $((n - 1)) more")"
   elif ! nvidia_driver; then
@@ -940,11 +963,13 @@ state_image_pre() { awk -F'\t' -v r="$1" '$1 == r { print $3 }' "$STATE/IMAGES" 
 # The bundle's images into the engine, each only when it is not there already; the release's own
 # images tagged as compose names them. fresh: an image already here is recorded as not ours.
 load_images() {   # load_images fresh|upgrade|repair
-  local ref file have pre n=0 skipped=0 tmp svc id out
+  local ref file have pre n=0 skipped=0 tmp svc id out need
   step "images ($ENGINE load; nothing is pulled)"
   tmp="$STATE/IMAGES.new"; : > "$tmp" || die "cannot write $tmp"
+  # Only those of the core and the features on (FEATURES_ON).
+  need=" $(needed_refs ${FEATURES_ON[@]+"${FEATURES_ON[@]}"} | tr '\n' ' ') "
   while IFS=$'\t' read -r ref file _ _ _; do
-    [[ -n "$ref" ]] || continue
+    [[ -n "$ref" && ( "$need" == *" $ref "* || "${ref#docker.io/library/}" == "$HELPER" ) ]] || continue
     have="$(image_id "$ref")"
     pre="$(state_image_pre "$ref")"
     if [[ -z "$pre" ]]; then pre=0; [[ $1 == fresh && -n "$have" ]] && pre=1; fi
@@ -963,7 +988,7 @@ load_images() {   # load_images fresh|upgrade|repair
     printf '%s\t%s\t%s\n' "$ref" "$have" "$pre" >> "$tmp"
   done < <(bundle_images)
   while IFS=$'\t' read -r svc ref; do
-    [[ -n "$svc" ]] || continue
+    [[ -n "$svc" && "$need" == *" $ref "* ]] || continue
     id="$(image_id "$ref")"
     [[ -n "$id" ]] || die "the release's image $ref is not in $ENGINE"
     if [[ "$(image_id "$(compose_image "$svc")")" != "$id" ]]; then
@@ -971,7 +996,7 @@ load_images() {   # load_images fresh|upgrade|repair
     fi
     printf '%s\t%s\t0\n' "$(compose_image "$svc")" "$id" >> "$tmp"
   done < <(bundle_release)
-  ok "$n loaded, $skipped there already; the release's own tagged for $PROJECT ($(bundle_release | cut -f1 | paste -sd' ' -))"
+  ok "$n loaded, $skipped there already; the release's own tagged for $PROJECT ($(bundle_release | while IFS=$'\t' read -r svc ref; do [[ "$need" == *" $ref "* ]] && echo "$svc"; done | paste -sd' ' -))"
 }
 record_images() {   # what load_images found and loaded, added to the state's image list (the new row wins)
   [[ -s "$STATE/IMAGES.new" ]] || return 0
@@ -1184,6 +1209,8 @@ merge_env() {   # merge_env plan|do (the release's .env.example and compose file
   while IFS= read -r key; do req["$key"]=1; done < <(required_keys "$BUNDLE/deploy")
   while IFS=$'\t' read -r key def; do
     [[ -n "$key" && -z "${have[$key]:-}" ]] || continue
+    # The features are chosen, not the example's default.
+    [[ $key == COMPOSE_PROFILES && $FEAT_CHOSEN -eq 1 ]] && def="$(features_csv)"
     if [[ -z "$def" && -n "${req[$key]:-}" ]]; then add+=("$key"$'\t'"@secret"); else add+=("$key"$'\t'"$def"); fi
   done < <(example_set_keys "$example")
   ENV_ADDED=()
@@ -1201,6 +1228,7 @@ merge_env() {   # merge_env plan|do (the release's .env.example and compose file
       [[ $1 == do && -n "$ENV_ADDED_FILE" ]] && echo "$key" >> "$ENV_ADDED_FILE"
       if [[ "$def" == @secret ]]; then msg="$key (a new secret, generated)"
       elif is_secret "$key"; then msg="$key (its default)"
+      elif [[ $key == COMPOSE_PROFILES ]]; then msg="$key=$val (the features chosen)"
       else msg="$key=$val (the default)"; fi
       if [[ $1 == do ]]; then did ".env: added $msg"; else would "add to .env: $msg"; fi
     done
@@ -1226,6 +1254,7 @@ make_env() {
   local -A V=()
   V[DOMAIN]="$NEW_DOMAIN"; V[ADMIN_EMAIL]="$NEW_EMAIL"; V[MODELS_DIR]="$NEW_MODELS_DIR"; V[MODEL]="$NEW_MODEL"; V[DATA_DIR]="$DATA_DIR"
   V[DEFAULT_MODELS]="$([[ "${NEW_DEFAULTS:-}" == download ]] && echo download)"
+  V[COMPOSE_PROFILES]="$(features_csv)"
   # Every key compose cannot start without gets a secret of its own (the gateway's starts with sk-).
   for key in DB_PASSWORD APP_KEY ENGINE_KEY ARGUS_KEY WORKSPACES_KEY $(required_keys "$DEPLOY"); do [[ -n "${V[$key]:-}" ]] || V[$key]="$(gen_secret)"; done
   V[GATEWAY_KEY]="sk-$(gen_secret)"
@@ -1253,15 +1282,16 @@ make_env() {
     if [[ "${V[DEFAULT_MODELS]}" == download ]] && ! grep -q '^DEFAULT_MODELS=' "$example"; then echo "DEFAULT_MODELS=download"; fi
   ) > "$tmp" || die "cannot write $tmp"
   mv -f "$tmp" "$env" && chmod 600 "$env" || die "writing $env failed"
-  did ".env written (0600): DOMAIN=$NEW_DOMAIN, MODELS_DIR=$NEW_MODELS_DIR, DATA_DIR=$DATA_DIR, MODEL=${NEW_MODEL:-none yet}$([[ "${NEW_DEFAULTS:-}" == download ]] && echo ", DEFAULT_MODELS=download")${NEW_GITLAB:+, GITLAB_URL=$NEW_GITLAB and its token}; the secrets generated, none printed"
+  did ".env written (0600): the features ($(feat_count)), DOMAIN=$NEW_DOMAIN, MODELS_DIR=$NEW_MODELS_DIR, DATA_DIR=$DATA_DIR, MODEL=${NEW_MODEL:-none yet}$([[ "${NEW_DEFAULTS:-}" == download ]] && echo ", DEFAULT_MODELS=download")${NEW_GITLAB:+, GITLAB_URL=$NEW_GITLAB and its token}; the secrets generated, none printed"
 }
 
 # docker-compose.override.yml for this host, when it has none: what it leaves out, and the
 # speech server kept off the network. Yours afterwards: upgrades and repairs keep it.
-write_override() {   # write_override plan|do SERVICES...
-  local act=$1 svc f="$DEPLOY/docker-compose.override.yml" audio_on=1 offline=""
-  shift
-  for svc in "$@"; do [[ $svc == audio ]] && audio_on=0; done
+write_override() {   # write_override plan|do
+  local act=$1 f="$DEPLOY/docker-compose.override.yml" audio_on=1 offline=""
+  # The speech server: on unless its feature is off.
+  local sf; sf="$(svc_feature audio)"
+  [[ -n "$sf" && " ${FEATURES_ON[*]} " != *" $sf "* ]] && audio_on=0
   # Offline only when its models come from a folder: with a network an admin may download speech models later.
   [[ $audio_on -eq 1 && $CMD == install && -n "${NEW_DEFAULTS:-}" && -d "${NEW_DEFAULTS:-}" ]] && offline="; the speech server offline (HF_HUB_OFFLINE=1)"
   if [[ -f "$f" ]]; then
@@ -1269,34 +1299,265 @@ write_override() {   # write_override plan|do SERVICES...
     return 0
   fi
   if [[ $act == plan ]]; then
-    would "write docker-compose.override.yml: ${*:+$* left out}$offline"
+    would "write docker-compose.override.yml${offline:+:$offline}"
     return 0
   fi
   {
     echo "# Written by installer.sh ($BVERSION) for this host. Yours to change: upgrades and repairs keep it."
+    echo "# The features that run are in .env (COMPOSE_PROFILES): installer.sh repair --with and --without change them."
     echo "services:"
-    # !override: a module with a profile of its own (Laya) would otherwise still run when asked for.
-    for svc in "$@"; do echo "  $svc: { profiles: !override [off] }"; done
-    if [[ $NO_GITLAB -eq 1 ]]; then
-      echo "  # Argus waits for a GitLab: put GITLAB_URL and GITLAB_TOKEN in .env, take out the argus line above, then up -d."
-    fi
     if [[ -n $offline ]]; then
       echo "  # Its models were copied from a folder: the speech server uses the models it has and never looks for others."
       echo "  audio: { environment: { HF_HUB_OFFLINE: \"1\" } }"
     fi
   } > "$f" || die "cannot write $f"
-  did "docker-compose.override.yml: ${*:+$* left out}$offline"
+  did "docker-compose.override.yml${offline:+:$offline}"
+}
+
+# ======================================================================= features
+# deploy/features (the bundle's, else the installation's): each feature's services, whether it is
+# on by default, what the host needs for it (gpu, gitlab), the features it requires, its title.
+# COMPOSE_PROFILES in .env is the list of those on: install, upgrade and repair choose it
+# (--with, --without, and on a terminal a list), and nothing of a feature that is off runs.
+FEAT_IDS=()
+declare -A FEAT_DEF=() FEAT_SVC=() FEAT_NEEDS=() FEAT_REQ=() FEAT_TITLE=()
+trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; printf '%s' "${s%"${s##*[![:space:]]}"}"; }
+read_features() {   # read_features FILE
+  local id def svc needs req title
+  FEAT_IDS=(); FEAT_DEF=(); FEAT_SVC=(); FEAT_NEEDS=(); FEAT_REQ=(); FEAT_TITLE=()
+  [[ -f "$1" ]] || die "no list of the features: $1 is missing (repair from the bundle puts it back)"
+  while IFS='|' read -r id def svc needs req title; do
+    id="$(trim "$id")"
+    [[ -n "$id" && "$id" != \#* ]] || continue
+    svc="$(trim "$svc")"; needs="$(trim "$needs")"; req="$(trim "$req")"
+    FEAT_IDS+=("$id"); FEAT_DEF[$id]="$(trim "$def")"; FEAT_TITLE[$id]="$(trim "$title")"
+    FEAT_SVC[$id]="${svc#-}"; FEAT_NEEDS[$id]="${needs#-}"; FEAT_REQ[$id]="${req#-}"
+  done < "$1"
+  [[ ${#FEAT_IDS[@]} -gt 0 ]] || die "$1 lists no feature"
+}
+feat_known() { [[ -n "${FEAT_DEF[$1]+x}" ]]; }
+feat_defaults() { local id; for id in "${FEAT_IDS[@]}"; do [[ ${FEAT_DEF[$id]} == on ]] && echo "$id"; done; }
+# The feature a service belongs to; none for the core.
+svc_feature() { local id; for id in "${FEAT_IDS[@]}"; do [[ " ${FEAT_SVC[$id]} " == *" $1 "* ]] && { echo "$id"; return; }; done; }
+# The ids given, with every feature they require, in deploy/features' order.
+feat_close() {   # feat_close ID...
+  local id r more=1
+  local -A on=()
+  for id in "$@"; do feat_known "$id" && on[$id]=1; done
+  while [[ $more -eq 1 ]]; do
+    more=0
+    for id in "${!on[@]}"; do for r in ${FEAT_REQ[$id]}; do [[ -n "${on[$r]:-}" ]] || { on[$r]=1; more=1; }; done; done
+  done
+  for id in "${FEAT_IDS[@]}"; do [[ -n "${on[$id]:-}" ]] && echo "$id"; done
+}
+# The features on that need ID, directly or through another.
+feat_needing() {   # feat_needing ID ON...
+  local off=$1 id; shift
+  for id in "$@"; do [[ $id != "$off" ]] && feat_close "$id" | grep -qxF "$off" && echo "$id"; done
+}
+# The services of the features given; with "core", the core's too (the bundle's compose file, else the installation's).
+feat_services() {   # feat_services [core] ID...
+  local id svc all=() f="${BUNDLE:+$BUNDLE/deploy/docker-compose.yml}"
+  [[ -f "$f" ]] || f="$DEPLOY/docker-compose.yml"
+  if [[ ${1:-} == core ]]; then
+    shift
+    for svc in $(sed -n '/^services:/,/^[^ ]/s/^  \([a-z0-9-]*\):.*/\1/p' "$f"); do [[ -z "$(svc_feature "$svc")" ]] && all+=("$svc"); done
+  fi
+  for id in "$@"; do for svc in ${FEAT_SVC[$id]}; do all+=("$svc"); done; done
+  printf '%s\n' ${all[@]+"${all[@]}"}
+}
+# The bundle's image of each service (images/SERVICES: service<TAB>reference).
+bundle_service_ref() { awk -F'\t' -v s="$1" '$1 == s { print $2; exit }' "$BUNDLE/images/SERVICES" 2>/dev/null; }
+# A feature the bundle carries every image of.
+bundle_has() {   # bundle_has ID
+  local svc
+  for svc in ${FEAT_SVC[$1]}; do [[ " $BLEFT " == *" $svc "* || -z "$(bundle_service_ref "$svc")" ]] && return 1; done
+  return 0
+}
+# The images the stack needs with these features on (the core's, and the helper backups use).
+needed_refs() {   # needed_refs ID...
+  local svc
+  { echo "$HELPER"; for svc in $(feat_services core "$@"); do bundle_service_ref "$svc"; done; } | sed '/^$/d' | sort -u
+}
+# What a feature's images take unpacked, those the core does not use: from the bundle, else the engine.
+feat_bytes() {   # feat_bytes ID
+  local svc ref core b total=0
+  core=" $(for svc in $(feat_services core); do bundle_service_ref "$svc"; done | tr '\n' ' ') "
+  for svc in ${FEAT_SVC[$1]}; do
+    ref="$(bundle_service_ref "$svc")"
+    [[ -n "$ref" && "$core" != *" $ref "* ]] || continue
+    b="$(awk -F'\t' -v r="$ref" '$1 == r { print $5; exit }' "$BUNDLE/images/IMAGES" 2>/dev/null)"
+    [[ -n "$b" ]] || b="$(E image inspect --format '{{.Size}}' "$ref" 2>/dev/null | head -n1)"
+    [[ "$b" =~ ^[0-9]+$ ]] || b=0
+    total=$((total + b))
+  done
+  echo "$total"
+}
+# The installation's features, as .env says.
+features_now() { local x; x="$(env_get COMPOSE_PROFILES)"; for x in ${x//,/ }; do echo "$x"; done; }
+feat_list() {   # feat_list ID...: the features, each on or off, its size, needs and title
+  local id b sz
+  local -A on=()
+  for id in "$@"; do on[$id]=1; done
+  for id in "${FEAT_IDS[@]}"; do
+    b="$(feat_bytes "$id")"; sz="-"; [[ $b -gt 0 ]] && sz="$(human "$b")"
+    printf '  %-4s %-15s %9s  %-30s %s\n' "$([[ -n "${on[$id]:-}" ]] && echo on || echo off)" "$id" "$sz" \
+      "$(n="${FEAT_NEEDS[$id]}"; r="${FEAT_REQ[$id]}"; printf '%s' "${n:+needs a ${n/gpu/GPU}}${n:+${r:+, }}${r:+with ${r// /, }}")" "${FEAT_TITLE[$id]}"
+  done
+}
+
+# Chooses FEATURES_ON from BASE, --with, --without and (on a terminal) the person's changes. A
+# feature turned on brings what it requires; turning off one that others on need is refused.
+FEATURES_ON=() FEAT_GPU_OFF="" FEAT_CHOSEN=0
+choose_features() {   # choose_features MODE BASE_ID...
+  local mode=$1 id r answer w
+  shift
+  FEAT_CHOSEN=1
+  local -A on=()
+  for id in ${WITH_ARG//,/ } ${WITHOUT_ARG//,/ }; do feat_known "$id" || usage_error "no feature $id (installer.sh features lists them)"; done
+  for id in ${WITH_ARG//,/ }; do [[ ",$WITHOUT_ARG," == *",$id,"* ]] && usage_error "$id is both --with and --without"; done
+  for id in "$@"; do feat_known "$id" && on[$id]=1; done
+  for id in ${WITH_ARG//,/ }; do on[$id]=1; done
+  for id in ${WITHOUT_ARG//,/ }; do unset "on[$id]"; done
+  while :; do
+    # Turned off on purpose: refused while a feature on needs it.
+    for id in ${WITHOUT_ARG//,/ }; do
+      mapfile -t w < <(feat_needing "$id" "${!on[@]}")
+      [[ ${#w[@]} -gt 0 ]] && refuse "$id cannot be off while ${w[*]} need$([[ ${#w[@]} -eq 1 ]] && echo s) it: turn those off too (--without $id,$(IFS=,; echo "${w[*]}"))"
+    done
+    mapfile -t FEATURES_ON < <(feat_close "${!on[@]}")
+    for id in "${FEATURES_ON[@]}"; do [[ -n "${on[$id]:-}" ]] || note "$id is on too: $(feat_needing "$id" "${!on[@]}" | paste -sd' ' -) need$([[ $(feat_needing "$id" "${!on[@]}" | wc -l) -eq 1 ]] && echo s) it"; on[$id]=1; done
+    for id in "${FEATURES_ON[@]}"; do
+      [[ -n "$BUNDLE" ]] && ! bundle_has "$id" && refuse "this bundle has no image for $id (made without it): --without $id, or a bundle that has it"
+    done
+    [[ $YES -eq 0 && $DRY -eq 0 && $TTY -eq 1 ]] || break
+    step "features ($([[ $mode == repair ]] && echo "as they are" || echo "as they will be"))"
+    feat_list "${FEATURES_ON[@]}"
+    answer="$(ask "Change them? +name turns one on, -name off, several at once (empty: as listed)" "")"
+    [[ -n "$answer" ]] || break
+    for w in $answer; do
+      id="${w#[+-]}"
+      feat_known "$id" || { note "no feature $id"; continue; }
+      case "$w" in -*) unset "on[$id]"; WITHOUT_ARG="${WITHOUT_ARG:+$WITHOUT_ARG,}$id" ;; *) on[$id]=1; WITHOUT_ARG="$(printf '%s' ",$WITHOUT_ARG," | sed "s/,$id,/,/g; s/^,//; s/,\$//")" ;; esac
+    done
+  done
+  # A feature that needs a GPU on a host with none: named, as it would not run.
+  FEAT_GPU_OFF=""
+  if [[ $CPU_ONLY -eq 1 ]]; then
+    for id in "${FEATURES_ON[@]}"; do [[ ${FEAT_NEEDS[$id]} == gpu ]] && FEAT_GPU_OFF+="$id "; done
+    [[ -n "$FEAT_GPU_OFF" ]] && note "on with --cpu-only, though they need a GPU: ${FEAT_GPU_OFF% }"
+  fi
+  return 0
+}
+features_csv() { local IFS=,; printf '%s' "${FEATURES_ON[*]}"; }
+# Those of the ids whose required features are among them too (a default whose requirement is off is off).
+feat_holding() {   # feat_holding ID...
+  local -a ids=("$@") keep=()
+  local id r ok more=1
+  while [[ $more -eq 1 ]]; do
+    more=0; keep=()
+    for id in ${ids[@]+"${ids[@]}"}; do
+      ok=1; for r in ${FEAT_REQ[$id]}; do [[ " ${ids[*]} " == *" $r "* ]] || ok=0; done
+      if [[ $ok -eq 1 ]]; then keep+=("$id"); else more=1; fi
+    done
+    ids=(${keep[@]+"${keep[@]}"})
+  done
+  printf '%s\n' ${ids[@]+"${ids[@]}"}
+}
+# COMPOSE_PROFILES in .env: the features on.
+write_features() {   # write_features plan|do
+  local want now
+  want="$(features_csv)"; now="$(env_get COMPOSE_PROFILES)"
+  if [[ "$want" == "$now" && -n "$(env_line "$DEPLOY/.env" COMPOSE_PROFILES)" ]]; then ok "features: as they were ($(feat_count))"; return 0; fi
+  if [[ $1 == plan ]]; then would "set the features in .env (COMPOSE_PROFILES): $(feat_count)"; return 0; fi
+  env_edit "$DEPLOY/.env" COMPOSE_PROFILES "COMPOSE_PROFILES=$want" || die "writing COMPOSE_PROFILES in $DEPLOY/.env failed"
+  # An upgrade's change, which its rollback puts back (unless it is changed again since).
+  [[ $CMD == upgrade && -n "$SNAP" ]] && printf 'COMPOSE_PROFILES\t%s\n' "$want" >> "$SNAP/env-changed"
+  did "features in .env (COMPOSE_PROFILES): $(feat_count)"
+}
+feat_count() {
+  local id off=()
+  for id in "${FEAT_IDS[@]}"; do [[ " ${FEATURES_ON[*]} " == *" $id "* ]] || off+=("$id"); done
+  printf '%s on%s' "${#FEATURES_ON[@]}" "${off[*]:+, off: ${off[*]}}"
+}
+# The services an override switches off ({ profiles: [off] }): a feature on does not run them.
+override_offs() {
+  sed -n -E 's/^  ([a-z0-9-]+): \{ profiles: (!override )?\[off\] \}.*/\1/p' "$DEPLOY/docker-compose.override.yml" 2>/dev/null
+}
+# What an earlier installer wrote there to leave a service out, taken out for a feature turned on.
+override_unblock() {   # override_unblock plan|do
+  local svc f="$DEPLOY/docker-compose.override.yml" tmp
+  for svc in $(override_offs); do
+    [[ -n "$(svc_feature "$svc")" && " ${FEATURES_ON[*]} " == *" $(svc_feature "$svc") "* ]] || continue
+    if [[ $1 == plan ]]; then would "take $svc's line out of docker-compose.override.yml (its feature, $(svc_feature "$svc"), is on)"; continue; fi
+    tmp="$f.installer-new"
+    grep -vE "^  $svc: \{ profiles: (!override )?\[off\] \}" "$f" > "$tmp" && mv -f "$tmp" "$f" \
+      && did "docker-compose.override.yml: took out $svc's line (its feature, $(svc_feature "$svc"), is on)" || bad "editing $f failed"
+  done
+}
+# The containers of services that do not run now (their feature off): stopped and removed. Their data stays.
+remove_off_containers() {   # remove_off_containers plan|do
+  local svc active ids gone=()
+  active=" $(dc config --services 2>/dev/null | tr '\n' ' ') "
+  for svc in $(container_rows | cut -d'|' -f1 | sort -u); do
+    [[ -n "$svc" && "$active" != *" $svc "* && -n "$(svc_feature "$svc")" ]] || continue
+    gone+=("$svc")
+    [[ $1 == plan ]] && continue
+    ids="$(E ps -aq --filter "label=com.docker.compose.project=$PROJECT" --filter "label=com.docker.compose.service=$svc" 2>/dev/null)"
+    # shellcheck disable=SC2086
+    [[ -n "$ids" ]] && E rm -f $ids >/dev/null 2>&1 || bad "removing $svc's container failed"
+  done
+  [[ ${#gone[@]} -eq 0 ]] && return 0
+  if [[ $1 == plan ]]; then would "stop and remove the containers of features that are off: ${gone[*]} (their data stays)"
+  else did "stopped and removed the containers of features that are off: ${gone[*]} (their data stays until remove --purge)"; fi
+}
+# The images no container of the project runs now and nothing this installation runs needs: a
+# feature's turned off. Never one that was here before the install, the helper, or another project's.
+off_images() {
+  local ref id used="" keep
+  for ref in $(dc config --images 2>/dev/null) "$HELPER"; do used+=" $(image_id "$ref")"; done
+  cut -f1 "$STATE/IMAGES" 2>/dev/null | sed '/^$/d' | sort -u | while IFS= read -r ref; do
+    [[ "$(state_image_pre "$ref")" == 1 || "$ref" == "$PROJECT"-rollback:* ]] && continue
+    id="$(image_id "$ref")"
+    [[ -n "$id" && "$used " != *" $id "* ]] || continue
+    keep="$(E ps -a --filter "ancestor=$id" --format '{{.Names}}' 2>/dev/null | head -n1)"
+    [[ -z "$keep" ]] && echo "$ref"
+  done
+}
+remove_off_images() {   # remove_off_images plan|do
+  local refs ref bytes=0 b
+  mapfile -t refs < <(off_images)
+  [[ ${#refs[@]} -gt 0 ]] || return 0
+  for ref in "${refs[@]}"; do b="$(E image inspect --format '{{.Size}}' "$ref" 2>/dev/null | head -n1)"; [[ "$b" =~ ^[0-9]+$ ]] || b=0; bytes=$((bytes + b)); done
+  if [[ $KEEP_IMAGES -eq 1 ]]; then note "kept (--keep-images): the images of features that are off, $(human "$bytes"): ${refs[*]}"; return 0; fi
+  if [[ $1 == plan ]]; then would "remove the images of features that are off, $(human "$bytes"): ${refs[*]}"; return 0; fi
+  for ref in "${refs[@]}"; do E image rm "$ref" >/dev/null 2>&1 || bad "removing $ref failed"; done
+  did "removed the images of features that are off ($(human "$bytes") freed): ${refs[*]}; repair --with loads them again from the bundle"
+}
+
+cmd_features() {
+  local -a on=()
+  if [[ -n "$BUNDLE" ]]; then read_features "$BUNDLE/deploy/features"; else read_features "$DEPLOY/features"; fi
+  if [[ -f "$DEPLOY/.env" ]]; then
+    mapfile -t on < <(features_now)
+    say "Argus Arena's features in $DIR: on as .env has them (COMPOSE_PROFILES)$([[ -n "$BUNDLE" ]] && echo "; sizes from the $BVERSION bundle")"
+  else
+    mapfile -t on < <(feat_defaults)
+    say "Argus Arena $BVERSION's features: on as a new installation has them"
+  fi
+  feat_list ${on[@]+"${on[@]}"}
+  say ""
+  say "installer.sh install, upgrade or repair with --with A,B and --without A,B changes them (a feature brings those it needs)."
 }
 
 # ========================================================================= models
 # The model files the bundle carries (all with --models; the embedding model always), as its
 # checksums name them: known from the small part of the .run too.
 bundle_model_files() { sed -n -E 's|^[0-9a-f]{64} [ *]models/library/(.*)$|\1|p' "$BUNDLE/SHA256SUMS" 2>/dev/null; }
-# Whether the embedding server runs here: install, from the bundle and what it leaves out.
-INSTALL_LEAVE=""
+# Whether the embedding server runs here: install, from the bundle and the features chosen.
 embed_runs() {
   if [[ $CMD == install ]]; then
-    grep -q '^  embed:' "$BUNDLE/deploy/docker-compose.yml" 2>/dev/null && [[ " $INSTALL_LEAVE " != *" embed "* ]]
+    grep -q '^  embed:' "$BUNDLE/deploy/docker-compose.yml" 2>/dev/null && [[ " ${FEATURES_ON[*]} " == *" $(svc_feature embed) "* ]]
   else
     dc config --services 2>/dev/null | grep -qx embed
   fi
@@ -1550,7 +1811,7 @@ show_password_once() {
 
 # ======================================================================= install
 cmd_install() {
-  local iv leave=() svc s again=0
+  local iv svc s id again=0
   need_bundle
   iv="$(state_get version)"
   if [[ -n "$iv" && "$iv" != "$BVERSION" ]]; then refuse "$DIR has $iv installed: upgrade it (or remove it first)"; fi
@@ -1561,11 +1822,8 @@ cmd_install() {
     if E ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null | grep -q .; then refuse "a stack named $PROJECT runs in $ENGINE already: upgrade it, or --project another name"; fi
     if E volume ls -q 2>/dev/null | grep -q "^${PROJECT}_postgres\$"; then refuse "the volume ${PROJECT}_postgres holds data from an earlier installation, whose .env opens it: restore that .env and upgrade, or remove those volumes (remove --purge)"; fi
   fi
-  # What this host leaves out: the bundle's own, no GPU, and as asked.
-  for svc in $BLEFT; do leave+=("$svc"); done
-  [[ $CPU_ONLY -eq 1 ]] && for svc in $GPU_SERVICES; do leave+=("$svc"); done
-  for svc in ${LEAVE_ARG//,/ }; do leave+=("$svc"); done
-  mapfile -t leave < <(printf '%s\n' ${leave[@]+"${leave[@]}"} | sed '/^$/d' | sort -u)
+  read_features "$BUNDLE/deploy/features"
+  # A bundle made without a GPU service is for hosts with none.
   if [[ -n "$BLEFT" && $CPU_ONLY -eq 0 ]]; then
     for svc in $GPU_SERVICES; do [[ " $BLEFT " == *" $svc "* ]] && { CPU_ONLY=1; break; }; done
   fi
@@ -1573,8 +1831,6 @@ cmd_install() {
   local podman=0; [[ $ENGINE == podman ]] && podman=1
   # Only services the release has (a GPU service a release lacks needs no leaving out).
   local known; known=" $(sed -n '/^services:/,/^[^ ]/s/^  \([a-z0-9-]*\):.*/\1/p' "$BUNDLE/deploy/docker-compose.yml" | tr '\n' ' ') "
-  for svc in ${LEAVE_ARG//,/ }; do [[ "$known" == *" $svc "* ]] || usage_error "--leave-out $svc: no such service (they are:${known% })"; done
-  mapfile -t leave < <(for svc in ${leave[@]+"${leave[@]}"}; do [[ "$known" == *" $svc "* ]] && echo "$svc"; done)
 
   [[ $YES -eq 1 || $DRY -eq 1 || $TTY -eq 1 ]] || refuse "no terminal to ask the domain, ports and models: give them as options, with --yes"
   if [[ $again -eq 1 && -f "$DEPLOY/.env" ]]; then
@@ -1604,11 +1860,28 @@ cmd_install() {
     if [[ -z "$NEW_GITLAB" || -z "$NEW_GITLAB_TOKEN" ]]; then
       [[ -n "$NEW_GITLAB" && $DRY -eq 0 ]] && refuse "--gitlab-url needs its token: --gitlab-token-file FILE"
       NEW_GITLAB=""
-      # Argus cannot start without a GitLab: left out until .env names one.
-      [[ "$known" == *" argus "* && " ${leave[*]} " != *" argus "* ]] && { leave+=(argus); NO_GITLAB=1; }
+      # Argus cannot start without a GitLab: off until .env names one.
+      [[ "$known" == *" argus "* ]] && NO_GITLAB=1
     fi
   fi
   [[ "$NEW_DOMAIN" =~ ^[A-Za-z0-9.-]+$ ]] || usage_error "the domain is a host name: $NEW_DOMAIN"
+  # The features: as .env has them when this carries on, else the release's defaults this host can run.
+  local -a base=()
+  if [[ $again -eq 1 && -f "$DEPLOY/.env" ]]; then
+    mapfile -t base < <(features_now)
+  else
+    for id in $(feat_defaults); do
+      [[ $CPU_ONLY -eq 1 && ${FEAT_NEEDS[$id]} == gpu && ",$WITH_ARG," != *",$id,"* ]] && continue
+      [[ $NO_GITLAB -eq 1 && ${FEAT_NEEDS[$id]} == gitlab ]] && continue
+      bundle_has "$id" || [[ ",$WITH_ARG," == *",$id,"* ]] || continue
+      base+=("$id")
+    done
+    mapfile -t base < <(feat_holding ${base[@]+"${base[@]}"})
+  fi
+  for id in ${WITH_ARG//,/ }; do
+    [[ $NO_GITLAB -eq 1 && ${FEAT_NEEDS[$id]:-} == gitlab ]] && refuse "$id needs a GitLab: --gitlab-url and --gitlab-token-file"
+  done
+  choose_features install ${base[@]+"${base[@]}"}
   NEW_DEFAULTS="${NEW_DEFAULTS:-${DEFAULTS_ARG:-skip}}"
   [[ "$NEW_MODEL" == *:* && "$NEW_DEFAULTS" == skip ]] \
     && note "MODEL=$NEW_MODEL is a Hugging Face name: it is added once its files are in MODELS_DIR (Admin -> Models -> Default models downloads them)"
@@ -1622,18 +1895,17 @@ cmd_install() {
   fi
   # A model folder there already: its models are used as they are, nothing is moved.
   MODELS_HAD="$(find "$MODELS_DIR" -type f \( -name '*.gguf' -o -name '*.safetensors' -o -name '*.onnx' -o -name '*.bin' \) 2>/dev/null | wc -l)"
-  INSTALL_LEAVE="${leave[*]}"
 
   say "Install Argus Arena $BVERSION in $DIR ($ENGINE, project $PROJECT)$([[ $DRY -eq 1 ]] && echo " -- dry run: nothing is done")"
-  say "  https://$NEW_DOMAIN$([[ "$NEW_HTTPS" != 443 ]] && echo ":$NEW_HTTPS"), models in $MODELS_DIR$([[ ${MODELS_HAD:-0} -gt 0 ]] && echo " ($MODELS_HAD model file(s) there already, used as they are)"), data in $DATA_DIR${leave[*]:+, left out: ${leave[*]}}"
-  [[ $NO_GITLAB -eq 1 ]] && note "no GitLab given (--gitlab-url, --gitlab-token-file): Argus is left out; to add it later, GITLAB_URL and GITLAB_TOKEN in .env, its line out of docker-compose.override.yml, then up -d"
+  say "  https://$NEW_DOMAIN$([[ "$NEW_HTTPS" != 443 ]] && echo ":$NEW_HTTPS"), models in $MODELS_DIR$([[ ${MODELS_HAD:-0} -gt 0 ]] && echo " ($MODELS_HAD model file(s) there already, used as they are)"), data in $DATA_DIR; features: $(feat_count)"
+  [[ $NO_GITLAB -eq 1 ]] && note "no GitLab given (--gitlab-url, --gitlab-token-file): Argus is off; to turn it on later, GITLAB_URL and GITLAB_TOKEN in .env, then installer.sh repair --with argus"
   if [[ $DRY -eq 1 ]]; then
     [[ -n "$BUNDLE" ]] && check_bundle
     check_requirements fresh
     [[ $REQ_FAIL -gt 0 && ${#FIXES[@]} -gt 0 ]] && fix_requirements fresh
     [[ $REQ_FAIL -gt 0 ]] && note "$REQ_FAIL requirement(s) not met: install would stop here$([[ $SKIP_REQ -eq 1 ]] && echo " (not with --skip-requirements)")"
     step "the plan"
-    would "load $(bundle_images | wc -l) images into $ENGINE (those there already kept) and tag the release's own for $PROJECT"
+    would "load the $(needed_refs "${FEATURES_ON[@]}" | wc -l) images of the core and the features on into $ENGINE (those there already kept) and tag the release's own for $PROJECT"
     if [[ -f "$DEPLOY/docker-compose.yml" ]]; then
       step "deploy/ (there already: the files changed here kept where $BVERSION ships them as they were)"
       sync_deploy install "" plan
@@ -1641,8 +1913,8 @@ cmd_install() {
       would "write $(bundle_deploy_sums | wc -l) files into $DEPLOY"
     fi
     write_extras plan
-    [[ -f "$DEPLOY/.env" ]] && would "keep the .env there, adding what it lacks" || would "write $DEPLOY/.env: these answers, the secrets generated (none printed; the admin's first password shown once, on the terminal)"
-    write_override plan ${leave[@]+"${leave[@]}"}
+    [[ -f "$DEPLOY/.env" ]] && would "keep the .env there, adding what it lacks, with the features: $(feat_count)" || would "write $DEPLOY/.env: these answers and the features ($(feat_count)), the secrets generated (none printed; the admin's first password shown once, on the terminal)"
+    write_override plan
     make_data_dirs plan
     place_models plan
     fill_audio plan
@@ -1676,8 +1948,8 @@ cmd_install() {
   ok "deploy/: $SYNC_SUMMARY"
   write_extras do
   step ".env"
-  if [[ -f "$DEPLOY/.env" ]]; then note ".env is there: kept"; merge_env do; else make_env; fi
-  write_override do ${leave[@]+"${leave[@]}"}
+  if [[ -f "$DEPLOY/.env" ]]; then note ".env is there: kept"; merge_env do; write_features do; else make_env; fi
+  write_override do
   step "models"
   place_models do
   fill_audio do
@@ -1840,11 +2112,20 @@ plan_restore() {
   elif [[ ! -f "$DEPLOY/.env" || ( -f "$SNAP/env-sha" && "$(sha_of "$DEPLOY/.env")" == "$(cat "$SNAP/env-sha")" ) ]]; then RB_ENV=whole
   else
     RB_ENV=keys
+    local -A set_by=()
+    local v
     while IFS= read -r key; do [[ -n "$key" ]] && added["$key"]=1; done < <(cat "$SNAP/env-added" 2>/dev/null)
+    # The keys the upgrade changed (the features), with the value it gave them.
+    while IFS=$'\t' read -r key v; do [[ -n "$key" ]] && set_by["$key"]="$v"; done < <(cat "$SNAP/env-changed" 2>/dev/null)
     while IFS= read -r key; do
       [[ -n "$key" ]] || continue
       if [[ -n "${added[$key]:-}" ]]; then
         [[ -n "$(env_line "$DEPLOY/.env" "$key")" ]] && RB_ENV_DEL+=("$key")
+        continue
+      fi
+      # As the upgrade set it: FROM's value back, as for the whole .env.
+      if [[ -n "${set_by[$key]+x}" && "$(env_get "$key" "$DEPLOY/.env")" == "${set_by[$key]}" ]]; then
+        [[ "$(env_get "$key" "$old/.env")" != "${set_by[$key]}" ]] && RB_ENV_PUT+=("$key")
         continue
       fi
       [[ -n "$(env_line "$old/.env" "$key")" && -n "$(env_line "$DEPLOY/.env" "$key")" \
@@ -2074,24 +2355,45 @@ cmd_upgrade() {
   fi
 
   say "Upgrade Argus Arena in $DIR from $FROM ($src) to $BVERSION ($ENGINE, project $PROJECT)$([[ $DRY -eq 1 ]] && echo " -- dry run: nothing is done")"
-  # The services this bundle has no image for must be left out here.
-  local svc active
+  # The features: those on before (from a release before the list, those whose services ran), and
+  # a feature new in this release asked about (unattended: off, and named).
+  local svc active id
+  local -a base=() was=() new=()
   active=" $(dc config --services 2>/dev/null | tr '\n' ' ') "
-  for svc in $BLEFT; do
-    [[ "$active" == *" $svc "* ]] && refuse "this bundle has no image for $svc, which runs here: leave it out in docker-compose.override.yml (services: { $svc: { profiles: [off] } }), or use a bundle made without --leave-out $svc"
+  if [[ -f "$DEPLOY/features" && -n "$(env_line "$DEPLOY/.env" COMPOSE_PROFILES)" ]]; then
+    mapfile -t was < <(sed -n -E 's/^[[:space:]]*([a-z0-9][a-z0-9-]*)[[:space:]]*\|.*/\1/p' "$DEPLOY/features")
+    read_features "$BUNDLE/deploy/features"
+    for id in $(features_now); do if feat_known "$id"; then base+=("$id"); else note "the feature $id is not in $BVERSION: it goes"; fi; done
+    for id in "${FEAT_IDS[@]}"; do [[ " ${was[*]} " == *" $id "* ]] || new+=("$id"); done
+  else
+    read_features "$BUNDLE/deploy/features"
+    for id in "${FEAT_IDS[@]}"; do
+      if [[ -n "${FEAT_SVC[$id]}" ]]; then
+        for svc in ${FEAT_SVC[$id]}; do [[ "$active" == *" $svc "* ]] && { base+=("$id"); break; }; done
+      elif [[ ${FEAT_DEF[$id]} == on ]]; then base+=("$id"); fi
+    done
+    mapfile -t base < <(feat_holding ${base[@]+"${base[@]}"})
+    note "from a release before the list of features: on, those whose services ran ($(IFS=' '; echo "${base[*]}"))"
+  fi
+  for id in ${new[@]+"${new[@]}"}; do
+    [[ ",$WITH_ARG,$WITHOUT_ARG," == *",$id,"* ]] && continue
+    if [[ $YES -eq 0 && $DRY -eq 0 && $TTY -eq 1 ]] && choose "New in $BVERSION: $id, ${FEAT_TITLE[$id]}. Turn it on?" "$([[ ${FEAT_DEF[$id]} == on ]] && echo y || echo n)"; then base+=("$id")
+    else note "new in $BVERSION, off: $id (${FEAT_TITLE[$id]}); installer.sh repair --with $id turns it on"; fi
   done
+  choose_features upgrade ${base[@]+"${base[@]}"}
   if [[ $DRY -eq 1 ]]; then
     check_bundle
     step "the plan"
     if [[ -f "$MARKER" ]]; then would "carry on the upgrade that was interrupted$([[ -n "$(marker_get backup)" ]] && echo " (its backup: $(marker_get backup))")"
     else would "keep the images $FROM runs (tagged $PROJECT-rollback:$FROM-...) and a copy of $DEPLOY, for a rollback"; fi
-    would "load $(bundle_images | wc -l) images into $ENGINE (those there already kept), while $FROM still runs"
+    would "load the $(needed_refs "${FEATURES_ON[@]}" | wc -l) images of the core and the features on into $ENGINE (those there already kept), while $FROM still runs"
     [[ -n "$(marker_get backup)" ]] || would "stop every service but postgres, and back up: scripts/backup.sh (the database, the volumes, .env and config) into $BACKUP_DIR"
     step "deploy/ ($FROM -> $BVERSION; .env, overrides, certificates, backups and models kept)"
     sync_deploy upgrade "$FROM" plan
     [[ $SYNC_CHANGES -eq 0 ]] && ok "no file changes"
     step ".env"
     merge_env plan
+    write_features plan
     write_extras plan
     make_data_dirs plan
     move_volumes plan
@@ -2126,7 +2428,7 @@ cmd_upgrade() {
     else ok "$(human $(( ${free:-0} * 1024 ))) free in $BACKUP_DIR, for volumes of $(human $((need * 1024)))"; fi
     step "a rollback point"
     mkdir -p "$SNAP" && chmod 700 "$STATE/rollback" "$SNAP" || die "cannot write $SNAP"
-    rm -f "$SNAP/added" "$SNAP/env-added" "$SNAP/env-sha" "$SNAP/reapply" "$SNAP/kept" "$SNAP/beside" "$SNAP/info"
+    rm -f "$SNAP/added" "$SNAP/env-added" "$SNAP/env-changed" "$SNAP/env-sha" "$SNAP/reapply" "$SNAP/kept" "$SNAP/beside" "$SNAP/info"
     (umask 077; cp -p "$BUNDLE/deploy/scripts/backup.sh" "$BACKUP_SCRIPT") || die "cannot write $BACKUP_SCRIPT"
     keep_old_images
     snapshot_deploy
@@ -2162,6 +2464,7 @@ cmd_upgrade() {
     step ".env"
     ENV_ADDED_FILE="$SNAP/env-added"; : > "$ENV_ADDED_FILE"
     merge_env do
+    write_features do
     # .env as the upgrade left it (its checksum only): a rollback tells a later change from it.
     (umask 077; sha_of "$DEPLOY/.env" > "$SNAP/env-sha")
     write_extras do
@@ -2179,6 +2482,7 @@ cmd_upgrade() {
     marker_set started 1
     start_stack || return 1
     fix_started
+    remove_off_containers do
     wait_healthy || return 1
     check_versions "$BVERSION" || return 1
   }
@@ -2201,6 +2505,7 @@ cmd_upgrade() {
   MODEL_WAITING="$(model_waits | xargs)"
   say ""
   say "Upgraded from $FROM to $BVERSION$([[ -n "$MODEL_WAITING" ]] && echo ": healthy, waiting for models ($MODEL_WAITING; below)"). The backup from before it: $BACKUP"
+  say "  features: $(feat_count)"
   say "  .env: $(cat "$SNAP/env-added" 2>/dev/null | grep -c .) key(s) added$([[ -s "$SNAP/env-added" ]] && echo " ($(tr '\n' ' ' < "$SNAP/env-added" | sed 's/ $//'))")"
   say_file_changes "$(tr '\n' ' ' < "$SNAP/reapply" 2>/dev/null)" "$(tr '\n' ' ' < "$SNAP/beside" 2>/dev/null)" "$(tr '\n' ' ' < "$SNAP/kept" 2>/dev/null)"
   say "  $FROM's images stay for a rollback (upgrade --rollback): $(wc -l < "$SNAP/IMAGES") tags $PROJECT-rollback:$FROM-...;"
@@ -2281,6 +2586,26 @@ cmd_repair() {
   if [[ $DRY -eq 0 ]]; then lock; start_log; fi
   [[ -n "$BUNDLE" ]] && check_bundle
 
+  # The features: as .env has them, and as --with, --without (and the person, on a terminal) change them.
+  local -a before=() turned_off=()
+  if [[ -n "$BUNDLE" ]]; then read_features "$BUNDLE/deploy/features"; else read_features "$DEPLOY/features"; fi
+  mapfile -t before < <(features_now)
+  for f in ${before[@]+"${before[@]}"}; do feat_known "$f" || note "COMPOSE_PROFILES names $f, which is no feature: it goes"; done
+  choose_features repair ${before[@]+"${before[@]}"}
+  for f in ${before[@]+"${before[@]}"}; do [[ " ${FEATURES_ON[*]} " == *" $f "* ]] || turned_off+=("$f"); done
+  step "features"
+  if [[ "$(features_csv)" != "$(IFS=,; echo "${before[*]}")" ]]; then
+    write_features "$act"
+    override_unblock "$act"
+    [[ ${#turned_off[@]} -gt 0 && $act == plan ]] && would "stop and remove the containers of ${turned_off[*]} (their data stays)$([[ $KEEP_IMAGES -eq 0 ]] && echo ", and remove their images")"
+  else
+    ok "as they were: $(feat_count)"
+  fi
+  [[ $act == do ]] && remove_off_containers do
+  for svc in $(override_offs); do
+    [[ -n "$(svc_feature "$svc")" && " ${FEATURES_ON[*]} " == *" $(svc_feature "$svc") "* ]] && note "docker-compose.override.yml switches $svc off, though its feature, $(svc_feature "$svc"), is on"
+  done
+
   step "deploy/ files"
   if [[ -n "$BUNDLE" ]]; then
     local -a missing=() changed=() yours=()
@@ -2329,9 +2654,12 @@ cmd_repair() {
   step "images"
   if [[ -n "$BUNDLE" ]]; then
     local -a absent=()
-    while IFS=$'\t' read -r ref _ _ _ _; do [[ -n "$ref" && -z "$(image_id "$ref")" ]] && absent+=("$ref"); done < <(bundle_images)
+    local need
+    # Those of the core and the features on.
+    need=" $(needed_refs ${FEATURES_ON[@]+"${FEATURES_ON[@]}"} | tr '\n' ' ') "
+    while IFS=$'\t' read -r ref _ _ _ _; do [[ -n "$ref" && "$need" == *" $ref "* && -z "$(image_id "$ref")" ]] && absent+=("$ref"); done < <(bundle_images)
     while IFS=$'\t' read -r svc ref; do
-      [[ -n "$svc" ]] || continue
+      [[ -n "$svc" && "$need" == *" $ref "* ]] || continue
       [[ -n "$(image_id "$ref")" && "$(image_id "$(compose_image "$svc")")" == "$(image_id "$ref")" ]] || absent+=("$(compose_image "$svc")")
     done < <(bundle_release)
     if [[ ${#absent[@]} -gt 0 ]]; then
@@ -2340,10 +2668,12 @@ cmd_repair() {
       if [[ $act == plan ]]; then would "load them again from the bundle"
       else load_images repair && record_images; fi
     else
-      ok "every image of the bundle is in $ENGINE"
+      ok "every image of the core and the features on is in $ENGINE"
     fi
+  elif [[ $act == plan ]]; then
+    ok "the images are checked as the features on need them"
   else
-    images_present && ok "every image compose names is in $ENGINE" || problems=$((problems + 1))
+    images_present && ok "every image compose names is in $ENGINE" || { problems=$((problems + 1)); note "a feature turned on needs its images: repair from the bundle loads them"; }
   fi
 
   step "permissions"
@@ -2395,7 +2725,8 @@ cmd_repair() {
   fi
   if wait_healthy && check_versions "${iv:-$BVERSION}" && [[ $fix_failed -eq 0 ]]; then
     [[ -n "$BUNDLE" && -n "$(state_get version)" ]] && record_images
-    say ""; say "Repaired: $problems finding(s) dealt with; every service is up and healthy."
+    remove_off_images do
+    say ""; say "Repaired: $problems finding(s) dealt with; every service is up and healthy. Features: $(feat_count)."
     return 0
   fi
   say ""; say "Not everything could be repaired: see the FAIL lines above. The log: $LOG"
@@ -2586,8 +2917,18 @@ cmd_status() {
     [[ $st == running && ( "$models" == *" $svc "* || ( $health != unhealthy && $health != starting ) ) ]] || problems=$((problems + 1))
   done < <(container_rows | sort)
   for svc in $(dc config --services 2>/dev/null); do [[ -n "${seen[$svc]:-}" ]] || { printf '  %-18s %s\n' "$svc" "no container"; problems=$((problems + 1)); }; done
-  left="$(comm -13 <(dc config --services 2>/dev/null | sort) <(sed -n '/^services:/,/^[^ ]/s/^  \([a-z0-9-]*\):.*/\1/p' "$DEPLOY/docker-compose.yml" | sort) | tr '\n' ' ')"
-  [[ -n "${left// /}" ]] && say "  left out: $left"
+  step "features"
+  if [[ -f "$DEPLOY/features" ]]; then
+    read_features "$DEPLOY/features"
+    mapfile -t FEATURES_ON < <(features_now)
+    say "  $(feat_count) (installer.sh features: each one; repair --with and --without change them)"
+    for svc in $(override_offs); do
+      [[ -n "$(svc_feature "$svc")" && " ${FEATURES_ON[*]} " == *" $(svc_feature "$svc") "* ]] && say "  note: docker-compose.override.yml switches $svc off, though its feature, $(svc_feature "$svc"), is on"
+    done
+  else
+    left="$(comm -13 <(dc config --services 2>/dev/null | sort) <(sed -n '/^services:/,/^[^ ]/s/^  \([a-z0-9-]*\):.*/\1/p' "$DEPLOY/docker-compose.yml" | sort) | tr '\n' ' ')"
+    [[ -n "${left// /}" ]] && say "  left out: $left (a release before the list of features)"
+  fi
   step "disk and GPU"
   say "  $DIR: $(human $(( $(free_kb "$DIR") * 1024 ))) free"
   [[ -d "$MODELS_DIR" ]] && say "  models: $(du -sh "$MODELS_DIR" 2>/dev/null | cut -f1) in $MODELS_DIR"
@@ -2661,4 +3002,5 @@ case "$CMD" in
   remove) cmd_remove ;;
   status) cmd_status ;;
   verify) cmd_verify ;;
+  features) cmd_features ;;
 esac

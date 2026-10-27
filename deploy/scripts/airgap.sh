@@ -152,7 +152,7 @@ if [[ $ACTION == pack ]]; then
     fi
     if [[ ! -f .env ]]; then
       PLACEHOLDER_ENV="$(mktemp)"
-      printf '%s=placeholder\n' APP_KEY DB_PASSWORD GATEWAY_KEY ENGINE_KEY ARGUS_KEY > "$PLACEHOLDER_ENV"
+      { printf '%s=placeholder\n' APP_KEY DB_PASSWORD GATEWAY_KEY ENGINE_KEY ARGUS_KEY; echo DATA_DIR=/placeholder; } > "$PLACEHOLDER_ENV"
       envf=(--env-file "$PLACEHOLDER_ENV")
     fi
     "${cmd[@]}" "${envf[@]}" config --images | sed '/^$/d' | sort -u

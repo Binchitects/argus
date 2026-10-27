@@ -59,6 +59,12 @@ class Features(unittest.TestCase):
         self.assertIsNotNone(m)
         self.assertEqual([f["id"] for f in self.features if f["on"]], m.group(1).split(","))
 
+    def test_The_deployment_guide_lists_every_feature(self):
+        doc = (DEPLOY.parent / "docs" / "deployment.md").read_text()
+        section = doc.split("\n## Features\n", 1)[1].split("\n## ", 1)[0]
+        for f in self.features:
+            self.assertIn(f"`{f['id']}`", section, f["id"])
+
 
 if __name__ == "__main__":
     unittest.main()

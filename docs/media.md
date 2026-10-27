@@ -129,7 +129,7 @@ Each comes as an MP3 in the gallery, under **Sound**.
   CLIPSeg (CIDAS/clipseg-rd64-refined, 603 MB, on its CPU), fetched with its other
   models; without it a traced drawing's parts are its islands of shapes.
 - For **Cut out**, **Speech** and **Music**, the **studio** module
-  (`COMPOSE_PROFILES=studio`): one service on the GPU with BiRefNet lite (178 MB),
+  (the `studio` feature): one service on the GPU with BiRefNet lite (178 MB),
   Chatterbox's English model (3.2 GB) and ACE-Step v1 3.5B (8.3 GB), fetched into
   the model library's `studio` folder with the default models (Admin → Models).
   One of them works at a time; it is loaded when asked for and unloaded after three

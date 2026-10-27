@@ -1,10 +1,11 @@
 # Deploying Argus Arena
 
 `deploy/` is the whole platform: one `docker-compose.yml`, a short `.env`, and a
-few configuration files. **Every module runs by default** but Laya; a module you
-do not want is left out in one line. Each running image prepares itself, and the app
-fetches the models the others read: there are no setup containers and no
-setup scripts.
+few configuration files. The core always runs; **everything else is a
+[feature](#features)**, on or off as `COMPOSE_PROFILES` in `.env` says, chosen when
+the installer installs, upgrades or repairs. Each running image prepares itself,
+and the app fetches the models the others read: there are no setup containers
+and no setup scripts.
 
 ## What runs
 
@@ -20,10 +21,10 @@ setup scripts.
 | `imagegen`, `videogen` | pictures (FLUX.2 klein) and video (Wan2.2 TI2V 5B), on the GPU |
 | `audio` | speech to text (Whisper) and text to speech (Kokoro, a Persian voice) |
 | `sandbox` | the chat's Python: no network, a read-only root, each run its own user |
-| `laya` | typed decisions on the CPU (the chat's Decide tool, Code Arena's look at commands); **off** until `COMPOSE_PROFILES=laya` ([below](#laya)) |
+| `laya` | typed decisions on the CPU (the chat's Decide tool, Code Arena's look at commands); **off** until its feature is on ([below](#laya)) |
 | `searxng` | the chat's web search |
 | `prometheus`, `alertmanager`, `loki`, `promtail`, `node-exporter`, `gpu-exporter`, `cpu-temp-exporter` | what the app's dashboards, logs and alerts read |
-| `dcgm-exporter` (profile `dcgm`, off by default) | NVIDIA DCGM's data-centre GPU detail for the GPU Hardware dashboard: PCIe and NVLink throughput, SM and tensor activity, XID errors, ECC and retired pages. Bare-metal Linux only, from NVIDIA's registry (`nvcr.io`); `COMPOSE_PROFILES=dcgm` in `.env` turns it on. Without it the dashboard's GPU detail section (clocks, throttling, PCIe link, fans, ECC) still comes from `gpu-exporter` |
+| `dcgm-exporter` (profile `dcgm`, off by default) | NVIDIA DCGM's data-centre GPU detail for the GPU Hardware dashboard: PCIe and NVLink throughput, SM and tensor activity, XID errors, ECC and retired pages. Bare-metal Linux only, from NVIDIA's registry (`nvcr.io`); the `dcgm` feature turns it on. Without it the dashboard's GPU detail section (clocks, throttling, PCIe link, fans, ECC) still comes from `gpu-exporter` |
 | `power-limits` | GPU and CPU power caps from `.env`, kept applied (privileged) |
 
 ## Deploy
@@ -131,20 +132,58 @@ it (from Traefik's metrics). The alert **CertificateExpiresSoon** warns 30 days
 before it expires (for a day: Traefik renews Let's Encrypt's within that time
 by itself), and **CertificateExpiresVerySoon** is critical 7 days before.
 
-## Leaving a module out
+## Features
 
-Every module runs. To leave one out, name it in `docker-compose.override.yml`
-(compose reads it by itself):
+`traefik`, `web`, `app`, `postgres` and `litellm` always run. Everything else is
+a feature, listed in [`deploy/features`](../deploy/features) with the services it
+runs, whether a new installation has it on, what the host needs for it and the
+features it requires. Each optional service runs under its feature's compose
+profile, and **`COMPOSE_PROFILES` in `.env` is the list of the features that
+are on**: a feature that is not named runs nothing and needs no image. The app
+reads the same list. A feature that is off is gone from the menus, the command
+palette and the tour; its pages say it is not installed and how it is turned
+on; its API answers 404; and its background work does not run.
 
-```yaml
-services:
-  videogen: { profiles: [off] }
-  argus: { profiles: [off] }
-```
+| feature | on in a new installation | runs | needs, requires |
+|---|---|---|---|
+| `chat-models` | yes | `llamacpp` | a GPU |
+| `vllm` | no | `vllm` (with `VLLM_IMAGE`) | a GPU |
+| `knowledge` | yes | `embed` | |
+| `argus` | yes | `argus` | a GitLab |
+| `pictures` | yes | `imagegen` | a GPU |
+| `video` | yes | `videogen` | a GPU |
+| `speech` | yes | `audio` | |
+| `sandbox` | yes | `sandbox` | |
+| `web-search` | yes | `searxng` | |
+| `browser` | no | `browser` | |
+| `3d` | no | `blender` | |
+| `lean` | no | `lean` (an image of about 13 GB) | the lab |
+| `studio` | no | `studio` | a GPU; the media studio |
+| `workspaces` | no | `workspaces` | Code Studio |
+| `laya` | no | `laya` | |
+| `monitoring` | yes | `prometheus`, `alertmanager`, `loki`, `promtail`, `node-exporter`, `cpu-temp-exporter` | |
+| `gpu-monitoring` | yes | `gpu-exporter` | a GPU; monitoring |
+| `dcgm` | no | `dcgm-exporter` | a GPU; monitoring |
+| `power-limits` | yes | `power-limits` | a GPU |
+| `ha` | no | `valkey` | |
+| `meetings` | yes | (the app) | speech |
+| `lab` | yes | (the app) | the sandbox |
+| `apps`, `data`, `decks`, `agents`, `code-studio` | yes | (the app) | |
+| `media` | yes | (the app) | pictures |
 
-The app finds out by itself: a module left out has no name on the stack's
-network, its tools are not offered, and **Admin → Services** says it does not
-run. Keep `traefik`, `app`, `web`, `postgres` and `litellm`.
+The installer chooses them ([below](#the-offline-installer)): `--with A,B` and
+`--without A,B` on `install`, `upgrade` and `repair`, and on a terminal the list
+to change, each with the disk its images take. A feature turned on brings those
+it requires; one that others on need is not turned off without them. `repair
+--with` loads a feature's images from the bundle and starts it; `repair
+--without` removes its containers and its images (`--keep-images` keeps them),
+and its data stays until `remove --purge`. `installer.sh features` lists them,
+on or off, with their sizes.
+
+By hand, in `deploy/`: change `COMPOSE_PROFILES` in `.env`, then `docker compose
+up -d` (which starts what is on) and `docker compose rm -sf SERVICE` for each
+service of a feature turned off (compose leaves those containers as they
+were).
 
 ## Laya
 
@@ -153,12 +192,13 @@ answers typed questions about a text with a probability for every option, in
 one forward pass, on the CPU: the chat's **Decide (Laya)** tool
 ([chat.md](chat.md#decide-laya)), which Arena MCP serves to agents, and Code
 Arena's look at commands ([code-arena.md](code-arena.md#laya-looks-at-commands)).
-It is the one module off by default. To turn it on:
+It is off by default. To turn it on, with the installer:
 
 ```bash
-echo COMPOSE_PROFILES=laya >> .env
-docker compose up -d --build laya
+installer.sh repair --with laya
 ```
+
+or by hand: add `laya` to `COMPOSE_PROFILES` in `.env`, then `docker compose up -d --build laya`.
 
 - **Its weights** are not in the image. The app fetches its two checkpoints
   from Hugging Face (`convaiinnovations/laya`) into the model library, as it
@@ -331,7 +371,7 @@ takes its volumes and secrets. `--dry-run` shows the plan and changes nothing.
 ### By hand
 
 1. Build the app, web, Argus and sandbox images, and Laya's if you turn it on
-   (`docker compose build`, with `COMPOSE_PROFILES=laya` for Laya), and push
+   (`docker compose build`, with `laya` in `COMPOSE_PROFILES` for Laya), and push
    them to a registry the cluster pulls from; name them under `images` (the tag
    defaults to the app's version).
 2. Make a TLS Secret for `DOMAIN`, `gateway.DOMAIN` and `argus.DOMAIN` (a
@@ -413,15 +453,15 @@ how). **no**: missing, with the reason.
 | `postgres` (or external) | yes | yes | yes (a StatefulSet, or `externalDatabase`) |
 | `litellm` | yes | yes | yes |
 | `llamacpp` | yes, every GPU | yes, CDI; no locked-memory limit | differs: `llamacpp.gpus` whole GPUs (`gpuResource`: `nvidia.com/gpu` or `amd.com/gpu`); no `ENGINE_RAM_PROTECT` |
-| `vllm` | off (`COMPOSE_PROFILES=vllm`, `VLLM_IMAGE`), every GPU; `fake-gpu.yml`: the fake vLLM, no GPU | the same, CDI; no locked-memory limit | off (`vllm.enabled`); a Deployment per `vllm.instances` entry with its GPUs and node; `vllm.fake` |
+| `vllm` | off (the `vllm` feature, `VLLM_IMAGE`), every GPU; `fake-gpu.yml`: the fake vLLM, no GPU | the same, CDI; no locked-memory limit | off (`vllm.enabled`); a Deployment per `vllm.instances` entry with its GPUs and node; `vllm.fake` |
 | `embed`, `audio`, `searxng` | yes | yes | yes |
 | `argus` | yes | yes | yes |
 | `imagegen`, `videogen` | yes, every GPU | yes, CDI | differs: whole GPUs each; `videogen` off by default |
 | `sandbox` | yes | yes | differs: no network by a NetworkPolicy (the CNI must enforce it); no `pids_limit` (the node's pod PID limit) |
-| `laya` | off (`COMPOSE_PROFILES=laya`) | the same | off (`laya.enabled`); a NetworkPolicy for compose's internal network |
+| `laya` | off (the `laya` feature) | the same | off (`laya.enabled`); a NetworkPolicy for compose's internal network |
 | `prometheus`, `alertmanager`, `loki` | yes | yes | yes |
-| `valkey` (the gateway's shared counts, LMCache's shared store) | off (`COMPOSE_PROFILES=ha`; `ha.yml` runs `LITELLM_REPLICAS` gateway replicas on it) | the same | off (`valkey.enabled`, with `litellm.replicas`) |
-| `dcgm-exporter` | off (`COMPOSE_PROFILES=dcgm`) | the same, CDI | no: the cluster's (GPU Operator) |
+| `valkey` (the gateway's shared counts, LMCache's shared store) | off (the `ha` feature; `ha.yml` runs `LITELLM_REPLICAS` gateway replicas on it) | the same | off (`valkey.enabled`, with `litellm.replicas`) |
+| `dcgm-exporter` | off (the `dcgm` feature) | the same, CDI | no: the cluster's (GPU Operator) |
 | `node-exporter`, `cpu-temp-exporter` | yes | yes | yes: the `host-exporters` DaemonSet (`monitoring.hostExporters`) |
 | `promtail` | yes | differs: Podman's socket for Docker's | no: the cluster's log agent ships the pods' logs to Loki |
 | `gpu-exporter` | yes | yes, CDI | no: the cluster's (NVIDIA's DCGM exporter); until Prometheus scrapes one, `GpuExporterDown` fires |
@@ -457,7 +497,7 @@ how). **no**: missing, with the reason.
 - **llama.cpp** runs on whatever GPUs the machine has (`LLAMACPP_BACKEND`:
   `cuda`, `rocm`, `vulkan`, `sycl`, `metal`, or `cpu`); the presets name the
   GPUs for its backend (`CUDA0`, `ROCm0`...).
-- **vLLM** is off until asked for: `COMPOSE_PROFILES=vllm` with `VLLM_IMAGE`
+- **vLLM** is off until asked for: the `vllm` feature with `VLLM_IMAGE`
   set to a vLLM image you have (none is pulled while the profile is off; Docker
   Hub's is blocked here, see [multi-gpu-server.md](multi-gpu-server.md) §6),
   `podman.yml` on Podman (CDI), `vllm.enabled` on Kubernetes (one Deployment per
@@ -501,7 +541,7 @@ In this order, on the new server (each step's details in
    (about 40–50 GB/s bus bandwidth over PCIe Gen5 with P2P). Fix every FAIL
    before going on.
 3. **The engine image** (approve the download): NGC's vLLM image as `VLLM_IMAGE`,
-   or build arena-vllm (`vllm-build.yml`); `COMPOSE_PROFILES=vllm`. Without the
+   or build arena-vllm (`vllm-build.yml`); the `vllm` feature on. Without the
    image, `fake-gpu.yml` runs the whole path on the fake vLLM first.
 4. **The models** (approve each snapshot's size, shown before it downloads):
    Admin → Models → Hugging Face → *snapshot*. A realistic first set is about
@@ -513,8 +553,8 @@ In this order, on the new server (each step's details in
 6. **Measure**: `scripts/multiuser-bench.py --scenarios ramp,prefixshare,returnafter
    --ramp 1..64 --json run.json`, then again with another setting (TP=2×2 against
    TP=4, a CPU or LMCache tier) and `--compare run.json`. Keep the JSON of each.
-7. **Durability**: `COMPOSE_PROFILES=ha` with `ha.yml` for gateway replicas,
-   `pitr.yml` for Postgres with point-in-time recovery, the `dcgm` profile for
+7. **Durability**: the `ha` feature with `ha.yml` for gateway replicas,
+   `pitr.yml` for Postgres with point-in-time recovery, the `dcgm` feature for
    per-GPU errors and PCIe throughput.
 
 ### Supported configurations
@@ -655,7 +695,7 @@ became fixed, or went away:
 | `MODEL_ENABLE_THINKING`, `MODEL_REASONING_EFFORT`, `THINKING_PRESETS` | Settings → Chat: default thinking, thinking levels offered |
 | `LITELLM_DEFAULT_USER_BUDGET`, `LITELLM_BUDGET_DURATION` | gone: each person's and group's credits, one per kind, are the app's (Admin → People, Groups) |
 | `BACKUP_*` | unchanged, still read by `scripts/backup.sh` from `.env` |
-| `COMPOSE_PROFILES` | every module runs but Laya (`COMPOSE_PROFILES=laya`); leave one out in `docker-compose.override.yml` |
+| `COMPOSE_PROFILES` | the list of the features that are on ([Features](#features)) |
 | `IMAGEGEN_*` | the picture model is fixed (FLUX.2 klein 4B), fetched by the app; turned on or off, loaded or kept in Admin → Models |
 | `PROMETHEUS_RETENTION_TIME`, `_SIZE`, `*_CPUS`, `*_MEM_LIMIT`, `SANDBOX_*`, `LITELLM_WORKERS`, `EMBED_CPUS` | fixed in `docker-compose.yml` (30 days or 20 GB of metrics; the sandbox's limits); change one in `docker-compose.override.yml`. The longest Python run is Settings → Python and web |
 | `LITELLM_SALT_KEY`, `SEARXNG_SECRET`, `ENGINE_API_BASE`, `LLAMACPP_ENGINE_URL` and `_SHA256`, `ARGUS_VERSION`, `LLM_UID`, `LLM_GID`, `LLM_CONFIG_DIR`, `LLM_SERVICES_DIR`, `LLM_ENV_SAMPLES_DIR`, `COMPOSE_PROJECT_NAME`, `BIND_ADDRESS`, `DOCKER_SOCKET`, `HOST_*`, `LLAMACPP_RAM_RESERVE_GB`, `HOST_SWAPPINESS` | gone: the stack makes or knows them itself (the search secret is new at each start; no web app gets the Docker socket) |
@@ -828,7 +868,7 @@ deploy/scripts/make-installer.sh --dry-run          # what it would hold
 | `--models`, `--models-dir DIR` | the models too, as `airgap.sh --models`; without it they are listed, and only the embedding model goes in |
 | `--packs` | the knowledge packs in `packs/` |
 | `--code-arena DIR` | Code Arena's packages (default `dist/`, which `tools/package-code-arena.sh` fills) |
-| `--leave-out A,B` | services whose images stay out: a smaller file for hosts without them (`llamacpp,embed,imagegen,videogen,gpu-exporter` for hosts with no GPU) |
+| `--without A,B` | features whose images stay out: a smaller file for hosts without them (`chat-models,pictures,video,gpu-monitoring,power-limits` for hosts with no GPU); the installer then cannot turn them on |
 | `--podman`, `--project NAME` | the images in Podman's store; the compose project they were built under (default `arena`) |
 | `--version V`, `--out DIR` | the release (default `VERSION`); where the file goes (default `dist/`) |
 
@@ -884,11 +924,13 @@ on the terminal and never in the log: it is `ADMIN_PASSWORD` in `.env` (0600).
   (`--models-dir`, `--default-models download|skip|DIR`, `--model`, `--http-port`,
   `--https-port`, `--acme-email`).
   The token is read from the file, never from the command line.
-- Without a GitLab, Argus is left out until `GITLAB_URL` and `GITLAB_TOKEN` are
-  in `.env` (and its line is out of `docker-compose.override.yml`).
-- `--cpu-only` leaves out the GPU's services, `--leave-out A,B` others. They go
-  in `docker-compose.override.yml`, which is yours from then on: upgrades and
-  repairs keep it. When the default models are copied from a folder
+- Without a GitLab, the `argus` feature is off until `GITLAB_URL` and
+  `GITLAB_TOKEN` are in `.env` and `repair --with argus` turns it on.
+- The [features](#features): the release's defaults, and on a terminal the list to
+  change; `--with A,B` and `--without A,B` unattended. `--cpu-only` turns off those
+  that need a GPU (unless `--with` names one). They go in `.env`
+  (`COMPOSE_PROFILES`), and only their images are loaded.
+- `docker-compose.override.yml` is yours: upgrades and repairs keep it. When the default models are copied from a folder
   (`--default-models DIR`), it also keeps the speech server from looking for
   models online (`HF_HUB_OFFLINE=1`); otherwise an admin can download speech
   models later.
@@ -921,6 +963,13 @@ or not: a checkout's `deploy/`, or one `airgap.sh` loaded (`--dir` is the folder
 that holds `deploy/`, or `deploy/` itself). The version comes from the
 installer's record, else `VERSION` beside `deploy/`, else the running app's
 `/api/info`. An older version, or one it cannot tell, is refused with why.
+
+The [features](#features) stay as they were. From a release before the list of
+features, those whose services ran are on (and the app's own, as a new
+installation has them). A feature new in the release is asked about on a
+terminal, and left off unattended, named with the `repair --with` that turns it
+on. `--with` and `--without` change them in the same run, and a rollback puts
+back the list there was.
 
 1. **A rollback point.** The images the stack runs are tagged
    `arena-rollback:5.2.0-...` and `deploy/` is copied.
@@ -989,8 +1038,16 @@ checks the versions. Without the bundle, the installation's own copy
 (`/srv/arena/deploy/scripts/installer.sh repair`) checks, and recreates
 containers. An embedding server waiting for its model is named, not recreated.
 
+`repair --with A,B` and `--without A,B` turn [features](#features) on and off:
+the images of one turned on are loaded from the bundle (without the bundle,
+only when they are on the host already), and a line an earlier installer wrote
+in `docker-compose.override.yml` to leave its service out is taken out; the
+containers of one turned off are removed, then its images (unless
+`--keep-images`), and its data stays until `remove --purge`.
+
 `status` says what runs: the version each service reports, its health, the
-disk, the GPU and the last backup. `verify` checks the `.run` against its
+features on and off, the disk, the GPU and the last backup. `features` lists
+every feature, on or off, with the disk its images take and what it needs. `verify` checks the `.run` against its
 `.sha256`, the bundle against its `SHA256SUMS`, and the installed files against
 what was written (or kept as you changed them).
 

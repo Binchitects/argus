@@ -1004,7 +1004,7 @@ so Argus can explain the business, not only the code.
 ## 3D models
 
 The **3D models** tool (Admin → Tools; the 3D sandbox runs with
-`COMPOSE_PROFILES=3d`) runs Blender 4.5 LTS headless in a sandbox of its own:
+the `3d` feature on) runs Blender 4.5 LTS headless in a sandbox of its own:
 no network, a read-only system, each run as its own user, 8 GB of memory,
 4 CPUs and 4 minutes at most. The model builds what you ask for in one of
 two ways:
@@ -1103,7 +1103,7 @@ my details", "check our status page and the vendor's for an outage".
   **Close** (the X) on the bar.
 - **Who has it**: the `feature.browser` permission and the tool's own
   settings (Admin → Tools). It is off in rooms, as it acts as you. It needs
-  the `browser` profile (`COMPOSE_PROFILES=browser` in `deploy/.env`).
+  the `browser` feature (`installer.sh repair --with browser`, or `browser` in `COMPOSE_PROFILES`).
 
 ## Apps
 
@@ -2007,7 +2007,7 @@ use and edit one); a new chat takes `assistantId`.
 | "… is not available for this answer: … did not answer" | an MCP server is down or refused the key | Admin → Tools → the server's **Edit** → **Test** |
 | No **Image generation** or **Video generation** in the Tools menu | the model is off, or its server does not run | Admin → Models: turn it on; a module left out in `docker-compose.override.yml` stays out |
 | No **Python** in the Tools menu | the sandbox is not running | `docker compose ps sandbox`; `scripts/sandbox-check.py` says whether it is sound |
-| No **Decide (Laya)** in the Tools menu | the laya module is off (the default), or still fetching or loading its checkpoints | `COMPOSE_PROFILES=laya` in `.env`, then `docker compose up -d laya`; Admin → Models shows the downloads |
+| No **Decide (Laya)** in the Tools menu | the laya module is off (the default), or still fetching or loading its checkpoints | `installer.sh repair --with laya` (or `laya` added to `COMPOSE_PROFILES` in `.env`, then `docker compose up -d laya`); Admin → Models shows the downloads |
 | No **Web** in the Tools menu | it is off (the default), or no site is allowed | Admin → Tools → Web on, and Settings → Python and web → Sites the chat may open |
 | No **Deep research** in the chat's **Tools** | an admin has not given deep research to you | Admin → Tools → Deep research: who may use it |
 | **Deep research** is greyed out | the chat's model calls no tools, or **Compare** is on (its tooltip, or a tap, says which) | choose a model that calls tools, or turn Compare off |

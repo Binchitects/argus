@@ -18,8 +18,8 @@
 #   --packs            the knowledge packs in packs/ (*.arguspack)
 #   --code-arena DIR   Code Arena's packages (default dist/: code-arena-*.tar.gz and .zip,
 #                      which tools/package-code-arena.sh makes)
-#   --leave-out A,B    services whose images are left out: a smaller bundle for hosts that
-#                      leave them out (the installer then leaves them out too)
+#   --without A,B      features (deploy/features) whose images are left out: a smaller bundle;
+#                      the installer then cannot turn them on
 #   --dry-run          the plan; nothing is written or saved
 #
 # The bundle, argus-arena-VERSION/ inside the file:
@@ -29,7 +29,8 @@
 #   SHA256SUMS     a checksum for every other file
 #   images/        every image compose names (docker save, gzipped); IMAGES: reference, file,
 #                  id, bytes, bytes unpacked; RELEASE: the release's own (service, reference),
-#                  tagged arena-SERVICE:VERSION
+#                  tagged arena-SERVICE:VERSION; SERVICES: each service's image (service,
+#                  reference), which the installer loads only for the features on
 #   deploy/        as airgap.sh packs it (no .env, backups, models or keys), without an
 #                  override, and only the files git has when this is a checkout
 #   known/         each release's deploy files' checksums since 5.2.0, from its git tag: an
@@ -74,7 +75,7 @@ vercmp() {
   elif [[ "$(printf '%s\n%s\n' "$ap" "$bp" | sort -V | head -n1)" == "$ap" ]]; then echo -1; else echo 1; fi
 }
 
-OUT_ARG="" VERSION_ARG="" PROJECT=arena ENGINE=docker WITH_MODELS=0 MODELS_ARG="" PACKS=0 CA_ARG="" LEAVE="" DRY=0
+OUT_ARG="" VERSION_ARG="" PROJECT=arena ENGINE=docker WITH_MODELS=0 MODELS_ARG="" PACKS=0 CA_ARG="" WITHOUT="" LEAVE="" DRY=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --out) [[ $# -gt 1 ]] || usage_error "--out needs a folder"; OUT_ARG="$2"; shift ;;
@@ -85,7 +86,7 @@ while [[ $# -gt 0 ]]; do
     --models-dir) [[ $# -gt 1 ]] || usage_error "--models-dir needs a folder"; MODELS_ARG="$2"; shift ;;
     --packs) PACKS=1 ;;
     --code-arena) [[ $# -gt 1 ]] || usage_error "--code-arena needs a folder"; CA_ARG="$2"; shift ;;
-    --leave-out) [[ $# -gt 1 ]] || usage_error "--leave-out needs services"; LEAVE="${LEAVE:+$LEAVE,}$2"; shift ;;
+    --without) [[ $# -gt 1 ]] || usage_error "--without needs features"; WITHOUT="${WITHOUT:+$WITHOUT,}$2"; shift ;;
     --dry-run) DRY=1 ;;
     -h|--help) usage ;;
     *) usage_error "unknown option: $1" ;;
@@ -93,7 +94,15 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 [[ "$PROJECT" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || usage_error "--project: lowercase letters, digits, - and _"
-[[ -z "$LEAVE" || "$LEAVE" =~ ^[a-z0-9,-]+$ ]] || usage_error "--leave-out names services: a,b,c"
+[[ -z "$WITHOUT" || "$WITHOUT" =~ ^[a-z0-9,-]+$ ]] || usage_error "--without names features: a,b,c"
+# The services of the features left out, from deploy/features ("id | default | services | ...").
+[[ -f "$ROOT/features" ]] || die "no deploy/features in $ROOT"
+for f in ${WITHOUT//,/ }; do
+  s="$(awk -F'|' -v f="$f" '{ id = $1; gsub(/[[:space:]]/, "", id) } id == f { x = $3; gsub(/^[[:space:]]+|[[:space:]]+$/, "", x); print x; found = 1 } END { exit !found }' "$ROOT/features")" \
+    || usage_error "--without $f: no such feature (deploy/features)"
+  [[ $s == - ]] && usage_error "--without $f: a part of the app, with no image of its own to leave out"
+  LEAVE="${LEAVE:+$LEAVE,}${s// /,}"
+done
 VERSION="${VERSION_ARG:-$(tr -d '[:space:]' < "$REPO/VERSION" 2>/dev/null)}"
 valid_version "$VERSION" || usage_error "not a version: \"$VERSION\" (VERSION, or --version)"
 [[ "$(vercmp "$VERSION" "$UPGRADES_FROM")" != -1 ]] || usage_error "$VERSION is older than $UPGRADES_FROM, the oldest release an upgrade starts from"
@@ -117,7 +126,7 @@ cleanup() {
 trap cleanup EXIT
 # Compose, for the release as it ships: docker-compose.yml alone, every profile but off, and
 # placeholder secrets (an image never depends on them).
-printf '%s=placeholder\n' APP_KEY DB_PASSWORD GATEWAY_KEY ENGINE_KEY ARGUS_KEY > "$WORK/placeholder.env"
+{ printf '%s=placeholder\n' APP_KEY DB_PASSWORD GATEWAY_KEY ENGINE_KEY ARGUS_KEY; echo DATA_DIR=/placeholder; } > "$WORK/placeholder.env"
 PROFILES=""
 rc() { (cd "$ROOT" && env -u COMPOSE_FILE COMPOSE_PROFILES="$PROFILES" COMPOSE_PROJECT_NAME="$PROJECT" "$ENGINE" compose --env-file "$WORK/placeholder.env" -f docker-compose.yml "$@"); }
 PROFILES="$(rc config --profiles 2>/dev/null | grep -vx off | paste -sd, -)"
@@ -129,7 +138,7 @@ mapfile -t BUILT < <(rc config 2>/dev/null | awk '
   s && /^    build:/ { print svc }')
 [[ ${#BUILT[@]} -gt 0 ]] || die "compose names no service it builds (is docker-compose.yml in $ROOT?)"
 ALL=" $(rc config --services 2>/dev/null | tr '\n' ' ') "
-for s in ${LEAVE//,/ }; do [[ "$ALL" == *" $s "* ]] || usage_error "--leave-out $s: no such service"; done
+for s in ${LEAVE//,/ }; do [[ "$ALL" == *" $s "* ]] || die "deploy/features names $s, which docker-compose.yml does not have"; done
 left() { [[ ",$LEAVE," == *",$1,"* ]]; }
 
 # The release's own images are saved as arena-SERVICE:VERSION (tagged so once the plan is
@@ -183,7 +192,7 @@ if [[ $DRY -eq 1 ]]; then
   for s in "${BUILT[@]}"; do left "$s" && continue
     if "$ENGINE" image inspect "$PROJECT-$s" >/dev/null 2>&1; then say "    $PROJECT-$s"; else say "    $PROJECT-$s   NOT ON THIS HOST: build it first"; fi
   done
-  [[ -n "$LEAVE" ]] && say "  left out: ${LEAVE//,/ }"
+  [[ -n "$WITHOUT" ]] && say "  features left out: ${WITHOUT//,/ } (their services: ${LEAVE//,/ })"
   "${AIRGAP_ENV[@]}" "${AIRGAP[@]}" --dry-run "$WORK/plan.tar" | sed -n '2,$p' | sed 's/^/  /'
   say "  the embedding model ($EMBED_FILE): $(case "$EMBEDDING" in packed) echo "from $MODELS_DIR" ;; missing) echo "NOT IN $MODELS_DIR: the embedding server would wait for it on the other host" ;; *) echo "$EMBEDDING" ;; esac)"
   say "  then gzipped, with installer.sh, docs/, LICENSE.md, LICENSING.md, VERSION, known/ ($(printf '%s\n' ${KNOWN[@]+"${KNOWN[@]}"} | cut -f2 | paste -sd' ' -))"
@@ -248,6 +257,14 @@ done < "$B/images/IMAGES"
 mv "$B/images/IMAGES.new" "$B/images/IMAGES"
 : > "$B/images/RELEASE"
 for s in "${BUILT[@]}"; do left "$s" || printf '%s\tarena-%s:%s\n' "$s" "$s" "$VERSION" >> "$B/images/RELEASE"; done
+# Each service's image, as compose names it with the release's own by version: the installer loads
+# only those of the core and the features on.
+"${AIRGAP_ENV[@]}" "$ENGINE" compose --env-file "$WORK/placeholder.env" config 2>/dev/null | awk '
+  /^services:/ { s = 1; next }
+  s && /^[^ ]/ { s = 0 }
+  s && /^  [a-z0-9_-]+:[[:space:]]*$/ { svc = $1; sub(/:$/, "", svc) }
+  s && /^    image:/ { img = $2; gsub(/"/, "", img); print svc "\t" img }' | sort > "$B/images/SERVICES"
+[[ -s "$B/images/SERVICES" ]] || die "compose named no service's image (images/SERVICES)"
 
 say "==> the installer, the docs, the licences"
 cp -p "$ROOT/scripts/installer.sh" "$B/installer.sh" && chmod 755 "$B/installer.sh" || die "no scripts/installer.sh"
@@ -310,6 +327,7 @@ ai() { sed -n "s/^$1: //p" <<<"$AIRGAP_MANIFEST" | head -n1; }
   echo "images: $(grep -c . "$B/images/IMAGES") ($(awk -F'\t' '{ s += $4 } END { printf "%d", s }' "$B/images/IMAGES") bytes, $(awk -F'\t' '{ s += $5 } END { printf "%d", s }' "$B/images/IMAGES") unpacked)"
   echo "release-images: $(cut -f1 "$B/images/RELEASE" | tr '\n' ' ' | sed 's/ $//')"
   echo "left-out: ${LEAVE//,/ }"
+  echo "features-left-out: ${WITHOUT//,/ }"
   echo "models: $(ai models)"
   echo "model: $(ai model)"
   echo "embedding: $EMBEDDING"
@@ -323,7 +341,7 @@ ai() { sed -n "s/^$1: //p" <<<"$AIRGAP_MANIFEST" | head -n1; }
 say "==> $RUN"
 # The small part first: the installer, what it reads to plan, and the text files.
 (cd "$B" && find . -type f -printf '%P\n' | sort) > "$WORK/all"
-grep -E '^(installer\.sh|MANIFEST|SHA256SUMS|VERSION|LICENSE\.md|LICENSING\.md|images/IMAGES|images/RELEASE|models/MODELS|known/.*|deploy/.*|docs/.*)$' "$WORK/all" \
+grep -E '^(installer\.sh|MANIFEST|SHA256SUMS|VERSION|LICENSE\.md|LICENSING\.md|images/IMAGES|images/RELEASE|images/SERVICES|models/MODELS|known/.*|deploy/.*|docs/.*)$' "$WORK/all" \
   | awk '{ p = ($0 == "installer.sh") ? 0 : ($0 == "MANIFEST") ? 1 : ($0 == "SHA256SUMS") ? 2 : 3; print p "\t" $0 }' | sort -k1,1n -k2 | cut -f2 > "$WORK/head"
 grep -vxF -f "$WORK/head" "$WORK/all" > "$WORK/body"
 TARF=(--owner=0 --group=0 --numeric-owner --no-recursion)
