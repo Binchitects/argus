@@ -1029,6 +1029,8 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("features: on as a new installation has them", r.stdout)
         self.assertRegex(r.stdout, r"\n  on   argus +[0-9.]+ [KMG]?B  needs a gitlab +Argus\n")
         self.assertRegex(r.stdout, r"\n  off  laya ")
+        # The chat models and the embedding server run one image: turning off one alone frees none of it.
+        self.assertIn("Chat models on this host (the same image as knowledge)", r.stdout)
         self.assertRegex(r.stdout, r"\n  on   meetings +- +with knowledge +Meetings\n")
         self.install()
         r = self.r.run("status", "--dir", str(self.dir))

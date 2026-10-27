@@ -1379,12 +1379,30 @@ needed_refs() {   # needed_refs ID...
   local svc
   { echo "$HELPER"; for svc in $(feat_services core "$@"); do bundle_service_ref "$svc"; done; } | sed '/^$/d' | sort -u
 }
+# The image a service runs: the bundle's; else as compose names it here, every feature on.
+SVC_REFS=""
+svc_ref() {   # svc_ref SERVICE
+  local r cf
+  if [[ -n "$BUNDLE" ]]; then bundle_service_ref "$1"; return; fi
+  if [[ -z "$SVC_REFS" ]]; then
+    cf="$(compose_files)"
+    SVC_REFS="$( (cd "$DEPLOY" && env COMPOSE_PROJECT_NAME="$PROJECT" COMPOSE_PROFILES="$(IFS=,; echo "${FEAT_IDS[*]}")" ${cf:+COMPOSE_FILE="$cf"} \
+      "$ENGINE" compose config 2>/dev/null) | awk '
+        /^services:/ { s = 1; next }
+        s && /^[^ ]/ { s = 0 }
+        s && /^  [a-z0-9_-]+:[[:space:]]*$/ { svc = $1; sub(/:$/, "", svc) }
+        s && /^    image:/ { img = $2; gsub(/"/, "", img); print svc "\t" img }')"
+    [[ -n "$SVC_REFS" ]] || SVC_REFS=" "
+  fi
+  r="$(awk -F'\t' -v s="$1" '$1 == s { print $2; exit }' <<<"$SVC_REFS")"
+  printf '%s' "${r:-$(compose_image "$1")}"
+}
 # What a feature's images take unpacked, those the core does not use: from the bundle, else the engine.
 feat_bytes() {   # feat_bytes ID
   local svc ref core b total=0
-  core=" $(for svc in $(feat_services core); do bundle_service_ref "$svc"; done | tr '\n' ' ') "
+  core=" $(for svc in $(feat_services core); do svc_ref "$svc"; echo; done | tr '\n' ' ') "
   for svc in ${FEAT_SVC[$1]}; do
-    ref="$(bundle_service_ref "$svc")"
+    ref="$(svc_ref "$svc")"
     [[ -n "$ref" && "$core" != *" $ref "* ]] || continue
     b="$(awk -F'\t' -v r="$ref" '$1 == r { print $5; exit }' "$BUNDLE/images/IMAGES" 2>/dev/null)"
     [[ -n "$b" ]] || b="$(E image inspect --format '{{.Size}}' "$ref" 2>/dev/null | head -n1)"
@@ -1392,6 +1410,16 @@ feat_bytes() {   # feat_bytes ID
     total=$((total + b))
   done
   echo "$total"
+}
+# The other features that run one of this feature's images: turning it off alone frees none of that disk.
+feat_shares() {   # feat_shares ID
+  local svc id mine="" other
+  for svc in ${FEAT_SVC[$1]}; do mine+=" $(svc_ref "$svc")"; done
+  [[ -n "${mine// /}" ]] || return 0
+  for id in "${FEAT_IDS[@]}"; do
+    [[ $id == "$1" ]] && continue
+    for svc in ${FEAT_SVC[$id]}; do other="$(svc_ref "$svc")"; [[ -n "$other" && "$mine " == *" $other "* ]] && { echo "$id"; break; }; done
+  done
 }
 # The installation's features, as .env says.
 features_now() { local x; x="$(env_get COMPOSE_PROFILES)"; for x in ${x//,/ }; do echo "$x"; done; }
@@ -1402,7 +1430,8 @@ feat_list() {   # feat_list ID...: the features, each on or off, its size, needs
   for id in "${FEAT_IDS[@]}"; do
     b="$(feat_bytes "$id")"; sz="-"; [[ $b -gt 0 ]] && sz="$(human "$b")"
     printf '  %-4s %-15s %9s  %-30s %s\n' "$([[ -n "${on[$id]:-}" ]] && echo on || echo off)" "$id" "$sz" \
-      "$(n="${FEAT_NEEDS[$id]}"; r="${FEAT_REQ[$id]}"; printf '%s' "${n:+needs a ${n/gpu/GPU}}${n:+${r:+, }}${r:+with ${r// /, }}")" "${FEAT_TITLE[$id]}"
+      "$(n="${FEAT_NEEDS[$id]}"; r="${FEAT_REQ[$id]}"; printf '%s' "${n:+needs a ${n/gpu/GPU}}${n:+${r:+, }}${r:+with ${r// /, }}")" \
+      "${FEAT_TITLE[$id]}$(s="$(feat_shares "$id" | paste -sd' ' -)"; [[ -n "$s" ]] && printf ' (the same image as %s)' "${s// /, }")"
   done
 }
 
