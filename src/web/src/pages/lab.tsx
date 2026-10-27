@@ -382,7 +382,7 @@ export function LabNotebookPage() {
       <ol aria-label="Notebook" aria-busy={working} className="grid gap-3">
         {steps
           .filter((m) => m.role !== 'tool')
-          .map((m) =>
+          .map((m, i, shown) =>
             m.role === 'user' ? (
               <li key={m.id}>
                 <section aria-label={asked++ === 0 ? 'The problem' : 'Asked'} className="rounded-lg bg-muted/50 p-3">
@@ -395,6 +395,12 @@ export function LabNotebookPage() {
               </li>
             ) : (
               <li key={m.id} className="grid gap-2">
+                {/* An answer right after one that no tool checked: the lab asked for its check. */}
+                {shown[i - 1]?.role === 'assistant' && !shown[i - 1].toolCalls?.length && (
+                  <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                    <CircleHelp className="size-3.5" aria-hidden="true" /> No tool had checked that answer: the lab asked for a check.
+                  </p>
+                )}
                 {m.content.trim().length > 0 && <Markdown text={m.content} />}
                 {m.toolCalls?.map((t) => <ToolCell key={t.id} name={t.function.name} args={parse(t.function.arguments) ?? {}} result={results.get(t.id)} />)}
                 {m.error && <Alert variant="destructive">{m.error}</Alert>}

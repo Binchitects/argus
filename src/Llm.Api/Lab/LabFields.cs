@@ -39,5 +39,11 @@ public static class LabFields
             "You are a scientist working a problem in the science lab. Look up what you need with the web and cite it. " + Method),
     ];
 
+    /// <summary>What the model is asked when its answer in a notebook ran no check: to check it with the tools, and correct it.</summary>
+    public const string CheckRequest =
+        "[The lab] Before this answer ends, check it with the lab's tools: math_check that the result satisfies the problem (or " +
+        "math_solve, chem_balance or lean_check, as fits), with the problem's own numbers. If the check disagrees, find the mistake and " +
+        "correct it. Then give the final answer again, in the same form as before.";
+
     public static LabField? Of(string? id) => All.FirstOrDefault(f => f.Id == id);
 }

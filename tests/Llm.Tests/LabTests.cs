@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace Llm.Tests;
@@ -109,6 +110,40 @@ public sealed class LabTests(AppFixture app)
         // Counted in the lab: two proved, one refuted; sorry proves nothing.
         var listed = (await b.JsonAsync(await b.GetAsync("/api/lab/notebooks"))).EnumerateArray().Single();
         Assert.Equal((2, 1), (listed.GetProperty("checks").GetProperty("proved").GetInt32(), listed.GetProperty("checks").GetProperty("refuted").GetInt32()));
+    }
+
+    [Fact]
+    public async Task A_notebooks_answer_that_no_tool_checked_is_checked_before_it_ends_once_and_a_chats_is_not()
+    {
+        await using var sandbox = new FakeSandbox();
+        await using var f = NewApp(new() { ["Sandbox:Dir"] = sandbox.Dir });
+        var (b, email) = await PersonAsync(f);
+        List<JsonObject> Sent() => [.. app.Model.Requests.Select(r => r.Body).Where(r => r["user"]?.GetValue<string>() == email && r["tools"] is JsonArray)];
+        static bool Asks(JsonObject r) => r["messages"]!.AsArray().Any(m => m!["content"]?.ToString() == Llm.Api.Lab.LabFields.CheckRequest);
+
+        // Answered without a check: asked once to check it, with a tool call required; the answer after it ends the turn.
+        var id = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { lab = "mathematics" }))).GetProperty("id").GetGuid();
+        await SendAsync(b, id, "What is 2 + 2?");
+        var sent = Sent();
+        Assert.Equal(2, sent.Count);
+        Assert.False(Asks(sent[0]));
+        Assert.True(Asks(sent[1]));
+        Assert.Equal("required", sent[1]["tool_choice"]?.GetValue<string>());
+        var chat = await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{id}"));
+        var messages = chat.GetProperty("messages").EnumerateArray().ToList();
+        Assert.Equal(["user", "assistant", "assistant"], messages.Select(m => m.GetProperty("role").GetString()));
+        Assert.DoesNotContain(messages, m => m.GetProperty("content").GetString() == Llm.Api.Lab.LabFields.CheckRequest);
+
+        // A check ran: nothing more is asked.
+        await SendAsync(b, id, """Check [call math_check {"left":"2 + 2","right":"2 + 2"}]""");
+        Assert.DoesNotContain(Sent().Skip(2), Asks);
+
+        // A chat with the lab's tools is not a notebook: its answers end as they are.
+        var plain = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { tools = new[] { "lab" } }))).GetProperty("id").GetGuid();
+        var before = Sent().Count;
+        await SendAsync(b, plain, "What is 3 + 3?");
+        Assert.Equal(before + 1, Sent().Count);
+        Assert.DoesNotContain(Sent(), r => Asks(r) && r["messages"]!.AsArray().Any(m => m!["content"]?.ToString() == "What is 3 + 3?"));
     }
 
     [Fact]

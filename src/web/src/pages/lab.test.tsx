@@ -191,4 +191,22 @@ describe('science lab', () => {
     expect(screen.getByText(/1 proved/)).toBeInTheDocument()
     expect(screen.getByText(/1 refuted/)).toBeInTheDocument()
   })
+
+  it('says when the lab asked for a check of an answer no tool had checked', async () => {
+    const steps = [
+      message({ id: 'u1', role: 'user', content: 'What is 2 + 2?' }),
+      message({ id: 'a1', parentId: 'u1', role: 'assistant', content: 'It is 4.' }),
+      message({ id: 'a2', parentId: 'a1', role: 'assistant', content: '', toolCalls: [call('t1', 'math_check', { left: '2 + 2', right: '4' })] }),
+      message({ id: 'r1', parentId: 'a2', role: 'tool', toolName: 'math_check', toolCallId: 't1', content: JSON.stringify({ verdict: 'proved', detail: 'SymPy shows left − right simplifies to 0.' }) }),
+      message({ id: 'a3', parentId: 'r1', role: 'assistant', content: 'Checked: 4.' }),
+    ]
+    fakeApi(member, {
+      'GET /api/lab/fields': () => ({ json: fields }),
+      'GET /api/lab/notebooks': () => ({ json: [] }),
+      'GET /api/chat/conversations/n1': () => ({ json: notebook(steps) }),
+    })
+    renderApp('/lab/n1')
+    expect(await screen.findByText('No tool had checked that answer: the lab asked for a check.')).toBeInTheDocument()
+    expect(screen.getAllByText(/the lab asked for a check/)).toHaveLength(1)
+  })
 })

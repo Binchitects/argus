@@ -365,6 +365,10 @@ public sealed partial class ChatService(
         var parent = question.Id;
         // Deep research with sub-agents: the rounds in which the answer delegated (ResearchDelegations).
         var delegations = 0;
+        // A lab notebook's answer is checked before it ends: whether a check ran, and the round that was asked for one.
+        var labChecks = conversation.Kind == Conversation.Lab;
+        var checkedHere = false;
+        int? checkRound = null;
         // Each round's cost at the model's prices now (the gateway was given the same); every round and tool call names the answer.
         var price = await prices.ForAsync(modelName, ct);
         // Rules on answers (Admin → Safeguards): read as they stream, the quick ones every so often and all of them at the end.
@@ -496,6 +500,11 @@ public sealed partial class ChatService(
                 Tools(request, researchByAgents ? WithoutWeb(demand.Request(), runs) : demand.Request(),
                     last: round >= (research ? Math.Max(ResearchRounds, chat.CurrentValue.MaxToolRounds) : chat.CurrentValue.MaxToolRounds)
                         || (researchByAgents && delegations >= ResearchDelegations));
+            }
+            if (checkRound == round && request["tool_choice"] is null)
+            {
+                // The check asked for is a tool's: a call, not more words.
+                request["tool_choice"] = "required";
             }
 
             // A round after tool calls that outgrew the context makes room before it is sent (the first round's history was built to fit).
@@ -703,6 +712,18 @@ public sealed partial class ChatService(
                 thinkingMs = msg.ThinkingMs, durationMs = msg.DurationMs, context = filled,
             });
 
+            if ((calls.Count == 0 || runs.Count == 0) && labChecks && !checkedHere && checkRound is null && !withheld && content.Length > 0
+                && runs.Keys.Any(Lab.LabEndpoints.IsCheck) && round + 1 < chat.CurrentValue.MaxToolRounds)
+            {
+                // A lab notebook's answer that no tool checked: the model is asked, once, to check it with the lab's tools and
+                // correct it; the answer it gives then ends the turn. The request is the lab's, not the person's: never kept.
+                await db.SaveChangesAsync(ct);
+                messages.Add(new JsonObject { ["role"] = "assistant", ["content"] = msg.Content });
+                messages.Add(new JsonObject { ["role"] = "user", ["content"] = Lab.LabFields.CheckRequest });
+                parent = msg.Id;
+                checkRound = round + 1;
+                continue;
+            }
             if (calls.Count == 0 || runs.Count == 0)
             {
                 // Written in full: a stop now must not lose it.
@@ -734,6 +755,7 @@ public sealed partial class ChatService(
                 var id = call["id"]!.GetValue<string>();
                 var name = call["function"]!["name"]!.GetValue<string>();
                 var rawArgs = call["function"]!["arguments"]!.GetValue<string>();
+                checkedHere |= Lab.LabEndpoints.IsCheck(name);
                 var known = runs.TryGetValue(name, out var target);
                 var loading = demand.Active && name == OnDemandTools.Function;
                 if (known && !demand.IsLoaded(name))

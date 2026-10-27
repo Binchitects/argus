@@ -62,6 +62,9 @@ public static class LabEndpoints
     /// <summary>The lab's functions whose result is a check: a claim, solutions put back, a reaction balanced, a proof Lean checked.</summary>
     private static readonly string[] Checks = ["math_check", "math_solve", "chem_balance", ProofTool.Function];
 
+    /// <summary>Whether the function checks a result (a claim, solutions, a reaction, a proof).</summary>
+    public static bool IsCheck(string function) => Checks.Contains(function, StringComparer.Ordinal);
+
     /// <summary>What a check's result says: proved (a balanced reaction: checked), refuted, numeric (holds only at the points tried) or other.</summary>
     public static string Verdict(string tool, string content)
     {

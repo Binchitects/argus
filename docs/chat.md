@@ -775,7 +775,10 @@ profile runs), and a reaction is **balanced,
 checked** only when each element and the charge count the same on both
 sides; a molecule is drawn beside its properties. On top, how many steps were proved,
 refuted or held only numerically; the lab's list shows the same for each
-notebook. **Ask more** goes on in the same notebook. A notebook is a chat
+notebook. An answer that no tool checked is not left at that: the lab asks
+the model, once, to check it with its tools (a tool call required) and to
+correct it if they disagree, and the notebook says so above the answer that
+follows. **Ask more** goes on in the same notebook. A notebook is a chat
 underneath (**Open as a chat** to branch, edit or share it), kept out of the
 chat list.
 
