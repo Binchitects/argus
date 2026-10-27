@@ -196,6 +196,8 @@ def common_criteria(src: Path) -> str:
 TEXT_URL = {"nist80053": "https://doi.org/10.6028/NIST.SP.800-53r5", "nist800171": "https://doi.org/10.6028/NIST.SP.800-171r3",
             "nistcsf": "https://doi.org/10.6028/NIST.CSWP.29", "airmf": "https://doi.org/10.6028/NIST.AI.100-1",
             "euaiact": "https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=OJ:L_202401689"}
+TEXT_TITLE = {"nist80053": "NIST SP 800-53 Rev. 5", "nist800171": "NIST SP 800-171 Rev. 3", "nistcsf": "NIST CSF 2.0", "airmf": "NIST AI RMF 1.0",
+              "euaiact": "EU AI Act"}
 TEXT_FROM = {"nist80053": ["800-53r5.json", "800-53r5-LOW.json", "800-53r5-MODERATE.json", "800-53r5-HIGH.json", "800-53r5-PRIVACY.json"],
              "nist800171": ["800-171r3.json"], "nistcsf": ["csf2.json"], "airmf": ["airmf-playbook.json"], "euaiact": ["ai-act.xhtml"]}
 INSERT = re.compile(r"\{\{\s*insert:\s*param,\s*([^\s}]+)\s*\}\}")
@@ -373,7 +375,9 @@ def write_text(out: Path, framework: str, path: str, rid: str, title: str, kind:
     target = out / framework / path
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(body.rstrip() + "\n", encoding="utf-8")
-    return {"path": f"{framework}/{path}", "id": rid, "title": title, "kind": kind, "framework": framework, "url": url or TEXT_URL[framework]}
+    name = TEXT_TITLE[framework]
+    return {"path": f"{framework}/{path}", "title": f"{rid} {title}", "url": url or TEXT_URL[framework],
+            "symbols": [{"name": rid, "kind": kind, "namespace": name, "signature": f"{name} {rid}: {title}"}]}
 
 
 TEXTS = {"nist80053": text_800_53, "nist800171": text_800_171, "nistcsf": text_csf, "airmf": text_ai_rmf, "euaiact": text_ai_act}
@@ -382,16 +386,16 @@ TEXTS = {"nist80053": text_800_53, "nist800171": text_800_171, "nistcsf": text_c
 def texts(src: Path, out: Path) -> int:
     """The shareable texts as the grc pack's work directory; each framework's pages must be as many as its catalog's clauses."""
     out.mkdir(parents=True, exist_ok=True)
-    docs, sources = [], {}
+    docs, provenance = [], []
     for key, write in TEXTS.items():
         got = write(src, out)
         want = (OUT / f"{key}.yaml").read_text().count("\n  - [")
         if len(got) != want:
             sys.exit(f"grc-catalogs: {key} gave {len(got)} texts for its {want} clauses")
         docs += got
-        sources[key] = [{"file": f, "url": SOURCES[f], "sha256": sha(src / f)} for f in TEXT_FROM[key]]
+        provenance.append(f"{key}=" + "+".join(sha(src / f)[:12] for f in TEXT_FROM[key]))
         print(f"grc-catalogs: {key}: {len(got)} texts")
-    (out / "index.json").write_text(json.dumps({"sources": sources, "docs": docs}, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
+    (out / "index.json").write_text(json.dumps({"provenance": ",".join(provenance), "docs": docs}, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     return 0
 
 

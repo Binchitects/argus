@@ -1,71 +1,44 @@
 {
- "sources": {
-  "nist80053": [
-   {
-    "file": "800-53r5.json",
-    "url": "https://raw.githubusercontent.com/usnistgov/oscal-content/main/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_catalog.json",
-    "sha256": "64ca6b4161de51ab6af098a7d101d326f14c95e1abf721396cd8a049e8115eeb"
-   },
-   {
-    "file": "800-53r5-LOW.json",
-    "url": "https://raw.githubusercontent.com/usnistgov/oscal-content/main/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_LOW-baseline_profile.json",
-    "sha256": "cfd4f5d9a192eb42dc04b745d82f95a85926a2a85a45418034a380a42bda9424"
-   },
-   {
-    "file": "800-53r5-MODERATE.json",
-    "url": "https://raw.githubusercontent.com/usnistgov/oscal-content/main/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_MODERATE-baseline_profile.json",
-    "sha256": "e3a0f11237cfaac24dfcf1586e07683f17423757fd84208deb33196b12e8f590"
-   },
-   {
-    "file": "800-53r5-HIGH.json",
-    "url": "https://raw.githubusercontent.com/usnistgov/oscal-content/main/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_HIGH-baseline_profile.json",
-    "sha256": "d2ef340986b9f1ee820ad866a0f964d9a9d1088b24080c74b795ddb0148b9f83"
-   },
-   {
-    "file": "800-53r5-PRIVACY.json",
-    "url": "https://raw.githubusercontent.com/usnistgov/oscal-content/main/nist.gov/SP800-53/rev5/json/NIST_SP-800-53_rev5_PRIVACY-baseline_profile.json",
-    "sha256": "c0e3d54d9f474bc6c33338a8e524bc52ad070f94f9274db7ec48242242fecacc"
-   }
-  ],
-  "nistcsf": [
-   {
-    "file": "csf2.json",
-    "url": "https://raw.githubusercontent.com/usnistgov/oscal-content/main/nist.gov/CSF/v2.0/json/NIST_CSF_v2.0_catalog.json",
-    "sha256": "0ac12904a4bcd877ec91be8e7ddc27278c88b0088c7db77d60ee24918e2563e2"
-   }
-  ],
-  "euaiact": [
-   {
-    "file": "ai-act.xhtml",
-    "url": "http://publications.europa.eu/resource/cellar/dc8116a1-3fe6-11ef-865a-01aa75ed71a1.0006.03/DOC_1",
-    "sha256": "8f0b656302f9864cc87e040c371f209a9d65ae1a6cecc25ca5eb737e872d721a"
-   }
-  ]
- },
+ "provenance": "nist80053=64ca6b4161de+cfd4f5d9a192+e3a0f11237cf+d2ef340986b9+c0e3d54d9f47,nistcsf=0ac12904a4bc,euaiact=8f0b656302f9",
  "docs": [
   {
    "path": "nist80053/ac/ac-2.1.md",
-   "id": "AC-2(1)",
-   "title": "Account Management: Automated System Account Management",
-   "kind": "control",
-   "framework": "nist80053",
-   "url": "https://doi.org/10.6028/NIST.SP.800-53r5"
+   "title": "AC-2(1) Account Management: Automated System Account Management",
+   "url": "https://doi.org/10.6028/NIST.SP.800-53r5",
+   "symbols": [
+    {
+     "name": "AC-2(1)",
+     "kind": "control",
+     "namespace": "NIST SP 800-53 Rev. 5",
+     "signature": "NIST SP 800-53 Rev. 5 AC-2(1): Account Management: Automated System Account Management"
+    }
+   ]
   },
   {
    "path": "nistcsf/GV/GV.OC-01.md",
-   "id": "GV.OC-01",
-   "title": "The organizational mission is understood and informs cybersecurity risk management",
-   "kind": "subcategory",
-   "framework": "nistcsf",
-   "url": "https://doi.org/10.6028/NIST.CSWP.29"
+   "title": "GV.OC-01 The organizational mission is understood and informs cybersecurity risk management",
+   "url": "https://doi.org/10.6028/NIST.CSWP.29",
+   "symbols": [
+    {
+     "name": "GV.OC-01",
+     "kind": "subcategory",
+     "namespace": "NIST CSF 2.0",
+     "signature": "NIST CSF 2.0 GV.OC-01: The organizational mission is understood and informs cybersecurity risk management"
+    }
+   ]
   },
   {
    "path": "euaiact/art_50.md",
-   "id": "Art.50",
-   "title": "Transparency obligations for providers and deployers of certain AI systems",
-   "kind": "article",
-   "framework": "euaiact",
-   "url": "https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=OJ:L_202401689#art_50"
+   "title": "Art.50 Transparency obligations for providers and deployers of certain AI systems",
+   "url": "https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=OJ:L_202401689#art_50",
+   "symbols": [
+    {
+     "name": "Art.50",
+     "kind": "article",
+     "namespace": "EU AI Act",
+     "signature": "EU AI Act Art.50: Transparency obligations for providers and deployers of certain AI systems"
+    }
+   ]
   }
  ]
 }

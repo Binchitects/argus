@@ -53,6 +53,7 @@ public static class SourceCatalog
         ["scripting"] = () => Composite.ScriptingDocs(),
         ["qt"] = () => new QtDocs(),
         ["grc"] = () => new GrcTexts(),
+        ["security"] = () => new SecurityTexts(),
     };
 }
 

@@ -1,0 +1,155 @@
+{
+ "provenance": "cwe=4.20,capec=3.9,cheatsheets=9d41c054686e,asvs=9ccce0e3cf47,codeql=fd2bfc8a3da9,bandit=48ef27bd1bbc",
+ "docs": [
+  {
+   "path": "cwe/top25/CWE-89.md",
+   "title": "CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')",
+   "url": "https://cwe.mitre.org/data/definitions/89.html",
+   "symbols": [
+    {
+     "name": "CWE-89",
+     "kind": "weakness",
+     "namespace": "CWE",
+     "signature": "CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection') (Base) — 2025 Top 25"
+    }
+   ]
+  },
+  {
+   "path": "capec/CAPEC-66.md",
+   "title": "CAPEC-66: SQL Injection",
+   "url": "https://capec.mitre.org/data/definitions/66.html",
+   "symbols": [
+    {
+     "name": "CAPEC-66",
+     "kind": "attack pattern",
+     "namespace": "CAPEC",
+     "signature": "CAPEC-66: SQL Injection (uses CWE-89, CWE-1286)"
+    }
+   ]
+  },
+  {
+   "path": "cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.md",
+   "title": "SQL Injection Prevention Cheat Sheet",
+   "url": "https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html",
+   "symbols": [
+    {
+     "name": "SQL Injection Prevention Cheat Sheet",
+     "kind": "cheat sheet",
+     "namespace": "OWASP Cheat Sheet Series",
+     "signature": "OWASP cheat sheet: SQL Injection Prevention Cheat Sheet"
+    }
+   ]
+  },
+  {
+   "path": "asvs/V6/V6.2.md",
+   "title": "ASVS 5.0 V6.2 Password Security",
+   "url": "https://github.com/OWASP/ASVS/blob/9ccce0e3cf47abd6a412fc8a8deadd7fd6da501f/5.0/en/0x15-V6-Authentication.md",
+   "symbols": [
+    {
+     "name": "V6.2",
+     "kind": "section",
+     "namespace": "OWASP ASVS 5.0",
+     "signature": "ASVS 5.0 V6.2 Password Security"
+    },
+    {
+     "name": "V6.2.1",
+     "kind": "requirement",
+     "namespace": "OWASP ASVS 5.0",
+     "signature": "ASVS 5.0 V6.2.1 (level 1): Verify that user set passwords are at least 8 characters in length although a minimum of 15 characters is strongly recommended."
+    },
+    {
+     "name": "V6.2.2",
+     "kind": "requirement",
+     "namespace": "OWASP ASVS 5.0",
+     "signature": "ASVS 5.0 V6.2.2 (level 1): Verify that users can change their password."
+    },
+    {
+     "name": "V6.2.3",
+     "kind": "requirement",
+     "namespace": "OWASP ASVS 5.0",
+     "signature": "ASVS 5.0 V6.2.3 (level 1): Verify that password change functionality requires the user's current and new password."
+    },
+    {
+     "name": "V6.2.4",
+     "kind": "requirement",
+     "namespace": "OWASP ASVS 5.0",
+     "signature": "ASVS 5.0 V6.2.4 (level 1): Verify that passwords submitted during account registration or password change are checked against an available set of, at least, the top 3000 passwords which match the application's password policy, e.g. minimum length."
+    },
+    {
+     "name": "V6.2.5",
+     "kind": "requirement",
+     "namespace": "OWASP ASVS 5.0",
+     "signature": "ASVS 5.0 V6.2.5 (level 1): Verify that passwords of any composition can be used, without rules limiting the type of characters permitted. There must be no requirement for a minimum number of upper or lower case characters, numbers, or special characters."
+    },
+    {
+     "name": "V6.2.6",
+     "kind": "requirement",
+     "namespace": "OWASP ASVS 5.0",
+     "signature": "ASVS 5.0 V6.2.6 (level 1): Verify that password input fields use type=password to mask the entry. Applications may allow the user to temporarily view the entire masked password, or the last typed character of the password."
+    },
+    {
+     "name": "V6.2.7",
+     "kind": "requirement",
+     "namespace": "OWASP ASVS 5.0",
+     "signature": "ASVS 5.0 V6.2.7 (level 1): Verify that \"paste\" functionality, browser password helpers, and external password managers are permitted."
+    },
+    {
+     "name": "V6.2.8",
+     "kind": "requirement",
+     "namespace": "OWASP ASVS 5.0",
+     "signature": "ASVS 5.0 V6.2.8 (level 1): Verify that the application verifies the user's password exactly as received from the user, without any modifications such as truncation or case transformation."
+    },
+    {
+     "name": "V6.2.9",
+     "kind": "requirement",
+     "namespace": "OWASP ASVS 5.0",
+     "signature": "ASVS 5.0 V6.2.9 (level 2): Verify that passwords of at least 64 characters are permitted."
+    },
+    {
+     "name": "V6.2.10",
+     "kind": "requirement",
+     "namespace": "OWASP ASVS 5.0",
+     "signature": "ASVS 5.0 V6.2.10 (level 2): Verify that a user's password stays valid until it is discovered to be compromised or the user rotates it. The application must not require periodic credential rotation."
+    },
+    {
+     "name": "V6.2.11",
+     "kind": "requirement",
+     "namespace": "OWASP ASVS 5.0",
+     "signature": "ASVS 5.0 V6.2.11 (level 2): Verify that the documented list of context specific words is used to prevent easy to guess passwords being created."
+    },
+    {
+     "name": "V6.2.12",
+     "kind": "requirement",
+     "namespace": "OWASP ASVS 5.0",
+     "signature": "ASVS 5.0 V6.2.12 (level 2): Verify that passwords submitted during account registration or password changes are checked against a set of breached passwords."
+    }
+   ]
+  },
+  {
+   "path": "codeql/csharp/cs__sql-injection.md",
+   "title": "CodeQL cs/sql-injection: SQL query built from user-controlled sources",
+   "url": "https://codeql.github.com/codeql-query-help/csharp/cs-sql-injection/",
+   "symbols": [
+    {
+     "name": "cs/sql-injection",
+     "kind": "codeql query",
+     "namespace": "CodeQL C#",
+     "signature": "CodeQL cs/sql-injection: SQL query built from user-controlled sources (CWE-89)"
+    }
+   ]
+  },
+  {
+   "path": "bandit/B608.md",
+   "title": "Bandit B608: Test for SQL injection",
+   "url": "https://bandit.readthedocs.io/en/latest/plugins/b608_hardcoded_sql_expressions.html",
+   "symbols": [
+    {
+     "name": "B608",
+     "kind": "bandit check",
+     "namespace": "Bandit",
+     "signature": "Bandit B608: Test for SQL injection (CWE-89)"
+    }
+   ]
+  }
+ ]
+}

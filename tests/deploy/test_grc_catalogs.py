@@ -48,8 +48,8 @@ class GrcTexts(unittest.TestCase):
             src.mkdir()
             (src / "ai-act.xhtml").write_text(xhtml, encoding="utf-8")
             [doc] = gc.text_ai_act(src, out)
-            self.assertEqual({"path": "euaiact/art_5.md", "id": "Art.5", "title": "Prohibited AI practices", "kind": "article", "framework": "euaiact",
-                              "url": gc.TEXT_URL["euaiact"] + "#art_5"}, doc)
+            self.assertEqual({"path": "euaiact/art_5.md", "title": "Art.5 Prohibited AI practices", "url": gc.TEXT_URL["euaiact"] + "#art_5",
+                              "symbols": [{"name": "Art.5", "kind": "article", "namespace": "EU AI Act", "signature": "EU AI Act Art.5: Prohibited AI practices"}]}, doc)
             self.assertEqual("# Article 5: Prohibited AI practices\n\nEU Artificial Intelligence Act, Regulation (EU) 2024/1689.\n\n"
                              "1. The following:\n\n(a) the first practice;\n", (out / doc["path"]).read_text(encoding="utf-8"))
 

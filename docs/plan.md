@@ -2225,6 +2225,10 @@ Arena's own dependencies.
      a symbol, linked to its CWE.
    Not taken: Semgrep's registry rules and the SEI CERT wiki (their terms do
    not allow redistributing them), and the CIS benchmarks.
+   Done: tools/fetch-security-sources.sh and tools/security-texts.py, Argus's
+   `security` source (2,676 pages, 3,023 symbols; each source a facet, CodeQL
+   per language), packs/security-1.0.arguspack loaded live. The sources were
+   fetched on the person's yes (2026-10-27).
 2. **The `advisories` pack, renewed every day**: known vulnerabilities in
    packages, from the GitHub Advisory Database (CC BY 4.0: npm, NuGet, PyPI,
    Maven, Go, crates, RubyGems, Composer), OSV, NVD's CVE records and CISA's

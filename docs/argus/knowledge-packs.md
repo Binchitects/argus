@@ -163,6 +163,41 @@ argus pack build --source grc --work-dir "$PWD/.packwork/docsrc/grc" --out packs
 It has 1,437 pages and 5,349 passages, about 10 MB; the embedding takes a few
 minutes on a GPU.
 
+## Security: the security pack
+
+The `security` pack is what is known of software weaknesses and how to find
+and fix them, for the security review and Fix it:
+
+| Source | What | Symbols | Licence |
+|---|---|---|---|
+| MITRE CWE | each weakness: consequences, detection, mitigations, the demonstrative examples (bad and good code), observed CVEs, related attack patterns | `CWE-89` | MITRE's terms of use |
+| MITRE CAPEC | each attack pattern: execution flow, prerequisites, mitigations, the weaknesses it uses | `CAPEC-66` | MITRE's terms of use |
+| OWASP Cheat Sheet Series | how to fix, by topic and framework | the cheat sheet's title | CC BY-SA 4.0 |
+| OWASP ASVS 5.0 | a page per section, each requirement with its level | `V6.2.1` | CC BY-SA 4.0 |
+| OWASP WSTG | each test | `WSTG-INJT-05` | CC BY-SA 4.0 |
+| OWASP Top 10s | web 2025 and 2021, API 2023, LLM applications 2025 | `A05:2025`, `API1:2023`, `LLM01:2025` | CC BY-SA 4.0 |
+| CodeQL query help | each security query's help, metadata and examples (never the engine) | `cs/sql-injection` | MIT |
+| .NET security rules | each rule of the Security category | `CA2100` | CC BY 4.0 |
+| Bandit, gosec, eslint-plugin-security | each check or rule, with its CWE | `B608`, `G201`, `security/detect-object-injection` | Apache-2.0 |
+
+Each page ends with its source and licence. Facets keep a search to a source:
+`cwe`, `cwe-top25` (the 2025 Top 25), `capec`, `cheatsheets`, `asvs`, `wstg`,
+`top10`, `api-top10`, `llm-top10`, `codeql` and `codeql-<language>`
+(`codeql-csharp`, `codeql-python`...), `dotnet-rules`, `bandit`, `gosec`,
+`eslint-security`. Not taken: Semgrep's registry rules and the SEI CERT wiki,
+whose terms do not allow redistributing them, and the CIS benchmarks.
+
+```bash
+tools/fetch-security-sources.sh
+python3 tools/security-texts.py --from .packwork/docsrc/security --out .packwork/docsrc/security-texts
+argus pack build --source security --work-dir "$PWD/.packwork/docsrc/security-texts" --out packs/security-1.0.arguspack --version 1.0
+```
+
+The fetch takes about 50 MB (shallow, sparse clones and MITRE's XML), each
+repository's commit and each catalogue's version recorded as the provenance.
+The pack has 2,676 pages, 3,023 symbols and 24,675 passages, about 45 MB; the
+embedding takes about two minutes on a GPU.
+
 ## Using packs
 
 Everything below works without a GitLab config. `--packs-dir` exists precisely
@@ -269,7 +304,7 @@ repository would otherwise record that repository's commit as the pack's
 provenance.
 
 Available sources: `python`, `react`, `cpp`, `dotnet`, `scripting`, `sqlite`,
-`cppreference`, `qt`, `grc`, `debugger`, `algorithms`, `system-design`, the two composites
+`cppreference`, `qt`, `grc`, `security`, `debugger`, `algorithms`, `system-design`, the two composites
 `win32` and `wdk` (API reference *and* samples in one pack), and the halves on
 their own — `win32-docs`, `wdk-docs`, `win32-samples`, `wdk-samples`.
 `argus pack build --help` prints the list.
