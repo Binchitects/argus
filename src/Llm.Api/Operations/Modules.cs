@@ -7,15 +7,20 @@ namespace Llm.Api.Operations;
 /// <summary>
 /// Which of the stack's modules run. Every one does unless left out in docker-compose.override.yml,
 /// and a module left out has no name on the stack's network. Asked again after a minute.
-/// "Modules:&lt;name&gt;" in configuration (true/false) answers instead, for tests and odd networks.
+/// "Modules:&lt;name&gt;" in configuration (true/false) answers instead, for tests and odd networks; a module whose
+/// feature is off (deploy/features) is not asked for.
 /// </summary>
-public sealed class Modules(IConfiguration config, TimeProvider clock)
+public sealed class Modules(IConfiguration config, Features features, TimeProvider clock)
 {
     private static readonly TimeSpan Fresh = TimeSpan.FromMinutes(1);
     private readonly ConcurrentDictionary<string, (bool Up, DateTimeOffset At)> _seen = new(StringComparer.Ordinal);
 
     public async Task<bool> HasAsync(string name, CancellationToken ct = default)
     {
+        if (!features.Runs(name))
+        {
+            return false;
+        }
         if (bool.TryParse(config[$"Modules:{name}"], out var forced))
         {
             return forced;

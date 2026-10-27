@@ -40,7 +40,7 @@ public static class MediaEndpoints
 
     public static void MapMedia(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/media").PersonOnly().RequirePermission(Core.Access.Permissions.Pictures);
+        var g = app.MapGroup("/api/media").RequireFeature("media").PersonOnly().RequirePermission(Core.Access.Permissions.Pictures);
         g.MapGet("", ConfigAsync);
         g.MapGet("/items", ItemsAsync);
         g.MapPost("/items", AddAsync);

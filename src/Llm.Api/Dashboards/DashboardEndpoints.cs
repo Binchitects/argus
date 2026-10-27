@@ -20,7 +20,7 @@ public static partial class DashboardEndpoints
     public static void MapDashboards(this IEndpointRouteBuilder app)
     {
         // Admins only: these dashboards show everyone's usage. People see their own under /api/usage/me.
-        var g = app.MapGroup("/api/dashboards").RequirePermissions(Llm.Core.Access.Permissions.MonitoringRead, Llm.Core.Access.Permissions.MonitoringRead);
+        var g = app.MapGroup("/api/dashboards").RequireFeature("monitoring").RequirePermissions(Llm.Core.Access.Permissions.MonitoringRead, Llm.Core.Access.Permissions.MonitoringRead);
         g.MapGet("/", (DashboardStore store) => Results.Ok(store.All().Select(d => new
         {
             d.Uid, d.Title, panels = d.Panels.Count(p => p.Type != "row"),

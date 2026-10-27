@@ -63,6 +63,8 @@ app.UseTwoFactorEnrolment();
 Llm.Api.Compliance.NoticeGate.UseNoticeGate(app);
 app.UseAuthorization();
 app.UseRateLimiter();
+// A feature that is off (deploy/features): its API answers 404.
+Llm.Api.FeatureEndpoints.UseFeatures(app);
 
 app.MapHealthChecks("/healthz", new HealthCheckOptions { Predicate = _ => false }).AllowAnonymous("Liveness: up or not, nothing private.");
 app.MapHealthChecks("/readyz", new HealthCheckOptions { Predicate = c => c.Tags.Contains("ready") }).AllowAnonymous("Readiness: ready or not, nothing private.");

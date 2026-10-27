@@ -98,3 +98,12 @@ affinity:
 strategy: { type: RollingUpdate, rollingUpdate: { maxUnavailable: 0, maxSurge: 1 } }
 {{- end }}
 
+{{/* The features that are on (deploy/features), for the app: each service's by its enabled, and app.features. */}}
+{{- define "arena.featuresOn" -}}
+{{- $v := .Values -}}
+{{- $on := list -}}
+{{- range $f, $s := dict "chat-models" $v.llamacpp "vllm" $v.vllm "knowledge" $v.embed "argus" $v.argus "pictures" $v.imagegen "video" $v.videogen "speech" $v.audio "sandbox" $v.sandbox "web-search" $v.searxng "3d" $v.blender "lean" $v.lean "studio" $v.studio "workspaces" $v.workspaces "laya" $v.laya "monitoring" $v.monitoring "ha" $v.valkey -}}
+{{- if $s.enabled }}{{ $on = append $on $f }}{{ end -}}
+{{- end -}}
+{{- join "," (concat $on $v.app.features) -}}
+{{- end }}

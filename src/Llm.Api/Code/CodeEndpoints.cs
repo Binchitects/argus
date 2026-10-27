@@ -31,7 +31,7 @@ public static class CodeEndpoints
 {
     public static void MapCode(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/code").PersonOnly();
+        var g = app.MapGroup("/api/code").RequireFeature("code-studio").PersonOnly();
         g.MapGet("/mrs", MergeRequestsAsync).RequirePermission(Core.Access.Permissions.CodeRead);
         g.MapGet("/mr", MergeRequestAsync).RequirePermission(Core.Access.Permissions.CodeRead);
         g.MapPost("/ask", AskAsync).RequirePermission(Core.Access.Permissions.CodeRead);

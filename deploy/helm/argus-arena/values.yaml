@@ -98,6 +98,10 @@ app:
   resources: { requests: { cpu: 500m, memory: 512Mi }, limits: { memory: 2Gi } }
   # More configuration for the app, as environment variables (Section__Key: value).
   env: {}
+  # The app's own features that are on (deploy/features: those with no service of their own). The others
+  # follow their services' enabled below: llamacpp is chat-models, embed knowledge, imagegen pictures,
+  # videogen video, audio speech, searxng web-search, blender 3d, valkey ha.
+  features: [meetings, lab, apps, data, decks, media, agents, code-studio]
 
 web:
   replicas: 2

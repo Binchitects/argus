@@ -30,7 +30,7 @@ public static class StudioEndpoints
 
     public static void MapStudio(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/studio").PersonOnly().RequirePermission(Core.Access.Permissions.CodeStudio);
+        var g = app.MapGroup("/api/studio").RequireFeature("code-studio").PersonOnly().RequirePermission(Core.Access.Permissions.CodeStudio);
         g.MapGet("/workspaces", ListAsync);
         g.MapPost("/workspaces", CreateAsync);
         g.MapPost("/workspaces/{id:guid}/start", StartAsync);

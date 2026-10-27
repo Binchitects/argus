@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { api, infoQuery, meQuery } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { findNavItem } from './nav'
 
 /** One page of a release's tour: what changed for people, in a few words, and where to try it. */
 interface Slide {
@@ -98,7 +99,9 @@ export function WhatsNew({ open, onOpenChange }: { open: boolean; onOpenChange: 
   const seen = useQuery(seenQuery)
   const info = useQuery(infoQuery).data
   const me = useQuery(meQuery).data
-  const slides = latestTour.slides.filter((s) => !s.permission || me?.isAdmin || me?.permissions?.includes(s.permission))
+  const off = new Set(me?.featuresOff ?? [])
+  // A page about a feature that is off here (deploy/features) is skipped too.
+  const slides = latestTour.slides.filter((s) => (!s.permission || me?.isAdmin || me?.permissions?.includes(s.permission)) && !off.has(findNavItem(s.to)?.feature ?? ''))
   const [page, setPage] = useState(0)
   const opened = useRef(false)
   const markSeen = useMutation({
@@ -119,6 +122,8 @@ export function WhatsNew({ open, onOpenChange }: { open: boolean; onOpenChange: 
     if (wantsTour(seen.data?.seen)) markSeen.mutate()
     if (to) navigate(to)
   }
+  // Every page about a feature that is off here: no tour.
+  if (slides.length === 0) return null
   const slide = slides[Math.min(page, slides.length - 1)]!
   const Icon = slide.icon
   const last = page >= slides.length - 1

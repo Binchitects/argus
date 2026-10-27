@@ -10,6 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
 import { HelpButton, HelpPanel } from '@/help/help-button'
+import { EmptyState } from '@/components/ui/empty-state'
 import { infoQuery, meQuery, type AppInfo, type Me } from '@/lib/api'
 import { AcceptNotice } from './accept-notice'
 import { SetUpTwoFactor } from './set-up-two-factor'
@@ -57,7 +58,10 @@ function SignedIn({ me }: { me: Me }) {
 
   const location = useLocation()
   const fullBleed = useMatches().some((m) => (m.handle as { fullBleed?: boolean } | undefined)?.fullBleed)
-  const pageTitle = findNavItem(location.pathname)?.title ?? (isManual(location.pathname) ? 'Manual' : undefined)
+  const page = findNavItem(location.pathname)
+  const pageTitle = page?.title ?? (isManual(location.pathname) ? 'Manual' : undefined)
+  // A page of a feature that is off here: what it is and how it is turned on, not a page that cannot work.
+  const notInstalled = page?.feature && me.featuresOff?.includes(page.feature) ? page : undefined
   useEffect(() => {
     // The chat names its tab after the conversation itself.
     if (fullBleed) return
@@ -140,7 +144,9 @@ function SignedIn({ me }: { me: Me }) {
           </div>
         </header>
         <main id="main" tabIndex={-1} className={cn('w-full flex-1 outline-none', fullBleed ? 'min-h-0' : 'mx-auto max-w-(--page-max) px-4 py-6 sm:px-6 lg:px-8')}>
-          {fullBleed ? (
+          {notInstalled ? (
+            <NotInstalled item={notInstalled} admin={me.isAdmin} />
+          ) : fullBleed ? (
             <Outlet context={me} />
           ) : (
             <div key={location.pathname} className="animate-page">
@@ -153,6 +159,21 @@ function SignedIn({ me }: { me: Me }) {
       <CommandMenu open={paletteOpen} onOpenChange={setPaletteOpen} me={me} onWhatsNew={() => setWhatsNew(true)} />
       <WhatsNew open={whatsNew} onOpenChange={setWhatsNew} />
     </div>
+  )
+}
+
+/** A page whose feature is off here (deploy/features): the installer turns it on. */
+function NotInstalled({ item, admin }: { item: NavItem; admin: boolean }) {
+  return (
+    <EmptyState icon={item.icon} title={`${item.title} is not installed here`} className="mx-auto mt-16 max-w-lg">
+      {admin ? (
+        <>
+          Its feature, <code>{item.feature}</code>, is off. The installer turns it on: <code>installer.sh repair --with {item.feature}</code>
+        </>
+      ) : (
+        'This feature is off on this server. Ask an admin if you need it.'
+      )}
+    </EmptyState>
   )
 }
 

@@ -1,0 +1,45 @@
+# Argus Arena's features: what each one is, what it runs, and what it needs.
+#
+# COMPOSE_PROFILES in .env is the list of the features that are on. Each optional service runs
+# under its feature's profile, so a feature that is off runs nothing and needs no image. The app
+# reads the same list (Features__On): a feature that is off is gone from its menus, its pages say
+# it is not installed, and its API answers 404. The core (the web, the app, Postgres, the
+# gateway, Traefik) always runs. installer.sh chooses them: --with and --without on install,
+# upgrade and repair, and installer.sh features lists them.
+#
+# One feature a line, its fields separated by "|":
+#   id        the feature, and its compose profile (lowercase letters, digits and -)
+#   default   on or off in a new installation
+#   services  the containers it runs; - for a part of the app with none of its own
+#   needs     what the host needs for it: gpu, gitlab, or -
+#   requires  the features it cannot work without, space separated; - for none
+#   title     what it is, in a few words
+#
+chat-models    | on  | llamacpp | gpu | - | Chat models on this host (llama.cpp)
+vllm           | off | vllm | gpu | - | The vLLM engine, for many people at once (VLLM_IMAGE in .env)
+knowledge      | on  | embed | - | - | Company knowledge and search by meaning (the embedding server)
+argus          | on  | argus | gitlab | - | Argus: the company's GitLab indexed, and knowledge packs
+pictures       | on  | imagegen | gpu | - | Pictures made and edited (stable-diffusion.cpp)
+video          | on  | videogen | gpu | - | Video made from words and pictures
+speech         | on  | audio | - | - | Speech to text and text to speech
+sandbox        | on  | sandbox | - | - | Python and commands run apart, for the chat's tools
+web-search     | on  | searxng | - | - | The chat's web search (SearXNG)
+browser        | off | browser | - | - | The browser agent (Chromium)
+3d             | off | blender | - | - | 3D models (Blender)
+lean           | off | lean | - | lab | Proofs checked by Lean 4 with Mathlib (an image of about 13 GB)
+studio         | off | studio | gpu | media | The media studio's own models: cutouts, voices, music
+workspaces     | off | workspaces | - | code-studio | Code Studio's workspaces on this server
+laya           | off | laya | - | - | Laya: typed decisions on the CPU
+monitoring     | on  | prometheus alertmanager loki promtail node-exporter cpu-temp-exporter | - | - | Dashboards, logs and alerts
+gpu-monitoring | on  | gpu-exporter | gpu | monitoring | The GPUs' metrics on the dashboards
+dcgm           | off | dcgm-exporter | gpu | monitoring | Data-centre GPU detail (NVIDIA DCGM, bare metal only)
+power-limits   | on  | power-limits | gpu | - | GPU and CPU power limits kept applied
+ha             | off | valkey | - | - | Shared counts for several gateway replicas (Valkey)
+meetings       | on  | - | - | speech | Meetings: recorded, written out and summed up
+lab            | on  | - | - | sandbox | The science lab
+apps           | on  | - | - | - | Apps the chat builds
+data           | on  | - | - | - | Ask your data: questions to the company's databases
+decks          | on  | - | - | - | Decks: slides from a chat
+media          | on  | - | - | pictures | The media studio: pictures, video and vectors
+agents         | on  | - | - | - | Agent Studio: workflows the agents run
+code-studio    | on  | - | - | - | Code Studio: the IDE and reviews in the browser

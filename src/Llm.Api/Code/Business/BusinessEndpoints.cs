@@ -22,7 +22,7 @@ public static class BusinessEndpoints
 {
     public static void MapBusiness(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/code/business").PersonOnly().RequirePermission(Core.Access.Permissions.CodeRead);
+        var g = app.MapGroup("/api/code/business").RequireFeature("code-studio").PersonOnly().RequirePermission(Core.Access.Permissions.CodeRead);
         g.MapGet("", ListAsync);
         g.MapGet("/{id:guid}", GetAsync);
         g.MapPost("", MapAsync);

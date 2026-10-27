@@ -33,7 +33,7 @@ public static class DataEndpoints
 
     public static void MapData(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/data").PersonOnly().RequirePermission(Core.Access.Permissions.Data);
+        var g = app.MapGroup("/api/data").RequireFeature("data").PersonOnly().RequirePermission(Core.Access.Permissions.Data);
         g.MapGet("/sources", SourcesAsync);
         g.MapPost("/ask", AskAsync);
         g.MapPost("/run", RunAsync);

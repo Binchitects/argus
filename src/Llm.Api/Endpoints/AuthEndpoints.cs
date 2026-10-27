@@ -37,7 +37,8 @@ public static class AuthEndpoints
         _ => Problem(500, "error", "Sign-in failed."),
     };
 
-    private static async Task<IResult> MeAsync(ClaimsPrincipal principal, UserManager<AppUser> users, Access.AccessService access, Compliance.Notice notice)
+    private static async Task<IResult> MeAsync(ClaimsPrincipal principal, UserManager<AppUser> users, Access.AccessService access, Compliance.Notice notice,
+        Operations.Features features)
     {
         var user = principal.Identity?.IsAuthenticated == true ? await users.GetUserAsync(principal) : null;
         if (user is null || user.IsDisabled)
@@ -61,6 +62,8 @@ public static class AuthEndpoints
             // Signed in, and to accept the sign-in notice's current version before anything else.
             mustAcceptNotice = await notice.MustAcceptAsync(user.Id),
             signedInAt = AppClaimsFactory.SignedInAt(principal)?.ToUnixTimeSeconds(),
+            // The features that are off here (deploy/features): their pages are left out.
+            featuresOff = features.Off,
         });
     }
 

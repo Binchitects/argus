@@ -29,7 +29,7 @@ public static class StoryEndpoints
 
     public static void MapStories(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/media/stories").PersonOnly().RequirePermission(Core.Access.Permissions.Video);
+        var g = app.MapGroup("/api/media/stories").RequireFeature("media").PersonOnly().RequirePermission(Core.Access.Permissions.Video);
         g.MapGet("", ListAsync);
         g.MapPost("", WriteAsync);
         g.MapGet("/{id:guid}", GetAsync);

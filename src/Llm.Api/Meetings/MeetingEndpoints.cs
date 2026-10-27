@@ -38,7 +38,7 @@ public static class MeetingEndpoints
 {
     public static void MapMeetings(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/meetings").PersonOnly().RequirePermission(Core.Access.Permissions.Meetings);
+        var g = app.MapGroup("/api/meetings").RequireFeature("meetings").PersonOnly().RequirePermission(Core.Access.Permissions.Meetings);
         g.MapGet("", ListAsync);
         g.MapPost("", UploadAsync).DisableAntiforgery();
         g.MapGet("/{id:guid}", GetAsync);

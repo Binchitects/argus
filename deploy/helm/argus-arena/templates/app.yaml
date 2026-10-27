@@ -60,6 +60,8 @@ spec:
             # Strict-Transport-Security's max-age on the app's answers (the Ingress controller sets its own on the rest).
             - { name: Stack__HstsSeconds, value: {{ .Values.ingress.hstsSeconds | int | quote }} }
             {{- include "arena.optionalSecretEnv" (list $ "HuggingFace__Token" "HF_TOKEN") | nindent 12 }}
+            # The features that are on (deploy/features): the app leaves the others out of its pages and API.
+            - { name: Features__On, value: {{ include "arena.featuresOn" . | quote }} }
             # Which media servers and Laya run: said outright rather than looked up by name.
             - { name: Modules__imagegen, value: {{ .Values.imagegen.enabled | quote }} }
             - { name: Modules__videogen, value: {{ .Values.videogen.enabled | quote }} }

@@ -83,8 +83,13 @@ def compose_command() -> list[str] | None:
 _configs: dict[tuple[str, ...], dict] = {}
 
 
+# Every feature of deploy/features but the browser agent and DCGM, which compose alone runs.
+EVERY_FEATURE = [line.split("|")[0].strip() for line in (DEPLOY / "features").read_text().splitlines()
+                 if line.strip() and not line.startswith("#") and line.split("|")[0].strip() not in ("browser", "dcgm")]
+
+
 def compose_config(*files: str) -> dict:
-    """The stack as compose resolves it, with the Laya, vLLM, HA and 3D profiles on (every module), from .env.example's placeholders."""
+    """The stack as compose resolves it, with every feature on (but the browser agent and DCGM), from .env.example's placeholders."""
     if files in _configs:
         return _configs[files]
     cmd = compose_command()
@@ -98,7 +103,7 @@ def compose_config(*files: str) -> dict:
         env_file = Path(tmp) / "parity.env"
         env_file.write_text(example)
         env = {k: v for k, v in os.environ.items() if not k.startswith(("COMPOSE_", "DOCKER_HOST"))}
-        env.update({"COMPOSE_PROFILES": "laya,vllm,ha,3d,lean,studio,workspaces", "PODMAN_COMPOSE_WARNING_LOGS": "false"})
+        env.update({"COMPOSE_PROFILES": ",".join(EVERY_FEATURE), "PODMAN_COMPOSE_WARNING_LOGS": "false"})
         args = [*cmd, "--env-file", str(env_file)]
         for f in files:
             args += ["-f", str(DEPLOY / f)]

@@ -39,7 +39,7 @@ public static class AppEndpoints
 
     public static void MapApps(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/apps").PersonOnly();
+        var g = app.MapGroup("/api/apps").RequireFeature("apps").PersonOnly();
         g.MapGet("", ListAsync);
         g.MapPost("", CreateAsync).RequirePermission(Core.Access.Permissions.Apps);
         g.MapPost("/ask", AskAsync);

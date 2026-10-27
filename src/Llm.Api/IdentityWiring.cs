@@ -262,6 +262,8 @@ public static class IdentityWiring
 
         services.Configure<Operations.StackOptions>(config.GetSection("Stack"));
         services.Configure<Operations.ArgusOptions>(config.GetSection("Argus"));
+        // The features that are on (deploy/features), and which of the stack's modules answer.
+        services.AddSingleton<Operations.Features>();
         services.AddSingleton<Operations.Modules>();
         services.AddHttpClient("probe", c => c.Timeout = TimeSpan.FromSeconds(3));
         services.AddHttpClient<Operations.ArgusAdmin>(c => c.Timeout = TimeSpan.FromSeconds(15));
@@ -313,7 +315,10 @@ public static class IdentityWiring
         services.AddScoped<Code.Studio.StudioWorkspaces>();
         // A workspace's clone may take minutes, and an agent's turn streams for as long as it runs.
         services.AddHttpClient(Code.Studio.StudioWorkspaces.Client, c => c.Timeout = Timeout.InfiniteTimeSpan);
-        services.AddHostedService<Code.Studio.StudioIdle>();
+        if (Operations.Features.On(config, "workspaces"))
+        {
+            services.AddHostedService<Code.Studio.StudioIdle>();
+        }
         services.AddSingleton<Code.Studio.MachineTunnels>();
         services.AddSingleton<Chat.Tools.CalculatorTool>();
         services.AddSingleton<Chat.Tools.TimeTool>();
@@ -344,9 +349,12 @@ public static class IdentityWiring
         services.Configure<Chat.Tools.Browser.BrowserOptions>(config.GetSection("Browser"));
         services.AddHttpClient(Chat.Tools.Browser.BrowserSessions.Client, c => c.Timeout = TimeSpan.FromSeconds(10));
         services.AddSingleton<Chat.Tools.Browser.BrowserSessions>();
-        services.AddHostedService(sp => sp.GetRequiredService<Chat.Tools.Browser.BrowserSessions>());
         services.AddSingleton<Chat.Tools.Browser.BrowserProxy>();
-        services.AddHostedService(sp => sp.GetRequiredService<Chat.Tools.Browser.BrowserProxy>());
+        if (Operations.Features.On(config, "browser"))
+        {
+            services.AddHostedService(sp => sp.GetRequiredService<Chat.Tools.Browser.BrowserSessions>());
+            services.AddHostedService(sp => sp.GetRequiredService<Chat.Tools.Browser.BrowserProxy>());
+        }
         services.AddScoped<Chat.Tools.Browser.BrowserTool>();
         // Ask your data: one question to the model as a person (apps use it too), the databases admins connect, the boards' refresher.
         services.AddScoped<Chat.OneQuestion>();
@@ -355,7 +363,10 @@ public static class IdentityWiring
         services.AddScoped<Chat.Tools.DeckTool>();
         // Agent Studio: its runs (a singleton that runs them in the background, and its schedules), and the step runner.
         services.AddSingleton<Studio.StudioRuns>();
-        services.AddHostedService(sp => sp.GetRequiredService<Studio.StudioRuns>());
+        if (Operations.Features.On(config, "agents"))
+        {
+            services.AddHostedService(sp => sp.GetRequiredService<Studio.StudioRuns>());
+        }
         services.AddScoped<Studio.FlowRunner>();
         // Fix it: GitLab as the person (their own token), the agent on the branch's files, its runs in the background.
         services.AddScoped<Code.Fixes.GitLabAsPerson>();
@@ -366,7 +377,10 @@ public static class IdentityWiring
         services.AddSingleton<Media.StoryRuns>();
         services.AddScoped<Chat.Tools.DataTool>();
         services.AddSingleton<Insights.BoardRefresher>();
-        services.AddHostedService(sp => sp.GetRequiredService<Insights.BoardRefresher>());
+        if (Operations.Features.On(config, "data"))
+        {
+            services.AddHostedService(sp => sp.GetRequiredService<Insights.BoardRefresher>());
+        }
         services.AddScoped<Plans.PlansTool>();
         services.AddScoped<Code.ReviewTool>();
         services.Configure<Chat.Tools.WebOptions>(config.GetSection("Web"));
@@ -420,9 +434,12 @@ public static class IdentityWiring
         services.AddSingleton<Code.Business.BusinessMap>();
         services.Configure<Meetings.MeetingOptions>(config.GetSection("Meetings"));
         services.AddSingleton<Meetings.MeetingEngine>();
-        services.AddHostedService(sp => sp.GetRequiredService<Meetings.MeetingEngine>());
         services.AddSingleton<Meetings.MeetingReminders>();
-        services.AddHostedService(sp => sp.GetRequiredService<Meetings.MeetingReminders>());
+        if (Operations.Features.On(config, "meetings"))
+        {
+            services.AddHostedService(sp => sp.GetRequiredService<Meetings.MeetingEngine>());
+            services.AddHostedService(sp => sp.GetRequiredService<Meetings.MeetingReminders>());
+        }
         services.AddHostedService(sp => sp.GetRequiredService<Code.Business.BusinessMap>());
         services.AddSingleton<Code.AutoReviews>();
         services.AddHostedService(sp => sp.GetRequiredService<Code.AutoReviews>());
@@ -451,7 +468,10 @@ public static class IdentityWiring
         services.AddSingleton<Models.GpuShare>();
         services.Configure<Schedules.ScheduleOptions>(config.GetSection("Schedules"));
         services.Configure<Operations.ArgusIndexOptions>(config.GetSection("ArgusIndex"));
-        services.AddHostedService<Operations.ArgusIndexSchedule>();
+        if (Operations.Features.On(config, "argus"))
+        {
+            services.AddHostedService<Operations.ArgusIndexSchedule>();
+        }
         services.Configure<Schedules.MailOptions>(config.GetSection("Mail"));
         services.AddSingleton<Schedules.Mailer>();
         services.AddSingleton<Schedules.Webhooks>();

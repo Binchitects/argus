@@ -24,7 +24,7 @@ public static class DataSourceEndpoints
 {
     public static void MapDataSources(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/data-sources").RequirePermissions(Core.Access.Permissions.DataManage, Core.Access.Permissions.DataManage);
+        var g = app.MapGroup("/api/admin/data-sources").RequireFeature("data").RequirePermissions(Core.Access.Permissions.DataManage, Core.Access.Permissions.DataManage);
         g.MapGet("", ListAsync);
         g.MapPost("/probe", ProbeAsync);
         g.MapPost("", AddAsync);

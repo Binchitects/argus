@@ -8,6 +8,8 @@ export interface NavItem {
   keywords?: string[]
   /** In an admin section: the permission that shows it (an Owner holds every one). */
   permission?: string
+  /** The feature it is part of (deploy/features): left out while that feature is off. */
+  feature?: string
 }
 
 export interface NavSection {
@@ -25,15 +27,15 @@ export const navigation: NavSection[] = [
       { title: 'Assistants', path: '/assistants', icon: Bot, keywords: ['gpts', 'gems', 'projects', 'instructions', 'knowledge', 'shared', 'team'] },
       { title: 'Skills', path: '/skills', icon: SquareSlash, keywords: ['slash commands', 'prompts', 'prompt library', 'templates', 'snippets', 'instructions', 'parameters'] },
       { title: 'Memory', path: '/memory', icon: Brain, keywords: ['remember', 'memories', 'recall', 'preferences', 'facts', 'decisions', 'lessons', 'pinned', 'context', 'what it knows about me'] },
-      { title: 'Meetings', path: '/meetings', icon: AudioLines, keywords: ['meeting', 'record', 'recording', 'transcript', 'minutes', 'notes', 'action items', 'decisions', 'who said', 'speakers', 'otter', 'fireflies', 'call'] },
+      { title: 'Meetings', path: '/meetings', icon: AudioLines, keywords: ['meeting', 'record', 'recording', 'transcript', 'minutes', 'notes', 'action items', 'decisions', 'who said', 'speakers', 'otter', 'fireflies', 'call'], feature: 'meetings' },
       { title: 'Plans', path: '/plans', icon: ListChecks, keywords: ['plan', 'board', 'timeline', 'gantt', 'steps', 'project', 'kanban'] },
-      { title: 'Science lab', path: '/lab', icon: FlaskConical, keywords: ['science', 'lab', 'mathematics', 'math', 'physics', 'chemistry', 'statistics', 'proof', 'sympy', 'units', 'notebook', 'wolfram'] },
-      { title: 'Apps', path: '/apps', icon: AppWindow, keywords: ['app', 'apps', 'tool', 'publish', 'page', 'component', 'gallery', 'remix'] },
-      { title: 'Data', path: '/data', icon: BarChart, keywords: ['ask your data', 'sql', 'database', 'query', 'chart', 'dashboard', 'board', 'report', 'analytics', 'bi'] },
-      { title: 'Decks', path: '/decks', icon: Presentation, keywords: ['slides', 'presentation', 'powerpoint', 'pptx', 'pdf', 'deck', 'keynote', 'template'] },
-      { title: 'Media studio', path: '/media', icon: Palette, keywords: ['pictures', 'images', 'photo', 'edit', 'inpaint', 'paint', 'variations', 'upscale', 'enlarge', 'animate', 'video', 'clip', 'midjourney', 'photoshop'] },
-      { title: 'Agent Studio', path: '/studio', icon: Workflow, keywords: ['workflow', 'automation', 'agent', 'zapier', 'n8n', 'flow', 'trigger', 'approval', 'webhook', 'form'] },
-      { title: 'Code Studio', path: '/code', icon: GitPullRequest, keywords: ['ide', 'vs code', 'workspace', 'editor', 'terminal', 'debug', 'review', 'merge request', 'mr', 'gitlab', 'diff', 'code assistant', 'branch', 'argus'] },
+      { title: 'Science lab', path: '/lab', icon: FlaskConical, keywords: ['science', 'lab', 'mathematics', 'math', 'physics', 'chemistry', 'statistics', 'proof', 'sympy', 'units', 'notebook', 'wolfram'], feature: 'lab' },
+      { title: 'Apps', path: '/apps', icon: AppWindow, keywords: ['app', 'apps', 'tool', 'publish', 'page', 'component', 'gallery', 'remix'], feature: 'apps' },
+      { title: 'Data', path: '/data', icon: BarChart, keywords: ['ask your data', 'sql', 'database', 'query', 'chart', 'dashboard', 'board', 'report', 'analytics', 'bi'], feature: 'data' },
+      { title: 'Decks', path: '/decks', icon: Presentation, keywords: ['slides', 'presentation', 'powerpoint', 'pptx', 'pdf', 'deck', 'keynote', 'template'], feature: 'decks' },
+      { title: 'Media studio', path: '/media', icon: Palette, keywords: ['pictures', 'images', 'photo', 'edit', 'inpaint', 'paint', 'variations', 'upscale', 'enlarge', 'animate', 'video', 'clip', 'midjourney', 'photoshop'], feature: 'media' },
+      { title: 'Agent Studio', path: '/studio', icon: Workflow, keywords: ['workflow', 'automation', 'agent', 'zapier', 'n8n', 'flow', 'trigger', 'approval', 'webhook', 'form'], feature: 'agents' },
+      { title: 'Code Studio', path: '/code', icon: GitPullRequest, keywords: ['ide', 'vs code', 'workspace', 'editor', 'terminal', 'debug', 'review', 'merge request', 'mr', 'gitlab', 'diff', 'code assistant', 'branch', 'argus'], feature: 'code-studio' },
       { title: 'Scheduled tasks', path: '/tasks', icon: CalendarClock, keywords: ['schedule', 'cron', 'daily', 'weekly', 'report', 'digest', 'webhook', 'email', 'notification'] },
       { title: 'Usage & cost', path: '/usage', icon: BarChart3, keywords: ['tokens', 'spend', 'credit', 'budget'] },
       { title: 'Leaderboard', path: '/leaderboard', icon: Trophy, keywords: ['arena', 'compare', 'models', 'elo', 'vote', 'ranking'] },
@@ -54,7 +56,7 @@ export const navigation: NavSection[] = [
       { title: 'Tools', path: '/admin/tools', icon: Wrench, keywords: ['mcp', 'argus', 'image generation', 'calculator', 'permissions', 'openapi', 'api'], permission: 'tools.read' },
       { title: 'Plugins', path: '/admin/plugins', icon: Blocks, keywords: ['catalog', 'install', 'jira', 'gitlab issues', 'oauth', 'integrations'], permission: 'plugins.read' },
       { title: 'Knowledge', path: '/admin/knowledge', icon: Library, keywords: ['documents', 'wiki', 'gitlab', 'folder', 'website', 'confluence', 'sharepoint', 'search', 'embeddings', 'rag'], permission: 'knowledge.read' },
-      { title: 'Data sources', path: '/admin/data-sources', icon: Database, keywords: ['ask your data', 'postgres', 'postgresql', 'sql', 'database', 'connection', 'read only', 'tables'], permission: 'data.manage' },
+      { title: 'Data sources', path: '/admin/data-sources', icon: Database, keywords: ['ask your data', 'postgres', 'postgresql', 'sql', 'database', 'connection', 'read only', 'tables'], permission: 'data.manage', feature: 'data' },
       { title: 'Storage', path: '/admin/storage', icon: HardDrive, keywords: ['disk', 'space', 'files', 'uploads', 'database', 'backups', 'quota', 'clean up', 'models', 'logs'], permission: 'storage.read' },
       { title: 'Settings', path: '/admin/settings', icon: Settings, keywords: ['configuration', 'config', 'env'], permission: 'settings.read' },
       { title: 'Audit log', path: '/admin/audit', icon: ScrollText, keywords: ['events', 'history', 'security'], permission: 'audit.read' },
@@ -66,9 +68,9 @@ export const navigation: NavSection[] = [
     title: 'Argus',
     adminOnly: true,
     items: [
-      { title: 'Indexing', path: '/admin/indexing', icon: Database, keywords: ['gitlab', 'repositories', 'index'], permission: 'argus.manage' },
-      { title: 'Packs', path: '/admin/packs', icon: Package, keywords: ['knowledge packs'], permission: 'argus.manage' },
-      { title: 'Explore', path: '/admin/explore', icon: Telescope, keywords: ['symbols', 'search code'], permission: 'argus.explore' },
+      { title: 'Indexing', path: '/admin/indexing', icon: Database, keywords: ['gitlab', 'repositories', 'index'], permission: 'argus.manage', feature: 'argus' },
+      { title: 'Packs', path: '/admin/packs', icon: Package, keywords: ['knowledge packs'], permission: 'argus.manage', feature: 'argus' },
+      { title: 'Explore', path: '/admin/explore', icon: Telescope, keywords: ['symbols', 'search code'], permission: 'argus.explore', feature: 'argus' },
     ],
   },
   {
@@ -76,19 +78,21 @@ export const navigation: NavSection[] = [
     adminOnly: true,
     items: [
       { title: 'Monitoring', path: '/admin/monitoring', icon: Activity, keywords: ['prometheus', 'probes', 'health', 'services'], permission: 'monitoring.read' },
-      { title: 'Dashboards', path: '/admin/dashboards', icon: LineChart, keywords: ['gpu', 'performance', 'metrics', 'charts'], permission: 'monitoring.read' },
-      { title: 'Logs', path: '/admin/logs', icon: Logs, keywords: ['loki', 'errors', 'containers', 'tail'], permission: 'logs.read' },
+      { title: 'Dashboards', path: '/admin/dashboards', icon: LineChart, keywords: ['gpu', 'performance', 'metrics', 'charts'], permission: 'monitoring.read', feature: 'monitoring' },
+      { title: 'Logs', path: '/admin/logs', icon: Logs, keywords: ['loki', 'errors', 'containers', 'tail'], permission: 'logs.read', feature: 'monitoring' },
       { title: 'Alerts', path: '/admin/alerts', icon: Siren, keywords: ['alertmanager', 'firing', 'rules', 'incidents'], permission: 'monitoring.read' },
       { title: 'Traces', path: '/admin/traces', icon: Timer, keywords: ['slow', 'answers', 'latency', 'timeline', 'sub-agents', 'speed', 'tokens'], permission: 'traces.read' },
     ],
   },
 ]
 
-/** What a person sees: an admin section's pages by the permissions they hold (all of them for an Owner). */
-export function visibleNavigation(me: { isAdmin: boolean; permissions?: string[] }): NavSection[] {
+/** What a person sees: an admin section's pages by the permissions they hold (all of them for an Owner), without the features that are off. */
+export function visibleNavigation(me: { isAdmin: boolean; permissions?: string[]; featuresOff?: string[] }): NavSection[] {
   const held = new Set(me.permissions ?? [])
+  const off = new Set(me.featuresOff ?? [])
   return navigation
     .map((s) => (!s.adminOnly || me.isAdmin ? s : { ...s, items: s.items.filter((i) => i.permission && held.has(i.permission)) }))
+    .map((s) => ({ ...s, items: s.items.filter((i) => !i.feature || !off.has(i.feature)) }))
     .filter((s) => s.items.length > 0)
 }
 

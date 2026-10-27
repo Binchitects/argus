@@ -33,7 +33,7 @@ public static class StudioEndpoints
 
     public static void MapStudio(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/studio").PersonOnly().RequirePermission(Core.Access.Permissions.Studio);
+        var g = app.MapGroup("/api/studio").RequireFeature("agents").PersonOnly().RequirePermission(Core.Access.Permissions.Studio);
         g.MapGet("", ListAsync);
         g.MapGet("/templates", () => Results.Ok(StudioTemplates.All));
         g.MapGet("/tools", ToolsAsync);

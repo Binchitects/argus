@@ -36,4 +36,5 @@ services:
 
   # Power caps write /sys, which needs the host's root.
   power-limits:
-    profiles: [off]
+    # !override: its feature's profile would otherwise still run it.
+    profiles: !override [off]

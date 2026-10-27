@@ -33,6 +33,8 @@ export interface Me {
   /** Signed in, and to accept the sign-in notice's current version before anything else. */
   mustAcceptNotice?: boolean
   signedInAt: number | null
+  /** The features that are off here (deploy/features): their pages are left out. */
+  featuresOff?: string[]
 }
 
 /** An API answer that was not 2xx. `status` is the app's code ("invalid", "locked", ...), `message` is for people. */

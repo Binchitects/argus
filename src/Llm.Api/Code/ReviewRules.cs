@@ -288,7 +288,7 @@ public static class ReviewRuleEndpoints
 {
     public static void MapReviewRules(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/code/rules").PersonOnly().RequirePermission(Core.Access.Permissions.ReviewPolicy);
+        var g = app.MapGroup("/api/code/rules").RequireFeature("code-studio").PersonOnly().RequirePermission(Core.Access.Permissions.ReviewPolicy);
         g.MapGet("", ListAsync);
         g.MapPost("", CreateAsync).RequirePermission(Core.Access.Permissions.ReviewRun);
         g.MapPut("/{id:guid}", UpdateAsync);

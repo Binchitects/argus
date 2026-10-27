@@ -3,13 +3,10 @@
 #   cp .env.example .env     # then fill it in
 #   docker compose up -d     # https://$DOMAIN
 #
-# Every module runs. To leave one out, name it in docker-compose.override.yml:
-#
-#   services:
-#     videogen: { profiles: [off] }
-#
-# Laya (typed decisions on the CPU) is the one module off until asked for:
-# COMPOSE_PROFILES=laya in .env.
+# The core (Traefik, the web, the app, Postgres, the gateway) always runs. Every
+# other service runs under its feature's profile, and COMPOSE_PROFILES in .env
+# names the features that are on (features beside this file lists them, with
+# what each runs and needs; installer.sh --with and --without change them).
 #
 # Traefik does TLS: Let's Encrypt when ACME_EMAIL is set, else its own
 # certificate (config/traefik/README.md has a certificate of your own).
@@ -111,6 +108,8 @@ services:
       Stack__Acme: ${ACME_EMAIL:+letsencrypt}
       # The same HSTS as Traefik's, on the app's own answers (and a cluster without Traefik).
       Stack__HstsSeconds: ${HSTS_SECONDS:-}
+      # The features that are on (features): the app leaves the others out of its pages and API.
+      Features__On: ${COMPOSE_PROFILES:-}
     volumes:
       - ${MODELS_DIR:-./models}:/library
       - engine:/engine-config
@@ -182,6 +181,7 @@ services:
   # The chat models (Admin -> Models), loaded and unloaded live.
   llamacpp:
     <<: [*service, *gpu]
+    profiles: [chat-models]
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
     container_name: llamacpp
     entrypoint: [/bin/sh, /router.sh]
@@ -243,6 +243,7 @@ services:
   # Embeddings for Argus and the app's company knowledge, on the CPU. The app fetches the file into MODELS_DIR/embed.
   embed:
     <<: *service
+    profiles: [knowledge]
     image: ghcr.io/ggml-org/llama.cpp:server-cuda
     container_name: embed
     volumes: ["${MODELS_DIR:-./models}:/models"]
@@ -256,6 +257,7 @@ services:
   # The code index (GitLab, read-only token) and knowledge packs, over MCP.
   argus:
     <<: *service
+    profiles: [argus]
     build: { context: .., dockerfile: src/Argus/Dockerfile, target: server }
     container_name: argus
     command:
@@ -302,6 +304,7 @@ services:
   # says what it does in its status file (services/sd-serve.sh).
   imagegen:
     <<: [*service, *gpu]
+    profiles: [pictures]
     image: ghcr.io/leejet/stable-diffusion.cpp@sha256:1aee2217d5e20ddfb19dfcbca21db3cbe1dcb0ae3b9bc4151773e503dca8aede
     container_name: imagegen
     user: "65534:65534"
@@ -312,6 +315,7 @@ services:
 
   videogen:
     <<: [*service, *gpu]
+    profiles: [video]
     image: ghcr.io/leejet/stable-diffusion.cpp@sha256:1aee2217d5e20ddfb19dfcbca21db3cbe1dcb0ae3b9bc4151773e503dca8aede
     container_name: videogen
     user: "65534:65534"
@@ -324,6 +328,7 @@ services:
   # Speech to text and text to speech. It fetches its models itself.
   audio:
     <<: *service
+    profiles: [speech]
     image: ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cpu
     container_name: audio
     # Plain HTTPS downloads: Hugging Face's Xet transfer stalls on flaky links. Its models stay loaded until the app
@@ -334,6 +339,7 @@ services:
   # The chat's Python: no network, a read-only root, each run its own user.
   sandbox:
     <<: *service
+    profiles: [sandbox]
     build: ./services/sandbox
     container_name: sandbox
     init: true
@@ -480,6 +486,7 @@ services:
   # The chat's web search.
   searxng:
     <<: *service
+    profiles: [web-search]
     image: ghcr.io/searxng/searxng:latest
     container_name: searxng
     user: "977:977"
@@ -494,6 +501,7 @@ services:
   # Monitoring: the app's dashboards, logs and alerts read these.
   prometheus:
     <<: *service
+    profiles: [monitoring]
     image: prom/prometheus:v3.1.0
     container_name: prometheus
     environment: { ENGINE_KEY: "${ENGINE_KEY}", ARGUS_KEY: "${ARGUS_KEY}" }
@@ -510,12 +518,14 @@ services:
 
   alertmanager:
     <<: *service
+    profiles: [monitoring]
     image: prom/alertmanager:v0.28.0
     container_name: alertmanager
     volumes: [./config/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro, alertmanager:/alertmanager]
 
   loki:
     <<: *service
+    profiles: [monitoring]
     image: grafana/loki:3.4.1
     container_name: loki
     command: -config.file=/etc/loki/loki.yml
@@ -523,6 +533,7 @@ services:
 
   promtail:
     <<: *service
+    profiles: [monitoring]
     image: grafana/promtail:3.4.1
     container_name: promtail
     command: -config.file=/etc/promtail/promtail.yml
@@ -533,6 +544,7 @@ services:
 
   node-exporter:
     <<: *service
+    profiles: [monitoring]
     image: prom/node-exporter:v1.9.0
     container_name: node-exporter
     pid: host
@@ -541,6 +553,7 @@ services:
 
   gpu-exporter:
     <<: [*service, *gpu]
+    profiles: [gpu-monitoring]
     image: utkuozdemir/nvidia_gpu_exporter:1.3.2
     container_name: gpu-exporter
 
@@ -559,6 +572,7 @@ services:
 
   cpu-temp-exporter:
     <<: *service
+    profiles: [monitoring]
     image: python:3.13-slim
     container_name: cpu-temp-exporter
     command: [python, /app/exporter.py]
@@ -567,6 +581,7 @@ services:
   # GPU_POWER_LIMIT_W and CPU_POWER_LIMIT_W from .env, kept applied. Privileged: it writes /sys.
   power-limits:
     <<: [*service, *gpu]
+    profiles: [power-limits]
     image: utkuozdemir/nvidia_gpu_exporter:1.3.2
     container_name: power-limits
     privileged: true

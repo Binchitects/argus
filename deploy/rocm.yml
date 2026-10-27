@@ -30,4 +30,5 @@ services:
     image: ${SDCPP_GPU_IMAGE:-ghcr.io/leejet/stable-diffusion.cpp:master-vulkan}
   # nvidia-smi's exporter has nothing to read here: the GPUs come from the vLLM supervisor's probe.
   gpu-exporter:
-    profiles: [off]
+    # !override: its feature's profile would otherwise still run it.
+    profiles: !override [off]

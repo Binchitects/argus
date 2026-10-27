@@ -48,6 +48,22 @@ describe('shell', () => {
     expect(within(sheet).getByRole('link', { name: 'Source' })).toHaveAttribute('href', source)
   })
 
+  it('says a page of a feature that is off is not installed, and how an admin turns it on', async () => {
+    fakeApi({ ...admin, featuresOff: ['lab'] })
+    renderApp('/lab')
+    expect(await screen.findByText('Science lab is not installed here')).toBeInTheDocument()
+    expect(screen.getByText('installer.sh repair --with lab')).toBeInTheDocument()
+    const nav = screen.getByRole('navigation', { name: 'Main' })
+    expect(within(nav).queryByRole('link', { name: 'Science lab' })).not.toBeInTheDocument()
+  })
+
+  it('tells a member to ask an admin for a feature that is off', async () => {
+    fakeApi({ ...member, featuresOff: ['meetings'] })
+    renderApp('/meetings')
+    expect(await screen.findByText('Meetings is not installed here')).toBeInTheDocument()
+    expect(screen.getByText(/Ask an admin/)).toBeInTheDocument()
+  })
+
   it('shows admins the administration sections', async () => {
     fakeApi(admin)
     renderApp('/')

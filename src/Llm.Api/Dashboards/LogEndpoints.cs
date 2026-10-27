@@ -34,7 +34,7 @@ public static class LogEndpoints
 
     public static void MapLogs(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/logs").RequirePermissions(Llm.Core.Access.Permissions.LogsRead, Llm.Core.Access.Permissions.LogsRead);
+        var g = app.MapGroup("/api/admin/logs").RequireFeature("monitoring").RequirePermissions(Llm.Core.Access.Permissions.LogsRead, Llm.Core.Access.Permissions.LogsRead);
         g.MapGet("/", LinesAsync);
         g.MapGet("/volume", VolumeAsync);
         g.MapGet("/containers", ContainersAsync);

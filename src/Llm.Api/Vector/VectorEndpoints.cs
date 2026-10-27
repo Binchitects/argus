@@ -24,7 +24,7 @@ public static class VectorEndpoints
 {
     public static void MapVectors(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/media").PersonOnly().RequirePermission(Core.Access.Permissions.Pictures);
+        var g = app.MapGroup("/api/media").RequireFeature("media").PersonOnly().RequirePermission(Core.Access.Permissions.Pictures);
         g.MapGet("/vectors/config", ConfigAsync);
         g.MapPost("/vectors", UploadAsync);
         g.MapGet("/vectors/{id:guid}", GetAsync);

@@ -33,7 +33,7 @@ public static class DeckEndpoints
 
     public static void MapDecks(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/decks").PersonOnly().RequirePermission(Core.Access.Permissions.Decks);
+        var g = app.MapGroup("/api/decks").RequireFeature("decks").PersonOnly().RequirePermission(Core.Access.Permissions.Decks);
         g.MapGet("", ListAsync);
         g.MapGet("/config", ConfigAsync);
         g.MapPost("", MakeAsync);
@@ -47,7 +47,7 @@ public static class DeckEndpoints
         g.MapPost("/{id:guid}/versions/{version:int}/restore", RestoreAsync);
         g.MapGet("/{id:guid}/pptx", PptxAsync);
 
-        var admin = app.MapGroup("/api/admin/deck-templates").RequirePermissions(Core.Access.Permissions.SettingsRead, Core.Access.Permissions.SettingsBranding);
+        var admin = app.MapGroup("/api/admin/deck-templates").RequireFeature("decks").RequirePermissions(Core.Access.Permissions.SettingsRead, Core.Access.Permissions.SettingsBranding);
         admin.MapGet("", TemplatesAsync);
         admin.MapPost("", UploadAsync).DisableAntiforgery();
         admin.MapPatch("/{id:guid}", ChangeTemplateAsync);

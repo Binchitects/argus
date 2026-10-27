@@ -18,7 +18,7 @@ public static class LabEndpoints
 {
     public static void MapLab(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/lab").PersonOnly();
+        var g = app.MapGroup("/api/lab").RequireFeature("lab").PersonOnly();
         g.MapGet("/fields", FieldsAsync);
         g.MapGet("/notebooks", NotebooksAsync);
     }

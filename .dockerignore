@@ -14,6 +14,8 @@ deploy/
 !deploy/services/workspaces/supervisor.py
 # Code Arena embeds the sandbox's arena module (code mode).
 !deploy/services/sandbox/arena/__init__.py
+# The app embeds the list of the stack's features.
+!deploy/features
 docs/measurements/
 evals/
 clients/
