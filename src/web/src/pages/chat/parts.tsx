@@ -1,4 +1,4 @@
-import { AlertTriangle, AudioLines, Brain, Calculator, Check, ChevronRight, CircleX, Clapperboard, Clock, Download, FilePen, FileText, FolderTree, Globe, Image as ImageIcon, ListChecks, ListTree, Loader2, Network, PenTool, Scale, Search, ShieldQuestion, ShieldX, SquareTerminal, Telescope, TextSearch, Wrench, Zap, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, AudioLines, Brain, Calculator, Check, ChevronRight, CircleX, Clapperboard, Clock, Download, FilePen, FileText, FolderTree, Globe, Image as ImageIcon, ListChecks, ListTree, Loader2, Network, Orbit, PenTool, Scale, Search, ShieldQuestion, ShieldX, SquareTerminal, Telescope, TextSearch, Wrench, Zap, type LucideIcon } from 'lucide-react'
 import { Link } from 'react-router'
 import { Collapsible } from 'radix-ui'
 import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from 'react'
@@ -22,7 +22,7 @@ import type { ToolRunning } from './live'
 import type { AgentWork, Message, ToolCall } from './types'
 import { MediaPlayer } from './media'
 import { isMedia } from './sound'
-import { Drawing } from './drawing'
+import { LabFigures } from './drawing'
 
 /** The 3D viewer, loaded when a model is shown. */
 const ModelViewer = lazy(() => import('./model-viewer'))
@@ -82,6 +82,7 @@ const toolIcons: [RegExp, LucideIcon][] = [
   [/^remember$/, Brain],
   [/^decide$/, Scale],
   [/^deep_research$/, Telescope],
+  [/^(quantum|qec|qubit)_/, Orbit],
   [/^canvas_/, FilePen],
   [/python|run_code/, SquareTerminal],
   [/web|url|fetch/, Globe],
@@ -265,7 +266,7 @@ export const ToolCard = memo(function ToolCard({
           </div>
         </Collapsible.Content>
       </Collapsible.Root>
-      {result && !failed && result.details?.lab?.svg && <Drawing svg={result.details.lab.svg} label="The molecule, drawn" />}
+      {result && !failed && <LabFigures lab={result.details?.lab} />}
       {result && !failed && call.function.name.startsWith('plan_') && planLink(value) && (
         <Link to={planLink(value)!} className="mt-2 inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring">
           <ListChecks className="size-4" aria-hidden="true" /> Open the plan: board and timeline

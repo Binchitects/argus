@@ -18,7 +18,7 @@ namespace Llm.Api.Lab;
 public abstract class LabPack(SandboxClient sandbox, IOptionsMonitor<SandboxOptions> options) : IChatTool
 {
     /// <summary>The lab's tools: they run in a sandbox (the proofs in Lean's), as Python does (its permission), and are called directly, never from code.</summary>
-    public static readonly IReadOnlyList<string> Ids = [LabTool.ToolId, ChemistryTool.ToolId, BiologyTool.ToolId, ProofTool.ToolId];
+    public static readonly IReadOnlyList<string> Ids = [LabTool.ToolId, ChemistryTool.ToolId, BiologyTool.ToolId, QuantumTool.ToolId, ProofTool.ToolId];
 
     private static readonly string Script = Read("lab.py");
 
@@ -207,5 +207,116 @@ public sealed class BiologyTool(SandboxClient sandbox, IOptionsMonitor<SandboxOp
                 ["second"] = Schema.Text("The second sequence"),
                 ["mode"] = Schema.Text("global (default) or local"),
             }, "first", "second"),
+    ];
+}
+
+/// <summary>
+/// The science lab's quantum computing, on simulators (the sandbox has no network): circuits run, compiled and checked with
+/// Qiskit and Aer, error correction sampled with Stim and decoded with PyMatching, a few qubits' open dynamics with QuTiP,
+/// variational circuits with PennyLane, and molecules' energies with PySCF and their qubit Hamiltonians with OpenFermion.
+/// </summary>
+public sealed class QuantumTool(SandboxClient sandbox, IOptionsMonitor<SandboxOptions> options) : LabPack(sandbox, options)
+{
+    public const string ToolId = "quantum";
+
+    public override string Id => ToolId;
+    public override string Title => "Quantum";
+    public override string Description => "Quantum circuits run and checked (Qiskit, Aer), error correction (Stim, PyMatching), open systems (QuTiP), VQE and QAOA (PennyLane), molecules (PySCF, OpenFermion). Simulators only.";
+    public override string Icon => "orbit";
+
+    protected override string Instructions =>
+        "Quantum: compute with these tools instead of in your head; they are simulators, no quantum computer is reached. Write circuits in " +
+        "OpenQASM 2 (qelib1's gates; the header may be left out). Bitstrings are Qiskit's: qubit 0 is the rightmost bit. Pauli strings are read " +
+        "left to right: the first letter acts on qubit 0. Before you state a circuit's state, its probabilities or that two circuits are the " +
+        "same, check it with quantum_check, and say it is checked only when it says equal. Quote energies with their units (hartree for " +
+        "molecules). Cirq and the others are there for a program too (run_python).";
+
+    protected override JsonArray Functions() =>
+    [
+        Schema.Function("quantum_run",
+            "Runs an OpenQASM circuit on Aer's simulator: the counts over shots (measuring every qubit when it measures none), the exact " +
+            "probabilities and, up to 6 qubits, the statevector; depth and gate counts. With noise, Aer's depolarizing and readout errors. " +
+            "With basis, the circuit compiled to those gates (and to a line of qubits with coupling: line): its depth, gates and QASM. " +
+            "The circuit and a histogram are drawn for the person.",
+            new JsonObject
+            {
+                ["qasm"] = Schema.Text("The circuit, e.g. qreg q[2]; creg c[2]; h q[0]; cx q[0],q[1]; measure q -> c;"),
+                ["shots"] = new JsonObject { ["type"] = "integer", ["description"] = "How many shots (1024; at most 100000)" },
+                ["noise"] = new JsonObject
+                {
+                    ["type"] = "object",
+                    ["description"] = "Errors: depolarizing (each one-qubit gate), two_qubit (each two-qubit gate; 10 times depolarizing when left out), readout (each measurement)",
+                    ["properties"] = new JsonObject
+                    {
+                        ["depolarizing"] = new JsonObject { ["type"] = "number" },
+                        ["two_qubit"] = new JsonObject { ["type"] = "number" },
+                        ["readout"] = new JsonObject { ["type"] = "number" },
+                    },
+                },
+                ["basis"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" }, ["description"] = "Compile to these gates, e.g. [\"rz\", \"sx\", \"x\", \"cx\"]" },
+                ["coupling"] = Schema.Text("line: two-qubit gates only between neighbours (with basis)"),
+                ["optimization"] = new JsonObject { ["type"] = "integer", ["description"] = "The compiler's optimisation level, 0 to 3 (2)" },
+                ["seed"] = new JsonObject { ["type"] = "integer", ["description"] = "The simulator's seed (7), for the same counts again" },
+            }, "qasm"),
+        Schema.Function("quantum_check",
+            "Checks a claim about a circuit (without its final measurements): with second, that the two circuits' unitaries are equal up to " +
+            "a global phase (up to 10 qubits); with state, that its state is the one claimed (fidelity); with probabilities, that its outcome " +
+            "probabilities are those claimed. Says equal or different.",
+            new JsonObject
+            {
+                ["first"] = Schema.Text("The circuit, in OpenQASM"),
+                ["second"] = Schema.Text("Another circuit, to compare unitaries"),
+                ["state"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "string" }, ["description"] = "The claimed amplitudes, |0…0⟩ first, e.g. [\"1/sqrt(2)\", \"0\", \"0\", \"1/sqrt(2)\"]" },
+                ["probabilities"] = new JsonObject { ["type"] = "object", ["description"] = "The claimed probabilities by bitstring, e.g. {\"00\": 0.5, \"11\": 0.5}" },
+            }, "first"),
+        Schema.Function("qec_sample",
+            "Samples a quantum error-correcting code with Stim under circuit-level depolarizing noise and decodes it with PyMatching: the " +
+            "logical error rate per shot for each distance and physical error rate (a larger distance lowers it below the threshold). Drawn " +
+            "as a chart.",
+            new JsonObject
+            {
+                ["code"] = Schema.Text("surface (rotated, Z memory; the default), surface_x or repetition"),
+                ["distances"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "integer" }, ["description"] = "Code distances, e.g. [3, 5, 7]" },
+                ["errors"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "number" }, ["description"] = "Physical error rates, e.g. [0.001, 0.005, 0.01]" },
+                ["rounds"] = new JsonObject { ["type"] = "integer", ["description"] = "Rounds of syndrome measurement (the distance)" },
+                ["shots"] = new JsonObject { ["type"] = "integer", ["description"] = "Shots per point (20000)" },
+            }),
+        Schema.Function("qubit_dynamics",
+            "Evolves up to 4 qubits under a Hamiltonian with QuTiP, with T1 decay and T2 dephasing (a Lindblad master equation): each " +
+            "qubit's Bloch vector at the end, the purity, qubit 0's ⟨X⟩, ⟨Y⟩, ⟨Z⟩ over time (drawn). ħ = 1.",
+            new JsonObject
+            {
+                ["hamiltonian"] = Schema.Text("Pauli strings with coefficients, e.g. 0.5*X + 1.0*Z, or ZZ + 0.3*XI + 0.3*IX"),
+                ["initial"] = Schema.Text("Each qubit's start: 0, 1, +, -, r (+i) or l (-i), e.g. 0+ (0 by default)"),
+                ["t1"] = new JsonObject { ["type"] = "number", ["description"] = "T1, the decay time (none when left out)" },
+                ["t2"] = new JsonObject { ["type"] = "number", ["description"] = "T2, the coherence time, at most 2 T1 (none when left out)" },
+                ["time"] = new JsonObject { ["type"] = "number", ["description"] = "How long (10)" },
+                ["steps"] = new JsonObject { ["type"] = "integer", ["description"] = "Time points (201)" },
+            }, "hamiltonian"),
+        Schema.Function("quantum_variational",
+            "Variational circuits with PennyLane, their gradients by automatic differentiation, optimised with Adam. vqe: a Hamiltonian's " +
+            "ground energy, against the exact one. qaoa: MaxCut on a graph, its best cut against the largest one (found by trying all). " +
+            "The energy by step is drawn.",
+            new JsonObject
+            {
+                ["problem"] = Schema.Text("vqe (default) or qaoa"),
+                ["hamiltonian"] = Schema.Text("vqe: Pauli strings with coefficients, e.g. -1.05*II + 0.39*ZI - 0.39*IZ - 0.01*ZZ + 0.18*XX"),
+                ["edges"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "array", ["items"] = new JsonObject { ["type"] = "integer" } }, ["description"] = "qaoa: the graph's edges, e.g. [[0, 1], [1, 2], [2, 0]]" },
+                ["layers"] = new JsonObject { ["type"] = "integer", ["description"] = "Layers of the ansatz (2)" },
+                ["steps"] = new JsonObject { ["type"] = "integer", ["description"] = "Optimisation steps (120)" },
+                ["step_size"] = new JsonObject { ["type"] = "number", ["description"] = "Adam's step (0.1)" },
+            }),
+        Schema.Function("quantum_chemistry",
+            "A molecule's energies with PySCF: Hartree–Fock, CCSD and CCSD(T), and FCI (exact in the basis) when small; its qubit " +
+            "Hamiltonian (Jordan–Wigner, OpenFermion) with its qubits, terms and ground energy; with vqe, VQE's energy against the exact " +
+            "one (up to 8 qubits). Energies in hartree.",
+            new JsonObject
+            {
+                ["atoms"] = Schema.Text("Each atom and its x y z in ångström, separated by ;, e.g. H 0 0 0; H 0 0 0.74"),
+                ["basis"] = Schema.Text("The basis set (sto-3g)"),
+                ["charge"] = new JsonObject { ["type"] = "integer", ["description"] = "The charge (0)" },
+                ["spin"] = new JsonObject { ["type"] = "integer", ["description"] = "2S, unpaired electrons (0)" },
+                ["vqe"] = new JsonObject { ["type"] = "boolean", ["description"] = "Also run VQE on its qubit Hamiltonian" },
+            }, "atoms"),
     ];
 }

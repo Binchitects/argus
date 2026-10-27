@@ -106,9 +106,11 @@ action items given to people and reminded on their day.
 <td valign="top">
 
 ### 🔬 Science lab
-Mathematics, physics, chemistry, statistics and biology, worked with tools that
-check each step: SymPy, units, RDKit, Biopython, and Lean with Mathlib for
-proofs. Each problem is kept as a notebook of its cells and their verdicts.
+Mathematics, physics, chemistry, statistics, biology and quantum computing,
+worked with tools that check each step: SymPy, units, RDKit, Biopython, Lean
+with Mathlib for proofs, and Qiskit, Stim, QuTiP, PennyLane and PySCF on
+simulators. Each problem is kept as a notebook of its cells, verdicts and
+charts.
 
 </td>
 </tr>

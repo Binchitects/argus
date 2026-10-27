@@ -2186,6 +2186,14 @@ real quantum computer; simulators only):
 6. **Measured**: a quantum test set with answers from a source, run alone and
    with the tools (the set, and its licence, need a yes).
 
+Done (items 1 to 5): the sandbox's quantum layer (Qiskit 2.6.1 and Aer
+0.18.2, Cirq 1.7.0, Stim 1.16.0, PyMatching 2.4.0, PennyLane 0.45.1, QuTiP
+5.3.1, PySCF 2.14.0, OpenFermion 1.8.1; the image grew by 1.07 GB unpacked),
+the Quantum tool pack (`quantum_run`, `quantum_check`, `qec_sample`,
+`qubit_dynamics`, `quantum_variational`, `quantum_chemistry`), the Quantum
+computing field, and the notebook's figures (a circuit drawn, histograms and
+charts). `quantum_check` counts as a check. Left: item 6, which needs a yes.
+
 #### Vulnerabilities: known, found and fixed
 
 The person asked (2026-10-26) for a knowledge pack about vulnerabilities, and

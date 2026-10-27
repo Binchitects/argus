@@ -285,10 +285,33 @@ def main():
     mass = lab_call("chem_formula", formula="CuSO4·5H2O")
     protein = lab_call("bio_sequence", sequence="ATGGCCATTGTAATGGGCCGCTGA", operation="translate")
     rec("the lab's chemistry reads molecules (and draws them), balances a redox reaction checked atom by atom and charge, and biology translates",
-        molecule.get("result", {}).get("formula") == "C9H8O4" and "<svg" in molecule.get("show", {}).get("svg", "")
+        molecule.get("result", {}).get("formula") == "C9H8O4" and "<svg" in molecule.get("show", {}).get("figures", [{}])[0].get("svg", "")
         and balanced.get("result", {}).get("coefficients") == [1, 5, 8, 1, 5, 4] and balanced.get("result", {}).get("checked") is True
         and mass.get("result", {}).get("molar_mass", "").startswith("249.6") and protein.get("result", {}).get("result") == "MAIVMGR*",
         json.dumps([molecule.get("result"), balanced, mass.get("result"), protein])[-300:])
+
+    # Quantum, on simulators: a Bell pair run, drawn and checked, and a wrong claim refuted; the surface code below its
+    # threshold; a qubit decaying; VQE on H2's qubit Hamiltonian; H2's energies (FCI equal to the qubit Hamiltonian's).
+    bell = "qreg q[2]; creg c[2]; h q[0]; cx q[0],q[1]; measure q -> c;"
+    ran = lab_call("quantum_run", qasm=bell, shots=2000, basis=["rz", "sx", "x", "cx"])
+    equal = lab_call("quantum_check", first=bell, state=["1/sqrt(2)", "0", "0", "1/sqrt(2)"])
+    wrong = lab_call("quantum_check", first="qreg q[1]; h q[0];", second="qreg q[1]; x q[0];")
+    rec("the lab's quantum circuits run on Aer (counts, the exact state, compiled), are drawn, and a claim is checked and a wrong one refuted",
+        set(ran.get("result", {}).get("counts", {})) == {"00", "11"} and ran.get("result", {}).get("statevector", "").startswith("0.7071|00⟩")
+        and "compiled" in ran.get("result", {}) and "<svg" in ran.get("show", {}).get("figures", [{}])[0].get("svg", "") and "┤ H ├" in ran.get("show", {}).get("diagram", "")
+        and equal.get("result", {}).get("checked") is True and wrong.get("result", {}).get("checked") is False,
+        json.dumps([ran.get("result"), equal.get("result"), wrong])[-300:])
+    code = lab_call("qec_sample", distances=[3, 5], errors=[0.001], shots=20000)
+    decay = lab_call("qubit_dynamics", hamiltonian="0*Z", initial="1", t1=1.0, time=5.0)
+    vqe = lab_call("quantum_variational", hamiltonian="-1.0524*II + 0.3979*ZI - 0.3979*IZ - 0.0113*ZZ + 0.1809*XX", steps=150)
+    h2 = lab_call("quantum_chemistry", atoms="H 0 0 0; H 0 0 0.735", basis="sto-3g")
+    rows = code.get("result", {}).get("results", [])
+    rec("error correction is sampled and decoded (d = 5 below d = 3 at p = 0.001), a qubit decays by T1, VQE reaches the exact energy, H2's FCI equals its qubit Hamiltonian's",
+        len(rows) == 2 and rows[1]["logical"] < rows[0]["logical"]
+        and abs(decay.get("result", {}).get("bloch", {}).get("qubit 0", [0, 0, 0])[2] - (1 - 2 * 2.718281828 ** -5)) < 0.01
+        and abs(vqe.get("result", {}).get("error", 1)) < 1e-3
+        and abs(h2.get("result", {}).get("fci", 0) - -1.1373) < 1e-3 and h2.get("result", {}).get("qubit_hamiltonian", {}).get("matches_fci") is True,
+        json.dumps([rows, decay.get("result", {}).get("bloch"), vqe.get("result", {}).get("error"), h2])[-300:])
 
     r = run("raise ValueError('bad input')")
     rec("an error comes back as its traceback, from main.py", r.get("exit_code") == 1 and 'File "main.py", line 1' in r.get("stderr", "") and "ValueError: bad input" in r.get("stderr", ""))

@@ -35,6 +35,11 @@ public static class LabFields
         new("biology", "Biology", "DNA, RNA and protein sequences with Biopython: translation, alignment, masses; data in Python.", ["biology", "python", "lab"],
             "You are a biologist working a problem in the science lab. Work sequences with bio_sequence and bio_align, never by hand, and " +
             "data with Python (SciPy, pandas), saying which test you use and why. " + Method),
+        new("quantum", "Quantum computing", "Circuits run and checked (Qiskit, Aer), error correction (Stim, PyMatching), open systems (QuTiP), VQE and QAOA (PennyLane), molecules (PySCF, OpenFermion).", ["quantum", "lab", "python"],
+            "You are a quantum information scientist working a problem in the science lab, on simulators. Run each circuit with quantum_run, " +
+            "check each claimed state, probability or equivalence with quantum_check, sample codes with qec_sample, follow open systems with " +
+            "qubit_dynamics, optimise with quantum_variational, and take molecules' energies from quantum_chemistry; never work amplitudes " +
+            "out by hand. Do the algebra around them with math_compute and math_check. " + Method),
         new("general", "Any science", "A problem of any science: computed and checked with the lab's tools, the web for what it needs to look up.", ["lab", "python", "web"],
             "You are a scientist working a problem in the science lab. Look up what you need with the web and cite it. " + Method),
     ];
@@ -42,7 +47,7 @@ public static class LabFields
     /// <summary>What the model is asked when its answer in a notebook ran no check: to check it with the tools, and correct it.</summary>
     public const string CheckRequest =
         "[The lab] Before this answer ends, check it with the lab's tools: math_check that the result satisfies the problem (or " +
-        "math_solve, chem_balance or lean_check, as fits), with the problem's own numbers. If the check disagrees, find the mistake and " +
+        "math_solve, chem_balance, quantum_check or lean_check, as fits), with the problem's own numbers. If the check disagrees, find the mistake and " +
         "correct it. Then give the final answer again, in the same form as before.";
 
     public static LabField? Of(string? id) => All.FirstOrDefault(f => f.Id == id);

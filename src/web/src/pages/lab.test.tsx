@@ -134,7 +134,7 @@ describe('science lab', () => {
       message({
         id: 'r1', parentId: 'a1', role: 'tool', toolName: 'chem_molecule', toolCallId: 't1',
         content: JSON.stringify({ smiles: 'CC(=O)Oc1ccccc1C(=O)O', formula: 'C9H8O4', molar_mass: '180.159 g/mol', logP: 1.31, tpsa: 63.6, h_donors: 1, h_acceptors: 3, rotatable_bonds: 2, rings: 1, lipinski: 'passes the rule of five', inchikey: 'BSYNRYMUTXBXSQ-UHFFFAOYSA-N' }),
-        details: { lab: { svg: '<svg xmlns="http://www.w3.org/2000/svg"></svg>' } },
+        details: { lab: { figures: [{ svg: '<svg xmlns="http://www.w3.org/2000/svg"></svg>', label: 'C9H8O4, drawn' }] } },
       }),
       message({
         id: 'r2', parentId: 'r1', role: 'tool', toolName: 'chem_balance', toolCallId: 't2',
@@ -149,7 +149,7 @@ describe('science lab', () => {
     })
     renderApp('/lab/n1')
     const molecule = await screen.findByRole('region', { name: 'Molecule' })
-    expect(within(molecule).getByRole('img', { name: 'C9H8O4 drawn' })).toHaveAttribute('src', expect.stringMatching(/^data:image\/svg\+xml;/))
+    expect(within(molecule).getByRole('img', { name: 'C9H8O4, drawn' })).toHaveAttribute('src', expect.stringMatching(/^data:image\/svg\+xml;/))
     expect(molecule).toHaveTextContent('180.159 g/mol')
     expect(molecule).toHaveTextContent('passes the rule of five')
     const reaction = screen.getByRole('region', { name: 'Reaction' })
@@ -158,6 +158,46 @@ describe('science lab', () => {
     expect(within(reaction).getAllByRole('row')).toHaveLength(3)
     expect(screen.getByRole('region', { name: 'Sequence: translate' })).toHaveTextContent('MA')
     // The balanced reaction counts as checked.
+    expect(screen.getByText(/1 proved/)).toBeInTheDocument()
+  })
+
+  it('shows a circuit drawn with its histogram, a claimed state checked, and a code sampled', async () => {
+    const bell = 'qreg q[2]; creg c[2]; h q[0]; cx q[0],q[1]; measure q -> c;'
+    const steps = [
+      message({ id: 'u1', role: 'user', content: 'A Bell pair, and the surface code.' }),
+      message({
+        id: 'a1', parentId: 'u1', role: 'assistant', content: '',
+        toolCalls: [call('t1', 'quantum_run', { qasm: bell }), call('t2', 'quantum_check', { first: bell, state: ['1/sqrt(2)', '0', '0', '1/sqrt(2)'] }), call('t3', 'qec_sample', { distances: [3, 5], errors: [0.001] })],
+      }),
+      message({
+        id: 'r1', parentId: 'a1', role: 'tool', toolName: 'quantum_run', toolCallId: 't1',
+        content: JSON.stringify({ qubits: 2, depth: 3, shots: 1024, noise: 'none (ideal)', statevector: '0.7071|00⟩ + 0.7071|11⟩', counts: { '00': 530, '11': 494 } }),
+        details: { lab: { diagram: 'q_0: ┤ H ├──■──', figures: [{ svg: '<svg xmlns="http://www.w3.org/2000/svg"></svg>', label: '1024 shots' }] } },
+      }),
+      message({
+        id: 'r2', parentId: 'r1', role: 'tool', toolName: 'quantum_check', toolCallId: 't2',
+        content: JSON.stringify({ checked: true, verdict: 'equal', fidelity: 1, state: '0.7071|00⟩ + 0.7071|11⟩', detail: "The circuit's state is the one claimed (up to a global phase)." }),
+      }),
+      message({
+        id: 'r3', parentId: 'r2', role: 'tool', toolName: 'qec_sample', toolCallId: 't3',
+        content: JSON.stringify({ code: 'surface', results: [{ distance: 3, physical: 0.001, logical: 0.0004, plus_minus: 0.0001, shots: 20000 }, { distance: 5, physical: 0.001, logical: 0.00005, plus_minus: 0.00005, shots: 20000 }], detail: 'p = 0.001: a larger distance lowers the logical error rate' }),
+      }),
+    ]
+    fakeApi(member, {
+      'GET /api/lab/fields': () => ({ json: fields }),
+      'GET /api/lab/notebooks': () => ({ json: [] }),
+      'GET /api/chat/conversations/n1': () => ({ json: { ...notebook(steps), labField: 'quantum' } }),
+    })
+    renderApp('/lab/n1')
+    const circuit = await screen.findByRole('region', { name: 'Circuit' })
+    expect(within(circuit).getByLabelText('The circuit, drawn')).toHaveTextContent('q_0: ┤ H ├──■──')
+    expect(within(circuit).getByRole('img', { name: '1024 shots' })).toHaveAttribute('src', expect.stringMatching(/^data:image\/svg\+xml;/))
+    expect(circuit).toHaveTextContent('0.7071|00⟩ + 0.7071|11⟩')
+    expect(within(circuit).getAllByRole('row')).toHaveLength(2)
+    expect(within(screen.getByRole('region', { name: 'Quantum check' })).getByText('Checked: equal')).toBeInTheDocument()
+    const code = screen.getByRole('region', { name: 'Error correction: surface code' })
+    expect(within(code).getAllByRole('row')).toHaveLength(3)
+    expect(code).toHaveTextContent('a larger distance lowers')
     expect(screen.getByText(/1 proved/)).toBeInTheDocument()
   })
 

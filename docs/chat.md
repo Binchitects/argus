@@ -309,7 +309,9 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   - **Python**: code run in the sandbox. It has data
     libraries (numpy, pandas, polars, pyarrow, duckdb, scipy, statsmodels,
     scikit-learn, xgboost, lightgbm, numba, sympy, networkx), science (pint,
-    RDKit for molecules, Biopython for sequences), charts
+    RDKit for molecules, Biopython for sequences; quantum computing with
+    Qiskit and Aer, Cirq, Stim and PyMatching, QuTiP, PennyLane, PySCF and
+    OpenFermion), charts
     (matplotlib, seaborn, plotly), images (pillow with HEIC, OpenCV,
     scikit-image, imageio, tesseract OCR in English, Arabic, Persian and
     Chinese, simplified and traditional), maps (geopandas, shapely, pyproj),
@@ -370,6 +372,34 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     isoelectric point and stability, reverse complement, transcription,
     translation by NCBI codon table) and `bio_align` (two sequences, global
     or local, proteins scored with BLOSUM62).
+  - **Quantum** (off in new chats, in the sandbox; simulators only, as the
+    sandbox has no network):
+    - `quantum_run` runs an OpenQASM 2 or 3 circuit on Aer: the counts, the
+      exact probabilities and (up to 6 qubits) the state, with Aer's
+      depolarizing and readout noise when asked, and compiled to a basis of
+      gates (and a line of qubits) when asked. The circuit is drawn and the
+      counts shown as a histogram beside the exact ones.
+    - `quantum_check` checks a claim: two circuits' unitaries equal up to a
+      global phase, a circuit's state against claimed amplitudes (fidelity),
+      or its probabilities against claimed ones. **Equal** or
+      **different**.
+    - `qec_sample` samples a surface or repetition code with Stim under
+      circuit-level noise and decodes it with PyMatching: the logical error
+      rate for each distance and physical rate, charted (the threshold is
+      where the lines cross).
+    - `qubit_dynamics` follows up to 4 qubits under a Hamiltonian of Pauli
+      strings with QuTiP, with T1 and T2: each Bloch vector, the purity,
+      and qubit 0 charted over time.
+    - `quantum_variational` optimises a variational circuit with
+      PennyLane: VQE against the Hamiltonian's exact ground energy, or
+      QAOA's MaxCut against the largest cut found by trying all.
+    - `quantum_chemistry` gives a molecule's Hartree–Fock, CCSD, CCSD(T)
+      and (small ones) FCI energies with PySCF, its qubit Hamiltonian by
+      Jordan–Wigner with OpenFermion (whose ground energy equals FCI), and
+      VQE on it up to 8 qubits.
+
+    Bitstrings are Qiskit's (qubit 0 is the rightmost bit); a Pauli string's
+    first letter acts on qubit 0.
   - **Canvas**: documents and code beside the chat, which you and the model
     both edit (see **Canvas** below).
   - **Reading files**: a long attachment goes into the question only up to a
@@ -753,10 +783,12 @@ it, ask the agent.
 
 **Science lab** (in the sidebar) works problems of a science with the lab's
 tools: the model does the mathematics with SymPy, units with Pint,
-molecules and reactions with RDKit, sequences with Biopython and data with
-Python, in the sandbox, and checks each step it relies on rather than
+molecules and reactions with RDKit, sequences with Biopython, quantum
+circuits, codes, open systems and molecules with the quantum tools, and data
+with Python, in the sandbox, and checks each step it relies on rather than
 working in its head. Choose the problem's science — **Mathematics**,
-**Physics**, **Chemistry**, **Statistics**, **Biology** or **Any science**
+**Physics**, **Chemistry**, **Statistics**, **Biology**, **Quantum
+computing** or **Any science**
 (which may also look things up on the web) — write the problem and press
 **Work it**.
 Each science has its own instructions (physics keeps units on every
@@ -773,7 +805,11 @@ put back into every equation (✓ or ✗), a proof is **checked by Lean**
 only when Lean accepts it with no `sorry` (Mathematics, where the `lean`
 profile runs), and a reaction is **balanced,
 checked** only when each element and the charge count the same on both
-sides; a molecule is drawn beside its properties. On top, how many steps were proved,
+sides; a claim about a circuit is **checked: equal** only when
+`quantum_check` says so. A molecule is drawn beside its properties, a
+circuit beside its counts and their histogram, and the quantum tools' charts
+(a code's logical error rates, a qubit's Bloch vector over time, VQE's
+energy by step) in their cells. On top, how many steps were proved,
 refuted or held only numerically; the lab's list shows the same for each
 notebook. An answer that no tool checked is not left at that: the lab asks
 the model, once, to check it with its tools (a tool call required) and to

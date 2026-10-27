@@ -63,6 +63,19 @@ RUN pip install --no-cache-dir --only-binary=:all: vtracer==0.6.15 resvg-py==0.5
 RUN pip install --no-cache-dir --only-binary=:all: rdkit==2026.9.1 biopython==1.88 \
  && python -c "import rdkit.Chem, Bio.Seq"
 
+# The science lab's quantum computing (its Quantum tools, and any program): Qiskit with Aer's simulators, Cirq, Stim
+# and PyMatching for error correction, PennyLane and QuTiP, PySCF and OpenFermion for quantum chemistry. Simulators
+# only: the sandbox has no network, so no quantum computer is reached. What is installed above is the constraint
+# (pip freeze), so nothing there changes. A layer of its own.
+RUN pip freeze > /tmp/installed.txt \
+ && pip install --no-cache-dir --only-binary=:all: -c /tmp/installed.txt \
+      qiskit==2.6.1 qiskit-aer==0.18.2 cirq-core==1.7.0 stim==1.16.0 pymatching==2.4.0 \
+      pennylane==0.45.1 pennylane-lightning==0.45.0 qutip==5.3.1 pyscf==2.14.0 openfermion==1.8.1 \
+ && rm /tmp/installed.txt \
+ && python -c "import qiskit, qiskit_aer, cirq, stim, pymatching, pennylane, qutip, pyscf, openfermion" \
+ && find / -xdev -perm /6000 -type f -exec chmod a-s {} + \
+ && rm -rf /root/.cache
+
 # LibreOffice as a job can run it (soffice and libreoffice): see the script.
 COPY --chmod=755 soffice /usr/local/bin/soffice
 RUN ln -s soffice /usr/local/bin/libreoffice

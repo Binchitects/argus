@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Atom, ChartNoAxesColumn, Dna, CircleCheck, CircleHelp, CircleX, FlaskConical, Globe, MessageSquare, Sigma, type LucideIcon } from 'lucide-react'
+import { Atom, ChartNoAxesColumn, Dna, CircleCheck, CircleHelp, CircleX, FlaskConical, Globe, MessageSquare, Orbit, Sigma, type LucideIcon } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router'
 import { ChoiceCard } from '@/components/app/choice-card'
@@ -18,7 +18,7 @@ import { api, errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { conversationQuery, streamChat } from './chat/api'
 import { Markdown } from './chat/markdown'
-import { Drawing } from './chat/drawing'
+import { LabFigures } from './chat/drawing'
 import type { Conversation, Message } from './chat/types'
 
 /** A science of the lab, as the server says it: its tools are those the person may use. */
@@ -43,7 +43,7 @@ interface Notebook {
   checks: { proved: number; refuted: number; numeric: number }
 }
 
-const fieldIcons: Record<string, LucideIcon> = { mathematics: Sigma, physics: Atom, chemistry: FlaskConical, statistics: ChartNoAxesColumn, biology: Dna, general: Globe }
+const fieldIcons: Record<string, LucideIcon> = { mathematics: Sigma, physics: Atom, chemistry: FlaskConical, statistics: ChartNoAxesColumn, biology: Dna, quantum: Orbit, general: Globe }
 
 const fieldsQuery = { queryKey: ['lab', 'fields'] as const, queryFn: ({ signal }: { signal: AbortSignal }) => api<LabFields>('/api/lab/fields', { signal }) }
 const notebooksQuery = { queryKey: ['lab', 'notebooks'] as const, queryFn: ({ signal }: { signal: AbortSignal }) => api<Notebook[]>('/api/lab/notebooks', { signal }) }
@@ -192,6 +192,7 @@ const verdictOf = (name: string, result: Record<string, unknown> | null): Verdic
   }
   if (name === 'chem_balance') return result.checked === true ? 'proved' : 'refuted'
   if (name === 'lean_check') return result.verdict === 'checked' ? 'proved' : result.verdict === 'rejected' ? 'refuted' : 'other'
+  if (name === 'quantum_check') return result.checked === true ? 'proved' : 'refuted'
   return null
 }
 
@@ -211,6 +212,7 @@ const fence = (lang: string, body: string) => `\`\`\`${lang}\n${body}\n\`\`\``
 /** What a verdict says for a reaction or a proof, in its own words. */
 function ownLook(name: string, verdict: Verdict): Partial<(typeof verdictLook)[Verdict]> {
   if (name === 'chem_balance') return { label: verdict === 'proved' ? 'Balanced, checked' : 'Not balanced' }
+  if (name === 'quantum_check') return { label: verdict === 'proved' ? 'Checked: equal' : 'Different' }
   if (name === 'lean_check')
     return verdict === 'proved' ? { label: 'Checked by Lean' } : verdict === 'refuted' ? { label: 'Rejected by Lean' } : { label: 'Uses sorry: not proved', tone: verdictLook.numeric.tone, Icon: CircleHelp }
   return {}
@@ -267,6 +269,44 @@ function ToolCell({ name, args, result }: { name: string; args: Record<string, u
   } else if (name === 'bio_align') {
     title = 'Alignment'
     body = `${text(r?.mode)}, ${text(r?.scoring)}: score **${text(r?.score)}**, identity ${text(r?.identity)}\n\n${fence('text', text(r?.alignment))}`
+  } else if (name === 'quantum_run') {
+    title = 'Circuit'
+    const counts = Object.entries((r?.counts as Record<string, number> | undefined) ?? {}).slice(0, 8)
+    const compiled = r?.compiled as { basis: string[]; depth: number; gates: Record<string, number> } | undefined
+    body = r
+      ? `${text(r.qubits)} qubits, depth ${text(r.depth)}, ${text(r.shots)} shots, noise: ${text(r.noise)}${r.statevector ? `\n\nState: \`${text(r.statevector)}\`` : ''}\n\n${table(
+          counts.map(([k]) => `\`${k}\``),
+          [counts.map(([, v]) => v)],
+        )}${compiled ? `\n\nCompiled to ${compiled.basis.join(', ')}: depth ${compiled.depth}, ${Object.entries(compiled.gates).map(([g, n]) => `${n} ${g}`).join(', ')}` : ''}`
+      : fence('text', text(args.qasm))
+  } else if (name === 'quantum_check') {
+    title = 'Quantum check'
+    body = `${text(r?.detail)}${r?.state ? `\n\nState: \`${text(r.state)}\`` : ''}`
+  } else if (name === 'qec_sample') {
+    title = `Error correction: ${text(r?.code ?? args.code ?? 'surface')} code`
+    const rows = (r?.results as { distance: number; physical: number; logical: number; plus_minus: number; shots: number }[] | undefined) ?? []
+    body = `${table(['Distance', 'Physical p', 'Logical rate', '±', 'Shots'], rows.map((x) => [x.distance, x.physical, x.logical, x.plus_minus, x.shots]))}\n\n${text(r?.detail)}`
+  } else if (name === 'qubit_dynamics') {
+    title = 'Qubit dynamics'
+    const bloch = Object.entries((r?.bloch as Record<string, number[]> | undefined) ?? {})
+    body = `\`${text(args.hamiltonian)}\`, ${text(r?.solver)}\n\n${table(['Qubit', '⟨X⟩', '⟨Y⟩', '⟨Z⟩'], bloch.map(([q, v]) => [q, ...v]))}\n\nPurity ${text(r?.purity)} · ${text(r?.units)}`
+  } else if (name === 'quantum_variational') {
+    title = text(r?.problem ?? (args.problem === 'qaoa' ? 'MaxCut by QAOA' : 'VQE'))
+    body =
+      r?.problem === 'MaxCut by QAOA'
+        ? `Best bitstring \`${text(r.best_bitstring)}\` cuts **${text(r.cut)}** of ${text(r.edges)} edges; the largest cut is ${text(r.maximum_cut)}.\n\n${text(r.detail)}`
+        : `Energy **${text(r?.energy)}**, exact ${text(r?.exact)} (error ${text(r?.error)}) · ${text(r?.ansatz)}, ${text(r?.steps)} steps, gradient norm ${text(r?.gradient_norm)}`
+  } else if (name === 'quantum_chemistry') {
+    title = 'Molecule: energies'
+    const q = r?.qubit_hamiltonian as { qubits: number; terms: number; ground_energy: number } | undefined
+    const vqe = r?.vqe as { energy: number; error_mhartree: number; chemical_accuracy: boolean } | undefined
+    const methods = (['hf', 'ccsd', 'ccsd_t', 'fci'] as const).filter((k) => r?.[k] !== undefined)
+    body = r
+      ? `\`${text(args.atoms)}\`, ${text(r.basis)}: ${text(r.electrons)} electrons, ${text(r.orbitals)} orbitals\n\n${table(
+          [...methods.map((k) => ({ hf: 'Hartree–Fock', ccsd: 'CCSD', ccsd_t: 'CCSD(T)', fci: 'FCI' })[k]), ...(vqe ? ['VQE'] : [])],
+          [[...methods.map((k) => r[k]), ...(vqe ? [vqe.energy] : [])]],
+        )}\n\nhartree${q ? ` · qubit Hamiltonian: ${q.qubits} qubits, ${q.terms} terms, ground ${q.ground_energy}` : ''}${vqe ? ` · VQE ${vqe.error_mhartree} mHa from exact${vqe.chemical_accuracy ? ', within chemical accuracy' : ''}` : ''}`
+      : `\`${text(args.atoms)}\``
   } else if (name === 'run_python' || name === 'run_code') {
     title = name === 'run_python' ? 'Python' : 'Program'
     const out = r ? String(r.stdout ?? '') : (result?.content ?? '')
@@ -278,7 +318,7 @@ function ToolCell({ name, args, result }: { name: string; args: Record<string, u
   return (
     <section aria-label={title} className={cn('rounded-lg border p-3', look?.tone)}>
       <div className="mb-1 flex flex-wrap items-center gap-2 text-xs font-medium">
-        {name.startsWith('math_') || name === 'units_convert' || name === 'lean_check' ? <Sigma className="size-3.5" aria-hidden="true" /> : name.startsWith('chem_') ? <Atom className="size-3.5" aria-hidden="true" /> : name.startsWith('bio_') ? <Dna className="size-3.5" aria-hidden="true" /> : null}
+        {name.startsWith('math_') || name === 'units_convert' || name === 'lean_check' ? <Sigma className="size-3.5" aria-hidden="true" /> : name.startsWith('chem_') ? <Atom className="size-3.5" aria-hidden="true" /> : name.startsWith('bio_') ? <Dna className="size-3.5" aria-hidden="true" /> : /^(quantum|qec|qubit)_/.test(name) ? <Orbit className="size-3.5" aria-hidden="true" /> : null}
         <span>{title}</span>
         {look && (
           <span className="ml-auto inline-flex items-center gap-1">
@@ -292,7 +332,7 @@ function ToolCell({ name, args, result }: { name: string; args: Record<string, u
         <p className="text-sm text-destructive-ink">{result?.content}</p>
       ) : (
         <>
-          {result?.details?.lab?.svg && <Drawing svg={result.details.lab.svg} label={`${text(r?.formula)} drawn`} />}
+          <LabFigures lab={result?.details?.lab} />
           <Markdown text={body} />
         </>
       )}

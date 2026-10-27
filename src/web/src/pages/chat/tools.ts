@@ -1,4 +1,4 @@
-import { AudioLines, Box, Brain, Sparkles, ListChecks, Calculator, Clapperboard, Clock, Database, FilePen, FileText, Globe, Image as ImageIcon, Library, MessageCircleQuestion, Network, Plug, Presentation, Scale, SearchCode, SquareCode, SquareTerminal, Telescope, type LucideIcon } from 'lucide-react'
+import { Atom, AudioLines, Box, Brain, Sparkles, ListChecks, Calculator, Clapperboard, Clock, Database, Dna, FilePen, FlaskConical, FileText, Globe, Image as ImageIcon, Library, MessageCircleQuestion, Network, Orbit, Plug, Presentation, Scale, SearchCode, SquareCode, SquareTerminal, Telescope, type LucideIcon } from 'lucide-react'
 import type { ChatTool } from './types'
 
 /** The icon for a tool's icon hint (the API's ChatTool.icon). */
@@ -26,6 +26,10 @@ export const toolIcon: Record<string, LucideIcon> = {
   library: Library,
   scale: Scale,
   telescope: Telescope,
+  'flask-conical': FlaskConical,
+  atom: Atom,
+  dna: Dna,
+  orbit: Orbit,
 }
 
 /** The tools a chat has on: its own choice, or those on in new chats. */

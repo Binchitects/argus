@@ -626,7 +626,7 @@ export const topics = {
 
   lab: {
     title: 'Science lab',
-    about: 'Problems of a science (mathematics, physics, chemistry, statistics, biology, or any) worked by the model with the lab\'s tools: each computation done and each step checked by SymPy, Pint, RDKit, Biopython, Lean or Python, not taken on trust. Each problem is kept as a notebook.',
+    about: 'Problems of a science (mathematics, physics, chemistry, statistics, biology, quantum computing, or any) worked by the model with the lab\'s tools: each computation done and each step checked by SymPy, Pint, RDKit, Biopython, Lean, the quantum simulators (Qiskit, Stim, QuTiP, PennyLane, PySCF) or Python, not taken on trust. Each problem is kept as a notebook.',
     parts: [
       { name: 'A new problem', text: 'Choose its science (each has its own instructions and tools), write the problem and press **Work it**: a notebook opens and the lab starts on it.' },
       { name: 'Notebooks', text: 'Yours, newest first, with how many of their checks were proved, refuted or held only numerically. A row opens it. They are not among your chats.' },
