@@ -1943,7 +1943,7 @@ of those to avoid.
    models on one problem, plots and structures in cells.
 2. **Mathematics.** A maths model (Qwen2.5-Math or DeepSeek-Math class,
    chosen by measurement) beside the chat's; SymPy for exact algebra and
-   calculus (done: math_compute, math_check, math_solve), Lean 4 with Mathlib to check a proof (a proof is "checked" only
+   calculus (done: math_compute, math_check, math_solve), Lean 4 with Mathlib (done: the lean profile, lean_check) to check a proof (a proof is "checked" only
    when Lean says so), plots; LaTeX rendered in the answer and the notebook.
    The measured question: what share of a test set of problems each gets right
    alone and with the tools.

@@ -180,6 +180,59 @@ spec:
   policyTypes: [Ingress, Egress]
 ---
 {{- end }}
+{{- /* The science lab's proof checker: Lean with Mathlib, as the sandbox is; the app hands it Lean files through a volume of its own. */}}
+{{- if .Values.lean.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lean
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "lean") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "arena.selector" (dict "root" $ "name" "lean") | nindent 8 }}
+    spec:
+      {{- include "arena.podDefaults" . | nindent 6 }}
+      automountServiceAccountToken: false
+      # The pod's pause process is PID 1 and reaps what a run leaves behind (a document converter's
+      # children), as compose's init: true; a run's own user sees it but cannot signal it.
+      shareProcessNamespace: true
+      containers:
+        - name: lean
+          image: {{ include "arena.image" (dict "root" $ "image" .Values.images.lean) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          resources: {{- toYaml .Values.lean.resources | nindent 12 }}
+          env:
+            - { name: SANDBOX_SLOTS, value: "2" }
+            - { name: SANDBOX_MAX_TIMEOUT, value: "300" }
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL], add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER, KILL] }
+          volumeMounts:
+            - { name: jobs, mountPath: /jobs }
+            - { name: work, mountPath: /work }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        {{- include "arena.claim" (list "jobs" "arena-lean") | nindent 8 }}
+        - { name: work, emptyDir: { sizeLimit: 1Gi } }
+        - { name: tmp, emptyDir: { sizeLimit: 512Mi } }
+---
+# No way in or out, as in compose.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: lean
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "lean") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+---
+{{- end }}
 {{- /* Laya: typed decisions on the CPU. It reads its checkpoints from the library and reaches nothing; only the app reaches it. */}}
 {{- if .Values.laya.enabled }}
 apiVersion: apps/v1

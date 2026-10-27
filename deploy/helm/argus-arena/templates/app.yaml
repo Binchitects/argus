@@ -83,6 +83,7 @@ spec:
             - { name: audit, mountPath: /audit }
             - { name: sandbox, mountPath: /sandbox }
             - { name: blender, mountPath: /blender }
+            - { name: lean, mountPath: /lean }
             {{- if and (not .Values.postgresql.enabled) .Values.externalDatabase.caSecret }}
             - { name: db-ca, mountPath: /db-ca, readOnly: true }
             {{- end }}
@@ -96,6 +97,7 @@ spec:
         {{- include "arena.claim" (list "audit" "arena-audit") | nindent 8 }}
         {{- include "arena.claim" (list "sandbox" "arena-sandbox") | nindent 8 }}
         {{- include "arena.claim" (list "blender" "arena-blender") | nindent 8 }}
+        {{- include "arena.claim" (list "lean" "arena-lean") | nindent 8 }}
         {{- if and (not .Values.postgresql.enabled) .Values.externalDatabase.caSecret }}
         - { name: db-ca, secret: { secretName: {{ .Values.externalDatabase.caSecret }} } }
         {{- end }}

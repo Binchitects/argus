@@ -160,4 +160,35 @@ describe('science lab', () => {
     // The balanced reaction counts as checked.
     expect(screen.getByText(/1 proved/)).toBeInTheDocument()
   })
+
+  it("shows a proof Lean checked, one it rejected with its messages, and one that leans on sorry", async () => {
+    const source = (body: string) => `import Mathlib\n\ntheorem t (a b : ℝ) : a + b = b + a := by ${body}`
+    const steps = [
+      message({ id: 'u1', role: 'user', content: 'Prove that addition commutes.' }),
+      message({
+        id: 'a1', parentId: 'u1', role: 'assistant', content: '',
+        toolCalls: [call('t1', 'lean_check', { source: source('ring') }), call('t2', 'lean_check', { source: source('simp') }), call('t3', 'lean_check', { source: source('sorry') })],
+      }),
+      message({ id: 'r1', parentId: 'a1', role: 'tool', toolName: 'lean_check', toolCallId: 't1', content: JSON.stringify({ verdict: 'checked', detail: 'Lean accepts the file: every theorem in it is proved.', messages: [] }) }),
+      message({
+        id: 'r2', parentId: 'r1', role: 'tool', toolName: 'lean_check', toolCallId: 't2',
+        content: JSON.stringify({ verdict: 'rejected', detail: 'Lean rejects it: 1 error.', messages: [{ line: 3, column: 52, severity: 'error', text: 'simp made no progress' }] }),
+      }),
+      message({ id: 'r3', parentId: 'r2', role: 'tool', toolName: 'lean_check', toolCallId: 't3', content: JSON.stringify({ verdict: 'incomplete', detail: 'Lean accepts the file, but a proof uses sorry: not proved.', messages: [] }) }),
+    ]
+    fakeApi(member, {
+      'GET /api/lab/fields': () => ({ json: fields }),
+      'GET /api/lab/notebooks': () => ({ json: [] }),
+      'GET /api/chat/conversations/n1': () => ({ json: notebook(steps) }),
+    })
+    renderApp('/lab/n1')
+    await screen.findByRole('list', { name: 'Notebook' })
+    const proofs = screen.getAllByRole('region', { name: 'Proof' })
+    expect(proofs.map((p) => within(p).getByText(/Lean|sorry/, { selector: 'span' }).textContent)).toEqual(['Checked by Lean', 'Rejected by Lean', 'Uses sorry: not proved'])
+    expect(proofs[1]).toHaveTextContent('line 3, column 52: error: simp made no progress')
+    expect(proofs[0]).toHaveTextContent('theorem t (a b : ℝ)')
+    // Sorry proves nothing: one proved, one refuted.
+    expect(screen.getByText(/1 proved/)).toBeInTheDocument()
+    expect(screen.getByText(/1 refuted/)).toBeInTheDocument()
+  })
 })

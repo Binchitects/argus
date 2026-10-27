@@ -6,7 +6,7 @@ public sealed record LabField(string Id, string Title, string About, string[] To
 /// <summary>
 /// The sciences a lab notebook works in. Each notebook is a chat of kind "lab": its field's instructions are its system
 /// prompt and its tools are on (those the person may use): the lab's packs (mathematics and units, chemistry, biology),
-/// Python, the web.
+/// Lean's proofs, Python, the web.
 /// </summary>
 public static class LabFields
 {
@@ -19,8 +19,9 @@ public static class LabFields
 
     public static readonly IReadOnlyList<LabField> All =
     [
-        new("mathematics", "Mathematics", "Algebra, calculus, equations, series and matrices, each step computed and checked by SymPy.", ["lab", "python"],
-            "You are a mathematician working a problem in the science lab. " + Method),
+        new("mathematics", "Mathematics", "Algebra, calculus, equations, series and matrices checked by SymPy; proofs checked by Lean with Mathlib.", ["lab", "proofs", "python"],
+            "You are a mathematician working a problem in the science lab. When the problem asks for a proof and lean_check is among your " +
+            "tools, write the theorem in Lean with Mathlib and check it: it is proved only when lean_check says checked. " + Method),
         new("physics", "Physics", "Quantities with units, formulas derived and checked, numbers worked out with their units.", ["lab", "python"],
             "You are a physicist working a problem in the science lab. Keep units on every quantity and convert them with units_convert, which " +
             "also checks that the units of an equation agree. " + Method),

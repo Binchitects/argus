@@ -59,8 +59,8 @@ public static class LabEndpoints
         }));
     }
 
-    /// <summary>The lab's functions whose result is a check: a claim, solutions put back, a reaction balanced.</summary>
-    private static readonly string[] Checks = ["math_check", "math_solve", "chem_balance"];
+    /// <summary>The lab's functions whose result is a check: a claim, solutions put back, a reaction balanced, a proof Lean checked.</summary>
+    private static readonly string[] Checks = ["math_check", "math_solve", "chem_balance", ProofTool.Function];
 
     /// <summary>What a check's result says: proved (a balanced reaction: checked), refuted, numeric (holds only at the points tried) or other.</summary>
     public static string Verdict(string tool, string content)
@@ -79,8 +79,8 @@ public static class LabEndpoints
             }
             return doc.RootElement.GetProperty("verdict").GetString() switch
             {
-                "proved" => "proved",
-                "refuted" => "refuted",
+                "proved" or "checked" => "proved",
+                "refuted" or "rejected" => "refuted",
                 "holds numerically" => "numeric",
                 _ => "other",
             };

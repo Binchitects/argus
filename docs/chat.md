@@ -359,6 +359,12 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     coefficients, each element and the charge counted on both sides:
     **checked**, or not) and `chem_similarity` (Tanimoto of Morgan
     fingerprints, and whether it is the same molecule).
+  - **Proofs (Lean)** (off in new chats; the `lean` profile): `lean_check`
+    checks a whole Lean file (`import Mathlib`, a theorem and its proof) with
+    Lean 4 and Mathlib in a sandbox of its own, no network. **Checked** only
+    when Lean accepts it with no error and no `sorry`; **incomplete** when a
+    proof uses `sorry`; **rejected** with Lean's messages by line and column,
+    which the model reads to correct the proof.
   - **Biology** (off in new chats, in the sandbox with Biopython):
     `bio_sequence` (DNA, RNA or protein, plain or FASTA: GC content, masses,
     isoelectric point and stability, reverse complement, transcription,
@@ -763,7 +769,9 @@ each computation, check, solution and conversion with what the tool gave,
 in LaTeX. A check is **proved** only when SymPy shows it exactly, **holds
 numerically, not proved** when it is only true at the points tried, and
 **refuted** with a point where it fails; each solution of `math_solve` is
-put back into every equation (✓ or ✗), and a reaction is **balanced,
+put back into every equation (✓ or ✗), a proof is **checked by Lean**
+only when Lean accepts it with no `sorry` (Mathematics, where the `lean`
+profile runs), and a reaction is **balanced,
 checked** only when each element and the charge count the same on both
 sides; a molecule is drawn beside its properties. On top, how many steps were proved,
 refuted or held only numerically; the lab's list shows the same for each

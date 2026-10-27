@@ -17,8 +17,8 @@ namespace Llm.Api.Lab;
 /// </summary>
 public abstract class LabPack(SandboxClient sandbox, IOptionsMonitor<SandboxOptions> options) : IChatTool
 {
-    /// <summary>The lab's packs: they run in the sandbox, as Python does (its permission), and are called directly, never from code.</summary>
-    public static readonly IReadOnlyList<string> Ids = [LabTool.ToolId, ChemistryTool.ToolId, BiologyTool.ToolId];
+    /// <summary>The lab's tools: they run in a sandbox (the proofs in Lean's), as Python does (its permission), and are called directly, never from code.</summary>
+    public static readonly IReadOnlyList<string> Ids = [LabTool.ToolId, ChemistryTool.ToolId, BiologyTool.ToolId, ProofTool.ToolId];
 
     private static readonly string Script = Read("lab.py");
 

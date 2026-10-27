@@ -120,6 +120,7 @@ services:
       - directory:/directory
       - sandbox:/sandbox
       - blender:/blender
+      - lean:/lean
       # The audit log's daily anchors, kept apart from the database (docs/compliance).
       - audit:/audit
       # scripts/backup.sh's backups, for Admin -> Storage: their sizes and how each ended.
@@ -390,6 +391,28 @@ services:
     tmpfs: ["/work:size=4g,mode=0711", "/tmp:size=1g,mode=0700"]
     volumes: [blender:/jobs]
 
+  # The science lab's proof checker: Lean 4 with Mathlib, run as the sandbox is (no network, a read-only root, each
+  # job its own user and limits); the app hands it Lean files through a volume of its own (Lab/ProofTool.cs). The
+  # image holds Mathlib's compiled library (about 13 GB). Off unless COMPOSE_PROFILES names lean.
+  lean:
+    <<: *service
+    build: { context: ./services, dockerfile: lean/Dockerfile, args: { MATHLIB_CACHE_DEBUG_USE_LEGACY: "${LEAN_CACHE_AZURE:-}" } }
+    image: arena-lean
+    container_name: lean
+    profiles: [lean]
+    init: true
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER, KILL]
+    security_opt: [no-new-privileges:true]
+    environment: { SANDBOX_SLOTS: "2", SANDBOX_MAX_TIMEOUT: "300" }
+    pids_limit: 512
+    mem_limit: 14g
+    cpus: 4
+    tmpfs: ["/work:size=1g,mode=0711", "/tmp:size=512m,mode=0700"]
+    volumes: [lean:/jobs]
+
   # The media studio's own models on the GPU: a picture's background taken away, a text spoken
   # in a voice from a short sample, music from words. Their weights come from the library
   # (MODELS_DIR/studio, fetched by the app); one works at a time and is unloaded when unused.
@@ -587,6 +610,8 @@ volumes:
     driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/workspaces" }
   blender:
     driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/blender" }
+  lean:
+    driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/lean" }
   argus:
     driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/argus" }
   audio:

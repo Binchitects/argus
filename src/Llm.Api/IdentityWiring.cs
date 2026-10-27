@@ -330,6 +330,9 @@ public static class IdentityWiring
         services.AddScoped<Lab.LabTool>();
         services.AddScoped<Lab.ChemistryTool>();
         services.AddScoped<Lab.BiologyTool>();
+        services.Configure<Lab.LeanOptions>(config.GetSection("Lean"));
+        services.AddSingleton<Lab.LeanClient>();
+        services.AddScoped<Lab.ProofTool>();
         services.Configure<Chat.Tools.BlenderOptions>(config.GetSection("Blender"));
         services.Configure<Chat.Tools.ToolOptions>(config.GetSection("Tools"));
         services.AddSingleton<Chat.Tools.ToolUsage>();

@@ -191,6 +191,7 @@ const verdictOf = (name: string, result: Record<string, unknown> | null): Verdic
     return s.length === 0 ? 'other' : s.every((x) => x.checked) ? 'proved' : 'refuted'
   }
   if (name === 'chem_balance') return result.checked === true ? 'proved' : 'refuted'
+  if (name === 'lean_check') return result.verdict === 'checked' ? 'proved' : result.verdict === 'rejected' ? 'refuted' : 'other'
   return null
 }
 
@@ -207,12 +208,20 @@ const text = (v: unknown) => (v === undefined || v === null ? '' : String(v))
 const table = (head: string[], rows: unknown[][]) => [`| ${head.join(' | ')} |`, `|${head.map(() => ' --- ').join('|')}|`, ...rows.map((r) => `| ${r.map(text).join(' | ')} |`)].join('\n')
 const fence = (lang: string, body: string) => `\`\`\`${lang}\n${body}\n\`\`\``
 
+/** What a verdict says for a reaction or a proof, in its own words. */
+function ownLook(name: string, verdict: Verdict): Partial<(typeof verdictLook)[Verdict]> {
+  if (name === 'chem_balance') return { label: verdict === 'proved' ? 'Balanced, checked' : 'Not balanced' }
+  if (name === 'lean_check')
+    return verdict === 'proved' ? { label: 'Checked by Lean' } : verdict === 'refuted' ? { label: 'Rejected by Lean' } : { label: 'Uses sorry: not proved', tone: verdictLook.numeric.tone, Icon: CircleHelp }
+  return {}
+}
+
 /** One call of a tool in the notebook: what it was asked, what it gave, and (a check's) its verdict. */
 function ToolCell({ name, args, result }: { name: string; args: Record<string, unknown>; result: Message | undefined }) {
   const failed = result?.status === 'failed' || (!!result && !parse(result.content) && name.startsWith('math_'))
   const r = parse(result?.content)
   const verdict = verdictOf(name, r)
-  const look = verdict ? { ...verdictLook[verdict], ...(name === 'chem_balance' && { label: verdict === 'proved' ? 'Balanced, checked' : 'Not balanced' }) } : null
+  const look = verdict ? { ...verdictLook[verdict], ...ownLook(name, verdict) } : null
   let body: string
   let title: string
   if (name === 'math_check') {
@@ -228,6 +237,10 @@ function ToolCell({ name, args, result }: { name: string; args: Record<string, u
   } else if (name === 'units_convert') {
     title = 'Units'
     body = `${String(args.quantity ?? '')}${args.to ? ` → ${String(args.to)}` : ''}: **${String(r?.result ?? '')}**`
+  } else if (name === 'lean_check') {
+    title = 'Proof'
+    const said = (r?.messages as { line: number; column: number; severity: string; text: string }[] | undefined) ?? []
+    body = `${fence('lean', text(args.source))}\n\n${text(r?.detail)}${said.length ? `\n\n${fence('text', said.map((m) => `line ${m.line}, column ${m.column}: ${m.severity}: ${m.text}`).join('\n'))}` : ''}`
   } else if (name === 'chem_molecule') {
     title = 'Molecule'
     body = r
@@ -265,7 +278,7 @@ function ToolCell({ name, args, result }: { name: string; args: Record<string, u
   return (
     <section aria-label={title} className={cn('rounded-lg border p-3', look?.tone)}>
       <div className="mb-1 flex flex-wrap items-center gap-2 text-xs font-medium">
-        {name.startsWith('math_') || name === 'units_convert' ? <Sigma className="size-3.5" aria-hidden="true" /> : name.startsWith('chem_') ? <Atom className="size-3.5" aria-hidden="true" /> : name.startsWith('bio_') ? <Dna className="size-3.5" aria-hidden="true" /> : null}
+        {name.startsWith('math_') || name === 'units_convert' || name === 'lean_check' ? <Sigma className="size-3.5" aria-hidden="true" /> : name.startsWith('chem_') ? <Atom className="size-3.5" aria-hidden="true" /> : name.startsWith('bio_') ? <Dna className="size-3.5" aria-hidden="true" /> : null}
         <span>{title}</span>
         {look && (
           <span className="ml-auto inline-flex items-center gap-1">

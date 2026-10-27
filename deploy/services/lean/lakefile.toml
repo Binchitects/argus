@@ -1,0 +1,8 @@
+# The science lab's Lean project: Mathlib at the release the toolchain is, its build taken from Mathlib's cache.
+# A proof is checked against it (lean with this project's packages on LEAN_PATH); nothing is built at run time.
+name = "lab"
+
+[[require]]
+name = "mathlib"
+git = "https://github.com/leanprover-community/mathlib4"
+rev = "v4.35.0"

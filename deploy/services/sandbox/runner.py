@@ -29,6 +29,7 @@ A job directory is written as in/.tmp-<id> and renamed, so it is whole when
 seen; results the same way.
 """
 
+import glob
 import json
 import os
 import queue
@@ -63,6 +64,11 @@ FIRST_UID = 20000
 # Blender headless, in the background, with no window and no add-ons of the person's).
 RUN_KIND = os.environ.get("SANDBOX_RUN", "python")
 BLENDER = os.environ.get("SANDBOX_BLENDER", "/opt/blender/blender")
+# The science lab's proof checker (SANDBOX_RUN=lean): a job's code is a Lean file, checked by lean against the Lean
+# project's packages (Mathlib), found on LEAN_PATH.
+LEAN = os.environ.get("SANDBOX_LEAN", "/opt/elan/bin/lean")
+LEAN_PROJECT = os.environ.get("SANDBOX_LEAN_PROJECT", "/opt/lab")
+LEAN_MEMORY_MB = int(os.environ.get("SANDBOX_LEAN_MEMORY_MB", "12288"))
 
 # The 3D sandbox's child: the limits (no address-space limit: Blender reserves far more than it uses, and the
 # container's memory limit holds it), then Blender in the background running the code, saved as .main.py (a dot file:
@@ -82,6 +88,25 @@ with open(".main.py", "w", encoding="utf-8") as f:
     f.write(sys.stdin.read())
 blender = sys.argv[3]
 os.execv(blender, [blender, "--background", "--factory-startup", "--python-exit-code", "1", "--python", ".main.py"])
+"""
+
+# The proof checker's child: the limits (no address-space limit: Lean maps Mathlib's library, about 7 GB of it
+# touched by import Mathlib, pages that runs share; lean's own memory limit, 12 GB, and the container's hold it), then
+# lean on the code, saved as .Proof.lean (a dot file: not given back), two threads.
+LEAN_PRELUDE = r"""
+import os, resource, sys
+cpu, fsize, lean, memory = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3], sys.argv[4]
+for what, value in ((resource.RLIMIT_CPU, cpu), (resource.RLIMIT_FSIZE, fsize), (resource.RLIMIT_NOFILE, 512),
+                    (resource.RLIMIT_NPROC, 64), (resource.RLIMIT_CORE, 0)):
+    resource.setrlimit(what, (value, value))
+try:
+    with open("/proc/self/oom_score_adj", "w") as f:
+        f.write("1000")
+except OSError:
+    pass
+with open(".Proof.lean", "w", encoding="utf-8") as f:
+    f.write(sys.stdin.read())
+os.execv(lean, [lean, "-j", "2", "-M", memory, ".Proof.lean"])
 """
 
 # Runs in the child, as the job's user: the limits first (hard ones too, so the
@@ -285,11 +310,15 @@ def run_job(slot, job_id):
         }
         if relay is not None:
             env["ARENA_SOCKET"] = relay.path
+        if RUN_KIND == "lean":
+            env["LEAN_PATH"] = ":".join(sorted(glob.glob(os.path.join(LEAN_PROJECT, ".lake", "packages", "*", ".lake", "build", "lib", "lean"))))
         out_path, err_path = os.path.join(PRIVATE, f"{slot}.out"), os.path.join(PRIVATE, f"{slot}.err")
         # The streams are files in the runner's own directory, handed to the child open.
         with open(out_path, "wb") as out, open(err_path, "wb") as err:
             command = ([sys.executable, "-I", "-c", BLENDER_PRELUDE, str(timeout + 1), str(MAX_FILE_MB * 1024 * 1024), BLENDER]
                        if RUN_KIND == "blender" else
+                       [sys.executable, "-I", "-c", LEAN_PRELUDE, str(timeout + 1), str(MAX_FILE_MB * 1024 * 1024), LEAN, str(LEAN_MEMORY_MB)]
+                       if RUN_KIND == "lean" else
                        [sys.executable, "-I", "-c", PRELUDE, str(timeout + 1), str(MEMORY_MB * 1024 * 1024), str(MAX_FILE_MB * 1024 * 1024)])
             proc = subprocess.Popen(
                 command,

@@ -12,7 +12,8 @@ namespace Llm.Tests;
 ///   "# pages" draws the pages it asks for ("first, last = 1, 20") of a document of <see cref="DocumentPages"/> pages (page-01.jpg...);
 ///   the media script (it runs ffprobe) makes sound.mp3, and for a video two frames, 4 seconds long;
 ///   "# canvas pdf" turns canvas.docx into canvas.pdf (a PDF header, then the Word file's size);
-///   the media studio's cut makes story.mp4, three seconds a shot.
+///   the media studio's cut makes story.mp4, three seconds a shot;
+///   a Lean file ("import Mathlib", the proof checker's) is accepted, warned of its sorry, or ("wrong") rejected.
 /// </summary>
 public sealed class FakeSandbox : IAsyncDisposable
 {
@@ -157,14 +158,20 @@ public sealed class FakeSandbox : IAsyncDisposable
             await File.WriteAllBytesAsync(Path.Combine(draft, "files", "story.mp4"), [0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6F, 0x6D]);
             cutReport = $"{{\"seconds\": {shots * 3}.0, \"starts\": [], \"error\": null}}\n";
         }
-        var served = await ServeMcpAsync(code, job) ?? await LabAsync(code, job) ?? await CallToolsAsync(spec, code, id, given);
-        var fail = code.Contains("# fail", StringComparison.Ordinal);
+        // The proof checker's job (a Lean file, services/lean): lean's messages, as it prints them.
+        var lean = code.StartsWith("import Mathlib", StringComparison.Ordinal);
+        var rejected = lean && code.Contains("wrong", StringComparison.Ordinal);
+        var served = lean
+            ? rejected ? ".Proof.lean:3:52: error: unsolved goals\na b : ℝ\n⊢ a + b = b + a + 1\n"
+            : code.Contains("sorry", StringComparison.Ordinal) ? ".Proof.lean:3:8: warning: declaration uses `sorry`\n" : ""
+            : await ServeMcpAsync(code, job) ?? await LabAsync(code, job) ?? await CallToolsAsync(spec, code, id, given);
+        var fail = code.Contains("# fail", StringComparison.Ordinal) || rejected;
         await File.WriteAllTextAsync(Path.Combine(draft, "result.json"), new JsonObject
         {
             ["exit_code"] = fail ? 1 : cancelled ? -9 : 0, ["timed_out"] = false, ["cancelled"] = cancelled,
             ["stdout"] = served ?? ($"given: {string.Join(",", given)}\nfirst line: {code.Split('\n')[0]}\n" + (pages ? $"{{\"total\": {DocumentPages}, \"error\": null}}\n" : "")
                 + (media ? "{\"seconds\": 4.0, \"sound\": true, \"frames\": 2}\n" : "") + cutReport), ["stdout_cut"] = false,
-            ["stderr"] = fail ? "Traceback (most recent call last):\n  File \"main.py\", line 1\nValueError: bad\n" : "", ["stderr_cut"] = false,
+            ["stderr"] = fail && !lean ? "Traceback (most recent call last):\n  File \"main.py\", line 1\nValueError: bad\n" : "", ["stderr_cut"] = false,
             ["killed"] = null, ["error"] = null, ["skipped_files"] = new JsonArray(), ["duration_ms"] = 12,
             ["files"] = new JsonArray([.. Directory.GetFiles(Path.Combine(draft, "files")).Select(f => (JsonNode)Path.GetFileName(f))]),
         }.ToJsonString());

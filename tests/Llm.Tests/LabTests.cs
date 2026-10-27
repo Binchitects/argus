@@ -72,6 +72,50 @@ public sealed class LabTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.BadRequest, await b.PostAsync("/api/chat/conversations", new { lab = "alchemy" }));
     }
 
+    [Fact]
+    public async Task A_proof_is_checked_by_lean_only_when_lean_accepts_it_with_no_sorry()
+    {
+        await using var sandbox = new FakeSandbox();
+        await using var lean = new FakeSandbox();
+        await using var f = NewApp(new() { ["Sandbox:Dir"] = sandbox.Dir, ["Lean:Dir"] = lean.Dir });
+        var (b, _) = await PersonAsync(f);
+        // A mathematics notebook has Lean's proofs when the checker runs.
+        var notebook = await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { lab = "mathematics" }));
+        var id = notebook.GetProperty("id").GetGuid();
+        Assert.Contains("proofs", notebook.GetProperty("tools").EnumerateArray().Select(t => t.GetString()));
+
+        static string Call(string source) => "Prove [call lean_check " + JsonSerializer.Serialize(new { source }) + "]";
+        var verdicts = new List<JsonElement>();
+        foreach (var source in new[]
+        {
+            "import Mathlib\n\ntheorem t (a b : ℝ) : a + b = b + a := by ring",
+            "import Mathlib\n\ntheorem t (a b : ℝ) : a + b = b + a := by sorry",
+            "import Mathlib\n\ntheorem wrong (a b : ℝ) : a + b = b + a + 1 := by ring",
+        })
+        {
+            var result = (await SendAsync(b, id, Call(source))).Single(e => e.GetProperty("type").GetString() == "tool_result");
+            verdicts.Add(JsonDocument.Parse(result.GetProperty("text").GetString()!).RootElement);
+        }
+        Assert.Equal(["checked", "incomplete", "rejected"], verdicts.Select(v => v.GetProperty("verdict").GetString()));
+        var message = verdicts[2].GetProperty("messages")[0];
+        Assert.Equal((3, 52, "error"), (message.GetProperty("line").GetInt32(), message.GetProperty("column").GetInt32(), message.GetProperty("severity").GetString()));
+        Assert.Contains("⊢ a + b = b + a + 1", message.GetProperty("text").GetString(), StringComparison.Ordinal);
+        // The Lean file went to Lean's sandbox, not Python's.
+        Assert.Equal(3, lean.Jobs.Count);
+        Assert.DoesNotContain(sandbox.Jobs, j => j["code"]!.GetValue<string>().StartsWith("import Mathlib", StringComparison.Ordinal));
+        // Counted in the lab: one proved, one refuted; sorry proves nothing.
+        var listed = (await b.JsonAsync(await b.GetAsync("/api/lab/notebooks"))).EnumerateArray().Single();
+        Assert.Equal((1, 1), (listed.GetProperty("checks").GetProperty("proved").GetInt32(), listed.GetProperty("checks").GetProperty("refuted").GetInt32()));
+    }
+
+    [Fact]
+    public void Leans_messages_are_read_by_line_and_column_with_what_follows_each()
+    {
+        var messages = Llm.Api.Lab.ProofTool.Messages(".Proof.lean:2:0: warning: unused variable `h`\n.Proof.lean:5:4: error(lean.unknownIdentifier): unknown identifier 'foo'\nmore of it\n");
+        Assert.Equal([(2, 0, "warning"), (5, 4, "error")], messages.Select(m => (m["line"]!.GetValue<int>(), m["column"]!.GetValue<int>(), m["severity"]!.GetValue<string>())));
+        Assert.Equal("unknown identifier 'foo'\nmore of it", messages[1]["text"]!.GetValue<string>());
+    }
+
     [Theory]
     [InlineData("math_check", """{"verdict":"proved"}""", "proved")]
     [InlineData("math_check", """{"verdict":"holds numerically"}""", "numeric")]
@@ -80,6 +124,9 @@ public sealed class LabTests(AppFixture app)
     [InlineData("math_solve", """{"solutions":[{"checked":true},{"checked":false}]}""", "refuted")]
     [InlineData("chem_balance", """{"balanced":"4 Fe + 3 O2 -> 2 Fe2O3","checked":true}""", "proved")]
     [InlineData("chem_balance", """{"checked":false}""", "refuted")]
+    [InlineData("lean_check", """{"verdict":"checked"}""", "proved")]
+    [InlineData("lean_check", """{"verdict":"rejected"}""", "refuted")]
+    [InlineData("lean_check", """{"verdict":"incomplete"}""", "other")]
     [InlineData("math_check", "not json", "other")]
     public void A_checks_verdict_is_read_from_its_result(string tool, string content, string verdict) =>
         Assert.Equal(verdict, Llm.Api.Lab.LabEndpoints.Verdict(tool, content));

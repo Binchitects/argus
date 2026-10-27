@@ -55,6 +55,7 @@ images:
   argus: { repository: arena-argus, tag: "" }
   sandbox: { repository: arena-sandbox, tag: "" }
   blender: { repository: arena-blender, tag: "" }
+  lean: { repository: arena-lean, tag: "" }
   laya: { repository: arena-laya, tag: "" }
   studio: { repository: arena-studio, tag: "" }
   workspaces: { repository: arena-workspaces, tag: "" }
@@ -229,6 +230,11 @@ blender:
   enabled: false
   resources: { limits: { cpu: "4", memory: 8Gi } }
 
+# The science lab's proof checker: Lean 4 with Mathlib, as the sandbox is (no network, a read-only root).
+lean:
+  enabled: false
+  resources: { limits: { cpu: "4", memory: 14Gi } }
+
 # The chat's web search.
 searxng:
   enabled: true
@@ -274,6 +280,7 @@ persistence:
   # Code Studio's workspaces: their clones, their engines' homes, what was not pushed yet.
   workspaces: { size: 100Gi }
   blender: { size: 10Gi }
+  lean: { size: 1Gi }
 
 ingress:
   enabled: true
