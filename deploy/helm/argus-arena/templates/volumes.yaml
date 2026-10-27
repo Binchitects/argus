@@ -1,6 +1,10 @@
 {{- /* The shared volumes: the model library and the app's files, read and written by several pods. */}}
 {{- $p := .Values.persistence }}
-{{- $claims := list (list "arena-engine" $p.engine.size) (list "arena-directory" $p.directory.size) (list "arena-audit" $p.audit.size) (list "arena-sandbox" $p.sandbox.size) (list "arena-workspaces" $p.workspaces.size) (list "arena-blender" $p.blender.size) (list "arena-lean" $p.lean.size) (list "arena-media-status" $p.mediaStatus.size) (list "arena-vllm-status" $p.vllmStatus.size) }}
+{{- /* Each made only when a pod mounts it: a claim nothing mounts never binds where binding waits for its first pod (WaitForFirstConsumer), and helm --wait waits for it. */}}
+{{- $claims := list (list "arena-engine" $p.engine.size) (list "arena-directory" $p.directory.size) (list "arena-audit" $p.audit.size) (list "arena-sandbox" $p.sandbox.size) (list "arena-blender" $p.blender.size) (list "arena-lean" $p.lean.size) (list "arena-media-status" $p.mediaStatus.size) (list "arena-vllm-status" $p.vllmStatus.size) }}
+{{- if .Values.workspaces.enabled }}
+{{- $claims = append $claims (list "arena-workspaces" $p.workspaces.size) }}
+{{- end }}
 {{- if not $p.models.existingClaim }}
 {{- $claims = prepend $claims (list "arena-models" $p.models.size) }}
 {{- end }}
