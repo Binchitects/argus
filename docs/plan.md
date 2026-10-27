@@ -1979,14 +1979,53 @@ of those to avoid.
 The person asked (2026-10-27, after v7.3.0) for "full GRC and related
 evaluation certifications requirement", and for quantum computing and the
 sciences around it in the science lab, both in this release with the security
-work planned below. Built in this order: GRC first, then the quantum lab, then
-vulnerabilities. Downloads approved (2026-10-27):
+work planned below. Built in this order: the features chosen at install (asked
+while GRC began), GRC, then the quantum lab, then vulnerabilities. Downloads approved (2026-10-27):
 - the quantum packages from PyPI (Qiskit with Aer, Cirq with Stim and
   PyMatching, PennyLane with QuTiP, PySCF with OpenFermion);
 - NIST's OSCAL catalogs (SP 800-53 rev5, SP 800-171 rev3, CSF 2.0);
 - the EU AI Act's text;
 - NIST's AI RMF and its Playbook;
 - the Common Criteria parts and the CEM.
+
+#### Features chosen at install, upgrade and repair
+
+The person said (2026-10-27) the stack is getting large and heavy, and asked
+for every feature to be turned on or off when installing, upgrading or
+repairing. Done before GRC. Today every module runs unless a service is named
+in `--leave-out` at install (and only then); the app finds a module missing by
+its name on the network, and its pages stay in the menu.
+
+1. **One list of the features** (`deploy/features`): each with its services,
+   whether it is on by default, what it needs (a GPU, a GitLab) and which
+   other features it needs (the lab needs the sandbox, Lean the lab, meetings
+   speech). Some are the stack's containers (the chat models, pictures,
+   video, speech, the sandbox, web search, the browser agent, 3D, Lean, the
+   studio's models, Code Studio's workspaces, Laya, monitoring, DCGM, vLLM);
+   others are parts of the app with no container of their own (meetings,
+   plans, the lab, apps, data, decks, the media studio, Agent Studio, Code
+   Studio, scheduled tasks, the leaderboard, memory).
+2. **The stack runs what is chosen**: each optional service runs under its
+   feature's compose profile, and `COMPOSE_PROFILES` in .env is the list of
+   features on. Nothing else runs, and nothing else is loaded.
+3. **The app follows it**: a feature off is gone from the menu, the command
+   palette and the tours. Its pages say it is not installed and how an admin
+   turns it on. Its API answers 404, and its background work does not run.
+4. **The installer chooses**:
+   - `--with A,B` and `--without A,B` on install, upgrade and repair, and on a
+     terminal a list to choose from, with each feature's disk size and what it
+     needs;
+   - an upgrade keeps what was on, and a feature new in the release is asked
+     (unattended: left off, and named);
+   - repair turns features on (their images loaded from the bundle) and off
+     (their containers stopped, their images removed to free the disk, their
+     data kept until `remove --purge`);
+   - `status` and `features` list what is on, with each feature's size.
+   A feature that needs another brings it, and turning one off that others
+   need is refused, naming them.
+5. **The bundle and Kubernetes**: `make-installer.sh --without` makes a
+   smaller bundle with the same names, and `--kubernetes` takes the same
+   `--with` and `--without` into the chart's values.
 
 #### GRC: governance, risk and compliance, and the certifications
 
