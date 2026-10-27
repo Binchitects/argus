@@ -119,8 +119,14 @@ test('the bell lists each kind of news, leads to it, and can say it on the deskt
   await bell.getByRole('button', { name: 'Clear: Morning digest' }).click()
   await expect.poll(() => cleared.some((u) => u.endsWith('/api/notifications/n5'))).toBe(true)
   const desktop = bell.getByRole('switch', { name: /Desktop notifications/ })
-  await desktop.click()
-  await expect(desktop).toBeChecked()
+  // Playwright's own headless shell denies notifications whatever was granted (Chrome allows them): each way is shown as it is.
+  if (await page.evaluate(() => Notification.permission === 'denied')) {
+    await expect(desktop).toBeDisabled()
+    await expect(bell).toContainText("Blocked in this browser's settings for this site.")
+  } else {
+    await desktop.click()
+    await expect(desktop).toBeChecked()
+  }
   await expectAccessible(page, info, 'notifications')
   await screenshot(page, info, 'notifications')
   await bell.getByRole('button', { name: /^Critical: Disk almost full/ }).click()
