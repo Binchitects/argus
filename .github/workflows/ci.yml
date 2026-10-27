@@ -125,7 +125,7 @@ jobs:
           docker run -d --name app --network e2e --read-only --tmpfs /tmp \
             -e Database__Host=postgres -e Database__Username=app -e Database__Password=ci \
             -e Auth__Domain=llm.localhost -e Auth__HttpsPort=8443 -e "Auth__AdminPassword=$E2E_PASSWORD" \
-            -e Auth__DataKey=ci-data-key -e Gateway__Url=http://127.0.0.1:9 llm-app:ci
+            -e Auth__DataKey=ci-data-key -e Gateway__Url=http://127.0.0.1:9 -e Gateway__ConnectWaitSeconds=0 llm-app:ci
           docker run -d --name web --network e2e --read-only --tmpfs /tmp --cap-drop ALL \
             --security-opt no-new-privileges:true llm-web:ci
           docker run -d --name traefik --network e2e -p 8443:8443 -v "$PWD/certs:/certs:ro" \

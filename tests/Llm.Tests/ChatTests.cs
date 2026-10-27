@@ -48,6 +48,37 @@ public sealed class ChatTests(AppFixture app)
 
     private static async Task<JsonElement> ConversationAsync(TestBrowser b, Guid id) => await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{id}"));
 
+    /// <summary>A gateway nobody listens on: each try refused at once, counted.</summary>
+    private sealed class Refusing : HttpMessageHandler
+    {
+        public int Tries;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            Interlocked.Increment(ref Tries);
+            throw new HttpRequestException("Connection refused (127.0.0.1:9)");
+        }
+    }
+
+    [Theory]
+    [InlineData("0", 1, 0)]
+    [InlineData("3", 3, 3)]
+    public async Task A_gateway_that_refuses_is_tried_again_as_long_as_the_wait_allows_then_the_answer_says_so(string wait, int tries, int seconds)
+    {
+        var refusing = new Refusing();
+        await using var f = app.Create(app.ConnectionStringFor("refused_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
+            new Dictionary<string, string?> { ["Gateway:ConnectWaitSeconds"] = wait },
+            s => s.AddHttpClient<GatewayChat>().ConfigurePrimaryHttpMessageHandler(() => refusing));
+        var b = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var id = await NewChatAsync(b);
+        var took = System.Diagnostics.Stopwatch.StartNew();
+        var events = await SendAsync(b, id, "hello");
+        // Tried again after 1 and 2 seconds while they fit in the wait (0: told at once, CI's stack with no gateway).
+        Assert.Equal(tries, refusing.Tries);
+        Assert.InRange(took.Elapsed.TotalSeconds, seconds, seconds + 10);
+        Assert.Contains(events, e => e.GetProperty("type").GetString() == "error" && e.GetProperty("message").GetString()!.Contains("not reachable", StringComparison.Ordinal));
+    }
+
     [Fact]
     public async Task Config_lists_the_model_its_presets_and_argus()
     {
@@ -246,6 +277,49 @@ public sealed class ChatTests(AppFixture app)
         Assert.StartsWith("w0 w1 w2 w3 w4 w5 ", content, StringComparison.Ordinal);
         Assert.DoesNotContain("w399", content, StringComparison.Ordinal);
         await StatusAssert.Is(HttpStatusCode.Conflict, await b.PostAsync($"/api/chat/conversations/{id}/stop", new { }));
+    }
+
+    /// <summary>Every log line's level and words, for a test that says what was logged.</summary>
+    private sealed class Logged : Microsoft.Extensions.Logging.ILoggerProvider
+    {
+        public System.Collections.Concurrent.ConcurrentQueue<(Microsoft.Extensions.Logging.LogLevel Level, string Category, string Message)> Lines { get; } = new();
+
+        public Microsoft.Extensions.Logging.ILogger CreateLogger(string categoryName) => new Line(this, categoryName);
+
+        public void Dispose()
+        {
+        }
+
+        private sealed class Line(Logged to, string category) : Microsoft.Extensions.Logging.ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+            public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception,
+                Func<TState, Exception?, string> formatter) => to.Lines.Enqueue((logLevel, category, formatter(state, exception)));
+        }
+    }
+
+    [Fact]
+    public async Task A_chat_deleted_while_it_answers_stops_its_answer_first_and_nothing_fails()
+    {
+        var logged = new Logged();
+        await using var f = app.Create(app.ConnectionStringFor("delete_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), null,
+            s => s.AddSingleton<Microsoft.Extensions.Logging.ILoggerProvider>(logged));
+        var b = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var id = await NewChatAsync(b, new { useArgus = false });
+        var (res, _) = await StartAsync(b, id, "Write a lot [slow]", "w5 ", CancellationToken.None);
+        using (res)
+        {
+            await StatusAssert.Is(HttpStatusCode.NoContent, await b.Http.DeleteAsync(new Uri($"/api/chat/conversations/{id}", UriKind.Relative)));
+            // Stopped before the chat went: the open stream says so, and ends.
+            Assert.Equal("stopped", Events(await res.Content.ReadAsStringAsync()).Last().GetProperty("type").GetString());
+        }
+        await StatusAssert.Is(HttpStatusCode.NotFound, await b.GetAsync($"/api/chat/conversations/{id}"));
+        // Nothing was saved into the chat once gone: neither the database nor the answer failed.
+        await Task.Delay(500);
+        Assert.DoesNotContain(logged.Lines, l => l.Level >= Microsoft.Extensions.Logging.LogLevel.Error);
     }
 
     [Fact]

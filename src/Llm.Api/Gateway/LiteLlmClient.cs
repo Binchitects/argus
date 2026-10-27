@@ -11,6 +11,12 @@ public sealed class LiteLlmOptions
 {
     public string Url { get; set; } = "http://litellm:4000";
     public string? MasterKey { get; set; }
+
+    /// <summary>
+    /// How long a chat's request waits, at most, for a gateway it cannot connect to (restarting after an upgrade takes it
+    /// 10-20 s): tried again after 1, 2, 4, 8 and 15 seconds while they fit. 0: told at once (a stack with no gateway, CI's).
+    /// </summary>
+    public int ConnectWaitSeconds { get; set; } = 30;
 }
 
 public sealed class LiteLlmClient(HttpClient http) : ILiteLlm

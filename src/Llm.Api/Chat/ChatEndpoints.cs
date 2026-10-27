@@ -588,15 +588,18 @@ public static partial class ChatEndpoints
         return Results.Ok(new { message.Id, message.Pinned, message.LeftOut });
     }
 
-    private static async Task<IResult> DeleteAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, Retention.Retention retention)
+    private static async Task<IResult> DeleteAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, Retention.Retention retention, AnswerJobs jobs,
+        CancellationToken ct)
     {
         var me = await Me(p, users);
         if (await Owned(db, id, me, Need.Manage) is null)
         {
             return Results.NotFound();
         }
+        // An answer still being written stops first (a moment at most): it would otherwise save into a chat that is gone.
+        await jobs.StopAndWaitAsync(id, TimeSpan.FromSeconds(10), ct);
         // Its files go too, except those another of the person's chats (a fork) or a project still uses; under legal hold it is only hidden.
-        await retention.DeleteAsync(me, [id]);
+        await retention.DeleteAsync(me, [id], ct);
         return Results.NoContent();
     }
 

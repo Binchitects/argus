@@ -232,6 +232,7 @@ test("the engine's models each say whether they are loaded, and more come from t
   test.skip(await page.getByText(/needs the llama\.cpp engine/).isVisible(), 'no llama.cpp engine')
   // Every chat model is one added here (none comes from .env); each loads when asked for unless it is kept loaded.
   const models = page.locator('main section').filter({ has: page.getByText('Added here', { exact: true }) })
+  test.skip(noGateway, 'no model added here: a stack without a gateway (CI\'s) has none')
   await expect(models.first()).toBeVisible()
   const loaded = models.filter({ has: page.getByText('Loaded', { exact: true }) })
   const unloaded = models.filter({ has: page.getByText('Not loaded', { exact: true }) })

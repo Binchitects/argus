@@ -52,7 +52,8 @@ public sealed class ChatGatewayException(string message, int? status = null) : E
 /// passes on): a conversation's turn to the slot that holds its start, a side request to the last
 /// slot first (<see cref="EngineRoute"/>, which also makes room for a model that is not loaded).
 /// </summary>
-public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFactory scopes, EngineRoute route, Models.MediaControl media)
+public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceScopeFactory scopes, EngineRoute route, Models.MediaControl media,
+    Microsoft.Extensions.Options.IOptionsMonitor<Gateway.LiteLlmOptions> gatewayOptions)
 {
     /// <summary>The person a request is for, as LiteLLM attributes spend (its user_header_mappings).</summary>
     public const string UserEmailHeader = "X-LLM-User-Email";
@@ -308,6 +309,9 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
     private Task<HttpResponseMessage> OpenAsync(JsonObject request, string personEmail, CancellationToken ct) =>
         PostAsync("/v1/chat/completions", request, personEmail, "text/event-stream", ct);
 
+    /// <summary>The waits between tries of a gateway that refuses the connection, in seconds (as many as Gateway:ConnectWaitSeconds holds).</summary>
+    private static readonly int[] ConnectWaits = [1, 2, 4, 8, 15];
+
     private Task<HttpResponseMessage> PostAsync(string path, JsonObject request, string personEmail, string accept, CancellationToken ct) =>
         PostAsync(path, () => new StringContent(request.ToJsonString(), Encoding.UTF8, "application/json"), personEmail, accept, ct);
 
@@ -324,9 +328,11 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
         }
 
         HttpResponseMessage res;
-        // A dropped connection (the gateway restarting, a new deployment settling) is tried again for about half a minute:
-        // the gateway takes 10-20 s to start after an upgrade or a restart.
-        int[] waits = [1, 2, 4, 8, 15];
+        // A dropped connection (the gateway restarting, a new deployment settling) is tried again for about half a minute
+        // (Gateway:ConnectWaitSeconds): the gateway takes 10-20 s to start after an upgrade or a restart.
+        var budget = gatewayOptions.CurrentValue.ConnectWaitSeconds;
+        var spent = 0;
+        int[] waits = [.. ConnectWaits.TakeWhile(w => (spent += w) <= budget)];
         for (var attempt = 1; ; attempt++)
         {
             using var req = new HttpRequestMessage(HttpMethod.Post, new Uri(path, UriKind.Relative)) { Content = content() };

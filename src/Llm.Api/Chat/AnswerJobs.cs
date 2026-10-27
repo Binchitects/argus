@@ -250,6 +250,23 @@ public sealed partial class AnswerJobs : IHostedService
         return true;
     }
 
+    /// <summary>
+    /// Stops the chat's answer and waits for it to end (at most <paramref name="wait"/>): before the chat goes, so the answer
+    /// saves nothing into a chat that is gone. On another replica it is only told to stop.
+    /// </summary>
+    public async Task StopAndWaitAsync(Guid conversation, TimeSpan wait, CancellationToken ct)
+    {
+        if (Find(conversation) is { } job)
+        {
+            await job.Stopping.CancelAsync();
+            await Task.WhenAny(job.Running, Task.Delay(wait, ct));
+        }
+        else
+        {
+            await replicas.AskAsync(StopTopic, conversation.ToString(), ct);
+        }
+    }
+
     /// <summary>Stops the chat's answer on whichever replica writes it; false when none does.</summary>
     public async Task<bool> StopAnywhereAsync(Guid conversation, CancellationToken ct) =>
         Stop(conversation) || await replicas.AskAsync(StopTopic, conversation.ToString(), ct);
@@ -342,8 +359,17 @@ public sealed partial class AnswerJobs : IHostedService
         }
         catch (Exception ex)
         {
-            LogFailed(logger, job.Conversation, ex);
-            job.Emit(new { type = "error", message = "The answer failed on the server. Try again, and tell an admin if it keeps failing." });
+            if (await GoneAsync(job.Conversation))
+            {
+                // Deleted while it was written (elsewhere, or past the wait a deletion gives it): nothing failed.
+                LogGone(logger, job.Conversation, ex);
+                job.Emit(new { type = "error", message = "This chat is gone." });
+            }
+            else
+            {
+                LogFailed(logger, job.Conversation, ex);
+                job.Emit(new { type = "error", message = "The answer failed on the server. Try again, and tell an admin if it keeps failing." });
+            }
         }
         finally
         {
@@ -458,6 +484,23 @@ public sealed partial class AnswerJobs : IHostedService
             // The host would not wait longer.
         }
     }
+
+    /// <summary>Whether the chat is gone (deleted while its answer ran).</summary>
+    private async Task<bool> GoneAsync(Guid conversation)
+    {
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            return !await scope.ServiceProvider.GetRequiredService<AppDbContext>().Conversations.AnyAsync(c => c.Id == conversation, CancellationToken.None);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            return false;
+        }
+    }
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Conversation {Conversation}: deleted while its answer was written")]
+    private static partial void LogGone(ILogger logger, Guid conversation, Exception ex);
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Conversation {Conversation}: the answer failed")]
     private static partial void LogFailed(ILogger logger, Guid conversation, Exception ex);

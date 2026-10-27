@@ -22,6 +22,8 @@ for (const [path, name] of opens) {
     await page.goto(path)
     await page.getByRole('heading', { level: 1 }).first().waitFor()
     await expect(page.locator('main [aria-busy="true"], main .animate-pulse')).toHaveCount(0, { timeout: 30_000 })
+    // Knowledge packs are Argus's: a stack without it (CI's) says so, with no pack to add.
+    test.skip(await page.getByText('Argus is not set up in this deployment').isVisible(), 'no Argus in this stack')
     const button = page.getByRole('button', { name, exact: typeof name === 'string' }).first()
     await expect(button).toBeEnabled({ timeout: 20_000 })
     await button.click()

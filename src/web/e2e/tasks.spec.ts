@@ -16,7 +16,7 @@ test('a scheduled task is set up in words, runs now, and its answer is a chat an
     test.skip(true, 'scheduled tasks are off here (Settings → Scheduled tasks)')
   }
   await page.getByRole('button', { name: 'New task' }).first().click()
-  const dialog = page.getByRole('dialog', { name: 'New scheduled task' })
+  const dialog = page.getByRole('dialog', { name: 'New task' })
   await dialog.getByRole('textbox', { name: 'Name' }).fill(name)
   await dialog.getByRole('textbox', { name: 'What to ask' }).fill('Reply with only this, exactly: scheduled hello')
   await dialog.getByRole('combobox', { name: 'Repeat', exact: true }).click()
