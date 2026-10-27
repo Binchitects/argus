@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ArrowRight, ClipboardList, ExternalLink, ListChecks, SlidersHorizontal, SquareCode, Terminal, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Atom, BadgeCheck, ExternalLink, FlaskConical, PanelsTopLeft, Server, type LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
@@ -28,44 +28,44 @@ interface Tour {
 }
 
 const latestTour: Tour = {
-  release: '7.2',
-  title: "What's new in Argus Arena 7.2",
+  release: '7.3',
+  title: "What's new in Argus Arena 7.3",
   slides: [
     {
-      icon: ListChecks,
-      title: 'Plans you approve',
-      text: 'For work of many steps, the chat proposes its plan first: approve it, change a step, or ask for another way. Then each step shows as it is done, and nothing is done that was not checked.',
-      to: '/chat',
-      action: 'Start a chat',
+      icon: FlaskConical,
+      title: 'A science lab',
+      text: 'Choose a science and write a problem: the model works it with tools that check each step (SymPy, Pint, RDKit, Biopython) and keeps it as a notebook, each step with what proved it. An answer no tool checked is checked before it ends.',
+      to: '/lab',
+      action: 'Open the lab',
     },
     {
-      icon: ClipboardList,
-      title: 'Long work that carries on',
-      text: 'Plans from your chats and from Code Arena on one page, those in progress first: a plan left half done is picked up by the next session, with the checks each step passed.',
-      to: '/plans',
-      action: 'Open Plans',
+      icon: BadgeCheck,
+      title: 'Proofs checked by Lean',
+      text: 'In Mathematics, a proof is written in Lean with Mathlib and checked by Lean itself: proved only when Lean accepts it, and when it does not, the model reads why and corrects it.',
+      to: '/lab',
+      action: 'Prove something',
     },
     {
-      icon: SquareCode,
-      title: 'Tools as code',
-      text: 'The chat can write a short program that calls your tools many times at once (every caller of a function, a dozen lookups) and keeps only what matters, so long answers stay focused.',
-      to: '/chat',
-      action: 'Try it in a chat',
+      icon: Atom,
+      title: 'Molecules, reactions and sequences',
+      text: 'Chemistry draws a molecule from its SMILES with its properties, gives molar masses and balances reactions checked atom by atom; Biology translates and aligns DNA, RNA and proteins.',
+      to: '/lab',
+      action: 'Try chemistry',
     },
     {
-      icon: Terminal,
-      title: 'Code Arena plans, proves and runs steps at once',
-      text: 'Plan mode with your review, steps grounded in the code and checked by commands, undone one by one, independent steps run together, and run_code for its own tools. Agents like Claude Code can take your tools as code too.',
+      icon: PanelsTopLeft,
+      title: "Code Arena's panes, your way",
+      text: 'Move views between the side bar and the panel, the side bar left or right, the panel below or beside the editor. A gear for its settings; files you change by hand show in Changes, whose right-click explains and fixes.',
       to: '/setup',
-      action: 'Connect your tools',
+      action: 'Get Code Arena',
     },
     {
-      icon: SlidersHorizontal,
-      title: "Each model's tools, your way",
-      text: 'On each chat model: tools direct, as code, or both. Small models call tools directly by default, larger ones get them as code (measured: 10 of 10 lookups against 4 direct); the chat and Code Arena follow your choice.',
-      to: '/admin/models',
-      action: 'Open Models',
-      permission: 'models.read',
+      icon: Server,
+      title: 'On Kubernetes, with Helm',
+      text: 'installer.sh install --kubernetes checks the cluster first and says what it lacks, makes the secrets in it and installs the chart, which keeps serving through node drains and grows with its load.',
+      to: '/help/deployment',
+      action: 'Read how',
+      permission: 'settings.read',
     },
   ],
 }

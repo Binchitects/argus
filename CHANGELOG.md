@@ -15,6 +15,110 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v7.3.0 (2026-10-27)
+
+A science lab, where models work problems of mathematics, physics, chemistry,
+statistics and biology with tools that check every step — SymPy, Pint, RDKit,
+Biopython and Lean with Mathlib — and keep each problem as a notebook; and
+Argus Arena installed on Kubernetes with Helm, for large teams and for
+availability.
+
+### :rocket: Epics and highlights
+
+- **The science lab**: Science lab in the sidebar. Choose a science, write the
+  problem, press Work it: the model works it with the lab's tools, and the
+  problem is kept as a notebook — the model's words, and a cell for each
+  computation, check, solution, conversion, molecule, sequence and proof,
+  with what the tool gave and its verdict (proved, refuted, holds only
+  numerically; a reaction balanced and checked; a proof checked by Lean).
+  On top, how many steps were proved and refuted; the lab lists the
+  notebooks with the same. A notebook is a chat underneath: ask more, or open
+  it as a chat to branch, edit or share it
+- **Every answer checked**: an answer in a notebook that no tool checked is
+  not left at that — the lab asks the model to check it with its tools and
+  correct it, and the notebook says so. Measured on forty MATH-500 problems
+  ([lab-math.md](docs/measurements/lab-math.md)): Qwen3-4B called a tool in
+  39 of them (none before the check), scored as it does alone (36 / 40) and
+  took 41% longer; the lab checks, it does not make a small model cleverer
+- **Proofs checked by Lean**: the Proofs (Lean) tool checks a theorem and its
+  proof with Lean 4.35 and Mathlib in a sandbox of its own (no network, its
+  own user and limits): checked only when Lean accepts it with no sorry,
+  rejected with Lean's messages, which the model reads to correct its proof
+- **On Kubernetes, with Helm**: `installer.sh install --kubernetes` checks the
+  cluster first (tools, rights, storage, ingress, TLS, GPUs, room, metrics)
+  and says what each lack needs, makes the secrets in the cluster (never on
+  a command line, in a file or the log), installs the chart atomically and
+  checks the app answers; external Postgres, air-gapped registries, upgrades
+  that keep the release's values. The chart's app, web and gateway roll
+  without a gap, spread over nodes, keep serving through drains
+  (PodDisruptionBudgets) and grow with their load (autoscaling)
+
+### :sparkles: New features & Enhancements
+
+- Science lab tools, each a pack the lab and any chat can turn on: Science lab
+  (math_compute, math_check, math_solve with solutions put back, units_convert
+  with a dimension check), Chemistry (chem_molecule from SMILES with its
+  properties and a drawing, chem_formula molar masses, chem_balance checked
+  atom by atom and charge, chem_similarity), Biology (bio_sequence, bio_align)
+  and Proofs (lean_check). Six fields: Mathematics, Physics, Chemistry,
+  Statistics, Biology, Any science, each with its own instructions and tools
+- The sandbox image gains RDKit 2026.9.1 and Biopython 1.88; a lean profile
+  runs Lean 4.35 with Mathlib (an image of about 13 GB, from GitHub's releases
+  and Mathlib's cache; LEAN_CACHE_AZURE=1 where cache.mathlib.org is out of
+  reach); `scripts/lean-check.py` checks a running one
+- Code Arena's IDE: panes moved and rearranged as VS Code's (views between
+  the activity bar and the panel, the side bar left or right, the panel
+  below or beside the editor); a gear for its settings and the model's
+  tools; files changed by hand show in the editor and in Changes; Changes'
+  right-click adds to the chat, explains and fixes; a readable right-click
+  menu
+- The Helm chart: `availability.strictSpread`, `availability.autoscale`,
+  `lean.enabled`; an install, its status and an upgrade on a kind cluster in
+  CI
+- `evals/run_lab_math.py`: MATH-500 problems through the chat, each model
+  alone and in a lab notebook, graded with MATH's own answer normalization.
+  The maths model tried, Qwen2.5-Math-7B, was not kept: behind Qwen3-4B alone
+  (32 / 40) and lost in the lab (a 4,096-token context, no tool calling)
+
+### :bug: Bugs fixed
+
+- The test sandbox wrote its heartbeat in place: a read could see half of it
+  and call the sandbox down (a CI flake in meetings and run_code)
+- CI's browser suite: a stack with no gateway answers at once; a chat deleted
+  mid-answer stops the answer first; the bell's spec follows what the browser
+  allows
+- Scheduled tasks' form: each way a task runs is its own tab panel
+- The Helm chart's app did not start: HSTS's seconds were rendered as
+  3.1536e+07, which the app cannot read as a number
+- The Helm chart's /.well-known path was a Prefix, which ingress-nginx's
+  strict path checking refuses, turning the whole Ingress away
+- The Helm chart made the workspaces' volume claim with Code Studio's
+  workspaces off: nothing mounted it, it never bound where binding waits for a
+  pod, and `helm --wait` waited until the install failed
+- A page closed while the app asked whether a module runs logged an
+  unhandled error
+
+### :arrow_up: Deps updates
+
+- The sandbox image: RDKit 2026.9.1 and Biopython 1.88 (new)
+- The lean image (new): Lean 4.35.0, Mathlib v4.35.0, elan 4.2.4
+- DOMPurify 3.4.17, Monaco's copy too (GHSA-cg2g-xh64-v4q7, critical, no
+  longer accepted; GHSA-mrv2-3pqr-j5jr, high; three low ones), and Zod 4.6.7
+  (GHSA-mrhx-c7xc-m3w5, high): the release scan finds two low advisories left
+
+### What an upgrade does, and what an admin does after
+
+The migration adds the lab notebooks' science (`conversations.LabField`, empty
+for every chat there is). Rebuild the sandbox image (RDKit and Biopython). For
+proofs checked by Lean, add `lean` to COMPOSE_PROFILES (an image of about 13 GB,
+built once; `LEAN_CACHE_AZURE=1` where cache.mathlib.org is out of reach) and
+check it with `deploy/scripts/lean-check.py`. On Kubernetes, `installer.sh
+requirements --kubernetes` says what a cluster lacks before anything changes.
+
+### :warning: Weakened controls
+
+- None.
+
 ## v7.2.0 (2026-10-26)
 
 Planning and code mode, for long work: the chat and Code Arena propose a plan,

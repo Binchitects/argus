@@ -63,3 +63,6 @@ desktop.ini
 
 # .NET runtime packs for standalone builds, downloaded once (tools/offline-nuget/README.md)
 tools/offline-nuget/*.nupkg
+
+# evals: downloaded test sets
+evals/.cache/

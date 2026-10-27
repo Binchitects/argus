@@ -1871,7 +1871,7 @@ sandbox that reaches tools needs a broker that keeps every right and every
     Qwen3.8-27B 10/10 as code, 6/10 both, 4/10 direct; Qwen3-4B 1/10 either
     way. The graph questions wait for a measured person with GitLab rights.
 
-### v7.3 — A model of your own, and a science lab
+### v7.3 — A science lab, and Kubernetes
 
 The person asked (2026-10-26, after v7.2.0) for four Code Arena IDE fixes in
 this release, and for a science lab "where mathematics and chemistry etc
@@ -1922,7 +1922,10 @@ installer only does Docker Compose. So, in this release:
 - Tested: `helm template` and lint of every value combination in
   tests/deploy, the installer's Kubernetes mode against fake kubectl and
   helm, and an install on a kind cluster in CI. Done
-  (tests/deploy/test_kube_install.py, CI job kubernetes).
+  (tests/deploy/test_kube_install.py, test_chart_render.py, CI job
+  kubernetes: install, status and an upgrade on kind; it found three chart
+  bugs no render caught: HSTS's seconds in scientific notation, a Prefix path
+  ingress-nginx refuses, a claim nothing mounted).
 
 The science lab: specialised models and the tools they need, working together
 on a problem, with what they did checkable. Every download asked first
@@ -1946,7 +1949,10 @@ of those to avoid.
    calculus (done: math_compute, math_check, math_solve), Lean 4 with Mathlib (done: the lean profile, lean_check) to check a proof (a proof is "checked" only
    when Lean says so), plots; LaTeX rendered in the answer and the notebook.
    The measured question: what share of a test set of problems each gets right
-   alone and with the tools.
+   alone and with the tools. Measured (docs/measurements/lab-math.md):
+   Qwen2.5-Math-7B was behind Qwen3-4B alone (32/40 against 36/40) and lost
+   the problem in the lab (4,096 tokens of context, no tool calling): not
+   kept. Left: plots; a maths model that calls tools, if one measures better.
 3. **Chemistry.** RDKit (molecules from SMILES, properties, similarity,
    reactions; done: chem_molecule drawn in 2D, chem_formula, chem_balance
    checked atom by atom and charge, chem_similarity), molecules drawn in 2D and turned in 3D in the page, the
@@ -1962,17 +1968,11 @@ of those to avoid.
    does what, and a model kept for the lab loads when a lab problem needs it.
 6. **Measured.** Each science's test set (problems with their answers taken
    from a source, not written from memory, as evals/README.md says) run with
-   and without the lab's tools; the release says the numbers.
-
-The model of your own:
-
-7. **Model lab.** Teach a small model the company's words on the local GPU
-   (a LoRA from chosen knowledge sources, prompts and good answers), then
-   compare it with the model it came from in blind battles, and give it to
-   people with one click. Needs a yes: the training libraries.
-8. **Evals.** Test sets for assistants, prompts and models, run on every
-   change (a new model, a new prompt), scored by rules or a judge model,
-   with what got worse shown first.
+   and without the lab's tools; the release says the numbers. Done for
+   mathematics (MATH-500, evals/run_lab_math.py): Qwen3-4B 36/40 alone and in
+   the lab, 39 of the lab's answers checked by a tool, 41% slower. Left:
+   chemistry's and physics' sets; the lab telling a person when the chosen
+   model's context is too small for its tools.
 
 ### v7.4 — Security: vulnerabilities known, found and fixed
 
@@ -2087,6 +2087,19 @@ the measurements. Needs a yes before downloading: the CWE and CAPEC files, the
 OWASP and CodeQL repositories, the advisory databases, opengrep, Bandit,
 gosec, gitleaks and Trivy for the sandbox image, the Juliet suite and the
 OWASP Benchmark; each one's size said when asked.
+
+
+### v7.5 — A model of your own
+
+Moved from v7.3, which shipped the science lab and the Kubernetes install.
+
+1. **Model lab.** Teach a small model the company's words on the local GPU
+   (a LoRA from chosen knowledge sources, prompts and good answers), then
+   compare it with the model it came from in blind battles, and give it to
+   people with one click. Needs a yes: the training libraries.
+2. **Evals.** Test sets for assistants, prompts and models, run on every
+   change (a new model, a new prompt), scored by rules or a judge model,
+   with what got worse shown first.
 
 ### Groundwork, in between
 

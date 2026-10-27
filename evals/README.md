@@ -10,6 +10,7 @@ they live outside `tests/` and are run deliberately.
 | `run_code_review.py <url> <token> <file>` | an agentic review of a real source file, closed book against with Argus's tools, printed side by side for a person to judge | stdout |
 | `run_load_test.py --url ... --token ...` | where the single-SQLite index stops scaling: concurrent readers, with and without a writer | `load-test-results.json` |
 | `run_tool_modes.py --models A,B` | the same tasks through Arena's chat with each model's tools direct and as code (run_code): pass, tokens, seconds, calls; the answer key looked up in the packs first | `tool-modes-results.json` |
+| `run_lab_math.py --models A,B [--count 40]` | MATH-500 problems through Arena's chat, each model alone and in a science lab notebook (Mathematics: SymPy, Lean, Python, the lab's check): right on MATH's own grading, seconds, tokens, tool calls | `lab-math-results.json` |
 
 ## The one rule these exist to enforce
 

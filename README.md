@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-7.2.0-5b8cff">
+  <img alt="version" src="https://img.shields.io/badge/version-7.3.0-5b8cff">
   <img alt="self-hosted" src="https://img.shields.io/badge/self--hosted-on%20your%20GPUs-7c4dff">
   <img alt="offline" src="https://img.shields.io/badge/installs-air--gapped-2ea043">
   <img alt="licence" src="https://img.shields.io/badge/licence-AGPL--3.0%20%7C%20commercial-555">
@@ -105,12 +105,23 @@ action items given to people and reminded on their day.
 </td>
 <td valign="top">
 
+### 🔬 Science lab
+Mathematics, physics, chemistry, statistics and biology, worked with tools that
+check each step: SymPy, units, RDKit, Biopython, and Lean with Mathlib for
+proofs. Each problem is kept as a notebook of its cells and their verdicts.
+
+</td>
+</tr>
+<tr>
+<td colspan="2" valign="top">
+
 ### 🛡️ Yours to run
 SSO, LDAP and two-factor sign-in; a key and a budget for each person; groups
 decide models and tools. Built for ISO 27001, SOC 2, HIPAA and the GDPR: an
 audit log nobody changes unseen, live checks of every control and the
-evidence in one download. Ten dashboards, and an installer for offline hosts
-in one file.
+evidence in one download. Ten dashboards, an installer for offline hosts in
+one file, and a Helm chart for Kubernetes that rolls without a gap and grows
+with its load.
 
 </td>
 </tr>
@@ -179,7 +190,9 @@ Open `https://llm.localhost` and sign in as `admin` with the password from
 `.env`. The app fetches its first model and the media models on its own. For an
 offline host, one `.run` file carries everything. The
 [deployment guide](docs/deployment.md) covers Podman, GPUs across servers and
-upgrades. **Argus alone**, without the platform, is in
+upgrades. For a large team or for availability, `installer.sh install
+--kubernetes` checks a cluster first and installs the
+[Helm chart](docs/deployment.md#helm). **Argus alone**, without the platform, is in
 [deploy/argus-standalone/](deploy/argus-standalone/README.md).
 
 ## Under the hood
