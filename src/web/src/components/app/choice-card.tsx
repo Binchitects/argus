@@ -14,7 +14,7 @@ export function ChoiceCard({ name, checked, onChange, icon: Icon, title, hint, d
   return (
     <label
       className={cn(
-        'grid cursor-pointer gap-1 rounded-lg border p-3 text-left hover:bg-accent has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring',
+        'grid cursor-pointer content-start gap-1 rounded-lg border p-3 text-left hover:bg-accent has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring',
         checked && 'border-primary bg-primary/5',
         disabled && 'cursor-not-allowed opacity-50 hover:bg-transparent',
       )}

@@ -335,7 +335,10 @@ export function LabNotebookPage() {
               <li key={m.id}>
                 <section aria-label={asked++ === 0 ? 'The problem' : 'Asked'} className="rounded-lg bg-muted/50 p-3">
                   <p className="mb-1 text-xs font-medium text-muted-foreground">{asked === 1 ? 'The problem' : 'Asked'}</p>
-                  <Markdown text={m.content} />
+                  {/* As written: x**2 is mathematics here, not Markdown. */}
+                  <p dir="auto" className="text-sm break-words whitespace-pre-wrap">
+                    {m.content}
+                  </p>
                 </section>
               </li>
             ) : (
