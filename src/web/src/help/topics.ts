@@ -626,7 +626,7 @@ export const topics = {
 
   lab: {
     title: 'Science lab',
-    about: 'Problems of a science (mathematics, physics, chemistry, statistics, or any) worked by the model with the lab\'s tools: each computation done and each step checked by SymPy, Pint or Python, not taken on trust. Each problem is kept as a notebook.',
+    about: 'Problems of a science (mathematics, physics, chemistry, statistics, biology, or any) worked by the model with the lab\'s tools: each computation done and each step checked by SymPy, Pint, RDKit, Biopython, Lean or Python, not taken on trust. Each problem is kept as a notebook.',
     parts: [
       { name: 'A new problem', text: 'Choose its science (each has its own instructions and tools), write the problem and press **Work it**: a notebook opens and the lab starts on it.' },
       { name: 'Notebooks', text: 'Yours, newest first, with how many of their checks were proved, refuted or held only numerically. A row opens it. They are not among your chats.' },
@@ -639,7 +639,9 @@ export const topics = {
     title: 'A lab notebook',
     about: 'One problem worked step by step: the model\'s words, and a cell for each computation, check, solution and conversion with what the tool gave. On top, what was proved and what not.',
     parts: [
-      { name: 'Checks', text: '**Proved** when SymPy shows it exactly; **holds numerically, not proved** when it is only true at the points tried; **refuted** with a point where it fails. A solution is checked by putting it back into every equation (✓ or ✗).' },
+      { name: 'Checks', text: '**Proved** when SymPy shows it exactly; **holds numerically, not proved** when it is only true at the points tried; **refuted** with a point where it fails. A solution is checked by putting it back into every equation (✓ or ✗); a reaction is **balanced, checked** when each element and the charge count the same on both sides; a proof is **checked by Lean** only when Lean accepts it with no sorry.' },
+      { name: 'Molecules and sequences', text: 'A molecule from its SMILES is drawn beside its formula, mass and properties; a sequence shows what it was turned into (its reverse complement, RNA or protein) and its figures.' },
+      { name: 'The lab\'s check', text: 'An answer that no tool checked is not left at that: the lab asks the model to check it with its tools and correct it, and says so above the answer that follows.' },
       { name: 'Ask more', text: 'A next step, another case, or why a step holds: the lab goes on in the same notebook.' },
       { name: 'Open as a chat', text: 'The notebook is a chat underneath: open it there to branch, edit or share it.' },
     ],
