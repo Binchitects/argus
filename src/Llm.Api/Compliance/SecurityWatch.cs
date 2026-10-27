@@ -156,7 +156,7 @@ public sealed partial class SecurityWatch(IServiceScopeFactory scopes, IOptionsM
         var notifier = scope.ServiceProvider.GetRequiredService<Notifications.Notifier>();
         foreach (var a in fresh)
         {
-            await notifier.ToAdminsAsync(new Notifications.News("alert", a.Title, a.Detail, "/admin/compliance#incidents", $"security:{a.Key}"), ct);
+            await notifier.ToAdminsAsync(new Notifications.News("alert", a.Title, a.Detail, "/admin/compliance?tab=incidents", $"security:{a.Key}"), ct);
             LogRaised(logger, a.Kind, a.Title);
         }
         return fresh.Count;

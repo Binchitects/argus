@@ -47,6 +47,14 @@ public sealed record OpenIncidentRequest(string? Title, string? Summary, string?
 
 public sealed record StepRequest(string? Kind, string? Text);
 
+public sealed record RiskReviewRequest(string? Note, DateTimeOffset? Next);
+
+public sealed record RiskAcceptRequest(string? Why, DateTimeOffset? Until);
+
+public sealed record RiskCloseRequest(string? Why);
+
+public sealed record RiskActionRequest(string? Text, string? Owner, DateTimeOffset? Due);
+
 public sealed record RestrictionRequest(bool Restricted, string? Why);
 
 public sealed record DataRequestView(Guid Id, Guid? UserId, string Person, string? Email, string Kind, string? Details, string Status, DateTimeOffset ReceivedAt,
@@ -75,6 +83,7 @@ public static class ComplianceEndpoints
         services.AddSingleton<SecurityWatch>();
         services.AddHostedService(sp => sp.GetRequiredService<SecurityWatch>());
         services.AddScoped<Incidents>();
+        services.AddScoped<Risks>();
         services.AddHostedService<AccessReviewSchedule>();
     }
 
@@ -135,6 +144,31 @@ public static class ComplianceEndpoints
         });
 
         // Security alerts and the incident register.
+        // The risk register: risks, their treatment's actions and history (GOV-04).
+        g.MapGet("/risks", async (Risks risks, CancellationToken ct) => Results.Ok(await risks.ListAsync(ct)));
+        g.MapGet("/risks/assets", async (Risks risks, CancellationToken ct) => Results.Ok(await risks.AssetsAsync(ct)));
+        g.MapPost("/risks", async (RiskInput body, ClaimsPrincipal p, UserManager<AppUser> users, Risks risks, CancellationToken ct) =>
+            await RiskAsync(async () => await risks.CreateAsync(body, await Who(p, users), ct)));
+        g.MapGet("/risks/{id:guid}", async (Guid id, Risks risks, CancellationToken ct) => await RiskAsync(async () =>
+        {
+            var (risk, actions, events) = await risks.GetAsync(id, ct);
+            return new { risk, actions, events };
+        }));
+        g.MapPut("/risks/{id:guid}", async (Guid id, RiskInput body, ClaimsPrincipal p, UserManager<AppUser> users, Risks risks, CancellationToken ct) =>
+            await RiskAsync(async () => await risks.UpdateAsync(id, body, await Who(p, users), ct)));
+        g.MapPost("/risks/{id:guid}/review", async (Guid id, RiskReviewRequest body, ClaimsPrincipal p, UserManager<AppUser> users, Risks risks, CancellationToken ct) =>
+            await RiskAsync(async () => await risks.ReviewAsync(id, body.Note, body.Next, await Who(p, users), ct)));
+        g.MapPost("/risks/{id:guid}/accept", async (Guid id, RiskAcceptRequest body, ClaimsPrincipal p, UserManager<AppUser> users, Risks risks, CancellationToken ct) =>
+            await RiskAsync(async () => await risks.AcceptAsync(id, body.Why, body.Until, await Who(p, users), ct)));
+        g.MapPost("/risks/{id:guid}/close", async (Guid id, RiskCloseRequest body, ClaimsPrincipal p, UserManager<AppUser> users, Risks risks, CancellationToken ct) =>
+            await RiskAsync(async () => await risks.CloseAsync(id, true, body.Why, await Who(p, users), ct)));
+        g.MapPost("/risks/{id:guid}/reopen", async (Guid id, RiskCloseRequest body, ClaimsPrincipal p, UserManager<AppUser> users, Risks risks, CancellationToken ct) =>
+            await RiskAsync(async () => await risks.CloseAsync(id, false, body.Why, await Who(p, users), ct)));
+        g.MapPost("/risks/{id:guid}/actions", async (Guid id, RiskActionRequest body, ClaimsPrincipal p, UserManager<AppUser> users, Risks risks, CancellationToken ct) =>
+            await RiskAsync(async () => await risks.AddActionAsync(id, body.Text, body.Owner, body.Due, await Who(p, users), ct)));
+        g.MapPost("/risks/{id:guid}/actions/{action:guid}/done", async (Guid id, Guid action, ClaimsPrincipal p, UserManager<AppUser> users, Risks risks, CancellationToken ct) =>
+            await RiskAsync(async () => await risks.CompleteActionAsync(id, action, await Who(p, users), ct)));
+
         g.MapGet("/incidents", async (AppDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
             var since = clock.GetUtcNow().AddDays(-60);
@@ -262,6 +296,25 @@ public static class ComplianceEndpoints
         }
     }
 
+    /// <summary>The signed-in person's name, as the records keep it.</summary>
+    private static async Task<string> Who(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!.UserName!;
+
+    private static async Task<IResult> RiskAsync<T>(Func<Task<T>> work)
+    {
+        try
+        {
+            return Results.Ok(await work());
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound();
+        }
+        catch (RiskException ex)
+        {
+            return AuthEndpoints.Problem(400, "risk", ex.Message);
+        }
+    }
+
     private static async Task<IResult> ReviewAsync<T>(Func<Task<T>> work)
     {
         try
@@ -385,6 +438,8 @@ public static class ComplianceEndpoints
                 access-reviews.csv    every access review's every item: who, what they held, the decision, by whom, when, what came of it
                 notice.csv            who accepted which version of the sign-in notice, when and from where
                 incidents.json        the incident register: each incident with its clocks and every step, and the security alerts
+                risks.csv             the risk register: each risk, its levels before and after treatment, owner, treatment, controls, review
+                risk-history.csv      each risk's every change, review, acceptance and action, by whom and when
 
                 """);
             Text("controls.yaml", ComplianceControls.Text);
@@ -415,6 +470,16 @@ public static class ComplianceEndpoints
                 incidents = allIncidents.Select(i => new { incident = IncidentShape(i), steps = allSteps.Where(e => e.IncidentId == i.Id) }),
                 alerts = await db.SecurityAlerts.AsNoTracking().OrderBy(a => a.At).ToListAsync(ct),
             }, json));
+            var riskViews = await http.RequestServices.GetRequiredService<Risks>().ListAsync(ct);
+            Text("risks.csv", Csv([["id", "title", "category", "assets", "threat", "likelihood", "impact", "level", "owner", "treatment", "controls",
+                "left likelihood", "left impact", "left level", "accepted by", "accepted until", "why", "review due", "closed", "open actions"], .. riskViews.Select(r => new object?[]
+            {
+                r.Id, r.Title, r.Category, string.Join("; ", r.Assets), r.Threat, r.Likelihood, r.Impact, r.Level, r.Owner, r.Treatment, string.Join(" ", r.Controls),
+                r.ResidualLikelihood, r.ResidualImpact, r.ResidualLevel, r.AcceptedBy, r.AcceptedUntil?.ToString("u", CultureInfo.InvariantCulture), r.AcceptedWhy,
+                r.ReviewDue.ToString("u", CultureInfo.InvariantCulture), r.ClosedAt?.ToString("u", CultureInfo.InvariantCulture), r.OpenActions,
+            })]));
+            var riskEvents = await db.RiskEvents.AsNoTracking().OrderBy(e => e.RiskId).ThenBy(e => e.At).ToListAsync(ct);
+            Text("risk-history.csv", Csv([["risk", "at", "by", "what", "text"], .. riskEvents.Select(e => new object?[] { e.RiskId, e.At.ToString("u", CultureInfo.InvariantCulture), e.By, e.Kind, e.Text })]));
             Text("audit-chain.json", JsonSerializer.Serialize(await watch.WalkAsync(anchor: false, ct), json));
             Text("audit-anchors.jsonl", string.Concat(AnchorsOf(auditOptions.CurrentValue).Select(a => JsonSerializer.Serialize(a, JsonSerializerOptions.Web) + "\n")));
         }

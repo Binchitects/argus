@@ -1,17 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckCircle2, CircleDashed, CircleHelp, Download, FileCheck2, RefreshCw, TriangleAlert, XCircle, type LucideIcon } from 'lucide-react'
 import { useState } from 'react'
-import { Link, useNavigate, useOutletContext } from 'react-router'
+import { Link, useLocation, useNavigate, useOutletContext, useSearchParams } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { QueryError } from '@/components/app/query-state'
-import { Segmented } from '@/components/app/segmented'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Field } from '@/components/ui/field'
 import { Textarea } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage, type Me } from '@/lib/api'
 import { ago, when } from '@/lib/format'
@@ -19,6 +20,10 @@ import { cn } from '@/lib/utils'
 import { attestedNow, complianceQuery, FRAMEWORK_GROUPS, FRAMEWORKS, manualLink, reviewsQuery, reviewState, tally, type Attestation, type CheckResult, type Control, type Framework, type State } from './compliance-api'
 import { DataRequestsSection } from './data-requests'
 import { IncidentsSection } from './incidents'
+import { RisksSection } from './risks'
+
+/** A section's old anchor (#incidents in a notification's link): its tab. */
+const HASH_TABS: Record<string, string> = { incidents: 'incidents', 'data-requests': 'requests', risks: 'risks', 'access-reviews': 'reviews' }
 
 const AREAS: Record<string, string> = {
   IAM: 'People and access',
@@ -252,6 +257,10 @@ export function CompliancePage() {
   const data = view.data
   const checks = new Map((data?.checks ?? []).map((c) => [c.id, c]))
   const controls = (data?.controls ?? []).filter((c) => framework === 'all' || (c.frameworks[framework]?.length ?? 0) > 0)
+  // The tab: ?tab=, or a section's old #anchor (a notification's link), else the frameworks.
+  const [params, setParams] = useSearchParams()
+  const { hash } = useLocation()
+  const tab = params.get('tab') ?? HASH_TABS[hash.slice(1)] ?? 'frameworks'
   const areas = [...new Set(controls.map((c) => c.id.split('-')[0]!))]
 
   return (
@@ -272,6 +281,15 @@ export function CompliancePage() {
           </>
         }
       />
+      <Tabs value={tab} onValueChange={(v) => setParams(v === 'frameworks' ? {} : { tab: v }, { replace: true })}>
+        <TabsList aria-label="Compliance" className="mb-2">
+          <TabsTrigger value="frameworks">Frameworks and controls</TabsTrigger>
+          <TabsTrigger value="risks">Risks</TabsTrigger>
+          <TabsTrigger value="reviews">Access reviews</TabsTrigger>
+          <TabsTrigger value="requests">Data requests</TabsTrigger>
+          <TabsTrigger value="incidents">Incidents</TabsTrigger>
+        </TabsList>
+        <TabsContent value="frameworks">
       {view.error ? (
         <QueryError error={view.error} retry={() => view.refetch()} />
       ) : !data ? (
@@ -364,18 +382,24 @@ export function CompliancePage() {
             </section>
           )}
 
-          <AccessReviews mayStart={mayAttest} />
-
-          <DataRequestsSection mayAnswer={!!me.isAdmin || !!me.permissions?.includes('privacy.manage')} />
-
-          <IncidentsSection mayManage={mayAttest} />
-
           <section aria-labelledby="controls" className="grid grid-cols-1 gap-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 id="controls" className="text-lg font-semibold">
                 Controls
               </h2>
-              <Segmented label="Framework" value={framework} onChange={setFramework} options={[{ value: 'all', label: 'All' }, ...FRAMEWORKS.map((f) => ({ value: f.key, label: f.label }))]} />
+              <Select value={framework} onValueChange={(v) => setFramework(v as Framework | 'all')}>
+                <SelectTrigger className="w-56" aria-label="Framework">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Every framework</SelectItem>
+                  {FRAMEWORKS.filter((f) => f.key in data.frameworks).map((f) => (
+                    <SelectItem key={f.key} value={f.key}>
+                      {f.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             {areas.map((area) => (
               <div key={area} className="grid gap-3">
@@ -390,6 +414,20 @@ export function CompliancePage() {
           </section>
         </div>
       )}
+        </TabsContent>
+        <TabsContent value="risks">
+          <RisksSection mayManage={mayAttest} controls={(data?.controls ?? []).map((c) => c.id)} />
+        </TabsContent>
+        <TabsContent value="reviews">
+          <AccessReviews mayStart={mayAttest} />
+        </TabsContent>
+        <TabsContent value="requests">
+          <DataRequestsSection mayAnswer={!!me.isAdmin || !!me.permissions?.includes('privacy.manage')} />
+        </TabsContent>
+        <TabsContent value="incidents">
+          <IncidentsSection mayManage={mayAttest} />
+        </TabsContent>
+      </Tabs>
       {attesting && <AttestDialog control={attesting} onClose={() => setAttesting(null)} />}
     </>
   )

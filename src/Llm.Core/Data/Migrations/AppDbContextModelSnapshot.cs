@@ -3512,6 +3512,169 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("notice_acceptances", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Compliance.Risk", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("AcceptedBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTimeOffset?>("AcceptedUntil")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("AcceptedWhy")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.PrimitiveCollection<string[]>("Assets")
+                        .IsRequired()
+                        .HasColumnType("text[]");
+
+                    b.Property<string>("Category")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTimeOffset?>("ClosedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.PrimitiveCollection<string[]>("Controls")
+                        .IsRequired()
+                        .HasColumnType("text[]");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<int>("Impact")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Likelihood")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Owner")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Plan")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<int?>("ResidualImpact")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ResidualLikelihood")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("ReviewDue")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Threat")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("Treatment")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClosedAt", "ReviewDue");
+
+                    b.ToTable("risks", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Compliance.RiskAction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("DoneAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DoneBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTimeOffset?>("Due")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Owner")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<Guid>("RiskId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RiskId");
+
+                    b.ToTable("risk_actions", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Compliance.RiskEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("By")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<Guid>("RiskId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Text")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RiskId", "At");
+
+                    b.ToTable("risk_events", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Compliance.SecurityAlert", b =>
                 {
                     b.Property<Guid>("Id")
@@ -6586,6 +6749,24 @@ namespace Llm.Core.Data.Migrations
                     b.HasOne("Llm.Core.Identity.AppUser", null)
                         .WithMany()
                         .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Compliance.RiskAction", b =>
+                {
+                    b.HasOne("Llm.Core.Compliance.Risk", null)
+                        .WithMany()
+                        .HasForeignKey("RiskId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Compliance.RiskEvent", b =>
+                {
+                    b.HasOne("Llm.Core.Compliance.Risk", null)
+                        .WithMany()
+                        .HasForeignKey("RiskId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

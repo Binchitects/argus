@@ -101,6 +101,9 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Compliance.SecurityAlert> SecurityAlerts => Set<Compliance.SecurityAlert>();
     public DbSet<Compliance.Incident> Incidents => Set<Compliance.Incident>();
     public DbSet<Compliance.IncidentEvent> IncidentEvents => Set<Compliance.IncidentEvent>();
+    public DbSet<Compliance.Risk> Risks => Set<Compliance.Risk>();
+    public DbSet<Compliance.RiskAction> RiskActions => Set<Compliance.RiskAction>();
+    public DbSet<Compliance.RiskEvent> RiskEvents => Set<Compliance.RiskEvent>();
     public DbSet<Compliance.AccessReviewItem> AccessReviewItems => Set<Compliance.AccessReviewItem>();
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<KnowledgeSource> KnowledgeSources => Set<KnowledgeSource>();
@@ -1003,6 +1006,39 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(v => v.Text).HasMaxLength(4000);
             e.HasIndex(v => new { v.IncidentId, v.At });
             e.HasOne<Compliance.Incident>().WithMany().HasForeignKey(v => v.IncidentId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Compliance.Risk>(e =>
+        {
+            e.ToTable("risks");
+            e.Property(r => r.Title).HasMaxLength(300);
+            e.Property(r => r.Description).HasMaxLength(4000);
+            e.Property(r => r.Category).HasMaxLength(16);
+            e.Property(r => r.Threat).HasMaxLength(2000);
+            e.Property(r => r.Owner).HasMaxLength(256);
+            e.Property(r => r.Treatment).HasMaxLength(16);
+            e.Property(r => r.Plan).HasMaxLength(4000);
+            e.Property(r => r.AcceptedBy).HasMaxLength(256);
+            e.Property(r => r.AcceptedWhy).HasMaxLength(2000);
+            e.Property(r => r.CreatedBy).HasMaxLength(256);
+            e.HasIndex(r => new { r.ClosedAt, r.ReviewDue });
+        });
+        builder.Entity<Compliance.RiskAction>(e =>
+        {
+            e.ToTable("risk_actions");
+            e.Property(a => a.Text).HasMaxLength(2000);
+            e.Property(a => a.Owner).HasMaxLength(256);
+            e.Property(a => a.DoneBy).HasMaxLength(256);
+            e.HasIndex(a => a.RiskId);
+            e.HasOne<Compliance.Risk>().WithMany().HasForeignKey(a => a.RiskId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Compliance.RiskEvent>(e =>
+        {
+            e.ToTable("risk_events");
+            e.Property(v => v.By).HasMaxLength(256);
+            e.Property(v => v.Kind).HasMaxLength(32);
+            e.Property(v => v.Text).HasMaxLength(4000);
+            e.HasIndex(v => new { v.RiskId, v.At });
+            e.HasOne<Compliance.Risk>().WithMany().HasForeignKey(v => v.RiskId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<Compliance.NoticeAcceptance>(e =>
         {

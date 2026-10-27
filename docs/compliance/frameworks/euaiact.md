@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 3 of the 126 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 4 of the 126 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
@@ -14,7 +14,7 @@ Arena's controls serve 3 of the 126 clauses here. Every clause is met by the com
 | Art.6 | Classification rules for high-risk AI systems |  | [AI policy](../policies/ai.md) |
 | Art.7 | Amendments to Annex III |  | [AI policy](../policies/ai.md) |
 | Art.8 | Compliance with the requirements |  | [AI policy](../policies/ai.md) |
-| Art.9 | Risk management system |  | [AI policy](../policies/ai.md) |
+| Art.9 | Risk management system | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [AI policy](../policies/ai.md) |
 | Art.10 | Data and data governance |  | [AI policy](../policies/ai.md) |
 | Art.11 | Technical documentation |  | [AI policy](../policies/ai.md) |
 | Art.12 | Record-keeping | [LOG-01](../controls.md#log-01-who-did-what-is-recorded) | [AI policy](../policies/ai.md) |

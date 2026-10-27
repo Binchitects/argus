@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-The 27 controls Arena provides, from [controls.yaml](controls.yaml). How they are kept: [README](README.md#controls-and-how-they-are-kept). Each framework's clauses and the controls that serve them: [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md), [SOC 2, Trust Services Criteria](frameworks/soc2.md), [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md), [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md), [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md), [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md), [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md), [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md), [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md), [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md), [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md), [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md), [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md), [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md).
+The 28 controls Arena provides, from [controls.yaml](controls.yaml). How they are kept: [README](README.md#controls-and-how-they-are-kept). Each framework's clauses and the controls that serve them: [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md), [SOC 2, Trust Services Criteria](frameworks/soc2.md), [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md), [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md), [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md), [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md), [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md), [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md), [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md), [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md), [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md), [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md), [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md), [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md).
 
 ## People and access (IAM)
 
@@ -771,3 +771,35 @@ Each release has a software bill of materials (CycloneDX) of every .NET, npm and
 - `deploy/test_release_scan.py::test_OSV_out_of_reach_fails_it_too`
 
 **The company's part** The release manager runs the scan and attaches the SBOM to the release; the security officer reviews each acceptance before its date and the high findings each release.
+
+### GOV-04: Risks are assessed, treated and reviewed
+
+A register of the risks to the company's information and its AI (Admin → Compliance → Risks): each with the assets it threatens (from what Arena knows: its stores, models, knowledge, data sources and tools), its likelihood and impact before and after treatment on a 5 by 5 scale, an owner, a treatment (reduced with named controls, accepted by a person with why and until when, a year at most, transferred, avoided), the treatment's actions with their dates, and a review date its level sets (three months for critical, six for high, a year otherwise). Every change is in the risk's history and the audit log, and the register is in the evidence.
+
+**Serves**
+
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): 6.1.1 Actions to address risks and opportunities: general; 6.1.2 Information security risk assessment; 6.1.3 Information security risk treatment; 8.2 Information security risk assessment, performed; 8.3 Information security risk treatment, implemented; A.5.7 Threat intelligence
+- [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC3.1 Objectives clear enough to identify and assess risks; CC3.2 Identifying and analysing risks; CC3.3 The potential for fraud; CC3.4 Changes that could significantly affect internal control; CC9.1 Reducing the risks of business disruption
+- [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.308(a)(1)(ii)(A) Risk analysis (required); 164.308(a)(1)(ii)(B) Risk management (required)
+- [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.32(1) Security of processing; Art.32(2) Security of processing
+- [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md): 6.1.1 Actions to address risks and opportunities: general; 6.1.2 AI risk assessment; 6.1.3 AI risk treatment; 8.2 AI risk assessment, performed; 8.3 AI risk treatment, implemented
+- [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md): 6.1 Actions to address risks and opportunities; 8.2.3 Risk assessment
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 12.3 Risks to the CDE are identified and managed
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): GRC Governance, risk and compliance
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): GV.RM Risk Management Strategy; ID.RA Risk Assessment; ID.RA-05 Threats, vulnerabilities, likelihoods, and impacts are used to understand inherent risk and inform risk response prioritization; ID.RA-06 Risk responses are chosen, prioritized, planned, tracked, and communicated
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): RA-3 Risk Assessment; RA-7 Risk Response; PM-9 Risk Management Strategy; CA-5 Plan of Action and Milestones
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.11.01 Risk Assessment
+- [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md): MAP 4.1 Approaches for mapping AI technology and legal risks of its components – including the use of third-party data or software – are in place, followed, and documented, as are risks of infringement of a third-party’s intellectual property or other rights.; MANAGE 1.2 Treatment of documented AI risks is prioritized based on impact, likelihood, or available resources or methods.; MANAGE 1.3 Responses to the AI risks deemed high priority as identified by the Map function, are developed, planned, and documented. Risk response options can include mitigating, transferring, avoiding, or accepting.; MANAGE 1.4 Negative residual risks (defined as the sum of all unmitigated risks) to both downstream acquirers of AI systems and end users are documented.
+- [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md): Art.9 Risk management system
+
+**Documented in** [compliance/README.md#risks](README.md#risks), [compliance/policies/risk-management.md#the-risk-register](policies/risk-management.md#the-risk-register)
+
+**Proved by**
+
+- `Llm.Tests/RiskRegisterTests.A_risk_has_its_levels_before_and_after_treatment_its_controls_and_a_review_its_level_sets`
+- `Llm.Tests/RiskRegisterTests.An_acceptance_names_who_why_and_until_when_and_a_treatment_has_its_actions_and_history`
+- `Llm.Tests/RiskRegisterTests.Only_those_who_manage_compliance_change_the_register_and_an_auditor_reads_it`
+
+**Watched by** `app:risks` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+
+**The company's part** Assess the risks at least once a year and after significant changes, with the owners who know them; management accepts the risks left, and the treatment's actions are done by their dates.

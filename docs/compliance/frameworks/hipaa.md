@@ -7,8 +7,8 @@ Arena's controls serve 33 of the 68 clauses here. Every clause is met by the com
 | Clause | | Arena | The company's document |
 |---|---|---|---|
 | 164.308(a)(1)(i) | Security management process |  | [Risk management policy](../policies/risk-management.md) |
-| 164.308(a)(1)(ii)(A) | Risk analysis (required) | [GOV-03](../controls.md#gov-03-what-a-release-ships-is-listed-and-its-known-vulnerabilities-gate-it) | [Risk management policy](../policies/risk-management.md) |
-| 164.308(a)(1)(ii)(B) | Risk management (required) | [GOV-03](../controls.md#gov-03-what-a-release-ships-is-listed-and-its-known-vulnerabilities-gate-it) | [Risk management policy](../policies/risk-management.md) |
+| 164.308(a)(1)(ii)(A) | Risk analysis (required) | [GOV-03](../controls.md#gov-03-what-a-release-ships-is-listed-and-its-known-vulnerabilities-gate-it), [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [Risk management policy](../policies/risk-management.md) |
+| 164.308(a)(1)(ii)(B) | Risk management (required) | [GOV-03](../controls.md#gov-03-what-a-release-ships-is-listed-and-its-known-vulnerabilities-gate-it), [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [Risk management policy](../policies/risk-management.md) |
 | 164.308(a)(1)(ii)(C) | Sanction policy (required) |  | [People security policy](../policies/people-security.md) |
 | 164.308(a)(1)(ii)(D) | Information system activity review (required) | [LOG-01](../controls.md#log-01-who-did-what-is-recorded), [LOG-04](../controls.md#log-04-the-audit-log-is-sent-on-to-the-companys-siem), [MON-01](../controls.md#mon-01-the-service-is-watched-and-people-are-alerted) | [Information security policy](../policies/information-security.md) |
 | 164.308(a)(2) | Assigned security responsibility |  | [Information security policy](../policies/information-security.md) |

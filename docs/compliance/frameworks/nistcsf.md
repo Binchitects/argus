@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 24 of the 128 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 28 of the 128 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
@@ -19,7 +19,7 @@ Arena's controls serve 24 of the 128 clauses here. Every clause is met by the co
 | GV.PO | Policy |  | [Information security policy](../policies/information-security.md) |
 | GV.PO-01 | Policy for managing cybersecurity risks is established based on organizational context, cybersecurity strategy, and priorities and is communicated and enforced | [GOV-02](../controls.md#gov-02-everyone-accepts-the-acceptable-use-and-privacy-notice) | [Information security policy](../policies/information-security.md) |
 | GV.PO-02 | Policy for managing cybersecurity risks is reviewed, updated, communicated, and enforced to reflect changes in requirements, threats, technology, and organizational mission |  | [Information security policy](../policies/information-security.md) |
-| GV.RM | Risk Management Strategy |  | [Risk management policy](../policies/risk-management.md) |
+| GV.RM | Risk Management Strategy | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [Risk management policy](../policies/risk-management.md) |
 | GV.RM-01 | Risk management objectives are established and agreed to by organizational stakeholders |  | [Risk management policy](../policies/risk-management.md) |
 | GV.RM-02 | Risk appetite and risk tolerance statements are established, communicated, and maintained |  | [Risk management policy](../policies/risk-management.md) |
 | GV.RM-03 | Cybersecurity risk management activities and outcomes are included in enterprise risk management processes |  | [Risk management policy](../policies/risk-management.md) |
@@ -56,13 +56,13 @@ Arena's controls serve 24 of the 128 clauses here. Every clause is met by the co
 | ID.IM-02 | Improvements are identified from security tests and exercises, including those done in coordination with suppliers and relevant third parties |  | [Risk management policy](../policies/risk-management.md) |
 | ID.IM-03 | Improvements are identified from execution of operational processes, procedures, and activities |  | [Risk management policy](../policies/risk-management.md) |
 | ID.IM-04 | Incident response plans and other cybersecurity plans that affect operations are established, communicated, maintained, and improved |  | [Risk management policy](../policies/risk-management.md) |
-| ID.RA | Risk Assessment |  | [Risk management policy](../policies/risk-management.md) |
+| ID.RA | Risk Assessment | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [Risk management policy](../policies/risk-management.md) |
 | ID.RA-01 | Vulnerabilities in assets are identified, validated, and recorded | [GOV-03](../controls.md#gov-03-what-a-release-ships-is-listed-and-its-known-vulnerabilities-gate-it) | [Risk management policy](../policies/risk-management.md) |
 | ID.RA-02 | Cyber threat intelligence is received from information sharing forums and sources |  | [Risk management policy](../policies/risk-management.md) |
 | ID.RA-03 | Internal and external threats to the organization are identified and recorded |  | [Risk management policy](../policies/risk-management.md) |
 | ID.RA-04 | Potential impacts and likelihoods of threats exploiting vulnerabilities are identified and recorded |  | [Risk management policy](../policies/risk-management.md) |
-| ID.RA-05 | Threats, vulnerabilities, likelihoods, and impacts are used to understand inherent risk and inform risk response prioritization |  | [Risk management policy](../policies/risk-management.md) |
-| ID.RA-06 | Risk responses are chosen, prioritized, planned, tracked, and communicated |  | [Risk management policy](../policies/risk-management.md) |
+| ID.RA-05 | Threats, vulnerabilities, likelihoods, and impacts are used to understand inherent risk and inform risk response prioritization | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [Risk management policy](../policies/risk-management.md) |
+| ID.RA-06 | Risk responses are chosen, prioritized, planned, tracked, and communicated | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [Risk management policy](../policies/risk-management.md) |
 | ID.RA-07 | Changes and exceptions are managed, assessed for risk impact, recorded, and tracked |  | [Risk management policy](../policies/risk-management.md) |
 | ID.RA-08 | Processes for receiving, analyzing, and responding to vulnerability disclosures are established |  | [Risk management policy](../policies/risk-management.md) |
 | ID.RA-09 | The authenticity and integrity of hardware and software are assessed prior to acquisition and use |  | [Risk management policy](../policies/risk-management.md) |

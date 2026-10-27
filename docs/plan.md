@@ -2077,6 +2077,11 @@ documents; it says what is the operator's part, as v7.1 does.
    treatment (reduce with named controls, accept with who and until when,
    transfer, avoid) and the treatment's actions with dates. A heat map, risks
    due for review, and the history of each.
+   Done: Admin → Compliance → Risks (GOV-04, the `risks` check): the register
+   with the assets Arena knows, levels before and after treatment, a heat map,
+   acceptance by a person with why and until when (a year at most), the
+   treatment's actions, reviews its level sets, the history, and the register
+   in the evidence. Admin → Compliance is in tabs now.
 3. **Statement of Applicability**: each Annex A control (and each ISO 42001
    one) applicable or not, why, and how far it is in place. Drawn from the
    controls' live state, the risks they treat and the operator's choices, and

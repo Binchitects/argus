@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 23 of the 63 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 24 of the 63 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
@@ -61,7 +61,7 @@ Arena's controls serve 23 of the 63 clauses here. Every clause is met by the com
 | 11.6 | Unauthorized changes on payment pages are detected |  | [Change and vulnerability management policy](../policies/change-management.md) |
 | 12.1 | An information security policy is known and current |  | [Information security policy](../policies/information-security.md) |
 | 12.2 | Acceptable use policies are defined and implemented | [GOV-02](../controls.md#gov-02-everyone-accepts-the-acceptable-use-and-privacy-notice) | [Acceptable use policy](../policies/acceptable-use.md) |
-| 12.3 | Risks to the CDE are identified and managed |  | [Risk management policy](../policies/risk-management.md) |
+| 12.3 | Risks to the CDE are identified and managed | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [Risk management policy](../policies/risk-management.md) |
 | 12.4 | PCI DSS compliance is managed | [GOV-01](../controls.md#gov-01-the-controls-are-kept-from-breaking) | [The management system (ISMS and AIMS)](../isms.md) |
 | 12.5 | PCI DSS scope is documented and validated |  | [The management system (ISMS and AIMS)](../isms.md) |
 | 12.6 | Security awareness education is ongoing |  | [People security policy](../policies/people-security.md) |

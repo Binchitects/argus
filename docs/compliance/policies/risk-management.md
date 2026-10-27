@@ -32,6 +32,7 @@ Kept by [owner] and reviewed every [year]. At least:
 
 ## The risk register
 
+Kept in Arena, under Admin → Compliance → Risks ([how](../README.md#risks)).
 Each risk: what could happen, to which asset, how likely (1–5), how bad (1–5),
 the owner, the treatment (reduce, avoid, transfer, accept), the controls that
 reduce it ([Arena's](../controls.md) and [Company]'s), the risk left after

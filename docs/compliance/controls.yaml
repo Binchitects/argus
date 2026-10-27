@@ -20,7 +20,7 @@
 #   operator   the part of the company that runs it
 
 frameworks:
-  iso27001: ISO/IEC 27001:2022, Annex A
+  iso27001: ISO/IEC 27001:2022, clauses 4 to 10 and Annex A
   soc2: SOC 2, Trust Services Criteria (2017, revised points of focus 2022)
   hipaa: HIPAA Security and Privacy Rules, 45 CFR Part 164
   gdpr: General Data Protection Regulation (EU) 2016/679
@@ -789,3 +789,41 @@ controls:
       The release manager runs the scan and attaches the SBOM to the release;
       the security officer reviews each acceptance before its date and the
       high findings each release.
+
+  - id: GOV-04
+    title: Risks are assessed, treated and reviewed
+    meets: >-
+      A register of the risks to the company's information and its AI (Admin
+      → Compliance → Risks): each with the assets it threatens (from what
+      Arena knows: its stores, models, knowledge, data sources and tools), its
+      likelihood and impact before and after treatment on a 5 by 5 scale, an
+      owner, a treatment (reduced with named controls, accepted by a person
+      with why and until when, a year at most, transferred, avoided), the
+      treatment's actions with their dates, and a review date its level sets
+      (three months for critical, six for high, a year otherwise). Every
+      change is in the risk's history and the audit log, and the register is
+      in the evidence.
+    frameworks:
+      iso27001: [6.1.1, 6.1.2, 6.1.3, 8.2, 8.3, A.5.7]
+      soc2: [CC3.1, CC3.2, CC3.3, CC3.4, CC9.1]
+      hipaa: [164.308(a)(1)(ii)(A), 164.308(a)(1)(ii)(B)]
+      gdpr: [Art.32(1), Art.32(2)]
+      iso42001: [6.1.1, 6.1.2, 6.1.3, 8.2, 8.3]
+      iso22301: [6.1, 8.2.3]
+      pcidss: [12.3]
+      csaccm: [GRC]
+      nistcsf: [GV.RM, ID.RA, ID.RA-05, ID.RA-06]
+      nist80053: [RA-3, RA-7, PM-9, CA-5]
+      nist800171: [03.11.01]
+      airmf: [MAP 4.1, MANAGE 1.2, MANAGE 1.3, MANAGE 1.4]
+      euaiact: [Art.9]
+    docs: [compliance/README.md#risks, compliance/policies/risk-management.md#the-risk-register]
+    tests:
+      - Llm.Tests/RiskRegisterTests.A_risk_has_its_levels_before_and_after_treatment_its_controls_and_a_review_its_level_sets
+      - Llm.Tests/RiskRegisterTests.An_acceptance_names_who_why_and_until_when_and_a_treatment_has_its_actions_and_history
+      - Llm.Tests/RiskRegisterTests.Only_those_who_manage_compliance_change_the_register_and_an_auditor_reads_it
+    checks: [app:risks]
+    operator: >-
+      Assess the risks at least once a year and after significant changes,
+      with the owners who know them; management accepts the risks left, and
+      the treatment's actions are done by their dates.

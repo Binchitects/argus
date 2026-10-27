@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 26 of the 61 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 30 of the 61 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
@@ -14,10 +14,10 @@ Arena's controls serve 26 of the 61 clauses here. Every clause is met by the com
 | CC2.1 | Relevant and quality information for internal control |  | [Information security policy](../policies/information-security.md) |
 | CC2.2 | Internal communication of objectives and responsibilities |  | [Information security policy](../policies/information-security.md) |
 | CC2.3 | Communication with external parties | [GOV-02](../controls.md#gov-02-everyone-accepts-the-acceptable-use-and-privacy-notice) | [Information security policy](../policies/information-security.md) |
-| CC3.1 | Objectives clear enough to identify and assess risks |  | [Risk management policy](../policies/risk-management.md) |
-| CC3.2 | Identifying and analysing risks |  | [Risk management policy](../policies/risk-management.md) |
-| CC3.3 | The potential for fraud |  | [Risk management policy](../policies/risk-management.md) |
-| CC3.4 | Changes that could significantly affect internal control |  | [Risk management policy](../policies/risk-management.md) |
+| CC3.1 | Objectives clear enough to identify and assess risks | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [Risk management policy](../policies/risk-management.md) |
+| CC3.2 | Identifying and analysing risks | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [Risk management policy](../policies/risk-management.md) |
+| CC3.3 | The potential for fraud | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [Risk management policy](../policies/risk-management.md) |
+| CC3.4 | Changes that could significantly affect internal control | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [Risk management policy](../policies/risk-management.md) |
 | CC4.1 | Ongoing and separate evaluations | [GOV-01](../controls.md#gov-01-the-controls-are-kept-from-breaking) | [Information security policy](../policies/information-security.md) |
 | CC4.2 | Communicating deficiencies |  | [Information security policy](../policies/information-security.md) |
 | CC5.1 | Control activities that reduce risks |  | [Information security policy](../policies/information-security.md) |
@@ -37,7 +37,7 @@ Arena's controls serve 26 of the 61 clauses here. Every clause is met by the com
 | CC7.4 | Responding to security incidents | [MON-02](../controls.md#mon-02-security-events-raise-alerts-and-incidents-are-handled-in-time) | [Incident response runbook](../incident-response.md) |
 | CC7.5 | Recovering from security incidents | [MON-02](../controls.md#mon-02-security-events-raise-alerts-and-incidents-are-handled-in-time) | [Incident response runbook](../incident-response.md) |
 | CC8.1 | Authorising, designing, testing, approving and putting changes in place | [GOV-01](../controls.md#gov-01-the-controls-are-kept-from-breaking), [GOV-03](../controls.md#gov-03-what-a-release-ships-is-listed-and-its-known-vulnerabilities-gate-it) | [Change and vulnerability management policy](../policies/change-management.md) |
-| CC9.1 | Reducing the risks of business disruption | [OPS-01](../controls.md#ops-01-backups-restored-and-proven) | [Backup and business continuity policy](../policies/business-continuity.md) |
+| CC9.1 | Reducing the risks of business disruption | [OPS-01](../controls.md#ops-01-backups-restored-and-proven), [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [Backup and business continuity policy](../policies/business-continuity.md) |
 | CC9.2 | Risks from vendors and business partners | [GOV-03](../controls.md#gov-03-what-a-release-ships-is-listed-and-its-known-vulnerabilities-gate-it) | [Supplier and transfer policy](../policies/suppliers.md) |
 | A1.1 | Managing and planning capacity |  | [Backup and business continuity policy](../policies/business-continuity.md) |
 | A1.2 | Environmental protections, software, backups and recovery infrastructure | [OPS-01](../controls.md#ops-01-backups-restored-and-proven) | [Backup and business continuity policy](../policies/business-continuity.md) |

@@ -53,7 +53,7 @@ public sealed partial class DataRequests(AppDbContext db, PeopleService people, 
         await db.SaveChangesAsync(ct);
         await audit.WriteAsync("privacy.request", person.UserName, detail: $"{kind}, due {request.DueAt:yyyy-MM-dd}, taken in by {by}");
         await notifier.ToAdminsAsync(new Notifications.News("compliance", $"{person.UserName} asked for {Words(kind)}",
-            $"To be answered by {request.DueAt:yyyy-MM-dd}.", "/admin/compliance#data-requests", $"data-request:{request.Id}"), ct);
+            $"To be answered by {request.DueAt:yyyy-MM-dd}.", "/admin/compliance?tab=requests", $"data-request:{request.Id}"), ct);
         return request;
     }
 

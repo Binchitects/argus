@@ -130,6 +130,35 @@ who holds an administrative permission (how they sign in, whether they have a
 second factor, when they last signed in), and the audit log's last 90 days
 counted by action. Each download is audited (`compliance.evidence`).
 
+## Risks
+
+Admin → Compliance → Risks is the risk register ISO 27001 (6.1.2, 6.1.3,
+8.2, 8.3), ISO 42001 (AI risks), SOC 2 (CC3) and HIPAA (164.308(a)(1)) ask for
+(GOV-04). Each risk has:
+
+- **what could happen, to what**: its category (security, privacy, AI,
+  continuity, supplier, legal), the assets it threatens, chosen from what
+  Arena knows (its database, files, backups, audit log, models, knowledge
+  sources, data sources, tools) or named, and the threat;
+- **how likely and how bad**, each 1 to 5, before treatment and after it. The
+  score is their product: low 1 to 4, medium 5 to 9, high 10 to 16, critical
+  20 to 25. A heat map shows them all;
+- **its owner and treatment**: reduced with Arena's controls (named, so each
+  control's page shows the risks it treats), accepted, transferred or avoided.
+  An acceptance is made by the person who decides it, with why and until when,
+  a year at most. Then the risk is decided again;
+- **the treatment's actions**, each with an owner and a date;
+- **a review date its level sets**: three months for critical, six for high,
+  a year otherwise (the level left after treatment, once assessed). A review
+  says what it found and sets the next.
+
+Every change, review, acceptance and action is in the risk's history and the
+audit log. The register and its history are in the evidence (`risks.csv`,
+`risk-history.csv`). The `risks` check is amber while the register is empty
+or a risk is past its review, its acceptance or its actions' dates, and red a
+month past a review. The [risk management policy](policies/risk-management.md)
+starts the register with the risks most installations share.
+
 ## Access reviews
 
 An access review lists, for a reviewer to **Keep** or **Revoke**:

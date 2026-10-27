@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 3 of the 72 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 7 of the 72 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
@@ -39,7 +39,7 @@ Arena's controls serve 3 of the 72 clauses here. Every clause is met by the comp
 | MAP 3.3 | Targeted application scope is specified and documented based on the system’s capability, established context, and AI system categorization. |  | [AI policy](../policies/ai.md) |
 | MAP 3.4 | Processes for operator and practitioner proficiency with AI system performance and trustworthiness – and relevant technical standards and certifications – are defined, assessed and documented. |  | [AI policy](../policies/ai.md) |
 | MAP 3.5 | Processes for human oversight are defined, assessed, and documented in accordance with organizational policies from GOVERN function. |  | [AI policy](../policies/ai.md) |
-| MAP 4.1 | Approaches for mapping AI technology and legal risks of its components – including the use of third-party data or software – are in place, followed, and documented, as are risks of infringement of a third-party’s intellectual property or other rights. |  | [AI policy](../policies/ai.md) |
+| MAP 4.1 | Approaches for mapping AI technology and legal risks of its components – including the use of third-party data or software – are in place, followed, and documented, as are risks of infringement of a third-party’s intellectual property or other rights. | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [AI policy](../policies/ai.md) |
 | MAP 4.2 | Internal risk controls for components of the AI system including third-party AI technologies are identified and documented. |  | [AI policy](../policies/ai.md) |
 | MAP 5.1 | Likelihood and magnitude of each identified impact (both potentially beneficial and harmful) based on expected use, past uses of AI systems in similar contexts, public incident reports, feedback from those external to the team that developed or deployed the AI system, or other data are identified and documented. |  | [AI policy](../policies/ai.md) |
 | MAP 5.2 | Practices and personnel for supporting regular engagement with relevant AI actors and integrating feedback about positive, negative, and unanticipated impacts are in place and documented. |  | [AI policy](../policies/ai.md) |
@@ -66,9 +66,9 @@ Arena's controls serve 3 of the 72 clauses here. Every clause is met by the comp
 | MEASURE 4.2 | Measurement results regarding AI system trustworthiness in deployment context(s) and across AI lifecycle are informed by input from domain experts and other relevant AI actors to validate whether the system is performing consistently as intended. Results are documented. |  | [AI policy](../policies/ai.md) |
 | MEASURE 4.3 | Measurable performance improvements or declines based on consultations with relevant AI actors including affected communities, and field data about context-relevant risks and trustworthiness characteristics, are identified and documented. |  | [AI policy](../policies/ai.md) |
 | MANAGE 1.1 | A determination is made as to whether the AI system achieves its intended purpose and stated objectives and whether its development or deployment should proceed. |  | [AI policy](../policies/ai.md) |
-| MANAGE 1.2 | Treatment of documented AI risks is prioritized based on impact, likelihood, or available resources or methods. |  | [AI policy](../policies/ai.md) |
-| MANAGE 1.3 | Responses to the AI risks deemed high priority as identified by the Map function, are developed, planned, and documented. Risk response options can include mitigating, transferring, avoiding, or accepting. |  | [AI policy](../policies/ai.md) |
-| MANAGE 1.4 | Negative residual risks (defined as the sum of all unmitigated risks) to both downstream acquirers of AI systems and end users are documented. |  | [AI policy](../policies/ai.md) |
+| MANAGE 1.2 | Treatment of documented AI risks is prioritized based on impact, likelihood, or available resources or methods. | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [AI policy](../policies/ai.md) |
+| MANAGE 1.3 | Responses to the AI risks deemed high priority as identified by the Map function, are developed, planned, and documented. Risk response options can include mitigating, transferring, avoiding, or accepting. | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [AI policy](../policies/ai.md) |
+| MANAGE 1.4 | Negative residual risks (defined as the sum of all unmitigated risks) to both downstream acquirers of AI systems and end users are documented. | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [AI policy](../policies/ai.md) |
 | MANAGE 2.1 | Resources required to manage AI risks are taken into account, along with viable non-AI alternative systems, approaches, or methods – to reduce the magnitude or likelihood of potential impacts. |  | [AI policy](../policies/ai.md) |
 | MANAGE 2.2 | Mechanisms are in place and applied to sustain the value of deployed AI systems. |  | [AI policy](../policies/ai.md) |
 | MANAGE 2.3 | Procedures are followed to respond to and recover from a previously unknown risk when it is identified. |  | [AI policy](../policies/ai.md) |

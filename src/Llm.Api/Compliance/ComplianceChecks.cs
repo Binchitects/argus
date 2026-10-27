@@ -47,6 +47,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         ("incidents", "Incidents handled within the law's time"),
         ("access-review", "Privileged access was reviewed"),
         ("data-requests", "People's data requests answered in time"),
+        ("risks", "Risks are assessed, treated and reviewed in time"),
     ];
 
     /// <summary>A newest backup older than this is amber; one older than <see cref="BackupStale"/> is red.</summary>
@@ -77,6 +78,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
                 "incidents" => await IncidentsAsync(ct),
                 "access-review" => await AccessReviewAsync(ct),
                 "data-requests" => await DataRequestsAsync(ct),
+                "risks" => await RisksAsync(ct),
                 _ => (Unknown, "No such check."),
             };
             results.Add(new CheckResult(id, title, state, detail));
@@ -364,6 +366,34 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         return open.Count > 0
             ? (Warn, $"{open.Count} incident{(open.Count == 1 ? "" : "s")} open; {alerts} security alerts in 30 days.")
             : (Ok, $"No incident open; {alerts} security alerts in 30 days.");
+    }
+
+    /// <summary>The register is not empty, and no risk is past its review, its acceptance or its actions' dates; a month past is red.</summary>
+    private async Task<(string, string)> RisksAsync(CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var open = await db.Risks.AsNoTracking().Where(r => r.ClosedAt == null).ToListAsync(ct);
+        if (open.Count == 0)
+        {
+            return (Warn, "The risk register is empty: assess the risks (Admin → Compliance → Risks).");
+        }
+        var ids = open.Select(r => r.Id).ToList();
+        var late = await db.RiskActions.AsNoTracking().Where(a => ids.Contains(a.RiskId) && a.DoneAt == null && a.Due < now).CountAsync(ct);
+        var overdue = open.Where(r => r.ReviewDue < now).ToList();
+        var expired = open.Count(r => r.Treatment == Llm.Core.Compliance.Risk.Accept && r.AcceptedUntil < now);
+        var levels = string.Join(", ", open.GroupBy(r => Risks.Level(r.ResidualLikelihood is { } l && r.ResidualImpact is { } i ? l * i : r.Likelihood * r.Impact))
+            .OrderBy(g => Array.IndexOf(["critical", "high", "medium", "low"], g.Key)).Select(g => $"{g.Count()} {g.Key}"));
+        var said = $"{open.Count} open risk{(open.Count == 1 ? "" : "s")} ({levels}, as left after treatment where assessed)";
+        if (overdue.Count == 0 && expired == 0 && late == 0)
+        {
+            return (Ok, $"{said}; the next review is due {open.Min(r => r.ReviewDue):yyyy-MM-dd}.");
+        }
+        var due = string.Join("; ", new[]
+        {
+            overdue.Count > 0 ? $"{overdue.Count} past their review" : null, expired > 0 ? $"{expired} accepted past the acceptance's end" : null,
+            late > 0 ? $"{late} treatment action{(late == 1 ? "" : "s")} past due" : null,
+        }.OfType<string>());
+        return (overdue.Any(r => r.ReviewDue < now.AddDays(-30)) ? Fail : Warn, $"{said}: {due}.");
     }
 
     private (string, string) DataKey() => string.IsNullOrEmpty(auth.CurrentValue.DataKey)

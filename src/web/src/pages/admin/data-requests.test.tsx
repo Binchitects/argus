@@ -47,7 +47,7 @@ describe('data requests', () => {
         return { json: all[1] }
       },
     })
-    renderApp('/admin/compliance')
+    renderApp('/admin/compliance?tab=requests')
     const section = (await screen.findByRole('heading', { name: 'Data requests' })).closest('section')!
     await userEvent.click(await within(section).findByRole('button', { name: 'Erase everything' }))
     const dialog = await screen.findByRole('alertdialog')

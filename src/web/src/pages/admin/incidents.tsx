@@ -219,7 +219,7 @@ export function IncidentPage() {
   const open = i.status !== 'closed'
   return (
     <>
-      <Link to="/admin/compliance#incidents" className="mb-3 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+      <Link to="/admin/compliance?tab=incidents" className="mb-3 inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-4" aria-hidden="true" /> Compliance
       </Link>
       <PageHeader

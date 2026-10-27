@@ -20,7 +20,7 @@ describe('incidents', () => {
       'POST /api/admin/compliance/incidents': () => ({ status: 201, json: incident({ id: 'i9' }) }),
       'GET /api/admin/compliance/incidents/i9': () => ({ json: { incident: incident({ id: 'i9' }), events: [], alerts: [] } }),
     })
-    renderApp('/admin/compliance')
+    renderApp('/admin/compliance?tab=incidents')
     const section = (await screen.findByRole('heading', { name: 'Security alerts and incidents' })).closest('section')!
     const alert = (await within(section).findByText('eve exported data 5 times in an hour')).closest('li')!
     await userEvent.click(within(alert).getByRole('button', { name: 'Open an incident' }))
