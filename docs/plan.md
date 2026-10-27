@@ -2267,6 +2267,11 @@ Arena's own dependencies.
      reaches the sink cannot be cited. A finding gives the CWE, severity,
      `file:line`, the data's path, how it could be exploited, the fix and the
      pack's pages it rests on.
+   Done (the model's review): Code Studio → Security (SecurityReview: sinks
+   by grep_at, traced to callers, kept only when the sink line is cited and
+   the CWE is the pack's, refuted or not by a second pass; fixed, accepted
+   with why and until when, or wrong), and the grounded `/security-review`
+   skill.
    - **Triage**: whether both passes found it, one, or neither; a finding
      people mark as wrong is remembered for that repository, and the
      reflection learns from it (v7.0's skills that learn).

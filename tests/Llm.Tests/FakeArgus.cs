@@ -112,6 +112,9 @@ public sealed class FakeArgus : HttpMessageHandler
     /// <summary>Tools answered with this structured content (JSON), by name: the merge request tools a review reads.</summary>
     public System.Collections.Concurrent.ConcurrentDictionary<string, string> Answers { get; } = new();
 
+    /// <summary>Tools answered by what they are asked (their arguments to the structured content, JSON): before <see cref="Answers"/>.</summary>
+    public System.Collections.Concurrent.ConcurrentDictionary<string, Func<JsonElement, string>> Handlers { get; } = new();
+
     /// <summary>Projects nobody may read: a tool asked about one says so, as Argus does for a project the person is no member of.</summary>
     public System.Collections.Concurrent.ConcurrentDictionary<string, bool> Unreadable { get; } = new();
 
@@ -143,6 +146,8 @@ public sealed class FakeArgus : HttpMessageHandler
             "tools/list" => """{"tools":[{"name":"find_symbol","description":"Find where a symbol is defined","inputSchema":{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}}]}""",
             "tools/call" when p.GetProperty("arguments").TryGetProperty("project", out var asked) && Unreadable.ContainsKey(asked.GetString()!) =>
                 """{"content":[{"type":"text","text":"No project by that path is visible to you."}],"isError":true}""",
+            "tools/call" when Handlers.TryGetValue(p.GetProperty("name").GetString()!, out var handler) =>
+                $$"""{"content":[{"type":"text","text":"(structured)"}],"structuredContent":{{handler(p.GetProperty("arguments"))}},"isError":false}""",
             "tools/call" when Answers.TryGetValue(p.GetProperty("name").GetString()!, out var answer) =>
                 $$"""{"content":[{"type":"text","text":"(structured)"}],"structuredContent":{{answer}},"isError":false}""",
             "tools/call" => p.GetProperty("arguments").GetProperty("name").GetString() == "SecretThing"

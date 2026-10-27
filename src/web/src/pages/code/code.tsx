@@ -17,6 +17,7 @@ import { errorMessage } from '@/lib/api'
 import { AutoReviews } from './auto-reviews'
 import { askCode, mergeRequestsQuery, reviewsQuery, startReview, verdictLabel, type ReviewBrief } from './api'
 import { BusinessMapSection } from './business'
+import { SecurityReviews } from './security'
 import { Workspaces } from './studio'
 
 /** A review's state in a word or two, with its verdict once done. */
@@ -188,6 +189,7 @@ export function CodePage() {
         </Card>
       </div>
       <AutoReviews />
+      <SecurityReviews />
       <h2 className="mt-8 mb-3 text-lg font-semibold">Reviews</h2>
       {reviews.error ? (
         <QueryError error={reviews.error} retry={() => reviews.refetch()} />

@@ -711,6 +711,17 @@ export const topics = {
     manual: { doc: 'chat', section: 'code-review' },
   },
 
+  'security-review': {
+    title: 'A security review',
+    about: 'One repository read for weaknesses: where data from outside reaches a query, a command, a path, a fetch, a deserialiser or HTML, each traced to its callers. A finding is kept only when it quotes the sink\'s line and names a CWE the security pack knows.',
+    parts: [
+      { name: 'Weaknesses', text: 'Each with its CWE and severity, the sink\'s line, where the data comes in and each step to the sink, how it could be exploited, the fix, and the security pack\'s pages it rests on. Ones a second check doubts are listed apart, with why.' },
+      { name: 'Triage', text: '**Fixed**, **Accept the risk** (why, and by when to look again) or **Not a weakness** (why); each is audited.' },
+    ],
+    tasks: [{ title: 'Review a repository\'s security', steps: ['In Code Studio, under **Security**, name the repository and maybe a branch.', 'Press **Review security**.', 'Read each weakness and triage it.'] }],
+    manual: { doc: 'chat', section: 'security-reviews' },
+  },
+
   groups: {
     title: 'Groups',
     about: 'Who may use which tools and models. An app group has the people you add; a directory group follows the company directory or the identity provider.',

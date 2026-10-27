@@ -225,3 +225,63 @@ export function sourceLabel(s: BusinessSource): string {
   if (s.kind === 'wiki') return `wiki: ${s.ref}`
   return s.ref
 }
+
+/** Security reviews of a repository (Code Studio → Security). */
+export interface ScanBrief {
+  id: string
+  project: string
+  ref: string | null
+  status: 'queued' | 'running' | 'done' | 'failed'
+  step: string | null
+  candidates: number
+  read: number
+  dropped: number
+  createdAt: string
+  finishedAt: string | null
+  error: string | null
+}
+
+export interface SecurityFinding {
+  id: string
+  path: string
+  line: number
+  sinkCode: string
+  cwe: string
+  cweTitle: string
+  severity: 'critical' | 'high' | 'medium' | 'low'
+  title: string
+  source: string | null
+  flow: string
+  exploit: string
+  fix: string
+  pages: { title: string; url: string | null }[]
+  verified: boolean | null
+  verifyNote: string | null
+  state: 'open' | 'fixed' | 'accepted' | 'wrong'
+  decidedAt: string | null
+  why: string | null
+  until: string | null
+}
+
+export interface Scan {
+  scan: ScanBrief
+  summary: string | null
+  model: string | null
+  by: string
+  mine: boolean
+  findings: SecurityFinding[]
+}
+
+const running = (s: ScanBrief) => s.status === 'running' || s.status === 'queued'
+
+export const securityScansQuery = {
+  queryKey: ['code', 'security'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ scan: ScanBrief; mine: boolean; open: Partial<Record<SecurityFinding['severity'], number>> }[]>('/api/code/security', { signal }),
+  refetchInterval: (q: { state: { data?: { scan: ScanBrief }[] } }) => (q.state.data?.some((s) => running(s.scan)) ? 3000 : false),
+}
+
+export const securityScanQuery = (id: string) => ({
+  queryKey: ['code', 'security', id] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<Scan>(`/api/code/security/${id}`, { signal }),
+  refetchInterval: (q: { state: { data?: Scan } }) => (q.state.data && running(q.state.data.scan) ? 2000 : false),
+})

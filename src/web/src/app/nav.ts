@@ -35,7 +35,7 @@ export const navigation: NavSection[] = [
       { title: 'Decks', path: '/decks', icon: Presentation, keywords: ['slides', 'presentation', 'powerpoint', 'pptx', 'pdf', 'deck', 'keynote', 'template'], feature: 'decks' },
       { title: 'Media studio', path: '/media', icon: Palette, keywords: ['pictures', 'images', 'photo', 'edit', 'inpaint', 'paint', 'variations', 'upscale', 'enlarge', 'animate', 'video', 'clip', 'midjourney', 'photoshop'], feature: 'media' },
       { title: 'Agent Studio', path: '/studio', icon: Workflow, keywords: ['workflow', 'automation', 'agent', 'zapier', 'n8n', 'flow', 'trigger', 'approval', 'webhook', 'form'], feature: 'agents' },
-      { title: 'Code Studio', path: '/code', icon: GitPullRequest, keywords: ['ide', 'vs code', 'workspace', 'editor', 'terminal', 'debug', 'review', 'merge request', 'mr', 'gitlab', 'diff', 'code assistant', 'branch', 'argus'], feature: 'code-studio' },
+      { title: 'Code Studio', path: '/code', icon: GitPullRequest, keywords: ['ide', 'vs code', 'workspace', 'editor', 'terminal', 'debug', 'review', 'merge request', 'mr', 'gitlab', 'diff', 'code assistant', 'branch', 'argus', 'security', 'vulnerability', 'cwe', 'owasp'], feature: 'code-studio' },
       { title: 'Scheduled tasks', path: '/tasks', icon: CalendarClock, keywords: ['schedule', 'cron', 'daily', 'weekly', 'report', 'digest', 'webhook', 'email', 'notification'] },
       { title: 'Usage & cost', path: '/usage', icon: BarChart3, keywords: ['tokens', 'spend', 'credit', 'budget'] },
       { title: 'Leaderboard', path: '/leaderboard', icon: Trophy, keywords: ['arena', 'compare', 'models', 'elo', 'vote', 'ranking'] },

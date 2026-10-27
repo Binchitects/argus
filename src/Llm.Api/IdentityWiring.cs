@@ -432,6 +432,8 @@ public static class IdentityWiring
         services.AddSingleton<Chat.RoomCaptions>();
         services.AddSingleton<Code.ReviewEngine>();
         services.AddHostedService(sp => sp.GetRequiredService<Code.ReviewEngine>());
+        services.AddSingleton<Code.SecurityReview>();
+        services.AddHostedService(sp => sp.GetRequiredService<Code.SecurityReview>());
         services.AddSingleton<Code.Business.BusinessMap>();
         services.Configure<Meetings.MeetingOptions>(config.GetSection("Meetings"));
         services.AddSingleton<Meetings.MeetingEngine>();
@@ -604,6 +606,7 @@ public static class IdentityWiring
         Chat.RoomTranslations.MapRoomTranslations(app);
         Chat.RoomCalls.MapRoomCalls(app);
         Code.CodeEndpoints.MapCode(app);
+        Code.SecurityEndpoints.MapSecurityScans(app);
         Code.ReviewRuleEndpoints.MapReviewRules(app);
         Code.CodeHostLinks.MapCodeHostLinks(app);
         Code.Studio.StudioEndpoints.MapStudio(app);

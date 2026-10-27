@@ -33,6 +33,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Plans.Plan> Plans => Set<Plans.Plan>();
     public DbSet<Plans.PlanStep> PlanSteps => Set<Plans.PlanStep>();
     public DbSet<Code.ReviewFinding> ReviewFindings => Set<Code.ReviewFinding>();
+    public DbSet<Code.SecurityScan> SecurityScans => Set<Code.SecurityScan>();
+    public DbSet<Code.SecurityFinding> SecurityFindings => Set<Code.SecurityFinding>();
     public DbSet<Code.ReviewRule> ReviewRules => Set<Code.ReviewRule>();
     public DbSet<ChatShareView> ChatShareViews => Set<ChatShareView>();
     public DbSet<Canvas> Canvases => Set<Canvas>();
@@ -329,6 +331,34 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Conversation>().WithMany().HasForeignKey(x => x.RoomId).OnDelete(DeleteBehavior.SetNull);
             e.HasMany(x => x.Findings).WithOne().HasForeignKey(f => f.ReviewId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Code.SecurityScan>(e =>
+        {
+            e.ToTable("security_scans");
+            e.Property(x => x.Project).HasMaxLength(500);
+            e.Property(x => x.Ref).HasMaxLength(300);
+            e.Property(x => x.Status).HasMaxLength(16);
+            e.Property(x => x.Step).HasMaxLength(200);
+            e.Property(x => x.Model).HasMaxLength(200);
+            e.HasIndex(x => new { x.UserId, x.CreatedAt });
+            e.HasIndex(x => new { x.Project, x.CreatedAt });
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.Findings).WithOne().HasForeignKey(f => f.ScanId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Code.SecurityFinding>(e =>
+        {
+            e.ToTable("security_findings");
+            e.Property(x => x.Path).HasMaxLength(1000);
+            e.Property(x => x.SinkCode).HasMaxLength(1000);
+            e.Property(x => x.Cwe).HasMaxLength(16);
+            e.Property(x => x.CweTitle).HasMaxLength(300);
+            e.Property(x => x.Severity).HasMaxLength(16);
+            e.Property(x => x.Title).HasMaxLength(300);
+            e.Property(x => x.Source).HasMaxLength(1000);
+            e.Property(x => x.State).HasMaxLength(16);
+            e.Property(x => x.Why).HasMaxLength(2000);
+            e.HasIndex(x => new { x.ScanId, x.Severity });
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.DecidedById).OnDelete(DeleteBehavior.SetNull);
         });
         builder.Entity<Code.ReviewRule>(e =>
         {

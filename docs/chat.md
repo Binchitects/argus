@@ -944,6 +944,38 @@ as they open and get new commits, without anyone pressing Review:
   `review.policy` feature, which everyone has unless an admin denies it;
   a reviews admin sees and changes everyone's rules.
 
+### Security reviews
+
+**Code Studio → Security** reviews a repository's security at a branch, tag
+or commit, read with your own access (Argus, read-only); nothing is written
+to the code host. Starting one needs `review.run`.
+
+1. **The sinks**: git grep (`grep_at`) finds where code makes a dangerous
+   call: SQL and other queries, OS commands, deserialisers, code run from
+   text, XML parsers, file paths, HTML written, URLs the server fetches and
+   redirects, in C#, Java and Kotlin, Python, JavaScript and TypeScript, Go,
+   PHP and Ruby. Tests, examples, vendored and built code and comments are
+   left out.
+2. **Each traced**: the 30 most dangerous (at most three a file) are read
+   with their function and the places that call it, and the model judges
+   whether data from outside reaches the call without what it needs (a
+   parameter, an allow-list, encoding, a safe parser setting).
+3. **Grounded**: a suspicion becomes a finding only when it quotes the
+   sink's line as the file has it and names a CWE the `security` knowledge
+   pack knows (the sink's own when the model's is not one); the rest are
+   dropped, and counted. Each finding carries the pack's pages: the CWE, the
+   OWASP cheat sheet and CodeQL's query for the language.
+4. **Refuted or not**: a second pass, with the CWE's page in hand, tries to
+   refute each; a refuted one is kept apart, with why.
+
+A finding gives its CWE and severity, `file:line` with the sink quoted,
+where the data comes in and each step to the sink, how it could be
+exploited and the fix. Mark it **Fixed**, **Accept the risk** (why, and by
+when to look again, within the year) or **Not a weakness** (why); each is
+audited as `security.finding.*`. A reviews admin sees everyone's. The
+`/security-review` skill does the same in a chat or Code Arena, with the
+Argus tools.
+
 ### Fix it
 
 An agent makes the change for a review's finding, an issue or a failed

@@ -189,6 +189,31 @@ public sealed class FakeModel : HttpMessageHandler
             chunks = [Delta(new JsonObject { ["content"] = $"```json\n{{\"findings\": {findings}}}\n```" }), Finish("stop"), Usage(300, 0, 40)];
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
         }
+        // Security review: the marked (">") line judged by its marker: "[vuln]" a weakness cited exactly, "[miscite]" one cited wrong,
+        // "[badcwe]" one with a CWE the pack does not know; none, not vulnerable. The refuting pass refutes "[harmless]".
+        if (system0.StartsWith("You are an application security engineer", StringComparison.Ordinal))
+        {
+            var marked = lastUser.Split('\n').FirstOrDefault(l => l.Length > 7 && l[5..7] == " >") ?? "";
+            var code = marked.Length > 7 ? marked[7..].Trim() : "";
+            var line = marked.Length > 5 && int.TryParse(marked[..5].Trim(), out var n) ? n : 0;
+            var said = !marked.Contains('[') ? """{"vulnerable": false, "check": "where id comes from"}"""
+                : new JsonObject
+                {
+                    ["vulnerable"] = true, ["cwe"] = marked.Contains("[badcwe]", StringComparison.Ordinal) ? "CWE-99999" : "cwe-89", ["severity"] = "high",
+                    ["title"] = "SQL built from the request", ["sink_line"] = line,
+                    ["sink_code"] = marked.Contains("[miscite]", StringComparison.Ordinal) ? "db.Run(query)" : code,
+                    ["source"] = "Controller.cs:9 Request.Query[\"id\"]", ["flow"] = new JsonArray("Request.Query[\"id\"]", "Orders.Find(id)", "new SqlCommand(... + id)"),
+                    ["exploit"] = "id = ' OR '1'='1", ["fix"] = "Use a parameter: @id.",
+                }.ToJsonString();
+            chunks = [Delta(new JsonObject { ["content"] = said }), Finish("stop"), Usage(400, 0, 60)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
+        if (system0.StartsWith("You check another engineer's security finding", StringComparison.Ordinal))
+        {
+            var real = !lastUser.Contains("[harmless]", StringComparison.Ordinal);
+            chunks = [Delta(new JsonObject { ["content"] = $$"""{"real": {{(real ? "true" : "false")}}, "why": "{{(real ? "The id goes into the text." : "The value is a constant.")}}"}""" }), Finish("stop"), Usage(200, 0, 20)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
         // Asked for JSON only (Agent Studio's ask step): the JSON a "[json:…]" marker in the question holds.
         if (system0.EndsWith("Answer with JSON only, no other words.", StringComparison.Ordinal)
             && System.Text.RegularExpressions.Regex.Match(lastUser, @"\[json:(.*)\]", System.Text.RegularExpressions.RegexOptions.Singleline) is { Success: true } jsonMarker)
