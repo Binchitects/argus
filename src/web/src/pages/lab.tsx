@@ -327,7 +327,7 @@ export function LabNotebookPage() {
           </Button>
         }
       />
-      <ol aria-label="Notebook" className="grid gap-3">
+      <ol aria-label="Notebook" aria-busy={working} className="grid gap-3">
         {steps
           .filter((m) => m.role !== 'tool')
           .map((m) =>

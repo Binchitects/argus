@@ -67,6 +67,7 @@ describe('science lab', () => {
     await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/chat/conversations')?.body).toEqual({ lab: 'physics' }))
     await waitFor(() => expect(calls.find((c) => c.path === '/api/chat/conversations/n1/messages')?.body).toEqual({ content: 'A ball falls 20 m.', attachments: [] }))
     expect(await screen.findByRole('region', { name: 'The problem' })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('list', { name: 'Notebook' })).toHaveAttribute('aria-busy', 'false'))
     expect(sent).toBe(1)
   })
 

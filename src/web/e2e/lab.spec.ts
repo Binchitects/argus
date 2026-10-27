@@ -32,7 +32,7 @@ test('the science lab works a problem as a notebook, its check proved by SymPy, 
     await expect(check).toContainText('Proved', { timeout: 240_000 })
     await expect(check).toContainText('simplifies to 0')
     await expect(page.getByRole('main').getByText(/\d+ proved/).first()).toBeVisible()
-    await expect(page.getByRole('list', { name: 'Notebook' }).getByText('Working…')).toHaveCount(0, { timeout: 120_000 })
+    await expect(page.getByRole('list', { name: 'Notebook' })).toHaveAttribute('aria-busy', 'false', { timeout: 120_000 })
     await expectAccessible(page, info, 'lab-notebook')
     await screenshot(page, info, `lab-notebook${isMobile ? '-phone' : ''}`)
 
