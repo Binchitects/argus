@@ -2093,6 +2093,8 @@ documents; it says what is the operator's part, as v7.1 does.
    policies. Each has an owner, versions, an approver, a review date that
    warns when due, and the people who must acknowledge it (with when they
    did). A change starts a new version and its acknowledgements.
+   Done: Admin → Compliance → Policies (GOV-06, the `policies` check), the
+   templates adopted or a policy written, Your account → Policies to read.
 5. **Audits and what they find**:
    - the internal audit programme (ISO 27001 9.2), each audit with its scope,
      its auditor and its findings;

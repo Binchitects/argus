@@ -3512,6 +3512,131 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("notice_acceptances", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Compliance.Policy", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Audience")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.PrimitiveCollection<Guid[]>("Groups")
+                        .IsRequired()
+                        .HasColumnType("uuid[]");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Owner")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int>("ReviewMonths")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Key")
+                        .IsUnique();
+
+                    b.ToTable("policies", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Compliance.PolicyAcknowledgement", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("PolicyVersionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("PolicyVersionId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("policy_acknowledgements", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Compliance.PolicyVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ApprovedBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Changes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<Guid>("PolicyId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset?>("ReviewDue")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset?>("ReviewedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ReviewedBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(200000)
+                        .HasColumnType("character varying(200000)");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PolicyId", "Version")
+                        .IsUnique();
+
+                    b.ToTable("policy_versions", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Compliance.Risk", b =>
                 {
                     b.Property<Guid>("Id")
@@ -6831,6 +6956,30 @@ namespace Llm.Core.Data.Migrations
                     b.HasOne("Llm.Core.Identity.AppUser", null)
                         .WithMany()
                         .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Compliance.PolicyAcknowledgement", b =>
+                {
+                    b.HasOne("Llm.Core.Compliance.PolicyVersion", null)
+                        .WithMany()
+                        .HasForeignKey("PolicyVersionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Compliance.PolicyVersion", b =>
+                {
+                    b.HasOne("Llm.Core.Compliance.Policy", null)
+                        .WithMany()
+                        .HasForeignKey("PolicyId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

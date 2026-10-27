@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 28 of the 128 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 29 of the 128 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
@@ -17,8 +17,8 @@ Arena's controls serve 28 of the 128 clauses here. Every clause is met by the co
 | GV.OV-02 | The cybersecurity risk management strategy is reviewed and adjusted to ensure coverage of organizational requirements and risks |  | [The management system (ISMS and AIMS)](../isms.md) |
 | GV.OV-03 | Organizational cybersecurity risk management performance is evaluated and reviewed for adjustments needed | [GOV-01](../controls.md#gov-01-the-controls-are-kept-from-breaking) | [The management system (ISMS and AIMS)](../isms.md) |
 | GV.PO | Policy |  | [Information security policy](../policies/information-security.md) |
-| GV.PO-01 | Policy for managing cybersecurity risks is established based on organizational context, cybersecurity strategy, and priorities and is communicated and enforced | [GOV-02](../controls.md#gov-02-everyone-accepts-the-acceptable-use-and-privacy-notice) | [Information security policy](../policies/information-security.md) |
-| GV.PO-02 | Policy for managing cybersecurity risks is reviewed, updated, communicated, and enforced to reflect changes in requirements, threats, technology, and organizational mission |  | [Information security policy](../policies/information-security.md) |
+| GV.PO-01 | Policy for managing cybersecurity risks is established based on organizational context, cybersecurity strategy, and priorities and is communicated and enforced | [GOV-02](../controls.md#gov-02-everyone-accepts-the-acceptable-use-and-privacy-notice), [GOV-06](../controls.md#gov-06-policies-are-owned-approved-reviewed-and-read) | [Information security policy](../policies/information-security.md) |
+| GV.PO-02 | Policy for managing cybersecurity risks is reviewed, updated, communicated, and enforced to reflect changes in requirements, threats, technology, and organizational mission | [GOV-06](../controls.md#gov-06-policies-are-owned-approved-reviewed-and-read) | [Information security policy](../policies/information-security.md) |
 | GV.RM | Risk Management Strategy | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [Risk management policy](../policies/risk-management.md) |
 | GV.RM-01 | Risk management objectives are established and agreed to by organizational stakeholders |  | [Risk management policy](../policies/risk-management.md) |
 | GV.RM-02 | Risk appetite and risk tolerance statements are established, communicated, and maintained |  | [Risk management policy](../policies/risk-management.md) |

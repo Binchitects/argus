@@ -106,6 +106,9 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Compliance.RiskEvent> RiskEvents => Set<Compliance.RiskEvent>();
     public DbSet<Compliance.SoaEntry> SoaEntries => Set<Compliance.SoaEntry>();
     public DbSet<Compliance.SoaApproval> SoaApprovals => Set<Compliance.SoaApproval>();
+    public DbSet<Compliance.Policy> Policies => Set<Compliance.Policy>();
+    public DbSet<Compliance.PolicyVersion> PolicyVersions => Set<Compliance.PolicyVersion>();
+    public DbSet<Compliance.PolicyAcknowledgement> PolicyAcknowledgements => Set<Compliance.PolicyAcknowledgement>();
     public DbSet<Compliance.AccessReviewItem> AccessReviewItems => Set<Compliance.AccessReviewItem>();
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<KnowledgeSource> KnowledgeSources => Set<KnowledgeSource>();
@@ -1059,6 +1062,34 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(s => s.ApprovedBy).HasMaxLength(256);
             e.Property(s => s.Note).HasMaxLength(2000);
             e.HasIndex(s => new { s.Framework, s.Version }).IsUnique();
+        });
+        builder.Entity<Compliance.Policy>(e =>
+        {
+            e.ToTable("policies");
+            e.Property(p => p.Key).HasMaxLength(64);
+            e.Property(p => p.Title).HasMaxLength(200);
+            e.Property(p => p.Owner).HasMaxLength(256);
+            e.Property(p => p.CreatedBy).HasMaxLength(256);
+            e.HasIndex(p => p.Key).IsUnique();
+        });
+        builder.Entity<Compliance.PolicyVersion>(e =>
+        {
+            e.ToTable("policy_versions");
+            e.Property(v => v.Text).HasMaxLength(200_000);
+            e.Property(v => v.Changes).HasMaxLength(2000);
+            e.Property(v => v.CreatedBy).HasMaxLength(256);
+            e.Property(v => v.ApprovedBy).HasMaxLength(256);
+            e.Property(v => v.ReviewedBy).HasMaxLength(256);
+            e.HasIndex(v => new { v.PolicyId, v.Version }).IsUnique();
+            e.HasOne<Compliance.Policy>().WithMany().HasForeignKey(v => v.PolicyId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Compliance.PolicyAcknowledgement>(e =>
+        {
+            e.ToTable("policy_acknowledgements");
+            e.HasIndex(a => new { a.PolicyVersionId, a.UserId }).IsUnique();
+            e.HasIndex(a => a.UserId);
+            e.HasOne<Compliance.PolicyVersion>().WithMany().HasForeignKey(a => a.PolicyVersionId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Identity.AppUser>().WithMany().HasForeignKey(a => a.UserId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<Compliance.NoticeAcceptance>(e =>
         {

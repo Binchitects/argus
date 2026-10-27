@@ -87,6 +87,7 @@ public static class ComplianceEndpoints
         services.AddScoped<Incidents>();
         services.AddScoped<Risks>();
         services.AddScoped<Soa>();
+        services.AddScoped<Policies>();
         services.AddHostedService<AccessReviewSchedule>();
     }
 
@@ -192,6 +193,31 @@ public static class ComplianceEndpoints
                 : Results.File(Encoding.UTF8.GetBytes(text), "text/csv", $"statement-of-applicability-{framework}{(version is { } n ? $"-v{n}" : "")}.csv");
         });
 
+        // The company's policies, governed (GOV-06).
+        g.MapGet("/policies", async (Policies policies, CancellationToken ct) => Results.Ok(await policies.ListAsync(ct)));
+        g.MapGet("/policies/templates", () => Results.Ok(Policies.TemplateList));
+        g.MapPost("/policies", async (PolicyCreate body, ClaimsPrincipal p, UserManager<AppUser> users, Policies policies, CancellationToken ct) =>
+            await PolicyAsync(async () => await policies.CreateAsync(body, await Who(p, users), ct)));
+        g.MapGet("/policies/{id:guid}", async (Guid id, Policies policies, CancellationToken ct) => await PolicyAsync(async () =>
+        {
+            var (policy, versions, pending) = await policies.GetAsync(id, ct);
+            return new { policy, versions, pending };
+        }));
+        g.MapGet("/policies/{id:guid}/versions/{version:int}", async (Guid id, int version, Policies policies, CancellationToken ct) =>
+            await PolicyAsync(async () => new { text = await policies.TextAsync(id, version, ct) }));
+        g.MapPut("/policies/{id:guid}", async (Guid id, PolicySettings body, ClaimsPrincipal p, UserManager<AppUser> users, Policies policies, CancellationToken ct) =>
+            await PolicyAsync(async () => await policies.SetAsync(id, body, await Who(p, users), ct)));
+        g.MapPut("/policies/{id:guid}/draft", async (Guid id, PolicyDraft body, ClaimsPrincipal p, UserManager<AppUser> users, Policies policies, CancellationToken ct) =>
+            await PolicyAsync(async () => await policies.DraftAsync(id, body, await Who(p, users), ct)));
+        g.MapPost("/policies/{id:guid}/approve", async (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, Policies policies, Notifications.Notifier notifier, CancellationToken ct) =>
+            await PolicyAsync(async () =>
+            {
+                var me = (await users.GetUserAsync(p))!;
+                return await policies.ApproveAsync(id, me.UserName!, me.Id, notifier, ct);
+            }));
+        g.MapPost("/policies/{id:guid}/review", async (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, Policies policies, CancellationToken ct) =>
+            await PolicyAsync(async () => await policies.ReviewAsync(id, await Who(p, users), ct)));
+
         g.MapGet("/incidents", async (AppDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
             var since = clock.GetUtcNow().AddDays(-60);
@@ -254,6 +280,15 @@ public static class ComplianceEndpoints
         });
 
         // The person's own: what they asked, and asking.
+        // The policies a person must read, and their acknowledgement.
+        var toRead = app.MapGroup("/api/account/policies").PersonOnly();
+        toRead.MapGet("", async (ClaimsPrincipal p, UserManager<AppUser> users, Policies policies, CancellationToken ct) =>
+            Results.Ok(await policies.ForAsync((await users.GetUserAsync(p))!, ct)));
+        toRead.MapGet("/{version:guid}", async (Guid version, ClaimsPrincipal p, UserManager<AppUser> users, Policies policies, CancellationToken ct) =>
+            await PolicyAsync(async () => new { text = await policies.ReadTextAsync((await users.GetUserAsync(p))!, version, ct) }));
+        toRead.MapPost("/{version:guid}/acknowledge", async (Guid version, ClaimsPrincipal p, UserManager<AppUser> users, Policies policies, CancellationToken ct) =>
+            await PolicyAsync(async () => await policies.AcknowledgeAsync((await users.GetUserAsync(p))!, version, ct)));
+
         var mine = app.MapGroup("/api/account/data-requests").PersonOnly();
         mine.MapGet("", async (ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct) =>
         {
@@ -321,6 +356,22 @@ public static class ComplianceEndpoints
 
     /// <summary>The signed-in person's name, as the records keep it.</summary>
     private static async Task<string> Who(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!.UserName!;
+
+    private static async Task<IResult> PolicyAsync<T>(Func<Task<T>> work)
+    {
+        try
+        {
+            return Results.Ok(await work());
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound();
+        }
+        catch (PolicyException ex)
+        {
+            return AuthEndpoints.Problem(400, "policy", ex.Message);
+        }
+    }
 
     private static async Task<IResult> SoaAsync<T>(Func<Task<T>> work)
     {
@@ -482,6 +533,9 @@ public static class ComplianceEndpoints
                 soa-iso27001.csv      ISO 27001's Statement of Applicability as it stands: each Annex A control, whether it applies and why, how far
                 soa-iso42001.csv      the same for ISO 42001's Annex A
                 soa-approvals.csv     every approved version of either, by whom and when
+                policies.csv          each policy's every version: approved by whom and when, its review, who must read it and how many did
+                policy-acknowledgements.csv  who read which version of which policy, and when
+                policies/             the text of each policy's version in force
 
                 """);
             Text("controls.yaml", ComplianceControls.Text);
@@ -530,6 +584,23 @@ public static class ComplianceEndpoints
             var approvals = await db.SoaApprovals.AsNoTracking().OrderBy(a => a.Framework).ThenBy(a => a.Version).ToListAsync(ct);
             Text("soa-approvals.csv", Csv([["framework", "version", "approved by", "at", "note"],
                 .. approvals.Select(a => new object?[] { a.Framework, a.Version, a.ApprovedBy, a.ApprovedAt.ToString("u", CultureInfo.InvariantCulture), a.Note })]));
+            var policyList = await http.RequestServices.GetRequiredService<Policies>().ListAsync(ct);
+            var policyVersions = await db.PolicyVersions.AsNoTracking().OrderBy(v => v.PolicyId).ThenBy(v => v.Version).ToListAsync(ct);
+            Text("policies.csv", Csv([["policy", "title", "version", "changes", "approved by", "approved at", "review due", "reviewed by", "reviewed at", "read by", "acknowledged", "must read"],
+                .. policyVersions.Join(policyList, v => v.PolicyId, pl => pl.Id, (v, pl) => new object?[]
+                {
+                    pl.Key, pl.Title, v.Version, v.Changes, v.ApprovedBy, v.ApprovedAt?.ToString("u", CultureInfo.InvariantCulture), v.ReviewDue?.ToString("u", CultureInfo.InvariantCulture),
+                    v.ReviewedBy, v.ReviewedAt?.ToString("u", CultureInfo.InvariantCulture), pl.Audience, pl.Version == v.Version ? pl.Acknowledged : null, pl.Version == v.Version ? pl.Readers : null,
+                })]));
+            var acknowledged = await db.PolicyAcknowledgements.AsNoTracking().Join(db.PolicyVersions.AsNoTracking(), a => a.PolicyVersionId, v => v.Id, (a, v) => new { a.UserId, a.At, v.PolicyId, v.Version })
+                .Join(db.Users.AsNoTracking(), x => x.UserId, u => u.Id, (x, u) => new { u.UserName, x.At, x.PolicyId, x.Version }).OrderBy(x => x.At).ToListAsync(ct);
+            var keys = policyList.ToDictionary(pl => pl.Id, pl => pl.Key);
+            Text("policy-acknowledgements.csv", Csv([["policy", "version", "person", "at"],
+                .. acknowledged.Select(x => new object?[] { keys.GetValueOrDefault(x.PolicyId), x.Version, x.UserName, x.At.ToString("u", CultureInfo.InvariantCulture) })]));
+            foreach (var pl in policyList.Where(pl => pl.Version is not null))
+            {
+                Text($"policies/{pl.Key}-v{pl.Version}.md", policyVersions.Single(v => v.PolicyId == pl.Id && v.Version == pl.Version).Text);
+            }
             Text("audit-chain.json", JsonSerializer.Serialize(await watch.WalkAsync(anchor: false, ct), json));
             Text("audit-anchors.jsonl", string.Concat(AnchorsOf(auditOptions.CurrentValue).Select(a => JsonSerializer.Serialize(a, JsonSerializerOptions.Web) + "\n")));
         }

@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 33 of the 68 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 36 of the 68 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
@@ -60,11 +60,11 @@ Arena's controls serve 33 of the 68 clauses here. Every clause is met by the com
 | 164.312(e)(2)(i) | Integrity controls (addressable) |  | [Cryptography policy](../policies/cryptography.md) |
 | 164.312(e)(2)(ii) | Encryption (addressable) | [NET-01](../controls.md#net-01-encrypted-in-transit-one-way-in) | [Cryptography policy](../policies/cryptography.md) |
 | 164.314(a)(1) | Business associate contracts or other arrangements |  | [Supplier and transfer policy](../policies/suppliers.md) |
-| 164.316(a) | Policies and procedures |  | [Information security policy](../policies/information-security.md) |
-| 164.316(b)(1) | Documentation |  | [Information security policy](../policies/information-security.md) |
+| 164.316(a) | Policies and procedures | [GOV-06](../controls.md#gov-06-policies-are-owned-approved-reviewed-and-read) | [Information security policy](../policies/information-security.md) |
+| 164.316(b)(1) | Documentation | [GOV-06](../controls.md#gov-06-policies-are-owned-approved-reviewed-and-read) | [Information security policy](../policies/information-security.md) |
 | 164.316(b)(2)(i) | Time limit of six years (required) | [DAT-07](../controls.md#dat-07-records-are-kept-for-set-times-and-no-longer) | [Information security policy](../policies/information-security.md) |
 | 164.316(b)(2)(ii) | Availability (required) |  | [Information security policy](../policies/information-security.md) |
-| 164.316(b)(2)(iii) | Updates (required) |  | [Information security policy](../policies/information-security.md) |
+| 164.316(b)(2)(iii) | Updates (required) | [GOV-06](../controls.md#gov-06-policies-are-owned-approved-reviewed-and-read) | [Information security policy](../policies/information-security.md) |
 | 164.404 | Notification to individuals of a breach | [MON-02](../controls.md#mon-02-security-events-raise-alerts-and-incidents-are-handled-in-time) | [Incident response runbook](../incident-response.md) |
 | 164.406 | Notification to the media of a breach |  | [Incident response runbook](../incident-response.md) |
 | 164.408 | Notification to the Secretary of a breach | [MON-02](../controls.md#mon-02-security-events-raise-alerts-and-incidents-are-handled-in-time) | [Incident response runbook](../incident-response.md) |

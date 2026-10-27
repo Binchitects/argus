@@ -853,3 +853,37 @@ controls:
       Decide each control with the risk owners, approve the statement (the
       information security officer, or management), and approve it again
       after the risk assessment each year and when the scope changes.
+
+  - id: GOV-06
+    title: Policies are owned, approved, reviewed and read
+    meets: >-
+      The company's policies (Admin → Compliance → Policies), adopted from the
+      templates in docs/compliance or written there: each with an owner, the
+      people who must read it (everyone, the admins, or groups), and versions.
+      A draft is in force once a person approves it (a later version says
+      what changed); its review is due after the period the policy sets; and
+      each reader acknowledges the version in force under Your account, told
+      of it in their bell. Every step is audited; every version, its approval
+      and review, the acknowledgements and the texts in force are in the
+      evidence.
+    frameworks:
+      iso27001: [5.2, 7.3, 7.5.2, 7.5.3, A.5.1, A.6.3]
+      iso42001: [5.2, 7.3, 7.5.2, 7.5.3, A.2.2, A.2.4]
+      iso22301: [5.2, 7.5]
+      soc2: [CC2.2, CC5.3]
+      hipaa: [164.316(a), 164.316(b)(1), 164.316(b)(2)(iii)]
+      pcidss: [12.1]
+      csaccm: [GRC]
+      nistcsf: [GV.PO-01, GV.PO-02]
+      nist80053: [PL-1, PM-1]
+      nist800171: [03.15.01]
+      airmf: [GOVERN 1.2, GOVERN 1.4]
+    docs: [compliance/README.md#policies]
+    tests:
+      - Llm.Tests/PolicyTests.A_policy_from_a_template_is_in_force_once_approved_and_each_reader_acknowledges_its_version
+      - Llm.Tests/PolicyTests.A_new_version_says_what_changed_is_read_again_and_a_review_keeps_it_in_force
+    checks: [app:policies]
+    operator: >-
+      Adopt the policies that apply, fill in their brackets, have them
+      approved by management, review each on time, and follow up with
+      those who have not read them.

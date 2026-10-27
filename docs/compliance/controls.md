@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-The 29 controls Arena provides, from [controls.yaml](controls.yaml). How they are kept: [README](README.md#controls-and-how-they-are-kept). Each framework's clauses and the controls that serve them: [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md), [SOC 2, Trust Services Criteria](frameworks/soc2.md), [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md), [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md), [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md), [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md), [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md), [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md), [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md), [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md), [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md), [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md), [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md), [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md).
+The 30 controls Arena provides, from [controls.yaml](controls.yaml). How they are kept: [README](README.md#controls-and-how-they-are-kept). Each framework's clauses and the controls that serve them: [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md), [SOC 2, Trust Services Criteria](frameworks/soc2.md), [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md), [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md), [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md), [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md), [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md), [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md), [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md), [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md), [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md), [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md), [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md), [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md).
 
 ## People and access (IAM)
 
@@ -826,3 +826,32 @@ For each of ISO 27001's and ISO 42001's Annex A controls (Admin → Compliance �
 **Watched by** `app:soa` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
 
 **The company's part** Decide each control with the risk owners, approve the statement (the information security officer, or management), and approve it again after the risk assessment each year and when the scope changes.
+
+### GOV-06: Policies are owned, approved, reviewed and read
+
+The company's policies (Admin → Compliance → Policies), adopted from the templates in docs/compliance or written there: each with an owner, the people who must read it (everyone, the admins, or groups), and versions. A draft is in force once a person approves it (a later version says what changed); its review is due after the period the policy sets; and each reader acknowledges the version in force under Your account, told of it in their bell. Every step is audited; every version, its approval and review, the acknowledgements and the texts in force are in the evidence.
+
+**Serves**
+
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): 5.2 Policy; 7.3 Awareness; 7.5.2 Creating and updating documented information; 7.5.3 Control of documented information; A.5.1 Policies for information security; A.6.3 Information security awareness, education and training
+- [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md): 5.2 AI policy; 7.3 Awareness; 7.5.2 Creating and updating documented information; 7.5.3 Control of documented information; A.2.2 AI policy; A.2.4 Review of the AI policy
+- [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md): 5.2 Business continuity policy; 7.5 Documented information
+- [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC2.2 Internal communication of objectives and responsibilities; CC5.3 Policies and procedures that put controls in place
+- [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.316(a) Policies and procedures; 164.316(b)(1) Documentation; 164.316(b)(2)(iii) Updates (required)
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 12.1 An information security policy is known and current
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): GRC Governance, risk and compliance
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): GV.PO-01 Policy for managing cybersecurity risks is established based on organizational context, cybersecurity strategy, and priorities and is communicated and enforced; GV.PO-02 Policy for managing cybersecurity risks is reviewed, updated, communicated, and enforced to reflect changes in requirements, threats, technology, and organizational mission
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): PL-1 Policy and Procedures; PM-1 Information Security Program Plan
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.15.01 Policy and Procedures
+- [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md): GOVERN 1.2 The characteristics of trustworthy AI are integrated into organizational policies, processes, and procedures.; GOVERN 1.4 The risk management process and its outcomes are established through transparent policies, procedures, and other controls based on organizational risk priorities.
+
+**Documented in** [compliance/README.md#policies](README.md#policies)
+
+**Proved by**
+
+- `Llm.Tests/PolicyTests.A_policy_from_a_template_is_in_force_once_approved_and_each_reader_acknowledges_its_version`
+- `Llm.Tests/PolicyTests.A_new_version_says_what_changed_is_read_again_and_a_review_keeps_it_in_force`
+
+**Watched by** `app:policies` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+
+**The company's part** Adopt the policies that apply, fill in their brackets, have them approved by management, review each on time, and follow up with those who have not read them.

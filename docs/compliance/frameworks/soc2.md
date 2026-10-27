@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 30 of the 61 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 32 of the 61 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
@@ -12,7 +12,7 @@ Arena's controls serve 30 of the 61 clauses here. Every clause is met by the com
 | CC1.4 | Attracting, developing and keeping competent people |  | [People security policy](../policies/people-security.md) |
 | CC1.5 | Accountability for internal control responsibilities |  | [People security policy](../policies/people-security.md) |
 | CC2.1 | Relevant and quality information for internal control |  | [Information security policy](../policies/information-security.md) |
-| CC2.2 | Internal communication of objectives and responsibilities |  | [Information security policy](../policies/information-security.md) |
+| CC2.2 | Internal communication of objectives and responsibilities | [GOV-06](../controls.md#gov-06-policies-are-owned-approved-reviewed-and-read) | [Information security policy](../policies/information-security.md) |
 | CC2.3 | Communication with external parties | [GOV-02](../controls.md#gov-02-everyone-accepts-the-acceptable-use-and-privacy-notice) | [Information security policy](../policies/information-security.md) |
 | CC3.1 | Objectives clear enough to identify and assess risks | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [Risk management policy](../policies/risk-management.md) |
 | CC3.2 | Identifying and analysing risks | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [Risk management policy](../policies/risk-management.md) |
@@ -22,7 +22,7 @@ Arena's controls serve 30 of the 61 clauses here. Every clause is met by the com
 | CC4.2 | Communicating deficiencies |  | [Information security policy](../policies/information-security.md) |
 | CC5.1 | Control activities that reduce risks |  | [Information security policy](../policies/information-security.md) |
 | CC5.2 | General control activities over technology |  | [Information security policy](../policies/information-security.md) |
-| CC5.3 | Policies and procedures that put controls in place |  | [Information security policy](../policies/information-security.md) |
+| CC5.3 | Policies and procedures that put controls in place | [GOV-06](../controls.md#gov-06-policies-are-owned-approved-reviewed-and-read) | [Information security policy](../policies/information-security.md) |
 | CC6.1 | Logical access security software, infrastructure and architectures | [IAM-01](../controls.md#iam-01-each-person-signs-in-as-themselves-with-a-strong-password), [IAM-02](../controls.md#iam-02-sessions-end-on-their-own), [IAM-03](../controls.md#iam-03-two-factor-sign-in), [IAM-05](../controls.md#iam-05-least-privilege-by-roles-and-rules), [IAM-06](../controls.md#iam-06-api-keys-are-personal-revocable-and-checked), [DAT-05](../controls.md#dat-05-secrets-and-peoples-files-are-encrypted-at-rest) | [Access control policy](../policies/access-control.md) |
 | CC6.2 | Registering and authorising new users | [IAM-01](../controls.md#iam-01-each-person-signs-in-as-themselves-with-a-strong-password), [IAM-04](../controls.md#iam-04-joiners-and-leavers-follow-the-companys-directory), [IAM-07](../controls.md#iam-07-privileged-access-is-reviewed) | [Access control policy](../policies/access-control.md) |
 | CC6.3 | Role-based access, least privilege and segregation of duties | [IAM-04](../controls.md#iam-04-joiners-and-leavers-follow-the-companys-directory), [IAM-05](../controls.md#iam-05-least-privilege-by-roles-and-rules), [IAM-07](../controls.md#iam-07-privileged-access-is-reviewed) | [Access control policy](../policies/access-control.md) |

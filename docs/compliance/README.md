@@ -178,6 +178,30 @@ and the approvals are in the evidence (`soa-iso27001.csv`, `soa-iso42001.csv`,
 when it changes after its approval, and a year after it (ISO 42001's too, once
 the company starts one).
 
+## Policies
+
+Admin → Compliance → Policies keeps the company's policies (GOV-06). Adopt
+one of the templates (the policies in this folder and [the management
+system](isms.md)), or write one. Each has:
+
+- **an owner**, and **who must read it**: everyone who can sign in, the
+  admins, or the members of chosen groups;
+- **versions**: a draft is edited until a person approves it, and is then in
+  force. A later version says what changed, and the earlier ones stay as they
+  were;
+- **a review**, due after the period the policy sets (a year by default). A
+  review that keeps it sets the next. A policy past its review is amber, and
+  red a month past;
+- **acknowledgements**: each reader is told in their bell when a version
+  comes into force, reads it under Your account → Policies to read, and says
+  so. Admin → Compliance shows who has not.
+
+Every step is in the audit log. Each version, its approval and review, the
+acknowledgements and the texts in force are in the evidence (`policies.csv`,
+`policy-acknowledgements.csv`, `policies/`). The `policies` check is amber
+until one is in force, when one is past its review, or when one is not read by
+everyone a month after it came into force.
+
 ## Access reviews
 
 An access review lists, for a reviewer to **Keep** or **Revoke**:

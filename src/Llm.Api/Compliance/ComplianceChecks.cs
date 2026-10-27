@@ -22,7 +22,7 @@ public sealed record CheckResult(string Id, string Title, string State, string D
 /// </summary>
 public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users, Access.AccessService access, IOptionsMonitor<AuthOptions> auth,
     IOptions<IdentityOptions> identity, IOptionsMonitor<Retention.RetentionOptions> retention, StoragePlaces places, LokiDatasource loki,
-    PromDatasource prom, IOptions<StackOptions> stack, AuditWatch auditWatch, AuditChainState auditState, IOptionsMonitor<AuditOptions> auditOptions, AuditForwarder forwarder, IOptionsMonitor<ComplianceOptions> compliance, IOptionsMonitor<NoticeOptions> notice, TimeProvider clock)
+    PromDatasource prom, IOptions<StackOptions> stack, AuditWatch auditWatch, AuditChainState auditState, IOptionsMonitor<AuditOptions> auditOptions, AuditForwarder forwarder, IOptionsMonitor<ComplianceOptions> compliance, IOptionsMonitor<NoticeOptions> notice, Policies policies, TimeProvider clock)
 {
     public const string Ok = "ok", Warn = "warn", Fail = "fail", Unknown = "unknown";
 
@@ -49,6 +49,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         ("data-requests", "People's data requests answered in time"),
         ("risks", "Risks are assessed, treated and reviewed in time"),
         ("soa", "The Statement of Applicability is approved and current"),
+        ("policies", "Policies are approved, reviewed in time and read"),
     ];
 
     /// <summary>A newest backup older than this is amber; one older than <see cref="BackupStale"/> is red.</summary>
@@ -81,6 +82,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
                 "data-requests" => await DataRequestsAsync(ct),
                 "risks" => await RisksAsync(ct),
                 "soa" => await SoaAsync(ct),
+                "policies" => await PoliciesAsync(ct),
                 _ => (Unknown, "No such check."),
             };
             results.Add(new CheckResult(id, title, state, detail));
@@ -428,6 +430,31 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
             }
         }
         return (state, string.Join("; ", said) + (state == Ok ? "." : ": Admin → Compliance → Statement of Applicability."));
+    }
+
+    /// <summary>Policies in force, none past its review (red a month past), and each read by those who must within a month of its approval.</summary>
+    private async Task<(string, string)> PoliciesAsync(CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var all = await policies.ListAsync(ct);
+        var inForce = all.Where(p => p.Version is not null).ToList();
+        if (inForce.Count == 0)
+        {
+            return (Warn, "No policy is approved yet: Admin → Compliance → Policies adopts the templates.");
+        }
+        var overdue = inForce.Where(p => p.ReviewOverdue).ToList();
+        var unread = inForce.Where(p => p.Acknowledged < p.Readers && p.ApprovedAt < now.AddDays(-30)).ToList();
+        var said = $"{inForce.Count} polic{(inForce.Count == 1 ? "y" : "ies")} in force{(all.Count > inForce.Count ? $", {all.Count - inForce.Count} draft only" : "")}; read: {inForce.Sum(p => p.Acknowledged)} of {inForce.Sum(p => p.Readers)} acknowledgements";
+        if (overdue.Count == 0 && unread.Count == 0)
+        {
+            return (Ok, $"{said}; the next review is due {inForce.Min(p => p.ReviewDue):yyyy-MM-dd}.");
+        }
+        var due = string.Join("; ", new[]
+        {
+            overdue.Count > 0 ? $"past their review: {string.Join(", ", overdue.Select(p => p.Title))}" : null,
+            unread.Count > 0 ? $"not read by everyone a month after approval: {string.Join(", ", unread.Select(p => $"{p.Title} ({p.Acknowledged} of {p.Readers})"))}" : null,
+        }.OfType<string>());
+        return (overdue.Any(p => p.ReviewDue < now.AddDays(-30)) ? Fail : Warn, $"{said}: {due}.");
     }
 
     private (string, string) DataKey() => string.IsNullOrEmpty(auth.CurrentValue.DataKey)

@@ -40,6 +40,20 @@ public sealed class Notifier(AppDbContext db, Access.AccessService access, TimeP
         }
     }
 
+    /// <summary>The same news to many people at once (a keyed one once each), in one write.</summary>
+    public async Task SendManyAsync(IReadOnlyCollection<Guid> userIds, News news, CancellationToken ct = default)
+    {
+        var had = news.Key is { } key ? (await db.Notifications.Where(n => n.Key == key && userIds.Contains(n.UserId)).Select(n => n.UserId).ToListAsync(ct)).ToHashSet() : [];
+        var now = clock.GetUtcNow();
+        var title = Cut(NewsText.Plain(news.Title, 300) ?? news.Kind, 300);
+        var body = NewsText.Plain(news.Body);
+        db.Notifications.AddRange(userIds.Where(u => !had.Contains(u)).Select(u => new Notification
+        {
+            UserId = u, Kind = news.Kind, Title = title, Body = body, Link = news.Link, Key = news.Key, CreatedAt = now,
+        }));
+        await db.SaveChangesAsync(ct);
+    }
+
     /// <summary>The same news to every admin who can sign in.</summary>
     public async Task ToAdminsAsync(News news, CancellationToken ct = default)
     {

@@ -29,6 +29,7 @@ import { setWidth, useWidth, type WidthPreference } from '@/lib/width'
 import { DataRights, YourData } from './account-data'
 import { AskForAccess } from './account-access'
 import { CodeHosts } from './account-code-hosts'
+import { PoliciesToRead } from './account-policies'
 import { VoiceSection } from './account-voice'
 
 export function AccountPage() {
@@ -38,6 +39,7 @@ export function AccountPage() {
       <PageHeader title="Your account" description="Your profile, API key, answers, voice, memory, sign-in security and appearance." />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="grid content-start gap-6">
+          <PoliciesToRead />
           <Profile me={me} />
           <ApiKey />
           <Answers />
