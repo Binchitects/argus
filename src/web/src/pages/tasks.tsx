@@ -18,7 +18,7 @@ import { Input, Textarea } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { configQuery } from './chat/api'
@@ -404,94 +404,97 @@ function TaskForm({ saved, start, view, onClose, onSaved }: { saved: Task | null
             <TabsTrigger value="gitlab">On GitLab events</TabsTrigger>
             <TabsTrigger value="webhook">On a webhook</TabsTrigger>
           </TabsList>
-        </Tabs>
-        {form.trigger === 'gitlab' && (
-          <fieldset className="grid gap-2">
-            <legend className="mb-1 text-sm font-medium">Events</legend>
-            {gitlabEvents.map((g) => (
-              <Label key={g.value} className="font-normal">
-                <input
-                  type="checkbox"
-                  className="size-3.5 accent-primary"
-                  checked={form.events.includes(g.value)}
-                  onChange={(e) => setForm({ ...form, events: e.target.checked ? [...form.events, g.value] : form.events.filter((x) => x !== g.value) })}
-                />
-                {g.label}
-              </Label>
-            ))}
-            <div className="mt-1 flex items-start gap-2">
-              <Switch id="task-reply" checked={form.replyInGitLab} disabled={!view.gitlabBot && !form.replyInGitLab} onCheckedChange={(replyInGitLab) => setForm({ ...form, replyInGitLab })} />
-              <div className="grid gap-0.5">
-                <Label htmlFor="task-reply">Answer as a comment in GitLab</Label>
-                <p className="text-xs text-muted-foreground">
-                  {view.gitlabBot
-                    ? 'On the merge request, issue or commit, by the GitLab bot; each comment is audited.'
-                    : 'The GitLab bot is not set up (an admin sets its token under Settings → Scheduled tasks). It also reads a merge request’s changes and a failed job’s log.'}
-                </p>
-              </div>
+          {/* Each way it runs, its own panel: the tabs say which panel they show. */}
+          <TabsContent value="schedule">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Repeat">
+                <Select value={schedule.repeat} onValueChange={(v) => set({ repeat: v as Repeat, cron: cronOf(schedule) })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="minutes">Every few minutes</SelectItem>
+                    <SelectItem value="daily">Every day</SelectItem>
+                    <SelectItem value="weekdays">Weekdays</SelectItem>
+                    <SelectItem value="weekly">Once a week</SelectItem>
+                    <SelectItem value="monthly">Once a month</SelectItem>
+                    <SelectItem value="hours">Every few hours</SelectItem>
+                    <SelectItem value="custom">Custom (cron)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+              {schedule.repeat === 'custom' ? (
+                <Field label="Cron" hint="Minute, hour, day of the month, month, day of the week.">
+                  <Input required className="font-mono" autoComplete="off" value={schedule.cron} onChange={(e) => set({ cron: e.target.value })} />
+                </Field>
+              ) : schedule.repeat === 'minutes' ? (
+                <Field label="Every (minutes)" hint={`At least ${view.minIntervalMinutes}.`}>
+                  <Input type="number" min={Math.max(5, view.minIntervalMinutes)} max={30} required value={schedule.minutes} onChange={(e) => set({ minutes: Number(e.target.value) })} />
+                </Field>
+              ) : schedule.repeat === 'hours' ? (
+                <Field label="Every (hours)">
+                  <Input type="number" min={1} max={23} required value={schedule.hours} onChange={(e) => set({ hours: Number(e.target.value) })} />
+                </Field>
+              ) : (
+                <Field label="At">
+                  <Input type="time" required value={schedule.time} onChange={(e) => set({ time: e.target.value })} />
+                </Field>
+              )}
+              {schedule.repeat === 'weekly' && (
+                <Field label="On">
+                  <Select value={String(schedule.day)} onValueChange={(v) => set({ day: Number(v) })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {weekdays.map((d, i) => (
+                        <SelectItem key={d} value={String(i + 1)}>
+                          {d}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              )}
+              {schedule.repeat === 'monthly' && (
+                <Field label="On day">
+                  <Input type="number" min={1} max={28} required value={schedule.date} onChange={(e) => set({ date: Number(e.target.value) })} />
+                </Field>
+              )}
             </div>
-          </fieldset>
-        )}
-        {form.trigger === 'webhook' && <p className="text-sm text-muted-foreground">Any system can run it by posting JSON to its address, with its secret. What it posts is added to the question.</p>}
+          </TabsContent>
+          <TabsContent value="gitlab">
+            <fieldset className="grid gap-2">
+              <legend className="mb-1 text-sm font-medium">Events</legend>
+              {gitlabEvents.map((g) => (
+                <Label key={g.value} className="font-normal">
+                  <input
+                    type="checkbox"
+                    className="size-3.5 accent-primary"
+                    checked={form.events.includes(g.value)}
+                    onChange={(e) => setForm({ ...form, events: e.target.checked ? [...form.events, g.value] : form.events.filter((x) => x !== g.value) })}
+                  />
+                  {g.label}
+                </Label>
+              ))}
+              <div className="mt-1 flex items-start gap-2">
+                <Switch id="task-reply" checked={form.replyInGitLab} disabled={!view.gitlabBot && !form.replyInGitLab} onCheckedChange={(replyInGitLab) => setForm({ ...form, replyInGitLab })} />
+                <div className="grid gap-0.5">
+                  <Label htmlFor="task-reply">Answer as a comment in GitLab</Label>
+                  <p className="text-xs text-muted-foreground">
+                    {view.gitlabBot
+                      ? 'On the merge request, issue or commit, by the GitLab bot; each comment is audited.'
+                      : 'The GitLab bot is not set up (an admin sets its token under Settings → Scheduled tasks). It also reads a merge request’s changes and a failed job’s log.'}
+                  </p>
+                </div>
+              </div>
+            </fieldset>
+          </TabsContent>
+          <TabsContent value="webhook">
+            <p className="text-sm text-muted-foreground">Any system can run it by posting JSON to its address, with its secret. What it posts is added to the question.</p>
+          </TabsContent>
+        </Tabs>
         <div className="grid gap-4 sm:grid-cols-2">
-          {form.trigger === 'schedule' && (
-            <>
-          <Field label="Repeat">
-            <Select value={schedule.repeat} onValueChange={(v) => set({ repeat: v as Repeat, cron: cronOf(schedule) })}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="minutes">Every few minutes</SelectItem>
-                <SelectItem value="daily">Every day</SelectItem>
-                <SelectItem value="weekdays">Weekdays</SelectItem>
-                <SelectItem value="weekly">Once a week</SelectItem>
-                <SelectItem value="monthly">Once a month</SelectItem>
-                <SelectItem value="hours">Every few hours</SelectItem>
-                <SelectItem value="custom">Custom (cron)</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          {schedule.repeat === 'custom' ? (
-            <Field label="Cron" hint="Minute, hour, day of the month, month, day of the week.">
-              <Input required className="font-mono" autoComplete="off" value={schedule.cron} onChange={(e) => set({ cron: e.target.value })} />
-            </Field>
-          ) : schedule.repeat === 'minutes' ? (
-            <Field label="Every (minutes)" hint={`At least ${view.minIntervalMinutes}.`}>
-              <Input type="number" min={Math.max(5, view.minIntervalMinutes)} max={30} required value={schedule.minutes} onChange={(e) => set({ minutes: Number(e.target.value) })} />
-            </Field>
-          ) : schedule.repeat === 'hours' ? (
-            <Field label="Every (hours)">
-              <Input type="number" min={1} max={23} required value={schedule.hours} onChange={(e) => set({ hours: Number(e.target.value) })} />
-            </Field>
-          ) : (
-            <Field label="At">
-              <Input type="time" required value={schedule.time} onChange={(e) => set({ time: e.target.value })} />
-            </Field>
-          )}
-          {schedule.repeat === 'weekly' && (
-            <Field label="On">
-              <Select value={String(schedule.day)} onValueChange={(v) => set({ day: Number(v) })}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {weekdays.map((d, i) => (
-                    <SelectItem key={d} value={String(i + 1)}>
-                      {d}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-          )}
-          {schedule.repeat === 'monthly' && (
-            <Field label="On day">
-              <Input type="number" min={1} max={28} required value={schedule.date} onChange={(e) => set({ date: Number(e.target.value) })} />
-            </Field>
-          )}
-            </>
-          )}
           <Field label="Time zone">
             <TimeZonePicker value={form.timeZone} onChange={(timeZone) => setForm({ ...form, timeZone })} />
           </Field>

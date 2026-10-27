@@ -219,7 +219,7 @@ test.describe('document pages', () => {
 // How full the context is, and what fills it: from the last answer's prompt tokens.
 const contextChat = {
   ...argusChat,
-  id: '00000000-0000-4000-8000-0000000c0e7a', title: 'A long chat', useArgus: false, currentLeafId: 'x2',
+  id: '00000000-0000-4000-8000-0000000c0e7a', title: 'A long chat', useArgus: false, currentLeafId: 'x2', model: 'Test-Model',
   messages: [
     { ...blank, id: 'x1', parentId: null, role: 'user', content: 'Summarize the attached report.' },
     {
@@ -231,6 +231,13 @@ const contextChat = {
 
 test.describe('context gauge', () => {
   test('shows how full the context is and what fills it, and compacts from there', async ({ page }, info) => {
+    // The gauge needs the chat's model and its window: a stack without models (CI's) is given one.
+    await page.route('**/api/chat/config', async (route) => {
+      const res = await route.fetch()
+      const config = await res.json()
+      const model = { name: 'Test-Model', context: 32768, maxOutput: 4096, vision: false, tools: true, thinking: false, loaded: true }
+      await route.fulfill({ response: res, json: { ...config, model: config.model ?? model.name, models: config.models?.some((m: { name: string }) => m.name === model.name) ? config.models : [...(config.models ?? []), model] } })
+    })
     await serveChat(page, contextChat)
     let compacted = false
     await page.route(`**/api/chat/conversations/${contextChat.id}/compact`, (route) => {
