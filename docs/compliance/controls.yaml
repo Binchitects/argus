@@ -923,3 +923,36 @@ controls:
       Plan internal audits that cover every clause and control over the
       certification cycle, by people who do not audit their own work; act on
       the findings by their dates; renew the certificates before they end.
+
+  - id: GOV-08
+    title: Suppliers are registered, agreed with and reviewed
+    meets: >-
+      The supplier register (Admin → Compliance → Suppliers): each model
+      provider, cloud, connector or other service, with what it provides, the
+      kinds of data it receives (personal, health, confidential, code,
+      payment), where, its certifications and reports, the agreements signed,
+      its risk and a review its risk sets (six months high, a year medium, two
+      years low). The services Arena connects to (cloud model servers, tool
+      servers, knowledge connectors, the GitLab Argus reads, Hugging Face) are
+      offered for the register until they are in it. Every change and review
+      is audited, and the register is in the evidence.
+    frameworks:
+      iso27001: [A.5.19, A.5.20, A.5.21, A.5.22, A.5.23]
+      iso42001: [A.10.2, A.10.3]
+      soc2: [CC9.2]
+      hipaa: [164.308(b)(1), 164.314(a)(1)]
+      gdpr: [Art.28]
+      pcidss: [12.8]
+      csaccm: [STA]
+      nistcsf: [GV.SC-04, GV.SC-07]
+      nist80053: [SA-9, SR-6]
+      nist800171: [03.17.01, 03.17.03]
+      airmf: [GOVERN 6.1]
+    docs: [compliance/README.md#suppliers]
+    tests:
+      - Llm.Tests/SupplierTests.What_Arena_connects_to_is_offered_until_registered_with_its_data_agreements_and_review
+    checks: [app:suppliers]
+    operator: >-
+      Register each supplier with what it gets, sign a DPA (and a BAA for
+      health data) where it processes personal data, keep its certificates'
+      dates current, and review it on time.

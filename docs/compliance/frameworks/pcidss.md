@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 25 of the 63 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 26 of the 63 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
@@ -66,6 +66,6 @@ Arena's controls serve 25 of the 63 clauses here. Every clause is met by the com
 | 12.5 | PCI DSS scope is documented and validated |  | [The management system (ISMS and AIMS)](../isms.md) |
 | 12.6 | Security awareness education is ongoing |  | [People security policy](../policies/people-security.md) |
 | 12.7 | Personnel are screened |  | [People security policy](../policies/people-security.md) |
-| 12.8 | Risks from third-party service providers are managed |  | [Supplier and transfer policy](../policies/suppliers.md) |
+| 12.8 | Risks from third-party service providers are managed | [GOV-08](../controls.md#gov-08-suppliers-are-registered-agreed-with-and-reviewed) | [Supplier and transfer policy](../policies/suppliers.md) |
 | 12.9 | Third-party service providers support their customers' compliance |  | [Supplier and transfer policy](../policies/suppliers.md) |
 | 12.10 | Security incidents are responded to immediately | [MON-02](../controls.md#mon-02-security-events-raise-alerts-and-incidents-are-handled-in-time) | [Incident response runbook](../incident-response.md) |

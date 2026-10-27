@@ -61,6 +61,8 @@ public sealed record AuditReportRequest(string? Conclusion);
 
 public sealed record FindingVerifyRequest(bool Worked, string? Note);
 
+public sealed record SupplierReviewRequest(string? Note);
+
 public sealed record RestrictionRequest(bool Restricted, string? Why);
 
 public sealed record DataRequestView(Guid Id, Guid? UserId, string Person, string? Email, string Kind, string? Details, string Status, DateTimeOffset ReceivedAt,
@@ -93,6 +95,7 @@ public static class ComplianceEndpoints
         services.AddScoped<Soa>();
         services.AddScoped<Policies>();
         services.AddScoped<Audits>();
+        services.AddScoped<Suppliers>();
         services.AddHostedService<AccessReviewSchedule>();
     }
 
@@ -248,6 +251,18 @@ public static class ComplianceEndpoints
         g.MapPost("/waivers/{id:guid}/withdraw", async (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, Audits audits, CancellationToken ct) =>
             await AuditAsync(async () => await audits.WithdrawAsync(id, await Who(p, users), ct)));
 
+        // The supplier register (GOV-08).
+        g.MapGet("/suppliers", async (Suppliers suppliers, CancellationToken ct) =>
+            Results.Ok(new { suppliers = await suppliers.ListAsync(ct), suggested = await suppliers.SuggestAsync(ct) }));
+        g.MapPost("/suppliers", async (SupplierInput body, ClaimsPrincipal p, UserManager<AppUser> users, Suppliers suppliers, CancellationToken ct) =>
+            await SupplierAsync(async () => await suppliers.SaveAsync(null, body, await Who(p, users), ct)));
+        g.MapPut("/suppliers/{id:guid}", async (Guid id, SupplierInput body, ClaimsPrincipal p, UserManager<AppUser> users, Suppliers suppliers, CancellationToken ct) =>
+            await SupplierAsync(async () => await suppliers.SaveAsync(id, body, await Who(p, users), ct)));
+        g.MapPost("/suppliers/{id:guid}/review", async (Guid id, SupplierReviewRequest body, ClaimsPrincipal p, UserManager<AppUser> users, Suppliers suppliers, CancellationToken ct) =>
+            await SupplierAsync(async () => await suppliers.ReviewAsync(id, body.Note, await Who(p, users), ct)));
+        g.MapPost("/suppliers/{id:guid}/retire", async (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, Suppliers suppliers, CancellationToken ct) =>
+            await SupplierAsync(async () => await suppliers.RetireAsync(id, await Who(p, users), ct)));
+
         g.MapGet("/incidents", async (AppDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
             var since = clock.GetUtcNow().AddDays(-60);
@@ -386,6 +401,22 @@ public static class ComplianceEndpoints
 
     /// <summary>The signed-in person's name, as the records keep it.</summary>
     private static async Task<string> Who(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!.UserName!;
+
+    private static async Task<IResult> SupplierAsync<T>(Func<Task<T>> work)
+    {
+        try
+        {
+            return Results.Ok(await work());
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound();
+        }
+        catch (SupplierException ex)
+        {
+            return AuthEndpoints.Problem(400, "supplier", ex.Message);
+        }
+    }
 
     private static async Task<IResult> AuditAsync<T>(Func<Task<T>> work)
     {
@@ -586,6 +617,7 @@ public static class ComplianceEndpoints
                 findings.csv          every finding: its kind, clause, correction, root cause, corrective action, and its check
                 certificates.csv      the certificates and reports the company holds, their scope and when they end
                 waivers.csv           each control waived for a time: why, what makes up for it, by whom, until when
+                suppliers.csv         each supplier: the data it gets, where, its certifications and agreements, its risk and review
 
                 """);
             Text("controls.yaml", ComplianceControls.Text);
@@ -661,6 +693,9 @@ public static class ComplianceEndpoints
                 .. auditsView.Certificates.Select(c => new object?[] { c.Framework, c.Body, c.Number, c.Scope, U(c.Issued), U(c.Expires) })]));
             Text("waivers.csv", Csv([["control", "reason", "compensating", "approved by", "approved at", "until", "withdrawn"],
                 .. auditsView.Waivers.Select(w => new object?[] { w.Control, w.Reason, w.Compensating, w.ApprovedBy, U(w.ApprovedAt), U(w.Until), U(w.WithdrawnAt) })]));
+            var supplierList = await http.RequestServices.GetRequiredService<Suppliers>().ListAsync(ct);
+            Text("suppliers.csv", Csv([["name", "kind", "service", "data", "location", "certifications", "agreements", "risk", "owner", "review due", "reviewed by", "reviewed at", "retired"],
+                .. supplierList.Select(s => new object?[] { s.Name, s.Kind, s.Service, string.Join(" ", s.Data), s.Location, s.Certifications, s.Agreements, s.Risk, s.Owner, U(s.ReviewDue), s.ReviewedBy, U(s.ReviewedAt), U(s.RetiredAt) })]));
             Text("audit-chain.json", JsonSerializer.Serialize(await watch.WalkAsync(anchor: false, ct), json));
             Text("audit-anchors.jsonl", string.Concat(AnchorsOf(auditOptions.CurrentValue).Select(a => JsonSerializer.Serialize(a, JsonSerializerOptions.Web) + "\n")));
         }

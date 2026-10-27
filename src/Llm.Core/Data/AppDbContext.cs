@@ -113,6 +113,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Compliance.Finding> Findings => Set<Compliance.Finding>();
     public DbSet<Compliance.Certificate> Certificates => Set<Compliance.Certificate>();
     public DbSet<Compliance.ControlWaiver> ControlWaivers => Set<Compliance.ControlWaiver>();
+    public DbSet<Compliance.Supplier> Suppliers => Set<Compliance.Supplier>();
     public DbSet<Compliance.AccessReviewItem> AccessReviewItems => Set<Compliance.AccessReviewItem>();
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<KnowledgeSource> KnowledgeSources => Set<KnowledgeSource>();
@@ -1143,6 +1144,23 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Reason).HasMaxLength(4000);
             e.Property(x => x.Compensating).HasMaxLength(4000);
             e.Property(x => x.ApprovedBy).HasMaxLength(256);
+        });
+        builder.Entity<Compliance.Supplier>(e =>
+        {
+            e.ToTable("suppliers");
+            e.Property(s => s.Name).HasMaxLength(200);
+            e.Property(s => s.Kind).HasMaxLength(16);
+            e.Property(s => s.Service).HasMaxLength(1000);
+            e.Property(s => s.Location).HasMaxLength(200);
+            e.Property(s => s.Certifications).HasMaxLength(2000);
+            e.Property(s => s.Agreements).HasMaxLength(2000);
+            e.Property(s => s.Risk).HasMaxLength(16);
+            e.Property(s => s.Owner).HasMaxLength(256);
+            e.Property(s => s.Notes).HasMaxLength(4000);
+            e.Property(s => s.Source).HasMaxLength(128);
+            e.Property(s => s.ReviewedBy).HasMaxLength(256);
+            e.Property(s => s.CreatedBy).HasMaxLength(256);
+            e.HasIndex(s => s.Source);
         });
         builder.Entity<Compliance.NoticeAcceptance>(e =>
         {

@@ -22,7 +22,7 @@ public sealed record CheckResult(string Id, string Title, string State, string D
 /// </summary>
 public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users, Access.AccessService access, IOptionsMonitor<AuthOptions> auth,
     IOptions<IdentityOptions> identity, IOptionsMonitor<Retention.RetentionOptions> retention, StoragePlaces places, LokiDatasource loki,
-    PromDatasource prom, IOptions<StackOptions> stack, AuditWatch auditWatch, AuditChainState auditState, IOptionsMonitor<AuditOptions> auditOptions, AuditForwarder forwarder, IOptionsMonitor<ComplianceOptions> compliance, IOptionsMonitor<NoticeOptions> notice, Policies policies, TimeProvider clock)
+    PromDatasource prom, IOptions<StackOptions> stack, AuditWatch auditWatch, AuditChainState auditState, IOptionsMonitor<AuditOptions> auditOptions, AuditForwarder forwarder, IOptionsMonitor<ComplianceOptions> compliance, IOptionsMonitor<NoticeOptions> notice, Policies policies, Suppliers suppliers, TimeProvider clock)
 {
     public const string Ok = "ok", Warn = "warn", Fail = "fail", Unknown = "unknown";
 
@@ -51,6 +51,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         ("soa", "The Statement of Applicability is approved and current"),
         ("policies", "Policies are approved, reviewed in time and read"),
         ("audits", "Audited each year, findings acted on in time, certificates current"),
+        ("suppliers", "Suppliers are registered, agreed with and reviewed"),
     ];
 
     /// <summary>A newest backup older than this is amber; one older than <see cref="BackupStale"/> is red.</summary>
@@ -85,6 +86,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
                 "soa" => await SoaAsync(ct),
                 "policies" => await PoliciesAsync(ct),
                 "audits" => await AuditsAsync(ct),
+                "suppliers" => await SuppliersAsync(ct),
                 _ => (Unknown, "No such check."),
             };
             results.Add(new CheckResult(id, title, state, detail));
@@ -493,6 +495,23 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         }
         var said = $"last internal audit {(lastInternal is { } d ? d.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) : "none")}; {open} finding{(open == 1 ? "" : "s")} open; {certs.Count} certificate{(certs.Count == 1 ? "" : "s")}";
         return (state, problems.Count == 0 ? $"{said}." : $"{said}: {string.Join("; ", problems)}.");
+    }
+
+    /// <summary>Every service Arena connects to in the register, none past its review, and each that gets personal or health data with its agreement.</summary>
+    private async Task<(string, string)> SuppliersAsync(CancellationToken ct)
+    {
+        var listed = (await suppliers.ListAsync(ct)).Where(s => s.RetiredAt is null).ToList();
+        var missing = await suppliers.SuggestAsync(ct);
+        var overdue = listed.Where(s => s.ReviewOverdue).Select(s => s.Name).ToList();
+        var unagreed = listed.Where(s => s.AgreementMissing).Select(s => s.Name).ToList();
+        var said = $"{listed.Count} supplier{(listed.Count == 1 ? "" : "s")} in the register";
+        var problems = new[]
+        {
+            missing.Count > 0 ? $"not in it yet: {string.Join(", ", missing.Select(m => m.Name))}" : null,
+            overdue.Count > 0 ? $"past their review: {string.Join(", ", overdue)}" : null,
+            unagreed.Count > 0 ? $"personal or health data with no agreement said (a DPA, a BAA): {string.Join(", ", unagreed)}" : null,
+        }.OfType<string>().ToList();
+        return problems.Count == 0 ? (Ok, $"{said}, every service Arena connects to among them.") : (Warn, $"{said}; {string.Join("; ", problems)}.");
     }
 
     private (string, string) DataKey() => string.IsNullOrEmpty(auth.CurrentValue.DataKey)

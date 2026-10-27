@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 15 of the 37 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 16 of the 37 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
@@ -27,7 +27,7 @@ Arena's controls serve 15 of the 37 clauses here. Every clause is met by the com
 | Art.24 | Responsibility of the controller |  | [Information security policy](../policies/information-security.md) |
 | Art.25 | Data protection by design and by default | [IAM-05](../controls.md#iam-05-least-privilege-by-roles-and-rules), [DAT-04](../controls.md#dat-04-personal-data-and-secrets-kept-from-the-model), [DAT-08](../controls.md#dat-08-personal-and-health-data-kept-in-bounds), [GOV-01](../controls.md#gov-01-the-controls-are-kept-from-breaking) | [Change and vulnerability management policy](../policies/change-management.md) |
 | Art.26 | Joint controllers |  | [Supplier and transfer policy](../policies/suppliers.md) |
-| Art.28 | Processors |  | [Supplier and transfer policy](../policies/suppliers.md) |
+| Art.28 | Processors | [GOV-08](../controls.md#gov-08-suppliers-are-registered-agreed-with-and-reviewed) | [Supplier and transfer policy](../policies/suppliers.md) |
 | Art.29 | Processing under the controller's or processor's authority |  | [Access control policy](../policies/access-control.md) |
 | Art.30 | Records of processing activities | [LOG-01](../controls.md#log-01-who-did-what-is-recorded) | [Record of processing activities](../templates/record-of-processing.md) |
 | Art.31 | Cooperation with the supervisory authority |  | [Incident response runbook](../incident-response.md) |

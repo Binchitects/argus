@@ -226,6 +226,22 @@ check is amber without an internal audit in the year, with a finding past its
 date, a certificate ending within 90 days or a waiver past its end; red for a
 major nonconformity past its date or a certificate that has ended.
 
+## Suppliers
+
+Admin → Compliance → Suppliers is the supplier register (GOV-08). Each
+supplier has what it provides; the kinds of data it receives (personal,
+health, confidential, code, payment) and where; its certifications and
+reports, with their dates; the agreements signed (a DPA, a HIPAA BAA, standard
+contractual clauses); its risk; and a review its risk sets (six months for
+high, a year for medium, two years for low). A supplier that gets personal or
+health data with no agreement said, or health data without a BAA, is flagged.
+
+The services Arena connects to are offered for the register until they are in
+it: the cloud model servers (Admin → Models), tool servers, knowledge
+connectors, the GitLab Argus reads, and Hugging Face. The register is in the
+evidence (`suppliers.csv`). The `suppliers` check is amber while such a
+service is missing, a review is past due, or an agreement is.
+
 ## Access reviews
 
 An access review lists, for a reviewer to **Keep** or **Revoke**:

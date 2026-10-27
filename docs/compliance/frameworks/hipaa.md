@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 36 of the 68 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 38 of the 68 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
@@ -34,7 +34,7 @@ Arena's controls serve 36 of the 68 clauses here. Every clause is met by the com
 | 164.308(a)(7)(ii)(D) | Testing and revision procedures (addressable) | [OPS-01](../controls.md#ops-01-backups-restored-and-proven) | [Backup and business continuity policy](../policies/business-continuity.md) |
 | 164.308(a)(7)(ii)(E) | Applications and data criticality analysis (addressable) |  | [Backup and business continuity policy](../policies/business-continuity.md) |
 | 164.308(a)(8) | Evaluation | [GOV-01](../controls.md#gov-01-the-controls-are-kept-from-breaking) | [Information security policy](../policies/information-security.md) |
-| 164.308(b)(1) | Business associate contracts and other arrangements |  | [Supplier and transfer policy](../policies/suppliers.md) |
+| 164.308(b)(1) | Business associate contracts and other arrangements | [GOV-08](../controls.md#gov-08-suppliers-are-registered-agreed-with-and-reviewed) | [Supplier and transfer policy](../policies/suppliers.md) |
 | 164.310(a)(1) | Facility access controls |  | [Physical security policy](../policies/physical-security.md) |
 | 164.310(a)(2)(i) | Contingency operations (addressable) |  | [Physical security policy](../policies/physical-security.md) |
 | 164.310(a)(2)(ii) | Facility security plan (addressable) |  | [Physical security policy](../policies/physical-security.md) |
@@ -59,7 +59,7 @@ Arena's controls serve 36 of the 68 clauses here. Every clause is met by the com
 | 164.312(e)(1) | Transmission security | [NET-01](../controls.md#net-01-encrypted-in-transit-one-way-in) | [Cryptography policy](../policies/cryptography.md) |
 | 164.312(e)(2)(i) | Integrity controls (addressable) |  | [Cryptography policy](../policies/cryptography.md) |
 | 164.312(e)(2)(ii) | Encryption (addressable) | [NET-01](../controls.md#net-01-encrypted-in-transit-one-way-in) | [Cryptography policy](../policies/cryptography.md) |
-| 164.314(a)(1) | Business associate contracts or other arrangements |  | [Supplier and transfer policy](../policies/suppliers.md) |
+| 164.314(a)(1) | Business associate contracts or other arrangements | [GOV-08](../controls.md#gov-08-suppliers-are-registered-agreed-with-and-reviewed) | [Supplier and transfer policy](../policies/suppliers.md) |
 | 164.316(a) | Policies and procedures | [GOV-06](../controls.md#gov-06-policies-are-owned-approved-reviewed-and-read) | [Information security policy](../policies/information-security.md) |
 | 164.316(b)(1) | Documentation | [GOV-06](../controls.md#gov-06-policies-are-owned-approved-reviewed-and-read) | [Information security policy](../policies/information-security.md) |
 | 164.316(b)(2)(i) | Time limit of six years (required) | [DAT-07](../controls.md#dat-07-records-are-kept-for-set-times-and-no-longer) | [Information security policy](../policies/information-security.md) |

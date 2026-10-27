@@ -87,3 +87,40 @@ public sealed class ControlWaiver
     public DateTimeOffset Until { get; set; }
     public DateTimeOffset? WithdrawnAt { get; set; }
 }
+
+/// <summary>
+/// A supplier (ISO 27001 A.5.19–A.5.23, SOC 2 CC9.2, the GDPR's processors): a model provider, a cloud, a connector or
+/// another service the company relies on, with the data it receives, its certifications, the agreements, its risk and
+/// its next review.
+/// </summary>
+public sealed class Supplier
+{
+    public static readonly string[] Kinds = ["model", "cloud", "connector", "software", "service", "other"];
+    public static readonly string[] DataKinds = ["personal", "health", "confidential", "code", "payment"];
+
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public required string Name { get; set; }
+    public string Kind { get; set; } = "service";
+    /// <summary>What it provides.</summary>
+    public string? Service { get; set; }
+    /// <summary>The kinds of data it receives: personal, health, confidential, code, payment.</summary>
+    public string[] Data { get; set; } = [];
+    /// <summary>Where it processes the data (a country, a region).</summary>
+    public string? Location { get; set; }
+    /// <summary>Its certifications and reports, with their dates (SOC 2 Type II to 2026-03; ISO 27001 until 2027-05).</summary>
+    public string? Certifications { get; set; }
+    /// <summary>The agreements signed (a DPA, a HIPAA BAA, standard contractual clauses).</summary>
+    public string? Agreements { get; set; }
+    /// <summary>low, medium or high: it sets how often it is reviewed.</summary>
+    public string Risk { get; set; } = "medium";
+    public string? Owner { get; set; }
+    public string? Notes { get; set; }
+    /// <summary>What Arena knows it as (remote-server:ID, mcp:ID, knowledge:ID, gitlab, huggingface), when it came from there.</summary>
+    public string? Source { get; set; }
+    public DateTimeOffset ReviewDue { get; set; }
+    public DateTimeOffset? ReviewedAt { get; set; }
+    public string? ReviewedBy { get; set; }
+    public DateTimeOffset? RetiredAt { get; set; }
+    public required string CreatedBy { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}

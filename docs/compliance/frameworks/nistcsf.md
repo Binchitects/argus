@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 31 of the 128 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 32 of the 128 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
@@ -36,10 +36,10 @@ Arena's controls serve 31 of the 128 clauses here. Every clause is met by the co
 | GV.SC-01 | A cybersecurity supply chain risk management program, strategy, objectives, policies, and processes are established and agreed to by organizational stakeholders |  | [Supplier and transfer policy](../policies/suppliers.md) |
 | GV.SC-02 | Cybersecurity roles and responsibilities for suppliers, customers, and partners are established, communicated, and coordinated internally and externally |  | [Supplier and transfer policy](../policies/suppliers.md) |
 | GV.SC-03 | Cybersecurity supply chain risk management is integrated into cybersecurity and enterprise risk management, risk assessment, and improvement processes |  | [Supplier and transfer policy](../policies/suppliers.md) |
-| GV.SC-04 | Suppliers are known and prioritized by criticality |  | [Supplier and transfer policy](../policies/suppliers.md) |
+| GV.SC-04 | Suppliers are known and prioritized by criticality | [GOV-08](../controls.md#gov-08-suppliers-are-registered-agreed-with-and-reviewed) | [Supplier and transfer policy](../policies/suppliers.md) |
 | GV.SC-05 | Requirements to address cybersecurity risks in supply chains are established, prioritized, and integrated into contracts and other types of agreements with suppliers and other relevant third parties |  | [Supplier and transfer policy](../policies/suppliers.md) |
 | GV.SC-06 | Planning and due diligence are performed to reduce risks before entering into formal supplier or other third-party relationships |  | [Supplier and transfer policy](../policies/suppliers.md) |
-| GV.SC-07 | The risks posed by a supplier, their products and services, and other third parties are understood, recorded, prioritized, assessed, responded to, and monitored over the course of the relationship | [GOV-03](../controls.md#gov-03-what-a-release-ships-is-listed-and-its-known-vulnerabilities-gate-it) | [Supplier and transfer policy](../policies/suppliers.md) |
+| GV.SC-07 | The risks posed by a supplier, their products and services, and other third parties are understood, recorded, prioritized, assessed, responded to, and monitored over the course of the relationship | [GOV-03](../controls.md#gov-03-what-a-release-ships-is-listed-and-its-known-vulnerabilities-gate-it), [GOV-08](../controls.md#gov-08-suppliers-are-registered-agreed-with-and-reviewed) | [Supplier and transfer policy](../policies/suppliers.md) |
 | GV.SC-08 | Relevant suppliers and other third parties are included in incident planning, response, and recovery activities |  | [Supplier and transfer policy](../policies/suppliers.md) |
 | GV.SC-09 | Supply chain security practices are integrated into cybersecurity and enterprise risk management programs, and their performance is monitored throughout the technology product and service life cycle |  | [Supplier and transfer policy](../policies/suppliers.md) |
 | GV.SC-10 | Cybersecurity supply chain risk management plans include provisions for activities that occur after the conclusion of a partnership or service agreement |  | [Supplier and transfer policy](../policies/suppliers.md) |

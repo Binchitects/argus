@@ -2109,6 +2109,7 @@ documents; it says what is the operator's part, as v7.1 does.
    knows, and any added, each with the data it receives, its certifications
    (a SOC 2 report's date, an ISO certificate's expiry), the agreements (a
    DPA, a BAA), its risk and its next review.
+   Done: Admin → Compliance → Suppliers (GOV-08, the `suppliers` check).
 7. **AI governance**: a register of the company's AI systems (Arena's
    assistants, agents, apps and the models behind them), each with:
    - its purpose, its AI Act class (prohibited, high-risk, limited or
