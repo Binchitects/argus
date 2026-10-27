@@ -201,6 +201,14 @@ public static partial class CodeAt
             foreach (var iid in stale) Drop(conn, mirror, gitlabId, iid);
         });
 
+    /// <summary>Every file's path at a commit.</summary>
+    public static List<string> ListFiles(string mirror, string sha)
+    {
+        var r = Indexing.Mirror.RunGit(mirror, ["ls-tree", "-r", "--name-only", "-z", sha]);
+        if (r.Code != 0) throw new GitError($"git ls-tree failed: {PyStr.Prefix(PyStr.Strip(r.Stderr), 300)}");
+        return [.. r.Stdout.Split('\0', StringSplitOptions.RemoveEmptyEntries)];
+    }
+
     /// <summary>A file at a commit; null when the commit has no such file (a directory is not one).</summary>
     public static FileAtCommit? Show(string mirror, string sha, string path)
     {

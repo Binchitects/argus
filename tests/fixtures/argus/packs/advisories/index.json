@@ -1,0 +1,162 @@
+{
+ "provenance": "github=18757d8ddab0,kev=2026.10.27",
+ "docs": [
+  {
+   "path": "npm/GHSA-35jh-r3h4-6jhm.md",
+   "title": "GHSA-35jh-r3h4-6jhm: Command Injection in lodash",
+   "url": "https://github.com/advisories/GHSA-35jh-r3h4-6jhm",
+   "symbols": [
+    {
+     "name": "GHSA-35jh-r3h4-6jhm",
+     "kind": "advisory",
+     "namespace": "GitHub Advisory Database",
+     "signature": "GHSA-35jh-r3h4-6jhm: Command Injection in lodash (RubyGems lodash-rails; npm lodash; npm lodash-es…; high; fixed in 4.17.21)"
+    },
+    {
+     "name": "CVE-2021-23337",
+     "kind": "cve",
+     "namespace": "GitHub Advisory Database",
+     "signature": "CVE-2021-23337 = GHSA-35jh-r3h4-6jhm: Command Injection in lodash (RubyGems lodash-rails; npm lodash; npm lodash-es…; high; fixed in 4.17.21)"
+    }
+   ]
+  },
+  {
+   "path": "nuget/GHSA-5crp-9r3c-p9vr.md",
+   "title": "GHSA-5crp-9r3c-p9vr: Improper Handling of Exceptional Conditions in Newtonsoft.Json",
+   "url": "https://github.com/advisories/GHSA-5crp-9r3c-p9vr",
+   "symbols": [
+    {
+     "name": "GHSA-5crp-9r3c-p9vr",
+     "kind": "advisory",
+     "namespace": "GitHub Advisory Database",
+     "signature": "GHSA-5crp-9r3c-p9vr: Improper Handling of Exceptional Conditions in Newtonsoft.Json (NuGet Newtonsoft.Json; high; fixed in 13.0.1)"
+    },
+    {
+     "name": "CVE-2024-21907",
+     "kind": "cve",
+     "namespace": "GitHub Advisory Database",
+     "signature": "CVE-2024-21907 = GHSA-5crp-9r3c-p9vr: Improper Handling of Exceptional Conditions in Newtonsoft.Json (NuGet Newtonsoft.Json; high; fixed in 13.0.1)"
+    }
+   ]
+  },
+  {
+   "path": "pypi/GHSA-j8r2-6x86-q33q.md",
+   "title": "GHSA-j8r2-6x86-q33q: Unintended leak of Proxy-Authorization header in requests",
+   "url": "https://github.com/advisories/GHSA-j8r2-6x86-q33q",
+   "symbols": [
+    {
+     "name": "GHSA-j8r2-6x86-q33q",
+     "kind": "advisory",
+     "namespace": "GitHub Advisory Database",
+     "signature": "GHSA-j8r2-6x86-q33q: Unintended leak of Proxy-Authorization header in requests (PyPI requests; medium; fixed in 2.31.0)"
+    },
+    {
+     "name": "CVE-2023-32681",
+     "kind": "cve",
+     "namespace": "GitHub Advisory Database",
+     "signature": "CVE-2023-32681 = GHSA-j8r2-6x86-q33q: Unintended leak of Proxy-Authorization header in requests (PyPI requests; medium; fixed in 2.31.0)"
+    }
+   ]
+  }
+ ],
+ "affected": [
+  {
+   "ecosystem": "npm",
+   "package": "lodash",
+   "introduced": "0",
+   "fixed": "4.17.21",
+   "last_affected": null,
+   "advisory": "GHSA-35jh-r3h4-6jhm",
+   "aliases": "CVE-2021-23337",
+   "severity": "high",
+   "cwes": "CWE-77,CWE-94",
+   "exploited": false,
+   "summary": "Command Injection in lodash",
+   "doc_path": "npm/GHSA-35jh-r3h4-6jhm.md"
+  },
+  {
+   "ecosystem": "npm",
+   "package": "lodash-es",
+   "introduced": "0",
+   "fixed": "4.17.21",
+   "last_affected": null,
+   "advisory": "GHSA-35jh-r3h4-6jhm",
+   "aliases": "CVE-2021-23337",
+   "severity": "high",
+   "cwes": "CWE-77,CWE-94",
+   "exploited": false,
+   "summary": "Command Injection in lodash",
+   "doc_path": "npm/GHSA-35jh-r3h4-6jhm.md"
+  },
+  {
+   "ecosystem": "npm",
+   "package": "lodash.template",
+   "introduced": "0",
+   "fixed": null,
+   "last_affected": "4.5.0",
+   "advisory": "GHSA-35jh-r3h4-6jhm",
+   "aliases": "CVE-2021-23337",
+   "severity": "high",
+   "cwes": "CWE-77,CWE-94",
+   "exploited": false,
+   "summary": "Command Injection in lodash",
+   "doc_path": "npm/GHSA-35jh-r3h4-6jhm.md"
+  },
+  {
+   "ecosystem": "npm",
+   "package": "lodash-template",
+   "introduced": "0",
+   "fixed": null,
+   "last_affected": "1.0.0",
+   "advisory": "GHSA-35jh-r3h4-6jhm",
+   "aliases": "CVE-2021-23337",
+   "severity": "high",
+   "cwes": "CWE-77,CWE-94",
+   "exploited": false,
+   "summary": "Command Injection in lodash",
+   "doc_path": "npm/GHSA-35jh-r3h4-6jhm.md"
+  },
+  {
+   "ecosystem": "RubyGems",
+   "package": "lodash-rails",
+   "introduced": "0",
+   "fixed": "4.17.21",
+   "last_affected": null,
+   "advisory": "GHSA-35jh-r3h4-6jhm",
+   "aliases": "CVE-2021-23337",
+   "severity": "high",
+   "cwes": "CWE-77,CWE-94",
+   "exploited": false,
+   "summary": "Command Injection in lodash",
+   "doc_path": "npm/GHSA-35jh-r3h4-6jhm.md"
+  },
+  {
+   "ecosystem": "NuGet",
+   "package": "Newtonsoft.Json",
+   "introduced": "0",
+   "fixed": "13.0.1",
+   "last_affected": null,
+   "advisory": "GHSA-5crp-9r3c-p9vr",
+   "aliases": "CVE-2024-21907",
+   "severity": "high",
+   "cwes": "CWE-755",
+   "exploited": false,
+   "summary": "Improper Handling of Exceptional Conditions in Newtonsoft.Json",
+   "doc_path": "nuget/GHSA-5crp-9r3c-p9vr.md"
+  },
+  {
+   "ecosystem": "PyPI",
+   "package": "requests",
+   "introduced": "2.3.0",
+   "fixed": "2.31.0",
+   "last_affected": null,
+   "advisory": "GHSA-j8r2-6x86-q33q",
+   "aliases": "CVE-2023-32681",
+   "severity": "medium",
+   "cwes": "CWE-200",
+   "exploited": false,
+   "summary": "Unintended leak of Proxy-Authorization header in requests",
+   "doc_path": "pypi/GHSA-j8r2-6x86-q33q.md"
+  }
+ ]
+}

@@ -2239,6 +2239,10 @@ Arena's own dependencies.
    each day, published in a pack index with its SHA-256, taken by `argus pack
    update` (and carried to an offline host by `airgap.sh`); Arena shows its
    age and warns past a week.
+   Done: tools/fetch-advisories.sh (GitHub's reviewed advisories by sparse
+   clone; Google's OSV storage refuses this location) and
+   tools/advisories-texts.py, Argus's `advisories` source with an affected
+   table in the pack. Left: the daily build, published in a pack index.
 3. **Recognising vulnerable dependencies.** Argus reads each indexed branch's
    manifests and lock files (npm, pnpm and yarn locks, NuGet's
    `packages.lock.json` and `PackageReference`, pip requirements, Poetry and
@@ -2249,6 +2253,10 @@ Arena's own dependencies.
    version that fixes it and the smallest upgrade. A CycloneDX SBOM per
    repository and branch, to download. Checked again whenever the advisories
    are renewed, so a new CVE in old code is found without a push.
+   Done: deps_check and sbom (Argus tools, any commit, as the person; no
+   model), and Code Studio → Security reviews the packages first and keeps
+   the bill of materials. Left: checked again when the advisories are
+   renewed.
 4. **Recognising weaknesses in code**, two passes that check each other:
    - **Scanners**, in the sandbox with no network, on a checkout of the
      indexed commit: opengrep (LGPL-2.1) with Arena's own rules (written

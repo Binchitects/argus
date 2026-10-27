@@ -198,6 +198,59 @@ repository's commit and each catalogue's version recorded as the provenance.
 The pack has 2,676 pages, 3,023 symbols and 24,675 passages, about 45 MB; the
 embedding takes about two minutes on a GPU.
 
+## Known vulnerabilities: the advisories pack
+
+The `advisories` pack holds GitHub's reviewed security advisories (the
+GitHub Advisory Database, CC BY 4.0) for npm, NuGet, PyPI, Maven, Go,
+crates.io, RubyGems, Packagist and the rest, each marked when CISA's Known
+Exploited Vulnerabilities catalog lists its CVE. A page per advisory (its
+summary, CVEs, severity and CVSS vector, CWEs, the versions it affects and
+the versions that fix them, its details and references); its `GHSA-…` id and
+each `CVE-…` are symbols, and each ecosystem a facet (`npm`, `nuget`, `pypi`,
+`maven`, `go`, `crates`, `rubygems`, `packagist`, `other`). Withdrawn
+advisories are left out.
+
+Beside its pages it carries a table of what each advisory affects (the
+package, and the versions from where it was introduced up to the fix or the
+last affected one), which the `deps_check` tool matches a repository's
+locked versions against with no model. NVD's own records are not taken:
+their CVEs are the advisories' aliases.
+
+Build it each day on a connected machine and publish it in a pack index;
+an offline host takes it with `argus pack update` (or `airgap.sh`):
+
+```bash
+tools/fetch-advisories.sh
+python3 tools/advisories-texts.py --from .packwork/docsrc/advisories --out .packwork/docsrc/advisories-texts
+argus pack build --source advisories --work-dir "$PWD/.packwork/docsrc/advisories-texts" --out packs/advisories-$(date +%Y.%m.%d).arguspack --version $(date +%Y.%m.%d)
+```
+
+The fetch is a shallow, sparse clone of the reviewed advisories (about
+340 MB unpacked, two minutes) and the KEV catalog (2 MB); Google's OSV
+storage is not used, as it refuses some locations. On 2026-10-27: 36,038
+advisories, 67,652 affected ranges, 1,760 known-exploited CVEs.
+
+### deps_check and sbom
+
+`deps_check` reads a project's lock files and manifests at any commit (a
+merge request's head, a branch, a tag or a commit), as the person asking:
+npm's `package-lock.json`, `yarn.lock` and `pnpm-lock.yaml`; NuGet's
+`packages.lock.json`, `PackageReference` and `Directory.Packages.props`;
+pip's `requirements*.txt`, `poetry.lock`, `uv.lock` and `Pipfile.lock`;
+`go.mod` and `go.sum`; `Cargo.lock`; Maven's `pom.xml` and Gradle's build
+files; `Gemfile.lock`; `composer.lock`. Vendored code (`node_modules`,
+`vendor`, `third_party`) is left out. Each pinned version is compared as its
+ecosystem orders versions (SemVer, PEP 440, Maven's, RubyGems') with every
+range an advisory gives for the package. Each finding gives the package and
+version, whether the project asks for it itself or which package brings it
+in, the file and line, the advisory and its CVEs, severity and CWEs, whether
+it is known to be exploited, the version that fixes it and the smallest
+upgrade that fixes all of its advisories; the known-exploited and most
+severe come first, and the answer says how old the advisories are.
+
+`sbom` gives the same packages as a CycloneDX 1.5 bill of materials, each
+with its package URL.
+
 ## Using packs
 
 Everything below works without a GitLab config. `--packs-dir` exists precisely
@@ -304,7 +357,7 @@ repository would otherwise record that repository's commit as the pack's
 provenance.
 
 Available sources: `python`, `react`, `cpp`, `dotnet`, `scripting`, `sqlite`,
-`cppreference`, `qt`, `grc`, `security`, `debugger`, `algorithms`, `system-design`, the two composites
+`cppreference`, `qt`, `grc`, `security`, `advisories`, `debugger`, `algorithms`, `system-design`, the two composites
 `win32` and `wdk` (API reference *and* samples in one pack), and the halves on
 their own — `win32-docs`, `wdk-docs`, `win32-samples`, `wdk-samples`.
 `argus pack build --help` prints the list.

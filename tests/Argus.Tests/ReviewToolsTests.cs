@@ -335,6 +335,44 @@ public sealed class ReviewToolsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Deps_check_matches_a_branchs_locked_packages_against_the_advisories_and_sbom_lists_them()
+    {
+        // Three real advisories (lodash, requests, Newtonsoft.Json), as an installed advisories pack.
+        var packs = Path.Combine(_ix.Root, "packs");
+        Directory.CreateDirectory(packs);
+        Packs.PackBuilder.BuildPack(new Packs.Sources.AdvisoriesTexts(), Path.Combine(AppContext.BaseDirectory, "packfixtures", "advisories"),
+            Path.Combine(packs, "advisories.arguspack"), "1", FakeEmbedder.Embed, log: TextWriter.Null);
+        _gitlab[ReviewFixture.EalCore].Commit("deps", new()
+        {
+            ["web/package-lock.json"] = """{"lockfileVersion": 3, "packages": {"": {"dependencies": {"lodash": "^4"}}, "node_modules/lodash": {"version": "4.17.20"}, "node_modules/ms": {"version": "2.1.3"}}}""",
+            ["svc/requirements.txt"] = "requests==2.30.0\nflask>=2\n",
+            ["api/packages.lock.json"] = """{"version": 1, "dependencies": {"net8.0": {"Some.Lib": {"type": "Direct", "resolved": "1.0.0", "dependencies": {"Newtonsoft.Json": "12.0.3"}}, "Newtonsoft.Json": {"type": "Transitive", "resolved": "12.0.3"}}}}""",
+            ["web/node_modules/old/package-lock.json"] = """{"lockfileVersion": 3, "packages": {"node_modules/lodash": {"version": "3.0.0"}}}""",
+        }, "Dependencies");
+
+        var check = await Answer("deps_check", new { project = "root/eal-core", @ref = "deps" });
+        Assert.Equal(("deps", 6), (check["ref"]!.GetValue<string>(), check["dependencies"]!.GetValue<int>()));
+        var findings = check["findings"]!.AsArray().Select(f => f!.AsObject()).ToList();
+        Assert.Equal(["Newtonsoft.Json", "lodash", "requests"], findings.Select(f => f["package"]!.GetValue<string>()).Order(StringComparer.Ordinal));
+        var lodash = findings.Single(f => f["package"]!.GetValue<string>() == "lodash");
+        Assert.Equal(("4.17.20", true, "web/package-lock.json", "4.17.21", "GHSA-35jh-r3h4-6jhm", "high"),
+            (lodash["version"]!.GetValue<string>(), lodash["direct"]!.GetValue<bool>(), lodash["file"]!.GetValue<string>(), lodash["upgrade_to"]!.GetValue<string>(),
+             lodash["advisory"]!.GetValue<string>(), lodash["severity"]!.GetValue<string>()));
+        Assert.Contains("CVE-2021-23337", lodash["aliases"]!.AsArray().Select(a => a!.GetValue<string>()));
+        var json = findings.Single(f => f["package"]!.GetValue<string>() == "Newtonsoft.Json");
+        Assert.Equal((false, "Some.Lib", "13.0.1"), (json["direct"]!.GetValue<bool>(), json["via"]!.GetValue<string>(), json["upgrade_to"]!.GetValue<string>()));
+        Assert.Equal("2026-10-27", check["advisories"]![0]!["as_of"]!.GetValue<string>());
+        // Nothing found on the default branch, which has no lock files; vendored lock files are never read.
+        Assert.Empty((await Answer("deps_check", new { project = "root/eal-core" }))["findings"]!.AsArray());
+
+        var bom = await Answer("sbom", new { project = "root/eal-core", @ref = "deps" });
+        Assert.Equal("CycloneDX", bom["bomFormat"]!.GetValue<string>());
+        Assert.Contains("pkg:nuget/Newtonsoft.Json@12.0.3", bom["components"]!.AsArray().Select(c => c!["purl"]!.GetValue<string>()));
+        Assert.DoesNotContain(bom["components"]!.AsArray(), c => c!["version"]!.GetValue<string>() == "3.0.0");
+        _gitlab.AssertOnlyReads();
+    }
+
+    [Fact]
     public async Task A_merged_or_closed_merge_requests_head_is_dropped_and_one_unused_for_thirty_days_too()
     {
         await Answer("file_at", new { project = "root/eal-core", iid = 1, path = "README.md" });
@@ -370,6 +408,8 @@ public sealed class ReviewToolsTests : IAsyncLifetime
         ["compare_refs"] = new { project = "root/driver-shim", from = "main", to = "shim-secret" },
         ["file_at"] = new { project = "root/driver-shim", @ref = "shim-secret", path = "src/shim.c" },
         ["grep_at"] = new { project = "root/driver-shim", @ref = "shim-secret", pattern = "SHIM_ONLY" },
+        ["deps_check"] = new { project = "root/driver-shim", @ref = "shim-secret" },
+        ["sbom"] = new { project = "root/driver-shim", @ref = "shim-secret" },
         ["issue_list"] = new { project = "root/driver-shim" },
         ["issue_get"] = new { project = "root/driver-shim", iid = 1 },
         ["wiki_list"] = new { project = "root/driver-shim" },

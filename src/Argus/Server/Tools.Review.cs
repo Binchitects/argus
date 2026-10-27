@@ -24,8 +24,11 @@ public sealed partial class Tools
     public static readonly IReadOnlySet<string> ReviewTools = new HashSet<string>(StringComparer.Ordinal)
     {
         "mr_list", "mr_get", "mr_diff", "mr_commits", "mr_discussions", "ci_status", "job_log", "compare_refs", "file_at", "grep_at",
-        "issue_list", "issue_get", "wiki_list", "wiki_get",
+        "issue_list", "issue_get", "wiki_list", "wiki_get", "deps_check", "sbom",
     };
+
+    /// <summary>The most lock files and manifests one deps_check reads.</summary>
+    public const int MostManifests = 400;
 
     /// <summary>The most diff text one answer carries; the files past it are listed without their text.</summary>
     public const int DiffBudget = 150_000;
@@ -503,6 +506,43 @@ public sealed partial class Tools
         }
     }
 
+    /// <summary>The project's packages at a commit, from its lock files and manifests (vendored code left out), and the commit read.</summary>
+    (List<Deps.Dependency> Dependencies, string Sha, string Label) ReadDependencies(string who, Identity identity, string project, string? rev, long? iid)
+    {
+        var p = Readable(identity, project);
+        if (p.Foreign) throw new ToolError($"{who} reads Argus's copies of GitLab projects; {p.Path} has none.");
+        try
+        {
+            var (mirror, sha, label) = At(p, rev, iid);
+            var files = CodeAt.ListFiles(mirror, sha).Where(f => Deps.Manifests.Reads(f) && !Deps.Manifests.Vendored().IsMatch(f)).Take(MostManifests).ToList();
+            var texts = files.Select(f => (Path: f, File: CodeAt.Show(mirror, sha, f)))
+                .Where(x => x.File is { TooLarge: false, Binary: false }).Select(x => (x.Path, x.File!.Text));
+            return (Deps.DepsCheck.Dependencies(texts), sha, label);
+        }
+        catch (GitError exc)
+        {
+            throw new ToolError($"git could not read {p.Path}: {exc.Message}", exc);
+        }
+    }
+
+    /// <summary>The project's packages at a ref matched against the advisories packs: the vulnerable ones, how each comes in, and the upgrade that fixes it.</summary>
+    public JsonNode DepsCheckAt(Identity who, string project, string? rev, long? iid)
+    {
+        var (dependencies, sha, label) = ReadDependencies("deps_check", who, project, rev, iid);
+        var result = RunPacks(opened => (JsonNode)Deps.DepsCheck.Check(dependencies, opened)).AsObject();
+        result["project"] = project;
+        result["ref"] = label;
+        result["sha"] = sha;
+        return result;
+    }
+
+    /// <summary>The project's packages at a ref as a CycloneDX bill of materials.</summary>
+    public JsonNode SbomAt(Identity who, string project, string? rev, long? iid)
+    {
+        var (dependencies, sha, _) = ReadDependencies("sbom", who, project, rev, iid);
+        return Deps.DepsCheck.CycloneDx(project, sha, dependencies, DateTimeOffset.UtcNow);
+    }
+
     // --- dispatch ---------------------------------------------------------------------------
 
     JsonNode? DispatchReview(string tool, ToolRuntime.Args a, Identity who)
@@ -545,6 +585,10 @@ public sealed partial class Tools
                     ["ignore_case"] = a.Bool("ignore_case"), ["fixed"] = a.Bool("fixed"), ["limit"] = a.Int("limit"),
                 }),
                 () => GrepAt(who, project, a.Str("pattern"), a.OptStr("ref"), a.OptInt("iid"), a.OptStr("path"), a.Bool("ignore_case"), a.Bool("fixed"), a.Int("limit"))),
+            "deps_check" => WithAudit(who, tool, Audited(new JsonObject { ["ref"] = a.OptStr("ref"), ["iid"] = a.OptInt("iid") }),
+                () => DepsCheckAt(who, project, a.OptStr("ref"), a.OptInt("iid"))),
+            "sbom" => WithAudit(who, tool, Audited(new JsonObject { ["ref"] = a.OptStr("ref"), ["iid"] = a.OptInt("iid") }),
+                () => SbomAt(who, project, a.OptStr("ref"), a.OptInt("iid"))),
             "issue_list" => WithAudit(who, tool,
                 Audited(new JsonObject { ["state"] = a.OptStr("state"), ["search"] = a.OptStr("search"), ["labels"] = a.OptStr("labels"), ["limit"] = a.Int("limit") }),
                 () => IssueList(who, project, a.OptStr("state") ?? "opened", a.OptStr("search"), a.OptStr("labels"), a.Int("limit"))),

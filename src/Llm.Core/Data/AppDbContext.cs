@@ -357,6 +357,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Source).HasMaxLength(1000);
             e.Property(x => x.State).HasMaxLength(16);
             e.Property(x => x.Why).HasMaxLength(2000);
+            e.Property(x => x.Kind).HasMaxLength(16).HasDefaultValueSql("'code'");
             e.HasIndex(x => new { x.ScanId, x.Severity });
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.DecidedById).OnDelete(DeleteBehavior.SetNull);
         });

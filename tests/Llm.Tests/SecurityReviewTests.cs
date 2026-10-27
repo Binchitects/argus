@@ -49,6 +49,15 @@ public sealed class SecurityReviewTests(AppFixture app)
             ? """{"result": [{"title": "SQL Injection Prevention Cheat Sheet", "doc_path": "cheatsheets/SQL.md", "url": "https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html"}]}"""
             : """{"result": [{"title": "CodeQL cs/sql-injection: SQL query built from user-controlled sources", "doc_path": "codeql/csharp/cs__sql-injection.md", "url": "https://codeql.github.com/codeql-query-help/csharp/cs-sql-injection/"}]}""";
         app.Argus.Handlers["docs_get"] = _ => """{"result": {"title": "CWE-89", "text": "Use prepared statements and parameters."}}""";
+        app.Argus.Handlers["deps_check"] = _ => """
+            {"project": "g/shop", "ref": "main", "sha": "abc", "dependencies": 42, "pinned": 40, "versions_not_compared": 0,
+             "advisories": [{"pack": "advisories", "as_of": "2026-10-27", "days_old": 0}],
+             "findings": [{"ecosystem": "NuGet", "package": "Newtonsoft.Json", "version": "12.0.3", "direct": false, "via": "Some.Lib", "file": "api/packages.lock.json", "line": 7,
+                           "advisory": "GHSA-5crp-9r3c-p9vr", "aliases": ["CVE-2024-21907"], "severity": "high", "cwes": ["CWE-755"], "exploited": true,
+                           "summary": "Improper Handling of Exceptional Conditions in Newtonsoft.Json", "fixed_in": "13.0.1", "upgrade_to": "13.0.1",
+                           "url": "https://github.com/advisories/GHSA-5crp-9r3c-p9vr"}]}
+            """;
+        app.Argus.Handlers["sbom"] = _ => """{"bomFormat": "CycloneDX", "specVersion": "1.5", "components": [{"type": "library", "name": "Newtonsoft.Json", "version": "12.0.3", "purl": "pkg:nuget/Newtonsoft.Json@12.0.3"}]}""";
     }
 
     private static async Task<JsonElement> DoneAsync(TestBrowser b, Guid id)
@@ -83,8 +92,20 @@ public sealed class SecurityReviewTests(AppFixture app)
         Assert.Equal("done", scan.GetProperty("status").GetString());
         // The test file is left out; one suspicion cites a line the file does not have, and is dropped.
         Assert.Equal((4, 4, 1), (scan.GetProperty("candidates").GetInt32(), scan.GetProperty("read").GetInt32(), scan.GetProperty("dropped").GetInt32()));
-        var findings = done.GetProperty("findings").EnumerateArray().ToList();
+        var all = done.GetProperty("findings").EnumerateArray().ToList();
+        var findings = all.Where(f => f.GetProperty("kind").GetString() == "code").ToList();
         Assert.Equal(["src/Audit.cs", "src/Orders.cs", "src/Report.cs"], findings.Select(f => f.GetProperty("path").GetString()).Order());
+        // Its packages too: the known-exploited one first, with how it comes in and the upgrade that fixes it; and its bill of materials.
+        var package = all[0];
+        Assert.Equal(("dependency", true, "api/packages.lock.json", "CWE-755"),
+            (package.GetProperty("kind").GetString(), package.GetProperty("exploited").GetBoolean(), package.GetProperty("path").GetString(), package.GetProperty("cwe").GetString()));
+        Assert.Equal("Newtonsoft.Json comes in through Some.Lib", package.GetProperty("flow").GetString());
+        Assert.StartsWith("Upgrade Newtonsoft.Json to 13.0.1", package.GetProperty("fix").GetString(), StringComparison.Ordinal);
+        Assert.Equal((42, "2026-10-27", true), (scan.GetProperty("dependencies").GetInt32(), scan.GetProperty("advisoriesAsOf").GetString(), scan.GetProperty("sbom").GetBoolean()));
+        Assert.StartsWith("42 package(s) checked against the advisories of 2026-10-27: 1 known vulnerabilit(ies), 1 known to be exploited.", done.GetProperty("summary").GetString(), StringComparison.Ordinal);
+        var bom = await me.GetAsync($"/api/code/security/{id}/sbom");
+        Assert.Equal("application/vnd.cyclonedx+json", bom.Content.Headers.ContentType?.MediaType);
+        Assert.Contains("pkg:nuget/Newtonsoft.Json@12.0.3", await bom.Content.ReadAsStringAsync(), StringComparison.Ordinal);
         var orders = findings.Single(f => f.GetProperty("path").GetString() == "src/Orders.cs");
         Assert.Equal((4, "CWE-89", "high", true), (orders.GetProperty("line").GetInt32(), orders.GetProperty("cwe").GetString(), orders.GetProperty("severity").GetString(), orders.GetProperty("verified").GetBoolean()));
         Assert.StartsWith("var cmd = new SqlCommand(\"SELECT * FROM orders WHERE id", orders.GetProperty("sinkCode").GetString(), StringComparison.Ordinal);
@@ -112,7 +133,8 @@ public sealed class SecurityReviewTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.BadRequest, await me.Http.PutAsJsonAsync(new Uri(path, UriKind.Relative), new { state = "wrong" }));
         var list = await me.JsonAsync(await me.GetAsync("/api/code/security"));
         var mine = list.EnumerateArray().Single(s => s.GetProperty("scan").GetProperty("id").GetGuid() == id);
-        Assert.Equal(1, mine.GetProperty("open").GetProperty("high").GetInt32());
+        // Audit.cs's weakness and the package are still open; Orders.cs's is accepted.
+        Assert.Equal(2, mine.GetProperty("open").GetProperty("high").GetInt32());
         var other = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
         await StatusAssert.Is(HttpStatusCode.OK, await other.GetAsync($"/api/code/security/{id}"));
     }

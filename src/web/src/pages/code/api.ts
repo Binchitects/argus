@@ -236,6 +236,9 @@ export interface ScanBrief {
   candidates: number
   read: number
   dropped: number
+  dependencies: number
+  advisoriesAsOf: string | null
+  sbom: boolean
   createdAt: string
   finishedAt: string | null
   error: string | null
@@ -243,6 +246,8 @@ export interface ScanBrief {
 
 export interface SecurityFinding {
   id: string
+  kind: 'code' | 'dependency'
+  exploited: boolean
   path: string
   line: number
   sinkCode: string

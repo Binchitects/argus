@@ -29,6 +29,11 @@ public sealed class SecurityScan
     public int Read { get; set; }
     /// <summary>Suspicions dropped because the sink's line could not be cited or the weakness is not one the pack knows.</summary>
     public int Dropped { get; set; }
+    /// <summary>The packages its lock files and manifests name, and the day the advisories they were matched against are from (null: no advisories pack).</summary>
+    public int Dependencies { get; set; }
+    public DateOnly? AdvisoriesAsOf { get; set; }
+    /// <summary>The packages as a CycloneDX bill of materials (JSON), to download.</summary>
+    public string? Sbom { get; set; }
     /// <summary>What the review did and found, in Markdown.</summary>
     public string? Summary { get; set; }
     public int PromptTokens { get; set; }
@@ -49,8 +54,15 @@ public sealed class SecurityFinding
     /// <summary>Not a weakness after all: remembered for the repository.</summary>
     public const string Wrong = "wrong";
 
+    public const string Code = "code";
+    public const string Dependency = "dependency";
+
     public Guid Id { get; set; } = Guid.CreateVersion7();
     public Guid ScanId { get; set; }
+    /// <summary>code (a sink untrusted data reaches) or dependency (a package version an advisory affects).</summary>
+    public string Kind { get; set; } = Code;
+    /// <summary>A dependency's advisory is on CISA's list of known exploited vulnerabilities.</summary>
+    public bool Exploited { get; set; }
     public required string Path { get; set; }
     /// <summary>The sink's line, cited as the file has it.</summary>
     public int Line { get; set; }

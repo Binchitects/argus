@@ -182,8 +182,10 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
                 ?? throw new ReviewException("Its person is gone.");
             scan.Status = SecurityScan.Running;
             scan.Model = await ModelAsync(services, user, ct);
-            await StepAsync(db, scan, "Finding where data reaches dangerous calls", ct);
             var session = await services.GetRequiredService<ArgusMcp>().ConnectAsync(user.Id, user.Email!, ct);
+            await StepAsync(db, scan, "Checking its packages against known vulnerabilities", ct);
+            var packages = await DependenciesAsync(session, scan, ct);
+            await StepAsync(db, scan, "Finding where data reaches dangerous calls", ct);
             var found = new List<Candidate>();
             foreach (var sink in Sinks)
             {
@@ -230,9 +232,9 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
                 await StepAsync(db, scan, $"Checking finding {i + 1} of {Math.Min(checkedFirst.Count, MostVerified)}", ct);
                 await VerifyAsync(services, session, scan, user.Email!, checkedFirst[i], cweCache, ct);
             }
-            scan.Findings.AddRange(checkedFirst);
-            db.SecurityFindings.AddRange(checkedFirst.Select(f => { f.ScanId = scan.Id; return f; }));
-            scan.Summary = Summary(scan, ordered, checkedFirst);
+            scan.Findings.AddRange([.. packages, .. checkedFirst]);
+            db.SecurityFindings.AddRange(scan.Findings.Select(f => { f.ScanId = scan.Id; return f; }));
+            scan.Summary = Summary(scan, ordered, scan.Findings);
             scan.Status = SecurityScan.Done;
             scan.Step = null;
             scan.FinishedAt = DateTimeOffset.UtcNow;
@@ -249,6 +251,54 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
             await db.SaveChangesAsync(CancellationToken.None);
             await NotifyAsync(services, scan, CancellationToken.None);
         }
+    }
+
+    /// <summary>
+    /// The repository's packages matched against the advisories (Argus's deps_check, no model) and its bill of materials:
+    /// a finding per package version an advisory affects. Without an advisories pack, or a tool that cannot read the
+    /// repository's lock files, the review goes on with its code alone and says so.
+    /// </summary>
+    private static async Task<List<SecurityFinding>> DependenciesAsync(McpSession session, SecurityScan scan, CancellationToken ct)
+    {
+        JsonObject check;
+        try
+        {
+            check = await CallAsync(session, "deps_check", Args(scan, []), ct);
+            var bom = await CallAnyAsync(session, "sbom", Args(scan, []), ct);
+            scan.Sbom = bom?.ToJsonString() is { Length: <= 5_000_000 } json ? json : null;
+        }
+        catch (ReviewException)
+        {
+            return [];
+        }
+        scan.Dependencies = check["dependencies"] is JsonValue n && n.TryGetValue<int>(out var count) ? count : 0;
+        scan.AdvisoriesAsOf = Rows(check["advisories"]).Select(a => DateOnly.TryParse(a["as_of"]?.ToString(), CultureInfo.InvariantCulture, out var day) ? day : (DateOnly?)null)
+            .FirstOrDefault(d => d is not null);
+        var found = new List<SecurityFinding>();
+        foreach (var f in Rows(check["findings"]))
+        {
+            var package = f["package"]?.ToString() ?? "";
+            var version = f["version"]?.ToString() ?? "";
+            var cwes = (f["cwes"] as JsonArray ?? []).Select(c => c?.ToString()).OfType<string>().ToList();
+            var aliases = (f["aliases"] as JsonArray ?? []).Select(c => c?.ToString()).OfType<string>().ToList();
+            var exploited = f["exploited"] is JsonValue e && e.TryGetValue<bool>(out var x) && x;
+            var upgrade = f["upgrade_to"]?.ToString();
+            found.Add(new SecurityFinding
+            {
+                Kind = SecurityFinding.Dependency, Exploited = exploited, Path = Cut(f["file"]?.ToString() ?? "", 1_000),
+                Line = f["line"] is JsonValue l && l.TryGetValue<int>(out var line) ? line : 0, SinkCode = Cut($"{package} {version} ({f["ecosystem"]})", 1_000),
+                Cwe = Cut(cwes.FirstOrDefault() ?? "CWE-1395", 16), CweTitle = cwes.Count > 0 ? string.Join(", ", cwes) : "CWE-1395: Dependency on Vulnerable Third-Party Component",
+                Severity = f["severity"]?.ToString() is "critical" or "high" or "medium" or "low" ? f["severity"]!.ToString() : "medium",
+                Title = Cut(f["summary"]?.ToString() is { Length: > 0 } summary ? summary : $"{package} {version} has a known vulnerability", 300),
+                Source = Cut(string.Join(", ", [f["advisory"]?.ToString(), .. aliases]), 1_000),
+                Flow = f["direct"] is JsonValue dv && dv.TryGetValue<bool>(out var direct) && direct ? $"{package} is asked for directly" : $"{package} comes in through {f["via"]?.ToString() ?? "another package"}",
+                Exploit = exploited ? "On CISA's list of known exploited vulnerabilities: attackers use it." : "",
+                Fix = upgrade is not null ? $"Upgrade {package} to {upgrade} or later (the smallest version that fixes all of its advisories here)." : $"No fixed version of {package} is known: replace it, or keep what reaches it away from the vulnerable part.",
+                Pages = new JsonArray(new JsonObject { ["title"] = $"{f["advisory"]}: {Cut(f["summary"]?.ToString() ?? "", 120)}", ["url"] = f["url"]?.ToString() }).ToJsonString(),
+                Verified = true,
+            });
+        }
+        return found;
     }
 
     private static JsonObject Args(SecurityScan scan, JsonObject args)
@@ -460,16 +510,29 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
     }
 
     /// <summary>What was done and found, written from the counts (no model).</summary>
-    public static string Summary(SecurityScan scan, List<Candidate> candidates, List<SecurityFinding> findings)
+    public static string Summary(SecurityScan scan, List<Candidate> candidates, IEnumerable<SecurityFinding> findings)
     {
-        var kept = findings.Where(f => f.Verified != false).ToList();
+        var all = findings.ToList();
+        var packages = all.Where(f => f.Kind == SecurityFinding.Dependency).ToList();
+        var code = all.Where(f => f.Kind == SecurityFinding.Code).ToList();
+        var kept = code.Where(f => f.Verified != false).ToList();
         var sb = new StringBuilder();
-        sb.Append(CultureInfo.InvariantCulture, $"{candidates.Count} place(s) where data reaches a dangerous call; the {scan.Read} most dangerous read with their callers. ");
-        sb.Append(kept.Count == 0 ? "No weakness was proven." : $"{kept.Count} weakness(es): " +
-            string.Join(", ", kept.GroupBy(f => f.Severity).OrderBy(g => Rank(g.Key)).Select(g => $"{g.Count()} {g.Key}")) + ".");
-        if (findings.Count > kept.Count)
+        if (scan.AdvisoriesAsOf is { } asOf)
         {
-            sb.Append(CultureInfo.InvariantCulture, $" {findings.Count - kept.Count} refuted by the second pass (kept apart).");
+            sb.Append(CultureInfo.InvariantCulture, $"{scan.Dependencies} package(s) checked against the advisories of {asOf:yyyy-MM-dd}: ");
+            sb.Append(packages.Count == 0 ? "none is known to be vulnerable. " : $"{packages.Count} known vulnerabilit(ies)" +
+                (packages.Count(f => f.Exploited) is > 0 and var k ? $", {k} known to be exploited" : "") + ". ");
+        }
+        else
+        {
+            sb.Append("Packages not checked: no advisories pack is loaded (Admin → Packs). ");
+        }
+        sb.Append(CultureInfo.InvariantCulture, $"{candidates.Count} place(s) where data reaches a dangerous call; the {scan.Read} most dangerous read with their callers. ");
+        sb.Append(kept.Count == 0 ? "No weakness was proven in the code." : $"{kept.Count} weakness(es) in the code: " +
+            string.Join(", ", kept.GroupBy(f => f.Severity).OrderBy(g => Rank(g.Key)).Select(g => $"{g.Count()} {g.Key}")) + ".");
+        if (code.Count > kept.Count)
+        {
+            sb.Append(CultureInfo.InvariantCulture, $" {code.Count - kept.Count} refuted by the second pass (kept apart).");
         }
         if (scan.Dropped > 0)
         {
@@ -481,7 +544,7 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
         {
             sb.Append(CultureInfo.InvariantCulture, $" {candidates.Count - scan.Read} were not read (past the {MostRead} most dangerous): run it on a narrower branch, or look at them by kind.");
         }
-        sb.Append("\n\nNot covered: authorisation and access checks, secrets, dependencies with known vulnerabilities, and configuration; the scanners and the dependency check look at those.");
+        sb.Append("\n\nNot covered: authorisation and access checks, secrets and configuration; the scanners look at those.");
         return sb.ToString();
     }
 

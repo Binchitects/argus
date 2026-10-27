@@ -30,6 +30,7 @@ public static class SecurityEndpoints
         g.MapGet("", ListAsync);
         g.MapPost("", StartAsync).RequirePermission(Core.Access.Permissions.ReviewRun);
         g.MapGet("/{id:guid}", GetAsync);
+        g.MapGet("/{id:guid}/sbom", SbomAsync);
         g.MapPut("/{id:guid}/findings/{findingId:guid}", DecideAsync);
         g.MapDelete("/{id:guid}", DeleteAsync);
     }
@@ -38,7 +39,8 @@ public static class SecurityEndpoints
 
     private static object Brief(SecurityScan s) => new
     {
-        s.Id, s.Project, s.Ref, s.Status, s.Step, s.Candidates, s.Read, s.Dropped, s.CreatedAt, s.FinishedAt, s.Error,
+        s.Id, s.Project, s.Ref, s.Status, s.Step, s.Candidates, s.Read, s.Dropped, s.Dependencies, s.AdvisoriesAsOf, s.CreatedAt, s.FinishedAt, s.Error,
+        sbom = s.Sbom is not null,
     };
 
     /// <summary>The person's security reviews (a reviews admin sees everyone's), newest first, with their open findings by severity.</summary>
@@ -108,13 +110,25 @@ public static class SecurityEndpoints
         return Results.Ok(new
         {
             scan = Brief(s), s.Summary, s.Model, s.PromptTokens, s.CompletionTokens, by, mine = s.UserId == me.Id,
-            findings = s.Findings.OrderBy(f => f.Verified == false).ThenBy(f => f.Severity switch { "critical" => 0, "high" => 1, "medium" => 2, _ => 3 }).ThenBy(f => f.Path).ThenBy(f => f.Line)
+            findings = s.Findings.OrderBy(f => f.Verified == false).ThenByDescending(f => f.Exploited).ThenBy(f => f.Severity switch { "critical" => 0, "high" => 1, "medium" => 2, _ => 3 }).ThenBy(f => f.Path).ThenBy(f => f.Line)
                 .Select(f => new
                 {
-                    f.Id, f.Path, f.Line, f.SinkCode, f.Cwe, f.CweTitle, f.Severity, f.Title, f.Source, f.Flow, f.Exploit, f.Fix,
+                    f.Id, f.Kind, f.Exploited, f.Path, f.Line, f.SinkCode, f.Cwe, f.CweTitle, f.Severity, f.Title, f.Source, f.Flow, f.Exploit, f.Fix,
                     pages = JsonNode.Parse(f.Pages), f.Verified, f.VerifyNote, f.State, f.DecidedAt, f.Why, f.Until,
                 }),
         });
+    }
+
+    /// <summary>The repository's packages at the commit reviewed, as a CycloneDX bill of materials.</summary>
+    private static async Task<IResult> SbomAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AccessService access, CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        if (await SeenAsync(db, access, me, id, ct) is not { Sbom: { } sbom } s)
+        {
+            return Results.NotFound();
+        }
+        var name = $"{s.Project.Replace('/', '-')}{(s.Ref is null ? "" : "-" + s.Ref.Replace('/', '-'))}.cdx.json";
+        return Results.File(System.Text.Encoding.UTF8.GetBytes(sbom), "application/vnd.cyclonedx+json", name);
     }
 
     /// <summary>A finding fixed, accepted as a risk (why, and until when it is looked at again), marked wrong (why), or opened again.</summary>

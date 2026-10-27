@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { BookOpen, ShieldAlert, ShieldCheck } from 'lucide-react'
+import { BookOpen, Download, Package, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -118,7 +118,10 @@ function FindingCard({ f, onDecide }: { f: SecurityFinding; onDecide: (state: Se
     <li className={`grid gap-2 rounded-lg border p-4 ${refuted || f.state !== 'open' ? 'opacity-70' : ''}`}>
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant={severityVariant[f.severity]}>{f.severity}</Badge>
-        {cwePage?.url ? (
+        {f.exploited && <Badge variant="destructive">known exploited</Badge>}
+        {f.kind === 'dependency' ? (
+          <Badge variant="outline">{f.cwe}</Badge>
+        ) : cwePage?.url ? (
           <a href={cwePage.url} target="_blank" rel="noreferrer" title={f.cweTitle}>
             <Badge variant="outline">{f.cwe}</Badge>
           </a>
@@ -126,24 +129,32 @@ function FindingCard({ f, onDecide }: { f: SecurityFinding; onDecide: (state: Se
           <Badge variant="outline">{f.cwe}</Badge>
         )}
         <code className="text-xs text-muted-foreground">
-          {f.path}:{f.line}
+          {f.path}
+          {f.line > 0 && `:${f.line}`}
         </code>
         {f.state !== 'open' && <Badge variant="secondary">{f.state === 'accepted' && f.until ? `accepted until ${new Date(f.until).toLocaleDateString()}` : f.state}</Badge>}
       </div>
       <p className="font-medium">{f.title}</p>
-      <pre className="overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs" aria-label="The sink">
-        <code>{f.sinkCode}</code>
-      </pre>
+      {f.kind === 'dependency' ? (
+        <p className="flex items-center gap-2 font-mono text-sm" aria-label="The package">
+          <Package className="size-4 text-muted-foreground" aria-hidden="true" />
+          {f.sinkCode}
+        </p>
+      ) : (
+        <pre className="overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs" aria-label="The sink">
+          <code>{f.sinkCode}</code>
+        </pre>
+      )}
       <dl className="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[8rem_1fr]">
         {f.source && (
           <>
-            <dt className="text-muted-foreground">Comes in at</dt>
+            <dt className="text-muted-foreground">{f.kind === 'dependency' ? 'Advisory' : 'Comes in at'}</dt>
             <dd>{f.source}</dd>
           </>
         )}
         {f.flow && (
           <>
-            <dt className="text-muted-foreground">Path</dt>
+            <dt className="text-muted-foreground">{f.kind === 'dependency' ? 'Comes in' : 'Path'}</dt>
             <dd>
               <ol className="list-decimal pl-5">
                 {f.flow.split('\n').map((step, i) => (
@@ -153,8 +164,12 @@ function FindingCard({ f, onDecide }: { f: SecurityFinding; onDecide: (state: Se
             </dd>
           </>
         )}
-        <dt className="text-muted-foreground">Exploited by</dt>
-        <dd>{f.exploit}</dd>
+        {f.exploit && (
+          <>
+            <dt className="text-muted-foreground">{f.kind === 'dependency' ? 'Exploited' : 'Exploited by'}</dt>
+            <dd>{f.exploit}</dd>
+          </>
+        )}
         <dt className="text-muted-foreground">Fix</dt>
         <dd>
           <Markdown text={f.fix} />
@@ -250,13 +265,25 @@ export function SecurityScanPage() {
       toast.error(errorMessage(e))
     }
   }
-  const kept = d.findings.filter((f) => f.verified !== false)
-  const doubted = d.findings.filter((f) => f.verified === false)
+  const packages = d.findings.filter((f) => f.kind === 'dependency')
+  const code = d.findings.filter((f) => f.kind === 'code')
+  const kept = code.filter((f) => f.verified !== false)
+  const doubted = code.filter((f) => f.verified === false)
+  const age = s.advisoriesAsOf ? Math.floor((Date.now() - new Date(`${s.advisoriesAsOf}T00:00:00Z`).getTime()) / 86_400_000) : null
   return (
     <>
       <PageHeader
         title={`Security: ${s.project}${s.ref ? ` @ ${s.ref}` : ''}`}
         description={`Reviewed for ${d.by}${d.model ? ` with ${d.model}` : ''}. Read with ${d.mine ? 'your' : 'their'} own access; nothing is written to the code host.`}
+        actions={
+          s.sbom ? (
+            <Button variant="outline" asChild>
+              <a href={`/api/code/security/${id}/sbom`} download>
+                <Download /> Bill of materials
+              </a>
+            </Button>
+          ) : undefined
+        }
       />
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <ScanState s={s} />
@@ -267,6 +294,11 @@ export function SecurityScanPage() {
         )}
       </div>
       {s.status === 'failed' && <Alert variant="destructive">{s.error}</Alert>}
+      {age !== null && age > 7 && (
+        <Alert variant="warning" className="mb-4">
+          The advisories its packages were checked against are {age} days old: renew the advisories pack (Admin → Packs) and review it again.
+        </Alert>
+      )}
       {d.summary && (
         <Card className="mb-6">
           <CardHeader>
@@ -279,7 +311,23 @@ export function SecurityScanPage() {
       )}
       {s.status === 'done' && (
         <>
-          <h2 className="mb-3 text-lg font-semibold">Weaknesses ({kept.length})</h2>
+          {s.advisoriesAsOf && (
+            <>
+              <h2 className="mb-3 text-lg font-semibold">
+                Vulnerable packages ({packages.length} of {s.dependencies})
+              </h2>
+              {packages.length === 0 ? (
+                <p className="mb-6 text-sm text-muted-foreground">No package is known to be vulnerable in the advisories of {s.advisoriesAsOf}.</p>
+              ) : (
+                <ul className="mb-6 grid gap-3" aria-label="Vulnerable packages">
+                  {packages.map((f) => (
+                    <FindingCard key={f.id} f={f} onDecide={(state, why, until) => decide(f.id, state, why, until)} />
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+          <h2 className="mb-3 text-lg font-semibold">Weaknesses in the code ({kept.length})</h2>
           {kept.length === 0 ? (
             <p className="text-sm text-muted-foreground">No weakness was proven in what was read.</p>
           ) : (

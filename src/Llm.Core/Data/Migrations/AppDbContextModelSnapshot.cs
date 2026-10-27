@@ -3157,6 +3157,9 @@ namespace Llm.Core.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<bool>("Exploited")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("Fix")
                         .IsRequired()
                         .HasColumnType("text");
@@ -3164,6 +3167,13 @@ namespace Llm.Core.Data.Migrations
                     b.Property<string>("Flow")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValueSql("'code'");
 
                     b.Property<int>("Line")
                         .HasColumnType("integer");
@@ -3232,6 +3242,9 @@ namespace Llm.Core.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<DateOnly?>("AdvisoriesAsOf")
+                        .HasColumnType("date");
+
                     b.Property<int>("Candidates")
                         .HasColumnType("integer");
 
@@ -3240,6 +3253,9 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Dependencies")
+                        .HasColumnType("integer");
 
                     b.Property<int>("Dropped")
                         .HasColumnType("integer");
@@ -3268,6 +3284,9 @@ namespace Llm.Core.Data.Migrations
                     b.Property<string>("Ref")
                         .HasMaxLength(300)
                         .HasColumnType("character varying(300)");
+
+                    b.Property<string>("Sbom")
+                        .HasColumnType("text");
 
                     b.Property<string>("Status")
                         .IsRequired()

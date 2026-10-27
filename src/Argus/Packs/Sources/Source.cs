@@ -7,6 +7,14 @@ public sealed record Doc(string Path, string Title, string Url, string Lang, str
 
 public sealed record ApiSymbol(string Name, string Kind, string Namespace, string DocPath, string Anchor, string Signature);
 
+/// <summary>
+/// A range of a package's versions an advisory affects (OSV's ECOSYSTEM range): from <see cref="Introduced"/> ("0": from
+/// the first), up to but not <see cref="Fixed"/>, or up to and including <see cref="LastAffected"/>; neither: every later
+/// version. Matched by Argus's deps_check with no model.
+/// </summary>
+public sealed record AffectedRange(string Ecosystem, string Package, string? Introduced, string? Fixed, string? LastAffected, string Advisory,
+    string Aliases, string Severity, string Cwes, bool Exploited, string Summary, string DocPath);
+
 /// <summary>A documentation corpus a pack is built from.</summary>
 public interface ISource
 {
@@ -22,6 +30,8 @@ public interface ISource
     string ArchiveSha256 => "";
     IEnumerable<Doc> IterDocs(string root);
     IEnumerable<ApiSymbol> IterSymbols(string root);
+    /// <summary>For an advisories pack: what each advisory affects, written to the pack's affected table.</summary>
+    IEnumerable<AffectedRange> IterAffected(string root) => [];
     /// <summary>For a composite: (part name, checkout) pairs whose commits make up the provenance.</summary>
     IReadOnlyList<(string Name, string Checkout)>? PartCheckouts(string root) => null;
     /// <summary>For a tree that is neither a checkout nor a fetched archive: the provenance it records itself, or null.</summary>
@@ -54,6 +64,7 @@ public static class SourceCatalog
         ["qt"] = () => new QtDocs(),
         ["grc"] = () => new GrcTexts(),
         ["security"] = () => new SecurityTexts(),
+        ["advisories"] = () => new AdvisoriesTexts(),
     };
 }
 

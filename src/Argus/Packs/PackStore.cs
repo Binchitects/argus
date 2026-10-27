@@ -25,6 +25,9 @@ public sealed class Pack(string name, string path, SqliteConnection conn, Dictio
     /// <summary>The slices a lang can name instead of the whole pack ("qt5"), to their doc path prefixes.</summary>
     public Dictionary<string, string> Facets => _facets ??= PackFormat.ParseFacets(Meta.GetValueOrDefault("facets"));
     Dictionary<string, string>? _facets;
+    /// <summary>Whether it is an advisories pack, with a table of what each advisory affects.</summary>
+    public bool HasAffected => _hasAffected ??= Sql.Scalar(Conn, "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'affected'") is long n && n > 0;
+    bool? _hasAffected;
     public void Dispose() => Conn.Dispose();
 }
 
@@ -151,6 +154,19 @@ public static class PackStore
         // the attribution, exactly where the Python dict literal puts it.
         if (score is not null) obj["score"] = score.Value;
         return Attributed(pack, obj);
+    }
+
+    /// <summary>The ranges of a package's versions the advisories packs say are affected, by ecosystem and name (matched as <see cref="Deps.Versions.PackageKey"/>).</summary>
+    public static List<Row> Affected(IReadOnlyList<Pack> packs, string ecosystem, string package)
+    {
+        var rows = new List<Row>();
+        var key = Deps.Versions.PackageKey(ecosystem, package);
+        foreach (var pack in packs.Where(p => p.HasAffected))
+            rows.AddRange(Query(pack, """
+                SELECT ecosystem, package, introduced, fixed, last_affected, advisory, aliases, severity, cwes, exploited, summary, doc_path
+                FROM affected WHERE ecosystem = ? AND package_key = ?
+                """, ecosystem, key));
+        return rows;
     }
 
     public static List<JsonObject> LookupSymbol(IReadOnlyList<Pack> packs, string name, string? lang = null, int limit = 20)

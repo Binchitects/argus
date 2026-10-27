@@ -3,10 +3,10 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { fakeApi, member, renderApp } from '@/test/utils'
 
-const brief = { id: 's1', project: 'g/shop', ref: 'main', status: 'done', step: null, candidates: 12, read: 12, dropped: 1, createdAt: '2026-10-27T00:00:00Z', finishedAt: null, error: null }
+const brief = { id: 's1', project: 'g/shop', ref: 'main', status: 'done', step: null, candidates: 12, read: 12, dropped: 1, dependencies: 40, advisoriesAsOf: '2026-10-01', sbom: true, createdAt: '2026-10-27T00:00:00Z', finishedAt: null, error: null }
 
 const finding = (id: string, over: object) => ({
-  id, path: 'src/Orders.cs', line: 4, sinkCode: 'var cmd = new SqlCommand("SELECT ... " + id, conn);', cwe: 'CWE-89', cweTitle: 'CWE-89: SQL Injection (Base)', severity: 'high',
+  id, kind: 'code', exploited: false, path: 'src/Orders.cs', line: 4, sinkCode: 'var cmd = new SqlCommand("SELECT ... " + id, conn);', cwe: 'CWE-89', cweTitle: 'CWE-89: SQL Injection (Base)', severity: 'high',
   title: 'SQL built from the request', source: 'Controller.cs:9 Request.Query["id"]', flow: 'Request.Query["id"]\nOrders.Find(id)', exploit: "id = ' OR '1'='1", fix: 'Use a parameter: `@id`.',
   pages: [{ title: 'CWE-89: SQL Injection (Base)', url: 'https://cwe.mitre.org/data/definitions/89.html' }, { title: 'SQL Injection Prevention Cheat Sheet', url: 'https://cheatsheetseries.owasp.org/x.html' }],
   verified: true, verifyNote: 'The id goes into the text.', state: 'open', decidedAt: null, why: null, until: null, ...over,
@@ -34,7 +34,18 @@ describe('code security', () => {
   it('shows each weakness with its sink, path and the pack’s pages, doubted ones apart, and accepts a risk with why and until when', async () => {
     const calls = fakeApi(member, {
       'GET /api/code/security/s1': () => ({
-        json: { scan: brief, summary: '12 places read.', model: 'Main', by: 'Mo', mine: true, findings: [finding('f1', {}), finding('f2', { title: 'A constant query', verified: false, verifyNote: 'The value is a constant.' })] },
+        json: {
+          scan: brief, summary: '12 places read.', model: 'Main', by: 'Mo', mine: true,
+          findings: [
+            finding('p1', {
+              kind: 'dependency', exploited: true, path: 'api/packages.lock.json', line: 7, sinkCode: 'Newtonsoft.Json 12.0.3 (NuGet)', cwe: 'CWE-755', title: 'Improper Handling of Exceptional Conditions',
+              source: 'GHSA-5crp-9r3c-p9vr, CVE-2024-21907', flow: 'Newtonsoft.Json comes in through Some.Lib', exploit: 'On CISA’s list of known exploited vulnerabilities.', fix: 'Upgrade Newtonsoft.Json to 13.0.1 or later.',
+              pages: [{ title: 'GHSA-5crp-9r3c-p9vr', url: 'https://github.com/advisories/GHSA-5crp-9r3c-p9vr' }],
+            }),
+            finding('f1', {}),
+            finding('f2', { title: 'A constant query', verified: false, verifyNote: 'The value is a constant.' }),
+          ],
+        },
       }),
       'PUT /api/code/security/s1/findings/f1': () => ({ status: 204 }),
     })
@@ -46,6 +57,13 @@ describe('code security', () => {
     expect(within(card).getByText('Orders.Find(id)')).toBeInTheDocument()
     expect(within(card).getByRole('link', { name: 'SQL Injection Prevention Cheat Sheet' })).toBeInTheDocument()
     expect(screen.getByText(/Doubted by the second check \(1\)/)).toBeInTheDocument()
+    const packages = screen.getByRole('list', { name: 'Vulnerable packages' })
+    expect(within(packages).getByText('known exploited')).toBeInTheDocument()
+    expect(within(packages).getByLabelText('The package')).toHaveTextContent('Newtonsoft.Json 12.0.3 (NuGet)')
+    expect(within(packages).getByText('Newtonsoft.Json comes in through Some.Lib')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Vulnerable packages (1 of 40)' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Bill of materials' })).toHaveAttribute('href', '/api/code/security/s1/sbom')
+    expect(screen.getByText(/advisories its packages were checked against are \d+ days old/)).toBeInTheDocument()
 
     await userEvent.click(within(card).getByRole('button', { name: 'Accept the risk' }))
     const dialog = await screen.findByRole('dialog', { name: 'Accept the risk' })

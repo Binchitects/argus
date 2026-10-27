@@ -295,7 +295,7 @@ public static class PackBuilder
             throw new BuildError($"source {PyStr.Repr(source.Name)} records no {string.Join(", ", missing)}; refusing to build a pack that cannot lawfully be shared");
     }
 
-    static IEnumerable<(string, object?)> MetaFor(ISource source, string version, string commit, long docs, long chunks, long symbols, long unresolved)
+    static IEnumerable<(string, object?)> MetaFor(ISource source, string version, string commit, long docs, long chunks, long symbols, long unresolved, long affected = 0)
     {
         IEnumerable<(string, object?)> meta =
         [
@@ -305,7 +305,8 @@ public static class PackBuilder
             ("builder_version", BuilderVersion), ("pack_version", version), ("doc_count", docs),
             ("chunk_count", chunks), ("symbol_count", symbols), ("unresolved_symbol_count", unresolved),
         ];
-        // A pack with facets says so; the others keep exactly the keys they always had.
+        // A pack with facets (or an affected table) says so; the others keep exactly the keys they always had.
+        if (affected > 0) meta = meta.Append(("affected_count", affected));
         return source.Facets.Count > 0 ? meta.Append(("facets", PackFormat.FormatFacets(source.Facets))) : meta;
     }
 
@@ -332,8 +333,9 @@ public static class PackBuilder
         }
         FlushEmbeddings(conn, pending, embedFn, cache);
         var (symbols, skipped) = InsertSymbols(conn, source, workDir, docIds, null);
+        var affected = WriteAffected(conn, source, workDir);
         tx.Commit();
-        PackFormat.WriteMeta(conn, MetaFor(source, version, commit, docIds.Count, chunkTotal, symbols, skipped));
+        PackFormat.WriteMeta(conn, MetaFor(source, version, commit, docIds.Count, chunkTotal, symbols, skipped, affected));
     }
 
     static List<Chunk> ChunksFor(Doc doc) => Chunker.ChunkMarkdown(doc.Lang == "rst" ? Chunker.RstToAtx(doc.Body) : doc.Body);
@@ -402,6 +404,25 @@ public static class PackBuilder
             Sql.Exec(conn, "INSERT INTO vec_bin (chunk_id, embedding) VALUES (?, vec_bit(?))", chunkId, bits);
             Sql.Exec(conn, "INSERT INTO vec_i8 (chunk_id, embedding) VALUES (?, vec_int8(?))", chunkId, i8);
         }
+    }
+
+    /// <summary>An advisories pack's table of what each advisory affects (rewritten whole on an incremental build); 0 rows for other packs, and no table.</summary>
+    static long WriteAffected(SqliteConnection conn, ISource source, string workDir)
+    {
+        var rows = source.IterAffected(workDir).ToList();
+        if (rows.Count == 0) return 0;
+        Sql.Exec(conn, """
+            CREATE TABLE IF NOT EXISTS affected (
+              ecosystem TEXT NOT NULL, package TEXT NOT NULL, package_key TEXT NOT NULL, introduced TEXT, fixed TEXT, last_affected TEXT,
+              advisory TEXT NOT NULL, aliases TEXT, severity TEXT, cwes TEXT, exploited INTEGER NOT NULL, summary TEXT, doc_path TEXT)
+            """);
+        Sql.Exec(conn, "CREATE INDEX IF NOT EXISTS idx_affected ON affected(ecosystem, package_key)");
+        Sql.Exec(conn, "DELETE FROM affected");
+        foreach (var r in rows)
+            Sql.Exec(conn, "INSERT INTO affected VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                r.Ecosystem, r.Package, Deps.Versions.PackageKey(r.Ecosystem, r.Package), r.Introduced, r.Fixed, r.LastAffected, r.Advisory, r.Aliases,
+                r.Severity, r.Cwes, r.Exploited ? 1L : 0L, r.Summary, r.DocPath);
+        return rows.Count;
     }
 
     static (long Written, long Skipped) InsertSymbols(SqliteConnection conn, ISource source, string workDir,
@@ -504,10 +525,11 @@ public static class PackBuilder
             removed++;
         }
         InsertSymbols(conn, source, workDir, docIds, changed);
+        var affected = WriteAffected(conn, source, workDir);
         var chunkTotal = Convert.ToInt64(Sql.Scalar(conn, "SELECT count(*) FROM chunks"));
         var symbolTotal = Convert.ToInt64(Sql.Scalar(conn, "SELECT count(*) FROM api_symbols"));
         tx.Commit();
-        PackFormat.WriteMeta(conn, MetaFor(source, version, commit, docIds.Count, chunkTotal, symbolTotal, 0));
+        PackFormat.WriteMeta(conn, MetaFor(source, version, commit, docIds.Count, chunkTotal, symbolTotal, 0, affected));
         return (kept, rebuilt, removed);
     }
 }
