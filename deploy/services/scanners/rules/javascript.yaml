@@ -1,0 +1,279 @@
+# Arena's own rules for JavaScript and TypeScript, under the app's licence. Each names its weakness (metadata.cwe),
+# Arena's severity and how sure a match is; javascript.js beside it holds the weak code each must find (ruleid) and
+# the fixed code it must not (ok), and the image is not built unless opengrep --test passes on them.
+rules:
+  - id: js-sql-built-from-strings
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      A query built from strings: data in it is read as SQL. Pass the values as parameters (db.query(sql, [values]),
+      knex's bindings, Sequelize's replacements) and keep the SQL text constant.
+    metadata: { cwe: CWE-89, severity: high, confidence: medium }
+    patterns:
+      - pattern-either:
+          - pattern: $DB.$Q(`...${$X}...`, ...)
+          - pattern: $DB.$Q("..." + $X, ...)
+          - pattern: $DB.$Q($S + $X, ...)
+          - patterns:
+              - pattern-either:
+                  - pattern-inside: |
+                      $V = `...${$X}...`;
+                      ...
+                  - pattern-inside: |
+                      $V = "..." + $X;
+                      ...
+                  - pattern-inside: |
+                      const $V = `...${$X}...`;
+                      ...
+                  - pattern-inside: |
+                      let $V = `...${$X}...`;
+                      ...
+                  - pattern-inside: |
+                      const $V = "..." + $X;
+                      ...
+              - pattern: $DB.$Q($V, ...)
+      - metavariable-regex:
+          metavariable: $Q
+          regex: ^(query|execute|raw|whereRaw|joinRaw|orderByRaw|havingRaw|\$queryRawUnsafe|\$executeRawUnsafe|unsafe)$
+
+  - id: js-command-from-strings
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      A shell runs a command built from data: a quote or a semicolon in it runs commands of its own. Use execFile or
+      spawn with the program and its arguments as an array, and no shell.
+    metadata: { cwe: CWE-78, severity: high, confidence: medium }
+    pattern-either:
+      - patterns:
+          - pattern-either:
+              - pattern: $CP.exec($CMD, ...)
+              - pattern: $CP.execSync($CMD, ...)
+              - pattern: exec($CMD, ...)
+              - pattern: execSync($CMD, ...)
+          - pattern-either:
+              - pattern-inside: $CP.$F(`...${$X}...`, ...)
+              - pattern-inside: $CP.$F("..." + $X, ...)
+              - pattern-inside: $F(`...${$X}...`, ...)
+              - pattern-inside: $F("..." + $X, ...)
+      - patterns:
+          - pattern: '$CP.spawn($CMD, $ARGS, {..., shell: true, ...})'
+          - pattern-not: '$CP.spawn("...", [...], {..., shell: true, ...})'
+
+  - id: js-code-from-data
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      eval, new Function and vm run text as code: whoever writes the text runs code here. Parse the data
+      (JSON.parse), or map names to functions.
+    metadata: { cwe: CWE-95, severity: high, confidence: medium }
+    pattern-either:
+      - patterns:
+          - pattern-either:
+              - pattern: eval($X)
+              - pattern: new Function(..., $X)
+              - pattern: vm.runInThisContext($X, ...)
+              - pattern: vm.runInNewContext($X, ...)
+          - pattern-not: eval("...")
+          - pattern-not: new Function(..., "...")
+      - pattern: setTimeout(`...${$Y}...`, ...)
+      - pattern: setTimeout($A + $B, ...)
+      - pattern: setInterval(`...${$Y}...`, ...)
+      - pattern: setInterval($A + $B, ...)
+
+  - id: js-html-not-escaped
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      Data written into the page as HTML runs as script there (cross-site scripting). Set textContent, let the
+      framework escape it, or clean it first (DOMPurify.sanitize).
+    metadata: { cwe: CWE-79, severity: medium, confidence: medium }
+    patterns:
+      - pattern-either:
+          - pattern: $EL.innerHTML = $X
+          - pattern: $EL.outerHTML = $X
+          - pattern: $EL.insertAdjacentHTML($POS, $X)
+          - pattern: document.write($X)
+          - pattern: document.writeln($X)
+      - pattern-not: $EL.innerHTML = "..."
+      - pattern-not: $EL.outerHTML = "..."
+      - pattern-not: $EL.insertAdjacentHTML($POS, "...")
+      - pattern-not: document.write("...")
+      - pattern-not: $EL.innerHTML = DOMPurify.sanitize(...)
+      - pattern-not: $EL.innerHTML = $P.sanitize(...)
+      - pattern-not: $EL.insertAdjacentHTML($POS, DOMPurify.sanitize(...))
+
+  - id: js-react-html-not-escaped
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      dangerouslySetInnerHTML puts data into the page as HTML, where it runs as script (cross-site scripting). Render
+      it as text, or clean it first (DOMPurify.sanitize).
+    metadata: { cwe: CWE-79, severity: medium, confidence: medium }
+    patterns:
+      - pattern: '<$EL dangerouslySetInnerHTML={{__html: $X}} />'
+      - pattern-not: '<$EL dangerouslySetInnerHTML={{__html: "..."}} />'
+      - pattern-not: '<$EL dangerouslySetInnerHTML={{__html: DOMPurify.sanitize(...)}} />'
+      - pattern-not: '<$EL dangerouslySetInnerHTML={{__html: $P.sanitize(...)}} />'
+
+  - id: js-tls-not-verified
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      The server's certificate is not checked, so anyone on the way can read and change the traffic. Leave
+      verification on; for a private CA, give it as ca.
+    metadata: { cwe: CWE-295, severity: high, confidence: high }
+    pattern-either:
+      - pattern: "{..., rejectUnauthorized: false, ...}"
+      - pattern: process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0"
+      - pattern: process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0"
+
+  - id: js-sql-from-request
+    mode: taint
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      Data from the request reaches a query's text. Pass it as a parameter (the query's bindings) and keep the SQL
+      text constant.
+    metadata: { cwe: CWE-89, severity: critical, confidence: high }
+    pattern-sources: &js-request
+      - patterns:
+          - pattern-either:
+              - pattern: $REQ.query
+              - pattern: $REQ.body
+              - pattern: $REQ.params
+              - pattern: $REQ.cookies
+              - pattern: $REQ.headers
+              - pattern: $REQ.get(...)
+              - pattern: $REQ.header(...)
+          - metavariable-regex:
+              metavariable: $REQ
+              regex: ^(req|request|ctx\.request|ctx)$
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: $DB.query($Q, ...)
+              - pattern: $DB.raw($Q, ...)
+              - pattern: $DB.execute($Q, ...)
+          - focus-metavariable: $Q
+
+  - id: js-command-from-request
+    mode: taint
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      Data from the request reaches a command. Do not run what a request names; when a value must be an argument, use
+      execFile with an argument array and check it against what is allowed.
+    metadata: { cwe: CWE-78, severity: critical, confidence: high }
+    pattern-sources: *js-request
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: $CP.exec($C, ...)
+              - pattern: $CP.execSync($C, ...)
+              - pattern: exec($C, ...)
+              - pattern: execSync($C, ...)
+              - pattern: $CP.spawn($C, ...)
+          - focus-metavariable: $C
+
+  - id: js-path-from-request
+    mode: taint
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      A file path from the request: ../ in it reaches any file the process can read. Take only a file's name
+      (path.basename), and check that the resolved path is inside the folder meant.
+    metadata: { cwe: CWE-22, severity: high, confidence: high }
+    pattern-sources: *js-request
+    pattern-sanitizers:
+      - pattern: path.basename(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: fs.$F($P, ...)
+              - pattern: $RES.sendFile($P, ...)
+              - pattern: $RES.download($P, ...)
+          - focus-metavariable: $P
+
+  - id: js-request-to-url-from-request
+    mode: taint
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      The server fetches a URL the request gives (server-side request forgery): it can be made to reach internal
+      services and the cloud's metadata. Allow only known hosts, and check the address before fetching.
+    metadata: { cwe: CWE-918, severity: high, confidence: high }
+    pattern-sources: *js-request
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: fetch($U, ...)
+              - pattern: axios.$M($U, ...)
+              - pattern: axios($U, ...)
+              - pattern: http.get($U, ...)
+              - pattern: https.get($U, ...)
+              - pattern: got($U, ...)
+          - focus-metavariable: $U
+
+  - id: js-redirect-from-request
+    mode: taint
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      A redirect to where the request says (an open redirect): a link on this site sends people to any other. Redirect
+      to paths of this site only, or to hosts on a list.
+    metadata: { cwe: CWE-601, severity: medium, confidence: high }
+    pattern-sources: *js-request
+    pattern-sinks:
+      - patterns:
+          - pattern: $RES.redirect($U)
+          - focus-metavariable: $U
+
+  - id: js-predictable-secret
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      A secret from Math.random, which is predictable from its output. Use crypto.randomBytes, crypto.randomUUID or
+      crypto.getRandomValues.
+    metadata: { cwe: CWE-338, severity: medium, confidence: medium }
+    patterns:
+      - pattern-either:
+          - pattern: $NAME = <... Math.random() ...>
+          - pattern: const $NAME = <... Math.random() ...>
+          - pattern: let $NAME = <... Math.random() ...>
+          - pattern: var $NAME = <... Math.random() ...>
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: (?i).*(token|secret|password|passwd|nonce|otp|salt|api_?key|session_?id|reset_?code).*
+
+  - id: js-jwt-not-verified
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      The token is accepted without its signature checked, so anyone can write one. Verify it, with the algorithms
+      named (jwt.verify(token, key, { algorithms: ["RS256"] })).
+    metadata: { cwe: CWE-347, severity: critical, confidence: high }
+    pattern-either:
+      - pattern: 'jwt.verify($T, $K, {..., algorithms: [..., "none", ...], ...}, ...)'
+      - pattern: 'jwt.verify($T, null, ...)'
+      - pattern: 'jwt.verify($T, undefined, ...)'
+
+  - id: js-cors-any-origin-with-credentials
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      Any site may read this server's answers with the visitor's cookies. Name the origins allowed.
+    metadata: { cwe: CWE-942, severity: medium, confidence: high }
+    pattern-either:
+      - pattern: 'cors({..., origin: true, ..., credentials: true, ...})'
+      - pattern: 'cors({..., credentials: true, ..., origin: true, ...})'
+      - pattern: 'cors({..., origin: "*", ..., credentials: true, ...})'
+
+  - id: js-unsafe-deserialization
+    languages: [javascript, typescript]
+    severity: ERROR
+    message: >-
+      node-serialize's unserialize runs functions the data carries. Read untrusted data as JSON.
+    metadata: { cwe: CWE-502, severity: critical, confidence: high }
+    pattern-either:
+      - pattern: $SER.unserialize(...)
+      - pattern: unserialize(...)

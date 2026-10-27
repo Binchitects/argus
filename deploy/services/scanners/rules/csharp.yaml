@@ -1,0 +1,268 @@
+# Arena's own rules for C#, under the app's licence. Each names its weakness (metadata.cwe), Arena's severity and how
+# sure a match is; csharp.cs beside it holds the weak code each must find (ruleid) and the fixed code it must not
+# (ok), and the image is not built unless opengrep --test passes on them.
+rules:
+  - id: csharp-sql-built-from-strings
+    languages: [csharp]
+    severity: ERROR
+    message: >-
+      A query built from strings: data in it is read as SQL. Add the values as parameters (command.Parameters.Add,
+      Dapper's anonymous object, EF Core's FromSql or FromSqlInterpolated) and keep the SQL text constant.
+    metadata: { cwe: CWE-89, severity: high, confidence: medium }
+    pattern-either:
+      - patterns:
+          - pattern-either:
+              - pattern: new $CMD($"...", ...)
+              - pattern: new $CMD("..." + $X, ...)
+              - pattern: new $CMD($S + $X, ...)
+              - pattern: new $CMD(string.Format(...), ...)
+          - metavariable-regex:
+              metavariable: $CMD
+              regex: ^(SqlCommand|NpgsqlCommand|MySqlCommand|SqliteCommand|OracleCommand|OleDbCommand|OdbcCommand|SQLiteCommand)$
+      - pattern: $C.CommandText = $"..."
+      - pattern: $C.CommandText = "..." + $X
+      - pattern: $C.CommandText = $S + $X
+      - pattern: $C.CommandText = string.Format(...)
+
+  - id: csharp-raw-sql-built-from-strings
+    languages: [csharp]
+    severity: ERROR
+    message: >-
+      A query built from strings: data in it is read as SQL. Use EF Core's FromSql or FromSqlInterpolated (each value
+      becomes a parameter), or Dapper's parameters, and keep the SQL text constant.
+    metadata: { cwe: CWE-89, severity: high, confidence: medium }
+    patterns:
+      - pattern-either:
+          - pattern: $DB.$RAW($"...", ...)
+          - pattern: $DB.$RAW("..." + $X, ...)
+          - pattern: $DB.$RAW($S + $X, ...)
+          - pattern: $DB.$RAW(string.Format(...), ...)
+      - metavariable-regex:
+          metavariable: $RAW
+          regex: ^(FromSqlRaw|ExecuteSqlRaw|ExecuteSqlRawAsync|SqlQueryRaw|Query|QueryAsync|QueryFirst|QueryFirstAsync|QueryFirstOrDefault|QueryFirstOrDefaultAsync|QuerySingle|QuerySingleAsync|Execute|ExecuteAsync|ExecuteScalar|ExecuteScalarAsync)$
+
+  - id: csharp-sql-from-request
+    mode: taint
+    languages: [csharp]
+    severity: ERROR
+    message: >-
+      Data from the request reaches a query's text. Add it as a parameter and keep the SQL text constant.
+    metadata: { cwe: CWE-89, severity: critical, confidence: high }
+    pattern-sources: &csharp-request
+      - pattern-either:
+          - pattern: Request.Query[...]
+          - pattern: Request.Form[...]
+          - pattern: Request.Headers[...]
+          - pattern: Request.Cookies[...]
+          - pattern: Request.QueryString[...]
+          - pattern: Request.Params[...]
+          - pattern: HttpContext.Request.Query[...]
+          - pattern: HttpContext.Request.Form[...]
+          - pattern: $CTX.Request.Query[...]
+          - pattern: $CTX.Request.Form[...]
+          - pattern: $CTX.Request.Headers[...]
+          - pattern: Request.Body
+          - pattern: $CTX.Request.Body
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: new $CMD($Q, ...)
+              - pattern: $C.CommandText = $Q
+              - pattern: $DB.FromSqlRaw($Q, ...)
+              - pattern: $DB.ExecuteSqlRaw($Q, ...)
+          - focus-metavariable: $Q
+
+  - id: csharp-command-from-data
+    languages: [csharp]
+    severity: WARNING
+    message: >-
+      A process started from data: the program it names, or a shell given its arguments, runs what the data says.
+      Start a fixed program, pass each argument through ProcessStartInfo.ArgumentList, and never cmd.exe /c or sh -c.
+    metadata: { cwe: CWE-78, severity: high, confidence: medium }
+    pattern-either:
+      - patterns:
+          - pattern: Process.Start($P, ...)
+          - pattern-not: Process.Start("...")
+          - pattern-not: Process.Start("...", "...")
+          - pattern-not: Process.Start((ProcessStartInfo $PSI))
+      - pattern: Process.Start("cmd.exe", $"...")
+      - pattern: Process.Start("cmd.exe", "..." + $X)
+      - pattern: Process.Start("/bin/sh", $"...")
+      - pattern: new ProcessStartInfo($P, $"...")
+      - pattern: new ProcessStartInfo($P, "..." + $X)
+      - pattern: '$PSI.Arguments = $"..."'
+      - pattern: $PSI.Arguments = "..." + $X
+
+  - id: csharp-unsafe-deserialization
+    languages: [csharp]
+    severity: ERROR
+    message: >-
+      This deserialiser builds any type the data names, and can run code doing it. Use System.Text.Json (or
+      Json.NET with TypeNameHandling.None) into the type you expect.
+    metadata: { cwe: CWE-502, severity: critical, confidence: high }
+    pattern-either:
+      - pattern: new BinaryFormatter(...)
+      - pattern: new NetDataContractSerializer(...)
+      - pattern: new SoapFormatter(...)
+      - pattern: new LosFormatter(...)
+      - pattern: new ObjectStateFormatter(...)
+      - pattern: new JavaScriptSerializer(new SimpleTypeResolver())
+      - pattern: TypeNameHandling = TypeNameHandling.All
+      - pattern: TypeNameHandling = TypeNameHandling.Auto
+      - pattern: TypeNameHandling = TypeNameHandling.Objects
+      - pattern: TypeNameHandling = TypeNameHandling.Arrays
+
+  - id: csharp-tls-not-verified
+    languages: [csharp]
+    severity: WARNING
+    message: >-
+      Any certificate is accepted, so anyone on the way can read and change the traffic. Leave the default check on;
+      for a private CA, check the chain against it.
+    metadata: { cwe: CWE-295, severity: high, confidence: high }
+    pattern-either:
+      - pattern: $H.ServerCertificateCustomValidationCallback = (...) => true
+      - pattern: $H.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+      - pattern: ServerCertificateCustomValidationCallback = (...) => true
+      - pattern: ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+      - pattern: ServicePointManager.ServerCertificateValidationCallback += (...) => true
+      - pattern: ServicePointManager.ServerCertificateValidationCallback = (...) => true
+      - pattern: RemoteCertificateValidationCallback = (...) => true
+
+  - id: csharp-xml-external-entities
+    languages: [csharp]
+    severity: WARNING
+    message: >-
+      The XML parser resolves external entities and DTDs: a document can read local files and reach other servers
+      (XXE). Leave XmlResolver null and DtdProcessing at Prohibit.
+    metadata: { cwe: CWE-611, severity: high, confidence: high }
+    pattern-either:
+      - pattern: $D.XmlResolver = new XmlUrlResolver()
+      - pattern: XmlResolver = new XmlUrlResolver()
+      - pattern: $S.DtdProcessing = DtdProcessing.Parse
+      - pattern: DtdProcessing = DtdProcessing.Parse
+
+  - id: csharp-html-not-escaped
+    languages: [csharp]
+    severity: WARNING
+    message: >-
+      Text marked as HTML is not encoded: data in it runs as script in the page (cross-site scripting). Let Razor
+      encode it, or clean it with an HTML sanitiser first.
+    metadata: { cwe: CWE-79, severity: medium, confidence: medium }
+    patterns:
+      - pattern-either:
+          - pattern: Html.Raw($X)
+          - pattern: new HtmlString($X)
+          - pattern: new MarkupString($X)
+          - pattern: (MarkupString)$X
+      - pattern-not: Html.Raw("...")
+      - pattern-not: new HtmlString("...")
+      - pattern-not: new MarkupString("...")
+
+  - id: csharp-weak-crypto
+    languages: [csharp]
+    severity: INFO
+    message: >-
+      A broken algorithm: MD5 and SHA-1 collide at will, DES, 3DES and RC2 are too weak, and ECB shows the
+      plaintext's patterns. Use SHA-256 or better, AES-GCM, and for passwords a password hash (PBKDF2 with many
+      iterations, or Argon2).
+    metadata: { cwe: CWE-327, severity: low, confidence: medium }
+    pattern-either:
+      - pattern: MD5.Create(...)
+      - pattern: SHA1.Create(...)
+      - pattern: MD5.HashData(...)
+      - pattern: SHA1.HashData(...)
+      - pattern: new MD5CryptoServiceProvider(...)
+      - pattern: new SHA1CryptoServiceProvider(...)
+      - pattern: new SHA1Managed(...)
+      - pattern: DES.Create(...)
+      - pattern: TripleDES.Create(...)
+      - pattern: RC2.Create(...)
+      - pattern: new DESCryptoServiceProvider(...)
+      - pattern: new TripleDESCryptoServiceProvider(...)
+      - pattern: $A.Mode = CipherMode.ECB
+
+  - id: csharp-predictable-secret
+    languages: [csharp]
+    severity: WARNING
+    message: >-
+      A secret from System.Random, which is predictable from its output. Use RandomNumberGenerator
+      (RandomNumberGenerator.GetBytes, GetInt32, GetString).
+    metadata: { cwe: CWE-338, severity: medium, confidence: medium }
+    patterns:
+      - pattern-either:
+          - pattern: var $NAME = <... $R.Next(...) ...>;
+          - pattern: $T $NAME = <... $R.Next(...) ...>;
+          - pattern: $NAME = <... $R.Next(...) ...>;
+          - pattern: var $NAME = <... Random.Shared.$M(...) ...>;
+          - pattern: $NAME = <... Random.Shared.$M(...) ...>;
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: (?i).*(token|secret|password|passwd|nonce|otp|salt|apikey|api_key|sessionid|resetcode).*
+
+  - id: csharp-jwt-signature-not-required
+    languages: [csharp]
+    severity: ERROR
+    message: >-
+      Tokens are accepted without a valid signature, so anyone can write one. Require signed tokens and validate the
+      signing key.
+    metadata: { cwe: CWE-347, severity: critical, confidence: high }
+    pattern-either:
+      - pattern: RequireSignedTokens = false
+      - pattern: $P.RequireSignedTokens = false
+      - pattern: SignatureValidator = (...) => new JwtSecurityToken(...)
+      - pattern: SignatureValidator = (...) => new JsonWebToken(...)
+
+  - id: csharp-path-from-request
+    mode: taint
+    languages: [csharp]
+    severity: WARNING
+    message: >-
+      A file path from the request: ..\ or ../ in it reaches any file the process can read or write. Take only a
+      file's name (Path.GetFileName), and check that the full path is inside the folder meant.
+    metadata: { cwe: CWE-22, severity: high, confidence: high }
+    pattern-sources: *csharp-request
+    pattern-sanitizers:
+      - pattern: Path.GetFileName(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: File.$F($P, ...)
+              - pattern: PhysicalFile($P, ...)
+              - pattern: new FileStream($P, ...)
+              - pattern: Directory.$F($P, ...)
+          - focus-metavariable: $P
+
+  - id: csharp-redirect-from-request
+    mode: taint
+    languages: [csharp]
+    severity: WARNING
+    message: >-
+      A redirect to where the request says (an open redirect): a link on this site sends people to any other. Use
+      LocalRedirect, or check Url.IsLocalUrl first.
+    metadata: { cwe: CWE-601, severity: medium, confidence: high }
+    pattern-sources: *csharp-request
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: Redirect($U)
+              - pattern: $R.Redirect($U, ...)
+          - focus-metavariable: $U
+
+  - id: csharp-request-to-url-from-request
+    mode: taint
+    languages: [csharp]
+    severity: WARNING
+    message: >-
+      The server fetches a URL the request gives (server-side request forgery): it can be made to reach internal
+      services and the cloud's metadata. Allow only known hosts, and check the address before fetching.
+    metadata: { cwe: CWE-918, severity: high, confidence: high }
+    pattern-sources: *csharp-request
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: $HTTP.GetAsync($U, ...)
+              - pattern: $HTTP.GetStringAsync($U, ...)
+              - pattern: $HTTP.PostAsync($U, ...)
+              - pattern: new HttpRequestMessage($M, $U)
+              - pattern: WebRequest.Create($U)
+          - focus-metavariable: $U

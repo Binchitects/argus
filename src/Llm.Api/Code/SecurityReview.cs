@@ -110,6 +110,24 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
         ["sql"] = 0, ["command"] = 1, ["deserialization"] = 2, ["code"] = 3, ["xxe"] = 4, ["path"] = 5, ["xss"] = 6, ["ssrf"] = 7, ["redirect"] = 8,
     };
 
+    /// <summary>The most scanner findings a review keeps (the most severe first); the rest are counted.</summary>
+    public const int MostScanned = 500;
+
+    /// <summary>
+    /// A weakness a scanner found that is about data reaching a sink, as the sink's kind: the model traces those as it
+    /// traces git grep's. A scanner's other findings (TLS checks off, weak crypto, a debugger on) need no trace.
+    /// </summary>
+    private static readonly Dictionary<string, string> TracedCwes = new()
+    {
+        ["CWE-89"] = "sql", ["CWE-78"] = "command", ["CWE-77"] = "command", ["CWE-502"] = "deserialization", ["CWE-94"] = "code", ["CWE-95"] = "code",
+        ["CWE-1336"] = "code", ["CWE-611"] = "xxe", ["CWE-22"] = "path", ["CWE-98"] = "path", ["CWE-79"] = "xss", ["CWE-80"] = "xss", ["CWE-918"] = "ssrf",
+        ["CWE-601"] = "redirect",
+    };
+
+    /// <summary>What a scanner found, as Argus's scan_at gives it.</summary>
+    public sealed record ScannerHit(string Kind, string[] Tools, string[] Rules, string Path, int Line, string Cwe, string Severity, string Confidence,
+        string Title, string Message, string Code, string? Commit);
+
     /// <summary>A place where a sink is called: the file, the line and its text, and the sink it matched.</summary>
     public sealed record Candidate(string Path, int Line, string Text, Sink Sink);
 
@@ -140,13 +158,19 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
     [GeneratedRegex(@"^\s*(//|#|\*|/\*|--|<!--)")]
     private static partial Regex Comment();
 
-    /// <summary>The sinks found, as git grep gave them: deduplicated, without tests, vendored code or comments, the most dangerous first, at most three a file.</summary>
-    public static List<Candidate> Order(IEnumerable<Candidate> found) =>
-        [.. found.Where(c => !NotProduct().IsMatch(c.Path) && !Comment().IsMatch(c.Text))
+    /// <summary>
+    /// The sinks found, as git grep and the scanners gave them: deduplicated, without tests, vendored code or comments, what
+    /// a scanner flagged first, then the most dangerous, at most three a file.
+    /// </summary>
+    public static List<Candidate> Order(IEnumerable<Candidate> found, IReadOnlySet<(string Path, int Line)>? flagged = null)
+    {
+        int Flag(Candidate c) => flagged?.Contains((c.Path, c.Line)) == true ? 0 : 1;
+        return [.. found.Where(c => !NotProduct().IsMatch(c.Path) && !Comment().IsMatch(c.Text))
             .GroupBy(c => (c.Path, c.Line)).Select(g => g.OrderBy(c => Danger[c.Sink.Kind]).First())
-            .OrderBy(c => Danger[c.Sink.Kind]).ThenBy(c => c.Path, StringComparer.Ordinal).ThenBy(c => c.Line)
+            .OrderBy(Flag).ThenBy(c => Danger[c.Sink.Kind]).ThenBy(c => c.Path, StringComparer.Ordinal).ThenBy(c => c.Line)
             .GroupBy(c => c.Path).SelectMany(g => g.Take(MostPerFile).Select((c, i) => (c, i)))
-            .OrderBy(x => x.i).ThenBy(x => Danger[x.c.Sink.Kind]).Select(x => x.c)];
+            .OrderBy(x => Flag(x.c)).ThenBy(x => x.i).ThenBy(x => Danger[x.c.Sink.Kind]).Select(x => x.c)];
+    }
 
     /// <summary>The name of the function a line is in, from the lines above it (C#, Java, Kotlin, Python, JavaScript, TypeScript, Go, PHP, Ruby).</summary>
     public static string? EnclosingFunction(IReadOnlyList<string> above)
@@ -189,8 +213,12 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
             var session = await services.GetRequiredService<ArgusMcp>().ConnectAsync(user.Id, user.Email!, ct);
             await StepAsync(db, scan, "Checking its packages against known vulnerabilities", ct);
             var packages = await DependenciesAsync(session, scan, ct);
+            await StepAsync(db, scan, "Running the security scanners", ct);
+            var scanned = await ScannersAsync(session, scan, ct);
             await StepAsync(db, scan, "Finding where data reaches dangerous calls", ct);
             var found = new List<Candidate>();
+            var traced = scanned.Where(h => h.Kind == SecurityFinding.Code && h.Commit is null && TracedCwes.ContainsKey(h.Cwe)).ToList();
+            found.AddRange(traced.Select(h => new Candidate(h.Path, h.Line, h.Code, new Sink(TracedCwes[h.Cwe], h.Cwe, h.Title, [], ""))));
             foreach (var sink in Sinks)
             {
                 foreach (var glob in sink.Globs)
@@ -205,10 +233,12 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
                     }
                 }
             }
-            var ordered = Order(found);
+            var ordered = Order(found, traced.Select(h => (h.Path, h.Line)).ToHashSet());
             scan.Candidates = ordered.Count;
             var findings = new List<SecurityFinding>();
             var cweCache = new Dictionary<string, JsonObject?>();
+            // What the model read and found no outside data reaching, and why: a scanner's finding there is kept apart.
+            var cleared = new Dictionary<(string Path, int Line), string>();
             for (var i = 0; i < ordered.Count && i < MostRead; i++)
             {
                 var c = ordered[i];
@@ -216,13 +246,18 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
                 scan.Read++;
                 var (context, lines) = await ContextAsync(session, scan, c, ct);
                 var callers = await CallersAsync(session, scan, c, lines, ct);
-                var answer = Json(await AskAsync(services, scan, user.Email!, AnalyzePrompt, Question(c, context, callers), 1_500, ct));
+                var flags = scanned.Where(h => h.Path == c.Path && Math.Abs(h.Line - c.Line) <= 3 && h.Kind == SecurityFinding.Code).ToList();
+                var answer = Json(await AskAsync(services, scan, user.Email!, AnalyzePrompt, Question(c, context, callers, flags), 1_500, ct));
                 if (answer?["vulnerable"] is not JsonValue v || !v.TryGetValue<bool>(out var vulnerable) || !vulnerable)
                 {
+                    cleared[(c.Path, c.Line)] = Cut(answer?["check"]?.ToString() ?? "", 600);
                     continue;
                 }
                 if (await GroundAsync(session, scan, c, answer, lines, cweCache, ct) is { } finding)
                 {
+                    var near = flags.Where(f => Math.Abs(f.Line - finding.Line) <= 3).ToList();
+                    finding.FoundBy = [SecurityFinding.Model, .. near.SelectMany(f => f.Tools).Distinct()];
+                    finding.Rule = near.Count == 0 ? null : Cut(string.Join(", ", near.SelectMany(f => f.Rules).Distinct()), 500);
                     findings.Add(finding);
                 }
                 else
@@ -236,7 +271,7 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
                 await StepAsync(db, scan, $"Checking finding {i + 1} of {Math.Min(checkedFirst.Count, MostVerified)}", ct);
                 await VerifyAsync(services, session, scan, user.Email!, checkedFirst[i], cweCache, ct);
             }
-            scan.Findings.AddRange([.. packages, .. checkedFirst]);
+            scan.Findings.AddRange([.. packages, .. checkedFirst, .. await FromScannersAsync(session, scanned, checkedFirst, cleared, cweCache, ct)]);
             db.SecurityFindings.AddRange(scan.Findings.Select(f => { f.ScanId = scan.Id; return f; }));
             scan.Summary = Summary(scan, ordered, scan.Findings);
             scan.Status = SecurityScan.Done;
@@ -275,6 +310,7 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
         {
             return [];
         }
+        scan.Commit ??= check["sha"]?.ToString() is { Length: > 0 and <= 64 } sha ? sha : null;
         scan.Dependencies = check["dependencies"] is JsonValue n && n.TryGetValue<int>(out var count) ? count : 0;
         scan.AdvisoriesAsOf = Rows(check["advisories"]).Select(a => DateOnly.TryParse(a["as_of"]?.ToString(), CultureInfo.InvariantCulture, out var day) ? day : (DateOnly?)null)
             .FirstOrDefault(d => d is not null);
@@ -300,6 +336,68 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
                 Fix = upgrade is not null ? $"Upgrade {package} to {upgrade} or later (the smallest version that fixes all of its advisories here)." : $"No fixed version of {package} is known: replace it, or keep what reaches it away from the vulnerable part.",
                 Pages = new JsonArray(new JsonObject { ["title"] = $"{f["advisory"]}: {Cut(f["summary"]?.ToString() ?? "", 120)}", ["url"] = f["url"]?.ToString() }).ToJsonString(),
                 Verified = true,
+            });
+        }
+        return found;
+    }
+
+    /// <summary>
+    /// The security scanners on the commit, its history too (Argus's scan_at): what they found, the most severe first.
+    /// Without the scanners feature, or when they cannot scan, the review goes on without them and says why.
+    /// </summary>
+    private static async Task<List<ScannerHit>> ScannersAsync(McpSession session, SecurityScan scan, CancellationToken ct)
+    {
+        JsonObject result;
+        try
+        {
+            result = await CallAsync(session, "scan_at", Args(scan, new JsonObject { ["history"] = true }), ct);
+        }
+        catch (ReviewException ex)
+        {
+            scan.Scanners = new JsonObject { ["tools"] = new JsonArray(), ["error"] = Cut(ex.Message, 500) }.ToJsonString();
+            return [];
+        }
+        static string[] Strings(JsonNode? n) => [.. (n as JsonArray ?? []).Select(x => x?.ToString()).OfType<string>()];
+        var hits = Rows(result["findings"]).Select(f => new ScannerHit(
+            f["kind"]?.ToString() is SecurityFinding.Secret or SecurityFinding.Config ? f["kind"]!.ToString() : SecurityFinding.Code,
+            Strings(f["tools"]), Strings(f["rules"]), Cut(f["path"]?.ToString() ?? "", 1_000),
+            f["line"] is JsonValue l && l.TryGetValue<int>(out var line) ? line : 0, Cwe(f["cwe"]?.ToString()) ?? "",
+            f["severity"]?.ToString() is "critical" or "high" or "medium" or "low" ? f["severity"]!.ToString() : "medium",
+            f["confidence"]?.ToString() ?? "medium", Cut(f["title"]?.ToString() ?? "", 300), Cut(f["message"]?.ToString() ?? "", 4_000),
+            Cut(f["code"]?.ToString() ?? "", 1_000), f["commit"]?.ToString() is { Length: > 0 } commit ? Cut(commit, 64) : null))
+            .Where(h => h.Path.Length > 0).ToList();
+        scan.Commit ??= result["sha"]?.ToString() is { Length: > 0 and <= 64 } sha ? sha : null;
+        var more = result["more"] is JsonValue m && m.TryGetValue<int>(out var n) ? n : 0;
+        scan.Scanners = new JsonObject
+        {
+            ["tools"] = result["tools"]?.DeepClone() ?? new JsonArray(), ["history"] = result["history"]?.DeepClone(), ["found"] = hits.Count + more,
+        }.ToJsonString();
+        return hits;
+    }
+
+    /// <summary>
+    /// The scanners' findings as the review's: one the model proved too is that finding (both named); one the model read and
+    /// found no outside data reaching is kept apart with why; the others as the scanners found them, each with the security
+    /// pack's page for its CWE where the pack has one.
+    /// </summary>
+    private static async Task<List<SecurityFinding>> FromScannersAsync(McpSession session, List<ScannerHit> hits, List<SecurityFinding> proven,
+        Dictionary<(string Path, int Line), string> cleared, Dictionary<string, JsonObject?> cweCache, CancellationToken ct)
+    {
+        var found = new List<SecurityFinding>();
+        foreach (var h in hits.Where(h => !proven.Any(p => p.Path == h.Path && Math.Abs(p.Line - h.Line) <= 3 && h.Kind == SecurityFinding.Code))
+                     .OrderBy(h => Rank(h.Severity)).Take(MostScanned))
+        {
+            var page = h.Cwe.Length > 0 ? await CweAsync(session, h.Cwe, cweCache, ct) : null;
+            var why = cleared.FirstOrDefault(c => c.Key.Path == h.Path && Math.Abs(c.Key.Line - h.Line) <= 3);
+            found.Add(new SecurityFinding
+            {
+                Kind = h.Kind, FoundBy = h.Tools, Rule = Cut(string.Join(", ", h.Rules), 500), Path = h.Path, Line = h.Line, SinkCode = h.Code,
+                Cwe = Cut(h.Cwe, 16), CweTitle = Cut(page?["signature"]?.ToString() ?? h.Cwe, 300), Severity = h.Severity, Title = h.Title.Length > 0 ? h.Title : h.Rules.FirstOrDefault() ?? "",
+                Fix = h.Message, Commit = h.Commit,
+                Pages = (page is null ? new JsonArray() : new JsonArray(new JsonObject { ["title"] = page["signature"]?.ToString(), ["url"] = page["url"]?.ToString() })).ToJsonString(),
+                Verified = why.Key.Path is null ? null : false,
+                VerifyNote = why.Key.Path is null ? null
+                    : $"The model read it with its callers and found no outside data reaching it.{(why.Value.Length > 0 ? " To check: " + why.Value : "")}",
             });
         }
         return found;
@@ -381,9 +479,11 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
         "parameterised call, an allow-list, encoding, a framework's protection, the data being the program's own) prevents it. When " +
         "unsure, it is not real. Answer with JSON only: {\"real\": true|false, \"why\": \"one or two sentences\"}.";
 
-    private static string Question(Candidate c, string context, string callers) =>
+    private static string Question(Candidate c, string context, string callers, List<ScannerHit> flags) =>
         $"Repository file {c.Path}, the call at line {c.Line} is {c.Sink.What} (as {c.Sink.Cwe} would be): `{Cut(c.Text.Trim(), 300)}`\n\n" +
-        $"```\n{Cut(context, 12_000)}```\n\n{Cut(callers, 10_000)}";
+        $"```\n{Cut(context, 12_000)}```\n\n{Cut(callers, 10_000)}" +
+        (flags.Count == 0 ? "" : "\n\nScanners matched a pattern here (a pattern is not proof: judge the code):\n" +
+            string.Join('\n', flags.Select(f => $"- line {f.Line}, {string.Join(", ", f.Tools)} ({string.Join(", ", f.Rules)}): {f.Title}")));
 
     /// <summary>
     /// A suspicion made a finding only when it holds to what can be cited: the sink's line as the file has it (on the line said,
@@ -518,7 +618,8 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
     {
         var all = findings.ToList();
         var packages = all.Where(f => f.Kind == SecurityFinding.Dependency).ToList();
-        var code = all.Where(f => f.Kind == SecurityFinding.Code).ToList();
+        // The model's own findings (a scanner may have found them too); the scanners' alone are counted after.
+        var code = all.Where(f => f.Kind == SecurityFinding.Code && (f.FoundBy.Length == 0 || f.FoundBy.Contains(SecurityFinding.Model))).ToList();
         var kept = code.Where(f => f.Verified != false).ToList();
         var sb = new StringBuilder();
         if (scan.AdvisoriesAsOf is { } asOf)
@@ -548,7 +649,30 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
         {
             sb.Append(CultureInfo.InvariantCulture, $" {candidates.Count - scan.Read} were not read (past the {MostRead} most dangerous): run it on a narrower branch, or look at them by kind.");
         }
-        sb.Append("\n\nNot covered: authorisation and access checks, secrets and configuration; the scanners look at those.");
+        var scanners = scan.Scanners is { } json ? JsonNode.Parse(json) as JsonObject : null;
+        var ran = Rows(scanners?["tools"]).Where(t => t["ran"] is JsonValue r && r.TryGetValue<bool>(out var yes) && yes).Select(t => t["name"]?.ToString()).ToList();
+        if (ran.Count > 0)
+        {
+            var scanned = all.Where(f => f.FoundBy.Any(t => t != SecurityFinding.Model)).ToList();
+            var both = scanned.Count(f => f.FoundBy.Contains(SecurityFinding.Model));
+            sb.Append(CultureInfo.InvariantCulture, $"\n\nScanners ({string.Join(", ", ran)}): {scanned.Count} finding(s)");
+            sb.Append(both > 0 ? $", {both} traced by the model too" : "");
+            sb.Append(scanned.Count(f => f.Verified == false && f.FoundBy.All(t => t != SecurityFinding.Model)) is > 0 and var c ? $", {c} the model read and cleared (kept apart)" : "");
+            sb.Append(scanned.Count(f => f.Kind == SecurityFinding.Secret) is > 0 and var secrets ? $", {secrets} secret(s)" : "");
+            sb.Append(scanned.Count(f => f.Kind == SecurityFinding.Config) is > 0 and var config ? $", {config} in configuration" : "");
+            sb.Append('.');
+            foreach (var t in Rows(scanners?["tools"]).Where(t => t["error"]?.ToString() is { Length: > 0 }))
+            {
+                sb.Append(CultureInfo.InvariantCulture, $" {t["name"]} did not run: {t["error"]}.");
+            }
+            sb.Append("\n\nNot covered: authorisation and access checks, and business logic.");
+        }
+        else
+        {
+            sb.Append(scanners?["error"]?.ToString() is { Length: > 0 } error
+                ? $"\n\nThe scanners did not run ({error}), so secrets and configuration were not looked at."
+                : "\n\nNot covered: authorisation and access checks, secrets and configuration (the scanners feature looks at those).");
+        }
         return sb.ToString();
     }
 

@@ -1,0 +1,256 @@
+# Arena's own rules for Go, under the app's licence (gosec needs the Go toolchain and the module's packages, which a
+# scanner with no network cannot fetch, so these stand in for it). Each names its weakness (metadata.cwe), Arena's
+# severity and how sure a match is; go.go beside it holds the weak code each must find (ruleid) and the fixed code it
+# must not (ok), and the image is not built unless opengrep --test passes on them.
+rules:
+  - id: go-sql-built-from-strings
+    languages: [go]
+    severity: ERROR
+    message: >-
+      A query built from strings: data in it is read as SQL. Pass the values as arguments (db.Query(sql, args...) with
+      numbered or ? placeholders) and keep the SQL text constant.
+    metadata: { cwe: CWE-89, severity: high, confidence: medium }
+    patterns:
+      - pattern-either:
+          - pattern: $DB.$Q(fmt.Sprintf(...), ...)
+          - pattern: $DB.$Q("..." + $X, ...)
+          - pattern: $DB.$Q($A + $B, ...)
+          - pattern: $DB.$Q($CTX, fmt.Sprintf(...), ...)
+          - pattern: $DB.$Q($CTX, "..." + $X, ...)
+          - pattern: $DB.$Q($CTX, $A + $B, ...)
+          - patterns:
+              - pattern-either:
+                  - pattern-inside: |
+                      $V := fmt.Sprintf(...)
+                      ...
+                  - pattern-inside: |
+                      $V := "..." + $X
+                      ...
+              - pattern-either:
+                  - pattern: $DB.$Q($V, ...)
+                  - pattern: $DB.$Q($CTX, $V, ...)
+      - metavariable-regex:
+          metavariable: $Q
+          regex: ^(Query|QueryRow|Exec|QueryContext|QueryRowContext|ExecContext|Prepare|PrepareContext|Raw|Select|Get|MustExec|Queryx|QueryRowx)$
+      - pattern-not: $DB.$Q("..." + "...", ...)
+
+  - id: go-command-from-data
+    languages: [go]
+    severity: WARNING
+    message: >-
+      A shell runs a command built from data, or the program run is data: either runs what the data says. Run a fixed
+      program with each argument its own string (exec.Command("ping", "-c", "1", host)), and never sh -c.
+    metadata: { cwe: CWE-78, severity: high, confidence: medium }
+    pattern-either:
+      - patterns:
+          - pattern-either:
+              - pattern: exec.Command("sh", "-c", $X, ...)
+              - pattern: exec.Command("bash", "-c", $X, ...)
+              - pattern: exec.Command("/bin/sh", "-c", $X, ...)
+              - pattern: exec.Command("cmd", "/c", $X, ...)
+              - pattern: exec.CommandContext($CTX, "sh", "-c", $X, ...)
+              - pattern: exec.CommandContext($CTX, "bash", "-c", $X, ...)
+          - pattern-not: exec.Command($SH, $C, "...")
+          - pattern-not: exec.CommandContext($CTX, $SH, $C, "...")
+      - patterns:
+          - pattern: exec.Command($P, ...)
+          - pattern-not: exec.Command("...", ...)
+
+  - id: go-tls-not-verified
+    languages: [go]
+    severity: WARNING
+    message: >-
+      InsecureSkipVerify accepts any certificate, so anyone on the way can read and change the traffic. Leave it
+      false; for a private CA, put it in RootCAs.
+    metadata: { cwe: CWE-295, severity: high, confidence: high }
+    pattern-either:
+      - pattern: 'tls.Config{..., InsecureSkipVerify: true, ...}'
+      - pattern: $C.InsecureSkipVerify = true
+
+  - id: go-weak-crypto
+    languages: [go]
+    severity: INFO
+    message: >-
+      A broken algorithm: MD5 and SHA-1 collide at will, and DES and RC4 are too weak. Use SHA-256 or better and
+      AES-GCM; for passwords, bcrypt or argon2 from golang.org/x/crypto.
+    metadata: { cwe: CWE-327, severity: low, confidence: medium }
+    pattern-either:
+      - pattern: md5.New()
+      - pattern: md5.Sum(...)
+      - pattern: sha1.New()
+      - pattern: sha1.Sum(...)
+      - pattern: des.NewCipher(...)
+      - pattern: des.NewTripleDESCipher(...)
+      - pattern: rc4.NewCipher(...)
+
+  - id: go-predictable-secret
+    languages: [go]
+    severity: WARNING
+    message: >-
+      A secret from math/rand, which is predictable from its output. Use crypto/rand (rand.Read, rand.Text).
+    metadata: { cwe: CWE-338, severity: medium, confidence: medium }
+    patterns:
+      - pattern-either:
+          - pattern: $NAME := <... rand.$F(...) ...>
+          - pattern: $NAME = <... rand.$F(...) ...>
+      - pattern-inside: |
+          import "math/rand"
+          ...
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: (?i).*(token|secret|password|passwd|nonce|otp|salt|apikey|api_key|sessionid|resetcode).*
+
+  - id: go-html-not-escaped
+    languages: [go]
+    severity: WARNING
+    message: >-
+      template.HTML marks text as safe HTML, so html/template does not escape it: data in it runs as script in the page
+      (cross-site scripting). Pass the data as a string and let the template escape it.
+    metadata: { cwe: CWE-79, severity: medium, confidence: medium }
+    patterns:
+      - pattern-either:
+          - pattern: template.HTML($X)
+          - pattern: template.JS($X)
+          - pattern: template.URL($X)
+      - pattern-not: template.HTML("...")
+      - pattern-not: template.JS("...")
+      - pattern-not: template.URL("...")
+
+  - id: go-zip-slip
+    languages: [go]
+    severity: WARNING
+    message: >-
+      A path from an archive entry: ../ in its name writes outside the folder (zip slip). Clean the joined path and
+      check that it is still inside the folder before writing.
+    metadata: { cwe: CWE-22, severity: high, confidence: medium }
+    patterns:
+      - pattern-either:
+          - pattern-inside: |
+              for $_, $F := range $R.File {
+                ...
+              }
+          - pattern-inside: |
+              $F, $ERR := $TR.Next()
+              ...
+      - pattern: filepath.Join($DIR, $F.Name)
+      - pattern-not-inside: |
+          $P := filepath.Join($DIR, $F.Name)
+          if !strings.HasPrefix($P, ...) {
+            ...
+          }
+          ...
+
+  - id: go-sql-from-request
+    mode: taint
+    languages: [go]
+    severity: ERROR
+    message: >-
+      Data from the request reaches a query's text. Pass it as a query argument with a placeholder and keep the SQL
+      text constant.
+    metadata: { cwe: CWE-89, severity: critical, confidence: high }
+    pattern-sources: &go-request
+      - patterns:
+          - pattern-either:
+              - pattern: $R.URL.Query().Get(...)
+              - pattern: $R.URL.Query()
+              - pattern: $R.URL.RawQuery
+              - pattern: $R.FormValue(...)
+              - pattern: $R.PostFormValue(...)
+              - pattern: $R.Header.Get(...)
+              - pattern: $R.PathValue(...)
+          - metavariable-regex:
+              metavariable: $R
+              regex: ^(r|req|request|httpReq)$
+      - pattern: mux.Vars(...)
+      - patterns:
+          - pattern-either:
+              - pattern: $C.Param(...)
+              - pattern: $C.PostForm(...)
+              - pattern: $C.DefaultQuery(...)
+              - pattern: $C.GetQuery(...)
+              - pattern: $C.QueryParam(...)
+          - metavariable-regex:
+              metavariable: $C
+              regex: ^(c|ctx|gc)$
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: $DB.Query($Q, ...)
+              - pattern: $DB.QueryRow($Q, ...)
+              - pattern: $DB.Exec($Q, ...)
+              - pattern: $DB.QueryContext($CTX, $Q, ...)
+              - pattern: $DB.ExecContext($CTX, $Q, ...)
+          - focus-metavariable: $Q
+
+  - id: go-command-from-request
+    mode: taint
+    languages: [go]
+    severity: ERROR
+    message: >-
+      Data from the request reaches a command. Do not run what a request names; when a value must be an argument, pass
+      it as its own string to a fixed program and check it against what is allowed.
+    metadata: { cwe: CWE-78, severity: critical, confidence: high }
+    pattern-sources: *go-request
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: exec.Command($C, ...)
+              - pattern: exec.Command("sh", "-c", $C)
+              - pattern: exec.CommandContext($CTX, $C, ...)
+          - focus-metavariable: $C
+
+  - id: go-path-from-request
+    mode: taint
+    languages: [go]
+    severity: WARNING
+    message: >-
+      A file path from the request: ../ in it reaches any file the process can read. Take only a file's name
+      (filepath.Base), or open it through os.Root (Go 1.24) so it cannot leave the folder.
+    metadata: { cwe: CWE-22, severity: high, confidence: high }
+    pattern-sources: *go-request
+    pattern-sanitizers:
+      - pattern: filepath.Base(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: os.Open($P)
+              - pattern: os.OpenFile($P, ...)
+              - pattern: os.ReadFile($P)
+              - pattern: os.WriteFile($P, ...)
+              - pattern: os.Remove($P)
+              - pattern: os.RemoveAll($P)
+              - pattern: ioutil.ReadFile($P)
+              - pattern: http.ServeFile($W, $REQ, $P)
+          - focus-metavariable: $P
+
+  - id: go-request-to-url-from-request
+    mode: taint
+    languages: [go]
+    severity: WARNING
+    message: >-
+      The server fetches a URL the request gives (server-side request forgery): it can be made to reach internal
+      services and the cloud's metadata. Allow only known hosts, and check the address before fetching.
+    metadata: { cwe: CWE-918, severity: high, confidence: high }
+    pattern-sources: *go-request
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: http.Get($U)
+              - pattern: http.Post($U, ...)
+              - pattern: http.NewRequest($M, $U, ...)
+              - pattern: http.NewRequestWithContext($CTX, $M, $U, ...)
+          - focus-metavariable: $U
+
+  - id: go-redirect-from-request
+    mode: taint
+    languages: [go]
+    severity: WARNING
+    message: >-
+      A redirect to where the request says (an open redirect): a link on this site sends people to any other. Redirect
+      to paths of this site only, or to hosts on a list.
+    metadata: { cwe: CWE-601, severity: medium, confidence: high }
+    pattern-sources: *go-request
+    pattern-sinks:
+      - patterns:
+          - pattern: http.Redirect($W, $REQ, $U, ...)
+          - focus-metavariable: $U

@@ -241,6 +241,7 @@ public static partial class ArgusServer
         app.MapMcp("/mcp");
 
         if (Jobs.IndexInterval() > 0) jobs.StartScheduler();
+        jobs.StartAdvisoriesRenewal();
         return app;
     }
 
@@ -751,6 +752,10 @@ public static partial class ArgusServer
                     ["index_url"] = Jobs.PackIndexUrl(), ["packs_dir"] = cfg.PacksDir,
                     ["library_dir"] = cfg.PackLibrary,
                     ["library"] = cfg.PackLibrary is { Length: > 0 } lib ? Jobs.LibraryRows(lib, cfg.PacksDir) : new JsonArray(),
+                    ["advisories"] = new JsonObject
+                    {
+                        ["renew_hours"] = Jobs.AdvisoriesRenewHours(), ["last"] = jobs.AdvisoriesRenewed?.DeepClone(),
+                    },
                 });
             }
             catch (Exception exc)
@@ -781,6 +786,18 @@ public static partial class ArgusServer
             if (!jobs.StartPackJob("update", name: name, indexUrl: indexUrl))
                 return Json(new JsonObject { ["error"] = "another pack operation is running" }, 409);
             return Json(new JsonObject { ["status"] = "started", ["action"] = "update", ["name"] = name ?? "" });
+        });
+
+        // The advisories pack renewed from GitHub's advisory database and CISA's catalog, built over the one installed.
+        app.MapPost(AdminPrefix + "packs/renew", async (HttpRequest request) =>
+        {
+            if (!Authorised(request)) return Forbidden();
+            var body = await BodyOrEmpty(request);
+            var name = PyStr.Strip(body["name"]?.ToString() ?? Deps.Advisories.PackName);
+            if (name != Deps.Advisories.PackName) return Json(new JsonObject { ["error"] = "only the advisories pack is renewed here" }, 400);
+            if (!jobs.StartPackJob("renew", name: name))
+                return Json(new JsonObject { ["error"] = "another pack operation is running" }, 409);
+            return Json(new JsonObject { ["status"] = "started", ["action"] = "renew", ["name"] = name });
         });
 
         // Loading from the pack library is a link, not a download: instant, so no job.

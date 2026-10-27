@@ -288,14 +288,18 @@ services:
       ARGUS_EMBED_URL: http://embed:8080
       ARGUS_PACK_LIBRARY: /pack-library
       ARGUS_APP: "off"
+      # The security scanners (the scanners feature): security reviews send them the commit read.
+      ARGUS_SCANNERS_URL: http://scanners:7800
+      # The advisories pack, once installed, renewed each day from GitHub's advisory database and CISA's catalog.
+      ARGUS_ADVISORIES_RENEW_HOURS: "24"
     volumes:
       - ./config/argus.yaml:/etc/argus/config.yaml:ro
       - argus:/var/lib/argus
       # Built knowledge packs to load (Admin -> Packs): the repository's packs/, or ARGUS_PACK_LIBRARY_DIR.
       - ${ARGUS_PACK_LIBRARY_DIR:-../packs}:/pack-library:ro
       - directory:/directory:ro
-    # Code Studio's workspaces ask it too, each with the person's own key.
-    networks: [default, workspaces]
+    # Code Studio's workspaces ask it too, each with the person's own key; it alone reaches the scanners.
+    networks: [default, workspaces, scanning]
     # A GitLab on this machine.
     extra_hosts: ["host.docker.internal:host-gateway"]
 
@@ -483,6 +487,27 @@ services:
     mem_limit: 6g
     cpus: 4
 
+  # The security scanners: opengrep with Arena's own rules, Bandit, gitleaks and Trivy's configuration checks, run on
+  # a commit Argus sends (a security review's). Off unless COMPOSE_PROFILES names scanners. Its network is Argus's
+  # alone and leads nowhere: the scanners fetch nothing, and nothing they are sent is run. A read-only root, nobody's
+  # user, and each scan's files in memory, gone when it ends.
+  scanners:
+    <<: *service
+    build: ./services/scanners
+    image: arena-scanners
+    container_name: scanners
+    profiles: [scanners]
+    user: "65534:65534"
+    read_only: true
+    tmpfs: ["/work:size=2g,uid=65534,gid=65534,mode=0700", "/tmp:size=256m,uid=65534,gid=65534,mode=0700"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment: { SCANNERS_THREADS: "2" }
+    networks: [scanning]
+    pids_limit: 512
+    mem_limit: 6g
+    cpus: 2
+
   # The chat's web search.
   searxng:
     <<: *service
@@ -599,6 +624,8 @@ networks:
   browsing: { internal: true }
   # Between the app and the studio only: internal, so no way out of the stack.
   studio: { internal: true }
+  # Between Argus and the security scanners only: internal, so no way out of the stack.
+  scanning: { internal: true }
   # Between the app, the gateway and Code Studio's workspaces: not internal (a workspace clones, pushes and installs
   # packages), and nothing else of the stack is on it.
   workspaces: {}

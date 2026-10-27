@@ -254,7 +254,7 @@ print("%d %d" % (sum(cpu(x.get("cpu", "0")) for x in a), sum(mem(x.get("memory",
 FEATURES_FILE="$HERE/../features"
 declare -A CHART_KEY=([chat-models]=llamacpp [vllm]=vllm [knowledge]=embed [argus]=argus [pictures]=imagegen [video]=videogen
   [speech]=audio [sandbox]=sandbox [web-search]=searxng [3d]=blender [lean]=lean [studio]=studio [workspaces]=workspaces
-  [laya]=laya [monitoring]=monitoring [ha]=valkey)
+  [laya]=laya [scanners]=scanners [monitoring]=monitoring [ha]=valkey)
 FEAT_IDS=() FEATURES_ON=()
 declare -A FEAT_DEF=() FEAT_SVC=() FEAT_NEEDS=() FEAT_REQ=()
 trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; printf '%s' "${s%"${s##*[![:space:]]}"}"; }

@@ -216,18 +216,25 @@ last affected one), which the `deps_check` tool matches a repository's
 locked versions against with no model. NVD's own records are not taken:
 their CVEs are the advisories' aliases.
 
-Build it each day on a connected machine and publish it in a pack index;
-an offline host takes it with `argus pack update` (or `airgap.sh`):
+Argus renews it itself. With `ARGUS_ADVISORIES_RENEW_HOURS` set (the
+stack sets 24), the server renews an installed advisories pack when it is
+that old, and Admin → Packs has **Renew** for any time. A renewal fetches
+again what changed in the advisory database and the KEV catalog, writes the
+pages, and builds the pack over the one installed. Only the advisories that
+changed are embedded again, with the stack's own embedder. On a connected
+machine that builds packs for offline hosts:
 
 ```bash
-tools/fetch-advisories.sh
-python3 tools/advisories-texts.py --from .packwork/docsrc/advisories --out .packwork/docsrc/advisories-texts
-argus pack build --source advisories --work-dir "$PWD/.packwork/docsrc/advisories-texts" --out packs/advisories-$(date +%Y.%m.%d).arguspack --version $(date +%Y.%m.%d)
+argus pack renew --packs-dir packs
+argus pack index --packs-dir packs --out packs/index.json --base-url https://packs.example.com/ advisories
 ```
 
-The fetch is a shallow, sparse clone of the reviewed advisories (about
-340 MB unpacked, two minutes) and the KEV catalog (2 MB); Google's OSV
-storage is not used, as it refuses some locations. On 2026-10-27: 36,038
+An offline host then takes it with `argus pack update` (or `airgap.sh`). The
+first fetch is a shallow, sparse clone of the reviewed advisories (about
+340 MB unpacked, two minutes) and the KEV catalog (2 MB); after that only
+what changed comes down. The first build embeds every advisory (some
+220,000 chunks: two hours on a GPU); a daily renewal embeds a few hundred.
+Google's OSV storage is not used, as it refuses some locations. On 2026-10-27: 36,038
 advisories, 67,652 affected ranges, 1,760 known-exploited CVEs.
 
 ### deps_check and sbom
@@ -250,6 +257,34 @@ severe come first, and the answer says how old the advisories are.
 
 `sbom` gives the same packages as a CycloneDX 1.5 bill of materials, each
 with its package URL.
+
+### scan_at
+
+`scan_at` runs the security scanners on a project at any commit, as the
+person, within their GitLab rights. It works only where the `scanners`
+feature is installed (`ARGUS_SCANNERS_URL`); elsewhere the answer says how
+an admin turns it on. Argus sends the commit's files from the project's
+mirror (`git archive`). With `history` (the default) it sends a git bundle
+of the commit instead, so gitleaks reads every commit before it too. The
+bundle's ref (`refs/arena/scan/...`) is removed again, and nothing sent is
+kept on either side. A history over 1 GB is sent as the commit's files
+alone.
+
+The scanners run in `deploy/services/scanners`, on a network shared with
+Argus only, with no way out:
+
+- opengrep's engine with Arena's own rules (`rules/`, one file per language,
+  each rule with its CWE, severity and confidence). The image is not built
+  unless every rule finds its weak examples and none of its fixed ones;
+- Bandit for Python;
+- gitleaks for secrets, redacted: the answer has where a secret is, never
+  its text;
+- Trivy's checks of configuration (Dockerfiles, Kubernetes, Helm,
+  Terraform), the ones built into Trivy.
+
+Findings on the same line are folded into one, with every scanner and rule
+named. gosec and the .NET analyzers are not there: they build the project,
+which fetches its packages.
 
 ## Using packs
 

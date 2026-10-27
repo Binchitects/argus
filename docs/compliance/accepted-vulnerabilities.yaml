@@ -6,3 +6,8 @@
 #   package: npm:example
 #   reason: the vulnerable function is never called; the upgrade breaks the editor
 #   until: 2026-12-31
+
+- id: GO-2026-4919
+  package: golang:github.com/aquasecurity/trivy
+  reason: "the Go database marks every Trivy release from 0.69.4 on; GitHub's advisory of the same compromise (GHSA-69fq-xp46-6x23) names 0.69.4 alone, and the scanners image pins 0.75.0 with its SHA-256 checked"
+  until: 2027-04-30

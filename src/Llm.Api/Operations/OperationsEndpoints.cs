@@ -200,6 +200,7 @@ public static class OperationsEndpoints
                 "update" => new() { ["name"] = body.Name, ["index_url"] = body.IndexUrl },
                 "remove" => new() { ["name"] = body.Name },
                 "load" => new() { ["file"] = body.File },
+                "renew" => new() { ["name"] = body.Name },
                 _ => throw new ArgusException("Unknown pack action.", 404),
             };
             var res = await a.PostAsync("packs/" + action, payload, ct);

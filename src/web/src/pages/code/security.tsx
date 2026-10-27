@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { BookOpen, Download, Package, ShieldAlert, ShieldCheck } from 'lucide-react'
+import { BookOpen, Download, FileCog, KeyRound, Package, ScanSearch, ShieldAlert, ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -19,6 +19,32 @@ import { securityScanQuery, securityScansQuery, type ScanBrief, type SecurityFin
 
 const severityVariant = { critical: 'destructive', high: 'destructive', medium: 'warning', low: 'secondary' } as const
 const severities = ['critical', 'high', 'medium', 'low'] as const
+
+/** Who found a finding, in words: the model's review, the scanners, or both. */
+const foundBy = (f: SecurityFinding) => (f.foundBy.length === 0 ? ['model'] : f.foundBy)
+const byModel = (f: SecurityFinding) => foundBy(f).includes('model')
+const byScanners = (f: SecurityFinding) => foundBy(f).some((t) => t !== 'model')
+const found = { all: 'All', both: 'Model and scanners', model: 'Model only', scanners: 'Scanners only' } as const
+type Found = keyof typeof found
+const shows = (f: SecurityFinding, by: Found) =>
+  by === 'all' || (by === 'both' ? byModel(f) && byScanners(f) : by === 'model' ? byModel(f) && !byScanners(f) : !byModel(f) && byScanners(f))
+
+/** The scanners that ran, each with its version (gitleaks with the history when it read it), and those that did not, with why. */
+function ScannersLine({ scanners }: { scanners: ScanBrief['scanners'] }) {
+  if (!scanners) return <span className="text-sm text-muted-foreground">No security scanners here (an admin turns the scanners feature on)</span>
+  if (scanners.tools.length === 0) return <span className="text-sm text-muted-foreground">The scanners did not run: {scanners.error}</span>
+  return (
+    <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground" aria-label="The scanners">
+      <ScanSearch className="size-4" aria-hidden="true" />
+      {scanners.tools.map((t) => (
+        <span key={t.name} title={t.error ?? `${t.findings} finding(s) in ${t.seconds} s`} className={t.ran ? '' : 'text-destructive line-through'}>
+          {t.name} {t.version}
+          {t.name === 'gitleaks' && scanners.history ? ' (with the history)' : ''}
+        </span>
+      ))}
+    </span>
+  )
+}
 
 export function ScanState({ s }: { s: ScanBrief }) {
   if (s.status === 'failed') return <Badge variant="destructive">Failed</Badge>
@@ -114,12 +140,15 @@ function FindingCard({ f, onDecide }: { f: SecurityFinding; onDecide: (state: Se
   const [until, setUntil] = useState(() => new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10))
   const refuted = f.verified === false
   const cwePage = f.pages[0]
+  const unread = f.kind === 'secret' || f.kind === 'config' || (f.verified === null && !byModel(f))
   return (
     <li className={`grid gap-2 rounded-lg border p-4 ${refuted || f.state !== 'open' ? 'opacity-70' : ''}`}>
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant={severityVariant[f.severity]}>{f.severity}</Badge>
         {f.exploited && <Badge variant="destructive">known exploited</Badge>}
-        {f.kind === 'dependency' ? (
+        {f.kind === 'secret' && <Badge variant="destructive">secret</Badge>}
+        {f.kind === 'config' && <Badge variant="outline">configuration</Badge>}
+        {!f.cwe ? null : f.kind === 'dependency' ? (
           <Badge variant="outline">{f.cwe}</Badge>
         ) : cwePage?.url ? (
           <a href={cwePage.url} target="_blank" rel="noreferrer" title={f.cweTitle}>
@@ -133,6 +162,15 @@ function FindingCard({ f, onDecide }: { f: SecurityFinding; onDecide: (state: Se
           {f.line > 0 && `:${f.line}`}
         </code>
         {f.state !== 'open' && <Badge variant="secondary">{f.state === 'accepted' && f.until ? `accepted until ${new Date(f.until).toLocaleDateString()}` : f.state}</Badge>}
+        {f.kind !== 'dependency' && (
+          <span className="ml-auto flex flex-wrap gap-1" aria-label="Found by">
+            {foundBy(f).map((t) => (
+              <Badge key={t} variant={t === 'model' ? 'default' : 'secondary'} title={t === 'model' ? "The model's trace" : f.rule ?? t}>
+                {t}
+              </Badge>
+            ))}
+          </span>
+        )}
       </div>
       <p className="font-medium">{f.title}</p>
       {f.kind === 'dependency' ? (
@@ -140,10 +178,23 @@ function FindingCard({ f, onDecide }: { f: SecurityFinding; onDecide: (state: Se
           <Package className="size-4 text-muted-foreground" aria-hidden="true" />
           {f.sinkCode}
         </p>
+      ) : f.kind === 'secret' ? (
+        <p className="flex items-center gap-2 text-sm" aria-label="Where the secret is">
+          <KeyRound className="size-4 text-muted-foreground" aria-hidden="true" />
+          {f.commit ? (
+            <span>
+              In the history, commit <code>{f.commit.slice(0, 12)}</code>: it may be gone from the code, and is still in the repository.
+            </span>
+          ) : (
+            <span>In the code at this commit. Its text is not shown.</span>
+          )}
+        </p>
       ) : (
-        <pre className="overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs" aria-label="The sink">
-          <code>{f.sinkCode}</code>
-        </pre>
+        f.sinkCode && (
+          <pre className="overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs" aria-label="The sink">
+            <code>{f.sinkCode}</code>
+          </pre>
+        )
       )}
       <dl className="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[8rem_1fr]">
         {f.source && (
@@ -189,12 +240,18 @@ function FindingCard({ f, onDecide }: { f: SecurityFinding; onDecide: (state: Se
           )}
         </p>
       )}
+      {f.rule && (
+        <p className="text-xs text-muted-foreground">
+          Rule: <code>{f.rule}</code>
+        </p>
+      )}
       {f.verifyNote && (
         <p className="text-xs text-muted-foreground">
-          {refuted ? 'A second check doubts it: ' : 'Checked: '}
+          {!byModel(f) ? '' : refuted ? 'A second check doubts it: ' : 'Checked: '}
           {f.verifyNote}
         </p>
       )}
+      {unread && f.kind === 'code' && <p className="text-xs text-muted-foreground">A scanner's match, not traced by the model: read the code before relying on it.</p>}
       {f.why && f.state !== 'open' && <p className="text-xs text-muted-foreground">Why: {f.why}</p>}
       <div className="flex flex-wrap gap-2">
         {f.state === 'open' ? (
@@ -253,6 +310,7 @@ export function SecurityScanPage() {
   const { id = '' } = useParams()
   const queryClient = useQueryClient()
   const scan = useQuery(securityScanQuery(id))
+  const [by, setBy] = useState<Found>('all')
   if (scan.error) return <QueryError error={scan.error} retry={() => scan.refetch()} />
   if (!scan.data) return <Skeleton className="h-64" />
   const d = scan.data
@@ -266,9 +324,12 @@ export function SecurityScanPage() {
     }
   }
   const packages = d.findings.filter((f) => f.kind === 'dependency')
-  const code = d.findings.filter((f) => f.kind === 'code')
+  const code = d.findings.filter((f) => f.kind === 'code' && shows(f, by))
   const kept = code.filter((f) => f.verified !== false)
   const doubted = code.filter((f) => f.verified === false)
+  const secrets = d.findings.filter((f) => f.kind === 'secret')
+  const config = d.findings.filter((f) => f.kind === 'config')
+  const card = (f: SecurityFinding) => <FindingCard key={f.id} f={f} onDecide={(state, why, until) => decide(f.id, state, why, until)} />
   const age = s.advisoriesAsOf ? Math.floor((Date.now() - new Date(`${s.advisoriesAsOf}T00:00:00Z`).getTime()) / 86_400_000) : null
   return (
     <>
@@ -276,22 +337,38 @@ export function SecurityScanPage() {
         title={`Security: ${s.project}${s.ref ? ` @ ${s.ref}` : ''}`}
         description={`Reviewed for ${d.by}${d.model ? ` with ${d.model}` : ''}. Read with ${d.mine ? 'your' : 'their'} own access; nothing is written to the code host.`}
         actions={
-          s.sbom ? (
-            <Button variant="outline" asChild>
-              <a href={`/api/code/security/${id}/sbom`} download>
-                <Download /> Bill of materials
-              </a>
-            </Button>
+          s.status === 'done' ? (
+            <>
+              {s.sbom && (
+                <Button variant="outline" asChild>
+                  <a href={`/api/code/security/${id}/sbom`} download>
+                    <Download /> Bill of materials
+                  </a>
+                </Button>
+              )}
+              <Button variant="outline" asChild>
+                <a href={`/api/code/security/${id}/sarif`} download title="The findings as SARIF, for a code host's or an IDE's security view">
+                  <Download /> SARIF
+                </a>
+              </Button>
+            </>
           ) : undefined
         }
       />
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2">
         <ScanState s={s} />
         {s.status === 'done' && (
           <span className="text-sm text-muted-foreground">
             {s.read} of {s.candidates} places read · {s.dropped} dropped uncited
+            {s.commit && (
+              <>
+                {' · commit '}
+                <code>{s.commit.slice(0, 12)}</code>
+              </>
+            )}
           </span>
         )}
+        {s.status === 'done' && <ScannersLine scanners={s.scanners} />}
       </div>
       {s.status === 'failed' && <Alert variant="destructive">{s.error}</Alert>}
       {age !== null && age > 7 && (
@@ -327,23 +404,53 @@ export function SecurityScanPage() {
               )}
             </>
           )}
-          <h2 className="mb-3 text-lg font-semibold">Weaknesses in the code ({kept.length})</h2>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-lg font-semibold">Weaknesses in the code ({kept.length})</h2>
+            {s.scanners && s.scanners.tools.length > 0 && (
+              <div className="flex flex-wrap gap-1" role="group" aria-label="Found by">
+                {(Object.keys(found) as Found[]).map((k) => (
+                  <Button key={k} size="sm" variant={by === k ? 'secondary' : 'ghost'} aria-pressed={by === k} onClick={() => setBy(k)}>
+                    {found[k]}
+                  </Button>
+                ))}
+              </div>
+            )}
+          </div>
           {kept.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No weakness was proven in what was read.</p>
+            <p className="text-sm text-muted-foreground">{by === 'all' ? 'No weakness was proven in what was read.' : 'None found that way.'}</p>
           ) : (
             <ul className="grid gap-3" aria-label="Weaknesses">
-              {kept.map((f) => (
-                <FindingCard key={f.id} f={f} onDecide={(state, why, until) => decide(f.id, state, why, until)} />
-              ))}
+              {kept.map(card)}
             </ul>
+          )}
+          {secrets.length > 0 && (
+            <>
+              <h2 className="mt-6 mb-3 flex items-center gap-2 text-lg font-semibold">
+                <KeyRound className="size-5" aria-hidden="true" /> Secrets ({secrets.length})
+              </h2>
+              <p className="mb-3 text-sm text-muted-foreground">
+                A secret once committed is in the repository's history for whoever could read it: revoke each one and make a new one, then take it out of the code.
+              </p>
+              <ul className="grid gap-3" aria-label="Secrets">
+                {secrets.map(card)}
+              </ul>
+            </>
+          )}
+          {config.length > 0 && (
+            <>
+              <h2 className="mt-6 mb-3 flex items-center gap-2 text-lg font-semibold">
+                <FileCog className="size-5" aria-hidden="true" /> Configuration ({config.length})
+              </h2>
+              <ul className="grid gap-3" aria-label="Configuration">
+                {config.map(card)}
+              </ul>
+            </>
           )}
           {doubted.length > 0 && (
             <details className="mt-6">
-              <summary className="cursor-pointer text-sm text-muted-foreground">Doubted by the second check ({doubted.length})</summary>
+              <summary className="cursor-pointer text-sm text-muted-foreground">Doubted by the model ({doubted.length})</summary>
               <ul className="mt-3 grid gap-3" aria-label="Doubted weaknesses">
-                {doubted.map((f) => (
-                  <FindingCard key={f.id} f={f} onDecide={(state, why, until) => decide(f.id, state, why, until)} />
-                ))}
+                {doubted.map(card)}
               </ul>
             </details>
           )}

@@ -30,6 +30,7 @@ lean           | off | lean | - | lab | Proofs checked by Lean 4 with Mathlib (a
 studio         | off | studio | gpu | media | The media studio's own models: cutouts, voices, music
 workspaces     | off | workspaces | - | code-studio | Code Studio's workspaces on this server
 laya           | off | laya | - | - | Laya: typed decisions on the CPU
+scanners       | off | scanners | - | argus | Security scanners for code reviews: opengrep, Bandit, gitleaks, Trivy (an image of about 700 MB)
 monitoring     | on  | prometheus alertmanager loki promtail node-exporter cpu-temp-exporter | - | - | Dashboards, logs and alerts
 gpu-monitoring | on  | gpu-exporter | gpu | monitoring | The GPUs' metrics on the dashboards
 dcgm           | off | dcgm-exporter | gpu | monitoring | Data-centre GPU detail (NVIDIA DCGM, bare metal only)

@@ -57,6 +57,7 @@ images:
   blender: { repository: arena-blender, tag: "" }
   lean: { repository: arena-lean, tag: "" }
   laya: { repository: arena-laya, tag: "" }
+  scanners: { repository: arena-scanners, tag: "" }
   studio: { repository: arena-studio, tag: "" }
   workspaces: { repository: arena-workspaces, tag: "" }
   postgres: { repository: pgvector/pgvector, tag: 0.8.0-pg16 }
@@ -238,6 +239,12 @@ blender:
 lean:
   enabled: false
   resources: { limits: { cpu: "4", memory: 14Gi } }
+
+# The security scanners for code reviews (opengrep with Arena's rules, Bandit, gitleaks, Trivy's configuration checks):
+# off unless turned on. Only Argus reaches them, and they reach nothing; each scan's files are in memory.
+scanners:
+  enabled: false
+  resources: { requests: { cpu: "500m", memory: 1Gi }, limits: { cpu: "2", memory: 6Gi } }
 
 # The chat's web search.
 searxng:

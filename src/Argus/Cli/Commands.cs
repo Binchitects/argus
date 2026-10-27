@@ -1104,6 +1104,20 @@ public static class Commands
         return 0;
     }
 
+    /// <summary>
+    /// The advisories pack renewed: GitHub's reviewed advisories and CISA's catalog fetched again, and the pack built over
+    /// the one installed in the packs directory (only the advisories that changed are embedded again, by ARGUS_EMBED_URL).
+    /// On a connected machine each day; then `pack index`, and an offline host takes it with `pack update` or airgap.sh.
+    /// </summary>
+    public static int PackRenew(Parsed a)
+    {
+        var dest = PacksDirFor(a);
+        var work = a.Get("work_dir") is { Length: > 0 } w ? w : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(dest))!, "advisories-work");
+        var built = Deps.Advisories.Renew(work, dest, line => Out.WriteLine(line));
+        Out.WriteLine($"wrote {built}");
+        return 0;
+    }
+
     public static int PackIndex(Parsed a)
     {
         var dest = PacksDirFor(a);

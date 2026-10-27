@@ -372,6 +372,79 @@ public sealed class ReviewToolsTests : IAsyncLifetime
         _gitlab.AssertOnlyReads();
     }
 
+    /// <summary>The security scanners as a test sees them: what each scan sent, and the answer given back.</summary>
+    sealed class FakeScanners(HttpStatusCode status, string answer) : HttpMessageHandler
+    {
+        public readonly List<(string Query, string Type, byte[] Body)> Sent = [];
+
+        protected override HttpResponseMessage Send(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Sent.Add((request.RequestUri!.Query, request.Content!.Headers.ContentType!.MediaType!, request.Content.ReadAsByteArrayAsync(cancellationToken).GetAwaiter().GetResult()));
+            return new HttpResponseMessage(status) { Content = new StringContent(answer) };
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(Send(request, cancellationToken));
+    }
+
+    [Fact]
+    public async Task Scan_at_sends_the_commit_and_its_history_to_the_scanners_and_keeps_nothing_of_it()
+    {
+        var mirror = Mirror.MirrorPath(_ix.Config().Index, ReviewFixture.EalCore);
+        Environment.SetEnvironmentVariable("ARGUS_SCANNERS_URL", null);
+        var none = await Call("scan_at", new { project = "root/eal-core" });
+        Assert.Contains("No security scanners are installed here", none["content"]![0]!["text"]!.GetValue<string>(), StringComparison.Ordinal);
+
+        var scanners = new FakeScanners(HttpStatusCode.OK, """{"commit": "x", "history": true, "tools": [{"name": "opengrep", "ran": true}], "findings": [{"tools": ["opengrep"], "path": "src/decoder.c", "line": 7}], "more": 0}""");
+        Environment.SetEnvironmentVariable("ARGUS_SCANNERS_URL", "http://scanners.test:7800");
+        Scanning.Scanners.Client = new HttpClient(scanners);
+        var leftBefore = Directory.GetFiles(Path.GetTempPath(), "argus-scan-*").Length;
+        try
+        {
+            var found = await Answer("scan_at", new { project = "root/eal-core", iid = 1 });
+            var head = found["sha"]!.GetValue<string>();
+            Assert.Equal(("!1", "src/decoder.c"), (found["ref"]!.GetValue<string>(), found["findings"]![0]!["path"]!.GetValue<string>()));
+            // With its history: a bundle of the merge request's head, under a ref made for it and gone again.
+            var (query, type, body) = Assert.Single(scanners.Sent);
+            Assert.Equal("application/x-git-bundle", type);
+            Assert.Contains($"commit={head}", query, StringComparison.Ordinal);
+            Assert.Contains("ref=refs%2Farena%2Fscan%2F", query, StringComparison.Ordinal);
+            var bundle = Path.Combine(_ix.Root, "sent.bundle");
+            await File.WriteAllBytesAsync(bundle, body);
+            Assert.Contains(head, Mirror.RunGit(mirror, ["bundle", "list-heads", bundle]).Stdout, StringComparison.Ordinal);
+            Assert.Equal("", Mirror.RunGit(mirror, ["for-each-ref", "refs/arena/scan/"]).Stdout);
+
+            // Without it: the commit's files as a tar, and only the tools asked.
+            await Answer("scan_at", new { project = "root/eal-core", history = false, tools = "opengrep,trivy" });
+            var (tarQuery, tarType, tar) = scanners.Sent[1];
+            Assert.Equal("application/x-tar", tarType);
+            Assert.Contains("tools=opengrep,trivy", tarQuery, StringComparison.Ordinal);
+            Assert.DoesNotContain("ref=", tarQuery, StringComparison.Ordinal);
+            using (var reader = new System.Formats.Tar.TarReader(new MemoryStream(tar)))
+            {
+                var names = new List<string>();
+                while (reader.GetNextEntry() is { } entry) names.Add(entry.Name);
+                Assert.Contains("README.md", names);
+            }
+            Assert.Equal(leftBefore, Directory.GetFiles(Path.GetTempPath(), "argus-scan-*").Length);
+
+            var unknown = await Call("scan_at", new { project = "root/eal-core", tools = "semgrep" });
+            Assert.Contains("tools are some of opengrep, bandit, gitleaks, trivy", unknown["content"]![0]!["text"]!.GetValue<string>(), StringComparison.Ordinal);
+
+            Scanning.Scanners.Client = new HttpClient(new FakeScanners(HttpStatusCode.ServiceUnavailable, """{"error": "the scanners are busy with other scans: try again later"}"""));
+            var busy = await Call("scan_at", new { project = "root/eal-core" });
+            Assert.True(busy["isError"]!.GetValue<bool>());
+            Assert.Contains("busy with other scans", busy["content"]![0]!["text"]!.GetValue<string>(), StringComparison.Ordinal);
+            Assert.Equal("", Mirror.RunGit(mirror, ["for-each-ref", "refs/arena/scan/"]).Stdout);
+        }
+        finally
+        {
+            Scanning.Scanners.Client = null;
+            Environment.SetEnvironmentVariable("ARGUS_SCANNERS_URL", null);
+        }
+        _gitlab.AssertOnlyReads();
+    }
+
     [Fact]
     public async Task A_merged_or_closed_merge_requests_head_is_dropped_and_one_unused_for_thirty_days_too()
     {
@@ -410,6 +483,7 @@ public sealed class ReviewToolsTests : IAsyncLifetime
         ["grep_at"] = new { project = "root/driver-shim", @ref = "shim-secret", pattern = "SHIM_ONLY" },
         ["deps_check"] = new { project = "root/driver-shim", @ref = "shim-secret" },
         ["sbom"] = new { project = "root/driver-shim", @ref = "shim-secret" },
+        ["scan_at"] = new { project = "root/driver-shim", @ref = "shim-secret" },
         ["issue_list"] = new { project = "root/driver-shim" },
         ["issue_get"] = new { project = "root/driver-shim", iid = 1 },
         ["wiki_list"] = new { project = "root/driver-shim" },

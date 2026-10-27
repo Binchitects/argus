@@ -1,0 +1,239 @@
+# Arena's own rules for PHP, under the app's licence. Each names its weakness (metadata.cwe), Arena's severity and how
+# sure a match is; php.php beside it holds the weak code each must find (ruleid) and the fixed code it must not (ok),
+# and the image is not built unless opengrep --test passes on them.
+rules:
+  - id: php-sql-built-from-strings
+    languages: [php]
+    severity: ERROR
+    message: >-
+      A query built from strings: data in it is read as SQL. Use a prepared statement with placeholders (PDO's
+      prepare and execute, mysqli's bind_param) and keep the SQL text constant.
+    metadata: { cwe: CWE-89, severity: high, confidence: medium }
+    pattern-either:
+      - pattern: mysqli_query($C, "..." . $X, ...)
+      - pattern: mysqli_query($C, "...$X...", ...)
+      - pattern: mysql_query("..." . $X, ...)
+      - pattern: pg_query($C, "..." . $X, ...)
+      - patterns:
+          - pattern-either:
+              - pattern: $DB->query("..." . $X, ...)
+              - pattern: $DB->query("...$X...", ...)
+              - pattern: $DB->exec("..." . $X, ...)
+              - pattern: $DB->exec("...$X...", ...)
+              - pattern: $DB->prepare("..." . $X, ...)
+              - pattern: $DB->prepare("...$X...", ...)
+              - pattern: DB::raw("..." . $X)
+              - pattern: DB::select("..." . $X, ...)
+              - pattern: $Q->whereRaw("..." . $X, ...)
+
+  - id: php-sql-from-request
+    mode: taint
+    languages: [php]
+    severity: ERROR
+    message: >-
+      Data from the request reaches a query's text. Use a prepared statement and bind the value.
+    metadata: { cwe: CWE-89, severity: critical, confidence: high }
+    pattern-sources: &php-request
+      - pattern-either:
+          - pattern: $_GET
+          - pattern: $_POST
+          - pattern: $_REQUEST
+          - pattern: $_COOKIE
+          - pattern: $_FILES
+          - pattern: $_SERVER['QUERY_STRING']
+          - pattern: $_SERVER['REQUEST_URI']
+          - pattern: $_SERVER['HTTP_REFERER']
+          - pattern: request(...)
+          - patterns:
+              - pattern-either:
+                  - pattern: $REQ->input(...)
+                  - pattern: $REQ->query(...)
+                  - pattern: $REQ->get(...)
+                  - pattern: $REQ->post(...)
+                  - pattern: $REQ->cookie(...)
+                  - pattern: $REQ->header(...)
+              - metavariable-regex:
+                  metavariable: $REQ
+                  regex: ^\$(request|req|this->request)$
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: mysqli_query($C, $Q, ...)
+              - pattern: mysql_query($Q, ...)
+              - pattern: pg_query($C, $Q, ...)
+              - pattern: $DB->query($Q, ...)
+              - pattern: $DB->exec($Q, ...)
+              - pattern: DB::raw($Q)
+          - focus-metavariable: $Q
+
+  - id: php-command-from-request
+    mode: taint
+    languages: [php]
+    severity: ERROR
+    message: >-
+      Data from the request reaches a command. Do not run what a request names; when a value must be an argument,
+      quote it with escapeshellarg and check it against what is allowed.
+    metadata: { cwe: CWE-78, severity: critical, confidence: high }
+    pattern-sources: *php-request
+    pattern-sanitizers:
+      - pattern: escapeshellarg(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: system($C, ...)
+              - pattern: exec($C, ...)
+              - pattern: shell_exec($C)
+              - pattern: passthru($C, ...)
+              - pattern: popen($C, ...)
+              - pattern: proc_open($C, ...)
+          - focus-metavariable: $C
+
+  - id: php-command-from-strings
+    languages: [php]
+    severity: WARNING
+    message: >-
+      A shell runs a command built from data: a quote or a semicolon in it runs commands of its own. Quote each value
+      with escapeshellarg, or avoid the shell (proc_open with an array, PHP 7.4 and later).
+    metadata: { cwe: CWE-78, severity: high, confidence: medium }
+    patterns:
+      - pattern-either:
+          - pattern: system("..." . $X, ...)
+          - pattern: exec("..." . $X, ...)
+          - pattern: shell_exec("..." . $X)
+          - pattern: passthru("..." . $X, ...)
+          - pattern: system("...$X...", ...)
+          - pattern: exec("...$X...", ...)
+          - pattern: shell_exec("...$X...")
+      - pattern-not: system("..." . escapeshellarg(...), ...)
+      - pattern-not: exec("..." . escapeshellarg(...), ...)
+      - pattern-not: shell_exec("..." . escapeshellarg(...))
+
+  - id: php-code-from-data
+    languages: [php]
+    severity: ERROR
+    message: >-
+      eval, assert on a string, create_function and preg_replace's /e run text as PHP: whoever writes the text runs
+      code here. Parse the data (json_decode), or map names to functions.
+    metadata: { cwe: CWE-95, severity: high, confidence: medium }
+    pattern-either:
+      - patterns:
+          - pattern: eval($X)
+          - pattern-not: eval("...")
+      - pattern: create_function(...)
+      - patterns:
+          - pattern: assert($X)
+          - pattern-not: assert(<... $Y ...> === <... $Z ...>)
+          - metavariable-pattern:
+              metavariable: $X
+              pattern-either:
+                - pattern: '"..." . $Y'
+                - pattern: $_GET[...]
+                - pattern: $_POST[...]
+                - pattern: $_REQUEST[...]
+
+  - id: php-include-from-request
+    mode: taint
+    languages: [php]
+    severity: ERROR
+    message: >-
+      A file to include named by the request: it runs any PHP file on the host, or one fetched from elsewhere. Include
+      fixed files only, choosing among them by a value checked against a list.
+    metadata: { cwe: CWE-98, severity: critical, confidence: high }
+    pattern-sources: *php-request
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: include $F;
+              - pattern: include_once $F;
+              - pattern: require $F;
+              - pattern: require_once $F;
+              - pattern: include($F);
+              - pattern: require($F);
+          - focus-metavariable: $F
+
+  - id: php-unsafe-deserialization
+    languages: [php]
+    severity: ERROR
+    message: >-
+      unserialize builds any object the data names, and its magic methods run doing it. Read untrusted data with
+      json_decode, or pass ['allowed_classes' => false].
+    metadata: { cwe: CWE-502, severity: high, confidence: medium }
+    patterns:
+      - pattern: unserialize(...)
+      - pattern-not: unserialize($X, ['allowed_classes' => false])
+      - pattern-not: unserialize($X, array('allowed_classes' => false))
+
+  - id: php-html-from-request
+    mode: taint
+    languages: [php]
+    severity: WARNING
+    message: >-
+      Data from the request is written into the page unencoded, where it runs as script (cross-site scripting). Encode
+      it with htmlspecialchars($value, ENT_QUOTES), or let the template engine escape it.
+    metadata: { cwe: CWE-79, severity: medium, confidence: high }
+    pattern-sources: *php-request
+    pattern-sanitizers:
+      - pattern: htmlspecialchars(...)
+      - pattern: htmlentities(...)
+      - pattern: intval(...)
+      - pattern: (int) $X
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: echo $X;
+              - pattern: print($X);
+              - pattern: printf($X, ...)
+          - focus-metavariable: $X
+
+  - id: php-path-from-request
+    mode: taint
+    languages: [php]
+    severity: WARNING
+    message: >-
+      A file path from the request: ../ in it reaches any file the process can read, and a URL in it fetches from
+      elsewhere. Take only a file's name (basename), and check that the real path is inside the folder meant.
+    metadata: { cwe: CWE-22, severity: high, confidence: high }
+    pattern-sources: *php-request
+    pattern-sanitizers:
+      - pattern: basename(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: file_get_contents($P, ...)
+              - pattern: fopen($P, ...)
+              - pattern: readfile($P, ...)
+              - pattern: file($P, ...)
+              - pattern: unlink($P)
+              - pattern: file_put_contents($P, ...)
+          - focus-metavariable: $P
+
+  - id: php-tls-not-verified
+    languages: [php]
+    severity: WARNING
+    message: >-
+      cURL does not check the server's certificate or name, so anyone on the way can read and change the traffic. Leave
+      CURLOPT_SSL_VERIFYPEER on and CURLOPT_SSL_VERIFYHOST at 2.
+    metadata: { cwe: CWE-295, severity: high, confidence: high }
+    pattern-either:
+      - pattern: curl_setopt($C, CURLOPT_SSL_VERIFYPEER, false)
+      - pattern: curl_setopt($C, CURLOPT_SSL_VERIFYPEER, 0)
+      - pattern: curl_setopt($C, CURLOPT_SSL_VERIFYHOST, 0)
+      - pattern: curl_setopt($C, CURLOPT_SSL_VERIFYHOST, false)
+
+  - id: php-weak-password-hash
+    languages: [php]
+    severity: WARNING
+    message: >-
+      A password hashed with a fast hash (MD5, SHA-1, or SHA-256 alone) is found from its hash by guessing quickly. Use
+      password_hash and password_verify.
+    metadata: { cwe: CWE-916, severity: medium, confidence: medium }
+    patterns:
+      - pattern-either:
+          - pattern: md5($P)
+          - pattern: sha1($P)
+          - pattern: hash("md5", $P)
+          - pattern: hash("sha1", $P)
+          - pattern: hash("sha256", $P)
+      - metavariable-regex:
+          metavariable: $P
+          regex: (?i).*(pass|pwd).*

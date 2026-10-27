@@ -53,6 +53,8 @@ interface Packs {
   library_dir?: string | null
   job: { state: string; action: string | null; target: string | null; returncode: number | null; tail: string[]; finished: number | null }
   index_url: string | null
+  /** The advisories pack's renewal: every so many hours (0: only when asked), and the last one. */
+  advisories?: { renew_hours: number; last: { at: number; ok: boolean; error: string | null } | null }
   error?: string
 }
 
@@ -159,7 +161,21 @@ export function PacksPage() {
                   </CardHeader>
                   <CardContent className="grid gap-3">
                     {!k.compatible && k.incompatible_reason && <Alert variant="warning">{k.incompatible_reason}</Alert>}
+                    {k.name === 'advisories' && (
+                      <p className="text-sm text-muted-foreground">
+                        {p.data.advisories?.renew_hours
+                          ? `Renewed every ${p.data.advisories.renew_hours} hours from GitHub's advisory database and CISA's catalog.`
+                          : "Renewed only when asked (ARGUS_ADVISORIES_RENEW_HOURS is not set)."}
+                        {p.data.advisories?.last &&
+                          (p.data.advisories.last.ok ? ` Last renewed ${agoSeconds(p.data.advisories.last.at)}.` : ` The last renewal failed ${agoSeconds(p.data.advisories.last.at)}: ${p.data.advisories.last.error}`)}
+                      </p>
+                    )}
                     <div className="flex flex-wrap gap-2">
+                      {k.name === 'advisories' && (
+                        <Button size="sm" variant="outline" disabled={running} onClick={() => act.mutate({ action: 'renew', body: { name: k.name } })}>
+                          <RefreshCw /> Renew
+                        </Button>
+                      )}
                       {p.data.index_url && copy && (
                         <Button size="sm" variant="outline" disabled={running} onClick={() => act.mutate({ action: 'update', body: { name: k.name } })}>
                           <RefreshCw /> Update

@@ -239,6 +239,15 @@ export interface ScanBrief {
   dependencies: number
   advisoriesAsOf: string | null
   sbom: boolean
+  /** The commit read, once Argus has said which. */
+  commit: string | null
+  /** The security scanners' run: each tool, and why none ran; null when none are installed. */
+  scanners: {
+    tools: { name: string; version: string | null; ran: boolean; seconds: number; findings: number; error: string | null }[]
+    history?: boolean
+    found?: number
+    error?: string
+  } | null
   createdAt: string
   finishedAt: string | null
   error: string | null
@@ -246,7 +255,12 @@ export interface ScanBrief {
 
 export interface SecurityFinding {
   id: string
-  kind: 'code' | 'dependency'
+  kind: 'code' | 'dependency' | 'secret' | 'config'
+  /** What found it: the model's review ("model") and the scanners (opengrep, bandit, gitleaks, trivy). */
+  foundBy: string[]
+  rule: string | null
+  /** A secret in the history: the commit it is in. */
+  commit: string | null
   exploited: boolean
   path: string
   line: number

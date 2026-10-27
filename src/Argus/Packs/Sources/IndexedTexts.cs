@@ -127,8 +127,8 @@ public sealed class SecurityTexts : IndexedTexts
 /// <summary>
 /// Known vulnerabilities in packages, renewed each day: GitHub's reviewed security advisories (CC BY 4.0) for npm, NuGet,
 /// PyPI, Maven, Go, crates.io, RubyGems, Packagist and the rest, each marked when CISA's Known Exploited Vulnerabilities
-/// catalog lists its CVE. <c>tools/fetch-advisories.sh</c> fetches them and <c>tools/advisories-texts.py</c> writes the
-/// work directory: a page per advisory (its GHSA id and CVEs as symbols, its ecosystem a facet) and the table of the
+/// catalog lists its CVE. <c>argus pack renew</c> (Argus.Deps.Advisories) fetches them and writes the work directory: a
+/// page per advisory (its GHSA id and CVEs as symbols, its ecosystem a facet) and the table of the
 /// versions each affects and the versions that fix them, which deps_check matches a repository's locked versions against.
 /// </summary>
 public sealed class AdvisoriesTexts : IndexedTexts
@@ -140,7 +140,7 @@ public sealed class AdvisoriesTexts : IndexedTexts
     public override string Attribution =>
         "The GitHub Advisory Database (github/advisory-database), © GitHub, Inc., under CC BY 4.0: GitHub-reviewed advisories in the OSV format. " +
         "CISA's Known Exploited Vulnerabilities catalog, a work of the United States government.";
-    protected override string Writer => "tools/advisories-texts.py --from .packwork/docsrc/advisories --out";
+    protected override string Writer => "argus pack renew (which fetches and writes it) instead of building";
 
     /// <summary>lang="npm", "nuget", "pypi", "maven", "go", "crates", "rubygems", "packagist" or "other" keeps a search to that ecosystem.</summary>
     public override IReadOnlyList<(string Name, string Prefix)> Facets =>

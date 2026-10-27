@@ -3,10 +3,13 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { fakeApi, member, renderApp } from '@/test/utils'
 
-const brief = { id: 's1', project: 'g/shop', ref: 'main', status: 'done', step: null, candidates: 12, read: 12, dropped: 1, dependencies: 40, advisoriesAsOf: '2026-10-01', sbom: true, createdAt: '2026-10-27T00:00:00Z', finishedAt: null, error: null }
+const brief = {
+  id: 's1', project: 'g/shop', ref: 'main', commit: 'abc1234567890def', status: 'done', step: null, candidates: 12, read: 12, dropped: 1, dependencies: 40, advisoriesAsOf: '2026-10-01', sbom: true,
+  scanners: null, createdAt: '2026-10-27T00:00:00Z', finishedAt: null, error: null,
+}
 
 const finding = (id: string, over: object) => ({
-  id, kind: 'code', exploited: false, path: 'src/Orders.cs', line: 4, sinkCode: 'var cmd = new SqlCommand("SELECT ... " + id, conn);', cwe: 'CWE-89', cweTitle: 'CWE-89: SQL Injection (Base)', severity: 'high',
+  id, kind: 'code', foundBy: ['model'], rule: null, commit: null, exploited: false, path: 'src/Orders.cs', line: 4, sinkCode: 'var cmd = new SqlCommand("SELECT ... " + id, conn);', cwe: 'CWE-89', cweTitle: 'CWE-89: SQL Injection (Base)', severity: 'high',
   title: 'SQL built from the request', source: 'Controller.cs:9 Request.Query["id"]', flow: 'Request.Query["id"]\nOrders.Find(id)', exploit: "id = ' OR '1'='1", fix: 'Use a parameter: `@id`.',
   pages: [{ title: 'CWE-89: SQL Injection (Base)', url: 'https://cwe.mitre.org/data/definitions/89.html' }, { title: 'SQL Injection Prevention Cheat Sheet', url: 'https://cheatsheetseries.owasp.org/x.html' }],
   verified: true, verifyNote: 'The id goes into the text.', state: 'open', decidedAt: null, why: null, until: null, ...over,
@@ -56,7 +59,8 @@ describe('code security', () => {
     expect(within(card).getByLabelText('The sink')).toHaveTextContent('new SqlCommand')
     expect(within(card).getByText('Orders.Find(id)')).toBeInTheDocument()
     expect(within(card).getByRole('link', { name: 'SQL Injection Prevention Cheat Sheet' })).toBeInTheDocument()
-    expect(screen.getByText(/Doubted by the second check \(1\)/)).toBeInTheDocument()
+    expect(screen.getByText(/Doubted by the model \(1\)/)).toBeInTheDocument()
+    expect(screen.getByText('No security scanners here (an admin turns the scanners feature on)')).toBeInTheDocument()
     const packages = screen.getByRole('list', { name: 'Vulnerable packages' })
     expect(within(packages).getByText('known exploited')).toBeInTheDocument()
     expect(within(packages).getByLabelText('The package')).toHaveTextContent('Newtonsoft.Json 12.0.3 (NuGet)')
@@ -77,5 +81,52 @@ describe('code security', () => {
       expect(body.why).toBe('Internal tool only')
       expect(new Date(body.until).getTime()).toBeGreaterThan(Date.now())
     })
+  })
+
+  it('shows what the scanners found beside the model, secrets and configuration apart, and filters by who found it', async () => {
+    const tools = [
+      { name: 'opengrep', version: '1.31.0', ran: true, seconds: 2, findings: 3, error: null },
+      { name: 'gitleaks', version: '8.30.1', ran: true, seconds: 1, findings: 1, error: null },
+      { name: 'trivy', version: '0.75.0', ran: false, seconds: 0, findings: 0, error: 'trivy did not finish within 900 s' },
+    ]
+    fakeApi(member, {
+      'GET /api/code/security/s1': () => ({
+        json: {
+          scan: { ...brief, scanners: { tools, history: true, found: 4 } }, summary: 'Scanners ran.', model: 'Main', by: 'Mo', mine: true,
+          findings: [
+            finding('f1', { foundBy: ['model', 'opengrep'], rule: 'csharp-sql-built-from-strings' }),
+            finding('f2', { title: 'A broken algorithm', foundBy: ['opengrep'], rule: 'csharp-weak-crypto', cwe: 'CWE-327', severity: 'low', verified: null, verifyNote: null, path: 'src/Crypto.cs' }),
+            finding('f3', {
+              kind: 'secret', title: 'A secret (aws-access-token) in the history, commit c0ffee000000', foundBy: ['gitleaks'], rule: 'aws-access-token', cwe: 'CWE-798', sinkCode: '', verified: null,
+              verifyNote: null, path: 'config/app.env', commit: 'c0ffee0000000000000000000000000000000000', pages: [],
+            }),
+            finding('f4', { kind: 'config', title: 'Image user should not be root', foundBy: ['trivy'], rule: 'AVD-DS-0002', cwe: '', verified: null, verifyNote: null, path: 'Dockerfile', line: 1, pages: [] }),
+          ],
+        },
+      }),
+    })
+    renderApp('/code/security/s1')
+    const list = await screen.findByRole('list', { name: 'Weaknesses' })
+    const both = within(list).getByText('SQL built from the request').closest('li')!
+    expect(within(within(both).getByLabelText('Found by')).getByText('model')).toBeInTheDocument()
+    expect(within(within(both).getByLabelText('Found by')).getByText('opengrep')).toBeInTheDocument()
+    const weak = within(list).getByText('A broken algorithm').closest('li')!
+    expect(within(weak).getByText(/not traced by the model/)).toBeInTheDocument()
+    const secrets = screen.getByRole('list', { name: 'Secrets' })
+    expect(within(secrets).getByLabelText('Where the secret is')).toHaveTextContent('commit c0ffee000000')
+    expect(within(secrets).queryByLabelText('The sink')).not.toBeInTheDocument()
+    expect(within(screen.getByRole('list', { name: 'Configuration' })).getByText('Image user should not be root')).toBeInTheDocument()
+    const scanners = screen.getByLabelText('The scanners')
+    expect(scanners).toHaveTextContent('gitleaks 8.30.1 (with the history)')
+    expect(within(scanners).getByText(/trivy/)).toHaveAttribute('title', 'trivy did not finish within 900 s')
+    expect(screen.getByRole('link', { name: 'SARIF' })).toHaveAttribute('href', '/api/code/security/s1/sarif')
+    expect(screen.getByText('abc123456789')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Scanners only' }))
+    expect(within(screen.getByRole('list', { name: 'Weaknesses' })).queryByText('SQL built from the request')).not.toBeInTheDocument()
+    expect(within(screen.getByRole('list', { name: 'Weaknesses' })).getByText('A broken algorithm')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Model and scanners' }))
+    expect(within(screen.getByRole('list', { name: 'Weaknesses' })).getByText('SQL built from the request')).toBeInTheDocument()
+    expect(within(screen.getByRole('list', { name: 'Weaknesses' })).queryByText('A broken algorithm')).not.toBeInTheDocument()
   })
 })

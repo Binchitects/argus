@@ -7,7 +7,8 @@
 
 What it lists: the .NET packages of the app, Argus and Code Arena (every transitive one, as `dotnet list package`
 resolves them), the web apps' npm packages (their lock files, without the build tools), the Python packages the
-images pin (`pip install name==version` in their Dockerfiles), and the base images. What it asks: OSV
+images pin (`pip install name==version` in their Dockerfiles), the programs they download by version (Trivy and
+gitleaks as Go modules, opengrep), and the base images. What it asks: OSV
 (api.osv.dev), which gathers GitHub's, PyPI's, npm's and NuGet's advisories, for each package at its version.
 
 A critical finding fails the release unless docs/compliance/accepted-vulnerabilities.yaml accepts it, with why and
@@ -96,6 +97,24 @@ def images(dockerfiles: list[Path]) -> list[dict]:
     return sorted(found.values(), key=lambda c: c["name"])
 
 
+# Programs an image downloads by version (ARG NAME_VERSION=...), by what OSV knows them as: a Go module, or generic
+# (listed in the bill of materials, with no ecosystem in OSV to ask).
+BINARIES = {"TRIVY": ("golang", "github.com/aquasecurity/trivy"), "GITLEAKS": ("golang", "github.com/zricethezav/gitleaks/v8"),
+            "OPENGREP": ("generic", "opengrep")}
+ARG = re.compile(r"^\s*ARG\s+([A-Z0-9_]+)_VERSION=v?([0-9][A-Za-z0-9.+-]*)\s*$", re.M)
+
+
+def binaries(dockerfiles: list[Path]) -> list[dict]:
+    """The programs the images download by version (their ARG ..._VERSION), as BINARIES names them."""
+    found = {}
+    for f in dockerfiles:
+        for arg, version in ARG.findall(f.read_text()):
+            if arg in BINARIES:
+                kind, name = BINARIES[arg]
+                found[f"{name}@{version}"] = {"ecosystem": kind, "name": name, "version": version}
+    return sorted(found.values(), key=lambda c: c["name"])
+
+
 def severity(vuln: dict) -> str:
     """GitHub's severity when the advisory carries it (most do); else the CVSS base score's band; else unknown."""
     def named(said) -> str | None:
@@ -126,7 +145,7 @@ def get(url: str, opener=urllib.request.urlopen) -> dict:
         return json.loads(r.read())
 
 
-ECOSYSTEM = {"nuget": "NuGet", "npm": "npm", "pypi": "PyPI"}
+ECOSYSTEM = {"nuget": "NuGet", "npm": "npm", "pypi": "PyPI", "golang": "Go"}
 
 
 def scan(components: list[dict], opener=urllib.request.urlopen) -> list[dict]:
@@ -166,7 +185,7 @@ def accepted(path: Path, today: date) -> dict[str, dict]:
 
 def bom(version: str, components: list[dict], findings: list[dict]) -> dict:
     """CycloneDX 1.5, its components with their package URLs, and the vulnerabilities found."""
-    kind = {"nuget": "nuget", "npm": "npm", "pypi": "pypi", "docker": "docker"}
+    kind = {"nuget": "nuget", "npm": "npm", "pypi": "pypi", "docker": "docker", "golang": "golang", "generic": "generic"}
     refs = {}
     comps = []
     for c in components:
@@ -192,9 +211,9 @@ def main(argv: list[str] | None = None, opener=urllib.request.urlopen, run=subpr
     version = (ROOT / "VERSION").read_text().strip()
     dockerfiles = sorted([*ROOT.glob("src/*/Dockerfile"), *ROOT.glob("deploy/services/*/Dockerfile"), *ROOT.glob("deploy/services/*.Dockerfile")])
     components = ([] if a.no_dotnet else dotnet_packages(run)) + [c for lock in LOCKS if (ROOT / lock).exists() for c in npm_packages(ROOT / lock)]
-    components += python_packages(dockerfiles) + images(dockerfiles)
+    components += python_packages(dockerfiles) + binaries(dockerfiles) + images(dockerfiles)
     print(f"release-scan: {version}, {len(components)} components "
-          f"({', '.join(f'{sum(1 for c in components if c['ecosystem'] == e)} {e}' for e in ('nuget', 'npm', 'pypi', 'docker'))})")
+          f"({', '.join(f'{sum(1 for c in components if c['ecosystem'] == e)} {e}' for e in ('nuget', 'npm', 'pypi', 'golang', 'generic', 'docker'))})")
     try:
         findings = scan(components, opener)
     except (urllib.error.URLError, TimeoutError, OSError) as e:

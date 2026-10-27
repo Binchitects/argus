@@ -31,6 +31,7 @@ public static class SecurityEndpoints
         g.MapPost("", StartAsync).RequirePermission(Core.Access.Permissions.ReviewRun);
         g.MapGet("/{id:guid}", GetAsync);
         g.MapGet("/{id:guid}/sbom", SbomAsync);
+        g.MapGet("/{id:guid}/sarif", SarifAsync);
         g.MapPut("/{id:guid}/findings/{findingId:guid}", DecideAsync);
         g.MapDelete("/{id:guid}", DeleteAsync);
     }
@@ -39,8 +40,8 @@ public static class SecurityEndpoints
 
     private static object Brief(SecurityScan s) => new
     {
-        s.Id, s.Project, s.Ref, s.Status, s.Step, s.Candidates, s.Read, s.Dropped, s.Dependencies, s.AdvisoriesAsOf, s.CreatedAt, s.FinishedAt, s.Error,
-        sbom = s.Sbom is not null,
+        s.Id, s.Project, s.Ref, s.Commit, s.Status, s.Step, s.Candidates, s.Read, s.Dropped, s.Dependencies, s.AdvisoriesAsOf, s.CreatedAt, s.FinishedAt, s.Error,
+        sbom = s.Sbom is not null, scanners = s.Scanners is { } json ? JsonNode.Parse(json) : null,
     };
 
     /// <summary>The person's security reviews (a reviews admin sees everyone's), newest first, with their open findings by severity.</summary>
@@ -113,8 +114,8 @@ public static class SecurityEndpoints
             findings = s.Findings.OrderBy(f => f.Verified == false).ThenByDescending(f => f.Exploited).ThenBy(f => f.Severity switch { "critical" => 0, "high" => 1, "medium" => 2, _ => 3 }).ThenBy(f => f.Path).ThenBy(f => f.Line)
                 .Select(f => new
                 {
-                    f.Id, f.Kind, f.Exploited, f.Path, f.Line, f.SinkCode, f.Cwe, f.CweTitle, f.Severity, f.Title, f.Source, f.Flow, f.Exploit, f.Fix,
-                    pages = JsonNode.Parse(f.Pages), f.Verified, f.VerifyNote, f.State, f.DecidedAt, f.Why, f.Until,
+                    f.Id, f.Kind, f.FoundBy, f.Rule, f.Commit, f.Exploited, f.Path, f.Line, f.SinkCode, f.Cwe, f.CweTitle, f.Severity, f.Title, f.Source, f.Flow,
+                    f.Exploit, f.Fix, pages = JsonNode.Parse(f.Pages), f.Verified, f.VerifyNote, f.State, f.DecidedAt, f.Why, f.Until,
                 }),
         });
     }
@@ -129,6 +130,81 @@ public static class SecurityEndpoints
         }
         var name = $"{s.Project.Replace('/', '-')}{(s.Ref is null ? "" : "-" + s.Ref.Replace('/', '-'))}.cdx.json";
         return Results.File(System.Text.Encoding.UTF8.GetBytes(sbom), "application/vnd.cyclonedx+json", name);
+    }
+
+    /// <summary>The review's findings as SARIF 2.1.0, for a code host's or an IDE's security view.</summary>
+    private static async Task<IResult> SarifAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AccessService access, CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        if (await SeenAsync(db, access, me, id, ct) is not { Status: SecurityScan.Done } s)
+        {
+            return Results.NotFound();
+        }
+        var name = $"{s.Project.Replace('/', '-')}{(s.Ref is null ? "" : "-" + s.Ref.Replace('/', '-'))}.sarif";
+        return Results.File(System.Text.Encoding.UTF8.GetBytes(Sarif(s).ToJsonString()), "application/sarif+json", name);
+    }
+
+    /// <summary>
+    /// SARIF 2.1.0: one run, a rule for each scanner rule, CWE or advisory, a result for each finding with what found it and
+    /// its state; one accepted as a risk or marked wrong is suppressed, with why.
+    /// </summary>
+    public static JsonObject Sarif(SecurityScan s)
+    {
+        static string Level(string severity) => severity is "critical" or "high" ? "error" : severity == "medium" ? "warning" : "note";
+        static string RuleOf(SecurityFinding f) => f.Kind == SecurityFinding.Dependency
+            ? f.Source?.Split(',')[0].Trim() is { Length: > 0 } advisory ? advisory : f.Cwe
+            : f.Rule?.Split(',')[0].Trim() is { Length: > 0 } rule ? rule : f.Cwe.Length > 0 ? f.Cwe : f.Kind;
+        var findings = s.Findings.OrderBy(f => f.Path, StringComparer.Ordinal).ThenBy(f => f.Line).ToList();
+        var rules = findings.GroupBy(RuleOf).Select(g => (JsonNode)new JsonObject
+        {
+            ["id"] = g.Key,
+            ["shortDescription"] = new JsonObject { ["text"] = g.First().Title },
+            ["properties"] = new JsonObject
+            {
+                ["tags"] = new JsonArray([.. new[] { "security", g.First().Kind }.Concat(g.Select(f => f.Cwe).Where(c => c.Length > 0).Distinct()).Select(t => (JsonNode)t)]),
+            },
+        }).ToList();
+        var results = findings.Select(f =>
+        {
+            var o = new JsonObject
+            {
+                ["ruleId"] = RuleOf(f),
+                ["level"] = Level(f.Severity),
+                ["message"] = new JsonObject { ["text"] = string.Join("\n\n", new[] { f.Title, f.Fix }.Where(t => !string.IsNullOrWhiteSpace(t))) },
+                ["locations"] = new JsonArray(new JsonObject
+                {
+                    ["physicalLocation"] = new JsonObject
+                    {
+                        ["artifactLocation"] = new JsonObject { ["uri"] = f.Path },
+                        ["region"] = new JsonObject { ["startLine"] = Math.Max(1, f.Line) },
+                    },
+                }),
+                ["properties"] = new JsonObject
+                {
+                    ["severity"] = f.Severity, ["kind"] = f.Kind, ["cwe"] = f.Cwe, ["foundBy"] = new JsonArray([.. f.FoundBy.Select(t => (JsonNode)t)]),
+                    ["verified"] = f.Verified, ["state"] = f.State, ["exploited"] = f.Exploited, ["commit"] = f.Commit,
+                },
+            };
+            if (f.State is SecurityFinding.Accepted or SecurityFinding.Wrong)
+            {
+                o["suppressions"] = new JsonArray(new JsonObject
+                {
+                    ["kind"] = "external", ["status"] = "accepted",
+                    ["justification"] = (f.State == SecurityFinding.Accepted ? "Risk accepted" : "Not a weakness") + (f.Why is null ? "" : $": {f.Why}"),
+                });
+            }
+            return (JsonNode)o;
+        }).ToList();
+        var run = new JsonObject
+        {
+            ["tool"] = new JsonObject { ["driver"] = new JsonObject { ["name"] = "Argus Arena security review", ["informationUri"] = "https://github.com/Binchitects/argus", ["rules"] = new JsonArray([.. rules]) } },
+            ["results"] = new JsonArray([.. results]),
+        };
+        if (s.Commit is not null)
+        {
+            run["versionControlProvenance"] = new JsonArray(new JsonObject { ["repositoryUri"] = s.Project, ["revisionId"] = s.Commit, ["branch"] = s.Ref });
+        }
+        return new JsonObject { ["$schema"] = "https://json.schemastore.org/sarif-2.1.0.json", ["version"] = "2.1.0", ["runs"] = new JsonArray(run) };
     }
 
     /// <summary>A finding fixed, accepted as a risk (why, and until when it is looked at again), marked wrong (why), or opened again.</summary>

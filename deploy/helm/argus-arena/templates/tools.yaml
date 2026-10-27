@@ -46,6 +46,10 @@ spec:
             - { name: ARGUS_USERS_FILE, value: /directory/users.yml }
             - { name: ARGUS_EMBED_URL, value: "http://embed:8080" }
             - { name: ARGUS_APP, value: "off" }
+            # The security scanners (scanners.enabled): security reviews send them the commit read.
+            - { name: ARGUS_SCANNERS_URL, value: "http://scanners:7800" }
+            # The advisories pack, once installed, renewed each day from GitHub's advisory database and CISA's catalog.
+            - { name: ARGUS_ADVISORIES_RENEW_HOURS, value: "24" }
             {{- if .Values.argus.packLibraryClaim }}
             - { name: ARGUS_PACK_LIBRARY, value: /pack-library }
             {{- end }}
@@ -292,6 +296,68 @@ spec:
         - podSelector:
             matchLabels: {{- include "arena.selector" (dict "root" $ "name" "app") | nindent 14 }}
       ports: [{ port: 8000 }]
+---
+{{- end }}
+{{- /* The security scanners: opengrep with Arena's rules, Bandit, gitleaks and Trivy's configuration checks, on a commit Argus sends. Only Argus reaches them, and they reach nothing. */}}
+{{- if .Values.scanners.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scanners
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "scanners") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "arena.selector" (dict "root" $ "name" "scanners") | nindent 8 }}
+    spec:
+      {{- include "arena.podDefaults" . | nindent 6 }}
+      automountServiceAccountToken: false
+      securityContext: { runAsUser: 65534, runAsGroup: 65534, runAsNonRoot: true, fsGroup: 65534 }
+      containers:
+        - name: scanners
+          image: {{ include "arena.image" (dict "root" $ "image" .Values.images.scanners) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          ports: [{ name: http, containerPort: 7800 }]
+          env:
+            - { name: SCANNERS_THREADS, value: "2" }
+          resources: {{- toYaml .Values.scanners.resources | nindent 12 }}
+          securityContext: { readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
+          readinessProbe: { httpGet: { path: /health, port: http }, periodSeconds: 30, timeoutSeconds: 10 }
+          volumeMounts:
+            - { name: work, mountPath: /work }
+            - { name: tmp, mountPath: /tmp }
+      volumes:
+        # Each scan's files in memory, as compose's tmpfs: gone when it ends.
+        - { name: work, emptyDir: { medium: Memory, sizeLimit: 2Gi } }
+        - { name: tmp, emptyDir: { sizeLimit: 256Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: scanners
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "arena.selector" (dict "root" $ "name" "scanners") | nindent 4 }}
+  ports: [{ name: http, port: 7800, targetPort: http }]
+---
+# Argus's pods in, nothing out: as compose's internal network.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: scanners
+  labels: {{- include "arena.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" "scanners") | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {{- include "arena.selector" (dict "root" $ "name" "argus") | nindent 14 }}
+      ports: [{ port: 7800 }]
 ---
 {{- end }}
 {{- /* The chat's web search. A new secret each start: it signs nothing that outlives the process. */}}

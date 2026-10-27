@@ -958,23 +958,38 @@ to the code host. Starting one needs `review.run`.
    materials (CycloneDX) is kept to download. Without an advisories pack the
    review says so and goes on with the code; it warns when the advisories
    are more than a week old.
-2. **The sinks**: git grep (`grep_at`) finds where code makes a dangerous
+2. **The scanners** (where the `scanners` feature is installed): Argus's
+   `scan_at` sends the commit, with its history, to opengrep with Arena's own
+   rules (94 of them, each tested on its weak and fixed examples), Bandit,
+   gitleaks and Trivy's checks of configuration. They run on a network of
+   their own with no way out, fetch nothing and run nothing they are sent.
+   A secret's text never comes back, only where it is (and the commit, in
+   the history).
+3. **The sinks**: git grep (`grep_at`) finds where code makes a dangerous
    call: SQL and other queries, OS commands, deserialisers, code run from
    text, XML parsers, file paths, HTML written, URLs the server fetches and
    redirects, in C#, Java and Kotlin, Python, JavaScript and TypeScript, Go,
-   PHP and Ruby. Tests, examples, vendored and built code and comments are
-   left out.
-3. **Each traced**: the 30 most dangerous (at most three a file) are read
-   with their function and the places that call it, and the model judges
-   whether data from outside reaches the call without what it needs (a
-   parameter, an allow-list, encoding, a safe parser setting).
-4. **Grounded**: a suspicion becomes a finding only when it quotes the
+   PHP and Ruby. A scanner's match on one of those sinks joins them. Tests,
+   examples, vendored and built code and comments are left out.
+4. **Each traced**: the 30 most dangerous (what a scanner matched first, at
+   most three a file) are read with their function and the places that call
+   it, and the model judges whether data from outside reaches the call
+   without what it needs (a parameter, an allow-list, encoding, a safe parser
+   setting). It is told what a scanner matched there, as a pattern and not a
+   proof.
+5. **Grounded**: a suspicion becomes a finding only when it quotes the
    sink's line as the file has it and names a CWE the `security` knowledge
    pack knows (the sink's own when the model's is not one); the rest are
    dropped, and counted. Each finding carries the pack's pages: the CWE, the
    OWASP cheat sheet and CodeQL's query for the language.
-5. **Refuted or not**: a second pass, with the CWE's page in hand, tries to
+6. **Refuted or not**: a second pass, with the CWE's page in hand, tries to
    refute each; a refuted one is kept apart, with why.
+7. **Triage**: each finding says what found it, the model, the scanners or
+   both (filter by it). A scanner's match the model traced and cleared is kept
+   apart with what to check; one the model did not trace (a weak hash, a TLS
+   check turned off) says so. Secrets and configuration have sections of their
+   own. The findings download as SARIF for a code host's or an IDE's security
+   view, with the commit read, and accepted or wrong ones suppressed with why.
 
 A finding gives its CWE and severity, `file:line` with the sink quoted,
 where the data comes in and each step to the sink, how it could be

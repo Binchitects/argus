@@ -58,6 +58,11 @@ class Lists(unittest.TestCase):
             docker.write_text("FROM python:3.13-slim AS base\nRUN pip install --no-cache-dir \\\n      numpy==2.5.3 Pillow==13.0.0 \\\n      uvicorn[standard]==0.54.0\nRUN echo x==1\nFROM ${BASE}\n")
             self.assertEqual([("numpy", "2.5.3"), ("pillow", "13.0.0"), ("uvicorn", "0.54.0")], [(c["name"], c["version"]) for c in rs.python_packages([docker])])
             self.assertEqual([("python", "3.13-slim")], [(c["name"], c["version"]) for c in rs.images([docker])])
+            scanners = Path(d) / "Scanners.Dockerfile"
+            scanners.write_text("FROM python:3.13-slim\nARG TRIVY_VERSION=0.75.0\nARG GITLEAKS_VERSION=v8.30.1\nARG OPENGREP_VERSION=1.31.0\nARG OTHER_VERSION=1\n")
+            self.assertEqual([("golang", "github.com/aquasecurity/trivy", "0.75.0"), ("golang", "github.com/zricethezav/gitleaks/v8", "8.30.1"), ("generic", "opengrep", "1.31.0")],
+                             [(c["ecosystem"], c["name"], c["version"]) for c in rs.binaries([scanners])])
+            self.assertIn("pkg:golang/github.com/aquasecurity/trivy@0.75.0", json.dumps(rs.bom("1", rs.binaries([scanners]), [])))
 
     def test_The_dotnet_packages_are_every_one_each_project_resolves(self):
         listed = {"projects": [{"frameworks": [{"topLevelPackages": [{"id": "Npgsql", "resolvedVersion": "10.0.0"}],

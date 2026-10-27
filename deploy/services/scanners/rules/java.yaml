@@ -1,0 +1,320 @@
+# Arena's own rules for Java and Kotlin's neighbours on the JVM, under the app's licence. Each names its weakness
+# (metadata.cwe), Arena's severity and how sure a match is; java.java beside it holds the weak code each must find
+# (ruleid) and the fixed code it must not (ok), and the image is not built unless opengrep --test passes on them.
+rules:
+  - id: java-sql-built-from-strings
+    languages: [java]
+    severity: ERROR
+    message: >-
+      A query built from strings: data in it is read as SQL. Use a PreparedStatement with ? placeholders (or JPA's
+      named parameters) and keep the SQL text constant.
+    metadata: { cwe: CWE-89, severity: high, confidence: medium }
+    patterns:
+      - pattern-either:
+          - pattern: $S.$EXEC("..." + $X, ...)
+          - pattern: $S.$EXEC($A + $B, ...)
+          - pattern: $S.$EXEC(String.format(...), ...)
+          - patterns:
+              - pattern-either:
+                  - pattern-inside: |
+                      String $Q = "..." + $X;
+                      ...
+                  - pattern-inside: |
+                      String $Q = String.format(...);
+                      ...
+              - pattern: $S.$EXEC($Q, ...)
+      - metavariable-regex:
+          metavariable: $EXEC
+          regex: ^(executeQuery|executeUpdate|execute|executeLargeUpdate|addBatch|prepareStatement|prepareCall|createQuery|createNativeQuery|queryForObject|queryForList|queryForMap|update|batchUpdate)$
+      - pattern-not: $S.$EXEC("..." + "...", ...)
+
+  - id: java-sql-from-request
+    mode: taint
+    languages: [java]
+    severity: ERROR
+    message: >-
+      Data from the request reaches a query's text. Use a PreparedStatement with ? placeholders and set the value
+      with setString or setInt.
+    metadata: { cwe: CWE-89, severity: critical, confidence: high }
+    pattern-sources: &java-request
+      - pattern-either:
+          - pattern: (HttpServletRequest $R).getParameter(...)
+          - pattern: (HttpServletRequest $R).getParameterValues(...)
+          - pattern: (HttpServletRequest $R).getHeader(...)
+          - pattern: (HttpServletRequest $R).getQueryString()
+          - pattern: (HttpServletRequest $R).getCookies()
+          - pattern: (HttpServletRequest $R).getInputStream()
+          - pattern: (HttpServletRequest $R).getReader()
+          - patterns:
+              - pattern-inside: |
+                  $RET $M(..., @RequestParam $T $P, ...) { ... }
+              - pattern: $P
+          - patterns:
+              - pattern-inside: |
+                  $RET $M(..., @RequestParam(...) $T $P, ...) { ... }
+              - pattern: $P
+          - patterns:
+              - pattern-inside: |
+                  $RET $M(..., @PathVariable $T $P, ...) { ... }
+              - pattern: $P
+          - patterns:
+              - pattern-inside: |
+                  $RET $M(..., @RequestHeader(...) $T $P, ...) { ... }
+              - pattern: $P
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: $S.executeQuery($Q, ...)
+              - pattern: $S.executeUpdate($Q, ...)
+              - pattern: $S.execute($Q, ...)
+              - pattern: $C.prepareStatement($Q, ...)
+              - pattern: $EM.createQuery($Q, ...)
+              - pattern: $EM.createNativeQuery($Q, ...)
+              - pattern: $J.queryForObject($Q, ...)
+              - pattern: $J.queryForList($Q, ...)
+          - focus-metavariable: $Q
+
+  - id: java-command-from-data
+    languages: [java]
+    severity: WARNING
+    message: >-
+      A command started from data: a shell given it, or the program it names, runs what the data says. Start a fixed
+      program with each argument its own element (new ProcessBuilder(List.of(...))), and never sh -c.
+    metadata: { cwe: CWE-78, severity: high, confidence: medium }
+    pattern-either:
+      - patterns:
+          - pattern: Runtime.getRuntime().exec($X, ...)
+          - pattern-not: Runtime.getRuntime().exec("...", ...)
+          - pattern-not: Runtime.getRuntime().exec(new String[] {"...", ...}, ...)
+      - pattern: new ProcessBuilder("sh", "-c", $X)
+      - pattern: new ProcessBuilder("/bin/sh", "-c", $X)
+      - pattern: new ProcessBuilder("bash", "-c", $X)
+      - pattern: new ProcessBuilder("cmd.exe", "/c", $X)
+      - pattern: new ProcessBuilder("cmd", "/c", $X)
+
+  - id: java-command-from-request
+    mode: taint
+    languages: [java]
+    severity: ERROR
+    message: >-
+      Data from the request reaches a command. Do not run what a request names; when a value must be an argument,
+      pass it as its own element to a fixed program and check it against what is allowed.
+    metadata: { cwe: CWE-78, severity: critical, confidence: high }
+    pattern-sources: *java-request
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: Runtime.getRuntime().exec($C, ...)
+              - pattern: new ProcessBuilder(..., $C, ...)
+          - focus-metavariable: $C
+
+  - id: java-unsafe-deserialization
+    languages: [java]
+    severity: ERROR
+    message: >-
+      This deserialiser builds any class the data names, and gadget chains in the classpath run code doing it. Read
+      untrusted data as JSON into a fixed type; if Java serialisation must stay, set an ObjectInputFilter that allows
+      only the expected classes.
+    metadata: { cwe: CWE-502, severity: critical, confidence: medium }
+    pattern-either:
+      - patterns:
+          - pattern: (ObjectInputStream $O).readObject()
+          - pattern-not-inside: |
+              $O.setObjectInputFilter(...);
+              ...
+      - pattern: new XMLDecoder(...)
+      - pattern: (ObjectMapper $M).enableDefaultTyping(...)
+      - pattern: (ObjectMapper $M).activateDefaultTyping(...)
+      - patterns:
+          - pattern: (XStream $X).fromXML(...)
+          - pattern-not-inside: |
+              $X.allowTypes(...);
+              ...
+          - pattern-not-inside: |
+              $X.addPermission(...);
+              ...
+      - patterns:
+          - pattern: new Yaml()
+          - pattern-not-inside: new Yaml(new SafeConstructor(...))
+
+  - id: java-xml-external-entities
+    languages: [java]
+    severity: WARNING
+    message: >-
+      The XML parser resolves external entities and DTDs: a document can read local files and reach other servers
+      (XXE). Set the disallow-doctype-decl feature (or XMLConstants.FEATURE_SECURE_PROCESSING and no external
+      entities) before parsing.
+    metadata: { cwe: CWE-611, severity: high, confidence: medium }
+    patterns:
+      - pattern-either:
+          - pattern: (DocumentBuilderFactory $F).newDocumentBuilder()
+          - pattern: (SAXParserFactory $F).newSAXParser()
+          - pattern: (XMLInputFactory $F).createXMLStreamReader(...)
+          - pattern: (TransformerFactory $F).newTransformer(...)
+      - pattern-not-inside: |
+          $F.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+          ...
+      - pattern-not-inside: |
+          $F.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+          ...
+      - pattern-not-inside: |
+          $F.setProperty(XMLInputFactory.SUPPORT_DTD, false);
+          ...
+      - pattern-not-inside: |
+          $F.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+          ...
+
+  - id: java-tls-not-verified
+    languages: [java]
+    severity: WARNING
+    message: >-
+      Any certificate or host name is accepted, so anyone on the way can read and change the traffic. Leave the
+      default trust manager and host name check; for a private CA, put it in a trust store.
+    metadata: { cwe: CWE-295, severity: high, confidence: high }
+    pattern-either:
+      - pattern: |
+          public void checkServerTrusted(...) {}
+      - pattern: |
+          public X509Certificate[] getAcceptedIssuers() { return null; }
+      - pattern: (String $H, SSLSession $S) -> true
+      - pattern: ($H, $S) -> true
+      - pattern: NoopHostnameVerifier.INSTANCE
+      - pattern: new NoopHostnameVerifier()
+      - pattern: SSLConnectionSocketFactory.ALLOW_ALL_HOSTNAME_VERIFIER
+      - pattern: |
+          public boolean verify(String $H, SSLSession $S) { return true; }
+
+  - id: java-weak-crypto
+    languages: [java]
+    severity: INFO
+    message: >-
+      A broken algorithm: MD5 and SHA-1 collide at will, DES and 3DES are too weak, and ECB (also what plain "AES"
+      means) shows the plaintext's patterns. Use SHA-256 or better, AES/GCM/NoPadding, and for passwords a password
+      hash (PBKDF2, bcrypt, Argon2).
+    metadata: { cwe: CWE-327, severity: low, confidence: medium }
+    pattern-either:
+      - pattern: MessageDigest.getInstance("MD5")
+      - pattern: MessageDigest.getInstance("SHA-1")
+      - pattern: MessageDigest.getInstance("SHA1")
+      - pattern: Cipher.getInstance("AES")
+      - patterns:
+          - pattern: Cipher.getInstance("$ALG")
+          - metavariable-regex:
+              metavariable: $ALG
+              regex: (?i)^(DES|DESede|RC2|RC4|Blowfish|.*/ECB/.*)
+      - patterns:
+          - pattern: Cipher.getInstance("$ALG", ...)
+          - metavariable-regex:
+              metavariable: $ALG
+              regex: (?i)^(DES|DESede|RC2|RC4|Blowfish|.*/ECB/.*)
+
+  - id: java-predictable-secret
+    languages: [java]
+    severity: WARNING
+    message: >-
+      A secret from java.util.Random, which is predictable from its output. Use SecureRandom.
+    metadata: { cwe: CWE-338, severity: medium, confidence: medium }
+    patterns:
+      - pattern-either:
+          - pattern: $T $NAME = <... (Random $R).$M(...) ...>;
+          - pattern: $T $NAME = <... new Random().$M(...) ...>;
+          - pattern: $T $NAME = <... Math.random() ...>;
+          - pattern: $T $NAME = <... ThreadLocalRandom.current().$M(...) ...>;
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: (?i).*(token|secret|password|passwd|nonce|otp|salt|apikey|api_key|sessionid|resetcode).*
+
+  - id: java-path-from-request
+    mode: taint
+    languages: [java]
+    severity: WARNING
+    message: >-
+      A file path from the request: ../ in it reaches any file the process can read or write. Take only a file's name,
+      normalise the path, and check that it starts with the folder meant.
+    metadata: { cwe: CWE-22, severity: high, confidence: high }
+    pattern-sources: *java-request
+    pattern-sanitizers:
+      - pattern: FilenameUtils.getName(...)
+      - pattern: (Path $P).getFileName()
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: new File($F, ...)
+              - pattern: new File($D, $F)
+              - pattern: new FileInputStream($F)
+              - pattern: new FileOutputStream($F, ...)
+              - pattern: new FileReader($F)
+              - pattern: Paths.get($F, ...)
+              - pattern: Path.of($F, ...)
+              - pattern: Files.$M($F, ...)
+          - focus-metavariable: $F
+
+  - id: java-redirect-from-request
+    mode: taint
+    languages: [java]
+    severity: WARNING
+    message: >-
+      A redirect to where the request says (an open redirect): a link on this site sends people to any other. Redirect
+      to paths of this site only, or to hosts on a list.
+    metadata: { cwe: CWE-601, severity: medium, confidence: high }
+    pattern-sources: *java-request
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: (HttpServletResponse $R).sendRedirect($U)
+              - pattern: '"redirect:" + $U'
+          - focus-metavariable: $U
+
+  - id: java-request-to-url-from-request
+    mode: taint
+    languages: [java]
+    severity: WARNING
+    message: >-
+      The server fetches a URL the request gives (server-side request forgery): it can be made to reach internal
+      services and the cloud's metadata. Allow only known hosts, and check the address before fetching.
+    metadata: { cwe: CWE-918, severity: high, confidence: high }
+    pattern-sources: *java-request
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: new URL($U)
+              - pattern: URI.create($U)
+              - pattern: (RestTemplate $T).$M($U, ...)
+              - pattern: HttpRequest.newBuilder($U)
+          - focus-metavariable: $U
+
+  - id: java-html-from-request
+    mode: taint
+    languages: [java]
+    severity: WARNING
+    message: >-
+      Data from the request is written into the page unencoded, where it runs as script (cross-site scripting). Encode
+      it for HTML (OWASP's Encoder.forHtml), or let the template engine escape it.
+    metadata: { cwe: CWE-79, severity: medium, confidence: high }
+    pattern-sources: *java-request
+    pattern-sanitizers:
+      - pattern: Encode.forHtml(...)
+      - pattern: StringEscapeUtils.escapeHtml4(...)
+      - pattern: HtmlUtils.htmlEscape(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: (HttpServletResponse $R).getWriter().print($X)
+              - pattern: (HttpServletResponse $R).getWriter().println($X)
+              - pattern: (HttpServletResponse $R).getWriter().write($X)
+              - pattern: (PrintWriter $W).print($X)
+              - pattern: (PrintWriter $W).println($X)
+              - pattern: (PrintWriter $W).write($X)
+          - focus-metavariable: $X
+
+  - id: java-spring-csrf-disabled
+    languages: [java]
+    severity: INFO
+    message: >-
+      Spring Security's CSRF protection is off: another site can make a signed-in person's browser post here. Keep it
+      on for anything a browser signs in to; an API with tokens in headers only may turn it off on purpose.
+    metadata: { cwe: CWE-352, severity: medium, confidence: medium }
+    pattern-either:
+      - pattern: $H.csrf().disable()
+      - pattern: $H.csrf($C -> $C.disable())
+      - pattern: $H.csrf(AbstractHttpConfigurer::disable)

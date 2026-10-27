@@ -2242,7 +2242,12 @@ Arena's own dependencies.
    Done: tools/fetch-advisories.sh (GitHub's reviewed advisories by sparse
    clone; Google's OSV storage refuses this location) and
    tools/advisories-texts.py, Argus's `advisories` source with an affected
-   table in the pack. Left: the daily build, published in a pack index.
+   table in the pack. Then the daily build, in Argus itself: `argus pack
+   renew`, and the server renews an installed pack every
+   `ARGUS_ADVISORIES_RENEW_HOURS` (24 in the stack) or on Admin → Packs →
+   Renew. It fetches what changed, writes the pages and builds over the pack
+   installed, embedding only the advisories that changed. The Python tools
+   are gone. `argus pack index` publishes it for offline hosts.
 3. **Recognising vulnerable dependencies.** Argus reads each indexed branch's
    manifests and lock files (npm, pnpm and yarn locks, NuGet's
    `packages.lock.json` and `PackageReference`, pip requirements, Poetry and
@@ -2280,9 +2285,21 @@ Arena's own dependencies.
    the CWE is the pack's, refuted or not by a second pass; fixed, accepted
    with why and until when, or wrong), and the grounded `/security-review`
    skill.
+   Done (the scanners): the `scanners` feature (off by default, an image of
+   about 700 MB): opengrep's engine with 94 of Arena's own rules for seven
+   languages, each tested on its examples when the image is built, Bandit,
+   gitleaks with the history, and Trivy's configuration checks. They run on
+   an internal network Argus alone reaches. Argus's `scan_at` sends the
+   commit, or a bundle with its history. gosec and the .NET analyzers are
+   not there: they fetch the project's packages to build it.
    - **Triage**: whether both passes found it, one, or neither; a finding
      people mark as wrong is remembered for that repository, and the
      reflection learns from it (v7.0's skills that learn).
+     Done (both passes): each finding names what found it. A scanner's
+     match on a sink is traced by the model first. One the model cleared is
+     kept apart with what to check. Secrets and configuration have sections
+     of their own, and the findings download as SARIF. Left: wrong findings
+     remembered for the repository.
 5. **Fixing.** **Fix it** on a finding, in Code Studio or in Code Arena on
    the person's machine: the agent writes a test that shows the weakness
    where it can (a request that injects, a path that escapes), makes the

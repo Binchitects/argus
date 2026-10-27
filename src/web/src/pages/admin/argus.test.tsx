@@ -53,6 +53,24 @@ describe('admin knowledge packs', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Remove' }))
     await waitFor(() => expect(calls.find((c) => c.path === '/api/admin/argus/packs/remove')?.body).toMatchObject({ name: 'legacy' }))
   })
+
+  it('renews the advisories pack and says how it is renewed and how the last one went', async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/argus/packs': () => ({
+        json: {
+          packs: [{ name: 'advisories', ...meta, version: '2026.10.27', source: 'installed' }], library: [], library_dir: '/pack-library', job: idle, index_url: null,
+          advisories: { renew_hours: 24, last: { at: Date.now() / 1000 - 3600, ok: false, error: 'CISA did not answer' } },
+        },
+      }),
+      'POST /api/admin/argus/packs/renew': () => ({ json: { status: 'started' } }),
+    })
+    renderApp('/admin/packs')
+    const card = (await screen.findByRole('heading', { name: /advisories/ })).closest('section')!
+    expect(within(card).getByText(/Renewed every 24 hours/)).toHaveTextContent('The last renewal failed')
+    expect(within(card).getByText(/Renewed every 24 hours/)).toHaveTextContent('CISA did not answer')
+    await userEvent.click(within(card).getByRole('button', { name: 'Renew' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/admin/argus/packs/renew')?.body).toMatchObject({ name: 'advisories' }))
+  })
 })
 
 describe('admin explore', () => {

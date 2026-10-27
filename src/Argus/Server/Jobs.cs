@@ -52,6 +52,16 @@ public sealed class Jobs(ArgusConfig cfg)
 
     public static string PackIndexUrl() => (Environment.GetEnvironmentVariable("ARGUS_PACK_INDEX_URL") ?? "").Trim();
 
+    /// <summary>
+    /// ARGUS_ADVISORIES_RENEW_HOURS: how often the advisories pack, once installed, is renewed from GitHub's advisory
+    /// database and CISA's catalog (0, the default: never by itself; an admin's Renew still runs).
+    /// </summary>
+    public static int AdvisoriesRenewHours() =>
+        int.TryParse(Environment.GetEnvironmentVariable("ARGUS_ADVISORIES_RENEW_HOURS"), out var v) && v > 0 ? v : 0;
+
+    /// <summary>When the advisories were last renewed, and how it went; null before the first.</summary>
+    public JsonObject? AdvisoriesRenewed { get; private set; }
+
     string CfgPath => cfg.SourcePath ?? Environment.GetEnvironmentVariable("ARGUS_CONFIG") ?? "/etc/argus/config.yaml";
 
     public JsonObject IndexJobSnapshot() { lock (_indexLock) return (JsonObject)_index.DeepClone(); }
@@ -217,6 +227,40 @@ public sealed class Jobs(ArgusConfig cfg)
                     AuditLog.IndexScheduled(interval, skipped: "a run is already in progress");
             }
         }) { IsBackground = true, Name = "argus-scheduler" }.Start();
+    }
+
+    /// <summary>
+    /// Renews the advisories pack every ARGUS_ADVISORIES_RENEW_HOURS while one is installed: first when the installed
+    /// pack is older than that, then at that interval. A renewal that cannot run now (another pack job) waits for the next.
+    /// </summary>
+    public void StartAdvisoriesRenewal()
+    {
+        var hours = AdvisoriesRenewHours();
+        if (hours <= 0) return;
+        new Thread(() =>
+        {
+            var delay = TimeSpan.FromMinutes(5);
+            while (true)
+            {
+                Thread.Sleep(delay);
+                delay = TimeSpan.FromHours(hours);
+                try
+                {
+                    var installed = Registry.ListInstalled(cfg.PacksDir).FirstOrDefault(p => p.Name == Deps.Advisories.PackName);
+                    if (installed is null) continue;
+                    var built = DateOnly.TryParseExact(installed.Version, "yyyy.MM.dd", System.Globalization.CultureInfo.InvariantCulture,
+                        System.Globalization.DateTimeStyles.None, out var day) ? day.ToDateTime(TimeOnly.MinValue) : DateTime.MinValue;
+                    var due = built.AddHours(hours) - DateTime.UtcNow;
+                    if (due > TimeSpan.Zero)
+                    {
+                        delay = due;
+                        continue;
+                    }
+                    if (!StartPackJob("renew", name: Deps.Advisories.PackName)) delay = TimeSpan.FromHours(1);
+                }
+                catch (Exception exc) { Console.Error.WriteLine($"the advisories could not be renewed: {exc.GetType().Name}: {exc.Message}"); }
+            }
+        }) { IsBackground = true, Name = "argus-advisories" }.Start();
     }
 
     /// <summary>Runs each repository's own schedule (every N hours, daily, weekly): looked at every <see cref="ScheduleTick"/> seconds.</summary>
@@ -622,6 +666,22 @@ public sealed class Jobs(ArgusConfig cfg)
                         updated++;
                     }
                     Say($"{updated} pack(s) updated");
+                    break;
+                }
+                case "renew":
+                {
+                    if (PyStr.Strip(name ?? "") != Deps.Advisories.PackName) throw new RegistryError("only the advisories pack is renewed here");
+                    var started = DateTimeOffset.UtcNow;
+                    try
+                    {
+                        Deps.Advisories.Renew(cfg.Index.DataDir, dest, Say);
+                        AdvisoriesRenewed = new JsonObject { ["at"] = started.ToUnixTimeSeconds(), ["ok"] = true, ["error"] = null };
+                    }
+                    catch (Exception exc)
+                    {
+                        AdvisoriesRenewed = new JsonObject { ["at"] = started.ToUnixTimeSeconds(), ["ok"] = false, ["error"] = PyStr.Prefix(exc.Message, 300) };
+                        throw;
+                    }
                     break;
                 }
                 case "remove":

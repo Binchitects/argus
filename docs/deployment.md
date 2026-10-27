@@ -161,6 +161,7 @@ on; its API answers 404; and its background work does not run.
 | `studio` | no | `studio` | a GPU; the media studio |
 | `workspaces` | no | `workspaces` | Code Studio |
 | `laya` | no | `laya` | |
+| `scanners` | no | `scanners` (an image of about 700 MB) | Argus |
 | `monitoring` | yes | `prometheus`, `alertmanager`, `loki`, `promtail`, `node-exporter`, `cpu-temp-exporter` | |
 | `gpu-monitoring` | yes | `gpu-exporter` | a GPU; monitoring |
 | `dcgm` | no | `dcgm-exporter` | a GPU; monitoring |

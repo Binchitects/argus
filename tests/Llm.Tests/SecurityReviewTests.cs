@@ -25,7 +25,25 @@ public sealed class SecurityReviewTests(AppFixture app)
         ["src/Search.cs"] = ["class Search {", "  void Run(string q) {", "    var cmd = new SqlCommand(\"SELECT 1 WHERE x = \" + q, conn); // [miscite]", "  }", "}"],
         ["src/Audit.cs"] = ["class Audit {", "  void Log(string who) {", "    var cmd = new SqlCommand(\"INSERT INTO log VALUES ('\" + who + \"')\", conn); // [badcwe]", "  }", "}"],
         ["src/Controller.cs"] = ["class Controller {", "  object Get() {", "", "", "", "", "", "", "    return orders.Find(Request.Query[\"id\"]);", "  }", "}"],
+        ["src/Export.cs"] = ["class Export {", "  string Read(string name) {", "    return File.ReadAllText(Path.Combine(Root, name));", "  }", "}"],
     };
+
+    /// <summary>What the scanners find: two of the model's sinks, a path the model clears, a weak hash, a secret in the history, a Dockerfile's root user.</summary>
+    private const string Scanned = """
+        {"project": "g/shop", "ref": "main", "sha": "abc", "history": true,
+         "tools": [{"name": "opengrep", "version": "1.31.0", "ran": true, "seconds": 2.0, "findings": 4, "error": null},
+                   {"name": "bandit", "version": "1.9.4", "ran": true, "seconds": 0.1, "findings": 1, "error": null},
+                   {"name": "gitleaks", "version": "8.30.1", "ran": true, "seconds": 0.5, "findings": 1, "error": null},
+                   {"name": "trivy", "version": "0.75.0", "ran": true, "seconds": 0.4, "findings": 1, "error": null}],
+         "findings": [
+           {"tools": ["opengrep", "bandit"], "rules": ["csharp-sql-built-from-strings", "B608"], "kind": "code", "path": "src/Orders.cs", "line": 4, "cwe": "CWE-89", "severity": "high", "confidence": "high", "title": "A query built from strings", "message": "Add the values as parameters.", "code": "var cmd = ..."},
+           {"tools": ["opengrep"], "rules": ["csharp-sql-built-from-strings"], "kind": "code", "path": "src/Report.cs", "line": 3, "cwe": "CWE-89", "severity": "high", "confidence": "medium", "title": "A query built from strings", "message": "Add the values as parameters.", "code": "var cmd = ..."},
+           {"tools": ["opengrep"], "rules": ["csharp-path-from-data"], "kind": "code", "path": "src/Export.cs", "line": 3, "cwe": "CWE-22", "severity": "high", "confidence": "medium", "title": "A file path from data", "message": "Take only a file's name.", "code": "return File.ReadAllText(Path.Combine(Root, name));"},
+           {"tools": ["opengrep"], "rules": ["csharp-weak-crypto"], "kind": "code", "path": "src/Crypto.cs", "line": 2, "cwe": "CWE-327", "severity": "low", "confidence": "medium", "title": "A broken algorithm", "message": "Use SHA-256 or better.", "code": "using var md5 = MD5.Create();"},
+           {"tools": ["gitleaks"], "rules": ["aws-access-token"], "kind": "secret", "path": "config/app.env", "line": 2, "cwe": "CWE-798", "severity": "high", "confidence": "medium", "title": "A secret (aws-access-token) in the history, commit c0ffee000000", "message": "Revoke it and make a new one.", "code": "", "commit": "c0ffee0000000000000000000000000000000000"},
+           {"tools": ["trivy"], "rules": ["AVD-DS-0002 Image user should not be 'root'"], "kind": "config", "path": "Dockerfile", "line": 1, "cwe": "", "severity": "high", "confidence": "high", "title": "Specify at least 1 USER command in Dockerfile with non-root user as argument", "message": "Add 'USER <non root user name>' line to the Dockerfile", "code": "FROM mcr.microsoft.com/dotnet/aspnet:10.0"}],
+         "more": 0}
+        """;
 
     private void Argus()
     {
@@ -34,7 +52,7 @@ public sealed class SecurityReviewTests(AppFixture app)
             var pattern = args.GetProperty("pattern").GetString()!;
             var glob = args.TryGetProperty("path", out var g) ? g.GetString() : null;
             object[] matches = pattern.Contains("SqlCommand", StringComparison.Ordinal) && glob == "*.cs"
-                ? [.. Files.Where(f => f.Key != "src/Controller.cs").Select(f => new { path = f.Key, line = Array.FindIndex(f.Value, l => l.Contains("SqlCommand(", StringComparison.Ordinal)) + 1, text = f.Value.First(l => l.Contains("SqlCommand(", StringComparison.Ordinal)) }),
+                ? [.. Files.Where(f => f.Value.Any(l => l.Contains("SqlCommand(", StringComparison.Ordinal))).Select(f => new { path = f.Key, line = Array.FindIndex(f.Value, l => l.Contains("SqlCommand(", StringComparison.Ordinal)) + 1, text = f.Value.First(l => l.Contains("SqlCommand(", StringComparison.Ordinal)) }),
                    new { path = "tests/OrdersTests.cs", line = 5, text = "var cmd = new SqlCommand(sql, conn); // [vuln]" }]
                 : pattern.Contains("Find", StringComparison.Ordinal) ? [new { path = "src/Controller.cs", line = 9, text = Files["src/Controller.cs"][8] }] : [];
             return JsonSerializer.Serialize(new { project = "g/shop", @ref = "main", matches, more = false });
@@ -62,6 +80,7 @@ public sealed class SecurityReviewTests(AppFixture app)
                            "url": "https://github.com/advisories/GHSA-5crp-9r3c-p9vr"}]}
             """;
         app.Argus.Handlers["sbom"] = _ => """{"bomFormat": "CycloneDX", "specVersion": "1.5", "components": [{"type": "library", "name": "Newtonsoft.Json", "version": "12.0.3", "purl": "pkg:nuget/Newtonsoft.Json@12.0.3"}]}""";
+        app.Argus.Handlers["scan_at"] = _ => Scanned;
     }
 
     private static async Task<JsonElement> DoneAsync(TestBrowser b, Guid id)
@@ -94,11 +113,11 @@ public sealed class SecurityReviewTests(AppFixture app)
         var id = (await me.JsonAsync(res)).GetProperty("id").GetGuid();
         var done = await DoneAsync(me, id);
         var scan = done.GetProperty("scan");
-        Assert.Equal("done", scan.GetProperty("status").GetString());
-        // The test file is left out; one suspicion cites a line the file does not have, and is dropped.
-        Assert.Equal((4, 4, 1), (scan.GetProperty("candidates").GetInt32(), scan.GetProperty("read").GetInt32(), scan.GetProperty("dropped").GetInt32()));
+        Assert.True(scan.GetProperty("status").GetString() == "done", scan.GetProperty("error").ToString());
+        // The test file is left out; the scanners' path sink joins git grep's; one suspicion cites a line the file does not have, and is dropped.
+        Assert.Equal((5, 5, 1), (scan.GetProperty("candidates").GetInt32(), scan.GetProperty("read").GetInt32(), scan.GetProperty("dropped").GetInt32()));
         var all = done.GetProperty("findings").EnumerateArray().ToList();
-        var findings = all.Where(f => f.GetProperty("kind").GetString() == "code").ToList();
+        var findings = all.Where(f => f.GetProperty("kind").GetString() == "code" && f.GetProperty("foundBy").EnumerateArray().Any(t => t.GetString() == "model")).ToList();
         Assert.Equal(["src/Audit.cs", "src/Orders.cs", "src/Report.cs"], findings.Select(f => f.GetProperty("path").GetString()).Order());
         // Its packages too: the known-exploited one first, with how it comes in and the upgrade that fixes it; and its bill of materials.
         var package = all[0];
@@ -123,13 +142,39 @@ public sealed class SecurityReviewTests(AppFixture app)
         Assert.Equal((false, "The value is a constant."), (report.GetProperty("verified").GetBoolean(), report.GetProperty("verifyNote").GetString()));
         Assert.Contains("1 suspicion(s) dropped", done.GetProperty("summary").GetString(), StringComparison.Ordinal);
 
+        // The scanners: what the model proved too names them both; what it read and cleared is kept apart with why; the rest as they found it.
+        static string[] FoundBy(JsonElement f) => [.. f.GetProperty("foundBy").EnumerateArray().Select(t => t.GetString()!)];
+        Assert.Equal(["model", "opengrep", "bandit"], FoundBy(orders));
+        Assert.Equal("csharp-sql-built-from-strings, B608", orders.GetProperty("rule").GetString());
+        Assert.Equal(["model", "opengrep"], FoundBy(report));
+        var export = all.Single(f => f.GetProperty("path").GetString() == "src/Export.cs");
+        Assert.Equal(["opengrep"], FoundBy(export));
+        Assert.Equal((false, "CWE-22"), (export.GetProperty("verified").GetBoolean(), export.GetProperty("cwe").GetString()));
+        Assert.Equal("The model read it with its callers and found no outside data reaching it. To check: where id comes from", export.GetProperty("verifyNote").GetString());
+        var crypto = all.Single(f => f.GetProperty("path").GetString() == "src/Crypto.cs");
+        Assert.Equal((JsonValueKind.Null, "low", "Use SHA-256 or better."), (crypto.GetProperty("verified").ValueKind, crypto.GetProperty("severity").GetString(), crypto.GetProperty("fix").GetString()));
+        var secret = all.Single(f => f.GetProperty("kind").GetString() == "secret");
+        Assert.Equal(("config/app.env", "", "c0ffee0000000000000000000000000000000000", "CWE-798"),
+            (secret.GetProperty("path").GetString(), secret.GetProperty("sinkCode").GetString(), secret.GetProperty("commit").GetString(), secret.GetProperty("cwe").GetString()));
+        var config = all.Single(f => f.GetProperty("kind").GetString() == "config");
+        Assert.Equal("Dockerfile", config.GetProperty("path").GetString());
+        Assert.Equal(["trivy"], FoundBy(config));
+        Assert.Equal(("abc", 4), (scan.GetProperty("commit").GetString(), scan.GetProperty("scanners").GetProperty("tools").GetArrayLength()));
+        Assert.Contains("Scanners (opengrep, bandit, gitleaks, trivy): 6 finding(s), 2 traced by the model too, 1 the model read and cleared (kept apart), 1 secret(s), 1 in configuration.",
+            done.GetProperty("summary").GetString(), StringComparison.Ordinal);
+        var scanCall = app.Argus.McpCalls.Last(c => c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "scan_at" && c.Email == $"{user}@example.test");
+        Assert.True(scanCall.Params!.Value.GetProperty("arguments").GetProperty("history").GetBoolean());
+
         // Read as the person, and asked as them, tagged security.
         Assert.All(app.Argus.McpCalls.Where(c => c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "grep_at"
             && c.Params?.GetProperty("arguments").GetProperty("project").GetString() == "g/shop" && c.Email == $"{user}@example.test"), c => Assert.Equal("main", c.Params!.Value.GetProperty("arguments").GetProperty("ref").GetString()));
         var asked = app.Model.Requests.Skip(before).Select(r => r.Body).Where(r => r["messages"]![0]!["content"]!.ToString().StartsWith("You are an application security engineer", StringComparison.Ordinal)).ToList();
-        Assert.Equal(4, asked.Count);
+        Assert.Equal(5, asked.Count);
         Assert.All(asked, r => Assert.Equal("security", r["metadata"]!["tags"]![0]!.ToString()));
         Assert.Contains(asked, r => r["messages"]![1]!["content"]!.ToString().Contains("orders.Find(Request.Query[\"id\"])", StringComparison.Ordinal));
+        // What a scanner matched is told to the model as a pattern, not a proof; the scanners' sinks are read first.
+        Assert.Contains("Scanners matched a pattern here (a pattern is not proof: judge the code):\n- line 4, opengrep, bandit (csharp-sql-built-from-strings, B608)",
+            asked[0]["messages"]![1]!["content"]!.ToString(), StringComparison.Ordinal);
 
         // Triage: an accepted risk needs why and until when; a wrong one why; others do not see it.
         var path = $"/api/code/security/{id}/findings/{orders.GetProperty("id").GetGuid()}";
@@ -138,8 +183,20 @@ public sealed class SecurityReviewTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.BadRequest, await me.Http.PutAsJsonAsync(new Uri(path, UriKind.Relative), new { state = "wrong" }));
         var list = await me.JsonAsync(await me.GetAsync("/api/code/security"));
         var mine = list.EnumerateArray().Single(s => s.GetProperty("scan").GetProperty("id").GetGuid() == id);
-        // Audit.cs's weakness and the package are still open; Orders.cs's is accepted.
-        Assert.Equal(2, mine.GetProperty("open").GetProperty("high").GetInt32());
+        // Audit.cs's weakness, the package, the secret and the Dockerfile are still open; Orders.cs's is accepted, Export.cs's cleared.
+        Assert.Equal((4, 1), (mine.GetProperty("open").GetProperty("high").GetInt32(), mine.GetProperty("open").GetProperty("low").GetInt32()));
+
+        // As SARIF, for a code host's security view: every finding, what found it, the commit read, the accepted one suppressed with why.
+        var sarif = JsonDocument.Parse(await (await me.GetAsync($"/api/code/security/{id}/sarif")).Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal("2.1.0", sarif.GetProperty("version").GetString());
+        var run = sarif.GetProperty("runs")[0];
+        Assert.Equal("abc", run.GetProperty("versionControlProvenance")[0].GetProperty("revisionId").GetString());
+        var results = run.GetProperty("results").EnumerateArray().ToList();
+        Assert.Equal(all.Count, results.Count);
+        var accepted = results.Single(r => r.GetProperty("locations")[0].GetProperty("physicalLocation").GetProperty("artifactLocation").GetProperty("uri").GetString() == "src/Orders.cs");
+        Assert.Equal(("csharp-sql-built-from-strings", "error"), (accepted.GetProperty("ruleId").GetString(), accepted.GetProperty("level").GetString()));
+        Assert.Equal("Risk accepted: Internal tool only", accepted.GetProperty("suppressions")[0].GetProperty("justification").GetString());
+        Assert.Contains(run.GetProperty("tool").GetProperty("driver").GetProperty("rules").EnumerateArray(), r => r.GetProperty("id").GetString() == "GHSA-5crp-9r3c-p9vr");
         var other = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
         await StatusAssert.Is(HttpStatusCode.OK, await other.GetAsync($"/api/code/security/{id}"));
     }

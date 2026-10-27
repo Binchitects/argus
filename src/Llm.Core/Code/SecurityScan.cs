@@ -21,6 +21,8 @@ public sealed class SecurityScan
     public required string Project { get; set; }
     /// <summary>The branch, tag or commit read; null: the default branch.</summary>
     public string? Ref { get; set; }
+    /// <summary>The commit it read, once Argus has said which.</summary>
+    public string? Commit { get; set; }
     public string Status { get; set; } = Queued;
     public string? Step { get; set; }
     public string? Model { get; set; }
@@ -34,6 +36,11 @@ public sealed class SecurityScan
     public DateOnly? AdvisoriesAsOf { get; set; }
     /// <summary>The packages as a CycloneDX bill of materials (JSON), to download.</summary>
     public string? Sbom { get; set; }
+    /// <summary>
+    /// The security scanners' run, as JSON: {"tools": [{name, version, ran, seconds, findings, error}], "history": bool,
+    /// "found": n, "error": why none ran}; null when none are installed.
+    /// </summary>
+    public string? Scanners { get; set; }
     /// <summary>What the review did and found, in Markdown.</summary>
     public string? Summary { get; set; }
     public int PromptTokens { get; set; }
@@ -56,11 +63,24 @@ public sealed class SecurityFinding
 
     public const string Code = "code";
     public const string Dependency = "dependency";
+    public const string Secret = "secret";
+    public const string Config = "config";
+    /// <summary>The model's review, in <see cref="FoundBy"/> beside the scanners' names.</summary>
+    public const string Model = "model";
 
     public Guid Id { get; set; } = Guid.CreateVersion7();
     public Guid ScanId { get; set; }
-    /// <summary>code (a sink untrusted data reaches) or dependency (a package version an advisory affects).</summary>
+    /// <summary>
+    /// code (a sink untrusted data reaches, or a weak call), dependency (a package version an advisory affects), secret
+    /// (a credential in the code or its history) or config (a misconfiguration: a Dockerfile, Kubernetes, Terraform).
+    /// </summary>
     public string Kind { get; set; } = Code;
+    /// <summary>What found it: the model's review (model) and the scanners (opengrep, bandit, gitleaks, trivy); both is surer.</summary>
+    public string[] FoundBy { get; set; } = [];
+    /// <summary>The scanners' rules that matched it.</summary>
+    public string? Rule { get; set; }
+    /// <summary>A secret found in the history: the commit it is in (it may be gone from the code since).</summary>
+    public string? Commit { get; set; }
     /// <summary>A dependency's advisory is on CISA's list of known exploited vulnerabilities.</summary>
     public bool Exploited { get; set; }
     public required string Path { get; set; }

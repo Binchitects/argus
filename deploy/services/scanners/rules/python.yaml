@@ -1,0 +1,336 @@
+# Arena's own rules for Python, under the app's licence. Each names its weakness (metadata.cwe), Arena's severity
+# (critical, high, medium or low) and how sure a match is; python.py beside it holds the weak code each must find
+# (ruleid) and the fixed code it must not (ok), and the image is not built unless opengrep --test passes on them.
+rules:
+  - id: python-sql-built-from-strings
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A query built from strings: data in it is read as SQL. Pass the values as parameters (cursor.execute(sql, params),
+      SQLAlchemy's bound parameters, Django's params=) and keep the SQL text constant.
+    metadata: { cwe: CWE-89, severity: high, confidence: medium }
+    patterns:
+      - pattern-either:
+          - pattern: $DB.$EXEC(f"...", ...)
+          - pattern: $DB.$EXEC("..." % $X, ...)
+          - pattern: $DB.$EXEC("..." + $X, ...)
+          - pattern: $DB.$EXEC($S + $X, ...)
+          - pattern: $DB.$EXEC("...".format(...), ...)
+          - patterns:
+              - pattern-either:
+                  - pattern-inside: |
+                      $Q = f"..."
+                      ...
+                  - pattern-inside: |
+                      $Q = "..." % $X
+                      ...
+                  - pattern-inside: |
+                      $Q = "..." + $X
+                      ...
+                  - pattern-inside: |
+                      $Q = "...".format(...)
+                      ...
+              - pattern: $DB.$EXEC($Q, ...)
+      - metavariable-regex:
+          metavariable: $EXEC
+          regex: ^(execute|executemany|executescript|raw|extra|text|exec_driver_sql)$
+      - pattern-not: $DB.$EXEC("..." % (), ...)
+
+  - id: python-sql-from-request
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Data from the request reaches a query's text. Pass it as a parameter (cursor.execute(sql, params)) and keep the
+      SQL text constant.
+    metadata: { cwe: CWE-89, severity: critical, confidence: high }
+    pattern-sources: &python-request
+      - patterns:
+          - pattern-either:
+              - pattern: $REQ.$ATTR
+              - pattern: $REQ.$ATTR(...)
+          - metavariable-regex:
+              metavariable: $REQ
+              regex: ^(request|req|self\.request|flask\.request)$
+          - metavariable-regex:
+              metavariable: $ATTR
+              regex: ^(args|form|values|json|get_json|cookies|headers|data|get_data|files|GET|POST|body|COOKIES|META|query_params|path_params|query_string)$
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: $DB.execute($Q, ...)
+              - pattern: $DB.executemany($Q, ...)
+              - pattern: $DB.executescript($Q, ...)
+              - pattern: $DB.raw($Q, ...)
+              - pattern: text($Q)
+          - focus-metavariable: $Q
+
+  - id: python-command-from-strings
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A shell runs a command built from data: a quote or a semicolon in it runs commands of its own. Pass the program
+      and its arguments as a list, with shell=False (subprocess.run([...])), and never os.system.
+    metadata: { cwe: CWE-78, severity: high, confidence: medium }
+    pattern-either:
+      - patterns:
+          - pattern-either:
+              - pattern: subprocess.$F($CMD, ..., shell=True, ...)
+              - pattern: subprocess.$F(args=$CMD, ..., shell=True, ...)
+          - pattern-not: subprocess.$F("...", ..., shell=True, ...)
+      - patterns:
+          - pattern-either:
+              - pattern: os.system($CMD)
+              - pattern: os.popen($CMD, ...)
+              - pattern: commands.getoutput($CMD)
+          - pattern-not: os.system("...")
+          - pattern-not: os.popen("...", ...)
+
+  - id: python-command-from-request
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Data from the request reaches a command. Do not run what a request names; when a value must be an argument, pass
+      a list with shell=False and check it against what is allowed.
+    metadata: { cwe: CWE-78, severity: critical, confidence: high }
+    pattern-sources: *python-request
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: subprocess.$F($CMD, ...)
+              - pattern: os.system($CMD)
+              - pattern: os.popen($CMD, ...)
+              - pattern: os.execv($CMD, ...)
+          - focus-metavariable: $CMD
+
+  - id: python-code-from-data
+    languages: [python]
+    severity: ERROR
+    message: >-
+      eval or exec runs text as Python: whoever writes the text runs code here. Parse the data instead
+      (ast.literal_eval for literals, json.loads for JSON), or map names to functions.
+    metadata: { cwe: CWE-95, severity: high, confidence: medium }
+    patterns:
+      - pattern-either:
+          - pattern: eval($X, ...)
+          - pattern: exec($X, ...)
+      - pattern-not: eval("...", ...)
+      - pattern-not: exec("...", ...)
+
+  - id: python-template-from-request
+    mode: taint
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A template built from the request: Jinja runs what it says (server-side template injection). Render a fixed
+      template and pass the data to it as variables.
+    metadata: { cwe: CWE-1336, severity: critical, confidence: high }
+    pattern-sources: *python-request
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: render_template_string($T, ...)
+              - pattern: flask.render_template_string($T, ...)
+              - pattern: jinja2.Template($T, ...)
+              - pattern: Template($T, ...).render(...)
+          - focus-metavariable: $T
+
+  - id: python-unsafe-deserialization
+    languages: [python]
+    severity: ERROR
+    message: >-
+      Unpickling (or YAML's full loader) builds any object the data describes, and can run code doing it. Read
+      untrusted data as JSON, yaml.safe_load, or torch.load(..., weights_only=True).
+    metadata: { cwe: CWE-502, severity: high, confidence: medium }
+    pattern-either:
+      - pattern: pickle.loads(...)
+      - pattern: pickle.load(...)
+      - pattern: cPickle.loads(...)
+      - pattern: dill.loads(...)
+      - pattern: dill.load(...)
+      - pattern: marshal.loads(...)
+      - pattern: jsonpickle.decode(...)
+      - pattern: shelve.open(...)
+      - pattern: yaml.unsafe_load(...)
+      - pattern: yaml.load(..., Loader=yaml.Loader, ...)
+      - pattern: yaml.load(..., Loader=yaml.UnsafeLoader, ...)
+      - pattern: yaml.load(..., Loader=yaml.FullLoader, ...)
+      - patterns:
+          - pattern: yaml.load($X)
+      - patterns:
+          - pattern: torch.load(...)
+          - pattern-not: torch.load(..., weights_only=True, ...)
+
+  - id: python-tls-not-verified
+    languages: [python]
+    severity: WARNING
+    message: >-
+      The server's certificate is not checked, so anyone on the way can read and change the traffic. Leave
+      verification on; for a private CA, pass its bundle (verify="/path/ca.pem").
+    metadata: { cwe: CWE-295, severity: high, confidence: high }
+    pattern-either:
+      - pattern: requests.$M(..., verify=False, ...)
+      - pattern: requests.Session(...).$M(..., verify=False, ...)
+      - pattern: $S.$M(..., verify=False, ...)
+      - pattern: httpx.$M(..., verify=False, ...)
+      - pattern: ssl._create_unverified_context(...)
+      - pattern: $CTX.verify_mode = ssl.CERT_NONE
+      - pattern: $CTX.check_hostname = False
+
+  - id: python-request-to-url-from-request
+    mode: taint
+    languages: [python]
+    severity: WARNING
+    message: >-
+      The server fetches a URL the request gives (server-side request forgery): it can be made to reach internal
+      services and the cloud's metadata. Allow only known hosts, and resolve and check the address before fetching.
+    metadata: { cwe: CWE-918, severity: high, confidence: high }
+    pattern-sources: *python-request
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: requests.$M($U, ...)
+              - pattern: httpx.$M($U, ...)
+              - pattern: urllib.request.urlopen($U, ...)
+              - pattern: urlopen($U, ...)
+              - pattern: $SESSION.get($U, ...)
+          - focus-metavariable: $U
+
+  - id: python-path-from-request
+    mode: taint
+    languages: [python]
+    severity: WARNING
+    message: >-
+      A file path from the request: ../ in it reaches any file the process can read or write. Take only a file's name
+      (werkzeug's secure_filename, os.path.basename), and check that the resolved path is inside the folder meant.
+    metadata: { cwe: CWE-22, severity: high, confidence: high }
+    pattern-sources: *python-request
+    pattern-sanitizers:
+      - pattern: secure_filename(...)
+      - pattern: os.path.basename(...)
+      - pattern: werkzeug.utils.secure_filename(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: open($P, ...)
+              - pattern: send_file($P, ...)
+              - pattern: flask.send_file($P, ...)
+              - pattern: FileResponse($P, ...)
+              - pattern: os.remove($P)
+              - pattern: os.unlink($P)
+              - pattern: shutil.rmtree($P, ...)
+              - pattern: pathlib.Path($P, ...)
+              - pattern: Path($P, ...)
+          - focus-metavariable: $P
+
+  - id: python-redirect-from-request
+    mode: taint
+    languages: [python]
+    severity: WARNING
+    message: >-
+      A redirect to where the request says (an open redirect): a link on this site sends people to any other. Redirect
+      to paths of this site only, or to hosts on a list.
+    metadata: { cwe: CWE-601, severity: medium, confidence: high }
+    pattern-sources: *python-request
+    pattern-sanitizers:
+      - pattern: url_for(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: redirect($U, ...)
+              - pattern: flask.redirect($U, ...)
+              - pattern: HttpResponseRedirect($U, ...)
+          - focus-metavariable: $U
+
+  - id: python-markup-not-escaped
+    languages: [python]
+    severity: WARNING
+    message: >-
+      Text marked as safe HTML is not escaped: data in it runs as script in the page (cross-site scripting). Let the
+      template escape it, or build the markup with format_html and its arguments.
+    metadata: { cwe: CWE-79, severity: medium, confidence: medium }
+    patterns:
+      - pattern-either:
+          - pattern: mark_safe($X)
+          - pattern: Markup($X)
+          - pattern: markupsafe.Markup($X)
+          - pattern: SafeString($X)
+      - pattern-not: mark_safe("...")
+      - pattern-not: Markup("...")
+      - pattern-not: markupsafe.Markup("...")
+      - pattern-not: SafeString("...")
+
+  - id: python-flask-debug
+    languages: [python]
+    severity: WARNING
+    message: >-
+      Flask's debugger is on: its console runs any Python for whoever reaches the page. Turn it off outside a
+      developer's machine (debug from an environment variable that is unset in production).
+    metadata: { cwe: CWE-489, severity: high, confidence: high }
+    pattern: $APP.run(..., debug=True, ...)
+
+  - id: python-jwt-not-verified
+    languages: [python]
+    severity: ERROR
+    message: >-
+      The token's signature is not checked, so anyone can write one. Verify it, with the algorithms named
+      (jwt.decode(token, key, algorithms=["RS256"])).
+    metadata: { cwe: CWE-347, severity: critical, confidence: high }
+    pattern-either:
+      - pattern: 'jwt.decode(..., options={..., "verify_signature": False, ...}, ...)'
+      - pattern: jwt.decode(..., verify=False, ...)
+      - pattern: jwt.decode(..., algorithms=[..., "none", ...], ...)
+
+  - id: python-weak-hash
+    languages: [python]
+    severity: INFO
+    message: >-
+      MD5 and SHA-1 are broken for security: collisions are made at will. Use SHA-256 or better; for passwords, a
+      password hash (argon2, bcrypt, hashlib.scrypt). Mark a hash used for something else usedforsecurity=False.
+    metadata: { cwe: CWE-328, severity: low, confidence: low }
+    patterns:
+      - pattern-either:
+          - pattern: hashlib.md5(...)
+          - pattern: hashlib.sha1(...)
+          - pattern: hashlib.new("md5", ...)
+          - pattern: hashlib.new("sha1", ...)
+      - pattern-not: hashlib.$H(..., usedforsecurity=False, ...)
+      - pattern-not: hashlib.new($N, ..., usedforsecurity=False, ...)
+
+  - id: python-predictable-secret
+    languages: [python]
+    severity: WARNING
+    message: >-
+      A secret from the random module, which is predictable from its output. Use the secrets module
+      (secrets.token_urlsafe, secrets.choice).
+    metadata: { cwe: CWE-338, severity: medium, confidence: medium }
+    patterns:
+      - pattern-either:
+          - pattern: $NAME = random.$F(...)
+          - pattern: $NAME = "...".join(random.$F(...) for ... in ...)
+          - pattern: $NAME = "".join(random.$F(...))
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: (?i).*(token|secret|password|passwd|nonce|otp|salt|api_?key|session_?id|reset_?code).*
+
+  - id: python-insecure-temp-file
+    languages: [python]
+    severity: INFO
+    message: >-
+      tempfile.mktemp names a file without making it: another process can make it first. Use
+      tempfile.NamedTemporaryFile or tempfile.mkstemp.
+    metadata: { cwe: CWE-377, severity: low, confidence: high }
+    pattern: tempfile.mktemp(...)
+
+  - id: python-csrf-exempt
+    languages: [python]
+    severity: INFO
+    message: >-
+      A view is exempt from CSRF checks: another site can make a signed-in person's browser post to it. Keep the check,
+      or require a token the browser does not send by itself.
+    metadata: { cwe: CWE-352, severity: medium, confidence: medium }
+    pattern: |
+      @csrf_exempt
+      def $F(...):
+          ...

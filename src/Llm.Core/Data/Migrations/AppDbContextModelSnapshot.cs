@@ -3137,6 +3137,10 @@ namespace Llm.Core.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Commit")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<string>("Cwe")
                         .IsRequired()
                         .HasMaxLength(16)
@@ -3168,6 +3172,12 @@ namespace Llm.Core.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.PrimitiveCollection<string[]>("FoundBy")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasDefaultValueSql("'{}'::text[]");
+
                     b.Property<string>("Kind")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -3186,6 +3196,10 @@ namespace Llm.Core.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("Rule")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
 
                     b.Property<Guid>("ScanId")
                         .HasColumnType("uuid");
@@ -3248,6 +3262,10 @@ namespace Llm.Core.Data.Migrations
                     b.Property<int>("Candidates")
                         .HasColumnType("integer");
 
+                    b.Property<string>("Commit")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
                     b.Property<int>("CompletionTokens")
                         .HasColumnType("integer");
 
@@ -3286,6 +3304,9 @@ namespace Llm.Core.Data.Migrations
                         .HasColumnType("character varying(300)");
 
                     b.Property<string>("Sbom")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Scanners")
                         .HasColumnType("text");
 
                     b.Property<string>("Status")

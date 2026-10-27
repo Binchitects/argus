@@ -1,0 +1,167 @@
+# Arena's own rules for Ruby and Rails, under the app's licence. Each names its weakness (metadata.cwe), Arena's
+# severity and how sure a match is; ruby.rb beside it holds the weak code each must find (ruleid) and the fixed code
+# it must not (ok), and the image is not built unless opengrep --test passes on them.
+rules:
+  - id: ruby-sql-built-from-strings
+    languages: [ruby]
+    severity: ERROR
+    message: >-
+      A query built from strings: data in it is read as SQL. Pass the values separately (where("name = ?", name),
+      where(name: name), sanitize_sql) and keep the SQL text constant.
+    metadata: { cwe: CWE-89, severity: high, confidence: medium }
+    patterns:
+      - pattern-either:
+          - pattern: $M.$Q("...#{$X}...", ...)
+          - pattern: $M.$Q("..." + $X, ...)
+          - pattern: $M.$Q($A + $B, ...)
+      - metavariable-regex:
+          metavariable: $Q
+          regex: ^(where|find_by_sql|execute|exec_query|select_all|select_one|select_value|select_values|order|group|having|joins|pluck|from|delete_all|update_all|count_by_sql|query)$
+
+  - id: ruby-sql-from-request
+    mode: taint
+    languages: [ruby]
+    severity: ERROR
+    message: >-
+      Data from the request reaches a query's text. Pass it separately (where("name = ?", value) or where(name: value)).
+    metadata: { cwe: CWE-89, severity: critical, confidence: high }
+    pattern-sources: &ruby-request
+      - pattern-either:
+          - pattern: params
+          - pattern: params[...]
+          - pattern: cookies[...]
+          - pattern: request.$ATTR
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: $M.where($Q, ...)
+              - pattern: $M.find_by_sql($Q, ...)
+              - pattern: $M.order($Q, ...)
+              - pattern: $C.execute($Q, ...)
+              - pattern: $C.exec_query($Q, ...)
+          - focus-metavariable: $Q
+          - pattern-not: '{...}'
+          - pattern-not: $X.permit(...)
+
+  - id: ruby-command-from-strings
+    languages: [ruby]
+    severity: ERROR
+    message: >-
+      A shell runs a command built from data: a quote or a semicolon in it runs commands of its own. Pass the program
+      and each argument separately (system("ping", "-c", "1", host), Open3.capture2("ping", host)).
+    metadata: { cwe: CWE-78, severity: high, confidence: medium }
+    pattern-either:
+      - pattern: system("...#{$X}...", ...)
+      - pattern: exec("...#{$X}...", ...)
+      - pattern: spawn("...#{$X}...", ...)
+      - pattern: IO.popen("...#{$X}...", ...)
+      - pattern: Open3.$F("...#{$X}...", ...)
+      - pattern: '`...#{$X}...`'
+      - pattern: Kernel.system("...#{$X}...", ...)
+
+  - id: ruby-command-from-request
+    mode: taint
+    languages: [ruby]
+    severity: ERROR
+    message: >-
+      Data from the request reaches a command. Do not run what a request names; when a value must be an argument, pass
+      it as its own argument to a fixed program and check it against what is allowed.
+    metadata: { cwe: CWE-78, severity: critical, confidence: high }
+    pattern-sources: *ruby-request
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: system($C, ...)
+              - pattern: exec($C, ...)
+              - pattern: IO.popen($C, ...)
+              - pattern: Open3.$F($C, ...)
+          - focus-metavariable: $C
+
+  - id: ruby-unsafe-deserialization
+    languages: [ruby]
+    severity: ERROR
+    message: >-
+      Marshal and YAML's full loader build any object the data describes, and can run code doing it. Read untrusted
+      data as JSON, or with YAML.safe_load.
+    metadata: { cwe: CWE-502, severity: critical, confidence: medium }
+    pattern-either:
+      - pattern: Marshal.load(...)
+      - pattern: Marshal.restore(...)
+      - pattern: YAML.unsafe_load(...)
+      - pattern: Psych.unsafe_load(...)
+      - pattern: 'YAML.load($X, ..., permitted_classes: ..., ...)'
+      - pattern: 'Oj.load($X, mode: :object)'
+      - pattern: 'JSON.load(...)'
+
+  - id: ruby-code-from-data
+    languages: [ruby]
+    severity: ERROR
+    message: >-
+      eval and friends run text as Ruby, and send or constantize on a request's value call whatever it names. Map
+      the values allowed to methods or classes instead.
+    metadata: { cwe: CWE-95, severity: high, confidence: medium }
+    pattern-either:
+      - patterns:
+          - pattern-either:
+              - pattern: eval($X, ...)
+              - pattern: instance_eval($X, ...)
+              - pattern: class_eval($X, ...)
+              - pattern: $O.instance_eval($X, ...)
+              - pattern: $O.class_eval($X, ...)
+          - pattern-not: eval("...", ...)
+          - pattern-not: $O.instance_eval("...", ...)
+          - pattern-not: $O.class_eval("...", ...)
+      - pattern: $O.send(params[...], ...)
+      - pattern: $O.public_send(params[...], ...)
+      - pattern: params[...].constantize
+      - pattern: params[...].safe_constantize
+
+  - id: ruby-html-not-escaped
+    languages: [ruby]
+    severity: WARNING
+    message: >-
+      Text marked as safe HTML is not escaped: data in it runs as script in the page (cross-site scripting). Let the
+      view escape it, or clean it with sanitize first.
+    metadata: { cwe: CWE-79, severity: medium, confidence: medium }
+    pattern-either:
+      - patterns:
+          - pattern: $X.html_safe
+          - pattern-not: '"...".html_safe'
+      - patterns:
+          - pattern: raw($X)
+          - pattern-not: raw("...")
+          - pattern-not: raw(sanitize(...))
+
+  - id: ruby-redirect-from-request
+    mode: taint
+    languages: [ruby]
+    severity: WARNING
+    message: >-
+      A redirect to where the request says (an open redirect): a link on this site sends people to any other. Redirect
+      to paths of this site only (Rails 7's raise_on_open_redirects), or to hosts on a list.
+    metadata: { cwe: CWE-601, severity: medium, confidence: high }
+    pattern-sources: *ruby-request
+    pattern-sinks:
+      - patterns:
+          - pattern: redirect_to($U, ...)
+          - focus-metavariable: $U
+          - pattern-not: '{...}'
+
+  - id: ruby-mass-assignment
+    languages: [ruby]
+    severity: WARNING
+    message: >-
+      permit! lets the request set every attribute, an admin flag or an owner among them. Permit the fields the form
+      has (params.require(:user).permit(:name, :email)).
+    metadata: { cwe: CWE-915, severity: high, confidence: high }
+    pattern: $P.permit!
+
+  - id: ruby-tls-not-verified
+    languages: [ruby]
+    severity: WARNING
+    message: >-
+      VERIFY_NONE accepts any certificate, so anyone on the way can read and change the traffic. Use VERIFY_PEER; for
+      a private CA, give it as ca_file.
+    metadata: { cwe: CWE-295, severity: high, confidence: high }
+    pattern-either:
+      - pattern: OpenSSL::SSL::VERIFY_NONE

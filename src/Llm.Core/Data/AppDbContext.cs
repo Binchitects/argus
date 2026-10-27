@@ -340,6 +340,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Status).HasMaxLength(16);
             e.Property(x => x.Step).HasMaxLength(200);
             e.Property(x => x.Model).HasMaxLength(200);
+            e.Property(x => x.Commit).HasMaxLength(64);
             e.HasIndex(x => new { x.UserId, x.CreatedAt });
             e.HasIndex(x => new { x.Project, x.CreatedAt });
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
@@ -358,6 +359,9 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.State).HasMaxLength(16);
             e.Property(x => x.Why).HasMaxLength(2000);
             e.Property(x => x.Kind).HasMaxLength(16).HasDefaultValueSql("'code'");
+            e.Property(x => x.FoundBy).HasDefaultValueSql("'{}'::text[]");
+            e.Property(x => x.Rule).HasMaxLength(500);
+            e.Property(x => x.Commit).HasMaxLength(64);
             e.HasIndex(x => new { x.ScanId, x.Severity });
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.DecidedById).OnDelete(DeleteBehavior.SetNull);
         });

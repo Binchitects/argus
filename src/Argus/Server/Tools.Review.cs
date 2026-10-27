@@ -24,7 +24,7 @@ public sealed partial class Tools
     public static readonly IReadOnlySet<string> ReviewTools = new HashSet<string>(StringComparer.Ordinal)
     {
         "mr_list", "mr_get", "mr_diff", "mr_commits", "mr_discussions", "ci_status", "job_log", "compare_refs", "file_at", "grep_at",
-        "issue_list", "issue_get", "wiki_list", "wiki_get", "deps_check", "sbom",
+        "issue_list", "issue_get", "wiki_list", "wiki_get", "deps_check", "sbom", "scan_at",
     };
 
     /// <summary>The most lock files and manifests one deps_check reads.</summary>
@@ -543,6 +543,30 @@ public sealed partial class Tools
         return Deps.DepsCheck.CycloneDx(project, sha, dependencies, DateTimeOffset.UtcNow);
     }
 
+    /// <summary>
+    /// The security scanners on a project at a ref (the scanners feature): its files, and its history for gitleaks,
+    /// sent from the project's mirror; what they found, each finding with the scanners and rules that found it.
+    /// </summary>
+    public JsonNode ScanAt(Identity who, string project, string? rev, long? iid, bool history, string? tools)
+    {
+        var p = Readable(who, project);
+        if (p.Foreign) throw new ToolError($"scan_at scans Argus's copies of GitLab projects; {p.Path} has none.");
+        var asked = string.IsNullOrWhiteSpace(tools) ? null : tools.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        try
+        {
+            var (mirror, sha, label) = At(p, rev, iid);
+            var result = Scanning.Scanners.Scan(mirror, sha, history, asked);
+            result["project"] = p.Path;
+            result["ref"] = label;
+            result["sha"] = sha;
+            return result;
+        }
+        catch (GitError exc)
+        {
+            throw new ToolError($"git could not read {p.Path}: {exc.Message}", exc);
+        }
+    }
+
     // --- dispatch ---------------------------------------------------------------------------
 
     JsonNode? DispatchReview(string tool, ToolRuntime.Args a, Identity who)
@@ -589,6 +613,9 @@ public sealed partial class Tools
                 () => DepsCheckAt(who, project, a.OptStr("ref"), a.OptInt("iid"))),
             "sbom" => WithAudit(who, tool, Audited(new JsonObject { ["ref"] = a.OptStr("ref"), ["iid"] = a.OptInt("iid") }),
                 () => SbomAt(who, project, a.OptStr("ref"), a.OptInt("iid"))),
+            "scan_at" => WithAudit(who, tool,
+                Audited(new JsonObject { ["ref"] = a.OptStr("ref"), ["iid"] = a.OptInt("iid"), ["history"] = a.Bool("history"), ["tools"] = a.OptStr("tools") }),
+                () => ScanAt(who, project, a.OptStr("ref"), a.OptInt("iid"), a.Bool("history"), a.OptStr("tools"))),
             "issue_list" => WithAudit(who, tool,
                 Audited(new JsonObject { ["state"] = a.OptStr("state"), ["search"] = a.OptStr("search"), ["labels"] = a.OptStr("labels"), ["limit"] = a.Int("limit") }),
                 () => IssueList(who, project, a.OptStr("state") ?? "opened", a.OptStr("search"), a.OptStr("labels"), a.Int("limit"))),

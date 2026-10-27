@@ -13,7 +13,7 @@ public static class Program
     static readonly string[] Commands_ =
         ["embed", "index", "backup", "kpi", "status", "verify", "resolve", "graph-eval", "serve", "flush-acl", "pack", "user", "healthcheck"];
 
-    static readonly string[] PackCommands = ["build", "list", "install", "info", "remove", "update", "index"];
+    static readonly string[] PackCommands = ["build", "list", "install", "info", "remove", "update", "index", "renew"];
 
     static readonly string[] UserCommands = ["add", "list", "passwd", "role", "disable", "enable"];
 
@@ -79,6 +79,8 @@ public static class Program
         "pack remove" => Where(new ArgSpec($"{Prog} pack remove").Positional("name")),
         "pack update" => Where(new ArgSpec($"{Prog} pack update").Positional("name", optional: true, help: "Only this pack (default: all)")
             .Opt("--index-url", "Published pack index JSON", required: true)),
+        "pack renew" => Where(new ArgSpec($"{Prog} pack renew")
+            .Opt("--work-dir", "Where the advisories' sources and pages are kept between renewals (default: beside the packs)")),
         "pack index" => Where(new ArgSpec($"{Prog} pack index").Opt("--out", "Index JSON file to write", required: true)
             .Opt("--base-url", "Where the packs will be SERVED from.", required: true)
             .Positional("name", optional: true, help: "Only this pack (default: all)")),
@@ -170,6 +172,7 @@ public static class Program
                     "pack info" => Cli.Commands.PackInfo(a),
                     "pack remove" => Cli.Commands.PackRemove(a),
                     "pack update" => Cli.Commands.PackUpdate(a),
+                    "pack renew" => Cli.Commands.PackRenew(a),
                     _ => Cli.Commands.PackIndex(a),
                 };
             }
@@ -178,7 +181,7 @@ public static class Program
                 Console.Error.WriteLine($"config error: {exc.Message}");
                 return 2;
             }
-            catch (Exception exc) when (exc is BuildError or RegistryError or GitError or InventoryError)
+            catch (Exception exc) when (exc is BuildError or RegistryError or GitError or InventoryError or IOException or HttpRequestException)
             {
                 Console.Error.WriteLine($"pack error: {exc.Message}");
                 return Cli.Commands.ExitPack;
