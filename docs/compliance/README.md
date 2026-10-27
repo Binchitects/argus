@@ -326,6 +326,28 @@ All of it is audited and in the evidence (`management.csv`,
 amber without a review in the year or an objective, with an objective missed,
 or with a request unanswered for a fortnight.
 
+## Vulnerabilities
+
+Code Studio → Security (VUL-01) reviews a repository at a commit, read with
+the person's own access:
+
+- **its packages**: the lock files and manifests read and each pinned
+  version matched against the `advisories` pack (GitHub's reviewed
+  advisories and CISA's known-exploited list, renewed each day), with how the
+  package comes in and the smallest upgrade that fixes it; its bill of
+  materials (CycloneDX) is kept to download;
+- **its code**: the places where outside data reaches a query, a command, a
+  path, a fetch, a deserialiser or HTML, traced to their callers; a finding
+  is kept only when it cites the line and names a CWE in the `security` pack,
+  and a second pass tries to refute it.
+
+Each finding is fixed, accepted (why, and until when) or marked wrong,
+audited as `security.finding.*`. The `vulnerabilities` check is amber
+without a review in 30 days, with advisories over a week old, or with a
+finding past its time (critical 7 days, high 30, medium 90, low 180, from the
+review that found it; an accepted one past its date counts again); an
+overdue critical or high finding makes it red.
+
 ## Access reviews
 
 An access review lists, for a reviewer to **Keep** or **Revoke**:

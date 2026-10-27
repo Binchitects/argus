@@ -84,6 +84,7 @@ const AREAS: Record<string, string> = {
   NET: 'Network and encryption',
   OPS: 'Operations',
   GOV: 'Kept from breaking',
+  VUL: 'Vulnerabilities',
 }
 
 const STATES: Record<State, { label: string; icon: LucideIcon; tone: string; badge: 'success' | 'warning' | 'destructive' | 'secondary' }> = {

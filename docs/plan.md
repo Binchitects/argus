@@ -2317,6 +2317,10 @@ Arena's own dependencies.
    (B), GDPR 32(1)(d)), secure coding (A.8.28) and security testing (A.8.29),
    each with its tests and live checks (the advisories' age, findings past
    the deadline their severity gives).
+   Done: VUL-01 (A.8.8, A.8.28, A.8.29, CC7.1, 164.308(a)(1)(ii)(A)/(B),
+   Art.32(1)(d) and the rest) and the `vulnerabilities` check (a review in 30
+   days, advisories within a week, findings fixed within 7/30/90/180 days by
+   severity).
 
 In this order: the `security` pack and the grounded review first (a headline
 on its own), then the advisories and dependencies, the scanners, Fix it, and

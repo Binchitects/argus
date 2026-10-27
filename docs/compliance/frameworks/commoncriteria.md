@@ -113,7 +113,7 @@ Arena's controls serve 25 of the 121 clauses here. Every clause is met by the co
 | ALC_CMS | CM scope |  | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
 | ALC_DEL | Delivery |  | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
 | ALC_DVS | Developer environment security |  | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
-| ALC_FLR | Flaw remediation | [GOV-03](../controls.md#gov-03-what-a-release-ships-is-listed-and-its-known-vulnerabilities-gate-it) | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
+| ALC_FLR | Flaw remediation | [GOV-03](../controls.md#gov-03-what-a-release-ships-is-listed-and-its-known-vulnerabilities-gate-it), [VUL-01](../controls.md#vul-01-repositories-are-reviewed-for-vulnerabilities-fixed-or-accepted-in-time) | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
 | ALC_LCD | Development Life-cycle definition |  | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
 | ALC_TDA | TOE Development Artefacts |  | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
 | ALC_TAT | Tools and techniques |  | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
@@ -121,7 +121,7 @@ Arena's controls serve 25 of the 121 clauses here. Every clause is met by the co
 | ATE_DPT | Depth |  | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
 | ATE_FUN | Functional tests | [GOV-01](../controls.md#gov-01-the-controls-are-kept-from-breaking), [GOV-11](../controls.md#gov-11-readiness-is-measured-and-the-evidence-is-kept-over-time) | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
 | ATE_IND | Independent testing |  | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
-| AVA_VAN | Vulnerability analysis | [GOV-03](../controls.md#gov-03-what-a-release-ships-is-listed-and-its-known-vulnerabilities-gate-it) | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
+| AVA_VAN | Vulnerability analysis | [GOV-03](../controls.md#gov-03-what-a-release-ships-is-listed-and-its-known-vulnerabilities-gate-it), [VUL-01](../controls.md#vul-01-repositories-are-reviewed-for-vulnerabilities-fixed-or-accepted-in-time) | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
 | ACO_COR | Composition rationale |  | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
 | ACO_DEV | Development evidence |  | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
 | ACO_REL | Reliance of dependent component |  | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |

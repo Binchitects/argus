@@ -26,7 +26,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 HERE = ROOT / "docs" / "compliance"
 AREAS = {"IAM": "People and access", "LOG": "Records", "MON": "Monitoring", "DAT": "Data", "NET": "Network",
-         "OPS": "Operations", "GOV": "Governance"}
+         "OPS": "Operations", "GOV": "Governance", "VUL": "Vulnerabilities"}
 NOTE = "<!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->"
 
 

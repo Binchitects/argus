@@ -54,6 +54,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         ("suppliers", "Suppliers are registered, agreed with and reviewed"),
         ("ai-systems", "AI systems are registered, classified, assessed and reviewed"),
         ("management", "The management system is reviewed, its objectives met, auditors answered"),
+        ("vulnerabilities", "Repositories are reviewed for security, and what is found fixed or accepted in time"),
     ];
 
     /// <summary>A newest backup older than this is amber; one older than <see cref="BackupStale"/> is red.</summary>
@@ -91,6 +92,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
                 "suppliers" => await SuppliersAsync(ct),
                 "ai-systems" => await AiSystemsAsync(ct),
                 "management" => await ManagementAsync(ct),
+                "vulnerabilities" => await VulnerabilitiesAsync(ct),
                 _ => (Unknown, "No such check."),
             };
             results.Add(new CheckResult(id, title, state, detail));
@@ -565,6 +567,40 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
             unanswered > 0 ? $"{unanswered} auditor's request{(unanswered == 1 ? "" : "s")} unanswered a fortnight" : null,
         }.OfType<string>().ToList();
         return problems.Count == 0 ? (Ok, $"{said}.") : (Warn, $"{said}: {string.Join("; ", problems)}.");
+    }
+
+    /// <summary>
+    /// Code Studio's security reviews: one within 30 days, against advisories no older than a week; each open finding fixed
+    /// within its severity's time (critical 7 days, high 30, medium 90, low 180) or accepted until a date not past. An overdue
+    /// critical or high finding fails; the rest warns.
+    /// </summary>
+    private async Task<(string, string)> VulnerabilitiesAsync(CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var last = await db.SecurityScans.AsNoTracking().Where(s => s.Status == Llm.Core.Code.SecurityScan.Done).OrderByDescending(s => s.FinishedAt).FirstOrDefaultAsync(ct);
+        if (last is null)
+        {
+            return (Warn, "No repository has been reviewed for security: run one in Code Studio → Security.");
+        }
+        var open = await db.SecurityFindings.AsNoTracking().Where(f => f.Verified != false && (f.State == Llm.Core.Code.SecurityFinding.Open
+                || (f.State == Llm.Core.Code.SecurityFinding.Accepted && f.Until != null && f.Until < now)))
+            .Join(db.SecurityScans.AsNoTracking(), f => f.ScanId, s => s.Id, (f, s) => new { f.Severity, f.State, Found = s.FinishedAt ?? s.CreatedAt })
+            .ToListAsync(ct);
+        var overdue = open.Where(f => f.State != Llm.Core.Code.SecurityFinding.Open
+            || f.Found.AddDays(Code.SecurityReview.FixWithinDays.GetValueOrDefault(f.Severity, 90)) < now).ToList();
+        var said = $"last security review {last.FinishedAt:yyyy-MM-dd} ({last.Project}); {open.Count} open finding{(open.Count == 1 ? "" : "s")}";
+        var problems = new[]
+        {
+            last.FinishedAt < now.AddDays(-30) ? "no security review within 30 days" : null,
+            last.AdvisoriesAsOf is null ? "its packages were not checked (no advisories pack)"
+                : last.AdvisoriesAsOf.Value.ToDateTime(TimeOnly.MinValue) < (last.FinishedAt ?? now).UtcDateTime.AddDays(-Code.SecurityReview.AdvisoriesDue) ? "its advisories were over a week old" : null,
+            overdue.Count > 0 ? $"{overdue.Count} past the time to fix ({string.Join(", ", overdue.GroupBy(f => f.Severity).Select(g => $"{g.Count()} {g.Key}"))})" : null,
+        }.OfType<string>().ToList();
+        if (overdue.Any(f => f.Severity is "critical" or "high"))
+        {
+            return (Fail, $"{said}: {string.Join("; ", problems)}.");
+        }
+        return problems.Count == 0 ? (Ok, $"{said}, none past its time.") : (Warn, $"{said}: {string.Join("; ", problems)}.");
     }
 
     private (string, string) DataKey() => string.IsNullOrEmpty(auth.CurrentValue.DataKey)

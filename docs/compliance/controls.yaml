@@ -1073,3 +1073,40 @@ controls:
       Name each control's owner, hold the management review at least once a
       year with the leadership, set objectives that matter, and answer the
       auditors' requests in time.
+
+  - id: VUL-01
+    title: Repositories are reviewed for vulnerabilities, fixed or accepted in time
+    meets: >-
+      Code Studio → Security reviews a repository at a commit, read with the
+      person's own access: its packages matched against GitHub's reviewed
+      advisories and CISA's known-exploited list (the advisories pack, renewed
+      each day), and the places where outside data reaches a query, a
+      command, a path, a fetch, a deserialiser or HTML, each kept only when
+      its line is cited and its CWE is in the security pack, then put to a
+      pass that tries to refute it. Each finding is fixed, accepted with why
+      and until when, or marked wrong, audited; its bill of materials is
+      kept. The vulnerabilities check wants a review within 30 days against
+      advisories no older than a week, and each open finding fixed within its
+      severity's time (critical 7 days, high 30, medium 90, low 180); an
+      overdue critical or high one fails it.
+    frameworks:
+      iso27001: [A.8.8, A.8.28, A.8.29]
+      soc2: [CC7.1, CC8.1]
+      hipaa: [164.308(a)(1)(ii)(A), 164.308(a)(1)(ii)(B)]
+      gdpr: [Art.32(1)(d)]
+      pcidss: [6.2, 6.3, 11.3]
+      csaccm: [TVM, AIS]
+      nistcsf: [ID.RA-01, PR.PS-06]
+      nist80053: [RA-5, SI-2, SA-11, SA-15]
+      nist800171: [03.11.02, 03.14.01]
+      euaiact: [Art.15]
+      commoncriteria: [AVA_VAN, ALC_FLR]
+    docs: [compliance/README.md#vulnerabilities]
+    tests:
+      - Llm.Tests/SecurityReviewTests.A_repository_is_reviewed_as_its_person_and_only_cited_weaknesses_the_pack_knows_are_kept
+      - Llm.Tests/SecurityReviewTests.The_vulnerabilities_check_counts_what_is_past_its_time_to_fix
+    checks: [app:vulnerabilities]
+    operator: >-
+      Load the advisories pack and renew it each day, review each repository
+      at least monthly and before each release, and fix or accept what it
+      finds within its time.

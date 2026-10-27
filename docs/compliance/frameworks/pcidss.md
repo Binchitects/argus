@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 26 of the 63 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 28 of the 63 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
@@ -28,8 +28,8 @@ Arena's controls serve 26 of the 63 clauses here. Every clause is met by the com
 | 5.3 | Anti-malware mechanisms are active and monitored |  | [Change and vulnerability management policy](../policies/change-management.md) |
 | 5.4 | Anti-phishing mechanisms protect users |  | [People security policy](../policies/people-security.md) |
 | 6.1 | Processes for secure systems and software are defined |  | [Change and vulnerability management policy](../policies/change-management.md) |
-| 6.2 | Bespoke and custom software is developed securely |  | [Change and vulnerability management policy](../policies/change-management.md) |
-| 6.3 | Security vulnerabilities are identified and addressed | [GOV-03](../controls.md#gov-03-what-a-release-ships-is-listed-and-its-known-vulnerabilities-gate-it) | [Change and vulnerability management policy](../policies/change-management.md) |
+| 6.2 | Bespoke and custom software is developed securely | [VUL-01](../controls.md#vul-01-repositories-are-reviewed-for-vulnerabilities-fixed-or-accepted-in-time) | [Change and vulnerability management policy](../policies/change-management.md) |
+| 6.3 | Security vulnerabilities are identified and addressed | [GOV-03](../controls.md#gov-03-what-a-release-ships-is-listed-and-its-known-vulnerabilities-gate-it), [VUL-01](../controls.md#vul-01-repositories-are-reviewed-for-vulnerabilities-fixed-or-accepted-in-time) | [Change and vulnerability management policy](../policies/change-management.md) |
 | 6.4 | Public-facing web applications are protected against attacks |  | [Change and vulnerability management policy](../policies/change-management.md) |
 | 6.5 | Changes to system components are managed securely |  | [Change and vulnerability management policy](../policies/change-management.md) |
 | 7.1 | Processes for restricting access by need to know are defined |  | [Access control policy](../policies/access-control.md) |
@@ -55,7 +55,7 @@ Arena's controls serve 26 of the 63 clauses here. Every clause is met by the com
 | 10.7 | Failures of critical security controls are detected and answered | [MON-01](../controls.md#mon-01-the-service-is-watched-and-people-are-alerted) | [Logging and monitoring policy](../policies/logging-monitoring.md) |
 | 11.1 | Processes for regular security testing are defined |  | [Change and vulnerability management policy](../policies/change-management.md) |
 | 11.2 | Wireless access points are identified and monitored |  | [Information security policy](../policies/information-security.md) |
-| 11.3 | Vulnerabilities are regularly identified and addressed |  | [Change and vulnerability management policy](../policies/change-management.md) |
+| 11.3 | Vulnerabilities are regularly identified and addressed | [VUL-01](../controls.md#vul-01-repositories-are-reviewed-for-vulnerabilities-fixed-or-accepted-in-time) | [Change and vulnerability management policy](../policies/change-management.md) |
 | 11.4 | Penetration testing is regularly performed |  | [Change and vulnerability management policy](../policies/change-management.md) |
 | 11.5 | Intrusions and unexpected file changes are detected |  | [Logging and monitoring policy](../policies/logging-monitoring.md) |
 | 11.6 | Unauthorized changes on payment pages are detected |  | [Change and vulnerability management policy](../policies/change-management.md) |

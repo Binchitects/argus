@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-The 36 controls Arena provides, from [controls.yaml](controls.yaml). How they are kept: [README](README.md#controls-and-how-they-are-kept). Each framework's clauses and the controls that serve them: [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md), [SOC 2, Trust Services Criteria](frameworks/soc2.md), [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md), [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md), [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md), [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md), [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md), [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md), [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md), [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md), [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md), [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md), [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md), [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md).
+The 37 controls Arena provides, from [controls.yaml](controls.yaml). How they are kept: [README](README.md#controls-and-how-they-are-kept). Each framework's clauses and the controls that serve them: [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md), [SOC 2, Trust Services Criteria](frameworks/soc2.md), [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md), [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md), [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md), [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md), [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md), [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md), [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md), [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md), [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md), [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md), [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md), [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md).
 
 ## People and access (IAM)
 
@@ -1003,3 +1003,34 @@ Admin → Compliance → Management: each of Arena's controls has its owner in t
 **Watched by** `app:management` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
 
 **The company's part** Name each control's owner, hold the management review at least once a year with the leadership, set objectives that matter, and answer the auditors' requests in time.
+
+## Vulnerabilities (VUL)
+
+### VUL-01: Repositories are reviewed for vulnerabilities, fixed or accepted in time
+
+Code Studio → Security reviews a repository at a commit, read with the person's own access: its packages matched against GitHub's reviewed advisories and CISA's known-exploited list (the advisories pack, renewed each day), and the places where outside data reaches a query, a command, a path, a fetch, a deserialiser or HTML, each kept only when its line is cited and its CWE is in the security pack, then put to a pass that tries to refute it. Each finding is fixed, accepted with why and until when, or marked wrong, audited; its bill of materials is kept. The vulnerabilities check wants a review within 30 days against advisories no older than a week, and each open finding fixed within its severity's time (critical 7 days, high 30, medium 90, low 180); an overdue critical or high one fails it.
+
+**Serves**
+
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.8.8 Management of technical vulnerabilities; A.8.28 Secure coding; A.8.29 Security testing in development and acceptance
+- [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC7.1 Detecting configuration changes and new vulnerabilities; CC8.1 Authorising, designing, testing, approving and putting changes in place
+- [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.308(a)(1)(ii)(A) Risk analysis (required); 164.308(a)(1)(ii)(B) Risk management (required)
+- [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.32(1)(d) Security of processing
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 6.2 Bespoke and custom software is developed securely; 6.3 Security vulnerabilities are identified and addressed; 11.3 Vulnerabilities are regularly identified and addressed
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): TVM Threat and vulnerability management; AIS Application and interface security
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): ID.RA-01 Vulnerabilities in assets are identified, validated, and recorded; PR.PS-06 Secure software development practices are integrated, and their performance is monitored throughout the software development life cycle
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): RA-5 Vulnerability Monitoring and Scanning; SI-2 Flaw Remediation; SA-11 Developer Testing and Evaluation; SA-15 Development Process, Standards, and Tools
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.11.02 Vulnerability Monitoring and Scanning; 03.14.01 Flaw Remediation
+- [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md): Art.15 Accuracy, robustness and cybersecurity
+- [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): AVA_VAN Vulnerability analysis; ALC_FLR Flaw remediation
+
+**Documented in** [compliance/README.md#vulnerabilities](README.md#vulnerabilities)
+
+**Proved by**
+
+- `Llm.Tests/SecurityReviewTests.A_repository_is_reviewed_as_its_person_and_only_cited_weaknesses_the_pack_knows_are_kept`
+- `Llm.Tests/SecurityReviewTests.The_vulnerabilities_check_counts_what_is_past_its_time_to_fix`
+
+**Watched by** `app:vulnerabilities` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+
+**The company's part** Load the advisories pack and renew it each day, review each repository at least monthly and before each release, and fix or accept what it finds within its time.

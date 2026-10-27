@@ -20,7 +20,7 @@ Arena's controls serve 12 of the 126 clauses here. Every clause is met by the co
 | Art.12 | Record-keeping | [LOG-01](../controls.md#log-01-who-did-what-is-recorded) | [AI policy](../policies/ai.md) |
 | Art.13 | Transparency and provision of information to deployers |  | [AI policy](../policies/ai.md) |
 | Art.14 | Human oversight | [GOV-09](../controls.md#gov-09-ai-systems-are-registered-classified-assessed-and-overseen) | [AI policy](../policies/ai.md) |
-| Art.15 | Accuracy, robustness and cybersecurity | [OPS-02](../controls.md#ops-02-code-the-model-writes-runs-apart) | [AI policy](../policies/ai.md) |
+| Art.15 | Accuracy, robustness and cybersecurity | [OPS-02](../controls.md#ops-02-code-the-model-writes-runs-apart), [VUL-01](../controls.md#vul-01-repositories-are-reviewed-for-vulnerabilities-fixed-or-accepted-in-time) | [AI policy](../policies/ai.md) |
 | Art.16 | Obligations of providers of high-risk AI systems |  | [AI policy](../policies/ai.md) |
 | Art.17 | Quality management system |  | [AI policy](../policies/ai.md) |
 | Art.18 | Documentation keeping |  | [AI policy](../policies/ai.md) |

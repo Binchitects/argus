@@ -36,6 +36,10 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
     public const int MostPerFile = 3;
     /// <summary>The most findings put to the second pass (the most severe first).</summary>
     public const int MostVerified = 25;
+    /// <summary>How long an open finding of each severity may stay open before the vulnerabilities check counts it overdue (days).</summary>
+    public static readonly IReadOnlyDictionary<string, int> FixWithinDays = new Dictionary<string, int> { ["critical"] = 7, ["high"] = 30, ["medium"] = 90, ["low"] = 180 };
+    /// <summary>Advisories older than this when a review ran make the vulnerabilities check warn (days).</summary>
+    public const int AdvisoriesDue = 7;
 
     private static readonly string[] Cs = ["*.cs"];
     private static readonly string[] Java = ["*.java", "*.kt"];

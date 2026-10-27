@@ -2,6 +2,10 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Llm.Api.Code;
+using Llm.Core.Code;
+using Llm.Core.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Llm.Tests;
 
@@ -75,6 +79,7 @@ public sealed class SecurityReviewTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "VUL-01")]
     public async Task A_repository_is_reviewed_as_its_person_and_only_cited_weaknesses_the_pack_knows_are_kept()
     {
         Argus();
@@ -137,6 +142,51 @@ public sealed class SecurityReviewTests(AppFixture app)
         Assert.Equal(2, mine.GetProperty("open").GetProperty("high").GetInt32());
         var other = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
         await StatusAssert.Is(HttpStatusCode.OK, await other.GetAsync($"/api/code/security/{id}"));
+    }
+
+    [Fact]
+    [Trait("Control", "VUL-01")]
+    public async Task The_vulnerabilities_check_counts_what_is_past_its_time_to_fix()
+    {
+        await using var f = app.Create(app.ConnectionStringFor("vul_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway());
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        async Task<(string State, string Detail)> Check()
+        {
+            var c = (await admin.JsonAsync(await admin.GetAsync("/api/admin/compliance"))).GetProperty("checks").EnumerateArray().Single(x => x.GetProperty("id").GetString() == "vulnerabilities");
+            return (c.GetProperty("state").GetString()!, c.GetProperty("detail").GetString()!);
+        }
+        Assert.Equal("warn", (await Check()).State);
+
+        var adminId = (await admin.JsonAsync(await admin.GetAsync("/api/auth/me"))).GetProperty("id").GetGuid();
+        Guid high;
+        using (var scope = f.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var old = DateTimeOffset.UtcNow.AddDays(-40);
+            var scan = new SecurityScan { UserId = adminId, Project = "g/shop", Status = SecurityScan.Done, CreatedAt = old, FinishedAt = old, AdvisoriesAsOf = DateOnly.FromDateTime(old.UtcDateTime.AddDays(-10)) };
+            var finding = new SecurityFinding { Path = "src/Orders.cs", Line = 4, Cwe = "CWE-89", Severity = "high", Title = "SQL", Verified = true };
+            var low = new SecurityFinding { Path = "src/Util.cs", Line = 9, Cwe = "CWE-601", Severity = "low", Title = "Redirect", Verified = true };
+            scan.Findings.AddRange([finding, low]);
+            db.SecurityScans.Add(scan);
+            await db.SaveChangesAsync();
+            high = finding.Id;
+        }
+        // A high finding 40 days old is past its 30: red, with the review's age and its stale advisories said too.
+        var (state, detail) = await Check();
+        Assert.Equal("fail", state);
+        Assert.Contains("no security review within 30 days", detail, StringComparison.Ordinal);
+        Assert.Contains("its advisories were over a week old", detail, StringComparison.Ordinal);
+        Assert.Contains("1 past the time to fix (1 high)", detail, StringComparison.Ordinal);
+
+        using (var scope = f.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<AppDbContext>().SecurityFindings.Where(x => x.Id == high)
+                .ExecuteUpdateAsync(s => s.SetProperty(x => x.State, SecurityFinding.Fixed));
+        }
+        // Fixed: amber now only for the old review; the low one has 180 days.
+        (state, detail) = await Check();
+        Assert.Equal("warn", state);
+        Assert.DoesNotContain("past the time to fix", detail, StringComparison.Ordinal);
     }
 
     [Theory]

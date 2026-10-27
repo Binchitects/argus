@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 34 of the 128 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 35 of the 128 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
@@ -57,7 +57,7 @@ Arena's controls serve 34 of the 128 clauses here. Every clause is met by the co
 | ID.IM-03 | Improvements are identified from execution of operational processes, procedures, and activities |  | [Risk management policy](../policies/risk-management.md) |
 | ID.IM-04 | Incident response plans and other cybersecurity plans that affect operations are established, communicated, maintained, and improved |  | [Risk management policy](../policies/risk-management.md) |
 | ID.RA | Risk Assessment | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [Risk management policy](../policies/risk-management.md) |
-| ID.RA-01 | Vulnerabilities in assets are identified, validated, and recorded | [GOV-03](../controls.md#gov-03-what-a-release-ships-is-listed-and-its-known-vulnerabilities-gate-it) | [Risk management policy](../policies/risk-management.md) |
+| ID.RA-01 | Vulnerabilities in assets are identified, validated, and recorded | [GOV-03](../controls.md#gov-03-what-a-release-ships-is-listed-and-its-known-vulnerabilities-gate-it), [VUL-01](../controls.md#vul-01-repositories-are-reviewed-for-vulnerabilities-fixed-or-accepted-in-time) | [Risk management policy](../policies/risk-management.md) |
 | ID.RA-02 | Cyber threat intelligence is received from information sharing forums and sources |  | [Risk management policy](../policies/risk-management.md) |
 | ID.RA-03 | Internal and external threats to the organization are identified and recorded |  | [Risk management policy](../policies/risk-management.md) |
 | ID.RA-04 | Potential impacts and likelihoods of threats exploiting vulnerabilities are identified and recorded |  | [Risk management policy](../policies/risk-management.md) |
@@ -93,7 +93,7 @@ Arena's controls serve 34 of the 128 clauses here. Every clause is met by the co
 | PR.PS-03 | Hardware is maintained, replaced, and removed commensurate with risk |  | [Change and vulnerability management policy](../policies/change-management.md) |
 | PR.PS-04 | Log records are generated and made available for continuous monitoring | [LOG-01](../controls.md#log-01-who-did-what-is-recorded), [LOG-02](../controls.md#log-02-logs-are-kept-and-kept-for-a-set-time), [LOG-03](../controls.md#log-03-nobody-changes-the-audit-log-unseen) | [Change and vulnerability management policy](../policies/change-management.md) |
 | PR.PS-05 | Installation and execution of unauthorized software are prevented | [OPS-02](../controls.md#ops-02-code-the-model-writes-runs-apart) | [Change and vulnerability management policy](../policies/change-management.md) |
-| PR.PS-06 | Secure software development practices are integrated, and their performance is monitored throughout the software development life cycle |  | [Change and vulnerability management policy](../policies/change-management.md) |
+| PR.PS-06 | Secure software development practices are integrated, and their performance is monitored throughout the software development life cycle | [VUL-01](../controls.md#vul-01-repositories-are-reviewed-for-vulnerabilities-fixed-or-accepted-in-time) | [Change and vulnerability management policy](../policies/change-management.md) |
 | DE.AE | Adverse Event Analysis |  | [Logging and monitoring policy](../policies/logging-monitoring.md) |
 | DE.AE-02 | Potentially adverse events are analyzed to better understand associated activities | [MON-02](../controls.md#mon-02-security-events-raise-alerts-and-incidents-are-handled-in-time) | [Logging and monitoring policy](../policies/logging-monitoring.md) |
 | DE.AE-03 | Information is correlated from multiple sources | [LOG-04](../controls.md#log-04-the-audit-log-is-sent-on-to-the-companys-siem) | [Logging and monitoring policy](../policies/logging-monitoring.md) |
