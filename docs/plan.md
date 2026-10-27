@@ -1929,7 +1929,7 @@ installer only does Docker Compose. So, in this release:
 
 The science lab: specialised models and the tools they need, working together
 on a problem, with what they did checkable. Every download asked first
-(models, packages); licences checked against [v7.4's list](#v74--security-vulnerabilities-known-found-and-fixed)
+(models, packages); licences checked against [v7.4's list](#v74--security-grc-and-a-quantum-lab)
 of those to avoid.
 
 1. **The lab, a place of its own.** Science lab in the sidebar: a problem
@@ -1974,7 +1974,151 @@ of those to avoid.
    chemistry's and physics' sets; the lab telling a person when the chosen
    model's context is too small for its tools.
 
-### v7.4 — Security: vulnerabilities known, found and fixed
+### v7.4 — Security, GRC and a quantum lab
+
+The person asked (2026-10-27, after v7.3.0) for "full GRC and related
+evaluation certifications requirement", and for quantum computing and the
+sciences around it in the science lab, both in this release with the security
+work planned below. Built in this order: GRC first, then the quantum lab, then
+vulnerabilities. Downloads approved (2026-10-27):
+- the quantum packages from PyPI (Qiskit with Aer, Cirq with Stim and
+  PyMatching, PennyLane with QuTiP, PySCF with OpenFermion);
+- NIST's OSCAL catalogs (SP 800-53 rev5, SP 800-171 rev3, CSF 2.0);
+- the EU AI Act's text;
+- NIST's AI RMF and its Playbook;
+- the Common Criteria parts and the CEM.
+
+#### GRC: governance, risk and compliance, and the certifications
+
+v7.1 gave the controls of four frameworks (ISO 27001's Annex A, SOC 2, HIPAA,
+the GDPR), their live checks, the evidence, access reviews, data subject
+requests and incidents. A certification asks for more: the management system
+around the controls (ISO 27001's clauses 4 to 10), a risk process with its
+register and Statement of Applicability, policies with owners and reviews,
+audits with their findings and corrective actions, suppliers assessed, and
+evidence over a period (SOC 2 Type II). An AI platform is also asked about
+its AI (ISO/IEC 42001, the EU AI Act, NIST's AI RMF), and a product about its
+evaluation (Common Criteria, FIPS 140-3). The organisation is certified, not
+the program. Arena keeps the system, its records and evidence, and drafts the
+documents; it says what is the operator's part, as v7.1 does.
+
+1. **Every framework in the catalog**, each clause with the controls that meet
+   it, its documents and its tests, kept by v7.1's guard:
+   - ISO/IEC 27001:2022's clauses 4 to 10 (the ISMS), beside Annex A;
+   - ISO/IEC 42001:2023 (the AI management system: clauses 4 to 10, Annex A's
+     38 controls);
+   - ISO 22301:2019 (business continuity);
+   - PCI DSS v4.0.1's twelve requirements (Arena kept out of the cardholder
+     data environment: card numbers blocked by the safeguards);
+   - NIST CSF 2.0, SP 800-53 rev5 with its low, moderate, high and privacy
+     baselines (which FedRAMP builds on), and SP 800-171 rev3 (which CMMC
+     builds on), each taken from NIST's OSCAL;
+   - NIST AI RMF 1.0 (Govern, Map, Measure, Manage);
+   - the EU AI Act (Regulation (EU) 2024/1689): AI literacy, the prohibited
+     practices, the high-risk requirements, a deployer's duties, and the
+     transparency duties (people told they are talking to an AI, generated
+     pictures, video and sound marked as such);
+   - CSA STAR's Cloud Controls Matrix, by its domains;
+   - Common Criteria's functional and assurance classes, for a product
+     evaluation.
+   Where a text may be shared (NIST, the AI Act), each clause's own words are
+   in a `grc` knowledge pack the chat cites. Where it may not (ISO, PCI DSS,
+   the CCM), there are ids and short titles written here.
+2. **Risk**: a register of risks to the company's information and its AI.
+   Each risk has its assets (taken from what Arena knows: models, providers,
+   data stores, connectors, repositories), its threat, likelihood and impact
+   on a scale the company sets, the inherent and residual levels, an owner, a
+   treatment (reduce with named controls, accept with who and until when,
+   transfer, avoid) and the treatment's actions with dates. A heat map, risks
+   due for review, and the history of each.
+3. **Statement of Applicability**: each Annex A control (and each ISO 42001
+   one) applicable or not, why, and how far it is in place. Drawn from the
+   controls' live state, the risks they treat and the operator's choices, and
+   downloaded as the auditor reads it.
+4. **Policies, governed**: v7.1's policy templates become the company's
+   policies. Each has an owner, versions, an approver, a review date that
+   warns when due, and the people who must acknowledge it (with when they
+   did). A change starts a new version and its acknowledgements.
+5. **Audits and what they find**:
+   - the internal audit programme (ISO 27001 9.2), each audit with its scope,
+     its auditor and its findings;
+   - nonconformities (major, minor) and observations, each with its corrective
+     action, root cause, owner, due date and the check that it worked (10.2);
+   - the external audits (stage 1 and 2, surveillance, recertification, the
+     SOC 2 period) and the certificates, with their expiry;
+   - exceptions: a control not met, its compensating control, who approved
+     it and until when.
+6. **Suppliers**: the model providers, clouds and connectors Arena already
+   knows, and any added, each with the data it receives, its certifications
+   (a SOC 2 report's date, an ISO certificate's expiry), the agreements (a
+   DPA, a BAA), its risk and its next review.
+7. **AI governance**: a register of the company's AI systems (Arena's
+   assistants, agents, apps and the models behind them), each with:
+   - its purpose, its AI Act class (prohibited, high-risk, limited or
+     minimal) and the company's role (provider or deployer);
+   - an impact assessment (ISO 42001 6.1.4, the AI Act's assessment of
+     fundamental rights where it applies);
+   - its human oversight and its evaluations (the measurements, the evals);
+   - its record kept.
+   The transparency duties built in: a notice that answers are generated, and
+   generated media marked in its metadata as made by an AI.
+8. **Readiness for each certification**, as a score with what is missing:
+   controls met, the operator's parts attested, risks treated, policies
+   current, audits' findings closed. Each one exports what its auditor reads:
+   - ISO 27001: the SoA, the ISMS's documents and records;
+   - SOC 2 Type II: the evidence over the period, each check's history day by
+     day, the samples;
+   - ISO 42001: the AIMS's documents;
+   - the AI Act: the technical documentation of Annex IV, drafted for each
+     high-risk system;
+   - NIST CSF: a current and target profile;
+   - Common Criteria: a Security Target drafted from the controls.
+9. **Running the system**:
+   - each control's owner;
+   - the management review (9.3), its agenda drawn from the inputs the clause
+     names, its minutes and decisions kept;
+   - security objectives measured by the live checks (6.2);
+   - an auditor's account that reads and does not change, with evidence
+     requests answered with links.
+10. **Kept in every release**: the guard grows to each new framework: a
+    clause a control cites must be in the catalog, every framework's page is
+    current, and a weaker control is named in the changelog.
+
+Later, each needing a yes:
+- FedRAMP's own baselines, from GSA;
+- NIST AI 600-1, the generative AI profile;
+- NIS2 and DORA;
+- ISO/IEC 27701, 27017 and 27018;
+- a FIPS mode, with the images built on OpenSSL's validated FIPS provider
+  (its source).
+
+#### The quantum lab
+
+The lab's sixth science, as a tool pack in the sandbox (no network, so no
+real quantum computer; simulators only):
+
+1. **Circuits**:
+   - built and run with Qiskit, from OpenQASM or from code: the counts, the
+     statevector, the circuit drawn, and the circuit compiled to a device's
+     gates;
+   - noisy runs on Aer's noise models;
+   - circuits checked equal (their unitaries), and states checked by
+     fidelity. A claimed answer is checked, as maths is by SymPy.
+2. **Error correction**: surface and repetition codes sampled with Stim and
+   decoded with PyMatching, giving the logical error rate against the
+   physical one; Cirq for its own circuits.
+3. **Open systems and algorithms**:
+   - QuTiP: master equations, decoherence, the Bloch sphere;
+   - PennyLane: variational circuits and their gradients (VQE, QAOA).
+4. **Quantum chemistry**: a molecule's Hartree–Fock and CCSD energies with
+   PySCF, its qubit Hamiltonian with OpenFermion, and VQE's energy against
+   the exact one.
+5. **In the notebook**: circuits and histograms drawn in the cells (the plots
+   v7.3 left).
+6. **Measured**: a quantum test set with answers from a source, run alone and
+   with the tools (the set, and its licence, need a yes).
+
+#### Vulnerabilities: known, found and fixed
 
 The person asked (2026-10-26) for a knowledge pack about vulnerabilities, and
 for recognising them and fixing them. Three parts: what the models know (two
