@@ -1929,9 +1929,15 @@ of those to avoid.
    result checked by a tool rather than taken on trust; saved as a notebook
    (text, maths, code, structures, plots) the person opens, edits and runs
    again, and shares like a chat.
+   Done in part: the lab page (a science chosen of five, each with its own
+   instructions and tools; the notebooks with how many checks were proved,
+   refuted or held only numerically) and the notebook (a cell for each
+   computation, check, solve, conversion and Python run with its verdict,
+   follow-ups, Open as a chat to branch, edit or share). Left: a team of
+   models on one problem, plots and structures in cells.
 2. **Mathematics.** A maths model (Qwen2.5-Math or DeepSeek-Math class,
    chosen by measurement) beside the chat's; SymPy for exact algebra and
-   calculus, Lean 4 with Mathlib to check a proof (a proof is "checked" only
+   calculus (done: math_compute, math_check, math_solve), Lean 4 with Mathlib to check a proof (a proof is "checked" only
    when Lean says so), plots; LaTeX rendered in the answer and the notebook.
    The measured question: what share of a test set of problems each gets right
    alone and with the tools.
