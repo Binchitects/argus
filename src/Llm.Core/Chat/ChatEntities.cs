@@ -63,11 +63,16 @@ public sealed class Conversation
     /// keeps the person's messages in the chat's queue meanwhile, and they go when Code Arena's turn ends. Null: it is not.
     /// </summary>
     public DateTimeOffset? CodeArenaTurnUntil { get; set; }
-    /// <summary>"room": a chat several people share (<see cref="RoomMember"/>); null: the owner's own.</summary>
+    /// <summary>"room": a chat several people share (<see cref="RoomMember"/>); "lab": a science lab notebook; null: the owner's own.</summary>
     public string? Kind { get; set; }
+    /// <summary>A lab notebook's science (mathematics, physics, chemistry, statistics, general): its instructions and tools.</summary>
+    public string? LabField { get; set; }
     /// <summary>A room's members may invite others, not only its owner.</summary>
     public bool MembersInvite { get; set; }
     public bool IsRoom => Kind == RoomMember.Room;
+    /// <summary>The kind a science lab notebook is: listed in the lab, not among the chats.</summary>
+    public const string Lab = "lab";
+    public bool IsLab => Kind == Lab;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<ChatMessage> Messages { get; set; } = [];

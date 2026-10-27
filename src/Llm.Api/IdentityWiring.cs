@@ -595,6 +595,7 @@ public static class IdentityWiring
         Vector.VectorEndpoints.MapVectors(app);
         Apps.AppEndpoints.MapApps(app);
         Plans.PlanEndpoints.MapPlans(app);
+        Lab.LabEndpoints.MapLab(app);
         app.MapForwardAuth();
         app.MapKeyCheck();
         app.MapOidc();

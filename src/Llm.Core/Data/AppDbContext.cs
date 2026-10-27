@@ -169,6 +169,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(c => c.OriginRef).HasMaxLength(128);
             e.Property(c => c.OriginPlace).HasMaxLength(1000);
             e.Property(c => c.Kind).HasMaxLength(16);
+            e.Property(c => c.LabField).HasMaxLength(20);
             e.HasIndex(c => new { c.UserId, c.Origin, c.OriginRef });
             e.HasIndex(c => new { c.UserId, c.UpdatedAt });
             e.HasOne<AppUser>().WithMany().HasForeignKey(c => c.UserId).OnDelete(DeleteBehavior.Cascade);

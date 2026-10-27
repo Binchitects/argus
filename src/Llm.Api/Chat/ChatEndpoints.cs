@@ -18,8 +18,9 @@ namespace Llm.Api.Chat;
 /// A new chat. Tools: the tool ids it may call (default: those on in new chats); UseArgus: Argus on or off in that list.
 /// With an assistant, what is not sent comes from the assistant.
 /// </summary>
+/// <param name="Lab">A science lab notebook of this field (LabFields): its instructions and tools unless the request gives them.</param>
 public sealed record NewConversation(string? Thinking = null, bool? UseArgus = null, string? Model = null, string? SystemPrompt = null,
-    double? Temperature = null, double? TopP = null, int? MaxTokens = null, string[]? Tools = null, Guid? AssistantId = null);
+    double? Temperature = null, double? TopP = null, int? MaxTokens = null, string[]? Tools = null, Guid? AssistantId = null, string? Lab = null);
 
 /// <summary>Only what is sent changes. For the numbers, a negative value clears them (back to the model's default).</summary>
 /// <param name="AssistantId">With this assistant; Guid.Empty takes it away from its assistant.</param>
@@ -163,7 +164,8 @@ public static partial class ChatEndpoints
         var me = await Me(p, users);
         // Their own chats, and the rooms they are in.
         var rooms = await RoomAccess.RoomsOfAsync(db, me);
-        var query = db.Conversations.AsNoTracking().Where(c => (c.UserId == me.Id || rooms.Contains(c.Id)) && (archived ? c.ArchivedAt != null : c.ArchivedAt == null));
+        // Lab notebooks are listed in the lab, not here.
+        var query = db.Conversations.AsNoTracking().Where(c => (c.UserId == me.Id || rooms.Contains(c.Id)) && c.Kind != Conversation.Lab && (archived ? c.ArchivedAt != null : c.ArchivedAt == null));
         if (assistant is { } aid)
         {
             query = query.Where(c => c.AssistantId == aid);
@@ -202,7 +204,26 @@ public static partial class ChatEndpoints
             // What the request leaves out comes from the assistant: its model, thinking and tools.
             body = await Assistants.StartAsync(body, assistant, me, allowed, policy, models, chat.CurrentValue, ct);
         }
-        var c = new Conversation { UserId = me.Id, AssistantId = assistant?.Id };
+        Lab.LabField? field = null;
+        if (body.Lab is { } fieldId)
+        {
+            if ((field = Lab.LabFields.Of(fieldId)) is null)
+            {
+                return AuthEndpoints.Problem(400, "lab", $"The lab's fields are {string.Join(", ", Lab.LabFields.All.Select(f => f.Id))}.");
+            }
+            if (allowed.All(t => t.Tool.Id != Lab.LabTool.ToolId))
+            {
+                return AuthEndpoints.Problem(409, "lab", "The science lab needs its tools: the sandbox, and Python among what you may use (an admin gives it, Admin → Access).");
+            }
+            // The field's instructions and tools (those the person may use), unless the request says its own.
+            body = body with
+            {
+                SystemPrompt = body.SystemPrompt ?? field.Instructions,
+                Tools = body.Tools ?? [.. field.Tools.Where(id => allowed.Any(a => a.Tool.Id == id))],
+                UseArgus = false,
+            };
+        }
+        var c = new Conversation { UserId = me.Id, AssistantId = assistant?.Id, Kind = field is null ? null : Conversation.Lab, LabField = field?.Id };
         if (await ApplyAsync(c, new ConversationChange(null, body.Thinking, null, body.Model, body.SystemPrompt, body.Temperature, body.TopP, body.MaxTokens), chat.CurrentValue, models, me, policy, small) is { } problem)
         {
             return problem;
@@ -441,6 +462,8 @@ public static partial class ChatEndpoints
             c.Id, c.Title, c.Thinking, tools, useArgus = tools.Contains("argus"), c.Model, c.SystemPrompt, c.Temperature, c.TopP, c.MaxTokens,
             c.CurrentLeafId, c.ArchivedAt, forkedFrom, assistant, c.CreatedAt, c.UpdatedAt, answering, messages, earlier, arenas = arenas ?? Array.Empty<object>(), queued = queued ?? [],
             c.Origin, c.OriginPlace,
+            // A science lab notebook's field (null: a chat).
+            labField = c.LabField,
             // Code Arena is answering in it: what the person sends waits in the queue until its turn ends.
             codeArena = CodeArenaSync.Answering(c),
         };

@@ -1169,6 +1169,10 @@ namespace Llm.Core.Data.Migrations
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
 
+                    b.Property<string>("LabField")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
                     b.PrimitiveCollection<List<string>>("LoadedTools")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
