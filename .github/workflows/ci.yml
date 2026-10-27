@@ -218,6 +218,13 @@ jobs:
           kubectl -n arena create secret tls arena-tls --cert=tls.crt --key=tls.key
       - name: Install with the installer
         run: |
+          # The pods' logs kept as they run: a failed install is uninstalled (--atomic), its logs with it.
+          ( while sleep 10; do
+              for d in app litellm web; do
+                kubectl -n arena logs deploy/$d --tail=200 > $d.tmp 2>/dev/null && mv $d.tmp $d.log
+                kubectl -n arena logs deploy/$d --previous --tail=200 > $d.tmp 2>/dev/null && mv $d.tmp $d-previous.log
+              done
+            done ) &
           bash deploy/scripts/installer.sh requirements --kubernetes --tls-secret arena-tls --replicas 1 --gpu no
           bash deploy/scripts/installer.sh install --kubernetes --domain arena.localhost --tls-secret arena-tls --replicas 1 --gpu no \
             --values deploy/helm/kind-values.yaml --timeout 20 --yes
@@ -231,8 +238,7 @@ jobs:
         run: |
           kubectl -n arena get pods -o wide
           kubectl -n arena get events --sort-by=.lastTimestamp | tail -40
-          kubectl -n arena logs deploy/app --tail=200 || true
-          kubectl -n arena logs deploy/litellm --tail=100 || true
+          for f in app-previous.log app.log litellm-previous.log litellm.log web.log; do [ -f $f ] && { echo "== $f"; tail -n 120 $f; }; done; true
 
   deploy:
     # The compose files resolving (the platform from .env.example, with Docker and
