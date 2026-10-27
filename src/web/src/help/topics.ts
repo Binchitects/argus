@@ -624,6 +624,29 @@ export const topics = {
     manual: { doc: 'chat', section: 'plans' },
   },
 
+  lab: {
+    title: 'Science lab',
+    about: 'Problems of a science (mathematics, physics, chemistry, statistics, or any) worked by the model with the lab\'s tools: each computation done and each step checked by SymPy, Pint or Python, not taken on trust. Each problem is kept as a notebook.',
+    parts: [
+      { name: 'A new problem', text: 'Choose its science (each has its own instructions and tools), write the problem and press **Work it**: a notebook opens and the lab starts on it.' },
+      { name: 'Notebooks', text: 'Yours, newest first, with how many of their checks were proved, refuted or held only numerically. A row opens it. They are not among your chats.' },
+    ],
+    tasks: [{ title: 'Check an answer you have', steps: ['Choose **Mathematics**.', 'Write the problem and your answer, and ask the lab to check it.', 'The notebook says whether SymPy proved it, and where it fails if not.'] }],
+    manual: { doc: 'chat', section: 'science-lab' },
+  },
+
+  'lab-notebook': {
+    title: 'A lab notebook',
+    about: 'One problem worked step by step: the model\'s words, and a cell for each computation, check, solution and conversion with what the tool gave. On top, what was proved and what not.',
+    parts: [
+      { name: 'Checks', text: '**Proved** when SymPy shows it exactly; **holds numerically, not proved** when it is only true at the points tried; **refuted** with a point where it fails. A solution is checked by putting it back into every equation (✓ or ✗).' },
+      { name: 'Ask more', text: 'A next step, another case, or why a step holds: the lab goes on in the same notebook.' },
+      { name: 'Open as a chat', text: 'The notebook is a chat underneath: open it there to branch, edit or share it.' },
+    ],
+    tasks: [{ title: 'Find a mistake', steps: ['Look for a **Refuted** cell.', 'Its detail says where it fails.', 'Ask the lab to correct that step.'] }],
+    manual: { doc: 'chat', section: 'science-lab' },
+  },
+
   'room-join': {
     title: 'Join a room',
     about: 'An invite link to a room: the room, its owner, how many are in it and the role you join with (member: read and write; viewer: read).',

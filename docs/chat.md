@@ -728,6 +728,30 @@ done means, the files it changes and how its check went. Its agent keeps
 such a plan, so the board shows it as it goes and moves nothing; to change
 it, ask the agent.
 
+## Science lab
+
+**Science lab** (in the sidebar) works problems of a science with the lab's
+tools: the model does the mathematics with SymPy, units with Pint and data
+with Python, in the sandbox, and checks each step it relies on rather than
+working in its head. Choose the problem's science — **Mathematics**,
+**Physics**, **Chemistry**, **Statistics** or **Any science** (which may
+also look things up on the web) — write the problem and press **Work it**.
+Each science has its own instructions (physics keeps units on every
+quantity, statistics says which test it uses and why) and tools, of those
+you may use; the lab needs the sandbox running and Python's permission, and
+says so when it is not yours.
+
+Each problem is kept as a **notebook**: the model's words, and a cell for
+each computation, check, solution and conversion with what the tool gave,
+in LaTeX. A check is **proved** only when SymPy shows it exactly, **holds
+numerically, not proved** when it is only true at the points tried, and
+**refuted** with a point where it fails; each solution of `math_solve` is
+put back into every equation (✓ or ✗). On top, how many steps were proved,
+refuted or held only numerically; the lab's list shows the same for each
+notebook. **Ask more** goes on in the same notebook. A notebook is a chat
+underneath (**Open as a chat** to branch, edit or share it), kept out of the
+chat list.
+
 ## Meetings
 
 **Meetings** (in the sidebar) makes a meeting's minutes from its recording.

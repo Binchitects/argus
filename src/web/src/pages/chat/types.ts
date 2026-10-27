@@ -374,6 +374,8 @@ export interface Conversation extends ConversationSummary {
   room?: RoomBrief | null
   /** Messages sent while it answered, waiting on the server for their turn, first in line first. */
   queued?: QueuedMessage[]
+  /** A science lab notebook: its science (mathematics, physics...). */
+  labField?: string | null
 }
 
 /** A message waiting for the answer before it to end (kept on the server: a reload still shows it). */
