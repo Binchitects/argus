@@ -328,6 +328,8 @@ public static class IdentityWiring
         services.AddScoped<Chat.Tools.PythonTool>();
         services.AddScoped<Chat.Tools.CodeTool>();
         services.AddScoped<Lab.LabTool>();
+        services.AddScoped<Lab.ChemistryTool>();
+        services.AddScoped<Lab.BiologyTool>();
         services.Configure<Chat.Tools.BlenderOptions>(config.GetSection("Blender"));
         services.Configure<Chat.Tools.ToolOptions>(config.GetSection("Tools"));
         services.AddSingleton<Chat.Tools.ToolUsage>();

@@ -46,7 +46,7 @@ public static class LabEndpoints
         var ids = notebooks.Select(n => n.Id).ToList();
         // What the lab's checks said in each: proved, refuted, or only numerically.
         var checks = await db.ChatMessages.AsNoTracking()
-            .Where(m => ids.Contains(m.ConversationId) && m.Role == "tool" && (m.ToolName == "math_check" || m.ToolName == "math_solve"))
+            .Where(m => ids.Contains(m.ConversationId) && m.Role == "tool" && Checks.Contains(m.ToolName!))
             .Select(m => new { m.ConversationId, m.ToolName, m.Content }).ToListAsync(ct);
         return Results.Ok(notebooks.Select(n =>
         {
@@ -59,12 +59,19 @@ public static class LabEndpoints
         }));
     }
 
-    /// <summary>What a check's result says: proved, refuted, numeric (holds only at the points tried) or other.</summary>
+    /// <summary>The lab's functions whose result is a check: a claim, solutions put back, a reaction balanced.</summary>
+    private static readonly string[] Checks = ["math_check", "math_solve", "chem_balance"];
+
+    /// <summary>What a check's result says: proved (a balanced reaction: checked), refuted, numeric (holds only at the points tried) or other.</summary>
     public static string Verdict(string tool, string content)
     {
         try
         {
             using var doc = JsonDocument.Parse(content);
+            if (tool == "chem_balance")
+            {
+                return doc.RootElement.GetProperty("checked").GetBoolean() ? "proved" : "refuted";
+            }
             if (tool == "math_solve")
             {
                 var solutions = doc.RootElement.GetProperty("solutions").EnumerateArray().ToList();

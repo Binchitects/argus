@@ -308,7 +308,8 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   - **Date and time**: the time in any time zone, and the days between dates.
   - **Python**: code run in the sandbox. It has data
     libraries (numpy, pandas, polars, pyarrow, duckdb, scipy, statsmodels,
-    scikit-learn, xgboost, lightgbm, numba, sympy, networkx), charts
+    scikit-learn, xgboost, lightgbm, numba, sympy, networkx), science (pint,
+    RDKit for molecules, Biopython for sequences), charts
     (matplotlib, seaborn, plotly), images (pillow with HEIC, OpenCV,
     scikit-image, imageio, tesseract OCR in English, Arabic, Persian and
     Chinese, simplified and traditional), maps (geopandas, shapely, pyproj),
@@ -349,6 +350,20 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     put back into every equation) and `units_convert` (with a dimension
     check). The model's expressions are read as mathematics there, never as
     code; it needs **Python**'s permission.
+  - **Chemistry** (off in new chats, in the sandbox with RDKit):
+    `chem_molecule` (a molecule from its SMILES: formula, molar and exact
+    mass, rings, logP, TPSA, H-bond donors and acceptors, Lipinski's rule of
+    five, InChI and InChIKey, and a drawing shown to you, not to the model),
+    `chem_formula` (molar mass and each element's share, hydrates, complexes
+    and ions written as `SO4^2-`), `chem_balance` (the smallest whole
+    coefficients, each element and the charge counted on both sides:
+    **checked**, or not) and `chem_similarity` (Tanimoto of Morgan
+    fingerprints, and whether it is the same molecule).
+  - **Biology** (off in new chats, in the sandbox with Biopython):
+    `bio_sequence` (DNA, RNA or protein, plain or FASTA: GC content, masses,
+    isoelectric point and stability, reverse complement, transcription,
+    translation by NCBI codon table) and `bio_align` (two sequences, global
+    or local, proteins scored with BLOSUM62).
   - **Canvas**: documents and code beside the chat, which you and the model
     both edit (see **Canvas** below).
   - **Reading files**: a long attachment goes into the question only up to a
@@ -731,11 +746,13 @@ it, ask the agent.
 ## Science lab
 
 **Science lab** (in the sidebar) works problems of a science with the lab's
-tools: the model does the mathematics with SymPy, units with Pint and data
-with Python, in the sandbox, and checks each step it relies on rather than
+tools: the model does the mathematics with SymPy, units with Pint,
+molecules and reactions with RDKit, sequences with Biopython and data with
+Python, in the sandbox, and checks each step it relies on rather than
 working in its head. Choose the problem's science — **Mathematics**,
-**Physics**, **Chemistry**, **Statistics** or **Any science** (which may
-also look things up on the web) — write the problem and press **Work it**.
+**Physics**, **Chemistry**, **Statistics**, **Biology** or **Any science**
+(which may also look things up on the web) — write the problem and press
+**Work it**.
 Each science has its own instructions (physics keeps units on every
 quantity, statistics says which test it uses and why) and tools, of those
 you may use; the lab needs the sandbox running and Python's permission, and
@@ -746,7 +763,9 @@ each computation, check, solution and conversion with what the tool gave,
 in LaTeX. A check is **proved** only when SymPy shows it exactly, **holds
 numerically, not proved** when it is only true at the points tried, and
 **refuted** with a point where it fails; each solution of `math_solve` is
-put back into every equation (✓ or ✗). On top, how many steps were proved,
+put back into every equation (✓ or ✗), and a reaction is **balanced,
+checked** only when each element and the charge count the same on both
+sides; a molecule is drawn beside its properties. On top, how many steps were proved,
 refuted or held only numerically; the lab's list shows the same for each
 notebook. **Ask more** goes on in the same notebook. A notebook is a chat
 underneath (**Open as a chat** to branch, edit or share it), kept out of the

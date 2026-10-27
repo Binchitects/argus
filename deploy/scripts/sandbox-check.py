@@ -280,6 +280,16 @@ def main():
         and str(units.get("result", {}).get("result", "")).startswith("20 ") and refused.get("ok") is False,
         json.dumps([proved, refuted, solved, units, refused])[-300:])
 
+    molecule = lab_call("chem_molecule", smiles="CC(=O)Oc1ccccc1C(=O)O")
+    balanced = lab_call("chem_balance", equation="MnO4^- + Fe^2+ + H^+ -> Mn^2+ + Fe^3+ + H2O")
+    mass = lab_call("chem_formula", formula="CuSO4·5H2O")
+    protein = lab_call("bio_sequence", sequence="ATGGCCATTGTAATGGGCCGCTGA", operation="translate")
+    rec("the lab's chemistry reads molecules (and draws them), balances a redox reaction checked atom by atom and charge, and biology translates",
+        molecule.get("result", {}).get("formula") == "C9H8O4" and "<svg" in molecule.get("show", {}).get("svg", "")
+        and balanced.get("result", {}).get("coefficients") == [1, 5, 8, 1, 5, 4] and balanced.get("result", {}).get("checked") is True
+        and mass.get("result", {}).get("molar_mass", "").startswith("249.6") and protein.get("result", {}).get("result") == "MAIVMGR*",
+        json.dumps([molecule.get("result"), balanced, mass.get("result"), protein])[-300:])
+
     r = run("raise ValueError('bad input')")
     rec("an error comes back as its traceback, from main.py", r.get("exit_code") == 1 and 'File "main.py", line 1' in r.get("stderr", "") and "ValueError: bad input" in r.get("stderr", ""))
 

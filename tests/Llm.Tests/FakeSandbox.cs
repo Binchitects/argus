@@ -227,7 +227,7 @@ public sealed class FakeSandbox : IAsyncDisposable
 
     /// <summary>
     /// The science lab's script: its call read from lab-call.json and answered as lab.py would, the call's op and arguments
-    /// given back (math_check of x and x is proved; an op named "bad" is refused). Null for any other job.
+    /// given back (math_check of x and x is proved; chem_molecule is C2H6O, drawn; an op named "bad" is refused). Null for any other job.
     /// </summary>
     private async Task<string?> LabAsync(string code, string job)
     {
@@ -245,6 +245,7 @@ public sealed class FakeSandbox : IAsyncDisposable
         var answer = op == "math_check"
             ? new JsonObject { ["ok"] = true, ["result"] = new JsonObject { ["verdict"] = args["left"]?.ToString() == args["right"]?.ToString() ? "proved" : "refuted" } }
             : op == "bad" ? new JsonObject { ["ok"] = false, ["error"] = "There is no lab tool bad." }
+            : op == "chem_molecule" ? new JsonObject { ["ok"] = true, ["result"] = new JsonObject { ["formula"] = "C2H6O" }, ["show"] = new JsonObject { ["svg"] = "<svg>ethanol</svg>" } }
             : new JsonObject { ["ok"] = true, ["result"] = new JsonObject { ["op"] = op, ["args"] = args.DeepClone() } };
         return answer.ToJsonString() + "\n";
     }

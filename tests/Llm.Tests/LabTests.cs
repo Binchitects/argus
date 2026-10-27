@@ -37,7 +37,7 @@ public sealed class LabTests(AppFixture app)
 
         var fields = await b.JsonAsync(await b.GetAsync("/api/lab/fields"));
         Assert.True(fields.GetProperty("available").GetBoolean());
-        Assert.Equal(["mathematics", "physics", "chemistry", "statistics", "general"], fields.GetProperty("fields").EnumerateArray().Select(x => x.GetProperty("id").GetString()));
+        Assert.Equal(["mathematics", "physics", "chemistry", "statistics", "biology", "general"], fields.GetProperty("fields").EnumerateArray().Select(x => x.GetProperty("id").GetString()));
 
         var res = await b.PostAsync("/api/chat/conversations", new { lab = "mathematics" });
         await StatusAssert.Is(HttpStatusCode.Created, res);
@@ -78,6 +78,8 @@ public sealed class LabTests(AppFixture app)
     [InlineData("math_check", """{"verdict":"refuted"}""", "refuted")]
     [InlineData("math_solve", """{"solutions":[{"checked":true},{"checked":true}]}""", "proved")]
     [InlineData("math_solve", """{"solutions":[{"checked":true},{"checked":false}]}""", "refuted")]
+    [InlineData("chem_balance", """{"balanced":"4 Fe + 3 O2 -> 2 Fe2O3","checked":true}""", "proved")]
+    [InlineData("chem_balance", """{"checked":false}""", "refuted")]
     [InlineData("math_check", "not json", "other")]
     public void A_checks_verdict_is_read_from_its_result(string tool, string content, string verdict) =>
         Assert.Equal(verdict, Llm.Api.Lab.LabEndpoints.Verdict(tool, content));

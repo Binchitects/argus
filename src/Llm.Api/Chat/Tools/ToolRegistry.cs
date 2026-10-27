@@ -150,7 +150,7 @@ public sealed record ToolChoice(IChatTool Tool, ToolSetting Setting, string? Una
 public sealed class ToolRegistry(
     AppDbContext db, ArgusTool argus, ImageTool image, VectorTool vector, VideoTool video, SpeechTool speech, CalculatorTool calculator, TimeTool time, FilesTool files, CanvasTool canvas, PythonTool python, WebTool web, AskTool ask, AgentsTool agents, MemoryTool memory, SkillTool skills,
     IHttpClientFactory http, IOptions<AuthOptions> auth, IOptionsMonitor<ChatOptions> chat, Plugins.PersonCredentials people, Knowledge.KnowledgeTool knowledge, LayaTool laya,
-    ResearchTool research, BlenderTool blender, Browser.BrowserTool browser, DataTool data, DeckTool decks, Plans.PlansTool plans, Code.ReviewTool reviews, GatewayChat gateway, ToolUsage usage, CodeTool code, Lab.LabTool lab,
+    ResearchTool research, BlenderTool blender, Browser.BrowserTool browser, DataTool data, DeckTool decks, Plans.PlansTool plans, Code.ReviewTool reviews, GatewayChat gateway, ToolUsage usage, CodeTool code, Lab.LabTool lab, Lab.ChemistryTool chemistry, Lab.BiologyTool biology,
     SandboxClient sandbox, IServiceScopeFactory scopes, IOptionsMonitor<SandboxOptions> sandboxOptions)
 {
     public const string McpClient = "mcp";
@@ -160,7 +160,7 @@ public sealed class ToolRegistry(
         var settings = await db.ToolSettings.AsNoTracking().ToDictionaryAsync(s => s.ToolId, ct);
         var servers = await db.McpServers.AsNoTracking().OrderBy(s => s.Name).ToListAsync(ct);
         var customs = await db.CustomTools.AsNoTracking().OrderBy(t => t.Name).ToListAsync(ct);
-        IEnumerable<IChatTool> tools = [argus, knowledge, data, decks, python, code, lab, web, research, browser, image, vector, video, speech, calculator, time, files, canvas, blender, plans, reviews, ask, agents, memory, skills, laya,
+        IEnumerable<IChatTool> tools = [argus, knowledge, data, decks, python, code, lab, chemistry, biology, web, research, browser, image, vector, video, speech, calculator, time, files, canvas, blender, plans, reviews, ask, agents, memory, skills, laya,
             .. servers.Select(Server), .. customs.Select(t => CustomTools.For(t, http, gateway, auth.Value.DataKey))];
         var all = new List<ToolChoice>();
         foreach (var tool in tools)
@@ -187,8 +187,10 @@ public sealed class ToolRegistry(
         [ResearchTool.ToolId] = Core.Access.Permissions.Research,
         ["python"] = Core.Access.Permissions.Python,
         [CodeTool.ToolId] = Core.Access.Permissions.Python,
-        // The lab's mathematics runs in the sandbox, as Python does.
+        // The lab's packs run in the sandbox, as Python does.
         [Lab.LabTool.ToolId] = Core.Access.Permissions.Python,
+        [Lab.ChemistryTool.ToolId] = Core.Access.Permissions.Python,
+        [Lab.BiologyTool.ToolId] = Core.Access.Permissions.Python,
         ["canvas"] = Core.Access.Permissions.Canvas,
         [BlenderTool.ToolId] = Core.Access.Permissions.ThreeD,
         [Browser.BrowserTool.ToolId] = Core.Access.Permissions.Browser,

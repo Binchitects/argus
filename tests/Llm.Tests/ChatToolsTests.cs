@@ -889,6 +889,27 @@ public sealed class ChatToolsTests(AppFixture app)
         Assert.Contains("units_convert", JsonDocument.Parse(Event(events, "tool_result").GetProperty("text").GetString()!).RootElement.GetProperty("op").GetString(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task The_labs_chemistry_pack_draws_a_molecule_for_the_page_and_not_for_the_model()
+    {
+        await using var sandbox = new FakeSandbox();
+        await using var f = NewApp(settings: new() { ["Sandbox:Dir"] = sandbox.Dir });
+        var (b, _, email) = await PersonAsync(f);
+        var id = await NewChatAsync(b, new { tools = new[] { "chemistry" } });
+
+        var events = await SendAsync(b, id, """Ethanol [call chem_molecule {"smiles":"CCO"}]""");
+        Assert.Equal(["chem_molecule", "chem_formula", "chem_balance", "chem_similarity"], FunctionsSentFor(email));
+        var text = Event(events, "tool_result").GetProperty("text").GetString()!;
+        Assert.Equal("C2H6O", JsonDocument.Parse(text).RootElement.GetProperty("formula").GetString());
+        Assert.DoesNotContain("svg", text, StringComparison.Ordinal);
+        // The drawing is kept with the call, for the page.
+        var chat = await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{id}"));
+        var call = chat.GetProperty("messages").EnumerateArray().Single(m => m.GetProperty("role").GetString() == "tool");
+        Assert.Equal("<svg>ethanol</svg>", call.GetProperty("details").GetProperty("lab").GetProperty("svg").GetString());
+        Assert.DoesNotContain(app.Model.Requests.Where(r => r.Body["user"]!.GetValue<string>() == email).SelectMany(r => r.Body["messages"]!.AsArray()),
+            m => m!["content"]?.ToString().Contains("<svg>", StringComparison.Ordinal) == true);
+    }
+
     [Theory]
     [InlineData("Qwen3-4B-Instruct-2507", 4.0, "direct")]
     [InlineData("llama-3.1-8b-instruct", 8.0, "direct")]

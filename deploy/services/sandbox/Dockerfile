@@ -58,6 +58,11 @@ RUN apt-get update \
 RUN pip install --no-cache-dir --only-binary=:all: vtracer==0.6.15 resvg-py==0.5.0 \
  && python -c "import vtracer, resvg_py"
 
+# The science lab's chemistry and biology (its Chemistry and Biology tools, and any program): RDKit for molecules
+# and reactions, Biopython for sequences. Wheels of their own, a layer of their own.
+RUN pip install --no-cache-dir --only-binary=:all: rdkit==2026.9.1 biopython==1.88 \
+ && python -c "import rdkit.Chem, Bio.Seq"
+
 # LibreOffice as a job can run it (soffice and libreoffice): see the script.
 COPY --chmod=755 soffice /usr/local/bin/soffice
 RUN ln -s soffice /usr/local/bin/libreoffice

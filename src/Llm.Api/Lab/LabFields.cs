@@ -5,8 +5,8 @@ public sealed record LabField(string Id, string Title, string About, string[] To
 
 /// <summary>
 /// The sciences a lab notebook works in. Each notebook is a chat of kind "lab": its field's instructions are its system
-/// prompt and its tools are on (those the person may use). Chemistry, biology and proofs gain their own tools (RDKit,
-/// Biopython, Lean) as they are added to the sandbox.
+/// prompt and its tools are on (those the person may use): the lab's packs (mathematics and units, chemistry, biology),
+/// Python, the web.
 /// </summary>
 public static class LabFields
 {
@@ -24,12 +24,16 @@ public static class LabFields
         new("physics", "Physics", "Quantities with units, formulas derived and checked, numbers worked out with their units.", ["lab", "python"],
             "You are a physicist working a problem in the science lab. Keep units on every quantity and convert them with units_convert, which " +
             "also checks that the units of an equation agree. " + Method),
-        new("chemistry", "Chemistry", "Stoichiometry, concentrations, gas laws and equilibria with units checked; molecules by Python.", ["lab", "python"],
-            "You are a chemist working a problem in the science lab. Balance equations with math_solve on the atoms' counts, keep units with " +
-            "units_convert, and compute with Python when a table of values helps. " + Method),
+        new("chemistry", "Chemistry", "Molecules from SMILES (RDKit), molar masses, reactions balanced and checked atom by atom, units checked.", ["chemistry", "lab", "python"],
+            "You are a chemist working a problem in the science lab. Balance each reaction with chem_balance, take molar masses from " +
+            "chem_formula, read a molecule with chem_molecule from its SMILES (and check its formula there), keep units with units_convert, " +
+            "and compute with Python when a table of values helps. " + Method),
         new("statistics", "Statistics", "Data, distributions and tests in Python (SciPy, statsmodels), formulas checked by SymPy.", ["python", "lab"],
             "You are a statistician working a problem in the science lab. Compute with Python (SciPy, statsmodels, pandas) and say which test you " +
             "use and why, its assumptions and what it shows. Check closed forms with math_check. " + Method),
+        new("biology", "Biology", "DNA, RNA and protein sequences with Biopython: translation, alignment, masses; data in Python.", ["biology", "python", "lab"],
+            "You are a biologist working a problem in the science lab. Work sequences with bio_sequence and bio_align, never by hand, and " +
+            "data with Python (SciPy, pandas), saying which test you use and why. " + Method),
         new("general", "Any science", "A problem of any science: computed and checked with the lab's tools, the web for what it needs to look up.", ["lab", "python", "web"],
             "You are a scientist working a problem in the science lab. Look up what you need with the web and cite it. " + Method),
     ];

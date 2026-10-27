@@ -123,4 +123,41 @@ describe('science lab', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Ask' }))
     await waitFor(() => expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ content: 'Why does the check fail?', attachments: [] }))
   })
+
+  it('shows a molecule drawn, a balanced reaction checked atom by atom, and a translated sequence', async () => {
+    const steps = [
+      message({ id: 'u1', role: 'user', content: 'Aspirin, rust and a gene.' }),
+      message({
+        id: 'a1', parentId: 'u1', role: 'assistant', content: '',
+        toolCalls: [call('t1', 'chem_molecule', { smiles: 'CC(=O)Oc1ccccc1C(=O)O' }), call('t2', 'chem_balance', { equation: 'Fe + O2 -> Fe2O3' }), call('t3', 'bio_sequence', { sequence: 'ATGGCC', operation: 'translate' })],
+      }),
+      message({
+        id: 'r1', parentId: 'a1', role: 'tool', toolName: 'chem_molecule', toolCallId: 't1',
+        content: JSON.stringify({ smiles: 'CC(=O)Oc1ccccc1C(=O)O', formula: 'C9H8O4', molar_mass: '180.159 g/mol', logP: 1.31, tpsa: 63.6, h_donors: 1, h_acceptors: 3, rotatable_bonds: 2, rings: 1, lipinski: 'passes the rule of five', inchikey: 'BSYNRYMUTXBXSQ-UHFFFAOYSA-N' }),
+        details: { lab: { svg: '<svg xmlns="http://www.w3.org/2000/svg"></svg>' } },
+      }),
+      message({
+        id: 'r2', parentId: 'r1', role: 'tool', toolName: 'chem_balance', toolCallId: 't2',
+        content: JSON.stringify({ balanced: '4 Fe + 3 O2 -> 2 Fe2O3', atoms: [{ element: 'Fe', left: 4, right: 4 }, { element: 'O', left: 6, right: 6 }], checked: true, detail: 'Each element counted on both sides: equal.' }),
+      }),
+      message({ id: 'r3', parentId: 'r2', role: 'tool', toolName: 'bio_sequence', toolCallId: 't3', content: JSON.stringify({ kind: 'dna', length: 6, operation: 'translate', result: 'MA', table: 1 }) }),
+    ]
+    fakeApi(member, {
+      'GET /api/lab/fields': () => ({ json: fields }),
+      'GET /api/lab/notebooks': () => ({ json: [] }),
+      'GET /api/chat/conversations/n1': () => ({ json: { ...notebook(steps), labField: 'chemistry' } }),
+    })
+    renderApp('/lab/n1')
+    const molecule = await screen.findByRole('region', { name: 'Molecule' })
+    expect(within(molecule).getByRole('img', { name: 'C9H8O4 drawn' })).toHaveAttribute('src', expect.stringMatching(/^data:image\/svg\+xml;/))
+    expect(molecule).toHaveTextContent('180.159 g/mol')
+    expect(molecule).toHaveTextContent('passes the rule of five')
+    const reaction = screen.getByRole('region', { name: 'Reaction' })
+    expect(within(reaction).getByText('Balanced, checked')).toBeInTheDocument()
+    expect(reaction).toHaveTextContent('4 Fe + 3 O2 → 2 Fe2O3')
+    expect(within(reaction).getAllByRole('row')).toHaveLength(3)
+    expect(screen.getByRole('region', { name: 'Sequence: translate' })).toHaveTextContent('MA')
+    // The balanced reaction counts as checked.
+    expect(screen.getByText(/1 proved/)).toBeInTheDocument()
+  })
 })

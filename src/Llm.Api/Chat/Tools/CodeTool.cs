@@ -22,12 +22,12 @@ public sealed partial class CodeTool(SandboxClient sandbox, PythonTool files, Ap
 
     /// <summary>
     /// Whether a program may call this tool's functions: not its own, nor those that hand work on (deep research, sub-agents) or
-    /// need the sandbox the program holds a place in (Python, vector, an admin's sandboxed server), nor those whose call acts in
+    /// need the sandbox the program holds a place in (Python, the lab's packs, vector, an admin's sandboxed server), nor those whose call acts in
     /// the chat's page (a question to the person ends the answer; a plan's card, a memory's, the canvas, the browser's screen
     /// are shown there). Those that ask first are left out too.
     /// </summary>
     public static bool Callable(IChatTool tool) =>
-        tool.Id is not (ToolId or "python" or Lab.LabTool.ToolId or ResearchTool.ToolId or VectorTool.ToolId or "agents" or "ask" or "canvas" or "memory" or Plans.PlansTool.ToolId or Browser.BrowserTool.ToolId)
+        !Lab.LabPack.Ids.Contains(tool.Id) && tool.Id is not (ToolId or "python" or ResearchTool.ToolId or VectorTool.ToolId or "agents" or "ask" or "canvas" or "memory" or Plans.PlansTool.ToolId or Browser.BrowserTool.ToolId)
         && tool is not SandboxServerTool;
 
     /// <summary>Python's keywords: a name that is one gets a _ after it, as the arena module names it.</summary>

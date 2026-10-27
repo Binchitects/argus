@@ -114,9 +114,9 @@ export interface Message {
   errorKind?: string | null
   /**
    * What a message shows beyond what the model read: a tool call's sub-agents' work ({ agents: [...] }), the canvas a call made or changed, an Auto answer's
-   * route, a memory to keep ({ memory }); { note: true }: Code Arena's own word to its model (the connection dropped), shown as a notice, not as the person's.
+   * route, a memory to keep ({ memory }), the science lab's drawing of a molecule ({ lab: { svg } }); { note: true }: Code Arena's own word to its model (the connection dropped), shown as a notice, not as the person's.
    */
-  details?: { agents?: AgentWork[]; canvas?: { id: string; title: string; version: number }; route?: AutoRoute; memory?: MemoryOffer; memories?: MemoryRead[]; note?: boolean; plan?: string } | null
+  details?: { agents?: AgentWork[]; canvas?: { id: string; title: string; version: number }; route?: AutoRoute; memory?: MemoryOffer; memories?: MemoryRead[]; note?: boolean; plan?: string; lab?: { svg?: string } } | null
   /** An answer: what filled the request it answered, in characters by kind (the context gauge scales it to its prompt tokens). */
   context?: MeasuredContext | null
   /** An answer whose thinking was cut short ("Answer now"). */

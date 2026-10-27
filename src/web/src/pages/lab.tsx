@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Atom, ChartNoAxesColumn, CircleCheck, CircleHelp, CircleX, FlaskConical, Globe, MessageSquare, Sigma, type LucideIcon } from 'lucide-react'
+import { Atom, ChartNoAxesColumn, Dna, CircleCheck, CircleHelp, CircleX, FlaskConical, Globe, MessageSquare, Sigma, type LucideIcon } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router'
 import { ChoiceCard } from '@/components/app/choice-card'
@@ -18,6 +18,7 @@ import { api, errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { conversationQuery, streamChat } from './chat/api'
 import { Markdown } from './chat/markdown'
+import { Drawing } from './chat/drawing'
 import type { Conversation, Message } from './chat/types'
 
 /** A science of the lab, as the server says it: its tools are those the person may use. */
@@ -42,7 +43,7 @@ interface Notebook {
   checks: { proved: number; refuted: number; numeric: number }
 }
 
-const fieldIcons: Record<string, LucideIcon> = { mathematics: Sigma, physics: Atom, chemistry: FlaskConical, statistics: ChartNoAxesColumn, general: Globe }
+const fieldIcons: Record<string, LucideIcon> = { mathematics: Sigma, physics: Atom, chemistry: FlaskConical, statistics: ChartNoAxesColumn, biology: Dna, general: Globe }
 
 const fieldsQuery = { queryKey: ['lab', 'fields'] as const, queryFn: ({ signal }: { signal: AbortSignal }) => api<LabFields>('/api/lab/fields', { signal }) }
 const notebooksQuery = { queryKey: ['lab', 'notebooks'] as const, queryFn: ({ signal }: { signal: AbortSignal }) => api<Notebook[]>('/api/lab/notebooks', { signal }) }
@@ -189,6 +190,7 @@ const verdictOf = (name: string, result: Record<string, unknown> | null): Verdic
     const s = (result.solutions as { checked: boolean }[] | undefined) ?? []
     return s.length === 0 ? 'other' : s.every((x) => x.checked) ? 'proved' : 'refuted'
   }
+  if (name === 'chem_balance') return result.checked === true ? 'proved' : 'refuted'
   return null
 }
 
@@ -200,13 +202,17 @@ const verdictLook: Record<Verdict, { label: string; tone: string; Icon: typeof C
 }
 
 const math = (latex: unknown) => (typeof latex === 'string' && latex.length > 0 ? `$$${latex}$$` : '')
+const text = (v: unknown) => (v === undefined || v === null ? '' : String(v))
+/** A table in Markdown: a header and its rows. */
+const table = (head: string[], rows: unknown[][]) => [`| ${head.join(' | ')} |`, `|${head.map(() => ' --- ').join('|')}|`, ...rows.map((r) => `| ${r.map(text).join(' | ')} |`)].join('\n')
+const fence = (lang: string, body: string) => `\`\`\`${lang}\n${body}\n\`\`\``
 
 /** One call of a tool in the notebook: what it was asked, what it gave, and (a check's) its verdict. */
 function ToolCell({ name, args, result }: { name: string; args: Record<string, unknown>; result: Message | undefined }) {
   const failed = result?.status === 'failed' || (!!result && !parse(result.content) && name.startsWith('math_'))
   const r = parse(result?.content)
   const verdict = verdictOf(name, r)
-  const look = verdict ? verdictLook[verdict] : null
+  const look = verdict ? { ...verdictLook[verdict], ...(name === 'chem_balance' && { label: verdict === 'proved' ? 'Balanced, checked' : 'Not balanced' }) } : null
   let body: string
   let title: string
   if (name === 'math_check') {
@@ -222,6 +228,32 @@ function ToolCell({ name, args, result }: { name: string; args: Record<string, u
   } else if (name === 'units_convert') {
     title = 'Units'
     body = `${String(args.quantity ?? '')}${args.to ? ` → ${String(args.to)}` : ''}: **${String(r?.result ?? '')}**`
+  } else if (name === 'chem_molecule') {
+    title = 'Molecule'
+    body = r
+      ? `**${text(r.formula)}**, ${text(r.molar_mass)} · \`${text(r.smiles)}\`\n\n${table(
+          ['logP', 'TPSA', 'H donors', 'H acceptors', 'Rotatable bonds', 'Rings'],
+          [[r.logP, r.tpsa, r.h_donors, r.h_acceptors, r.rotatable_bonds, r.rings]],
+        )}\n\n${text(r.lipinski)} · InChIKey \`${text(r.inchikey)}\``
+      : `\`${text(args.smiles)}\``
+  } else if (name === 'chem_formula') {
+    title = 'Formula'
+    const parts = (r?.elements as { element: string; count: number; mass: number; share: string }[] | undefined) ?? []
+    body = `**${text(r?.formula ?? args.formula)}**: ${text(r?.molar_mass)}\n\n${table(['Element', 'Atoms', 'Mass (g/mol)', 'Share'], parts.map((p) => [p.element, p.count, p.mass, p.share]))}`
+  } else if (name === 'chem_balance') {
+    title = 'Reaction'
+    const atoms = (r?.atoms as { element: string; left: number; right: number }[] | undefined) ?? []
+    body = `**${text(r?.balanced ?? args.equation).replace('->', '→')}**\n\n${table(['Element', 'Left', 'Right'], atoms.map((a) => [a.element, a.left, a.right]))}\n\n${text(r?.detail)}`
+  } else if (name === 'chem_similarity') {
+    title = 'Similarity'
+    body = `\`${text(r?.first ?? args.first)}\` and \`${text(r?.second ?? args.second)}\`: Tanimoto **${text(r?.tanimoto)}**\n\n${text(r?.detail)}`
+  } else if (name === 'bio_sequence') {
+    title = `Sequence: ${text(r?.operation ?? args.operation ?? 'info')}`
+    const facts = r ? Object.entries(r).filter(([k]) => !['kind', 'operation', 'result', 'length'].includes(k)) : []
+    body = `${text(r?.kind)}, ${text(r?.length)} letters${r?.result ? `\n\n${fence('text', text(r.result))}` : ''}${facts.length ? `\n\n${table(facts.map(([k]) => k.replace(/_/g, ' ')), [facts.map(([, v]) => v)])}` : ''}`
+  } else if (name === 'bio_align') {
+    title = 'Alignment'
+    body = `${text(r?.mode)}, ${text(r?.scoring)}: score **${text(r?.score)}**, identity ${text(r?.identity)}\n\n${fence('text', text(r?.alignment))}`
   } else if (name === 'run_python' || name === 'run_code') {
     title = name === 'run_python' ? 'Python' : 'Program'
     const out = r ? String(r.stdout ?? '') : (result?.content ?? '')
@@ -233,7 +265,7 @@ function ToolCell({ name, args, result }: { name: string; args: Record<string, u
   return (
     <section aria-label={title} className={cn('rounded-lg border p-3', look?.tone)}>
       <div className="mb-1 flex flex-wrap items-center gap-2 text-xs font-medium">
-        {name.startsWith('math_') || name === 'units_convert' ? <Sigma className="size-3.5" aria-hidden="true" /> : null}
+        {name.startsWith('math_') || name === 'units_convert' ? <Sigma className="size-3.5" aria-hidden="true" /> : name.startsWith('chem_') ? <Atom className="size-3.5" aria-hidden="true" /> : name.startsWith('bio_') ? <Dna className="size-3.5" aria-hidden="true" /> : null}
         <span>{title}</span>
         {look && (
           <span className="ml-auto inline-flex items-center gap-1">
@@ -243,7 +275,14 @@ function ToolCell({ name, args, result }: { name: string; args: Record<string, u
         )}
         {!result && <span className="ml-auto text-muted-foreground">Working…</span>}
       </div>
-      {failed ? <p className="text-sm text-destructive-ink">{result?.content}</p> : <Markdown text={body} />}
+      {failed ? (
+        <p className="text-sm text-destructive-ink">{result?.content}</p>
+      ) : (
+        <>
+          {result?.details?.lab?.svg && <Drawing svg={result.details.lab.svg} label={`${text(r?.formula)} drawn`} />}
+          <Markdown text={body} />
+        </>
+      )}
     </section>
   )
 }
