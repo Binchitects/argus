@@ -32,8 +32,10 @@ spec:
     - host: {{ .Values.domain | quote }}
       http:
         paths:
+          {{- /* ingress-nginx (1.12, strict path types) refuses a dot in a Prefix path: /.well-known is ImplementationSpecific,
+          which it and Traefik both match as a prefix. */}}
           {{- range list "/api" "/connect" "/.well-known" "/mcp" "/scim" }}
-          - { path: {{ . }}, pathType: Prefix, backend: { service: { name: app, port: { number: 8080 } } } }
+          - { path: {{ . }}, pathType: {{ if contains "." . }}ImplementationSpecific{{ else }}Prefix{{ end }}, backend: { service: { name: app, port: { number: 8080 } } } }
           {{- end }}
           - { path: /, pathType: Prefix, backend: { service: { name: web, port: { number: 8080 } } } }
     - host: {{ printf "gateway.%s" .Values.domain | quote }}
