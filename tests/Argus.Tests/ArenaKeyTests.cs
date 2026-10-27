@@ -349,6 +349,38 @@ public sealed class ArenaKeyCheckTests : IAsyncLifetime
         Assert.Equal("bob", (await keys.CheckAsync("sk-bob")).Username);
     }
 
+    /// <summary>The app's answers, given at once (synchronously), as a fast local app's may be.</summary>
+    sealed class AtOnce(Func<string, HttpResponseMessage> answer) : HttpMessageHandler
+    {
+        public int Asked;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref Asked);
+            var key = JsonNode.Parse(request.Content!.ReadAsStringAsync(cancellationToken).GetAwaiter().GetResult())!["key"]!.ToString();
+            return Task.FromResult(answer(key));
+        }
+    }
+
+    [Fact]
+    public async Task An_answer_that_comes_back_at_once_is_cached_and_asked_again_once_it_runs_out()
+    {
+        double now = 1000;
+        var known = false;
+        var app = new AtOnce(_ => known
+            ? new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent("""{"email": "bob@corp.example", "username": "bob"}""") }
+            : new HttpResponseMessage(System.Net.HttpStatusCode.Unauthorized) { Content = new StringContent("""{"status": "invalid_key"}""") });
+        var keys = new ArenaKeys("http://app.test/api/authz/key", FakePlatform.Credential, new HttpClient(app), () => now);
+        await Assert.ThrowsAsync<AclDenied>(() => keys.CheckAsync("sk-bob"));
+        known = true;
+        now += 29;
+        await Assert.ThrowsAsync<AclDenied>(() => keys.CheckAsync("sk-bob"));
+        Assert.Equal(1, app.Asked);
+        now += 2;
+        Assert.Equal("bob", (await keys.CheckAsync("sk-bob")).Username);
+        Assert.Equal(2, app.Asked);
+    }
+
     [Fact]
     public async Task An_app_that_cannot_answer_is_not_remembered_and_never_blames_the_key()
     {

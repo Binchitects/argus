@@ -70,9 +70,11 @@ public sealed class ArenaKeys
                 return hit.Person ?? throw new AclDenied(Refused);
             if (!_asking.TryGetValue(hash, out asking!))
             {
-                // Not tied to the first request: one that gives up does not fail the others waiting on the answer.
+                // Not tied to the first request: one that gives up does not fail the others waiting on the answer. An answer
+                // that came back at once (on this thread, inside this lock) is cached already and must not be kept as waiting:
+                // its own cleanup ran before it was stored, and a stored finished answer would outlive the cache.
                 asking = AskAsync(key, hash);
-                _asking[hash] = asking;
+                if (!asking.IsCompleted) _asking[hash] = asking;
             }
         }
         return await asking.WaitAsync(ct) ?? throw new AclDenied(Refused);
