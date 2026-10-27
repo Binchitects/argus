@@ -1890,6 +1890,34 @@ models live and work". The IDE fixes first:
 - The editor's right-click menu had no background (done: Monaco's colours
   reach it).
 
+The person also asked (2026-10-27) for the installer to install on Kubernetes
+with Helm, for large scale and availability. The chart is there
+(deploy/helm/argus-arena: app and web replicas, the gateway with Valkey); the
+installer only does Docker Compose. So, in this release:
+
+- **`installer.sh --kubernetes`**: checks what a cluster install needs before
+  anything is changed (kubectl and helm and their versions, the cluster
+  reachable with rights to the namespace, a default storage class and one
+  that shares volumes between pods, an ingress controller, a certificate
+  issuer or the person's own TLS secret, GPU nodes with NVIDIA's device
+  plugin or GPU operator, room on the nodes), says what is missing and how
+  to fix it, then asks for the domain, the TLS, the database (in-cluster or
+  the company's managed Postgres) and the sizes; makes the secrets in the
+  cluster (never printed, never in a values file); installs or upgrades
+  with `helm upgrade --install --atomic --wait`, and checks the stack
+  answers as `deploy/scripts/compliance-check.py` does.
+- **Availability**: two or more replicas of the app, the web and the
+  gateway, spread over nodes (anti-affinity), PodDisruptionBudgets, rolling
+  updates that keep serving, readiness and liveness probes, HPAs where load
+  varies, Postgres with a standby (CloudNativePG) or the company's managed
+  one, backups to object storage; the models on GPU nodes with their own
+  pools.
+- **Air-gapped clusters**: the images listed by the chart, pushed to the
+  company's registry by the installer, the chart packaged with the release.
+- Tested: `helm template` and lint of every value combination in
+  tests/deploy, the installer's Kubernetes mode against fake kubectl and
+  helm, and an install on a kind cluster in CI.
+
 The science lab: specialised models and the tools they need, working together
 on a problem, with what they did checkable. Every download asked first
 (models, packages); licences checked against [v7.4's list](#v74--security-vulnerabilities-known-found-and-fixed)
