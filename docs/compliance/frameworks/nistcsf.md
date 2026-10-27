@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 29 of the 128 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 31 of the 128 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
@@ -13,7 +13,7 @@ Arena's controls serve 29 of the 128 clauses here. Every clause is met by the co
 | GV.OC-04 | Critical objectives, capabilities, and services that external stakeholders depend on or expect from the organization are understood and communicated |  | [The management system (ISMS and AIMS)](../isms.md) |
 | GV.OC-05 | Outcomes, capabilities, and services that the organization depends on are understood and communicated |  | [The management system (ISMS and AIMS)](../isms.md) |
 | GV.OV | Oversight |  | [The management system (ISMS and AIMS)](../isms.md) |
-| GV.OV-01 | Cybersecurity risk management strategy outcomes are reviewed to inform and adjust strategy and direction |  | [The management system (ISMS and AIMS)](../isms.md) |
+| GV.OV-01 | Cybersecurity risk management strategy outcomes are reviewed to inform and adjust strategy and direction | [GOV-07](../controls.md#gov-07-audits-their-findings-and-corrective-actions-are-kept) | [The management system (ISMS and AIMS)](../isms.md) |
 | GV.OV-02 | The cybersecurity risk management strategy is reviewed and adjusted to ensure coverage of organizational requirements and risks |  | [The management system (ISMS and AIMS)](../isms.md) |
 | GV.OV-03 | Organizational cybersecurity risk management performance is evaluated and reviewed for adjustments needed | [GOV-01](../controls.md#gov-01-the-controls-are-kept-from-breaking) | [The management system (ISMS and AIMS)](../isms.md) |
 | GV.PO | Policy |  | [Information security policy](../policies/information-security.md) |
@@ -52,8 +52,8 @@ Arena's controls serve 29 of the 128 clauses here. Every clause is met by the co
 | ID.AM-07 | Inventories of data and corresponding metadata for designated data types are maintained |  | [Risk management policy](../policies/risk-management.md) |
 | ID.AM-08 | Systems, hardware, software, services, and data are managed throughout their life cycles |  | [Risk management policy](../policies/risk-management.md) |
 | ID.IM | Improvement |  | [Risk management policy](../policies/risk-management.md) |
-| ID.IM-01 | Improvements are identified from evaluations | [GOV-01](../controls.md#gov-01-the-controls-are-kept-from-breaking) | [Risk management policy](../policies/risk-management.md) |
-| ID.IM-02 | Improvements are identified from security tests and exercises, including those done in coordination with suppliers and relevant third parties |  | [Risk management policy](../policies/risk-management.md) |
+| ID.IM-01 | Improvements are identified from evaluations | [GOV-01](../controls.md#gov-01-the-controls-are-kept-from-breaking), [GOV-07](../controls.md#gov-07-audits-their-findings-and-corrective-actions-are-kept) | [Risk management policy](../policies/risk-management.md) |
+| ID.IM-02 | Improvements are identified from security tests and exercises, including those done in coordination with suppliers and relevant third parties | [GOV-07](../controls.md#gov-07-audits-their-findings-and-corrective-actions-are-kept) | [Risk management policy](../policies/risk-management.md) |
 | ID.IM-03 | Improvements are identified from execution of operational processes, procedures, and activities |  | [Risk management policy](../policies/risk-management.md) |
 | ID.IM-04 | Incident response plans and other cybersecurity plans that affect operations are established, communicated, maintained, and improved |  | [Risk management policy](../policies/risk-management.md) |
 | ID.RA | Risk Assessment | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [Risk management policy](../policies/risk-management.md) |

@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-The 30 controls Arena provides, from [controls.yaml](controls.yaml). How they are kept: [README](README.md#controls-and-how-they-are-kept). Each framework's clauses and the controls that serve them: [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md), [SOC 2, Trust Services Criteria](frameworks/soc2.md), [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md), [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md), [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md), [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md), [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md), [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md), [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md), [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md), [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md), [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md), [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md), [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md).
+The 31 controls Arena provides, from [controls.yaml](controls.yaml). How they are kept: [README](README.md#controls-and-how-they-are-kept). Each framework's clauses and the controls that serve them: [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md), [SOC 2, Trust Services Criteria](frameworks/soc2.md), [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md), [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md), [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md), [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md), [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md), [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md), [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md), [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md), [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md), [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md), [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md), [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md).
 
 ## People and access (IAM)
 
@@ -855,3 +855,31 @@ The company's policies (Admin → Compliance → Policies), adopted from the tem
 **Watched by** `app:policies` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
 
 **The company's part** Adopt the policies that apply, fill in their brackets, have them approved by management, review each on time, and follow up with those who have not read them.
+
+### GOV-07: Audits, their findings and corrective actions are kept
+
+The audit programme (Admin → Compliance → Audits): each audit, internal or an external body's (a certification's stages, surveillance, recertification, a SOC 2 period), with its scope, auditor, dates and conclusion. Each finding (a major or minor nonconformity, an observation, an opportunity) against a framework's clause and Arena's control, with its correction, root cause, corrective action, owner and date; a nonconformity's action is taken only once its root cause and action are said, and closed only when someone checks that it worked (else it opens again). The certificates and reports the company holds, with when they end; and waivers of a control not met for a time, by a person, with why, what makes up for it and until when (a year at most). Every step is audited and all of it is in the evidence.
+
+**Serves**
+
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): 9.2.1 Internal audit: general; 9.2.2 Internal audit programme; 10.1 Continual improvement; 10.2 Nonconformity and corrective action; A.5.35 Independent review of information security; A.5.36 Compliance with policies, rules and standards for information security
+- [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md): 9.2.1 Internal audit: general; 9.2.2 Internal audit programme; 10.1 Continual improvement; 10.2 Nonconformity and corrective action
+- [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md): 9.2 Internal audit; 10.1 Nonconformity and corrective action; 10.2 Continual improvement
+- [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC4.1 Ongoing and separate evaluations; CC4.2 Communicating deficiencies; CC5.1 Control activities that reduce risks
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 12.4 PCI DSS compliance is managed
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): A&A Audit and assurance
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): ID.IM-01 Improvements are identified from evaluations; ID.IM-02 Improvements are identified from security tests and exercises, including those done in coordination with suppliers and relevant third parties; GV.OV-01 Cybersecurity risk management strategy outcomes are reviewed to inform and adjust strategy and direction
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): CA-2 Control Assessments; CA-5 Plan of Action and Milestones; CA-7 Continuous Monitoring
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.12.01 Security Assessment; 03.12.02 Plan of Action and Milestones
+- [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md): GOVERN 1.5 Ongoing monitoring and periodic review of the risk management process and its outcomes are planned, organizational roles and responsibilities are clearly defined, including determining the frequency of periodic review.
+
+**Documented in** [compliance/README.md#audits-findings-and-certificates](README.md#audits-findings-and-certificates)
+
+**Proved by**
+
+- `Llm.Tests/AuditTests.A_finding_is_acted_on_with_its_root_cause_and_closed_only_when_its_action_is_checked`
+- `Llm.Tests/AuditTests.The_check_wants_an_internal_audit_each_year_findings_in_time_certificates_current_and_waivers_decided`
+
+**Watched by** `app:audits` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+
+**The company's part** Plan internal audits that cover every clause and control over the certification cycle, by people who do not audit their own work; act on the findings by their dates; renew the certificates before they end.

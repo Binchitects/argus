@@ -109,6 +109,10 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Compliance.Policy> Policies => Set<Compliance.Policy>();
     public DbSet<Compliance.PolicyVersion> PolicyVersions => Set<Compliance.PolicyVersion>();
     public DbSet<Compliance.PolicyAcknowledgement> PolicyAcknowledgements => Set<Compliance.PolicyAcknowledgement>();
+    public DbSet<Compliance.ComplianceAudit> ComplianceAudits => Set<Compliance.ComplianceAudit>();
+    public DbSet<Compliance.Finding> Findings => Set<Compliance.Finding>();
+    public DbSet<Compliance.Certificate> Certificates => Set<Compliance.Certificate>();
+    public DbSet<Compliance.ControlWaiver> ControlWaivers => Set<Compliance.ControlWaiver>();
     public DbSet<Compliance.AccessReviewItem> AccessReviewItems => Set<Compliance.AccessReviewItem>();
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<KnowledgeSource> KnowledgeSources => Set<KnowledgeSource>();
@@ -1090,6 +1094,55 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasIndex(a => a.UserId);
             e.HasOne<Compliance.PolicyVersion>().WithMany().HasForeignKey(a => a.PolicyVersionId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Identity.AppUser>().WithMany().HasForeignKey(a => a.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Compliance.ComplianceAudit>(e =>
+        {
+            e.ToTable("compliance_audits");
+            e.Property(a => a.Title).HasMaxLength(300);
+            e.Property(a => a.Kind).HasMaxLength(32);
+            e.Property(a => a.Framework).HasMaxLength(32);
+            e.Property(a => a.Scope).HasMaxLength(4000);
+            e.Property(a => a.Auditor).HasMaxLength(256);
+            e.Property(a => a.Conclusion).HasMaxLength(4000);
+            e.Property(a => a.CreatedBy).HasMaxLength(256);
+            e.HasIndex(a => a.Starts);
+        });
+        builder.Entity<Compliance.Finding>(e =>
+        {
+            e.ToTable("findings");
+            e.Property(f => f.Title).HasMaxLength(300);
+            e.Property(f => f.Kind).HasMaxLength(16);
+            e.Property(f => f.Description).HasMaxLength(4000);
+            e.Property(f => f.Clause).HasMaxLength(64);
+            e.Property(f => f.Control).HasMaxLength(16);
+            e.Property(f => f.Owner).HasMaxLength(256);
+            e.Property(f => f.Correction).HasMaxLength(4000);
+            e.Property(f => f.RootCause).HasMaxLength(4000);
+            e.Property(f => f.CorrectiveAction).HasMaxLength(4000);
+            e.Property(f => f.Status).HasMaxLength(16);
+            e.Property(f => f.DoneBy).HasMaxLength(256);
+            e.Property(f => f.VerifiedBy).HasMaxLength(256);
+            e.Property(f => f.Verification).HasMaxLength(4000);
+            e.Property(f => f.CreatedBy).HasMaxLength(256);
+            e.HasIndex(f => new { f.Status, f.Due });
+            e.HasOne<Compliance.ComplianceAudit>().WithMany().HasForeignKey(f => f.AuditId).OnDelete(DeleteBehavior.SetNull);
+        });
+        builder.Entity<Compliance.Certificate>(e =>
+        {
+            e.ToTable("certificates");
+            e.Property(c => c.Framework).HasMaxLength(32);
+            e.Property(c => c.Body).HasMaxLength(256);
+            e.Property(c => c.Number).HasMaxLength(128);
+            e.Property(c => c.Scope).HasMaxLength(4000);
+            e.Property(c => c.CreatedBy).HasMaxLength(256);
+        });
+        builder.Entity<Compliance.ControlWaiver>(e =>
+        {
+            e.ToTable("control_waivers");
+            e.Property(x => x.Control).HasMaxLength(64);
+            e.Property(x => x.Reason).HasMaxLength(4000);
+            e.Property(x => x.Compensating).HasMaxLength(4000);
+            e.Property(x => x.ApprovedBy).HasMaxLength(256);
         });
         builder.Entity<Compliance.NoticeAcceptance>(e =>
         {

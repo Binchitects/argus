@@ -57,6 +57,10 @@ public sealed record RiskActionRequest(string? Text, string? Owner, DateTimeOffs
 
 public sealed record SoaApproveRequest(string? Note);
 
+public sealed record AuditReportRequest(string? Conclusion);
+
+public sealed record FindingVerifyRequest(bool Worked, string? Note);
+
 public sealed record RestrictionRequest(bool Restricted, string? Why);
 
 public sealed record DataRequestView(Guid Id, Guid? UserId, string Person, string? Email, string Kind, string? Details, string Status, DateTimeOffset ReceivedAt,
@@ -88,6 +92,7 @@ public static class ComplianceEndpoints
         services.AddScoped<Risks>();
         services.AddScoped<Soa>();
         services.AddScoped<Policies>();
+        services.AddScoped<Audits>();
         services.AddHostedService<AccessReviewSchedule>();
     }
 
@@ -217,6 +222,31 @@ public static class ComplianceEndpoints
             }));
         g.MapPost("/policies/{id:guid}/review", async (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, Policies policies, CancellationToken ct) =>
             await PolicyAsync(async () => await policies.ReviewAsync(id, await Who(p, users), ct)));
+
+        // Audits, findings, certificates and waivers (GOV-07).
+        g.MapGet("/audits", async (Audits audits, CancellationToken ct) => Results.Ok(await audits.AllAsync(ct)));
+        g.MapPost("/audits", async (AuditInput body, ClaimsPrincipal p, UserManager<AppUser> users, Audits audits, CancellationToken ct) =>
+            await AuditAsync(async () => await audits.SaveAuditAsync(null, body, await Who(p, users), ct)));
+        g.MapPut("/audits/{id:guid}", async (Guid id, AuditInput body, ClaimsPrincipal p, UserManager<AppUser> users, Audits audits, CancellationToken ct) =>
+            await AuditAsync(async () => await audits.SaveAuditAsync(id, body, await Who(p, users), ct)));
+        g.MapPost("/audits/{id:guid}/report", async (Guid id, AuditReportRequest body, ClaimsPrincipal p, UserManager<AppUser> users, Audits audits, CancellationToken ct) =>
+            await AuditAsync(async () => await audits.ReportAsync(id, body.Conclusion, await Who(p, users), ct)));
+        g.MapPost("/findings", async (FindingInput body, ClaimsPrincipal p, UserManager<AppUser> users, Audits audits, CancellationToken ct) =>
+            await AuditAsync(async () => await audits.SaveFindingAsync(null, body, await Who(p, users), ct)));
+        g.MapPut("/findings/{id:guid}", async (Guid id, FindingInput body, ClaimsPrincipal p, UserManager<AppUser> users, Audits audits, CancellationToken ct) =>
+            await AuditAsync(async () => await audits.SaveFindingAsync(id, body, await Who(p, users), ct)));
+        g.MapPost("/findings/{id:guid}/done", async (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, Audits audits, CancellationToken ct) =>
+            await AuditAsync(async () => await audits.DoneAsync(id, await Who(p, users), ct)));
+        g.MapPost("/findings/{id:guid}/verify", async (Guid id, FindingVerifyRequest body, ClaimsPrincipal p, UserManager<AppUser> users, Audits audits, CancellationToken ct) =>
+            await AuditAsync(async () => await audits.VerifyAsync(id, body.Worked, body.Note, await Who(p, users), ct)));
+        g.MapPost("/certificates", async (CertificateInput body, ClaimsPrincipal p, UserManager<AppUser> users, Audits audits, CancellationToken ct) =>
+            await AuditAsync(async () => await audits.SaveCertificateAsync(null, body, await Who(p, users), ct)));
+        g.MapPut("/certificates/{id:guid}", async (Guid id, CertificateInput body, ClaimsPrincipal p, UserManager<AppUser> users, Audits audits, CancellationToken ct) =>
+            await AuditAsync(async () => await audits.SaveCertificateAsync(id, body, await Who(p, users), ct)));
+        g.MapPost("/waivers", async (WaiverInput body, ClaimsPrincipal p, UserManager<AppUser> users, Audits audits, CancellationToken ct) =>
+            await AuditAsync(async () => await audits.WaiveAsync(body, await Who(p, users), ct)));
+        g.MapPost("/waivers/{id:guid}/withdraw", async (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, Audits audits, CancellationToken ct) =>
+            await AuditAsync(async () => await audits.WithdrawAsync(id, await Who(p, users), ct)));
 
         g.MapGet("/incidents", async (AppDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
@@ -356,6 +386,22 @@ public static class ComplianceEndpoints
 
     /// <summary>The signed-in person's name, as the records keep it.</summary>
     private static async Task<string> Who(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!.UserName!;
+
+    private static async Task<IResult> AuditAsync<T>(Func<Task<T>> work)
+    {
+        try
+        {
+            return Results.Ok(await work());
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound();
+        }
+        catch (AuditException ex)
+        {
+            return AuthEndpoints.Problem(400, "audit", ex.Message);
+        }
+    }
 
     private static async Task<IResult> PolicyAsync<T>(Func<Task<T>> work)
     {
@@ -536,6 +582,10 @@ public static class ComplianceEndpoints
                 policies.csv          each policy's every version: approved by whom and when, its review, who must read it and how many did
                 policy-acknowledgements.csv  who read which version of which policy, and when
                 policies/             the text of each policy's version in force
+                audits.csv            the audit programme: each audit, its kind, scope, auditor, dates and conclusion
+                findings.csv          every finding: its kind, clause, correction, root cause, corrective action, and its check
+                certificates.csv      the certificates and reports the company holds, their scope and when they end
+                waivers.csv           each control waived for a time: why, what makes up for it, by whom, until when
 
                 """);
             Text("controls.yaml", ComplianceControls.Text);
@@ -601,6 +651,16 @@ public static class ComplianceEndpoints
             {
                 Text($"policies/{pl.Key}-v{pl.Version}.md", policyVersions.Single(v => v.PolicyId == pl.Id && v.Version == pl.Version).Text);
             }
+            var auditsView = await http.RequestServices.GetRequiredService<Audits>().AllAsync(ct);
+            static string? U(DateTimeOffset? d) => d?.ToString("u", CultureInfo.InvariantCulture);
+            Text("audits.csv", Csv([["id", "title", "kind", "framework", "scope", "auditor", "starts", "ends", "reported", "conclusion", "findings", "open"],
+                .. auditsView.Audits.Select(a => new object?[] { a.Id, a.Title, a.Kind, a.Framework, a.Scope, a.Auditor, U(a.Starts), U(a.Ends), U(a.ReportedAt), a.Conclusion, a.Findings, a.OpenFindings })]));
+            Text("findings.csv", Csv([["id", "audit", "title", "kind", "clause", "control", "owner", "due", "status", "correction", "root cause", "corrective action", "done by", "done at", "verified by", "verified at", "verification"],
+                .. auditsView.Findings.Select(f => new object?[] { f.Id, f.Audit, f.Title, f.Kind, f.Clause, f.Control, f.Owner, U(f.Due), f.Status, f.Correction, f.RootCause, f.CorrectiveAction, f.DoneBy, U(f.DoneAt), f.VerifiedBy, U(f.VerifiedAt), f.Verification })]));
+            Text("certificates.csv", Csv([["framework", "body", "number", "scope", "issued", "expires"],
+                .. auditsView.Certificates.Select(c => new object?[] { c.Framework, c.Body, c.Number, c.Scope, U(c.Issued), U(c.Expires) })]));
+            Text("waivers.csv", Csv([["control", "reason", "compensating", "approved by", "approved at", "until", "withdrawn"],
+                .. auditsView.Waivers.Select(w => new object?[] { w.Control, w.Reason, w.Compensating, w.ApprovedBy, U(w.ApprovedAt), U(w.Until), U(w.WithdrawnAt) })]));
             Text("audit-chain.json", JsonSerializer.Serialize(await watch.WalkAsync(anchor: false, ct), json));
             Text("audit-anchors.jsonl", string.Concat(AnchorsOf(auditOptions.CurrentValue).Select(a => JsonSerializer.Serialize(a, JsonSerializerOptions.Web) + "\n")));
         }

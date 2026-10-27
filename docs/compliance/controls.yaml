@@ -887,3 +887,39 @@ controls:
       Adopt the policies that apply, fill in their brackets, have them
       approved by management, review each on time, and follow up with
       those who have not read them.
+
+  - id: GOV-07
+    title: Audits, their findings and corrective actions are kept
+    meets: >-
+      The audit programme (Admin → Compliance → Audits): each audit, internal
+      or an external body's (a certification's stages, surveillance,
+      recertification, a SOC 2 period), with its scope, auditor, dates and
+      conclusion. Each finding (a major or minor nonconformity, an
+      observation, an opportunity) against a framework's clause and Arena's
+      control, with its correction, root cause, corrective action, owner and
+      date; a nonconformity's action is taken only once its root cause and
+      action are said, and closed only when someone checks that it worked
+      (else it opens again). The certificates and reports the company holds,
+      with when they end; and waivers of a control not met for a time, by a
+      person, with why, what makes up for it and until when (a year at most).
+      Every step is audited and all of it is in the evidence.
+    frameworks:
+      iso27001: [9.2.1, 9.2.2, 10.1, 10.2, A.5.35, A.5.36]
+      iso42001: [9.2.1, 9.2.2, 10.1, 10.2]
+      iso22301: [9.2, 10.1, 10.2]
+      soc2: [CC4.1, CC4.2, CC5.1]
+      pcidss: [12.4]
+      csaccm: [A&A]
+      nistcsf: [ID.IM-01, ID.IM-02, GV.OV-01]
+      nist80053: [CA-2, CA-5, CA-7]
+      nist800171: [03.12.01, 03.12.02]
+      airmf: [GOVERN 1.5]
+    docs: [compliance/README.md#audits-findings-and-certificates]
+    tests:
+      - Llm.Tests/AuditTests.A_finding_is_acted_on_with_its_root_cause_and_closed_only_when_its_action_is_checked
+      - Llm.Tests/AuditTests.The_check_wants_an_internal_audit_each_year_findings_in_time_certificates_current_and_waivers_decided
+    checks: [app:audits]
+    operator: >-
+      Plan internal audits that cover every clause and control over the
+      certification cycle, by people who do not audit their own work; act on
+      the findings by their dates; renew the certificates before they end.

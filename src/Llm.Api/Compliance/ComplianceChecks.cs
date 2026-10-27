@@ -50,6 +50,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         ("risks", "Risks are assessed, treated and reviewed in time"),
         ("soa", "The Statement of Applicability is approved and current"),
         ("policies", "Policies are approved, reviewed in time and read"),
+        ("audits", "Audited each year, findings acted on in time, certificates current"),
     ];
 
     /// <summary>A newest backup older than this is amber; one older than <see cref="BackupStale"/> is red.</summary>
@@ -83,6 +84,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
                 "risks" => await RisksAsync(ct),
                 "soa" => await SoaAsync(ct),
                 "policies" => await PoliciesAsync(ct),
+                "audits" => await AuditsAsync(ct),
                 _ => (Unknown, "No such check."),
             };
             results.Add(new CheckResult(id, title, state, detail));
@@ -455,6 +457,42 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
             unread.Count > 0 ? $"not read by everyone a month after approval: {string.Join(", ", unread.Select(p => $"{p.Title} ({p.Acknowledged} of {p.Readers})"))}" : null,
         }.OfType<string>());
         return (overdue.Any(p => p.ReviewDue < now.AddDays(-30)) ? Fail : Warn, $"{said}: {due}.");
+    }
+
+    /// <summary>An internal audit within the year; no finding past its date (a major one is red); no certificate ended (red) or ending within 90 days; no waiver past its end.</summary>
+    private async Task<(string, string)> AuditsAsync(CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var lastInternal = await db.ComplianceAudits.AsNoTracking().Where(a => a.Kind == "internal" && a.Starts <= now).MaxAsync(a => (DateTimeOffset?)a.Starts, ct);
+        var late = await db.Findings.AsNoTracking().Where(f => f.Status == Llm.Core.Compliance.Finding.Open && f.Due < now).Select(f => new { f.Title, f.Kind }).ToListAsync(ct);
+        var open = await db.Findings.CountAsync(f => f.Status != Llm.Core.Compliance.Finding.Verified, ct);
+        var certs = await db.Certificates.AsNoTracking().ToListAsync(ct);
+        var waivers = await db.ControlWaivers.CountAsync(w => w.WithdrawnAt == null && w.Until < now, ct);
+        var problems = new List<string>();
+        var state = Ok;
+        void Say(string what, string level)
+        {
+            problems.Add(what);
+            state = level == Fail || state == Fail ? Fail : Warn;
+        }
+        if (lastInternal is null || lastInternal < now.AddDays(-365))
+        {
+            Say(lastInternal is null ? "no internal audit yet" : $"no internal audit since {lastInternal:yyyy-MM-dd}", Warn);
+        }
+        if (late.Count > 0)
+        {
+            Say($"{late.Count} finding{(late.Count == 1 ? "" : "s")} past due ({string.Join(", ", late.Take(3).Select(f => $"{f.Kind}: {f.Title}"))})", late.Any(f => f.Kind == "major") ? Fail : Warn);
+        }
+        foreach (var c in certs.Where(c => c.Expires < now.AddDays(90)))
+        {
+            Say(c.Expires < now ? $"{c.Framework}'s certificate ended {c.Expires:yyyy-MM-dd}" : $"{c.Framework}'s certificate ends {c.Expires:yyyy-MM-dd}", c.Expires < now ? Fail : Warn);
+        }
+        if (waivers > 0)
+        {
+            Say($"{waivers} waiver{(waivers == 1 ? "" : "s")} past {(waivers == 1 ? "its" : "their")} end, to decide again", Warn);
+        }
+        var said = $"last internal audit {(lastInternal is { } d ? d.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) : "none")}; {open} finding{(open == 1 ? "" : "s")} open; {certs.Count} certificate{(certs.Count == 1 ? "" : "s")}";
+        return (state, problems.Count == 0 ? $"{said}." : $"{said}: {string.Join("; ", problems)}.");
     }
 
     private (string, string) DataKey() => string.IsNullOrEmpty(auth.CurrentValue.DataKey)

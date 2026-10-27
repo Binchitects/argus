@@ -62,7 +62,7 @@ Arena's controls serve 25 of the 63 clauses here. Every clause is met by the com
 | 12.1 | An information security policy is known and current | [GOV-06](../controls.md#gov-06-policies-are-owned-approved-reviewed-and-read) | [Information security policy](../policies/information-security.md) |
 | 12.2 | Acceptable use policies are defined and implemented | [GOV-02](../controls.md#gov-02-everyone-accepts-the-acceptable-use-and-privacy-notice) | [Acceptable use policy](../policies/acceptable-use.md) |
 | 12.3 | Risks to the CDE are identified and managed | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [Risk management policy](../policies/risk-management.md) |
-| 12.4 | PCI DSS compliance is managed | [GOV-01](../controls.md#gov-01-the-controls-are-kept-from-breaking) | [The management system (ISMS and AIMS)](../isms.md) |
+| 12.4 | PCI DSS compliance is managed | [GOV-01](../controls.md#gov-01-the-controls-are-kept-from-breaking), [GOV-07](../controls.md#gov-07-audits-their-findings-and-corrective-actions-are-kept) | [The management system (ISMS and AIMS)](../isms.md) |
 | 12.5 | PCI DSS scope is documented and validated |  | [The management system (ISMS and AIMS)](../isms.md) |
 | 12.6 | Security awareness education is ongoing |  | [People security policy](../policies/people-security.md) |
 | 12.7 | Personnel are screened |  | [People security policy](../policies/people-security.md) |

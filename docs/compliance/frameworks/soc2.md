@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 32 of the 61 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 34 of the 61 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
@@ -18,9 +18,9 @@ Arena's controls serve 32 of the 61 clauses here. Every clause is met by the com
 | CC3.2 | Identifying and analysing risks | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [Risk management policy](../policies/risk-management.md) |
 | CC3.3 | The potential for fraud | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [Risk management policy](../policies/risk-management.md) |
 | CC3.4 | Changes that could significantly affect internal control | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [Risk management policy](../policies/risk-management.md) |
-| CC4.1 | Ongoing and separate evaluations | [GOV-01](../controls.md#gov-01-the-controls-are-kept-from-breaking) | [Information security policy](../policies/information-security.md) |
-| CC4.2 | Communicating deficiencies |  | [Information security policy](../policies/information-security.md) |
-| CC5.1 | Control activities that reduce risks |  | [Information security policy](../policies/information-security.md) |
+| CC4.1 | Ongoing and separate evaluations | [GOV-01](../controls.md#gov-01-the-controls-are-kept-from-breaking), [GOV-07](../controls.md#gov-07-audits-their-findings-and-corrective-actions-are-kept) | [Information security policy](../policies/information-security.md) |
+| CC4.2 | Communicating deficiencies | [GOV-07](../controls.md#gov-07-audits-their-findings-and-corrective-actions-are-kept) | [Information security policy](../policies/information-security.md) |
+| CC5.1 | Control activities that reduce risks | [GOV-07](../controls.md#gov-07-audits-their-findings-and-corrective-actions-are-kept) | [Information security policy](../policies/information-security.md) |
 | CC5.2 | General control activities over technology |  | [Information security policy](../policies/information-security.md) |
 | CC5.3 | Policies and procedures that put controls in place | [GOV-06](../controls.md#gov-06-policies-are-owned-approved-reviewed-and-read) | [Information security policy](../policies/information-security.md) |
 | CC6.1 | Logical access security software, infrastructure and architectures | [IAM-01](../controls.md#iam-01-each-person-signs-in-as-themselves-with-a-strong-password), [IAM-02](../controls.md#iam-02-sessions-end-on-their-own), [IAM-03](../controls.md#iam-03-two-factor-sign-in), [IAM-05](../controls.md#iam-05-least-privilege-by-roles-and-rules), [IAM-06](../controls.md#iam-06-api-keys-are-personal-revocable-and-checked), [DAT-05](../controls.md#dat-05-secrets-and-peoples-files-are-encrypted-at-rest) | [Access control policy](../policies/access-control.md) |

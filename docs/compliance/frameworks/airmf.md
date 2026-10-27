@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 9 of the 72 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 10 of the 72 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
@@ -10,7 +10,7 @@ Arena's controls serve 9 of the 72 clauses here. Every clause is met by the comp
 | GOVERN 1.2 | The characteristics of trustworthy AI are integrated into organizational policies, processes, and procedures. | [GOV-06](../controls.md#gov-06-policies-are-owned-approved-reviewed-and-read) | [AI policy](../policies/ai.md) |
 | GOVERN 1.3 | Processes and procedures are in place to determine the needed level of risk management activities based on the organization's risk tolerance. |  | [AI policy](../policies/ai.md) |
 | GOVERN 1.4 | The risk management process and its outcomes are established through transparent policies, procedures, and other controls based on organizational risk priorities. | [GOV-06](../controls.md#gov-06-policies-are-owned-approved-reviewed-and-read) | [AI policy](../policies/ai.md) |
-| GOVERN 1.5 | Ongoing monitoring and periodic review of the risk management process and its outcomes are planned, organizational roles and responsibilities are clearly defined, including determining the frequency of periodic review. |  | [AI policy](../policies/ai.md) |
+| GOVERN 1.5 | Ongoing monitoring and periodic review of the risk management process and its outcomes are planned, organizational roles and responsibilities are clearly defined, including determining the frequency of periodic review. | [GOV-07](../controls.md#gov-07-audits-their-findings-and-corrective-actions-are-kept) | [AI policy](../policies/ai.md) |
 | GOVERN 1.6 | Mechanisms are in place to inventory AI systems and are resourced according to organizational risk priorities. |  | [AI policy](../policies/ai.md) |
 | GOVERN 1.7 | Processes and procedures are in place for decommissioning and phasing out of AI systems safely and in a manner that does not increase risks or decrease the organization’s trustworthiness. |  | [AI policy](../policies/ai.md) |
 | GOVERN 2.1 | Roles and responsibilities and lines of communication related to mapping, measuring, and managing AI risks are documented and are clear to individuals and teams throughout the organization. |  | [AI policy](../policies/ai.md) |

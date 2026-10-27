@@ -202,6 +202,30 @@ acknowledgements and the texts in force are in the evidence (`policies.csv`,
 until one is in force, when one is past its review, or when one is not read by
 everyone a month after it came into force.
 
+## Audits, findings and certificates
+
+Admin → Compliance → Audits keeps the audit programme (GOV-07):
+
+- **audits**: internal, or an external body's (a certification's stage 1 and
+  2, surveillance, recertification, a SOC 2 period, an assessment), each with
+  its framework, scope, auditor, dates, and the conclusion once reported;
+- **findings**: a major or minor nonconformity, an observation or an
+  opportunity, from an audit or found otherwise, against a framework's clause
+  (`iso27001 A.8.5`) and Arena's control, with its correction, root cause,
+  corrective action, owner and date. A nonconformity's action is marked taken
+  only once its root cause and action are said; a finding is closed only when
+  someone checks that the action worked, and opens again when it did not;
+- **certificates**: the certificates and reports the company holds, with their
+  scope and when they end;
+- **waivers**: a control not met for a time, approved by a person, with why,
+  what makes up for it, and until when (a year at most).
+
+Every step is in the audit log, and all of it is in the evidence
+(`audits.csv`, `findings.csv`, `certificates.csv`, `waivers.csv`). The `audits`
+check is amber without an internal audit in the year, with a finding past its
+date, a certificate ending within 90 days or a waiver past its end; red for a
+major nonconformity past its date or a certificate that has ended.
+
 ## Access reviews
 
 An access review lists, for a reviewer to **Keep** or **Revoke**:

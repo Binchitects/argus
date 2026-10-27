@@ -2104,6 +2104,7 @@ documents; it says what is the operator's part, as v7.1 does.
      SOC 2 period) and the certificates, with their expiry;
    - exceptions: a control not met, its compensating control, who approved
      it and until when.
+   Done: Admin → Compliance → Audits (GOV-07, the `audits` check).
 6. **Suppliers**: the model providers, clouds and connectors Arena already
    knows, and any added, each with the data it receives, its certifications
    (a SOC 2 report's date, an ISO certificate's expiry), the agreements (a
