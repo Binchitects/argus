@@ -27,7 +27,7 @@ public sealed partial class CodeTool(SandboxClient sandbox, PythonTool files, Ap
     /// are shown there). Those that ask first are left out too.
     /// </summary>
     public static bool Callable(IChatTool tool) =>
-        tool.Id is not (ToolId or "python" or ResearchTool.ToolId or VectorTool.ToolId or "agents" or "ask" or "canvas" or "memory" or Plans.PlansTool.ToolId or Browser.BrowserTool.ToolId)
+        tool.Id is not (ToolId or "python" or Lab.LabTool.ToolId or ResearchTool.ToolId or VectorTool.ToolId or "agents" or "ask" or "canvas" or "memory" or Plans.PlansTool.ToolId or Browser.BrowserTool.ToolId)
         && tool is not SandboxServerTool;
 
     /// <summary>Python's keywords: a name that is one gets a _ after it, as the arena module names it.</summary>

@@ -860,6 +860,35 @@ public sealed class ChatToolsTests(AppFixture app)
         Assert.Equal(0.01m, result.GetProperty("cost").GetDecimal());
     }
 
+    [Fact]
+    public async Task The_science_lab_checks_mathematics_in_the_sandbox_and_says_what_it_proved()
+    {
+        await using var sandbox = new FakeSandbox();
+        await using var f = NewApp(settings: new() { ["Sandbox:Dir"] = sandbox.Dir });
+        var (b, _, email) = await PersonAsync(f);
+        // Off in new chats: the lab's page, or the person, turns it on.
+        var config = await b.JsonAsync(await b.GetAsync("/api/chat/config"));
+        var lab = config.GetProperty("tools").EnumerateArray().Single(t => t.GetProperty("id").GetString() == "lab");
+        Assert.False(lab.GetProperty("onByDefault").GetBoolean());
+        var id = await NewChatAsync(b, new { tools = new[] { "lab" } });
+
+        var events = await SendAsync(b, id, """Is it right? [call math_check {"left":"sin(x)**2 + cos(x)**2","right":"sin(x)**2 + cos(x)**2"}]""");
+        Assert.Equal(["math_compute", "math_check", "math_solve", "units_convert"], FunctionsSentFor(email));
+        var result = Event(events, "tool_result");
+        Assert.False(result.GetProperty("isError").GetBoolean(), result.GetProperty("text").GetString());
+        Assert.Equal("proved", JsonDocument.Parse(result.GetProperty("text").GetString()!).RootElement.GetProperty("verdict").GetString());
+        // The call reached the sandbox as data beside lab.py, never as code of its own.
+        var call = Assert.Single(sandbox.LabCalls);
+        Assert.Equal("math_check", call["op"]!.GetValue<string>());
+        Assert.Equal("sin(x)**2 + cos(x)**2", call["args"]!["left"]!.GetValue<string>());
+        // Its instructions say what proved means.
+        Assert.Contains("Say a result is proved only when math_check says proved", app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]![0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
+
+        // What the lab refuses comes back as an error the model reads.
+        events = await SendAsync(b, id, """Units [call units_convert {"quantity":"9.81 m/s^2","to":"ft/s^2"}]""");
+        Assert.Contains("units_convert", JsonDocument.Parse(Event(events, "tool_result").GetProperty("text").GetString()!).RootElement.GetProperty("op").GetString(), StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("Qwen3-4B-Instruct-2507", 4.0, "direct")]
     [InlineData("llama-3.1-8b-instruct", 8.0, "direct")]

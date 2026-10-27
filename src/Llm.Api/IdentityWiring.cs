@@ -327,6 +327,7 @@ public static class IdentityWiring
         services.AddSingleton<Chat.Tools.SandboxClient>();
         services.AddScoped<Chat.Tools.PythonTool>();
         services.AddScoped<Chat.Tools.CodeTool>();
+        services.AddScoped<Lab.LabTool>();
         services.Configure<Chat.Tools.BlenderOptions>(config.GetSection("Blender"));
         services.Configure<Chat.Tools.ToolOptions>(config.GetSection("Tools"));
         services.AddSingleton<Chat.Tools.ToolUsage>();

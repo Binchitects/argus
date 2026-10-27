@@ -12,6 +12,7 @@ outlives the run; and a stop request stops it. Exit status: failures.
 """
 
 import json
+import pathlib
 import os
 import subprocess
 import sys
@@ -257,6 +258,27 @@ def main():
     rec("a program calls the chat's tools through the runner, one line each way, and no other way out",
         "arena.argus.find_symbol" in r.get("stdout", "") and "'called': 'find_symbol', 'with': {'name': 'DecodeFrame'}" in r.get("stdout", "") and r.get("calls") == 1,
         (r.get("stdout", "") + r.get("stderr", ""))[-200:].strip())
+
+    # The science lab's mathematics (src/Llm.Api/Lab/lab.py), as the app runs it: its call in a file beside it.
+    lab = (pathlib.Path(__file__).resolve().parents[2] / "src" / "Llm.Api" / "Lab" / "lab.py").read_text()
+
+    def lab_call(op, **args):
+        out = run(lab, timeout=60, inputs={"lab-call.json": json.dumps({"op": op, "args": args})})
+        try:
+            return json.loads(out.get("stdout", "").strip().splitlines()[-1])
+        except (IndexError, json.JSONDecodeError):
+            return {"ok": False, "error": (out.get("stderr") or out.get("error") or "")[-200:]}
+
+    proved = lab_call("math_check", left="sin(x)**2 + cos(x)**2", right="1")
+    refuted = lab_call("math_check", left="(x + 1)**2", right="x**2 + 1")
+    solved = lab_call("math_solve", equations=["x + y = 3", "x - y = 1"])
+    units = lab_call("units_convert", quantity="72 km/h", to="m/s")
+    refused = lab_call("math_compute", expression="__import__('os').system('id')")
+    rec("the science lab proves, refutes, solves and converts with SymPy and Pint, and reads nothing but mathematics",
+        proved.get("result", {}).get("verdict") == "proved" and refuted.get("result", {}).get("verdict") == "refuted"
+        and solved.get("result", {}).get("solutions", [{}])[0].get("solution") == {"x": "2", "y": "1"}
+        and str(units.get("result", {}).get("result", "")).startswith("20 ") and refused.get("ok") is False,
+        json.dumps([proved, refuted, solved, units, refused])[-300:])
 
     r = run("raise ValueError('bad input')")
     rec("an error comes back as its traceback, from main.py", r.get("exit_code") == 1 and 'File "main.py", line 1' in r.get("stderr", "") and "ValueError: bad input" in r.get("stderr", ""))

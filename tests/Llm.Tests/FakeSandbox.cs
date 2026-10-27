@@ -155,7 +155,7 @@ public sealed class FakeSandbox : IAsyncDisposable
             await File.WriteAllBytesAsync(Path.Combine(draft, "files", "story.mp4"), [0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6F, 0x6D]);
             cutReport = $"{{\"seconds\": {shots * 3}.0, \"starts\": [], \"error\": null}}\n";
         }
-        var served = await ServeMcpAsync(code, job) ?? await CallToolsAsync(spec, code, id, given);
+        var served = await ServeMcpAsync(code, job) ?? await LabAsync(code, job) ?? await CallToolsAsync(spec, code, id, given);
         var fail = code.Contains("# fail", StringComparison.Ordinal);
         await File.WriteAllTextAsync(Path.Combine(draft, "result.json"), new JsonObject
         {
@@ -222,6 +222,33 @@ public sealed class FakeSandbox : IAsyncDisposable
     /// A plugin's own MCP server's job (Chat/Tools/SandboxServerTool): answered as its server.py would, a units converter
     /// (sandbox_tools/mcp_server.py's example): initialize, tools/list, tools/call of convert (boom fails). Null for any other job.
     /// </summary>
+    /// <summary>The science lab's calls (lab.py with lab-call.json beside it), as they reached the sandbox.</summary>
+    public List<JsonObject> LabCalls { get; } = [];
+
+    /// <summary>
+    /// The science lab's script: its call read from lab-call.json and answered as lab.py would, the call's op and arguments
+    /// given back (math_check of x and x is proved; an op named "bad" is refused). Null for any other job.
+    /// </summary>
+    private async Task<string?> LabAsync(string code, string job)
+    {
+        if (!code.Contains("lab-call.json", StringComparison.Ordinal))
+        {
+            return null;
+        }
+        var call = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(job, "files", "lab-call.json")))!.AsObject();
+        lock (LabCalls)
+        {
+            LabCalls.Add(call);
+        }
+        var op = call["op"]!.GetValue<string>();
+        var args = call["args"]!.AsObject();
+        var answer = op == "math_check"
+            ? new JsonObject { ["ok"] = true, ["result"] = new JsonObject { ["verdict"] = args["left"]?.ToString() == args["right"]?.ToString() ? "proved" : "refuted" } }
+            : op == "bad" ? new JsonObject { ["ok"] = false, ["error"] = "There is no lab tool bad." }
+            : new JsonObject { ["ok"] = true, ["result"] = new JsonObject { ["op"] = op, ["args"] = args.DeepClone() } };
+        return answer.ToJsonString() + "\n";
+    }
+
     private async Task<string?> ServeMcpAsync(string code, string job)
     {
         var input = System.Text.RegularExpressions.Regex.Match(code, @"sys\.stdin = io\.StringIO\((""(?:[^""\\]|\\.)*"")\)");

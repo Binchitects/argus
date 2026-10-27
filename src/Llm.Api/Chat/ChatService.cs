@@ -269,7 +269,8 @@ public sealed partial class ChatService(
             {
                 chosen.RemoveAll(c => c.Tool.Id == CodeTool.ToolId);
             }
-            else if (toolMode == ToolModes.Code && chosen.All(c => c.Tool.Id != CodeTool.ToolId) && allowed.FirstOrDefault(t => t.Tool.Id == CodeTool.ToolId) is { } code)
+            else if (toolMode == ToolModes.Code && chosen.All(c => c.Tool.Id != CodeTool.ToolId) && chosen.Any(c => CodeTool.Callable(c.Tool))
+                && allowed.FirstOrDefault(t => t.Tool.Id == CodeTool.ToolId) is { } code)
             {
                 chosen.Add(code);
             }

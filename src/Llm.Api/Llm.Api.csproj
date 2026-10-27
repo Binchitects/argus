@@ -24,6 +24,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Models\engine-options.txt" LogicalName="engine-options.txt" />
     <EmbeddedResource Include="Chat\Tools\Blender\builder.py" LogicalName="blender-builder.py" />
+    <EmbeddedResource Include="Lab\lab.py" LogicalName="lab.py" />
     <EmbeddedResource Include="Chat\Tools\Blender\epilogue.py" LogicalName="blender-epilogue.py" />
     <EmbeddedResource Include="Media\Scripts\cut-story.py" LogicalName="cut-story.py" />
     <EmbeddedResource Include="Vector\Icons\lucide.json" LogicalName="lucide.json" />

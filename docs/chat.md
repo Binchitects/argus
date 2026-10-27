@@ -340,6 +340,15 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     automatic choice for larger models), or both. Questions to you, plans,
     memory, the canvas and the browser are always called directly; a picture a
     program makes comes to you under its card.
+  - **Science lab** (off in new chats): exact mathematics checked by SymPy
+    and units by Pint, in the sandbox: `math_compute` (simplify, expand,
+    factor, derivatives, integrals definite or not, limits, series, solve,
+    matrices), `math_check` (a claim is **proved** only when SymPy shows it,
+    **holds numerically** when it is only true at the points tried,
+    **refuted** with a point where it fails), `math_solve` (each solution
+    put back into every equation) and `units_convert` (with a dimension
+    check). The model's expressions are read as mathematics there, never as
+    code; it needs **Python**'s permission.
   - **Canvas**: documents and code beside the chat, which you and the model
     both edit (see **Canvas** below).
   - **Reading files**: a long attachment goes into the question only up to a
