@@ -465,10 +465,10 @@ public sealed class ChatToolsTests(AppFixture app)
         Assert.Equal("image", picture.GetProperty("kind").GetString());
         Assert.DoesNotContain("base64", result.GetProperty("text").GetString(), StringComparison.OrdinalIgnoreCase);
 
-        // Kept as the person's file, on the tool's message, and gone with the chat.
+        // Kept as the person's file (marked in its metadata as made by an AI), on the tool's message, and gone with the chat.
         var content = await b.GetAsync($"/api/chat/attachments/{picture.GetProperty("id").GetGuid()}/content");
         await StatusAssert.Is(HttpStatusCode.OK, content);
-        Assert.Equal(FakeModel.Png, await content.Content.ReadAsByteArrayAsync());
+        Assert.Equal(Llm.Api.Media.AiMark.Mark(FakeModel.Png, "image/png"), await content.Content.ReadAsByteArrayAsync());
         var tool = (await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{id}"))).GetProperty("messages").EnumerateArray().Single(m => m.GetProperty("role").GetString() == "tool");
         Assert.Equal(picture.GetProperty("id").GetGuid(), tool.GetProperty("attachments")[0].GetProperty("id").GetGuid());
         await StatusAssert.Is(HttpStatusCode.NoContent, await b.Http.DeleteAsync(new Uri($"/api/chat/conversations/{id}", UriKind.Relative)));

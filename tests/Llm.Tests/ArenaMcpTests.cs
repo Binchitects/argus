@@ -578,7 +578,7 @@ public sealed class ArenaMcpTests(AppFixture app)
         Assert.Equal(email, app.Model.ImageRequests.Skip(before).Single()["user"]!.GetValue<string>());
         var content = answer.GetProperty("result").GetProperty("content").EnumerateArray().ToList();
         Assert.Equal(["text", "image", "resource_link"], content.Select(c => c.GetProperty("type").GetString()));
-        Assert.Equal(FakeModel.Png, Convert.FromBase64String(content[1].GetProperty("data").GetString()!));
+        Assert.Equal(Llm.Api.Media.AiMark.Mark(FakeModel.Png, "image/png"), Convert.FromBase64String(content[1].GetProperty("data").GetString()!));
         Assert.Equal("image/png", content[1].GetProperty("mimeType").GetString());
         var link = content[2].GetProperty("uri").GetString()!;
         Assert.StartsWith("https://llm.test/api/chat/attachments/", link, StringComparison.Ordinal);
@@ -586,10 +586,10 @@ public sealed class ArenaMcpTests(AppFixture app)
 
         // The agent reads it with its key; the person opens it signed in; nobody else does.
         var read = (await RpcAsync(agent, "resources/read", new { uri = link })).Answer.GetProperty("result").GetProperty("contents")[0];
-        Assert.Equal(FakeModel.Png, Convert.FromBase64String(read.GetProperty("blob").GetString()!));
+        Assert.Equal(Llm.Api.Media.AiMark.Mark(FakeModel.Png, "image/png"), Convert.FromBase64String(read.GetProperty("blob").GetString()!));
         var opened = await b.GetAsync(new Uri(link).AbsolutePath);
         await StatusAssert.Is(HttpStatusCode.OK, opened);
-        Assert.Equal(FakeModel.Png, await opened.Content.ReadAsByteArrayAsync());
+        Assert.Equal(Llm.Api.Media.AiMark.Mark(FakeModel.Png, "image/png"), await opened.Content.ReadAsByteArrayAsync());
         var (_, _, _, otherKey) = await PersonAsync(f);
         Assert.Equal(-32002, (await RpcAsync(Agent(f, otherKey), "resources/read", new { uri = link })).Answer.GetProperty("error").GetProperty("code").GetInt32());
 
