@@ -6,8 +6,3 @@
 #   package: npm:example
 #   reason: the vulnerable function is never called; the upgrade breaks the editor
 #   until: 2026-12-31
-
-- id: GHSA-cg2g-xh64-v4q7
-  package: npm:dompurify
-  reason: the bypass needs SAFE_FOR_TEMPLATES, which neither the web (markdown-blocks.ts, dashboards' text panels) nor Monaco's copy sets; upgrade to 3.4.17 when the npm registry is reachable again (it timed out 2026-10-26)
-  until: 2026-11-30
