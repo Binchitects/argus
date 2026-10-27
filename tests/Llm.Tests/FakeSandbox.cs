@@ -39,7 +39,9 @@ public sealed class FakeSandbox : IAsyncDisposable
     {
         while (!_stop.IsCancellationRequested)
         {
-            await File.WriteAllTextAsync(Path.Combine(Dir, "heartbeat"), new JsonObject { ["at"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0, ["slots"] = 2, ["busy"] = 0 }.ToJsonString());
+            // Written whole and renamed, as runner.py does: the app never reads half a heartbeat.
+            await File.WriteAllTextAsync(Path.Combine(Dir, ".heartbeat"), new JsonObject { ["at"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0, ["slots"] = 2, ["busy"] = 0 }.ToJsonString());
+            File.Move(Path.Combine(Dir, ".heartbeat"), Path.Combine(Dir, "heartbeat"), overwrite: true);
             foreach (var job in Directory.GetDirectories(Path.Combine(Dir, "in")).Where(d => !Path.GetFileName(d).StartsWith('.')))
             {
                 await RunAsync(job);
