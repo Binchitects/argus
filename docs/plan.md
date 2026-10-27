@@ -1942,13 +1942,14 @@ of those to avoid.
    The measured question: what share of a test set of problems each gets right
    alone and with the tools.
 3. **Chemistry.** RDKit (molecules from SMILES, properties, similarity,
-   reactions), molecules drawn in 2D and turned in 3D in the page, the
+   reactions; done: chem_molecule drawn in 2D, chem_formula, chem_balance
+   checked atom by atom and charge, chem_similarity), molecules drawn in 2D and turned in 3D in the page, the
    periodic table and units checked by a tool; a chemistry-trained model where
    one measures better than the general one; PubChem-style lookups only from a
    pack loaded here (no network from the sandbox).
 4. **Physics, biology and the rest, as tools.** Units and constants (Pint),
    numerical simulation (SciPy), sequences and structures (Biopython, a
-   protein viewer); each a group of the lab's tools that a model calls from
+   protein viewer; done: bio_sequence, bio_align, a Biology field); each a group of the lab's tools that a model calls from
    code (v7.2's tools as code), so a new science is a tool pack, not a release.
 5. **Models that live there.** The lab's models are ordinary models (Admin →
    Models, who may use them, their GPU place): a lab team names which model
