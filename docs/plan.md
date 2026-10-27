@@ -2069,7 +2069,8 @@ documents; it says what is the operator's part, as v7.1 does.
    checksum and licence), every control mapped, a page per framework, the
    management system, AI, logging and product evaluation documents, the app
    reading the same catalog (Admin → Compliance by group, each framework's
-   clauses served). Left: the `grc` pack of the shareable texts.
+   clauses served), and the `grc` knowledge pack of the shareable texts
+   (NIST's and the AI Act's, 1,437 clauses in their own words).
 2. **Risk**: a register of risks to the company's information and its AI.
    Each risk has its assets (taken from what Arena knows: models, providers,
    data stores, connectors, repositories), its threat, likelihood and impact

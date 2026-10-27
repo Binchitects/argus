@@ -136,6 +136,33 @@ Member lists (`-members.html`) and the source listings of examples are left
 out. Parsing the three sets takes about 10 seconds; the build's time is the
 embedding of its 190,970 chunks.
 
+## Governance frameworks: the grc pack
+
+The `grc` pack holds the governance frameworks whose texts may be shared, each
+clause a page in its own words: NIST SP 800-53 Rev. 5 (each control and
+enhancement, its discussion, related controls and baselines), SP 800-171
+Rev. 3, the Cybersecurity Framework 2.0 (with its implementation examples),
+the AI RMF 1.0 with its Playbook, and the EU AI Act's articles and annexes.
+ISO's, PCI DSS's, the CCM's and the Common Criteria's texts are not shared, so
+they are not in it; [docs/compliance](../compliance/README.md) names their
+clauses.
+
+A clause's id is its symbol (`AC-2(1)`, `03.01.01`, `GV.OC-01`, `GOVERN 1.1`,
+`Art.50`, `Annex III`), and each framework is a facet: `lang="nist80053"`,
+`"nist800171"`, `"nistcsf"`, `"airmf"` or `"euaiact"` keeps a search to it.
+The pages link to each publication (the AI Act's to the article on EUR-Lex).
+
+Its work directory is written from the downloaded sources (the addresses are
+in `tools/grc-catalogs.py`), and records their checksums as its provenance:
+
+```bash
+python3 tools/grc-catalogs.py --from <the downloaded sources> --texts .packwork/docsrc/grc
+argus pack build --source grc --work-dir "$PWD/.packwork/docsrc/grc" --out packs/grc-1.0.arguspack --version 1.0
+```
+
+It has 1,437 pages and 5,349 passages, about 10 MB; the embedding takes a few
+minutes on a GPU.
+
 ## Using packs
 
 Everything below works without a GitLab config. `--packs-dir` exists precisely
@@ -242,7 +269,7 @@ repository would otherwise record that repository's commit as the pack's
 provenance.
 
 Available sources: `python`, `react`, `cpp`, `dotnet`, `scripting`, `sqlite`,
-`cppreference`, `qt`, `debugger`, `algorithms`, `system-design`, the two composites
+`cppreference`, `qt`, `grc`, `debugger`, `algorithms`, `system-design`, the two composites
 `win32` and `wdk` (API reference *and* samples in one pack), and the halves on
 their own — `win32-docs`, `wdk-docs`, `win32-samples`, `wdk-samples`.
 `argus pack build --help` prints the list.

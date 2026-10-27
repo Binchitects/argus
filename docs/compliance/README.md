@@ -28,6 +28,16 @@ Criteria's families come from their published sources
 source's address, checksum and licence). ISO's, PCI DSS's and the CCM's texts
 are not shared: only their ids, with short titles written here.
 
+The texts that may be shared, NIST's (public domain) and the AI Act's (whose
+reuse the EU authorises), are in the `grc` knowledge pack, each clause in its
+own words, so the chat quotes the clause it cites: 1,437 pages (SP 800-53's
+controls with their discussion and baselines, SP 800-171's requirements, CSF
+2.0's categories and subcategories with their examples, the AI RMF's
+subcategories with the Playbook's suggested actions, the AI Act's 113 articles
+and 13 annexes). Build it with
+[the pack docs](../argus/knowledge-packs.md#governance-frameworks-the-grc-pack),
+then load it in Admin → Packs.
+
 A framework is met by an organisation, not by a program. Arena gives the
 controls, the evidence and the documents; the company that runs it does the
 rest, and an auditor checks both.
