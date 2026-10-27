@@ -31,7 +31,12 @@ public sealed class Modules(IConfiguration config, TimeProvider clock)
             wait.CancelAfter(TimeSpan.FromSeconds(2));
             up = (await Dns.GetHostAddressesAsync(name, wait.Token)).Length > 0;
         }
-        catch (Exception ex) when (ex is SocketException or OperationCanceledException && !ct.IsCancellationRequested)
+        catch (SocketException)
+        {
+            // An answer even when the request went away meanwhile: the name is not there
+            up = false;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             up = false;
         }
