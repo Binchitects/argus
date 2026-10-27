@@ -27,9 +27,9 @@ public sealed class Readiness(AppDbContext db, ComplianceChecks checks, IService
     /// <summary>The management system's checks each framework's audit reads, beside its controls.</summary>
     public static readonly IReadOnlyDictionary<string, string[]> Governance = new Dictionary<string, string[]>
     {
-        ["iso27001"] = ["risks", "soa", "policies", "audits", "suppliers", "access-review", "incidents"],
-        ["iso42001"] = ["risks", "soa", "policies", "audits", "suppliers", "ai-systems"],
-        ["iso22301"] = ["risks", "policies", "audits", "backups"],
+        ["iso27001"] = ["risks", "soa", "policies", "audits", "suppliers", "access-review", "incidents", "management"],
+        ["iso42001"] = ["risks", "soa", "policies", "audits", "suppliers", "ai-systems", "management"],
+        ["iso22301"] = ["risks", "policies", "audits", "backups", "management"],
         ["soc2"] = ["risks", "policies", "audits", "suppliers", "access-review", "incidents"],
         ["hipaa"] = ["risks", "policies", "access-review", "incidents", "suppliers"],
         ["gdpr"] = ["policies", "suppliers", "data-requests", "incidents"],
@@ -48,7 +48,7 @@ public sealed class Readiness(AppDbContext db, ComplianceChecks checks, IService
         ["risks"] = "Admin → Compliance → Risks", ["soa"] = "Admin → Compliance → Statement of Applicability", ["policies"] = "Admin → Compliance → Policies",
         ["audits"] = "Admin → Compliance → Audits", ["suppliers"] = "Admin → Compliance → Suppliers", ["ai-systems"] = "Admin → Compliance → AI systems",
         ["access-review"] = "Admin → Compliance → Access reviews", ["incidents"] = "Admin → Compliance → Incidents", ["data-requests"] = "Admin → Compliance → Data requests",
-        ["backups"] = "scripts/backup.sh and its restore drill",
+        ["backups"] = "scripts/backup.sh and its restore drill", ["management"] = "Admin → Compliance → Management",
     };
 
     public async Task<IReadOnlyList<FrameworkReadiness>> AllAsync(CancellationToken ct)

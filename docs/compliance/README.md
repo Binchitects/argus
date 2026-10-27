@@ -295,6 +295,27 @@ where it is put right.
 
 Each download is in the audit log.
 
+## Running the management system
+
+Admin → Compliance → Management (GOV-12):
+
+- **owners**: each of Arena's controls has its owner in the company, who runs
+  its part and answers for it;
+- **management reviews** (ISO 27001, 42001 and 22301 clause 9.3): Arena draws
+  up the inputs the clause names from the system as it stands (the actions
+  from the review before, the findings, the audits, the objectives and
+  readiness, the risks); the review is recorded with who took part, the
+  minutes and the decisions, beside its inputs as they were that day;
+- **security objectives** (6.2): each measured by one of the compliance
+  checks, as the share of the last 90 days it held, against its target;
+- **auditors' requests**: an auditor (the Auditor role reads everything and
+  changes nothing) asks for evidence here, and is answered.
+
+All of it is audited and in the evidence (`management.csv`,
+`management-reviews/`, `evidence-requests.csv`). The `management` check is
+amber without a review in the year or an objective, with an objective missed,
+or with a request unanswered for a fortnight.
+
 ## Access reviews
 
 An access review lists, for a reviewer to **Keep** or **Revoke**:

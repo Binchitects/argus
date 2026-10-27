@@ -186,3 +186,56 @@ public sealed class ComplianceSnapshot
     public string? Detail { get; set; }
     public DateTimeOffset At { get; set; } = DateTimeOffset.UtcNow;
 }
+
+/// <summary>Who owns one of Arena's controls in the company: the person who runs its part and answers for it.</summary>
+public sealed class ControlOwner
+{
+    public required string ControlId { get; set; }
+    public required string Owner { get; set; }
+    public required string SetBy { get; set; }
+    public DateTimeOffset SetAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
+/// A management review (ISO 27001, 42001 and 22301 9.3): its inputs as the system stood that day (drawn up by Arena), who
+/// took part, the minutes and the decisions.
+/// </summary>
+public sealed class ManagementReview
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public DateTimeOffset HeldAt { get; set; }
+    public string? Attendees { get; set; }
+    /// <summary>The inputs the clause names, as Arena drew them up (Markdown).</summary>
+    public required string Inputs { get; set; }
+    public string? Minutes { get; set; }
+    public string? Decisions { get; set; }
+    public required string CreatedBy { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>A security objective (ISO 27001 6.2): what is to hold, measured by one of the compliance checks, its target and owner.</summary>
+public sealed class SecurityObjective
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public required string Title { get; set; }
+    /// <summary>The compliance check that measures it.</summary>
+    public required string Check { get; set; }
+    /// <summary>The share of days, out of 100, the check is to hold (ok).</summary>
+    public int Target { get; set; } = 95;
+    public string? Owner { get; set; }
+    public required string CreatedBy { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>An auditor's request for evidence, and its answer.</summary>
+public sealed class EvidenceRequest
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public required string Text { get; set; }
+    public string? Clause { get; set; }
+    public required string RequestedBy { get; set; }
+    public DateTimeOffset RequestedAt { get; set; } = DateTimeOffset.UtcNow;
+    public string? Answer { get; set; }
+    public string? AnsweredBy { get; set; }
+    public DateTimeOffset? AnsweredAt { get; set; }
+}

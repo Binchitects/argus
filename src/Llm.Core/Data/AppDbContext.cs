@@ -116,6 +116,10 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Compliance.Supplier> Suppliers => Set<Compliance.Supplier>();
     public DbSet<Compliance.AiSystem> AiSystems => Set<Compliance.AiSystem>();
     public DbSet<Compliance.ComplianceSnapshot> ComplianceSnapshots => Set<Compliance.ComplianceSnapshot>();
+    public DbSet<Compliance.ControlOwner> ControlOwners => Set<Compliance.ControlOwner>();
+    public DbSet<Compliance.ManagementReview> ManagementReviews => Set<Compliance.ManagementReview>();
+    public DbSet<Compliance.SecurityObjective> SecurityObjectives => Set<Compliance.SecurityObjective>();
+    public DbSet<Compliance.EvidenceRequest> EvidenceRequests => Set<Compliance.EvidenceRequest>();
     public DbSet<Compliance.AccessReviewItem> AccessReviewItems => Set<Compliance.AccessReviewItem>();
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<KnowledgeSource> KnowledgeSources => Set<KnowledgeSource>();
@@ -1193,6 +1197,42 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(s => s.State).HasMaxLength(16);
             e.Property(s => s.Detail).HasMaxLength(4000);
             e.HasIndex(s => new { s.Day, s.Check }).IsUnique();
+        });
+        builder.Entity<Compliance.ControlOwner>(e =>
+        {
+            e.ToTable("control_owners");
+            e.HasKey(o => o.ControlId);
+            e.Property(o => o.ControlId).HasMaxLength(16);
+            e.Property(o => o.Owner).HasMaxLength(256);
+            e.Property(o => o.SetBy).HasMaxLength(256);
+        });
+        builder.Entity<Compliance.ManagementReview>(e =>
+        {
+            e.ToTable("management_reviews");
+            e.Property(r => r.Attendees).HasMaxLength(2000);
+            e.Property(r => r.Inputs).HasMaxLength(100_000);
+            e.Property(r => r.Minutes).HasMaxLength(20_000);
+            e.Property(r => r.Decisions).HasMaxLength(10_000);
+            e.Property(r => r.CreatedBy).HasMaxLength(256);
+            e.HasIndex(r => r.HeldAt);
+        });
+        builder.Entity<Compliance.SecurityObjective>(e =>
+        {
+            e.ToTable("security_objectives");
+            e.Property(o => o.Title).HasMaxLength(300);
+            e.Property(o => o.Check).HasMaxLength(64);
+            e.Property(o => o.Owner).HasMaxLength(256);
+            e.Property(o => o.CreatedBy).HasMaxLength(256);
+        });
+        builder.Entity<Compliance.EvidenceRequest>(e =>
+        {
+            e.ToTable("evidence_requests");
+            e.Property(r => r.Text).HasMaxLength(4000);
+            e.Property(r => r.Clause).HasMaxLength(64);
+            e.Property(r => r.RequestedBy).HasMaxLength(256);
+            e.Property(r => r.Answer).HasMaxLength(8000);
+            e.Property(r => r.AnsweredBy).HasMaxLength(256);
+            e.HasIndex(r => r.RequestedAt);
         });
         builder.Entity<Compliance.NoticeAcceptance>(e =>
         {

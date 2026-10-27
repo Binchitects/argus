@@ -2,17 +2,17 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 34 of the 61 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 35 of the 61 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
 | CC1.1 | Commitment to integrity and ethical values |  | [Information security policy](../policies/information-security.md) |
 | CC1.2 | Board independence and oversight of internal control |  | [Information security policy](../policies/information-security.md) |
-| CC1.3 | Structures, reporting lines, authorities and responsibilities |  | [Information security policy](../policies/information-security.md) |
+| CC1.3 | Structures, reporting lines, authorities and responsibilities | [GOV-12](../controls.md#gov-12-the-management-system-is-run-reviewed-and-measured) | [Information security policy](../policies/information-security.md) |
 | CC1.4 | Attracting, developing and keeping competent people |  | [People security policy](../policies/people-security.md) |
 | CC1.5 | Accountability for internal control responsibilities |  | [People security policy](../policies/people-security.md) |
 | CC2.1 | Relevant and quality information for internal control |  | [Information security policy](../policies/information-security.md) |
-| CC2.2 | Internal communication of objectives and responsibilities | [GOV-06](../controls.md#gov-06-policies-are-owned-approved-reviewed-and-read) | [Information security policy](../policies/information-security.md) |
+| CC2.2 | Internal communication of objectives and responsibilities | [GOV-06](../controls.md#gov-06-policies-are-owned-approved-reviewed-and-read), [GOV-12](../controls.md#gov-12-the-management-system-is-run-reviewed-and-measured) | [Information security policy](../policies/information-security.md) |
 | CC2.3 | Communication with external parties | [GOV-02](../controls.md#gov-02-everyone-accepts-the-acceptable-use-and-privacy-notice) | [Information security policy](../policies/information-security.md) |
 | CC3.1 | Objectives clear enough to identify and assess risks | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [Risk management policy](../policies/risk-management.md) |
 | CC3.2 | Identifying and analysing risks | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [Risk management policy](../policies/risk-management.md) |

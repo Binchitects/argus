@@ -1042,3 +1042,34 @@ controls:
     operator: >-
       Read each framework's gaps before its audit, and hand the auditor its
       package for the period under audit.
+
+  - id: GOV-12
+    title: The management system is run, reviewed and measured
+    meets: >-
+      Admin → Compliance → Management: each of Arena's controls has its
+      owner in the company; management reviews are recorded with who took
+      part, the minutes and the decisions, beside their inputs as the clause
+      names them, drawn up from the system as it stood (the actions from the
+      review before, the findings, the audits, the objectives and readiness,
+      the risks); the security objectives are each measured by a compliance
+      check's daily history, as the share of days it held against its
+      target; and an auditor, who may only read, asks for evidence there and
+      is answered. Audited, and in the evidence.
+    frameworks:
+      iso27001: [5.3, 6.2, 9.3.1, 9.3.2, 9.3.3]
+      iso42001: [5.3, 6.2, 9.3.1, 9.3.2, 9.3.3]
+      iso22301: [5.3, 6.2, 9.3]
+      soc2: [CC1.3, CC2.2]
+      csaccm: [GRC]
+      nistcsf: [GV.RR-01, GV.RR-02]
+      nist80053: [PM-2, PM-6]
+      airmf: [GOVERN 2.1]
+    docs: [compliance/README.md#running-the-management-system]
+    tests:
+      - Llm.Tests/ManagementTests.A_review_keeps_its_inputs_as_the_system_stood_and_objectives_are_measured_by_their_checks
+      - Llm.Tests/ManagementTests.An_auditor_reads_and_asks_for_evidence_and_changes_nothing_else
+    checks: [app:management]
+    operator: >-
+      Name each control's owner, hold the management review at least once a
+      year with the leadership, set objectives that matter, and answer the
+      auditors' requests in time.

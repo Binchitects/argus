@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-The 35 controls Arena provides, from [controls.yaml](controls.yaml). How they are kept: [README](README.md#controls-and-how-they-are-kept). Each framework's clauses and the controls that serve them: [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md), [SOC 2, Trust Services Criteria](frameworks/soc2.md), [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md), [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md), [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md), [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md), [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md), [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md), [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md), [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md), [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md), [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md), [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md), [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md).
+The 36 controls Arena provides, from [controls.yaml](controls.yaml). How they are kept: [README](README.md#controls-and-how-they-are-kept). Each framework's clauses and the controls that serve them: [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md), [SOC 2, Trust Services Criteria](frameworks/soc2.md), [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md), [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md), [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md), [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md), [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md), [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md), [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md), [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md), [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md), [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md), [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md), [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md).
 
 ## People and access (IAM)
 
@@ -977,3 +977,29 @@ Each day once, every compliance check's result is kept (six years), so an audit 
 - `Llm.Tests/ReadinessTests.The_checks_are_kept_once_a_day_and_the_package_reads_them_over_the_period`
 
 **The company's part** Read each framework's gaps before its audit, and hand the auditor its package for the period under audit.
+
+### GOV-12: The management system is run, reviewed and measured
+
+Admin → Compliance → Management: each of Arena's controls has its owner in the company; management reviews are recorded with who took part, the minutes and the decisions, beside their inputs as the clause names them, drawn up from the system as it stood (the actions from the review before, the findings, the audits, the objectives and readiness, the risks); the security objectives are each measured by a compliance check's daily history, as the share of days it held against its target; and an auditor, who may only read, asks for evidence there and is answered. Audited, and in the evidence.
+
+**Serves**
+
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): 5.3 Organizational roles, responsibilities and authorities; 6.2 Information security objectives and planning to achieve them; 9.3.1 Management review: general; 9.3.2 Management review inputs; 9.3.3 Management review results
+- [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md): 5.3 Roles, responsibilities and authorities; 6.2 AI objectives and planning to achieve them; 9.3.1 Management review: general; 9.3.2 Management review inputs; 9.3.3 Management review results
+- [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md): 5.3 Roles, responsibilities and authorities; 6.2 Business continuity objectives and planning to achieve them; 9.3 Management review
+- [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC1.3 Structures, reporting lines, authorities and responsibilities; CC2.2 Internal communication of objectives and responsibilities
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): GRC Governance, risk and compliance
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): GV.RR-01 Organizational leadership is responsible and accountable for cybersecurity risk and fosters a culture that is risk-aware, ethical, and continually improving; GV.RR-02 Roles, responsibilities, and authorities related to cybersecurity risk management are established, communicated, understood, and enforced
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): PM-2 Information Security Program Leadership Role; PM-6 Measures of Performance
+- [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md): GOVERN 2.1 Roles and responsibilities and lines of communication related to mapping, measuring, and managing AI risks are documented and are clear to individuals and teams throughout the organization.
+
+**Documented in** [compliance/README.md#running-the-management-system](README.md#running-the-management-system)
+
+**Proved by**
+
+- `Llm.Tests/ManagementTests.A_review_keeps_its_inputs_as_the_system_stood_and_objectives_are_measured_by_their_checks`
+- `Llm.Tests/ManagementTests.An_auditor_reads_and_asks_for_evidence_and_changes_nothing_else`
+
+**Watched by** `app:management` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+
+**The company's part** Name each control's owner, hold the management review at least once a year with the leadership, set objectives that matter, and answer the auditors' requests in time.

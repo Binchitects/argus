@@ -53,6 +53,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         ("audits", "Audited each year, findings acted on in time, certificates current"),
         ("suppliers", "Suppliers are registered, agreed with and reviewed"),
         ("ai-systems", "AI systems are registered, classified, assessed and reviewed"),
+        ("management", "The management system is reviewed, its objectives met, auditors answered"),
     ];
 
     /// <summary>A newest backup older than this is amber; one older than <see cref="BackupStale"/> is red.</summary>
@@ -89,6 +90,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
                 "audits" => await AuditsAsync(ct),
                 "suppliers" => await SuppliersAsync(ct),
                 "ai-systems" => await AiSystemsAsync(ct),
+                "management" => await ManagementAsync(ct),
                 _ => (Unknown, "No such check."),
             };
             results.Add(new CheckResult(id, title, state, detail));
@@ -533,6 +535,36 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
             overdue.Count > 0 ? $"past their review: {string.Join(", ", overdue)}" : null,
         }.OfType<string>().ToList();
         return problems.Count == 0 ? (Ok, $"{said}.") : (lacking.Count > 0 ? Fail : Warn, $"{said}; {string.Join("; ", problems)}.");
+    }
+
+    /// <summary>A management review within the year, the objectives met over 90 days, and no auditor's request a fortnight unanswered.</summary>
+    private async Task<(string, string)> ManagementAsync(CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var last = await db.ManagementReviews.AsNoTracking().MaxAsync(r => (DateTimeOffset?)r.HeldAt, ct);
+        var unanswered = await db.EvidenceRequests.CountAsync(r => r.AnsweredAt == null && r.RequestedAt < now.AddDays(-14), ct);
+        var objectives = await db.SecurityObjectives.AsNoTracking().ToListAsync(ct);
+        var owned = await db.ControlOwners.CountAsync(ct);
+        var since = DateOnly.FromDateTime(now.UtcDateTime.AddDays(-90));
+        var missed = new List<string>();
+        foreach (var o in objectives)
+        {
+            var days = await db.ComplianceSnapshots.Where(s => s.Check == o.Check && s.Day >= since).GroupBy(_ => 1)
+                .Select(g => new { Days = g.Count(), Ok = g.Count(s => s.State == Ok) }).FirstOrDefaultAsync(ct);
+            if (days is { Days: > 0 } && 100.0 * days.Ok / days.Days < o.Target)
+            {
+                missed.Add(o.Title);
+            }
+        }
+        var said = $"last management review {(last is { } l ? l.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) : "none")}; {objectives.Count} objective{(objectives.Count == 1 ? "" : "s")}; {owned} of {ComplianceControls.All.Controls.Count} controls owned";
+        var problems = new[]
+        {
+            last is null || last < now.AddDays(-365) ? "no management review within the year" : null,
+            objectives.Count == 0 ? "no security objective set" : null,
+            missed.Count > 0 ? $"objectives not met: {string.Join(", ", missed)}" : null,
+            unanswered > 0 ? $"{unanswered} auditor's request{(unanswered == 1 ? "" : "s")} unanswered a fortnight" : null,
+        }.OfType<string>().ToList();
+        return problems.Count == 0 ? (Ok, $"{said}.") : (Warn, $"{said}: {string.Join("; ", problems)}.");
     }
 
     private (string, string) DataKey() => string.IsNullOrEmpty(auth.CurrentValue.DataKey)

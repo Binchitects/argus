@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils'
 import { attestedNow, complianceQuery, FRAMEWORK_GROUPS, FRAMEWORKS, manualLink, readinessQuery, type FrameworkReadiness, reviewsQuery, reviewState, tally, type Attestation, type CheckResult, type Control, type Framework, type State } from './compliance-api'
 import { DataRequestsSection } from './data-requests'
 import { IncidentsSection } from './incidents'
+import { ManagementSection } from './management'
 import { AiSystemsSection } from './ai-systems'
 import { AuditsSection } from './audits'
 import { PoliciesSection } from './policies'
@@ -73,7 +74,7 @@ function ReadinessPanel({ r, label }: { r: FrameworkReadiness; label: string }) 
 }
 
 /** A section's old anchor (#incidents in a notification's link): its tab. */
-const HASH_TABS: Record<string, string> = { incidents: 'incidents', 'data-requests': 'requests', risks: 'risks', soa: 'soa', policies: 'policies', audits: 'audits', suppliers: 'suppliers', ai: 'ai', 'access-reviews': 'reviews' }
+const HASH_TABS: Record<string, string> = { incidents: 'incidents', 'data-requests': 'requests', risks: 'risks', soa: 'soa', policies: 'policies', audits: 'audits', suppliers: 'suppliers', ai: 'ai', management: 'management', 'access-reviews': 'reviews' }
 
 const AREAS: Record<string, string> = {
   IAM: 'People and access',
@@ -342,6 +343,7 @@ export function CompliancePage() {
           <TabsTrigger value="audits">Audits</TabsTrigger>
           <TabsTrigger value="suppliers">Suppliers</TabsTrigger>
           <TabsTrigger value="ai">AI systems</TabsTrigger>
+          <TabsTrigger value="management">Management</TabsTrigger>
           <TabsTrigger value="reviews">Access reviews</TabsTrigger>
           <TabsTrigger value="requests">Data requests</TabsTrigger>
           <TabsTrigger value="incidents">Incidents</TabsTrigger>
@@ -503,6 +505,9 @@ export function CompliancePage() {
         </TabsContent>
         <TabsContent value="ai">
           <AiSystemsSection mayManage={mayAttest} />
+        </TabsContent>
+        <TabsContent value="management">
+          <ManagementSection mayManage={mayAttest} controls={data?.controls ?? []} checks={data?.checks ?? []} />
         </TabsContent>
         <TabsContent value="reviews">
           <AccessReviews mayStart={mayAttest} />

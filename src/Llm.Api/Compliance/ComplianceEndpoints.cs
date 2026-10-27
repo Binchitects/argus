@@ -65,6 +65,12 @@ public sealed record SupplierReviewRequest(string? Note);
 
 public sealed record AiAssessRequest(string? Assessment);
 
+public sealed record OwnerRequest(string? Owner);
+
+public sealed record EvidenceAskRequest(string? Text, string? Clause);
+
+public sealed record EvidenceAnswerRequest(string? Answer);
+
 public sealed record RestrictionRequest(bool Restricted, string? Why);
 
 public sealed record DataRequestView(Guid Id, Guid? UserId, string Person, string? Email, string Kind, string? Details, string Status, DateTimeOffset ReceivedAt,
@@ -100,6 +106,7 @@ public static class ComplianceEndpoints
         services.AddScoped<Suppliers>();
         services.AddScoped<AiSystems>();
         services.AddScoped<Readiness>();
+        services.AddScoped<Governance>();
         services.AddSingleton<ComplianceSnapshots>();
         services.AddHostedService(sp => sp.GetRequiredService<ComplianceSnapshots>());
         services.AddHostedService<AccessReviewSchedule>();
@@ -107,7 +114,11 @@ public static class ComplianceEndpoints
 
     public static void MapCompliance(IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/admin/compliance").RequirePermissions(Permissions.ComplianceRead, Permissions.ComplianceManage);
+        // An auditor, who may only read, may also ask for evidence.
+        var g = app.MapGroup("/api/admin/compliance").RequirePermissions(Permissions.ComplianceRead, Permissions.ComplianceManage, new Dictionary<string, string>
+        {
+            ["POST /api/admin/compliance/evidence-requests"] = Permissions.ComplianceRead,
+        });
         g.MapGet("", async (ComplianceChecks checks, AppDbContext db, Storage.StorageReport storage, TimeProvider clock, CancellationToken ct) =>
             Results.Ok(View(await checks.RunAsync(ct), await LatestAsync(db, ct), clock.GetUtcNow()) with { Retention = await storage.RulesAsync(ct) }));
         g.MapPost("/controls/{id}/attest", AttestAsync);
@@ -298,6 +309,35 @@ public static class ComplianceEndpoints
             return Results.File(zip, "application/zip", $"{framework}-for-the-auditor-{clock.GetUtcNow():yyyy-MM-dd}.zip");
         });
 
+        // Running the management system: owners, management reviews, objectives, auditors' requests (GOV-12).
+        g.MapGet("/owners", async (Governance gov, CancellationToken ct) => Results.Ok(await gov.OwnersAsync(ct)));
+        g.MapPut("/owners/{control}", async (string control, OwnerRequest body, ClaimsPrincipal p, UserManager<AppUser> users, Governance gov, CancellationToken ct) =>
+            await GovernanceAsync(async () =>
+            {
+                await gov.SetOwnerAsync(control, body.Owner, await Who(p, users), ct);
+                return new { control, owner = body.Owner };
+            }));
+        g.MapGet("/management-reviews", async (Governance gov, CancellationToken ct) => Results.Ok(await gov.ReviewsAsync(ct)));
+        g.MapGet("/management-reviews/inputs", async (Governance gov, CancellationToken ct) => Results.Ok(new { inputs = await gov.InputsAsync(ct) }));
+        g.MapPost("/management-reviews", async (ReviewInput body, ClaimsPrincipal p, UserManager<AppUser> users, Governance gov, CancellationToken ct) =>
+            await GovernanceAsync(async () => await gov.RecordAsync(body, await Who(p, users), ct)));
+        g.MapGet("/objectives", async (Governance gov, CancellationToken ct) => Results.Ok(await gov.ObjectivesAsync(ct)));
+        g.MapPost("/objectives", async (ObjectiveInput body, ClaimsPrincipal p, UserManager<AppUser> users, Governance gov, CancellationToken ct) =>
+            await GovernanceAsync(async () => await gov.SaveObjectiveAsync(null, body, await Who(p, users), ct)));
+        g.MapPut("/objectives/{id:guid}", async (Guid id, ObjectiveInput body, ClaimsPrincipal p, UserManager<AppUser> users, Governance gov, CancellationToken ct) =>
+            await GovernanceAsync(async () => await gov.SaveObjectiveAsync(id, body, await Who(p, users), ct)));
+        g.MapDelete("/objectives/{id:guid}", async (Guid id, Governance gov, CancellationToken ct) =>
+            await GovernanceAsync(async () =>
+            {
+                await gov.RemoveObjectiveAsync(id, ct);
+                return new { id };
+            }));
+        g.MapGet("/evidence-requests", async (Governance gov, CancellationToken ct) => Results.Ok(await gov.RequestsAsync(ct)));
+        g.MapPost("/evidence-requests", async (EvidenceAskRequest body, ClaimsPrincipal p, UserManager<AppUser> users, Governance gov, CancellationToken ct) =>
+            await GovernanceAsync(async () => await gov.AskAsync(body.Text, body.Clause, await Who(p, users), ct)));
+        g.MapPost("/evidence-requests/{id:guid}/answer", async (Guid id, EvidenceAnswerRequest body, ClaimsPrincipal p, UserManager<AppUser> users, Governance gov, CancellationToken ct) =>
+            await GovernanceAsync(async () => await gov.AnswerAsync(id, body.Answer, await Who(p, users), ct)));
+
         g.MapGet("/incidents", async (AppDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
             var since = clock.GetUtcNow().AddDays(-60);
@@ -436,6 +476,22 @@ public static class ComplianceEndpoints
 
     /// <summary>The signed-in person's name, as the records keep it.</summary>
     private static async Task<string> Who(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!.UserName!;
+
+    private static async Task<IResult> GovernanceAsync<T>(Func<Task<T>> work)
+    {
+        try
+        {
+            return Results.Ok(await work());
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound();
+        }
+        catch (GovernanceException ex)
+        {
+            return AuthEndpoints.Problem(400, "governance", ex.Message);
+        }
+    }
 
     private static async Task<IResult> AiAsync<T>(Func<Task<T>> work)
     {
@@ -671,6 +727,9 @@ public static class ComplianceEndpoints
                 suppliers.csv         each supplier: the data it gets, where, its certifications and agreements, its risk and review
                 ai-systems.csv        each AI system: purpose, intended use, whom it affects, AI Act class and role, oversight, evaluation, review
                 ai-impact/            each AI system's impact assessment, as written
+                management.csv        each control's owner, the security objectives with what they achieved, the management reviews
+                management-reviews/   each management review: its inputs as Arena drew them up, who took part, minutes and decisions
+                evidence-requests.csv each auditor's request for evidence, and its answer
 
                 """);
             Text("controls.yaml", ComplianceControls.Text);
@@ -756,6 +815,21 @@ public static class ComplianceEndpoints
             {
                 Text($"ai-impact/{s.Id}.md", $"# {s.Name}: impact assessment\n\nBy {s.ImpactAssessedBy}, {U(s.ImpactAssessedAt)}.\n\n{s.ImpactAssessment}\n");
             }
+            var gov = http.RequestServices.GetRequiredService<Governance>();
+            var owners = await gov.OwnersAsync(ct);
+            var objectives = await gov.ObjectivesAsync(ct);
+            var mreviews = await gov.ReviewsAsync(ct);
+            Text("management.csv", Csv([["kind", "what", "who", "measure", "achieved", "target", "when"],
+                .. owners.Select(o => new object?[] { "owner", o.Key, o.Value, null, null, null, null }),
+                .. objectives.Select(o => new object?[] { "objective", o.Title, o.Owner, o.Check, o.Achieved, o.Target, null }),
+                .. mreviews.Select(r => new object?[] { "management review", r.Decisions, r.Attendees, null, null, null, U(r.HeldAt) })]));
+            foreach (var r in mreviews)
+            {
+                Text($"management-reviews/{r.HeldAt:yyyy-MM-dd}-{r.Id.ToString()[..8]}.md",
+                    $"{r.Inputs}\n\n# The review, {r.HeldAt:yyyy-MM-dd}\n\nTook part: {r.Attendees}\n\n## Minutes\n\n{r.Minutes}\n\n## Decisions\n\n{r.Decisions}\n");
+            }
+            Text("evidence-requests.csv", Csv([["asked", "by", "clause", "request", "answered", "by", "answer"],
+                .. (await gov.RequestsAsync(ct)).Select(r => new object?[] { U(r.RequestedAt), r.RequestedBy, r.Clause, r.Text, U(r.AnsweredAt), r.AnsweredBy, r.Answer })]));
             Text("audit-chain.json", JsonSerializer.Serialize(await watch.WalkAsync(anchor: false, ct), json));
             Text("audit-anchors.jsonl", string.Concat(AnchorsOf(auditOptions.CurrentValue).Select(a => JsonSerializer.Serialize(a, JsonSerializerOptions.Web) + "\n")));
         }

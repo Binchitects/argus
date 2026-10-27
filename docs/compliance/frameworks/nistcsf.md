@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 32 of the 128 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 34 of the 128 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
@@ -28,8 +28,8 @@ Arena's controls serve 32 of the 128 clauses here. Every clause is met by the co
 | GV.RM-06 | A standardized method for calculating, documenting, categorizing, and prioritizing cybersecurity risks is established and communicated |  | [Risk management policy](../policies/risk-management.md) |
 | GV.RM-07 | Strategic opportunities (i.e., positive risks) are characterized and are included in organizational cybersecurity risk discussions |  | [Risk management policy](../policies/risk-management.md) |
 | GV.RR | Roles, Responsibilities, and Authorities |  | [The management system (ISMS and AIMS)](../isms.md) |
-| GV.RR-01 | Organizational leadership is responsible and accountable for cybersecurity risk and fosters a culture that is risk-aware, ethical, and continually improving |  | [The management system (ISMS and AIMS)](../isms.md) |
-| GV.RR-02 | Roles, responsibilities, and authorities related to cybersecurity risk management are established, communicated, understood, and enforced |  | [The management system (ISMS and AIMS)](../isms.md) |
+| GV.RR-01 | Organizational leadership is responsible and accountable for cybersecurity risk and fosters a culture that is risk-aware, ethical, and continually improving | [GOV-12](../controls.md#gov-12-the-management-system-is-run-reviewed-and-measured) | [The management system (ISMS and AIMS)](../isms.md) |
+| GV.RR-02 | Roles, responsibilities, and authorities related to cybersecurity risk management are established, communicated, understood, and enforced | [GOV-12](../controls.md#gov-12-the-management-system-is-run-reviewed-and-measured) | [The management system (ISMS and AIMS)](../isms.md) |
 | GV.RR-03 | Adequate resources are allocated commensurate with the cybersecurity risk strategy, roles, responsibilities, and policies |  | [The management system (ISMS and AIMS)](../isms.md) |
 | GV.RR-04 | Cybersecurity is included in human resources practices |  | [The management system (ISMS and AIMS)](../isms.md) |
 | GV.SC | Cybersecurity Supply Chain Risk Management |  | [Supplier and transfer policy](../policies/suppliers.md) |

@@ -3560,6 +3560,30 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("compliance_snapshots", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Compliance.ControlOwner", b =>
+                {
+                    b.Property<string>("ControlId")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Owner")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTimeOffset>("SetAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SetBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.HasKey("ControlId");
+
+                    b.ToTable("control_owners", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Compliance.ControlWaiver", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3663,6 +3687,47 @@ namespace Llm.Core.Data.Migrations
                     b.HasIndex("Status", "DueAt");
 
                     b.ToTable("data_requests", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Compliance.EvidenceRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Answer")
+                        .HasMaxLength(8000)
+                        .HasColumnType("character varying(8000)");
+
+                    b.Property<DateTimeOffset?>("AnsweredAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("AnsweredBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Clause")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("RequestedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RequestedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("RequestedAt");
+
+                    b.ToTable("evidence_requests", (string)null);
                 });
 
             modelBuilder.Entity("Llm.Core.Compliance.Finding", b =>
@@ -3848,6 +3913,47 @@ namespace Llm.Core.Data.Migrations
                     b.HasIndex("IncidentId", "At");
 
                     b.ToTable("incident_events", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Compliance.ManagementReview", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Attendees")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Decisions")
+                        .HasMaxLength(10000)
+                        .HasColumnType("character varying(10000)");
+
+                    b.Property<DateTimeOffset>("HeldAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Inputs")
+                        .IsRequired()
+                        .HasMaxLength(100000)
+                        .HasColumnType("character varying(100000)");
+
+                    b.Property<string>("Minutes")
+                        .HasMaxLength(20000)
+                        .HasColumnType("character varying(20000)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HeldAt");
+
+                    b.ToTable("management_reviews", (string)null);
                 });
 
             modelBuilder.Entity("Llm.Core.Compliance.NoticeAcceptance", b =>
@@ -4205,6 +4311,42 @@ namespace Llm.Core.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("security_alerts", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Compliance.SecurityObjective", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Check")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<string>("Owner")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<int>("Target")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("security_objectives", (string)null);
                 });
 
             modelBuilder.Entity("Llm.Core.Compliance.SoaApproval", b =>

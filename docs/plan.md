@@ -2143,6 +2143,10 @@ documents; it says what is the operator's part, as v7.1 does.
    - security objectives measured by the live checks (6.2);
    - an auditor's account that reads and does not change, with evidence
      requests answered with links.
+   Done: Admin → Compliance → Management (GOV-12, the `management` check):
+   owners, reviews with their inputs drawn up, objectives measured over 90
+   days, and the requests an auditor (compliance.read) asks and a manager
+   answers.
 10. **Kept in every release**: the guard grows to each new framework: a
     clause a control cites must be in the catalog, every framework's page is
     current, and a weaker control is named in the changelog.
