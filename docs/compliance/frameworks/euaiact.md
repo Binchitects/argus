@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 4 of the 126 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 10 of the 126 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
@@ -10,8 +10,8 @@ Arena's controls serve 4 of the 126 clauses here. Every clause is met by the com
 | Art.2 | Scope |  | [AI policy](../policies/ai.md) |
 | Art.3 | Definitions |  | [AI policy](../policies/ai.md) |
 | Art.4 | AI literacy |  | [AI policy](../policies/ai.md) |
-| Art.5 | Prohibited AI practices |  | [AI policy](../policies/ai.md) |
-| Art.6 | Classification rules for high-risk AI systems |  | [AI policy](../policies/ai.md) |
+| Art.5 | Prohibited AI practices | [GOV-09](../controls.md#gov-09-ai-systems-are-registered-classified-assessed-and-overseen) | [AI policy](../policies/ai.md) |
+| Art.6 | Classification rules for high-risk AI systems | [GOV-09](../controls.md#gov-09-ai-systems-are-registered-classified-assessed-and-overseen) | [AI policy](../policies/ai.md) |
 | Art.7 | Amendments to Annex III |  | [AI policy](../policies/ai.md) |
 | Art.8 | Compliance with the requirements |  | [AI policy](../policies/ai.md) |
 | Art.9 | Risk management system | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [AI policy](../policies/ai.md) |
@@ -19,7 +19,7 @@ Arena's controls serve 4 of the 126 clauses here. Every clause is met by the com
 | Art.11 | Technical documentation |  | [AI policy](../policies/ai.md) |
 | Art.12 | Record-keeping | [LOG-01](../controls.md#log-01-who-did-what-is-recorded) | [AI policy](../policies/ai.md) |
 | Art.13 | Transparency and provision of information to deployers |  | [AI policy](../policies/ai.md) |
-| Art.14 | Human oversight |  | [AI policy](../policies/ai.md) |
+| Art.14 | Human oversight | [GOV-09](../controls.md#gov-09-ai-systems-are-registered-classified-assessed-and-overseen) | [AI policy](../policies/ai.md) |
 | Art.15 | Accuracy, robustness and cybersecurity | [OPS-02](../controls.md#ops-02-code-the-model-writes-runs-apart) | [AI policy](../policies/ai.md) |
 | Art.16 | Obligations of providers of high-risk AI systems |  | [AI policy](../policies/ai.md) |
 | Art.17 | Quality management system |  | [AI policy](../policies/ai.md) |
@@ -31,8 +31,8 @@ Arena's controls serve 4 of the 126 clauses here. Every clause is met by the com
 | Art.23 | Obligations of importers |  | [AI policy](../policies/ai.md) |
 | Art.24 | Obligations of distributors |  | [AI policy](../policies/ai.md) |
 | Art.25 | Responsibilities along the AI value chain |  | [AI policy](../policies/ai.md) |
-| Art.26 | Obligations of deployers of high-risk AI systems |  | [AI policy](../policies/ai.md) |
-| Art.27 | Fundamental rights impact assessment for high-risk AI systems |  | [AI policy](../policies/ai.md) |
+| Art.26 | Obligations of deployers of high-risk AI systems | [GOV-09](../controls.md#gov-09-ai-systems-are-registered-classified-assessed-and-overseen) | [AI policy](../policies/ai.md) |
+| Art.27 | Fundamental rights impact assessment for high-risk AI systems | [GOV-09](../controls.md#gov-09-ai-systems-are-registered-classified-assessed-and-overseen) | [AI policy](../policies/ai.md) |
 | Art.28 | Notifying authorities |  | [AI policy](../policies/ai.md) |
 | Art.29 | Application of a conformity assessment body for notification |  | [AI policy](../policies/ai.md) |
 | Art.30 | Notification procedure |  | [AI policy](../policies/ai.md) |
@@ -55,7 +55,7 @@ Arena's controls serve 4 of the 126 clauses here. Every clause is met by the com
 | Art.47 | EU declaration of conformity |  | [AI policy](../policies/ai.md) |
 | Art.48 | CE marking |  | [AI policy](../policies/ai.md) |
 | Art.49 | Registration |  | [AI policy](../policies/ai.md) |
-| Art.50 | Transparency obligations for providers and deployers of certain AI systems |  | [AI policy](../policies/ai.md) |
+| Art.50 | Transparency obligations for providers and deployers of certain AI systems | [GOV-10](../controls.md#gov-10-people-know-when-content-is-made-by-ai) | [AI policy](../policies/ai.md) |
 | Art.51 | Classification of general-purpose AI models as general-purpose AI models with systemic risk |  | [AI policy](../policies/ai.md) |
 | Art.52 | Procedure |  | [AI policy](../policies/ai.md) |
 | Art.53 | Obligations for providers of general-purpose AI models |  | [AI policy](../policies/ai.md) |

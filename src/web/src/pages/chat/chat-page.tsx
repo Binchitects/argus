@@ -1216,6 +1216,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   autoFocus
                   big
                 />
+                <p className="mt-1 text-center text-[11px] text-muted-foreground">Answers are made by AI and can be wrong: check what matters.</p>
                 <div className={cn('stagger mt-4 grid gap-2', starters ? 'sm:grid-cols-2' : 'sm:grid-cols-3')} aria-label={starters ? 'Conversation starters' : undefined}>
                   {(starters ?? (config.argus ? [{ icon: Search, text: 'Which of our repositories call the payment service, and where?' }, ...suggestions.slice(0, 2)] : suggestions)).map((s) => (
                     <button
@@ -1469,6 +1470,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   autoFocus
                 />
                 )}
+                {/* People are told they are talking to an AI (EU AI Act Art. 50(1)). */}
+                <p className="mt-1 text-center text-[11px] text-muted-foreground">Answers are made by AI and can be wrong: check what matters.</p>
               </div>
             </>
           )}

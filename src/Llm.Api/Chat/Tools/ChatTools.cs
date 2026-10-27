@@ -434,7 +434,8 @@ public sealed partial class ImageTool(ChatModels models, GatewayChat gateway, Ap
                 byte[] png;
                 try
                 {
-                    png = await gateway.GenerateImageAsync(model.Name, prompt, size, context.Email, token);
+                    // Marked as made by a model, in its own metadata (AI Act Art. 50(2)).
+                    png = Llm.Api.Media.AiMark.Mark(await gateway.GenerateImageAsync(model.Name, prompt, size, context.Email, token), "image/png");
                     media.Touch(model.Name);
                 }
                 catch (ChatGatewayException ex)

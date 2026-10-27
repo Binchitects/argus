@@ -956,3 +956,55 @@ controls:
       Register each supplier with what it gets, sign a DPA (and a BAA for
       health data) where it processes personal data, keep its certificates'
       dates current, and review it on time.
+
+  - id: GOV-09
+    title: AI systems are registered, classified, assessed and overseen
+    meets: >-
+      The register of the company's AI systems (Admin → Compliance → AI
+      systems): assistants, agents, apps and models, each with its purpose,
+      intended use and whom it affects, its class under the EU AI Act
+      (minimal, limited, high-risk with its Annex III area, or a prohibited
+      practice) and the company's role (deployer, provider), its impact
+      assessment in the assessor's name, its human oversight and its
+      evaluation. A system is put into use only once its class, purpose and
+      impact assessment are said, and for a high-risk one its area, oversight
+      and evaluation; a prohibited practice is never in use. Reviewed each
+      year (every six months when high-risk). The shared assistants, Agent
+      Studio's workflows, the shared apps and the models are offered until
+      registered. Audited, and in the evidence with each impact assessment.
+    frameworks:
+      iso42001: [6.1.4, 8.4, A.4.2, A.5.2, A.5.3, A.5.4, A.5.5, A.6.2.4, A.6.2.6, A.9.2, A.9.3, A.9.4]
+      euaiact: [Art.5, Art.6, Art.14, Art.26, Art.27]
+      airmf: [GOVERN 1.6, MAP 1.1, MAP 3.5, MAP 5.1, MEASURE 2.1]
+      nist80053: [CM-8, PM-5]
+    docs: [compliance/README.md#ai-systems]
+    tests:
+      - Llm.Tests/AiGovernanceTests.An_AI_system_is_put_into_use_only_once_its_class_impact_oversight_and_evaluation_are_said
+    checks: [app:ai-systems]
+    operator: >-
+      Register each AI system before it goes into use, with its owner;
+      classify it under the AI Act with your counsel; assess its impact with
+      the people it affects in mind; give each high-risk system its human
+      oversight and evaluation, and its fundamental rights assessment where
+      Article 27 asks for one.
+
+  - id: GOV-10
+    title: People know when content is made by AI
+    meets: >-
+      Under the chat's box, people are told that answers are made by AI and
+      can be wrong. A picture a model made (in the chat or the media studio)
+      says so in its own metadata, as IPTC's digital source type
+      trainedAlgorithmicMedia in XMP; a person's picture a model changed (an
+      edit, a cutout) says compositeWithTrainedAlgorithmicMedia. PNG and JPEG
+      carry it; video and sound do not yet.
+    frameworks:
+      euaiact: [Art.50]
+      iso42001: [A.8.2, A.8.5]
+      airmf: [GOVERN 4.2, MANAGE 2.4]
+    docs: [compliance/README.md#ai-systems]
+    tests:
+      - Llm.Tests/AiGovernanceTests.A_generated_picture_says_in_its_metadata_that_a_model_made_or_changed_it
+    operator: >-
+      Tell people elsewhere too where your use of AI is not obvious (a
+      published text, a voice on the phone), and keep the marks on what you
+      publish.

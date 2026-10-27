@@ -278,8 +278,10 @@ public sealed partial class MediaJobs(IServiceScopeFactory scopes, TimeProvider 
         }
         var items = new List<MediaItem>();
         var stem = Path.GetFileNameWithoutExtension(Chat.Tools.ImageTool.FileName(prompt.Length > 0 ? prompt : source?.Prompt ?? job.Action));
-        foreach (var (data, type, rw, rh, secs) in results)
+        foreach (var (made, type, rw, rh, secs) in results)
         {
+            // Marked as made by a model, in its own metadata where the format has a place for it (AI Act Art. 50(2)).
+            var data = AiMark.Mark(made, type, composite: source is not null);
             var attachment = new ChatAttachment
             {
                 UserId = me.Id, FileName = stem + type switch { "image/png" => ".png", "image/jpeg" => ".jpg", "video/webm" => ".webm", _ => ".avi" }, ContentType = type, Size = data.Length,
@@ -398,7 +400,8 @@ public sealed partial class MediaJobs(IServiceScopeFactory scopes, TimeProvider 
             {
                 case MediaJob.Cutout:
                     await PhaseAsync(db, job, "Taking the background away");
-                    data = await server.CutoutAsync(file!.Data!, file.ContentType, ct);
+                    // The person's picture, changed by a model: marked so (AI Act Art. 50(2)).
+                    data = AiMark.Mark(await server.CutoutAsync(file!.Data!, file.ContentType, ct), "image/png", composite: true);
                     (type, model, call) = ("image/png", StudioServer.CutoutModel, Gateway.SpendLog.PictureCall);
                     (width, height) = Png.SizeOf(data) is { } wh ? (wh.Width, wh.Height) : (source!.Width, source.Height);
                     break;

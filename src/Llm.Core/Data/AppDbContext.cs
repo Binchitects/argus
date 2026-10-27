@@ -114,6 +114,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Compliance.Certificate> Certificates => Set<Compliance.Certificate>();
     public DbSet<Compliance.ControlWaiver> ControlWaivers => Set<Compliance.ControlWaiver>();
     public DbSet<Compliance.Supplier> Suppliers => Set<Compliance.Supplier>();
+    public DbSet<Compliance.AiSystem> AiSystems => Set<Compliance.AiSystem>();
     public DbSet<Compliance.AccessReviewItem> AccessReviewItems => Set<Compliance.AccessReviewItem>();
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<KnowledgeSource> KnowledgeSources => Set<KnowledgeSource>();
@@ -1158,6 +1159,28 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(s => s.Owner).HasMaxLength(256);
             e.Property(s => s.Notes).HasMaxLength(4000);
             e.Property(s => s.Source).HasMaxLength(128);
+            e.Property(s => s.ReviewedBy).HasMaxLength(256);
+            e.Property(s => s.CreatedBy).HasMaxLength(256);
+            e.HasIndex(s => s.Source);
+        });
+        builder.Entity<Compliance.AiSystem>(e =>
+        {
+            e.ToTable("ai_systems");
+            e.Property(s => s.Name).HasMaxLength(200);
+            e.Property(s => s.Kind).HasMaxLength(16);
+            e.Property(s => s.Source).HasMaxLength(128);
+            e.Property(s => s.Purpose).HasMaxLength(2000);
+            e.Property(s => s.IntendedUse).HasMaxLength(2000);
+            e.Property(s => s.Affected).HasMaxLength(2000);
+            e.Property(s => s.Class).HasMaxLength(16);
+            e.Property(s => s.ClassWhy).HasMaxLength(2000);
+            e.Property(s => s.HighRiskArea).HasMaxLength(64);
+            e.Property(s => s.Role).HasMaxLength(16);
+            e.Property(s => s.Owner).HasMaxLength(256);
+            e.Property(s => s.Oversight).HasMaxLength(2000);
+            e.Property(s => s.Evaluation).HasMaxLength(2000);
+            e.Property(s => s.ImpactAssessment).HasMaxLength(8000);
+            e.Property(s => s.ImpactAssessedBy).HasMaxLength(256);
             e.Property(s => s.ReviewedBy).HasMaxLength(256);
             e.Property(s => s.CreatedBy).HasMaxLength(256);
             e.HasIndex(s => s.Source);

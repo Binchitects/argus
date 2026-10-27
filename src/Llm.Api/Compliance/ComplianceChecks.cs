@@ -22,7 +22,7 @@ public sealed record CheckResult(string Id, string Title, string State, string D
 /// </summary>
 public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users, Access.AccessService access, IOptionsMonitor<AuthOptions> auth,
     IOptions<IdentityOptions> identity, IOptionsMonitor<Retention.RetentionOptions> retention, StoragePlaces places, LokiDatasource loki,
-    PromDatasource prom, IOptions<StackOptions> stack, AuditWatch auditWatch, AuditChainState auditState, IOptionsMonitor<AuditOptions> auditOptions, AuditForwarder forwarder, IOptionsMonitor<ComplianceOptions> compliance, IOptionsMonitor<NoticeOptions> notice, Policies policies, Suppliers suppliers, TimeProvider clock)
+    PromDatasource prom, IOptions<StackOptions> stack, AuditWatch auditWatch, AuditChainState auditState, IOptionsMonitor<AuditOptions> auditOptions, AuditForwarder forwarder, IOptionsMonitor<ComplianceOptions> compliance, IOptionsMonitor<NoticeOptions> notice, Policies policies, Suppliers suppliers, AiSystems ai, TimeProvider clock)
 {
     public const string Ok = "ok", Warn = "warn", Fail = "fail", Unknown = "unknown";
 
@@ -52,6 +52,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         ("policies", "Policies are approved, reviewed in time and read"),
         ("audits", "Audited each year, findings acted on in time, certificates current"),
         ("suppliers", "Suppliers are registered, agreed with and reviewed"),
+        ("ai-systems", "AI systems are registered, classified, assessed and reviewed"),
     ];
 
     /// <summary>A newest backup older than this is amber; one older than <see cref="BackupStale"/> is red.</summary>
@@ -87,6 +88,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
                 "policies" => await PoliciesAsync(ct),
                 "audits" => await AuditsAsync(ct),
                 "suppliers" => await SuppliersAsync(ct),
+                "ai-systems" => await AiSystemsAsync(ct),
                 _ => (Unknown, "No such check."),
             };
             results.Add(new CheckResult(id, title, state, detail));
@@ -512,6 +514,25 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
             unagreed.Count > 0 ? $"personal or health data with no agreement said (a DPA, a BAA): {string.Join(", ", unagreed)}" : null,
         }.OfType<string>().ToList();
         return problems.Count == 0 ? (Ok, $"{said}, every service Arena connects to among them.") : (Warn, $"{said}; {string.Join("; ", problems)}.");
+    }
+
+    /// <summary>The shared assistants, workflows, apps and models in the register; none in use with something missing (red) or past its review.</summary>
+    private async Task<(string, string)> AiSystemsAsync(CancellationToken ct)
+    {
+        var listed = (await ai.ListAsync(ct)).Where(s => s.RetiredAt is null).ToList();
+        var missing = await ai.SuggestAsync(ct);
+        var inUse = listed.Where(s => s.InUseSince is not null).ToList();
+        var lacking = inUse.Where(s => s.Missing.Count > 0).Select(s => $"{s.Name} ({string.Join(", ", s.Missing)})").ToList();
+        var overdue = listed.Where(s => s.ReviewOverdue).Select(s => s.Name).ToList();
+        var classes = string.Join(", ", listed.GroupBy(s => s.Class).Select(g => $"{g.Count()} {g.Key}"));
+        var said = $"{listed.Count} AI system{(listed.Count == 1 ? "" : "s")} in the register{(classes.Length > 0 ? $" ({classes})" : "")}, {inUse.Count} in use";
+        var problems = new[]
+        {
+            lacking.Count > 0 ? $"in use without what their class needs: {string.Join("; ", lacking)}" : null,
+            missing.Count > 0 ? $"not in it yet: {string.Join(", ", missing.Take(5).Select(m => m.Name))}{(missing.Count > 5 ? $" and {missing.Count - 5} more" : "")}" : null,
+            overdue.Count > 0 ? $"past their review: {string.Join(", ", overdue)}" : null,
+        }.OfType<string>().ToList();
+        return problems.Count == 0 ? (Ok, $"{said}.") : (lacking.Count > 0 ? Fail : Warn, $"{said}; {string.Join("; ", problems)}.");
     }
 
     private (string, string) DataKey() => string.IsNullOrEmpty(auth.CurrentValue.DataKey)

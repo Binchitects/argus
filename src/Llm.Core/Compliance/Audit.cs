@@ -124,3 +124,52 @@ public sealed class Supplier
     public required string CreatedBy { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
+
+/// <summary>
+/// An AI system the company runs (ISO 42001's inventory, the EU AI Act, NIST's AI RMF): an assistant, an agent, an app or a
+/// model, with its purpose and intended use, whom it affects, its class under the AI Act and the company's role, its impact
+/// assessment, human oversight and evaluation; in use only once those its class needs are said.
+/// </summary>
+public sealed class AiSystem
+{
+    public static readonly string[] Kinds = ["assistant", "agent", "app", "model", "other"];
+    /// <summary>Under the AI Act: not yet assessed, minimal, limited (transparency duties), high-risk, or a prohibited practice.</summary>
+    public static readonly string[] Classes = ["unassessed", "minimal", "limited", "high", "prohibited"];
+    public static readonly string[] Roles = ["deployer", "provider", "both"];
+    /// <summary>The AI Act's Annex III areas, where a system is high-risk.</summary>
+    public static readonly string[] HighRiskAreas =
+    [
+        "biometrics", "critical infrastructure", "education and vocational training", "employment and workers management",
+        "essential private and public services", "law enforcement", "migration, asylum and border control", "justice and democratic processes",
+    ];
+
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public required string Name { get; set; }
+    public string Kind { get; set; } = "assistant";
+    /// <summary>What Arena knows it as (assistant:ID, workflow:ID, app:ID, model:NAME), when it came from there.</summary>
+    public string? Source { get; set; }
+    public string? Purpose { get; set; }
+    public string? IntendedUse { get; set; }
+    /// <summary>Whom it affects: the people who use it, and those its outputs are about.</summary>
+    public string? Affected { get; set; }
+    public string Class { get; set; } = "unassessed";
+    public string? ClassWhy { get; set; }
+    /// <summary>For a high-risk system: its Annex III area.</summary>
+    public string? HighRiskArea { get; set; }
+    public string Role { get; set; } = "deployer";
+    public string? Owner { get; set; }
+    /// <summary>How people oversee it: who can stop or overrule it, and how.</summary>
+    public string? Oversight { get; set; }
+    /// <summary>How it was evaluated for its task, and where the results are.</summary>
+    public string? Evaluation { get; set; }
+    public string? ImpactAssessment { get; set; }
+    public DateTimeOffset? ImpactAssessedAt { get; set; }
+    public string? ImpactAssessedBy { get; set; }
+    public DateTimeOffset? InUseSince { get; set; }
+    public DateTimeOffset ReviewDue { get; set; }
+    public DateTimeOffset? ReviewedAt { get; set; }
+    public string? ReviewedBy { get; set; }
+    public DateTimeOffset? RetiredAt { get; set; }
+    public required string CreatedBy { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}

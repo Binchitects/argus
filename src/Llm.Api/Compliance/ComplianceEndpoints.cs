@@ -63,6 +63,8 @@ public sealed record FindingVerifyRequest(bool Worked, string? Note);
 
 public sealed record SupplierReviewRequest(string? Note);
 
+public sealed record AiAssessRequest(string? Assessment);
+
 public sealed record RestrictionRequest(bool Restricted, string? Why);
 
 public sealed record DataRequestView(Guid Id, Guid? UserId, string Person, string? Email, string Kind, string? Details, string Status, DateTimeOffset ReceivedAt,
@@ -96,6 +98,7 @@ public static class ComplianceEndpoints
         services.AddScoped<Policies>();
         services.AddScoped<Audits>();
         services.AddScoped<Suppliers>();
+        services.AddScoped<AiSystems>();
         services.AddHostedService<AccessReviewSchedule>();
     }
 
@@ -263,6 +266,21 @@ public static class ComplianceEndpoints
         g.MapPost("/suppliers/{id:guid}/retire", async (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, Suppliers suppliers, CancellationToken ct) =>
             await SupplierAsync(async () => await suppliers.RetireAsync(id, await Who(p, users), ct)));
 
+        // The AI systems register (GOV-09).
+        g.MapGet("/ai-systems", async (AiSystems ai, CancellationToken ct) => Results.Ok(new { systems = await ai.ListAsync(ct), suggested = await ai.SuggestAsync(ct) }));
+        g.MapPost("/ai-systems", async (AiSystemInput body, ClaimsPrincipal p, UserManager<AppUser> users, AiSystems ai, CancellationToken ct) =>
+            await AiAsync(async () => await ai.SaveAsync(null, body, await Who(p, users), ct)));
+        g.MapPut("/ai-systems/{id:guid}", async (Guid id, AiSystemInput body, ClaimsPrincipal p, UserManager<AppUser> users, AiSystems ai, CancellationToken ct) =>
+            await AiAsync(async () => await ai.SaveAsync(id, body, await Who(p, users), ct)));
+        g.MapPost("/ai-systems/{id:guid}/assess", async (Guid id, AiAssessRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AiSystems ai, CancellationToken ct) =>
+            await AiAsync(async () => await ai.AssessAsync(id, body.Assessment, await Who(p, users), ct)));
+        g.MapPost("/ai-systems/{id:guid}/in-use", async (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AiSystems ai, CancellationToken ct) =>
+            await AiAsync(async () => await ai.PutInUseAsync(id, await Who(p, users), ct)));
+        g.MapPost("/ai-systems/{id:guid}/review", async (Guid id, SupplierReviewRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AiSystems ai, CancellationToken ct) =>
+            await AiAsync(async () => await ai.ReviewAsync(id, body.Note, await Who(p, users), ct)));
+        g.MapPost("/ai-systems/{id:guid}/retire", async (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AiSystems ai, CancellationToken ct) =>
+            await AiAsync(async () => await ai.RetireAsync(id, await Who(p, users), ct)));
+
         g.MapGet("/incidents", async (AppDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
             var since = clock.GetUtcNow().AddDays(-60);
@@ -401,6 +419,22 @@ public static class ComplianceEndpoints
 
     /// <summary>The signed-in person's name, as the records keep it.</summary>
     private static async Task<string> Who(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!.UserName!;
+
+    private static async Task<IResult> AiAsync<T>(Func<Task<T>> work)
+    {
+        try
+        {
+            return Results.Ok(await work());
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound();
+        }
+        catch (AiSystemException ex)
+        {
+            return AuthEndpoints.Problem(400, "ai-system", ex.Message);
+        }
+    }
 
     private static async Task<IResult> SupplierAsync<T>(Func<Task<T>> work)
     {
@@ -618,6 +652,8 @@ public static class ComplianceEndpoints
                 certificates.csv      the certificates and reports the company holds, their scope and when they end
                 waivers.csv           each control waived for a time: why, what makes up for it, by whom, until when
                 suppliers.csv         each supplier: the data it gets, where, its certifications and agreements, its risk and review
+                ai-systems.csv        each AI system: purpose, intended use, whom it affects, AI Act class and role, oversight, evaluation, review
+                ai-impact/            each AI system's impact assessment, as written
 
                 """);
             Text("controls.yaml", ComplianceControls.Text);
@@ -696,6 +732,13 @@ public static class ComplianceEndpoints
             var supplierList = await http.RequestServices.GetRequiredService<Suppliers>().ListAsync(ct);
             Text("suppliers.csv", Csv([["name", "kind", "service", "data", "location", "certifications", "agreements", "risk", "owner", "review due", "reviewed by", "reviewed at", "retired"],
                 .. supplierList.Select(s => new object?[] { s.Name, s.Kind, s.Service, string.Join(" ", s.Data), s.Location, s.Certifications, s.Agreements, s.Risk, s.Owner, U(s.ReviewDue), s.ReviewedBy, U(s.ReviewedAt), U(s.RetiredAt) })]));
+            var aiList = await http.RequestServices.GetRequiredService<AiSystems>().ListAsync(ct);
+            Text("ai-systems.csv", Csv([["name", "kind", "purpose", "intended use", "affects", "class", "why", "annex III area", "role", "owner", "oversight", "evaluation", "assessed by", "assessed at", "in use since", "review due", "retired"],
+                .. aiList.Select(s => new object?[] { s.Name, s.Kind, s.Purpose, s.IntendedUse, s.Affected, s.Class, s.ClassWhy, s.HighRiskArea, s.Role, s.Owner, s.Oversight, s.Evaluation, s.ImpactAssessedBy, U(s.ImpactAssessedAt), U(s.InUseSince), U(s.ReviewDue), U(s.RetiredAt) })]));
+            foreach (var s in aiList.Where(s => s.ImpactAssessment is not null))
+            {
+                Text($"ai-impact/{s.Id}.md", $"# {s.Name}: impact assessment\n\nBy {s.ImpactAssessedBy}, {U(s.ImpactAssessedAt)}.\n\n{s.ImpactAssessment}\n");
+            }
             Text("audit-chain.json", JsonSerializer.Serialize(await watch.WalkAsync(anchor: false, ct), json));
             Text("audit-anchors.jsonl", string.Concat(AnchorsOf(auditOptions.CurrentValue).Select(a => JsonSerializer.Serialize(a, JsonSerializerOptions.Web) + "\n")));
         }

@@ -2120,6 +2120,9 @@ documents; it says what is the operator's part, as v7.1 does.
    - its record kept.
    The transparency duties built in: a notice that answers are generated, and
    generated media marked in its metadata as made by an AI.
+   Done: Admin → Compliance → AI systems (GOV-09, the `ai-systems` check);
+   the chat's notice and pictures marked in XMP (GOV-10). Left: video and
+   sound marked too.
 8. **Readiness for each certification**, as a score with what is missing:
    controls met, the operator's parts attested, risks treated, policies
    current, audits' findings closed. Each one exports what its auditor reads:

@@ -242,6 +242,31 @@ connectors, the GitLab Argus reads, and Hugging Face. The register is in the
 evidence (`suppliers.csv`). The `suppliers` check is amber while such a
 service is missing, a review is past due, or an agreement is.
 
+## AI systems
+
+Admin → Compliance → AI systems is the register of the company's AI systems
+that ISO/IEC 42001, the EU AI Act and NIST's AI RMF ask for (GOV-09): the
+assistants, agents (Agent Studio's workflows), apps and models people use.
+Each has its purpose, intended use and whom it affects; its class under the
+AI Act (minimal, limited, high-risk with its Annex III area, or a prohibited
+practice) and the company's role (deployer, provider, or both); its impact
+assessment, in the assessor's name; its human oversight; and its evaluation.
+A system is put into use only once its class, purpose and impact assessment
+are said, and for a high-risk one its area, oversight and evaluation too; a
+prohibited practice is never in use. Each is reviewed every year (every six
+months when high-risk). The shared assistants, the workflows, the shared apps
+and the models are offered for the register until they are in it. The
+register and each impact assessment are in the evidence (`ai-systems.csv`,
+`ai-impact/`); the `ai-systems` check is amber while something is missing or
+past its review, red for a system in use without what its class needs.
+
+People know when content is made by AI (GOV-10, the AI Act's Article 50):
+under the chat's box, a line says answers are made by AI and can be wrong;
+and a picture a model made says so in its own metadata (IPTC's digital source
+type in XMP: `trainedAlgorithmicMedia`, or `compositeWithTrainedAlgorithmicMedia`
+for a person's picture a model changed). PNG and JPEG carry the mark; video and
+sound do not yet.
+
 ## Access reviews
 
 An access review lists, for a reviewer to **Keep** or **Revoke**:

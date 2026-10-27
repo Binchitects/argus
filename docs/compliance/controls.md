@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-The 32 controls Arena provides, from [controls.yaml](controls.yaml). How they are kept: [README](README.md#controls-and-how-they-are-kept). Each framework's clauses and the controls that serve them: [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md), [SOC 2, Trust Services Criteria](frameworks/soc2.md), [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md), [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md), [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md), [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md), [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md), [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md), [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md), [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md), [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md), [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md), [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md), [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md).
+The 34 controls Arena provides, from [controls.yaml](controls.yaml). How they are kept: [README](README.md#controls-and-how-they-are-kept). Each framework's clauses and the controls that serve them: [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md), [SOC 2, Trust Services Criteria](frameworks/soc2.md), [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md), [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md), [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md), [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md), [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md), [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md), [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md), [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md), [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md), [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md), [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md), [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md).
 
 ## People and access (IAM)
 
@@ -911,3 +911,42 @@ The supplier register (Admin → Compliance → Suppliers): each model provider,
 **Watched by** `app:suppliers` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
 
 **The company's part** Register each supplier with what it gets, sign a DPA (and a BAA for health data) where it processes personal data, keep its certificates' dates current, and review it on time.
+
+### GOV-09: AI systems are registered, classified, assessed and overseen
+
+The register of the company's AI systems (Admin → Compliance → AI systems): assistants, agents, apps and models, each with its purpose, intended use and whom it affects, its class under the EU AI Act (minimal, limited, high-risk with its Annex III area, or a prohibited practice) and the company's role (deployer, provider), its impact assessment in the assessor's name, its human oversight and its evaluation. A system is put into use only once its class, purpose and impact assessment are said, and for a high-risk one its area, oversight and evaluation; a prohibited practice is never in use. Reviewed each year (every six months when high-risk). The shared assistants, Agent Studio's workflows, the shared apps and the models are offered until registered. Audited, and in the evidence with each impact assessment.
+
+**Serves**
+
+- [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md): 6.1.4 AI system impact assessment; 8.4 AI system impact assessment, performed; A.4.2 Resource documentation; A.5.2 AI system impact assessment process; A.5.3 Documentation of AI system impact assessments; A.5.4 Assessing AI system impact on individuals or groups of individuals; A.5.5 Assessing societal impacts of AI systems; A.6.2.4 AI system verification and validation; A.6.2.6 AI system operation and monitoring; A.9.2 Processes for responsible use of AI systems; A.9.3 Objectives for responsible use of AI systems; A.9.4 Intended use of the AI system
+- [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md): Art.5 Prohibited AI practices; Art.6 Classification rules for high-risk AI systems; Art.14 Human oversight; Art.26 Obligations of deployers of high-risk AI systems; Art.27 Fundamental rights impact assessment for high-risk AI systems
+- [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md): GOVERN 1.6 Mechanisms are in place to inventory AI systems and are resourced according to organizational risk priorities.; MAP 1.1 Intended purpose, potentially beneficial uses, context-specific laws, norms and expectations, and prospective settings in which the AI system will be deployed are understood and documented. Considerations include: specific set or types of users along with their expectations; potential positive and negative impacts of system uses to individuals, communities, organizations, society, and the planet; assumptions and related limitations about AI system purposes; uses and risks across the development or product AI lifecycle; TEVV and system metrics.; MAP 3.5 Processes for human oversight are defined, assessed, and documented in accordance with organizational policies from GOVERN function.; MAP 5.1 Likelihood and magnitude of each identified impact (both potentially beneficial and harmful) based on expected use, past uses of AI systems in similar contexts, public incident reports, feedback from those external to the team that developed or deployed the AI system, or other data are identified and documented.; MEASURE 2.1 Test sets, metrics, and details about the tools used during test, evaluation, validation, and verification (TEVV) are documented.
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): CM-8 System Component Inventory; PM-5 System Inventory
+
+**Documented in** [compliance/README.md#ai-systems](README.md#ai-systems)
+
+**Proved by**
+
+- `Llm.Tests/AiGovernanceTests.An_AI_system_is_put_into_use_only_once_its_class_impact_oversight_and_evaluation_are_said`
+
+**Watched by** `app:ai-systems` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+
+**The company's part** Register each AI system before it goes into use, with its owner; classify it under the AI Act with your counsel; assess its impact with the people it affects in mind; give each high-risk system its human oversight and evaluation, and its fundamental rights assessment where Article 27 asks for one.
+
+### GOV-10: People know when content is made by AI
+
+Under the chat's box, people are told that answers are made by AI and can be wrong. A picture a model made (in the chat or the media studio) says so in its own metadata, as IPTC's digital source type trainedAlgorithmicMedia in XMP; a person's picture a model changed (an edit, a cutout) says compositeWithTrainedAlgorithmicMedia. PNG and JPEG carry it; video and sound do not yet.
+
+**Serves**
+
+- [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md): Art.50 Transparency obligations for providers and deployers of certain AI systems
+- [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md): A.8.2 System documentation and information for users; A.8.5 Information for interested parties
+- [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md): GOVERN 4.2 Organizational teams document the risks and potential impacts of the AI technology they design, develop, deploy, evaluate and use, and communicate about the impacts more broadly.; MANAGE 2.4 Mechanisms are in place and applied, responsibilities are assigned and understood to supersede, disengage, or deactivate AI systems that demonstrate performance or outcomes inconsistent with intended use.
+
+**Documented in** [compliance/README.md#ai-systems](README.md#ai-systems)
+
+**Proved by**
+
+- `Llm.Tests/AiGovernanceTests.A_generated_picture_says_in_its_metadata_that_a_model_made_or_changed_it`
+
+**The company's part** Tell people elsewhere too where your use of AI is not obvious (a published text, a voice on the phone), and keep the marks on what you publish.

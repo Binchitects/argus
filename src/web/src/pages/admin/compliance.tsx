@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils'
 import { attestedNow, complianceQuery, FRAMEWORK_GROUPS, FRAMEWORKS, manualLink, reviewsQuery, reviewState, tally, type Attestation, type CheckResult, type Control, type Framework, type State } from './compliance-api'
 import { DataRequestsSection } from './data-requests'
 import { IncidentsSection } from './incidents'
+import { AiSystemsSection } from './ai-systems'
 import { AuditsSection } from './audits'
 import { PoliciesSection } from './policies'
 import { RisksSection } from './risks'
@@ -27,7 +28,7 @@ import { SoaSection } from './soa'
 import { SuppliersSection } from './suppliers'
 
 /** A section's old anchor (#incidents in a notification's link): its tab. */
-const HASH_TABS: Record<string, string> = { incidents: 'incidents', 'data-requests': 'requests', risks: 'risks', soa: 'soa', policies: 'policies', audits: 'audits', suppliers: 'suppliers', 'access-reviews': 'reviews' }
+const HASH_TABS: Record<string, string> = { incidents: 'incidents', 'data-requests': 'requests', risks: 'risks', soa: 'soa', policies: 'policies', audits: 'audits', suppliers: 'suppliers', ai: 'ai', 'access-reviews': 'reviews' }
 
 const AREAS: Record<string, string> = {
   IAM: 'People and access',
@@ -293,6 +294,7 @@ export function CompliancePage() {
           <TabsTrigger value="policies">Policies</TabsTrigger>
           <TabsTrigger value="audits">Audits</TabsTrigger>
           <TabsTrigger value="suppliers">Suppliers</TabsTrigger>
+          <TabsTrigger value="ai">AI systems</TabsTrigger>
           <TabsTrigger value="reviews">Access reviews</TabsTrigger>
           <TabsTrigger value="requests">Data requests</TabsTrigger>
           <TabsTrigger value="incidents">Incidents</TabsTrigger>
@@ -437,6 +439,9 @@ export function CompliancePage() {
         </TabsContent>
         <TabsContent value="suppliers">
           <SuppliersSection mayManage={mayAttest} />
+        </TabsContent>
+        <TabsContent value="ai">
+          <AiSystemsSection mayManage={mayAttest} />
         </TabsContent>
         <TabsContent value="reviews">
           <AccessReviews mayStart={mayAttest} />

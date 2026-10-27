@@ -239,7 +239,7 @@ public sealed partial class ComplianceControlsTests(AppFixture app)
             using var r = new StreamReader(zip.GetEntry(name)!.Open());
             return r.ReadToEnd();
         }
-        Assert.Equal(["README.txt", "access-reviews.csv", "attestations.csv", "audit-actions.csv", "audit-anchors.jsonl", "audit-chain.json", "audits.csv", "certificates.csv", "compliance.json", "controls.yaml", "findings.csv", "incidents.json", "notice.csv", "policies.csv", "policy-acknowledgements.csv", "privileged-access.csv", "risk-history.csv", "risks.csv", "settings.json", "soa-approvals.csv", "soa-iso27001.csv", "soa-iso42001.csv", "suppliers.csv", "waivers.csv"],
+        Assert.Equal(["README.txt", "access-reviews.csv", "ai-systems.csv", "attestations.csv", "audit-actions.csv", "audit-anchors.jsonl", "audit-chain.json", "audits.csv", "certificates.csv", "compliance.json", "controls.yaml", "findings.csv", "incidents.json", "notice.csv", "policies.csv", "policy-acknowledgements.csv", "privileged-access.csv", "risk-history.csv", "risks.csv", "settings.json", "soa-approvals.csv", "soa-iso27001.csv", "soa-iso42001.csv", "suppliers.csv", "waivers.csv"],
             zip.Entries.Select(e => e.FullName).Order(StringComparer.Ordinal));
         Assert.Equal(File.ReadAllText(Path.Combine(Root, "docs", "compliance", "controls.yaml")), Read("controls.yaml"));
         Assert.Contains("IAM-01,", Read("attestations.csv"), StringComparison.Ordinal);
