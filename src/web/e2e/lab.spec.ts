@@ -47,3 +47,33 @@ test('the science lab works a problem as a notebook, its check proved by SymPy, 
   }
   expect(errors).toEqual([])
 })
+
+test('the lab balances a reaction checked atom by atom, and draws a molecule', async ({ page, isMobile }, info) => {
+  test.setTimeout(300_000)
+  test.skip(!live, 'working a problem needs the deployed stack (E2E_CHAT=1)')
+  const fields = await (await page.request.get('/api/lab/fields')).json()
+  test.skip(!fields.available, `the lab is not available here: ${fields.why}`)
+  const errors = watchConsole(page)
+  await page.goto('/lab')
+  // A choice card: its radio is hidden, its label takes the click.
+  await page.locator('label', { has: page.getByRole('radio', { name: /Chemistry/ }) }).click()
+  await expect(page.getByRole('radio', { name: /Chemistry/ })).toBeChecked()
+  await page.getByRole('textbox', { name: 'The problem' }).fill('Balance Fe + O2 -> Fe2O3 with chem_balance, then show ethanol (SMILES CCO) with chem_molecule.')
+  await page.getByRole('button', { name: 'Work it' }).click()
+  await expect(page).toHaveURL(/\/lab\/[0-9a-f-]{36}$/)
+  const id = page.url().split('/').pop()!
+  try {
+    const reaction = page.getByRole('region', { name: 'Reaction' }).first()
+    await expect(reaction).toContainText('Balanced, checked', { timeout: 240_000 })
+    await expect(reaction).toContainText('4 Fe + 3 O2 → 2 Fe2O3')
+    const molecule = page.getByRole('region', { name: 'Molecule' }).first()
+    await expect(molecule).toContainText('C2H6O', { timeout: 120_000 })
+    await expect(molecule.getByRole('img', { name: 'C2H6O drawn' })).toBeVisible()
+    await expect(page.getByRole('list', { name: 'Notebook' })).toHaveAttribute('aria-busy', 'false', { timeout: 120_000 })
+    await expectAccessible(page, info, 'lab-chemistry')
+    await screenshot(page, info, `lab-chemistry${isMobile ? '-phone' : ''}`)
+  } finally {
+    expect((await page.request.delete(`/api/chat/conversations/${id}`, { headers: H })).status()).toBe(204)
+  }
+  expect(errors).toEqual([])
+})
