@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-The 27 controls Arena provides, from [controls.yaml](controls.yaml). How they are kept: [README](README.md#controls-and-how-they-are-kept). Each framework's clauses and the controls that serve them: [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md), [SOC 2, Trust Services Criteria](frameworks/soc2.md), [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md), [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md).
+The 27 controls Arena provides, from [controls.yaml](controls.yaml). How they are kept: [README](README.md#controls-and-how-they-are-kept). Each framework's clauses and the controls that serve them: [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md), [SOC 2, Trust Services Criteria](frameworks/soc2.md), [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md), [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md), [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md), [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md), [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md), [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md), [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md), [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md), [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md), [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md), [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md), [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md).
 
 ## People and access (IAM)
 
@@ -12,10 +12,16 @@ Every person has their own account. Passwords must score 3 or more on zxcvbn, wi
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.5.16 Identity management; A.5.17 Authentication information; A.8.5 Secure authentication
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.5.16 Identity management; A.5.17 Authentication information; A.8.5 Secure authentication
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC6.1 Logical access security software, infrastructure and architectures; CC6.2 Registering and authorising new users
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.308(a)(5)(ii)(C) Log-in monitoring (addressable); 164.308(a)(5)(ii)(D) Password management (addressable); 164.312(a)(2)(i) Unique user identification (required); 164.312(d) Person or entity authentication
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.32 Security of processing
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 8.2 User identification and accounts are strictly managed; 8.3 Strong authentication is established and managed
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): IAM Identity and access management
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): PR.AA-01 Identities and credentials for authorized users, services, and hardware are managed by the organization; PR.AA-03 Users, services, and hardware are authenticated
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): AC-2 Account Management; AC-7 Unsuccessful Logon Attempts; IA-2 Identification and Authentication (Organizational Users); IA-4 Identifier Management; IA-5 Authenticator Management; IA-5(1) Password-based Authentication
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.01.01 Account Management; 03.01.08 Unsuccessful Logon Attempts; 03.05.01 User Identification and Authentication; 03.05.05 Identifier Management; 03.05.07 Password Management
+- [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): FIA_UID User identification; FIA_UAU User authentication; FIA_AFL Authentication failures; FIA_SOS Specification of secrets
 
 **Documented in** [authentication.md#what-protects-the-sign-in](../authentication.md#what-protects-the-sign-in)
 
@@ -38,10 +44,16 @@ A session ends after an hour without activity and after 12 hours in any case (30
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.8.5 Secure authentication
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.8.5 Secure authentication
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC6.1 Logical access security software, infrastructure and architectures
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.312(a)(2)(iii) Automatic logoff (addressable)
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.32 Security of processing
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 8.2 User identification and accounts are strictly managed
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): IAM Identity and access management
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): PR.AA-03 Users, services, and hardware are authenticated
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): AC-11 Device Lock; AC-12 Session Termination; SC-23 Session Authenticity
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.01.10 Device Lock; 03.01.11 Session Termination
+- [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): FTA_SSL Session locking and termination
 
 **Documented in** [authentication.md#what-protects-the-sign-in](../authentication.md#what-protects-the-sign-in)
 
@@ -61,10 +73,16 @@ People enrol an authenticator app and get recovery codes; an admin can reset a l
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.8.5 Secure authentication
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.8.5 Secure authentication
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC6.1 Logical access security software, infrastructure and architectures
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.312(d) Person or entity authentication
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.32 Security of processing
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 8.4 Multi-factor authentication secures access into the CDE; 8.5 Multi-factor authentication systems prevent misuse
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): IAM Identity and access management
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): PR.AA-03 Users, services, and hardware are authenticated
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): IA-2(1) Multi-factor Authentication to Privileged Accounts; IA-2(2) Multi-factor Authentication to Non-privileged Accounts
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.05.03 Multi-Factor Authentication
+- [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): FIA_UAU User authentication
 
 **Documented in** [authentication.md#what-protects-the-sign-in](../authentication.md#what-protects-the-sign-in)
 
@@ -86,10 +104,15 @@ People come from the company's directory (LDAP or Active Directory), OIDC or SAM
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.5.16 Identity management; A.5.18 Access rights
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.5.16 Identity management; A.5.18 Access rights
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC6.2 Registering and authorising new users; CC6.3 Role-based access, least privilege and segregation of duties
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.308(a)(3)(ii)(C) Termination procedures (addressable); 164.308(a)(4)(ii)(C) Access establishment and modification (addressable)
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.32 Security of processing
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 8.2 User identification and accounts are strictly managed
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): IAM Identity and access management; HRS Human resources
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): PR.AA-01 Identities and credentials for authorized users, services, and hardware are managed by the organization; PR.AA-05 Access permissions, entitlements, and authorizations are defined in a policy, managed, enforced, and reviewed, and incorporate the principles of least privilege and separation of duties
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): AC-2 Account Management; AC-2(1) Automated System Account Management; PS-4 Personnel Termination; PS-5 Personnel Transfer
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.01.01 Account Management; 03.09.02 Personnel Termination and Transfer
 
 **Documented in** [authentication.md#the-company-directory-ldap--active-directory](../authentication.md#the-company-directory-ldap--active-directory), [authentication.md#scim-provisioning](../authentication.md#scim-provisioning), [authentication.md#company-sign-in-by-saml-20](../authentication.md#company-sign-in-by-saml-20)
 
@@ -109,10 +132,16 @@ What a person may do comes from roles (built in, or made by the company) held di
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.5.15 Access control; A.5.18 Access rights; A.8.2 Privileged access rights; A.8.3 Information access restriction
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.5.15 Access control; A.5.18 Access rights; A.8.2 Privileged access rights; A.8.3 Information access restriction
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC6.1 Logical access security software, infrastructure and architectures; CC6.3 Role-based access, least privilege and segregation of duties
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.308(a)(4)(ii)(B) Access authorisation (addressable); 164.312(a)(1) Access control
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.25 Data protection by design and by default; Art.32 Security of processing
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 7.2 Access to system components and data is defined and assigned; 7.3 Access is managed through an access control system
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): IAM Identity and access management
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): PR.AA-05 Access permissions, entitlements, and authorizations are defined in a policy, managed, enforced, and reviewed, and incorporate the principles of least privilege and separation of duties
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): AC-3 Access Enforcement; AC-5 Separation of Duties; AC-6 Least Privilege
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.01.02 Access Enforcement; 03.01.04 Separation of Duties; 03.01.05 Least Privilege
+- [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): FDP_ACC Access control policy; FDP_ACF Access control functions; FMT_SMR Security management roles
 
 **Documented in** [admin.md#access-roles-and-rules](../admin.md#access-roles-and-rules)
 
@@ -130,10 +159,16 @@ Each key belongs to one person and works only as them; an unknown, blocked or ex
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.5.17 Authentication information; A.8.5 Secure authentication
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.5.17 Authentication information; A.8.5 Secure authentication
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC6.1 Logical access security software, infrastructure and architectures
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.312(d) Person or entity authentication
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.32 Security of processing
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 8.6 Application and system accounts are strictly managed
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): IAM Identity and access management
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): PR.AA-01 Identities and credentials for authorized users, services, and hardware are managed by the organization
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): AC-2 Account Management; IA-5 Authenticator Management
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.05.12 Authenticator Management
+- [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): FIA_UAU User authentication
 
 **Documented in** [authentication.md#as-a-machine-client-of-the-engine-api](../authentication.md#as-a-machine-client-of-the-engine-api)
 
@@ -150,10 +185,15 @@ An access review lists every privileged role given to a person, a group or every
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.5.18 Access rights; A.8.2 Privileged access rights
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.5.18 Access rights; A.8.2 Privileged access rights
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC6.2 Registering and authorising new users; CC6.3 Role-based access, least privilege and segregation of duties
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.308(a)(3)(ii)(B) Workforce clearance procedure (addressable); 164.308(a)(4)(ii)(C) Access establishment and modification (addressable)
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.32(1)(d) Security of processing
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 7.2 Access to system components and data is defined and assigned
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): IAM Identity and access management
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): PR.AA-05 Access permissions, entitlements, and authorizations are defined in a policy, managed, enforced, and reviewed, and incorporate the principles of least privilege and separation of duties
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): AC-2 Account Management; AC-6(7) Review of User Privileges
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.01.01 Account Management
 
 **Documented in** [compliance/README.md#access-reviews](README.md#access-reviews)
 
@@ -174,10 +214,18 @@ The audit log keeps every sign-in, every change to people, groups, roles, settin
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.8.15 Logging
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.8.15 Logging
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC7.2 Monitoring system components for anomalies
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.308(a)(1)(ii)(D) Information system activity review (required); 164.312(b) Audit controls
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.5(2) Principles of processing personal data; Art.30 Records of processing activities
+- [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md): A.6.2.8 AI system recording of event logs
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 10.2 Audit logs support detection and forensic analysis
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): LOG Logging and monitoring
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): PR.PS-04 Log records are generated and made available for continuous monitoring; DE.CM-03 Personnel activity and technology usage are monitored to find potentially adverse events
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): AU-2 Event Logging; AU-3 Content of Audit Records; AU-12 Audit Record Generation
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.03.01 Event Logging; 03.03.02 Audit Record Content
+- [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md): Art.12 Record-keeping
+- [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): FAU_GEN Security audit data generation
 
 **Documented in** [admin.md#admin](../admin.md#admin), [settings.md#every-change-is-audited](../settings.md#every-change-is-audited)
 
@@ -198,10 +246,16 @@ Every service's logs go to Loki, searchable by container, level and text; how lo
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.8.15 Logging
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.8.15 Logging
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC7.2 Monitoring system components for anomalies
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.312(b) Audit controls
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.5(1)(e) Principles of processing personal data
+- [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md): A.6.2.8 AI system recording of event logs
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 10.5 Audit log history is retained and available
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): LOG Logging and monitoring
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): PR.PS-04 Log records are generated and made available for continuous monitoring
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): AU-11 Audit Record Retention
+- [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): FAU_STG Security audit data storage
 
 **Documented in** [admin.md#storage](../admin.md#storage)
 
@@ -220,10 +274,16 @@ Each entry is sealed onto the one before it with SHA-256, under one lock for eve
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.5.28 Collection of evidence; A.5.33 Protection of records; A.8.15 Logging
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.5.28 Collection of evidence; A.5.33 Protection of records; A.8.15 Logging
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC7.2 Monitoring system components for anomalies; CC7.3 Evaluating security events
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.312(b) Audit controls; 164.312(c)(1) Integrity; 164.312(c)(2) Mechanism to authenticate electronic PHI (addressable)
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.5(1)(f) Principles of processing personal data; Art.5(2) Principles of processing personal data; Art.32(1)(b) Security of processing
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 10.3 Audit logs are protected from destruction and modification
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): LOG Logging and monitoring
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): PR.PS-04 Log records are generated and made available for continuous monitoring
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): AU-9 Protection of Audit Information; AU-9(3) Cryptographic Protection
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.03.08 Protection of Audit Information
+- [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): FAU_STG Security audit data storage
 
 **Documented in** [compliance/README.md#the-audit-log-as-a-chain](README.md#the-audit-log-as-a-chain)
 
@@ -243,10 +303,16 @@ Every entry, as it is written, in order and each once, by syslog (RFC 5424 over 
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.8.15 Logging; A.8.16 Monitoring activities
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.8.15 Logging; A.8.16 Monitoring activities
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC7.2 Monitoring system components for anomalies
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.308(a)(1)(ii)(D) Information system activity review (required); 164.312(b) Audit controls
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.32(1)(b) Security of processing
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 10.4 Audit logs are reviewed for anomalies
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): LOG Logging and monitoring
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): DE.AE-03 Information is correlated from multiple sources
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): AU-6 Audit Record Review, Analysis, and Reporting; AU-9(2) Store on Separate Physical Systems or Components
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.03.05 Audit Record Review, Analysis, and Reporting
+- [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): FAU_SAR Security audit review
 
 **Documented in** [compliance/README.md#sending-it-to-the-siem](README.md#sending-it-to-the-siem)
 
@@ -267,10 +333,15 @@ Prometheus and Alertmanager watch the stack; an alert that starts firing reaches
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.8.16 Monitoring activities
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.8.16 Monitoring activities
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC7.2 Monitoring system components for anomalies; CC7.3 Evaluating security events
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.308(a)(1)(ii)(D) Information system activity review (required); 164.308(a)(6)(ii) Response and reporting (required)
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.32(1)(b) Security of processing
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 10.7 Failures of critical security controls are detected and answered
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): LOG Logging and monitoring
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): DE.CM-01 Networks and network services are monitored to find potentially adverse events; DE.CM-09 Computing hardware and software, runtime environments, and their data are monitored to find potentially adverse events
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): CA-7 Continuous Monitoring; SI-4 System Monitoring
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.14.06 System Monitoring
 
 **Documented in** [admin.md#admin](../admin.md#admin)
 
@@ -290,10 +361,19 @@ Many failed sign-ins, an administrative role given, many exports by one person, 
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.5.24 Information security incident management planning and preparation; A.5.25 Assessment and decision on information security events; A.5.26 Response to information security incidents; A.5.27 Learning from information security incidents; A.8.16 Monitoring activities
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.5.24 Information security incident management planning and preparation; A.5.25 Assessment and decision on information security events; A.5.26 Response to information security incidents; A.5.27 Learning from information security incidents; A.8.16 Monitoring activities
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC7.3 Evaluating security events; CC7.4 Responding to security incidents; CC7.5 Recovering from security incidents
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.308(a)(6)(ii) Response and reporting (required); 164.404 Notification to individuals of a breach; 164.408 Notification to the Secretary of a breach
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.33 Notifying the supervisory authority of a breach; Art.34 Telling the people affected of a breach
+- [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md): A.8.4 Communication of incidents
+- [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md): 8.4.3 Warning and communication
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 10.4 Audit logs are reviewed for anomalies; 12.10 Security incidents are responded to immediately
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): SEF Security incident management, e-discovery and cloud forensics
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): DE.AE-02 Potentially adverse events are analyzed to better understand associated activities; RS.MA-01 The incident response plan is executed in coordination with relevant third parties once an incident is declared; RS.CO-02 Internal and external stakeholders are notified of incidents
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): IR-4 Incident Handling; IR-5 Incident Monitoring; IR-6 Incident Reporting; IR-8 Incident Response Plan; SI-4 System Monitoring
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.06.01 Incident Handling; 03.06.02 Incident Monitoring, Reporting, and Response Assistance
+- [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md): MANAGE 4.3 Incidents and errors are communicated to relevant AI actors including affected communities. Processes for tracking, responding to, and recovering from incidents and errors are followed and documented.
+- [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md): Art.73 Reporting of serious incidents
 
 **Documented in** [compliance/README.md#security-alerts-and-incidents](README.md#security-alerts-and-incidents)
 
@@ -314,9 +394,12 @@ The company sets how long chats are kept, a group can set a shorter time, and ev
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.5.33 Protection of records; A.8.10 Information deletion
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.5.33 Protection of records; A.8.10 Information deletion
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): C1.2 Disposing of confidential information; P4.2 Retention of personal information; P4.3 Disposal of personal information
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.5(1)(e) Principles of processing personal data; Art.17 Right to erasure
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 3.2 Storage of account data is kept to a minimum
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): DSP Data security and privacy lifecycle management
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): SI-12 Information Management and Retention
 
 **Documented in** [admin.md#retention-legal-hold-and-exports](../admin.md#retention-legal-hold-and-exports)
 
@@ -334,8 +417,10 @@ A person on legal hold keeps everything: retention passes them by, and a chat th
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.5.28 Collection of evidence; A.5.33 Protection of records
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.5.28 Collection of evidence; A.5.33 Protection of records
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.17(3)(e) Right to erasure
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): DSP Data security and privacy lifecycle management
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): SI-12 Information Management and Retention
 
 **Documented in** [admin.md#retention-legal-hold-and-exports](../admin.md#retention-legal-hold-and-exports)
 
@@ -351,10 +436,11 @@ People download everything of theirs from Your account; an admin exports a perso
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.5.34 Privacy and protection of PII
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.5.34 Privacy and protection of PII
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): P5.1 People's access to their personal information
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.524 Access of individuals to their health information
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.15 Right of access; Art.20 Right to data portability
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): DSP Data security and privacy lifecycle management; IPY Interoperability and portability
 
 **Documented in** [admin.md#retention-legal-hold-and-exports](../admin.md#retention-legal-hold-and-exports)
 
@@ -370,10 +456,16 @@ Safeguards mask personal data before a question reaches the model while the chat
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.8.11 Data masking; A.8.12 Data leakage prevention
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.8.11 Data masking; A.8.12 Data leakage prevention
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): C1.1 Identifying and keeping confidential information; CC6.7 Restricting the transmission, movement and removal of information
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.502(b) Minimum necessary
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.25 Data protection by design and by default; Art.32(1)(a) Security of processing
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 3.2 Storage of account data is kept to a minimum
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): DSP Data security and privacy lifecycle management
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): PR.DS-01 The confidentiality, integrity, and availability of data-at-rest are protected; PR.DS-02 The confidentiality, integrity, and availability of data-in-transit are protected
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): AC-4 Information Flow Enforcement; SI-15 Information Output Filtering
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.01.03 Information Flow Enforcement
+- [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): FDP_IFC Information flow control policy; FDP_IFF Information flow control functions
 
 **Documented in** [admin.md#safeguards](../admin.md#safeguards), [chat.md#safeguards](../chat.md#safeguards)
 
@@ -391,10 +483,16 @@ The signing keys, settings' secrets (directory, SSO, connectors) and tokens are 
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.8.24 Use of cryptography
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.8.24 Use of cryptography
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC6.1 Logical access security software, infrastructure and architectures
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.312(a)(2)(iv) Encryption and decryption (addressable)
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.32(1)(a) Security of processing
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 3.5 Card numbers are secured wherever they are stored; 3.6 Keys protecting stored account data are secured
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): CEK Cryptography, encryption and key management
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): PR.DS-01 The confidentiality, integrity, and availability of data-at-rest are protected
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): SC-12 Cryptographic Key Establishment and Management; SC-28 Protection of Information at Rest; SC-28(1) Cryptographic Protection
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.13.08 Transmission and Storage Confidentiality; 03.13.10 Cryptographic Key Establishment and Management
+- [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): FCS_CKM Cryptographic key management; FCS_COP Cryptographic operation; FDP_SDC Stored data confidentiality
 
 **Documented in** [authentication.md#what-protects-the-sign-in](../authentication.md#what-protects-the-sign-in)
 
@@ -417,10 +515,11 @@ A person asks from Your account (or an admin takes the request in for them) for 
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.5.34 Privacy and protection of PII
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.5.34 Privacy and protection of PII
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): P5.1 People's access to their personal information; P5.2 Correction of personal information; P4.3 Disposal of personal information
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.524 Access of individuals to their health information; 164.526 Amendment of health information
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.12(3) Transparent information and how the rights are exercised; Art.15 Right of access; Art.16 Right to rectification; Art.17 Right to erasure; Art.18 Right to restriction of processing; Art.20 Right to data portability; Art.21 Right to object
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): DSP Data security and privacy lifecycle management
 
 **Documented in** [compliance/README.md#peoples-data-requests](README.md#peoples-data-requests)
 
@@ -440,10 +539,13 @@ The audit log six years unless set (only ever from the start of its chain), the 
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.5.33 Protection of records; A.8.10 Information deletion; A.8.15 Logging
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.5.33 Protection of records; A.8.10 Information deletion; A.8.15 Logging
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): C1.2 Disposing of confidential information; P4.2 Retention of personal information; P4.3 Disposal of personal information
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.316(b)(2)(i) Time limit of six years (required)
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.5(1)(e) Principles of processing personal data
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 3.2 Storage of account data is kept to a minimum; 10.5 Audit log history is retained and available
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): DSP Data security and privacy lifecycle management
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): AU-11 Audit Record Retention; SI-12 Information Management and Retention
 
 **Documented in** [compliance/README.md#how-long-things-are-kept](README.md#how-long-things-are-kept)
 
@@ -461,10 +563,15 @@ The safeguards find e-mail addresses, phone, card, IBAN and social security numb
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.5.34 Privacy and protection of PII; A.8.11 Data masking; A.8.12 Data leakage prevention
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.5.34 Privacy and protection of PII; A.8.11 Data masking; A.8.12 Data leakage prevention
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): C1.1 Identifying and keeping confidential information; CC6.7 Restricting the transmission, movement and removal of information; P4.1 Use limited to the purposes identified
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.502(b) Minimum necessary; 164.514(b) De-identification
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.5(1)(c) Principles of processing personal data; Art.9 Special categories of personal data; Art.25 Data protection by design and by default; Art.32(1)(a) Security of processing
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 3.2 Storage of account data is kept to a minimum; 3.3 Sensitive authentication data is not stored after authorization
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): DSP Data security and privacy lifecycle management
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): PR.DS-01 The confidentiality, integrity, and availability of data-at-rest are protected
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): PT-2 Authority to Process Personally Identifiable Information; PT-3 Personally Identifiable Information Processing Purposes
+- [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md): MEASURE 2.10 Privacy risk of the AI system – as identified in the MAP function – is examined and documented.
 
 **Documented in** [compliance/README.md#personal-and-health-data](README.md#personal-and-health-data)
 
@@ -487,10 +594,16 @@ Only Traefik's ports 80 and 443 are published, 80 only to redirect; TLS 1.2 and 
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.8.20 Networks security; A.8.24 Use of cryptography; A.8.26 Application security requirements
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.8.20 Networks security; A.8.24 Use of cryptography; A.8.26 Application security requirements
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC6.6 Security against threats from outside the system's boundaries; CC6.7 Restricting the transmission, movement and removal of information
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.312(e)(1) Transmission security; 164.312(e)(2)(ii) Encryption (addressable)
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.32(1)(a) Security of processing
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 1.3 Network access to and from the cardholder data environment is restricted; 1.4 Connections between trusted and untrusted networks are controlled; 4.2 Card numbers are protected with strong cryptography in transmission
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): IVS Infrastructure and virtualization security; CEK Cryptography, encryption and key management
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): PR.DS-02 The confidentiality, integrity, and availability of data-in-transit are protected; PR.IR-01 Networks and environments are protected from unauthorized logical access and usage
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): SC-7 Boundary Protection; SC-8 Transmission Confidentiality and Integrity; SC-8(1) Cryptographic Protection; SC-13 Cryptographic Protection
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.13.01 Boundary Protection; 03.13.08 Transmission and Storage Confidentiality
+- [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): FTP_ITC Inter-TSF trusted channel; FTP_TRP Trusted path; FCS_COP Cryptographic operation
 
 **Documented in** [authentication.md#what-is-deliberately-not-behind-sign-in](../authentication.md#what-is-deliberately-not-behind-sign-in), [deployment.md#certificates](../deployment.md#certificates)
 
@@ -513,10 +626,16 @@ scripts/backup.sh backs up the databases, the settings and the files, with a sec
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.5.30 ICT readiness for business continuity; A.8.13 Information backup
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.5.30 ICT readiness for business continuity; A.8.13 Information backup
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): A1.2 Environmental protections, software, backups and recovery infrastructure; A1.3 Testing the recovery plan; CC9.1 Reducing the risks of business disruption
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.308(a)(7)(ii)(A) Data backup plan (required); 164.308(a)(7)(ii)(B) Disaster recovery plan (required); 164.308(a)(7)(ii)(D) Testing and revision procedures (addressable)
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.32(1)(c) Security of processing; Art.32(1)(d) Security of processing
+- [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md): 8.4.5 Recovery; 8.5 Exercise programme; 8.6 Evaluation of business continuity documentation and capabilities
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): BCR Business continuity management and operational resilience
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): PR.DS-11 Backups of data are created, protected, maintained, and tested; RC.RP-03 The integrity of backups and other restoration assets is verified before using them for restoration
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): CP-4 Contingency Plan Testing; CP-9 System Backup; CP-10 System Recovery and Reconstitution
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.08.09 System Backup – Cryptographic Protection
+- [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): FPT_RCV Trusted recovery
 
 **Documented in** [deployment.md#backups-and-restore](../deployment.md#backups-and-restore), [deployment.md#point-in-time-recovery-pitr](../deployment.md#point-in-time-recovery-pitr)
 
@@ -540,10 +659,15 @@ Python, documents and a plugin's own server run in the sandbox: no network, a re
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.8.22 Segregation of networks; A.8.7 Protection against malware
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.8.22 Segregation of networks; A.8.7 Protection against malware
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC6.8 Preventing or detecting unauthorised or malicious software
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.308(a)(5)(ii)(B) Protection from malicious software (addressable)
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.32(1)(b) Security of processing
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): IVS Infrastructure and virtualization security; AIS Application and interface security
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): PR.PS-05 Installation and execution of unauthorized software are prevented
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): SC-39 Process Isolation; SC-44 Detonation Chambers
+- [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md): MEASURE 2.7 AI system security and resilience – as identified in the MAP function – are evaluated and documented.
+- [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md): Art.15 Accuracy, robustness and cybersecurity
 
 **Documented in** [plugins.md#a-server-of-its-own-in-the-sandbox](../plugins.md#a-server-of-its-own-in-the-sandbox)
 
@@ -563,10 +687,17 @@ This file names, for each control, the tests and live checks that prove it; the 
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.5.36 Compliance with policies, rules and standards for information security; A.8.29 Security testing in development and acceptance; A.8.32 Change management
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.5.36 Compliance with policies, rules and standards for information security; A.8.29 Security testing in development and acceptance; A.8.32 Change management; 9.1 Monitoring, measurement, analysis and evaluation; 7.5.3 Control of documented information
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC4.1 Ongoing and separate evaluations; CC8.1 Authorising, designing, testing, approving and putting changes in place
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.308(a)(8) Evaluation
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.5(2) Principles of processing personal data; Art.25 Data protection by design and by default
+- [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md): 9.1 Monitoring, measurement, analysis and evaluation; A.6.2.4 AI system verification and validation
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 12.4 PCI DSS compliance is managed
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): A&A Audit and assurance
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): GV.OV-03 Organizational cybersecurity risk management performance is evaluated and reviewed for adjustments needed; ID.IM-01 Improvements are identified from evaluations
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): CA-2 Control Assessments; CA-7 Continuous Monitoring; SA-11 Developer Testing and Evaluation
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.12.01 Security Assessment; 03.12.03 Continuous Monitoring
+- [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): ATE_FUN Functional tests; ALC_CMC CM capabilities
 
 **Documented in** [compliance/README.md#controls-and-how-they-are-kept](README.md#controls-and-how-they-are-kept), [compliance/README.md#the-documents](README.md#the-documents), [compliance/README.md#when-a-change-weakens-a-control](README.md#when-a-change-weakens-a-control), [compliance/README.md#the-compliance-center](README.md#the-compliance-center), [development.md#releasing](../development.md#releasing)
 
@@ -590,10 +721,17 @@ The notice the company sets (acceptable use, the privacy notice) is on the sign-
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.5.10 Acceptable use of information and other associated assets; A.6.3 Information security awareness, education and training
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.5.10 Acceptable use of information and other associated assets; A.6.3 Information security awareness, education and training; 7.3 Awareness
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC2.3 Communication with external parties; P1.1 Notice of privacy practices
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.308(a)(5)(i) Security awareness and training
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.12 Transparent information and how the rights are exercised; Art.13 Information when data is collected from the person
+- [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md): 7.3 Awareness
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 12.2 Acceptable use policies are defined and implemented
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): HRS Human resources
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): GV.PO-01 Policy for managing cybersecurity risks is established based on organizational context, cybersecurity strategy, and priorities and is communicated and enforced; PR.AT-01 Personnel are provided with awareness and training so that they possess the knowledge and skills to perform general tasks with cybersecurity risks in mind
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): AC-8 System Use Notification; PL-4 Rules of Behavior; PT-5 Privacy Notice
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.15.03 Rules of Behavior
+- [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): FTA_TAB TOE access banners
 
 **Documented in** [compliance/README.md#the-sign-in-notice](README.md#the-sign-in-notice)
 
@@ -612,10 +750,16 @@ Each release has a software bill of materials (CycloneDX) of every .NET, npm and
 
 **Serves**
 
-- [ISO/IEC 27001:2022, Annex A](frameworks/iso27001.md): A.5.21 Managing information security in the ICT supply chain; A.8.8 Management of technical vulnerabilities; A.8.28 Secure coding
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.5.21 Managing information security in the ICT supply chain; A.8.8 Management of technical vulnerabilities; A.8.28 Secure coding
 - [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC7.1 Detecting configuration changes and new vulnerabilities; CC8.1 Authorising, designing, testing, approving and putting changes in place; CC9.2 Risks from vendors and business partners
 - [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.308(a)(1)(ii)(A) Risk analysis (required); 164.308(a)(1)(ii)(B) Risk management (required)
 - [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.32(1)(d) Security of processing
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 6.3 Security vulnerabilities are identified and addressed
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): TVM Threat and vulnerability management; STA Supply chain management, transparency and accountability
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): ID.AM-02 Inventories of software, services, and systems managed by the organization are maintained; ID.RA-01 Vulnerabilities in assets are identified, validated, and recorded; GV.SC-07 The risks posed by a supplier, their products and services, and other third parties are understood, recorded, prioritized, assessed, responded to, and monitored over the course of the relationship
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): CM-8 System Component Inventory; RA-5 Vulnerability Monitoring and Scanning; SI-2 Flaw Remediation; SR-4 Provenance
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.11.02 Vulnerability Monitoring and Scanning; 03.14.01 Flaw Remediation
+- [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): ALC_FLR Flaw remediation; AVA_VAN Vulnerability analysis
 
 **Documented in** [compliance/README.md#supply-chain](README.md#supply-chain), [development.md#releasing](../development.md#releasing)
 

@@ -53,7 +53,21 @@ class ComplianceDocs(unittest.TestCase):
             text = cd.framework_md(key, controls, catalog)
             for anchor in __import__("re").findall(r"\.\./controls\.md#([\w-]+)", text):
                 self.assertIn(anchor, sections, f"{key}: {anchor}")
-        self.assertEqual(93, len(catalog["frameworks"]["iso27001"]["clauses"]))
+        # ISO 27001's clauses 4 to 10 (30) and Annex A's controls (93).
+        self.assertEqual(123, len(catalog["frameworks"]["iso27001"]["clauses"]))
+        self.assertEqual(14, len(catalog["frameworks"]))
+
+    def test_Each_catalog_says_its_source_its_checksum_and_its_licence(self):
+        import yaml
+        for key, fw in cd.load("frameworks.yaml")["frameworks"].items():
+            if "catalog" not in fw:
+                continue
+            cat = yaml.load((cd.HERE / fw["catalog"]).read_text(), Loader=yaml.BaseLoader)
+            self.assertTrue(cat["licence"], key)
+            for src in cat["source"]:
+                self.assertRegex(src["url"], r"^https?://", key)
+                self.assertRegex(src["sha256"], r"^[0-9a-f]{64}$", key)
+            self.assertGreater(len(cat["clauses"]), 50, key)
 
 
 class Weakened(unittest.TestCase):

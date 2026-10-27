@@ -29,6 +29,8 @@
     <EmbeddedResource Include="Media\Scripts\cut-story.py" LogicalName="cut-story.py" />
     <EmbeddedResource Include="Vector\Icons\lucide.json" LogicalName="lucide.json" />
     <EmbeddedResource Include="../../docs/compliance/controls.yaml" LogicalName="compliance-controls.yaml" />
+    <EmbeddedResource Include="../../docs/compliance/frameworks.yaml" LogicalName="compliance-frameworks.yaml" />
+    <EmbeddedResource Include="../../docs/compliance/catalogs/*.yaml" LogicalName="compliance-catalogs/%(Filename)%(Extension)" />
     <EmbeddedResource Include="../../deploy/features" LogicalName="features" />
     <!-- The dashboards go into the image at /dashboards (Dockerfile), not beside the app. -->
     <Content Remove="Dashboards\json\**" />

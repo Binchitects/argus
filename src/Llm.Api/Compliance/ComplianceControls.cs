@@ -7,7 +7,7 @@ namespace Llm.Api.Compliance;
 /// <summary>docs/compliance/controls.yaml: the frameworks, and each control with what proves it.</summary>
 public sealed class ControlsFile
 {
-    /// <summary>Framework key (iso27001, soc2, hipaa, gdpr) to its name and version.</summary>
+    /// <summary>Framework key (iso27001, soc2, ..., commoncriteria) to its name and version.</summary>
     public Dictionary<string, string> Frameworks { get; set; } = [];
     public List<Control> Controls { get; set; } = [];
 }
@@ -55,29 +55,19 @@ public static partial class ComplianceControls
     [GeneratedRegex(@"^[A-Z]{3}-\d{2}$")]
     public static partial Regex IdFormat();
 
-    /// <summary>
-    /// What a clause of each framework looks like: Annex A's controls (5.1–5.37, 6.1–6.8, 7.1–7.14, 8.1–8.34), the Trust
-    /// Services Criteria, 45 CFR 160/164 sections with their paragraphs, the GDPR's articles with their paragraphs and points.
-    /// </summary>
-    public static bool IsClause(string framework, string clause) => framework switch
+    private static readonly Lazy<IReadOnlyDictionary<string, FrameworkCatalog>> BuiltCatalogs = new(() => FrameworkCatalog.Read(Resource));
+
+    /// <summary>Each framework's clauses, as frameworks.yaml and its catalogs built into the app list them.</summary>
+    public static IReadOnlyDictionary<string, FrameworkCatalog> Catalogs => BuiltCatalogs.Value;
+
+    /// <summary>Whether a clause a control cites is in its framework's catalog: itself, or the nearest one it is part of.</summary>
+    public static bool IsClause(string framework, string clause) => Catalogs.TryGetValue(framework, out var c) && c.Entry(clause) is not null;
+
+    private static string Resource(string name)
     {
-        "iso27001" => Iso().Match(clause) is { Success: true } m && int.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture) is var n && n >= 1
-            && n <= m.Groups[1].Value switch { "5" => 37, "6" => 8, "7" => 14, _ => 34 },
-        "soc2" => Soc2().IsMatch(clause),
-        "hipaa" => Hipaa().IsMatch(clause),
-        "gdpr" => Gdpr().Match(clause) is { Success: true } g && int.Parse(g.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) is >= 1 and <= 99,
-        _ => false,
-    };
-
-    [GeneratedRegex(@"^A\.([5-8])\.(\d{1,2})$")]
-    private static partial Regex Iso();
-
-    [GeneratedRegex(@"^(CC[1-9]\.[1-9]|A1\.[1-3]|C1\.[12]|PI1\.[1-5]|P[1-8]\.[1-9])$")]
-    private static partial Regex Soc2();
-
-    [GeneratedRegex(@"^16[04]\.\d{3}(\([a-zA-Z0-9]{1,4}\))*$")]
-    private static partial Regex Hipaa();
-
-    [GeneratedRegex(@"^Art\.(\d{1,2})(\(\d{1,2}\))?(\([a-z]\))?$")]
-    private static partial Regex Gdpr();
+        using var stream = typeof(ComplianceControls).Assembly.GetManifestResourceStream(name)
+            ?? throw new InvalidOperationException($"{name} is not built into the app.");
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
 }

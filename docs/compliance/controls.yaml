@@ -6,9 +6,12 @@
 #   id         area and number (IAM-01); never reused for something else
 #   title      what it is, in a few words
 #   meets      how Arena meets it
-#   frameworks the clauses it serves: iso27001 (Annex A of ISO/IEC 27001:2022),
-#              soc2 (the Trust Services Criteria), hipaa (45 CFR, 164.xxx),
-#              gdpr (the Regulation's articles, Art.N)
+#   frameworks the clauses it serves, as frameworks.yaml lists each framework's
+#              (its clauses, or its catalog): iso27001 (clauses 4 to 10 and
+#              Annex A), soc2, hipaa (45 CFR, 164.xxx), gdpr (Art.N), iso42001,
+#              iso22301, pcidss, csaccm (by domain), nistcsf, nist80053,
+#              nist800171, airmf, euaiact (Art.N, Annex N), commoncriteria
+#              (families, FIA_UAU)
 #   docs       where it is documented: a file under docs/ and a section's anchor
 #   tests      what proves it: Project/Class.Method for .NET (the method carries
 #              [Trait("Control", "<id>")]), deploy/test_x.py::test_name for Python
@@ -21,6 +24,16 @@ frameworks:
   soc2: SOC 2, Trust Services Criteria (2017, revised points of focus 2022)
   hipaa: HIPAA Security and Privacy Rules, 45 CFR Part 164
   gdpr: General Data Protection Regulation (EU) 2016/679
+  iso42001: ISO/IEC 42001:2023, the AI management system
+  iso22301: ISO 22301:2019, business continuity
+  pcidss: PCI DSS v4.0.1
+  csaccm: CSA Cloud Controls Matrix v4 (CSA STAR)
+  nistcsf: NIST Cybersecurity Framework 2.0
+  nist80053: NIST SP 800-53 Rev. 5 (FedRAMP's baselines build on it)
+  nist800171: NIST SP 800-171 Rev. 3 (CMMC builds on it)
+  airmf: NIST AI Risk Management Framework 1.0
+  euaiact: EU AI Act, Regulation (EU) 2024/1689
+  commoncriteria: Common Criteria CC:2022 (ISO/IEC 15408)
 
 controls:
   - id: IAM-01
@@ -35,6 +48,12 @@ controls:
       soc2: [CC6.1, CC6.2]
       hipaa: [164.308(a)(5)(ii)(C), 164.308(a)(5)(ii)(D), 164.312(a)(2)(i), 164.312(d)]
       gdpr: [Art.32]
+      pcidss: [8.2, 8.3]
+      csaccm: [IAM]
+      nistcsf: [PR.AA-01, PR.AA-03]
+      nist80053: [AC-2, AC-7, IA-2, IA-4, IA-5, IA-5(1)]
+      nist800171: [03.01.01, 03.01.08, 03.05.01, 03.05.05, 03.05.07]
+      commoncriteria: [FIA_UID, FIA_UAU, FIA_AFL, FIA_SOS]
     docs: [authentication.md#what-protects-the-sign-in]
     tests:
       - Llm.Tests/IdentityTests.Wrong_password_and_unknown_name_get_the_same_answer
@@ -61,6 +80,12 @@ controls:
       soc2: [CC6.1]
       hipaa: [164.312(a)(2)(iii)]
       gdpr: [Art.32]
+      pcidss: [8.2]
+      csaccm: [IAM]
+      nistcsf: [PR.AA-03]
+      nist80053: [AC-11, AC-12, SC-23]
+      nist800171: [03.01.10, 03.01.11]
+      commoncriteria: [FTA_SSL]
     docs: [authentication.md#what-protects-the-sign-in]
     tests:
       - Llm.Tests/SessionCapTests.Refreshing_a_session_does_not_restart_the_twelve_hour_cap
@@ -87,6 +112,12 @@ controls:
       soc2: [CC6.1]
       hipaa: [164.312(d)]
       gdpr: [Art.32]
+      pcidss: [8.4, 8.5]
+      csaccm: [IAM]
+      nistcsf: [PR.AA-03]
+      nist80053: [IA-2(1), IA-2(2)]
+      nist800171: [03.05.03]
+      commoncriteria: [FIA_UAU]
     docs: [authentication.md#what-protects-the-sign-in]
     tests:
       - Llm.Tests/IdentityTests.Two_factor_sign_in_with_an_authenticator_and_with_a_recovery_code
@@ -112,6 +143,11 @@ controls:
       soc2: [CC6.2, CC6.3]
       hipaa: [164.308(a)(3)(ii)(C), 164.308(a)(4)(ii)(C)]
       gdpr: [Art.32]
+      pcidss: [8.2]
+      csaccm: [IAM, HRS]
+      nistcsf: [PR.AA-01, PR.AA-05]
+      nist80053: [AC-2, AC-2(1), PS-4, PS-5]
+      nist800171: [03.01.01, 03.09.02]
     docs:
       - authentication.md#the-company-directory-ldap--active-directory
       - authentication.md#scim-provisioning
@@ -138,6 +174,12 @@ controls:
       soc2: [CC6.1, CC6.3]
       hipaa: [164.308(a)(4)(ii)(B), 164.312(a)(1)]
       gdpr: [Art.25, Art.32]
+      pcidss: [7.2, 7.3]
+      csaccm: [IAM]
+      nistcsf: [PR.AA-05]
+      nist80053: [AC-3, AC-5, AC-6]
+      nist800171: [03.01.02, 03.01.04, 03.01.05]
+      commoncriteria: [FDP_ACC, FDP_ACF, FMT_SMR]
     docs: [admin.md#access-roles-and-rules]
     tests:
       - Llm.Tests/EndpointAccessTests.A_role_reaches_the_reads_of_its_permissions_and_no_others
@@ -156,6 +198,12 @@ controls:
       soc2: [CC6.1]
       hipaa: [164.312(d)]
       gdpr: [Art.32]
+      pcidss: [8.6]
+      csaccm: [IAM]
+      nistcsf: [PR.AA-01]
+      nist80053: [AC-2, IA-5]
+      nist800171: [03.05.12]
+      commoncriteria: [FIA_UAU]
     docs: [authentication.md#as-a-machine-client-of-the-engine-api]
     tests:
       - Llm.Tests/KeyCheckTests.An_unknown_blocked_or_expired_key_is_refused
@@ -176,6 +224,11 @@ controls:
       soc2: [CC6.2, CC6.3]
       hipaa: [164.308(a)(3)(ii)(B), 164.308(a)(4)(ii)(C)]
       gdpr: [Art.32(1)(d)]
+      pcidss: [7.2]
+      csaccm: [IAM]
+      nistcsf: [PR.AA-05]
+      nist80053: [AC-2, AC-6(7)]
+      nist800171: [03.01.01]
     docs: [compliance/README.md#access-reviews]
     tests:
       - Llm.Tests/AccessReviewTests.A_review_lists_privileged_roles_their_groups_members_and_unused_accounts_and_revoking_takes_effect_at_once
@@ -199,6 +252,14 @@ controls:
       soc2: [CC7.2]
       hipaa: [164.308(a)(1)(ii)(D), 164.312(b)]
       gdpr: [Art.5(2), Art.30]
+      iso42001: [A.6.2.8]
+      pcidss: [10.2]
+      csaccm: [LOG]
+      nistcsf: [PR.PS-04, DE.CM-03]
+      nist80053: [AU-2, AU-3, AU-12]
+      nist800171: [03.03.01, 03.03.02]
+      euaiact: [Art.12]
+      commoncriteria: [FAU_GEN]
     docs: [admin.md#admin, settings.md#every-change-is-audited]
     tests:
       - Llm.Tests/IdentityTests.Everything_is_in_the_audit_log
@@ -218,6 +279,12 @@ controls:
       soc2: [CC7.2]
       hipaa: [164.312(b)]
       gdpr: [Art.5(1)(e)]
+      iso42001: [A.6.2.8]
+      pcidss: [10.5]
+      csaccm: [LOG]
+      nistcsf: [PR.PS-04]
+      nist80053: [AU-11]
+      commoncriteria: [FAU_STG]
     docs: [admin.md#storage]
     tests:
       - Llm.Tests/StorageTests.Lokis_retention_is_read_from_its_configuration
@@ -239,6 +306,12 @@ controls:
       soc2: [CC7.2, CC7.3]
       hipaa: [164.312(b), 164.312(c)(1), 164.312(c)(2)]
       gdpr: [Art.5(1)(f), Art.5(2), Art.32(1)(b)]
+      pcidss: [10.3]
+      csaccm: [LOG]
+      nistcsf: [PR.PS-04]
+      nist80053: [AU-9, AU-9(3)]
+      nist800171: [03.03.08]
+      commoncriteria: [FAU_STG]
     docs: [compliance/README.md#the-audit-log-as-a-chain]
     tests:
       - Llm.Tests/AuditChainTests.An_entry_changed_removed_or_slipped_in_breaks_the_chain_there_and_every_admin_is_told
@@ -263,6 +336,12 @@ controls:
       soc2: [CC7.2]
       hipaa: [164.308(a)(1)(ii)(D), 164.312(b)]
       gdpr: [Art.32(1)(b)]
+      pcidss: [10.4]
+      csaccm: [LOG]
+      nistcsf: [DE.AE-03]
+      nist80053: [AU-6, AU-9(2)]
+      nist800171: [03.03.05]
+      commoncriteria: [FAU_SAR]
     docs: [compliance/README.md#sending-it-to-the-siem]
     tests:
       - Llm.Tests/AuditForwardTests.Each_entry_is_posted_once_in_order_signed_and_a_webhook_that_fails_gets_them_all_later
@@ -283,6 +362,11 @@ controls:
       soc2: [CC7.2, CC7.3]
       hipaa: [164.308(a)(1)(ii)(D), 164.308(a)(6)(ii)]
       gdpr: [Art.32(1)(b)]
+      pcidss: [10.7]
+      csaccm: [LOG]
+      nistcsf: [DE.CM-01, DE.CM-09]
+      nist80053: [CA-7, SI-4]
+      nist800171: [03.14.06]
     docs: [admin.md#admin]
     tests:
       - Llm.Tests/ObserveTests.Alerts_show_what_fires_and_every_rule_and_survive_either_source_down
@@ -305,6 +389,15 @@ controls:
       soc2: [CC7.3, CC7.4, CC7.5]
       hipaa: [164.308(a)(6)(ii), 164.404, 164.408]
       gdpr: [Art.33, Art.34]
+      iso42001: [A.8.4]
+      iso22301: [8.4.3]
+      pcidss: [10.4, 12.10]
+      csaccm: [SEF]
+      nistcsf: [DE.AE-02, RS.MA-01, RS.CO-02]
+      nist80053: [IR-4, IR-5, IR-6, IR-8, SI-4]
+      nist800171: [03.06.01, 03.06.02]
+      airmf: [MANAGE 4.3]
+      euaiact: [Art.73]
     docs: [compliance/README.md#security-alerts-and-incidents]
     tests:
       - Llm.Tests/IncidentTests.Failed_sign_ins_an_admin_made_many_exports_and_a_failed_backup_each_raise_one_alert_to_every_admin
@@ -324,6 +417,9 @@ controls:
       iso27001: [A.5.33, A.8.10]
       soc2: [C1.2, P4.2, P4.3]
       gdpr: [Art.5(1)(e), Art.17]
+      pcidss: [3.2]
+      csaccm: [DSP]
+      nist80053: [SI-12]
     docs: [admin.md#retention-legal-hold-and-exports]
     tests:
       - Llm.Tests/RetentionTests.A_chat_past_its_groups_retention_is_deleted_with_its_files_and_one_under_legal_hold_is_not
@@ -338,6 +434,8 @@ controls:
     frameworks:
       iso27001: [A.5.28, A.5.33]
       gdpr: [Art.17(3)(e)]
+      csaccm: [DSP]
+      nist80053: [SI-12]
     docs: [admin.md#retention-legal-hold-and-exports]
     tests:
       - Llm.Tests/RetentionTests.A_person_on_legal_hold_who_deletes_a_chat_only_hides_it_until_the_hold_ends
@@ -354,6 +452,7 @@ controls:
       soc2: [P5.1]
       hipaa: [164.524]
       gdpr: [Art.15, Art.20]
+      csaccm: [DSP, IPY]
     docs: [admin.md#retention-legal-hold-and-exports]
     tests:
       - Llm.Tests/RetentionTests.A_persons_export_holds_their_profile_chats_as_json_and_markdown_and_their_files
@@ -371,6 +470,12 @@ controls:
       soc2: [C1.1, CC6.7]
       hipaa: [164.502(b)]
       gdpr: [Art.25, Art.32(1)(a)]
+      pcidss: [3.2]
+      csaccm: [DSP]
+      nistcsf: [PR.DS-01, PR.DS-02]
+      nist80053: [AC-4, SI-15]
+      nist800171: [03.01.03]
+      commoncriteria: [FDP_IFC, FDP_IFF]
     docs: [admin.md#safeguards, chat.md#safeguards]
     tests:
       - Llm.Tests/SafeguardsTests.Personal_data_reaches_the_model_masked_and_the_chat_keeps_it_as_written
@@ -393,6 +498,12 @@ controls:
       soc2: [CC6.1]
       hipaa: [164.312(a)(2)(iv)]
       gdpr: [Art.32(1)(a)]
+      pcidss: [3.5, 3.6]
+      csaccm: [CEK]
+      nistcsf: [PR.DS-01]
+      nist80053: [SC-12, SC-28, SC-28(1)]
+      nist800171: [03.13.08, 03.13.10]
+      commoncriteria: [FCS_CKM, FCS_COP, FDP_SDC]
     docs: [authentication.md#what-protects-the-sign-in]
     tests:
       - Llm.Tests/KeyRingTests.With_a_data_key_the_key_ring_is_encrypted_and_survives_a_restart
@@ -420,6 +531,7 @@ controls:
       soc2: [P5.1, P5.2, P4.3]
       hipaa: [164.524, 164.526]
       gdpr: [Art.12(3), Art.15, Art.16, Art.17, Art.18, Art.20, Art.21]
+      csaccm: [DSP]
     docs: [compliance/README.md#peoples-data-requests]
     tests:
       - Llm.Tests/DataRequestTests.A_person_asks_the_admins_hear_it_is_due_in_a_month_and_answering_tells_them
@@ -444,6 +556,9 @@ controls:
       soc2: [C1.2, P4.2, P4.3]
       hipaa: [164.316(b)(2)(i)]
       gdpr: [Art.5(1)(e)]
+      pcidss: [3.2, 10.5]
+      csaccm: [DSP]
+      nist80053: [AU-11, SI-12]
     docs: [compliance/README.md#how-long-things-are-kept]
     tests:
       - Llm.Tests/RecordRetentionTests.Records_past_their_time_go_the_audit_log_only_from_the_start_of_its_chain_and_the_check_says_how_long_each_is_kept
@@ -469,6 +584,11 @@ controls:
       soc2: [C1.1, CC6.7, P4.1]
       hipaa: [164.502(b), 164.514(b)]
       gdpr: [Art.5(1)(c), Art.9, Art.25, Art.32(1)(a)]
+      pcidss: [3.2, 3.3]
+      csaccm: [DSP]
+      nistcsf: [PR.DS-01]
+      nist80053: [PT-2, PT-3]
+      airmf: [MEASURE 2.10]
     docs: [compliance/README.md#personal-and-health-data]
     tests:
       - Llm.Tests/PersonalDataTests.Health_and_identity_data_are_found_by_what_names_them_and_their_check_digits
@@ -496,6 +616,12 @@ controls:
       soc2: [CC6.6, CC6.7]
       hipaa: [164.312(e)(1), 164.312(e)(2)(ii)]
       gdpr: [Art.32(1)(a)]
+      pcidss: [1.3, 1.4, 4.2]
+      csaccm: [IVS, CEK]
+      nistcsf: [PR.DS-02, PR.IR-01]
+      nist80053: [SC-7, SC-8, SC-8(1), SC-13]
+      nist800171: [03.13.01, 03.13.08]
+      commoncriteria: [FTP_ITC, FTP_TRP, FCS_COP]
     docs:
       - authentication.md#what-is-deliberately-not-behind-sign-in
       - deployment.md#certificates
@@ -521,6 +647,12 @@ controls:
       soc2: [A1.2, A1.3, CC9.1]
       hipaa: [164.308(a)(7)(ii)(A), 164.308(a)(7)(ii)(B), 164.308(a)(7)(ii)(D)]
       gdpr: [Art.32(1)(c), Art.32(1)(d)]
+      iso22301: [8.4.5, 8.5, 8.6]
+      csaccm: [BCR]
+      nistcsf: [PR.DS-11, RC.RP-03]
+      nist80053: [CP-4, CP-9, CP-10]
+      nist800171: [03.08.09]
+      commoncriteria: [FPT_RCV]
     docs:
       - deployment.md#backups-and-restore
       - deployment.md#point-in-time-recovery-pitr
@@ -549,6 +681,11 @@ controls:
       soc2: [CC6.8]
       hipaa: [164.308(a)(5)(ii)(B)]
       gdpr: [Art.32(1)(b)]
+      csaccm: [IVS, AIS]
+      nistcsf: [PR.PS-05]
+      nist80053: [SC-39, SC-44]
+      airmf: [MEASURE 2.7]
+      euaiact: [Art.15]
     docs: [plugins.md#a-server-of-its-own-in-the-sandbox]
     tests:
       - Llm.Tests/ChatToolsTests.Python_runs_in_the_sandbox_with_the_chats_files_and_what_it_writes_comes_back
@@ -563,10 +700,17 @@ controls:
       it; the guard test fails when one of them is gone, and the release
       checklist requires the live checks to pass.
     frameworks:
-      iso27001: [A.5.36, A.8.29, A.8.32]
+      iso27001: [A.5.36, A.8.29, A.8.32, 9.1, 7.5.3]
       soc2: [CC4.1, CC8.1]
       hipaa: [164.308(a)(8)]
       gdpr: [Art.5(2), Art.25]
+      iso42001: [9.1, A.6.2.4]
+      pcidss: [12.4]
+      csaccm: [A&A]
+      nistcsf: [GV.OV-03, ID.IM-01]
+      nist80053: [CA-2, CA-7, SA-11]
+      nist800171: [03.12.01, 03.12.03]
+      commoncriteria: [ATE_FUN, ALC_CMC]
     docs:
       - compliance/README.md#controls-and-how-they-are-kept
       - compliance/README.md#the-documents
@@ -594,10 +738,17 @@ controls:
       when a new version is set; each acceptance is kept with its version,
       time and address, audited, and in the evidence.
     frameworks:
-      iso27001: [A.5.10, A.6.3]
+      iso27001: [A.5.10, A.6.3, 7.3]
       soc2: [CC2.3, P1.1]
       hipaa: [164.308(a)(5)(i)]
       gdpr: [Art.12, Art.13]
+      iso42001: [7.3]
+      pcidss: [12.2]
+      csaccm: [HRS]
+      nistcsf: [GV.PO-01, PR.AT-01]
+      nist80053: [AC-8, PL-4, PT-5]
+      nist800171: [03.15.03]
+      commoncriteria: [FTA_TAB]
     docs: [compliance/README.md#the-sign-in-notice]
     tests:
       - Llm.Tests/NoticeTests.Everyone_accepts_the_current_version_before_anything_else_and_a_new_version_again
@@ -620,6 +771,12 @@ controls:
       soc2: [CC7.1, CC8.1, CC9.2]
       hipaa: [164.308(a)(1)(ii)(A), 164.308(a)(1)(ii)(B)]
       gdpr: [Art.32(1)(d)]
+      pcidss: [6.3]
+      csaccm: [TVM, STA]
+      nistcsf: [ID.AM-02, ID.RA-01, GV.SC-07]
+      nist80053: [CM-8, RA-5, SI-2, SR-4]
+      nist800171: [03.11.02, 03.14.01]
+      commoncriteria: [ALC_FLR, AVA_VAN]
     docs:
       - compliance/README.md#supply-chain
       - development.md#releasing

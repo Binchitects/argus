@@ -11,7 +11,9 @@ const control = (over: Partial<Control>): Control => ({
 })
 
 const view: ComplianceView = {
-  frameworks: { iso27001: 'ISO/IEC 27001:2022, Annex A', soc2: 'SOC 2, Trust Services Criteria', hipaa: 'HIPAA, 45 CFR Part 164', gdpr: 'GDPR (EU) 2016/679' },
+  frameworks: { iso27001: 'ISO/IEC 27001:2022, Annex A', soc2: 'SOC 2, Trust Services Criteria', hipaa: 'HIPAA, 45 CFR Part 164', gdpr: 'GDPR (EU) 2016/679',
+    euaiact: 'EU AI Act, Regulation (EU) 2024/1689' },
+  coverage: { iso27001: { title: 'ISO/IEC 27001:2022, clauses 4 to 10 and Annex A', clauses: 123, served: 2 } },
   checkedAt: new Date().toISOString(),
   retention: [{ what: 'The audit log', rule: 'Kept 6 years, then deleted by the hourly sweep.' }],
   checks: [
@@ -31,7 +33,11 @@ describe('Admin → Compliance', () => {
     fakeApi(admin, { 'GET /api/admin/compliance': () => ({ json: view }) })
     renderApp('/admin/compliance')
     const iso = await screen.findByRole('button', { name: /ISO 27001/ })
-    expect(iso).toHaveTextContent('2 controls, 2 clauses')
+    expect(iso).toHaveTextContent('2 controls, serving 2 of its 123 clauses')
+    // Grouped: security, privacy and AI here; only the frameworks the controls file names.
+    expect(screen.getByRole('heading', { name: 'AI' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /EU AI Act/ })).toHaveTextContent('0 controls, 0 clauses')
+    expect(screen.queryByRole('button', { name: /PCI DSS/ })).not.toBeInTheDocument()
     expect(iso).toHaveTextContent('1 met')
     expect(iso).toHaveTextContent('1 in part')
     // An attestation older than a year no longer counts.

@@ -31,8 +31,16 @@ export interface Control {
   attested: Attestation | null
 }
 
+/** A framework's catalog: its clauses, and how many of them a control serves. */
+export interface Coverage {
+  title: string
+  clauses: number
+  served: number
+}
+
 export interface ComplianceView {
   frameworks: Record<string, string>
+  coverage: Record<string, Coverage>
   controls: Control[]
   checks: CheckResult[]
   checkedAt: string
@@ -41,11 +49,23 @@ export interface ComplianceView {
 }
 
 export const FRAMEWORKS = [
-  { key: 'iso27001', label: 'ISO 27001' },
-  { key: 'soc2', label: 'SOC 2' },
-  { key: 'hipaa', label: 'HIPAA' },
-  { key: 'gdpr', label: 'GDPR' },
+  { key: 'iso27001', label: 'ISO 27001', group: 'Security' },
+  { key: 'soc2', label: 'SOC 2', group: 'Security' },
+  { key: 'nistcsf', label: 'NIST CSF 2.0', group: 'Security' },
+  { key: 'nist80053', label: 'NIST 800-53', group: 'Security' },
+  { key: 'nist800171', label: 'NIST 800-171', group: 'Security' },
+  { key: 'pcidss', label: 'PCI DSS', group: 'Security' },
+  { key: 'csaccm', label: 'CSA STAR', group: 'Security' },
+  { key: 'hipaa', label: 'HIPAA', group: 'Privacy' },
+  { key: 'gdpr', label: 'GDPR', group: 'Privacy' },
+  { key: 'iso42001', label: 'ISO 42001', group: 'AI' },
+  { key: 'euaiact', label: 'EU AI Act', group: 'AI' },
+  { key: 'airmf', label: 'NIST AI RMF', group: 'AI' },
+  { key: 'iso22301', label: 'ISO 22301', group: 'Continuity' },
+  { key: 'commoncriteria', label: 'Common Criteria', group: 'Product evaluation' },
 ] as const
+
+export const FRAMEWORK_GROUPS = [...new Set(FRAMEWORKS.map((f) => f.group))]
 
 export type Framework = (typeof FRAMEWORKS)[number]['key']
 

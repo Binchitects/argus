@@ -1,0 +1,25 @@
+# CSA Cloud Controls Matrix v4 (CSA STAR), by its domains
+
+<!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
+
+Arena's controls serve 13 of the 17 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+
+| Clause | | Arena | The company's document |
+|---|---|---|---|
+| A&A | Audit and assurance | [GOV-01](../controls.md#gov-01-the-controls-are-kept-from-breaking) | [The management system (ISMS and AIMS)](../isms.md) |
+| AIS | Application and interface security | [OPS-02](../controls.md#ops-02-code-the-model-writes-runs-apart) | [Change and vulnerability management policy](../policies/change-management.md) |
+| BCR | Business continuity management and operational resilience | [OPS-01](../controls.md#ops-01-backups-restored-and-proven) | [Backup and business continuity policy](../policies/business-continuity.md) |
+| CCC | Change control and configuration management |  | [Change and vulnerability management policy](../policies/change-management.md) |
+| CEK | Cryptography, encryption and key management | [DAT-05](../controls.md#dat-05-secrets-and-peoples-files-are-encrypted-at-rest), [NET-01](../controls.md#net-01-encrypted-in-transit-one-way-in) | [Cryptography policy](../policies/cryptography.md) |
+| DCS | Datacenter security |  | [Physical security policy](../policies/physical-security.md) |
+| DSP | Data security and privacy lifecycle management | [DAT-01](../controls.md#dat-01-chats-and-files-are-deleted-when-their-time-is-up), [DAT-02](../controls.md#dat-02-legal-hold), [DAT-03](../controls.md#dat-03-a-persons-data-exported), [DAT-04](../controls.md#dat-04-personal-data-and-secrets-kept-from-the-model), [DAT-06](../controls.md#dat-06-peoples-requests-about-their-data-are-answered), [DAT-07](../controls.md#dat-07-records-are-kept-for-set-times-and-no-longer), [DAT-08](../controls.md#dat-08-personal-and-health-data-kept-in-bounds) | [Data protection and retention policy](../policies/data-protection.md) |
+| GRC | Governance, risk and compliance |  | [The management system (ISMS and AIMS)](../isms.md) |
+| HRS | Human resources | [IAM-04](../controls.md#iam-04-joiners-and-leavers-follow-the-companys-directory), [GOV-02](../controls.md#gov-02-everyone-accepts-the-acceptable-use-and-privacy-notice) | [People security policy](../policies/people-security.md) |
+| IAM | Identity and access management | [IAM-01](../controls.md#iam-01-each-person-signs-in-as-themselves-with-a-strong-password), [IAM-02](../controls.md#iam-02-sessions-end-on-their-own), [IAM-03](../controls.md#iam-03-two-factor-sign-in), [IAM-04](../controls.md#iam-04-joiners-and-leavers-follow-the-companys-directory), [IAM-05](../controls.md#iam-05-least-privilege-by-roles-and-rules), [IAM-06](../controls.md#iam-06-api-keys-are-personal-revocable-and-checked), [IAM-07](../controls.md#iam-07-privileged-access-is-reviewed) | [Access control policy](../policies/access-control.md) |
+| IPY | Interoperability and portability | [DAT-03](../controls.md#dat-03-a-persons-data-exported) | [Data protection and retention policy](../policies/data-protection.md) |
+| IVS | Infrastructure and virtualization security | [NET-01](../controls.md#net-01-encrypted-in-transit-one-way-in), [OPS-02](../controls.md#ops-02-code-the-model-writes-runs-apart) | [Information security policy](../policies/information-security.md) |
+| LOG | Logging and monitoring | [LOG-01](../controls.md#log-01-who-did-what-is-recorded), [LOG-02](../controls.md#log-02-logs-are-kept-and-kept-for-a-set-time), [LOG-03](../controls.md#log-03-nobody-changes-the-audit-log-unseen), [LOG-04](../controls.md#log-04-the-audit-log-is-sent-on-to-the-companys-siem), [MON-01](../controls.md#mon-01-the-service-is-watched-and-people-are-alerted) | [Logging and monitoring policy](../policies/logging-monitoring.md) |
+| SEF | Security incident management, e-discovery and cloud forensics | [MON-02](../controls.md#mon-02-security-events-raise-alerts-and-incidents-are-handled-in-time) | [Incident response runbook](../incident-response.md) |
+| STA | Supply chain management, transparency and accountability | [GOV-03](../controls.md#gov-03-what-a-release-ships-is-listed-and-its-known-vulnerabilities-gate-it) | [Supplier and transfer policy](../policies/suppliers.md) |
+| TVM | Threat and vulnerability management | [GOV-03](../controls.md#gov-03-what-a-release-ships-is-listed-and-its-known-vulnerabilities-gate-it) | [Change and vulnerability management policy](../policies/change-management.md) |
+| UEM | Universal endpoint management |  | [Information security policy](../policies/information-security.md) |

@@ -20,6 +20,20 @@ import complianceGdpr from '@docs/compliance/frameworks/gdpr.md?raw'
 import complianceHipaa from '@docs/compliance/frameworks/hipaa.md?raw'
 import complianceIso from '@docs/compliance/frameworks/iso27001.md?raw'
 import complianceSoc2 from '@docs/compliance/frameworks/soc2.md?raw'
+import complianceIso42001 from '@docs/compliance/frameworks/iso42001.md?raw'
+import complianceIso22301 from '@docs/compliance/frameworks/iso22301.md?raw'
+import compliancePci from '@docs/compliance/frameworks/pcidss.md?raw'
+import complianceCcm from '@docs/compliance/frameworks/csaccm.md?raw'
+import complianceCsf from '@docs/compliance/frameworks/nistcsf.md?raw'
+import compliance80053 from '@docs/compliance/frameworks/nist80053.md?raw'
+import compliance800171 from '@docs/compliance/frameworks/nist800171.md?raw'
+import complianceAiRmf from '@docs/compliance/frameworks/airmf.md?raw'
+import complianceAiAct from '@docs/compliance/frameworks/euaiact.md?raw'
+import complianceCc from '@docs/compliance/frameworks/commoncriteria.md?raw'
+import complianceIsms from '@docs/compliance/isms.md?raw'
+import complianceEvaluation from '@docs/compliance/product-evaluation.md?raw'
+import policyAi from '@docs/compliance/policies/ai.md?raw'
+import policyLogging from '@docs/compliance/policies/logging-monitoring.md?raw'
 import complianceIncidents from '@docs/compliance/incident-response.md?raw'
 import policyUse from '@docs/compliance/policies/acceptable-use.md?raw'
 import policyAccess from '@docs/compliance/policies/access-control.md?raw'
@@ -123,7 +137,7 @@ export const manualGroups: ManualGroup[] = [
       doc('admin.md', 'Admin, usage and cost', 'The admin area: people, groups, models, tools, dashboards, logs, alerts, usage and cost.', 'admins', admin),
       doc('settings.md', 'Settings', 'The Settings page: what applies at once or after a restart, secrets, what groups can set.', 'admins', settings),
       doc('authentication.md', 'Sign-in', 'Who signs in where: local accounts, the directory, company sign-in, SCIM, 2FA.', 'admins', authentication),
-      doc('compliance/README.md', 'Compliance', 'ISO 27001, SOC 2, HIPAA and the GDPR: what Arena covers and the company does, the controls, and the checks that keep them.', 'admins', compliance),
+      doc('compliance/README.md', 'Compliance', 'Fourteen frameworks, from ISO 27001 and SOC 2 to the EU AI Act: what Arena covers and the company does, the controls, and the checks that keep them.', 'admins', compliance),
       doc('knowledge.md', 'Company knowledge', 'GitLab, Confluence, SharePoint, folders and websites, searched by each person within their rights.', 'admins', knowledge),
       doc('plugins.md', 'Plugins and APIs', 'Installing plugins, each person\'s own account, the manifest, a catalog.', 'admins', plugins),
       doc('deployment.md', 'Deploying', 'The samples and secrets, addresses, a host with no network, switching the model, the traps.', 'admins', deployment),
@@ -137,10 +151,22 @@ export const manualGroups: ManualGroup[] = [
     title: 'Compliance documents',
     docs: [
       doc('compliance/controls.md', 'The controls', 'Every control: what meets it, the clauses it serves, the tests and checks behind it, the company\'s part.', 'admins', complianceControls),
-      doc('compliance/frameworks/iso27001.md', 'ISO 27001, clause by clause', 'Annex A\'s 93 controls, Arena\'s controls and the company\'s document for each.', 'admins', complianceIso),
+      doc('compliance/isms.md', 'The management system', 'ISO 27001, 42001 and 22301\'s clauses 4 to 10: scope, roles, objectives, audits, reviews.', 'admins', complianceIsms),
+      doc('compliance/frameworks/iso27001.md', 'ISO 27001, clause by clause', 'Clauses 4 to 10 and Annex A\'s 93 controls, Arena\'s controls and the company\'s document for each.', 'admins', complianceIso),
       doc('compliance/frameworks/soc2.md', 'SOC 2, criterion by criterion', 'The Trust Services Criteria, Arena\'s controls and the company\'s document for each.', 'admins', complianceSoc2),
       doc('compliance/frameworks/hipaa.md', 'HIPAA, section by section', 'The Security Rule, breach notification and the Privacy Rule\'s parts, with Arena\'s controls.', 'admins', complianceHipaa),
       doc('compliance/frameworks/gdpr.md', 'The GDPR, article by article', 'The articles a controller\'s systems meet, with Arena\'s controls.', 'admins', complianceGdpr),
+      doc('compliance/frameworks/nistcsf.md', 'NIST CSF 2.0', 'The Cybersecurity Framework\'s categories and subcategories, with Arena\'s controls.', 'admins', complianceCsf),
+      doc('compliance/frameworks/nist80053.md', 'NIST SP 800-53', 'Every control and enhancement of Rev. 5, with the baselines FedRAMP builds on.', 'admins', compliance80053),
+      doc('compliance/frameworks/nist800171.md', 'NIST SP 800-171', 'Rev. 3\'s requirements for controlled unclassified information (CMMC).', 'admins', compliance800171),
+      doc('compliance/frameworks/pcidss.md', 'PCI DSS', 'The twelve requirements and their sections, with Arena\'s controls.', 'admins', compliancePci),
+      doc('compliance/frameworks/csaccm.md', 'CSA STAR (CCM)', 'The Cloud Controls Matrix\'s domains, with Arena\'s controls.', 'admins', complianceCcm),
+      doc('compliance/frameworks/iso42001.md', 'ISO 42001, clause by clause', 'The AI management system: clauses 4 to 10 and Annex A\'s 38 controls.', 'admins', complianceIso42001),
+      doc('compliance/frameworks/euaiact.md', 'The EU AI Act, article by article', 'Regulation (EU) 2024/1689\'s articles and annexes, with Arena\'s controls.', 'admins', complianceAiAct),
+      doc('compliance/frameworks/airmf.md', 'NIST AI RMF', 'Govern, Map, Measure and Manage, subcategory by subcategory.', 'admins', complianceAiRmf),
+      doc('compliance/frameworks/iso22301.md', 'ISO 22301, clause by clause', 'The business continuity management system, with Arena\'s controls.', 'admins', complianceIso22301),
+      doc('compliance/frameworks/commoncriteria.md', 'Common Criteria', 'The functional and assurance families a product evaluation reads.', 'admins', complianceCc),
+      doc('compliance/product-evaluation.md', 'Product evaluation', 'What a Common Criteria evaluation of Arena rests on, and FIPS 140-3.', 'admins', complianceEvaluation),
       doc('compliance/data-flows.md', 'Data flows', 'Where people\'s data goes in the stack, and the flows out of the company an admin turns on.', 'admins', complianceFlows),
       doc('compliance/incident-response.md', 'Incident response', 'From noticing to closure, with the register\'s steps and the law\'s clocks.', 'admins', complianceIncidents),
       doc('compliance/templates/record-of-processing.md', 'Record of processing', 'GDPR Art. 30, filled in with what Arena processes.', 'admins', complianceRopa),
@@ -156,6 +182,8 @@ export const manualGroups: ManualGroup[] = [
       doc('compliance/policies/suppliers.md', 'Supplier and transfer policy', 'A template: cloud models and other suppliers, contracts, transfers.', 'admins', policySuppliers),
       doc('compliance/policies/change-management.md', 'Change and vulnerability policy', 'A template: upgrades, rollback, the SBOM, patching.', 'admins', policyChange),
       doc('compliance/policies/cryptography.md', 'Cryptography policy', 'A template: TLS, encryption at rest, the keys and who holds them.', 'admins', policyCrypto),
+      doc('compliance/policies/logging-monitoring.md', 'Logging and monitoring policy', 'A template: what is recorded, kept and watched.', 'admins', policyLogging),
+      doc('compliance/policies/ai.md', 'AI policy', 'A template: purposes, the AI Act\'s classes, oversight, evaluation, impact assessments.', 'admins', policyAi),
     ],
   },
 ]

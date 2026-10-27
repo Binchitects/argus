@@ -2,6 +2,7 @@
 """The compliance documents written from docs/compliance/controls.yaml and frameworks.yaml.
 
     python3 tools/compliance-docs.py           writes docs/compliance/controls.md and frameworks/<framework>.md
+                                               (a framework's clauses from frameworks.yaml, or the catalog it names)
     python3 tools/compliance-docs.py --check   exits 1, naming them, when any is not current
 
 controls.md is every control as an auditor reads it: what meets it, the clauses it serves, where it is documented,
@@ -30,8 +31,13 @@ NOTE = "<!-- Written by tools/compliance-docs.py from controls.yaml and framewor
 
 
 def load(name: str) -> dict:
-    """Every scalar as a string (a clause such as 164.410 is not a number)."""
-    return yaml.load((HERE / name).read_text(), Loader=yaml.BaseLoader)
+    """Every scalar as a string (a clause such as 164.410 is not a number); a framework's catalog file read in its place."""
+    data = yaml.load((HERE / name).read_text(), Loader=yaml.BaseLoader)
+    for key, fw in (data.get("frameworks") or {}).items() if name == "frameworks.yaml" else ():
+        if "catalog" in fw:
+            cat = yaml.load((HERE / fw["catalog"]).read_text(), Loader=yaml.BaseLoader)
+            data["frameworks"][key] = {"title": cat["title"], "clauses": cat["clauses"], "catalog": fw["catalog"]}
+    return data
 
 
 def slug(heading: str) -> str:

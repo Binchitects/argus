@@ -1,13 +1,32 @@
-# Compliance: ISO 27001, SOC 2, HIPAA and the GDPR
+# Compliance: the frameworks and the certifications
 
-Arena is built so that a company running it can meet four frameworks:
+Arena is built so that a company running it can meet these frameworks, and be
+certified or audited against them. Each has a page, clause by clause: its
+clauses, Arena's controls that serve each, and the company's document that
+governs it.
 
-| Framework | What it is | The part Arena covers |
+| Framework | What it is | Its page |
 |---|---|---|
-| **ISO/IEC 27001:2022** | an information security management system, certified by an auditor | the technical controls of Annex A: [34 of its 93, clause by clause](frameworks/iso27001.md) |
-| **SOC 2** | an auditor's report on the Trust Services Criteria (2017, points of focus revised 2022) | the common criteria CC6–CC9, availability A1, confidentiality C1 and privacy P1, P4–P5 ([criterion by criterion](frameworks/soc2.md)) |
-| **HIPAA** | the US rules for health information: the Security Rule (45 CFR 164.308–316) and the Privacy Rule | the technical safeguards of 164.312, the parts of the administrative safeguards of 164.308 a system can do, documentation kept as 164.316 asks, and breach notification's clocks ([section by section](frameworks/hipaa.md)) |
-| **The GDPR** | the EU's rules for personal data (Regulation 2016/679) | security of processing (Article 32), privacy by design (25), the people's rights (15–22), storage limitation (5(1)(e)), breaches (33–34) and accountability (5(2)) ([article by article](frameworks/gdpr.md)) |
+| **ISO/IEC 27001:2022** | an information security management system, certified by an auditor: clauses 4 to 10 (the system) and Annex A (the controls) | [clause by clause](frameworks/iso27001.md) |
+| **SOC 2** | an auditor's report on the Trust Services Criteria (2017, points of focus revised 2022), Type I or over a period (Type II) | [criterion by criterion](frameworks/soc2.md) |
+| **NIST CSF 2.0** | the Cybersecurity Framework's six functions, their categories and subcategories | [subcategory by subcategory](frameworks/nistcsf.md) |
+| **NIST SP 800-53 Rev. 5** | the federal control catalog, with its low, moderate, high and privacy baselines (FedRAMP's build on them) | [control by control](frameworks/nist80053.md) |
+| **NIST SP 800-171 Rev. 3** | protecting controlled unclassified information (CMMC builds on it) | [requirement by requirement](frameworks/nist800171.md) |
+| **PCI DSS v4.0.1** | the card industry's standard: Arena keeps card numbers out (the safeguards block them), which keeps it out of the cardholder data environment | [requirement by requirement](frameworks/pcidss.md) |
+| **CSA STAR (CCM v4)** | the Cloud Security Alliance's Cloud Controls Matrix, by its 17 domains | [domain by domain](frameworks/csaccm.md) |
+| **HIPAA** | the US rules for health information: the Security Rule (45 CFR 164.308–316) and the Privacy Rule | [section by section](frameworks/hipaa.md) |
+| **The GDPR** | the EU's rules for personal data (Regulation 2016/679) | [article by article](frameworks/gdpr.md) |
+| **ISO/IEC 42001:2023** | an AI management system, certified as ISO 27001 is: clauses 4 to 10 and Annex A's 38 controls | [clause by clause](frameworks/iso42001.md) |
+| **The EU AI Act** | Regulation (EU) 2024/1689: AI literacy, prohibited practices, high-risk systems, transparency | [article by article](frameworks/euaiact.md) |
+| **NIST AI RMF 1.0** | the AI Risk Management Framework: Govern, Map, Measure, Manage | [subcategory by subcategory](frameworks/airmf.md) |
+| **ISO 22301:2019** | a business continuity management system | [clause by clause](frameworks/iso22301.md) |
+| **Common Criteria (ISO/IEC 15408)** | a product's evaluation by an accredited laboratory: the functional and assurance families ([product evaluation](product-evaluation.md), with FIPS 140-3) | [family by family](frameworks/commoncriteria.md) |
+
+The clauses of NIST's frameworks, the AI Act's articles and the Common
+Criteria's families come from their published sources
+([catalogs](catalogs/), written by `tools/grc-catalogs.py`, each with its
+source's address, checksum and licence). ISO's, PCI DSS's and the CCM's texts
+are not shared: only their ids, with short titles written here.
 
 A framework is met by an organisation, not by a program. Arena gives the
 controls, the evidence and the documents; the company that runs it does the
@@ -53,10 +72,13 @@ What a company needs beside the software, here to adapt:
 
 - **[The controls](controls.md)**: every control as an auditor reads it, with
   the clauses it serves, the tests that prove it and the company's part.
-- **Each framework, clause by clause**: [ISO/IEC 27001](frameworks/iso27001.md),
-  [SOC 2](frameworks/soc2.md), [HIPAA](frameworks/hipaa.md) and
-  [the GDPR](frameworks/gdpr.md): every clause, Arena's controls that serve it,
-  and the company's document that governs it.
+- **Each framework, clause by clause** (the table above): every clause, Arena's
+  controls that serve it, and the company's document that governs it.
+- **[The management system](isms.md)**: clauses 4 to 10 of ISO 27001, 42001
+  and 22301, which an audit reads first: scope, roles, objectives, internal
+  audit, management review, corrective action.
+- **[Product evaluation](product-evaluation.md)**: what a Common Criteria
+  evaluation of Arena would rest on, and FIPS 140-3.
 - **[Data flows](data-flows.md)**: where people's data goes inside the stack,
   and the flows out of the company that an admin turns on.
 - **[The incident response runbook](incident-response.md)**: from noticing to
@@ -75,7 +97,9 @@ What a company needs beside the software, here to adapt:
   [data protection and retention](policies/data-protection.md),
   [suppliers and transfers](policies/suppliers.md),
   [change and vulnerability management](policies/change-management.md),
-  [cryptography](policies/cryptography.md).
+  [cryptography](policies/cryptography.md),
+  [logging and monitoring](policies/logging-monitoring.md),
+  [AI](policies/ai.md).
 
 The controls and the framework pages are written from `controls.yaml` and
 [`frameworks.yaml`](frameworks.yaml) (each framework's clauses and the

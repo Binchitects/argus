@@ -16,7 +16,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, errorMessage, type Me } from '@/lib/api'
 import { ago, when } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { attestedNow, complianceQuery, FRAMEWORKS, manualLink, reviewsQuery, reviewState, tally, type Attestation, type CheckResult, type Control, type Framework, type State } from './compliance-api'
+import { attestedNow, complianceQuery, FRAMEWORK_GROUPS, FRAMEWORKS, manualLink, reviewsQuery, reviewState, tally, type Attestation, type CheckResult, type Control, type Framework, type State } from './compliance-api'
 import { DataRequestsSection } from './data-requests'
 import { IncidentsSection } from './incidents'
 
@@ -258,7 +258,7 @@ export function CompliancePage() {
     <>
       <PageHeader
         title="Compliance"
-        description="ISO 27001, SOC 2, HIPAA and the GDPR: what Arena does for each control, whether it holds now, and the company's part, attested."
+        description="Fourteen frameworks, from ISO 27001 and SOC 2 to the EU AI Act: what Arena does for each control, whether it holds now, and the company's part, attested."
         actions={
           <>
             <Button variant="outline" onClick={() => view.refetch()} loading={view.isFetching && !view.isPending}>
@@ -276,15 +276,20 @@ export function CompliancePage() {
         <QueryError error={view.error} retry={() => view.refetch()} />
       ) : !data ? (
         <div className="grid gap-3 md:grid-cols-4">
-          {FRAMEWORKS.map((f) => (
+          {FRAMEWORKS.slice(0, 8).map((f) => (
             <Skeleton key={f.key} className="h-28" />
           ))}
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-8">
-          <section aria-label="Frameworks" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {FRAMEWORKS.map((f) => {
+          <section aria-label="Frameworks" className="grid gap-5">
+            {FRAMEWORK_GROUPS.filter((g) => FRAMEWORKS.some((f) => f.group === g && f.key in data.frameworks)).map((group) => (
+              <div key={group} className="grid gap-2">
+                <h2 className="text-sm font-medium text-muted-foreground">{group}</h2>
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {FRAMEWORKS.filter((f) => f.group === group && f.key in data.frameworks).map((f) => {
               const t = tally(data.controls, f.key, now)
+              const cov = data.coverage[f.key]
               const chosen = framework === f.key
               return (
                 <button
@@ -297,7 +302,7 @@ export function CompliancePage() {
                   <div className="text-xs font-medium text-muted-foreground">{data.frameworks[f.key]}</div>
                   <div className="mt-1 text-lg font-semibold">{f.label}</div>
                   <div className="mt-2 text-sm text-muted-foreground">
-                    {t.controls} controls, {t.clauses} clauses
+                    {t.controls} controls{cov ? `, serving ${cov.served} of its ${cov.clauses} clauses` : `, ${t.clauses} clauses`}
                   </div>
                   <div className="mt-1 flex flex-wrap gap-x-3 text-xs">
                     <span className="text-success-ink">{t.ok} met</span>
@@ -310,6 +315,9 @@ export function CompliancePage() {
                 </button>
               )
             })}
+                </div>
+              </div>
+            ))}
           </section>
 
           <section aria-labelledby="checks" className="grid gap-3">

@@ -2063,6 +2063,13 @@ documents; it says what is the operator's part, as v7.1 does.
    Where a text may be shared (NIST, the AI Act), each clause's own words are
    in a `grc` knowledge pack the chat cites. Where it may not (ISO, PCI DSS,
    the CCM), there are ids and short titles written here.
+   Done: the 14 frameworks in docs/compliance (frameworks.yaml, and catalogs/
+   that tools/grc-catalogs.py writes from NIST's OSCAL, the AI Act's text, the
+   AI RMF Playbook and the Common Criteria's parts, each with its source's
+   checksum and licence), every control mapped, a page per framework, the
+   management system, AI, logging and product evaluation documents, the app
+   reading the same catalog (Admin → Compliance by group, each framework's
+   clauses served). Left: the `grc` pack of the shareable texts.
 2. **Risk**: a register of risks to the company's information and its AI.
    Each risk has its assets (taken from what Arena knows: models, providers,
    data stores, connectors, repositories), its threat, likelihood and impact

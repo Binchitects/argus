@@ -25,9 +25,13 @@ public sealed record AttestationView(string Actor, DateTimeOffset At, string Not
 public sealed record ControlView(string Id, string Title, string Meets, IReadOnlyDictionary<string, List<string>> Frameworks, IReadOnlyList<string> Docs,
     IReadOnlyList<string> Tests, IReadOnlyList<string> Checks, string? Operator, string? State, AttestationView? Attested);
 
+/// <summary>How much of a framework Arena's controls serve: its clauses, and those a control serves.</summary>
+public sealed record FrameworkCoverage(string Title, int Clauses, int Served);
+
+/// <param name="Coverage">Each framework's clauses (its catalog) and how many a control serves.</param>
 /// <param name="Retention">How long each kind of data and record is kept, and what removes it.</param>
 public sealed record ComplianceView(IReadOnlyDictionary<string, string> Frameworks, IReadOnlyList<ControlView> Controls, IReadOnlyList<CheckResult> Checks,
-    DateTimeOffset CheckedAt, IReadOnlyList<Storage.KeepRule>? Retention = null);
+    DateTimeOffset CheckedAt, IReadOnlyDictionary<string, FrameworkCoverage> Coverage, IReadOnlyList<Storage.KeepRule>? Retention = null);
 
 public sealed record AttestRequest(string? Note);
 
@@ -305,8 +309,13 @@ public static class ComplianceEndpoints
             return new ControlView(c.Id, c.Title, c.Meets, c.Frameworks, c.Docs, c.Tests, c.Checks, c.Operator,
                 states.Count == 0 ? null : Worst.First(states.Contains), a is null ? null : new AttestationView(a.Actor, a.At, a.Note, a.At + AttestationLasts));
         }).ToList();
-        return new ComplianceView(file.Frameworks, controls, results, at);
+        return new ComplianceView(file.Frameworks, controls, results, at, Coverage(file));
     }
+
+    /// <summary>For each framework: its catalog's clauses, and those at least one control serves.</summary>
+    public static IReadOnlyDictionary<string, FrameworkCoverage> Coverage(ControlsFile file) =>
+        ComplianceControls.Catalogs.ToDictionary(kv => kv.Key, kv => new FrameworkCoverage(kv.Value.Title, kv.Value.Clauses.Count,
+            file.Controls.SelectMany(c => c.Frameworks.GetValueOrDefault(kv.Key) ?? []).Select(kv.Value.Entry).OfType<string>().Distinct().Count()));
 
     private static async Task<IResult> AttestAsync(string id, AttestRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, Audit audit,
         TimeProvider clock, CancellationToken ct)

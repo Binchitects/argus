@@ -41,7 +41,12 @@ public sealed partial class ComplianceControlsTests(AppFixture app)
     {
         var file = Repository();
         var wrong = new List<string>();
-        Assert.Equal(["gdpr", "hipaa", "iso27001", "soc2"], file.Frameworks.Keys.Order(StringComparer.Ordinal));
+        // Every framework has its catalog (frameworks.yaml, and the catalogs it names), and the app's copy is the repository's.
+        Assert.Equal(file.Frameworks.Keys.Order(StringComparer.Ordinal), ComplianceControls.Catalogs.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal(14, file.Frameworks.Count);
+        var repo = FrameworkCatalog.Read(name => File.ReadAllText(Path.Combine(Root, "docs", "compliance",
+            name == "compliance-frameworks.yaml" ? "frameworks.yaml" : name["compliance-".Length..])));
+        Assert.Equal(repo.ToDictionary(kv => kv.Key, kv => kv.Value.Clauses.Count), ComplianceControls.Catalogs.ToDictionary(kv => kv.Key, kv => kv.Value.Clauses.Count));
         // The copy built into the app is this file.
         Assert.Equal(file.Controls.Select(c => c.Id), ComplianceControls.All.Controls.Select(c => c.Id));
 
@@ -182,7 +187,11 @@ public sealed partial class ComplianceControlsTests(AppFixture app)
             Assert.Equal("warn", iam03.GetProperty("state").GetString());
             Assert.Contains("A.8.5", iam03.GetProperty("frameworks").GetProperty("iso27001").EnumerateArray().Select(e => e.GetString()));
             Assert.Equal(JsonValueKind.Null, controls.Single(c => c.GetProperty("id").GetString() == "IAM-04").GetProperty("state").ValueKind);
-            Assert.Equal(4, view.GetProperty("frameworks").EnumerateObject().Count());
+            Assert.Equal(14, view.GetProperty("frameworks").EnumerateObject().Count());
+            // Each framework's catalog, and how much of it the controls serve: 800-53 by its baselines' source, ISO 27001's clauses with Annex A.
+            var coverage = view.GetProperty("coverage");
+            Assert.Equal(123, coverage.GetProperty("iso27001").GetProperty("clauses").GetInt32());
+            Assert.InRange(coverage.GetProperty("nist80053").GetProperty("served").GetInt32(), 40, 1014);
 
             // A member does not see it.
             var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = "cmpmember", email = "cmpmember@example.test" }));
