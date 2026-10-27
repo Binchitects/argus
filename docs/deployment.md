@@ -367,6 +367,11 @@ chart at them. `upgrade` keeps the release's values and secrets (helm
 does not come up; `status` says the release, its pods and the app's version;
 `remove` uninstalls and keeps the data, `remove --purge --confirm PURGE` also
 takes its volumes and secrets. `--dry-run` shows the plan and changes nothing.
+`--with A,B` and `--without A,B` choose the [features](#features) on `install`
+and `upgrade`, as on one host: each becomes its service's `enabled` in the
+values (a part of the app, a name in `app.features`); an upgrade sets only them
+on top of the release's values. The browser agent, DCGM, the GPU metrics and
+the power limits run with compose only.
 
 ### By hand
 

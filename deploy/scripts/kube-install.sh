@@ -41,6 +41,9 @@
 #   --registry HOST/PATH      air-gapped: the bundle's images loaded and pushed there, and pulled from it
 #   --pull-secret NAME        the Secret the cluster pulls from that registry with
 #   --gitlab-url URL --gitlab-token-file FILE   Argus's GitLab and its read-only token (read from the file)
+#   --with A,B  --without A,B   features (deploy/features) on and off: install and upgrade; each the chart's
+#                             enabled for its service, or app.features for a part of the app. A feature brings
+#                             those it requires; one others need is not turned off without them
 #   --values FILE             more values of your own, last (they win)
 #   --dir DIR                 where the values and logs are kept (default ~/.arena-kube)
 #   --timeout MIN             how long helm waits (default 20)
@@ -79,7 +82,7 @@ esac
 
 NS=arena RELEASE=arena CONTEXT="" CHART="" DOMAIN="" EMAIL="" TLS_SECRET="" ISSUER="" DATABASE=in-cluster
 DB_HOST="" DB_PORT=5432 DB_USER=arena DB_CA="" DB_PASSWORD_FILE="" STORAGE="" SHARED="" GPU=auto REPLICAS=2
-VALKEY=0 AUTOSCALE=0 STRICT=0 REGISTRY="" PULL_SECRET="" GITLAB_URL="" GITLAB_TOKEN_FILE="" USER_VALUES=""
+VALKEY=0 AUTOSCALE=0 STRICT=0 REGISTRY="" PULL_SECRET="" GITLAB_URL="" GITLAB_TOKEN_FILE="" USER_VALUES="" WITH="" WITHOUT=""
 DIR="${HOME:-/root}/.arena-kube" TIMEOUT=20 YES=0 DRY=0 PURGE=0 CONFIRM=""
 value() { [[ $2 -gt 1 ]] || usage_error "$1 needs a value"; }
 while [[ $# -gt 0 ]]; do
@@ -111,6 +114,8 @@ while [[ $# -gt 0 ]]; do
     --gitlab-url) value "$1" $#; GITLAB_URL="$2"; shift ;;
     --gitlab-token-file) value "$1" $#; GITLAB_TOKEN_FILE="$2"; shift; [[ -r "$GITLAB_TOKEN_FILE" ]] || usage_error "cannot read $GITLAB_TOKEN_FILE" ;;
     --values) value "$1" $#; USER_VALUES="$2"; shift; [[ -r "$USER_VALUES" ]] || usage_error "cannot read $USER_VALUES" ;;
+    --with) value "$1" $#; WITH="${WITH:+$WITH,}$2"; shift ;;
+    --without) value "$1" $#; WITHOUT="${WITHOUT:+$WITHOUT,}$2"; shift ;;
     --dir) value "$1" $#; DIR="$2"; shift ;;
     --timeout) value "$1" $#; TIMEOUT="$2"; shift; [[ "$TIMEOUT" =~ ^[1-9][0-9]*$ ]] || usage_error "--timeout is minutes" ;;
     --yes|-y) YES=1 ;;
@@ -125,6 +130,8 @@ done
 [[ "$NS" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || usage_error "--namespace: lowercase letters, digits and -"
 [[ "$RELEASE" =~ ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$ ]] || usage_error "--release: lowercase letters, digits and -"
 [[ -n "$TLS_SECRET" && -n "$ISSUER" ]] && usage_error "--tls-secret or --cluster-issuer, not both"
+for f in "$WITH" "$WITHOUT"; do [[ -z "$f" || "$f" =~ ^[a-z0-9,-]+$ ]] || usage_error "--with and --without name features: a,b,c"; done
+[[ -n "$WITH$WITHOUT" && $CMD != install && $CMD != upgrade ]] && usage_error "--with and --without are for install and upgrade"
 [[ $DATABASE == external && ( -z "$DB_HOST" || -z "$DB_PASSWORD_FILE" ) && $CMD == install ]] && usage_error "--database external needs --db-host and --db-password-file"
 if [[ -z "$CHART" ]]; then
   for c in "$HERE/../helm/argus-arena" "$HERE/deploy/helm/argus-arena"; do [[ -f "$c/Chart.yaml" ]] && { CHART="$(cd "$c" && pwd)"; break; }; done
@@ -241,6 +248,67 @@ print("%d %d" % (sum(cpu(x.get("cpu", "0")) for x in a), sum(mem(x.get("memory",
   fi
 }
 
+# ================================================================ features
+# deploy/features: each feature's services, default, needs and the features it requires. In the chart a feature
+# is its service's enabled (CHART_KEY), or, for a part of the app, a name in app.features.
+FEATURES_FILE="$HERE/../features"
+declare -A CHART_KEY=([chat-models]=llamacpp [vllm]=vllm [knowledge]=embed [argus]=argus [pictures]=imagegen [video]=videogen
+  [speech]=audio [sandbox]=sandbox [web-search]=searxng [3d]=blender [lean]=lean [studio]=studio [workspaces]=workspaces
+  [laya]=laya [monitoring]=monitoring [ha]=valkey)
+FEAT_IDS=() FEATURES_ON=()
+declare -A FEAT_DEF=() FEAT_SVC=() FEAT_NEEDS=() FEAT_REQ=()
+trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; printf '%s' "${s%"${s##*[![:space:]]}"}"; }
+read_features() {
+  local id def svc needs req _title
+  [[ -f "$FEATURES_FILE" ]] || die "no list of the features: $FEATURES_FILE"
+  while IFS='|' read -r id def svc needs req _title; do
+    id="$(trim "$id")"; [[ -n "$id" && "$id" != \#* ]] || continue
+    svc="$(trim "$svc")"; needs="$(trim "$needs")"; req="$(trim "$req")"
+    FEAT_IDS+=("$id"); FEAT_DEF[$id]="$(trim "$def")"; FEAT_SVC[$id]="${svc#-}"; FEAT_NEEDS[$id]="${needs#-}"; FEAT_REQ[$id]="${req#-}"
+  done < "$FEATURES_FILE"
+}
+feat_known() { [[ -n "${FEAT_DEF[$1]+x}" ]]; }
+# Whether the chart runs it: a part of the app, or a service the chart has.
+in_chart() { [[ -z "${FEAT_SVC[$1]}" || -n "${CHART_KEY[$1]:-}" ]]; }
+# The features the release runs now (helm's values, the chart's defaults with them).
+features_now() {
+  H get values "$RELEASE" -n "$NS" --all -o json 2>/dev/null | python3 -c '
+import json, sys
+d, keys = json.load(sys.stdin), dict(a.split("=", 1) for a in sys.argv[1:])
+app = (d.get("app") or {}).get("features") or []
+for f, key in keys.items():
+    if (key and (d.get(key) or {}).get("enabled")) or (not key and f in app):
+        print(f)' $(for id in "${FEAT_IDS[@]}"; do in_chart "$id" && printf '%s=%s ' "$id" "${CHART_KEY[$id]:-}"; done)
+}
+choose_features() {   # choose_features BASE...: FEATURES_ON from them, --with and --without
+  local id r more=1
+  local -A on=()
+  for id in ${WITH//,/ } ${WITHOUT//,/ }; do feat_known "$id" || usage_error "no feature $id (deploy/features)"; done
+  for id in ${WITH//,/ }; do in_chart "$id" || refuse "$id is not in the chart yet (it runs with compose only)"; done
+  for id in "$@"; do on[$id]=1; done
+  for id in ${WITH//,/ }; do on[$id]=1; done
+  for id in ${WITHOUT//,/ }; do unset "on[$id]"; done
+  while [[ $more -eq 1 ]]; do
+    more=0
+    for id in "${!on[@]}"; do for r in ${FEAT_REQ[$id]}; do
+      [[ ",$WITHOUT," == *",$r,"* ]] && refuse "$r cannot be off while $id needs it: turn that off too (--without $r,$id)"
+      [[ -n "${on[$r]:-}" ]] || { on[$r]=1; more=1; }
+    done; done
+  done
+  FEATURES_ON=()
+  for id in "${FEAT_IDS[@]}"; do [[ -n "${on[$id]:-}" ]] && in_chart "$id" && FEATURES_ON+=("$id"); done
+}
+# The chart's values for the features chosen.
+features_values() {   # features_values [replicas]: with the app's replicas too
+  local id app=()
+  for id in "${FEAT_IDS[@]}"; do
+    if [[ -n "${CHART_KEY[$id]:-}" ]]; then
+      printf '%s: { enabled: %s }\n' "${CHART_KEY[$id]}" "$([[ " ${FEATURES_ON[*]} " == *" $id "* ]] && echo true || echo false)"
+    elif [[ -z "${FEAT_SVC[$id]}" && " ${FEATURES_ON[*]} " == *" $id "* ]]; then app+=("$id"); fi
+  done
+  printf 'app: { %sfeatures: [%s] }\n' "${1:+replicas: $REPLICAS, }" "$(IFS=,; echo "${app[*]}" | sed 's/,/, /g')"
+}
+
 # ================================================================ secrets, images, values
 # The secrets as a manifest on stdin: never in a command line, a file or the log.
 make_secrets() {
@@ -288,12 +356,11 @@ write_values() {
     [[ -z "$ISSUER" ]] || printf '  annotations: { cert-manager.io/cluster-issuer: "%s" }\n' "$ISSUER"
     # No shared class (one node): the shared volumes are ReadWriteOnce, which every class gives.
     printf 'persistence: { storageClass: "%s", sharedStorageClass: "%s", sharedAccessMode: %s }\n' "$STORAGE" "$SHARED" "$([[ -n "$SHARED" ]] && echo ReadWriteMany || echo ReadWriteOnce)"
-    printf 'app: { replicas: %s }\nweb: { replicas: %s }\n' "$REPLICAS" "$REPLICAS"
-    if [[ $VALKEY -eq 1 ]]; then printf 'valkey: { enabled: true }\nlitellm: { replicas: %s }\n' "$REPLICAS"; fi
+    printf 'web: { replicas: %s }\n' "$REPLICAS"
+    # The features: each service's enabled, and the app's own (app.features).
+    features_values replicas
+    if [[ " ${FEATURES_ON[*]} " == *" ha "* ]]; then printf 'litellm: { replicas: %s }\n' "$REPLICAS"; fi
     printf 'availability: { strictSpread: %s, autoscale: { enabled: %s } }\n' "$( ((STRICT)) && echo true || echo false)" "$( ((AUTOSCALE)) && echo true || echo false)"
-    if [[ $gpu -eq 0 ]]; then
-      printf 'llamacpp: { enabled: false }\nimagegen: { enabled: false }\nvideogen: { enabled: false }\nvllm: { enabled: false }\nstudio: { enabled: false }\n'
-    fi
     if [[ $DATABASE == external ]]; then
       printf 'postgresql: { enabled: false }\nexternalDatabase: { host: "%s", port: %s, username: "%s", caSecret: "%s" }\n' "$DB_HOST" "$DB_PORT" "$DB_USER" "$DB_CA"
     fi
@@ -361,11 +428,39 @@ cmd_install() {
   # set): the domain, the TLS, the storage and the database stay as installed.
   [[ $CMD == upgrade ]] && DOMAIN="$(H get values "$RELEASE" -n "$NS" -o json 2>/dev/null | json 'print(d.get("domain", ""))')"
   check_requirements
+  # The features: a new release's defaults (those that need a GPU off without one; ha with --valkey), or the
+  # release's as they are; then --with and --without.
+  read_features
+  local -a base=()
+  if [[ $CMD == upgrade ]]; then
+    mapfile -t base < <(features_now)
+  else
+    local id gpu=$HAS_GPU
+    [[ $GPU == yes ]] && gpu=1
+    [[ $GPU == no ]] && gpu=0
+    for id in "${FEAT_IDS[@]}"; do
+      [[ ${FEAT_DEF[$id]} == on || ( $id == ha && $VALKEY -eq 1 ) ]] || continue
+      [[ $gpu -eq 0 && ${FEAT_NEEDS[$id]} == gpu ]] && continue
+      base+=("$id")
+    done
+    # A default whose required feature is off is off too (the media studio without pictures).
+    local more=1 r keep x
+    while [[ $more -eq 1 ]]; do
+      more=0; keep=()
+      for id in ${base[@]+"${base[@]}"}; do
+        r=1; for x in ${FEAT_REQ[$id]}; do [[ " ${base[*]} " == *" $x "* ]] || r=0; done
+        if [[ $r -eq 1 ]]; then keep+=("$id"); else more=1; fi
+      done
+      base=(${keep[@]+"${keep[@]}"})
+    done
+  fi
+  choose_features ${base[@]+"${base[@]}"}
   [[ $FAIL -eq 0 ]] || { say ""; refuse "$FAIL requirement(s) not met: put them right as said above, then run again"; }
 
   step "The plan"
   say "  release $RELEASE in namespace $NS, https://$DOMAIN ($([[ $DATABASE == external ]] && echo "Postgres at $DB_HOST" || echo "Postgres in the cluster"))"
   say "  $REPLICAS replica(s) of the app and the web$( ((AUTOSCALE)) && echo ", grown with their load")$( ((HAS_GPU)) || [[ $GPU == yes ]] && echo "; GPU servers on" || echo "; no GPU servers")"
+  say "  features: ${FEATURES_ON[*]}"
   if [[ $DRY -eq 0 && $YES -eq 0 && -t 0 ]]; then
     local a; read -r -p "Go on? [y/N] " a; [[ "$a" == [yY]* ]] || refuse "not confirmed"
   fi
@@ -380,8 +475,10 @@ cmd_install() {
 
   step "The chart"
   if [[ $CMD == upgrade ]]; then
-    local images="$DIR/$RELEASE-images.yaml" args=(--reset-then-reuse-values)
+    local images="$DIR/$RELEASE-images.yaml" features="$DIR/$RELEASE-features.yaml" args=(--reset-then-reuse-values)
     if [[ -n "$REGISTRY" ]]; then image_values > "$images"; args+=(-f "$images"); fi
+    # Asked to change them: the features' values on top of the release's.
+    if [[ -n "$WITH$WITHOUT" ]]; then mkdir -p "$DIR" && features_values > "$features" || die "cannot write $features"; args+=(-f "$features"); fi
     if [[ $DRY -eq 1 ]]; then note "would run: helm upgrade $RELEASE $CHART -n $NS ${args[*]} --atomic --wait --timeout ${TIMEOUT}m${USER_VALUES:+ -f $USER_VALUES}"; return 0; fi
     H upgrade "$RELEASE" "$CHART" -n "$NS" "${args[@]}" --atomic --wait --timeout "${TIMEOUT}m" ${USER_VALUES:+-f "$USER_VALUES"} \
       || die "helm did not finish: the release was rolled back to what ran before; kubectl -n $NS get events --sort-by=.lastTimestamp says why"

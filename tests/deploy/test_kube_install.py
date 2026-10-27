@@ -249,6 +249,41 @@ class KubeInstall(unittest.TestCase):
         self.assertNotIn("--install", upgrade)
         self.assertFalse([c for c in self.calls("kubectl") if "apply" in c])
 
+    def test_The_features_asked_for_are_the_charts_values_and_bring_what_they_need(self):
+        r = self.run_it("install", "--domain", "arena.example.test", "--cluster-issuer", "letsencrypt", "--shared-storage-class", "nfs", "--yes",
+                        "--without", "video", "--with", "laya,lean")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        values = (self.keep / "arena-values.yaml").read_text()
+        for line in ("videogen: { enabled: false }", "laya: { enabled: true }", "lean: { enabled: true }", "imagegen: { enabled: true }"):
+            self.assertIn(line, values)
+        self.assertIn("app: { replicas: 2, features: [meetings, lab, apps, data, decks, media, agents, code-studio] }", values)
+        for args, message in [
+            (["--without", "pictures"], "pictures cannot be off while media needs it"),
+            (["--with", "browser"], "browser is not in the chart yet"),
+            (["--with", "nope"], "no feature nope"),
+        ]:
+            self.cluster(GOOD)
+            r = self.run_it("install", "--domain", "arena.example.test", "--cluster-issuer", "letsencrypt", "--shared-storage-class", "nfs", "--yes", "--dry-run", *args)
+            self.assertNotEqual(r.returncode, 0, args)
+            self.assertIn(message, r.stderr, args)
+
+    def test_An_upgrade_changes_only_the_features_asked_for_on_top_of_the_releases(self):
+        self.cluster(GOOD, installed=True, namespaces=["arena"], secrets={"arena/arena-secrets": {"type": "Opaque"}},
+                     values={"domain": "arena.example.test", "llamacpp": {"enabled": True}, "imagegen": {"enabled": True},
+                             "laya": {"enabled": False}, "sandbox": {"enabled": True}, "app": {"replicas": 3, "features": ["lab", "media"]}})
+        r = self.run_it("upgrade", "--yes", "--with", "laya")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        files = self.now()["values_files"]
+        features = files[-1]
+        self.assertIn("laya: { enabled: true }", features)
+        self.assertIn("llamacpp: { enabled: true }", features)
+        self.assertIn("videogen: { enabled: false }", features)
+        # The release's replicas stay: only the features are given.
+        self.assertIn("app: { features: [lab, media] }", features)
+        r = self.run_it("upgrade", "--yes")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(len(self.now()["values_files"]), 1, "no change asked: no features file")
+
     def test_A_failed_helm_run_is_said_and_nothing_is_said_to_run(self):
         r = self.run_it("install", "--domain", "arena.example.test", "--cluster-issuer", "letsencrypt", "--shared-storage-class", "nfs", "--yes")
         self.cluster({**self.now(), "installed": False, "helm_fails": True})
@@ -262,6 +297,7 @@ class KubeInstall(unittest.TestCase):
         (bundle / "deploy" / "scripts").mkdir(parents=True)
         shutil.copy(SCRIPT, bundle / "deploy" / "scripts" / "kube-install.sh")
         shutil.copytree(CHART, bundle / "deploy" / "helm" / "argus-arena")
+        shutil.copy(REPO / "deploy" / "features", bundle / "deploy" / "features")
         rows = [("arena-app:7.3.0", "app.tar.gz"), ("arena-web:7.3.0", "web.tar.gz"), ("pgvector/pgvector:0.8.0-pg16", "pg.tar.gz"),
                 ("ghcr.io/berriai/litellm:main-stable", "litellm.tar.gz")]
         for _, f in rows:
