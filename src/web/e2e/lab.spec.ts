@@ -77,3 +77,28 @@ test('the lab balances a reaction checked atom by atom, and draws a molecule', a
   }
   expect(errors).toEqual([])
 })
+
+test('the lab proves a theorem with Lean and Mathlib, checked by Lean', async ({ page, isMobile }, info) => {
+  test.setTimeout(300_000)
+  test.skip(!live, 'working a problem needs the deployed stack (E2E_CHAT=1)')
+  const fields = await (await page.request.get('/api/lab/fields')).json()
+  const maths = fields.fields.find((f: { id: string }) => f.id === 'mathematics')
+  test.skip(!fields.available || !maths?.tools.includes('proofs'), 'the proof checker (the lean profile) does not run here')
+  const errors = watchConsole(page)
+  await page.goto('/lab')
+  await page.getByRole('textbox', { name: 'The problem' }).fill(
+    'Prove with lean_check, in Lean 4 with Mathlib, that for all real numbers a and b, (a + b)^2 = a^2 + 2*a*b + b^2. The proof is `by ring`.',
+  )
+  await page.getByRole('button', { name: 'Work it' }).click()
+  await expect(page).toHaveURL(/\/lab\/[0-9a-f-]{36}$/)
+  const id = page.url().split('/').pop()!
+  try {
+    await expect(page.getByRole('region', { name: 'Proof' }).filter({ hasText: 'Checked by Lean' }).first()).toBeVisible({ timeout: 240_000 })
+    await expect(page.getByRole('list', { name: 'Notebook' })).toHaveAttribute('aria-busy', 'false', { timeout: 120_000 })
+    await expectAccessible(page, info, 'lab-proof')
+    await screenshot(page, info, `lab-proof${isMobile ? '-phone' : ''}`)
+  } finally {
+    expect((await page.request.delete(`/api/chat/conversations/${id}`, { headers: H })).status()).toBe(204)
+  }
+  expect(errors).toEqual([])
+})

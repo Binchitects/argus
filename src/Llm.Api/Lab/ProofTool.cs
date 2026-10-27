@@ -50,7 +50,7 @@ public sealed partial class ProofTool(LeanClient lean, IOptionsMonitor<LeanOptio
                 "Checks a proof with Lean 4 and Mathlib. Give a whole Lean file: `import Mathlib`, then the theorem and its proof " +
                 "(tactics such as simp, ring, linarith, nlinarith, norm_num, omega, positivity, induction). Returns checked (Lean accepts it, " +
                 "no sorry), incomplete (it uses sorry) or rejected, with Lean's messages by line and column to correct it.",
-                new JsonObject { ["source"] = Schema.Text("The Lean file, e.g. import Mathlib\\n\\ntheorem t (a b : ℝ) : (a + b)^2 = a^2 + 2*a*b + b^2 := by ring") },
+                new JsonObject { ["source"] = Schema.Text("The whole Lean file, with real line breaks: import Mathlib on the first line, then e.g. theorem t (a b : ℝ) : (a + b)^2 = a^2 + 2*a*b + b^2 := by ring") },
                 "source"),
         ],
         "Proofs (Lean): to prove a statement, write it as a Lean theorem with Mathlib and check it with lean_check. Say it is proved " +
@@ -68,6 +68,11 @@ public sealed partial class ProofTool(LeanClient lean, IOptionsMonitor<LeanOptio
         if (source.Length > MaxLength)
         {
             return new ToolResult($"The file is longer than {MaxLength} characters: check one theorem at a time.", IsError: true);
+        }
+        // A file written on one line with \n for its line breaks (as JSON would write them) is read with them.
+        if (!source.Contains('\n', StringComparison.Ordinal) && source.Contains("\\n", StringComparison.Ordinal))
+        {
+            source = source.Replace("\\n", "\n", StringComparison.Ordinal);
         }
         SandboxResult run;
         try

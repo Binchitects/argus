@@ -91,21 +91,24 @@ public sealed class LabTests(AppFixture app)
             "import Mathlib\n\ntheorem t (a b : ℝ) : a + b = b + a := by ring",
             "import Mathlib\n\ntheorem t (a b : ℝ) : a + b = b + a := by sorry",
             "import Mathlib\n\ntheorem wrong (a b : ℝ) : a + b = b + a + 1 := by ring",
+            // One line, with \n for its line breaks: read with them.
+            "import Mathlib\\n\\ntheorem t (a b : ℝ) : a + b = b + a := by ring",
         })
         {
             var result = (await SendAsync(b, id, Call(source))).Single(e => e.GetProperty("type").GetString() == "tool_result");
             verdicts.Add(JsonDocument.Parse(result.GetProperty("text").GetString()!).RootElement);
         }
-        Assert.Equal(["checked", "incomplete", "rejected"], verdicts.Select(v => v.GetProperty("verdict").GetString()));
+        Assert.Equal(["checked", "incomplete", "rejected", "checked"], verdicts.Select(v => v.GetProperty("verdict").GetString()));
+        Assert.StartsWith("import Mathlib\n\ntheorem t", lean.Jobs[3]["code"]!.GetValue<string>(), StringComparison.Ordinal);
         var message = verdicts[2].GetProperty("messages")[0];
         Assert.Equal((3, 52, "error"), (message.GetProperty("line").GetInt32(), message.GetProperty("column").GetInt32(), message.GetProperty("severity").GetString()));
         Assert.Contains("⊢ a + b = b + a + 1", message.GetProperty("text").GetString(), StringComparison.Ordinal);
         // The Lean file went to Lean's sandbox, not Python's.
-        Assert.Equal(3, lean.Jobs.Count);
+        Assert.Equal(4, lean.Jobs.Count);
         Assert.DoesNotContain(sandbox.Jobs, j => j["code"]!.GetValue<string>().StartsWith("import Mathlib", StringComparison.Ordinal));
-        // Counted in the lab: one proved, one refuted; sorry proves nothing.
+        // Counted in the lab: two proved, one refuted; sorry proves nothing.
         var listed = (await b.JsonAsync(await b.GetAsync("/api/lab/notebooks"))).EnumerateArray().Single();
-        Assert.Equal((1, 1), (listed.GetProperty("checks").GetProperty("proved").GetInt32(), listed.GetProperty("checks").GetProperty("refuted").GetInt32()));
+        Assert.Equal((2, 1), (listed.GetProperty("checks").GetProperty("proved").GetInt32(), listed.GetProperty("checks").GetProperty("refuted").GetInt32()));
     }
 
     [Fact]
