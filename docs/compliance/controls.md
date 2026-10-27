@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-The 34 controls Arena provides, from [controls.yaml](controls.yaml). How they are kept: [README](README.md#controls-and-how-they-are-kept). Each framework's clauses and the controls that serve them: [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md), [SOC 2, Trust Services Criteria](frameworks/soc2.md), [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md), [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md), [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md), [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md), [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md), [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md), [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md), [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md), [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md), [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md), [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md), [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md).
+The 35 controls Arena provides, from [controls.yaml](controls.yaml). How they are kept: [README](README.md#controls-and-how-they-are-kept). Each framework's clauses and the controls that serve them: [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md), [SOC 2, Trust Services Criteria](frameworks/soc2.md), [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md), [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md), [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md), [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md), [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md), [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md), [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md), [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md), [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md), [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md), [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md), [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md).
 
 ## People and access (IAM)
 
@@ -950,3 +950,30 @@ Under the chat's box, people are told that answers are made by AI and can be wro
 - `Llm.Tests/AiGovernanceTests.A_generated_picture_says_in_its_metadata_that_a_model_made_or_changed_it`
 
 **The company's part** Tell people elsewhere too where your use of AI is not obvious (a published text, a voice on the phone), and keep the marks on what you publish.
+
+### GOV-11: Readiness is measured and the evidence is kept over time
+
+Each day once, every compliance check's result is kept (six years), so an audit over a period (SOC 2 Type II) reads it day by day. For each framework, Admin → Compliance says how ready the company is, from 0 to 100: Arena's controls that serve it holding now, their operator's parts attested within the year, and the checks of the management system its audit reads; with each gap and where it is put right. Each framework's auditor package is one download: its clauses with Arena's controls, their state and attestations, the checks' history over the period asked, the records its audit reads, and the drafts its scheme asks for (a Common Criteria Security Target, the AI Act's Annex IV for each high-risk system, a CSF profile). Each download is audited.
+
+**Serves**
+
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): 9.1 Monitoring, measurement, analysis and evaluation; 9.3.2 Management review inputs
+- [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md): 9.1 Monitoring, measurement, analysis and evaluation; 9.3.2 Management review inputs
+- [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md): 9.1 Monitoring, measurement, analysis and evaluation
+- [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC4.1 Ongoing and separate evaluations; CC4.2 Communicating deficiencies
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): A&A Audit and assurance
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): GV.OV-03 Organizational cybersecurity risk management performance is evaluated and reviewed for adjustments needed
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): CA-7 Continuous Monitoring; CA-2 Control Assessments
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.12.03 Continuous Monitoring
+- [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md): Art.11 Technical documentation; Annex IV Technical documentation referred to in Article 11(1)
+- [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md): MEASURE 1.1 Approaches and metrics for measurement of AI risks enumerated during the Map function are selected for implementation starting with the most significant AI risks. The risks or trustworthiness characteristics that will not – or cannot – be measured are properly documented.
+- [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): ASE_TSS TOE summary specification; ATE_FUN Functional tests
+
+**Documented in** [compliance/README.md#readiness-and-the-auditors-package](README.md#readiness-and-the-auditors-package)
+
+**Proved by**
+
+- `Llm.Tests/ReadinessTests.Each_framework_says_how_ready_and_what_is_missing_and_its_package_holds_what_its_auditor_reads`
+- `Llm.Tests/ReadinessTests.The_checks_are_kept_once_a_day_and_the_package_reads_them_over_the_period`
+
+**The company's part** Read each framework's gaps before its audit, and hand the auditor its package for the period under audit.

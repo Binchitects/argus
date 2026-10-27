@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Field } from '@/components/ui/field'
-import { Textarea } from '@/components/ui/input'
+import { Input, Textarea } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -17,7 +17,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, errorMessage, type Me } from '@/lib/api'
 import { ago, when } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { attestedNow, complianceQuery, FRAMEWORK_GROUPS, FRAMEWORKS, manualLink, reviewsQuery, reviewState, tally, type Attestation, type CheckResult, type Control, type Framework, type State } from './compliance-api'
+import { attestedNow, complianceQuery, FRAMEWORK_GROUPS, FRAMEWORKS, manualLink, readinessQuery, type FrameworkReadiness, reviewsQuery, reviewState, tally, type Attestation, type CheckResult, type Control, type Framework, type State } from './compliance-api'
 import { DataRequestsSection } from './data-requests'
 import { IncidentsSection } from './incidents'
 import { AiSystemsSection } from './ai-systems'
@@ -26,6 +26,51 @@ import { PoliciesSection } from './policies'
 import { RisksSection } from './risks'
 import { SoaSection } from './soa'
 import { SuppliersSection } from './suppliers'
+
+/** How ready the company is for a framework, what is missing and where, and its auditor's package for a period. */
+function ReadinessPanel({ r, label }: { r: FrameworkReadiness; label: string }) {
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const query = new URLSearchParams({ ...(from ? { from } : {}), ...(to ? { to } : {}) }).toString()
+  return (
+    <section aria-labelledby="readiness" className="grid gap-3 rounded-xl border bg-card p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 id="readiness" className="text-lg font-semibold">
+          Ready for {label}: {r.score} of 100
+        </h2>
+        <span className="text-sm text-muted-foreground">
+          {r.holding} of {r.controls} of Arena's controls holding, {r.attested} attested
+        </span>
+      </div>
+      {r.gaps.length === 0 ? (
+        <p className="text-sm text-success-ink">Nothing missing that Arena can see.</p>
+      ) : (
+        <ul className="grid gap-1.5 text-sm">
+          {r.gaps.map((g) => (
+            <li key={g.what} className="grid gap-x-3 sm:grid-cols-[1fr_auto]">
+              <span>{g.what}</span>
+              <span className="text-xs text-muted-foreground">{g.where}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex flex-wrap items-end gap-2">
+        <Field label="From" className="w-40">
+          <Input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </Field>
+        <Field label="To" className="w-40">
+          <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        </Field>
+        <Button asChild>
+          <a href={`/api/admin/compliance/readiness/${r.framework}/package${query ? `?${query}` : ''}`} download>
+            <Download /> Download for the auditor
+          </a>
+        </Button>
+        <span className="pb-2 text-xs text-muted-foreground">The checks' history over the period (a year if not said), and what its audit reads.</span>
+      </div>
+    </section>
+  )
+}
 
 /** A section's old anchor (#incidents in a notification's link): its tab. */
 const HASH_TABS: Record<string, string> = { incidents: 'incidents', 'data-requests': 'requests', risks: 'risks', soa: 'soa', policies: 'policies', audits: 'audits', suppliers: 'suppliers', ai: 'ai', 'access-reviews': 'reviews' }
@@ -258,6 +303,8 @@ export function CompliancePage() {
   const view = useQuery(complianceQuery)
   const [framework, setFramework] = useState<Framework | 'all'>('all')
   const [attesting, setAttesting] = useState<Control | null>(null)
+  const readiness = useQuery(readinessQuery)
+  const ready = new Map((readiness.data ?? []).map((r) => [r.framework, r]))
   const now = new Date()
   const data = view.data
   const checks = new Map((data?.checks ?? []).map((c) => [c.id, c]))
@@ -319,6 +366,7 @@ export function CompliancePage() {
               const t = tally(data.controls, f.key, now)
               const cov = data.coverage[f.key]
               const chosen = framework === f.key
+              const r = ready.get(f.key)
               return (
                 <button
                   key={f.key}
@@ -340,6 +388,17 @@ export function CompliancePage() {
                       {t.attested} of {t.controls} attested
                     </span>
                   </div>
+                  {r && (
+                    <div className="mt-3 grid gap-1">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-muted-foreground">Ready</span>
+                        <span className="font-medium tabular-nums">{r.score} of 100</span>
+                      </div>
+                      <div className="h-1.5 overflow-hidden rounded-full bg-muted" role="presentation">
+                        <div className={cn('h-full rounded-full', r.score >= 80 ? 'bg-success' : r.score >= 50 ? 'bg-warning' : 'bg-destructive')} style={{ width: `${r.score}%` }} />
+                      </div>
+                    </div>
+                  )}
                 </button>
               )
             })}
@@ -347,6 +406,8 @@ export function CompliancePage() {
               </div>
             ))}
           </section>
+
+          {framework !== 'all' && ready.get(framework) && <ReadinessPanel r={ready.get(framework)!} label={FRAMEWORKS.find((f) => f.key === framework)?.label ?? framework} />}
 
           <section aria-labelledby="checks" className="grid gap-3">
             <div className="flex flex-wrap items-baseline justify-between gap-2">

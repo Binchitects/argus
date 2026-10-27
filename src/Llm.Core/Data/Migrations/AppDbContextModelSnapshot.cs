@@ -3526,6 +3526,40 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("compliance_audits", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Compliance.ComplianceSnapshot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Check")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateOnly>("Day")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Detail")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Day", "Check")
+                        .IsUnique();
+
+                    b.ToTable("compliance_snapshots", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Compliance.ControlWaiver", b =>
                 {
                     b.Property<Guid>("Id")

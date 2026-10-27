@@ -115,6 +115,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Compliance.ControlWaiver> ControlWaivers => Set<Compliance.ControlWaiver>();
     public DbSet<Compliance.Supplier> Suppliers => Set<Compliance.Supplier>();
     public DbSet<Compliance.AiSystem> AiSystems => Set<Compliance.AiSystem>();
+    public DbSet<Compliance.ComplianceSnapshot> ComplianceSnapshots => Set<Compliance.ComplianceSnapshot>();
     public DbSet<Compliance.AccessReviewItem> AccessReviewItems => Set<Compliance.AccessReviewItem>();
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<KnowledgeSource> KnowledgeSources => Set<KnowledgeSource>();
@@ -1184,6 +1185,14 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(s => s.ReviewedBy).HasMaxLength(256);
             e.Property(s => s.CreatedBy).HasMaxLength(256);
             e.HasIndex(s => s.Source);
+        });
+        builder.Entity<Compliance.ComplianceSnapshot>(e =>
+        {
+            e.ToTable("compliance_snapshots");
+            e.Property(s => s.Check).HasMaxLength(64);
+            e.Property(s => s.State).HasMaxLength(16);
+            e.Property(s => s.Detail).HasMaxLength(4000);
+            e.HasIndex(s => new { s.Day, s.Check }).IsUnique();
         });
         builder.Entity<Compliance.NoticeAcceptance>(e =>
         {

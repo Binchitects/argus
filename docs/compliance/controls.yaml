@@ -1008,3 +1008,37 @@ controls:
       Tell people elsewhere too where your use of AI is not obvious (a
       published text, a voice on the phone), and keep the marks on what you
       publish.
+
+  - id: GOV-11
+    title: Readiness is measured and the evidence is kept over time
+    meets: >-
+      Each day once, every compliance check's result is kept (six years), so
+      an audit over a period (SOC 2 Type II) reads it day by day. For each
+      framework, Admin → Compliance says how ready the company is, from 0 to
+      100: Arena's controls that serve it holding now, their operator's parts
+      attested within the year, and the checks of the management system its
+      audit reads; with each gap and where it is put right. Each framework's
+      auditor package is one download: its clauses with Arena's controls,
+      their state and attestations, the checks' history over the period
+      asked, the records its audit reads, and the drafts its scheme asks for
+      (a Common Criteria Security Target, the AI Act's Annex IV for each
+      high-risk system, a CSF profile). Each download is audited.
+    frameworks:
+      iso27001: [9.1, 9.3.2]
+      iso42001: [9.1, 9.3.2]
+      iso22301: [9.1]
+      soc2: [CC4.1, CC4.2]
+      csaccm: [A&A]
+      nistcsf: [GV.OV-03]
+      nist80053: [CA-7, CA-2]
+      nist800171: [03.12.03]
+      euaiact: [Art.11, Annex IV]
+      airmf: [MEASURE 1.1]
+      commoncriteria: [ASE_TSS, ATE_FUN]
+    docs: [compliance/README.md#readiness-and-the-auditors-package]
+    tests:
+      - Llm.Tests/ReadinessTests.Each_framework_says_how_ready_and_what_is_missing_and_its_package_holds_what_its_auditor_reads
+      - Llm.Tests/ReadinessTests.The_checks_are_kept_once_a_day_and_the_package_reads_them_over_the_period
+    operator: >-
+      Read each framework's gaps before its audit, and hand the auditor its
+      package for the period under audit.

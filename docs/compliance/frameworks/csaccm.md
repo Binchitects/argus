@@ -6,7 +6,7 @@ Arena's controls serve 14 of the 17 clauses here. Every clause is met by the com
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
-| A&A | Audit and assurance | [GOV-01](../controls.md#gov-01-the-controls-are-kept-from-breaking), [GOV-07](../controls.md#gov-07-audits-their-findings-and-corrective-actions-are-kept) | [The management system (ISMS and AIMS)](../isms.md) |
+| A&A | Audit and assurance | [GOV-01](../controls.md#gov-01-the-controls-are-kept-from-breaking), [GOV-07](../controls.md#gov-07-audits-their-findings-and-corrective-actions-are-kept), [GOV-11](../controls.md#gov-11-readiness-is-measured-and-the-evidence-is-kept-over-time) | [The management system (ISMS and AIMS)](../isms.md) |
 | AIS | Application and interface security | [OPS-02](../controls.md#ops-02-code-the-model-writes-runs-apart) | [Change and vulnerability management policy](../policies/change-management.md) |
 | BCR | Business continuity management and operational resilience | [OPS-01](../controls.md#ops-01-backups-restored-and-proven) | [Backup and business continuity policy](../policies/business-continuity.md) |
 | CCC | Change control and configuration management |  | [Change and vulnerability management policy](../policies/change-management.md) |

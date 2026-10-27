@@ -69,6 +69,22 @@ export const FRAMEWORK_GROUPS = [...new Set(FRAMEWORKS.map((f) => f.group))]
 
 export type Framework = (typeof FRAMEWORKS)[number]['key']
 
+/** How ready for a framework: its score, its controls holding and attested, and what is missing where. */
+export interface FrameworkReadiness {
+  framework: string
+  title: string
+  score: number
+  controls: number
+  holding: number
+  attested: number
+  gaps: { what: string; where: string }[]
+}
+
+export const readinessQuery = {
+  queryKey: ['admin', 'compliance', 'readiness'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<FrameworkReadiness[]>('/api/admin/compliance/readiness', { signal }),
+}
+
 export const complianceQuery = {
   queryKey: ['admin', 'compliance'] as const,
   queryFn: ({ signal }: { signal: AbortSignal }) => api<ComplianceView>('/api/admin/compliance', { signal }),

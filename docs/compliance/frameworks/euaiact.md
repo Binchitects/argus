@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 10 of the 126 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 12 of the 126 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
@@ -16,7 +16,7 @@ Arena's controls serve 10 of the 126 clauses here. Every clause is met by the co
 | Art.8 | Compliance with the requirements |  | [AI policy](../policies/ai.md) |
 | Art.9 | Risk management system | [GOV-04](../controls.md#gov-04-risks-are-assessed-treated-and-reviewed) | [AI policy](../policies/ai.md) |
 | Art.10 | Data and data governance |  | [AI policy](../policies/ai.md) |
-| Art.11 | Technical documentation |  | [AI policy](../policies/ai.md) |
+| Art.11 | Technical documentation | [GOV-11](../controls.md#gov-11-readiness-is-measured-and-the-evidence-is-kept-over-time) | [AI policy](../policies/ai.md) |
 | Art.12 | Record-keeping | [LOG-01](../controls.md#log-01-who-did-what-is-recorded) | [AI policy](../policies/ai.md) |
 | Art.13 | Transparency and provision of information to deployers |  | [AI policy](../policies/ai.md) |
 | Art.14 | Human oversight | [GOV-09](../controls.md#gov-09-ai-systems-are-registered-classified-assessed-and-overseen) | [AI policy](../policies/ai.md) |
@@ -122,7 +122,7 @@ Arena's controls serve 10 of the 126 clauses here. Every clause is met by the co
 | Annex I | List of Union harmonisation legislation |  | [AI policy](../policies/ai.md) |
 | Annex II | List of criminal offences referred to in Article 5(1), first subparagraph, point (h)(iii) |  | [AI policy](../policies/ai.md) |
 | Annex III | High-risk AI systems referred to in Article 6(2) |  | [AI policy](../policies/ai.md) |
-| Annex IV | Technical documentation referred to in Article 11(1) |  | [AI policy](../policies/ai.md) |
+| Annex IV | Technical documentation referred to in Article 11(1) | [GOV-11](../controls.md#gov-11-readiness-is-measured-and-the-evidence-is-kept-over-time) | [AI policy](../policies/ai.md) |
 | Annex V | EU declaration of conformity |  | [AI policy](../policies/ai.md) |
 | Annex VI | Conformity assessment procedure based on internal control |  | [AI policy](../policies/ai.md) |
 | Annex VII | Conformity based on an assessment of the quality management system and an assessment of the technical documentation |  | [AI policy](../policies/ai.md) |

@@ -2134,6 +2134,8 @@ documents; it says what is the operator's part, as v7.1 does.
      high-risk system;
    - NIST CSF: a current and target profile;
    - Common Criteria: a Security Target drafted from the controls.
+   Done: readiness per framework with its gaps, the auditor's package with
+   the checks' daily history (kept six years) and the drafts (GOV-11).
 9. **Running the system**:
    - each control's owner;
    - the management review (9.3), its agenda drawn from the inputs the clause

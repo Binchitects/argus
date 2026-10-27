@@ -30,7 +30,11 @@ const view: ComplianceView = {
 
 describe('Admin → Compliance', () => {
   it('shows each framework, the checks now and the controls, filtered by a framework', async () => {
-    fakeApi(admin, { 'GET /api/admin/compliance': () => ({ json: view }) })
+    fakeApi(admin, {
+      'GET /api/admin/compliance': () => ({ json: view }),
+      'GET /api/admin/compliance/readiness': () => ({ json: [{ framework: 'iso27001', title: 'ISO 27001', score: 54, controls: 2, holding: 1, attested: 0,
+        gaps: [{ what: 'The Statement of Applicability is approved and current: not approved yet', where: 'Admin → Compliance → Statement of Applicability' }] }] }),
+    })
     renderApp('/admin/compliance')
     const iso = await screen.findByRole('button', { name: /ISO 27001/ })
     expect(iso).toHaveTextContent('2 controls, serving 2 of its 123 clauses')
@@ -38,6 +42,13 @@ describe('Admin → Compliance', () => {
     expect(screen.getByRole('heading', { name: 'AI' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /EU AI Act/ })).toHaveTextContent('0 controls, 0 clauses')
     expect(screen.queryByRole('button', { name: /PCI DSS/ })).not.toBeInTheDocument()
+    // Each framework's readiness, and for the one picked its gaps and its auditor's package.
+    expect(await within(iso).findByText('54 of 100')).toBeInTheDocument()
+    await userEvent.click(iso)
+    expect(await screen.findByRole('heading', { name: 'Ready for ISO 27001: 54 of 100' })).toBeInTheDocument()
+    expect(screen.getByText('The Statement of Applicability is approved and current: not approved yet')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Download for the auditor/ })).toHaveAttribute('href', '/api/admin/compliance/readiness/iso27001/package')
+    await userEvent.click(iso)
     expect(iso).toHaveTextContent('1 met')
     expect(iso).toHaveTextContent('1 in part')
     // An attestation older than a year no longer counts.

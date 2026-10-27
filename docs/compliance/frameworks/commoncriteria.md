@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 24 of the 121 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 25 of the 121 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
@@ -100,7 +100,7 @@ Arena's controls serve 24 of the 121 clauses here. Every clause is met by the co
 | ASE_OBJ | Security objectives |  | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
 | ASE_ECD | Extended components definition |  | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
 | ASE_REQ | Security requirements |  | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
-| ASE_TSS | TOE summary specification |  | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
+| ASE_TSS | TOE summary specification | [GOV-11](../controls.md#gov-11-readiness-is-measured-and-the-evidence-is-kept-over-time) | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
 | ADV_ARC | Security Architecture |  | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
 | ADV_FSP | Functional specification |  | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
 | ADV_IMP | Implementation representation |  | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
@@ -119,7 +119,7 @@ Arena's controls serve 24 of the 121 clauses here. Every clause is met by the co
 | ALC_TAT | Tools and techniques |  | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
 | ATE_COV | Coverage |  | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
 | ATE_DPT | Depth |  | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
-| ATE_FUN | Functional tests | [GOV-01](../controls.md#gov-01-the-controls-are-kept-from-breaking) | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
+| ATE_FUN | Functional tests | [GOV-01](../controls.md#gov-01-the-controls-are-kept-from-breaking), [GOV-11](../controls.md#gov-11-readiness-is-measured-and-the-evidence-is-kept-over-time) | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
 | ATE_IND | Independent testing |  | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
 | AVA_VAN | Vulnerability analysis | [GOV-03](../controls.md#gov-03-what-a-release-ships-is-listed-and-its-known-vulnerabilities-gate-it) | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |
 | ACO_COR | Composition rationale |  | [Product evaluation (Common Criteria and FIPS 140-3)](../product-evaluation.md) |

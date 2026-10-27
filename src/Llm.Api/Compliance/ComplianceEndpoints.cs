@@ -99,6 +99,9 @@ public static class ComplianceEndpoints
         services.AddScoped<Audits>();
         services.AddScoped<Suppliers>();
         services.AddScoped<AiSystems>();
+        services.AddScoped<Readiness>();
+        services.AddSingleton<ComplianceSnapshots>();
+        services.AddHostedService(sp => sp.GetRequiredService<ComplianceSnapshots>());
         services.AddHostedService<AccessReviewSchedule>();
     }
 
@@ -280,6 +283,20 @@ public static class ComplianceEndpoints
             await AiAsync(async () => await ai.ReviewAsync(id, body.Note, await Who(p, users), ct)));
         g.MapPost("/ai-systems/{id:guid}/retire", async (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AiSystems ai, CancellationToken ct) =>
             await AiAsync(async () => await ai.RetireAsync(id, await Who(p, users), ct)));
+
+        // How ready for each framework, and what its auditor reads (GOV-11).
+        g.MapGet("/readiness", async (Readiness readiness, CancellationToken ct) => Results.Ok(await readiness.AllAsync(ct)));
+        g.MapGet("/readiness/{framework}/package", async (string framework, DateOnly? from, DateOnly? to, ClaimsPrincipal p, UserManager<AppUser> users, Readiness readiness,
+            Audit audit, TimeProvider clock, CancellationToken ct) =>
+        {
+            if (!ComplianceControls.Catalogs.ContainsKey(framework))
+            {
+                return Results.NotFound();
+            }
+            var zip = await readiness.PackageAsync(framework, from, to, await Who(p, users), ct);
+            await audit.WriteAsync("compliance.package", framework, detail: $"{from?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "a year"} to {to?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "today"}");
+            return Results.File(zip, "application/zip", $"{framework}-for-the-auditor-{clock.GetUtcNow():yyyy-MM-dd}.zip");
+        });
 
         g.MapGet("/incidents", async (AppDbContext db, TimeProvider clock, CancellationToken ct) =>
         {

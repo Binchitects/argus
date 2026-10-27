@@ -267,6 +267,34 @@ type in XMP: `trainedAlgorithmicMedia`, or `compositeWithTrainedAlgorithmicMedia
 for a person's picture a model changed). PNG and JPEG carry the mark; video and
 sound do not yet.
 
+## Readiness and the auditor's package
+
+Each day once, every compliance check's result is kept, for six years: an audit
+over a period (SOC 2 Type II) reads it day by day (GOV-11). For each framework,
+Admin → Compliance says how ready the company is, from 0 to 100: Arena's
+controls that serve it holding now, their operator's parts attested within the
+year, and the checks of the management system its audit reads (the risk
+register, the Statement of Applicability, policies, audits, suppliers, access
+reviews, incidents, AI systems, as each framework asks). Each gap is named with
+where it is put right.
+
+**Download for the auditor** gives a framework's package in one zip:
+
+- `clauses.csv`: every clause, the company's document for it, Arena's controls
+  that serve it, their state now and their attestation;
+- `readiness.json`: the score and the gaps;
+- `check-history.csv`: each check of its controls and its management system,
+  day by day over the period asked (`?from=` and `?to=`, a year by default);
+- the records its audit reads: the risk register, the Statement of
+  Applicability, the policies, the audits and findings, the suppliers, the AI
+  systems;
+- the drafts its scheme asks for: a **Security Target** for the Common
+  Criteria, the **AI Act's Annex IV** technical documentation for each
+  high-risk system (its gaps marked "To write"), a **CSF profile** with the
+  target for the company to fill in.
+
+Each download is in the audit log.
+
 ## Access reviews
 
 An access review lists, for a reviewer to **Keep** or **Revoke**:

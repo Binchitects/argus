@@ -173,3 +173,16 @@ public sealed class AiSystem
     public required string CreatedBy { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
+
+/// <summary>
+/// A compliance check's result as it was on a day: the history an audit over a period reads (SOC 2 Type II), kept six years.
+/// </summary>
+public sealed class ComplianceSnapshot
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public DateOnly Day { get; set; }
+    public required string Check { get; set; }
+    public required string State { get; set; }
+    public string? Detail { get; set; }
+    public DateTimeOffset At { get; set; } = DateTimeOffset.UtcNow;
+}

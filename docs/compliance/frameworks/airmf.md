@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 18 of the 72 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 19 of the 72 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
@@ -43,7 +43,7 @@ Arena's controls serve 18 of the 72 clauses here. Every clause is met by the com
 | MAP 4.2 | Internal risk controls for components of the AI system including third-party AI technologies are identified and documented. |  | [AI policy](../policies/ai.md) |
 | MAP 5.1 | Likelihood and magnitude of each identified impact (both potentially beneficial and harmful) based on expected use, past uses of AI systems in similar contexts, public incident reports, feedback from those external to the team that developed or deployed the AI system, or other data are identified and documented. | [GOV-09](../controls.md#gov-09-ai-systems-are-registered-classified-assessed-and-overseen) | [AI policy](../policies/ai.md) |
 | MAP 5.2 | Practices and personnel for supporting regular engagement with relevant AI actors and integrating feedback about positive, negative, and unanticipated impacts are in place and documented. |  | [AI policy](../policies/ai.md) |
-| MEASURE 1.1 | Approaches and metrics for measurement of AI risks enumerated during the Map function are selected for implementation starting with the most significant AI risks. The risks or trustworthiness characteristics that will not – or cannot – be measured are properly documented. |  | [AI policy](../policies/ai.md) |
+| MEASURE 1.1 | Approaches and metrics for measurement of AI risks enumerated during the Map function are selected for implementation starting with the most significant AI risks. The risks or trustworthiness characteristics that will not – or cannot – be measured are properly documented. | [GOV-11](../controls.md#gov-11-readiness-is-measured-and-the-evidence-is-kept-over-time) | [AI policy](../policies/ai.md) |
 | MEASURE 1.2 | Appropriateness of AI metrics and effectiveness of existing controls is regularly assessed and updated including reports of errors and impacts on affected communities. |  | [AI policy](../policies/ai.md) |
 | MEASURE 1.3 | Internal experts who did not serve as front-line developers for the system and/or independent assessors are involved in regular assessments and updates. Domain experts, users, AI actors external to the team that developed or deployed the AI system, and affected communities are consulted in support of assessments as necessary per organizational risk tolerance. |  | [AI policy](../policies/ai.md) |
 | MEASURE 2.1 | Test sets, metrics, and details about the tools used during test, evaluation, validation, and verification (TEVV) are documented. | [GOV-09](../controls.md#gov-09-ai-systems-are-registered-classified-assessed-and-overseen) | [AI policy](../policies/ai.md) |
