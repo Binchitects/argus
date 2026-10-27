@@ -17,6 +17,13 @@ public sealed class LiteLlmOptions
     /// 10-20 s): tried again after 1, 2, 4, 8 and 15 seconds while they fit. 0: told at once (a stack with no gateway, CI's).
     /// </summary>
     public int ConnectWaitSeconds { get; set; } = 30;
+
+    /// <summary>
+    /// How long a new deployment's first chat waits, at most, for the gateway to make the chat's key (on a first start it
+    /// sets up its database before it listens, which can take a minute or more): tried again after 1, 2, 4, 8 and then 15
+    /// seconds while they fit. 0: told at once (a stack with no gateway, CI's).
+    /// </summary>
+    public int KeyWaitSeconds { get; set; } = 90;
 }
 
 public sealed class LiteLlmClient(HttpClient http) : ILiteLlm

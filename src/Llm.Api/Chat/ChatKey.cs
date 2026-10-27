@@ -12,7 +12,7 @@ namespace Llm.Api.Chat;
 /// to do nothing else. Each request still names its person in `user`: its spend is
 /// theirs, and counts to their credits (the app's, checked before each answer).
 /// </summary>
-public sealed class ChatKey(IServiceScopeFactory scopes, IDataProtectionProvider protection) : IDisposable
+public sealed class ChatKey(IServiceScopeFactory scopes, IDataProtectionProvider protection, Microsoft.Extensions.Options.IOptionsMonitor<LiteLlmOptions> options) : IDisposable
 {
     public const string Alias = "chat";
     private const string SettingKey = "chat.gateway_key";
@@ -38,19 +38,23 @@ public sealed class ChatKey(IServiceScopeFactory scopes, IDataProtectionProvider
             }
             // A new deployment: the gateway sets up its database before it listens, which on a
             // first start can take a minute or more after the model is already serving. Tries for
-            // about a minute and a half, further apart each time.
+            // about a minute and a half (Gateway:KeyWaitSeconds), further apart each time.
             var gateway = scope.ServiceProvider.GetRequiredService<ILiteLlm>();
+            var budget = options.CurrentValue.KeyWaitSeconds;
+            var waited = 0;
             string key;
             for (var attempt = 1; ; attempt++)
             {
+                var wait = Math.Min(1 << (attempt - 1), 15);
                 try
                 {
                     key = await gateway.GenerateServiceKeyAsync(Alias, ct);
                     break;
                 }
-                catch (Gateway.GatewayException) when (attempt < 10)
+                catch (Gateway.GatewayException) when (waited + wait <= budget)
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(Math.Min(1 << (attempt - 1), 15)), ct);
+                    waited += wait;
+                    await Task.Delay(TimeSpan.FromSeconds(wait), ct);
                 }
             }
             db.Settings.Add(new Setting { Key = SettingKey, Value = _protector.Protect(key) });

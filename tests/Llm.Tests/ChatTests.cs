@@ -80,6 +80,25 @@ public sealed class ChatTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_new_deployments_first_chat_waits_for_the_gateway_to_make_its_key_only_as_long_as_the_wait_allows()
+    {
+        var gateway = new FakeGateway();
+        await using var f = app.Create(app.ConnectionStringFor("nokey_" + Guid.NewGuid().ToString("N")[..8]), gateway,
+            new Dictionary<string, string?> { ["Gateway:KeyWaitSeconds"] = "0" });
+        var b = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var id = await NewChatAsync(b);
+        // No gateway yet to make the chat's key: told at once (CI's stack, with none), not after a minute and a half.
+        gateway.Down = true;
+        var took = System.Diagnostics.Stopwatch.StartNew();
+        var events = await SendAsync(b, id, "hello");
+        Assert.InRange(took.Elapsed.TotalSeconds, 0, 10);
+        Assert.Contains(events, e => e.GetProperty("type").GetString() == "error" && e.GetProperty("message").GetString()!.Contains("not reachable", StringComparison.Ordinal));
+        // The gateway back: the next answer makes the key and is answered.
+        gateway.Down = false;
+        Assert.Contains(await SendAsync(b, id, "again"), e => e.GetProperty("type").GetString() == "done");
+    }
+
+    [Fact]
     public async Task Config_lists_the_model_its_presets_and_argus()
     {
         var (b, _) = await PersonAsync();
