@@ -1905,18 +1905,24 @@ installer only does Docker Compose. So, in this release:
   the company's managed Postgres) and the sizes; makes the secrets in the
   cluster (never printed, never in a values file); installs or upgrades
   with `helm upgrade --install --atomic --wait`, and checks the stack
-  answers as `deploy/scripts/compliance-check.py` does.
+  answers as `deploy/scripts/compliance-check.py` does. Done
+  (deploy/scripts/kube-install.sh: the options name what a terminal would be
+  asked; the app's answer read through the API server's proxy).
 - **Availability**: two or more replicas of the app, the web and the
   gateway, spread over nodes (anti-affinity), PodDisruptionBudgets, rolling
   updates that keep serving, readiness and liveness probes, HPAs where load
   varies, Postgres with a standby (CloudNativePG) or the company's managed
   one, backups to object storage; the models on GPU nodes with their own
-  pools.
+  pools. Done: spread, PDBs, rolling updates, HPAs (`availability.*`); the
+  probes were there. Left: CloudNativePG, backups to object storage.
 - **Air-gapped clusters**: the images listed by the chart, pushed to the
   company's registry by the installer, the chart packaged with the release.
+  Done: `--registry` loads the bundle's images and pushes them, the values
+  name them; the bundle carries the chart in deploy/helm.
 - Tested: `helm template` and lint of every value combination in
   tests/deploy, the installer's Kubernetes mode against fake kubectl and
-  helm, and an install on a kind cluster in CI.
+  helm, and an install on a kind cluster in CI. Done
+  (tests/deploy/test_kube_install.py, CI job kubernetes).
 
 The science lab: specialised models and the tools they need, working together
 on a problem, with what they did checkable. Every download asked first

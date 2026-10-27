@@ -5,7 +5,10 @@ metadata:
   name: app
   labels: {{- include "arena.labels" . | nindent 4 }}
 spec:
+  {{- if not .Values.availability.autoscale.enabled }}
   replicas: {{ .Values.app.replicas }}
+  {{- end }}
+  {{- include "arena.rolling" . | nindent 2 }}
   selector:
     matchLabels: {{- include "arena.selector" (dict "root" $ "name" "app") | nindent 6 }}
   template:
@@ -13,6 +16,7 @@ spec:
       labels: {{- include "arena.selector" (dict "root" $ "name" "app") | nindent 8 }}
     spec:
       {{- include "arena.podDefaults" . | nindent 6 }}
+      {{- include "arena.spread" (dict "root" $ "name" "app") | nindent 6 }}
       securityContext: { runAsUser: 1000, runAsGroup: 1000, fsGroup: 1000, runAsNonRoot: true }
       # A replica asked to stop finishes its answers' saving and lets go of the lead.
       terminationGracePeriodSeconds: 30
@@ -120,7 +124,10 @@ metadata:
   name: web
   labels: {{- include "arena.labels" . | nindent 4 }}
 spec:
+  {{- if not .Values.availability.autoscale.enabled }}
   replicas: {{ .Values.web.replicas }}
+  {{- end }}
+  {{- include "arena.rolling" . | nindent 2 }}
   selector:
     matchLabels: {{- include "arena.selector" (dict "root" $ "name" "web") | nindent 6 }}
   template:
@@ -128,6 +135,7 @@ spec:
       labels: {{- include "arena.selector" (dict "root" $ "name" "web") | nindent 8 }}
     spec:
       {{- include "arena.podDefaults" . | nindent 6 }}
+      {{- include "arena.spread" (dict "root" $ "name" "web") | nindent 6 }}
       containers:
         - name: web
           image: {{ include "arena.image" (dict "root" $ "image" .Values.images.web) }}

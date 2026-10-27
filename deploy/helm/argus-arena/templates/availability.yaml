@@ -1,0 +1,33 @@
+{{- /* Availability: the app, the web and the gateway kept serving while nodes are drained (a PodDisruptionBudget
+each, when it has more than one replica), and grown with their load between their replicas and maxReplicas
+(availability.autoscale: a HorizontalPodAutoscaler each, on CPU; the cluster needs its metrics server). */}}
+{{- range $name := list "app" "web" "litellm" }}
+{{- $v := index $.Values $name }}
+{{- if gt (int $v.replicas) 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  labels: {{- include "arena.labels" $ | nindent 4 }}
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" $name) | nindent 6 }}
+---
+{{- end }}
+{{- if $.Values.availability.autoscale.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $name }}
+  labels: {{- include "arena.labels" $ | nindent 4 }}
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: {{ $name }} }
+  minReplicas: {{ $v.replicas }}
+  maxReplicas: {{ max (int $v.replicas) (int (index $.Values.availability.autoscale.maxReplicas $name)) }}
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: {{ $.Values.availability.autoscale.cpuPercent }} } }
+---
+{{- end }}
+{{- end }}

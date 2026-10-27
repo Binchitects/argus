@@ -35,6 +35,9 @@
 #   status    what is installed: the version each service runs, health, disk and GPU
 #   verify    the bundle's checksums; with an installation, its files' too
 #
+# On Kubernetes, with Helm: COMMAND --kubernetes (requirements, install, upgrade, status, remove), as
+#   scripts/kube-install.sh says (installer.sh requirements --kubernetes --help).
+#
 # Options:
 #   --dir DIR            the installation: DIR/deploy holds the compose files and .env (DIR may
 #                        also be the deploy folder itself). Default: /srv/arena as root, else
@@ -109,6 +112,17 @@ unset COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME COMPOSE_ENV_FILES
 export PODMAN_COMPOSE_WARNING_LOGS=false
 
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+
+# On Kubernetes (--kubernetes): the cluster's own installer, scripts/kube-install.sh (beside this one, or in the
+# bundle's deploy/scripts), takes the command and its options.
+for a in "$@"; do
+  if [[ "$a" == --kubernetes ]]; then
+    for k in "$(dirname "$SELF")/kube-install.sh" "$(dirname "$SELF")/deploy/scripts/kube-install.sh"; do
+      [[ -f "$k" ]] && exec bash "$k" "$@"
+    done
+    printf 'installer: no kube-install.sh beside %s\n' "$SELF" >&2; exit 2
+  fi
+done
 
 say()  { printf '%s\n' "$*"; }
 step() { printf '==> %s\n' "$*"; }

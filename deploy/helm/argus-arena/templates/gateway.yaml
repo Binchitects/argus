@@ -55,7 +55,10 @@ metadata:
   name: litellm
   labels: {{- include "arena.labels" . | nindent 4 }}
 spec:
+  {{- if not .Values.availability.autoscale.enabled }}
   replicas: {{ .Values.litellm.replicas }}
+  {{- end }}
+  {{- include "arena.rolling" . | nindent 2 }}
   selector:
     matchLabels: {{- include "arena.selector" (dict "root" $ "name" "litellm") | nindent 6 }}
   template:
@@ -63,6 +66,7 @@ spec:
       labels: {{- include "arena.selector" (dict "root" $ "name" "litellm") | nindent 8 }}
     spec:
       {{- include "arena.podDefaults" . | nindent 6 }}
+      {{- include "arena.spread" (dict "root" $ "name" "litellm") | nindent 6 }}
       containers:
         - name: litellm
           image: {{ include "arena.image" (dict "root" $ "image" .Values.images.litellm) }}

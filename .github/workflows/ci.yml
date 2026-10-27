@@ -184,6 +184,50 @@ jobs:
             src/argus-web/test-results
           if-no-files-found: ignore
 
+  kubernetes:
+    # The Kubernetes installer (installer.sh --kubernetes) on a kind cluster: the cluster's requirements, the chart
+    # installed with helm --atomic --wait, the app answering through its Service, then status and an upgrade that
+    # keeps the release's values. The app's and the web's images are built here; what needs a GPU, Argus, the
+    # sandbox and the monitoring are left out (deploy/helm/kind-values.yaml).
+    needs: [api, web]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the images
+        run: |
+          docker build -t arena-app:ci --build-arg APP_VERSION=0.0.0-ci.${{ github.run_number }} -f src/Llm.Api/Dockerfile .
+          docker build -t arena-web:ci --build-arg APP_VERSION=0.0.0-ci.${{ github.run_number }} -f src/web/Dockerfile .
+      - uses: helm/kind-action@v1.12.0
+        with: { cluster_name: arena, version: v0.27.0 }
+      - name: The images, an ingress controller and a TLS Secret
+        run: |
+          kind load docker-image arena-app:ci arena-web:ci --name arena
+          kubectl label node arena-control-plane ingress-ready=true
+          kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.12.1/deploy/static/provider/kind/deploy.yaml
+          kubectl -n ingress-nginx wait --for=condition=available deployment/ingress-nginx-controller --timeout=300s
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=arena.localhost \
+            -addext "subjectAltName=DNS:arena.localhost,DNS:*.arena.localhost" -keyout tls.key -out tls.crt
+          kubectl create namespace arena
+          kubectl -n arena create secret tls arena-tls --cert=tls.crt --key=tls.key
+      - name: Install with the installer
+        run: |
+          bash deploy/scripts/installer.sh requirements --kubernetes --tls-secret arena-tls --replicas 1 --gpu no
+          bash deploy/scripts/installer.sh install --kubernetes --domain arena.localhost --tls-secret arena-tls --replicas 1 --gpu no \
+            --values deploy/helm/kind-values.yaml --timeout 20 --yes
+      - name: Status, and an upgrade that keeps its values
+        run: |
+          bash deploy/scripts/kube-install.sh status
+          bash deploy/scripts/kube-install.sh upgrade --values deploy/helm/kind-values.yaml --timeout 20 --yes
+          test "$(helm get values arena -n arena -o json | python3 -c 'import json, sys; print(json.load(sys.stdin)["domain"])')" = arena.localhost
+      - name: What the cluster says
+        if: failure()
+        run: |
+          kubectl -n arena get pods -o wide
+          kubectl -n arena get events --sort-by=.lastTimestamp | tail -40
+          kubectl -n arena logs deploy/app --tail=200 || true
+          kubectl -n arena logs deploy/litellm --tail=100 || true
+
   deploy:
     # The compose files resolving (the platform from .env.example, with Docker and
     # with Podman's overrides; Argus alone per sample), the scripts parsing, and the

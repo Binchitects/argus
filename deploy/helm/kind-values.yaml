@@ -1,0 +1,17 @@
+# The CI's install on a kind cluster (.github/workflows/ci.yml, job kubernetes): the app's and the web's images built
+# there and loaded into the cluster; what needs a GPU, an image of this repository not built there (Argus, the
+# sandbox), or more room than a runner has (the monitoring, search) left out.
+images:
+  app: { repository: arena-app, tag: ci }
+  web: { repository: arena-web, tag: ci }
+llamacpp: { enabled: false }
+embed: { enabled: false }
+imagegen: { enabled: false }
+videogen: { enabled: false }
+audio: { enabled: false }
+argus: { enabled: false }
+sandbox: { enabled: false }
+searxng: { enabled: false }
+monitoring: { enabled: false }
+persistence:
+  models: { size: 1Gi }

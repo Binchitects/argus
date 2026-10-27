@@ -73,3 +73,28 @@ imagePullSecrets:
 {{- end }}
 {{- end }}
 {{- end }}
+
+{{- /* A serving Deployment's availability: its replicas spread over nodes (preferred, or required with
+availability.strictSpread), and rolled one new pod at a time with none taken away before it is ready. */}}
+{{- define "arena.spread" -}}
+affinity:
+  podAntiAffinity:
+    {{- if .root.Values.availability.strictSpread }}
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - topologyKey: kubernetes.io/hostname
+        labelSelector:
+          matchLabels: {{- include "arena.selector" (dict "root" .root "name" .name) | nindent 12 }}
+    {{- else }}
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchLabels: {{- include "arena.selector" (dict "root" .root "name" .name) | nindent 14 }}
+    {{- end }}
+{{- end }}
+
+{{- define "arena.rolling" -}}
+strategy: { type: RollingUpdate, rollingUpdate: { maxUnavailable: 0, maxSurge: 1 } }
+{{- end }}
+

@@ -78,6 +78,18 @@ images:
   pullPolicy: IfNotPresent
   pullSecrets: []
 
+# Availability of what serves people (the app, the web, the gateway): their replicas spread over nodes
+# (strictSpread: never two on one node, which needs as many nodes as replicas), rolled one at a time, a
+# PodDisruptionBudget each when it has more than one; autoscale grows them with their CPU up to maxReplicas
+# (the cluster's metrics server). The app's replicas share the model library: its volume must be
+# ReadWriteMany (storage.className) when they run on several nodes.
+availability:
+  strictSpread: false
+  autoscale:
+    enabled: false
+    cpuPercent: 70
+    maxReplicas: { app: 6, web: 4, litellm: 4 }
+
 app:
   # Several replicas share the database: one leads (the once-only background work), and the
   # ingress keeps each browser on one (ingress.sticky), where its answers run.

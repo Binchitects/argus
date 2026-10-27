@@ -292,6 +292,43 @@ NetworkPolicy), SearXNG, Prometheus, Alertmanager, Loki, and Laya (off unless
 `laya.enabled`). Each module is turned on or off in `values.yaml`. One release
 per namespace: the services keep the names the app reaches them by.
 
+### With the installer
+
+`installer.sh COMMAND --kubernetes` (the offline bundle's, or
+`deploy/scripts/kube-install.sh` from the repository) installs the chart for
+you. `requirements` checks the cluster before anything is changed and says
+what each lack needs: kubectl 1.27 and helm 3.14 or newer, the cluster
+answering and your rights in the namespace, a default storage class (or
+`--storage-class`), one that shares volumes between nodes for more than one
+app replica (`--shared-storage-class`: NFS, CephFS, EFS, Azure Files,
+Filestore), an ingress controller, the TLS (`--tls-secret`, or cert-manager's
+`--cluster-issuer`), GPUs (NVIDIA's GPU operator or device plugin; without
+them the chat engine, pictures and video are left out), room on the nodes (4
+CPUs and 12 GiB at least; 8 and 24 with the GPU servers), and the metrics
+server for `--autoscale`.
+
+```bash
+installer.sh install --kubernetes --domain arena.example.com \
+  --cluster-issuer letsencrypt --shared-storage-class nfs --replicas 3 --autoscale
+```
+
+`install` then makes the namespace and the stack's secrets in the cluster (a
+Secret, `RELEASE-secrets`, written from stdin: never on a command line, in a
+file or the log; the admin's password is read from it with the command it
+prints), writes the values (`~/.arena-kube/RELEASE-values.yaml`, no secret in
+it), runs `helm upgrade --install --atomic --wait` and checks that the app
+answers through its Service. `--database external --db-host HOST
+--db-password-file FILE` uses the company's Postgres (16 or newer;
+`--db-ca-secret` for its CA). Air-gapped, `--registry HOST/PATH` (with
+`--pull-secret`) loads the bundle's images, pushes them there and points the
+chart at them. `upgrade` keeps the release's values and secrets (helm
+`--reset-then-reuse-values`) and rolls back by itself when the new release
+does not come up; `status` says the release, its pods and the app's version;
+`remove` uninstalls and keeps the data, `remove --purge --confirm PURGE` also
+takes its volumes and secrets. `--dry-run` shows the plan and changes nothing.
+
+### By hand
+
 1. Build the app, web, Argus and sandbox images, and Laya's if you turn it on
    (`docker compose build`, with `COMPOSE_PROFILES=laya` for Laya), and push
    them to a registry the cluster pulls from; name them under `images` (the tag
@@ -332,6 +369,17 @@ nodes, give it a `nodeSelector` for the GPU node. GPU telemetry and power caps
 are the cluster's. Argus checks coding agents' API keys with the app, as in
 compose; built knowledge packs (**Admin → Packs**) come from a claim of yours
 (`argus.packLibraryClaim`), mounted read only.
+
+Availability: the app, the web and the gateway roll one new pod at a time and
+take none away before it is ready (`maxUnavailable: 0`), spread their replicas
+over nodes (preferred; `availability.strictSpread=true` requires a node each),
+and have a PodDisruptionBudget each when they run more than one replica, so a
+node's drain keeps them serving. `availability.autoscale.enabled=true` adds a
+HorizontalPodAutoscaler each, from their replicas up to
+`availability.autoscale.maxReplicas` at `cpuPercent` of their CPU request (the
+cluster's metrics server reads it); the Deployments then leave their replica
+counts to it. The gateway's replicas share their rate-limit counts only with
+`valkey.enabled`.
 
 `python3 deploy/helm/check-chart.py` checks the chart without helm: its copies
 of `config/` are the same, every template's blocks close, and every value it
