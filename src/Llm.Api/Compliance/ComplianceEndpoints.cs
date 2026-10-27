@@ -55,6 +55,8 @@ public sealed record RiskCloseRequest(string? Why);
 
 public sealed record RiskActionRequest(string? Text, string? Owner, DateTimeOffset? Due);
 
+public sealed record SoaApproveRequest(string? Note);
+
 public sealed record RestrictionRequest(bool Restricted, string? Why);
 
 public sealed record DataRequestView(Guid Id, Guid? UserId, string Person, string? Email, string Kind, string? Details, string Status, DateTimeOffset ReceivedAt,
@@ -84,6 +86,7 @@ public static class ComplianceEndpoints
         services.AddHostedService(sp => sp.GetRequiredService<SecurityWatch>());
         services.AddScoped<Incidents>();
         services.AddScoped<Risks>();
+        services.AddScoped<Soa>();
         services.AddHostedService<AccessReviewSchedule>();
     }
 
@@ -168,6 +171,26 @@ public static class ComplianceEndpoints
             await RiskAsync(async () => await risks.AddActionAsync(id, body.Text, body.Owner, body.Due, await Who(p, users), ct)));
         g.MapPost("/risks/{id:guid}/actions/{action:guid}/done", async (Guid id, Guid action, ClaimsPrincipal p, UserManager<AppUser> users, Risks risks, CancellationToken ct) =>
             await RiskAsync(async () => await risks.CompleteActionAsync(id, action, await Who(p, users), ct)));
+
+        // The Statements of Applicability, ISO 27001's and ISO 42001's (GOV-05).
+        g.MapGet("/soa/{framework}", async (string framework, Soa soa, CancellationToken ct) => await SoaAsync(() => soa.GetAsync(framework, ct)));
+        g.MapPut("/soa/{framework}/{clause}", async (string framework, string clause, SoaUpdate body, ClaimsPrincipal p, UserManager<AppUser> users, Soa soa, CancellationToken ct) =>
+            await SoaAsync(async () => await soa.SetAsync(framework, clause, body, await Who(p, users), ct)));
+        g.MapPost("/soa/{framework}/approve", async (string framework, SoaApproveRequest body, ClaimsPrincipal p, UserManager<AppUser> users, Soa soa, CancellationToken ct) =>
+            await SoaAsync(async () => await soa.ApproveAsync(framework, body.Note, await Who(p, users), ct)));
+        g.MapGet("/soa/{framework}/csv", async (string framework, int? version, Soa soa, AppDbContext db, CancellationToken ct) =>
+        {
+            if (!Soa.Frameworks.Contains(framework))
+            {
+                return Results.NotFound();
+            }
+            // A version as it was approved, or the statement as it stands.
+            var text = version is { } v
+                ? await db.SoaApprovals.AsNoTracking().Where(a => a.Framework == framework && a.Version == v).Select(a => a.Snapshot).SingleOrDefaultAsync(ct)
+                : Soa.Csv(await soa.GetAsync(framework, ct));
+            return text is null ? Results.NotFound()
+                : Results.File(Encoding.UTF8.GetBytes(text), "text/csv", $"statement-of-applicability-{framework}{(version is { } n ? $"-v{n}" : "")}.csv");
+        });
 
         g.MapGet("/incidents", async (AppDbContext db, TimeProvider clock, CancellationToken ct) =>
         {
@@ -298,6 +321,22 @@ public static class ComplianceEndpoints
 
     /// <summary>The signed-in person's name, as the records keep it.</summary>
     private static async Task<string> Who(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!.UserName!;
+
+    private static async Task<IResult> SoaAsync<T>(Func<Task<T>> work)
+    {
+        try
+        {
+            return Results.Ok(await work());
+        }
+        catch (KeyNotFoundException)
+        {
+            return Results.NotFound();
+        }
+        catch (SoaException ex)
+        {
+            return AuthEndpoints.Problem(400, "soa", ex.Message);
+        }
+    }
 
     private static async Task<IResult> RiskAsync<T>(Func<Task<T>> work)
     {
@@ -440,6 +479,9 @@ public static class ComplianceEndpoints
                 incidents.json        the incident register: each incident with its clocks and every step, and the security alerts
                 risks.csv             the risk register: each risk, its levels before and after treatment, owner, treatment, controls, review
                 risk-history.csv      each risk's every change, review, acceptance and action, by whom and when
+                soa-iso27001.csv      ISO 27001's Statement of Applicability as it stands: each Annex A control, whether it applies and why, how far
+                soa-iso42001.csv      the same for ISO 42001's Annex A
+                soa-approvals.csv     every approved version of either, by whom and when
 
                 """);
             Text("controls.yaml", ComplianceControls.Text);
@@ -480,6 +522,14 @@ public static class ComplianceEndpoints
             })]));
             var riskEvents = await db.RiskEvents.AsNoTracking().OrderBy(e => e.RiskId).ThenBy(e => e.At).ToListAsync(ct);
             Text("risk-history.csv", Csv([["risk", "at", "by", "what", "text"], .. riskEvents.Select(e => new object?[] { e.RiskId, e.At.ToString("u", CultureInfo.InvariantCulture), e.By, e.Kind, e.Text })]));
+            var soa = http.RequestServices.GetRequiredService<Soa>();
+            foreach (var fw in Soa.Frameworks)
+            {
+                Text($"soa-{fw}.csv", Soa.Csv(await soa.GetAsync(fw, ct)));
+            }
+            var approvals = await db.SoaApprovals.AsNoTracking().OrderBy(a => a.Framework).ThenBy(a => a.Version).ToListAsync(ct);
+            Text("soa-approvals.csv", Csv([["framework", "version", "approved by", "at", "note"],
+                .. approvals.Select(a => new object?[] { a.Framework, a.Version, a.ApprovedBy, a.ApprovedAt.ToString("u", CultureInfo.InvariantCulture), a.Note })]));
             Text("audit-chain.json", JsonSerializer.Serialize(await watch.WalkAsync(anchor: false, ct), json));
             Text("audit-anchors.jsonl", string.Concat(AnchorsOf(auditOptions.CurrentValue).Select(a => JsonSerializer.Serialize(a, JsonSerializerOptions.Web) + "\n")));
         }

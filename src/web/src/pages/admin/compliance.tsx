@@ -21,9 +21,10 @@ import { attestedNow, complianceQuery, FRAMEWORK_GROUPS, FRAMEWORKS, manualLink,
 import { DataRequestsSection } from './data-requests'
 import { IncidentsSection } from './incidents'
 import { RisksSection } from './risks'
+import { SoaSection } from './soa'
 
 /** A section's old anchor (#incidents in a notification's link): its tab. */
-const HASH_TABS: Record<string, string> = { incidents: 'incidents', 'data-requests': 'requests', risks: 'risks', 'access-reviews': 'reviews' }
+const HASH_TABS: Record<string, string> = { incidents: 'incidents', 'data-requests': 'requests', risks: 'risks', soa: 'soa', 'access-reviews': 'reviews' }
 
 const AREAS: Record<string, string> = {
   IAM: 'People and access',
@@ -285,6 +286,7 @@ export function CompliancePage() {
         <TabsList aria-label="Compliance" className="mb-2">
           <TabsTrigger value="frameworks">Frameworks and controls</TabsTrigger>
           <TabsTrigger value="risks">Risks</TabsTrigger>
+          <TabsTrigger value="soa">Statement of Applicability</TabsTrigger>
           <TabsTrigger value="reviews">Access reviews</TabsTrigger>
           <TabsTrigger value="requests">Data requests</TabsTrigger>
           <TabsTrigger value="incidents">Incidents</TabsTrigger>
@@ -417,6 +419,9 @@ export function CompliancePage() {
         </TabsContent>
         <TabsContent value="risks">
           <RisksSection mayManage={mayAttest} controls={(data?.controls ?? []).map((c) => c.id)} />
+        </TabsContent>
+        <TabsContent value="soa">
+          <SoaSection mayManage={mayAttest} controls={data?.controls ?? []} />
         </TabsContent>
         <TabsContent value="reviews">
           <AccessReviews mayStart={mayAttest} />

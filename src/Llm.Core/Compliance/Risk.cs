@@ -65,3 +65,36 @@ public sealed class RiskEvent
     public required string Kind { get; set; }
     public string? Text { get; set; }
 }
+
+/// <summary>
+/// A Statement of Applicability's line (ISO 27001 6.1.3 d, ISO 42001 6.1.3): for one of a framework's Annex A controls,
+/// whether it applies, why, and how far it is in place.
+/// </summary>
+public sealed class SoaEntry
+{
+    public const string Implemented = "implemented", Partial = "partial", Planned = "planned", NotImplemented = "not_implemented";
+
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    /// <summary>iso27001 or iso42001.</summary>
+    public required string Framework { get; set; }
+    public required string Clause { get; set; }
+    public bool Applicable { get; set; } = true;
+    /// <summary>implemented, partial, planned or not_implemented.</summary>
+    public string Status { get; set; } = Implemented;
+    public string? Justification { get; set; }
+    public required string UpdatedBy { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>A Statement of Applicability approved as it stood: its version, who approved it and when.</summary>
+public sealed class SoaApproval
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public required string Framework { get; set; }
+    public int Version { get; set; }
+    public required string ApprovedBy { get; set; }
+    public DateTimeOffset ApprovedAt { get; set; } = DateTimeOffset.UtcNow;
+    public string? Note { get; set; }
+    /// <summary>Its lines as they were approved (CSV), so a version can be read again.</summary>
+    public required string Snapshot { get; set; }
+}

@@ -104,6 +104,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Compliance.Risk> Risks => Set<Compliance.Risk>();
     public DbSet<Compliance.RiskAction> RiskActions => Set<Compliance.RiskAction>();
     public DbSet<Compliance.RiskEvent> RiskEvents => Set<Compliance.RiskEvent>();
+    public DbSet<Compliance.SoaEntry> SoaEntries => Set<Compliance.SoaEntry>();
+    public DbSet<Compliance.SoaApproval> SoaApprovals => Set<Compliance.SoaApproval>();
     public DbSet<Compliance.AccessReviewItem> AccessReviewItems => Set<Compliance.AccessReviewItem>();
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<KnowledgeSource> KnowledgeSources => Set<KnowledgeSource>();
@@ -1039,6 +1041,24 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(v => v.Text).HasMaxLength(4000);
             e.HasIndex(v => new { v.RiskId, v.At });
             e.HasOne<Compliance.Risk>().WithMany().HasForeignKey(v => v.RiskId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Compliance.SoaEntry>(e =>
+        {
+            e.ToTable("soa_entries");
+            e.Property(s => s.Framework).HasMaxLength(32);
+            e.Property(s => s.Clause).HasMaxLength(32);
+            e.Property(s => s.Status).HasMaxLength(16);
+            e.Property(s => s.Justification).HasMaxLength(2000);
+            e.Property(s => s.UpdatedBy).HasMaxLength(256);
+            e.HasIndex(s => new { s.Framework, s.Clause }).IsUnique();
+        });
+        builder.Entity<Compliance.SoaApproval>(e =>
+        {
+            e.ToTable("soa_approvals");
+            e.Property(s => s.Framework).HasMaxLength(32);
+            e.Property(s => s.ApprovedBy).HasMaxLength(256);
+            e.Property(s => s.Note).HasMaxLength(2000);
+            e.HasIndex(s => new { s.Framework, s.Version }).IsUnique();
         });
         builder.Entity<Compliance.NoticeAcceptance>(e =>
         {

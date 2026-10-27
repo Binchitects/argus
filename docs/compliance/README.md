@@ -159,6 +159,25 @@ or a risk is past its review, its acceptance or its actions' dates, and red a
 month past a review. The [risk management policy](policies/risk-management.md)
 starts the register with the risks most installations share.
 
+## Statement of Applicability
+
+Admin → Compliance → Statement of Applicability keeps ISO 27001's (6.1.3 d)
+and ISO 42001's (6.1.3) statements (GOV-05). For each Annex A control:
+
+- **whether it applies**, and why not when it does not (an exclusion needs its
+  reason);
+- **how far it is in place**: implemented, in part, planned, or not;
+- **Arena's controls that serve it**, with their state now, and the open
+  risks those controls treat, so the statement shows why each control is there.
+
+A statement is approved as a whole, by the person who does it, once every
+control is decided. Each approval is a version kept as it stood, with who and
+when, and can be downloaded again. The statement as it stands, its versions
+and the approvals are in the evidence (`soa-iso27001.csv`, `soa-iso42001.csv`,
+`soa-approvals.csv`). The `soa` check is amber until ISO 27001's is approved,
+when it changes after its approval, and a year after it (ISO 42001's too, once
+the company starts one).
+
 ## Access reviews
 
 An access review lists, for a reviewer to **Keep** or **Revoke**:

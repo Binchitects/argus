@@ -48,6 +48,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         ("access-review", "Privileged access was reviewed"),
         ("data-requests", "People's data requests answered in time"),
         ("risks", "Risks are assessed, treated and reviewed in time"),
+        ("soa", "The Statement of Applicability is approved and current"),
     ];
 
     /// <summary>A newest backup older than this is amber; one older than <see cref="BackupStale"/> is red.</summary>
@@ -79,6 +80,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
                 "access-review" => await AccessReviewAsync(ct),
                 "data-requests" => await DataRequestsAsync(ct),
                 "risks" => await RisksAsync(ct),
+                "soa" => await SoaAsync(ct),
                 _ => (Unknown, "No such check."),
             };
             results.Add(new CheckResult(id, title, state, detail));
@@ -394,6 +396,38 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
             late > 0 ? $"{late} treatment action{(late == 1 ? "" : "s")} past due" : null,
         }.OfType<string>());
         return (overdue.Any(r => r.ReviewDue < now.AddDays(-30)) ? Fail : Warn, $"{said}: {due}.");
+    }
+
+    /// <summary>ISO 27001's statement approved within the year and not changed since; ISO 42001's said beside it when there is one.</summary>
+    private async Task<(string, string)> SoaAsync(CancellationToken ct)
+    {
+        var now = clock.GetUtcNow();
+        var said = new List<string>();
+        var state = Ok;
+        foreach (var fw in Soa.Frameworks)
+        {
+            var name = fw == "iso27001" ? "ISO 27001's" : "ISO 42001's";
+            var latest = await db.SoaApprovals.AsNoTracking().Where(a => a.Framework == fw).OrderByDescending(a => a.Version).FirstOrDefaultAsync(ct);
+            var decided = await db.SoaEntries.CountAsync(e => e.Framework == fw, ct);
+            if (latest is null)
+            {
+                // ISO 42001's only when the company is working on one.
+                if (fw == "iso27001" || decided > 0)
+                {
+                    said.Add($"{name} is not approved yet ({decided} of {Soa.AnnexA(fw).Count} controls decided)");
+                    state = Warn;
+                }
+                continue;
+            }
+            var changed = await db.SoaEntries.AnyAsync(e => e.Framework == fw && e.UpdatedAt > latest.ApprovedAt, ct);
+            var stale = latest.ApprovedAt < now.AddDays(-365);
+            said.Add($"{name} version {latest.Version}, approved by {latest.ApprovedBy} on {latest.ApprovedAt:yyyy-MM-dd}{(changed ? ", changed since" : "")}{(stale ? ", over a year ago" : "")}");
+            if (changed || stale)
+            {
+                state = Warn;
+            }
+        }
+        return (state, string.Join("; ", said) + (state == Ok ? "." : ": Admin → Compliance → Statement of Applicability."));
     }
 
     private (string, string) DataKey() => string.IsNullOrEmpty(auth.CurrentValue.DataKey)

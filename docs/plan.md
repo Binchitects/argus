@@ -2086,6 +2086,9 @@ documents; it says what is the operator's part, as v7.1 does.
    one) applicable or not, why, and how far it is in place. Drawn from the
    controls' live state, the risks they treat and the operator's choices, and
    downloaded as the auditor reads it.
+   Done: Admin → Compliance → Statement of Applicability (GOV-05, the `soa`
+   check), ISO 27001's and ISO 42001's, approved as versions kept as they
+   stood, in the evidence.
 4. **Policies, governed**: v7.1's policy templates become the company's
    policies. Each has an owner, versions, an approver, a review date that
    warns when due, and the people who must acknowledge it (with when they
