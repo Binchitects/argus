@@ -499,7 +499,7 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
         "setting). Say vulnerable only when the code shown proves the path, or a caller shown clearly passes outside data; when it " +
         "depends on code not shown, say not vulnerable and what to check. Constant strings, configuration and data the program made " +
         "itself are not outside data.\n\n" +
-        "Answer with JSON only: {\"vulnerable\": true|false, \"cwe\": \"CWE-89\", \"severity\": \"critical|high|medium|low\", " +
+        "Answer with JSON only: {\"vulnerable\": true|false, \"cwe\": \"CWE-<number>\", \"severity\": \"critical|high|medium|low\", " +
         "\"title\": \"short\", \"sink_line\": 123, \"sink_code\": \"the sink's line, copied exactly as shown\", " +
         "\"source\": \"where the outside data comes in: path:line and what\", \"flow\": [\"each step from the source to the sink\"], " +
         "\"exploit\": \"how an attacker would use it\", \"fix\": \"the change that removes it\", \"check\": \"what to look at when not proven\"}.";
@@ -535,7 +535,7 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
         {
             return null;
         }
-        var cwe = Cwe(answer["cwe"]?.ToString()) ?? c.Sink.Cwe;
+        var cwe = FindingCwe(answer["cwe"]?.ToString(), c.Sink);
         var page = await CweAsync(session, cwe, cweCache, ct);
         if (page is null && cwe != c.Sink.Cwe)
         {
@@ -578,11 +578,21 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
         };
     }
 
-    /// <summary>A CWE's id as the pack names it ("cwe-89", "CWE 89" and "89" are CWE-89); null when it is not one.</summary>
+    /// <summary>
+    /// The weakness a finding is for: the model's CWE, or the sink's when it named none. One of another sink's kind (an SQL
+    /// injection said at a file path's call) is the sink's own: a small model copies the example it was shown.
+    /// </summary>
+    public static string FindingCwe(string? said, Sink sink)
+    {
+        var cwe = Cwe(said) ?? sink.Cwe;
+        return TracedCwes.TryGetValue(cwe, out var kind) && kind != sink.Kind && TracedCwes.ContainsKey(sink.Cwe) ? sink.Cwe : cwe;
+    }
+
+    /// <summary>A CWE's id as the pack names it ("cwe-89", "CWE 89", "89" and "CWE-89: SQL injection" are CWE-89); null when it is not one.</summary>
     public static string? Cwe(string? said) =>
         said is not null && CweId().Match(said) is { Success: true } m ? $"CWE-{int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture)}" : null;
 
-    [GeneratedRegex(@"^\s*(?:CWE)?[\s-]*(\d{1,5})\s*$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^\s*(?:CWE)?[\s-]*(\d{1,5})(?:\s*$|\s*[:(,]|\s+-)", RegexOptions.IgnoreCase)]
     private static partial Regex CweId();
 
     /// <summary>The CWE's entry in the security pack, or null when the pack does not know it.</summary>

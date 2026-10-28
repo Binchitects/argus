@@ -433,6 +433,21 @@ public sealed class SecurityReviewTests(AppFixture app)
         };
         Assert.Equal(["src/A.cs:1", "src/C.cs:7", "src/A.cs:2", "src/A.cs:3"], SecurityReview.Order(found).Select(c => $"{c.Path}:{c.Line}"));
         Assert.Equal("CWE-89", SecurityReview.Cwe("cwe 89"));
+        Assert.Equal("CWE-22", SecurityReview.Cwe("CWE-22: Path Traversal"));
         Assert.Null(SecurityReview.Cwe("SQL injection"));
+        Assert.Null(SecurityReview.Cwe("CWE-22b"));
     }
+
+    [Theory]
+    // The model's own, or the sink's when it named none.
+    [InlineData("CWE-89", "sql", "CWE-89")]
+    [InlineData(null, "path", "CWE-22")]
+    // Another sink's kind at this one (the prompt's example copied): the sink's own.
+    [InlineData("CWE-89", "path", "CWE-22")]
+    [InlineData("CWE-79", "command", "CWE-78")]
+    // A narrower weakness of no sink's kind is the model's.
+    [InlineData("CWE-73", "path", "CWE-73")]
+    [InlineData("CWE-80", "xss", "CWE-80")]
+    public void A_findings_weakness_is_the_models_unless_it_is_another_sinks(string? said, string kind, string cwe) =>
+        Assert.Equal(cwe, SecurityReview.FindingCwe(said, SecurityReview.Sinks.First(s => s.Kind == kind)));
 }
