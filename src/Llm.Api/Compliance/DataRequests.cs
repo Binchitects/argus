@@ -176,6 +176,7 @@ public sealed partial class DataRequests(AppDbContext db, PeopleService people, 
         ("safeguard_events", "UserId", "safeguard events"),
         ("access_requests", "UserId", "access requests"),
         ("tool_calls", "UserId", "tool calls of their chats"),
+        ("prompt_log", "UserId", "questions asked with their API keys, with the answers (the prompt log)"),
         ("app_data", "UserId", "what apps kept for them"),
     ];
 

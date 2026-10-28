@@ -293,6 +293,10 @@ public static class SettingsCatalog
             { Default = "6", Unit = "years", Min = 0, Max = 100, Optional = false },
         new("Retention:GatewayLogDays", Retention, "Keep the gateway's request log for", "Each request through the gateway (who, which model, tokens, cost): usage, credit and the dashboards read it. 0: forever.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "400", Unit = "days", Min = 0, Max = 36500, Optional = false },
+        new("Retention:PromptLogDays", Retention, "Keep API requests in the prompt log for", "Each API request's last question and its answer (Admin → Prompt log, with prompts.review); the chat's are kept with the chats. 0: forever.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "90", Min = 0, Max = 3650, Unit = "days", Optional = false },
+        new("Gateway:LogPrompts", Api, "Prompt log of API requests", "Keeps each API request's last question and its answer, for those with prompts.review (Admin → Prompt log); the chat's questions and answers are there from the chats themselves. Off: API requests are not kept.", SettingType.Boolean, SettingScope.Live)
+            { Default = "true" },
         new("Retention:ToolCallDays", Retention, "Keep the record of tool calls for", "Which tool was called, how long it took, whether it failed (never what was sent): Admin → Tools reads it. 0: forever.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "180", Unit = "days", Min = 0, Max = 36500, Optional = false },
         new("Retention:NotificationDays", Retention, "Keep news in the bell for", "People's notifications, read or not. 0: forever.", SettingType.WholeNumber, SettingScope.Live)

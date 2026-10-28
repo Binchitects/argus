@@ -9,6 +9,8 @@ interface ConfirmOptions {
   description?: ReactNode
   confirm?: string
   destructive?: boolean
+  /** A choice that goes with it, off at first: a checkbox, its state told as it changes. */
+  check?: { label: string; onChange: (on: boolean) => void }
 }
 
 const ConfirmContext = createContext<((o: ConfirmOptions) => Promise<boolean>) | null>(null)
@@ -22,11 +24,13 @@ export function useConfirm() {
 
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [options, setOptions] = useState<ConfirmOptions | null>(null)
+  const [checked, setChecked] = useState(false)
   const resolver = useRef<((ok: boolean) => void) | null>(null)
   const opener = useRef<Element | null>(null)
   const ask = useCallback((o: ConfirmOptions) => {
     opener.current = document.activeElement === document.body ? null : document.activeElement
     setOptions(o)
+    setChecked(false)
     return new Promise<boolean>((resolve) => {
       resolver.current = resolve
     })
@@ -51,6 +55,20 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
               <AD.Description className="text-sm text-muted-foreground">{options.description}</AD.Description>
             ) : (
               <AD.Description className="sr-only">Confirm or cancel.</AD.Description>
+            )}
+            {options?.check && (
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="size-4 accent-primary"
+                  checked={checked}
+                  onChange={(e) => {
+                    setChecked(e.target.checked)
+                    options.check?.onChange(e.target.checked)
+                  }}
+                />
+                {options.check.label}
+              </label>
             )}
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <AD.Cancel className={buttonVariants({ variant: 'outline' })}>Cancel</AD.Cancel>

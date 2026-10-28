@@ -385,6 +385,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             tools.Add(ProjectMemory.Tool());
         }
         tools.Add(SkillSave.Tool());
+        tools.Add(SessionChecklist.Tool());
         tools.Add(SessionSearch.Tool());
         tools.AddRange(SessionHistory.Tools());
         if (Extensions.Skills.Count > 0)
@@ -490,6 +491,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             Memory = () => _memory,
             Skills = () => [.. Extensions.Skills.Select(s => (s.Name, s.Description))],
             Agents = () => [.. Extensions.Agents.Select(a => (a.Name, a.Description))],
+            Checklist = () => Checklist is { } on ? SessionChecklist.Text(on) : "",
         };
         Context = new ToolContext
         {
@@ -546,6 +548,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         };
         Context.SessionId = () => Session.Id;
         Context.Store = () => Session;
+        Context.Checklist = CheckItemAsync;
 
         if (resumed is not null && resumedFile is not null)
         {
@@ -599,6 +602,8 @@ internal sealed partial class Runtime : IAsyncDisposable
             return Taken.None;
         }
         await sync.BeginTurnAsync(ct);
+        // The checklist as the web chat left it (ticked there, or turned on or off).
+        await RefreshChecklistAsync(ct);
         return await sync.TakeInAsync(ct);
     }
 
@@ -611,8 +616,11 @@ internal sealed partial class Runtime : IAsyncDisposable
             Notice(warn, text);
             Agent?.Events?.Notice(text);
         }, () => Sees(Model.Info));
+        // Another session, another chat: its own checklist, read from Arena.
+        Volatile.Write(ref _checklist, null);
         if (Sync is not null)
         {
+            _ = Task.Run(() => RefreshChecklistAsync(CancellationToken.None));
             Sync.OnNews = _webNews;
             if (Account is null)
             {

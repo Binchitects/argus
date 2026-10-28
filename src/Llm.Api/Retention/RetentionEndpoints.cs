@@ -4,6 +4,7 @@ using Llm.Api.Endpoints;
 using Llm.Api.Identity;
 using Llm.Core.Identity;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Retention;
 
@@ -20,11 +21,14 @@ public static class RetentionEndpoints
         admin.MapGet("/export", AdminExportAsync);
         app.MapGet("/api/account/export", OwnExportAsync).RequirePermission(Llm.Core.Access.Permissions.Export);
         // How long the person's chats are kept, and what their files take of their room, for the account page.
-        app.MapGet("/api/account/data", async (ClaimsPrincipal p, UserManager<AppUser> users, Retention retention, Storage.StorageQuotas quotas, CancellationToken ct) =>
+        app.MapGet("/api/account/data", async (ClaimsPrincipal p, UserManager<AppUser> users, Retention retention, Storage.StorageQuotas quotas,
+            IOptionsMonitor<Gateway.AnswerCacheOptions> gateway, IOptionsMonitor<RetentionOptions> kept, CancellationToken ct) =>
         {
             var me = (await users.GetUserAsync(p))!;
             var (used, limit) = await quotas.OfAsync(me.Id, ct);
-            return Results.Ok(new { retentionDays = await retention.DaysForAsync(me, ct), files = new { bytes = used, limitBytes = limit } });
+            // The prompt log: whether API requests are kept in it, and for how many days (0: forever).
+            int? promptLogDays = gateway.CurrentValue.LogPrompts ? kept.CurrentValue.PromptLogDays : null;
+            return Results.Ok(new { retentionDays = await retention.DaysForAsync(me, ct), files = new { bytes = used, limitBytes = limit }, promptLogDays });
         }).PersonOnly();
     }
 

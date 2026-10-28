@@ -210,9 +210,9 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
     private (string, string) RecordsRetention()
     {
         var r = retention.CurrentValue;
-        var forever = new[] { ("the gateway's request log", r.GatewayLogDays), ("the record of tool calls", r.ToolCallDays), ("news in the bell", r.NotificationDays) }
+        var forever = new[] { ("the gateway's request log", r.GatewayLogDays), ("the record of tool calls", r.ToolCallDays), ("news in the bell", r.NotificationDays), ("the prompt log of API requests", r.PromptLogDays) }
             .Where(x => x.Item2 <= 0).Select(x => x.Item1).ToList();
-        var said = $"The audit log {(r.AuditYears > 0 ? $"{r.AuditYears} years" : "forever")}; the gateway's request log {Days(r.GatewayLogDays)}, tool calls {Days(r.ToolCallDays)}, the bell {Days(r.NotificationDays)}.";
+        var said = $"The audit log {(r.AuditYears > 0 ? $"{r.AuditYears} years" : "forever")}; the gateway's request log {Days(r.GatewayLogDays)}, tool calls {Days(r.ToolCallDays)}, the bell {Days(r.NotificationDays)}, the prompt log {Days(r.PromptLogDays)}.";
         if (r.AuditYears is > 0 and < 6)
         {
             return (Warn, $"{said} HIPAA keeps the audit log six years: set Settings → Data retention → Keep the audit log for to 6.");

@@ -53,6 +53,15 @@ public sealed class CodeReview
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? FinishedAt { get; set; }
     public List<ReviewFinding> Findings { get; set; } = [];
+
+    /// <summary>
+    /// Who else may read it, its owner's choice: everyone, members of <see cref="ShareGroups"/>, and <see cref="SharePeople"/>
+    /// whatever the reach. Each of them reads it only while they may read its project themselves (GitLab's rights stay the ceiling).
+    /// </summary>
+    public Access.Reach Reach { get; set; } = Access.Reach.Private;
+    public List<Guid> ShareGroups { get; set; } = [];
+    public List<Guid> SharePeople { get; set; } = [];
+    public DateTimeOffset? SharedAt { get; set; }
 }
 
 /// <summary>One thing a review found, on a line of a file the change touched.</summary>

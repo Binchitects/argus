@@ -4,10 +4,10 @@ import { topics, type HelpTopic, type ManualLink, type TopicId } from './topics'
 /** The manual's page of page help, in the sidebar's order. */
 const order: { title: string; ids: TopicId[] }[] = [
   { title: 'Everywhere', ids: ['app', 'manual'] },
-  { title: 'Workspace', ids: ['home', 'chat', 'assistants', 'assistant', 'shared', 'skills', 'memory', 'meetings', 'meeting', 'plans', 'plan', 'lab', 'lab-notebook', 'apps', 'app-page', 'data', 'boards', 'board', 'decks', 'deck', 'media', 'studio', 'workflow', 'room-join', 'code', 'workspace', 'business', 'review', 'security-review', 'fixes', 'fix', 'tasks', 'usage', 'leaderboard', 'setup', 'account', 'ask'] },
-  { title: 'Administration', ids: ['overview', 'people', 'person', 'access', 'safeguards', 'groups', 'group', 'sign-in', 'models', 'tools', 'plugins', 'knowledge', 'data-sources', 'storage', 'settings', 'audit', 'compliance', 'access-review', 'incident', 'admin-security', 'quality'] },
+  { title: 'Workspace', ids: ['home', 'chat', 'assistants', 'assistant', 'shared', 'skills', 'memory', 'checklists', 'meetings', 'meeting', 'plans', 'plan', 'lab', 'lab-notebook', 'apps', 'app-page', 'data', 'boards', 'board', 'decks', 'deck', 'media', 'studio', 'workflow', 'room-join', 'code', 'workspace', 'business', 'review', 'security-review', 'fixes', 'fix', 'tasks', 'usage', 'leaderboard', 'setup', 'account', 'ask'] },
+  { title: 'Administration', ids: ['overview', 'people', 'person', 'access', 'safeguards', 'groups', 'group', 'sign-in', 'models', 'tools', 'plugins', 'knowledge', 'data-sources', 'storage', 'settings', 'audit', 'compliance', 'access-review', 'incident', 'admin-security', 'prompts', 'feedback', 'quality'] },
   { title: 'Argus', ids: ['indexing', 'packs', 'explore'] },
-  { title: 'Observe', ids: ['monitoring', 'dashboards', 'dashboard', 'logs', 'alerts', 'traces'] },
+  { title: 'Observe', ids: ['monitoring', 'dashboards', 'dashboard', 'line', 'logs', 'alerts', 'traces'] },
   { title: 'Other pages', ids: ['login', 'design'] },
 ]
 

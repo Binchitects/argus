@@ -15,6 +15,27 @@ const page = '<!doctype html><html><body><h1>Votes</h1></body></html>'
 
 afterEach(() => vi.restoreAllMocks())
 
+/** A chat whose answer wrote a page, to publish from its preview. */
+function chatWithPage() {
+  const config: ChatConfig = {
+    model: 'Main-Model',
+    models: [{ name: 'Main-Model', context: 32768, maxOutput: 8192, vision: false, tools: true, thinking: false, loaded: true, prices: { input: 0.2, cachedInput: 0.02, output: 0.8 } }],
+    presets: [{ level: 'off', label: 'No thinking' }],
+    defaultThinking: 'off',
+    argus: false,
+    tools: [],
+    gitlabUrl: null,
+    maxUploadBytes: 20 * 1024 * 1024,
+    imageTypes: ['image/png'],
+  }
+  const messages = [blank('q1', 'user', null, 'A lunch poll'), { ...blank('a1', 'assistant', 'q1', 'Here:\n\n```html\n' + page + '\n```'), model: 'Main-Model' }]
+  const conversation: Conversation = {
+    id: 'c1', title: 'Lunch', thinking: null, tools: [], useArgus: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
+    currentLeafId: 'a1', archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '', messages,
+  }
+  return { config, conversation }
+}
+
 describe('apps', () => {
   it('the gallery lists the apps one may open, and Mine only one’s own', async () => {
     fakeApi(member, {
@@ -102,22 +123,7 @@ describe('apps', () => {
   })
 
   it('a page the chat wrote is published as an app from its preview, and its link shown', async () => {
-    const config: ChatConfig = {
-      model: 'Main-Model',
-      models: [{ name: 'Main-Model', context: 32768, maxOutput: 8192, vision: false, tools: true, thinking: false, loaded: true, prices: { input: 0.2, cachedInput: 0.02, output: 0.8 } }],
-      presets: [{ level: 'off', label: 'No thinking' }],
-      defaultThinking: 'off',
-      argus: false,
-      tools: [],
-      gitlabUrl: null,
-      maxUploadBytes: 20 * 1024 * 1024,
-      imageTypes: ['image/png'],
-    }
-    const messages = [blank('q1', 'user', null, 'A lunch poll'), { ...blank('a1', 'assistant', 'q1', 'Here:\n\n```html\n' + page + '\n```'), model: 'Main-Model' }]
-    const conversation: Conversation = {
-      id: 'c1', title: 'Lunch', thinking: null, tools: [], useArgus: false, model: null, systemPrompt: null, temperature: null, topP: null, maxTokens: null,
-      currentLeafId: 'a1', archivedAt: null, forkedFrom: null, createdAt: '', updatedAt: '', messages,
-    }
+    const { config, conversation } = chatWithPage()
     const calls = fakeApi(member, {
       'GET /api/chat/config': () => ({ json: config }),
       'GET /api/chat/conversations': () => ({ json: [conversation] }),
@@ -141,5 +147,37 @@ describe('apps', () => {
     expect(await screen.findByRole('heading', { name: 'Lunch poll is published' })).toBeInTheDocument()
     expect(screen.getByLabelText("The app's link")).toHaveValue(`${window.location.origin}/apps/n1`)
     expect(calls.find((c) => c.path === '/api/apps' && c.method === 'POST')?.body).toEqual({ name: 'Lunch poll', description: '', kind: 'html', code: page, reach: 'groups', groupIds: ['g1'], conversationId: 'c1' })
+  })
+
+  it('published again from the same chat, it is a new version of the app, its link and data kept', async () => {
+    const { config, conversation } = chatWithPage()
+    const calls = fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config }),
+      'GET /api/chat/conversations': () => ({ json: [conversation] }),
+      'GET /api/chat/conversations/c1': () => ({ json: conversation }),
+      'GET /api/apps': () => ({
+        json: [
+          brief({ id: 'old', name: 'Other app', mine: true, version: 1, updatedAt: '2026-10-22T10:00:00Z' }),
+          brief({ id: 'p1', name: 'Lunch poll', mine: true, version: 2, conversationId: 'c1', reach: 'private' }),
+          brief({ id: 'x', name: 'Not mine', mine: false, conversationId: 'c1' }),
+        ],
+      }),
+      'PUT /api/apps/p1': () => ({ json: brief({ id: 'p1', name: 'Lunch poll', mine: true, version: 3, reach: 'private' }) }),
+    })
+    renderApp('/chat/c1')
+    await userEvent.click(within(await screen.findByRole('figure', { name: 'Code: html' })).getByRole('button', { name: 'Preview this page' }))
+    await userEvent.click(within(await screen.findByRole('complementary', { name: 'Files' })).getByRole('button', { name: 'Publish as app' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Publish as app' })
+    // The app published from this chat, with its name and who may open it.
+    expect(await within(dialog).findByRole('combobox', { name: 'Publish as' })).toHaveTextContent('A new version of Lunch poll (now version 2, from this chat)')
+    expect(within(dialog).getByLabelText('Name')).toHaveValue('Lunch poll')
+    expect(within(dialog).getByRole('radio', { name: 'Only me' })).toBeChecked()
+    await userEvent.type(within(dialog).getByLabelText('What changed (optional)'), 'Bigger buttons')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Publish the new version' }))
+
+    expect(await screen.findByRole('heading', { name: 'Version 3 of Lunch poll is published' })).toBeInTheDocument()
+    expect(screen.getByLabelText("The app's link")).toHaveValue(`${window.location.origin}/apps/p1`)
+    expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ name: 'Lunch poll', description: 'Where the team eats.', code: page, reach: 'private', groupIds: [], note: 'Bigger buttons' })
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/api/apps')).toBe(false)
   })
 })

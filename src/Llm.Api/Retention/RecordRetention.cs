@@ -7,9 +7,9 @@ using Npgsql;
 namespace Llm.Api.Retention;
 
 /// <summary>What one sweep of the records removed, kind by kind.</summary>
-public sealed record RecordsSwept(int Audit, int GatewayLog, int ToolCalls, int Notifications)
+public sealed record RecordsSwept(int Audit, int GatewayLog, int ToolCalls, int Notifications, int PromptLog)
 {
-    public int Total => Audit + GatewayLog + ToolCalls + Notifications;
+    public int Total => Audit + GatewayLog + ToolCalls + Notifications + PromptLog;
 }
 
 /// <summary>
@@ -27,6 +27,7 @@ public sealed partial class RecordRetention(AppDbContext db, Gateway.SpendLog sp
         var auditGone = o.AuditYears > 0 ? await AuditAsync(now.AddYears(-o.AuditYears), ct) : 0;
         var toolsGone = o.ToolCallDays > 0 ? await db.ToolCalls.Where(c => c.At < now.AddDays(-o.ToolCallDays)).ExecuteDeleteAsync(ct) : 0;
         var newsGone = o.NotificationDays > 0 ? await db.Notifications.Where(n => n.CreatedAt < now.AddDays(-o.NotificationDays)).ExecuteDeleteAsync(ct) : 0;
+        var promptsGone = o.PromptLogDays > 0 ? await db.PromptLog.Where(p => p.At < now.AddDays(-o.PromptLogDays)).ExecuteDeleteAsync(ct) : 0;
         var gatewayGone = 0;
         if (o.GatewayLogDays > 0)
         {
@@ -39,11 +40,11 @@ public sealed partial class RecordRetention(AppDbContext db, Gateway.SpendLog sp
                 LogGateway(logger, ex.Message);
             }
         }
-        var swept = new RecordsSwept(auditGone, gatewayGone, toolsGone, newsGone);
+        var swept = new RecordsSwept(auditGone, gatewayGone, toolsGone, newsGone, promptsGone);
         if (swept.Total > 0)
         {
             await audit.WriteAsync("retention.records", detail:
-                $"past their time: {auditGone} audit entries, {gatewayGone} gateway requests, {toolsGone} tool calls, {newsGone} notifications");
+                $"past their time: {auditGone} audit entries, {gatewayGone} gateway requests, {toolsGone} tool calls, {newsGone} notifications, {promptsGone} API requests in the prompt log");
         }
         return swept;
     }

@@ -498,3 +498,55 @@ describe('admin models', () => {
     expect(sent).not.toHaveProperty('name')
   })
 })
+
+describe('models on disk', () => {
+  const disk = {
+    items: [
+      { path: 'big/Big-Q4.gguf', kind: 'gguf', size: 18e9, parts: 1, usedBy: ['Big-Model'], keptBy: null, downloading: false, whyNot: 'Big-Model uses it: remove that model first (with its files, if you like).' },
+      { path: 'old/Old-00001-of-00002.gguf', kind: 'gguf', size: 9e9, parts: 2, usedBy: [], keptBy: null, downloading: false, whyNot: null },
+      { path: 'hf/org/Snap@abc', kind: 'snapshot', size: 3e9, parts: 1, usedBy: [], keptBy: null, downloading: false, whyNot: null },
+      { path: 'embed/nomic.gguf', kind: 'gguf', size: 2.7e8, parts: 1, usedBy: [], keptBy: 'the embedder (knowledge and Argus)', downloading: false, whyNot: 'It stays.' },
+    ],
+    used: 30.27e9, free: 100e9, total: 500e9,
+  }
+
+  it('lists what the library holds, deletes what nothing uses after asking, and keeps the servers’ own files out of the way', async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/models': () => ({ json: view() }),
+      'GET /api/admin/models/library/disk': () => ({ json: disk }),
+      'DELETE /api/admin/models/library/disk': () => ({ json: { path: 'old/Old-00001-of-00002.gguf', freed: 9e9 } }),
+    })
+    renderApp('/admin/models')
+    const table = await screen.findByRole('table', { name: 'On disk' })
+    expect(screen.getByText(/2 are used by no model/)).toBeInTheDocument()
+    expect(within(table).queryByText('embed/nomic.gguf')).not.toBeInTheDocument()
+    expect(within(table).getByRole('button', { name: 'Delete big/Big-Q4.gguf from disk' })).toBeDisabled()
+    expect(within(table).getByText('(2 parts)')).toBeInTheDocument()
+
+    await userEvent.click(within(table).getByRole('button', { name: 'Delete old/Old-00001-of-00002.gguf from disk' }))
+    const dialog = await screen.findByRole('alertdialog', { name: 'Delete old/Old-00001-of-00002.gguf from disk?' })
+    expect(within(dialog).getByText(/in 2 parts are deleted for good/)).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Delete' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/admin/models/library/disk?path=old%2FOld-00001-of-00002.gguf')).toBe(true))
+
+    await userEvent.click(screen.getByRole('button', { name: /Show the servers’ own files too \(1\)/ }))
+    expect(within(table).getByText('embed/nomic.gguf')).toBeInTheDocument()
+    expect(within(table).getByText('the embedder (knowledge and Argus)')).toBeInTheDocument()
+  })
+
+  it('a model removed with its files says what was freed', async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/models': () => ({ json: view() }),
+      'GET /api/admin/models/library/disk': () => ({ json: disk }),
+      'DELETE /api/admin/models/Small-Model': () => ({ json: { restarting: true, warning: null, freed: 8 * 1024 ** 3, stayed: [] } }),
+    })
+    renderApp('/admin/models')
+    const small = (await screen.findByRole('heading', { name: /Small-Model/ })).closest('section')!
+    await userEvent.click(within(small).getByRole('button', { name: 'Remove' }))
+    const dialog = await screen.findByRole('alertdialog', { name: 'Remove Small-Model?' })
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: /Also delete its files from disk/ }))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/admin/models/Small-Model?files=true')).toBe(true))
+    expect(await screen.findByText(/8.0 GiB freed on disk/)).toBeInTheDocument()
+  })
+})

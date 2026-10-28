@@ -1163,6 +1163,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
             onCompact={canCompact ? () => void compact() : undefined}
             room={room ? { people: room.members.length, here: roomLive.here.length, onOpen: () => setPeopleOpen(true), readIn: { value: readIn, onChange: setReadIn }, call: <CallButton call={call} canSpeak={room.role !== 'viewer'} /> } : undefined}
             onMakeRoom={id && data && !room && !data.origin ? () => setMakingRoom(true) : undefined}
+            checklist={id && data && !room ? { chat: id, answering: streaming } : undefined}
           />
           {empty ? (
             <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-8">

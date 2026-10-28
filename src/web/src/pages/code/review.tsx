@@ -14,10 +14,11 @@ import { api, errorMessage } from '@/lib/api'
 import { Markdown } from '@/pages/chat/markdown'
 import { decideFinding, reviewAgain, reviewQuery, reviewRoom, type Finding } from './api'
 import { ReviewState } from './code'
+import { ShareReview } from './review-share'
 
 const severityVariant = { critical: 'destructive', major: 'warning', minor: 'default', nit: 'secondary' } as const
 
-function FindingCard({ f, onDecide, onFix }: { f: Finding; onDecide: (state: Finding['state']) => void; onFix: () => void }) {
+function FindingCard({ f, onDecide, onFix, readOnly }: { f: Finding; onDecide: (state: Finding['state']) => void; onFix: () => void; readOnly: boolean }) {
   const refuted = f.verified === false
   return (
     <li className={`grid gap-2 rounded-lg border p-4 ${refuted || f.state !== 'open' ? 'opacity-70' : ''}`}>
@@ -45,25 +46,27 @@ function FindingCard({ f, onDecide, onFix }: { f: Finding; onDecide: (state: Fin
           {f.verifyNote}
         </p>
       )}
-      <div className="flex gap-2">
-        {f.state === 'open' ? (
-          <>
-            <Button size="sm" variant="outline" onClick={() => onDecide('resolved')}>
-              Resolved
+      {!readOnly && (
+        <div className="flex gap-2">
+          {f.state === 'open' ? (
+            <>
+              <Button size="sm" variant="outline" onClick={() => onDecide('resolved')}>
+                Resolved
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => onDecide('dismissed')}>
+                Dismiss
+              </Button>
+              <Button size="sm" variant="ghost" onClick={onFix}>
+                <Wrench /> Fix it
+              </Button>
+            </>
+          ) : (
+            <Button size="sm" variant="ghost" onClick={() => onDecide('open')}>
+              Open again
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => onDecide('dismissed')}>
-              Dismiss
-            </Button>
-            <Button size="sm" variant="ghost" onClick={onFix}>
-              <Wrench /> Fix it
-            </Button>
-          </>
-        ) : (
-          <Button size="sm" variant="ghost" onClick={() => onDecide('open')}>
-            Open again
-          </Button>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </li>
   )
 }
@@ -115,7 +118,7 @@ export function ReviewPage() {
     <>
       <PageHeader
         title={`${r.project} ${r.title}`}
-        description={`Reviewed for ${d.by}${d.model ? ` with ${d.model}` : ''}${r.files ? ` · ${r.files} files` : ''}. Nothing is posted to GitLab.`}
+        description={`Reviewed for ${d.by}${d.model ? ` with ${d.model}` : ''}${r.files ? ` · ${r.files} files` : ''}. Nothing is posted to GitLab.${d.readOnly ? ` ${d.by} shared it with you to read.` : ''}`}
         actions={
           <div className="flex flex-wrap gap-2">
             {r.webUrl && (
@@ -125,12 +128,13 @@ export function ReviewPage() {
                 </a>
               </Button>
             )}
-            {r.status === 'done' && (
+            {d.share && r.status === 'done' && <ShareReview id={id} share={d.share} />}
+            {r.status === 'done' && !d.readOnly && (
               <Button variant="outline" disabled={busy} onClick={() => void go(() => reviewRoom(id), (room) => `/chat/${room}`)}>
                 <MessagesSquare /> {d.roomId ? 'Its room' : 'Discuss in a room'}
               </Button>
             )}
-            {(r.status === 'done' || r.status === 'failed') && (
+            {(r.status === 'done' || r.status === 'failed') && !d.readOnly && (
               <Button disabled={busy} onClick={() => void go(() => reviewAgain(id), (again) => `/code/reviews/${again}`)}>
                 <RefreshCw /> Review again
               </Button>
@@ -162,7 +166,7 @@ export function ReviewPage() {
           ) : (
             <ul className="grid gap-3" aria-label="Findings">
               {kept.map((f) => (
-                <FindingCard key={f.id} f={f} onDecide={(state) => void decide(f.id, state)} onFix={() => void fix(f.id)} />
+                <FindingCard key={f.id} f={f} readOnly={d.readOnly} onDecide={(state) => void decide(f.id, state)} onFix={() => void fix(f.id)} />
               ))}
             </ul>
           )}
@@ -171,7 +175,7 @@ export function ReviewPage() {
               <summary className="cursor-pointer text-sm text-muted-foreground">Doubted by the second check ({doubted.length})</summary>
               <ul className="mt-3 grid gap-3" aria-label="Doubted findings">
                 {doubted.map((f) => (
-                  <FindingCard key={f.id} f={f} onDecide={(state) => void decide(f.id, state)} onFix={() => void fix(f.id)} />
+                  <FindingCard key={f.id} f={f} readOnly={d.readOnly} onDecide={(state) => void decide(f.id, state)} onFix={() => void fix(f.id)} />
                 ))}
               </ul>
             </details>

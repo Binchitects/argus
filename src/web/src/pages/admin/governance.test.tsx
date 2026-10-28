@@ -149,13 +149,15 @@ describe('legal hold and exports', () => {
 
   it('a person downloads their own data and sees how long chats are kept', async () => {
     fakeApi(member, {
-      'GET /api/account/data': () => ({ json: { retentionDays: 90 } }),
+      'GET /api/account/data': () => ({ json: { retentionDays: 90, promptLogDays: 30 } }),
       'GET /api/account/preferences': () => ({ json: { answerLength: 'normal' } }),
       'GET /api/account/2fa': () => ({ json: { enabled: false, recoveryCodesLeft: 0 } }),
       'GET /api/account/connections': () => ({ json: [] }),
     })
     renderApp('/account')
     expect(await screen.findByText(/Chats are kept for 90 days after their last message/)).toBeInTheDocument()
+    // Who may read their questions, and how long the API ones are kept.
+    expect(screen.getByText(/with the right to the prompt log; each time they look is kept in the audit log\. Questions asked with API keys are kept in the prompt log for 30 days\./)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Download your data' })).toHaveAttribute('href', '/api/account/export')
   })
 })

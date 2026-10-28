@@ -31,6 +31,7 @@ internal sealed class Repl(Runtime rt)
         ("/thinking [level]", "show or set thinking: default, off, low, medium, high, xhigh"),
         ("/tools [on|off NAME]", "the tools this session has; turn a group of Arena's or a server's tools on or off in it"),
         ("/plan", "the plan, as it stands; a proposed one: approve [ask], change N what, another why, reject why; undo N; resume"),
+        ("/checklist", "the checklist on, and yours (kept in Arena); N or NAME turns one on; off; tick N, untick N"),
         ("/agent [NAME TASK]", "your own coding agents (Claude Code, Codex, Gemini CLI: your subscriptions), or hand one a task"),
         ("/review [BASE]", "review the changes not yet committed, or this branch's over BASE (main...): findings by file and line, and a verdict"),
         ("/compact", "summarize the conversation to free the model's window"),
@@ -683,6 +684,9 @@ internal sealed class Repl(Runtime rt)
                 {
                     Ui.Info("Arena's tools are not connected in this session.");
                 }
+                break;
+            case "/checklist":
+                Ui.Line(await rt.ChecklistCommandAsync(arg, ct));
                 break;
             case "/plan" when arg.Length == 0:
                 Ui.Line(rt.Context.Plan.Render(Ui));

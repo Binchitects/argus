@@ -20,6 +20,9 @@ namespace Llm.Api.Gateway;
 /// <summary>The answer cache's settings, in the Gateway section.</summary>
 public sealed class AnswerCacheOptions
 {
+    /// <summary>Gateway:LogPrompts: each API request's last question and answer kept in the prompt log.</summary>
+    public bool LogPrompts { get; set; } = true;
+
     /// <summary>off; opt-in: the keys of people who turned it on (Your account); all: every key.</summary>
     public string AnswerCache { get; set; } = AnswerCacheModes.Off;
     /// <summary>How long an answer is kept.</summary>
@@ -391,6 +394,9 @@ public static class AnswerCacheEndpoints
     /// <summary>Answers larger than this are not kept.</summary>
     private const int MostCachedAnswer = 4 * 1024 * 1024;
 
+    // The most of an answer the prompt log reads (it keeps 20,000 characters of it; a stream carries more than its words).
+    private const int MostLoggedAnswer = 8 * 1024 * 1024;
+
     /// <summary>Not passed on: they belong to one connection, or to the app's own site.</summary>
     internal static readonly HashSet<string> Dropped = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -406,6 +412,7 @@ public static class AnswerCacheEndpoints
         services.AddSingleton<KeyLine>();
         services.AddSingleton<OwnKeyPlaces>();
         services.AddSingleton<KeyPeople>();
+        services.AddSingleton<PromptLogWriter>();
         services.AddScoped<OwnKeys>();
         services.AddHttpClient(AnswerCache.Client, (sp, c) =>
         {
@@ -510,7 +517,8 @@ public static class AnswerCacheEndpoints
         return new Guid(hash.AsSpan(0, 16));
     }
 
-    private static async Task ProxyAsync(HttpContext http, AnswerCache cache, IHttpClientFactory factory, KeyLine line, Chat.EngineRoute route, Chat.AnswerGate gate, KeyPeople people)
+    private static async Task ProxyAsync(HttpContext http, AnswerCache cache, IHttpClientFactory factory, KeyLine line, Chat.EngineRoute route, Chat.AnswerGate gate, KeyPeople people,
+        PromptLogWriter prompts)
     {
         var ct = http.RequestAborted;
         var request = http.Request;
@@ -586,6 +594,11 @@ public static class AnswerCacheEndpoints
             var includeUsage = json?["stream_options"]?["include_usage"] is JsonValue u && u.TryGetValue<bool>(out var yes) && yes;
             http.Response.ContentType = streamed ? "text/event-stream" : "application/json";
             await http.Response.WriteAsync(AnswerCache.Render(kept, streamed, includeUsage), ct);
+            // Answered from the cache, and in the prompt log all the same: the person asked it and got this.
+            if (cache.Options.LogPrompts && completions && json is not null && await people.ForAsync(key!, ct) is { } cached)
+            {
+                prompts.Record(cached.Id, AnswerCache.HashOf(key!), json, kept, StatusCodes.Status200OK);
+            }
             return;
         }
 
@@ -687,6 +700,8 @@ public static class AnswerCacheEndpoints
             }
             http.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
             var keep = lookup is not null && res.IsSuccessStatusCode ? new MemoryStream() : null;
+            // The prompt log (Gateway:LogPrompts): the answer as it went out, whole, for its person's request.
+            var logged = cache.Options.LogPrompts && completions && json is not null && key is { Length: > 0 } && await people.ForAsync(key, ct) is { } asker ? (asker, new MemoryStream()) : default;
             await using var upstream = await res.Content.ReadAsStreamAsync(ct);
             var buffer = new byte[16 * 1024];
             int n;
@@ -695,6 +710,10 @@ public static class AnswerCacheEndpoints
             {
                 await http.Response.Body.WriteAsync(buffer.AsMemory(0, n), ct);
                 await http.Response.Body.FlushAsync(ct);
+                if (logged.Item2 is { } log && log.Length + n <= MostLoggedAnswer)
+                {
+                    log.Write(buffer, 0, n);
+                }
                 if (keep is not null)
                 {
                     if (keep.Length + n > MostCachedAnswer)
@@ -708,6 +727,10 @@ public static class AnswerCacheEndpoints
                 }
             }
             var sse = res.Content.Headers.ContentType?.MediaType == "text/event-stream" || streamed;
+            if (logged.Item2 is { } written)
+            {
+                prompts.Record(logged.Item1.Id, AnswerCache.HashOf(key!), json!, res.IsSuccessStatusCode ? AnswerCache.Assemble(Encoding.UTF8.GetString(written.ToArray()), sse) : null, (int)res.StatusCode);
+            }
             if (keep is not null && AnswerCache.Assemble(Encoding.UTF8.GetString(keep.ToArray()), sse) is { } answer)
             {
                 await cache.StoreAsync(lookup!, answer, CancellationToken.None);

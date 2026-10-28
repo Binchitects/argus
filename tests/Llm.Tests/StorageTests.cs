@@ -446,7 +446,7 @@ public sealed class StorageTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.Conflict, await admin.PostAsync("/api/admin/storage/cleanups/unused-models", new { only = new[] { "used/Used-Q4.gguf" } }));
         var gone = await admin.JsonAsync(await admin.PostAsync("/api/admin/storage/cleanups/unused-models", new { only = new[] { "split/Split-00001-of-00002.gguf" } }));
         Assert.Equal(1, gone.GetProperty("count").GetInt64());
-        Assert.Empty(Directory.GetFiles(Path.Combine(s.Library, "split")));
+        Assert.False(Directory.Exists(Path.Combine(s.Library, "split")), "every part, and the folder it left empty");
         Assert.True(File.Exists(Path.Combine(s.Library, "spare", "Spare-Q4.gguf")));
         Assert.True(File.Exists(Path.Combine(s.Library, "used", "Used-Q4.gguf")));
         await using (var scope = f.Services.CreateAsyncScope())

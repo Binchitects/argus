@@ -22,6 +22,7 @@ import type { EngineInstance } from './engine-api'
 import { EngineProblems } from './engine-fields'
 import { engineSlot } from './engine-slot'
 import { ModelDialog, type ModelDialogOpen } from './model-dialog'
+import { OnDiskCard } from './model-disk'
 import { type SavedModel } from './model-form'
 import { WorkingHours } from './model-hours'
 import { DefaultModelsCard } from './default-models'
@@ -205,6 +206,7 @@ export function ModelsPage() {
           />
         ))}
       </div>
+      {engine.enabled && <OnDiskCard />}
       <Dialog open={dialog !== null} onOpenChange={(o) => !o && setDialog(null)}>
         <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-3xl">
           {dialog !== null && (
@@ -340,6 +342,9 @@ function Status({ status, why, since, draining }: { status: ModelRow['status']; 
 }
 
 /** "262,144 tokens of context, 65,536 a conversation": the context, and each slot's share of it when it has several. */
+/** The remove dialog's choice: its files deleted from disk too (those no other model uses). */
+const filesCheck = (onChange: (on: boolean) => void) => ({ label: 'Also delete its files from disk (those no other model uses)', onChange })
+
 function contextLine(context: number, window?: number | null): string {
   const all = `${context.toLocaleString('en-US')} tokens of context`
   return window && window < context ? `${all}, ${window.toLocaleString('en-US')} a conversation` : all
@@ -407,9 +412,12 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
     onError: (e) => toast.error(errorMessage(e)),
   })
   const remove = useMutation({
-    mutationFn: () => api(`/api/admin/models/${encodeURIComponent(m.name)}`, { method: 'DELETE' }),
-    onSuccess: () => {
-      toast.success(`${m.name} removed`, { description: 'The engine restarts to drop it; the loaded model comes back in a moment.' })
+    mutationFn: (files: boolean) =>
+      api<{ freed?: number; stayed?: { path: string; why: string }[] }>(`/api/admin/models/${encodeURIComponent(m.name)}${files ? '?files=true' : ''}`, { method: 'DELETE' }),
+    onSuccess: (r, files) => {
+      const restart = m.source === 'media' ? '' : ' The engine restarts to drop it; the loaded model comes back in a moment.'
+      const freed = files ? ` ${bytes(r.freed ?? 0)} freed on disk.${r.stayed?.length ? ` Kept: ${r.stayed.map((x) => x.why).join(' ')}` : ''}` : ''
+      toast.success(`${m.name} removed`, { description: (restart + freed).trim() || undefined })
       onChanged()
     },
     onError: (e) => toast.error(errorMessage(e)),
@@ -595,8 +603,9 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
               variant="outline"
               className="text-destructive-ink"
               onClick={async () => {
-                const description = `It is unloaded and removed from the gateway and the chat’s tools${m.kept ? ', and stops being kept loaded' : ''}. Its files stay in the library.`
-                if (await confirm({ title: `Remove ${m.name}?`, description, confirm: 'Remove', destructive: true })) remove.mutate()
+                const description = `It is unloaded and removed from the gateway and the chat’s tools${m.kept ? ', and stops being kept loaded' : ''}. Its files stay in the library unless you delete them too.`
+                let files = false
+                if (await confirm({ title: `Remove ${m.name}?`, description, confirm: 'Remove', destructive: true, check: filesCheck((on) => (files = on)) })) remove.mutate(files)
               }}
             >
               <Trash2 /> Remove
@@ -613,9 +622,10 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
                 className="text-destructive-ink"
                 onClick={async () => {
                   const description = m.kept
-                    ? 'It is kept loaded: it stops being kept, and chats that chose it fall back to a loaded model. The model file stays in the library.'
-                    : 'Chats that chose it fall back to a loaded model. The model file stays in the library.'
-                  if (await confirm({ title: `Remove ${m.name}?`, description, confirm: 'Remove', destructive: true })) remove.mutate()
+                    ? 'It is kept loaded: it stops being kept, and chats that chose it fall back to a loaded model. The model file stays in the library unless you delete it too.'
+                    : 'Chats that chose it fall back to a loaded model. The model file stays in the library unless you delete it too.'
+                  let files = false
+                  if (await confirm({ title: `Remove ${m.name}?`, description, confirm: 'Remove', destructive: true, check: filesCheck((on) => (files = on)) })) remove.mutate(files)
                 }}
               >
                 <Trash2 /> Remove

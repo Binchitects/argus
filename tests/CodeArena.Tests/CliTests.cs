@@ -189,6 +189,12 @@ public sealed class CliTests : IDisposable
             var withArena = new SystemPrompt.Inputs { Workspace = inputs.Workspace, Paths = inputs.Paths, Mode = inputs.Mode, Model = inputs.Model, HasArenaTools = () => true };
             Assert.Contains("pictures, video and speech", SystemPrompt.Note(withArena));
             Assert.Equal(prompt, SystemPrompt.Build(withArena, now: new DateTime(2026, 10, 4)));
+            // A checklist on in the session's chat: in the note (the prompt stays the same), its items numbered and ticked.
+            Assert.DoesNotContain("# Checklist", note);
+            var run = Json.ParseObject("""{"name":"Done means done","done":1,"total":2,"items":[{"number":1,"text":"The tests pass","done":true,"note":"42 of 42"},{"number":2,"text":"The docs say what changed","done":false}]}""")!;
+            var withChecklist = new SystemPrompt.Inputs { Workspace = inputs.Workspace, Paths = inputs.Paths, Mode = inputs.Mode, Model = inputs.Model, Checklist = () => SessionChecklist.Text(run) };
+            Assert.Contains("# Checklist\n\n" + SessionChecklist.Instructions + "\n\nChecklist \"Done means done\" (1 of 2 done):\n1. [x] The tests pass (42 of 42)\n2. [ ] The docs say what changed", SystemPrompt.Note(withChecklist));
+            Assert.Equal(prompt, SystemPrompt.Build(withChecklist, now: new DateTime(2026, 10, 4)));
             Assert.Contains("Run make test before finishing.", prompt);
             Assert.Contains("I prefer short answers.", prompt);
             Assert.Contains("Model: model-a", prompt);

@@ -26,6 +26,7 @@ import { AUTO, assistantsQuery, chatModel, onAuto } from './api'
 import { AssistantIcon } from './assistant-icon'
 import type { ChatConfig, ChatSettings } from './types'
 import { useChatActions } from './chat-actions'
+import { ChecklistButton } from './checklist-button'
 import { MemoryButton } from './memory'
 
 const DEFAULT = '__default__'
@@ -224,6 +225,7 @@ export function ChatHeader({
   canvas,
   room,
   onMakeRoom,
+  checklist,
 }: {
   config: ChatConfig
   settings: ChatSettings
@@ -249,6 +251,8 @@ export function ChatHeader({
   room?: { people: number; here: number; onOpen: () => void; readIn?: { value: string; onChange: (code: string) => void }; call?: ReactNode }
   /** Make the chat a room (its owner's, not a room yet). */
   onMakeRoom?: () => void
+  /** The chat's checklist (its owner's chat, not a room): whether an answer runs now, which ticks it. */
+  checklist?: { chat: string; answering: boolean }
 }) {
   return (
     <header className="@container flex h-12 shrink-0 items-center gap-1 border-b px-2 sm:px-3">
@@ -281,6 +285,7 @@ export function ChatHeader({
           </Tooltip>
         )}
         <MemoryButton />
+        {checklist && <ChecklistButton chat={checklist.chat} answering={checklist.answering} />}
         <ChatSettingsPopover config={config} settings={settings} onChange={onChange} />
         {canvas && (
           <Tooltip content={canvas.open ? 'Hide the canvas' : 'Canvas: documents and code you and the model edit'}>

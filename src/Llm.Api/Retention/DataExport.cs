@@ -66,6 +66,10 @@ public sealed class DataExport(AppDbContext db, AccessService access)
             webhook = t.WebhookEncrypted is not null, t.Trigger, t.Events, t.ReplyInGitLab, t.Enabled, t.CreatedAt, t.LastRunAt,
         }), ct);
 
+        // The prompt log: what they asked with their API keys and the answers, as long as it keeps them (Retention:PromptLogDays).
+        var prompts = await db.PromptLog.AsNoTracking().Where(l => l.UserId == user.Id).OrderBy(l => l.At).ToListAsync(ct);
+        await JsonAsync(zip, "api-prompts.json", prompts.Select(l => new { l.At, l.Model, l.Prompt, l.Answer, l.PromptTokens, l.CompletionTokens, l.Status }), ct);
+
         var names = new Dictionary<Guid, string>();
         foreach (var file in await db.ChatAttachments.AsNoTracking().Where(a => a.UserId == user.Id).OrderBy(a => a.CreatedAt).Select(a => new { a.Id, a.FileName }).ToListAsync(ct))
         {

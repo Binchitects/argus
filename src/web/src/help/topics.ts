@@ -602,6 +602,17 @@ export const topics = {
     manual: { doc: 'chat', section: 'meetings' },
   },
 
+  checklists: {
+    title: 'Checklists',
+    about: 'Your own checklists: what is done before work counts as done. Turned on in a chat or a Code Arena session, the model goes through one and ticks each item, saying how.',
+    parts: [
+      { name: 'Your checklists', text: 'Each with its items in order. **New checklist** writes one, an item a line; the pencil changes it, the bin deletes it (chats it is on in keep their copy).' },
+      { name: 'In a chat', text: 'The checklist button in a chat\'s header turns one on, shows how many items are done, who ticked each and how, and lets you tick them too.' },
+    ],
+    tasks: [{ title: 'Have every change checked the same way', steps: ['Write a checklist: the tests pass, the docs say what changed.', 'In a chat (or Code Arena, with **/checklist**), turn it on.', 'Ask for the work: before it says it is done, it ticks each item with how.'] }],
+    manual: { doc: 'chat', section: 'checklists' },
+  },
+
   plans: {
     title: 'Plans',
     about: "Plans the chat made with its Plans tool, and Code Arena's working plans: steps with what done means, owners, dates and what each waits for. Yours, and those of rooms you are in.",
@@ -987,6 +998,43 @@ export const topics = {
     manual: { doc: 'admin', section: 'security' },
   },
 
+  line: {
+    title: 'Line',
+    about: 'Chat answers and API requests running now, and who waits in the order they will be served, every two seconds.',
+    admin: true,
+    parts: [
+      { name: 'Waiting', text: 'Each request waiting its turn: its place, whose it is, the model, chat or API, how long it has waited and its priority.' },
+      { name: 'Running', text: 'What runs now, the longest first.' },
+      { name: 'The limits', text: 'How many run at once for everyone, per person, the longest line and how long a wait lasts (Settings → Chat), and each model\'s places.' },
+    ],
+    tasks: [{ title: 'Find out why someone waits', steps: ['Find them under **Waiting**.', 'See who runs before them, and the limits above.', 'Raise a limit in Settings → Chat, or theirs in Admin → People.'] }],
+    manual: { doc: 'admin', section: 'line' },
+  },
+
+  feedback: {
+    title: 'Feedback',
+    about: 'What people send about Arena with Send feedback: ideas, problems, praise; each marked read or done, or answered.',
+    admin: true,
+    parts: [
+      { name: 'The list', text: 'Each one with its kind, words, who sent it and the page it came from, newest first.' },
+      { name: 'Handling one', text: 'Mark it read or done, or answer it: the answer goes to the person\'s bell.' },
+    ],
+    tasks: [{ title: 'Answer a problem report', steps: ['Open it from the list.', 'Write the answer.', 'Send it: the person is told, and it shows under Your feedback.'] }],
+    manual: { doc: 'admin', section: 'feedback' },
+  },
+
+  prompts: {
+    title: 'Prompt log',
+    about: "Everyone's questions and the answers they got, in the chat and with API keys, for those with prompts.review. Every search is in the audit log.",
+    admin: true,
+    parts: [
+      { name: 'Search', text: 'Words in the question (and in an API answer), a person by user name or email, and where: all, chat or API.' },
+      { name: 'The log', text: 'Each question with its answer, person, model, chat and tokens, newest first; **Older** goes on.' },
+    ],
+    tasks: [{ title: 'Look into a complaint about an answer', steps: ['Search by the person and a few words of the question.', 'Read the answer they got.', 'The search itself is audited as prompts.viewed.'] }],
+    manual: { doc: 'admin', section: 'prompt-log' },
+  },
+
   quality: {
     title: 'Quality',
     about: 'How people rate the answers, per model and per assistant, and how the models fare when people compare them blind.',
@@ -1096,6 +1144,9 @@ export const topics = {
       argus: { name: 'Argus: who asked what', text: 'Who asked Argus what: tool calls, people, refusals and timings.' },
       'stack-indexing': { name: 'Indexing: Argus code index', text: 'Argus\'s index runs: repositories, files, symbols and failures.' },
       'usage-by-user': { name: 'Usage by person', text: 'Each person\'s tokens and cost. The Usage & cost page shows it too.' },
+      'llm-users': { name: 'LLM and users', text: 'Requests, tokens, latency and time to first token; the line (running, waiting, the average wait, refusals); the engine\'s speed; and who uses what. With usage.read.' },
+      system: { name: 'System', text: 'The services: which answer, their alerts, errors, restarts, the database and the logs\' volume. With monitoring.read.' },
+      hardware: { name: 'Hardware', text: 'GPU, CPU, memory, disks, network and temperatures of the machine. With hardware.read.' },
     },
   },
 

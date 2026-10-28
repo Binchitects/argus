@@ -535,7 +535,7 @@ A person asks from Your account (or an admin takes the request in for them) for 
 
 ### DAT-07: Records are kept for set times, and no longer
 
-The audit log six years unless set (only ever from the start of its chain), the gateway's request log, the record of tool calls and the bell each for a period set under Settings → Data retention, removed by the hourly sweep and audited with counts; the services' logs 90 days (Loki's compactor) and metrics 30 days (Prometheus). Admin → Compliance lists how long each kind of data and record is kept, and what removes it.
+The audit log six years unless set (only ever from the start of its chain), the gateway's request log, the record of tool calls, the bell and the prompt log of API requests each for a period set under Settings → Data retention, removed by the hourly sweep and audited with counts; the services' logs 90 days (Loki's compactor) and metrics 30 days (Prometheus). Admin → Compliance lists how long each kind of data and record is kept, and what removes it.
 
 **Serves**
 
@@ -559,7 +559,7 @@ The audit log six years unless set (only ever from the start of its chain), the 
 
 ### DAT-08: Personal and health data kept in bounds
 
-The safeguards find e-mail addresses, phone, card, IBAN and social security numbers, and health and identity data: dates of birth and medical record numbers by the words that name them, NHS numbers and Iranian national codes with their check digits right, and US Medicare numbers by their shape; a rule warns, masks or blocks them before a question reaches a model, stricter for models on other providers (the template "Health and identity data to cloud models" blocks them there). The app's log lines carry no personal data: it is masked before a line is written (IP addresses stay, as security needs them); answers' traces hold times, tokens and tool names only, and the gateway's request log no prompts.
+The safeguards find e-mail addresses, phone, card, IBAN and social security numbers, and health and identity data: dates of birth and medical record numbers by the words that name them, NHS numbers and Iranian national codes with their check digits right, and US Medicare numbers by their shape; a rule warns, masks or blocks them before a question reaches a model, stricter for models on other providers (the template "Health and identity data to cloud models" blocks them there). The app's log lines carry no personal data: it is masked before a line is written (IP addresses stay, as security needs them); answers' traces hold times, tokens and tool names only, and the gateway's request log no prompts. The one record of what people ask is the prompt log: only those with prompts.review (no built-in role but the admins') read it, each search is audited, people are told on their account page, it is kept for a set time, and it can be turned off for API requests.
 
 **Serves**
 
@@ -581,6 +581,9 @@ The safeguards find e-mail addresses, phone, card, IBAN and social security numb
 - `Llm.Tests/PersonalDataTests.A_wrong_check_digit_or_a_number_nothing_names_is_not_taken_for_one`
 - `Llm.Tests/PersonalDataTests.The_apps_log_lines_carry_no_personal_data_but_keep_the_addresses_security_needs`
 - `Llm.Tests/PersonalDataTests.The_compliance_check_wants_a_rule_keeping_health_data_from_cloud_models_and_the_templates_give_one`
+- `Llm.Tests/PromptLogTests.The_chats_and_the_API_requests_questions_and_answers_are_read_with_prompts_review_and_each_search_is_audited`
+- `Llm.Tests/PromptLogTests.An_answer_from_the_answer_cache_is_in_the_prompt_log_as_well`
+- `Llm.Tests/PromptLogTests.With_the_prompt_log_off_API_requests_are_not_kept`
 
 **Watched by** `app:personal-data` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
 

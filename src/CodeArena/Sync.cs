@@ -1384,6 +1384,21 @@ internal sealed class ChatSync : IAsyncDisposable
         return (res.StatusCode, text.Length > 0 && text.TrimStart().StartsWith('{') ? Json.ParseObject(text) : null);
     }
 
+    /// <summary>A call to Arena about this session's chat (its checklist): the path after /api/code-arena/chats/{id}; null without a chat there yet.</summary>
+    public async Task<(HttpStatusCode Status, JsonNode? Body)?> ChatCallAsync(HttpMethod method, string path, JsonObject? body, CancellationToken ct)
+    {
+        if (Conversation is not { } chat)
+        {
+            return null;
+        }
+        using var req = Request(method, $"{_base}/api/code-arena/chats/{chat}{path}", _key, body);
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        limit.CancelAfter(RequestLimit);
+        using var res = await _http.SendAsync(req, limit.Token);
+        var text = await res.Content.ReadAsStringAsync(limit.Token);
+        return (res.StatusCode, text.Length > 0 ? JsonNode.Parse(text) : null);
+    }
+
     internal static HttpRequestMessage Request(HttpMethod method, string url, string key, JsonObject? body)
     {
         var req = new HttpRequestMessage(method, url);

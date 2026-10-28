@@ -1,4 +1,4 @@
-import { Activity, AppWindow, ListOrdered, MessageSquareHeart, BadgeCheck, AudioLines, Brain, GitPullRequest, ListChecks, BarChart, BarChart3, Blocks, Bot, Boxes, CalendarClock, Database, FlaskConical, HardDrive, Home, KeyRound, LayoutDashboard, Library, LineChart, Logs, MessageSquare, Package, Palette, Plug, Presentation, ScanSearch, ScrollText, Settings, ShieldAlert, ShieldCheck, Siren, SquareSlash, Telescope, ThumbsUp, Timer, Trophy, Users, UsersRound, Workflow, Wrench, type LucideIcon } from 'lucide-react'
+import { Activity, AppWindow, ListOrdered, MessageSquareHeart, BadgeCheck, AudioLines, Brain, GitPullRequest, ListChecks, ListTodo, BarChart, BarChart3, Blocks, Bot, Boxes, CalendarClock, Database, FlaskConical, HardDrive, Home, KeyRound, LayoutDashboard, Library, LineChart, Logs, MessageSquare, Package, Palette, Plug, Presentation, ScanSearch, ScrollText, Settings, ShieldAlert, ShieldCheck, Siren, SquareSlash, Telescope, ThumbsUp, Timer, Trophy, Users, UsersRound, Workflow, Wrench, type LucideIcon } from 'lucide-react'
 
 export interface NavItem {
   title: string
@@ -30,6 +30,7 @@ export const navigation: NavSection[] = [
       { title: 'Skills', path: '/skills', icon: SquareSlash, keywords: ['slash commands', 'prompts', 'prompt library', 'templates', 'snippets', 'instructions', 'parameters'] },
       { title: 'Memory', path: '/memory', icon: Brain, keywords: ['remember', 'memories', 'recall', 'preferences', 'facts', 'decisions', 'lessons', 'pinned', 'context', 'what it knows about me'] },
       { title: 'Meetings', path: '/meetings', icon: AudioLines, keywords: ['meeting', 'record', 'recording', 'transcript', 'minutes', 'notes', 'action items', 'decisions', 'who said', 'speakers', 'otter', 'fireflies', 'call'], feature: 'meetings' },
+      { title: 'Checklists', path: '/checklists', icon: ListTodo, keywords: ['checklist', 'definition of done', 'steps', 'review', 'before merge', 'tick', 'todo'] },
       { title: 'Plans', path: '/plans', icon: ListChecks, keywords: ['plan', 'board', 'timeline', 'gantt', 'steps', 'project', 'kanban'] },
       { title: 'Science lab', path: '/lab', icon: FlaskConical, keywords: ['science', 'lab', 'mathematics', 'math', 'physics', 'chemistry', 'statistics', 'proof', 'sympy', 'units', 'notebook', 'wolfram'], feature: 'lab' },
       { title: 'Apps', path: '/apps', icon: AppWindow, keywords: ['app', 'apps', 'tool', 'publish', 'page', 'component', 'gallery', 'remix'], feature: 'apps' },
@@ -64,6 +65,7 @@ export const navigation: NavSection[] = [
       { title: 'Audit log', path: '/admin/audit', icon: ScrollText, keywords: ['events', 'history', 'security'], permission: 'audit.read' },
       { title: 'Compliance', path: '/admin/compliance', icon: BadgeCheck, keywords: ['iso 27001', 'soc 2', 'hipaa', 'gdpr', 'audit', 'controls', 'evidence', 'attest', 'policy', 'auditor'], permission: 'compliance.read' },
       { title: 'Security', path: '/admin/security', icon: ScanSearch, keywords: ['vulnerabilities', 'cve', 'findings', 'exploited', 'sbom', 'risks accepted', 'secrets', 'advisories'], permission: 'reviews.admin', feature: 'code-studio' },
+      { title: 'Prompt log', path: '/admin/prompts', icon: ScrollText, keywords: ['prompts', 'questions', 'answers', 'review', 'what people asked', 'log'], permission: 'prompts.review' },
       { title: 'Feedback', path: '/admin/feedback', icon: MessageSquareHeart, keywords: ['ideas', 'problems', 'praise', 'send feedback', 'suggestions', 'bugs'], permission: 'feedback.manage' },
       { title: 'Quality', path: '/admin/quality', icon: ThumbsUp, keywords: ['feedback', 'thumbs', 'ratings', 'arena', 'leaderboard', 'answers'], permission: 'monitoring.read' },
     ],

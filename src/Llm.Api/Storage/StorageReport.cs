@@ -455,6 +455,9 @@ public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, S
         rules.Add(new("The gateway's request log", Kept(r.GatewayLogDays, "days", "Settings → Data retention: usage, credit and the dashboards read it.")));
         rules.Add(new("The record of tool calls", Kept(r.ToolCallDays, "days", "Settings → Data retention.")));
         rules.Add(new("News in the bell", Kept(r.NotificationDays, "days", "Settings → Data retention.")));
+        rules.Add(new("The prompt log of API requests", answerCache.CurrentValue.LogPrompts
+            ? Kept(r.PromptLogDays, "days", "Settings → Data retention; Admin → Prompt log reads it, with prompts.review.")
+            : "Off: no API request's question or answer is kept (Settings → API keys)."));
         string? logs;
         try
         {

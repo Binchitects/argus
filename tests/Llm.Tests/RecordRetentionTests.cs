@@ -36,10 +36,13 @@ public sealed class RecordRetentionTests(AppFixture app)
             late = await db.AuditEvents.Where(e => e.Action == "test.late").Select(e => e.Id).SingleAsync();
             db.ToolCalls.AddRange(new ToolCall { ToolId = "python", Function = "run", At = DateTimeOffset.UtcNow.AddDays(-200) }, new ToolCall { ToolId = "python", Function = "run" });
             db.Notifications.AddRange(new Notification { UserId = adminId, Title = "Old news", CreatedAt = DateTimeOffset.UtcNow.AddDays(-200) }, new Notification { UserId = adminId, Title = "Fresh news" });
+            db.PromptLog.AddRange(new PromptLogEntry { UserId = adminId, Model = "m", Prompt = "old question", At = DateTimeOffset.UtcNow.AddDays(-100) },
+                new PromptLogEntry { UserId = adminId, Model = "m", Prompt = "fresh question", At = DateTimeOffset.UtcNow });
             await db.SaveChangesAsync();
 
             var swept = await scope.ServiceProvider.GetRequiredService<RecordRetention>().SweepAsync(CancellationToken.None);
-            Assert.Equal((2, 1, 1), (swept.Audit, swept.ToolCalls, swept.Notifications));
+            Assert.Equal((2, 1, 1, 1), (swept.Audit, swept.ToolCalls, swept.Notifications, swept.PromptLog));
+            Assert.Equal(["fresh question"], await db.PromptLog.Select(l => l.Prompt).ToListAsync());
             Assert.False(await db.AuditEvents.AnyAsync(e => first.Contains(e.Id)));
             Assert.True(await db.AuditEvents.AnyAsync(e => e.Id == late), "the late entry is kept");
             Assert.Equal(1, await db.ToolCalls.CountAsync());
@@ -52,6 +55,7 @@ public sealed class RecordRetentionTests(AppFixture app)
 
         var view = await admin.JsonAsync(await admin.GetAsync("/api/admin/compliance"));
         Assert.Contains(view.GetProperty("retention").EnumerateArray(), r => r.GetProperty("what").GetString() == "The audit log" && r.GetProperty("rule").GetString()!.StartsWith("Kept 6 years", StringComparison.Ordinal));
+        Assert.Contains(view.GetProperty("retention").EnumerateArray(), r => r.GetProperty("what").GetString() == "The prompt log of API requests" && r.GetProperty("rule").GetString()!.StartsWith("Kept 90 days", StringComparison.Ordinal));
         var check = view.GetProperty("checks").EnumerateArray().Single(c => c.GetProperty("id").GetString() == "records-retention");
         Assert.Equal("ok", check.GetProperty("state").GetString());
 

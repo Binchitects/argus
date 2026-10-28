@@ -20,6 +20,18 @@ export interface ReviewBrief {
   ruleId?: string | null
   /** webhook, check or schedule: what started an automatic one. */
   trigger?: 'webhook' | 'check' | 'schedule' | null
+  /** Shared with others (everyone, groups or people). */
+  shared?: boolean
+}
+
+export type ReviewReach = 'Private' | 'Groups' | 'Company'
+
+/** Whom its owner shared it with. */
+export interface ReviewSharing {
+  reach: ReviewReach
+  groups: { id: string; name: string }[]
+  people: { id: string; userName: string; displayName: string | null }[]
+  sharedAt: string | null
 }
 
 export interface Finding {
@@ -49,6 +61,10 @@ export interface Review {
   completionTokens: number
   by: string
   mine: boolean
+  /** Its owner's only. */
+  share: ReviewSharing | null
+  /** Shared with the person: they read it, and change nothing of it. */
+  readOnly: boolean
   findings: Finding[]
 }
 
@@ -66,7 +82,7 @@ export interface MergeRequestRow {
 
 export const reviewsQuery = {
   queryKey: ['code', 'reviews'] as const,
-  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ review: ReviewBrief; open: number; mine: boolean }[]>('/api/code/reviews', { signal }),
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ review: ReviewBrief; open: number; mine: boolean; sharedBy: string | null }[]>('/api/code/reviews', { signal }),
   refetchInterval: (q: { state: { data?: { review: ReviewBrief }[] } }) => (q.state.data?.some((r) => r.review.status === 'running' || r.review.status === 'queued') ? 3000 : false),
 }
 
@@ -89,6 +105,8 @@ export const reviewAgain = (id: string) => api<{ id: string }>(`/api/code/review
 export const decideFinding = (id: string, findingId: string, state: Finding['state']) => api(`/api/code/reviews/${id}/findings/${findingId}`, { method: 'PUT', body: { state } })
 
 export const reviewRoom = (id: string) => api<{ id: string }>(`/api/code/reviews/${id}/room`, { body: {} })
+
+export const shareReview = (id: string, body: { reach: ReviewReach; groups: string[]; people: string[] }) => api(`/api/code/reviews/${id}/share`, { method: 'PUT', body })
 
 export const askCode = (body: { question: string; project?: string; ref?: string; iid?: number }) => api<{ id: string; message: string }>('/api/code/ask', { body })
 

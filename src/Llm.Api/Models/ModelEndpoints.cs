@@ -50,6 +50,7 @@ public static class ModelEndpoints
             ["POST /api/admin/models"] = Llm.Core.Access.Permissions.ModelsAdd,
             ["PATCH /api/admin/models/{name}"] = Llm.Core.Access.Permissions.ModelsEdit,
             ["DELETE /api/admin/models/{name}"] = Llm.Core.Access.Permissions.ModelsDelete,
+            ["DELETE /api/admin/models/library/disk"] = Llm.Core.Access.Permissions.ModelsDelete,
             ["PUT /api/admin/models/{name}/keep"] = Llm.Core.Access.Permissions.ModelsEdit,
             ["PUT /api/admin/models/{name}/tools"] = Llm.Core.Access.Permissions.ModelsEdit,
             ["PUT /api/admin/models/{name}/access"] = Llm.Core.Access.Permissions.ModelsAccess,
@@ -58,6 +59,7 @@ public static class ModelEndpoints
         g.MapGet("", ListAsync);
         MediaModelEndpoints.Map(g);
         g.MapGet("/library", LibraryAsync);
+        ModelDiskEndpoints.Map(g);
         g.MapGet("/library/snapshots", SnapshotsAsync);
         g.MapPost("/advice", AdviceAsync);
         g.MapPost("", AddAsync);
@@ -326,12 +328,17 @@ public static class ModelEndpoints
         return Results.Ok(await AfterChangeAsync(catalog, watcher, warning, ct));
     }
 
-    private static async Task<IResult> RemoveAsync(string name, AppDbContext db, ModelCatalog catalog, IOptions<EngineOptions> engine, EngineWatcher watcher,
-        MediaControl media, Audit audit, AccessService access, ClaimsPrincipal principal, UserManager<AppUser> users, CancellationToken ct)
+    /// <summary>
+    /// Removes a model from Arena. Its files stay in the library unless <c>?files=true</c>: then those no other model uses
+    /// are deleted from disk as well (Admin → Models → On disk), and the answer says what was freed and what stayed.
+    /// </summary>
+    private static async Task<IResult> RemoveAsync(string name, bool? files, AppDbContext db, ModelCatalog catalog, IOptions<EngineOptions> engine, EngineWatcher watcher,
+        MediaControl media, Audit audit, AccessService access, ClaimsPrincipal principal, UserManager<AppUser> users, ModelDisk disk, ModelDownloads downloads, CancellationToken ct)
     {
         // A picture, video or speech model: unloaded, then gone (its files stay in the library, as a chat model's).
         if (await db.MediaModels.SingleOrDefaultAsync(m => m.Name == name, ct) is { } row)
         {
+            var itsFiles = row.Files.Select(f => f.Path).ToList();
             await media.UnloadAsync(name, ct);
             db.MediaModels.Remove(row);
             await db.SaveChangesAsync(ct);
@@ -346,12 +353,14 @@ public static class ModelEndpoints
                 // In step within a minute (the engine watcher).
             }
             await audit.WriteAsync("model.remove", name);
-            return Results.Ok(new { restarting = false, warning = (string?)null });
+            var (freed, stayed) = files is true ? await DeleteFilesAsync(itsFiles, disk, db, downloads, audit, ct) : (0L, []);
+            return Results.Ok(new { restarting = false, warning = (string?)null, freed, stayed });
         }
         if (await db.LocalModels.SingleOrDefaultAsync(m => m.Name == name, ct) is not { } model)
         {
             return Results.NotFound();
         }
+        var paths = new[] { model.File, model.Projector, model.DraftHead }.OfType<string>().ToList();
         db.LocalModels.Remove(model);
         await db.SaveChangesAsync(ct);
         await access.RemoveResourceAsync(await users.GetUserAsync(principal), ResourceKinds.Model, name, ct);
@@ -367,11 +376,36 @@ public static class ModelEndpoints
         }
         await db.SaveChangesAsync(ct);
         await audit.WriteAsync("model.remove", name);
-        return Results.Ok(await AfterChangeAsync(catalog, watcher, null, ct));
+        var changed = await AfterChangeAsync(catalog, watcher, null, ct);
+        var (gone, kept) = files is true ? await DeleteFilesAsync(paths, disk, db, downloads, audit, ct) : (0L, []);
+        return Results.Ok(new { changed.Restarting, changed.Warning, freed = gone, stayed = kept });
+    }
+
+    /// <summary>A removed model's files deleted from disk, those another model or a server uses kept: the bytes freed, and what stayed and why.</summary>
+    private static async Task<(long Freed, List<object> Stayed)> DeleteFilesAsync(List<string> paths, ModelDisk disk, AppDbContext db, ModelDownloads downloads, Audit audit, CancellationToken ct)
+    {
+        var items = (await disk.ListAsync(db, ct)).Where(i => paths.Contains(i.Path)).ToList();
+        long freed = 0;
+        var stayed = new List<object>();
+        foreach (var item in items)
+        {
+            if (ModelDisk.WhyNot(item) is { } why)
+            {
+                stayed.Add(new { item.Path, why });
+                continue;
+            }
+            freed += disk.Delete(item);
+            await audit.WriteAsync("model.files.delete", item.Path, detail: $"{item.Kind}, {Storage.StorageDisks.Size(item.Size)} freed");
+        }
+        await disk.ForgetGoneDownloadsAsync(db, downloads, ct);
+        return (freed, stayed);
     }
 
     /// <summary>The engine restarts on new presets; the gateway learns of the change. A gateway that is down is tried again later.</summary>
-    private static async Task<object> AfterChangeAsync(ModelCatalog catalog, EngineWatcher watcher, string? warning, CancellationToken ct)
+    /// <summary>What a change of models did: the engine restarts, and a warning when the gateway was not told yet.</summary>
+    private sealed record Changed(bool Restarting, string? Warning);
+
+    private static async Task<Changed> AfterChangeAsync(ModelCatalog catalog, EngineWatcher watcher, string? warning, CancellationToken ct)
     {
         await catalog.WritePresetsAsync(ct);
         await catalog.WriteVllmPresetsAsync(ct);
@@ -379,11 +413,11 @@ public static class ModelEndpoints
         try
         {
             await catalog.SyncGatewayAsync(ct);
-            return new { restarting = true, warning };
+            return new Changed(true, warning);
         }
         catch (GatewayException ex)
         {
-            return new { restarting = true, warning = $"Saved, but the gateway could not be updated yet ({ex.Message}); it is tried again within a minute." };
+            return new Changed(true, $"Saved, but the gateway could not be updated yet ({ex.Message}); it is tried again within a minute.");
         }
     }
 

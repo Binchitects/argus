@@ -19,6 +19,9 @@ public sealed record NewReview(string Project, int? Iid = null, string? From = n
 
 public sealed record FindingChange(string State);
 
+/// <summary>Who else may read a review: everyone, chosen groups (Reach), and chosen people by user name or email whatever the reach.</summary>
+public sealed record ReviewShare(Core.Access.Reach Reach = Core.Access.Reach.Private, Guid[]? Groups = null, string[]? People = null);
+
 /// <summary>A question about code for the online code assistant: a project, maybe a ref or a merge request, and what to ask.</summary>
 public sealed record CodeQuestion(string Question, string? Project = null, string? Ref = null, int? Iid = null);
 
@@ -42,6 +45,7 @@ public static class CodeEndpoints
         g.MapPut("/reviews/{id:guid}/findings/{findingId:guid}", DecideAsync);
         g.MapPost("/reviews/{id:guid}/room", RoomAsync).RequirePermission(Core.Access.Permissions.RoomsCreate);
         g.MapDelete("/reviews/{id:guid}", DeleteAsync);
+        g.MapPut("/reviews/{id:guid}/share", ShareAsync).RequirePermission(Core.Access.Permissions.ShareLinks);
     }
 
     private static async Task<AppUser> Me(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!;
@@ -97,22 +101,56 @@ public static class CodeEndpoints
     private static object Brief(CodeReview r) => new
     {
         r.Id, r.Project, r.Iid, r.FromRef, r.ToRef, r.Title, r.WebUrl, r.Status, r.Step, r.Verdict, r.Risk, r.Files, r.CreatedAt, r.FinishedAt, r.Error, r.RuleId, r.Trigger,
+        shared = r.Reach != Core.Access.Reach.Private || r.SharePeople.Count > 0,
     };
 
-    /// <summary>The person's reviews, and those of the rooms they are in; newest first.</summary>
-    private static async Task<IResult> ListAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)
+    /// <summary>
+    /// The person's reviews, those of the rooms they are in, and those shared with them of projects they may read themselves
+    /// (each project asked of Argus once, as the person); newest first.
+    /// </summary>
+    private static async Task<IResult> ListAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AccessService access, ArgusMcp argus, CancellationToken ct)
     {
         var me = await Me(p, users);
         var rooms = await RoomAccess.RoomsOfAsync(db, me, ct);
-        var list = await db.CodeReviews.AsNoTracking().Where(r => r.UserId == me.Id || (r.RoomId != null && rooms.Contains(r.RoomId.Value)))
+        var groups = (await access.MembershipAsync(me, ct)).Groups.ToList();
+        var list = await db.CodeReviews.AsNoTracking().Where(r => r.UserId == me.Id || (r.RoomId != null && rooms.Contains(r.RoomId.Value))
+                || (r.Status == CodeReview.Done && (r.Reach == Core.Access.Reach.Company || r.SharePeople.Contains(me.Id) || (r.Reach == Core.Access.Reach.Groups && r.ShareGroups.Any(g => groups.Contains(g))))))
             .OrderByDescending(r => r.CreatedAt).Take(200).ToListAsync(ct);
+        var shared = list.Where(r => r.UserId != me.Id && !(r.RoomId is { } room && rooms.Contains(room))).ToList();
+        var readable = new Dictionary<string, bool>(StringComparer.Ordinal);
+        foreach (var project in shared.Select(r => r.Project).Distinct().Take(20))
+        {
+            readable[project] = await ReadsAsync(argus, me, project, ct);
+        }
+        list = [.. list.Where(r => !shared.Contains(r) || readable.GetValueOrDefault(r.Project))];
         var counts = await db.ReviewFindings.AsNoTracking().Where(f => list.Select(r => r.Id).Contains(f.ReviewId) && f.Verified != false && f.State == ReviewFinding.Open)
             .GroupBy(f => f.ReviewId).Select(x => new { x.Key, n = x.Count() }).ToDictionaryAsync(x => x.Key, x => x.n, ct);
-        return Results.Ok(list.Select(r => new { review = Brief(r), open = counts.GetValueOrDefault(r.Id), mine = r.UserId == me.Id }));
+        var owners = await NamesAsync(db, shared.Select(r => r.UserId), ct);
+        return Results.Ok(list.Select(r => new
+        {
+            review = Brief(r), open = counts.GetValueOrDefault(r.Id), mine = r.UserId == me.Id, sharedBy = shared.Contains(r) ? owners.GetValueOrDefault(r.UserId) : null,
+        }));
     }
 
-    /// <summary>A review the person may see: theirs, one of a room they are in, or any for a reviews admin.</summary>
-    private static async Task<CodeReview?> SeenAsync(AppDbContext db, AccessService access, AppUser me, Guid id, CancellationToken ct)
+    /// <summary>Whether the person may read a project themselves: Argus, as them, lists its merge requests.</summary>
+    private static async Task<bool> ReadsAsync(ArgusMcp argus, AppUser me, string project, CancellationToken ct) =>
+        (await ArgusAsync(argus, me, "mr_list", new JsonObject { ["project"] = project, ["state"] = "all", ["limit"] = 1 }, ct)).Problem is null;
+
+    private static async Task<Dictionary<Guid, string>> NamesAsync(AppDbContext db, IEnumerable<Guid> ids, CancellationToken ct)
+    {
+        var wanted = ids.Distinct().ToList();
+        return await db.Users.AsNoTracking().Where(u => wanted.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.DisplayName == "" ? u.UserName! : u.DisplayName, ct);
+    }
+
+    /// <summary>Whether a review is shared with the person (not whether they may read its project: <see cref="ReadsAsync"/>).</summary>
+    private static bool SharedWith(CodeReview r, AppUser me, Membership m) =>
+        r.Status == CodeReview.Done && (r.Reach == Core.Access.Reach.Company || r.SharePeople.Contains(me.Id) || (r.Reach == Core.Access.Reach.Groups && r.ShareGroups.Any(m.Groups.Contains)));
+
+    /// <summary>
+    /// A review the person may see: theirs, one of a room they are in, or any for a reviews admin; with <paramref name="argus"/>,
+    /// also one shared with them, while they may read its project themselves (to read only).
+    /// </summary>
+    private static async Task<CodeReview?> SeenAsync(AppDbContext db, AccessService access, AppUser me, Guid id, CancellationToken ct, ArgusMcp? argus = null)
     {
         var r = await db.CodeReviews.Include(x => x.Findings).SingleOrDefaultAsync(x => x.Id == id, ct);
         if (r is null)
@@ -123,7 +161,11 @@ public static class CodeEndpoints
         {
             return r;
         }
-        return await access.MayAsync(me, Core.Access.Permissions.ReviewsAdmin, ct) ? r : null;
+        if (await access.MayAsync(me, Core.Access.Permissions.ReviewsAdmin, ct))
+        {
+            return r;
+        }
+        return argus is not null && SharedWith(r, me, await access.MembershipAsync(me, ct)) && await ReadsAsync(argus, me, r.Project, ct) ? r : null;
     }
 
     private static async Task<IResult> StartAsync(NewReview body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, ArgusMcp argus, ReviewEngine engine,
@@ -179,17 +221,27 @@ public static class CodeEndpoints
         return Results.Accepted($"/api/code/reviews/{review.Id}", new { review.Id });
     }
 
-    private static async Task<IResult> GetAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AccessService access, CancellationToken ct)
+    private static async Task<IResult> GetAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AccessService access, ArgusMcp argus, CancellationToken ct)
     {
         var me = await Me(p, users);
-        if (await SeenAsync(db, access, me, id, ct) is not { } r)
+        if (await SeenAsync(db, access, me, id, ct, argus) is not { } r)
         {
             return Results.NotFound();
         }
         var by = await db.Users.AsNoTracking().Where(u => u.Id == r.UserId).Select(u => u.DisplayName == "" ? u.UserName : u.DisplayName).SingleOrDefaultAsync(ct);
+        // Shared with them only: they read it, and change nothing of it.
+        var readOnly = await SeenAsync(db, access, me, id, ct) is null;
+        // Its owner sees whom it is shared with.
+        object? share = null;
+        if (r.UserId == me.Id)
+        {
+            var groupNames = await db.Groups.AsNoTracking().Where(g => r.ShareGroups.Contains(g.Id)).OrderBy(g => g.Name).Select(g => new { g.Id, g.Name }).ToListAsync(ct);
+            var people = await db.Users.AsNoTracking().Where(u => r.SharePeople.Contains(u.Id)).OrderBy(u => u.UserName).Select(u => new { u.Id, u.UserName, u.DisplayName }).ToListAsync(ct);
+            share = new { r.Reach, groups = groupNames, people, r.SharedAt };
+        }
         return Results.Ok(new
         {
-            review = Brief(r), r.Summary, r.Ci, r.Model, r.HeadSha, r.PreviousId, r.RoomId, r.PromptTokens, r.CompletionTokens, by, mine = r.UserId == me.Id,
+            review = Brief(r), r.Summary, r.Ci, r.Model, r.HeadSha, r.PreviousId, r.RoomId, r.PromptTokens, r.CompletionTokens, by, mine = r.UserId == me.Id, share, readOnly,
             findings = r.Findings.OrderBy(f => f.Verified == false).ThenBy(f => f.Severity switch { "critical" => 0, "major" => 1, "minor" => 2, _ => 3 }).ThenBy(f => f.Path).ThenBy(f => f.Line)
                 .Select(f => new { f.Id, f.Path, f.Line, f.Severity, f.Category, f.Title, f.Body, f.Suggestion, f.Verified, f.VerifyNote, f.State, f.DecidedAt }),
         });
@@ -253,6 +305,64 @@ public static class CodeEndpoints
             (r.WebUrl is { } url ? $" · [in {HostOf(r.Project)}]({url})" : "") + "\n\n" + (r.Summary ?? "") + "\n\n" +
             string.Join('\n', r.Findings.Where(f => f.Verified != false).Select(f => $"- **{f.Severity}** `{f.Path}{(f.Line is { } l ? $":{l}" : "")}` {f.Title}"));
         return text.Length > 60_000 ? text[..60_000] : text;
+    }
+
+    /// <summary>
+    /// Shares the person's review (done) with everyone, chosen groups, or chosen people, or takes the share back (private, no
+    /// one): each of them reads it, without changing its findings, while they may read its project. Audited.
+    /// </summary>
+    private static async Task<IResult> ShareAsync(Guid id, ReviewShare body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AccessService access, Audit audit,
+        Notifications.Notifier notifier, CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        if (await db.CodeReviews.SingleOrDefaultAsync(r => r.Id == id && r.UserId == me.Id, ct) is not { } r)
+        {
+            return Results.NotFound();
+        }
+        if (r.Status != CodeReview.Done)
+        {
+            return AuthEndpoints.Problem(409, "running", "The review is not done yet.");
+        }
+        List<Guid> groups = body.Reach == Core.Access.Reach.Groups ? [.. (body.Groups ?? []).Distinct()] : [];
+        if (body.Reach == Core.Access.Reach.Groups && groups.Count == 0)
+        {
+            return AuthEndpoints.Problem(400, "groups", "Choose at least one group, or share it with everyone.");
+        }
+        if (await db.Groups.AsNoTracking().CountAsync(g => groups.Contains(g.Id), ct) != groups.Count)
+        {
+            return AuthEndpoints.Problem(400, "groups", "A group in the list does not exist.");
+        }
+        var m = await access.MembershipAsync(me, ct);
+        if (!m.IsAdmin && groups.Any(g => !m.Groups.Contains(g) && !r.ShareGroups.Contains(g)))
+        {
+            return AuthEndpoints.Problem(403, "groups", "You can share with groups you are in.");
+        }
+        var people = new List<Guid>();
+        foreach (var named in (body.People ?? []).Select(x => x.Trim()).Where(x => x.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var lower = named.ToLowerInvariant();
+            if (await db.Users.AsNoTracking().Where(u => u.UserName == lower || u.Email == named).Select(u => (Guid?)u.Id).FirstOrDefaultAsync(ct) is not { } person)
+            {
+                return AuthEndpoints.Problem(400, "people", $"There is no one named {named}.");
+            }
+            if (person != me.Id)
+            {
+                people.Add(person);
+            }
+        }
+        var newly = people.Except(r.SharePeople).ToList();
+        (r.Reach, r.ShareGroups, r.SharePeople) = (body.Reach, groups, people);
+        r.SharedAt = body.Reach == Core.Access.Reach.Private && people.Count == 0 ? null : DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        await audit.WriteAsync("review.share", r.Id.ToString(), detail: r.SharedAt is null ? "not shared" :
+            $"{r.Reach.ToString().ToLowerInvariant()}{(groups.Count > 0 ? $", {groups.Count} groups" : "")}{(people.Count > 0 ? $", {people.Count} people" : "")}");
+        // The people named are told, in their bell.
+        var from = me.DisplayName == "" ? me.UserName : me.DisplayName;
+        foreach (var person in newly)
+        {
+            await notifier.SendAsync(person, new Notifications.News("review", $"{from} shared a review with you", $"{r.Project} {r.Title}", $"/code/reviews/{r.Id}", $"review-share:{r.Id}:{person}"), ct);
+        }
+        return Results.Ok(new { r.Reach, groups = r.ShareGroups, people = r.SharePeople, r.SharedAt });
     }
 
     private static async Task<IResult> DeleteAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)

@@ -201,7 +201,7 @@ export function CodePage() {
         </EmptyState>
       ) : (
         <ul className="grid gap-2" aria-label="Reviews">
-          {reviews.data.map(({ review: r, open }) => (
+          {reviews.data.map(({ review: r, open, sharedBy }) => (
             <li key={r.id}>
               <Link to={`/code/reviews/${r.id}`} className="flex items-center gap-3 rounded-lg border px-4 py-3 text-sm outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring">
                 <span className="min-w-0 flex-1">
@@ -211,6 +211,7 @@ export function CodePage() {
                   <span className="block text-xs text-muted-foreground">
                     {new Date(r.createdAt).toLocaleString()}
                     {r.trigger && ` · ${r.trigger === 'schedule' ? 'scheduled' : 'automatic'}`}
+                    {sharedBy ? ` · shared by ${sharedBy}` : r.shared ? ' · shared' : ''}
                   </span>
                 </span>
                 {r.status === 'done' && open > 0 && <span className="text-xs text-muted-foreground">{open} open</span>}

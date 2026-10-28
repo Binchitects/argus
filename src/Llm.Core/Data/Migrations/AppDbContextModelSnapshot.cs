@@ -1130,6 +1130,76 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("chat_share_views", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Chat.Checklist", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.PrimitiveCollection<List<string>>("Items")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasDefaultValueSql("'{}'::text[]");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Name");
+
+                    b.ToTable("checklists", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.ChecklistRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("ChecklistId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChecklistId");
+
+                    b.HasIndex("ConversationId")
+                        .IsUnique();
+
+                    b.ToTable("checklist_runs", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Chat.Conversation", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1993,6 +2063,54 @@ namespace Llm.Core.Data.Migrations
                     b.HasIndex("UserId", "CreatedAt");
 
                     b.ToTable("product_feedback", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.PromptLogEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Answer")
+                        .HasMaxLength(20000)
+                        .HasColumnType("character varying(20000)");
+
+                    b.Property<DateTimeOffset>("At")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("CompletionTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("KeyToken")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Prompt")
+                        .IsRequired()
+                        .HasMaxLength(20000)
+                        .HasColumnType("character varying(20000)");
+
+                    b.Property<int?>("PromptTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("At");
+
+                    b.HasIndex("UserId", "At");
+
+                    b.ToTable("prompt_log", (string)null);
                 });
 
             modelBuilder.Entity("Llm.Core.Chat.PushSubscription", b =>
@@ -2983,6 +3101,9 @@ namespace Llm.Core.Data.Migrations
                     b.Property<int>("PromptTokens")
                         .HasColumnType("integer");
 
+                    b.Property<int>("Reach")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Risk")
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
@@ -2992,6 +3113,21 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<Guid?>("RuleId")
                         .HasColumnType("uuid");
+
+                    b.PrimitiveCollection<List<Guid>>("ShareGroups")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid[]")
+                        .HasDefaultValueSql("'{}'::uuid[]");
+
+                    b.PrimitiveCollection<List<Guid>>("SharePeople")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid[]")
+                        .HasDefaultValueSql("'{}'::uuid[]");
+
+                    b.Property<DateTimeOffset?>("SharedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -3030,6 +3166,8 @@ namespace Llm.Core.Data.Migrations
                         .HasColumnType("character varying(1000)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Reach");
 
                     b.HasIndex("RoomId");
 
@@ -7486,6 +7624,61 @@ namespace Llm.Core.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Llm.Core.Chat.Checklist", b =>
+                {
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.ChecklistRun", b =>
+                {
+                    b.HasOne("Llm.Core.Chat.Checklist", null)
+                        .WithMany()
+                        .HasForeignKey("ChecklistId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Llm.Core.Chat.Conversation", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.OwnsMany("Llm.Core.Chat.ChecklistRunItem", "Items", b1 =>
+                        {
+                            b1.Property<Guid>("ChecklistRunId");
+
+                            b1.Property<int>("__synthesizedOrdinal")
+                                .ValueGeneratedOnAdd();
+
+                            b1.Property<string>("By");
+
+                            b1.Property<bool>("Done");
+
+                            b1.Property<DateTimeOffset?>("DoneAt");
+
+                            b1.Property<string>("Note");
+
+                            b1.Property<string>("Text")
+                                .IsRequired();
+
+                            b1.HasKey("ChecklistRunId", "__synthesizedOrdinal");
+
+                            b1.ToTable("checklist_runs");
+
+                            b1
+                                .ToJson("Items")
+                                .HasColumnType("jsonb");
+
+                            b1.WithOwner()
+                                .HasForeignKey("ChecklistRunId");
+                        });
+
+                    b.Navigation("Items");
+                });
+
             modelBuilder.Entity("Llm.Core.Chat.Conversation", b =>
                 {
                     b.HasOne("Llm.Core.Chat.Assistant", null)
@@ -7614,6 +7807,15 @@ namespace Llm.Core.Data.Migrations
                 });
 
             modelBuilder.Entity("Llm.Core.Chat.ProductFeedback", b =>
+                {
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.PromptLogEntry", b =>
                 {
                     b.HasOne("Llm.Core.Identity.AppUser", null)
                         .WithMany()

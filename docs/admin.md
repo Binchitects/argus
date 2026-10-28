@@ -622,6 +622,11 @@ would be with them.
   with the command that regenerates it after an engine upgrade). Should the
   engine refuse the list anyway, it serves the `.env` model alone until the list
   changes, and the models it left out say so on their cards.
+- **Remove** takes a model off the engine, the gateway and the chat. Its file
+  (and its vision projector and draft head) stays in the library unless
+  **Also delete its files from disk** is ticked in the dialog: then those no
+  other model uses are deleted too, and the message says how much was freed
+  and what stayed and why.
 - **Adding, editing or removing a model restarts the engine** so it reads the
   new list: a few seconds, then the loaded model loads again. The gateway
   learns of the change at once (or within a minute, if it was down).
@@ -832,7 +837,8 @@ and removed there.
   30 minutes, its server off meanwhile; settings it refused wait until it is
   changed or loaded by hand. **Load** tries at once.
 - **Remove** takes the model away (from the gateway and the chat's tools too);
-  its files stay in the library (Admin → Storage cleans up unused ones).
+  its files stay in the library unless **Also delete its files from disk** is
+  ticked ([On disk](#on-disk)).
 - **Find on Hugging Face** has tabs: Chat (GGUF), Pictures and Video (the
   text-to-image and text-to-video repositories, any format stable-diffusion.cpp
   reads; pick the files a model needs) and Speech (the speech server's
@@ -843,6 +849,24 @@ and removed there.
   person may use (each model's **Who may use it**), and the chat's model may
   name another picture model the person asks for.
 
+
+#### On disk
+
+**On disk**, under the models, lists what the model library holds: GGUF
+files (a split model as one item, with its parts), Hugging Face snapshots for
+vLLM, and picture and video models' other files (safetensors and the like),
+largest first, with the library's total and its disk's free room. Each says
+which models use it. Deleting one from disk (the bin, with `models.delete`)
+removes it for good, every part of a split model and a snapshot's whole
+folder, and the folders it leaves empty; a finished download whose files are
+all gone is forgotten, so Find on Hugging Face offers it again. It is refused
+while a model uses the file (remove the model first, with its files if you
+like), while a download still writes into it, and for the servers' own files
+(the picture and video servers', the embedder's, Laya's and the media
+studio's: **Show the servers' own files too** lists them). Each deletion is
+audited as `model.files.delete`, with what was deleted and the room freed.
+Admin → Storage's **Models nothing uses** clean-up deletes the same files,
+several at once.
 ### Security
 
 Admin → Security (for those who may manage every review, `reviews.admin`,
@@ -879,6 +903,28 @@ ones come to the admins' bell. Mark each read or done, or answer it: the
 answer goes to the person's bell, and their **Your feedback** shows it.
 Sending is audited (`feedback.sent`), and so is handling it
 (`feedback.handled`); a person sends at most twenty a day.
+
+### Prompt log
+
+**Prompt log** (Oversight, with `prompts.review`, a permission of its own that
+no built-in role but the admins' has; the Auditor's `.read` permissions do not
+include it) shows everyone's questions and the answers they got, newest first:
+
+- **Chat**: each question in a chat (Code Arena's sessions kept in Arena and
+  rooms among them) with the model's answer, its chat's title, whether the
+  chat was deleted, and the answer's tokens. These are read from the chats
+  themselves, so they are there as long as the chats are kept.
+- **API**: each chat completion asked with an API key, its last question and
+  the whole answer as it went out (cut at 20,000 characters each, one from
+  the answer cache too), and its tokens. **Settings → Data retention → Keep API requests in the prompt log
+  for** (90 days by default, 0 forever) keeps them; **Settings → API keys → Prompt log of API
+  requests** off keeps none. Deleting a person deletes theirs.
+
+Search by words (in the question, and in an API answer), by person (user name
+or email) and by where (all, chat, API); **Older** goes on 50 at a time. Every
+search is in the audit log as `prompts.viewed`, with what was searched for and
+how many were shown. **Your account → Your data** tells each person that their
+questions can be read this way.
 
 ### Quality
 
@@ -1010,7 +1056,7 @@ preview gives the command that removes them on the host instead.
 | Files of deleted chats | chats deleted while their owner was on legal hold, once the hold is over, with their files (the hourly retention job takes them too); it shows what the holds still keep |
 | Leftovers on disk | what no database row owns: a download's `.part` file no download will finish, and Python sandbox jobs left behind (older than an hour) |
 | Old backups | shown only: backups beyond the newest ones kept (`BACKUP_KEEP` in `.env`, 14 by default, or the number typed), never the latest nor the newest that ended well, and `scripts/backup.sh --prune --keep N` to run in `deploy/` on the host. With anyone on legal hold it warns that backups from before the hold hold their data (what they deleted since, too) and marks those taken before it: ask whoever placed the hold before removing them. A backup's start is the one its `MANIFEST` gives in UTC; a backup's name is the host's local time, so for a backup from before v5.3, which has only its name, one named up to 14 hours after the hold began counts as before it |
-| Models nothing uses | model files no model of Admin → Models uses and no server reads, each chosen by hand: one deleted is gone from the library, and using it again means downloading it again |
+| Models nothing uses | model files (GGUF, vLLM snapshots, picture and video models' files) no model of Admin → Models uses, no server reads and no download writes into, each chosen by hand (as [On disk](#on-disk) does, one at a time): one deleted is gone from the library, and using it again means downloading it again |
 
 A clean-up that cannot run says why (the backups not mounted, or another
 user's).

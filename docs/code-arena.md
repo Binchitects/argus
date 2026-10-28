@@ -206,6 +206,7 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/thinking [level]` | `default`, `off`, `low`, `medium`, `high`, `xhigh` (sent as the chat sends it, through `chat_template_kwargs`); `default` is the web chat's default level when Arena says one (`DEFAULT_THINKING`), else the model's own |
 | `/tools [on\|off NAME]` | the tools of the session, which ask, which are off and which are loaded when needed; `on` or `off` a group of Arena's or a server's tools in this session (by its name, its title or one of its functions) |
 | `/plan` | the plan, as it stands |
+| `/checklist [N\|NAME\|off\|tick N\|untick N]` | the checklist on in this session and yours (kept in Arena); a number or a name turns one on, `off` turns it off, `tick` and `untick` by hand ([below](#checklists)) |
 | `/review [BASE]` | reviews the changes not yet committed, or this branch's over BASE (`/review main`): the model reads them with git, tries to refute each finding before it reports it, and ends with a verdict; it changes nothing. A `/review` command of the project's or your own goes first |
 | `/agent [NAME TASK]` | your own coding agents (below); with a name and a task, run one on it: its output shows as it comes, and what it said goes into the conversation |
 | `/compact` | summarize the conversation now |
@@ -1603,6 +1604,19 @@ Every session reads, into the model's instructions:
 What to put there: how to build and test, conventions, what not to touch.
 Each file is read up to 20,000 characters. The model also gets the system, the
 shell, the working directory, the git branch, the date and the mode.
+
+## Checklists
+
+Your checklists live in Arena (Workspace → Checklists), so Code Arena and the
+web chat use the same ones. `/checklist` lists them and the one on in this
+session; `/checklist 2` or `/checklist Done means done` turns one on in the
+session's chat (the session must be synced: say something first). From then
+on the model is told the items in every turn and has `checklist_check`:
+before it says a piece of work is done, it does or checks each item that
+applies (running the tests with `run_shell`, say), ticks it with how, and says
+which are left. `/checklist tick 3` and `untick 3` tick by hand; `/checklist
+off` turns it off. The web chat of that session shows the same ticks, and a
+tick made there is read by the next turn here.
 
 ## The plan
 

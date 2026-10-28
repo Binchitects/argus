@@ -754,6 +754,27 @@ a room holds (Settings → Chat → **Most people in a room**, 50).
   STUN or TURN server: `Rooms:Calls:IceServers` (none by default, for one
   network); `Rooms:Calls:MostInCall` (8) sets the size.
 
+## Checklists
+
+**Workspace → Checklists** keeps your own checklists: a name, a line about
+it, and up to 50 items, in order (the tests pass, the docs say what changed,
+no debugging left in the code). Nobody else sees them.
+
+- **Turn one on in a chat** with the checklist button in its header (beside
+  Memory). One is on at a time; turning on another replaces it.
+- **The answers go through it.** Each answer is told the items and given
+  `checklist_check`: before it says a piece of work is done, it does or
+  checks each item that applies, ticks it, and says how in a few words
+  ("42 of 42 pass"); an item that does not apply is ticked with why. It ends
+  by saying which are left. The button shows how many are done; open it to
+  see each item, who ticked it (you or the model) and how, and tick or
+  untick items yourself.
+- **The same in Code Arena.** A session synced to this chat shows and ticks
+  the same checklist (`/checklist` there turns one of yours on: see
+  [code-arena.md](code-arena.md#checklists)).
+- **A chat keeps its copy**: changing or deleting the checklist later does
+  not change one already on. **Turn it off** in the button.
+
 ## Plans
 
 The **Plans** tool (in the chat's Tools menu) makes and keeps plans: a title,
@@ -893,6 +914,15 @@ Access), and write nothing to GitLab: no comments, no approvals.
 - **Discuss in a room** makes a room with the review in it (its summary and
   findings). Add people from the room's **People** panel; they see the review
   too. The model answers there when someone writes `@Arena` or replies to it.
+- **Share** (a done review of yours) lets others read it: **Everyone**,
+  **Some groups** (yours), and people by user name or email whatever you
+  choose (they are told in their bell). They find it under Reviews, "shared
+  by" you, and read its summary and findings without changing them (no
+  Resolved or Dismiss, no room, no review again). Each of them sees it only
+  while they may read its project themselves: Argus asks GitLab as them, so a
+  review never shows code to someone GitLab keeps it from. **Stop sharing**
+  takes it back. Each change is audited as `review.share`; it needs the
+  `feature.share_links` permission.
 - **Who pays.** A review's requests are its person's, on the chat credit,
   tagged `review`. Three of a person's reviews run at once at most. Who may
   review: the `review.run` permission; who may ask about code: `code.read`
@@ -1268,6 +1298,11 @@ component, at its own link, for you, some groups or everyone.
 - **Publish as app** (above the preview): a name, a line about it, and who
   may open it: **Only me**, **Some groups** (yours, or any for those who may
   share with any group), or **Everyone**. It gets its link to share.
+- **Published again, a new version.** When you have published an app from
+  this chat, **Publish as** starts on **A new version of** it, with its name
+  and who may open it; any other app of yours of the same kind can be
+  chosen, or **A new app**. A new version keeps the app's link and its data,
+  takes a note of what changed, and shows in its **Versions**.
 - **Workspace → Apps** lists the apps you may open, the most used first.
   An app's page runs it full size, with **Copy link** and **Remix** (a copy
   of your own, private, to change); its owner has **Change** (its name,
@@ -1948,11 +1983,14 @@ their turn:
 
 ## Who sees what
 
-- A chat belongs to one person. Nobody else can read it in the app, **admins
-  included**: every query is filtered by the signed-in person, attachments too.
-  The exceptions: a shared chat's link (read-only, for the company or chosen
-  groups) and an assistant's files (for the people it is shared with), both the
-  owner's to make; a down vote with **Share this chat with the admins**, which
+- A chat belongs to one person. Nobody else can read it in the app's chat,
+  **admins included**: every query is filtered by the signed-in person,
+  attachments too. The exceptions: the **prompt log** (Admin → Prompt log, for
+  those with `prompts.review`: each question and its answer, in chats and with
+  API keys, every search audited as `prompts.viewed`; Your account → Your data
+  says so, see [admin.md](admin.md#prompt-log)); a shared chat's link
+  (read-only, for the company or chosen groups) and an assistant's files (for
+  the people it is shared with), both the owner's to make; a down vote with **Share this chat with the admins**, which
   lets admins read that chat, down to the rated answer, from Admin → Quality
   (each reading is in the audit log, `quality.read_shared`; rate it again
   without the box, or take the rating back, and it is closed again); and an

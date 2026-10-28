@@ -18,6 +18,8 @@ interface AccountData {
   retentionDays: number | null
   /** What their files take, and their room (null: no limit). */
   files?: { bytes: number; limitBytes: number | null }
+  /** Days the prompt log keeps a question asked with an API key (0: forever); null: not kept. */
+  promptLogDays?: number | null
 }
 
 /** A person's own copy of their data, how long their chats are kept, and what their files take of their room. */
@@ -34,6 +36,14 @@ export function YourData() {
           A zip of your chats (each as JSON and as Markdown), your files, assistants, scheduled tasks and settings.
           {data.data && (days ? ` Chats are kept for ${days} days after their last message, then deleted.` : ' Chats are kept until you delete them.')}
         </CardDescription>
+        {data.data && (
+          <p className="text-sm text-muted-foreground">
+            Your questions and the answers you got, in chats and with your API keys, can be read by the people who run this with the right to the prompt log; each time they
+            look is kept in the audit log.
+            {data.data.promptLogDays === 0 && ' Questions asked with API keys are kept in the prompt log for good.'}
+            {!!data.data.promptLogDays && ` Questions asked with API keys are kept in the prompt log for ${data.data.promptLogDays} days.`}
+          </p>
+        )}
       </CardHeader>
       <CardContent className="grid gap-4">
         {files && (

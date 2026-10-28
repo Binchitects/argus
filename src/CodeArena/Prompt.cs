@@ -33,6 +33,8 @@ internal static class SystemPrompt
         public Func<IReadOnlyList<(string Name, string Description)>> Agents { get; init; } = () => [];
         /// <summary>The skills it may load (name and what each is for).</summary>
         public Func<IReadOnlyList<(string Name, string Description)>> Skills { get; init; } = () => [];
+        /// <summary>The checklist on in the session's chat, as the model reads it (empty: none).</summary>
+        public Func<string> Checklist { get; init; } = () => "";
     }
 
     /// <summary>How to answer in the IDE: its page renders Markdown, and a file cited in backticks opens in the editor at its lines.</summary>
@@ -146,6 +148,10 @@ internal static class SystemPrompt
         if (x.ToolsInCode() is { Length: > 0 } inCode)
         {
             sb.Append("\n# Tools as code\n\n").Append(inCode).Append('\n');
+        }
+        if (x.Checklist() is { Length: > 0 } checklist)
+        {
+            sb.Append("\n# Checklist\n\n").Append(SessionChecklist.Instructions).Append("\n\n").Append(checklist).Append('\n');
         }
         return sb.ToString().TrimEnd();
     }

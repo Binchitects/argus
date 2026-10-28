@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using Llm.Api.Identity;
 using Llm.Core.Data;
 using Microsoft.EntityFrameworkCore;
@@ -33,7 +32,7 @@ public sealed class CleanupException(string message) : Exception(message);
 /// read only, as they hold every secret of the stack, and scripts/backup.sh --prune removes them on the host.
 /// </summary>
 public sealed partial class StorageCleanups(AppDbContext db, StorageFiles files, StoragePlaces places, Retention.Retention retention, StorageCache cache,
-    IOptionsMonitor<StorageOptions> options, Audit audit, TimeProvider clock, ILogger<StorageCleanups> logger)
+    IOptionsMonitor<StorageOptions> options, Audit audit, TimeProvider clock, Models.ModelDisk disk, Models.ModelDownloads downloads, ILogger<StorageCleanups> logger)
 {
     public static readonly IReadOnlyList<string> Kinds = ["deleted-chats", "unused-files", "old-media", "disk-orphans", "old-backups", "unused-models"];
 
@@ -72,7 +71,7 @@ public sealed partial class StorageCleanups(AppDbContext db, StorageFiles files,
             "unused-files" or "old-media" => await DeleteFilesAsync(kind, plan, ct),
             "disk-orphans" => await RemoveOrphansAsync(plan, ct),
             "old-backups" => throw new CleanupException($"The app sees the backups read only and never deletes one. On the host, in deploy/: {plan.Command}"),
-            _ => await RemoveModelsAsync(plan, only ?? [], ct),
+            _ => await RemoveModelsAsync(only ?? [], ct),
         };
         cache.Forget();
         return done;
@@ -249,78 +248,51 @@ public sealed partial class StorageCleanups(AppDbContext db, StorageFiles files,
 
     private async Task<CleanupPlan> ModelsAsync(CancellationToken ct)
     {
-        var library = await places.LibraryAsync(ct);
-        if (!library.Exists)
+        if (!Directory.Exists(places.LibraryDir))
         {
-            return new CleanupPlan("unused-models", 0, 0, Amount.None, [], $"The model library ({library.Dir}) is not there.", null, null, null);
+            return new CleanupPlan("unused-models", 0, 0, Amount.None, [], $"The model library ({places.LibraryDir}) is not there.", null, null, null);
         }
-        var unused = library.Files.Where(f => f.Use == "unused").ToList();
-        return new CleanupPlan("unused-models", unused.Count, unused.Sum(f => f.Bytes), Amount.None,
-            [.. unused.Select(f => new CleanupItem(f.Path, f.Path, null, f.Bytes, null, f.Note ?? f.Kind))], null,
+        // What Admin → Models → On disk may delete: no model uses it, no server owns it, no download writes into it.
+        var unused = (await disk.ListAsync(db, ct)).Where(i => i.Deletable).ToList();
+        return new CleanupPlan("unused-models", unused.Count, unused.Sum(i => i.Size), Amount.None,
+            [.. unused.Select(i => new CleanupItem(i.Path, i.Path, null, i.Size, null, i.Kind == "snapshot" ? "a snapshot, for vLLM" : i.Parts > 1 ? $"{i.Parts} parts" : null))], null,
             "No model of Admin → Models uses these, and no server reads them. Deleted, a model is gone from the library: using it again means downloading it again.",
             null, null);
     }
 
-    private async Task<CleanupDone> RemoveModelsAsync(CleanupPlan plan, IReadOnlyCollection<string> only, CancellationToken ct)
+    private async Task<CleanupDone> RemoveModelsAsync(IReadOnlyCollection<string> only, CancellationToken ct)
     {
         if (only.Count == 0)
         {
             throw new CleanupException("Choose the models to delete.");
         }
-        var chosen = plan.Items.Where(i => only.Contains(i.Id)).ToList();
+        var chosen = (await disk.ListAsync(db, ct)).Where(i => i.Deletable && only.Contains(i.Path)).ToList();
         if (chosen.Count < only.Count)
         {
             throw new CleanupException("A model chosen is in use now, or not in the library: look again.");
         }
-        var root = Path.GetFullPath(places.LibraryDir);
         var failed = new List<string>();
-        var done = new List<CleanupItem>();
-        var gone = new HashSet<string>(StringComparer.Ordinal);
+        var done = new List<Models.DiskItem>();
         foreach (var item in chosen)
         {
-            var full = Path.GetFullPath(Path.Combine(root, item.Id));
-            if (!full.StartsWith(root.TrimEnd('/') + "/", StringComparison.Ordinal))
-            {
-                continue;
-            }
-            // A split model: every part of it.
-            var parts = SplitPart().Match(full) is { Success: true } m
-                ? Directory.GetFiles(Path.GetDirectoryName(full)!, Path.GetFileName(full).Replace($"-{m.Groups[1].Value}-of-", "-*-of-", StringComparison.Ordinal))
-                : [full];
             try
             {
-                foreach (var part in parts)
-                {
-                    File.Delete(part);
-                    gone.Add(part);
-                }
+                disk.Delete(item);
                 done.Add(item);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                failed.Add($"{item.Name}: {ex.Message}");
+                failed.Add($"{item.Path}: {ex.Message}");
             }
         }
         // A finished download whose files are all gone would offer "Add as a model" for nothing.
-        var finished = await db.ModelDownloads.Where(d => d.State == "done").ToListAsync(ct);
-        foreach (var d in finished)
-        {
-            var paths = d.Files.Select(f => Path.GetFullPath(Path.Combine(root, d.Dir, f.Target ?? f.Path))).ToList();
-            if (paths.Any(gone.Contains) && paths.All(p => !File.Exists(p)))
-            {
-                db.ModelDownloads.Remove(d);
-            }
-        }
-        await db.SaveChangesAsync(ct);
-        var amount = new Amount(done.Count, done.Sum(d => d.Bytes));
+        await disk.ForgetGoneDownloadsAsync(db, downloads, ct);
+        var amount = new Amount(done.Count, done.Sum(d => d.Size));
         await audit.WriteAsync("storage.cleanup", "unused-models",
-            detail: $"{Of(amount, "model", "models")} deleted from the library: {string.Join(", ", done.Select(d => d.Name))}" + (failed.Count > 0 ? $"; {failed.Count} could not be" : ""));
+            detail: $"{Of(amount, "model", "models")} deleted from the library: {string.Join(", ", done.Select(d => d.Path))}" + (failed.Count > 0 ? $"; {failed.Count} could not be" : ""));
         LogRan(logger, "unused-models", amount.Count, amount.Bytes);
         return new CleanupDone("unused-models", amount.Count, amount.Bytes, Amount.None, failed);
     }
-
-    [GeneratedRegex(@"-(\d{5})-of-\d{5}\.gguf$")]
-    private static partial Regex SplitPart();
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Storage: the {Kind} clean-up removed {Count} things ({Bytes} bytes)")]
     private static partial void LogRan(ILogger logger, string kind, long count, long bytes);

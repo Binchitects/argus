@@ -497,6 +497,7 @@ public static class IdentityWiring
         services.AddSingleton<Models.EngineClient>();
         services.AddSingleton<Models.EngineState>();
         services.AddSingleton<Models.ModelLibrary>();
+        services.AddSingleton<Models.ModelDisk>();
         services.AddSingleton<Models.HardwareProbe>();
         // Other GPU servers: their certificates are checked against the system's roots; a server
         // an admin marked unchecked uses the other client.
@@ -653,6 +654,8 @@ public static class IdentityWiring
         Chat.SkillEndpoints.MapSkills(app);
         Quality.QualityEndpoints.MapQuality(app);
         Quality.ProductFeedbackEndpoints.MapProductFeedback(app);
+        Quality.PromptLogEndpoints.MapPromptLog(app);
+        Chat.ChecklistEndpoints.MapChecklists(app);
         Chat.CanvasEndpoints.MapCanvases(app);
         Chat.QueuedMessages.MapQueue(app);
         Chat.Tools.ToolEndpoints.MapTools(app);

@@ -25,6 +25,29 @@ public sealed class AnswerFeedback
 }
 
 /// <summary>
+/// An API request in the prompt log (Admin → Prompt log): the question it asked last and the answer, cut at
+/// <see cref="MaxText"/> characters each; whose key, which model, the tokens. The chat's questions and answers are read from
+/// the chats themselves; these are the requests with a key, which nothing else keeps. Kept Retention:PromptLogDays.
+/// </summary>
+public sealed class PromptLogEntry
+{
+    public const int MaxText = 20_000;
+
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid UserId { get; set; }
+    /// <summary>The key's hash at the gateway (never the key).</summary>
+    public string? KeyToken { get; set; }
+    public required string Model { get; set; }
+    public required string Prompt { get; set; }
+    public string? Answer { get; set; }
+    public int? PromptTokens { get; set; }
+    public int? CompletionTokens { get; set; }
+    /// <summary>The gateway's status for it (200 for an answer).</summary>
+    public int Status { get; set; }
+    public DateTimeOffset At { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
 /// What a person said about Arena itself (Send feedback): an idea, a problem, praise or anything else, with the page it was
 /// sent from; read, marked and answered on Admin → Feedback (the answer reaches their bell).
 /// </summary>

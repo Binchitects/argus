@@ -75,6 +75,9 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Code.CodeFix> CodeFixes => Set<Code.CodeFix>();
     public DbSet<Identity.OwnKey> OwnKeys => Set<Identity.OwnKey>();
     public DbSet<ProductFeedback> ProductFeedback => Set<ProductFeedback>();
+    public DbSet<PromptLogEntry> PromptLog => Set<PromptLogEntry>();
+    public DbSet<Checklist> Checklists => Set<Checklist>();
+    public DbSet<ChecklistRun> ChecklistRuns => Set<ChecklistRun>();
     public DbSet<Code.StudioWorkspace> StudioWorkspaces => Set<Code.StudioWorkspace>();
     public DbSet<Code.BusinessSystem> BusinessSystems => Set<Code.BusinessSystem>();
     public DbSet<Meetings.Meeting> Meetings => Set<Meetings.Meeting>();
@@ -326,8 +329,11 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Risk).HasMaxLength(16);
             e.Property(x => x.Model).HasMaxLength(200);
             e.Property(x => x.Trigger).HasMaxLength(16);
+            e.Property(x => x.ShareGroups).HasDefaultValueSql("'{}'::uuid[]");
+            e.Property(x => x.SharePeople).HasDefaultValueSql("'{}'::uuid[]");
             e.HasIndex(x => new { x.UserId, x.CreatedAt });
             e.HasIndex(x => new { x.Project, x.Iid });
+            e.HasIndex(x => x.Reach);
             e.HasIndex(x => new { x.RuleId, x.CreatedAt });
             e.HasOne<Code.ReviewRule>().WithMany().HasForeignKey(x => x.RuleId).OnDelete(DeleteBehavior.SetNull);
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
@@ -422,6 +428,25 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasIndex(x => x.GroupId);
             e.HasOne<Conversation>().WithMany().HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne<Group>().WithMany().HasForeignKey(x => x.GroupId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Checklist>(e =>
+        {
+            e.ToTable("checklists");
+            e.Property(x => x.Name).HasMaxLength(100);
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.Property(x => x.Items).HasDefaultValueSql("'{}'::text[]");
+            e.HasIndex(x => new { x.UserId, x.Name });
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<ChecklistRun>(e =>
+        {
+            e.ToTable("checklist_runs");
+            e.Property(x => x.Name).HasMaxLength(100);
+            e.OwnsMany(x => x.Items, i => i.ToJson());
+            // One at a time in a chat: turning on another replaces it.
+            e.HasIndex(x => x.ConversationId).IsUnique();
+            e.HasOne<Conversation>().WithMany().HasForeignKey(x => x.ConversationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Checklist>().WithMany().HasForeignKey(x => x.ChecklistId).OnDelete(DeleteBehavior.SetNull);
         });
         builder.Entity<ChatShare>(e =>
         {
@@ -751,6 +776,17 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Error).HasMaxLength(2000);
             e.HasIndex(x => new { x.RunId, x.Path }).IsUnique();
             e.HasOne<Studio.WorkflowRun>().WithMany().HasForeignKey(x => x.RunId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<PromptLogEntry>(e =>
+        {
+            e.ToTable("prompt_log");
+            e.Property(x => x.KeyToken).HasMaxLength(64);
+            e.Property(x => x.Model).HasMaxLength(200);
+            e.Property(x => x.Prompt).HasMaxLength(PromptLogEntry.MaxText);
+            e.Property(x => x.Answer).HasMaxLength(PromptLogEntry.MaxText);
+            e.HasIndex(x => x.At);
+            e.HasIndex(x => new { x.UserId, x.At });
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<ProductFeedback>(e =>
         {

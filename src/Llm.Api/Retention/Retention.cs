@@ -28,6 +28,9 @@ public sealed class RetentionOptions
 
     /// <summary>Days news stays in people's bells; 0: forever.</summary>
     public int NotificationDays { get; set; } = 180;
+
+    /// <summary>Days the prompt log keeps an API request's question and answer; 0: forever.</summary>
+    public int PromptLogDays { get; set; } = 90;
 }
 
 /// <summary>What was removed: chats and files.</summary>

@@ -107,6 +107,8 @@ internal sealed class ToolContext
     public Action<string>? BeforeWrite { get; set; }
     /// <summary>Told how a long call goes (an MCP tool's progress reports), for the person.</summary>
     public Action<string>? Progress { get; set; }
+    /// <summary>Ticks an item of the checklist on in this session's chat (checklist_check); null where none can be (a sub-agent).</summary>
+    public Func<JsonObject, CancellationToken, Task<ToolResult>>? Checklist { get; set; }
 }
 
 /// <summary>The permission modes: how much runs without asking.</summary>

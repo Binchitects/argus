@@ -120,6 +120,72 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
     }
 
     [Fact]
+    public async Task On_disk_lists_the_library_deletes_only_what_nothing_uses_and_a_model_removed_with_its_files_frees_them()
+    {
+        var (f, _) = NewApp();
+        await using var _f = f;
+        var admin = await AdminAsync(f);
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", Tiny));
+        var snapshot = Path.Combine(Library, "hf", "org", "Snap@abc123");
+        Directory.CreateDirectory(snapshot);
+        File.WriteAllText(Path.Combine(snapshot, "config.json"), """{"architectures":["Qwen3ForCausalLM"]}""");
+        File.WriteAllBytes(Path.Combine(snapshot, "model.safetensors"), new byte[4096]);
+        File.WriteAllBytes(Path.Combine(Library, "image", "extra-vae.safetensors"), new byte[2048]);
+        async Task<Dictionary<string, JsonElement>> DiskAsync() =>
+            (await admin.JsonAsync(await admin.GetAsync("/api/admin/models/library/disk"))).GetProperty("items").EnumerateArray().ToDictionary(i => i.GetProperty("path").GetString()!);
+        async Task<HttpResponseMessage> DeleteAsync(string path) => await admin.Http.DeleteAsync(new Uri($"/api/admin/models/library/disk?path={Uri.EscapeDataString(path)}", UriKind.Relative));
+
+        var disk = await DiskAsync();
+        Assert.Equal(["tiny-b"], disk["tiny/Tiny-4B-Q4_K_M.gguf"].GetProperty("usedBy").EnumerateArray().Select(x => x.GetString()));
+        Assert.Equal(["tiny-b"], disk["tiny/mmproj-Tiny-F16.gguf"].GetProperty("usedBy").EnumerateArray().Select(x => x.GetString()));
+        Assert.Equal((2, "gguf"), (disk["big/Big-00001-of-00002.gguf"].GetProperty("parts").GetInt32(), disk["big/Big-00001-of-00002.gguf"].GetProperty("kind").GetString()));
+        Assert.False(disk.ContainsKey("big/Big-00002-of-00002.gguf"), "a split model is one item");
+        Assert.Equal("snapshot", disk["hf/org/Snap@abc123"].GetProperty("kind").GetString());
+        Assert.Equal("file", disk["image/extra-vae.safetensors"].GetProperty("kind").GetString());
+        Assert.Contains("embedder", disk["embed/nomic-embed-text-v1.5.f16.gguf"].GetProperty("keptBy").GetString(), StringComparison.Ordinal);
+        Assert.Equal(JsonValueKind.Null, disk["plain/Plain-Q8_0.gguf"].GetProperty("whyNot").ValueKind);
+
+        // What a model uses, and a server's own file, stay: refused, and still on disk.
+        var used = await DeleteAsync("tiny/Tiny-4B-Q4_K_M.gguf");
+        await StatusAssert.Is(HttpStatusCode.Conflict, used);
+        Assert.Contains("tiny-b uses it", await used.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        await StatusAssert.Is(HttpStatusCode.Conflict, await DeleteAsync("embed/nomic-embed-text-v1.5.f16.gguf"));
+        Assert.True(File.Exists(Path.Combine(Library, "embed", "nomic-embed-text-v1.5.f16.gguf")));
+        // Nothing outside the library, nor what is not in it.
+        await StatusAssert.Is(HttpStatusCode.NotFound, await DeleteAsync("../config/keep"));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await DeleteAsync("nowhere/None.gguf"));
+        Assert.True(File.Exists(Path.Combine(Config, "keep")));
+        // Only with models.delete.
+        var name = "dk" + Guid.NewGuid().ToString("N")[..8];
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
+        var person = await new TestBrowser(f).SignedInAsync(name, made.GetProperty("password").GetString()!);
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await person.Http.DeleteAsync(new Uri("/api/admin/models/library/disk?path=plain%2FPlain-Q8_0.gguf", UriKind.Relative)));
+        Assert.True(File.Exists(Path.Combine(Library, "plain", "Plain-Q8_0.gguf")));
+
+        // What nothing uses goes: each part of a split model, a snapshot's folder and the folders left empty.
+        var big = await DeleteAsync("big/Big-00001-of-00002.gguf");
+        await StatusAssert.Is(HttpStatusCode.OK, big);
+        Assert.Equal(disk["big/Big-00001-of-00002.gguf"].GetProperty("size").GetInt64(), (await admin.JsonAsync(big)).GetProperty("freed").GetInt64());
+        Assert.Equal(["mtp-Big-Q8_0.gguf"], Directory.EnumerateFiles(Path.Combine(Library, "big")).Select(Path.GetFileName));
+        await StatusAssert.Is(HttpStatusCode.OK, await DeleteAsync("hf/org/Snap@abc123"));
+        Assert.False(Directory.Exists(Path.Combine(Library, "hf")), "the snapshot and the folders it left empty are gone");
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", new { name = "plain-b", file = "plain/Plain-Q8_0.gguf", context = 4096, kvType = "f16", thinking = false, tools = false }));
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.DeleteAsync(new Uri("/api/admin/models/plain-b", UriKind.Relative)));
+        Assert.True(File.Exists(Path.Combine(Library, "plain", "Plain-Q8_0.gguf")), "removed without its files, they stay");
+        await StatusAssert.Is(HttpStatusCode.OK, await DeleteAsync("plain/Plain-Q8_0.gguf"));
+        Assert.False(Directory.Exists(Path.Combine(Library, "plain")));
+        var audit = (await admin.JsonAsync(await admin.GetAsync("/api/admin/audit?take=20"))).EnumerateArray().ToList();
+        Assert.Contains(audit, e => e.GetProperty("action").GetString() == "model.files.delete" && e.GetProperty("target").GetString() == "hf/org/Snap@abc123");
+
+        // A model removed with its files frees them.
+        var removed = await admin.Http.DeleteAsync(new Uri("/api/admin/models/tiny-b?files=true", UriKind.Relative));
+        await StatusAssert.Is(HttpStatusCode.OK, removed);
+        Assert.True((await admin.JsonAsync(removed)).GetProperty("freed").GetInt64() > 0);
+        Assert.False(File.Exists(Path.Combine(Library, "tiny", "Tiny-4B-Q4_K_M.gguf")));
+        Assert.False(File.Exists(Path.Combine(Library, "tiny", "mmproj-Tiny-F16.gguf")));
+    }
+
+    [Fact]
     public async Task The_library_tells_what_each_file_is()
     {
         var (f, _) = NewApp();
@@ -465,7 +531,7 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         await EventuallyAsync(async () => (await ChatModelsAsync(member)).GetValueOrDefault("tiny-b"), "tiny-b loaded for the chat");
         var fresh = (await member.JsonAsync(await member.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
         await (await member.PostAsync($"/api/chat/conversations/{fresh}/messages", new { content = "which model?" })).Content.ReadAsStringAsync();
-        Assert.Equal("Qwen3.8-Flash-Next", app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == "modelmember@example.test").Body["model"]!.GetValue<string>());
+        Assert.Equal("Qwen3.8-Flash-Next", app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == "modelmember@example.test").Body["model"]!.GetValue<string>());
         Assert.Equal("Qwen3.8-Flash-Next", (await member.JsonAsync(await member.GetAsync("/api/chat/config"))).GetProperty("model").GetString());
     }
 

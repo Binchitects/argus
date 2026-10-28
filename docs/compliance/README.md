@@ -499,6 +499,7 @@ what removes it:
 | The gateway's request log | 400 days | Keep the gateway's request log for |
 | The record of tool calls | 180 days | Keep the record of tool calls for |
 | News in the bell | 180 days | Keep news in the bell for |
+| The prompt log of API requests | 90 days (none when Settings → API keys → Prompt log of API requests is off) | Keep API requests in the prompt log for |
 | The services' logs (Loki) | 90 days | `retention_period` in `config/loki.yml` |
 | Metrics (Prometheus) | 30 days, or 20 GB | its `--storage.tsdb.retention` flags in `docker-compose.yml` |
 | Backups | the newest `BACKUP_KEEP` | `.env` |

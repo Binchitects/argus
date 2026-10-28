@@ -283,6 +283,11 @@ public sealed partial class ChatService(
             {
                 await StartToolAsync(new ToolChoice(new ChatHistoryTool(db), new ToolSetting { ToolId = ChatHistoryTool.ToolId }, null));
             }
+            // A checklist turned on in this chat: the answer goes through it, and ticks it.
+            if (await db.ChecklistRuns.AnyAsync(r => r.ConversationId == conversation.Id, ct))
+            {
+                await StartToolAsync(new ToolChoice(new ChecklistTool(db), new ToolSetting { ToolId = ChecklistTool.ToolId }, null));
+            }
         }
 
         // Deep research with sub-agents: the parts research and the web is theirs, and the answer delegates at most

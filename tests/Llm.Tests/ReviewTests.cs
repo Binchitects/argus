@@ -68,7 +68,7 @@ public sealed class ReviewTests(AppFixture app)
         Assert.Equal("The caller checks the bound.", findings[1].GetProperty("verifyNote").GetString());
         // Read as the person, and asked as them, tagged review.
         Assert.All(app.Argus.McpCalls.Where(c => c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "mr_diff"), c => Assert.Equal(email, c.Email));
-        var asked = app.Model.Requests.Where(r => r.Body["user"]!.GetValue<string>() == email).ToList();
+        var asked = app.Model.Requests.Where(r => r.Body["user"]?.GetValue<string>() == email).ToList();
         Assert.Equal(5, asked.Count);
         Assert.All(asked, r => Assert.Equal("review", r.Body["metadata"]!["tags"]![0]!.GetValue<string>()));
 
@@ -87,6 +87,58 @@ public sealed class ReviewTests(AppFixture app)
         var again = (await me.JsonAsync(await me.PostAsync($"/api/code/reviews/{id}/again"))).GetProperty("id").GetGuid();
         var second = await DoneAsync(me, again);
         Assert.Equal("Nothing changed since the last review.", second.GetProperty("summary").GetString());
+    }
+
+    [Fact]
+    public async Task A_shared_review_is_read_by_whom_it_is_shared_with_while_they_may_read_its_project_and_they_change_nothing()
+    {
+        GitLab();
+        var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
+        var (_, _, me) = await PersonAsync(admin);
+        var (_, _, other) = await PersonAsync(admin);
+        var (_, thirdEmail, third) = await PersonAsync(admin);
+        var otherName = (await other.JsonAsync(await other.GetAsync("/api/auth/me"))).GetProperty("userName").GetString()!;
+        var id = (await me.JsonAsync(await me.PostAsync("/api/code/reviews", new { project = "g/app", iid = 7 }))).GetProperty("id").GetGuid();
+        var done = await DoneAsync(me, id);
+        var finding = done.GetProperty("findings")[0].GetProperty("id").GetGuid();
+        Assert.Equal("Private", done.GetProperty("share").GetProperty("reach").GetString());
+        await StatusAssert.Is(HttpStatusCode.NotFound, await other.GetAsync($"/api/code/reviews/{id}"));
+        Task<HttpResponseMessage> Share(TestBrowser b, object body) => b.Http.PutAsJsonAsync(new Uri($"/api/code/reviews/{id}/share", UriKind.Relative), body);
+
+        // With one person by name: they are told, and read it; nobody else does.
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await Share(me, new { reach = "Private", people = new[] { "nobody-here" } }));
+        await StatusAssert.Is(HttpStatusCode.OK, await Share(me, new { reach = "Private", people = new[] { otherName } }));
+        var read = await other.JsonAsync(await other.GetAsync($"/api/code/reviews/{id}"));
+        Assert.True(read.GetProperty("readOnly").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, read.GetProperty("share").ValueKind);
+        Assert.Contains((await other.JsonAsync(await other.GetAsync("/api/code/reviews"))).EnumerateArray(), r => r.GetProperty("review").GetProperty("id").GetGuid() == id && r.GetProperty("sharedBy").GetString() == "Rae");
+        Assert.Contains((await other.JsonAsync(await other.GetAsync("/api/notifications"))).GetProperty("items").EnumerateArray(), n => n.GetProperty("link").GetString() == $"/code/reviews/{id}");
+        await StatusAssert.Is(HttpStatusCode.NotFound, await third.GetAsync($"/api/code/reviews/{id}"));
+        // To read, not to change: no deciding findings, no room, no sharing it on.
+        await StatusAssert.Is(HttpStatusCode.NotFound, await other.Http.PutAsJsonAsync(new Uri($"/api/code/reviews/{id}/findings/{finding}", UriKind.Relative), new { state = "dismissed" }));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await other.PostAsync($"/api/code/reviews/{id}/room"));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await Share(other, new { reach = "Company" }));
+
+        // With everyone: each of them, while GitLab lets them read the project.
+        await StatusAssert.Is(HttpStatusCode.OK, await Share(me, new { reach = "Company" }));
+        await StatusAssert.Is(HttpStatusCode.OK, await third.GetAsync($"/api/code/reviews/{id}"));
+        app.Argus.Unreadable[$"{thirdEmail}|g/app"] = true;
+        try
+        {
+            await StatusAssert.Is(HttpStatusCode.NotFound, await third.GetAsync($"/api/code/reviews/{id}"));
+            Assert.DoesNotContain((await third.JsonAsync(await third.GetAsync("/api/code/reviews"))).EnumerateArray(), r => r.GetProperty("review").GetProperty("id").GetGuid() == id);
+        }
+        finally
+        {
+            app.Argus.Unreadable.TryRemove($"{thirdEmail}|g/app", out _);
+        }
+
+        // Taken back: theirs alone again; audited each time.
+        await StatusAssert.Is(HttpStatusCode.OK, await Share(me, new { reach = "Private" }));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await other.GetAsync($"/api/code/reviews/{id}"));
+        var audit = (await admin.JsonAsync(await admin.GetAsync("/api/admin/audit?take=50"))).EnumerateArray().ToList();
+        Assert.Contains(audit, e => e.GetProperty("action").GetString() == "review.share" && e.GetProperty("target").GetString() == id.ToString() && e.GetProperty("detail").GetString() == "not shared");
+        Assert.Contains(audit, e => e.GetProperty("action").GetString() == "review.share" && e.GetProperty("target").GetString() == id.ToString() && e.GetProperty("detail").GetString() == "company");
     }
 
     [Fact]
