@@ -240,12 +240,17 @@ public sealed class VllmBackendTests : IDisposable
         backend.Write(VllmBackend.PresetsFile, entries);
 
         // What the app writes reaches the container, and what the supervisor writes comes back (a shared volume in a stack).
+        // As the app writes it: whole, renamed into place, and only when it changes (a copy is written in place, and the
+        // supervisor may read it half written).
+        var copied = "";
         async Task SyncAsync()
         {
             var desired = Path.Combine(backend.ConfigDir, VllmBackend.DesiredFile);
-            if (File.Exists(desired))
+            if (File.Exists(desired) && await File.ReadAllTextAsync(desired) is var text && text != copied)
             {
-                await container.CopyAsync(await File.ReadAllBytesAsync(desired), "/presets/models.json");
+                await container.CopyAsync(Encoding.UTF8.GetBytes(text), "/presets/models.json.tmp");
+                Assert.Equal(0, (await container.ExecAsync(["mv", "-f", "/presets/models.json.tmp", "/presets/models.json"])).ExitCode);
+                copied = text;
             }
             foreach (var file in new[] { "supervisor.json", "flash.json" })
             {

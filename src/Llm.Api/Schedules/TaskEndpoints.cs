@@ -385,8 +385,11 @@ public static class TaskEndpoints
     private static async Task<IResult> NotificationsAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct)
     {
         var me = await Me(p, users);
+        // One snapshot for both, so the count never tells of news the list does not have yet.
+        await using var tx = await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead, ct);
         var items = await db.Notifications.AsNoTracking().Where(x => x.UserId == me.Id && !x.Cleared).OrderByDescending(x => x.CreatedAt).Take(50).ToListAsync(ct);
         var unread = await db.Notifications.CountAsync(x => x.UserId == me.Id && x.ReadAt == null && !x.Cleared, ct);
+        await tx.CommitAsync(ct);
         // Plain words, as the bell shows them (news kept before it was made plain too).
         return Results.Ok(new
         {
