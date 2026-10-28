@@ -1170,10 +1170,10 @@ instead of the model:
   the model) gets nothing from the cache: its request goes to the gateway,
   which refuses it. A person who turns the cache off for their key loses what
   was kept for it at once.
-- **How it is reached**: Traefik sends `gateway.DOMAIN`'s chat completions to
-  the app while the app's health check (`GET /v1/answer-cache`) says the cache
-  is on; otherwise, and whenever the app is down, straight to LiteLLM as
-  before. A change applies within Traefik's check, 10 seconds. The app passes
+- **How it is reached**: Traefik sends `gateway.DOMAIN`'s completions to the
+  app whenever the app is up (its health check, `/healthz`, every 10 seconds),
+  cache on or off: each key's line, the fair line and the prompt log are the
+  app's too. While the app is down they go straight to LiteLLM. The app passes
   everything it does not answer on to LiteLLM with the caller's own key, and
   streams the answer back as it comes.
 

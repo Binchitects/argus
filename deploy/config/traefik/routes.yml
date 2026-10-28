@@ -69,12 +69,14 @@ http:
     argus: { loadBalancer: { servers: [{ url: "http://argus:7700" }] } }
     # The app answers its health check only while the answer cache is on: Traefik
     # asks every 10 seconds, so turning the cache on or off takes effect within that.
+    # Whenever the app is up (its health, not the answer cache's mode: the key's line, the fair line
+    # and the prompt log are the app's whether the cache is on or off).
     completions:
-      failover: { service: answer-cache, fallback: litellm }
-    answer-cache:
+      failover: { service: app-completions, fallback: litellm }
+    app-completions:
       loadBalancer:
         servers: [{ url: "http://app:8080" }]
-        healthCheck: { path: /v1/answer-cache, interval: 10s, timeout: 3s }
+        healthCheck: { path: /healthz, interval: 10s, timeout: 3s }
     speech:
       failover: { service: app-speech, fallback: litellm }
     app-speech:

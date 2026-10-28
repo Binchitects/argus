@@ -215,35 +215,32 @@ public sealed class AnswerCacheTests(AppFixture app)
     }
 
     [Fact]
-    public async Task Off_by_default_every_call_goes_to_the_model_and_the_health_check_tells_Traefik_to_go_straight_to_the_gateway()
+    public async Task Off_by_default_every_call_goes_to_the_model_and_turned_on_it_answers_at_once()
     {
         var (f, _) = NewApp("off");
         await using var _f = f;
         var (_, key) = await PersonAsync(f);
         var marker = "off-" + Guid.NewGuid().ToString("N")[..8];
-        var http = f.CreateClient();
-
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, (await http.GetAsync(new Uri("/v1/answer-cache", UriKind.Relative))).StatusCode);
         Assert.Null(Cache(await CallAsync(f, key, Question(marker))));
         Assert.Null(Cache(await CallAsync(f, key, Question(marker))));
         Assert.Equal(2, Asked(marker));
 
-        // Turned on in Settings: the health check says so at once, and Traefik sends the calls here.
+        // Turned on in Settings: at once.
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/config", UriKind.Relative),
             new { changes = new[] { new { key = "Gateway:AnswerCache", value = "all" } } }));
-        Assert.Equal(HttpStatusCode.OK, (await http.GetAsync(new Uri("/v1/answer-cache", UriKind.Relative))).StatusCode);
         Assert.Equal("miss", Cache(await CallAsync(f, key, Question(marker))));
         Assert.Equal("hit", Cache(await CallAsync(f, key, Question(marker))));
     }
 
     [Fact]
-    public void Traefik_sends_chat_completions_by_the_app_only_while_its_health_check_passes()
+    public void Traefik_sends_completions_by_the_app_whenever_it_is_up_cache_on_or_off()
     {
         var routes = File.ReadAllText(Path.Combine(AppFixture.PluginsPath, "..", "deploy", "config", "traefik", "routes.yml"));
         Assert.Contains("Path(`/v1/chat/completions`) || Path(`/chat/completions`)", routes, StringComparison.Ordinal);
-        Assert.Contains("failover: { service: answer-cache, fallback: litellm }", routes, StringComparison.Ordinal);
-        Assert.Contains("healthCheck: { path: /v1/answer-cache", routes, StringComparison.Ordinal);
+        Assert.Contains("failover: { service: app-completions, fallback: litellm }", routes, StringComparison.Ordinal);
+        // The app's health, never the cache's mode: the key's line, the fair line and the prompt log are the app's.
+        Assert.Matches(@"app-completions:\n      loadBalancer:\n        servers: \[[^\]]*\]\n        healthCheck: \{ path: /healthz,", routes);
     }
 
     [Fact]

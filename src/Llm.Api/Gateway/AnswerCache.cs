@@ -382,10 +382,11 @@ public sealed class AnswerCache(AppDbContext db, ILiteLlm gateway, AnswerCacheSt
 }
 
 /// <summary>
-/// The OpenAI chat completions of API keys, by way of the app while the answer cache is on:
-/// Traefik sends gateway.DOMAIN's /v1/chat/completions here while GET /v1/answer-cache says so
-/// (its health check), and straight to LiteLLM otherwise or when the app is down. Everything the
-/// cache does not answer goes on to LiteLLM as it came, with the caller's own key, and streams back.
+/// The completions of API keys, by way of the app: Traefik sends gateway.DOMAIN's /v1/chat/completions
+/// (and the other ways agents ask) here whenever the app is up (/healthz), and straight to LiteLLM
+/// when it is down. The key's line, the fair line, the prompt log and the answer cache (when on) are
+/// here; everything the cache does not answer goes on to LiteLLM as it came, with the caller's own
+/// key, and streams back.
 /// </summary>
 public static class AnswerCacheEndpoints
 {
@@ -425,10 +426,6 @@ public static class AnswerCacheEndpoints
 
     public static void MapAnswerCache(this IEndpointRouteBuilder app)
     {
-        // Traefik's health check: while it fails (the cache off, or the app down), keys go straight to LiteLLM.
-        app.MapGet("/v1/answer-cache", (IOptionsMonitor<AnswerCacheOptions> o) =>
-            o.CurrentValue.On ? Results.Ok(new { mode = o.CurrentValue.AnswerCache }) : Results.Json(new { mode = AnswerCacheModes.Off }, statusCode: 503))
-            .AllowAnonymous("Traefik's health check of the answer cache: its mode only.");
         app.MapPost("/v1/chat/completions", ProxyAsync).AllowAnonymous("The OpenAI-style API: the API key is checked.").DisableAntiforgery();
         app.MapPost("/chat/completions", ProxyAsync).AllowAnonymous("The OpenAI-style API: the API key is checked.").DisableAntiforgery();
         // The other ways agents ask (Anthropic's messages, OpenAI's responses and completions): through the
