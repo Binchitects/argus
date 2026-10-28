@@ -19,18 +19,71 @@ internal sealed class Workspace
     private static readonly char[] Separators = [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar];
     private const int MaxLinks = 40;
 
-    /// <summary>Where the roots lead (one may be reached through a link, as /tmp is on macOS).</summary>
-    private readonly string[] _physical;
+    // The roots and where each leads (one may be reached through a link, as /tmp is on macOS): replaced whole when one is
+    // added or taken away, as the tools read them while they run.
+    private volatile string[] _roots;
+    private volatile string[] _physical;
+    private readonly Lock _gate = new();
 
     public Workspace(string root, IEnumerable<string>? allowed = null)
     {
         Root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
-        Roots = [Root, .. (allowed ?? []).Select(a => Path.TrimEndingDirectorySeparator(Path.GetFullPath(Home(a), Root))).Distinct()];
-        _physical = [.. Roots.Select(r => Physical(r) ?? r)];
+        _roots = [Root, .. (allowed ?? []).Select(a => Path.TrimEndingDirectorySeparator(Path.GetFullPath(Home(a), Root))).Distinct()];
+        _physical = [.. _roots.Select(r => Physical(r) ?? r)];
     }
 
     public string Root { get; }
-    public IReadOnlyList<string> Roots { get; }
+    public IReadOnlyList<string> Roots => _roots;
+
+    /// <summary>
+    /// A folder or a file the tools may use from now on, besides the others (a folder added to the IDE's workspace, a
+    /// path the person named with @); false when it already was one.
+    /// </summary>
+    public bool Allow(string full)
+    {
+        full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(full));
+        lock (_gate)
+        {
+            if (_roots.Any(r => r.Equals(full, Compare)))
+            {
+                return false;
+            }
+            _physical = [.. _physical, Physical(full) ?? full];
+            _roots = [.. _roots, full];
+            return true;
+        }
+    }
+
+    /// <summary>A folder allowed besides the working directory, no more (never the working directory itself).</summary>
+    public bool Disallow(string full)
+    {
+        full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(full));
+        lock (_gate)
+        {
+            var at = Array.FindIndex(_roots, r => r.Equals(full, Compare));
+            if (at <= 0)
+            {
+                return false;
+            }
+            _roots = [.. _roots.Where((_, i) => i != at)];
+            _physical = [.. _physical.Where((_, i) => i != at)];
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// A path the person named themselves (whole, or from their home with ~), outside what the tools may use: its full
+    /// path when it is there; null for a path inside, a relative one, or nothing there.
+    /// </summary>
+    public string? Named(string path)
+    {
+        if (!(Path.IsPathFullyQualified(path) || path == "~" || path.StartsWith("~/", StringComparison.Ordinal) || path.StartsWith("~\\", StringComparison.Ordinal)))
+        {
+            return null;
+        }
+        var full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Home(path)));
+        return !Allowed(full) && Path.Exists(full) ? full : null;
+    }
 
     /// <summary>
     /// The full path of a path the model gave (relative to the working directory),
@@ -178,7 +231,8 @@ internal sealed class Workspace
     {
         if (!Within(full, Root))
         {
-            return full;
+            // Outside, as a whole path; with / on Windows too, as the page's paths are.
+            return OperatingSystem.IsWindows() ? full.Replace('\\', '/') : full;
         }
         var relative = Path.GetRelativePath(Root, full);
         // \ separates parts on Windows only: elsewhere it is part of a name.

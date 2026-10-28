@@ -289,6 +289,13 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   terminals and the language servers are that folder's. The last session of
   the folder left is saved, as when it stops. Not offered in Code Studio,
   whose workspace is the server's.
+- **Add Folder to Workspace…** (the Explorer's button, or the command)
+  chooses a folder the same way: the agent's tools may use it from then on,
+  and the Explorer shows it below the folder's files, as a root of its own
+  (× takes it out again). Its files open and save in the editor by their
+  whole paths; Search, Source control and the language servers stay the
+  folder's. The folders added are kept with the folder, and the next run has
+  them.
 - **Explorer**: the project's files, with New file, New folder, Refresh and
   Collapse at its top. Click opens; a right-click menu has new file, new
   folder, Copy path, Rename (F2) and Delete (Del, asks first); the arrow
@@ -951,7 +958,12 @@ folder's files only.
 Lines of a file go to the agent from the editor itself:
 
 - In the chat's box, **@** offers the folder's files, best first: ↑ and ↓
-  choose, Enter or Tab puts `@path` in the box. Above the box, a dashed chip
+  choose, Enter or Tab puts `@path` in the box. A whole path (`@/`, `@~/`,
+  `@C:/`) offers what is there instead, outside the folder: a folder chosen
+  goes into it, a file chosen goes with the message. A file or folder outside
+  named whole goes with the message too when it is there, and the agent's
+  tools may use it from then on in this run (it is the person's to give); a
+  relative path outside stays as typed. Above the box, a dashed chip
   offers the lines the editor shows (those chosen, or the cursor's): a click
   sends them with the message.
 - **Add to chat** (Ctrl+L, or the editor's right-click menu): the lines chosen,
@@ -1175,7 +1187,9 @@ status (403 `outside` for a path outside the folder).
 | call | what it does |
 |---|---|
 | `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting); `context` (the window), `contextUsed` (about how much of it is in use), `compactAt` and `compactTarget` (percent; `compactAt` 0: only when a request would not fit), `compactAtSource` (`flag`, `config`, `account`, `arena` or `default`) and `compactAtAccount` (the Arena account's threshold, null when Arena did not say); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output); `arenaChats` (sessions are kept with chats in Arena here), `account` (whose chats: the key's account, null until Arena said), `chat` (this session's chat there, null: none yet) and `synced` (how many times the web chat's news came in while nothing ran: the page reads the session again when it changes; taking it in is not `busy`); `sync` (`{chat, account, waiting, trouble, behind}`: the chat, whose chats, how many messages Arena lacks, what stops them, whether the web chat has news not taken in; null without the sync) and `notices` (`[{id, text, at}]`: the last 20 said while nothing ran, the page shows each once) |
-| `GET /api/folders?path=` | for Open Folder: a folder's folders by name (hidden ones last, no files, at most 2,000) as `{path, parent, folders, why, current, home, separator, drives, recent}` (`why`: what is not listed; `recent`: the folders opened lately, the one open now first); with no path, the open folder's parent; 404 `not_found` when it is not a folder |
+| `GET /api/folders?path=` | for Open Folder: a folder's folders by name (hidden ones last, no files, at most 2,000) as `{path, parent, folders, why, current, home, separator, drives, recent, added, files}` (`why`: what is not listed; `recent`: the folders opened lately, the one open now first; `added`: the folders added to this workspace; `files`: its files' names, with `files=1`, for @ in the chat); with no path, the open folder's parent; 404 `not_found` when it is not a folder |
+| `POST /api/folders/add` `{path}` | Add Folder to Workspace: the tools may use it, kept with this folder: `{folder, added}` (`added`: the folders added, whole); 409 `inside` for the folder open now or one in it |
+| `POST /api/folders/remove` `{path}` | takes an added folder out again: `{added}`; 404 `not_added` |
 | `POST /api/folders/open` `{path}` | opens that folder (`~` is the home folder; relative to the one open now): answers `{folder}` with its full path, then code-arena starts again on it at the same address with the same key; 404 `not_found` when it is not a folder, 409 `not_here` in Code Studio |
 | `GET /api/sessions` | this folder's sessions, newest first: `[{id, title, updatedAt, messages, chat, unsent, waiting}]` (`chat`: the chat in Arena it is kept with; `unsent`: Arena lacks `waiting` of its messages) |
 | `GET /api/sessions/web` | the person's chats in Arena (the 5,000 newest): `[{id, title, origin, place, updatedAt, messages, session}]` (`session`: this folder's session kept with it); 409 `off` without the sync, 503 `arena` when Arena cannot say |

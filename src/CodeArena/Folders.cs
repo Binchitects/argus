@@ -69,20 +69,28 @@ internal static class Folders
 
     /// <summary>
     /// A folder's folders, by name (the hidden ones last), with its parent and, on Windows, the drives: what the picker
-    /// shows. Files are not listed.
+    /// shows. Its files' names too when asked (for @ in the chat), never what they hold.
     /// </summary>
-    public static JsonObject List(string folder, string current, string dataDir, Func<string, string?> env)
+    public static JsonObject List(string folder, string current, string dataDir, Func<string, string?> env, bool withFiles = false)
     {
         var names = new List<string>();
+        var files = new List<string>();
         string? why = null;
         try
         {
-            foreach (var dir in new DirectoryInfo(folder).EnumerateDirectories("*", new EnumerationOptions { IgnoreInaccessible = true, AttributesToSkip = 0 }))
+            foreach (var entry in new DirectoryInfo(folder).EnumerateFileSystemInfos("*", new EnumerationOptions { IgnoreInaccessible = true, AttributesToSkip = 0 }))
             {
-                names.Add(dir.Name);
-                if (names.Count >= Listed)
+                if (entry is DirectoryInfo)
                 {
-                    why = $"Only the first {Listed} folders are listed: type the name.";
+                    names.Add(entry.Name);
+                }
+                else if (withFiles)
+                {
+                    files.Add(entry.Name);
+                }
+                if (names.Count + files.Count >= Listed)
+                {
+                    why = $"Only the first {Listed} are listed: type the name.";
                     break;
                 }
             }
@@ -91,13 +99,16 @@ internal static class Folders
         {
             why = $"Its folders cannot be read: {e.Message}";
         }
-        names.Sort((a, b) => a.StartsWith('.') != b.StartsWith('.') ? a.StartsWith('.') ? 1 : -1 : string.Compare(a, b, StringComparison.OrdinalIgnoreCase));
+        Comparison<string> byName = (a, b) => a.StartsWith('.') != b.StartsWith('.') ? a.StartsWith('.') ? 1 : -1 : string.Compare(a, b, StringComparison.OrdinalIgnoreCase);
+        names.Sort(byName);
+        files.Sort(byName);
         var parent = Directory.GetParent(folder)?.FullName;
         return new JsonObject
         {
             ["path"] = folder,
             ["parent"] = parent,
             ["folders"] = new JsonArray([.. names.Select(n => (JsonNode)n)]),
+            ["files"] = withFiles ? new JsonArray([.. files.Select(n => (JsonNode)n)]) : null,
             ["why"] = why,
             ["current"] = current,
             ["home"] = Home(env),
@@ -106,6 +117,17 @@ internal static class Folders
             ["recent"] = new JsonArray([.. Recent(dataDir).Select(f => (JsonNode)f)]),
         };
     }
+
+    /// <summary>The key in a folder's state of the folders added to its workspace (Add Folder).</summary>
+    public const string AddedKey = "folders";
+
+    /// <summary>The folders added to this folder's workspace, those still there.</summary>
+    public static List<string> Added(WorkspaceState state) =>
+        state.Read()[AddedKey] is JsonArray list ? [.. list.Select(f => f?.GetValue<string>()).OfType<string>().Where(Directory.Exists)] : [];
+
+    /// <summary>A folder added to the workspace, or taken out of it: the list kept.</summary>
+    public static void SetAdded(WorkspaceState state, IEnumerable<string> folders) =>
+        state.Merge(new JsonObject { [AddedKey] = new JsonArray([.. folders.Select(f => (JsonNode)f)]) });
 
     private static string Home(Func<string, string?> env) =>
         (OperatingSystem.IsWindows() ? env("USERPROFILE") : env("HOME")) is { Length: > 0 } home ? home : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);

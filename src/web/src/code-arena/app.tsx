@@ -16,7 +16,7 @@ import { stateQuery, type CodeEvent, type CodeState } from './api'
 import { ChangesPanel } from './changes'
 import { Sessions, ThemeMenu, Thread } from './chat'
 import { useCommands, type Command } from './commands'
-import { chooseAndOpenFolder, openRecentFolder } from './folders'
+import { chooseAndAddFolder, chooseAndOpenFolder, foldersQuery, openRecentFolder } from './folders'
 import { completion } from './completion'
 import { CommandPalette, recentLimit, type PaletteCommand } from './palette'
 import { MemoryPanel } from './memory-panel'
@@ -1057,6 +1057,9 @@ function Workbench({
     { id: 'workbench.action.gotoSymbol', category: 'Go', title: 'Go to Symbol in Editor…', enabled: () => file, run: () => runAction('editor.action.quickOutline') },
     { id: 'workbench.action.files.openFolder', category: 'File', title: 'Open Folder…', run: () => void chooseAndOpenFolder(setOpening) },
     { id: 'workbench.action.openRecent', category: 'File', title: 'Open Recent…', run: () => void openRecentFolder(setOpening) },
+    { id: 'workbench.action.addRootFolder', category: 'Workspaces', title: 'Add Folder to Workspace…', run: async () => {
+      if (await chooseAndAddFolder()) await queryClient.invalidateQueries({ queryKey: foldersQuery.queryKey })
+    } },
     { id: 'workbench.action.files.save', category: 'File', title: 'Save', enabled: () => savable, run: () => void ed.save() },
     { id: 'workbench.action.files.saveAll', category: 'File', title: 'Save All', run: () => void ed.saveAll() },
     { id: 'workbench.action.closeActiveEditor', category: 'View', title: 'Close Editor', enabled: () => !!active, run: () => active && void ed.close(active.id) },

@@ -8,7 +8,7 @@ vi.mock('./quick-pick', () => ({ quickPick: vi.fn() }))
 vi.mock('@/components/ui/toaster', () => ({ toast: { info: vi.fn(), error: vi.fn() } }))
 
 const list = (path: string, folders: string[], extra: Partial<FolderList> = {}): FolderList => ({
-  path, parent: path === '/' ? null : path.slice(0, path.lastIndexOf('/')) || '/', folders, why: null, current: '/home/me/shop', home: '/home/me', separator: '/', drives: [], recent: ['/home/me/shop'], ...extra,
+  path, parent: path === '/' ? null : path.slice(0, path.lastIndexOf('/')) || '/', folders, why: null, current: '/home/me/shop', home: '/home/me', separator: '/', drives: [], recent: ['/home/me/shop'], added: [], ...extra,
 })
 
 describe('Open Folder', () => {
@@ -27,7 +27,7 @@ describe('Open Folder', () => {
     })
     expect(await pickFolder('Open Folder', 'Open')).toBe('/home/me/notes/2026')
     // The folder shown first, its parent, its folders, then the recent ones.
-    expect(picks[0]!.map((i) => i.label)).toEqual(['Open /home/me', '..', 'shop', 'notes', '/home/me/shop'])
+    expect(picks[0]!.map((i) => i.label)).toEqual(['Open me', '..', 'shop', 'notes', '/home/me/shop'])
     expect(picks[0]![4]!.group).toBe('recently opened')
     expect(picks[2]![0]!.value).toEqual({ kind: 'take', path: '/home/me/notes/2026' })
   })
@@ -55,5 +55,17 @@ describe('Open Folder', () => {
     expect(vi.mocked(api)).toHaveBeenCalledWith('/api/folders/open', { body: { path: '../notes' } })
     vi.useRealTimers()
     vi.unstubAllGlobals()
+  })
+})
+
+describe('@ with a whole path', () => {
+  it('lists the folder typed so far and the start of a name in it, for /, ~/ and a drive only', async () => {
+    const { outsidePath } = await import('./mention')
+    expect(outsidePath('/home/me/no')).toEqual({ folder: '/home/me/', start: 'no' })
+    expect(outsidePath('~/')).toEqual({ folder: '~/', start: '' })
+    expect(outsidePath('C:\\Users\\me\\Doc')).toEqual({ folder: 'C:/Users/me/', start: 'Doc' })
+    expect(outsidePath('src/app.ts')).toBeNull()
+    expect(outsidePath('~')).toBeNull()
+    expect(outsidePath(null)).toBeNull()
   })
 })

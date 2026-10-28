@@ -53,8 +53,9 @@ internal sealed class IdeFiles(Workspace workspace)
     /// <summary>
     /// The full path of a path the page gave: relative to the working directory
     /// (empty: the folder itself), with no .. in it, and not through a link that
-    /// leads outside. An absolute path, a drive or .. is refused, even where it
-    /// would end up inside: the page never sends one. ~ is a name like any other,
+    /// leads outside. A whole path is taken only in a folder added to the
+    /// workspace (Add Folder, a path named with @); a drive or .. is refused
+    /// otherwise, even where it would end up inside. ~ is a name like any other,
     /// and the name is taken exactly as given (`notes ` is not `notes`).
     /// </summary>
     public string Resolve(string? path)
@@ -62,6 +63,12 @@ internal sealed class IdeFiles(Workspace workspace)
         if (string.IsNullOrEmpty(path) || path == ".")
         {
             return workspace.Root;
+        }
+        // A folder added to the workspace, or what is in one: by its whole path (no .., and not the working directory's).
+        if (!path.Contains('\0') && Path.IsPathFullyQualified(path) && !path.Split(Separators).Contains(".."))
+        {
+            var whole = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+            return workspace.Allowed(whole) && !workspace.InRoot(whole) ? whole : throw Outside(path);
         }
         if (path.Contains('\0') || OperatingSystem.IsWindows() && path.Contains(':'))
         {

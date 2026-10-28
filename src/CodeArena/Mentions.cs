@@ -6,8 +6,8 @@ namespace CodeArena;
 /// <summary>
 /// @path in what the person types: the file goes with the message (a folder, its list), so the model need not look
 /// for it; @path:12-30 (or #L12-L30) its lines, with a few around them. From the IDE, the lines chosen in its editor go
-/// too (<see cref="Piece"/>). Only paths the tools may read, that exist; anything else (an email address, @decorator)
-/// stays as typed. What goes with a message comes after what was typed, between <see cref="Marker"/> and
+/// too (<see cref="Piece"/>). Only paths the tools may read, or a path outside named whole (or from ~) that exists, which
+/// the tools may then use too; anything else (an email address, @decorator) stays as typed. What goes with a message comes after what was typed, between <see cref="Marker"/> and
 /// <see cref="End"/>: the page shows what was typed (<see cref="Typed"/>) and what went with it (<see cref="Attached"/>).
 /// </summary>
 internal static partial class Mentions
@@ -159,7 +159,14 @@ internal static partial class Mentions
             }
             catch (ToolError)
             {
-                continue;
+                // A path outside that the person named whole (or from ~), and that is there: theirs to give, so it goes,
+                // and the tools may use it from now on.
+                if (workspace.Named(path) is not { } named)
+                {
+                    continue;
+                }
+                workspace.Allow(named);
+                full = named;
             }
             if (Directory.Exists(full))
             {
@@ -284,7 +291,7 @@ internal static partial class Mentions
         }
         catch (ToolError)
         {
-            return false;
+            return workspace.Named(path) is { } named && File.Exists(named);
         }
     }
 

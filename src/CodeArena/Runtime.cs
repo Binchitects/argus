@@ -267,7 +267,8 @@ internal sealed partial class Runtime : IAsyncDisposable
 
     private async Task InitAsync(Options o, CancellationToken ct)
     {
-        Workspace = new Workspace(Env.Cwd, Config.AllowedPaths.Concat(o.AddDirs));
+        // The folders added to this folder's workspace in the IDE (Add Folder) too, those still there.
+        Workspace = new Workspace(Env.Cwd, Config.AllowedPaths.Concat(o.AddDirs).Concat(Folders.Added(new WorkspaceState(Env.Paths.DataDir, Path.GetFullPath(Env.Cwd)))));
         History = new InputHistory(Env.Paths.HistoryDir, Workspace.Root);
         var mode = Modes.Parse(o.Mode ?? Config.Mode);
         if ((o.Mode ?? Config.Mode) is { } m && mode is null)

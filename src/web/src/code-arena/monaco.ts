@@ -167,15 +167,27 @@ void document.fonts?.ready.then(() => monaco.editor.remeasureFonts())
 
 export { monaco }
 
-/** A file's model's address: its path in the folder, so the language services know what it is (.tsx: with JSX); the person's own settings files (user:settings.json) where VS Code keeps them. */
-export const fileUri = (path: string) => (path.startsWith('user:') ? monaco.Uri.from({ scheme: 'vscode-userdata', path: `/User/${path.slice(5)}` }) : monaco.Uri.file('/' + path))
+/** A path outside the folder open (in a folder added to the workspace, or named with @): whole, from / or a drive. */
+export const isOutside = (path: string) => path.startsWith('/') || /^[A-Za-z]:\//.test(path)
+
+/**
+ * A file's model's address: its path in the folder, so the language services know what it is (.tsx: with JSX); the
+ * person's own settings files (user:settings.json) where VS Code keeps them; a file outside the folder under a scheme of
+ * its own (the folder's language servers are not given it).
+ */
+export const fileUri = (path: string) =>
+  path.startsWith('user:')
+    ? monaco.Uri.from({ scheme: 'vscode-userdata', path: `/User/${path.slice(5)}` })
+    : isOutside(path)
+      ? monaco.Uri.from({ scheme: 'outside', path: '/' + encodeURIComponent(path) })
+      : monaco.Uri.file('/' + path)
 
 let sides = 0
 /** A side of the agent's change to a file: an address of its own each time, never a file's. */
-export const diffUri = (side: 'before' | 'after', path: string) => monaco.Uri.from({ scheme: `agent-${side}`, path: '/' + path, query: String(++sides) })
+export const diffUri = (side: 'before' | 'after', path: string) => monaco.Uri.from({ scheme: `agent-${side}`, path: '/' + path.replace(/^\/+/, ''), query: String(++sides) })
 
 /** The path of a file's model (fileUri); null for any other model. */
-export const pathOf = (uri: monaco.Uri) => (uri.scheme === 'file' ? uri.path.slice(1) : null)
+export const pathOf = (uri: monaco.Uri) => (uri.scheme === 'file' ? uri.path.slice(1) : uri.scheme === 'outside' ? decodeURIComponent(uri.path.slice(1)) : null)
 
 
 /** A file's language by its name: a name Monaco knows (Dockerfile), else its longest known extension (.d.ts before .ts). */

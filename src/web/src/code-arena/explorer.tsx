@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronRight, ChevronsDownUp, Columns2, Copy, FilePlus, FolderOpen, FolderPlus, GitCompareArrows, MessageSquarePlus, Pencil, RefreshCw, SquareDashedMousePointer, Trash2 } from 'lucide-react'
+import { ChevronRight, ChevronsDownUp, Columns2, Copy, FilePlus, FolderInput, FolderOpen, FolderPlus, GitCompareArrows, MessageSquarePlus, Pencil, RefreshCw, SquareDashedMousePointer, Trash2, X } from 'lucide-react'
 import { ContextMenu } from 'radix-ui'
 import { useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useConfirm } from '@/components/ui/confirm'
@@ -18,6 +18,7 @@ import { chatBridge } from './bridge'
 import { runCommand, useCommands } from './commands'
 import { useKeyFor } from './keyboard'
 import { compareSelection } from './compare'
+import { foldersQuery, removeFolder } from './folders'
 
 /** A row's place in the tree, for keys and the context menu. */
 interface Target {
@@ -187,6 +188,17 @@ export function Explorer({ project, onOpenChanges }: { project: string; onOpenCh
   }
 
   const rows = { expanded, selected, editing, marks, onActivate: activate, onSelect: setSelected, onFinish: (name: string) => void finish(name), onMenu: setMenuFor, onKey }
+  // The folders added to the workspace (Add Folder), each a root below this folder's files.
+  const folders = useQuery(foldersQuery)
+  const added = folders.data?.added ?? []
+  const takeOut = async (folder: string) => {
+    try {
+      await removeFolder(folder)
+      await queryClient.invalidateQueries({ queryKey: foldersQuery.queryKey })
+    } catch (e) {
+      toast.error(errorMessage(e))
+    }
+  }
   const first = root.data?.entries[0]
   const tools: [string, ReactNode, () => void][] = [
     ['New file', <FilePlus key="f" />, () => startNew('file')],
@@ -194,6 +206,7 @@ export function Explorer({ project, onOpenChanges }: { project: string; onOpenCh
     ['Refresh', <RefreshCw key="r" />, () => void reload()],
     ['Collapse folders', <ChevronsDownUp key="c" />, () => setExpanded(new Set())],
     ['Open folder…', <FolderOpen key="o" />, () => runCommand('workbench.action.files.openFolder')],
+    ['Add folder to workspace…', <FolderInput key="a" />, () => runCommand('workbench.action.addRootFolder')],
   ]
   // Right-clicked on a row, or on the space below them (the working directory).
   const at = menuFor ?? { path: '', kind: 'dir' as const }
@@ -226,6 +239,9 @@ export function Explorer({ project, onOpenChanges }: { project: string; onOpenCh
                 {root.data.entries.length === 0 && editing === null && <li className="px-3 py-2 text-muted-foreground">The folder is empty.</li>}
               </ul>
             )}
+            {added.map((folder) => (
+              <AddedFolder key={folder} folder={folder} rows={rows} onRemove={() => void takeOut(folder)} />
+            ))}
           </div>
         </ContextMenu.Trigger>
         <ContextMenu.Portal>
@@ -275,6 +291,44 @@ export function Explorer({ project, onOpenChanges }: { project: string; onOpenCh
         </ContextMenu.Portal>
       </ContextMenu.Root>
     </div>
+  )
+}
+
+/** A folder added to the workspace (Add Folder): its name as a root, its files below it as the folder's are, × takes it out. */
+function AddedFolder({ folder, rows, onRemove }: { folder: string; rows: RowProps; onRemove: () => void }) {
+  const [open, setOpen] = useState(true)
+  const list = useQuery({ ...folderQuery(folder), enabled: open })
+  const name = folder.split('/').filter(Boolean).at(-1) ?? folder
+  return (
+    <section aria-label={`Added folder ${name}`} className="mt-2">
+      <div className="flex h-6 items-center gap-1 pr-1.5 pl-1">
+        <button
+          type="button"
+          aria-expanded={open}
+          title={folder}
+          onClick={() => setOpen(!open)}
+          className="flex min-w-0 flex-1 items-center gap-1 rounded-sm text-left text-[0.6875rem] font-semibold tracking-wider text-muted-foreground uppercase outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <ChevronRight className={cn('size-3.5 shrink-0 transition-transform', open && 'rotate-90')} aria-hidden="true" />
+          <span className="truncate">{name}</span>
+        </button>
+        <Tooltip content="Remove folder from workspace">
+          <button type="button" aria-label={`Remove ${name} from the workspace`} onClick={onRemove} className="grid size-6 place-items-center rounded-sm text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-3.5">
+            <X />
+          </button>
+        </Tooltip>
+      </div>
+      {open && list.isPending && <Skeleton className="mx-3 my-1.5 h-4" />}
+      {open && list.error && <p className="px-3 py-1 text-sm text-muted-foreground">{errorMessage(list.error)}</p>}
+      {open && list.data && (
+        <ul role="tree" aria-label={`Files of ${name}`} data-context="explorer" className="text-[0.8125rem]">
+          {list.data.entries.map((e) => (
+            <Row key={e.path} entry={e} level={0} {...rows} />
+          ))}
+          {list.data.entries.length === 0 && <li className="px-3 py-1 text-muted-foreground">The folder is empty.</li>}
+        </ul>
+      )}
+    </section>
   )
 }
 

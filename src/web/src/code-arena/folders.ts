@@ -17,9 +17,31 @@ export interface FolderList {
   separator: string
   drives: string[]
   recent: string[]
+  /** The folders added to this workspace (Add Folder), whole. */
+  added: string[]
+  /** Its files' names, when asked for (@ in the chat). */
+  files?: string[] | null
 }
 
-export const listFolders = (path?: string) => api<FolderList>(`/api/folders${path ? `?path=${encodeURIComponent(path)}` : ''}`)
+export const listFolders = (path?: string, files = false) =>
+  api<FolderList>(`/api/folders${path || files ? '?' : ''}${path ? `path=${encodeURIComponent(path)}` : ''}${path && files ? '&' : ''}${files ? 'files=1' : ''}`)
+
+export const foldersQuery = { queryKey: ['code', 'folders'] as const, queryFn: () => listFolders() }
+
+/** Add Folder to Workspace…: chosen, then added (the tools may use it, the Explorer shows it); the folders added now. */
+export async function chooseAndAddFolder(): Promise<string[] | undefined> {
+  const path = await pickFolder('Add Folder to Workspace', 'Add')
+  if (!path) return undefined
+  try {
+    return (await api<{ added: string[] }>('/api/folders/add', { body: { path } })).added
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : `${path} could not be added.`)
+    return undefined
+  }
+}
+
+/** A folder added to the workspace, taken out of it again; the folders added now. */
+export const removeFolder = (path: string) => api<{ added: string[] }>('/api/folders/remove', { body: { path } })
 
 /** Whether a typed path stands on its own (a root, a drive, the home folder), not under the folder shown. */
 const absolute = (path: string) => /^([/\\~]|[A-Za-z]:)/.test(path)
@@ -45,7 +67,7 @@ export async function pickFolder(title: string, action: string, start?: string):
     const here = at
     const item = (id: string, label: string, step: Step, extra: Partial<PickItem<Step>> = {}): PickItem<Step> => ({ id, label, value: step, ...extra })
     const items: PickItem<Step>[] = [
-      item('take', `${action} ${here.path}`, { kind: 'take', path: here.path }, { icon: createElement(FolderOpen), detail: here.why ?? undefined }),
+      item('take', `${action} ${here.path.split(here.separator).filter(Boolean).at(-1) ?? here.path}`, { kind: 'take', path: here.path }, { description: here.path, icon: createElement(FolderOpen), detail: here.why ?? undefined }),
       ...(here.parent ? [item('up', '..', { kind: 'go', path: here.parent }, { description: here.parent, icon: createElement(Undo2) })] : []),
       ...here.folders.map((name) => item(`f:${name}`, name, { kind: 'go', path: inside(here.path, name, here.separator) }, { icon: createElement(FolderInput) })),
       ...here.recent

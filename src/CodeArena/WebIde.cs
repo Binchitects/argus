@@ -40,6 +40,9 @@ internal sealed partial class WebApp
     /// <summary>The folder the page asked to open (Open Folder): the IDE is then started again on it.</summary>
     public Task<string> FolderOpened => _folderOpened.Task;
 
+    /// <summary>The folders added to this workspace (Add Folder), as the page shows them: whole paths, / between parts.</summary>
+    private JsonArray AddedJson() => new([.. Folders.Added(_state).Select(f => (JsonNode)_rt.Workspace.Show(f))]);
+
     /// <summary>The one call whose body is not JSON: a VS Code extension's .vsix, sent whole.</summary>
     private const string InstallPath = "/api/extensions/install";
 
@@ -79,10 +82,41 @@ internal sealed partial class WebApp
                     await res.JsonAsync(200, _files.List(Query(req, "path")), ct);
                     return true;
                 case ("GET", "/api/folders"):
-                    // A folder's folders for the picker (the one open now's parent first), with the recent ones.
-                    await res.JsonAsync(200, Folders.List(Folders.Resolve(Query(req, "path") is { Length: > 0 } at ? at : Path.GetDirectoryName(_rt.Workspace.Root) ?? _rt.Workspace.Root,
-                        _rt.Workspace.Root, _rt.Env.Env), _rt.Workspace.Root, _rt.Env.Paths.DataDir, _rt.Env.Env), ct);
+                {
+                    // A folder's folders for the picker (the one open now's parent first), with the recent ones and the folders
+                    // added to this workspace; its files' names too for @ in the chat.
+                    var listed = Folders.List(Folders.Resolve(Query(req, "path") is { Length: > 0 } at ? at : Path.GetDirectoryName(_rt.Workspace.Root) ?? _rt.Workspace.Root,
+                        _rt.Workspace.Root, _rt.Env.Env), _rt.Workspace.Root, _rt.Env.Paths.DataDir, _rt.Env.Env, Query(req, "files") == "1");
+                    listed["added"] = AddedJson();
+                    await res.JsonAsync(200, listed, ct);
                     return true;
+                }
+                case ("POST", "/api/folders/add"):
+                {
+                    // Add Folder to Workspace: the tools may use it from now on, the Explorer shows it, and it stays added here.
+                    var folder = Folders.Resolve(Body(req).Str("path"), _rt.Workspace.Root, _rt.Env.Env);
+                    if (_rt.Workspace.Allowed(folder) && _rt.Workspace.InRoot(folder))
+                    {
+                        throw new IdeError(409, "inside", $"{folder} is in the folder open now already.");
+                    }
+                    _rt.Workspace.Allow(folder);
+                    Folders.SetAdded(_state, Folders.Added(_state).Where(f => !string.Equals(f, folder, StringComparison.Ordinal)).Append(folder));
+                    await res.JsonAsync(200, new JsonObject { ["folder"] = folder, ["added"] = AddedJson() }, ct);
+                    return true;
+                }
+                case ("POST", "/api/folders/remove"):
+                {
+                    var folder = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Body(req).Str("path") ?? throw new IdeError(400, "invalid", "Name the folder.")));
+                    var kept = Folders.Added(_state);
+                    if (!kept.Remove(folder))
+                    {
+                        throw new IdeError(404, "not_added", $"{folder} was not added to this workspace.");
+                    }
+                    _rt.Workspace.Disallow(folder);
+                    Folders.SetAdded(_state, kept);
+                    await res.JsonAsync(200, new JsonObject { ["added"] = AddedJson() }, ct);
+                    return true;
+                }
                 case ("POST", "/api/folders/open"):
                 {
                     if (!FoldersOpen)

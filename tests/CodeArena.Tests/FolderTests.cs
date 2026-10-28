@@ -61,6 +61,73 @@ public sealed class FolderTests : IDisposable
     }
 
     [Fact]
+    public async Task A_folder_added_to_the_workspace_is_listed_read_and_kept_and_taken_out_again()
+    {
+        using var h = new Harness(_gateway);
+        h.Write("a.txt", "a\n");
+        var lib = Directory.CreateDirectory(Path.Combine(h.Root, "lib")).FullName;
+        File.WriteAllText(Path.Combine(lib, "util.py"), "def f():\n    return 1\n");
+        var secret = Directory.CreateDirectory(Path.Combine(h.Root, "secret")).FullName;
+        File.WriteAllText(Path.Combine(secret, "key.txt"), "no\n");
+        var util = Path.Combine(lib, "util.py");
+
+        await using (var web = await WebRun.StartAsync(h))
+        {
+            // Before it is added, a whole path is refused, as it always was.
+            Assert.Equal(HttpStatusCode.Forbidden, (await web.Http.GetAsync($"/api/file?path={Uri.EscapeDataString(util)}")).StatusCode);
+            // The folder open now, or one in it, is not added.
+            Assert.Equal(HttpStatusCode.Conflict, (await web.PostAsync("/api/folders/add", new JsonObject { ["path"] = h.Work })).StatusCode);
+
+            var added = await web.PostAsync("/api/folders/add", new JsonObject { ["path"] = "../lib" });
+            Assert.Equal(HttpStatusCode.OK, added.StatusCode);
+            Assert.Equal([lib], JsonNode.Parse(await added.Content.ReadAsStringAsync())!["added"]!.AsArray().Select(f => f!.GetValue<string>()));
+            // Listed and read by its whole path; what is beside it is still refused.
+            var listed = await web.GetJsonAsync($"/api/files?path={Uri.EscapeDataString(lib)}");
+            Assert.Equal([util], listed["entries"]!.AsArray().Select(e => e!["path"]!.GetValue<string>()));
+            Assert.Equal("def f():\n    return 1\n", (await web.GetJsonAsync($"/api/file?path={Uri.EscapeDataString(util)}"))["text"]!.GetValue<string>());
+            Assert.Equal(HttpStatusCode.Forbidden, (await web.Http.GetAsync($"/api/file?path={Uri.EscapeDataString(Path.Combine(secret, "key.txt"))}")).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await web.Http.GetAsync($"/api/file?path={Uri.EscapeDataString(lib + "/../secret/key.txt")}")).StatusCode);
+            Assert.Equal([lib], (await web.GetJsonAsync("/api/folders"))["added"]!.AsArray().Select(f => f!.GetValue<string>()));
+        }
+
+        // Kept with this folder: the next run has it, and taken out, it is refused again.
+        await using (var web = await WebRun.StartAsync(h))
+        {
+            Assert.Equal(HttpStatusCode.OK, (await web.Http.GetAsync($"/api/file?path={Uri.EscapeDataString(util)}")).StatusCode);
+            Assert.Equal(HttpStatusCode.OK, (await web.PostAsync("/api/folders/remove", new JsonObject { ["path"] = lib })).StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, (await web.Http.GetAsync($"/api/file?path={Uri.EscapeDataString(util)}")).StatusCode);
+            Assert.Equal(HttpStatusCode.NotFound, (await web.PostAsync("/api/folders/remove", new JsonObject { ["path"] = lib })).StatusCode);
+            Assert.Empty((await web.GetJsonAsync("/api/folders"))["added"]!.AsArray());
+        }
+    }
+
+    [Fact]
+    public async Task A_file_outside_named_whole_with_at_goes_with_the_message_and_the_tools_may_read_it_then()
+    {
+        using var h = new Harness(_gateway);
+        var notes = Path.Combine(Directory.CreateDirectory(Path.Combine(h.Root, "elsewhere")).FullName, "notes.md");
+        File.WriteAllText(notes, "# Plan\nship it\n");
+        _gateway.Answer = r => FakeGateway.HasToolResults(r) ? Reply.Say("Read it.") : Reply.Call(("read_file", new JsonObject { ["path"] = notes }.ToJsonString()));
+        await using var web = await WebRun.StartAsync(h, "--mode", "yolo");
+
+        // Its listing for the @ in the chat: files too, with ?files=1.
+        var listed = await web.GetJsonAsync($"/api/folders?path={Uri.EscapeDataString(Path.GetDirectoryName(notes)!)}&files=1");
+        Assert.Equal(["notes.md"], listed["files"]!.AsArray().Select(f => f!.GetValue<string>()));
+
+        await (await web.SendAsync($"Follow @{notes} please")).RestAsync();
+        var first = _gateway.Requests[0];
+        Assert.Contains($"<file path=\"{notes}\">", FakeGateway.Last(first));
+        Assert.Contains("ship it", FakeGateway.Last(first));
+        // The model's read_file of it then works: the person gave it.
+        var result = _gateway.Requests[1]["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "tool")!["content"]!.GetValue<string>();
+        Assert.Contains("ship it", result);
+        // A path outside not named whole (relative, though there), or one not there, stays as typed.
+        File.WriteAllText(Path.Combine(Path.GetDirectoryName(notes)!, "other.md"), "other\n");
+        await (await web.SendAsync("And @../elsewhere/other.md and @/no/such/file.md")).RestAsync();
+        Assert.DoesNotContain("<attached>", FakeGateway.Last(_gateway.Requests[2]));
+    }
+
+    [Fact]
     public async Task A_workspace_served_for_code_studio_does_not_open_another_folder()
     {
         using var h = new Harness(_gateway);
