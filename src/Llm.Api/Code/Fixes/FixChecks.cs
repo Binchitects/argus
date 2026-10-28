@@ -40,10 +40,27 @@ public static partial class FixChecks
         {
             return new JsonObject { ["note"] = "A package's fix is checked against the advisories when its merge request is reviewed." };
         }
-        var checks = new JsonObject { ["scanners"] = await ScannersAsync(services, finding, w, ct) };
+        // A file the checks cannot read (binary, or over 1 MB) is said, and the fix stays as the agent left it.
+        JsonObject Unread(WorkspaceException ex) => new() { ["error"] = ex.Message };
+        var checks = new JsonObject();
+        try
+        {
+            checks["scanners"] = await ScannersAsync(services, finding, w, ct);
+        }
+        catch (WorkspaceException ex)
+        {
+            checks["scanners"] = Unread(ex);
+        }
         if (finding.Kind == SecurityFinding.Code && fix.Model is { } model)
         {
-            checks["review"] = await ReviewAsync(services, finding, w, model, me, ct);
+            try
+            {
+                checks["review"] = await ReviewAsync(services, finding, w, model, me, ct);
+            }
+            catch (WorkspaceException ex)
+            {
+                checks["review"] = Unread(ex);
+            }
         }
         return checks;
     }
@@ -74,10 +91,6 @@ public static partial class FixChecks
             after = Hits(await argus.PostAsync("scan-files", Files([.. paths.Select(p => (p, (string?)w.Read(p)))], tools), ct));
         }
         catch (ArgusException ex)
-        {
-            return new JsonObject { ["error"] = ex.Message };
-        }
-        catch (WorkspaceException ex)
         {
             return new JsonObject { ["error"] = ex.Message };
         }
