@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace Llm.Api.Lab;
 
 /// <summary>A science of the lab: what it is for, the tools a notebook of it has on, and what its model is told.</summary>
@@ -8,7 +10,7 @@ public sealed record LabField(string Id, string Title, string About, string[] To
 /// prompt and its tools are on (those the person may use): the lab's packs (mathematics and units, chemistry, biology),
 /// Lean's proofs, Python, the web.
 /// </summary>
-public static class LabFields
+public static partial class LabFields
 {
     private const string Method =
         "Work in steps. Before each, say in a line what it is for. Do the mathematics with the lab's tools, never in your head: math_compute for " +
@@ -50,5 +52,26 @@ public static class LabFields
         "math_solve, chem_balance, quantum_check or lean_check, as fits), with the problem's own numbers. If the check disagrees, find the mistake and " +
         "correct it. Then give the final answer again, in the same form as before.";
 
+    /// <summary>What the model is asked when its answer in a notebook gives code no run had as written: to run it, and correct it.</summary>
+    public const string RunRequest =
+        "[The lab] Your answer gives code. Before this answer ends, run that code as written with run_python, with a short call of it on " +
+        "an example of the problem's input after it. If it fails, or gives what the problem does not ask, correct it and run it again. " +
+        "Then give the final answer again, in the same form as before, with the whole code in one block.";
+
     public static LabField? Of(string? id) => All.FirstOrDefault(f => f.Id == id);
+
+    /// <summary>The last Python block of an answer, or null when it gives none.</summary>
+    public static string? AnswerCode(string answer)
+    {
+        var blocks = PythonBlock().Matches(answer);
+        return blocks.Count == 0 ? null : blocks[^1].Groups[1].Value;
+    }
+
+    /// <summary>Whether a program ran the code as written: its lines in order, blank lines and trailing spaces aside.</summary>
+    public static bool Ran(string program, string code) => Lines(program).Contains(Lines(code), StringComparison.Ordinal);
+
+    private static string Lines(string code) => string.Join('\n', code.Split('\n').Select(l => l.TrimEnd()).Where(l => l.Length > 0));
+
+    [GeneratedRegex(@"```(?:python|py)[ \t]*\n(.*?)```", RegexOptions.Singleline)]
+    private static partial Regex PythonBlock();
 }

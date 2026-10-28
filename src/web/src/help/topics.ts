@@ -641,7 +641,7 @@ export const topics = {
     parts: [
       { name: 'Checks', text: '**Proved** when SymPy shows it exactly; **holds numerically, not proved** when it is only true at the points tried; **refuted** with a point where it fails. A solution is checked by putting it back into every equation (✓ or ✗); a reaction is **balanced, checked** when each element and the charge count the same on both sides; a proof is **checked by Lean** only when Lean accepts it with no sorry.' },
       { name: 'Molecules and sequences', text: 'A molecule from its SMILES is drawn beside its formula, mass and properties; a sequence shows what it was turned into (its reverse complement, RNA or protein) and its figures.' },
-      { name: 'The lab\'s check', text: 'An answer that no tool checked is not left at that: the lab asks the model to check it with its tools and correct it, and says so above the answer that follows.' },
+      { name: 'The lab\'s check', text: 'An answer that no tool checked is not left at that: the lab asks the model to check it with its tools and correct it, and says so above the answer that follows. An answer that gives code is run instead: when no run had that code as written, the lab asks the model to run it and correct it.' },
       { name: 'Ask more', text: 'A next step, another case, or why a step holds: the lab goes on in the same notebook.' },
       { name: 'Open as a chat', text: 'The notebook is a chat underneath: open it there to branch, edit or share it.' },
     ],

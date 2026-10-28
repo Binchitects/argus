@@ -25,6 +25,7 @@ namespace Llm.Tests;
 ///   [call NAME {json}]  asks for any tool NAME with those arguments, then answers "Found it."
 ///   [script [[{"name":N,"arguments":{…}}, …], …]]  the k-th round of tool calls asks for the k-th list's calls, until
 ///               the lists run out or calling is switched off (tool_choice none); then answers "Found it."
+///   [code]      in any of the chat's questions: its answer (for "Found it." too) is <see cref="CodeAnswer"/>, a Python block
 ///   [timed]     its last chunk carries llama.cpp's timings: 60 prompt tokens read in 300 ms, 12 written in 1,200 ms
 ///   [offer {json}]  asks for remember with those arguments (the word itself in a message reads as the person asking to remember)
 ///   [context overflow]       refused as LiteLLM refuses a prompt bigger than llama.cpp's context (<see cref="Overflow"/>)
@@ -139,6 +140,8 @@ public sealed class FakeModel : HttpMessageHandler
             ? string.Concat(parts.OfType<JsonObject>().Where(x => x["type"]?.GetValue<string>() == "text").Select(x => x["text"]!.GetValue<string>()))
             : lastUserContent.GetValue<string>();
         var toolAnswered = messages.Last()!["role"]!.GetValue<string>() == "tool" || Shown(messages.Last());
+        var closing = messages.Any(m => m!["role"]!.GetValue<string>() == "user" && m["content"]?.ToString().Contains("[code]", StringComparison.Ordinal) == true)
+            ? CodeAnswer : "Found it.";
 
         if (lastUser.Contains("[budget]", StringComparison.Ordinal))
         {
@@ -467,7 +470,7 @@ public sealed class FakeModel : HttpMessageHandler
                     })),
                     Finish("tool_calls"),
                 ]
-                : [Delta(new JsonObject { ["content"] = "Found it." }), Finish("stop")];
+                : [Delta(new JsonObject { ["content"] = closing }), Finish("stop")];
         }
         else if (call.Success && !toolAnswered)
         {
@@ -490,7 +493,7 @@ public sealed class FakeModel : HttpMessageHandler
         }
         else if (toolAnswered)
         {
-            chunks = [Delta(new JsonObject { ["content"] = "Found it." }), Finish("stop")];
+            chunks = [Delta(new JsonObject { ["content"] = closing }), Finish("stop")];
         }
         else if (lastUser.Contains("[ponder]", StringComparison.Ordinal))
         {
@@ -510,6 +513,10 @@ public sealed class FakeModel : HttpMessageHandler
             chunks = [.. Enumerable.Range(0, 400).Select(i => Delta(new JsonObject { ["content"] = $"w{i} " })), Finish("stop")];
             delay = TimeSpan.FromMilliseconds(25);
         }
+        else if (closing == CodeAnswer)
+        {
+            chunks = [Delta(new JsonObject { ["content"] = closing }), Finish("stop")];
+        }
         else
         {
             chunks =
@@ -528,6 +535,9 @@ public sealed class FakeModel : HttpMessageHandler
         }
         return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
     }
+
+    /// <summary>The answer to a chat asked with [code]: a function in a Python block.</summary>
+    public const string CodeAnswer = "Here it is:\n\n```python\ndef double(x):\n    return 2 * x\n```";
 
     /// <summary>
     /// LiteLLM's refusal of a prompt bigger than llama.cpp's context (32,768 tokens), as the gateway sends it: a 400 whose

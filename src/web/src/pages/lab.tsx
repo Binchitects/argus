@@ -435,10 +435,13 @@ export function LabNotebookPage() {
               </li>
             ) : (
               <li key={m.id} className="grid gap-2">
-                {/* An answer right after one that no tool checked: the lab asked for its check. */}
+                {/* An answer right after one that no tool checked, or whose code no run had as written: the lab asked for its check. */}
                 {shown[i - 1]?.role === 'assistant' && !shown[i - 1].toolCalls?.length && (
                   <p className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                    <CircleHelp className="size-3.5" aria-hidden="true" /> No tool had checked that answer: the lab asked for a check.
+                    <CircleHelp className="size-3.5" aria-hidden="true" />{' '}
+                    {/```(?:python|py)[ \t]*\n/.test(shown[i - 1].content)
+                      ? 'No run had the code of that answer as written: the lab asked to run it.'
+                      : 'No tool had checked that answer: the lab asked for a check.'}
                   </p>
                 )}
                 {m.content.trim().length > 0 && <Markdown text={m.content} />}

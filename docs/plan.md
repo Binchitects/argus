@@ -1998,8 +1998,9 @@ alone, 10 of 40 in the lab, most misses an API Qiskit removed). Left: the
 review's own sinks for the forms the measuring showed they miss (C#'s
 `new StreamReader(` and `Response.Write`, Java's `new java.io.File(`,
 LDAP and XPath); Fix it measured on real CVE fixes (CVEfixes, needs a yes);
-the quantum lab running the function an answer gives, once, before answering,
-and measured again on the same forty; qiskit-ibm-runtime in the sandbox for
+the quantum lab measured again on the same forty with the lab's run of an
+answer's code (built: an answer whose code no run had as written is asked,
+once, to run it); qiskit-ibm-runtime in the sandbox for
 the set's 51 problems that need its fake devices (needs a yes).
 
 The person asked (2026-10-27, after v7.3.0) for "full GRC and related

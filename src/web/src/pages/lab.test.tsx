@@ -249,4 +249,22 @@ describe('science lab', () => {
     expect(await screen.findByText('No tool had checked that answer: the lab asked for a check.')).toBeInTheDocument()
     expect(screen.getAllByText(/the lab asked for a check/)).toHaveLength(1)
   })
+
+  it('says when the lab asked to run the code of an answer that no run had as written', async () => {
+    const steps = [
+      message({ id: 'u1', role: 'user', content: 'Write double(x).' }),
+      message({ id: 'a1', parentId: 'u1', role: 'assistant', content: 'Here:\n\n```python\ndef double(x):\n    return 2 * x\n```' }),
+      message({ id: 'a2', parentId: 'a1', role: 'assistant', content: '', toolCalls: [call('t1', 'run_python', { code: 'def double(x):\n    return 2 * x\n\nprint(double(2))' })] }),
+      message({ id: 'r1', parentId: 'a2', role: 'tool', toolName: 'run_python', toolCallId: 't1', content: '4' }),
+      message({ id: 'a3', parentId: 'r1', role: 'assistant', content: 'Ran it: 4.' }),
+    ]
+    fakeApi(member, {
+      'GET /api/lab/fields': () => ({ json: fields }),
+      'GET /api/lab/notebooks': () => ({ json: [] }),
+      'GET /api/chat/conversations/n1': () => ({ json: notebook(steps) }),
+    })
+    renderApp('/lab/n1')
+    expect(await screen.findByText('No run had the code of that answer as written: the lab asked to run it.')).toBeInTheDocument()
+    expect(screen.queryByText(/the lab asked for a check/)).not.toBeInTheDocument()
+  })
 })

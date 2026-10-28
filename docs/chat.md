@@ -814,7 +814,10 @@ refuted or held only numerically; the lab's list shows the same for each
 notebook. An answer that no tool checked is not left at that: the lab asks
 the model, once, to check it with its tools (a tool call required) and to
 correct it if they disagree, and the notebook says so above the answer that
-follows. **Ask more** goes on in the same notebook. A notebook is a chat
+follows. An answer that gives code (a Python block) is checked by running it
+instead: when no `run_python` run had that code as written, the lab asks the
+model, once, to run it with a call of it on an example, and to correct it if
+it fails. **Ask more** goes on in the same notebook. A notebook is a chat
 underneath (**Open as a chat** to branch, edit or share it), kept out of the
 chat list.
 Measured on [mathematics](measurements/lab-math.md) and

@@ -365,9 +365,10 @@ public sealed partial class ChatService(
         var parent = question.Id;
         // Deep research with sub-agents: the rounds in which the answer delegated (ResearchDelegations).
         var delegations = 0;
-        // A lab notebook's answer is checked before it ends: whether a check ran, and the round that was asked for one.
+        // A lab notebook's answer is checked before it ends: whether a check ran, the programs run, and the round that was asked for one.
         var labChecks = conversation.Kind == Conversation.Lab;
         var checkedHere = false;
+        var programs = new List<string>();
         int? checkRound = null;
         // Each round's cost at the model's prices now (the gateway was given the same); every round and tool call names the answer.
         var price = await prices.ForAsync(modelName, ct);
@@ -712,14 +713,18 @@ public sealed partial class ChatService(
                 thinkingMs = msg.ThinkingMs, durationMs = msg.DurationMs, context = filled,
             });
 
-            if ((calls.Count == 0 || runs.Count == 0) && labChecks && !checkedHere && checkRound is null && !withheld && content.Length > 0
-                && runs.Keys.Any(Lab.LabEndpoints.IsCheck) && round + 1 < chat.CurrentValue.MaxToolRounds)
+            // An answer that is code is checked by running it as written (when Python is on); any other by the lab's checks.
+            var answerCode = labChecks && runs.ContainsKey("run_python") ? Lab.LabFields.AnswerCode(msg.Content ?? "") : null;
+            var unrun = answerCode is not null && !programs.Any(p => Lab.LabFields.Ran(p, answerCode));
+            if ((calls.Count == 0 || runs.Count == 0) && labChecks && checkRound is null && !withheld && content.Length > 0
+                && (answerCode is null ? !checkedHere && runs.Keys.Any(Lab.LabEndpoints.IsCheck) : unrun) && round + 1 < chat.CurrentValue.MaxToolRounds)
             {
-                // A lab notebook's answer that no tool checked: the model is asked, once, to check it with the lab's tools and
-                // correct it; the answer it gives then ends the turn. The request is the lab's, not the person's: never kept.
+                // A lab notebook's answer that no tool checked, or whose code no run had as written: the model is asked, once, to
+                // check it (run it) with the lab's tools and correct it; the answer it gives then ends the turn. The request is the
+                // lab's, not the person's: never kept.
                 await db.SaveChangesAsync(ct);
                 messages.Add(new JsonObject { ["role"] = "assistant", ["content"] = msg.Content });
-                messages.Add(new JsonObject { ["role"] = "user", ["content"] = Lab.LabFields.CheckRequest });
+                messages.Add(new JsonObject { ["role"] = "user", ["content"] = unrun ? Lab.LabFields.RunRequest : Lab.LabFields.CheckRequest });
                 parent = msg.Id;
                 checkRound = round + 1;
                 continue;
@@ -756,6 +761,10 @@ public sealed partial class ChatService(
                 var name = call["function"]!["name"]!.GetValue<string>();
                 var rawArgs = call["function"]!["arguments"]!.GetValue<string>();
                 checkedHere |= Lab.LabEndpoints.IsCheck(name);
+                if (labChecks && name == "run_python" && TryArguments(rawArgs)?["code"] is JsonValue source && source.TryGetValue<string>(out var program))
+                {
+                    programs.Add(program);
+                }
                 var known = runs.TryGetValue(name, out var target);
                 var loading = demand.Active && name == OnDemandTools.Function;
                 if (known && !demand.IsLoaded(name))
@@ -993,6 +1002,19 @@ public sealed partial class ChatService(
     /// A call's arguments as the model wrote them. A key written twice (models do) keeps its last
     /// value, at every depth: JsonObject would otherwise throw on the first read.
     /// </summary>
+    /// <summary>A call's arguments, or null when they are not JSON.</summary>
+    private static JsonObject? TryArguments(string raw)
+    {
+        try
+        {
+            return Arguments(raw);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     public static JsonObject Arguments(string raw)
     {
         using var doc = JsonDocument.Parse(raw.Trim().Length == 0 ? "{}" : raw);

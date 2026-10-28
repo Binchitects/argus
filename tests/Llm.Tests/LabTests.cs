@@ -147,6 +147,55 @@ public sealed class LabTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_notebooks_answer_that_gives_code_no_run_had_as_written_is_run_before_it_ends_once()
+    {
+        await using var sandbox = new FakeSandbox();
+        await using var f = NewApp(new() { ["Sandbox:Dir"] = sandbox.Dir });
+        var (b, email) = await PersonAsync(f);
+        List<JsonObject> Sent() => [.. app.Model.Requests.Select(r => r.Body).Where(r => r["user"]?.GetValue<string>() == email && r["tools"] is JsonArray)];
+        static bool Asks(JsonObject r, string request) => r["messages"]!.AsArray().Any(m => m!["content"]?.ToString() == request);
+        static string Ran(string code) => "Write it [code] [script " + JsonSerializer.Serialize(new[] { new[] { new { name = "run_python", arguments = new { code } } } }) + "]";
+
+        // The code was not run: asked once to run it as written, with a tool call required; the answer after it ends the turn.
+        var id = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { lab = "quantum" }))).GetProperty("id").GetGuid();
+        await SendAsync(b, id, "Write it [code]");
+        var sent = Sent();
+        Assert.Equal(2, sent.Count);
+        Assert.True(Asks(sent[1], Llm.Api.Lab.LabFields.RunRequest));
+        Assert.False(Asks(sent[1], Llm.Api.Lab.LabFields.CheckRequest));
+        Assert.Equal("required", sent[1]["tool_choice"]?.GetValue<string>());
+        var messages = (await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{id}"))).GetProperty("messages").EnumerateArray().ToList();
+        Assert.Equal(["user", "assistant", "assistant"], messages.Select(m => m.GetProperty("role").GetString()));
+
+        // Run as written, with a call after it: nothing more is asked, though no check ran.
+        id = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { lab = "quantum" }))).GetProperty("id").GetGuid();
+        var before = Sent().Count;
+        await SendAsync(b, id, Ran("import math\n\ndef double(x):\n    return 2 * x   \n\nprint(double(2))"));
+        Assert.Equal(before + 2, Sent().Count);
+        Assert.DoesNotContain(Sent().Skip(before), r => Asks(r, Llm.Api.Lab.LabFields.RunRequest) || Asks(r, Llm.Api.Lab.LabFields.CheckRequest));
+
+        // What ran was another function: asked to run the one given.
+        id = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { lab = "quantum" }))).GetProperty("id").GetGuid();
+        before = Sent().Count;
+        await SendAsync(b, id, Ran("def double(x):\n    return x + x\n\nprint(double(2))"));
+        Assert.Contains(Sent().Skip(before), r => Asks(r, Llm.Api.Lab.LabFields.RunRequest));
+    }
+
+    [Theory]
+    [InlineData("Here:\n\n```python\ndef f():\n    return 1\n```\n\nand\n\n```py\ndef g():\n    return 2\n```", "def g():\n    return 2\n")]
+    [InlineData("Run `f()`:\n\n```\ndef f():\n    return 1\n```", null)]
+    [InlineData("No code here.", null)]
+    public void An_answers_code_is_its_last_python_block(string answer, string? code) =>
+        Assert.Equal(code, Llm.Api.Lab.LabFields.AnswerCode(answer));
+
+    [Theory]
+    [InlineData("import math\n\ndef f():\n    return 1   \n\n\nprint(f())", "def f():\n\n    return 1\n", true)]
+    [InlineData("def f():\n    return 2\n", "def f():\n    return 1\n", false)]
+    [InlineData("def f():\n  return 1\n", "def f():\n    return 1\n", false)]
+    public void Code_ran_as_written_when_its_lines_are_in_the_program_in_order(string program, string code, bool ran) =>
+        Assert.Equal(ran, Llm.Api.Lab.LabFields.Ran(program, code));
+
+    [Fact]
     public void Leans_messages_are_read_by_line_and_column_with_what_follows_each()
     {
         var messages = Llm.Api.Lab.ProofTool.Messages(".Proof.lean:2:0: warning: unused variable `h`\n.Proof.lean:5:4: error(lean.unknownIdentifier): unknown identifier 'foo'\nmore of it\n");
