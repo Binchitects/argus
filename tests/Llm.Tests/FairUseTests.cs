@@ -96,6 +96,26 @@ public sealed class FairUseTests(AppFixture app)
     }
 
     [Fact]
+    public async Task The_lines_numbers_for_prometheus_count_running_waiting_people_refusals_and_waits_never_names()
+    {
+        var gate = Gate(perPerson: 1, atOnce: 1, queueLength: 1);
+        var (ann, ben) = (Guid.NewGuid(), Guid.NewGuid());
+        Task Nothing(AnswerGate.Line _) => Task.CompletedTask;
+        var running = await gate.EnterAsync(ann, 0, "Qwen3-4B", Nothing, default, kind: "api");
+        var waiting = gate.EnterAsync(ben, 0, "Qwen3-4B", Nothing, default);
+        await Assert.ThrowsAsync<AnswerGate.BusyException>(() => gate.EnterAsync(Guid.NewGuid(), 0, "Qwen3-4B", Nothing, default, kind: "api"));
+        var text = LineMetrics.Render(gate);
+        Assert.Contains("arena_line_running{model=\"Qwen3-4B\",kind=\"api\"} 1", text, StringComparison.Ordinal);
+        Assert.Contains("arena_line_waiting{model=\"Qwen3-4B\",kind=\"chat\"} 1", text, StringComparison.Ordinal);
+        Assert.Contains("arena_line_people 1", text, StringComparison.Ordinal);
+        Assert.Contains("arena_line_refused_total{reason=\"busy\",kind=\"api\"} 1", text, StringComparison.Ordinal);
+        Assert.DoesNotContain(ann.ToString(), text, StringComparison.Ordinal);
+        running.Dispose();
+        (await waiting.WaitAsync(TimeSpan.FromSeconds(5))).Dispose();
+        Assert.Contains("arena_line_waited_seconds_count{kind=\"chat\"} 1", LineMetrics.Render(gate), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Someone_who_gives_up_waiting_leaves_the_line()
     {
         var gate = Gate(perPerson: 1, atOnce: 1);

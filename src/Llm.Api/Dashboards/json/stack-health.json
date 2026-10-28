@@ -1,5 +1,7 @@
 {
   "uid": "stack-health",
+  "permission": "monitoring.read",
+  "area": "system",
   "title": "Stack Health & Alerts",
   "tags": ["llmservice", "meta"],
   "timezone": "browser",

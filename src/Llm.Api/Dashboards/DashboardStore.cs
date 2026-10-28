@@ -37,7 +37,11 @@ public sealed record PanelTarget(string RefId, string Datasource, string? RawSql
 
 public sealed record Panel(int Key, string Type, string? Title, JsonObject Definition, IReadOnlyList<PanelTarget> Targets, TimeSpan? MinInterval = null);
 
-public sealed record Dashboard(string Uid, string Title, JsonObject? Time, string? Refresh, IReadOnlyList<Panel> Panels, IReadOnlyList<Variable>? Variables = null);
+/// <param name="Permission">Who may see it (the file's "permission"; monitoring.read when it names none).</param>
+/// <param name="Area">Where the Dashboards page lists it: "llm" (the model and its users), "system" or "hardware".</param>
+/// <param name="Main">The area's own dashboard, listed first; the others go into detail.</param>
+public sealed record Dashboard(string Uid, string Title, JsonObject? Time, string? Refresh, IReadOnlyList<Panel> Panels, IReadOnlyList<Variable>? Variables = null,
+    string Permission = Core.Access.Permissions.MonitoringRead, string Area = "system", bool Main = false);
 
 /// <summary>
 /// Reads the dashboard files on each request (they are small, and an edit then
@@ -103,7 +107,8 @@ public sealed class DashboardStore(IOptions<DashboardOptions> options)
             [.. (v["options"] as JsonArray ?? []).OfType<JsonObject>().Select(o => o["value"]?.GetValue<string>() ?? "")],
             v["hide"] is JsonValue hv && hv.TryGetValue<int>(out var hide) ? hide : 0)).Where(v => v.Name.Length > 0).ToList();
         var time = d["time"] is JsonObject t && t["from"] is JsonValue ? (JsonObject)t.DeepClone() : DefaultTime();
-        return new Dashboard(uid, d["title"]?.GetValue<string>() ?? uid, time, d["refresh"]?.GetValue<string>(), panels, variables);
+        return new Dashboard(uid, d["title"]?.GetValue<string>() ?? uid, time, d["refresh"]?.GetValue<string>(), panels, variables,
+            d["permission"]?.GetValue<string>() ?? Core.Access.Permissions.MonitoringRead, d["area"]?.GetValue<string>() ?? "system", d["main"]?.GetValue<bool>() == true);
     }
 
     /// <summary>The time range a dashboard opens on when its file gives none: the last hour, as every dashboard of the app does.</summary>

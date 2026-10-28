@@ -59,6 +59,12 @@ public sealed class ApiLineTests(AppFixture app)
         Assert.Equal(HttpStatusCode.ServiceUnavailable, third.StatusCode);
         Assert.NotNull(third.Headers.RetryAfter);
         Assert.Contains("busy", await third.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        // Prometheus reads the line on the stack's network; what came through Traefik does not.
+        var plain = f.CreateClient(new WebApplicationFactoryClientOptions { HandleCookies = false });
+        Assert.Contains("arena_line_waiting", await plain.GetStringAsync(new Uri("/metrics", UriKind.Relative)), StringComparison.Ordinal);
+        using var forwarded = new HttpRequestMessage(HttpMethod.Get, new Uri("/metrics", UriKind.Relative));
+        forwarded.Headers.Add("X-Forwarded-For", "203.0.113.9");
+        Assert.Equal(HttpStatusCode.NotFound, (await plain.SendAsync(forwarded)).StatusCode);
         await first.Content.ReadAsStringAsync();
         first.Dispose();
         using var answered = await second.WaitAsync(TimeSpan.FromSeconds(30));

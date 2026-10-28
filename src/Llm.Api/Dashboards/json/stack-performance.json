@@ -1,5 +1,7 @@
 {
   "uid": "stack-performance",
+  "permission": "usage.read",
+  "area": "llm",
   "title": "Stack Performance",
   "tags": [
     "llmservice",

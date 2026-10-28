@@ -1338,6 +1338,28 @@ app replica keeps its own line: the page shows the one that answered.
 
 ### Dashboards
 
+The dashboards come in three areas, each seen with its own permission, so a
+role can give one without the others (Admin → Access → Roles):
+
+| area | its dashboard | in detail | permission |
+|---|---|---|---|
+| the model and its users | **LLM and users**: requests, tokens, latency and time to first token, the line (running, waiting, people, the average wait, refusals), the engine's speed, and who uses what (per person, tokens and cost, refused by rate limits) | LLM Overview, Stack Performance, Argus (Usage by person is on Usage) | `usage.read` |
+| the system | **System**: targets up and down, alerts firing, the line, each service's requests, server errors and response time (p95, through Traefik), the host | Stack Health & Alerts, Host & Containers, Logs, Indexing | `monitoring.read` |
+| the hardware | **Hardware**: GPU utilisation, memory, temperature, fan, power against its limit, clocks and throttling; CPU by mode and per core, load, clock and temperature; memory, swap, disks, disk I/O, network, NVMe temperature | GPU Hardware, Resources | `hardware.read` |
+
+The Supervisor and Operator roles hold all three; an Owner, every
+permission. Each file names its area and permission (`"area"`,
+`"permission"`, `"main"` for the area's own dashboard; a file of your own
+without them is the system's, with `monitoring.read`). The line's numbers come
+from the app itself (Prometheus job `app`: `arena_line_running`,
+`arena_line_waiting` by model and chat or API, `arena_line_people`,
+`arena_line_refused_total` by reason, `arena_line_waited_seconds`), read on
+the stack's network only: Traefik routes no `/metrics` to the app, and the app
+refuses one that came through it. NVIDIA's DCGM detail (SM activity, tensor
+cores, XID errors, ECC, NVLink) needs the **dcgm** profile
+(`COMPOSE_PROFILES=dcgm`, where nvcr.io is reachable): the Hardware dashboard
+says so, and GPU Hardware's DCGM panels are empty without it.
+
 The dashboards are files in Grafana's JSON format, in `src/Llm.Api/Dashboards/json/`
 (built into the app's image, so an upgrade brings the new ones), and the app draws
 them itself. Each panel's query runs on the app's server:

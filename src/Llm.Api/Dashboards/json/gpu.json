@@ -1,5 +1,7 @@
 {
   "uid": "gpu-hardware",
+  "permission": "hardware.read",
+  "area": "hardware",
   "title": "GPU Hardware",
   "tags": ["llmservice", "gpu", "hardware"],
   "timezone": "browser",

@@ -1,5 +1,7 @@
 {
   "uid": "host-containers",
+  "permission": "monitoring.read",
+  "area": "system",
   "title": "Host & Containers",
   "tags": ["llmservice", "hardware", "docker"],
   "timezone": "browser",

@@ -635,6 +635,7 @@ public static class IdentityWiring
         Company.CompanyEndpoints.MapCompany(app);
         Scim.ScimEndpoints.MapScim(app);
         Dashboards.DashboardEndpoints.MapDashboards(app);
+        Chat.LineMetrics.MapLineMetrics(app);
         Dashboards.UsageEndpoints.MapUsage(app);
         Dashboards.LogEndpoints.MapLogs(app);
         Dashboards.AlertEndpoints.MapAlerts(app);

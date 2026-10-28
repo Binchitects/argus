@@ -1,5 +1,7 @@
 {
   "uid": "stack-indexing",
+  "permission": "monitoring.read",
+  "area": "system",
   "title": "Indexing: Argus code index",
   "description": "Every index pass, what it did, and what failed. Fed by `argus index` writing one JSON line per event to the container log, which Promtail ships to Loki.",
   "tags": [

@@ -66,6 +66,12 @@ scrape_configs:
       - targets: ["traefik:8080"]
         labels: { tier: optional, component: proxy }
 
+  # The app's answers' line (Admin → Line): running and waiting, by model and chat or API; on the stack's network only.
+  - job_name: app
+    static_configs:
+      - targets: ["app:8080"]
+        labels: { tier: core, component: app }
+
   - job_name: argus
     metrics_path: /admin/metrics
     authorization:

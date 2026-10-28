@@ -33,6 +33,34 @@ public sealed class DashboardTests(AppFixture app)
         result.GetProperty("results")[0].GetProperty("table").GetProperty("rows")[0][0].GetDouble();
 
     [Fact]
+    public async Task Each_dashboard_is_seen_with_its_own_permission_the_hardware_ones_with_hardware_read_only()
+    {
+        var admin = await Admin();
+        // Everyone's: an admin (Owner) sees them all, the three of each area first.
+        var all = (await admin.JsonAsync(await admin.GetAsync("/api/dashboards/"))).EnumerateArray().ToList();
+        Assert.Equal(["hardware", "llm-users", "system"], all.Where(d => d.GetProperty("main").GetBoolean()).Select(d => d.GetProperty("uid").GetString()!).Order());
+        Assert.Equal("hardware", all.Single(d => d.GetProperty("uid").GetString() == "gpu-hardware").GetProperty("area").GetString());
+
+        // A role with hardware.read alone: the hardware dashboards, and nothing of the others.
+        var name = "hw" + Guid.NewGuid().ToString("N")[..8];
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
+        var role = (await admin.JsonAsync(await admin.PostAsync("/api/admin/access/roles", new { name = "Hardware " + name, permissions = new[] { "hardware.read" } }))).GetProperty("id").GetGuid();
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/access/assignments", new { roleId = role, subjectKind = "Person", subjectId = made.GetProperty("id").GetGuid() }));
+        var them = await new TestBrowser(app.Factory).SignedInAsync(name, made.GetProperty("password").GetString()!);
+        var theirs = (await them.JsonAsync(await them.GetAsync("/api/dashboards/"))).EnumerateArray().Select(d => d.GetProperty("uid").GetString()).Order().ToList();
+        Assert.Equal(["gpu-hardware", "hardware", "resources"], theirs);
+        await StatusAssert.Is(HttpStatusCode.OK, await them.GetAsync("/api/dashboards/hardware"));
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await them.GetAsync("/api/dashboards/llm-users"));
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await them.PostAsync("/api/dashboards/usage-by-user/panels/1/query",
+            new { from = DateTimeOffset.UtcNow.AddHours(-1), to = DateTimeOffset.UtcNow }));
+        // Someone with none of them: no dashboards.
+        var plain = "pl" + Guid.NewGuid().ToString("N")[..8];
+        var person = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = plain, email = $"{plain}@example.test" }));
+        var nobody = await new TestBrowser(app.Factory).SignedInAsync(plain, person.GetProperty("password").GetString()!);
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await nobody.GetAsync("/api/dashboards/"));
+    }
+
+    [Fact]
     public async Task Every_sql_panel_of_the_real_dashboards_runs_without_error()
     {
         var b = await Admin();

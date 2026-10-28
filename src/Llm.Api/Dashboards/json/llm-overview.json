@@ -1,5 +1,7 @@
 {
   "uid": "llm-overview",
+  "permission": "usage.read",
+  "area": "llm",
   "title": "LLM Overview",
   "schemaVersion": 39,
   "version": 2,

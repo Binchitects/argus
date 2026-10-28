@@ -1,5 +1,7 @@
 {
   "uid": "argus",
+  "permission": "usage.read",
+  "area": "llm",
   "title": "Argus: who asked what",
   "tags": [
     "llmservice",

@@ -1,5 +1,7 @@
 {
   "uid": "resources",
+  "permission": "hardware.read",
+  "area": "hardware",
   "title": "Resources (CPU, Memory, GPU)",
   "tags": [
     "llmservice",

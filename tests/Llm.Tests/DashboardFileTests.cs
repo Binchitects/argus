@@ -148,7 +148,7 @@ public sealed partial class DashboardFileTests(Promtool promtool) : IClassFixtur
     {
         var queries = PromTargets().Where(x => x.Target.Expr!.Contains("node_nvme_info", StringComparison.Ordinal)).Select(x => x.Target.Expr!).Distinct().ToList();
         Assert.True(queries.Count == 1, "every NVMe panel names its drives with the same query");
-        Assert.Equal(3, PromTargets().Count(x => x.Target.Expr == queries[0] && x.Target.LegendFormat == "{{drive}}"));
+        Assert.Equal(4, PromTargets().Count(x => x.Target.Expr == queries[0] && x.Target.LegendFormat == "{{drive}}"));
         // "one": a drive with its model. "three": two of one model (told apart by the device,
         // which comes first so a cell that cuts the name keeps it), one reporting no model, and a
         // second sensor (temp2) that is not the composite. "old": a node-exporter without the nvme

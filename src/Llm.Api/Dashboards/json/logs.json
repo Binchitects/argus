@@ -1,5 +1,7 @@
 {
   "uid": "stack-logs",
+  "permission": "monitoring.read",
+  "area": "system",
   "title": "Logs (Loki)",
   "tags": [
     "llmservice",

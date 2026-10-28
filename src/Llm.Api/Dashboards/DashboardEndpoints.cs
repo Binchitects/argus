@@ -1,5 +1,7 @@
 using System.Globalization;
+using System.Security.Claims;
 using Llm.Api.Access;
+using Microsoft.AspNetCore.Identity;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Llm.Api.Endpoints;
@@ -19,16 +21,22 @@ public static partial class DashboardEndpoints
 
     public static void MapDashboards(this IEndpointRouteBuilder app)
     {
-        // Admins only: these dashboards show everyone's usage. People see their own under /api/usage/me.
-        var g = app.MapGroup("/api/dashboards").RequireFeature("monitoring").RequirePermissions(Llm.Core.Access.Permissions.MonitoringRead, Llm.Core.Access.Permissions.MonitoringRead);
-        g.MapGet("/", (DashboardStore store) => Results.Ok(store.All().Select(d => new
+        // Admins only, each dashboard by its own permission (the model and its users: usage.read; the system: monitoring.read;
+        // the hardware: hardware.read): these show everyone's usage and the machine. People see their own under /api/usage/me.
+        var g = app.MapGroup("/api/dashboards").RequireFeature("monitoring").PersonOnly();
+        g.MapGet("/", async (DashboardStore store, ClaimsPrincipal user, UserManager<Core.Identity.AppUser> users, AccessService access) =>
         {
-            d.Uid, d.Title, panels = d.Panels.Count(p => p.Type != "row"),
-            supported = d.Panels.Count(p => p.Type != "row" && Supported(p)),
-        })));
-        g.MapGet("/{uid}", (string uid, DashboardStore store) =>
-            store.Find(uid) is { } d
-                ? Results.Ok(new
+            var mine = await MineAsync(store.All(), user, users, access);
+            return mine.Count == 0 && store.All().Count > 0 ? Results.Forbid() : Results.Ok(mine.Select(d => new
+            {
+                d.Uid, d.Title, d.Area, d.Main, panels = d.Panels.Count(p => p.Type != "row"),
+                supported = d.Panels.Count(p => p.Type != "row" && Supported(p)),
+            }));
+        });
+        g.MapGet("/{uid}", async (string uid, DashboardStore store, ClaimsPrincipal user, UserManager<Core.Identity.AppUser> users, AccessService access) =>
+            store.Find(uid) is not { } d ? Results.NotFound()
+            : !await MayAsync(d, user, users, access) ? Results.Forbid()
+                : Results.Ok(new
                 {
                     d.Uid, d.Title, d.Time, d.Refresh,
                     panels = d.Panels.Select(p => WithSupport(p)),
@@ -36,10 +44,35 @@ public static partial class DashboardEndpoints
                     {
                         v.Name, label = v.Label ?? v.Name, v.Type, v.Multi, v.IncludeAll, current = Defaults(v),
                     }),
-                })
-                : Results.NotFound());
-        g.MapGet("/{uid}/variables", VariablesAsync);
-        g.MapPost("/{uid}/panels/{key:int}/query", QueryAsync);
+                }));
+        g.MapGet("/{uid}/variables", async (string uid, DateTimeOffset? from, DateTimeOffset? to, DashboardStore store, PromDatasource prom, LokiDatasource loki,
+            ClaimsPrincipal user, UserManager<Core.Identity.AppUser> users, AccessService access, CancellationToken ct) =>
+            store.Find(uid) is { } d && !await MayAsync(d, user, users, access) ? Results.Forbid() : await VariablesAsync(uid, from, to, store, prom, loki, ct));
+        g.MapPost("/{uid}/panels/{key:int}/query", async (string uid, int key, PanelQuery q, DashboardStore store, SqlDatasource sql, PromDatasource prom, LokiDatasource loki,
+            IOptions<DashboardOptions> options, ClaimsPrincipal user, UserManager<Core.Identity.AppUser> users, AccessService access, CancellationToken ct) =>
+            store.Find(uid) is { } d && !await MayAsync(d, user, users, access) ? Results.Forbid() : await QueryAsync(uid, key, q, store, sql, prom, loki, options, ct));
+    }
+
+    /// <summary>Whether the person may see this dashboard: its permission (an Owner has every one).</summary>
+    private static async Task<bool> MayAsync(Dashboard d, ClaimsPrincipal user, UserManager<Core.Identity.AppUser> users, AccessService access) =>
+        await users.GetUserAsync(user) is { } me && await access.MayAsync(me, d.Permission);
+
+    /// <summary>The dashboards the person may see.</summary>
+    private static async Task<List<Dashboard>> MineAsync(IReadOnlyList<Dashboard> all, ClaimsPrincipal user, UserManager<Core.Identity.AppUser> users, AccessService access)
+    {
+        if (await users.GetUserAsync(user) is not { } me)
+        {
+            return [];
+        }
+        var mine = new List<Dashboard>();
+        foreach (var d in all)
+        {
+            if (await access.MayAsync(me, d.Permission))
+            {
+                mine.Add(d);
+            }
+        }
+        return mine;
     }
 
     public static bool Supported(Panel p) =>

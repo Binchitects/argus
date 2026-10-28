@@ -17,7 +17,13 @@ const lokiQuery = (url: URL) => `{container=~".+"}${url.searchParams.get('search
 describe('dashboards', () => {
   it('lists the dashboards but usage, opens one, and sends its variables with each panel', async () => {
     const calls = fakeApi(admin, {
-      'GET /api/dashboards/': () => ({ json: [{ uid: 'stack-logs', title: 'Stack Logs', panels: 1, supported: 1 }, { uid: 'usage-by-user', title: 'Usage by user', panels: 5, supported: 5 }] }),
+      'GET /api/dashboards/': () => ({
+        json: [
+          { uid: 'stack-logs', title: 'Stack Logs', area: 'system', main: false, panels: 1, supported: 1 },
+          { uid: 'system', title: 'System', area: 'system', main: true, panels: 20, supported: 20 },
+          { uid: 'usage-by-user', title: 'Usage by user', area: 'llm', main: false, panels: 5, supported: 5 },
+        ],
+      }),
       'GET /api/dashboards/stack-logs': () => ({
         json: {
           uid: 'stack-logs', title: 'Stack Logs', time: { from: 'now-1h', to: 'now' },
@@ -29,6 +35,10 @@ describe('dashboards', () => {
       'POST /api/dashboards/stack-logs/panels/0/query': () => ({ json: { intervalMs: 1000, results: [{ refId: 'A', format: 'time_series', table: null, series: [{ name: 'lines', points: [[1, 42]] }], error: null }] } }),
     })
     const { router } = renderApp('/admin/dashboards')
+    // By area, the area's own dashboard first; an area with none of them shown is left out.
+    const system = await screen.findByRole('list', { name: 'System' })
+    expect(within(system).getAllByRole('link').map((l) => l.querySelector('.font-semibold')?.textContent)).toEqual(['System', 'Stack Logs'])
+    expect(screen.queryByRole('list', { name: 'Hardware' })).toBeNull()
     await userEvent.click(await screen.findByRole('link', { name: /Stack Logs/ }))
     expect(screen.queryByText('Usage by user')).not.toBeInTheDocument()
     await waitFor(() => expect(router.state.location.pathname).toBe('/admin/dashboards/stack-logs'))

@@ -38,6 +38,7 @@ public static class Permissions
     public const string PrivacyManage = "privacy.manage";
     public const string LogsRead = "logs.read";
     public const string MonitoringRead = "monitoring.read";
+    public const string HardwareRead = "hardware.read";
     public const string AlertsManage = "alerts.manage";
     public const string RetentionManage = "retention.manage";
     public const string LegalHoldManage = "legalhold.manage";
@@ -176,6 +177,7 @@ public static class Permissions
         new(PrivacyManage, "Data", "Answer people's requests about their data: a copy, a correction, restriction, objection and erasure.", true),
         new(LogsRead, "Oversight", "Read the stack's logs and the answers' traces.", true),
         new(MonitoringRead, "Oversight", "See the monitoring dashboards, the quality reports and the stack's state.", true),
+        new(HardwareRead, "Oversight", "See the hardware dashboards: the GPUs, CPUs, memory, disks, network, temperatures and power.", true),
         new(AlertsManage, "Oversight", "Set alert rules and where they go.", true),
         new(SafeguardsRead, "Safeguards", "See the safeguard rules, what they did, and try texts on the test bench.", true),
         new(SafeguardsManage, "Safeguards", "Make, change, order and remove safeguard rules.", true),
@@ -346,9 +348,9 @@ public static class BuiltInRoles
         new(TeamManager, "Team manager", "A group's manager: its people, their credit and limits, its spend and usage. Given over a group, it reaches only that group.",
             [Permissions.PeopleRead, Permissions.PeopleManage, Permissions.PeopleDisable, Permissions.CreditsManage, Permissions.BillingRead, Permissions.UsageRead]),
         new(Supervisor, "Supervisor", "Watches the service: dashboards, alerts, logs, traces, usage and the audit log; changes nothing.",
-            [Permissions.MonitoringRead, Permissions.LogsRead, Permissions.UsageRead, Permissions.AuditRead, Permissions.ModelsRead]),
+            [Permissions.MonitoringRead, Permissions.HardwareRead, Permissions.LogsRead, Permissions.UsageRead, Permissions.AuditRead, Permissions.ModelsRead]),
         new(Operator, "Operator", "Runs the service day to day: takes alerts, loads and unloads models, cleans up storage, reads logs and dashboards.",
-            [Permissions.MonitoringRead, Permissions.LogsRead, Permissions.AlertsManage, Permissions.ModelsRead, Permissions.ModelsLoad, Permissions.StorageManage]),
+            [Permissions.MonitoringRead, Permissions.HardwareRead, Permissions.LogsRead, Permissions.AlertsManage, Permissions.ModelsRead, Permissions.ModelsLoad, Permissions.StorageManage]),
         new(SafetyOfficer, "Safety officer", "The safeguards: their rules, what they did, and people's requests to review a refusal; reads the audit log.",
             [Permissions.SafeguardsRead, Permissions.SafeguardsManage, Permissions.AuditRead]),
         new(ComplianceOfficer, "Compliance officer", "The Compliance center: the controls and their checks, the company's part attested, access reviews, people's data requests and the evidence; reads the audit log.",

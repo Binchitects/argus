@@ -1,5 +1,7 @@
 {
   "uid": "usage-by-user",
+  "permission": "usage.read",
+  "area": "llm",
   "title": "Usage by person",
   "schemaVersion": 39,
   "version": 1,

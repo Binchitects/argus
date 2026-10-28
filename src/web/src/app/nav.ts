@@ -8,6 +8,8 @@ export interface NavItem {
   keywords?: string[]
   /** In an admin section: the permission that shows it (an Owner holds every one). */
   permission?: string
+  /** ... or any of these. */
+  anyOf?: string[]
   /** The feature it is part of (deploy/features): left out while that feature is off. */
   feature?: string
 }
@@ -80,7 +82,7 @@ export const navigation: NavSection[] = [
     items: [
       { title: 'Monitoring', path: '/admin/monitoring', icon: Activity, keywords: ['prometheus', 'probes', 'health', 'services'], permission: 'monitoring.read' },
       { title: 'Line', path: '/admin/line', icon: ListOrdered, keywords: ['queue', 'waiting', 'busy', 'running', 'who waits', 'at once'], permission: 'usage.read' },
-      { title: 'Dashboards', path: '/admin/dashboards', icon: LineChart, keywords: ['gpu', 'performance', 'metrics', 'charts'], permission: 'monitoring.read', feature: 'monitoring' },
+      { title: 'Dashboards', path: '/admin/dashboards', icon: LineChart, keywords: ['gpu', 'performance', 'metrics', 'charts', 'hardware', 'system', 'users'], anyOf: ['usage.read', 'monitoring.read', 'hardware.read'], feature: 'monitoring' },
       { title: 'Logs', path: '/admin/logs', icon: Logs, keywords: ['loki', 'errors', 'containers', 'tail'], permission: 'logs.read', feature: 'monitoring' },
       { title: 'Alerts', path: '/admin/alerts', icon: Siren, keywords: ['alertmanager', 'firing', 'rules', 'incidents'], permission: 'monitoring.read' },
       { title: 'Traces', path: '/admin/traces', icon: Timer, keywords: ['slow', 'answers', 'latency', 'timeline', 'sub-agents', 'speed', 'tokens'], permission: 'traces.read' },
@@ -93,7 +95,7 @@ export function visibleNavigation(me: { isAdmin: boolean; permissions?: string[]
   const held = new Set(me.permissions ?? [])
   const off = new Set(me.featuresOff ?? [])
   return navigation
-    .map((s) => (!s.adminOnly || me.isAdmin ? s : { ...s, items: s.items.filter((i) => i.permission && held.has(i.permission)) }))
+    .map((s) => (!s.adminOnly || me.isAdmin ? s : { ...s, items: s.items.filter((i) => (i.permission && held.has(i.permission)) || i.anyOf?.some((k) => held.has(k))) }))
     .map((s) => ({ ...s, items: s.items.filter((i) => !i.feature || !off.has(i.feature)) }))
     .filter((s) => s.items.length > 0)
 }

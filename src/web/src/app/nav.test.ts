@@ -17,6 +17,14 @@ describe('nav', () => {
     expect(findNavItem('/nope')).toBeUndefined()
   })
 
+  it('shows Dashboards to whoever holds any of its areas, and Line to who reads usage', () => {
+    const titles = (permissions: string[]) => visibleNavigation({ isAdmin: false, permissions }).flatMap((s) => s.items.map((i) => i.title))
+    for (const p of ['usage.read', 'monitoring.read', 'hardware.read']) expect(titles([p]), p).toContain('Dashboards')
+    expect(titles(['hardware.read'])).not.toContain('Line')
+    expect(titles(['usage.read'])).toContain('Line')
+    expect(titles(['audit.read'])).not.toContain('Dashboards')
+  })
+
   it('leaves out the pages of the features that are off, and names only features deploy/features lists', () => {
     const titles = (off: string[]) => visibleNavigation({ isAdmin: true, featuresOff: off }).flatMap((s) => s.items.map((i) => i.title))
     expect(titles([])).toContain('Science lab')

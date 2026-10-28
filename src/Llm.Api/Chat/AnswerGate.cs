@@ -76,6 +76,21 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
 
     private readonly HashSet<Place> _held = [];
 
+    // What the line refused and how long its requests waited, by kind, since the app started (Admin → Dashboards).
+    private readonly Dictionary<(string Reason, string Kind), long> _refused = [];
+    private readonly Dictionary<string, (long Count, double Seconds)> _waited = new(StringComparer.Ordinal);
+
+    /// <summary>The line's numbers for Prometheus: refusals by reason ("busy", "too_long") and kind, and the time waited by kind.</summary>
+    public (Dictionary<(string Reason, string Kind), long> Refused, Dictionary<string, (long Count, double Seconds)> Waited) Counters()
+    {
+        lock (_lock)
+        {
+            return (new(_refused), new(_waited, StringComparer.Ordinal));
+        }
+    }
+
+    private void Count(string reason, string kind) => _refused[(reason, kind)] = _refused.GetValueOrDefault((reason, kind)) + 1;
+
     /// <summary>
     /// What the line looks like to one person: the model they wait for (null when it is the whole
     /// chat's limit that holds them), how many are ahead of them, how many answers it runs, of how
@@ -157,6 +172,7 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
             if (!me.Granted.Task.IsCompleted && options.CurrentValue.QueueLength is > 0 and var most && _waiting.Count > Share(most))
             {
                 _waiting.Remove(me);
+                Count("busy", kind);
                 throw new BusyException($"The service is busy: {_waiting.Count} requests are waiting already, the most there may be. Try again in a little while.");
             }
         }
@@ -185,6 +201,10 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
                 ct.ThrowIfCancellationRequested();
                 if (clock.GetUtcNow() - started > timeout)
                 {
+                    lock (_lock)
+                    {
+                        Count("too_long", kind);
+                    }
                     throw new TooLongException($"{model} has been busy for {timeout.TotalMinutes:0} minutes: nothing was sent. Try again in a while, or choose another model.");
                 }
             }
@@ -302,6 +322,8 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
             _total++;
             _lastServed[next.Person] = ++_tick;
             var place = new Place(this, next.Person, next.Model, next.Kind, clock.GetUtcNow());
+            var (count, seconds) = _waited.GetValueOrDefault(next.Kind);
+            _waited[next.Kind] = (count + 1, seconds + (place.Since - next.Since).TotalSeconds);
             _held.Add(place);
             next.Granted.TrySetResult(place);
         }
