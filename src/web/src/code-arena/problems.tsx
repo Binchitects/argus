@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CircleAlert, CircleCheck, Info, Play, TriangleAlert, Wand2 } from 'lucide-react'
+import { CircleAlert, CircleCheck, ExternalLink, Info, Play, ShieldAlert, TriangleAlert, Wand2 } from 'lucide-react'
+import { useEffect } from 'react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -9,7 +10,7 @@ import { asks, chatBridge, problemText } from './bridge'
 import { useEditor } from './editor-state'
 import { FileIcon } from './file-icon'
 import { PartHelp } from './help'
-import { nameOf, parentOf, problemsQuery, runCheck, type CheckProblem } from './ide-api'
+import { nameOf, parentOf, problemsQuery, readSecurity, runCheck, securityProblemsQuery, type CheckProblem } from './ide-api'
 import { languageServers, useLanguageServers } from './lsp/servers'
 
 const action =
@@ -34,6 +35,20 @@ export function ProblemsPanel() {
     onSuccess: (r) => queryClient.setQueryData(problemsQuery.queryKey, r),
     onError: (e) => toast.error(errorMessage(e)),
   })
+  // Arena's security review of this repository: read as the view opens, again on asking; its findings join the problems.
+  const security = useQuery(securityProblemsQuery)
+  const reread = useMutation({
+    mutationFn: readSecurity,
+    onSuccess: (r) => {
+      queryClient.setQueryData(securityProblemsQuery.queryKey, r)
+      void queryClient.invalidateQueries({ queryKey: problemsQuery.queryKey, exact: true })
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  const securityRead = security.dataUpdatedAt
+  useEffect(() => {
+    if (securityRead) void queryClient.invalidateQueries({ queryKey: problemsQuery.queryKey, exact: true })
+  }, [securityRead, queryClient])
   useLanguageServers()
   const fromServers: Listed[] = languageServers.problems()
   const data = last.data
@@ -48,6 +63,11 @@ export function ProblemsPanel() {
         <Tooltip content={data?.command ? `Run check: ${data.command}` : 'Run check'}>
           <button type="button" aria-label="Run check" onClick={() => run.mutate()} disabled={running || !data?.command} className={action}>
             <Play className={cn(running && 'animate-pulse')} />
+          </button>
+        </Tooltip>
+        <Tooltip content="Read Arena's security review again">
+          <button type="button" aria-label="Read the security review again" onClick={() => reread.mutate()} disabled={reread.isPending} className={action}>
+            <ShieldAlert className={cn(reread.isPending && 'animate-pulse')} />
           </button>
         </Tooltip>
         <PartHelp part="problems" />
@@ -68,6 +88,23 @@ export function ProblemsPanel() {
                       ? 'No problems.'
                       : `The check failed (exit code ${data.exitCode ?? '—'}): ${data.said ?? 'nothing it printed reads as a problem'}`
                     : `${count(problems, 'error')} · ${count(problems, 'warning')} · ran ${new Date(data.ran).toLocaleTimeString()}`}
+          </p>
+        )}
+        {security.data && (
+          <p className="flex flex-wrap items-center gap-x-1.5 px-3 pb-2 text-xs text-muted-foreground" aria-label="Security review">
+            <ShieldAlert className="size-3.5" aria-hidden="true" />
+            {security.data.said ?? (
+              <>
+                Security review of {security.data.project}
+                {security.data.ref ? ` at ${security.data.ref}` : ''}: {security.data.count} open {security.data.count === 1 ? 'finding' : 'findings'}
+                {security.data.finishedAt ? `, ${new Date(security.data.finishedAt).toLocaleDateString()}` : ''}
+                {security.data.link && (
+                  <a href={security.data.link} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 text-primary hover:underline">
+                    in Arena <ExternalLink className="size-3" aria-hidden="true" />
+                  </a>
+                )}
+              </>
+            )}
           </p>
         )}
         {data?.ran && problems.length === 0 && data.exitCode === 0 && !running && (
@@ -130,7 +167,7 @@ function FileProblems({ file, problems, label }: { file: string; problems: Liste
                 <button
                   type="button"
                   aria-label={`Fix ${p.path}:${p.line}`}
-                  onClick={() => chatBridge.current?.ask(asks.fix([problemText(p)]), [{ path: p.path, startLine: p.line, endLine: p.line }])}
+                  onClick={() => chatBridge.current?.ask(p.ask ?? asks.fix([problemText(p)]), [{ path: p.path, startLine: p.line, endLine: p.line }])}
                   className={cn(action, 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100')}
                 >
                   <Wand2 />

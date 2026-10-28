@@ -72,6 +72,50 @@ public sealed class CodeArenaSyncTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "VUL-01")]
+    public async Task Code_Arena_reads_the_latest_security_review_of_its_branch_with_what_Fix_it_would_ask()
+    {
+        await using var f = NewApp();
+        var (web, key) = await PersonAsync(f);
+        var me = (await web.JsonAsync(await web.GetAsync("/api/auth/me"))).GetProperty("id").GetGuid();
+        var arena = CodeArena(f, key);
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await CodeArena(f, null).GetAsync(new Uri("/api/code-arena/security?project=group/shop", UriKind.Relative)));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await arena.GetAsync(new Uri("/api/code-arena/security", UriKind.Relative)));
+        var none = await Json(await arena.GetAsync(new Uri("/api/code-arena/security?project=group/shop&ref=main", UriKind.Relative)));
+        Assert.Equal(JsonValueKind.Null, none.GetProperty("scan").ValueKind);
+        Guid older, latest, others;
+        using (var scope = f.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+            Llm.Core.Code.SecurityFinding Finding(string title, string severity, string state = "open", bool? verified = true) => new()
+            {
+                Path = "src/Orders.cs", Line = 4, SinkCode = "new SqlCommand(q)", Cwe = "CWE-89", CweTitle = "CWE-89: SQL Injection", Severity = severity, Title = title, Pages = "[]",
+                State = state, Verified = verified,
+            };
+            var before = new Llm.Core.Code.SecurityScan { UserId = me, Project = "group/shop", Ref = "main", Status = "done", FinishedAt = DateTimeOffset.UtcNow.AddDays(-2) };
+            before.Findings.Add(Finding("An old one", "high"));
+            var now = new Llm.Core.Code.SecurityScan { UserId = me, Project = "group/shop", Ref = "main", Commit = "abc1234567890", Status = "done", FinishedAt = DateTimeOffset.UtcNow };
+            now.Findings.AddRange([Finding("Medium one", "medium"), Finding("Critical one", "critical"), Finding("Settled", "high", "fixed"), Finding("Doubted", "high", verified: false)]);
+            var theirs = new Llm.Core.Code.SecurityScan { UserId = Guid.NewGuid(), Project = "group/shop", Ref = "feature", Status = "done", FinishedAt = DateTimeOffset.UtcNow };
+            db.Users.Add(new Llm.Core.Identity.AppUser { Id = theirs.UserId, UserName = "someone" + Guid.NewGuid().ToString("N")[..6] });
+            db.SecurityScans.AddRange(before, now, theirs);
+            await db.SaveChangesAsync();
+            (older, latest, others) = (before.Id, now.Id, theirs.Id);
+        }
+        var read = await Json(await arena.GetAsync(new Uri("/api/code-arena/security?project=group/shop&ref=main", UriKind.Relative)));
+        Assert.Equal((latest, $"/code/security/{latest}"), (read.GetProperty("scan").GetProperty("id").GetGuid(), read.GetProperty("scan").GetProperty("link").GetString()));
+        // The open ones the review stands by, the most severe first, each with what Fix it would ask.
+        var findings = read.GetProperty("findings").EnumerateArray().ToList();
+        Assert.Equal(["Critical one", "Medium one"], findings.Select(x => x.GetProperty("title").GetString()));
+        Assert.StartsWith("Fix this security weakness in src/Orders.cs at line 4: CWE-89", findings[0].GetProperty("ask").GetString(), StringComparison.Ordinal);
+        // Another person's review of another branch is not theirs to read.
+        var other = await Json(await arena.GetAsync(new Uri("/api/code-arena/security?project=group/shop&ref=feature", UriKind.Relative)));
+        Assert.Equal(JsonValueKind.Null, other.GetProperty("scan").ValueKind);
+        Assert.NotEqual(older, latest);
+        Assert.NotEqual(others, latest);
+    }
+
+    [Fact]
     public async Task Code_Arena_reads_the_web_chat_s_config_with_the_person_s_key()
     {
         await using var f = NewApp();

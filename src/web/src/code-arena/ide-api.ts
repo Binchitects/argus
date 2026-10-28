@@ -256,7 +256,30 @@ export interface CheckProblem {
   severity: 'error' | 'warning' | 'info'
   code: string | null
   message: string
+  /** What found it: "check", a task ("task:" and its label), "review", or "security" (Arena's security review). */
+  source?: string
+  /** What the agent is asked to fix it, when its source says more than its message (a security review's finding). */
+  ask?: string | null
 }
+
+/** Arena's latest security review of the folder's repository at its branch, as the IDE last read it; or why there is none. */
+export interface SecurityRead {
+  project: string | null
+  ref: string | null
+  count: number
+  said?: string
+  finishedAt?: string | null
+  commit?: string | null
+  link?: string
+}
+
+export const securityProblemsQuery = {
+  queryKey: ['code', 'problems', 'security'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<SecurityRead>('/api/problems/security', { signal }),
+}
+
+/** Reads Arena's security review again; its findings replace the ones listed. */
+export const readSecurity = () => api<SecurityRead>('/api/problems/security', { body: {} })
 
 /** The check's last run: its command (or the one it would run), whether one runs now, when, its exit code, and what it found. */
 export interface CheckRun {

@@ -1883,6 +1883,36 @@ describe('Code Arena, the IDE', () => {
     }))
   })
 
+  it("lists the security review's open findings among the problems, and Fix gives the agent what Fix it would ask", async () => {
+    const finding = {
+      path: 'src/app.ts', line: 2, column: 1, severity: 'error', code: 'CWE-89', message: 'SQL built from the request (high, security review)', source: 'security',
+      ask: 'Fix this security weakness in src/app.ts at line 2: CWE-89. First write a test that shows the weakness.',
+    }
+    let read = 0
+    const { calls } = backend({
+      'GET /api/problems': () => ({ json: { command: null, running: false, ran: null, exitCode: null, said: null, problems: [finding] } }),
+      'GET /api/problems/security': () => ({ json: { project: 'group/shop', ref: 'main', count: 1, finishedAt: '2026-10-28T00:00:00Z', commit: 'abc', link: 'https://arena.test/code/security/s1' } }),
+      'POST /api/problems/security': () => {
+        read++
+        return { json: { project: 'group/shop', ref: 'main', count: 1, link: 'https://arena.test/code/security/s1' } }
+      },
+      'POST /api/messages': () => answerOnly(),
+    })
+    renderIde()
+    await openApp()
+    await userEvent.click(await screen.findByRole('button', { name: 'Problems (1)' }))
+    const panel = await screen.findByRole('complementary', { name: 'Problems' })
+    const line = await within(panel).findByLabelText('Security review')
+    expect(line).toHaveTextContent('Security review of group/shop at main: 1 open finding')
+    expect(within(line).getByRole('link', { name: /in Arena/ })).toHaveAttribute('href', 'https://arena.test/code/security/s1')
+    const list = await within(panel).findByRole('list', { name: 'Problems in src/app.ts' })
+    expect(within(list).getByText(/SQL built from the request/)).toBeInTheDocument()
+    await userEvent.click(within(list).getByRole('button', { name: 'Fix src/app.ts:2' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/messages')?.body).toEqual({ text: finding.ask, context: [{ path: 'src/app.ts', startLine: 2, endLine: 2 }] }))
+    await userEvent.click(within(panel).getByRole('button', { name: 'Read the security review again' }))
+    await waitFor(() => expect(read).toBe(1))
+  })
+
   it('reviews the changes: its steps while it runs, then findings by file that open their line, apply their fix in the editor, go to the agent or are dismissed', async () => {
     const finding = (over: Record<string, unknown>) => ({ endLine: 2, why: 'Logs the total on every load.', fix: 'Remove the log.', old: null, new: null, state: 'open', ...over })
     const findings = [

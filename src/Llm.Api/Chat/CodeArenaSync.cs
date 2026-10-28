@@ -113,12 +113,49 @@ public static class CodeArenaSync
         g.MapGet("/preferences", PreferencesAsync);
         g.MapGet("/config", ConfigAsync);
         g.MapGet("/skills", SkillsAsync);
+        g.MapGet("/security", SecurityAsync);
     }
 
     /// <summary>
     /// The skills the person's plugins bring (each a SKILL.md and the files beside it), for Code Arena to keep with theirs: only
     /// the plugins whose tool they may use. Its own and the project's skills of the same name win there.
     /// </summary>
+    /// <summary>
+    /// The latest security review of a repository's branch the person may read (their own, or everyone's with
+    /// reviews.admin), for Code Arena's Problems: its open findings (the doubted ones left out), the most severe first, each
+    /// with what Fix it would ask, so the IDE's agent is given the weakness, its path and the references. A branch with no
+    /// review of its own falls back to one of the default branch (a review that named none).
+    /// </summary>
+    private static async Task<IResult> SecurityAsync(HttpContext http, McpPeople people, AccessService access, AppDbContext db, string? project, string? @ref)
+    {
+        var (me, refusal) = await CallerAsync(http, people);
+        if (me is null)
+        {
+            return refusal!;
+        }
+        if (project?.Trim().Trim('/') is not { Length: > 0 and <= 500 } path)
+        {
+            return AuthEndpoints.Problem(400, "project", "Name the repository: group/project.");
+        }
+        var ct = http.RequestAborted;
+        var everyone = await access.MayAsync(me, Core.Access.Permissions.ReviewsAdmin, ct);
+        var reviews = db.SecurityScans.AsNoTracking().Where(s => s.Project == path && s.Status == Core.Code.SecurityScan.Done && (everyone || s.UserId == me.Id));
+        var scan = (@ref is { Length: > 0 } branch ? await reviews.Where(s => s.Ref == branch).OrderByDescending(s => s.FinishedAt).FirstOrDefaultAsync(ct) : null)
+            ?? await reviews.Where(s => s.Ref == null).OrderByDescending(s => s.FinishedAt).FirstOrDefaultAsync(ct);
+        if (scan is null)
+        {
+            return Results.Ok(new { scan = (object?)null, findings = Array.Empty<object>() });
+        }
+        static int Rank(string severity) => severity switch { "critical" => 0, "high" => 1, "medium" => 2, _ => 3 };
+        var findings = (await db.SecurityFindings.AsNoTracking().Where(f => f.ScanId == scan.Id && f.State == Core.Code.SecurityFinding.Open && f.Verified != false).ToListAsync(ct))
+            .OrderBy(f => f.Exploited ? 0 : 1).ThenBy(f => Rank(f.Severity)).ThenBy(f => f.Path, StringComparer.Ordinal).ThenBy(f => f.Line).ToList();
+        return Results.Ok(new
+        {
+            scan = new { scan.Id, scan.Project, scan.Ref, scan.Commit, scan.FinishedAt, link = $"/code/security/{scan.Id}" },
+            findings = findings.Select(f => new { f.Id, f.Kind, f.Path, f.Line, f.Severity, f.Exploited, f.Cwe, f.Rule, f.Title, ask = Code.Fixes.FixEndpoints.SecurityAsk(f, scan) }),
+        });
+    }
+
     private static async Task<IResult> SkillsAsync(HttpContext http, McpPeople people, ToolRegistry registry, AccessService access, AppDbContext db)
     {
         var (me, refusal) = await CallerAsync(http, people);

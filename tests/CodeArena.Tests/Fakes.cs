@@ -847,6 +847,11 @@ public sealed class FakeChats
         await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes(reply.ToJsonString()));
     }
 
+    /// <summary>The latest security review, as /api/code-arena/security gives it; null: Arena does not answer it (an older one).</summary>
+    public JsonObject? Security { get; set; }
+    /// <summary>What Code Arena asked /api/code-arena/security (its query: the project and the branch).</summary>
+    public List<string> SecurityAsked { get; } = [];
+
     /// <summary>Whether Arena answers /api/code-arena/preferences (an older one does not).</summary>
     public bool Preferences { get; set; } = true;
     /// <summary>The web chat's config for the person, as /api/code-arena/config gives it; null: Arena does not answer it.</summary>
@@ -1090,6 +1095,20 @@ public sealed class FakeChats
             {
                 ctx.Response.ContentType = "application/json";
                 await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes("""{"id":"plan-1","link":"/plans/plan-1"}"""));
+            }
+            return;
+        }
+        if (parts is ["security"] && method == "GET")
+        {
+            lock (_gate)
+            {
+                SecurityAsked.Add(ctx.Request.Url!.Query);
+            }
+            ctx.Response.StatusCode = Security is null ? 404 : 200;
+            if (Security is { } security)
+            {
+                ctx.Response.ContentType = "application/json";
+                await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes(security.ToJsonString()));
             }
             return;
         }

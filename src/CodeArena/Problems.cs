@@ -8,7 +8,8 @@ namespace CodeArena;
 /// A problem a check or a task found: where (a path of the folder, from 1), how bad, its code, what it says, and what
 /// found it ("check", or "task:" and the task's label).
 /// </summary>
-internal sealed record Problem(string Path, int Line, int Column, string Severity, string? Code, string Message, string Source = Problems.CheckSource);
+/// <param name="Ask">What the agent is asked to fix it, when its source says more than its message (a security review's finding).</param>
+internal sealed record Problem(string Path, int Line, int Column, string Severity, string? Code, string Message, string Source = Problems.CheckSource, string? Ask = null);
 
 /// <summary>Which group of a task's own pattern holds what: 0 for none (for the message, the whole line).</summary>
 internal sealed record ProblemGroups(int File = 1, int Line = 2, int Column = 3, int Location = 0, int Severity = 0, int Code = 0, int Message = 0);

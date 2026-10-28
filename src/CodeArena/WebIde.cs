@@ -29,6 +29,7 @@ internal sealed partial class WebApp
     private RunConfigs _runs = null!;
     private EditorExtensions _extensions = null!;
     private Reviews _reviews = null!;
+    private SecurityProblems _security = null!;
     private DiskWatch _watch = null!;
 
     /// <summary>The one call whose body is not JSON: a VS Code extension's .vsix, sent whole.</summary>
@@ -49,6 +50,7 @@ internal sealed partial class WebApp
         _runs = new RunConfigs(_rt.Workspace, _terminals, _tasks, _state, _rt.Env.Env);
         _extensions = new EditorExtensions(_rt.Env.Paths.DataDir, _rt.Env.Env);
         _reviews = new Reviews(_rt, _problems);
+        _security = new SecurityProblems(_rt, _problems);
         _watch = new DiskWatch(_rt.Workspace.Root);
         StartDebug();
         StartLsp();
@@ -122,6 +124,12 @@ internal sealed partial class WebApp
                     return true;
                 case ("POST", "/api/problems/run"):
                     await res.JsonAsync(200, ProblemsJson(await _problems.RunAsync()), ct);
+                    return true;
+                case ("GET", "/api/problems/security"):
+                    await res.JsonAsync(200, await _security.CurrentAsync(ct), ct);
+                    return true;
+                case ("POST", "/api/problems/security"):
+                    await res.JsonAsync(200, await _security.RefreshAsync(ct), ct);
                     return true;
                 case ("GET", "/api/review"):
                     await res.JsonAsync(200, _reviews.Json(), ct);
@@ -526,6 +534,7 @@ internal sealed partial class WebApp
         ["problems"] = new JsonArray([.. (run?.Found ?? []).Concat(_problems.FromTasks()).Select(p => (JsonNode)new JsonObject
         {
             ["path"] = p.Path, ["line"] = p.Line, ["column"] = p.Column, ["severity"] = p.Severity, ["code"] = p.Code, ["message"] = p.Message, ["source"] = p.Source,
+            ["ask"] = p.Ask,
         })]),
     };
 

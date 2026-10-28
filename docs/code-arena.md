@@ -1011,6 +1011,17 @@ but a linter's rule code (ruff's `F401`) or ESLint's `[Warning/…]` as a
 warning. The worst 2,000 are kept; a check that leaves something running in
 the background is not waited for.
 
+Arena's **security review** of the folder's repository joins them, read with
+your key as the view opens (and again with **Read the security review
+again**): the latest review of origin's project at the folder's branch (or
+of its default branch, when the branch has none of its own) that you may
+read. Its open findings are problems, critical and high ones errors, medium
+warnings, low notes, each with its CWE (or the scanner's rule); the doubted
+ones are left out. **Fix** beside one gives the agent what Fix it would ask:
+the weakness, where outside data comes in, its way to the sink, the
+references, and a test that shows it first. The line above them says which
+review it is, with a link to it in Arena.
+
 
 ### Review
 
