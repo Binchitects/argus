@@ -1032,6 +1032,7 @@ Code Studio → Security reviews a repository at a commit, read with the person'
 - `Llm.Tests/SecurityReviewTests.The_vulnerabilities_check_counts_what_is_past_its_time_to_fix`
 - `Llm.Tests/SecurityReviewTests.When_the_advisories_are_renewed_a_reviews_packages_are_checked_again_at_the_commit_it_read`
 - `Llm.Tests/FixTests.A_security_findings_fix_starts_from_the_branch_reviewed_with_the_weakness_its_references_and_a_test_first`
+- `Llm.Tests/SecurityReviewTests.Admin_security_shows_each_repositorys_latest_review_what_cannot_wait_this_week_and_the_risks_accepted`
 
 **Watched by** `app:vulnerabilities` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
 

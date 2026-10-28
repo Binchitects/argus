@@ -843,6 +843,32 @@ and removed there.
   person may use (each model's **Who may use it**), and the chat's model may
   name another picture model the person asks for.
 
+### Security
+
+Admin → Security (for those who may manage every review, `reviews.admin`,
+where Code Studio is on) shows every repository's latest security review at
+a glance. Reviews are run in Code Studio → Security
+([chat.md](chat.md#security-reviews)).
+
+- **The numbers**: open findings by severity, the known-exploited (on CISA's
+  list), those past their time to fix, and what was new and fixed this week.
+  The time to fix is 7, 30, 90 or 180 days by severity, counted from when
+  each finding was found. A vulnerable package found when the advisories were
+  renewed counts from then.
+- **Repositories**: each repository and branch's latest review, the
+  known-exploited and most severe first, with its bill of materials to
+  download.
+- **Cannot wait**: open findings known to be exploited, and those past their
+  time.
+- **This week**: what reviews, and the packages checked again against renewed
+  advisories, found in the last seven days, and what was fixed.
+- **Risks accepted**: by whom, why and until when; lapsed ones are marked.
+
+A new critical or known-exploited finding, from a review or from a renewed
+advisory, is sent at once to everyone with `reviews.admin` (the security
+team), as well as to the review's person. The page warns when no advisories
+pack is installed, or when the advisories are more than a week old.
+
 ### Quality
 
 Two things feed it, both from the chat ([chat.md](chat.md)):

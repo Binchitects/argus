@@ -91,6 +91,7 @@ export const routes: RouteObject[] = [
               { path: 'compliance', ...lazy(() => import('@/pages/admin/compliance').then((m) => ({ Component: m.CompliancePage }))) },
               { path: 'compliance/incidents/:id', ...lazy(() => import('@/pages/admin/incidents').then((m) => ({ Component: m.IncidentPage }))) },
               { path: 'compliance/reviews/:id', ...lazy(() => import('@/pages/admin/access-review').then((m) => ({ Component: m.AccessReviewPage }))) },
+              { path: 'security', ...lazy(() => import('@/pages/admin/security').then((m) => ({ Component: m.SecurityPage }))) },
               { path: 'quality', ...lazy(() => import('@/pages/admin/quality').then((m) => ({ Component: m.QualityPage }))) },
               { path: 'indexing', ...lazy(() => import('@/pages/admin/argus').then((m) => ({ Component: m.IndexingPage }))) },
               { path: 'packs', ...lazy(() => import('@/pages/admin/argus-packs').then((m) => ({ Component: m.PacksPage }))) },

@@ -126,6 +126,7 @@ public sealed partial class SecurityRecheck(IServiceScopeFactory scopes, ILogger
                 $"New known vulnerabilities in {scan.Project}",
                 $"{fresh.Count} package version(s) affected by advisories published since the review{(exploited > 0 ? $", {exploited} known to be exploited" : "")}",
                 $"/code/security/{scan.Id}"), ct);
+            await SecurityOverview.AlertAsync(services, scan, fresh, ct);
         }
         return fresh.Count;
     }

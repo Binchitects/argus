@@ -2329,6 +2329,11 @@ Arena's own dependencies.
      vulnerable package says so in its review.
    - **Alerts**: a new critical or known-exploited finding reaches the
      repository's owners and the security team.
+   Done: Admin → Security (each repository's latest review, the
+   known-exploited, past due, new and fixed this week, risks accepted, the
+   SBOMs) and the alerts (to everyone with `reviews.admin`, and the
+   review's person). Left: findings in Code Arena's Problems panel, and
+   automatic reviews saying what a merge request adds.
 7. **Measured, as Argus was.** Recognising: on the Juliet test suite (NIST
    SARD, public domain: C, C++, Java, C#) and the OWASP Benchmark (Java),
    precision and recall per CWE for the scanners alone, the model alone, the

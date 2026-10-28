@@ -279,6 +279,7 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
             scan.FinishedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(ct);
             await NotifyAsync(services, scan, ct);
+            await SecurityOverview.AlertAsync(services, scan, scan.Findings, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {

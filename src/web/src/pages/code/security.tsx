@@ -441,13 +441,13 @@ export function SecurityScanPage() {
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h2 className="text-lg font-semibold">Weaknesses in the code ({kept.length})</h2>
             {s.scanners && s.scanners.tools.length > 0 && (
-              <div className="flex flex-wrap gap-1" role="group" aria-label="Found by">
+              <fieldset className="flex flex-wrap gap-1" aria-label="Found by">
                 {(Object.keys(found) as Found[]).map((k) => (
                   <Button key={k} size="sm" variant={by === k ? 'secondary' : 'ghost'} aria-pressed={by === k} onClick={() => setBy(k)}>
                     {found[k]}
                   </Button>
                 ))}
-              </div>
+              </fieldset>
             )}
           </div>
           {kept.length === 0 ? (

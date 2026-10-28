@@ -199,6 +199,62 @@ public sealed class SecurityReviewTests(AppFixture app)
         Assert.Contains(run.GetProperty("tool").GetProperty("driver").GetProperty("rules").EnumerateArray(), r => r.GetProperty("id").GetString() == "GHSA-5crp-9r3c-p9vr");
         var other = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
         await StatusAssert.Is(HttpStatusCode.OK, await other.GetAsync($"/api/code/security/{id}"));
+        // The known-exploited package reached the security team (who may manage every review) at once.
+        var news = (await other.JsonAsync(await other.GetAsync("/api/notifications"))).GetProperty("items").EnumerateArray();
+        Assert.Contains(news, n => n.GetProperty("title").GetString() == "Urgent security findings in g/shop" && n.GetProperty("link").GetString() == $"/code/security/{id}"
+            && n.GetProperty("body").GetString()!.Contains("known to be exploited", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Control", "VUL-01")]
+    public async Task Admin_security_shows_each_repositorys_latest_review_what_cannot_wait_this_week_and_the_risks_accepted()
+    {
+        await using var f = app.Create(app.ConnectionStringFor("sec_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway());
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var adminId = (await admin.JsonAsync(await admin.GetAsync("/api/auth/me"))).GetProperty("id").GetGuid();
+        var now = DateTimeOffset.UtcNow;
+        using (var scope = f.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            SecurityFinding Found(string title, string severity, int daysAgo, string state = SecurityFinding.Open, bool exploited = false, string kind = SecurityFinding.Code) =>
+                new() { Kind = kind, Path = "src/a.cs", Line = 1, Cwe = "CWE-89", Severity = severity, Title = title, Verified = true, State = state, Exploited = exploited, FoundAt = now.AddDays(-daysAgo) };
+            // An old review of g/shop is history: the latest speaks for it.
+            var before = new SecurityScan { UserId = adminId, Project = "g/shop", Ref = "main", Status = SecurityScan.Done, FinishedAt = now.AddDays(-60) };
+            before.Findings.Add(Found("Gone since", "critical", 60));
+            var shop = new SecurityScan { UserId = adminId, Project = "g/shop", Ref = "main", Status = SecurityScan.Done, FinishedAt = now.AddDays(-40), Sbom = "{}" };
+            var accepted = Found("Runs as root", "medium", 40, SecurityFinding.Accepted, kind: SecurityFinding.Config);
+            (accepted.Why, accepted.Until, accepted.DecidedById, accepted.DecidedAt) = ("Until the base image moves", now.AddMonths(2), adminId, now.AddDays(-30));
+            var fixedOne = Found("A secret", "high", 40, SecurityFinding.Fixed, kind: SecurityFinding.Secret);
+            (fixedOne.DecidedAt, fixedOne.DecidedById) = (now.AddDays(-2), adminId);
+            shop.Findings.AddRange([Found("SQL built from the request", "high", 40), Found("Log4Shell", "critical", 1, exploited: true, kind: SecurityFinding.Dependency),
+                Found("Weak hash", "low", 40), new SecurityFinding { Path = "x", Cwe = "CWE-89", Severity = "critical", Title = "Refuted", Verified = false, FoundAt = now }, accepted, fixedOne]);
+            var blog = new SecurityScan { UserId = adminId, Project = "g/blog", Status = SecurityScan.Done, FinishedAt = now.AddDays(-3) };
+            blog.Findings.Add(Found("Open redirect", "medium", 3));
+            db.SecurityScans.AddRange(before, shop, blog);
+            await db.SaveChangesAsync();
+        }
+        var d = await admin.JsonAsync(await admin.GetAsync("/api/admin/security"));
+        var repos = d.GetProperty("repositories").EnumerateArray().ToList();
+        // The known-exploited first; the old review's critical is not counted, nor the refuted one.
+        Assert.Equal(["g/shop", "g/blog"], repos.Select(r => r.GetProperty("project").GetString()));
+        var shopRow = repos[0];
+        Assert.Equal((1, 1, 1, 1, true), (shopRow.GetProperty("open").GetProperty("critical").GetInt32(), shopRow.GetProperty("open").GetProperty("high").GetInt32(),
+            shopRow.GetProperty("exploited").GetInt32(), shopRow.GetProperty("overdue").GetInt32(), shopRow.GetProperty("sbom").GetBoolean()));
+        var totals = d.GetProperty("totals");
+        Assert.Equal((1, 1, 2, 1), (totals.GetProperty("exploited").GetInt32(), totals.GetProperty("overdue").GetInt32(), totals.GetProperty("fresh").GetInt32(), totals.GetProperty("fixedThisWeek").GetInt32()));
+        Assert.Equal("Log4Shell", d.GetProperty("exploited")[0].GetProperty("title").GetString());
+        // The high one is 40 days old, past its 30; the low one has 180.
+        Assert.Equal(["SQL built from the request"], d.GetProperty("overdue").EnumerateArray().Select(x => x.GetProperty("title").GetString()));
+        Assert.Equal(["Log4Shell", "Open redirect"], d.GetProperty("fresh").EnumerateArray().Select(x => x.GetProperty("title").GetString()));
+        var risk = d.GetProperty("accepted")[0];
+        Assert.Equal(("Runs as root", "Until the base image moves", false), (risk.GetProperty("title").GetString(), risk.GetProperty("why").GetString(), risk.GetProperty("lapsed").GetBoolean()));
+        Assert.Equal("A secret", d.GetProperty("fixedThisWeek")[0].GetProperty("title").GetString());
+
+        // Only those who may manage every review.
+        var name = "s" + Guid.NewGuid().ToString("N")[..8];
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test", displayName = "Sid" }));
+        var someone = await new TestBrowser(f).SignedInAsync(name, made.GetProperty("password").GetString()!);
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await someone.GetAsync("/api/admin/security"));
     }
 
     [Fact]

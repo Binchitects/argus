@@ -716,9 +716,12 @@ export const topics = {
     about: 'One repository read for weaknesses: where data from outside reaches a query, a command, a path, a fetch, a deserialiser or HTML, each traced to its callers. A finding is kept only when it quotes the sink\'s line and names a CWE the security pack knows.',
     parts: [
       { name: 'Weaknesses', text: 'Each with its CWE and severity, the sink\'s line, where the data comes in and each step to the sink, how it could be exploited, the fix, and the security pack\'s pages it rests on. Ones a second check doubts are listed apart, with why.' },
-      { name: 'Triage', text: '**Fixed**, **Accept the risk** (why, and by when to look again) or **Not a weakness** (why); each is audited.' },
+      { name: 'Found by', text: 'The model\'s trace, the scanners (opengrep, Bandit, gitleaks, Trivy) where the scanners feature is installed, or both: filter by it. A scanner\'s match the model cleared is kept apart with what to check.' },
+      { name: 'Packages, secrets, configuration', text: 'Vulnerable packages with the smallest upgrade (checked again when the advisories are renewed, new ones marked), secrets in the code or its history, and misconfigurations, each in its own section.' },
+      { name: 'Triage', text: '**Fix it** (an agent\'s change, opened as a merge request as you), **Fixed**, **Accept the risk** (why, and by when to look again) or **Not a weakness** (why); each is audited.' },
+      { name: 'Downloads', text: 'The bill of materials (CycloneDX) and the findings as SARIF, for a code host\'s or an IDE\'s security view.' },
     ],
-    tasks: [{ title: 'Review a repository\'s security', steps: ['In Code Studio, under **Security**, name the repository and maybe a branch.', 'Press **Review security**.', 'Read each weakness and triage it.'] }],
+    tasks: [{ title: 'Review a repository\'s security', steps: ['In Code Studio, under **Security**, name the repository and maybe a branch.', 'Press **Review security**.', 'Read each weakness and triage it, or press **Fix it**.'] }],
     manual: { doc: 'chat', section: 'security-reviews' },
   },
 
@@ -967,6 +970,21 @@ export const topics = {
     ],
     tasks: [{ title: 'Handle a personal data breach', steps: ['Open an incident (from its alert, or by hand) with personal data ticked.', 'Contain it, then tell the supervisory authority within 72 hours, or record why it need not be.', 'Tell the people when the risk to them is high.', 'Close it with what was learned.'] }],
     manual: { doc: 'compliance', section: 'security-alerts-and-incidents' },
+  },
+
+  'admin-security': {
+    title: 'Security',
+    about: 'Every repository\'s latest security review at a glance: what is open, what cannot wait, what changed this week, and the risks accepted.',
+    admin: true,
+    parts: [
+      { name: 'The numbers', text: 'Open findings by severity, the known-exploited, those past their time to fix (7, 30, 90 and 180 days by severity, from when each was found), new and fixed this week.' },
+      { name: 'Repositories', text: 'Each repository and branch\'s latest review, the known-exploited and most severe first, with its bill of materials. A row opens the review.' },
+      { name: 'Cannot wait', text: 'Open findings known to be exploited, and those past their time to fix.' },
+      { name: 'This week', text: 'Found in the last seven days, by reviews and by the packages checked again when the advisories are renewed; and what was fixed.' },
+      { name: 'Risks accepted', text: 'Who accepted each, why, and until when; lapsed ones are marked.' },
+    ],
+    tasks: [{ title: 'See what needs doing first', steps: ['Read **Cannot wait**.', 'Open a finding\'s review and press **Fix it**, or triage it.'] }],
+    manual: { doc: 'admin', section: 'security' },
   },
 
   quality: {
