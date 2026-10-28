@@ -1976,6 +1976,16 @@ of those to avoid.
 
 ### v7.4 — Security, GRC and a quantum lab
 
+Released: **v7.4.0** (2026-10-28): the features chosen at install, GRC with
+the certifications, the quantum lab and the vulnerabilities, as the items below
+say, except what is left for later:
+- the quantum lab's measured test set, and the measurements of the security
+  review on the Juliet suite and the OWASP Benchmark (each needs a yes to
+  download them);
+- security findings in Code Arena's Problems panel, with Fix it beside each;
+- Fix it running the scanners and the review again on its change, and many
+  findings fixed at once, one branch each.
+
 The person asked (2026-10-27, after v7.3.0) for "full GRC and related
 evaluation certifications requirement", and for quantum computing and the
 sciences around it in the science lab, both in this release with the security

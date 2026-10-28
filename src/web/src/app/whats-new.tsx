@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ArrowRight, Atom, BadgeCheck, ExternalLink, FlaskConical, PanelsTopLeft, Server, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Atom, BadgeCheck, ExternalLink, ScanSearch, Server, ShieldAlert, Wrench, type LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
@@ -29,41 +29,50 @@ interface Tour {
 }
 
 const latestTour: Tour = {
-  release: '7.3',
-  title: "What's new in Argus Arena 7.3",
+  release: '7.4',
+  title: "What's new in Argus Arena 7.4",
   slides: [
     {
-      icon: FlaskConical,
-      title: 'A science lab',
-      text: 'Choose a science and write a problem: the model works it with tools that check each step (SymPy, Pint, RDKit, Biopython) and keeps it as a notebook, each step with what proved it. An answer no tool checked is checked before it ends.',
+      icon: ShieldAlert,
+      title: 'Security reviews',
+      text: "Code Studio → Security reads a repository as you: each weakness quotes its line, names its CWE and traces the data to it, with the pages it rests on; a second pass tries to refute it. Its packages are matched against GitHub's advisories, known-exploited first, with the smallest upgrade.",
+      to: '/code',
+      action: 'Review a repository',
+    },
+    {
+      icon: Wrench,
+      title: 'Fix it, for security too',
+      text: "Fix it on a security finding: the agent writes a test that shows the weakness, makes the change the cheat sheet describes, and opens the merge request as you. A merge request's review now says when it brings a vulnerable package or a scanner's finding.",
+      to: '/code',
+      action: 'Open Code Studio',
+    },
+    {
+      icon: ScanSearch,
+      title: 'Security across the company',
+      text: 'Admin → Security: every repository at a glance, what cannot wait, what changed this week, the risks accepted. The advisories are renewed every day, and old reviews are checked again against them: a new CVE in old code is found without a push.',
+      to: '/admin/security',
+      action: 'Open Security',
+      permission: 'reviews.admin',
+    },
+    {
+      icon: BadgeCheck,
+      title: 'GRC and the certifications',
+      text: "Fourteen frameworks, each clause mapped: ISO 27001 and 42001, SOC 2, NIST's, the EU AI Act and more. The risk register, the Statements of Applicability, policies, audits, suppliers, AI systems, and how ready you are for each certification, with its auditor's package.",
+      to: '/admin/compliance',
+      action: 'Open Compliance',
+      permission: 'compliance.read',
+    },
+    {
+      icon: Atom,
+      title: 'Quantum computing in the lab',
+      text: 'Run circuits on simulators with noise, check that two circuits are the same, sample error-correcting codes, follow a qubit as it decays, run VQE and QAOA, and compute molecules with quantum chemistry: drawn and charted in the notebook.',
       to: '/lab',
       action: 'Open the lab',
     },
     {
-      icon: BadgeCheck,
-      title: 'Proofs checked by Lean',
-      text: 'In Mathematics, a proof is written in Lean with Mathlib and checked by Lean itself: proved only when Lean accepts it, and when it does not, the model reads why and corrects it.',
-      to: '/lab',
-      action: 'Prove something',
-    },
-    {
-      icon: Atom,
-      title: 'Molecules, reactions and sequences',
-      text: 'Chemistry draws a molecule from its SMILES with its properties, gives molar masses and balances reactions checked atom by atom; Biology translates and aligns DNA, RNA and proteins.',
-      to: '/lab',
-      action: 'Try chemistry',
-    },
-    {
-      icon: PanelsTopLeft,
-      title: "Code Arena's panes, your way",
-      text: 'Move views between the side bar and the panel, the side bar left or right, the panel below or beside the editor. A gear for its settings; files you change by hand show in Changes, whose right-click explains and fixes.',
-      to: '/setup',
-      action: 'Get Code Arena',
-    },
-    {
       icon: Server,
-      title: 'On Kubernetes, with Helm',
-      text: 'installer.sh install --kubernetes checks the cluster first and says what it lacks, makes the secrets in it and installs the chart, which keeps serving through node drains and grows with its load.',
+      title: 'Only what you need',
+      text: 'Every part of the stack is a feature, turned on or off when installing, upgrading or repairing (installer.sh features lists them, with their sizes); what is off runs nothing and leaves the menus.',
       to: '/help/deployment',
       action: 'Read how',
       permission: 'settings.read',

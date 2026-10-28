@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-7.3.0-5b8cff">
+  <img alt="version" src="https://img.shields.io/badge/version-7.4.0-5b8cff">
   <img alt="self-hosted" src="https://img.shields.io/badge/self--hosted-on%20your%20GPUs-7c4dff">
   <img alt="offline" src="https://img.shields.io/badge/installs-air--gapped-2ea043">
   <img alt="licence" src="https://img.shields.io/badge/licence-AGPL--3.0%20%7C%20commercial-555">
@@ -115,15 +115,35 @@ charts.
 </td>
 </tr>
 <tr>
+<td valign="top">
+
+### 🔐 Security reviews
+A repository read for weaknesses as you: each one quotes its line, names its
+CWE and traces the data to it, grounded in CWE, OWASP and CodeQL's guidance,
+with scanners beside the model. Its packages are matched against GitHub's
+advisories, renewed every day, and **Fix it** writes a test and the fix and
+opens the merge request as you.
+
+</td>
+<td valign="top">
+
+### 📋 GRC and certifications
+Fourteen frameworks with every clause mapped: ISO 27001, 42001 and 22301, SOC
+2, PCI DSS, NIST's CSF, 800-53 and 800-171, the AI RMF and the EU AI Act. A
+risk register, Statements of Applicability, policies, audits, suppliers and
+AI systems, and how ready you are for each certification.
+
+</td>
+</tr>
+<tr>
 <td colspan="2" valign="top">
 
 ### 🛡️ Yours to run
 SSO, LDAP and two-factor sign-in; a key and a budget for each person; groups
-decide models and tools. Built for ISO 27001, SOC 2, HIPAA and the GDPR: an
-audit log nobody changes unseen, live checks of every control and the
-evidence in one download. Ten dashboards, an installer for offline hosts in
-one file, and a Helm chart for Kubernetes that rolls without a gap and grows
-with its load.
+decide models and tools. An audit log nobody changes unseen, live checks of
+every control and the evidence in one download. Ten dashboards, an installer
+for offline hosts in one file that installs only the features you choose, and
+a Helm chart for Kubernetes that rolls without a gap and grows with its load.
 
 </td>
 </tr>

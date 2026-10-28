@@ -15,6 +15,133 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v7.4.0 (2026-10-28)
+
+Security reviews of your repositories, grounded in what is known of weaknesses
+and fixed with Fix it; known vulnerabilities in their packages, renewed every
+day; governance, risk and compliance for fourteen frameworks and the
+certifications; quantum computing in the science lab; and every part of the
+stack chosen at install.
+
+### :rocket: Epics and highlights
+
+- **Security reviews**: Code Studio → Security reads a repository at a branch,
+  tag or commit, as you (Argus, read-only). Git grep finds where code calls
+  something dangerous: queries, commands, deserialisers, code run from text,
+  XML parsers, paths, HTML, fetches and redirects, in C#, Java and Kotlin,
+  Python, JavaScript and TypeScript, Go, PHP and Ruby. The model traces the 30
+  most dangerous through their callers. A weakness is kept only when it quotes
+  the line as the file has it and names a CWE the new `security` knowledge
+  pack knows. Each carries that pack's pages: the CWE, OWASP's cheat sheet and
+  CodeQL's query help. A second pass, with the CWE's page in hand, tries to
+  refute each one. Mark a finding fixed, accept the risk (why, and until
+  when), or mark it not a weakness; the repository's next review remembers
+- **Known vulnerabilities in packages**: Argus's `deps_check` reads a
+  project's lock files and manifests at any commit (npm, yarn, pnpm, NuGet,
+  pip, Poetry, uv, Pipenv, Go, Cargo, Maven, Gradle, Bundler, Composer). It
+  matches each pinned version against GitHub's reviewed advisories with no
+  model, comparing versions as each ecosystem orders them. Each vulnerable
+  package comes with how it comes in, its CVEs, whether CISA lists it as
+  exploited, and the smallest upgrade that fixes it. `sbom` gives the packages
+  as CycloneDX. The `advisories` pack is renewed every day by Argus itself;
+  only what changed is embedded again. Reviews of the last 90 days are then
+  checked again, so a vulnerability published after a review is found in the
+  code it read, without a push
+- **Scanners beside the model**: the optional `scanners` feature runs
+  opengrep with 94 of Arena's own rules, each tested on its weak and fixed
+  examples, plus Bandit, gitleaks (with the history) and Trivy's checks of
+  configuration. They run on a network that only Argus reaches, and fetch and
+  run nothing they are sent. Their findings join the model's: a match on a
+  sink is traced first, and each finding names what found it (the model, the
+  scanners, or both). Secrets and misconfigurations have sections of their
+  own, and everything downloads as SARIF
+- **Fix it on a security finding**: the agent writes a test that shows the
+  weakness, then makes the change the references describe (a parameterised
+  query, not an escaped string), runs the tests, and opens the merge request
+  as you. A vulnerable package is upgraded the smallest step that fixes it.
+  A secret is taken out of the code, and you are told to revoke it. Every
+  merge request's review, automatic ones too, now says when the change
+  brings a vulnerable package or a scanner's finding on its own lines
+- **Admin → Security**: every repository at a glance, with what cannot wait
+  (the known-exploited, and what is past its time to fix: 7, 30, 90 or 180
+  days by severity), what changed this week, the risks accepted, and the
+  bills of materials. A new critical or known-exploited finding reaches the
+  security team at once
+- **GRC and the certifications**: fourteen frameworks in the catalog, each
+  clause mapped to Arena's controls: ISO 27001 (clauses 4 to 10 and Annex A),
+  ISO 42001, ISO 22301, SOC 2, HIPAA, the GDPR, PCI DSS v4.0.1, NIST CSF 2.0,
+  SP 800-53 Rev. 5 with its baselines, SP 800-171 Rev. 3, the AI RMF, the EU
+  AI Act, CSA's CCM and the Common Criteria. Admin → Compliance keeps the
+  management system, in tabs:
+  - a risk register with treatments;
+  - ISO 27001's and ISO 42001's Statements of Applicability;
+  - policies with owners, versions, reviews and acknowledgements;
+  - audits with their findings and corrective actions, certificates and
+    waivers;
+  - the supplier register and the AI systems register (each system's EU AI
+    Act class and impact assessment);
+  - management reviews, objectives, and auditors' requests.
+
+  For each framework it says how ready you are, 0 to 100, and Download for
+  the auditor gives its package for a period, with the checks' daily history.
+  NIST's texts and the AI Act's, which may be shared, are in a `grc`
+  knowledge pack the chat cites
+- **Quantum computing in the science lab**: a Quantum tool pack and field, on
+  simulators in the sandbox:
+  - circuits in OpenQASM on Qiskit Aer, with noise;
+  - two circuits or a state checked equal;
+  - surface and repetition codes sampled with Stim and PyMatching;
+  - a qubit's decay with QuTiP;
+  - VQE and QAOA with PennyLane;
+  - molecules with PySCF and OpenFermion.
+
+  Circuits are drawn, and counts, logical error rates, Bloch vectors and
+  energies charted, in the chat and the notebook
+- **Only what you need**: every part of the stack is a feature
+  (`deploy/features`), turned on or off with `--with` and `--without` on
+  install, upgrade and repair, or chosen from a list with each one's disk
+  size. A feature that is off runs nothing, loads no image, and leaves the
+  menus, the palette and the tour. Its API answers 404, saying how to turn
+  it on. `make-installer.sh --without` makes a smaller bundle, and
+  `--kubernetes` takes the same choices into the chart
+
+### :sparkles: New features & Enhancements
+
+- The `security` knowledge pack (2,676 pages, 3,023 symbols): MITRE's CWE
+  4.20 and CAPEC 3.9, OWASP's Cheat Sheet Series, ASVS 5.0, WSTG and Top 10s
+  (web, API, LLM), CodeQL's security query help (not its engine), and .NET's,
+  Bandit's, gosec's and eslint-plugin-security's rules. Each id is a symbol
+  (`CWE-89`, `V6.2.1`, `cs/sql-injection`, `B608`); each source and CodeQL
+  language is a facet. Semgrep's registry rules, the SEI CERT wiki and the
+  CIS benchmarks are not taken: their terms do not allow it
+- The `advisories` pack (36,053 advisories, 67,682 affected ranges), with a
+  table of what each affects that `deps_check` reads. `argus pack renew`
+  builds it on a connected machine for offline hosts, and Admin → Packs has
+  **Renew**
+- Argus's `scan_at` tool: the scanners on any commit as the person, or on a
+  change's files alone (`paths`)
+- The `/security-review` skill follows the same grounded procedure in a chat
+  or Code Arena
+- A new compliance control, VUL-01 (ISO 27001 A.8.8, A.8.28, A.8.29; SOC 2
+  CC7.1; PCI DSS 6.2, 6.3, 11.3; NIST RA-5, SI-2; the AI Act's Article 15;
+  Common Criteria AVA_VAN), with its live check: a review in 30 days,
+  advisories within a week, and findings fixed in time. The controls GOV-04
+  to GOV-12 cover the GRC records
+- Generated and edited pictures carry IPTC's mark of AI in their metadata,
+  and the chat says answers are made by AI (the AI Act's Article 50, GOV-10)
+- The release SBOM lists the scanners' programs too (Trivy and gitleaks as
+  Go modules, opengrep)
+
+### :bug: Bugs fixed
+
+- Postgres ran with Docker's 64 MB of shared memory, and a busy moment's
+  parallel query failed with "could not resize shared memory segment". It has
+  1 GB now, in compose and in the chart
+- Argus kept a key check that the app answered at once beyond its cache, so
+  a refused key could stay refused
+- Code Arena's `stop_command` answered before the command had ended, so with
+  piped input a session could end before the model heard how it ended
+
 ## v7.3.0 (2026-10-27)
 
 A science lab, where models work problems of mathematics, physics, chemistry,

@@ -14,29 +14,29 @@ describe("what's new", () => {
       },
     })
     renderApp('/')
-    const tour = await screen.findByRole('dialog', { name: 'A science lab' })
-    expect(within(tour).getByText("What's new in Argus Arena 7.3")).toBeInTheDocument()
+    const tour = await screen.findByRole('dialog', { name: 'Security reviews' })
+    expect(within(tour).getByText("What's new in Argus Arena 7.4")).toBeInTheDocument()
     await userEvent.click(within(tour).getByRole('button', { name: /Next/ }))
-    expect(await screen.findByRole('dialog', { name: 'Proofs checked by Lean' })).toBeInTheDocument()
-    // A page by its dot, then to the last one: a member has no deployment page to see.
-    await userEvent.click(screen.getByRole('button', { name: "Code Arena's panes, your way (4 of 4)" }))
-    const last = await screen.findByRole('dialog', { name: "Code Arena's panes, your way" })
+    expect(await screen.findByRole('dialog', { name: 'Fix it, for security too' })).toBeInTheDocument()
+    // A page by its dot, then to the last one: a member has no admin pages to see.
+    await userEvent.click(screen.getByRole('button', { name: 'Quantum computing in the lab (3 of 3)' }))
+    const last = await screen.findByRole('dialog', { name: 'Quantum computing in the lab' })
     await userEvent.click(within(last).getByRole('button', { name: 'Done' }))
-    await waitFor(() => expect(calls.find((c) => c.method === 'PUT' && c.path === '/api/account/whats-new')?.body).toEqual({ release: '7.3' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT' && c.path === '/api/account/whats-new')?.body).toEqual({ release: '7.4' }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
 
     // Again from the account menu, as often as they like.
     await userEvent.click(screen.getByRole('button', { name: /Account menu/ }))
     await userEvent.click(await screen.findByRole('menuitem', { name: "What's new" }))
-    expect(await screen.findByRole('dialog', { name: 'A science lab' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: 'Security reviews' })).toBeInTheDocument()
   })
 
-  it('shows the Kubernetes install to those who may read the settings', async () => {
-    fakeApi({ ...member, permissions: ['settings.read'] }, { 'GET /api/account/whats-new': () => ({ json: { seen: '7.2' } }), 'PUT /api/account/whats-new': () => ({ json: { seen: '7.3' } }) })
+  it('shows the features chosen at install to those who may read the settings', async () => {
+    fakeApi({ ...member, permissions: ['settings.read'] }, { 'GET /api/account/whats-new': () => ({ json: { seen: '7.3' } }), 'PUT /api/account/whats-new': () => ({ json: { seen: '7.4' } }) })
     renderApp('/')
-    await screen.findByRole('dialog', { name: 'A science lab' })
-    await userEvent.click(screen.getByRole('button', { name: 'On Kubernetes, with Helm (5 of 5)' }))
-    const page = await screen.findByRole('dialog', { name: 'On Kubernetes, with Helm' })
+    await screen.findByRole('dialog', { name: 'Security reviews' })
+    await userEvent.click(screen.getByRole('button', { name: 'Only what you need (4 of 4)' }))
+    const page = await screen.findByRole('dialog', { name: 'Only what you need' })
     expect(within(page).getByRole('button', { name: 'Read how' })).toBeInTheDocument()
   })
 
@@ -51,14 +51,14 @@ describe("what's new", () => {
   it('takes them where to try it', async () => {
     const calls = fakeApi(member, {
       'GET /api/account/whats-new': () => ({ json: { seen: null } }),
-      'PUT /api/account/whats-new': () => ({ json: { seen: '7.3' } }),
+      'PUT /api/account/whats-new': () => ({ json: { seen: '7.4' } }),
       'GET /api/lab/fields': () => ({ json: { available: true, why: null, fields: [{ id: 'mathematics', title: 'Mathematics', about: 'Checked by SymPy.', tools: ['lab'] }] } }),
       'GET /api/lab/notebooks': () => ({ json: [] }),
     })
     renderApp('/')
-    await screen.findByRole('dialog', { name: 'A science lab' })
-    await userEvent.click(screen.getByRole('button', { name: 'Proofs checked by Lean (2 of 4)' }))
-    await userEvent.click(within(await screen.findByRole('dialog', { name: 'Proofs checked by Lean' })).getByRole('button', { name: 'Prove something' }))
+    await screen.findByRole('dialog', { name: 'Security reviews' })
+    await userEvent.click(screen.getByRole('button', { name: 'Quantum computing in the lab (3 of 3)' }))
+    await userEvent.click(within(await screen.findByRole('dialog', { name: 'Quantum computing in the lab' })).getByRole('button', { name: 'Open the lab' }))
     // The lab's page.
     expect(await screen.findByRole('heading', { level: 1, name: 'Science lab' })).toBeInTheDocument()
     expect(calls.some((c) => c.method === 'PUT' && c.path === '/api/account/whats-new')).toBe(true)
