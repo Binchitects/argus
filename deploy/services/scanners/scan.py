@@ -408,7 +408,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             started = time.monotonic()
             if kind == "application/x-tar":
                 os.makedirs(src)
-                unpack_tar(LimitedReader(self.rfile, size), src)
+                body = LimitedReader(self.rfile, size)
+                try:
+                    unpack_tar(body, src)
+                finally:
+                    # The tar's padding after its end (tarfile stops reading there), or what an error left: read to
+                    # the end, or it begins the next request on a kept connection, or resets it as it closes.
+                    body.drain()
             else:
                 bundle = os.path.join(scratch, "commit.bundle")
                 with open(bundle, "wb") as out:
@@ -442,6 +448,12 @@ class LimitedReader(io.RawIOBase):
         self.left -= len(data)
         buffer[:len(data)] = data
         return len(data)
+
+    def drain(self):
+        """What is left of the body read and dropped."""
+        buffer = bytearray(1024 * 1024)
+        while self.readinto(buffer):
+            pass
 
 
 # --- the rules' own examples -------------------------------------------------------------------------------------

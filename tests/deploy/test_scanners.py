@@ -3,6 +3,7 @@ secret's text never comes back, and the HTTP around it; the scanners themselves 
 the real engine on the rules' own examples)."""
 from __future__ import annotations
 
+import http.client
 import importlib.util
 import io
 import json
@@ -177,6 +178,24 @@ class Serving(unittest.TestCase):
         self.assertEqual(200, status, body)
         self.assertEqual({"files": ["views.py"], "commit": SHA, "history": False, "tools": ["opengrep", "bandit"]}, seen)
         self.assertEqual([], os.listdir(self.work))
+
+    def test_A_tars_padding_is_read_so_a_kept_connection_answers_the_next_scan(self):
+        # tarfile reads a stream's first block alone, then whole records: a tar whose end falls early in its last record
+        # (one file of 9,216 bytes) leaves 9,728 bytes of padding unread unless the body is read to its end. Unread, they
+        # began the next request on the connection, or reset it as the server closed.
+        def fake_scan(src, scratch, commit, history, tools):
+            return {"commit": commit, "history": history, "tools": [], "findings": [], "more": 0}
+
+        body = tar_of([regular("app/a.py", "x" * 9216)])
+        self.assertEqual(20480, len(body))
+        conn = http.client.HTTPConnection("127.0.0.1", self.server.server_address[1], timeout=10)
+        self.addCleanup(conn.close)
+        with mock.patch.object(scan, "scan", fake_scan):
+            for _ in range(2):
+                conn.request("POST", f"/scan?commit={SHA}", body=body, headers={"Content-Type": "application/x-tar"})
+                answer = conn.getresponse()
+                self.assertEqual(200, answer.status)
+                self.assertEqual(SHA, json.loads(answer.read())["commit"])
 
     def test_What_is_not_a_scan_is_refused(self):
         self.assertEqual(400, self.post("commit=abc", b"")[0])
