@@ -151,6 +151,16 @@ by a tenth or more.
   from strings, so the model alone scored below zero on paths and SQL there.
   With the scanners' matches named in the question (both), it traces those
   too.
+- **Broader sinks for the model: tried, not kept.** The review's own sinks
+  were broadened to the forms above (C#'s `new StreamReader(` and
+  `Response.Write`, Java's `new java.io.File(`, `Paths.get`, `prepareStatement`
+  built from strings, LDAP and XPath) and measured again (2026-10-28). The
+  model alone rose on the Benchmark (0.045 to 0.106) and stayed the same on
+  Juliet Java (0.183 to 0.180), but it now read many of the Benchmark's safe
+  flows and flagged them (its false positive rate 0.42), and both fell there
+  from 0.576 to 0.439, against 0.315 to 0.333 on Juliet Java. Not kept: more
+  sinks pay only with a model that tells safe flows apart. (Juliet C# was not
+  measured with them: its run read the harness without them.)
 - **Commands are matched, not told apart.** Besides the taint rules, a
   command rule flags every command run with a value that is not a literal in
   the call: recall 1.0, but 94% of Juliet's safe flows flagged and 79% of the

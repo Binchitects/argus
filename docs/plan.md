@@ -1994,10 +1994,11 @@ scanner's match the model clears kept open); the security review's findings
 in Code Arena's Problems with Fix; Fix it checking its change with the
 scanners and the review; Fix them for many findings at once; the quantum lab
 on Qiskit HumanEval ([lab-quantum.md](measurements/lab-quantum.md): 12 of 40
-alone, 10 of 40 in the lab, most misses an API Qiskit removed). Left: the
-review's own sinks for the forms the measuring showed they miss (C#'s
-`new StreamReader(` and `Response.Write`, Java's `new java.io.File(`,
-LDAP and XPath); Fix it measured on real CVE fixes (CVEfixes, needs a yes);
+alone, 10 of 40 in the lab, most misses an API Qiskit removed). The
+review's own sinks broadened to the forms the measuring showed they miss were
+measured and not kept: the Benchmark fell from 0.576 to 0.439 (the model
+flags safe flows). Left: Fix it measured on real CVE fixes (CVEfixes, needs
+a yes);
 the quantum lab measured again on the same forty with the lab's run of an
 answer's code (built: an answer whose code no run had as written is asked,
 once, to run it); qiskit-ibm-runtime in the sandbox for
