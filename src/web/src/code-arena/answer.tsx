@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils'
 import { answerUsage, seconds, toolTitle } from '@/pages/chat/format'
 import { refLabel, useFileRefs, type FileRef } from '@/pages/chat/file-refs'
 import { ImageViewer } from '@/pages/chat/image-viewer'
-import type { Notice, ToolRunning } from '@/pages/chat/live'
+import { waitsForModel, type Notice, type ToolRunning } from '@/pages/chat/live'
 import { Markdown } from '@/pages/chat/markdown'
 import { MediaPlayer } from '@/pages/chat/media'
 import { NoticeLine, Thinking, ToolCard } from '@/pages/chat/parts'
@@ -272,22 +272,12 @@ export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince
   const took = answer.reduce((n, m) => n + (m.durationMs ?? 0), 0)
   const usage = answerUsage(answer, config)
   const cached = usage.prompt > 0 ? Math.round((usage.cached / usage.prompt) * 100) : null
-  const pending = live && assistants.every((a) => !a.content && !a.reasoning && !a.toolCalls?.length)
+  const pending = waitsForModel(answer, live)
   return (
     <section className={cn('min-w-0 animate-enter', live && 'pb-2')} aria-label="Answer" aria-busy={live}>
       {notices.map((n, i) => (
         <NoticeLine key={i} text={n.text} />
       ))}
-      {pending && (
-        <output className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span className="flex gap-1" aria-hidden="true">
-            <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.3s]" />
-            <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
-            <span className="size-1.5 animate-bounce rounded-full bg-current" />
-          </span>
-          Waiting for the model…
-        </output>
-      )}
       {assistants.map((a, i) => {
         const isLast = i === assistants.length - 1
         return (
@@ -327,6 +317,16 @@ export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince
           </div>
         )
       })}
+      {pending && (
+        <output className="flex items-center gap-2 text-sm text-muted-foreground">
+          <span className="flex gap-1" aria-hidden="true">
+            <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.3s]" />
+            <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
+            <span className="size-1.5 animate-bounce rounded-full bg-current" />
+          </span>
+          Waiting for the model…
+        </output>
+      )}
       {!live && last && (
         <div className="mt-1 flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
           {text && <CopyButton text={text} label="Copy answer" />}

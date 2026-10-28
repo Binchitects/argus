@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { blank, keepSame, reduce, sameJson, stopped, withQuestion, type LiveState } from './live'
+import { blank, keepSame, reduce, sameJson, stopped, waitsForModel, withQuestion, type LiveState } from './live'
 import type { ChatEvent } from './types'
 
 const start: LiveState = { messages: [], leaf: null, notices: [], title: null, thinkingSince: null }
@@ -170,5 +170,29 @@ describe('the session read again', () => {
     expect(sameJson({ a: [1, 2] }, { a: [1, 2, 3] })).toBe(false)
     expect(sameJson({ a: [] }, { a: {} })).toBe(false)
     expect(sameJson({ a: 1 }, { a: '1' })).toBe(false)
+  })
+})
+
+describe('waiting for the model', () => {
+  const call = (id: string) => ({ id, type: 'function' as const, function: { name: 'read_file', arguments: '{}' } })
+  const asked = { ...blank('a1', 'assistant', 'q1'), toolCalls: [call('c1'), call('c2')] }
+  const result = (id: string) => ({ ...blank(`r-${id}`, 'tool', 'a1', 'text'), toolCallId: id })
+
+  it('waits while nothing is written, and while a step just begun is empty', () => {
+    expect(waitsForModel([], true)).toBe(true)
+    expect(waitsForModel([blank('a1', 'assistant', 'q1')], true)).toBe(true)
+    expect(waitsForModel([{ ...blank('a1', 'assistant', 'q1'), content: 'Hi' }, blank('a2', 'assistant', 'a1')], true)).toBe(true)
+  })
+
+  it('waits after a step once each of its calls came back, not while one still runs or before', () => {
+    expect(waitsForModel([asked], true)).toBe(false)
+    expect(waitsForModel([asked, result('c1')], true)).toBe(false)
+    expect(waitsForModel([asked, result('c1'), result('c2')], true)).toBe(true)
+  })
+
+  it('does not wait once the model writes, or when the answer is not live', () => {
+    expect(waitsForModel([asked, result('c1'), result('c2'), { ...blank('a2', 'assistant', 'r-c2'), reasoning: 'hmm' }], true)).toBe(false)
+    expect(waitsForModel([{ ...blank('a1', 'assistant', 'q1'), content: 'Done.' }], true)).toBe(false)
+    expect(waitsForModel([asked, result('c1'), result('c2')], false)).toBe(false)
   })
 })

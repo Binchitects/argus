@@ -13,7 +13,7 @@ import { attachmentUrl } from './api'
 import { attachedOf, typedOf } from './attached'
 import { ImageViewer } from './image-viewer'
 import { asViewerImages } from './viewer-images'
-import type { Notice, ToolRunning } from './live'
+import { waitsForModel, type Notice, type ToolRunning } from './live'
 import { parseRef, useFileRefs } from './file-refs'
 import { Markdown } from './markdown'
 import { answerUsage, seconds, waitingText } from './format'
@@ -468,7 +468,7 @@ export function AnswerTurn({
   const text = assistants.map((a) => a.content).filter(Boolean).join('\n\n')
   const took = assistants.reduce((a, m) => a + (m.durationMs ?? 0), 0) + answer.filter((m) => m.role === 'tool').reduce((a, m) => a + (m.durationMs ?? 0), 0)
   const usage = answerUsage(answer, config)
-  const waiting = live && assistants.every((a) => !a.content && !a.reasoning && !a.toolCalls?.length)
+  const waiting = waitsForModel(answer, live)
   // Auto: who answered and why, kept with the answer's first message.
   const route = first?.details?.route
   // Which model did which part: the sub-agents' models, when not the answer's.
@@ -547,17 +547,6 @@ export function AnswerTurn({
       {notices.map((n, i) => (
         <NoticeLine key={i} text={n.text} />
       ))}
-      {waiting && (
-        <output className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span className="flex gap-1" aria-hidden="true">
-            <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.3s]" />
-            <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
-            <span className="size-1.5 animate-bounce rounded-full bg-current" />
-          </span>
-          {compacting ? 'Compacting the chat: summarizing its older messages so the answer fits…' : waitingText(queued)}
-          <Waited since={question?.createdAt} />
-        </output>
-      )}
       {assistants.map((a, i) => {
         const isLast = i === assistants.length - 1
         return (
@@ -607,6 +596,18 @@ export function AnswerTurn({
           </div>
         )
       })}
+      {waiting && (
+        <output className="flex items-center gap-2 text-sm text-muted-foreground">
+          <span className="flex gap-1" aria-hidden="true">
+            <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.3s]" />
+            <span className="size-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
+            <span className="size-1.5 animate-bounce rounded-full bg-current" />
+          </span>
+          {compacting ? 'Compacting the chat: summarizing its older messages so the answer fits…' : waitingText(queued)}
+          {/* Since the question, or since the last step's results came back. */}
+          <Waited since={answer.findLast((m) => m.role === 'tool')?.createdAt ?? question?.createdAt} />
+        </output>
+      )}
       {(() => {
         // The plan this answer made or changed last: under it, as it stands now (reviewed there when proposed).
         const planId = assistants

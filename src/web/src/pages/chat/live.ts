@@ -60,6 +60,19 @@ export const blank = (id: string, role: Message['role'], parentId: string | null
   createdAt: new Date().toISOString(), noAccess: false,
 })
 
+/**
+ * Whether a live answer waits for the model: it has written nothing yet (or its step just begun has not), or each call of
+ * its last step has come back and the next step has not begun to show; the model reads the results first, which takes a
+ * while on a long chat or a big result.
+ */
+export function waitsForModel(answer: Message[], live: boolean): boolean {
+  if (!live) return false
+  const last = answer.findLast((m) => m.role === 'assistant')
+  if (!last || (!last.content && !last.reasoning && !last.toolCalls?.length)) return true
+  const calls = last.toolCalls ?? []
+  return calls.length > 0 && calls.every((c) => answer.some((m) => m.role === 'tool' && m.toolCallId === c.id))
+}
+
 /** The question shown at once, before the server has it (with the part of an answer it quotes). */
 export function withQuestion(state: LiveState, localId: string, parentId: string | null, text: string, attachments: Attachment[], quote?: string | null, skill?: SkillUse): LiveState {
   // A skill used shows as the person chose it; the server's instructions come with the saved chat.
