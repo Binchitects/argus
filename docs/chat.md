@@ -995,6 +995,11 @@ to the code host. Starting one needs `review.run`.
    own. The findings download as SARIF for a code host's or an IDE's security
    view, with the commit read, and accepted or wrong ones suppressed with why.
 
+What people decided is remembered for the repository: in its next review, a
+finding marked **Not a weakness** stays so, and a risk accepted stays
+accepted until its date, each with who decided and why. One marked **Fixed**
+that is found again is open again.
+
 A finding gives its CWE and severity, `file:line` with the sink quoted,
 where the data comes in and each step to the sink, how it could be
 exploited and the fix. Mark it **Fixed**, **Accept the risk** (why, and by

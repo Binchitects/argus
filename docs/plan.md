@@ -2297,6 +2297,9 @@ Arena's own dependencies.
    - **Triage**: whether both passes found it, one, or neither; a finding
      people mark as wrong is remembered for that repository, and the
      reflection learns from it (v7.0's skills that learn).
+     Done (remembered): a finding marked wrong stays so in the
+     repository's next review, and a risk accepted stays accepted until its
+     date; a fixed one found again is open again.
      Done (both passes): each finding names what found it. A scanner's
      match on a sink is traced by the model first. One the model cleared is
      kept apart with what to check. Secrets and configuration have sections

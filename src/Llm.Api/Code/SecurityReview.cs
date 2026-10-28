@@ -272,6 +272,7 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
                 await VerifyAsync(services, session, scan, user.Email!, checkedFirst[i], cweCache, ct);
             }
             scan.Findings.AddRange([.. packages, .. checkedFirst, .. await FromScannersAsync(session, scanned, checkedFirst, cleared, cweCache, ct)]);
+            await RememberAsync(db, scan, ct);
             db.SecurityFindings.AddRange(scan.Findings.Select(f => { f.ScanId = scan.Id; return f; }));
             scan.Summary = Summary(scan, ordered, scan.Findings);
             scan.Status = SecurityScan.Done;
@@ -403,6 +404,34 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
             Pages = new JsonArray(new JsonObject { ["title"] = $"{f["advisory"]}: {Cut(f["summary"]?.ToString() ?? "", 120)}", ["url"] = f["url"]?.ToString() }).ToJsonString(),
             Verified = true,
         };
+    }
+
+    /// <summary>What makes a finding the same one in another review: its kind and file, its weakness or rule, and its line's text (lines move).</summary>
+    public static string Sameness(SecurityFinding f) => f.Kind == SecurityFinding.Dependency
+        ? $"{f.Kind}|{f.Source?.Split(',')[0].Trim()}|{f.SinkCode}"
+        : $"{f.Kind}|{f.Path}|{(f.Kind == SecurityFinding.Code ? f.Cwe : f.Rule ?? f.Cwe)}|{Squash(f.SinkCode)}";
+
+    /// <summary>
+    /// What people decided about this repository's findings before, kept: one marked not a weakness stays so (with who said
+    /// it and why), a risk accepted stays accepted until its date. One marked fixed is not kept: found again, it is open again.
+    /// </summary>
+    private static async Task RememberAsync(AppDbContext db, SecurityScan scan, CancellationToken ct)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var decided = await db.SecurityFindings.AsNoTracking()
+            .Where(f => (f.State == SecurityFinding.Wrong || (f.State == SecurityFinding.Accepted && f.Until > now))
+                && db.SecurityScans.Any(s => s.Id == f.ScanId && s.Project == scan.Project && s.Id != scan.Id))
+            .OrderByDescending(f => f.DecidedAt).ToListAsync(ct);
+        var known = decided.GroupBy(Sameness).ToDictionary(g => g.Key, g => g.First());
+        foreach (var f in scan.Findings)
+        {
+            if (known.GetValueOrDefault(Sameness(f)) is not { } before)
+            {
+                continue;
+            }
+            (f.State, f.Why, f.Until, f.DecidedById, f.DecidedAt) = (before.State, before.Why, before.Until, before.DecidedById, before.DecidedAt);
+            scan.Remembered++;
+        }
     }
 
     private static JsonObject Args(SecurityScan scan, JsonObject args)
@@ -640,6 +669,10 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
         if (code.Count > kept.Count)
         {
             sb.Append(CultureInfo.InvariantCulture, $" {code.Count - kept.Count} refuted by the second pass (kept apart).");
+        }
+        if (scan.Remembered > 0)
+        {
+            sb.Append(CultureInfo.InvariantCulture, $" {scan.Remembered} decided in an earlier review of the repository (not a weakness, or a risk accepted until its date), and kept so.");
         }
         if (scan.Dropped > 0)
         {

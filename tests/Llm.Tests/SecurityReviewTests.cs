@@ -259,6 +259,44 @@ public sealed class SecurityReviewTests(AppFixture app)
 
     [Fact]
     [Trait("Control", "VUL-01")]
+    public async Task What_people_decided_is_remembered_for_the_repositorys_next_review_and_a_fixed_one_found_again_is_open()
+    {
+        Argus();
+        var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
+        var user = "rm" + Guid.NewGuid().ToString("N")[..8];
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = user, email = $"{user}@example.test", displayName = "Ola" }));
+        var me = await new TestBrowser(app.Factory).SignedInAsync(user, made.GetProperty("password").GetString()!);
+        var project = "g/remember" + Guid.NewGuid().ToString("N")[..6];
+        async Task<JsonElement> ReviewAsync()
+        {
+            var res = await me.PostAsync("/api/code/security", new { project, @ref = "main" });
+            return await DoneAsync(me, (await me.JsonAsync(res)).GetProperty("id").GetGuid());
+        }
+        JsonElement At(JsonElement review, string path) => review.GetProperty("findings").EnumerateArray().Single(f => f.GetProperty("path").GetString() == path);
+        var first = await ReviewAsync();
+        var firstId = first.GetProperty("scan").GetProperty("id").GetGuid();
+        async Task Decide(string path, object body) => await StatusAssert.Is(HttpStatusCode.NoContent,
+            await me.Http.PutAsJsonAsync(new Uri($"/api/code/security/{firstId}/findings/{At(first, path).GetProperty("id").GetGuid()}", UriKind.Relative), body));
+        var until = DateTimeOffset.UtcNow.AddMonths(2);
+        await Decide("src/Audit.cs", new { state = "wrong", why = "who comes from our own audit table" });
+        await Decide("src/Orders.cs", new { state = "accepted", why = "Internal tool only", until });
+        await Decide("Dockerfile", new { state = "fixed" });
+
+        var second = await ReviewAsync();
+        Assert.Equal(2, second.GetProperty("scan").GetProperty("remembered").GetInt32());
+        var audit = At(second, "src/Audit.cs");
+        Assert.Equal(("wrong", "who comes from our own audit table"), (audit.GetProperty("state").GetString(), audit.GetProperty("why").GetString()));
+        var orders = At(second, "src/Orders.cs");
+        Assert.Equal("accepted", orders.GetProperty("state").GetString());
+        Assert.Equal(until.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture),
+            orders.GetProperty("until").GetDateTimeOffset().ToUniversalTime().ToString("yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture));
+        // Marked fixed, found again: open again.
+        Assert.Equal("open", At(second, "Dockerfile").GetProperty("state").GetString());
+        Assert.Contains("2 decided in an earlier review of the repository", second.GetProperty("summary").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Control", "VUL-01")]
     public async Task When_the_advisories_are_renewed_a_reviews_packages_are_checked_again_at_the_commit_it_read()
     {
         Argus();

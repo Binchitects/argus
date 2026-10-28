@@ -31,6 +31,8 @@ public sealed class SecurityScan
     public int Read { get; set; }
     /// <summary>Suspicions dropped because the sink's line could not be cited or the weakness is not one the pack knows.</summary>
     public int Dropped { get; set; }
+    /// <summary>Findings decided in an earlier review of the repository (not a weakness, or a risk accepted until its date), kept so.</summary>
+    public int Remembered { get; set; }
     /// <summary>The packages its lock files and manifests name, and the day the advisories they were matched against are from (null: no advisories pack).</summary>
     public int Dependencies { get; set; }
     public DateOnly? AdvisoriesAsOf { get; set; }

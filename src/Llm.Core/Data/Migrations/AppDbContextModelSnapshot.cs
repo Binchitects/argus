@@ -3311,6 +3311,9 @@ namespace Llm.Core.Data.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("character varying(300)");
 
+                    b.Property<int>("Remembered")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Sbom")
                         .HasColumnType("text");
 

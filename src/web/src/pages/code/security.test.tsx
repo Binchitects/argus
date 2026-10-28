@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { fakeApi, member, renderApp } from '@/test/utils'
 
 const brief = {
-  id: 's1', project: 'g/shop', ref: 'main', commit: 'abc1234567890def', status: 'done', step: null, candidates: 12, read: 12, dropped: 1, dependencies: 40, advisoriesAsOf: '2026-10-01', sbom: true,
+  id: 's1', project: 'g/shop', ref: 'main', commit: 'abc1234567890def', status: 'done', step: null, candidates: 12, read: 12, dropped: 1, remembered: 0, dependencies: 40, advisoriesAsOf: '2026-10-01', sbom: true,
   scanners: null, recheckedAt: null, createdAt: '2026-10-27T00:00:00Z', finishedAt: '2026-10-01T00:10:00Z', error: null,
 }
 

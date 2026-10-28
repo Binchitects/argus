@@ -267,7 +267,12 @@ function FindingCard({
         </p>
       )}
       {unread && f.kind === 'code' && <p className="text-xs text-muted-foreground">A scanner's match, not traced by the model: read the code before relying on it.</p>}
-      {f.why && f.state !== 'open' && <p className="text-xs text-muted-foreground">Why: {f.why}</p>}
+      {f.why && f.state !== 'open' && (
+        <p className="text-xs text-muted-foreground">
+          Why: {f.why}
+          {since && f.decidedAt && new Date(f.decidedAt).getTime() < new Date(since).getTime() - 3_600_000 && ` (decided in an earlier review, ${new Date(f.decidedAt).toLocaleDateString()})`}
+        </p>
+      )}
       <div className="flex flex-wrap gap-2">
         {f.state === 'open' ? (
           <>
@@ -391,6 +396,7 @@ export function SecurityScanPage() {
         {s.status === 'done' && (
           <span className="text-sm text-muted-foreground">
             {s.read} of {s.candidates} places read · {s.dropped} dropped uncited
+            {s.remembered > 0 && ` · ${s.remembered} decided before`}
             {s.commit && (
               <>
                 {' · commit '}

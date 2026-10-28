@@ -236,6 +236,8 @@ export interface ScanBrief {
   candidates: number
   read: number
   dropped: number
+  /** Findings decided in an earlier review of the repository (not a weakness, or a risk accepted until its date), kept so. */
+  remembered: number
   dependencies: number
   advisoriesAsOf: string | null
   /** When its packages were last checked again, against advisories renewed since. */
