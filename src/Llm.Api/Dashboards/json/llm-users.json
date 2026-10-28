@@ -705,7 +705,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(increase(arena_line_waited_seconds_sum[1h])) / clamp_min(sum(increase(arena_line_waited_seconds_count[1h])), 1)",
+          "expr": "(sum(increase(arena_line_waited_seconds_sum[1h])) / clamp_min(sum(increase(arena_line_waited_seconds_count[1h])), 1)) or vector(0)",
           "instant": true
         }
       ],
