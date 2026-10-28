@@ -18,6 +18,9 @@ namespace Llm.Api.Code.Fixes;
 public sealed record NewFix(Guid? FindingId = null, string? Project = null, string? Branch = null, string? Ask = null, int? Issue = null, long? Pipeline = null,
     Guid? SecurityFindingId = null);
 
+/// <summary>Several security findings fixed at once (Fix them): a fix each, and a branch each.</summary>
+public sealed record NewFixes(List<Guid>? SecurityFindingIds, string? Ask = null);
+
 public sealed record MoreFix(string? Ask);
 
 public sealed record FixToken(string? Token);
@@ -31,6 +34,8 @@ public sealed record MergeRequestFix(string? Title = null);
 public static partial class FixEndpoints
 {
     public const int MostWorking = 2;
+    /// <summary>The most findings one Fix them takes: the ones past the person's places wait their turn.</summary>
+    public const int MostAtOnce = 20;
 
     public static void MapFixes(this IEndpointRouteBuilder app)
     {
@@ -40,6 +45,7 @@ public static partial class FixEndpoints
         g.MapDelete("/token", UnlinkAsync);
         g.MapGet("", ListAsync);
         g.MapPost("", CreateAsync);
+        g.MapPost("/batch", BatchAsync);
         g.MapGet("/{id:guid}", GetAsync);
         g.MapPost("/{id:guid}/more", MoreAsync);
         g.MapPost("/{id:guid}/stop", StopAsync);
@@ -125,17 +131,14 @@ public static partial class FixEndpoints
         {
             if (body.SecurityFindingId is { } securityId)
             {
-                var finding = await db.SecurityFindings.AsNoTracking().SingleOrDefaultAsync(f => f.Id == securityId, ct);
-                var scan = finding is null ? null : await db.SecurityScans.AsNoTracking().SingleOrDefaultAsync(s => s.Id == finding.ScanId, ct);
-                if (finding is null || scan is null || (scan.UserId != me.Id && !await access.MayAsync(me, Core.Access.Permissions.ReviewsAdmin, ct)))
+                if (await SecurityFixAsync(db, gitlab, token, access, me, securityId, body.Ask, ct) is not { } made)
                 {
                     return Results.NotFound();
                 }
-                project = scan.Project;
-                branch = scan.Ref ?? await DefaultBranchAsync(gitlab, token, project, ct);
-                title = finding.Kind == SecurityFinding.Dependency ? $"Upgrade {finding.SinkCode.Split(' ')[0]}: {finding.Title}" : $"{finding.Cwe} {finding.Title}".Trim();
-                ask = SecurityAsk(finding, scan) + (body.Ask is { Length: > 0 } more ? $"\n\n{more}" : "");
-                (source, sourceId) = ("security", finding.Id.ToString());
+                db.CodeFixes.Add(made);
+                await db.SaveChangesAsync(ct);
+                runs.Go(made.Id);
+                return Results.Accepted($"/api/fixes/{made.Id}", Brief(made));
             }
             else if (body.FindingId is { } findingId)
             {
@@ -203,6 +206,70 @@ public static partial class FixEndpoints
         await db.SaveChangesAsync(ct);
         runs.Go(fix.Id);
         return Results.Accepted($"/api/fixes/{fix.Id}", Brief(fix));
+    }
+
+    /// <summary>A security review's finding as a fix (not yet saved): from the branch reviewed; null when the person may not fix it.</summary>
+    private static async Task<CodeFix?> SecurityFixAsync(AppDbContext db, GitLabAsPerson gitlab, string token, AccessService access, AppUser me, Guid id, string? more,
+        CancellationToken ct)
+    {
+        var finding = await db.SecurityFindings.AsNoTracking().SingleOrDefaultAsync(f => f.Id == id, ct);
+        var scan = finding is null ? null : await db.SecurityScans.AsNoTracking().SingleOrDefaultAsync(s => s.Id == finding.ScanId, ct);
+        if (finding is null || scan is null || (scan.UserId != me.Id && !await access.MayAsync(me, Core.Access.Permissions.ReviewsAdmin, ct)))
+        {
+            return null;
+        }
+        var title = finding.Kind == SecurityFinding.Dependency ? $"Upgrade {finding.SinkCode.Split(' ')[0]}: {finding.Title}" : $"{finding.Cwe} {finding.Title}".Trim();
+        return new CodeFix
+        {
+            UserId = me.Id, Project = scan.Project, Branch = scan.Ref ?? await DefaultBranchAsync(gitlab, token, scan.Project, ct), Title = Cut(title, 200),
+            Ask = Cut(SecurityAsk(finding, scan) + (more is { Length: > 0 } ? $"\n\n{more}" : ""), 30_000), Source = "security", SourceId = finding.Id.ToString(), Step = "Starting",
+        };
+    }
+
+    /// <summary>
+    /// Fix them: several security findings, a fix each (each its own branch and merge request). As many start as the person
+    /// has places for; the rest wait, and start as the ones before them end.
+    /// </summary>
+    private static async Task<IResult> BatchAsync(NewFixes body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, GitLabAsPerson gitlab, FixRuns runs,
+        AccessService access, CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        var ids = (body.SecurityFindingIds ?? []).Distinct().ToList();
+        if (ids.Count is 0 or > MostAtOnce)
+        {
+            return AuthEndpoints.Problem(400, "findings", $"Choose 1 to {MostAtOnce} findings to fix.");
+        }
+        if (await gitlab.TokenAsync(me.Id, ct) is not { } token)
+        {
+            return AuthEndpoints.Problem(409, "token", "Link your GitLab token for Fix it first: it reads the branch and opens the merge request as you.");
+        }
+        var fixes = new List<CodeFix>();
+        try
+        {
+            foreach (var id in ids)
+            {
+                if (await SecurityFixAsync(db, gitlab, token, access, me, id, body.Ask, ct) is not { } made)
+                {
+                    return Results.NotFound();
+                }
+                fixes.Add(made);
+            }
+        }
+        catch (GitLabException ex)
+        {
+            return AuthEndpoints.Problem(400, "gitlab", ex.Message);
+        }
+        // Each waits; the person's places are taken as Fix it starts them, one replica each.
+        foreach (var f in fixes)
+        {
+            f.Status = CodeFix.Queued;
+            f.Step = "Waiting for a place";
+        }
+        db.CodeFixes.AddRange(fixes);
+        await db.SaveChangesAsync(ct);
+        await runs.StartQueuedAsync(me.Id, ct);
+        var states = await db.CodeFixes.AsNoTracking().Where(f => fixes.Select(x => x.Id).Contains(f.Id)).ToDictionaryAsync(f => f.Id, ct);
+        return Results.Ok(new { fixes = fixes.Select(f => Brief(states[f.Id])), queued = states.Values.Count(f => f.Status == CodeFix.Queued) });
     }
 
     /// <summary>
@@ -282,9 +349,10 @@ public static partial class FixEndpoints
         {
             return AuthEndpoints.Problem(400, "ask", "Say what more to do, up to 10,000 characters.");
         }
-        if (f.Status is CodeFix.Working or CodeFix.Opened || runs.IsRunning(id))
+        if (f.Status is CodeFix.Working or CodeFix.Queued or CodeFix.Opened || runs.IsRunning(id))
         {
-            return AuthEndpoints.Problem(409, "status", f.Status == CodeFix.Opened ? "Its merge request is open: change it there, or start a new fix." : "It is at work.");
+            return AuthEndpoints.Problem(409, "status", f.Status == CodeFix.Opened ? "Its merge request is open: change it there, or start a new fix."
+                : f.Status == CodeFix.Queued ? "It is waiting for a place." : "It is at work.");
         }
         f.Status = CodeFix.Working;
         f.Step = "Starting";
@@ -302,7 +370,7 @@ public static partial class FixEndpoints
         {
             return Results.NotFound();
         }
-        if (!runs.Stop(id) && f.Status == CodeFix.Working)
+        if (!runs.Stop(id) && f.Status is CodeFix.Working or CodeFix.Queued)
         {
             f.Status = CodeFix.Stopped;
             f.Error = "Stopped.";

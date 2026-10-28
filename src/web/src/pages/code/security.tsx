@@ -8,6 +8,7 @@ import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Field } from '@/components/ui/field'
 import { Input, Textarea } from '@/components/ui/input'
@@ -137,11 +138,15 @@ export function SecurityReviews() {
 function FindingCard({
   f,
   since,
+  chosen,
+  onChoose,
   onDecide,
   onFix,
 }: {
   f: SecurityFinding
   since?: string | null
+  chosen: boolean
+  onChoose: (on: boolean) => void
   onDecide: (state: SecurityFinding['state'], why?: string, until?: string) => Promise<void>
   onFix: () => void
 }) {
@@ -154,6 +159,7 @@ function FindingCard({
   return (
     <li className={`grid gap-2 rounded-lg border p-4 ${refuted || f.state !== 'open' ? 'opacity-70' : ''}`}>
       <div className="flex flex-wrap items-center gap-2">
+        {f.state === 'open' && <Checkbox checked={chosen} onCheckedChange={(v) => onChoose(v === true)} aria-label={`Choose “${f.title}” to fix`} />}
         <Badge variant={severityVariant[f.severity]}>{f.severity}</Badge>
         {f.exploited && <Badge variant="destructive">known exploited</Badge>}
         {since && new Date(f.foundAt).getTime() > new Date(since).getTime() + 60_000 && (
@@ -335,6 +341,8 @@ export function SecurityScanPage() {
   const scan = useQuery(securityScanQuery(id))
   const navigate = useNavigate()
   const [by, setBy] = useState<Found>('all')
+  const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set())
+  const [fixing, setFixing] = useState(false)
   if (scan.error) return <QueryError error={scan.error} retry={() => scan.refetch()} />
   if (!scan.data) return <Skeleton className="h-64" />
   const d = scan.data
@@ -363,8 +371,36 @@ export function SecurityScanPage() {
       navigate('/code/fixes')
     }
   }
+  // Fix them: a fix each for the findings chosen, each its own branch; those past the person's places wait their turn.
+  const fixThem = async () => {
+    setFixing(true)
+    try {
+      const made = await api<{ fixes: { id: string }[]; queued: number }>('/api/fixes/batch', { body: { securityFindingIds: [...chosen] } })
+      toast.success(`${made.fixes.length} fixes: ${made.fixes.length - made.queued} at work${made.queued > 0 ? `, ${made.queued} waiting their turn` : ''}.`)
+      navigate('/code/fixes')
+    } catch (e) {
+      toast.error(errorMessage(e))
+    } finally {
+      setFixing(false)
+    }
+  }
+  const choose = (findingId: string, on: boolean) =>
+    setChosen((was) => {
+      const next = new Set(was)
+      if (on) next.add(findingId)
+      else next.delete(findingId)
+      return next
+    })
   const card = (f: SecurityFinding) => (
-    <FindingCard key={f.id} f={f} since={s.finishedAt} onDecide={(state, why, until) => decide(f.id, state, why, until)} onFix={() => void fix(f.id)} />
+    <FindingCard
+      key={f.id}
+      f={f}
+      since={s.finishedAt}
+      chosen={chosen.has(f.id)}
+      onChoose={(on) => choose(f.id, on)}
+      onDecide={(state, why, until) => decide(f.id, state, why, until)}
+      onFix={() => void fix(f.id)}
+    />
   )
   const age = s.advisoriesAsOf ? Math.floor((Date.now() - new Date(`${s.advisoriesAsOf}T00:00:00Z`).getTime()) / 86_400_000) : null
   return (
@@ -422,6 +458,19 @@ export function SecurityScanPage() {
             <Markdown text={d.summary} />
           </CardContent>
         </Card>
+      )}
+      {s.status === 'done' && chosen.size > 0 && (
+        <section aria-label="Fix them" className="sticky top-2 z-10 mb-4 flex flex-wrap items-center gap-2 rounded-xl border bg-card p-3 shadow-sm">
+          <span className="text-sm">
+            {chosen.size} chosen: a fix each, each its own branch and merge request. Two work at once; the rest wait their turn.
+          </span>
+          <Button size="sm" onClick={() => void fixThem()} loading={fixing} disabled={chosen.size > 20} title={chosen.size > 20 ? 'Choose 20 at most' : undefined}>
+            <Wrench /> Fix them
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setChosen(new Set())}>
+            Choose none
+          </Button>
+        </section>
       )}
       {s.status === 'done' && (
         <>

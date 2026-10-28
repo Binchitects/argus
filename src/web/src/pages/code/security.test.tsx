@@ -101,6 +101,29 @@ describe('code security', () => {
     expect(calls.find((c) => c.path === '/api/fixes' && c.method === 'POST')?.body).toEqual({ securityFindingId: 'f1' })
   })
 
+  it('fixes the findings chosen at once, a fix each, the rest waiting their turn', async () => {
+    const calls = fakeApi(member, {
+      'GET /api/code/security/s1': () => ({
+        json: { scan: brief, summary: null, model: 'Main', by: 'Mo', mine: true, findings: [finding('f1', {}), finding('f2', { line: 9, title: 'Another query' }), finding('f3', { title: 'Settled', state: 'fixed' })] },
+      }),
+      'POST /api/fixes/batch': () => ({ json: { fixes: [{ id: 'x1' }, { id: 'x2' }], queued: 0 } }),
+      'GET /api/fixes': () => ({ json: [] }),
+      'GET /api/fixes/token': () => ({ json: { linked: true } }),
+    })
+    const { router } = renderApp('/code/security/s1')
+    const list = await screen.findByRole('list', { name: 'Weaknesses' })
+    expect(screen.queryByRole('region', { name: 'Fix them' })).not.toBeInTheDocument()
+    // A settled finding is not chosen from.
+    expect(within(list).queryByRole('checkbox', { name: 'Choose “Settled” to fix' })).not.toBeInTheDocument()
+    await userEvent.click(within(list).getByRole('checkbox', { name: 'Choose “SQL built from the request” to fix' }))
+    await userEvent.click(within(list).getByRole('checkbox', { name: 'Choose “Another query” to fix' }))
+    const bar = screen.getByRole('region', { name: 'Fix them' })
+    expect(bar).toHaveTextContent('2 chosen')
+    await userEvent.click(within(bar).getByRole('button', { name: 'Fix them' }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/code/fixes'))
+    expect(calls.find((c) => c.path === '/api/fixes/batch')?.body).toEqual({ securityFindingIds: ['f1', 'f2'] })
+  })
+
   it('shows what the scanners found beside the model, secrets and configuration apart, and filters by who found it', async () => {
     const tools = [
       { name: 'opengrep', version: '1.31.0', ran: true, seconds: 2, findings: 3, error: null },

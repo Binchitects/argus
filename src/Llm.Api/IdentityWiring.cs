@@ -373,6 +373,7 @@ public static class IdentityWiring
         services.AddScoped<Code.Fixes.GitLabAsPerson>();
         services.AddScoped<Code.Fixes.FixAgent>();
         services.AddSingleton<Code.Fixes.FixRuns>();
+        services.AddHostedService<Code.Fixes.WaitingFixes>();
         services.AddSingleton<Panels.PanelRuns>();
         services.AddSingleton<Media.MediaJobs>();
         services.AddSingleton<Media.StoryRuns>();

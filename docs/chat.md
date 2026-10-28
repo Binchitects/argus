@@ -1056,6 +1056,13 @@ say so.
   request into the branch it started from, with the agent's account. It is
   yours in GitLab from then on.
 
+- **Fix them.** On a security review's page, choose open findings (up to
+  20) and press **Fix them**: each gets a fix of its own, with its own branch
+  and merge request when you open it. Two work at once; the others wait their
+  turn (**Waiting its turn** under **Code → Fix it**) and start as the ones
+  before them end, after a restart too. **Stop** takes a waiting fix out of
+  the line.
+
 At most two fixes of yours work at once, each for at most 30 minutes. Fix it
 needs the `feature.fixit` permission. Everyone holds it unless an admin
 denies it. Tests in other languages cannot run here yet: the agent says so,

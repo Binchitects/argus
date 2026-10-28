@@ -7,6 +7,8 @@ namespace Llm.Core.Code;
 /// </summary>
 public sealed class CodeFix
 {
+    /// <summary>Started with others (Fix them), waiting for one of its person's places.</summary>
+    public const string Queued = "queued";
     public const string Working = "working";
     public const string Ready = "ready";
     public const string Failed = "failed";

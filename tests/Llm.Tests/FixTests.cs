@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Llm.Api.Code.Fixes;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Llm.Tests;
@@ -235,6 +236,106 @@ public sealed class FixTests(AppFixture app)
         {
             app.Argus.ScanFiles = null;
             app.Mcp.FixFiles.Remove("app/views.py");
+        }
+    }
+
+    private static async Task<List<Guid>> SecurityFindingsAsync(WebApplicationFactory<Program> f, Guid me, int count)
+    {
+        using var scope = f.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+        var scan = new Llm.Core.Code.SecurityScan { UserId = me, Project = "group/app", Ref = "main", Status = "done", FinishedAt = DateTimeOffset.UtcNow };
+        scan.Findings.AddRange(Enumerable.Range(1, count).Select(i => new Llm.Core.Code.SecurityFinding
+        {
+            Path = $"app/v{i}.py", Line = i, SinkCode = "cursor.execute(q)", Cwe = "CWE-89", CweTitle = "CWE-89: SQL Injection", Severity = "high", Title = $"SQL {i}", Pages = "[]",
+        }));
+        db.SecurityScans.Add(scan);
+        await db.SaveChangesAsync();
+        return [.. scan.Findings.Select(x => x.Id)];
+    }
+
+    [Fact]
+    public async Task Several_findings_are_fixed_at_once_each_its_own_fix_and_branch()
+    {
+        await using var f = NewApp();
+        var kim = await PersonAsync(f);
+        var me = (await kim.JsonAsync(await kim.GetAsync("/api/auth/me"))).GetProperty("id").GetGuid();
+        var ids = await SecurityFindingsAsync(f, me, 3);
+        await StatusAssert.Is(HttpStatusCode.Conflict, await kim.PostAsync("/api/fixes/batch", new { securityFindingIds = ids }));
+        await kim.Http.PutAsJsonAsync(new Uri("/api/fixes/token", UriKind.Relative), new { token = "person-token" });
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await kim.PostAsync("/api/fixes/batch", new { securityFindingIds = Array.Empty<Guid>() }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await kim.PostAsync("/api/fixes/batch", new { securityFindingIds = Enumerable.Range(0, 21).Select(_ => Guid.NewGuid()) }));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await kim.PostAsync("/api/fixes/batch", new { securityFindingIds = new[] { ids[0], Guid.NewGuid() } }));
+
+        var batch = await kim.JsonAsync(await kim.PostAsync("/api/fixes/batch", new { securityFindingIds = ids, ask = Script }));
+        var made = batch.GetProperty("fixes").EnumerateArray().Select(x => x.GetProperty("id").GetGuid()).ToList();
+        Assert.Equal(3, made.Distinct().Count());
+        Assert.Equal(["CWE-89 SQL 1", "CWE-89 SQL 2", "CWE-89 SQL 3"], batch.GetProperty("fixes").EnumerateArray().Select(x => x.GetProperty("title").GetString()));
+        // Each ends (the one that waited, after a place was free), ready: a fix and, when opened, a branch each.
+        var runs = f.Services.GetRequiredService<FixRuns>();
+        var done = new List<JsonElement>();
+        foreach (var id in made)
+        {
+            JsonElement fix;
+            var deadline = DateTime.UtcNow.AddSeconds(60);
+            do
+            {
+                await runs.Finished(id).WaitAsync(TimeSpan.FromSeconds(30));
+                fix = await kim.JsonAsync(await kim.GetAsync($"/api/fixes/{id}"));
+            }
+            while (fix.GetProperty("status").GetString() is "queued" or "working" && DateTime.UtcNow < deadline);
+            done.Add(fix);
+        }
+        Assert.All(done, x => Assert.Equal("ready", x.GetProperty("status").GetString()));
+        var branches = new List<string>();
+        foreach (var id in made)
+        {
+            branches.Add((await kim.JsonAsync(await kim.PostAsync($"/api/fixes/{id}/merge-request"))).GetProperty("branch").GetString()!);
+        }
+        Assert.Equal(3, branches.Distinct().Count());
+    }
+
+    [Fact]
+    public async Task Waiting_fixes_start_only_in_the_places_free_and_each_once()
+    {
+        await using var f = NewApp();
+        var kim = await PersonAsync(f);
+        await kim.Http.PutAsJsonAsync(new Uri("/api/fixes/token", UriKind.Relative), new { token = "person-token" });
+        var me = (await kim.JsonAsync(await kim.GetAsync("/api/auth/me"))).GetProperty("id").GetGuid();
+        var runs = f.Services.GetRequiredService<FixRuns>();
+        List<Guid> waiting;
+        using (var scope = f.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+            // One place is taken (a fix at work), three wait; the one that starts works a while (its model answers slowly).
+            db.CodeFixes.Add(new Llm.Core.Code.CodeFix { UserId = me, Project = "group/app", Branch = "main", Status = Llm.Core.Code.CodeFix.Working, CreatedAt = DateTimeOffset.UtcNow.AddMinutes(-9) });
+            var queued = Enumerable.Range(0, 3).Select(i => new Llm.Core.Code.CodeFix
+            {
+                UserId = me, Project = "group/app", Branch = "main", Ask = "Take your time [slow]", Status = Llm.Core.Code.CodeFix.Queued, CreatedAt = DateTimeOffset.UtcNow.AddMinutes(i - 5),
+            }).ToList();
+            db.CodeFixes.AddRange(queued);
+            await db.SaveChangesAsync();
+            waiting = [.. queued.Select(q => q.Id)];
+        }
+        try
+        {
+            // Two at once (a fix ending on each of two replicas): the one free place is filled once, by the oldest.
+            await Task.WhenAll(runs.StartQueuedAsync(me, default), runs.StartQueuedAsync(me, default));
+            Assert.True(runs.IsRunning(waiting[0]));
+            using var scope = f.Services.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+            var states = await db.CodeFixes.AsNoTracking().Where(x => waiting.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.Status);
+            Assert.Equal(["working", "queued", "queued"], waiting.Select(w => states[w]));
+            Assert.False(runs.IsRunning(waiting[1]) || runs.IsRunning(waiting[2]));
+        }
+        finally
+        {
+            using (var scope = f.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+                await db.CodeFixes.Where(x => waiting.Contains(x.Id) && x.Status == Llm.Core.Code.CodeFix.Queued).ExecuteUpdateAsync(u => u.SetProperty(x => x.Status, Llm.Core.Code.CodeFix.Stopped));
+            }
+            runs.Stop(waiting[0]);
+            await runs.Finished(waiting[0]).WaitAsync(TimeSpan.FromSeconds(30));
         }
     }
 

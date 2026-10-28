@@ -32,6 +32,28 @@ public sealed partial class FixRuns(IServiceScopeFactory scopes, TimeProvider cl
         return true;
     }
 
+    /// <summary>
+    /// The person's waiting fixes started while they have places, the oldest first. Each is taken by one update from
+    /// queued to working, so two replicas (or two fixes ending at once) never start the same one.
+    /// </summary>
+    public async Task StartQueuedAsync(Guid userId, CancellationToken ct)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var working = await db.CodeFixes.CountAsync(f => f.UserId == userId && f.Status == CodeFix.Working, ct);
+        var waiting = await db.CodeFixes.Where(f => f.UserId == userId && f.Status == CodeFix.Queued).OrderBy(f => f.CreatedAt).Select(f => f.Id)
+            .Take(Math.Max(0, FixEndpoints.MostWorking - working)).ToListAsync(ct);
+        foreach (var id in waiting)
+        {
+            var now = clock.GetUtcNow();
+            if (await db.CodeFixes.Where(f => f.Id == id && f.Status == CodeFix.Queued)
+                    .ExecuteUpdateAsync(u => u.SetProperty(f => f.Status, CodeFix.Working).SetProperty(f => f.Step, "Starting").SetProperty(f => f.UpdatedAt, now), ct) == 1)
+            {
+                Go(id);
+            }
+        }
+    }
+
     /// <summary>Works on the fix (again, with more to do: <paramref name="more"/>), in the background.</summary>
     public void Go(Guid fix, string? more = null)
     {
@@ -156,8 +178,34 @@ public sealed partial class FixRuns(IServiceScopeFactory scopes, TimeProvider cl
         {
             await End(CodeFix.Failed, ex.Message);
         }
+        finally
+        {
+            // Its place is free: the next of the person's waiting fixes takes it.
+            await StartQueuedAsync(fix.UserId, CancellationToken.None);
+        }
     }
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Fix {Fix} failed")]
     private static partial void FixFailed(ILogger logger, Guid fix, Exception ex);
+}
+
+/// <summary>At start, everyone's waiting fixes taken up again where they have places (the app restarted while they waited).</summary>
+public sealed class WaitingFixes(IServiceScopeFactory scopes, FixRuns runs) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        try
+        {
+            foreach (var person in await db.CodeFixes.Where(f => f.Status == CodeFix.Queued).Select(f => f.UserId).Distinct().ToListAsync(stoppingToken))
+            {
+                await runs.StartQueuedAsync(person, stoppingToken);
+            }
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Stopping before it looked: the next start looks.
+        }
+    }
 }

@@ -19,7 +19,7 @@ import { api, errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Markdown } from '@/pages/chat/markdown'
 
-type FixStatus = 'working' | 'ready' | 'failed' | 'opened' | 'stopped'
+type FixStatus = 'queued' | 'working' | 'ready' | 'failed' | 'opened' | 'stopped'
 
 interface FixBrief {
   id: string
@@ -61,8 +61,8 @@ interface Checks {
   review?: { error?: string; verdict?: 'fixed' | 'still' | 'gone'; line?: number; why?: string }
 }
 
-const statusLabels: Record<FixStatus, string> = { working: 'At work', ready: 'Ready', failed: 'Failed', opened: 'Merge request open', stopped: 'Stopped' }
-const statusTone: Record<FixStatus, 'secondary' | 'outline' | 'destructive' | 'success'> = { working: 'outline', ready: 'secondary', failed: 'destructive', opened: 'success', stopped: 'outline' }
+const statusLabels: Record<FixStatus, string> = { queued: 'Waiting its turn', working: 'At work', ready: 'Ready', failed: 'Failed', opened: 'Merge request open', stopped: 'Stopped' }
+const statusTone: Record<FixStatus, 'secondary' | 'outline' | 'destructive' | 'success'> = { queued: 'outline', working: 'outline', ready: 'secondary', failed: 'destructive', opened: 'success', stopped: 'outline' }
 const toolLabels: Record<string, string> = { list_files: 'Looked at the files', read_file: 'Read', search: 'Searched for', replace: 'Changed', write_file: 'Wrote', delete_file: 'Deleted', run_tests: 'Ran', finish: 'Finished' }
 
 const tokenQuery = { queryKey: ['fixes', 'token'] as const, queryFn: ({ signal }: { signal: AbortSignal }) => api<{ linked: boolean; account: string | null; gitlab: string | null }>('/api/fixes/token', { signal }) }
@@ -125,7 +125,7 @@ export function TokenCard() {
 
 /** Code → Fix it: one's fixes, the newest first, and a new one: words, an issue, or a failed pipeline. */
 export function FixesPage() {
-  const fixes = useQuery({ ...fixesQuery, refetchInterval: (q) => (q.state.data?.some((f) => f.status === 'working') ? 3000 : false) })
+  const fixes = useQuery({ ...fixesQuery, refetchInterval: (q) => (q.state.data?.some((f) => f.status === 'working' || f.status === 'queued') ? 3000 : false) })
   const token = useQuery(tokenQuery)
   const navigate = useNavigate()
   const [from, setFrom] = useState<'ask' | 'issue' | 'pipeline'>('ask')
@@ -316,7 +316,7 @@ export function FixPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const confirm = useConfirm()
-  const fix = useQuery({ ...fixQuery(id), refetchInterval: (q) => (q.state.data?.status === 'working' ? 2000 : false) })
+  const fix = useQuery({ ...fixQuery(id), refetchInterval: (q) => (q.state.data?.status === 'working' || q.state.data?.status === 'queued' ? 2000 : false) })
   const [title, setTitle] = useState<string | null>(null)
   const [more, setMore] = useState('')
   const changed = () => void queryClient.invalidateQueries({ queryKey: ['fixes'] })
@@ -346,7 +346,7 @@ export function FixPage() {
                 <ArrowLeft /> Fix it
               </Link>
             </Button>
-            {f.status === 'working' && (
+            {(f.status === 'working' || f.status === 'queued') && (
               <Button variant="outline" onClick={() => stop.mutate()} loading={stop.isPending}>
                 <Square /> Stop
               </Button>
