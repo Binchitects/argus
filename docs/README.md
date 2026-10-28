@@ -75,4 +75,8 @@ The numbers behind the claims, kept as evidence:
 [index](measurements/index-measurements.md),
 [packs](measurements/pack-measurements.md),
 [KPIs](measurements/kpis.md),
+[tool modes](measurements/tool-modes.md),
+[lab mathematics](measurements/lab-math.md),
+[lab quantum computing](measurements/lab-quantum.md),
+[security review](measurements/security-review.md),
 [verification report](measurements/verification-report.md).

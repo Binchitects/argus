@@ -1,0 +1,1125 @@
+{
+ "set": "Qiskit HumanEval (qiskit-community/qiskit-human-eval, Apache-2.0)",
+ "set_sha256": "631f212e0130627f39fab788d1e02d15ff1de5ef9e0e7acfd6079b8498399b06",
+ "grading": "the set's own tests, run in the sandbox's image",
+ "problems": 151,
+ "usable": 97,
+ "left_out": {
+  "qiskitHumanEval/1": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/3": [
+   "qiskit.exceptions.MissingOptionalLibraryError: \"The 'pylatexenc' library is required to use 'MatplotlibDrawer'. You can install it with 'pip install pylatexenc'.\""
+  ],
+  "qiskitHumanEval/14": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/15": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/16": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/18": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/19": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/20": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/21": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/22": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/28": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/29": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/31": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/32": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/33": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/34": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/35": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/37": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/40": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/43": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/47": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/48": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/51": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/52": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/53": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/54": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/55": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/56": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/63": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/64": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/66": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/68": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/72": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/88": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/94": [
+   "qiskit.exceptions.MissingOptionalLibraryError: \"The 'qiskit_qasm3_import' library is required to use 'loading from OpenQASM 3'. You can install it with 'pip install qiskit_qasm3_import'.\""
+  ],
+  "qiskitHumanEval/96": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/97": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/98": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/101": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/102": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/103": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/104": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/121": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/122": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_transpiler'"
+  ],
+  "qiskitHumanEval/123": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/124": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/128": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/129": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/131": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/132": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/133": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/134": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/146": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ],
+  "qiskitHumanEval/148": [
+   "ModuleNotFoundError: No module named 'qiskit_ibm_runtime'"
+  ]
+ },
+ "count": 40,
+ "seed": 7,
+ "runs": [
+  {
+   "model": "Qwen3-4B-Q4_K_M",
+   "arm": "plain",
+   "passed": 12,
+   "asked": 40,
+   "seconds": 5420.9000000000015,
+   "tokens": 169213,
+   "tool_calls": 0,
+   "problems": [
+    {
+     "id": "qiskitHumanEval/45",
+     "difficulty": "basic",
+     "seconds": 161.8,
+     "tokens": 5647,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "qiskit.circuit.exceptions.CircuitError: 'The amount of qubit(1)/clbit(0) arguments does not match the gate expectation (3).'"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/150",
+     "difficulty": "difficult",
+     "seconds": 257.1,
+     "tokens": 7672,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AssertionError: Expected operation name \"for_loop\""
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/147",
+     "difficulty": "intermediate",
+     "seconds": 100.9,
+     "tokens": 3428,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "ImportError: cannot import name 'MultiControlledY' from 'qiskit.circuit.library' (/usr/local/lib/python3.13/site-packages/qiskit/circuit/library/__init__.py)"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/26",
+     "difficulty": "basic",
+     "seconds": 156.5,
+     "tokens": 5130,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": true,
+     "error": []
+    },
+    {
+     "id": "qiskitHumanEval/144",
+     "difficulty": "intermediate",
+     "seconds": 65.9,
+     "tokens": 2344,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "qiskit.exceptions.QiskitError: 'Input density matrix must be a 2-qubit state.'"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/73",
+     "difficulty": "basic",
+     "seconds": 28.0,
+     "tokens": 1035,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": true,
+     "error": []
+    },
+    {
+     "id": "qiskitHumanEval/86",
+     "difficulty": "intermediate",
+     "seconds": 54.8,
+     "tokens": 1954,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": true,
+     "error": []
+    },
+    {
+     "id": "qiskitHumanEval/13",
+     "difficulty": "basic",
+     "seconds": 28.3,
+     "tokens": 1041,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AttributeError: 'QuantumCircuit' object has no attribute 'u3'. Did you mean: 'u'?"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/145",
+     "difficulty": "intermediate",
+     "seconds": 243.3,
+     "tokens": 7432,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AssertionError: The circuit doesn't match the expected inverse QFT circuit"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/83",
+     "difficulty": "basic",
+     "seconds": 105.2,
+     "tokens": 3561,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "ImportError: cannot import name 'Aer' from 'qiskit' (/usr/local/lib/python3.13/site-packages/qiskit/__init__.py)"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/143",
+     "difficulty": "intermediate",
+     "seconds": 86.5,
+     "tokens": 2997,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": true,
+     "error": []
+    },
+    {
+     "id": "qiskitHumanEval/12",
+     "difficulty": "basic",
+     "seconds": 658.0,
+     "tokens": 16312,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AttributeError: 'QuantumCircuit' object has no attribute 'to_matrix'"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/115",
+     "difficulty": "intermediate",
+     "seconds": 122.8,
+     "tokens": 4098,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "qiskit.circuit.exceptions.CircuitError: \"Invalid param type <class 'str'> for gate u.\""
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/0",
+     "difficulty": "basic",
+     "seconds": 62.7,
+     "tokens": 2212,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "TypeError: QuantumCircuit.measure() missing 1 required positional argument: 'cbit'"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/24",
+     "difficulty": "intermediate",
+     "seconds": 307.9,
+     "tokens": 9032,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "ImportError: cannot import name 'Aer' from 'qiskit' (/usr/local/lib/python3.13/site-packages/qiskit/__init__.py)"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/93",
+     "difficulty": "basic",
+     "seconds": 71.8,
+     "tokens": 2509,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AttributeError: 'QuantumCircuit' object has no attribute 'tableau'"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/74",
+     "difficulty": "intermediate",
+     "seconds": 119.0,
+     "tokens": 4017,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AttributeError: 'QuantumCircuit' object has no attribute 'instructions'. Did you mean: 'get_instructions'?"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/130",
+     "difficulty": "basic",
+     "seconds": 38.6,
+     "tokens": 1410,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AttributeError: 'QuantumCircuit' object has no attribute 'adjoint'"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/117",
+     "difficulty": "intermediate",
+     "seconds": 67.1,
+     "tokens": 2364,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AttributeError: 'TwoQubitBasisDecomposer' object has no attribute 'decompose'. Did you mean: 'decomp0'?"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/38",
+     "difficulty": "basic",
+     "seconds": 45.0,
+     "tokens": 1623,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": true,
+     "error": []
+    },
+    {
+     "id": "qiskitHumanEval/67",
+     "difficulty": "intermediate",
+     "seconds": 168.5,
+     "tokens": 5445,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AssertionError: Expected depth 4, got 3"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/108",
+     "difficulty": "basic",
+     "seconds": 67.7,
+     "tokens": 2392,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": true,
+     "error": []
+    },
+    {
+     "id": "qiskitHumanEval/149",
+     "difficulty": "intermediate",
+     "seconds": 66.1,
+     "tokens": 2352,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "ValueError: The input array must have at least two axes."
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/39",
+     "difficulty": "basic",
+     "seconds": 30.1,
+     "tokens": 1121,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": true,
+     "error": []
+    },
+    {
+     "id": "qiskitHumanEval/106",
+     "difficulty": "intermediate",
+     "seconds": 101.0,
+     "tokens": 3447,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": true,
+     "error": []
+    },
+    {
+     "id": "qiskitHumanEval/10",
+     "difficulty": "basic",
+     "seconds": 380.4,
+     "tokens": 10688,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AttributeError: 'str' object has no attribute 'target'"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/58",
+     "difficulty": "intermediate",
+     "seconds": 256.8,
+     "tokens": 7767,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AttributeError: 'QuantumCircuit' object has no attribute 'cnot'"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/92",
+     "difficulty": "basic",
+     "seconds": 70.4,
+     "tokens": 2479,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "ModuleNotFoundError: No module named 'qiskit.providers.aer'"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/60",
+     "difficulty": "intermediate",
+     "seconds": 299.3,
+     "tokens": 8812,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AssertionError: Operators are not equivalent"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/107",
+     "difficulty": "basic",
+     "seconds": 32.4,
+     "tokens": 1183,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": true,
+     "error": []
+    },
+    {
+     "id": "qiskitHumanEval/25",
+     "difficulty": "intermediate",
+     "seconds": 66.0,
+     "tokens": 2320,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AttributeError: 'QuantumCircuit' object has no attribute 'cnot'"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/139",
+     "difficulty": "basic",
+     "seconds": 69.0,
+     "tokens": 2425,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": true,
+     "error": []
+    },
+    {
+     "id": "qiskitHumanEval/142",
+     "difficulty": "intermediate",
+     "seconds": 72.7,
+     "tokens": 2548,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": true,
+     "error": []
+    },
+    {
+     "id": "qiskitHumanEval/85",
+     "difficulty": "basic",
+     "seconds": 104.6,
+     "tokens": 3563,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AttributeError: 'QuantumCircuit' object has no attribute 'qasm'"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/110",
+     "difficulty": "intermediate",
+     "seconds": 254.6,
+     "tokens": 7695,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "TypeError: random_clifford() missing 1 required positional argument: 'num_qubits'"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/42",
+     "difficulty": "basic",
+     "seconds": 39.1,
+     "tokens": 1415,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AttributeError: type object 'Pauli' has no attribute 'from_label'. Did you mean: 'to_label'?"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/76",
+     "difficulty": "intermediate",
+     "seconds": 205.5,
+     "tokens": 6423,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "TypeError: Can't instantiate abstract class HXHPass without an implementation for abstract method 'run'"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/127",
+     "difficulty": "basic",
+     "seconds": 38.8,
+     "tokens": 1400,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "TypeError: random_circuit() got an unexpected keyword argument 'n_qubits'. Did you mean 'num_qubits'?"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/65",
+     "difficulty": "intermediate",
+     "seconds": 245.1,
+     "tokens": 7435,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AttributeError: 'QuantumCircuit' object has no attribute 'cphase'"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/105",
+     "difficulty": "basic",
+     "seconds": 71.6,
+     "tokens": 2485,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": true,
+     "error": []
+    }
+   ],
+   "share": 0.3,
+   "by_difficulty": {
+    "basic": "8/20",
+    "difficult": "0/1",
+    "intermediate": "4/19"
+   }
+  },
+  {
+   "model": "Qwen3-4B-Q4_K_M",
+   "arm": "lab",
+   "passed": 10,
+   "asked": 40,
+   "seconds": 24602.600000000002,
+   "tokens": 599502,
+   "tool_calls": 77,
+   "problems": [
+    {
+     "id": "qiskitHumanEval/45",
+     "difficulty": "basic",
+     "seconds": 91.6,
+     "tokens": 3109,
+     "tool_calls": 1,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AssertionError: Expected Clifford instance, got QuantumCircuit"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/150",
+     "difficulty": "difficult",
+     "seconds": 329.4,
+     "tokens": 10147,
+     "tool_calls": 2,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AssertionError: Expected operation name \"for_loop\""
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/147",
+     "difficulty": "intermediate",
+     "seconds": 827.3,
+     "tokens": 23646,
+     "tool_calls": 7,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "ImportError: cannot import name 'MCYGate' from 'qiskit.circuit.library' (/usr/local/lib/python3.13/site-packages/qiskit/circuit/library/__init__.py)"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/26",
+     "difficulty": "basic",
+     "seconds": 1826.3,
+     "tokens": 34366,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AttributeError: 'qiskit._accelerate.circuit.DAGCircuit' object has no attribute 'h'"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/144",
+     "difficulty": "intermediate",
+     "seconds": 131.0,
+     "tokens": 4155,
+     "tool_calls": 2,
+     "answered": false,
+     "passed": false,
+     "error": [
+      "no Python block in the answer"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/73",
+     "difficulty": "basic",
+     "seconds": 344.6,
+     "tokens": 11220,
+     "tool_calls": 7,
+     "answered": true,
+     "passed": true,
+     "error": []
+    },
+    {
+     "id": "qiskitHumanEval/86",
+     "difficulty": "intermediate",
+     "seconds": 132.1,
+     "tokens": 4399,
+     "tool_calls": 1,
+     "answered": true,
+     "passed": true,
+     "error": []
+    },
+    {
+     "id": "qiskitHumanEval/13",
+     "difficulty": "basic",
+     "seconds": 114.7,
+     "tokens": 3934,
+     "tool_calls": 1,
+     "answered": true,
+     "passed": true,
+     "error": []
+    },
+    {
+     "id": "qiskitHumanEval/145",
+     "difficulty": "intermediate",
+     "seconds": 130.4,
+     "tokens": 4435,
+     "tool_calls": 1,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AttributeError: 'QFT' object has no attribute 'reverse_qubits'. Did you mean: 'reverse_bits'?"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/83",
+     "difficulty": "basic",
+     "seconds": 136.5,
+     "tokens": 4550,
+     "tool_calls": 2,
+     "answered": false,
+     "passed": false,
+     "error": [
+      "no Python block in the answer"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/143",
+     "difficulty": "intermediate",
+     "seconds": 109.0,
+     "tokens": 3700,
+     "tool_calls": 1,
+     "answered": true,
+     "passed": true,
+     "error": []
+    },
+    {
+     "id": "qiskitHumanEval/12",
+     "difficulty": "basic",
+     "seconds": 648.5,
+     "tokens": 19420,
+     "tool_calls": 4,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "SyntaxError: invalid syntax"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/115",
+     "difficulty": "intermediate",
+     "seconds": 397.2,
+     "tokens": 11092,
+     "tool_calls": 1,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "while processing 'properties'"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/0",
+     "difficulty": "basic",
+     "seconds": 47.9,
+     "tokens": 1668,
+     "tool_calls": 1,
+     "answered": true,
+     "passed": true,
+     "error": []
+    },
+    {
+     "id": "qiskitHumanEval/24",
+     "difficulty": "intermediate",
+     "seconds": 568.4,
+     "tokens": 17336,
+     "tool_calls": 3,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "SyntaxError: unterminated string literal (detected at line 10)"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/93",
+     "difficulty": "basic",
+     "seconds": 92.9,
+     "tokens": 3134,
+     "tool_calls": 1,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AssertionError: Operators are not equivalent"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/74",
+     "difficulty": "intermediate",
+     "seconds": 362.4,
+     "tokens": 11304,
+     "tool_calls": 2,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AttributeError: 'QuantumCircuit' object has no attribute 'instructions'. Did you mean: 'get_instructions'?"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/130",
+     "difficulty": "basic",
+     "seconds": 335.9,
+     "tokens": 10669,
+     "tool_calls": 2,
+     "answered": true,
+     "passed": true,
+     "error": []
+    },
+    {
+     "id": "qiskitHumanEval/117",
+     "difficulty": "intermediate",
+     "seconds": 341.1,
+     "tokens": 10607,
+     "tool_calls": 2,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "SyntaxError: invalid syntax"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/38",
+     "difficulty": "basic",
+     "seconds": 157.8,
+     "tokens": 5199,
+     "tool_calls": 2,
+     "answered": true,
+     "passed": true,
+     "error": []
+    },
+    {
+     "id": "qiskitHumanEval/67",
+     "difficulty": "intermediate",
+     "seconds": 1825.4,
+     "tokens": 34879,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AttributeError: 'QuantumCircuit' object has no attribute 'cnot'"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/108",
+     "difficulty": "basic",
+     "seconds": 123.4,
+     "tokens": 3914,
+     "tool_calls": 1,
+     "answered": true,
+     "passed": true,
+     "error": []
+    },
+    {
+     "id": "qiskitHumanEval/149",
+     "difficulty": "intermediate",
+     "seconds": 1747.2,
+     "tokens": 32443,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "ValueError: The input array must have at least two axes."
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/39",
+     "difficulty": "basic",
+     "seconds": 220.3,
+     "tokens": 7059,
+     "tool_calls": 4,
+     "answered": true,
+     "passed": true,
+     "error": []
+    },
+    {
+     "id": "qiskitHumanEval/106",
+     "difficulty": "intermediate",
+     "seconds": 1851.9,
+     "tokens": 35771,
+     "tool_calls": 1,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AttributeError: type object 'CNOTDihedral' has no attribute 'from_quantum_circuit'"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/10",
+     "difficulty": "basic",
+     "seconds": 2114.8,
+     "tokens": 54663,
+     "tool_calls": 5,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "SyntaxError: invalid syntax"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/58",
+     "difficulty": "intermediate",
+     "seconds": 224.1,
+     "tokens": 7095,
+     "tool_calls": 1,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AssertionError: Unexpected result value"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/92",
+     "difficulty": "basic",
+     "seconds": 1820.3,
+     "tokens": 34524,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "ModuleNotFoundError: No module named 'qiskit.providers.aer'"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/60",
+     "difficulty": "intermediate",
+     "seconds": 3513.9,
+     "tokens": 87200,
+     "tool_calls": 7,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AssertionError: Operators are not equivalent"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/107",
+     "difficulty": "basic",
+     "seconds": 1756.5,
+     "tokens": 32783,
+     "tool_calls": 0,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AssertionError: Unexpected result value"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/25",
+     "difficulty": "intermediate",
+     "seconds": 141.2,
+     "tokens": 4422,
+     "tool_calls": 1,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "ImportError: cannot import name 'transpile' from 'qiskit.transpiler' (/usr/local/lib/python3.13/site-packages/qiskit/transpiler/__init__.py). Did you mean: 'transpiler'?"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/139",
+     "difficulty": "basic",
+     "seconds": 50.4,
+     "tokens": 1753,
+     "tool_calls": 1,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "ValueError: too many values to unpack (expected 3)"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/142",
+     "difficulty": "intermediate",
+     "seconds": 129.4,
+     "tokens": 4397,
+     "tool_calls": 1,
+     "answered": true,
+     "passed": true,
+     "error": []
+    },
+    {
+     "id": "qiskitHumanEval/85",
+     "difficulty": "basic",
+     "seconds": 104.4,
+     "tokens": 3576,
+     "tool_calls": 1,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AttributeError: module 'qiskit.qasm2' has no attribute 'qasm2'"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/110",
+     "difficulty": "intermediate",
+     "seconds": 425.3,
+     "tokens": 13000,
+     "tool_calls": 2,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "took over 120 s"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/42",
+     "difficulty": "basic",
+     "seconds": 188.4,
+     "tokens": 6327,
+     "tool_calls": 1,
+     "answered": false,
+     "passed": false,
+     "error": [
+      "no Python block in the answer"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/76",
+     "difficulty": "intermediate",
+     "seconds": 865.1,
+     "tokens": 25175,
+     "tool_calls": 5,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "TypeError: 'qiskit._accelerate.circuit.DAGCircuit' object is not iterable"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/127",
+     "difficulty": "basic",
+     "seconds": 87.3,
+     "tokens": 2971,
+     "tool_calls": 1,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "TypeError: QuantumCircuit.measure() missing 1 required positional argument: 'cbit'"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/65",
+     "difficulty": "intermediate",
+     "seconds": 169.3,
+     "tokens": 5551,
+     "tool_calls": 1,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AttributeError: 'QuantumCircuit' object has no attribute 'cu1'. Did you mean: 'cu'?"
+     ]
+    },
+    {
+     "id": "qiskitHumanEval/105",
+     "difficulty": "basic",
+     "seconds": 119.0,
+     "tokens": 3909,
+     "tool_calls": 1,
+     "answered": true,
+     "passed": false,
+     "error": [
+      "AttributeError: 'QuantumCircuit' object has no attribute 'cnot'"
+     ]
+    }
+   ],
+   "share": 0.25,
+   "by_difficulty": {
+    "basic": "7/20",
+    "difficult": "0/1",
+    "intermediate": "3/19"
+   }
+  }
+ ]
+}

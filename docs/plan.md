@@ -1992,10 +1992,15 @@ measured on Juliet for Java and C# and the OWASP Benchmark
 measuring found fixed (the rules broadened, the prompt's example copied, a
 scanner's match the model clears kept open); the security review's findings
 in Code Arena's Problems with Fix; Fix it checking its change with the
-scanners and the review; Fix them for many findings at once. Left: the
+scanners and the review; Fix them for many findings at once; the quantum lab
+on Qiskit HumanEval ([lab-quantum.md](measurements/lab-quantum.md): 12 of 40
+alone, 10 of 40 in the lab, most misses an API Qiskit removed). Left: the
 review's own sinks for the forms the measuring showed they miss (C#'s
 `new StreamReader(` and `Response.Write`, Java's `new java.io.File(`,
-LDAP and XPath); Fix it measured on real CVE fixes (CVEfixes, needs a yes).
+LDAP and XPath); Fix it measured on real CVE fixes (CVEfixes, needs a yes);
+the quantum lab running the function an answer gives, once, before answering,
+and measured again on the same forty; qiskit-ibm-runtime in the sandbox for
+the set's 51 problems that need its fake devices (needs a yes).
 
 The person asked (2026-10-27, after v7.3.0) for "full GRC and related
 evaluation certifications requirement", and for quantum computing and the
@@ -2213,7 +2218,8 @@ Done (items 1 to 5): the sandbox's quantum layer (Qiskit 2.6.1 and Aer
 the Quantum tool pack (`quantum_run`, `quantum_check`, `qec_sample`,
 `qubit_dynamics`, `quantum_variational`, `quantum_chemistry`), the Quantum
 computing field, and the notebook's figures (a circuit drawn, histograms and
-charts). `quantum_check` counts as a check. Left: item 6, which needs a yes.
+charts). `quantum_check` counts as a check. Item 6 done after v7.4.0
+([lab-quantum.md](measurements/lab-quantum.md)).
 
 #### Vulnerabilities: known, found and fixed
 

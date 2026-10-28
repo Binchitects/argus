@@ -817,6 +817,10 @@ correct it if they disagree, and the notebook says so above the answer that
 follows. **Ask more** goes on in the same notebook. A notebook is a chat
 underneath (**Open as a chat** to branch, edit or share it), kept out of the
 chat list.
+Measured on [mathematics](measurements/lab-math.md) and
+[quantum computing](measurements/lab-quantum.md): the lab checks results, and
+a small model's Qiskit code fails on APIs Qiskit removed in the lab as much as
+alone.
 
 ## Meetings
 
