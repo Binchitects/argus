@@ -1325,6 +1325,17 @@ An answer of a comparison (Compare) not voted on yet stays blind, as in the
 chat: its model is "Model A" or "Model B", its cost waits for the vote (and is
 out of the cost total until then), and the model filter does not find it.
 
+### Line
+
+**Line** (Observe, with `usage.read`) shows the answers' line every two
+seconds: each chat answer and API request running (whose, its model, chat
+or API, for how long, the longest first) and each waiting in the order it
+will be served (a higher priority first, then whoever has fewest running,
+then whoever was served longest ago), with its place. Above them are the
+line's settings (Settings → Chat: Answers at once for everyone and per
+person, Longest line, Longest wait in line) and each model's places. Each
+app replica keeps its own line: the page shows the one that answered.
+
 ### Dashboards
 
 The dashboards are files in Grafana's JSON format, in `src/Llm.Api/Dashboards/json/`

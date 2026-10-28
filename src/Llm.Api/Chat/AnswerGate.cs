@@ -26,8 +26,10 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
     private int _total;
     private int _replicas = 1;
 
-    private sealed class Waiter(Guid person, int priority, string model, long order, int limit)
+    private sealed class Waiter(Guid person, int priority, string model, long order, int limit, string kind, DateTimeOffset since)
     {
+        public string Kind { get; } = kind;
+        public DateTimeOffset Since { get; } = since;
         public Guid Person { get; } = person;
         public int Priority { get; } = priority;
         public string Model { get; } = model;
@@ -38,18 +40,41 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
     }
 
     /// <summary>A place taken: give it back by disposing it.</summary>
-    public sealed class Place(AnswerGate gate, Guid person, string model) : IDisposable
+    public sealed class Place(AnswerGate gate, Guid person, string model, string kind, DateTimeOffset since) : IDisposable
     {
         private int _released;
+
+        public Guid Person { get; } = person;
+        public string Model { get; } = model;
+        /// <summary>"chat" (an answer) or "api" (a request with a key).</summary>
+        public string Kind { get; } = kind;
+        public DateTimeOffset Since { get; } = since;
 
         public void Dispose()
         {
             if (Interlocked.Exchange(ref _released, 1) == 0)
             {
-                gate.Release(person, model);
+                gate.Release(this);
             }
         }
     }
+
+    /// <summary>A request running or waiting, as Admin → Line shows it: whose, on which model, of which kind, since when; a waiter's place (1: next) and priority.</summary>
+    public sealed record Entry(Guid Person, string Model, string Kind, DateTimeOffset Since, int? Position = null, int? Priority = null);
+
+    /// <summary>Everything running now, and everyone waiting in the order they will be served.</summary>
+    public (List<Entry> Running, List<Entry> Waiting) Snapshot()
+    {
+        lock (_lock)
+        {
+            var running = _held.OrderBy(p => p.Since).Select(p => new Entry(p.Person, p.Model, p.Kind, p.Since)).ToList();
+            var order = _waiting.ToList();
+            order.Sort((a, b) => a == b ? 0 : Before(a, b) ? -1 : 1);
+            return (running, [.. order.Select((w, i) => new Entry(w.Person, w.Model, w.Kind, w.Since, i + 1, w.Priority))]);
+        }
+    }
+
+    private readonly HashSet<Place> _held = [];
 
     /// <summary>
     /// What the line looks like to one person: the model they wait for (null when it is the whole
@@ -119,12 +144,13 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
 
     /// <param name="priority">Their place in line: higher goes first (0 for most people).</param>
     /// <param name="atOnce">The most of their requests that may run at once (Admin → People or Groups); null: the company's, Chat:AnswersPerPerson; 0: no limit.</param>
-    public async Task<Place> EnterAsync(Guid person, int priority, string model, Func<Line, Task> waiting, CancellationToken ct, int? atOnce = null)
+    /// <param name="kind">"chat" (an answer) or "api" (a request with a key): for Admin → Line.</param>
+    public async Task<Place> EnterAsync(Guid person, int priority, string model, Func<Line, Task> waiting, CancellationToken ct, int? atOnce = null, string kind = "chat")
     {
         Waiter me;
         lock (_lock)
         {
-            me = new Waiter(person, priority, model, ++_tick, atOnce switch { null => PerPerson, 0 => int.MaxValue, { } n => Math.Max(1, n) });
+            me = new Waiter(person, priority, model, ++_tick, atOnce switch { null => PerPerson, 0 => int.MaxValue, { } n => Math.Max(1, n) }, kind, clock.GetUtcNow());
             _waiting.Add(me);
             Dispatch();
             // Not served at once, with the line as long as it may be: refused now, rather than left to wait (Chat:QueueLength).
@@ -216,10 +242,12 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
         }
     }
 
-    private void Release(Guid person, string model)
+    private void Release(Place place)
     {
+        var (person, model) = (place.Person, place.Model);
         lock (_lock)
         {
+            _held.Remove(place);
             _total--;
             if (--_running[person] == 0)
             {
@@ -273,7 +301,9 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
             _runningOn[next.Model] = _runningOn.GetValueOrDefault(next.Model) + 1;
             _total++;
             _lastServed[next.Person] = ++_tick;
-            next.Granted.TrySetResult(new Place(this, next.Person, next.Model));
+            var place = new Place(this, next.Person, next.Model, next.Kind, clock.GetUtcNow());
+            _held.Add(place);
+            next.Granted.TrySetResult(place);
         }
     }
 }

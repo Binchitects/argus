@@ -1,4 +1,4 @@
-import { Activity, AppWindow, BadgeCheck, AudioLines, Brain, GitPullRequest, ListChecks, BarChart, BarChart3, Blocks, Bot, Boxes, CalendarClock, Database, FlaskConical, HardDrive, Home, KeyRound, LayoutDashboard, Library, LineChart, Logs, MessageSquare, Package, Palette, Plug, Presentation, ScanSearch, ScrollText, Settings, ShieldAlert, ShieldCheck, Siren, SquareSlash, Telescope, ThumbsUp, Timer, Trophy, Users, UsersRound, Workflow, Wrench, type LucideIcon } from 'lucide-react'
+import { Activity, AppWindow, ListOrdered, BadgeCheck, AudioLines, Brain, GitPullRequest, ListChecks, BarChart, BarChart3, Blocks, Bot, Boxes, CalendarClock, Database, FlaskConical, HardDrive, Home, KeyRound, LayoutDashboard, Library, LineChart, Logs, MessageSquare, Package, Palette, Plug, Presentation, ScanSearch, ScrollText, Settings, ShieldAlert, ShieldCheck, Siren, SquareSlash, Telescope, ThumbsUp, Timer, Trophy, Users, UsersRound, Workflow, Wrench, type LucideIcon } from 'lucide-react'
 
 export interface NavItem {
   title: string
@@ -79,6 +79,7 @@ export const navigation: NavSection[] = [
     adminOnly: true,
     items: [
       { title: 'Monitoring', path: '/admin/monitoring', icon: Activity, keywords: ['prometheus', 'probes', 'health', 'services'], permission: 'monitoring.read' },
+      { title: 'Line', path: '/admin/line', icon: ListOrdered, keywords: ['queue', 'waiting', 'busy', 'running', 'who waits', 'at once'], permission: 'usage.read' },
       { title: 'Dashboards', path: '/admin/dashboards', icon: LineChart, keywords: ['gpu', 'performance', 'metrics', 'charts'], permission: 'monitoring.read', feature: 'monitoring' },
       { title: 'Logs', path: '/admin/logs', icon: Logs, keywords: ['loki', 'errors', 'containers', 'tail'], permission: 'logs.read', feature: 'monitoring' },
       { title: 'Alerts', path: '/admin/alerts', icon: Siren, keywords: ['alertmanager', 'firing', 'rules', 'incidents'], permission: 'monitoring.read' },

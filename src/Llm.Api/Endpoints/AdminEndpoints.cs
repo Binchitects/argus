@@ -32,11 +32,13 @@ public static class AdminEndpoints
             ["POST /api/admin/people/{id:guid}/sign-out"] = Llm.Core.Access.Permissions.PeoplePasswords,
             ["DELETE /api/admin/people/{id:guid}"] = Llm.Core.Access.Permissions.PeopleDelete,
             ["GET /api/admin/audit"] = Llm.Core.Access.Permissions.AuditRead,
+            ["GET /api/admin/line"] = Llm.Core.Access.Permissions.UsageRead,
             ["GET /api/admin/sign-in"] = Llm.Core.Access.Permissions.SettingsRead,
             ["POST /api/admin/ldap/moves/plan"] = Llm.Core.Access.Permissions.SignInMoves,
             ["POST /api/admin/ldap/moves"] = Llm.Core.Access.Permissions.SignInMoves,
             ["POST /api/admin/ldap/sync"] = Llm.Core.Access.Permissions.SignInDirectory,
         }).ScopedToGroups();
+        admin.MapGet("/line", LineAsync);
         admin.MapGet("/people", ListAsync);
         admin.MapPost("/people", CreateAsync);
         admin.MapGet("/people/{id:guid}", GetAsync);
@@ -231,6 +233,36 @@ public static class AdminEndpoints
                 warning,
             });
         });
+
+    /// <summary>
+    /// The answers' line now (Admin → Line): every request running and every one waiting, in the order they will be served,
+    /// with whose it is, its model, chat or API, and since when; each model's places and the line's settings. This replica's
+    /// line: with several, each keeps its own.
+    /// </summary>
+    private static async Task<IResult> LineAsync(Chat.AnswerGate gate, AppDbContext db, Microsoft.Extensions.Options.IOptionsMonitor<Chat.ChatOptions> chat, TimeProvider clock)
+    {
+        var (running, waiting) = gate.Snapshot();
+        var ids = running.Concat(waiting).Select(e => e.Person).Distinct().ToList();
+        var people = await db.Users.AsNoTracking().Where(u => ids.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => new { u.Id, u.UserName, u.DisplayName });
+        var now = clock.GetUtcNow();
+        object Row(Chat.AnswerGate.Entry e) => new
+        {
+            person = people.GetValueOrDefault(e.Person) ?? new { Id = e.Person, UserName = (string?)null, DisplayName = "someone removed" },
+            e.Model, e.Kind, e.Since, seconds = (int)(now - e.Since).TotalSeconds, e.Position, e.Priority,
+        };
+        var models = running.Concat(waiting).Select(e => e.Model).Distinct().Order(StringComparer.Ordinal);
+        var o = chat.CurrentValue;
+        return Results.Ok(new
+        {
+            running = running.Select(Row),
+            waiting = waiting.Select(Row),
+            places = models.ToDictionary(m => m, gate.PlacesOf),
+            answersAtOnce = o.AnswersAtOnce,
+            answersPerPerson = o.AnswersPerPerson,
+            queueLength = o.QueueLength,
+            queueTimeoutMinutes = (int)o.QueueTimeout.TotalMinutes,
+        });
+    }
 
     private static async Task<object> AtOnceAsync(AppUser u, Access.AccessService access)
     {

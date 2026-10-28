@@ -605,7 +605,7 @@ public static class AnswerCacheEndpoints
         {
             try
             {
-                turn = await gate.EnterAsync(who.Id, who.Priority, lineModel, _ => Task.CompletedTask, ct, who.AtOnce ?? 0);
+                turn = await gate.EnterAsync(who.Id, who.Priority, lineModel, _ => Task.CompletedTask, ct, who.AtOnce ?? 0, kind: "api");
             }
             catch (Chat.AnswerGate.BusyException ex)
             {

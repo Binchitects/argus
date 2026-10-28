@@ -44,6 +44,16 @@ public sealed class ApiLineTests(AppFixture app)
             await Task.Delay(50);
         }
         Assert.Equal((1, 1), gate.Now());
+        // Admin → Line: whose request runs and whose waits, in order, chat or API.
+        var line = await admin.JsonAsync(await admin.GetAsync("/api/admin/line"));
+        var running = Assert.Single(line.GetProperty("running").EnumerateArray());
+        var waiting = Assert.Single(line.GetProperty("waiting").EnumerateArray());
+        Assert.Equal((name, "api"), (running.GetProperty("person").GetProperty("userName").GetString(), running.GetProperty("kind").GetString()));
+        Assert.Equal((name, 1), (waiting.GetProperty("person").GetProperty("userName").GetString(), waiting.GetProperty("position").GetInt32()));
+        Assert.Equal(1, line.GetProperty("queueLength").GetInt32());
+        // Someone without usage.read does not see it.
+        var nosy = await new TestBrowser(f).SignedInAsync(name, made.GetProperty("password").GetString()!);
+        Assert.Equal(HttpStatusCode.Forbidden, (await nosy.GetAsync("/api/admin/line")).StatusCode);
         // The line holds one: a third is refused at once, as busy, with Retry-After.
         using var third = await Ask("three");
         Assert.Equal(HttpStatusCode.ServiceUnavailable, third.StatusCode);
