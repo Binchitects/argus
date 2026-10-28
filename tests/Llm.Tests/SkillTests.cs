@@ -46,7 +46,7 @@ public sealed class SkillTests(AppFixture app)
     private static async Task<JsonElement> ChatAsync(TestBrowser b, Guid id) => await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{id}"));
 
     /// <summary>The last request the model was sent for this person.</summary>
-    private JsonObject LastRequestFor(string email) => app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body;
+    private JsonObject LastRequestFor(string email) => app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body;
 
     private static string LastUser(JsonObject request) => request["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!["content"] switch
     {
@@ -181,7 +181,7 @@ public sealed class SkillTests(AppFixture app)
         var res = await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = """Notes for 2.4 please [call use_skill {"name":"release-notes","parameters":{"version":"2.4"},"request":"for the mobile app"}]""" });
         Assert.True(res.IsSuccessStatusCode, await res.Content.ReadAsStringAsync());
         await res.Content.ReadAsStringAsync();
-        var first = app.Model.Requests.First(r => r.Body["user"]!.GetValue<string>() == email && r.Body["tools"] is not null).Body;
+        var first = app.Model.Requests.First(r => r.Body["user"]?.GetValue<string>() == email && r.Body["tools"] is not null).Body;
         Assert.Contains("use_skill", first["tools"]!.AsArray().Select(t => t!["function"]!["name"]!.GetValue<string>()));
         var system = System(first);
         Assert.Contains("- release-notes: Write release notes for a version from its changes. (parameters: version)", system, StringComparison.Ordinal);

@@ -50,7 +50,7 @@ public sealed class MemoryRecallTests(AppFixture app)
     /// <summary>The system prompt and the last question of the person's newest request to the model.</summary>
     private (string System, string Question) SentFor(string email)
     {
-        var messages = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]!.AsArray();
+        var messages = app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body["messages"]!.AsArray();
         var question = messages.Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!;
         return (messages[0]!["content"]!.GetValue<string>(), question is System.Text.Json.Nodes.JsonValue v ? v.GetValue<string>() : question.ToJsonString());
     }
@@ -151,7 +151,7 @@ public sealed class MemoryRecallTests(AppFixture app)
         events = await AskAsync(b, """What do I do before a commit? [call recall {"query":"tests before a commit"}]""", new { tools = new[] { "memory" } });
         var found = events.Single(e => e.GetProperty("type").GetString() == "tool_result").GetProperty("text").GetString();
         Assert.Equal("- Runs the tests with tools/dn before a commit. (how to)", found);
-        Assert.Contains("recall", app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["tools"]!.ToJsonString(), StringComparison.Ordinal);
+        Assert.Contains("recall", app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body["tools"]!.ToJsonString(), StringComparison.Ordinal);
     }
 
 

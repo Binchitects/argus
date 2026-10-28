@@ -43,7 +43,7 @@ public sealed class PastChatsTests(AppFixture app)
     }
 
     private string LastResult(string email) =>
-        app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email && r.Body["messages"]!.AsArray().Any(m => m!["role"]!.GetValue<string>() == "tool"))
+        app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email && r.Body["messages"]!.AsArray().Any(m => m!["role"]!.GetValue<string>() == "tool"))
             .Body["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "tool")!["content"]!.GetValue<string>();
 
     private static async Task<int> DigestAsync(WebApplicationFactory<Program> f, MovableClock clock)
@@ -148,7 +148,7 @@ public sealed class PastChatsTests(AppFixture app)
         Assert.Equal(2, await DigestAsync(f, clock));
 
         await SendAsync(b, null, "Which parts vendor did we choose, Northwind Traders?");
-        var asked = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]!.AsArray()
+        var asked = app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body["messages"]!.AsArray()
             .Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.ToString();
         Assert.Contains("(Past chats of the person's that may bear on this", asked, StringComparison.Ordinal);
         Assert.Contains($"[{vendor}]", asked, StringComparison.Ordinal);
@@ -156,7 +156,7 @@ public sealed class PastChatsTests(AppFixture app)
 
         // A question about nothing earlier comes alone.
         await SendAsync(b, null, "Write a haiku about autumn leaves falling.");
-        asked = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]!.AsArray()
+        asked = app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body["messages"]!.AsArray()
             .Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.ToString();
         Assert.DoesNotContain("Past chats", asked, StringComparison.Ordinal);
     }

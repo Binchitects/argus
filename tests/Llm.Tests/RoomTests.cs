@@ -58,7 +58,7 @@ public sealed class RoomTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.BadRequest, await member.PostAsync($"/api/chat/conversations/{room}/messages", new { content = "Not to the model" }));
         await SendAsync(member, room, new { content = "@Arena what could go wrong?" });
         // The member's question goes as theirs: their email to the gateway, their name in the room's history.
-        var asked = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == memberEmail).Body["messages"]!.AsArray();
+        var asked = app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == memberEmail).Body["messages"]!.AsArray();
         Assert.Contains("room several people share", asked[0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
         Assert.Contains("You are answering Ben", asked[0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
         Assert.Contains("[Olivia]: Shall we launch Friday?", asked[^1]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
@@ -98,7 +98,7 @@ public sealed class RoomTests(AppFixture app)
         var (_, _, owner) = await PersonAsync(admin, "Ola");
         var (memberId, memberEmail, member) = await PersonAsync(admin, "Bo");
         var room = (await owner.JsonAsync(await owner.PostAsync("/api/rooms", new { title = "Ops", userIds = new[] { memberId } }))).GetProperty("id").GetGuid();
-        var asked = () => app.Model.Requests.Count(r => r.Body["user"]!.GetValue<string>() == memberEmail);
+        var asked = () => app.Model.Requests.Count(r => r.Body["user"]?.GetValue<string>() == memberEmail);
 
         await StatusAssert.Is(HttpStatusCode.OK, await owner.PostAsync($"/api/chat/conversations/{room}/queue", new { content = "Coffee first, @Bo?", mentions = new[] { memberId } }));
         await EventuallyAsync(async () => (await MessagesAsync(owner, room)).Any(m => m.GetProperty("content").GetString() == "Coffee first, @Bo?"));
@@ -123,7 +123,7 @@ public sealed class RoomTests(AppFixture app)
         // A reply to the model's answer: a question to it, with the answer it replies to.
         await StatusAssert.Is(HttpStatusCode.OK, await member.PostAsync($"/api/chat/conversations/{room}/queue", new { content = "Say it shorter", replyTo = answer.GetProperty("id").GetGuid() }));
         await EventuallyAsync(() => Task.FromResult(asked() == before + 2));
-        var last = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == memberEmail).Body["messages"]!.AsArray();
+        var last = app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == memberEmail).Body["messages"]!.AsArray();
         var question = last[^1]!["content"]!.GetValue<string>();
         Assert.Contains("Say it shorter", question, StringComparison.Ordinal);
         Assert.Contains(answer.GetProperty("content").GetString()![..10], question, StringComparison.Ordinal);

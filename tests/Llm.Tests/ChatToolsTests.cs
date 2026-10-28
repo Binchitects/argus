@@ -38,7 +38,7 @@ public sealed class ChatToolsTests(AppFixture app)
     private static JsonElement Event(List<JsonElement> events, string type) => events.Single(e => e.GetProperty("type").GetString() == type);
 
     private List<string> FunctionsSentFor(string email) =>
-        [.. (app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["tools"]?.AsArray() ?? [])
+        [.. (app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body["tools"]?.AsArray() ?? [])
             .Select(t => t!["function"]!["name"]!.GetValue<string>())];
 
     private static async Task<List<string>> ToolsInConfigAsync(TestBrowser b) =>
@@ -60,7 +60,7 @@ public sealed class ChatToolsTests(AppFixture app)
         var id = await NewChatAsync(b, new { useArgus = true, tools = new[] { "argus", "calculator", "time" } });
 
         var events = await SendAsync(b, id, """Where is ParseHeader? [call load_tools {"names":["argus"]}]""");
-        var requests = app.Model.Requests.Where(r => r.Body["user"]!.GetValue<string>() == email).ToList();
+        var requests = app.Model.Requests.Where(r => r.Body["user"]?.GetValue<string>() == email).ToList();
         // First: load_tools only, and a line for each tool in the system prompt.
         Assert.Equal([OnDemandTools.Function], requests[0].Body["tools"]!.AsArray().Select(t => t!["function"]!["name"]!.GetValue<string>()));
         var system = requests[0].Body["messages"]![0]!["content"]!.GetValue<string>();
@@ -77,7 +77,7 @@ public sealed class ChatToolsTests(AppFixture app)
 
         // The next turn starts with Argus loaded: the same prompt start as the round before.
         await SendAsync(b, id, "And its callers?");
-        var next = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body;
+        var next = app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body;
         Assert.Equal(requests[1].Body["tools"]!.ToJsonString(), next["tools"]!.ToJsonString());
         Assert.Equal(after, next["messages"]![0]!["content"]!.GetValue<string>());
     }
@@ -96,7 +96,7 @@ public sealed class ChatToolsTests(AppFixture app)
 
         var done = JsonDocument.Parse(Event(events, "tool_result").GetProperty("text").GetString()!).RootElement.EnumerateArray().First();
         Assert.Equal("Found it.", done.GetProperty("result").GetString());
-        var agent = app.Model.Requests.Where(r => r.Body["user"]!.GetValue<string>() == email)
+        var agent = app.Model.Requests.Where(r => r.Body["user"]?.GetValue<string>() == email)
             .Select(r => r.Body).First(r => r["messages"]![0]!["content"]!.GetValue<string>().Contains("You are a sub-agent", StringComparison.Ordinal));
         // The chat had loaded only delegate, which sub-agents never get: they start with load_tools and the list.
         Assert.Equal([OnDemandTools.Function], agent["tools"]!.AsArray().Select(t => t!["function"]!["name"]!.GetValue<string>()));
@@ -166,7 +166,7 @@ public sealed class ChatToolsTests(AppFixture app)
         Assert.Single(events, e => e.GetProperty("type").GetString() == "assistant");
         Assert.Single(events, e => e.GetProperty("type").GetString() == "done");
         // The model was asked once: the answer stopped at the questions instead of going on.
-        Assert.Equal(1, app.Model.Requests.Skip(asks).Count(r => r.Body["user"]!.GetValue<string>() == email));
+        Assert.Equal(1, app.Model.Requests.Skip(asks).Count(r => r.Body["user"]?.GetValue<string>() == email));
         Assert.Contains("ask_user", app.Model.Requests.Last().Body["messages"]![0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
 
         // The reply is the person's next message, after the questions.
@@ -225,7 +225,7 @@ public sealed class ChatToolsTests(AppFixture app)
 
         // Each sub-agent starts clean, with the chat's tools but not delegating again nor asking the person.
         var agents = app.Model.Requests.Select(r => r.Body)
-            .Where(r => r["user"]!.GetValue<string>() == email && r["messages"]![0]!["content"]!.GetValue<string>().Contains("You are a sub-agent", StringComparison.Ordinal))
+            .Where(r => r["user"]?.GetValue<string>() == email && r["messages"]![0]!["content"]!.GetValue<string>().Contains("You are a sub-agent", StringComparison.Ordinal))
             .ToList();
         Assert.True(agents.Count >= 3);
         Assert.All(agents, r => Assert.Equal(2, r["messages"]!.AsArray().Count(m => m!["role"]!.GetValue<string>() != "tool" && m["role"]!.GetValue<string>() != "assistant")));
@@ -587,7 +587,7 @@ public sealed class ChatToolsTests(AppFixture app)
         }
         var events = await AskAsync("""Where is the error? [call search_file {"file":"worker.log","text":"zebra"}]""");
         // The question carried the start of the file and a note, not the whole of it.
-        var question = app.Model.Requests.First(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.GetValue<string>();
+        var question = app.Model.Requests.First(r => r.Body["user"]?.GetValue<string>() == email).Body["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.GetValue<string>();
         Assert.Contains("line 1: all quiet", question, StringComparison.Ordinal);
         Assert.DoesNotContain("ZEBRA-9", question, StringComparison.Ordinal);
         Assert.Matches(@"\[This file goes on: lines 1 to \d+ of 1000 are above .* Read on with read_file \(file ""worker\.log"", from_line \d+\)", question);
@@ -690,9 +690,9 @@ public sealed class ChatToolsTests(AppFixture app)
         Assert.Contains(events, e => e.GetProperty("type").GetString() == "notice" && e.GetProperty("kind").GetString() == "research_no_web");
         // The page is told, so its status line says which step the research is on.
         Assert.Contains(events, e => e.GetProperty("type").GetString() == "research");
-        var system = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]![0]!["content"]!.GetValue<string>();
+        var system = app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body["messages"]![0]!["content"]!.GetValue<string>();
         Assert.Contains("Deep research: the person asked for a thorough, sourced report", system, StringComparison.Ordinal);
-        var sent = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.GetValue<string>();
+        var sent = app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.GetValue<string>();
         Assert.StartsWith("Compare the codecs\n\n(Deep research: plan the research questions", sent, StringComparison.Ordinal);
         var kept = (await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{id}"))).GetProperty("messages")[0].GetProperty("content").GetString();
         Assert.Equal("Compare the codecs", kept);
@@ -790,7 +790,7 @@ public sealed class ChatToolsTests(AppFixture app)
         var (b, _, email) = await PersonAsync(f);
         const string model = "Qwen3.8-Flash-Next";
         Task<HttpResponseMessage> SetModeAsync(string? mode) => admin.Http.PutAsJsonAsync(new Uri($"/api/admin/models/{model}/tools", UriKind.Relative), new { mode });
-        string SystemSent() => app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]![0]!["content"]!.GetValue<string>();
+        string SystemSent() => app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body["messages"]![0]!["content"]!.GetValue<string>();
         var id = await NewChatAsync(b, new { tools = new[] { "code", "calculator" } });
 
         // Automatic: its name says no small size, so as code.
@@ -882,7 +882,7 @@ public sealed class ChatToolsTests(AppFixture app)
         Assert.Equal("math_check", call["op"]!.GetValue<string>());
         Assert.Equal("sin(x)**2 + cos(x)**2", call["args"]!["left"]!.GetValue<string>());
         // Its instructions say what proved means.
-        Assert.Contains("Say a result is proved only when math_check says proved", app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]![0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.Contains("Say a result is proved only when math_check says proved", app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body["messages"]![0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
 
         // What the lab refuses comes back as an error the model reads.
         events = await SendAsync(b, id, """Units [call units_convert {"quantity":"9.81 m/s^2","to":"ft/s^2"}]""");
@@ -906,7 +906,7 @@ public sealed class ChatToolsTests(AppFixture app)
         var chat = await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{id}"));
         var call = chat.GetProperty("messages").EnumerateArray().Single(m => m.GetProperty("role").GetString() == "tool");
         Assert.Equal("<svg>ethanol</svg>", call.GetProperty("details").GetProperty("lab").GetProperty("svg").GetString());
-        Assert.DoesNotContain(app.Model.Requests.Where(r => r.Body["user"]!.GetValue<string>() == email).SelectMany(r => r.Body["messages"]!.AsArray()),
+        Assert.DoesNotContain(app.Model.Requests.Where(r => r.Body["user"]?.GetValue<string>() == email).SelectMany(r => r.Body["messages"]!.AsArray()),
             m => m!["content"]?.ToString().Contains("<svg>", StringComparison.Ordinal) == true);
     }
 

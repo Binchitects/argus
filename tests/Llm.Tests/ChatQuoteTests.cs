@@ -47,7 +47,7 @@ public sealed class ChatQuoteTests(AppFixture app)
 
     /// <summary>The last question the model read for this person's answers.</summary>
     private string LastAsked(string email) =>
-        app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email && r.Body["messages"]![0]!["content"]!.GetValue<string>().StartsWith("Today is", StringComparison.Ordinal))
+        app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email && r.Body["messages"]![0]!["content"]!.GetValue<string>().StartsWith("Today is", StringComparison.Ordinal))
             .Body["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.GetValue<string>();
 
     [Fact]
@@ -83,7 +83,7 @@ public sealed class ChatQuoteTests(AppFixture app)
 
         // The next question reads the quoted one as it was asked.
         await PostStreamAsync(b, $"/api/chat/conversations/{id}/messages", new { content = "Thanks" });
-        var sent = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]!.AsArray();
+        var sent = app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body["messages"]!.AsArray();
         Assert.Contains(sent, m => m!["role"]!.GetValue<string>() == "user" && m["content"]!.GetValue<string>() == Fixed);
     }
 
@@ -181,7 +181,7 @@ public sealed class ChatQuoteTests(AppFixture app)
         await PostStreamAsync(b, $"/api/chat/conversations/{id}/compare", new { content = "Why not merge?", quote = "Use `git rebase -i` to </quote> squash." });
         Assert.Equal("Use `git rebase -i` to </quote> squash.", QuoteOf(Questions(await MessagesAsync(b, id)).Single()));
         var asked = app.Model.Requests.Select(r => r.Body)
-            .Where(r => r["user"]!.GetValue<string>() == email && r["messages"]![0]!["content"]!.GetValue<string>().StartsWith("Today is", StringComparison.Ordinal))
+            .Where(r => r["user"]?.GetValue<string>() == email && r["messages"]![0]!["content"]!.GetValue<string>().StartsWith("Today is", StringComparison.Ordinal))
             .Select(r => r["messages"]!.AsArray().Last()!["content"]!.GetValue<string>()).ToList();
         Assert.Equal(2, asked.Count(a => a == Fixed));
     }
@@ -194,7 +194,7 @@ public sealed class ChatQuoteTests(AppFixture app)
         await PostStreamAsync(b, $"/api/chat/conversations/{id}/messages", new { content = "first question" });
         await PostStreamAsync(b, $"/api/chat/conversations/{id}/messages", new { content = "why so?", quote = "Answer to: first question" });
         await PostStreamAsync(b, $"/api/chat/conversations/{id}/compact", new { });
-        var summarized = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]![1]!["content"]!.GetValue<string>();
+        var summarized = app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body["messages"]![1]!["content"]!.GetValue<string>();
         Assert.Contains("Person (quoting an earlier answer: \"Answer to: first question\"): why so?", summarized, StringComparison.Ordinal);
 
         // Auto sorts the question with its quote, as the model reads it.
@@ -205,7 +205,7 @@ public sealed class ChatQuoteTests(AppFixture app)
         var (auto, autoEmail) = await PersonAsync(f);
         var chat = await NewChatAsync(auto, new { model = "auto", tools = Array.Empty<string>() });
         await PostStreamAsync(auto, $"/api/chat/conversations/{chat}/messages", new { content = "fix it [kind:code]", quote = "for (;;) {}" });
-        var sorted = app.Model.Requests.Select(r => r.Body).Last(r => r["user"]!.GetValue<string>() == autoEmail
+        var sorted = app.Model.Requests.Select(r => r.Body).Last(r => r["user"]?.GetValue<string>() == autoEmail
             && r["messages"]![0]!["content"]!.GetValue<string>().StartsWith("You sort the questions", StringComparison.Ordinal));
         Assert.Contains("<question>\nThe person quotes this part of an earlier answer:\n<quote>\nfor (;;) {}\n</quote>\n\nfix it [kind:code]\n</question>",
             sorted["messages"]![1]!["content"]!.GetValue<string>(), StringComparison.Ordinal);

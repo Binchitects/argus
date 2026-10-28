@@ -101,7 +101,7 @@ public sealed class ChatOrganiseTests(AppFixture app)
 
         // The fork goes its own way; the original is untouched.
         await SendAsync(b, forkId, new { content = "third" });
-        var sent = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]!.AsArray();
+        var sent = app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body["messages"]!.AsArray();
         Assert.Equal(["system", "user", "assistant", "user"], sent.Select(m => m!["role"]!.GetValue<string>()));
         Assert.Contains("The launch is on Tuesday.", sent[1]!["content"]!.ToJsonString(), StringComparison.Ordinal);
         Assert.Equal(4, Messages(await ChatAsync(b, id)).Count);

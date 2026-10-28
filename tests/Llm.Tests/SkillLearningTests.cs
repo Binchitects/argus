@@ -72,12 +72,12 @@ public sealed class SkillLearningTests(AppFixture app)
 
         // Not used until kept: the model is not offered it.
         await SendAsync(b, null, new { content = "Hello" });
-        Assert.DoesNotContain("weekly-notes", app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body.ToJsonString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("weekly-notes", app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body.ToJsonString(), StringComparison.Ordinal);
 
         await StatusAssert.Is(HttpStatusCode.NoContent, await b.PostAsync($"/api/skills/changes/{change.GetProperty("id").GetGuid()}/apply", new { }));
         Assert.False((await LibraryAsync(b)).GetProperty("skills").EnumerateArray().Single(s => s.GetProperty("name").GetString() == "weekly-notes").GetProperty("proposed").GetBoolean());
         await SendAsync(b, null, new { content = "Hello again" });
-        Assert.Contains("weekly-notes", app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body.ToJsonString(), StringComparison.Ordinal);
+        Assert.Contains("weekly-notes", app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body.ToJsonString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -102,7 +102,7 @@ public sealed class SkillLearningTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.OK, await b.Http.PutAsJsonAsync(new Uri($"/api/chat/conversations/{chat}/messages/{answer.GetProperty("id").GetString()}/feedback", UriKind.Relative),
             new { up = false, comment = "listed the refactors again" }));
         Assert.Equal(1, await ReflectAsync(f, clock));
-        var asked = app.Model.Requests.Last(r => r.Body["metadata"]?["tags"]?[0]?.GetValue<string>() == MemoryReflection.Tag && r.Body["user"]!.GetValue<string>() == email)
+        var asked = app.Model.Requests.Last(r => r.Body["metadata"]?["tags"]?[0]?.GetValue<string>() == MemoryReflection.Tag && r.Body["user"]?.GetValue<string>() == email)
             .Body["messages"]![1]!["content"]!.GetValue<string>();
         Assert.Contains("The skill /release-notes used here, its instructions:\nWrite the release notes from the commits", asked, StringComparison.Ordinal);
         Assert.Contains("(The person marked this answer bad: listed the refactors again.)", asked, StringComparison.Ordinal);

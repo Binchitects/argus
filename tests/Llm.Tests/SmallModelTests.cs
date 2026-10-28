@@ -59,7 +59,7 @@ public sealed class SmallModelTests(AppFixture app)
 
     /// <summary>What the person's requests were, by the start of their system prompt.</summary>
     private List<JsonObject> RequestsOf(string email, string systemStart) =>
-        [.. app.Model.Requests.Select(r => r.Body).Where(r => r["user"]!.GetValue<string>() == email
+        [.. app.Model.Requests.Select(r => r.Body).Where(r => r["user"]?.GetValue<string>() == email
             && r["messages"]![0]!["content"]!.GetValue<string>().StartsWith(systemStart, StringComparison.Ordinal))];
 
     /// <summary>The answers' own requests (not a sub-agent's, a summary, a title or Auto's sorting).</summary>
@@ -268,7 +268,7 @@ public sealed class SmallModelTests(AppFixture app)
         Assert.Equal("unavailable", route.GetProperty("kind").GetString());
         Assert.Equal(Main, route.GetProperty("model").GetString());
         Assert.Equal(sorts, RequestsOf(email, "You sort the questions").Count);
-        Assert.DoesNotContain(app.Model.Requests, r => r.Body["user"]!.GetValue<string>() == email && ModelOf(r.Body) == Small
+        Assert.DoesNotContain(app.Model.Requests, r => r.Body["user"]?.GetValue<string>() == email && ModelOf(r.Body) == Small
             && r.Body["messages"]!.ToJsonString().Contains("hello once more", StringComparison.Ordinal));
 
         // Without a small model there is no Auto at all.

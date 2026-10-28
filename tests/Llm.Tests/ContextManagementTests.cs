@@ -38,7 +38,7 @@ public sealed class ContextManagementTests(AppFixture app)
     private static IEnumerable<string> Types(List<JsonElement> events) => events.Select(e => e.GetProperty("type").GetString()!);
 
     private JsonArray LastAnswerRequest(string email) =>
-        app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email && !r.Body["messages"]![0]!["content"]!.GetValue<string>().StartsWith("You compact", StringComparison.Ordinal))
+        app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email && !r.Body["messages"]![0]!["content"]!.GetValue<string>().StartsWith("You compact", StringComparison.Ordinal))
             .Body["messages"]!.AsArray();
 
     private static async Task<List<JsonElement>> MessagesAsync(TestBrowser b, Guid id) =>
@@ -144,7 +144,7 @@ public sealed class ContextManagementTests(AppFixture app)
             await db.SaveChangesAsync();
         }
         await SendAsync(b, id, "", path: "compact");
-        var asked = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email && r.Body["messages"]![0]!["content"]!.GetValue<string>().StartsWith("You compact", StringComparison.Ordinal));
+        var asked = app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email && r.Body["messages"]![0]!["content"]!.GetValue<string>().StartsWith("You compact", StringComparison.Ordinal));
         Assert.Contains("## Decisions", asked.Body["messages"]![0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
         Assert.Contains("## Earlier parts", asked.Body["messages"]![0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
         // Each message with its number, as chat_read reads it again.
@@ -236,7 +236,7 @@ public sealed class ContextManagementTests(AppFixture app)
         // A chat that never compacted has no such tool.
         var fresh = await NewChatAsync(b);
         await SendAsync(b, fresh, "Hello.");
-        Assert.DoesNotContain("chat_search", app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body.ToJsonString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("chat_search", app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body.ToJsonString(), StringComparison.Ordinal);
     }
 
     [Fact]

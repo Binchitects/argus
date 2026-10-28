@@ -157,7 +157,7 @@ public sealed class QualityTests(AppFixture app)
         Assert.DoesNotContain(Other, raw, StringComparison.Ordinal);
 
         // Both models answered, one after the other, each the question alone.
-        var asked = app.Model.Requests.Where(r => r.Body["user"]!.GetValue<string>() == email).Select(r => r.Body).ToList();
+        var asked = app.Model.Requests.Where(r => r.Body["user"]?.GetValue<string>() == email).Select(r => r.Body).ToList();
         Assert.Equal(2, asked.Count);
         var order = asked.Select(r => r["model"]!.GetValue<string>()).ToList();
         Assert.Equal([Other, Main], order.Order());
@@ -279,7 +279,7 @@ public sealed class QualityTests(AppFixture app)
             await Task.Delay(100);
         }
         Assert.Equal(JsonValueKind.Null, arena.GetProperty("b").ValueKind);
-        Assert.Single(app.Model.Requests, r => r.Body["user"]!.GetValue<string>() == email);
+        Assert.Single(app.Model.Requests, r => r.Body["user"]?.GetValue<string>() == email);
         await StatusAssert.Is(HttpStatusCode.Conflict, await b.PostAsync($"/api/chat/arena/{arena.GetProperty("id").GetGuid()}/vote", new { vote = "a" }));
     }
 

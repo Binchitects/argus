@@ -89,7 +89,7 @@ public sealed class QueuedMessagesTests(AppFixture app)
         var chat = await SettledAsync(b, id, 2);
         var question = chat.GetProperty("messages").EnumerateArray().Last(m => m.GetProperty("role").GetString() == "user");
         Assert.Equal("recap", question.GetProperty("skill").GetProperty("name").GetString());
-        Assert.Contains(app.Model.Requests, r => r.Body["user"]!.GetValue<string>() == email
+        Assert.Contains(app.Model.Requests, r => r.Body["user"]?.GetValue<string>() == email
             && r.Body["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.ToJsonString().Contains("Recap the outage in three bullets.", StringComparison.Ordinal));
     }
 

@@ -179,7 +179,7 @@ public sealed class ChatTests(AppFixture app)
         Assert.All(calls.Skip(1), c => Assert.Equal("session-" + email, c.Session));
 
         // The model got the tools, Argus's instructions, and then the tool's answer.
-        var requests = app.Model.Requests.Where(r => r.Body["user"]!.GetValue<string>() == email).ToList();
+        var requests = app.Model.Requests.Where(r => r.Body["user"]?.GetValue<string>() == email).ToList();
         Assert.Equal("find_symbol", requests[0].Body["tools"]![0]!["function"]!["name"]!.GetValue<string>());
         Assert.Contains(FakeArgus.Instructions, requests[0].Body["messages"]![0]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
         var second = requests[1].Body["messages"]!.AsArray();
@@ -655,7 +655,7 @@ public sealed class ChatTests(AppFixture app)
             await db.SaveChangesAsync();
         }
         await SendAsync(b, id, "the newest question");
-        var sent = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]!.AsArray();
+        var sent = app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body["messages"]!.AsArray();
         var text = sent.ToJsonString();
         Assert.Contains("the newest question", text, StringComparison.Ordinal);
         Assert.DoesNotContain("old question 0 ", text, StringComparison.Ordinal);
@@ -683,7 +683,7 @@ public sealed class ChatTests(AppFixture app)
     }
 
     private IEnumerable<JsonObject> RequestsOf(string email, bool summaries) =>
-        app.Model.Requests.Where(r => r.Body["user"]!.GetValue<string>() == email).Select(r => r.Body)
+        app.Model.Requests.Where(r => r.Body["user"]?.GetValue<string>() == email).Select(r => r.Body)
             .Where(b => b["messages"]![0]!["content"]!.GetValue<string>().StartsWith("You compact", StringComparison.Ordinal) == summaries);
 
     [Fact]
@@ -771,7 +771,7 @@ public sealed class ChatTests(AppFixture app)
 
     /// <summary>The main requests of a person's answers (not summaries, titles or checks), as sent.</summary>
     private IEnumerable<JsonObject> AnswersOf(string email) =>
-        app.Model.Requests.Where(r => r.Body["user"]!.GetValue<string>() == email && r.Body["messages"]![0]!["content"]!.GetValue<string>().StartsWith("Today is", StringComparison.Ordinal))
+        app.Model.Requests.Where(r => r.Body["user"]?.GetValue<string>() == email && r.Body["messages"]![0]!["content"]!.GetValue<string>().StartsWith("Today is", StringComparison.Ordinal))
             .Select(r => r.Body);
 
     private static async Task<JsonElement> PreferAsync(TestBrowser b, object body)

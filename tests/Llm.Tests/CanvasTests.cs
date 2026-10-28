@@ -105,7 +105,7 @@ public sealed class CanvasTests(AppFixture app)
         var tools = (await b.JsonAsync(await b.GetAsync("/api/chat/config"))).GetProperty("tools").EnumerateArray().ToList();
         Assert.True(tools.Single(t => t.GetProperty("id").GetString() == "canvas").GetProperty("onByDefault").GetBoolean());
         await SendAsync(b, chat, "Thanks");
-        var system = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]![0]!["content"]!.GetValue<string>();
+        var system = app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body["messages"]![0]!["content"]!.GetValue<string>();
         Assert.Contains($"\"Launch plan\" (id {id}, document)", system, StringComparison.Ordinal);
     }
 

@@ -37,10 +37,10 @@ public sealed class MemoryTests(AppFixture app)
 
     /// <summary>The system prompt of the person's newest request to the model.</summary>
     private string SystemSentFor(string email) =>
-        app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["messages"]![0]!["content"]!.GetValue<string>();
+        app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body["messages"]![0]!["content"]!.GetValue<string>();
 
     private List<string> FunctionsSentFor(string email) =>
-        [.. (app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body["tools"]?.AsArray() ?? [])
+        [.. (app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body["tools"]?.AsArray() ?? [])
             .Select(t => t!["function"]!["name"]!.GetValue<string>())];
 
     private static async Task<List<JsonElement>> MemoriesAsync(TestBrowser b) =>

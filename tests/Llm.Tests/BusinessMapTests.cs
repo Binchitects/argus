@@ -71,7 +71,7 @@ public sealed class BusinessMapTests(AppFixture app)
 
         // It read with Argus's tools, as the person who asked; its requests are theirs, tagged business.
         Assert.Contains(app.Argus.McpCalls, c => c.Method == "tools/call" && c.Email == email && c.Params?.GetProperty("name").GetString() == "find_symbol");
-        Assert.Contains(app.Model.Requests, r => r.Body["user"]!.GetValue<string>() == email && r.Body["metadata"]?["tags"]?[0]?.GetValue<string>() == "business");
+        Assert.Contains(app.Model.Requests, r => r.Body["user"]?.GetValue<string>() == email && r.Body["metadata"]?["tags"]?[0]?.GetValue<string>() == "business");
         var listed = (await b.JsonAsync(await b.GetAsync("/api/code/business"))).GetProperty("systems").EnumerateArray();
         Assert.Contains(listed, s => s.GetProperty("project").GetString() == project);
         // Mapped again on request.
@@ -142,7 +142,7 @@ public sealed class BusinessMapTests(AppFixture app)
         await sent.Content.ReadAsStringAsync();
 
         // The chat's own request (not the mapper's, tagged business).
-        var asked = app.Model.Requests.First(r => r.Body["user"]!.GetValue<string>() == email && r.Body["tools"] is not null
+        var asked = app.Model.Requests.First(r => r.Body["user"]?.GetValue<string>() == email && r.Body["tools"] is not null
             && r.Body["metadata"]?["tags"]?[0]?.GetValue<string>() != "business").Body;
         var functions = asked["tools"]!.AsArray().Select(t => t!["function"]!["name"]!.GetValue<string>()).ToList();
         Assert.Contains("business_map", functions);

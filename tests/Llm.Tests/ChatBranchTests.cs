@@ -47,7 +47,7 @@ public sealed class ChatBranchTests(AppFixture app)
 
     private (JsonElement Body, string[] Roles) LastRequest(string email)
     {
-        var body = app.Model.Requests.Last(r => r.Body["user"]!.GetValue<string>() == email).Body;
+        var body = app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body;
         return (JsonDocument.Parse(body.ToJsonString()).RootElement, [.. body["messages"]!.AsArray().Select(m => m!["role"]!.GetValue<string>())]);
     }
 
