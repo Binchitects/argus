@@ -995,9 +995,11 @@ to the code host. Starting one needs `review.run`.
 6. **Refuted or not**: a second pass, with the CWE's page in hand, tries to
    refute each; a refuted one is kept apart, with why.
 7. **Triage**: each finding says what found it, the model, the scanners or
-   both (filter by it). A scanner's match the model traced and cleared is kept
-   apart with what to check; one the model did not trace (a weak hash, a TLS
-   check turned off) says so. Secrets and configuration have sections of their
+   both (filter by it). A scanner's match the model traced and cleared stays
+   open with the model's doubt and what to check (on Juliet and the OWASP
+   Benchmark the model cleared more real matches than false ones, see
+   [the measurements](measurements/security-review.md)); one the model did
+   not trace (a weak hash, a TLS check turned off) says so. Secrets and configuration have sections of their
    own. The findings download as SARIF for a code host's or an IDE's security
    view, with the commit read, and accepted or wrong ones suppressed with why.
 

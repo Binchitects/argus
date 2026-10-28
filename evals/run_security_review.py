@@ -8,8 +8,8 @@ here, never shipped): precision and recall per weakness for four arms.
                skeptic, told only the CWE's id
     pack       the model with the security pack: as above, a finding kept only for a CWE the pack knows, and the
                skeptic given the pack's page
-    both       the review as it ships: the scanners' hits traced too and named in the question, the pack, and the
-               scanners' findings the model did not clear
+    both       the review as it ships: the scanners' hits traced too and named in the question, the pack, and every
+               scanners' finding (one the model cleared too, kept with its doubt)
 
 Each case is reviewed as a repository of its own, the way SecurityReview.cs reviews one: its sink patterns over the
 case's files, at most three a file and thirty a review, the lines around each sink and its function's callers, the
@@ -723,19 +723,23 @@ def verify(case: Case, f: Finding, model: Model, pack: Pack | None) -> None:
 SHOW_CALLEES = False
 
 
+def same_kind(a: str | None, b: str | None) -> bool:
+    """Two CWEs of one weakness: the same, or traced as one kind (CWE-79 and CWE-80)."""
+    return a == b or (a in TRACED_CWES and TRACED_CWES.get(a) == TRACED_CWES.get(b))
+
+
 def review(case: Case, arm: str, model: Model, pack: Pack | None, scanned: list[dict]) -> list[Finding]:
     """One arm's review of a case; the findings it keeps (a refuted one is not kept, as the review's summary leaves it out)."""
     hits = scanned if arm == "both" else []
     traced = [h for h in hits if h.get("kind", "code") == "code" and h.get("cwe") in TRACED_CWES]
     use_pack = pack if arm in ("pack", "both") else None
-    findings, cleared = [], set()
+    findings = []
     for c in candidates(case, traced)[:MOST_READ]:
         context, shown = numbered(case.files[c.path], c.line - 60, c.line + 15, c.line)
         called = callers(case, c, shown)
         flags = [h for h in hits if h["path"] == c.path and abs(h["line"] - c.line) <= 3 and h.get("kind", "code") == "code"]
         answer = json_of(model.ask(ANALYZE_PROMPT, question(c, context, called, flags, callees(case, c, shown) if SHOW_CALLEES else ""), 1_500))
         if not answer or answer.get("vulnerable") is not True:
-            cleared.add((c.path, c.line))
             continue
         f = ground(c, answer, shown, use_pack)
         if f is not None:
@@ -746,9 +750,8 @@ def review(case: Case, arm: str, model: Model, pack: Pack | None, scanned: list[
     kept = [f for f in ranked if f.verified is not False]
     if arm == "both":
         for h in hits:
-            if h.get("kind", "code") == "code" and any(p.path == h["path"] and abs(p.line - h["line"]) <= 3 for p in ranked):
-                continue
-            if any(path == h["path"] and abs(line - h["line"]) <= 3 for path, line in cleared):
+            if h.get("kind", "code") == "code" and any(p.path == h["path"] and abs(p.line - h["line"]) <= 3 and p.verified is not False and same_kind(p.cwe, h.get("cwe"))
+                                                       for p in ranked):
                 continue
             kept.append(Finding(h["path"], h["line"], h.get("cwe") or "", "scanners"))
     return kept

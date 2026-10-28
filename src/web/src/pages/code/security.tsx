@@ -155,7 +155,7 @@ function FindingCard({
   const [until, setUntil] = useState(() => new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10))
   const refuted = f.verified === false
   const cwePage = f.pages[0]
-  const unread = f.kind === 'secret' || f.kind === 'config' || (f.verified === null && !byModel(f))
+  const unread = f.kind === 'secret' || f.kind === 'config' || (f.verified === null && !byModel(f) && !f.verifyNote)
   return (
     <li className={`grid gap-2 rounded-lg border p-4 ${refuted || f.state !== 'open' ? 'opacity-70' : ''}`}>
       <div className="flex flex-wrap items-center gap-2">

@@ -237,7 +237,7 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
             scan.Candidates = ordered.Count;
             var findings = new List<SecurityFinding>();
             var cweCache = new Dictionary<string, JsonObject?>();
-            // What the model read and found no outside data reaching, and why: a scanner's finding there is kept apart.
+            // What the model read and found no outside data reaching, and why: a scanner's finding there says so.
             var cleared = new Dictionary<(string Path, int Line), string>();
             for (var i = 0; i < ordered.Count && i < MostRead; i++)
             {
@@ -255,7 +255,7 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
                 }
                 if (await GroundAsync(session, scan, c, answer, lines, cweCache, ct) is { } finding)
                 {
-                    var near = flags.Where(f => Math.Abs(f.Line - finding.Line) <= 3).ToList();
+                    var near = flags.Where(f => Math.Abs(f.Line - finding.Line) <= 3 && SameKind(f.Cwe, finding.Cwe)).ToList();
                     finding.FoundBy = [SecurityFinding.Model, .. near.SelectMany(f => f.Tools).Distinct()];
                     finding.Rule = near.Count == 0 ? null : Cut(string.Join(", ", near.SelectMany(f => f.Rules).Distinct()), 500);
                     findings.Add(finding);
@@ -270,6 +270,11 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
             {
                 await StepAsync(db, scan, $"Checking finding {i + 1} of {Math.Min(checkedFirst.Count, MostVerified)}", ct);
                 await VerifyAsync(services, session, scan, user.Email!, checkedFirst[i], cweCache, ct);
+            }
+            // A refuted finding does not take the scanners' matches with it: they stay findings of their own.
+            foreach (var f in checkedFirst.Where(f => f.Verified == false && f.FoundBy.Length > 1))
+            {
+                (f.FoundBy, f.Rule) = ([SecurityFinding.Model], null);
             }
             scan.Findings.AddRange([.. packages, .. checkedFirst, .. await FromScannersAsync(session, scanned, checkedFirst, cleared, cweCache, ct)]);
             await RememberAsync(db, scan, ct);
@@ -354,15 +359,17 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
     }
 
     /// <summary>
-    /// The scanners' findings as the review's: one the model proved too is that finding (both named); one the model read and
-    /// found no outside data reaching is kept apart with why; the others as the scanners found them, each with the security
-    /// pack's page for its CWE where the pack has one.
+    /// The scanners' findings as the review's: one the model proved too (the same weakness, not refuted) is that finding
+    /// (both named); the others as the scanners found them, each with the security pack's page for its CWE where the pack
+    /// has one. One the model read and found no outside data reaching stays open, with the model's doubt and what to
+    /// check: on Juliet and the OWASP Benchmark the model cleared more real matches than false ones
+    /// (docs/measurements/security-review.md).
     /// </summary>
     private static async Task<List<SecurityFinding>> FromScannersAsync(McpSession session, List<ScannerHit> hits, List<SecurityFinding> proven,
         Dictionary<(string Path, int Line), string> cleared, Dictionary<string, JsonObject?> cweCache, CancellationToken ct)
     {
         var found = new List<SecurityFinding>();
-        foreach (var h in hits.Where(h => !proven.Any(p => p.Path == h.Path && Math.Abs(p.Line - h.Line) <= 3 && h.Kind == SecurityFinding.Code))
+        foreach (var h in hits.Where(h => !proven.Any(p => p.Path == h.Path && Math.Abs(p.Line - h.Line) <= 3 && h.Kind == SecurityFinding.Code && p.Verified != false && SameKind(p.Cwe, h.Cwe)))
                      .OrderBy(h => Rank(h.Severity)).Take(MostScanned))
         {
             var page = h.Cwe.Length > 0 ? await CweAsync(session, h.Cwe, cweCache, ct) : null;
@@ -373,7 +380,6 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
                 Cwe = Cut(h.Cwe, 16), CweTitle = Cut(page?["signature"]?.ToString() ?? h.Cwe, 300), Severity = h.Severity, Title = h.Title.Length > 0 ? h.Title : h.Rules.FirstOrDefault() ?? "",
                 Fix = h.Message, Commit = h.Commit,
                 Pages = (page is null ? new JsonArray() : new JsonArray(new JsonObject { ["title"] = page["signature"]?.ToString(), ["url"] = page["url"]?.ToString() })).ToJsonString(),
-                Verified = why.Key.Path is null ? null : false,
                 VerifyNote = why.Key.Path is null ? null
                     : $"The model read it with its callers and found no outside data reaching it.{(why.Value.Length > 0 ? " To check: " + why.Value : "")}",
             });
@@ -702,7 +708,7 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
             var both = scanned.Count(f => f.FoundBy.Contains(SecurityFinding.Model));
             sb.Append(CultureInfo.InvariantCulture, $"\n\nScanners ({string.Join(", ", ran)}): {scanned.Count} finding(s)");
             sb.Append(both > 0 ? $", {both} traced by the model too" : "");
-            sb.Append(scanned.Count(f => f.Verified == false && f.FoundBy.All(t => t != SecurityFinding.Model)) is > 0 and var c ? $", {c} the model read and cleared (kept apart)" : "");
+            sb.Append(scanned.Count(f => f.VerifyNote is not null && f.FoundBy.All(t => t != SecurityFinding.Model)) is > 0 and var c ? $", {c} the model read and doubts (kept, with what to check)" : "");
             sb.Append(scanned.Count(f => f.Kind == SecurityFinding.Secret) is > 0 and var secrets ? $", {secrets} secret(s)" : "");
             sb.Append(scanned.Count(f => f.Kind == SecurityFinding.Config) is > 0 and var config ? $", {config} in configuration" : "");
             sb.Append('.');
@@ -734,6 +740,9 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
             scan.Status == SecurityScan.Done ? $"Security review ready: {scan.Project}" : $"Security review failed: {scan.Project}",
             scan.Status == SecurityScan.Done ? $"{kept} weakness(es) found" : scan.Error, $"/code/security/{scan.Id}"), ct);
     }
+
+    /// <summary>Two CWEs of one weakness: the same, or traced as one kind (CWE-79 and CWE-80).</summary>
+    private static bool SameKind(string a, string b) => a == b || (TracedCwes.TryGetValue(a, out var x) && TracedCwes.TryGetValue(b, out var y) && x == y);
 
     private static int Rank(string severity) => severity switch { "critical" => 0, "high" => 1, "medium" => 2, _ => 3 };
 

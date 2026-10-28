@@ -142,6 +142,10 @@ describe('code security', () => {
               verifyNote: null, path: 'config/app.env', commit: 'c0ffee0000000000000000000000000000000000', pages: [],
             }),
             finding('f4', { kind: 'config', title: 'Image user should not be root', foundBy: ['trivy'], rule: 'AVD-DS-0002', cwe: '', verified: null, verifyNote: null, path: 'Dockerfile', line: 1, pages: [] }),
+            finding('f5', {
+              title: 'A file path from data', foundBy: ['opengrep'], rule: 'csharp-path-from-data', cwe: 'CWE-22', verified: null, path: 'src/Export.cs',
+              verifyNote: 'The model read it with its callers and found no outside data reaching it. To check: where name comes from',
+            }),
           ],
         },
       }),
@@ -153,6 +157,11 @@ describe('code security', () => {
     expect(within(within(both).getByLabelText('Found by')).getByText('opengrep')).toBeInTheDocument()
     const weak = within(list).getByText('A broken algorithm').closest('li')!
     expect(within(weak).getByText(/not traced by the model/)).toBeInTheDocument()
+    // A match the model read and doubts stays open, with what to check, and is not said to be untraced.
+    const doubted = within(list).getByText('A file path from data').closest('li')!
+    expect(within(doubted).getByText(/found no outside data reaching it. To check: where name comes from/)).toBeInTheDocument()
+    expect(within(doubted).queryByText(/not traced by the model/)).not.toBeInTheDocument()
+    expect(within(doubted).getByRole('checkbox', { name: 'Choose “A file path from data” to fix' })).toBeInTheDocument()
     const secrets = screen.getByRole('list', { name: 'Secrets' })
     expect(within(secrets).getByLabelText('Where the secret is')).toHaveTextContent('commit c0ffee000000')
     expect(within(secrets).queryByLabelText('The sink')).not.toBeInTheDocument()

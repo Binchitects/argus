@@ -142,14 +142,18 @@ public sealed class SecurityReviewTests(AppFixture app)
         Assert.Equal((false, "The value is a constant."), (report.GetProperty("verified").GetBoolean(), report.GetProperty("verifyNote").GetString()));
         Assert.Contains("1 suspicion(s) dropped", done.GetProperty("summary").GetString(), StringComparison.Ordinal);
 
-        // The scanners: what the model proved too names them both; what it read and cleared is kept apart with why; the rest as they found it.
+        // The scanners: what the model proved too names them both; what it read and cleared stays open with its doubt; the rest as they found it.
+        // A refuted finding does not take the scanner's match with it: the match is open on its own.
         static string[] FoundBy(JsonElement f) => [.. f.GetProperty("foundBy").EnumerateArray().Select(t => t.GetString()!)];
         Assert.Equal(["model", "opengrep", "bandit"], FoundBy(orders));
         Assert.Equal("csharp-sql-built-from-strings, B608", orders.GetProperty("rule").GetString());
-        Assert.Equal(["model", "opengrep"], FoundBy(report));
+        Assert.Equal(["model"], FoundBy(report));
+        var reportMatch = all.Single(f => f.GetProperty("path").GetString() == "src/Report.cs" && f.GetProperty("id").GetGuid() != report.GetProperty("id").GetGuid());
+        Assert.Equal((JsonValueKind.Null, "open", "CWE-89"), (reportMatch.GetProperty("verified").ValueKind, reportMatch.GetProperty("state").GetString(), reportMatch.GetProperty("cwe").GetString()));
+        Assert.Equal(["opengrep"], FoundBy(reportMatch));
         var export = all.Single(f => f.GetProperty("path").GetString() == "src/Export.cs");
         Assert.Equal(["opengrep"], FoundBy(export));
-        Assert.Equal((false, "CWE-22"), (export.GetProperty("verified").GetBoolean(), export.GetProperty("cwe").GetString()));
+        Assert.Equal((JsonValueKind.Null, "CWE-22", "open"), (export.GetProperty("verified").ValueKind, export.GetProperty("cwe").GetString(), export.GetProperty("state").GetString()));
         Assert.Equal("The model read it with its callers and found no outside data reaching it. To check: where id comes from", export.GetProperty("verifyNote").GetString());
         var crypto = all.Single(f => f.GetProperty("path").GetString() == "src/Crypto.cs");
         Assert.Equal((JsonValueKind.Null, "low", "Use SHA-256 or better."), (crypto.GetProperty("verified").ValueKind, crypto.GetProperty("severity").GetString(), crypto.GetProperty("fix").GetString()));
@@ -160,7 +164,7 @@ public sealed class SecurityReviewTests(AppFixture app)
         Assert.Equal("Dockerfile", config.GetProperty("path").GetString());
         Assert.Equal(["trivy"], FoundBy(config));
         Assert.Equal(("abc", 4), (scan.GetProperty("commit").GetString(), scan.GetProperty("scanners").GetProperty("tools").GetArrayLength()));
-        Assert.Contains("Scanners (opengrep, bandit, gitleaks, trivy): 6 finding(s), 2 traced by the model too, 1 the model read and cleared (kept apart), 1 secret(s), 1 in configuration.",
+        Assert.Contains("Scanners (opengrep, bandit, gitleaks, trivy): 6 finding(s), 1 traced by the model too, 1 the model read and doubts (kept, with what to check), 1 secret(s), 1 in configuration.",
             done.GetProperty("summary").GetString(), StringComparison.Ordinal);
         var scanCall = app.Argus.McpCalls.Last(c => c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "scan_at" && c.Email == $"{user}@example.test");
         Assert.True(scanCall.Params!.Value.GetProperty("arguments").GetProperty("history").GetBoolean());
@@ -183,8 +187,8 @@ public sealed class SecurityReviewTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.BadRequest, await me.Http.PutAsJsonAsync(new Uri(path, UriKind.Relative), new { state = "wrong" }));
         var list = await me.JsonAsync(await me.GetAsync("/api/code/security"));
         var mine = list.EnumerateArray().Single(s => s.GetProperty("scan").GetProperty("id").GetGuid() == id);
-        // Audit.cs's weakness, the package, the secret and the Dockerfile are still open; Orders.cs's is accepted, Export.cs's cleared.
-        Assert.Equal((4, 1), (mine.GetProperty("open").GetProperty("high").GetInt32(), mine.GetProperty("open").GetProperty("low").GetInt32()));
+        // Audit.cs's, Export.cs's and Report.cs's scanner match, the package, the secret and the Dockerfile are still open; Orders.cs's is accepted.
+        Assert.Equal((6, 1), (mine.GetProperty("open").GetProperty("high").GetInt32(), mine.GetProperty("open").GetProperty("low").GetInt32()));
 
         // As SARIF, for a code host's security view: every finding, what found it, the commit read, the accepted one suppressed with why.
         var sarif = JsonDocument.Parse(await (await me.GetAsync($"/api/code/security/{id}/sarif")).Content.ReadAsStringAsync()).RootElement;
