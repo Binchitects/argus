@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { FileCode2, FileDiff, FileText, GitCompareArrows, Keyboard, Settings2, X } from 'lucide-react'
+import { FileCode2, FileDiff, FileText, FolderOpen, GitCompareArrows, Keyboard, Settings2, X } from 'lucide-react'
 import type * as Monaco from 'monaco-editor'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ContextMenu } from 'radix-ui'
@@ -1546,6 +1546,7 @@ function TabMenu({ tab }: { tab: Tab }) {
 
 function Welcome() {
   const keys: [string | undefined, string][] = [
+    [useKeyFor('workbench.action.files.openFolder'), 'Open a folder'],
     [useKeyFor('workbench.action.quickOpen'), 'Go to a file'],
     [useKeyFor('workbench.action.showCommands'), 'Show all commands'],
     [useKeyFor('workbench.action.findInFiles'), 'Search the files'],
@@ -1562,6 +1563,9 @@ function Welcome() {
           <h2 className="text-base font-semibold">No file is open</h2>
           <p className="mt-1 text-sm text-muted-foreground">Open one from the Explorer, or ask the agent in the chat: what it changes shows under Agent changes.</p>
         </div>
+        <Button variant="outline" size="sm" onClick={() => runCommand('workbench.action.files.openFolder')}>
+          <FolderOpen /> Open Folder…
+        </Button>
         {/* The keys only where there is room for them beside what they do. */}
         <dl className="hidden w-full grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 text-left text-sm @xs:grid">
           {keys.filter((k): k is [string, string] => !!k[0]).map(([k, what]) => (

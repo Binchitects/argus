@@ -55,7 +55,8 @@ internal sealed class CliEnv
     public required TextWriter Out { get; init; }
     public required TextWriter Err { get; init; }
     public required Func<string, string?> Env { get; init; }
-    public required string Cwd { get; init; }
+    /// <summary>The folder worked in; Open Folder in the IDE changes it.</summary>
+    public required string Cwd { get; set; }
     public required AppPaths Paths { get; init; }
     /// <summary>stdin is a terminal: questions can be asked.</summary>
     public bool InTerminal { get; init; }
@@ -570,95 +571,136 @@ internal static partial class Cli
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, key.Token);
         try
         {
-            Runtime rt;
             o.Ide = true;
+            string? served;
             try
             {
-                rt = await Runtime.StartAsync(o, env, ui, linked.Token);
+                // Served for Code Studio: the key Arena's workspace service gave it, at least 32 characters.
+                served = o.Serve ? env.Env("CODE_ARENA_TOKEN") is { Length: >= 32 } given ? given : throw new ArgumentException("--serve needs CODE_ARENA_TOKEN, at least 32 characters.") : null;
             }
-            catch (Runtime.StartException e)
+            catch (ArgumentException e)
             {
                 ui.Error(e.Message);
                 return 1;
             }
-            catch (OperationCanceledException) when (linked.IsCancellationRequested)
+            // Open Folder starts the IDE again on that folder, on the same port with the same key: the window stays, its page
+            // reloads. The window, the launcher and the tunnel are the first run's.
+            var port = o.Port ?? 0;
+            string? token = null;
+            Launcher? launcher = null;
+            Task? closed = null;
+            try
             {
-                return 130;
-            }
-            await using (rt)
-            {
-                WebApp app;
-                try
+                while (true)
                 {
-                    // Served for Code Studio: the key Arena's workspace service gave it, at least 32 characters.
-                    var served = o.Serve ? env.Env("CODE_ARENA_TOKEN") is { Length: >= 32 } given ? given : throw new ArgumentException("--serve needs CODE_ARENA_TOKEN, at least 32 characters.") : null;
-                    app = WebApp.Start(rt, assets, o.Port ?? 0, served);
-                }
-                catch (ArgumentException e)
-                {
-                    ui.Error(e.Message);
-                    return 1;
-                }
-                catch (System.Net.Sockets.SocketException e)
-                {
-                    ui.Error(e.SocketErrorCode == System.Net.Sockets.SocketError.AddressAlreadyInUse
-                        ? $"Port {o.Port} is taken: choose another with --port, or leave --port out for a free one."
-                        : $"Could not listen on 127.0.0.1: {e.Message}");
-                    return 1;
-                }
-                await using (app)
-                {
-                    var git = SystemPrompt.GitRoot(rt.Workspace.Root) is { } root && SystemPrompt.GitBranch(root) is { } branch ? $" ({branch})" : "";
-                    env.Out.WriteLine($"Code Arena {Version}, the IDE for {rt.Workspace.Root}{git}: {rt.Model.Name}, mode {rt.Permissions.Mode.Name()}");
-                    env.Out.WriteLine();
-                    env.Out.WriteLine(o.Serve ? $"  served on port {app.Port} for Code Studio" : $"  {app.Address}");
-                    env.Out.WriteLine();
-                    env.Out.WriteLine(o.Serve ? "Only with its key, as a bearer token. Ctrl+C stops it." : "Only this machine can open it, and only with the key in the address. Ctrl+C stops it.");
-                    env.Out.WriteLine("The agent in this terminal instead: code-arena chat");
-                    // This folder in Code Studio too: a tunnel to Arena, with the person's key, for as long as this runs.
-                    if (o.Connect)
-                    {
-                        if (MachineFor(rt, env, app) is { } tunnel)
-                        {
-                            _ = tunnel.RunAsync(linked.Token);
-                        }
-                        else
-                        {
-                            ui.Warn("--connect needs Arena: sign in with code-arena login first. The IDE runs here meanwhile.");
-                        }
-                    }
-                    using var launcher = o.NoOpen ? null : Launcher.Write(env.Paths.DataDir, app.Port, app.Address);
-                    // Its own window first (config.json "window": false, or --browser, a tab instead), else a tab.
-                    var window = launcher is null || o.Browser || !rt.Config.Window ? null
-                        : (env.Window ?? (url => AppWindow.Open(url, Path.Combine(env.Paths.DataDir, "window"), env.Env)))(launcher.Url);
-                    var closed = Task.Delay(Timeout.Infinite, linked.Token);
-                    if (window is not null)
-                    {
-                        _ = NoBrowserYetAsync(app.Opened, env.BrowserWait, env.Out, linked.Token);
-                        closed = WindowClosedAsync(window, env.WindowHandOff, linked.Token);
-                        env.Out.WriteLine("Closing its window stops it too.");
-                    }
-                    else if (launcher is not null && (env.Browse ?? (url => Browser.Open(url, env.Env)))(launcher.Url))
-                    {
-                        _ = NoBrowserYetAsync(app.Opened, env.BrowserWait, env.Out, linked.Token);
-                    }
-                    else if (!o.NoOpen)
-                    {
-                        env.Out.WriteLine("Open the address in your browser.");
-                    }
-                    env.Out.Flush();
+                    Runtime rt;
                     try
                     {
-                        await closed;
-                        ui.Info("Its window was closed.");
+                        rt = await Runtime.StartAsync(o, env, ui, linked.Token);
                     }
-                    catch (OperationCanceledException)
+                    catch (Runtime.StartException e)
                     {
-                        // Ctrl+C, or the caller stopped it.
+                        ui.Error(e.Message);
+                        return 1;
                     }
+                    catch (OperationCanceledException) when (linked.IsCancellationRequested)
+                    {
+                        return 130;
+                    }
+                    string? next = null;
+                    await using (rt)
+                    {
+                        WebApp app;
+                        try
+                        {
+                            app = WebApp.Start(rt, assets, port, served, token);
+                        }
+                        catch (System.Net.Sockets.SocketException e)
+                        {
+                            ui.Error(e.SocketErrorCode == System.Net.Sockets.SocketError.AddressAlreadyInUse
+                                ? $"Port {port} is taken: choose another with --port, or leave --port out for a free one."
+                                : $"Could not listen on 127.0.0.1: {e.Message}");
+                            return 1;
+                        }
+                        await using (app)
+                        {
+                            app.FoldersOpen = !o.Serve && !o.Connect;
+                            var git = SystemPrompt.GitRoot(rt.Workspace.Root) is { } root && SystemPrompt.GitBranch(root) is { } branch ? $" ({branch})" : "";
+                            env.Out.WriteLine($"Code Arena {Version}, the IDE for {rt.Workspace.Root}{git}: {rt.Model.Name}, mode {rt.Permissions.Mode.Name()}");
+                            if (closed is null)
+                            {
+                                env.Out.WriteLine();
+                                env.Out.WriteLine(o.Serve ? $"  served on port {app.Port} for Code Studio" : $"  {app.Address}");
+                                env.Out.WriteLine();
+                                env.Out.WriteLine(o.Serve ? "Only with its key, as a bearer token. Ctrl+C stops it." : "Only this machine can open it, and only with the key in the address. Ctrl+C stops it.");
+                                env.Out.WriteLine("The agent in this terminal instead: code-arena chat");
+                                // This folder in Code Studio too: a tunnel to Arena, with the person's key, for as long as this runs.
+                                if (o.Connect)
+                                {
+                                    if (MachineFor(rt, env, app) is { } tunnel)
+                                    {
+                                        _ = tunnel.RunAsync(linked.Token);
+                                    }
+                                    else
+                                    {
+                                        ui.Warn("--connect needs Arena: sign in with code-arena login first. The IDE runs here meanwhile.");
+                                    }
+                                }
+                                launcher = o.NoOpen ? null : Launcher.Write(env.Paths.DataDir, app.Port, app.Address);
+                                // Its own window first (config.json "window": false, or --browser, a tab instead), else a tab.
+                                var window = launcher is null || o.Browser || !rt.Config.Window ? null
+                                    : (env.Window ?? (url => AppWindow.Open(url, Path.Combine(env.Paths.DataDir, "window"), env.Env)))(launcher.Url);
+                                closed = Task.Delay(Timeout.Infinite, linked.Token);
+                                if (window is not null)
+                                {
+                                    _ = NoBrowserYetAsync(app.Opened, env.BrowserWait, env.Out, linked.Token);
+                                    closed = WindowClosedAsync(window, env.WindowHandOff, linked.Token);
+                                    env.Out.WriteLine("Closing its window stops it too.");
+                                }
+                                else if (launcher is not null && (env.Browse ?? (url => Browser.Open(url, env.Env)))(launcher.Url))
+                                {
+                                    _ = NoBrowserYetAsync(app.Opened, env.BrowserWait, env.Out, linked.Token);
+                                }
+                                else if (!o.NoOpen)
+                                {
+                                    env.Out.WriteLine("Open the address in your browser.");
+                                }
+                            }
+                            env.Out.Flush();
+                            try
+                            {
+                                if (await Task.WhenAny(closed, app.FolderOpened) == app.FolderOpened)
+                                {
+                                    next = await app.FolderOpened;
+                                }
+                                else
+                                {
+                                    await closed;
+                                    ui.Info("Its window was closed.");
+                                }
+                            }
+                            catch (OperationCanceledException)
+                            {
+                                // Ctrl+C, or the caller stopped it.
+                            }
+                            (port, token) = (app.Port, app.Token);
+                        }
+                        var saved = rt.Agent.Messages.Count > 0 ? $"The last session is saved as {rt.Session.Id}: code-arena --resume {rt.Session.Id}" : null;
+                        ui.Info(next is null ? saved is null ? "Stopped." : $"Stopped. {saved}" : $"Opening {next}.{(saved is null ? "" : $" In {rt.Workspace.Root}: {saved}")}");
+                    }
+                    if (next is null)
+                    {
+                        return 0;
+                    }
+                    // The new folder's own: its last session is not carried, nor the folders added for the one before.
+                    env.Cwd = next;
+                    (o.Continue, o.Resume, o.ResumeId, o.Plan, o.WebChat) = (false, false, null, false, null);
+                    o.AddDirs.Clear();
                 }
-                ui.Info(rt.Agent.Messages.Count > 0 ? $"Stopped. The last session is saved as {rt.Session.Id}: code-arena --resume {rt.Session.Id}" : "Stopped.");
-                return 0;
+            }
+            finally
+            {
+                launcher?.Dispose();
             }
         }
         finally

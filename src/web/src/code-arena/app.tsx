@@ -16,6 +16,7 @@ import { stateQuery, type CodeEvent, type CodeState } from './api'
 import { ChangesPanel } from './changes'
 import { Sessions, ThemeMenu, Thread } from './chat'
 import { useCommands, type Command } from './commands'
+import { chooseAndOpenFolder, openRecentFolder } from './folders'
 import { completion } from './completion'
 import { CommandPalette, recentLimit, type PaletteCommand } from './palette'
 import { MemoryPanel } from './memory-panel'
@@ -430,6 +431,8 @@ function Workbench({
   // The editor sent lines to the chat: it shows, if hidden.
   const showChat = useCallback(() => change({ chatOpen: true }), [change])
   const [about, setAbout] = useState(false)
+  // The folder being opened (Open Folder): code-arena starts again on it, and the page loads it.
+  const [opening, setOpening] = useState<string | null>(null)
   const openHelp = useOpenHelp()
   // Bumped to put the focus in the search box or the terminal.
   const [searchFocus, setSearchFocus] = useState(0)
@@ -1052,6 +1055,8 @@ function Workbench({
     { id: 'workbench.action.quickOpen', category: 'File', title: 'Go to File…', run: () => setQuickOpen(true) },
     { id: 'workbench.action.gotoLine', category: 'Go', title: 'Go to Line/Column…', enabled: () => file, run: () => setQuickOpen(true, ':') },
     { id: 'workbench.action.gotoSymbol', category: 'Go', title: 'Go to Symbol in Editor…', enabled: () => file, run: () => runAction('editor.action.quickOutline') },
+    { id: 'workbench.action.files.openFolder', category: 'File', title: 'Open Folder…', run: () => void chooseAndOpenFolder(setOpening) },
+    { id: 'workbench.action.openRecent', category: 'File', title: 'Open Recent…', run: () => void openRecentFolder(setOpening) },
     { id: 'workbench.action.files.save', category: 'File', title: 'Save', enabled: () => savable, run: () => void ed.save() },
     { id: 'workbench.action.files.saveAll', category: 'File', title: 'Save All', run: () => void ed.saveAll() },
     { id: 'workbench.action.closeActiveEditor', category: 'View', title: 'Close Editor', enabled: () => !!active, run: () => active && void ed.close(active.id) },
@@ -1353,6 +1358,13 @@ function Workbench({
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
       {!!lost && <Unreachable error={lost} />}
+      {opening && (
+        <output className="fixed inset-0 z-[100] grid place-items-center bg-background/90 backdrop-blur-sm">
+          <span className="flex items-center gap-2 text-sm">
+            <Spinner label={`Opening ${opening}`} /> Opening {opening}…
+          </span>
+        </output>
+      )}
       {/* By key, in the order the side bar's place gives: React moves the parts, never draws the editor or the chat again. */}
       <div className="flex min-h-0 flex-1">{left ? workbenchParts : [...workbenchParts].reverse()}</div>
       <StatusBar

@@ -32,6 +32,14 @@ internal sealed partial class WebApp
     private SecurityProblems _security = null!;
     private DiskWatch _watch = null!;
 
+    private readonly TaskCompletionSource<string> _folderOpened = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Whether the page may open another folder here (not served for Code Studio, nor connected to it).</summary>
+    public bool FoldersOpen { get; set; }
+
+    /// <summary>The folder the page asked to open (Open Folder): the IDE is then started again on it.</summary>
+    public Task<string> FolderOpened => _folderOpened.Task;
+
     /// <summary>The one call whose body is not JSON: a VS Code extension's .vsix, sent whole.</summary>
     private const string InstallPath = "/api/extensions/install";
 
@@ -52,6 +60,10 @@ internal sealed partial class WebApp
         _reviews = new Reviews(_rt, _problems);
         _security = new SecurityProblems(_rt, _problems);
         _watch = new DiskWatch(_rt.Workspace.Root);
+        if (!_served)
+        {
+            Folders.Remember(_rt.Env.Paths.DataDir, _rt.Workspace.Root);
+        }
         StartDebug();
         StartLsp();
     }
@@ -66,6 +78,23 @@ internal sealed partial class WebApp
                 case ("GET", "/api/files"):
                     await res.JsonAsync(200, _files.List(Query(req, "path")), ct);
                     return true;
+                case ("GET", "/api/folders"):
+                    // A folder's folders for the picker (the one open now's parent first), with the recent ones.
+                    await res.JsonAsync(200, Folders.List(Folders.Resolve(Query(req, "path") is { Length: > 0 } at ? at : Path.GetDirectoryName(_rt.Workspace.Root) ?? _rt.Workspace.Root,
+                        _rt.Workspace.Root, _rt.Env.Env), _rt.Workspace.Root, _rt.Env.Paths.DataDir, _rt.Env.Env), ct);
+                    return true;
+                case ("POST", "/api/folders/open"):
+                {
+                    if (!FoldersOpen)
+                    {
+                        throw new IdeError(409, "not_here", "This workspace is Code Studio's: open another folder there.");
+                    }
+                    var folder = Folders.Resolve(Body(req).Str("path"), _rt.Workspace.Root, _rt.Env.Env);
+                    await res.JsonAsync(200, new JsonObject { ["folder"] = folder }, ct);
+                    // Answered first: the IDE then stops here and starts again on it, on this port with this key.
+                    _folderOpened.TrySetResult(folder);
+                    return true;
+                }
                 case ("GET", "/api/fs/changes"):
                     // What changed on disk since the version the page has: answered at once, or within 25 seconds of waiting.
                     await res.JsonAsync(200, await _watch.SinceAsync(long.TryParse(Query(req, "since"), out var since) ? since : 0, TimeSpan.FromSeconds(25), ct), ct);

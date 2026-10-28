@@ -278,6 +278,17 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   (`https://DOMAIN/help/code-arena`). The **?** in a panel's header
   (Explorer, Search, Agent changes, Sessions, the terminal, the chat) opens it
   at that panel. Esc closes it.
+- **Open Folder…** (**Ctrl+K Ctrl+O**, the Explorer's folder button, or the
+  welcome page) chooses another folder as VS Code's simple dialog does: the
+  folder shown and its folders, Enter goes into one, the first row opens the
+  one shown, and a path typed (from the folder shown, or whole: `~/`, `/`,
+  `C:\`) goes there; the folders opened lately and, on Windows, the drives are
+  listed too. **Open Recent…** (**Ctrl+R**) lists the folders opened lately.
+  Code Arena then starts again on that folder in the same window, at the same
+  address with the same key (its terminal says so): the session, the
+  terminals and the language servers are that folder's. The last session of
+  the folder left is saved, as when it stops. Not offered in Code Studio,
+  whose workspace is the server's.
 - **Explorer**: the project's files, with New file, New folder, Refresh and
   Collapse at its top. Click opens; a right-click menu has new file, new
   folder, Copy path, Rename (F2) and Delete (Del, asks first); the arrow
@@ -1164,6 +1175,8 @@ status (403 `outside` for a path outside the folder).
 | call | what it does |
 |---|---|
 | `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting); `context` (the window), `contextUsed` (about how much of it is in use), `compactAt` and `compactTarget` (percent; `compactAt` 0: only when a request would not fit), `compactAtSource` (`flag`, `config`, `account`, `arena` or `default`) and `compactAtAccount` (the Arena account's threshold, null when Arena did not say); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output); `arenaChats` (sessions are kept with chats in Arena here), `account` (whose chats: the key's account, null until Arena said), `chat` (this session's chat there, null: none yet) and `synced` (how many times the web chat's news came in while nothing ran: the page reads the session again when it changes; taking it in is not `busy`); `sync` (`{chat, account, waiting, trouble, behind}`: the chat, whose chats, how many messages Arena lacks, what stops them, whether the web chat has news not taken in; null without the sync) and `notices` (`[{id, text, at}]`: the last 20 said while nothing ran, the page shows each once) |
+| `GET /api/folders?path=` | for Open Folder: a folder's folders by name (hidden ones last, no files, at most 2,000) as `{path, parent, folders, why, current, home, separator, drives, recent}` (`why`: what is not listed; `recent`: the folders opened lately, the one open now first); with no path, the open folder's parent; 404 `not_found` when it is not a folder |
+| `POST /api/folders/open` `{path}` | opens that folder (`~` is the home folder; relative to the one open now): answers `{folder}` with its full path, then code-arena starts again on it at the same address with the same key; 404 `not_found` when it is not a folder, 409 `not_here` in Code Studio |
 | `GET /api/sessions` | this folder's sessions, newest first: `[{id, title, updatedAt, messages, chat, unsent, waiting}]` (`chat`: the chat in Arena it is kept with; `unsent`: Arena lacks `waiting` of its messages) |
 | `GET /api/sessions/web` | the person's chats in Arena (the 5,000 newest): `[{id, title, origin, place, updatedAt, messages, session}]` (`session`: this folder's session kept with it); 409 `off` without the sync, 503 `arena` when Arena cannot say |
 | `POST /api/sessions/web` `{id}` | continues that chat here (in the session kept with it, else a new one with its messages); the session; 404 `gone` when Arena has no such chat of the person's, 409 `busy` while an answer is written, 503 `arena` when Arena cannot say |

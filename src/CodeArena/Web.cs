@@ -107,13 +107,13 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     // The commands with no time limit: their output to the page as it comes, a few times a second, for as long as they run.
     private readonly Dictionary<int, (StringBuilder Pending, bool Flushing)> _jobOutput = [];
 
-    private WebApp(Runtime rt, WebAssets assets, HttpServer server, string? served)
+    private WebApp(Runtime rt, WebAssets assets, HttpServer server, string? served, string? token)
     {
         _rt = rt;
         _assets = assets;
         _server = server;
         _served = served is not null;
-        Token = served ?? Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        Token = served ?? token ?? Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
         StartIde();
     }
 
@@ -136,11 +136,12 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
 
     /// <summary>
     /// Listens on 127.0.0.1 at the port (0: a free one) and takes over the runtime's events and questions; served for Code
-    /// Studio (<paramref name="served"/>: its key), on every address of the machine instead.
+    /// Studio (<paramref name="served"/>: its key), on every address of the machine instead. Opened again on another folder,
+    /// with the key it had (<paramref name="token"/>): the page's address and cookie stay good.
     /// </summary>
-    public static WebApp Start(Runtime rt, WebAssets assets, int port, string? served = null)
+    public static WebApp Start(Runtime rt, WebAssets assets, int port, string? served = null, string? token = null)
     {
-        var app = new WebApp(rt, assets, new HttpServer(port, served is null ? null : IPAddress.Any), served);
+        var app = new WebApp(rt, assets, new HttpServer(port, served is null ? null : IPAddress.Any), served, token);
         rt.Agent.Events = app;
         rt.Permissions.Asker = app.AskAsync;
         rt.Jobs.Started += app.JobStarted;

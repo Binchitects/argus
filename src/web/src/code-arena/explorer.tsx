@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronRight, ChevronsDownUp, Columns2, Copy, FilePlus, FolderPlus, GitCompareArrows, MessageSquarePlus, Pencil, RefreshCw, SquareDashedMousePointer, Trash2 } from 'lucide-react'
+import { ChevronRight, ChevronsDownUp, Columns2, Copy, FilePlus, FolderOpen, FolderPlus, GitCompareArrows, MessageSquarePlus, Pencil, RefreshCw, SquareDashedMousePointer, Trash2 } from 'lucide-react'
 import { ContextMenu } from 'radix-ui'
 import { useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useConfirm } from '@/components/ui/confirm'
@@ -15,7 +15,7 @@ import { FileIcon, FolderIcon } from './file-icon'
 import { PartHelp } from './help'
 import { changesQuery, createEntry, deleteEntry, folderQuery, join, nameOf, parentOf, renameEntry, within, type Change, type Entry } from './ide-api'
 import { chatBridge } from './bridge'
-import { useCommands } from './commands'
+import { runCommand, useCommands } from './commands'
 import { useKeyFor } from './keyboard'
 import { compareSelection } from './compare'
 
@@ -193,6 +193,7 @@ export function Explorer({ project, onOpenChanges }: { project: string; onOpenCh
     ['New folder', <FolderPlus key="d" />, () => startNew('dir')],
     ['Refresh', <RefreshCw key="r" />, () => void reload()],
     ['Collapse folders', <ChevronsDownUp key="c" />, () => setExpanded(new Set())],
+    ['Open folder…', <FolderOpen key="o" />, () => runCommand('workbench.action.files.openFolder')],
   ]
   // Right-clicked on a row, or on the space below them (the working directory).
   const at = menuFor ?? { path: '', kind: 'dir' as const }

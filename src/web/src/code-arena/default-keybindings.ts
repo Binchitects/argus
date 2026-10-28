@@ -35,6 +35,8 @@ export const defaultKeybindings: RuleJson[] = [
   { key: 'ctrl+0', command: 'workbench.action.focusSideBar' },
   { key: 'ctrl+1', command: 'workbench.action.focusFirstEditorGroup' },
   { key: 'ctrl+s', command: 'workbench.action.files.save' },
+  { key: 'ctrl+k ctrl+o', command: 'workbench.action.files.openFolder' },
+  { key: 'ctrl+r', command: 'workbench.action.openRecent' },
   { key: 'ctrl+k s', command: 'workbench.action.files.saveAll', mac: 'alt+cmd+s' },
   { key: 'ctrl+w', command: 'workbench.action.closeActiveEditor', when: 'editorIsOpen' },
   { key: 'ctrl+f4', command: 'workbench.action.closeActiveEditor', when: 'editorIsOpen', mac: 'cmd+f4' },
