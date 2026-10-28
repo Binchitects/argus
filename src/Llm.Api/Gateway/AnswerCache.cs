@@ -405,6 +405,7 @@ public static class AnswerCacheEndpoints
         services.AddScoped<AnswerCache>();
         services.AddSingleton<KeyLine>();
         services.AddSingleton<OwnKeyPlaces>();
+        services.AddSingleton<KeyPeople>();
         services.AddScoped<OwnKeys>();
         services.AddHttpClient(AnswerCache.Client, (sp, c) =>
         {
@@ -509,7 +510,7 @@ public static class AnswerCacheEndpoints
         return new Guid(hash.AsSpan(0, 16));
     }
 
-    private static async Task ProxyAsync(HttpContext http, AnswerCache cache, IHttpClientFactory factory, KeyLine line, Chat.EngineRoute route)
+    private static async Task ProxyAsync(HttpContext http, AnswerCache cache, IHttpClientFactory factory, KeyLine line, Chat.EngineRoute route, Chat.AnswerGate gate, KeyPeople people)
     {
         var ct = http.RequestAborted;
         var request = http.Request;
@@ -597,6 +598,31 @@ public static class AnswerCacheEndpoints
             await http.Response.WriteAsJsonAsync(new { error = new { message = $"This API key's requests waited longer than {line.Timeout.TotalMinutes:0} minutes for their turn: {line.PlacesFor(key)} are answered at once. Try again in a moment.", type = "rate_limit_error", code = "429" } }, ct);
             return;
         }
+        // Its turn in the model's line, with the chat's answers: the model's places, everyone's (Chat:AnswersAtOnce), the
+        // person's own when set (Admin → People or Groups); a line already as long as it may be refuses it at once.
+        Chat.AnswerGate.Place? turn = null;
+        if (completions && key is { Length: > 0 } && json?["model"] is JsonValue gm && gm.TryGetValue<string>(out var lineModel) && await people.ForAsync(key, ct) is { } who)
+        {
+            try
+            {
+                turn = await gate.EnterAsync(who.Id, who.Priority, lineModel, _ => Task.CompletedTask, ct, who.AtOnce ?? 0);
+            }
+            catch (Chat.AnswerGate.BusyException ex)
+            {
+                http.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                http.Response.Headers.RetryAfter = "30";
+                await http.Response.WriteAsJsonAsync(new { error = new { message = ex.Message, type = "service_busy", code = "503" } }, ct);
+                return;
+            }
+            catch (Chat.AnswerGate.TooLongException ex)
+            {
+                http.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                http.Response.Headers.RetryAfter = "30";
+                await http.Response.WriteAsJsonAsync(new { error = new { message = ex.Message, type = "rate_limit_error", code = "429" } }, ct);
+                return;
+            }
+        }
+        using var _turn = turn;
         // The agent's session goes back to the engine slot that holds its start (and its cache, from disk when it lost it),
         // as a chat's conversation does: each turn reads only what is new.
         using var sending = completions && key is { Length: > 0 } && json?["model"] is JsonValue pm && pm.TryGetValue<string>(out var pinned) && SessionOf(key, json) is { } session

@@ -12,7 +12,7 @@ public sealed record CreditRequest(decimal? Credit);
 /// <summary>API access on (their keys work) or off (blocked, none shown or made).</summary>
 public sealed record ApiAccessRequest(bool On);
 /// <summary>A person's own rate limits for their API keys, a minute: null takes their groups' or the company's, 0 is no limit.</summary>
-public sealed record LimitsRequest(int? RequestsPerMinute = null, int? TokensPerMinute = null);
+public sealed record LimitsRequest(int? RequestsPerMinute = null, int? TokensPerMinute = null, int? AnswersAtOnce = null);
 
 /// <summary>The people to move to directory sign-in.</summary>
 public sealed record MoveRequest(List<Guid>? Ids);

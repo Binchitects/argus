@@ -11,8 +11,8 @@ namespace Llm.Tests;
 [Collection(nameof(AppCollection))]
 public sealed class FairUseTests(AppFixture app)
 {
-    private static AnswerGate Gate(int perPerson, int atOnce) =>
-        new(new StaticOptions(new ChatOptions { AnswersPerPerson = perPerson, AnswersAtOnce = atOnce }), TimeProvider.System);
+    private static AnswerGate Gate(int perPerson, int atOnce, int queueLength = 0) =>
+        new(new StaticOptions(new ChatOptions { AnswersPerPerson = perPerson, AnswersAtOnce = atOnce, QueueLength = queueLength }), TimeProvider.System);
 
     private sealed class StaticOptions(ChatOptions value) : IOptionsMonitor<ChatOptions>
     {
@@ -47,6 +47,52 @@ public sealed class FairUseTests(AppFixture app)
             }
         }
         Assert.Equal((0, 0), gate.Now());
+    }
+
+    [Fact]
+    public async Task Each_person_has_their_own_requests_at_once_and_0_is_no_limit()
+    {
+        var gate = Gate(perPerson: 1, atOnce: 0);
+        var (ann, ben, cy) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        Task Nothing(AnswerGate.Line _) => Task.CompletedTask;
+        // Ann may have 2 (hers, or her group's); Ben the company's 1; Cy no limit.
+        using var a1 = await gate.EnterAsync(ann, 0, "m", Nothing, default, atOnce: 2);
+        using var a2 = await gate.EnterAsync(ann, 0, "m", Nothing, default, atOnce: 2);
+        var a3 = gate.EnterAsync(ann, 0, "m", Nothing, default, atOnce: 2);
+        using var b1 = await gate.EnterAsync(ben, "m", Nothing, default);
+        var b2 = gate.EnterAsync(ben, "m", Nothing, default);
+        var cs = await Task.WhenAll(Enumerable.Range(0, 5).Select(_ => gate.EnterAsync(cy, 0, "m", Nothing, default, atOnce: 0)));
+        Assert.False(a3.IsCompleted);
+        Assert.False(b2.IsCompleted);
+        Assert.Equal((8, 2), gate.Now());
+        a1.Dispose();
+        (await a3.WaitAsync(TimeSpan.FromSeconds(5))).Dispose();
+        foreach (var c in cs)
+        {
+            c.Dispose();
+        }
+        b1.Dispose();
+        (await b2.WaitAsync(TimeSpan.FromSeconds(5))).Dispose();
+    }
+
+    [Fact]
+    public async Task Past_the_longest_line_a_request_is_refused_at_once_as_busy()
+    {
+        var gate = Gate(perPerson: 1, atOnce: 1, queueLength: 1);
+        Task Nothing(AnswerGate.Line _) => Task.CompletedTask;
+        using var running = await gate.EnterAsync(Guid.NewGuid(), "m", Nothing, default);
+        // One may wait; the next is refused at once, and leaves nothing in line.
+        var waiting = gate.EnterAsync(Guid.NewGuid(), "m", Nothing, default);
+        var busy = await Assert.ThrowsAsync<AnswerGate.BusyException>(() => gate.EnterAsync(Guid.NewGuid(), "m", Nothing, default));
+        Assert.Contains("busy", busy.Message, StringComparison.Ordinal);
+        Assert.Equal((1, 1), gate.Now());
+        running.Dispose();
+        using (await waiting.WaitAsync(TimeSpan.FromSeconds(5)))
+        {
+            // Served at once, it is never refused, however long the line.
+            Assert.Equal((1, 0), gate.Now());
+        }
+        using var free = await gate.EnterAsync(Guid.NewGuid(), "m", Nothing, default);
     }
 
     [Fact]

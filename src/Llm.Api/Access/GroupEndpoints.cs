@@ -24,8 +24,9 @@ public sealed record MembersRequest(Guid[] UserIds);
 /// <param name="RequestsPerMinute">Requests a minute each member's API key may send; 0: no limit.</param>
 /// <param name="TokensPerMinute">Tokens a minute each member's API key may use; 0: no limit.</param>
 /// <param name="RequireTwoFactor">Members sign in with a second factor (set up at their next sign-in).</param>
+/// <param name="AnswersAtOnce">Each member's requests answered at once (chat and API together); 0: no limit.</param>
 public sealed record PoliciesRequest(int? RetentionDays = null, CreditsRequest? Credits = null, bool CreditPerMember = false, string? CostCentre = null,
-    int? RequestsPerMinute = null, int? TokensPerMinute = null, bool RequireTwoFactor = false);
+    int? RequestsPerMinute = null, int? TokensPerMinute = null, bool RequireTwoFactor = false, int? AnswersAtOnce = null);
 
 /// <summary>Groups for access rules, retention, credit and API keys' rate limits: app groups whose members are chosen here, and directory groups.</summary>
 public static class GroupEndpoints
@@ -73,7 +74,7 @@ public static class GroupEndpoints
         {
             x.Id, x.Name, x.Description, x.Directory, x.Scim, x.Priority, x.CreatedAt,
             members = x.Directory is { } d ? directoryPeople.Count(m => AccessService.InDirectoryGroup(m, d)) : counts.GetValueOrDefault(x.Id),
-            x.RetentionDays, credits = CreditsRequest.Of(x), x.CreditPerMember, x.CostCentre, x.RequestsPerMinute, x.TokensPerMinute, x.RequireTwoFactor,
+            x.RetentionDays, credits = CreditsRequest.Of(x), x.CreditPerMember, x.CostCentre, x.RequestsPerMinute, x.TokensPerMinute, x.RequireTwoFactor, x.AnswersAtOnce,
         }));
     }
 
@@ -115,7 +116,7 @@ public static class GroupEndpoints
             policies = new
             {
                 group.RetentionDays, credits = CreditsRequest.Of(group), group.CreditPerMember, group.CostCentre,
-                group.RequestsPerMinute, group.TokensPerMinute, group.RequireTwoFactor,
+                group.RequestsPerMinute, group.TokensPerMinute, group.RequireTwoFactor, group.AnswersAtOnce,
             },
             spentThisMonth = month is null ? (decimal?)null : people.Sum(u => month.Total(u.Email ?? "")),
             spentByKind = Kinds(k => people.Sum(u => month!.Of(u.Email ?? "", k))),
@@ -267,6 +268,10 @@ public static class GroupEndpoints
             return AuthEndpoints.Problem(400, "rate_limits",
                 $"Requests a minute are 0 (no limit) to {RateLimits.MaxRequests:N0}, tokens a minute 0 to {RateLimits.MaxTokens:N0}; empty: the company's setting.");
         }
+        if (body.AnswersAtOnce is < 0 or > 1000)
+        {
+            return AuthEndpoints.Problem(400, "at_once", "Requests at once are 0 (no limit) to 1,000; empty: the company's setting.");
+        }
         if (body.CostCentre?.Trim() is { Length: > 100 })
         {
             return AuthEndpoints.Problem(400, "cost_centre", "A cost centre is at most 100 characters.");
@@ -278,6 +283,7 @@ public static class GroupEndpoints
         group.RequestsPerMinute = body.RequestsPerMinute;
         group.TokensPerMinute = body.TokensPerMinute;
         group.RequireTwoFactor = body.RequireTwoFactor;
+        group.AnswersAtOnce = body.AnswersAtOnce;
         await db.SaveChangesAsync();
         await audit.WriteAsync("group.policies", group.Name, detail: Describe(group));
         keys.Wake();
@@ -293,6 +299,7 @@ public static class GroupEndpoints
         g.RequestsPerMinute is { } r ? $"requests a minute {(r == 0 ? "no limit" : r.ToString("N0", CultureInfo.InvariantCulture))}" : null,
         g.TokensPerMinute is { } t ? $"tokens a minute {(t == 0 ? "no limit" : t.ToString("N0", CultureInfo.InvariantCulture))}" : null,
         g.RequireTwoFactor ? "two-factor required" : null,
+        g.AnswersAtOnce is { } a ? $"requests at once {(a == 0 ? "no limit" : a.ToString(CultureInfo.InvariantCulture))}" : null,
     }.OfType<string>());
 
     /// <summary>

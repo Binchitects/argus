@@ -68,6 +68,8 @@ export interface PersonDetail {
   directoryGroups: string[]
   /** Their API keys' rate limits: their own, and what applies with where it comes from. */
   limits?: KeyLimits
+  /** Their requests answered at once (chat and API): their own, and what applies, from them, a group, or the company. */
+  atOnce?: { own: number | null; value: number | null; from: 'person' | 'group' | 'company'; group: string | null }
   warning: string | null
 }
 

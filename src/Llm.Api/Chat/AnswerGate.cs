@@ -26,12 +26,14 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
     private int _total;
     private int _replicas = 1;
 
-    private sealed class Waiter(Guid person, int priority, string model, long order)
+    private sealed class Waiter(Guid person, int priority, string model, long order, int limit)
     {
         public Guid Person { get; } = person;
         public int Priority { get; } = priority;
         public string Model { get; } = model;
         public long Order { get; } = order;
+        /// <summary>The most of the person's requests that may run at once (theirs, their groups', or the company's).</summary>
+        public int Limit { get; } = limit;
         public TaskCompletionSource<Place> Granted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
@@ -58,6 +60,9 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
 
     /// <summary>Thrown when an answer has waited longer than <see cref="ChatOptions.QueueTimeout"/>: nothing was sent.</summary>
     public sealed class TooLongException(string message) : TimeoutException(message);
+
+    /// <summary>Thrown at once when the line is as long as <see cref="ChatOptions.QueueLength"/> allows: nothing was sent, try again later.</summary>
+    public sealed class BusyException(string message) : InvalidOperationException(message);
 
     private int PerPerson => Math.Max(1, options.CurrentValue.AnswersPerPerson);
 
@@ -113,14 +118,21 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
     public Task<Place> EnterAsync(Guid person, string model, Func<Line, Task> waiting, CancellationToken ct) => EnterAsync(person, 0, model, waiting, ct);
 
     /// <param name="priority">Their place in line: higher goes first (0 for most people).</param>
-    public async Task<Place> EnterAsync(Guid person, int priority, string model, Func<Line, Task> waiting, CancellationToken ct)
+    /// <param name="atOnce">The most of their requests that may run at once (Admin → People or Groups); null: the company's, Chat:AnswersPerPerson; 0: no limit.</param>
+    public async Task<Place> EnterAsync(Guid person, int priority, string model, Func<Line, Task> waiting, CancellationToken ct, int? atOnce = null)
     {
         Waiter me;
         lock (_lock)
         {
-            me = new Waiter(person, priority, model, ++_tick);
+            me = new Waiter(person, priority, model, ++_tick, atOnce switch { null => PerPerson, 0 => int.MaxValue, { } n => Math.Max(1, n) });
             _waiting.Add(me);
             Dispatch();
+            // Not served at once, with the line as long as it may be: refused now, rather than left to wait (Chat:QueueLength).
+            if (!me.Granted.Task.IsCompleted && options.CurrentValue.QueueLength is > 0 and var most && _waiting.Count > Share(most))
+            {
+                _waiting.Remove(me);
+                throw new BusyException($"The service is busy: {_waiting.Count} requests are waiting already, the most there may be. Try again in a little while.");
+            }
         }
         if (me.Granted.Task.IsCompleted)
         {
@@ -194,7 +206,7 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
                 return null;
             }
             var places = PlacesHere(me.Model);
-            var yours = _running.GetValueOrDefault(me.Person) >= PerPerson;
+            var yours = _running.GetValueOrDefault(me.Person) >= me.Limit;
             // Their model is full, or only their own answers hold them: its line. Else the whole chat's limit does.
             if ((places > 0 && _runningOn.GetValueOrDefault(me.Model) >= places) || AtOnce == 0 || _total < AtOnce)
             {
@@ -246,7 +258,7 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
             foreach (var w in _waiting)
             {
                 var places = PlacesHere(w.Model);
-                if (_running.GetValueOrDefault(w.Person) < PerPerson && (places == 0 || _runningOn.GetValueOrDefault(w.Model) < places)
+                if (_running.GetValueOrDefault(w.Person) < w.Limit && (places == 0 || _runningOn.GetValueOrDefault(w.Model) < places)
                     && (next is null || Before(w, next)))
                 {
                     next = w;

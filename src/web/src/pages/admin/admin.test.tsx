@@ -178,7 +178,7 @@ describe('people', () => {
     await userEvent.type(requests, '0')
     await userEvent.type(within(card).getByLabelText('Tokens a minute'), '50000')
     await userEvent.click(within(card).getByRole('button', { name: 'Set limits' }))
-    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ requestsPerMinute: 0, tokensPerMinute: 50000 }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ requestsPerMinute: 0, tokensPerMinute: 50000, answersAtOnce: null }))
   })
 })
 

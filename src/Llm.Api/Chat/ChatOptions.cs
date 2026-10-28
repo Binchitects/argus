@@ -79,6 +79,9 @@ public sealed class ChatOptions
     /// <summary>Longest an answer waits in line before it gives up.</summary>
     public TimeSpan QueueTimeout { get; set; } = TimeSpan.FromMinutes(10);
 
+    /// <summary>The most requests waiting in the line (chat answers and API requests together); one more is refused at once as busy; 0: no limit.</summary>
+    public int QueueLength { get; set; }
+
     /// <summary>Requests one API key has answered at once; more wait their turn (KeyLine); 0: no limit.</summary>
     public int ApiRequestsPerKey { get; set; } = 4;
 

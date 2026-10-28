@@ -73,6 +73,8 @@ public sealed partial class AnswerJobs : IHostedService
 
         /// <summary>Its place in line: the person's groups' priority (Admin → Groups).</summary>
         internal int Priority { get; set; }
+        /// <summary>The most of the person's requests answered at once (theirs, their groups'); null: the company's.</summary>
+        internal int? AtOnce { get; set; }
 
         /// <summary>Its end goes to the person's bell when no page watched it (off for a scheduled task's, which says so itself, and a compaction).</summary>
         public bool Notify { get; set; } = true;
@@ -345,10 +347,12 @@ public sealed partial class AnswerJobs : IHostedService
             }
 
             // Fair use: once the answer knows its model, a place of the few that model serves at once (PlaceAsync).
-            job.Priority = await services.GetRequiredService<Access.AccessService>().PriorityAsync(user, ct);
+            var access = services.GetRequiredService<Access.AccessService>();
+            job.Priority = await access.PriorityAsync(user, ct);
+            job.AtOnce = (await access.AnswersAtOnceAsync(user, ct)).Value;
             await work(services, user, conversation, ct);
         }
-        catch (AnswerGate.TooLongException ex)
+        catch (Exception ex) when (ex is AnswerGate.TooLongException or AnswerGate.BusyException)
         {
             job.Emit(new { type = "error", message = ex.Message });
         }
@@ -404,7 +408,7 @@ public sealed partial class AnswerJobs : IHostedService
     {
         gate.Replicas = replicas.Count;
         return await gate.EnterAsync(job.Person, job.Priority, model,
-            line => job.EmitAsync(new { type = "queued", ahead = line.Ahead, model = blind ? null : line.Model, yours = line.Yours }), ct);
+            line => job.EmitAsync(new { type = "queued", ahead = line.Ahead, model = blind ? null : line.Model, yours = line.Yours }), ct, job.AtOnce);
     }
 
     /// <summary>An answer that ended while no page watched it (the person left, or closed the tab): the bell says so.</summary>

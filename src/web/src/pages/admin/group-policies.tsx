@@ -29,6 +29,7 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
   const [requests, setRequests] = useState(p.requestsPerMinute === null || p.requestsPerMinute === undefined ? '' : String(p.requestsPerMinute))
   const [tokens, setTokens] = useState(p.tokensPerMinute === null || p.tokensPerMinute === undefined ? '' : String(p.tokensPerMinute))
   const [twoFactor, setTwoFactor] = useState(p.requireTwoFactor ?? false)
+  const [atOnce, setAtOnce] = useState(p.answersAtOnce === null || p.answersAtOnce === undefined ? '' : String(p.answersAtOnce))
   const [error, setError] = useState<string | null>(null)
   const save = useMutation({
     mutationFn: (body: GroupPolicies) => api(`/api/admin/groups/${group.id}/policies`, { method: 'PUT', body }),
@@ -50,6 +51,8 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
     const t = parseLimit(tokens, maxTokens)
     if (r === 'invalid' || t === 'invalid')
       return setError(`Limits are whole numbers: requests 0 to ${maxRequests.toLocaleString('en-US')}, tokens 0 to ${maxTokens.toLocaleString('en-US')} a minute. 0: no limit; empty: the company's setting.`)
+    const a = parseLimit(atOnce, 1000)
+    if (a === 'invalid') return setError("Requests at once are a whole number, 0 to 1,000. 0: no limit; empty: the company's setting.")
     save.mutate({
       retentionDays: retention,
       credits: c as Credits,
@@ -58,6 +61,7 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
       requestsPerMinute: r,
       tokensPerMinute: t,
       requireTwoFactor: twoFactor,
+      answersAtOnce: a,
     })
   }
   const spent = group.spentThisMonth
@@ -123,7 +127,10 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
             <Input inputMode="numeric" value={tokens} onChange={(e) => setTokens(e.target.value)} placeholder="the company's setting" />
           </Field>
         </div>
-        <p className="text-xs text-muted-foreground">A person in several groups gets the highest limit of the groups that set one (0, no limit, is the highest); their own (Admin → People) replaces it. The chat is not limited by these.</p>
+        <Field label="Requests at once, per member" hint="Each member's chat answers and API requests running together; more wait their turn. 0: no limit. Empty: the company's setting (Answers at once, per person) for the chat, none for API keys.">
+          <Input inputMode="numeric" value={atOnce} onChange={(e) => setAtOnce(e.target.value)} placeholder="the company's setting" className="sm:w-1/2" />
+        </Field>
+        <p className="text-xs text-muted-foreground">A person in several groups gets the highest limit of the groups that set one (0, no limit, is the highest); their own (Admin → People) replaces it. The chat is not limited by the rate limits, only by requests at once.</p>
         <div className="flex items-start gap-3">
           <Switch id="group-2fa" checked={twoFactor} onCheckedChange={setTwoFactor} />
           <div className="grid gap-0.5">

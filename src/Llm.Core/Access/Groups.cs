@@ -45,6 +45,8 @@ public sealed class Group
     /// <summary>The label its spend is charged to in the monthly chargeback report.</summary>
     public string? CostCentre { get; set; }
 
+    /// <summary>Its members' requests answered at once each (chat and API together); null: none set here, 0: no limit. A person in several takes the most generous.</summary>
+    public int? AnswersAtOnce { get; set; }
     /// <summary>Requests a minute each member's API key may send to the gateway; null: the company's setting, 0: no limit. A person in several groups gets the highest.</summary>
     public int? RequestsPerMinute { get; set; }
 

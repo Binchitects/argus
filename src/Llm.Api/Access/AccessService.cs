@@ -174,6 +174,28 @@ public sealed class AccessService(AppDbContext db, AccessSnapshotCache cache, IO
         return groups.Count == 0 ? 0 : await db.Groups.AsNoTracking().Where(g => groups.Contains(g.Id)).MaxAsync(g => (int?)g.Priority, ct) ?? 0;
     }
 
+    /// <summary>
+    /// Their requests answered at once, chat and API together, and where it comes from: their own ("person"), else the most
+    /// generous of their groups that set one ("group", a 0 there is no limit and wins), else none here ("company": the
+    /// chat's Chat:AnswersPerPerson holds their answers, nothing their API requests). 0: no limit.
+    /// </summary>
+    public async Task<(int? Value, string From, string? Group)> AnswersAtOnceAsync(AppUser user, CancellationToken ct = default)
+    {
+        if (user.AnswersAtOnce is { } own)
+        {
+            return (own, "person", null);
+        }
+        var groups = (await MembershipAsync(user, ct)).Groups;
+        var set = groups.Count == 0 ? [] : await db.Groups.AsNoTracking().Where(g => groups.Contains(g.Id) && g.AnswersAtOnce != null)
+            .Select(g => new { g.Name, g.AnswersAtOnce }).ToListAsync(ct);
+        if (set.Count == 0)
+        {
+            return (null, "company", null);
+        }
+        var best = set.OrderBy(g => g.AnswersAtOnce == 0 ? 0 : 1).ThenByDescending(g => g.AnswersAtOnce).ThenBy(g => g.Name, StringComparer.OrdinalIgnoreCase).First();
+        return (best.AnswersAtOnce, "group", best.Name);
+    }
+
     /// <summary>The directory's rule for group names: the full DN, or its common name, in any case.</summary>
     public static bool InDirectoryGroup(IEnumerable<string> memberOf, string group) => memberOf.Any(g => LdapDirectory.IsNamed(g, group));
 

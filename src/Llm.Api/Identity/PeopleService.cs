@@ -288,8 +288,12 @@ public sealed partial class PeopleService(
     /// the company's; 0: no limit). Audited; their keys have it at once, or, when the gateway cannot
     /// be reached, at the next check (the warning returned says so).
     /// </summary>
-    public async Task<string?> SetLimitsAsync(AppUser user, int? requestsPerMinute, int? tokensPerMinute)
+    public async Task<string?> SetLimitsAsync(AppUser user, int? requestsPerMinute, int? tokensPerMinute, int? answersAtOnce = null)
     {
+        if (answersAtOnce is < 0 or > 1000)
+        {
+            throw new PeopleException("Requests at once are 0 (no limit) to 1,000, or empty for their groups' or the company's.");
+        }
         if (requestsPerMinute is < 0 or > RateLimits.MaxRequests)
         {
             throw new PeopleException($"Requests a minute are 0 (no limit) to {RateLimits.MaxRequests:N0}, or empty for their groups' or the company's.");
@@ -300,8 +304,10 @@ public sealed partial class PeopleService(
         }
         user.RequestsPerMinute = requestsPerMinute;
         user.TokensPerMinute = tokensPerMinute;
+        user.AnswersAtOnce = answersAtOnce;
         Check(await users.UpdateAsync(user));
-        await audit.WriteAsync("person.set_limits", user.UserName, detail: $"requests a minute {Limit(requestsPerMinute)}; tokens a minute {Limit(tokensPerMinute)}");
+        await audit.WriteAsync("person.set_limits", user.UserName,
+            detail: $"requests a minute {Limit(requestsPerMinute)}; tokens a minute {Limit(tokensPerMinute)}" + (answersAtOnce is null ? "" : $"; requests at once {Limit(answersAtOnce)}"));
         try
         {
             await rateLimits.ApplyAsync(user);

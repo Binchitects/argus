@@ -72,6 +72,11 @@ public sealed class AppUser : IdentityUser<Guid>
     public int? RequestsPerMinute { get; set; }
     /// <summary>Tokens a minute each of their API keys may use at the gateway, their own; null: their groups' or the company's, 0: no limit.</summary>
     public int? TokensPerMinute { get; set; }
+    /// <summary>
+    /// Their requests answered at once, chat answers and API requests together, their own; more wait their turn. Null: their
+    /// groups' (the most generous), else the company's for the chat (Chat:AnswersPerPerson) and none for their keys; 0: no limit.
+    /// </summary>
+    public int? AnswersAtOnce { get; set; }
 
     /// <summary>What they may spend in a calendar month on the chat's answers; null: no limit of their own (Credits).</summary>
     public decimal? ChatCredit { get; set; }

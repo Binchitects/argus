@@ -1892,9 +1892,15 @@ their turn:
 - **In the chat**, each model has its own line: it runs as many answers at
   once as it serves, so someone on a small model never waits behind people on
   the big one. A person has one answer running at a time, on any model
-  (Settings → Chat → Answers at once, per person).
-  **Answers at once, everyone** can also limit all models together (0, the
-  default: no limit beyond each model's own). Who waits sees which model is
+  (Settings → Chat → Answers at once, per person), unless an admin set
+  **Requests at once** for them (Admin → People, their limits) or for one of
+  their groups (the group's policies; the most generous of their groups wins,
+  0 is no limit): that holds their chat answers and their API requests
+  together. **Answers at once, everyone** can also limit all models together
+  (0, the default: no limit beyond each model's own). **Longest line**
+  (Settings → Chat; 0, the default: no limit) is the most requests that may
+  wait: one more is refused at once as busy ("The service is busy: … Try
+  again in a little while"), rather than left to wait. Who waits sees which model is
   busy and how many answers are ahead of them ("Qwen3.8-Flash-Next is busy:
   2 answers ahead of you"), or that their own other answer goes first. A free
   place goes to whoever has had least: someone with nothing running goes
@@ -1905,6 +1911,12 @@ their turn:
   Wan2.2-TI2V-5B just now: … loads again as soon as it is done"), then goes on.
 - **Each conversation keeps its slot** in the engine, so the next turn reads
   only what is new from the cache (see [admin.md](admin.md#the-token-cache)).
+- **API requests** (chat completions with a key) wait in the same lines as
+  the chat's answers: the model's places, everyone's, and their person's
+  requests at once when an admin set it (none set: only their key's own line
+  holds them). A line as long as Longest line allows refuses the next at
+  once with HTTP 503 and `Retry-After`; a wait past Longest wait in line gets
+  HTTP 429.
 - **API keys** (coding agents, IDEs, scripts) have four requests answered at
   once (API requests at once, per key; fewer for a key its person set so on
   Account → API keys); more wait their turn in the order they

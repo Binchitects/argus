@@ -271,6 +271,9 @@ namespace Llm.Core.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<int?>("AnswersAtOnce")
+                        .HasColumnType("integer");
+
                     b.Property<decimal?>("ApiCredit")
                         .HasColumnType("numeric");
 
@@ -4927,6 +4930,9 @@ namespace Llm.Core.Data.Migrations
                     b.Property<string>("AnswerLength")
                         .HasMaxLength(16)
                         .HasColumnType("character varying(16)");
+
+                    b.Property<int?>("AnswersAtOnce")
+                        .HasColumnType("integer");
 
                     b.Property<decimal?>("ApiCredit")
                         .HasColumnType("numeric");

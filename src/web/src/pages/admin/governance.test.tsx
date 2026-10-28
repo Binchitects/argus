@@ -10,7 +10,7 @@ const group: GroupDetail = {
   members: [{ id: 'p1', userName: 'ann', displayName: 'Ann', email: 'ann@example.test', isDisabled: false, spend: 3.5 }],
   policies: {
     retentionDays: null, credits: { chat: 50, api: null, pictures: null, video: null, speech: null }, creditPerMember: false, costCentre: null,
-    requestsPerMinute: null, tokensPerMinute: null, requireTwoFactor: false,
+    requestsPerMinute: null, tokensPerMinute: null, requireTwoFactor: false, answersAtOnce: null,
   },
   spentThisMonth: 3.5,
   spentByKind: { chat: 3, api: 0.5, pictures: 0, video: 0, speech: 0 },
@@ -42,13 +42,14 @@ describe('retention and credit per group', () => {
     await userEvent.type(within(card).getByLabelText('API keys credit a month ($)'), '20')
     await userEvent.click(within(card).getByRole('radio', { name: 'Each member’s' }))
     await userEvent.click(within(card).getByRole('switch', { name: 'Require two-factor sign-in' }))
+    await userEvent.type(within(card).getByLabelText('Requests at once, per member'), '2')
     // Safeguards for a group are rules, made on their own page.
     expect(within(card).getByRole('link', { name: 'Admin → Safeguards' })).toHaveAttribute('href', '/admin/safeguards')
     await userEvent.click(within(card).getByRole('button', { name: 'Save policies' }))
     await waitFor(() =>
       expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({
         retentionDays: 90, credits: { chat: 50, api: 20, pictures: null, video: null, speech: null }, creditPerMember: true, costCentre: 'CC-42',
-        requestsPerMinute: null, tokensPerMinute: null, requireTwoFactor: true,
+        requestsPerMinute: null, tokensPerMinute: null, requireTwoFactor: true, answersAtOnce: 2,
       }),
     )
   })
