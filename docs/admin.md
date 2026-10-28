@@ -1383,6 +1383,20 @@ An answer of a comparison (Compare) not voted on yet stays blind, as in the
 chat: its model is "Model A" or "Model B", its cost waits for the vote (and is
 out of the cost total until then), and the model filter does not find it.
 
+### Usage by group
+
+**Usage by group** (Observe, with `usage.read`) has each group's requests,
+tokens and spend over a day, a week, 30 or 90 days: chat and API keys
+together, by the dashboards' rule of whose a request is, refusals for a key's
+rate limit left out. Each row has the group's members, how many of them used
+it, the share of input tokens read from the cache, and its spend, the most
+spent first, with **(in no group)** last. Open a group for its members who
+used it, each with their own requests, tokens and spend (a name opens the
+person). A person in two groups counts in both, so the groups can add up to
+more than everyone's together (the line above the table). Each person's own
+use is on the **LLM and users** dashboard, and each month's spend per group
+and cost centre on Groups' chargeback report.
+
 ### Line
 
 **Line** (Observe, with `usage.read`) shows the answers' line every two

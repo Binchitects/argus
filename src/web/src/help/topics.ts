@@ -998,6 +998,18 @@ export const topics = {
     manual: { doc: 'admin', section: 'security' },
   },
 
+  'usage-groups': {
+    title: 'Usage by group',
+    about: "Each group's requests, tokens and spend over a day, a week, 30 or 90 days, chat and API keys together, and the people in no group.",
+    admin: true,
+    parts: [
+      { name: 'The groups', text: 'Members, how many used it, requests, tokens, the share of input read from the cache, and spend, the most spent first; a person in two groups counts in both.' },
+      { name: 'Members', text: 'Open a group for its members who used it, each with their own requests, tokens and spend.' },
+    ],
+    tasks: [{ title: 'See which team uses the models most', steps: ['Choose **30 days**.', 'Read the spend column.', 'Open the group for who in it.'] }],
+    manual: { doc: 'admin', section: 'usage-by-group' },
+  },
+
   line: {
     title: 'Line',
     about: 'Chat answers and API requests running now, and who waits in the order they will be served, every two seconds.',

@@ -195,6 +195,46 @@ public sealed class GroupCreditTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Usage_by_group_has_each_groups_requests_tokens_and_spend_with_each_member_and_the_people_in_no_group()
+    {
+        await using var f = NewApp(new FakeGateway());
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var (_, annId, annEmail) = await PersonAsync(f, admin);
+        var (_, benId, benEmail) = await PersonAsync(f, admin);
+        var (_, _, cyEmail) = await PersonAsync(f, admin);
+        var (_, quietId, _) = await PersonAsync(f, admin);
+        var data = await GroupAsync(admin, new { }, annId, benId, quietId);
+        var other = await GroupAsync(admin, new { }, annId);
+        // A window of its own, so other tests' requests are not in it.
+        var at = new DateTimeOffset(2023, 7, 14, 10, 0, 0, TimeSpan.Zero);
+        await app.SpendAsync(annEmail, 1m, at);
+        await app.SpendAsync(annEmail, 2m, at.AddMinutes(1), apiKey: true);
+        await app.SpendAsync(benEmail, 4m, at.AddMinutes(2));
+        await app.SpendAsync(cyEmail, 8m, at.AddMinutes(3));
+        await app.SpendAsync(benEmail, 16m, at.AddDays(2));
+
+        var from = Uri.EscapeDataString(at.AddHours(-1).ToString("O"));
+        var to = Uri.EscapeDataString(at.AddHours(1).ToString("O"));
+        var usage = await admin.JsonAsync(await admin.GetAsync($"/api/admin/usage/groups?from={from}&to={to}"));
+        var groups = usage.GetProperty("groups").EnumerateArray().ToDictionary(g => g.GetProperty("id").GetGuid());
+        var d = groups[data];
+        Assert.Equal((3, 2), (d.GetProperty("members").GetInt32(), d.GetProperty("active").GetInt32()));
+        Assert.Equal((3L, 7m), (d.GetProperty("used").GetProperty("requests").GetInt64(), d.GetProperty("used").GetProperty("cost").GetDecimal()));
+        Assert.True(d.GetProperty("used").GetProperty("tokens").GetInt64() > 0);
+        // The members who used it, the most spent first; Ann in both groups, counted in each.
+        Assert.Equal([benEmail, annEmail], d.GetProperty("people").EnumerateArray().Select(p => p.GetProperty("email").GetString()));
+        Assert.Equal(3m, groups[other].GetProperty("used").GetProperty("cost").GetDecimal());
+        var none = usage.GetProperty("none");
+        Assert.Contains(none.GetProperty("people").EnumerateArray(), p => p.GetProperty("email").GetString() == cyEmail && p.GetProperty("used").GetProperty("cost").GetDecimal() == 8m);
+        Assert.Equal(15m, usage.GetProperty("total").GetProperty("cost").GetDecimal());
+
+        // For those who may see the usage dashboards.
+        var (person, _, _) = await PersonAsync(f, admin);
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await person.GetAsync($"/api/admin/usage/groups?from={from}&to={to}"));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.GetAsync($"/api/admin/usage/groups?from={to}&to={from}"));
+    }
+
+    [Fact]
     public async Task The_chargeback_report_has_each_groups_and_cost_centres_spend_per_month_as_csv()
     {
         await using var f = NewApp(new FakeGateway());
