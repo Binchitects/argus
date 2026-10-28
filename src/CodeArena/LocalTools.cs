@@ -670,16 +670,23 @@ internal static class LocalTools
         return new ToolResult(text, !job.Running && (job.ExitCode != 0 || job.StoppedBy is not null)) { Display = c.Ui.Dim($"job {job.Id}: {job.Status()}") };
     }
 
-    private static Task<ToolResult> StopCommand(JsonObject a, ToolContext c, CancellationToken ct)
+    private static async Task<ToolResult> StopCommand(JsonObject a, ToolContext c, CancellationToken ct)
     {
         var job = Job(a, c);
         if (!job.Running)
         {
-            return Task.FromResult(new ToolResult($"Job {job.Id} has already ended: {job.Status()}."));
+            return new ToolResult($"Job {job.Id} has already ended: {job.Status()}.");
         }
         job.Stop("by the person, through stop_command");
-        return Task.FromResult(new ToolResult($"Job {job.Id} is being stopped; you are told when it has ended.") { Display = c.Ui.Dim($"job {job.Id} stopping") });
+        // As /jobs stop does: a few seconds for it to end, so how it ended is told within this turn (a command that
+        // ignores the signal for longer is told when it ends).
+        await Task.WhenAny(job.Done, Task.Delay(StopWait, ct));
+        ct.ThrowIfCancellationRequested();
+        return new ToolResult($"Job {job.Id} is being stopped; you are told when it has ended.") { Display = c.Ui.Dim($"job {job.Id} stopping") };
     }
+
+    /// <summary>How long stop_command waits for the command to end before the model is answered.</summary>
+    private static readonly TimeSpan StopWait = TimeSpan.FromSeconds(5);
 
     private static readonly HashSet<string> GitReading = ["status", "diff", "log", "show", "blame", "branch", "ls-files", "rev-parse", "shortlog", "describe"];
 

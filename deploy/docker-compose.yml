@@ -147,6 +147,9 @@ services:
       # The gateway's; the app makes its own.
       POSTGRES_DB: litellm
     volumes: [postgres:/var/lib/postgresql/data]
+    # Room for parallel queries' shared memory: Docker's 64 MB fails a large sort or hash join with "could not resize
+    # shared memory segment ... No space left on device".
+    shm_size: 1g
     healthcheck: { test: [CMD, pg_isready, -U, arena, -d, litellm], interval: 10s }
 
   litellm:

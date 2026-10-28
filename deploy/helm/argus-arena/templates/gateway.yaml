@@ -28,7 +28,12 @@ spec:
             - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
           readinessProbe: { exec: { command: [pg_isready, -U, arena, -d, litellm] }, periodSeconds: 10 }
           resources: {{- toYaml .Values.postgresql.resources | nindent 12 }}
-          volumeMounts: [{ name: data, mountPath: /var/lib/postgresql/data }]
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: shm, mountPath: /dev/shm }
+      # Room for parallel queries' shared memory, as compose's shm_size.
+      volumes:
+        - { name: shm, emptyDir: { medium: Memory, sizeLimit: 1Gi } }
   volumeClaimTemplates:
     - metadata: { name: data }
       spec:

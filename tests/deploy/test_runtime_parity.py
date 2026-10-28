@@ -53,6 +53,7 @@ ALLOWED: dict[tuple[str, str, str], str] = {
     ("mount", "app", "/db-ca"): "externalDatabase.caSecret; compose mounts the CA in the override",
     ("mount", "llamacpp", "/dev/shm"): "compose's shm_size, as an emptyDir in memory",
     ("mount", "vllm", "/dev/shm"): "compose's shm_size, as an emptyDir in memory",
+    ("mount", "postgres", "/dev/shm"): "compose's shm_size, as an emptyDir in memory",
     ("mount", "imagegen", "/tmp"): "the chart gives every read-only pod a /tmp; compose's imagegen needs none",
     ("mount", "prometheus", "/tmp"): "the scrape tokens' files: an emptyDir in the chart, the container's own /tmp in compose",
 }

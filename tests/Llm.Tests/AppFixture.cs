@@ -27,9 +27,11 @@ public sealed class AppFixture : IAsyncLifetime
     /// </summary>
     private static readonly string? External = Environment.GetEnvironmentVariable("LLM_TEST_POSTGRES") is { Length: > 0 } cs ? cs : null;
     private readonly string _run = External is null ? "" : "_" + Guid.NewGuid().ToString("N")[..8];
-    // Many apps at once, each with its own database and connection pools: more than Postgres's usual 100 connections.
+    // Many apps at once, each with its own database and connection pools: more than Postgres's usual 100 connections; and
+    // as the stack runs it, 1 GB of shared memory for parallel queries (Docker's 64 MB runs out with so many at once).
     private readonly PostgreSqlContainer? _postgres = External is null
-        ? new PostgreSqlBuilder("pgvector/pgvector:0.8.0-pg16").WithCommand("-c", "max_connections=1000").Build()
+        ? new PostgreSqlBuilder("pgvector/pgvector:0.8.0-pg16").WithCommand("-c", "max_connections=1000")
+            .WithCreateParameterModifier(p => p.HostConfig.ShmSize = 1L << 30).Build()
         : null;
     private string Server => External ?? _postgres!.GetConnectionString();
     private readonly string _webRoot = Directory.CreateTempSubdirectory("llm-webroot-").FullName;
