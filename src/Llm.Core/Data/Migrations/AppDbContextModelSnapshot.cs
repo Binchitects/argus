@@ -3172,6 +3172,11 @@ namespace Llm.Core.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<DateTimeOffset>("FoundAt")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("timestamp with time zone")
+                        .HasDefaultValueSql("now()");
+
                     b.PrimitiveCollection<string[]>("FoundBy")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -3298,6 +3303,9 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<int>("Read")
                         .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset?>("RecheckedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Ref")
                         .HasMaxLength(300)

@@ -238,6 +238,8 @@ export interface ScanBrief {
   dropped: number
   dependencies: number
   advisoriesAsOf: string | null
+  /** When its packages were last checked again, against advisories renewed since. */
+  recheckedAt: string | null
   sbom: boolean
   /** The commit read, once Argus has said which. */
   commit: string | null
@@ -280,6 +282,8 @@ export interface SecurityFinding {
   decidedAt: string | null
   why: string | null
   until: string | null
+  /** When it was found: the review's end, or a later check of the packages. */
+  foundAt: string
 }
 
 export interface Scan {

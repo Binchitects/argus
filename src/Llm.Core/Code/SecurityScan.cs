@@ -48,6 +48,8 @@ public sealed class SecurityScan
     public string? Error { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? FinishedAt { get; set; }
+    /// <summary>When its packages were last checked again, against advisories renewed since (<see cref="AdvisoriesAsOf"/> is theirs then).</summary>
+    public DateTimeOffset? RecheckedAt { get; set; }
     public List<SecurityFinding> Findings { get; set; } = [];
 }
 
@@ -111,4 +113,6 @@ public sealed class SecurityFinding
     public string? Why { get; set; }
     /// <summary>An accepted risk's end, when it is to be looked at again.</summary>
     public DateTimeOffset? Until { get; set; }
+    /// <summary>When it was found: the review's end, or a later check of its packages against renewed advisories.</summary>
+    public DateTimeOffset FoundAt { get; set; } = DateTimeOffset.UtcNow;
 }

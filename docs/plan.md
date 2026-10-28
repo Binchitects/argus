@@ -2260,8 +2260,10 @@ Arena's own dependencies.
    are renewed, so a new CVE in old code is found without a push.
    Done: deps_check and sbom (Argus tools, any commit, as the person; no
    model), and Code Studio → Security reviews the packages first and keeps
-   the bill of materials. Left: checked again when the advisories are
-   renewed.
+   the bill of materials. Checked again when the advisories are renewed:
+   each repository's latest review of the last 90 days, at the commit it
+   read, as its person. What is new joins it, found then, and the person is
+   told.
 4. **Recognising weaknesses in code**, two passes that check each other:
    - **Scanners**, in the sandbox with no network, on a checkout of the
      indexed commit: opengrep (LGPL-2.1) with Arena's own rules (written

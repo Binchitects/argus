@@ -584,7 +584,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         }
         var open = await db.SecurityFindings.AsNoTracking().Where(f => f.Verified != false && (f.State == Llm.Core.Code.SecurityFinding.Open
                 || (f.State == Llm.Core.Code.SecurityFinding.Accepted && f.Until != null && f.Until < now)))
-            .Join(db.SecurityScans.AsNoTracking(), f => f.ScanId, s => s.Id, (f, s) => new { f.Severity, f.State, Found = s.FinishedAt ?? s.CreatedAt })
+            .Select(f => new { f.Severity, f.State, Found = f.FoundAt })
             .ToListAsync(ct);
         var overdue = open.Where(f => f.State != Llm.Core.Code.SecurityFinding.Open
             || f.Found.AddDays(Code.SecurityReview.FixWithinDays.GetValueOrDefault(f.Severity, 90)) < now).ToList();

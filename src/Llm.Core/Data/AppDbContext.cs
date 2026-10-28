@@ -362,6 +362,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.FoundBy).HasDefaultValueSql("'{}'::text[]");
             e.Property(x => x.Rule).HasMaxLength(500);
             e.Property(x => x.Commit).HasMaxLength(64);
+            e.Property(x => x.FoundAt).HasDefaultValueSql("now()");
             e.HasIndex(x => new { x.ScanId, x.Severity });
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.DecidedById).OnDelete(DeleteBehavior.SetNull);
         });

@@ -434,6 +434,8 @@ public static class IdentityWiring
         services.AddHostedService(sp => sp.GetRequiredService<Code.ReviewEngine>());
         services.AddSingleton<Code.SecurityReview>();
         services.AddHostedService(sp => sp.GetRequiredService<Code.SecurityReview>());
+        services.AddSingleton<Code.SecurityRecheck>();
+        services.AddHostedService(sp => sp.GetRequiredService<Code.SecurityRecheck>());
         services.AddSingleton<Code.Business.BusinessMap>();
         services.Configure<Meetings.MeetingOptions>(config.GetSection("Meetings"));
         services.AddSingleton<Meetings.MeetingEngine>();

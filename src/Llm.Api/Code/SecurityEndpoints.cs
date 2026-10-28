@@ -40,7 +40,7 @@ public static class SecurityEndpoints
 
     private static object Brief(SecurityScan s) => new
     {
-        s.Id, s.Project, s.Ref, s.Commit, s.Status, s.Step, s.Candidates, s.Read, s.Dropped, s.Dependencies, s.AdvisoriesAsOf, s.CreatedAt, s.FinishedAt, s.Error,
+        s.Id, s.Project, s.Ref, s.Commit, s.Status, s.Step, s.Candidates, s.Read, s.Dropped, s.Dependencies, s.AdvisoriesAsOf, s.RecheckedAt, s.CreatedAt, s.FinishedAt, s.Error,
         sbom = s.Sbom is not null, scanners = s.Scanners is { } json ? JsonNode.Parse(json) : null,
     };
 
@@ -115,7 +115,7 @@ public static class SecurityEndpoints
                 .Select(f => new
                 {
                     f.Id, f.Kind, f.FoundBy, f.Rule, f.Commit, f.Exploited, f.Path, f.Line, f.SinkCode, f.Cwe, f.CweTitle, f.Severity, f.Title, f.Source, f.Flow,
-                    f.Exploit, f.Fix, pages = JsonNode.Parse(f.Pages), f.Verified, f.VerifyNote, f.State, f.DecidedAt, f.Why, f.Until,
+                    f.Exploit, f.Fix, pages = JsonNode.Parse(f.Pages), f.Verified, f.VerifyNote, f.State, f.DecidedAt, f.Why, f.Until, f.FoundAt,
                 }),
         });
     }

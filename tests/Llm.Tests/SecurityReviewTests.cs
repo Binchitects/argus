@@ -203,6 +203,67 @@ public sealed class SecurityReviewTests(AppFixture app)
 
     [Fact]
     [Trait("Control", "VUL-01")]
+    public async Task When_the_advisories_are_renewed_a_reviews_packages_are_checked_again_at_the_commit_it_read()
+    {
+        Argus();
+        app.Argus.PacksAnswer = null;
+        var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
+        var user = "rc" + Guid.NewGuid().ToString("N")[..8];
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = user, email = $"{user}@example.test", displayName = "Rae" }));
+        var me = await new TestBrowser(app.Factory).SignedInAsync(user, made.GetProperty("password").GetString()!);
+        var project = "g/recheck" + Guid.NewGuid().ToString("N")[..6];
+        var res = await me.PostAsync("/api/code/security", new { project, @ref = "main" });
+        var id = (await me.JsonAsync(res)).GetProperty("id").GetGuid();
+        var done = await DoneAsync(me, id);
+        var finished = done.GetProperty("scan").GetProperty("finishedAt").GetDateTimeOffset();
+        var recheck = app.Factory.Services.GetRequiredService<SecurityRecheck>();
+        try
+        {
+            // The advisories of the review's day: nothing to check again.
+            app.Argus.PacksAnswer = """{"packs": [{"name": "advisories", "version": "2026.10.27"}], "job": {"state": "idle"}}""";
+            var calls = app.Argus.McpCalls.Count;
+            await recheck.RecheckAsync(CancellationToken.None);
+            Assert.DoesNotContain(app.Argus.McpCalls.Skip(calls), c => c.Params?.GetProperty("arguments").TryGetProperty("project", out var p) == true && p.GetString() == project);
+
+            // Renewed two days on, with an advisory for a package the review saw as clean.
+            app.Argus.PacksAnswer = """{"packs": [{"name": "advisories", "version": "2026.10.29"}], "job": {"state": "idle"}}""";
+            app.Argus.Handlers["deps_check"] = _ => """
+                {"project": "g/shop", "ref": "abc", "sha": "abc", "dependencies": 42, "advisories": [{"pack": "advisories", "as_of": "2026-10-29", "days_old": 0}],
+                 "findings": [{"ecosystem": "NuGet", "package": "Newtonsoft.Json", "version": "12.0.3", "direct": false, "via": "Some.Lib", "file": "api/packages.lock.json", "line": 7,
+                               "advisory": "GHSA-5crp-9r3c-p9vr", "aliases": ["CVE-2024-21907"], "severity": "high", "cwes": ["CWE-755"], "exploited": true,
+                               "summary": "Improper Handling of Exceptional Conditions in Newtonsoft.Json", "fixed_in": "13.0.1", "upgrade_to": "13.0.1", "url": "https://github.com/advisories/GHSA-5crp-9r3c-p9vr"},
+                              {"ecosystem": "npm", "package": "qs", "version": "6.10.1", "direct": true, "via": null, "file": "web/package-lock.json", "line": 12,
+                               "advisory": "GHSA-hrpp-h998-j3pp", "aliases": ["CVE-2022-24999"], "severity": "high", "cwes": ["CWE-1321"], "exploited": false,
+                               "summary": "qs vulnerable to Prototype Pollution", "fixed_in": "6.10.3", "upgrade_to": "6.10.3", "url": "https://github.com/advisories/GHSA-hrpp-h998-j3pp"}]}
+                """;
+            Assert.True(await recheck.RecheckAsync(CancellationToken.None) >= 1);
+            var call = app.Argus.McpCalls.Last(c => c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "deps_check"
+                && c.Params?.GetProperty("arguments").GetProperty("project").GetString() == project);
+            // At the commit the review read, as its person.
+            Assert.Equal(("abc", $"{user}@example.test"), (call.Params!.Value.GetProperty("arguments").GetProperty("ref").GetString(), call.Email));
+            var after = await me.JsonAsync(await me.GetAsync($"/api/code/security/{id}"));
+            Assert.Equal("2026-10-29", after.GetProperty("scan").GetProperty("advisoriesAsOf").GetString());
+            Assert.NotEqual(JsonValueKind.Null, after.GetProperty("scan").GetProperty("recheckedAt").ValueKind);
+            var packages = after.GetProperty("findings").EnumerateArray().Where(f => f.GetProperty("kind").GetString() == "dependency").ToList();
+            Assert.Equal(2, packages.Count);
+            var qs = packages.Single(f => f.GetProperty("sinkCode").GetString()!.StartsWith("qs ", StringComparison.Ordinal));
+            Assert.True(qs.GetProperty("foundAt").GetDateTimeOffset() > finished);
+            var news = (await me.JsonAsync(await me.GetAsync("/api/notifications"))).GetProperty("items").EnumerateArray();
+            Assert.Contains(news, n => n.GetProperty("title").GetString() == $"New known vulnerabilities in {project}" && n.GetProperty("link").GetString() == $"/code/security/{id}");
+
+            // Checked again once: the next look finds nothing due.
+            calls = app.Argus.McpCalls.Count;
+            await recheck.RecheckAsync(CancellationToken.None);
+            Assert.DoesNotContain(app.Argus.McpCalls.Skip(calls), c => c.Params?.GetProperty("arguments").TryGetProperty("project", out var p) == true && p.GetString() == project);
+        }
+        finally
+        {
+            app.Argus.PacksAnswer = null;
+        }
+    }
+
+    [Fact]
+    [Trait("Control", "VUL-01")]
     public async Task The_vulnerabilities_check_counts_what_is_past_its_time_to_fix()
     {
         await using var f = app.Create(app.ConnectionStringFor("vul_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway());
@@ -221,8 +282,8 @@ public sealed class SecurityReviewTests(AppFixture app)
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var old = DateTimeOffset.UtcNow.AddDays(-40);
             var scan = new SecurityScan { UserId = adminId, Project = "g/shop", Status = SecurityScan.Done, CreatedAt = old, FinishedAt = old, AdvisoriesAsOf = DateOnly.FromDateTime(old.UtcDateTime.AddDays(-10)) };
-            var finding = new SecurityFinding { Path = "src/Orders.cs", Line = 4, Cwe = "CWE-89", Severity = "high", Title = "SQL", Verified = true };
-            var low = new SecurityFinding { Path = "src/Util.cs", Line = 9, Cwe = "CWE-601", Severity = "low", Title = "Redirect", Verified = true };
+            var finding = new SecurityFinding { Path = "src/Orders.cs", Line = 4, Cwe = "CWE-89", Severity = "high", Title = "SQL", Verified = true, FoundAt = old };
+            var low = new SecurityFinding { Path = "src/Util.cs", Line = 9, Cwe = "CWE-601", Severity = "low", Title = "Redirect", Verified = true, FoundAt = old };
             scan.Findings.AddRange([finding, low]);
             db.SecurityScans.Add(scan);
             await db.SaveChangesAsync();
@@ -240,7 +301,16 @@ public sealed class SecurityReviewTests(AppFixture app)
             await scope.ServiceProvider.GetRequiredService<AppDbContext>().SecurityFindings.Where(x => x.Id == high)
                 .ExecuteUpdateAsync(s => s.SetProperty(x => x.State, SecurityFinding.Fixed));
         }
-        // Fixed: amber now only for the old review; the low one has 180 days.
+        // One found today, by a check of the packages against renewed advisories: its 30 days count from now.
+        using (var scope = f.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var scanId = await db.SecurityFindings.Where(x => x.Id == high).Select(x => x.ScanId).SingleAsync();
+            db.SecurityFindings.Add(new SecurityFinding { ScanId = scanId, Kind = SecurityFinding.Dependency, Path = "web/package-lock.json", Cwe = "CWE-1321", Severity = "high", Title = "qs", Verified = true });
+            await db.SaveChangesAsync();
+        }
+
+        // Fixed: amber now only for the old review; the low one has 180 days, the new one its own 30.
         (state, detail) = await Check();
         Assert.Equal("warn", state);
         Assert.DoesNotContain("past the time to fix", detail, StringComparison.Ordinal);

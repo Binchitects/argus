@@ -8,8 +8,9 @@ using Npgsql;
 namespace Llm.Tests;
 
 /// <summary>
-/// Upgrading a stack that already has security reviews to the scanners: each finding kept, found by nothing named (the
-/// model's review before the scanners came), and each review with no scanners' run and no commit said.
+/// Upgrading a stack that already has security reviews to the scanners and the checks against renewed advisories: each
+/// finding kept, found by nothing named (the model's review before the scanners came) and found when its review ended,
+/// and each review with no scanners' run, no commit said and not checked again.
 /// </summary>
 [Collection(nameof(AppCollection))]
 public sealed class SecurityScannersMigrationTests(AppFixture app)
@@ -33,7 +34,7 @@ public sealed class SecurityScannersMigrationTests(AppFixture app)
             await V61MigrationTests.InsertAsync(conn, "security_scans", new()
             {
                 ["Id"] = scan, ["UserId"] = user, ["Project"] = "g/shop", ["Status"] = "done", ["Candidates"] = 1, ["Read"] = 1, ["Dropped"] = 0, ["Dependencies"] = 0,
-                ["PromptTokens"] = 0, ["CompletionTokens"] = 0, ["CreatedAt"] = DateTimeOffset.UtcNow,
+                ["PromptTokens"] = 0, ["CompletionTokens"] = 0, ["CreatedAt"] = Finished.AddMinutes(-5), ["FinishedAt"] = Finished,
             });
             await V61MigrationTests.InsertAsync(conn, "security_findings", new()
             {
@@ -48,5 +49,10 @@ public sealed class SecurityScannersMigrationTests(AppFixture app)
         Assert.Equal((SecurityFinding.Code, 0, null, null), (kept.Kind, kept.FoundBy.Length, kept.Rule, kept.Commit));
         var reviewed = await db.SecurityScans.AsNoTracking().SingleAsync(s => s.Id == scan);
         Assert.Equal((null, null), (reviewed.Scanners, reviewed.Commit));
+        // Found when its review ended, so its time to fix counts from then; never checked again yet.
+        Assert.Equal(Finished.ToUniversalTime(), kept.FoundAt.ToUniversalTime());
+        Assert.Null(reviewed.RecheckedAt);
     }
+
+    private static readonly DateTimeOffset Finished = new(2026, 9, 1, 10, 0, 0, TimeSpan.Zero);
 }

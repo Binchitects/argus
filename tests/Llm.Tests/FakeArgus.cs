@@ -66,6 +66,7 @@ public sealed class FakeArgus : HttpMessageHandler
             ("POST", "/admin/repos/discover") => Json(HttpStatusCode.OK, """{"new_repos":"include","global_branches":[],"repos":[]}"""),
             ("POST", "/admin/index") when IndexRunning => Json(HttpStatusCode.Conflict, """{"error":"an index run is already in progress","started":1790000000}"""),
             ("POST", "/admin/index") => Json(HttpStatusCode.OK, """{"status":"started","branches":[],"allow_partial":false}"""),
+            ("GET", "/admin/packs") when PacksAnswer is { } packs => Json(HttpStatusCode.OK, packs),
             ("GET", "/admin/packs") => Json(HttpStatusCode.OK, """
                 {"packs":[{"name":"dotnet-docs","version":"1.2.0","model":"nomic-embed-text","dim":768,"size_bytes":1048576,"license":"MIT","commit":"abc","compatible":true,"incompatible_reason":null}],
                  "job":{"state":"idle","action":null,"target":null,"started":null,"finished":null,"returncode":null,"tail":[]},
@@ -111,6 +112,9 @@ public sealed class FakeArgus : HttpMessageHandler
 
     /// <summary>Tools answered with this structured content (JSON), by name: the merge request tools a review reads.</summary>
     public System.Collections.Concurrent.ConcurrentDictionary<string, string> Answers { get; } = new();
+
+    /// <summary>/admin/packs' answer instead of the usual one (a test's packs).</summary>
+    public string? PacksAnswer { get; set; }
 
     /// <summary>Tools answered by what they are asked (their arguments to the structured content, JSON): before <see cref="Answers"/>.</summary>
     public System.Collections.Concurrent.ConcurrentDictionary<string, Func<JsonElement, string>> Handlers { get; } = new();

@@ -957,7 +957,11 @@ to the code host. Starting one needs `review.run`.
    the package comes in and the smallest upgrade that fixes it. Its bill of
    materials (CycloneDX) is kept to download. Without an advisories pack the
    review says so and goes on with the code; it warns when the advisories
-   are more than a week old.
+   are more than a week old. When Argus renews the advisories (each day), the
+   latest review of each repository from the last 90 days is checked again,
+   at the commit it read and as its person. A vulnerability published since
+   joins it, marked **new since the review**, and its person is told; its
+   time to fix counts from then.
 2. **The scanners** (where the `scanners` feature is installed): Argus's
    `scan_at` sends the commit, with its history, to opengrep with Arena's own
    rules (94 of them, each tested on its weak and fixed examples), Bandit,

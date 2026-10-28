@@ -134,7 +134,7 @@ export function SecurityReviews() {
   )
 }
 
-function FindingCard({ f, onDecide }: { f: SecurityFinding; onDecide: (state: SecurityFinding['state'], why?: string, until?: string) => Promise<void> }) {
+function FindingCard({ f, since, onDecide }: { f: SecurityFinding; since?: string | null; onDecide: (state: SecurityFinding['state'], why?: string, until?: string) => Promise<void> }) {
   const [asking, setAsking] = useState<'accepted' | 'wrong' | null>(null)
   const [why, setWhy] = useState('')
   const [until, setUntil] = useState(() => new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10))
@@ -146,6 +146,11 @@ function FindingCard({ f, onDecide }: { f: SecurityFinding; onDecide: (state: Se
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant={severityVariant[f.severity]}>{f.severity}</Badge>
         {f.exploited && <Badge variant="destructive">known exploited</Badge>}
+        {since && new Date(f.foundAt).getTime() > new Date(since).getTime() + 60_000 && (
+          <Badge variant="warning" title={`Found ${new Date(f.foundAt).toLocaleDateString()}, when the advisories were renewed`}>
+            new since the review
+          </Badge>
+        )}
         {f.kind === 'secret' && <Badge variant="destructive">secret</Badge>}
         {f.kind === 'config' && <Badge variant="outline">configuration</Badge>}
         {!f.cwe ? null : f.kind === 'dependency' ? (
@@ -329,7 +334,7 @@ export function SecurityScanPage() {
   const doubted = code.filter((f) => f.verified === false)
   const secrets = d.findings.filter((f) => f.kind === 'secret')
   const config = d.findings.filter((f) => f.kind === 'config')
-  const card = (f: SecurityFinding) => <FindingCard key={f.id} f={f} onDecide={(state, why, until) => decide(f.id, state, why, until)} />
+  const card = (f: SecurityFinding) => <FindingCard key={f.id} f={f} since={s.finishedAt} onDecide={(state, why, until) => decide(f.id, state, why, until)} />
   const age = s.advisoriesAsOf ? Math.floor((Date.now() - new Date(`${s.advisoriesAsOf}T00:00:00Z`).getTime()) / 86_400_000) : null
   return (
     <>
@@ -393,13 +398,16 @@ export function SecurityScanPage() {
               <h2 className="mb-3 text-lg font-semibold">
                 Vulnerable packages ({packages.length} of {s.dependencies})
               </h2>
+              {s.recheckedAt && (
+                <p className="mb-3 text-sm text-muted-foreground">
+                  Checked again {new Date(s.recheckedAt).toLocaleDateString()}, against the advisories of {s.advisoriesAsOf}, at the commit reviewed.
+                </p>
+              )}
               {packages.length === 0 ? (
                 <p className="mb-6 text-sm text-muted-foreground">No package is known to be vulnerable in the advisories of {s.advisoriesAsOf}.</p>
               ) : (
                 <ul className="mb-6 grid gap-3" aria-label="Vulnerable packages">
-                  {packages.map((f) => (
-                    <FindingCard key={f.id} f={f} onDecide={(state, why, until) => decide(f.id, state, why, until)} />
-                  ))}
+                  {packages.map(card)}
                 </ul>
               )}
             </>

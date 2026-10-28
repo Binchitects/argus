@@ -314,31 +314,7 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
         scan.Dependencies = check["dependencies"] is JsonValue n && n.TryGetValue<int>(out var count) ? count : 0;
         scan.AdvisoriesAsOf = Rows(check["advisories"]).Select(a => DateOnly.TryParse(a["as_of"]?.ToString(), CultureInfo.InvariantCulture, out var day) ? day : (DateOnly?)null)
             .FirstOrDefault(d => d is not null);
-        var found = new List<SecurityFinding>();
-        foreach (var f in Rows(check["findings"]))
-        {
-            var package = f["package"]?.ToString() ?? "";
-            var version = f["version"]?.ToString() ?? "";
-            var cwes = (f["cwes"] as JsonArray ?? []).Select(c => c?.ToString()).OfType<string>().ToList();
-            var aliases = (f["aliases"] as JsonArray ?? []).Select(c => c?.ToString()).OfType<string>().ToList();
-            var exploited = f["exploited"] is JsonValue e && e.TryGetValue<bool>(out var x) && x;
-            var upgrade = f["upgrade_to"]?.ToString();
-            found.Add(new SecurityFinding
-            {
-                Kind = SecurityFinding.Dependency, Exploited = exploited, Path = Cut(f["file"]?.ToString() ?? "", 1_000),
-                Line = f["line"] is JsonValue l && l.TryGetValue<int>(out var line) ? line : 0, SinkCode = Cut($"{package} {version} ({f["ecosystem"]})", 1_000),
-                Cwe = Cut(cwes.FirstOrDefault() ?? "CWE-1395", 16), CweTitle = cwes.Count > 0 ? string.Join(", ", cwes) : "CWE-1395: Dependency on Vulnerable Third-Party Component",
-                Severity = f["severity"]?.ToString() is "critical" or "high" or "medium" or "low" ? f["severity"]!.ToString() : "medium",
-                Title = Cut(f["summary"]?.ToString() is { Length: > 0 } summary ? summary : $"{package} {version} has a known vulnerability", 300),
-                Source = Cut(string.Join(", ", [f["advisory"]?.ToString(), .. aliases]), 1_000),
-                Flow = f["direct"] is JsonValue dv && dv.TryGetValue<bool>(out var direct) && direct ? $"{package} is asked for directly" : $"{package} comes in through {f["via"]?.ToString() ?? "another package"}",
-                Exploit = exploited ? "On CISA's list of known exploited vulnerabilities: attackers use it." : "",
-                Fix = upgrade is not null ? $"Upgrade {package} to {upgrade} or later (the smallest version that fixes all of its advisories here)." : $"No fixed version of {package} is known: replace it, or keep what reaches it away from the vulnerable part.",
-                Pages = new JsonArray(new JsonObject { ["title"] = $"{f["advisory"]}: {Cut(f["summary"]?.ToString() ?? "", 120)}", ["url"] = f["url"]?.ToString() }).ToJsonString(),
-                Verified = true,
-            });
-        }
-        return found;
+        return [.. Rows(check["findings"]).Select(PackageFinding)];
     }
 
     /// <summary>
@@ -401,6 +377,31 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
             });
         }
         return found;
+    }
+
+    /// <summary>A package version an advisory affects, as deps_check gave it, made a finding.</summary>
+    public static SecurityFinding PackageFinding(JsonObject f)
+    {
+        var package = f["package"]?.ToString() ?? "";
+        var version = f["version"]?.ToString() ?? "";
+        var cwes = (f["cwes"] as JsonArray ?? []).Select(c => c?.ToString()).OfType<string>().ToList();
+        var aliases = (f["aliases"] as JsonArray ?? []).Select(c => c?.ToString()).OfType<string>().ToList();
+        var exploited = f["exploited"] is JsonValue e && e.TryGetValue<bool>(out var x) && x;
+        var upgrade = f["upgrade_to"]?.ToString();
+        return new SecurityFinding
+        {
+            Kind = SecurityFinding.Dependency, Exploited = exploited, Path = Cut(f["file"]?.ToString() ?? "", 1_000),
+            Line = f["line"] is JsonValue l && l.TryGetValue<int>(out var line) ? line : 0, SinkCode = Cut($"{package} {version} ({f["ecosystem"]})", 1_000),
+            Cwe = Cut(cwes.FirstOrDefault() ?? "CWE-1395", 16), CweTitle = cwes.Count > 0 ? string.Join(", ", cwes) : "CWE-1395: Dependency on Vulnerable Third-Party Component",
+            Severity = f["severity"]?.ToString() is "critical" or "high" or "medium" or "low" ? f["severity"]!.ToString() : "medium",
+            Title = Cut(f["summary"]?.ToString() is { Length: > 0 } summary ? summary : $"{package} {version} has a known vulnerability", 300),
+            Source = Cut(string.Join(", ", [f["advisory"]?.ToString(), .. aliases]), 1_000),
+            Flow = f["direct"] is JsonValue dv && dv.TryGetValue<bool>(out var direct) && direct ? $"{package} is asked for directly" : $"{package} comes in through {f["via"]?.ToString() ?? "another package"}",
+            Exploit = exploited ? "On CISA's list of known exploited vulnerabilities: attackers use it." : "",
+            Fix = upgrade is not null ? $"Upgrade {package} to {upgrade} or later (the smallest version that fixes all of its advisories here)." : $"No fixed version of {package} is known: replace it, or keep what reaches it away from the vulnerable part.",
+            Pages = new JsonArray(new JsonObject { ["title"] = $"{f["advisory"]}: {Cut(f["summary"]?.ToString() ?? "", 120)}", ["url"] = f["url"]?.ToString() }).ToJsonString(),
+            Verified = true,
+        };
     }
 
     private static JsonObject Args(SecurityScan scan, JsonObject args)
