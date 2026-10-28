@@ -1,6 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
+import type { OwnKey } from '@/components/app/own-keys'
 import { fakeApi, member, renderApp } from '@/test/utils'
 
 describe('account', () => {
@@ -293,5 +294,41 @@ describe('account', () => {
     await userEvent.click(await screen.findByRole('radio', { name: 'Dark' }))
     expect(document.documentElement).toHaveClass('dark')
     expect(localStorage.getItem('theme')).toBe('dark')
+  })
+
+  it('keys of your own are added with a name and limits, shown once, and revoked one by one', async () => {
+    let keys: OwnKey[] = [
+      { id: 'm1', name: 'Your key', kind: 'main', preview: 'sk-...main', spend: 1, blocked: false, createdAt: null, limits: null, effective: { requestsPerMinute: 60, tokensPerMinute: null, parallel: 4, monthlyBudget: null } },
+    ]
+    const calls = fakeApi(member, {
+      'GET /api/account/keys/own': () => ({ json: { keys, most: 20 } }),
+      'POST /api/account/keys/own': (body) => {
+        const k: OwnKey = { id: 'c1', name: (body as { name: string }).name, kind: 'own', preview: 'sk-...ci01', spend: 0, blocked: false, createdAt: null, limits: { requestsPerMinute: 100, tokensPerMinute: null, parallel: 2, monthlyBudget: 5 }, effective: { requestsPerMinute: 60, tokensPerMinute: null, parallel: 2, monthlyBudget: 5 } }
+        keys = [...keys, k]
+        return { json: { apiKey: 'sk-secret-ci', key: k } }
+      },
+      'DELETE /api/account/keys/own/c1': () => {
+        keys = keys.filter((k) => k.id !== 'c1')
+        return { status: 204 }
+      },
+    })
+    renderApp('/account')
+    const list = await screen.findByRole('list', { name: 'Your API keys' })
+    expect(await within(list).findByText(/60 requests a minute · 4 at once/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Add key' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add an API key' })
+    await userEvent.type(within(dialog).getByLabelText('Name'), 'CI')
+    await userEvent.type(within(dialog).getByLabelText('Requests a minute'), '100')
+    await userEvent.type(within(dialog).getByLabelText('Requests at once'), '2')
+    await userEvent.type(within(dialog).getByLabelText('Budget in 30 days ($)'), '5')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    expect(calls.find((c) => c.path === '/api/account/keys/own' && c.method === 'POST')?.body).toEqual({ name: 'CI', requestsPerMinute: 100, tokensPerMinute: null, parallel: 2, monthlyBudget: 5 })
+    expect(await screen.findByText('CI: the key, shown only this once')).toBeInTheDocument()
+    expect(await within(list).findByText(/60 requests a minute · 2 at once · \$5\.00 in 30 days/)).toBeInTheDocument()
+
+    await userEvent.click(within(list).getByRole('button', { name: 'Revoke CI' }))
+    await userEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Revoke' }))
+    await waitFor(() => expect(within(list).queryByText('CI')).toBeNull())
+    expect(within(list).getByText('Your key')).toBeInTheDocument()
   })
 })

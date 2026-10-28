@@ -149,6 +149,15 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
             ["tpm_limit"] = rate.TokensPerMinute is > 0 ? rate.TokensPerMinute : null,
         }, ct);
 
+    public async Task SetKeyBudgetAsync(string token, decimal? monthly, CancellationToken ct = default) =>
+        await SendAsync(HttpMethod.Post, "/key/update", new JsonObject
+        {
+            ["key"] = token,
+            // LiteLLM resets the key's spend every 30 days and refuses it past the budget (400, budget exceeded).
+            ["max_budget"] = monthly is > 0 ? monthly : null,
+            ["budget_duration"] = monthly is > 0 ? "30d" : null,
+        }, ct);
+
     public async Task<IReadOnlyList<ManagedModel>> ManagedModelsAsync(CancellationToken ct = default)
     {
         var res = await SendAsync(HttpMethod.Get, "/model/info", null, ct);
@@ -201,7 +210,7 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
                 DateTimeOffset.TryParse(Str(k, "created_at"), CultureInfo.InvariantCulture, out var at) ? at : null,
                 [.. (k["models"] as JsonArray ?? []).Select(m => m?.GetValue<string>() ?? "")],
                 k["max_parallel_requests"] is JsonValue p && p.TryGetValue<int>(out var parallel) ? parallel : null,
-                Str(k, "team_id"), new KeyRate(Limit(k, "rpm_limit"), Limit(k, "tpm_limit"))));
+                Str(k, "team_id"), new KeyRate(Limit(k, "rpm_limit"), Limit(k, "tpm_limit")), Dec(k, "max_budget")));
         }
         return keys;
     }

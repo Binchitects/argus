@@ -7,6 +7,7 @@ import { useForm } from 'react-hook-form'
 import { useOutletContext } from 'react-router'
 import { z } from 'zod'
 import { ApiKey } from '@/components/app/api-key'
+import { OwnKeys } from '@/components/app/own-keys'
 import { Connections } from '@/components/app/connections'
 import { MemoryManager } from '@/components/app/memory'
 import { PageHeader } from '@/components/app/page-header'
@@ -42,6 +43,7 @@ export function AccountPage() {
           <PoliciesToRead />
           <Profile me={me} />
           <ApiKey />
+          <OwnKeys />
           <Answers />
           <VoiceSection />
           <Memory />

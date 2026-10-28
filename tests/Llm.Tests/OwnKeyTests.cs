@@ -1,0 +1,140 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+using Llm.Api.Gateway;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Llm.Tests;
+
+/// <summary>
+/// A person's own API keys (Account → API keys): named, each with limits of its own under those an admin set on them,
+/// each changed or revoked on its own, and kept so by the gateway's sync.
+/// </summary>
+[Collection(nameof(AppCollection))]
+public sealed class OwnKeyTests(AppFixture app)
+{
+    private WebApplicationFactory<Program> NewApp(FakeGateway gateway) =>
+        app.Create(app.ConnectionStringFor("ownkeys_" + Guid.NewGuid().ToString("N")[..8]), gateway);
+
+    private static async Task<(Guid Id, string Email, TestBrowser Person)> PersonAsync(WebApplicationFactory<Program> f, TestBrowser admin)
+    {
+        var name = "ok" + Guid.NewGuid().ToString("N")[..10];
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
+        var person = await new TestBrowser(f).SignedInAsync(name, made.GetProperty("password").GetString()!);
+        return (made.GetProperty("id").GetGuid(), $"{name}@example.test", person);
+    }
+
+    [Fact]
+    public async Task Keys_of_ones_own_are_named_limited_under_ones_limits_changed_and_revoked_one_by_one()
+    {
+        var gateway = new FakeGateway();
+        await using var f = NewApp(gateway);
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var (id, email, person) = await PersonAsync(f, admin);
+        // The admin holds them to 60 requests a minute.
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{id}/limits", UriKind.Relative), new { requestsPerMinute = 60, tokensPerMinute = (int?)null }));
+        var main = gateway.KeysOf(email).Single();
+
+        // A key for CI: 100 requests a minute asked, 60 held (theirs is tighter); 2 at once; $5 in 30 days.
+        var made = await person.JsonAsync(await person.PostAsync("/api/account/keys/own", new { name = "CI", requestsPerMinute = 100, tokensPerMinute = 5000, parallel = 2, monthlyBudget = 5m }));
+        var secret = made.GetProperty("apiKey").GetString()!;
+        var ci = gateway.Keys[AnswerCache.HashOf(secret)];
+        Assert.Equal(new KeyRate(60, 5000), ci.Rate);
+        Assert.Equal(2, ci.MaxParallel);
+        Assert.Equal(5m, ci.MaxBudget);
+        var view = made.GetProperty("key");
+        Assert.Equal(("CI", "own"), (view.GetProperty("name").GetString(), view.GetProperty("kind").GetString()));
+        Assert.Equal(100, view.GetProperty("limits").GetProperty("requestsPerMinute").GetInt32());
+        Assert.Equal(60, view.GetProperty("effective").GetProperty("requestsPerMinute").GetInt32());
+
+        // A second, a name taken is refused, and a limit of 0 too.
+        var laptop = (await person.JsonAsync(await person.PostAsync("/api/account/keys/own", new { name = "laptop", requestsPerMinute = 10 }))).GetProperty("apiKey").GetString()!;
+        Assert.Equal(new KeyRate(10, null), gateway.Keys[AnswerCache.HashOf(laptop)].Rate);
+        var taken = await person.PostAsync("/api/account/keys/own", new { name = "CI" });
+        Assert.Equal(HttpStatusCode.Conflict, taken.StatusCode);
+        Assert.Contains("named CI already", await taken.Content.ReadAsStringAsync());
+        Assert.Equal(HttpStatusCode.BadRequest, (await person.PostAsync("/api/account/keys/own", new { name = "zero", parallel = 0 })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await person.PostAsync("/api/account/keys/own", new { name = " " })).StatusCode);
+
+        // Listed: the main key and the two of their own.
+        var listed = (await person.JsonAsync(await person.GetAsync("/api/account/keys/own"))).GetProperty("keys").EnumerateArray().ToList();
+        Assert.Equal(["Your key:main", "CI:own", "laptop:own"], listed.Select(k => $"{k.GetProperty("name").GetString()}:{k.GetProperty("kind").GetString()}"));
+
+        // Changed: CI to 30 a minute, no budget; the gateway holds it so.
+        var changed = await person.JsonAsync(await person.Http.PutAsJsonAsync(new Uri($"/api/account/keys/own/{ci.Token}", UriKind.Relative),
+            new { name = "CI runners", requestsPerMinute = 30, tokensPerMinute = 5000, parallel = 2 }));
+        Assert.Equal("CI runners", changed.GetProperty("name").GetString());
+        Assert.Equal(new KeyRate(30, 5000), ci.Rate);
+        Assert.Null(ci.MaxBudget);
+
+        // The sync keeps each key's own: the person's limit lifted, CI stays at its 30, the main key has none.
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{id}/limits", UriKind.Relative), new { requestsPerMinute = (int?)0, tokensPerMinute = (int?)null }));
+        await using (var scope = f.Services.CreateAsyncScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<RateLimits>().SyncAsync();
+            await scope.ServiceProvider.GetRequiredService<Llm.Api.Models.KeyAccess>().SyncAsync();
+        }
+        Assert.Equal(new KeyRate(30, 5000), ci.Rate);
+        Assert.Equal(2, ci.MaxParallel);
+        Assert.Equal(KeyRate.None, main.Rate);
+
+        // Rotate replaces the main key only; revoking CI leaves laptop.
+        var rotated = (await person.JsonAsync(await person.PostAsync("/api/account/keys/rotate"))).GetProperty("apiKey").GetString()!;
+        Assert.True(gateway.Keys.ContainsKey(ci.Token));
+        Assert.False(gateway.Keys.ContainsKey(main.Token));
+        Assert.True(gateway.Keys.ContainsKey(AnswerCache.HashOf(rotated)));
+        await StatusAssert.Is(HttpStatusCode.NoContent, await person.Http.DeleteAsync(new Uri($"/api/account/keys/own/{ci.Token}", UriKind.Relative)));
+        Assert.False(gateway.Keys.ContainsKey(ci.Token));
+        Assert.True(gateway.Keys.ContainsKey(AnswerCache.HashOf(laptop)));
+        // Another person's key, or one not there, is not theirs to change.
+        Assert.Equal(HttpStatusCode.NotFound, (await person.Http.DeleteAsync(new Uri($"/api/account/keys/own/{ci.Token}", UriKind.Relative))).StatusCode);
+        var (_, _, other) = await PersonAsync(f, admin);
+        Assert.Equal(HttpStatusCode.NotFound, (await other.Http.DeleteAsync(new Uri($"/api/account/keys/own/{AnswerCache.HashOf(laptop)}", UriKind.Relative))).StatusCode);
+        Assert.True(gateway.Keys.ContainsKey(AnswerCache.HashOf(laptop)));
+    }
+
+    [Fact]
+    public async Task A_keys_own_requests_at_once_hold_in_the_apps_line()
+    {
+        var gateway = new FakeGateway();
+        await using var f = NewApp(gateway);
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var (_, _, person) = await PersonAsync(f, admin);
+        var one = (await person.JsonAsync(await person.PostAsync("/api/account/keys/own", new { name = "one at a time", parallel = 1 }))).GetProperty("apiKey").GetString()!;
+        var free = (await person.JsonAsync(await person.PostAsync("/api/account/keys/own", new { name = "free" }))).GetProperty("apiKey").GetString()!;
+        var line = f.Services.GetRequiredService<KeyLine>();
+        using var first = await line.EnterAsync(one, CancellationToken.None);
+        Assert.NotNull(first);
+        // The second waits for the first (it would be refused only past the line's timeout).
+        var second = line.EnterAsync(one, CancellationToken.None);
+        await Task.Delay(200);
+        Assert.False(second.IsCompleted);
+        Assert.Equal(1, line.PlacesFor(one));
+        first!.Dispose();
+        using (await second)
+        {
+            // The other key has everyone's places.
+            using var a = await line.EnterAsync(free, CancellationToken.None);
+            using var b = await line.EnterAsync(free, CancellationToken.None);
+            Assert.NotNull(b);
+        }
+    }
+
+    [Fact]
+    public async Task Making_keys_counts_with_rotating_them_an_hour()
+    {
+        var gateway = new FakeGateway();
+        await using var f = NewApp(gateway);
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var (_, _, person) = await PersonAsync(f, admin);
+        for (var i = 0; i < Llm.Api.Identity.PeopleService.OwnKeysPerHour; i++)
+        {
+            await StatusAssert.Is(HttpStatusCode.OK, await person.PostAsync("/api/account/keys/own", new { name = $"k{i}" }));
+        }
+        var refused = await person.PostAsync("/api/account/keys/own", new { name = "one more" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, refused.StatusCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await person.PostAsync("/api/account/keys/rotate")).StatusCode);
+        Assert.Equal("too_many_keys", JsonDocument.Parse(await refused.Content.ReadAsStringAsync()).RootElement.GetProperty("status").GetString());
+    }
+}

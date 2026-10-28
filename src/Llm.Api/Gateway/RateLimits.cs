@@ -151,20 +151,24 @@ public sealed partial class RateLimits(AppDbContext db, AccessService access, IL
     private async Task<int> ApplyAsync(AppUser user, string email, KeyRate want, Func<Task<KeyRate>> recheck, DateTimeOffset? upgrade, CancellationToken ct)
     {
         var keys = await gateway.KeysAsync(email, ct);
-        if (keys.Any(k => (k.Rate ?? KeyRate.None) != want))
+        // A key the person made with limits of its own carries the tighter of theirs and its own (OwnKeys).
+        var own = await db.OwnKeys.AsNoTracking().Where(k => k.UserId == user.Id).ToDictionaryAsync(k => k.Token, ct);
+        KeyRate Target(GatewayKey k, KeyRate w) => OwnKeys.Tighter(w, own.GetValueOrDefault(k.Token));
+        if (keys.Any(k => (k.Rate ?? KeyRate.None) != Target(k, want)))
         {
             if (upgrade is { } since)
             {
-                await KeepAsync(user, keys, want, since, ct);
+                // Keys made since the upgrade carry nothing from before it.
+                await KeepAsync(user, [.. keys.Where(k => !own.ContainsKey(k.Token))], want, since, ct);
             }
             want = await recheck();
         }
         var changed = 0;
         foreach (var key in keys)
         {
-            if ((key.Rate ?? KeyRate.None) != want)
+            if ((key.Rate ?? KeyRate.None) is var now && Target(key, want) is var target && now != target)
             {
-                await gateway.SetKeyRateAsync(key.Token, want, ct);
+                await gateway.SetKeyRateAsync(key.Token, target, ct);
                 changed++;
             }
         }

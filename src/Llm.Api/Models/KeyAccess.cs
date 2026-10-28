@@ -14,7 +14,8 @@ namespace Llm.Api.Models;
 /// is not one of them; the app checks the chat itself. Fair use holds for keys
 /// too: each carries how many requests it may have at once.
 /// </summary>
-public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, ChatModels models, ILiteLlm gateway, IOptionsMonitor<ChatOptions> chat, Access.AccessService access)
+public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, ChatModels models, ILiteLlm gateway, IOptionsMonitor<ChatOptions> chat, Access.AccessService access,
+    Core.Data.AppDbContext db)
 {
     /// <summary>
     /// LiteLLM's own limit of a key's requests at once; null: none. The app's line (KeyLine) holds a key to
@@ -76,11 +77,14 @@ public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, Ch
         foreach (var user in await users.Users.AsNoTracking().Where(u => u.Email != null).ToListAsync(ct))
         {
             var want = await ListForAsync(user, ct);
+            // A key the person made with fewer at once of its own carries that.
+            var own = await db.OwnKeys.AsNoTracking().Where(k => k.UserId == user.Id).ToDictionaryAsync(k => k.Token, k => k.Parallel, ct);
             foreach (var key in await gateway.KeysAsync(user.Email!, ct))
             {
-                if (!(key.Models ?? []).Order(StringComparer.Ordinal).SequenceEqual(want.Order(StringComparer.Ordinal)) || key.MaxParallel != MaxParallel)
+                var parallel = Gateway.OwnKeys.TighterParallel(MaxParallel, own.GetValueOrDefault(key.Token));
+                if (!(key.Models ?? []).Order(StringComparer.Ordinal).SequenceEqual(want.Order(StringComparer.Ordinal)) || key.MaxParallel != parallel)
                 {
-                    await gateway.SetKeyAccessAsync(key.Token, want, MaxParallel, ct);
+                    await gateway.SetKeyAccessAsync(key.Token, want, parallel, ct);
                     changed++;
                 }
             }

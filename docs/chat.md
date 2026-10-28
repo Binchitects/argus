@@ -1906,7 +1906,8 @@ their turn:
 - **Each conversation keeps its slot** in the engine, so the next turn reads
   only what is new from the cache (see [admin.md](admin.md#the-token-cache)).
 - **API keys** (coding agents, IDEs, scripts) have four requests answered at
-  once (API requests at once, per key); more wait their turn in the order they
+  once (API requests at once, per key; fewer for a key its person set so on
+  Account → API keys); more wait their turn in the order they
   came and are answered as one ends, never refused at once, so an agent that
   sends several at the same time (sub-agents, tools side by side) is not slowed
   by retries. Only a request that waits past ten minutes (API request's longest

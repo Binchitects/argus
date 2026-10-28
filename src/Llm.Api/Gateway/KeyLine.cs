@@ -1,6 +1,4 @@
 using System.Collections.Concurrent;
-using System.Security.Cryptography;
-using System.Text;
 using Llm.Api.Chat;
 using Microsoft.Extensions.Options;
 
@@ -13,7 +11,7 @@ namespace Llm.Api.Gateway;
 /// would retry after longer and longer waits and look stuck. Only past Chat:ApiQueueTimeout is a request
 /// refused. Kept by the key's hash, never the key.
 /// </summary>
-public sealed class KeyLine(IOptionsMonitor<ChatOptions> options)
+public sealed class KeyLine(IOptionsMonitor<ChatOptions> options, OwnKeyPlaces? own = null)
 {
     // A SemaphoreSlim needs disposing only once its wait handle was asked for, which this never does.
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Reliability", "CA1001", Justification = "SemaphoreSlim's wait handle is never made")]
@@ -33,12 +31,15 @@ public sealed class KeyLine(IOptionsMonitor<ChatOptions> options)
     /// <summary>A place for the key's request: disposed when the request ends. Null when the wait ran out.</summary>
     public async Task<IDisposable?> EnterAsync(string key, CancellationToken ct)
     {
-        var places = options.CurrentValue.ApiRequestsPerKey;
+        var all = options.CurrentValue.ApiRequestsPerKey;
+        // A key its person made with fewer at once (Account → API keys) has that many places.
+        var token = AnswerCache.HashOf(key);
+        var places = OwnKeys.TighterParallel(all > 0 ? all : null, own is null ? null : await own.ForAsync(token, ct)) ?? 0;
         if (places <= 0)
         {
             return Nothing.Instance;
         }
-        var id = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)));
+        var id = token;
         // A changed setting takes effect for the lines made after it; a busy line keeps its count until it empties.
         var line = _lines.AddOrUpdate(id, _ => new Line(places), (_, l) => l.Count != places && l.Places.CurrentCount == l.Count && l.Waiting == 0 ? new Line(places) : l);
         Interlocked.Increment(ref line.Waiting);
@@ -58,7 +59,10 @@ public sealed class KeyLine(IOptionsMonitor<ChatOptions> options)
 
     /// <summary>How many of the key's requests wait now (for the 429's message).</summary>
     public int WaitingFor(string key) =>
-        _lines.TryGetValue(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key))), out var l) ? l.Waiting : 0;
+        _lines.TryGetValue(AnswerCache.HashOf(key), out var l) ? l.Waiting : 0;
+
+    /// <summary>How many of the key's requests are answered at once now (its own count, else everyone's).</summary>
+    public int PlacesFor(string key) => _lines.TryGetValue(AnswerCache.HashOf(key), out var l) ? l.Count : Places;
 
     private sealed class Place(SemaphoreSlim places) : IDisposable
     {

@@ -21,6 +21,8 @@ public sealed class FakeGateway : ILiteLlm
         public string? TeamId { get; set; }
         /// <summary>Its requests and tokens a minute.</summary>
         public KeyRate Rate { get; set; } = KeyRate.None;
+        /// <summary>What it may spend in 30 days; null: no budget of its own.</summary>
+        public decimal? MaxBudget { get; set; }
         /// <summary>When it was made: a test sets an earlier time for a key made before an upgrade.</summary>
         public DateTimeOffset CreatedAt { get; init; } = DateTimeOffset.UtcNow;
     }
@@ -83,6 +85,16 @@ public sealed class FakeGateway : ILiteLlm
         }
     }
 
+    public Task SetKeyBudgetAsync(string token, decimal? monthly, CancellationToken ct = default)
+    {
+        Check();
+        if (Keys.TryGetValue(token, out var key))
+        {
+            key.MaxBudget = monthly is > 0 ? monthly : null;
+        }
+        return Task.CompletedTask;
+    }
+
     public Task SetKeyAccessAsync(string token, IReadOnlyList<string> models, int? maxParallel, CancellationToken ct = default)
     {
         Check();
@@ -122,7 +134,7 @@ public sealed class FakeGateway : ILiteLlm
         {
             await before(email);
         }
-        return [.. KeysOf(email).Select(k => new GatewayKey(k.Token, k.Alias, "sk-...", 0, k.Blocked, k.CreatedAt, k.Models, k.MaxParallel, k.TeamId, k.Rate))];
+        return [.. KeysOf(email).Select(k => new GatewayKey(k.Token, k.Alias, "sk-...", 0, k.Blocked, k.CreatedAt, k.Models, k.MaxParallel, k.TeamId, k.Rate, k.MaxBudget))];
     }
 
     /// <summary>The keys looked up by the key itself (each one asked about), so tests can see what was cached.</summary>

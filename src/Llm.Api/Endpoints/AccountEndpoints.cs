@@ -78,6 +78,21 @@ public static class AccountEndpoints
         me.MapGet("/keys", KeysAsync);
         me.MapGet("/keys/limits", LimitsAsync);
         me.MapPost("/keys/rotate", RotateAsync);
+        // Keys of their own: named, each with limits under theirs, each revoked on its own.
+        me.MapGet("/keys/own", async (ClaimsPrincipal p, UserManager<AppUser> users, Gateway.OwnKeys keys, CancellationToken ct) =>
+            Results.Ok(new { keys = await keys.ListAsync((await users.GetUserAsync(p))!, ct), most = Gateway.OwnKeys.MaxKeys }));
+        me.MapPost("/keys/own", (ClaimsPrincipal p, UserManager<AppUser> users, Gateway.OwnKeys keys, Gateway.KeyRequest body, CancellationToken ct) => OwnAsync(async () =>
+        {
+            var (key, view) = await keys.MakeAsync((await users.GetUserAsync(p))!, body, ct);
+            return Results.Ok(new { apiKey = key, key = view });
+        }));
+        me.MapPut("/keys/own/{id}", (string id, ClaimsPrincipal p, UserManager<AppUser> users, Gateway.OwnKeys keys, Gateway.KeyRequest body, CancellationToken ct) =>
+            OwnAsync(async () => Results.Ok(await keys.ChangeAsync((await users.GetUserAsync(p))!, id, body, ct))));
+        me.MapDelete("/keys/own/{id}", (string id, ClaimsPrincipal p, UserManager<AppUser> users, Gateway.OwnKeys keys, CancellationToken ct) => OwnAsync(async () =>
+        {
+            await keys.RevokeAsync((await users.GetUserAsync(p))!, id, ct);
+            return Results.NoContent();
+        }));
     }
 
     /// <summary>A person's choices as the account page shows them: compactAt null follows the company's, compactAtDefault.</summary>
@@ -232,6 +247,23 @@ public static class AccountEndpoints
     {
         var user = (await users.GetUserAsync(p))!;
         return Results.Ok(await rateLimits.ViewAsync(user, await gateway.KeysAsync(user.Email!, ct), keyAccess.AtOnce, ct));
+    }
+
+    /// <summary>A key call, its refusal said as it is (409 for a name taken, 429 for too many an hour...).</summary>
+    private static async Task<IResult> OwnAsync(Func<Task<IResult>> call)
+    {
+        try
+        {
+            return await call();
+        }
+        catch (Gateway.OwnKeyException e)
+        {
+            return AuthEndpoints.Problem(e.Status, e.Code, e.Message);
+        }
+        catch (Gateway.GatewayException e)
+        {
+            return AuthEndpoints.Problem(502, "gateway", e.Message);
+        }
     }
 
     private static string Group(string key)

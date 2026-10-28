@@ -208,7 +208,7 @@ public sealed partial class PeopleService(
     {
         var since = now.AddHours(-1);
         var made = await db.AuditEvents.AsNoTracking()
-            .Where(a => a.Action == "person.rotate_key" && a.Success && a.ActorId == user.Id && a.Target == user.UserName && a.At >= since)
+            .Where(a => (a.Action == "person.rotate_key" || a.Action == Gateway.OwnKeys.Made) && a.Success && a.ActorId == user.Id && a.Target == user.UserName && a.At >= since)
             .OrderByDescending(a => a.At).Select(a => a.At).Take(OwnKeysPerHour).ToListAsync();
         return made.Count < OwnKeysPerHour ? TimeSpan.Zero : made[^1].AddHours(1) - now;
     }
@@ -224,7 +224,9 @@ public sealed partial class PeopleService(
         {
             throw new PeopleException($"{user.UserName} is disabled: enable them first.");
         }
-        var old = await gateway.KeysAsync(user.Email!);
+        // The main key (and any other not made on Account → API keys, nor a Code Studio workspace's): those keep working.
+        var own = await db.OwnKeys.AsNoTracking().Where(k => k.UserId == user.Id).Select(k => k.Token).ToListAsync();
+        var old = (await gateway.KeysAsync(user.Email!)).Where(k => !own.Contains(k.Token) && !k.Alias.StartsWith("studio:", StringComparison.Ordinal)).ToList();
         // Before the old keys go: a limit they carried from before the upgrade to rate limits is kept.
         var rate = await rateLimits.ForNewKeyAsync(user, old);
         await gateway.DeleteKeysAsync(old.Select(k => k.Token));

@@ -404,6 +404,8 @@ public static class AnswerCacheEndpoints
         services.AddSingleton<AnswerCacheState>();
         services.AddScoped<AnswerCache>();
         services.AddSingleton<KeyLine>();
+        services.AddSingleton<OwnKeyPlaces>();
+        services.AddScoped<OwnKeys>();
         services.AddHttpClient(AnswerCache.Client, (sp, c) =>
         {
             c.BaseAddress = new Uri(sp.GetRequiredService<IOptions<LiteLlmOptions>>().Value.Url);
@@ -592,7 +594,7 @@ public static class AnswerCacheEndpoints
         {
             http.Response.StatusCode = StatusCodes.Status429TooManyRequests;
             http.Response.Headers.RetryAfter = "30";
-            await http.Response.WriteAsJsonAsync(new { error = new { message = $"This API key's requests waited longer than {line.Timeout.TotalMinutes:0} minutes for their turn: {line.Places} are answered at once. Try again in a moment.", type = "rate_limit_error", code = "429" } }, ct);
+            await http.Response.WriteAsJsonAsync(new { error = new { message = $"This API key's requests waited longer than {line.Timeout.TotalMinutes:0} minutes for their turn: {line.PlacesFor(key)} are answered at once. Try again in a moment.", type = "rate_limit_error", code = "429" } }, ct);
             return;
         }
         // The agent's session goes back to the engine slot that holds its start (and its cache, from disk when it lost it),

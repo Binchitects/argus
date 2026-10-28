@@ -5126,6 +5126,43 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("audit_events", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Identity.OwnKey", b =>
+                {
+                    b.Property<string>("Token")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal?>("MonthlyBudget")
+                        .HasPrecision(12, 4)
+                        .HasColumnType("numeric(12,4)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<int?>("Parallel")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("RequestsPerMinute")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("TokensPerMinute")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Token");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("own_keys", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Identity.UsedSamlAssertion", b =>
                 {
                     b.Property<string>("Id")
@@ -7866,6 +7903,15 @@ namespace Llm.Core.Data.Migrations
                     b.HasOne("Llm.Core.Decks.Deck", null)
                         .WithMany()
                         .HasForeignKey("DeckId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Identity.OwnKey", b =>
+                {
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

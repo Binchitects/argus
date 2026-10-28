@@ -20,7 +20,7 @@ public sealed record ManagedModel(string Id, string Name, string? Fingerprint);
 /// <summary>A key as the gateway lists it: the hashed token (never the key itself), alias, spend and state.</summary>
 /// <remarks>Models: the models the key may call; empty means every model. Rate: its requests and tokens a minute.</remarks>
 public sealed record GatewayKey(string Token, string Alias, string? Preview, decimal Spend, bool Blocked, DateTimeOffset? CreatedAt, IReadOnlyList<string>? Models = null, int? MaxParallel = null,
-    string? TeamId = null, KeyRate? Rate = null);
+    string? TeamId = null, KeyRate? Rate = null, decimal? MaxBudget = null);
 
 /// <summary>A group's credit at the gateway: a LiteLLM team (id "group-..."), its members and the budget it holds the keys in it to.</summary>
 /// <param name="MemberBudget">Each member's own ceiling in the team; null: the team's budget is shared.</param>
@@ -52,6 +52,9 @@ public interface ILiteLlm
 
     /// <summary>How many requests and tokens a minute a key may use (by its hashed token); past either the gateway answers HTTP 429.</summary>
     Task SetKeyRateAsync(string token, KeyRate rate, CancellationToken ct = default);
+
+    /// <summary>What a key may spend in 30 days (by its hashed token), past which the gateway refuses it; null lifts it.</summary>
+    Task SetKeyBudgetAsync(string token, decimal? monthly, CancellationToken ct = default);
 
     /// <summary>A key that belongs to no person (the chat's): spend is attributed by the request's `user`.</summary>
     Task<string> GenerateServiceKeyAsync(string keyAlias, CancellationToken ct = default);

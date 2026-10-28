@@ -1150,6 +1150,14 @@ limits are the keys'.
 
 Each of a person's keys carries the limits: the app gives each person one key,
 and **New key** makes the next with the same limits, so they are the person's.
+People also make keys of their own on **Account → API keys** (up to 20): each
+named, each with limits of its own (requests and tokens a minute, requests at
+once, a budget in 30 days) that hold under the person's, as the gateway holds
+the key to the tighter of the two, and the key sync keeps it so when the
+person's limits change. Each is revoked on its own (`person.key_revoked`);
+making one is audited (`person.key_made`) and counts with **New key** in the
+five an hour. **New key** replaces the main key only: keys of their own and a
+Code Studio workspace's keep working.
 The gateway counts each key on its own, so a new key starts a fresh minute:
 people may make at most five new keys an hour themselves (the sixth is refused
 with HTTP 429 and audited as a failed `person.rotate_key`), so a new key is no
