@@ -792,13 +792,56 @@ async function openApp() {
 }
 
 describe('Code Arena, the IDE', () => {
+  it('accounts: whose key it is, sign in with a password and the second factor, and Arena\'s own pages', async () => {
+    const reload = vi.fn()
+    vi.stubGlobal('location', { ...window.location, reload })
+    onTestFinished(() => {
+      vi.unstubAllGlobals()
+    })
+    const opened: string[] = []
+    vi.spyOn(window, 'open').mockImplementation((url) => (opened.push(String(url)), null))
+    let signedIn = false
+    const { calls } = backend({
+      'GET /api/account': () => ({
+        json: { arena: 'https://arena.example.com', signedIn: true, codeStudio: false, account: { userName: signedIn ? 'sam' : 'mo', displayName: signedIn ? null : 'Mo', email: null, managesPeople: true } },
+      }),
+      'POST /api/account/sign-in': () => ({ json: { status: '2fa' } }),
+      'POST /api/account/sign-in/code': () => {
+        signedIn = true
+        return { json: { status: 'ok' } }
+      },
+    })
+    renderIde()
+    const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
+    await userEvent.click(within(bar).getByRole('button', { name: 'Accounts' }))
+    const menu = await screen.findByRole('menu')
+    expect(within(menu).getByText('Mo (mo)')).toBeInTheDocument()
+    expect(within(menu).getByText('on arena.example.com')).toBeInTheDocument()
+    await userEvent.click(within(menu).getByRole('menuitem', { name: 'People (Admin)' }))
+    expect(opened).toEqual(['https://arena.example.com/admin/people'])
+
+    await userEvent.click(within(bar).getByRole('button', { name: 'Accounts' }))
+    await userEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Sign in as someone else…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Sign in to Arena' })
+    expect(within(dialog).getByLabelText("Arena's address")).toHaveValue('https://arena.example.com')
+    await userEvent.type(within(dialog).getByLabelText('User name'), 'sam')
+    await userEvent.type(within(dialog).getByLabelText('Password'), 'pw')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Sign in' }))
+    await userEvent.type(await within(dialog).findByLabelText('Two-factor code'), '123456')
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Verify' }))
+    expect(calls.find((c) => c.path === '/api/account/sign-in')?.body).toEqual({ url: 'https://arena.example.com', userName: 'sam', password: 'pw' })
+    expect(calls.find((c) => c.path === '/api/account/sign-in/code')?.body).toEqual({ code: '123456' })
+    // Code Arena starts again with the new key: the page loads once Arena says whose it is.
+    await waitFor(() => expect(reload).toHaveBeenCalled(), { timeout: 3000 })
+  })
+
   it('lays out an editor: the activity bar, the explorer, the editor, the chat and the status bar', async () => {
     backend()
     renderIde()
     const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
     // The agent's changes are counted on their button.
     expect(await within(bar).findByRole('button', { name: 'Agent changes (1)' })).toBeInTheDocument()
-    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Plan', 'Memory', 'Chat', 'Terminal', 'Theme', 'Manage', 'Help', 'About Code Arena'])
+    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Plan', 'Memory', 'Chat', 'Terminal', 'Theme', 'Accounts', 'Manage', 'Help', 'About Code Arena'])
     expect(within(bar).getByRole('button', { name: 'Explorer' })).toHaveAttribute('aria-pressed', 'true')
     expect(await screen.findByRole('tree', { name: 'Files' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'No file is open' })).toBeInTheDocument()

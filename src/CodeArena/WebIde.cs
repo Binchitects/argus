@@ -76,6 +76,10 @@ internal sealed partial class WebApp
     {
         try
         {
+            if (await AccountAsync(req, res, ct))
+            {
+                return true;
+            }
             switch (req.Method, req.Path)
             {
                 case ("GET", "/api/files"):

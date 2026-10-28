@@ -114,6 +114,42 @@ public static class CodeArenaSync
         g.MapGet("/config", ConfigAsync);
         g.MapGet("/skills", SkillsAsync);
         g.MapGet("/security", SecurityAsync);
+        g.MapGet("/me", MeAsync);
+        g.MapPost("/sign-out", SignOutAsync);
+    }
+
+    /// <summary>Whose the key is, for Code Arena's Accounts menu: their name, and whether they may see Admin → People.</summary>
+    private static async Task<IResult> MeAsync(HttpContext http, McpPeople people, AccessService access)
+    {
+        var (me, refusal) = await CallerAsync(http, people);
+        return me is null ? refusal! : Results.Ok(new
+        {
+            userName = me.UserName,
+            displayName = me.DisplayName,
+            email = me.Email,
+            managesPeople = await access.MayAsync(me, Core.Access.Permissions.PeopleRead, http.RequestAborted),
+        });
+    }
+
+    /// <summary>
+    /// Code Arena signs out: the key it signed in with (one the person made, as Code Arena's sign-in makes one for its
+    /// machine) is revoked. Their main key is theirs to replace on Account → API keys, not revoked from here.
+    /// </summary>
+    private static async Task<IResult> SignOutAsync(HttpContext http, McpPeople people, Gateway.OwnKeys keys, AppDbContext db)
+    {
+        var (me, refusal) = await CallerAsync(http, people);
+        if (me is null)
+        {
+            return refusal!;
+        }
+        var header = http.Request.Headers.Authorization.ToString();
+        var token = Gateway.AnswerCache.HashOf(header.StartsWith("Bearer ", StringComparison.Ordinal) ? header[7..].Trim() : header.Trim());
+        if (!await db.OwnKeys.AnyAsync(k => k.Token == token && k.UserId == me.Id, http.RequestAborted))
+        {
+            return AuthEndpoints.Problem(409, "not_own", "This key is not one Code Arena made: it stays (Account → API keys revokes it).");
+        }
+        await keys.RevokeAsync(me, token, http.RequestAborted);
+        return Results.NoContent();
     }
 
     /// <summary>

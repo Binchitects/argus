@@ -30,6 +30,8 @@ internal sealed class Options
     public string? Ca { get; set; }
     public List<string> AddDirs { get; } = [];
     public string? Url { get; set; }
+    /// <summary>login: sign in with this user name and a password (asked) instead of an API key.</summary>
+    public string? User { get; set; }
     public string? Gateway { get; set; }
     public bool NoColor { get; set; }
     /// <summary>The IDE: the port (null: a free one), and whether to leave the browser closed.</summary>
@@ -113,7 +115,7 @@ internal static partial class Cli
           code-arena chat [prompt]          the agent in this terminal instead
           code-arena [options] "prompt"     a conversation in this terminal that starts with the prompt
           code-arena -p "prompt"            answer once and print the answer (-p - reads the prompt from stdin)
-          code-arena login                  sign in: the Arena's address and your API key
+          code-arena login                  sign in: the Arena's address, and your API key or your user name and password
           code-arena logout                 forget the API key
           code-arena models                 the models you may use
           code-arena update                 install the newer Code Arena your Arena serves, if any
@@ -134,6 +136,7 @@ internal static partial class Cli
               --add-dir DIR          let the tools use another folder too (repeatable)
               --ca FILE              trust this CA certificate (PEM) besides the system's
               --url URL              login: the Arena's address, https://DOMAIN
+              --user NAME            login: sign in with this user name and its password (asked) instead of a key
               --gateway URL          login: the gateway, when it is not https://gateway.DOMAIN
               --no-color             plain text
               --port N               the IDE: listen on this port (default: a free one)
@@ -257,6 +260,9 @@ internal static partial class Cli
                 case "--ca":
                     o.Ca = Value();
                     break;
+                case "--user":
+                    o.User = Value();
+                    break;
                 case "--add-dir":
                     o.AddDirs.Add(Value());
                     break;
@@ -377,14 +383,46 @@ internal static partial class Cli
         var ca = o.Ca ?? (sameArena ? config.Ca : null);
 
         string? key;
-        if (env.Env("ARENA_API_KEY") is { Length: > 0 } fromEnv)
+        if (env.Env("ARENA_API_KEY") is { Length: > 0 } fromEnv && o.User is null)
         {
             ui.Info("Using the key in ARENA_API_KEY.");
             key = fromEnv;
         }
         else
         {
-            key = ui.ReadSecret("Your API key (in Arena: Your account → API key): ")?.Trim();
+            key = o.User is not null ? "" : ui.ReadSecret("Your API key (in Arena: Your account → API keys), or Enter to sign in with your user name and password: ")?.Trim();
+            if (string.IsNullOrEmpty(key))
+            {
+                // As Arena's sign-in page: the password, then the second factor when asked; a key of their own made for this machine.
+                var userName = o.User ?? ui.ReadLine("Your user name in Arena: ")?.Trim();
+                var password = string.IsNullOrEmpty(userName) ? null : ui.ReadSecret($"Password of {userName}: ");
+                if (string.IsNullOrEmpty(userName) || string.IsNullOrEmpty(password))
+                {
+                    ui.Error("No key, and no user name and password, given.");
+                    return 2;
+                }
+                try
+                {
+                    using var signIn = new ArenaSignIn(new Uri(url.TrimEnd('/') + "/"), Net.CaFile(ca, null, env.Env));
+                    if (await signIn.PasswordAsync(userName, password, ct))
+                    {
+                        var code = ui.ReadSecret("Two-factor code (from your authenticator app, or a recovery code): ")?.Trim();
+                        if (string.IsNullOrEmpty(code))
+                        {
+                            ui.Error("Arena asks for the second factor: no code given.");
+                            return 2;
+                        }
+                        await signIn.CodeAsync(code, ct);
+                    }
+                    key = await signIn.KeyAsync(ct);
+                    ui.Info($"Signed in as {userName}: Arena made a key of yours for this machine ({ArenaSignIn.KeyName}), kept here; Your account → API keys lists it.");
+                }
+                catch (Exception e) when (e is ArenaSignInException or HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+                {
+                    ui.Error(e is TaskCanceledException ? $"{url} did not answer in time." : e.Message);
+                    return 1;
+                }
+            }
         }
         if (string.IsNullOrEmpty(key))
         {

@@ -122,6 +122,39 @@ public sealed class OwnKeyTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Code_arena_says_whose_its_key_is_and_signing_out_revokes_a_key_it_made_not_the_main_one()
+    {
+        var gateway = new FakeGateway();
+        await using var f = NewApp(gateway);
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var name = "ca" + Guid.NewGuid().ToString("N")[..10];
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
+        var person = await new TestBrowser(f).SignedInAsync(name, made.GetProperty("password").GetString()!);
+        var mainKey = made.GetProperty("apiKey").GetString()!;
+        // As Code Arena's sign-in makes it.
+        var machine = (await person.JsonAsync(await person.PostAsync("/api/account/keys/own", new { name = "Code Arena on laptop" }))).GetProperty("apiKey").GetString()!;
+        HttpClient Arena(string key)
+        {
+            var http = f.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://{AppFixture.Domain}"), AllowAutoRedirect = false, HandleCookies = false });
+            http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", key);
+            http.DefaultRequestHeaders.Add("X-Requested-With", "code-arena");
+            return http;
+        }
+
+        var me = JsonDocument.Parse(await (await Arena(machine).GetAsync(new Uri("/api/code-arena/me", UriKind.Relative))).Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal((name, false), (me.GetProperty("userName").GetString(), me.GetProperty("managesPeople").GetBoolean()));
+        var adminKey = (await admin.JsonAsync(await admin.PostAsync("/api/account/keys/rotate"))).GetProperty("apiKey").GetString()!;
+        var adminMe = JsonDocument.Parse(await (await Arena(adminKey).GetAsync(new Uri("/api/code-arena/me", UriKind.Relative))).Content.ReadAsStringAsync()).RootElement;
+        Assert.True(adminMe.GetProperty("managesPeople").GetBoolean());
+
+        // The main key is not Code Arena's to revoke; the machine's is.
+        Assert.Equal(HttpStatusCode.Conflict, (await Arena(mainKey).PostAsync(new Uri("/api/code-arena/sign-out", UriKind.Relative), null)).StatusCode);
+        Assert.True(gateway.Keys.ContainsKey(AnswerCache.HashOf(mainKey)));
+        Assert.Equal(HttpStatusCode.NoContent, (await Arena(machine).PostAsync(new Uri("/api/code-arena/sign-out", UriKind.Relative), null)).StatusCode);
+        Assert.False(gateway.Keys.ContainsKey(AnswerCache.HashOf(machine)));
+    }
+
+    [Fact]
     public async Task Making_keys_counts_with_rotating_them_an_hour()
     {
         var gateway = new FakeGateway();

@@ -82,6 +82,24 @@ tools to say how many there are, and saves both in its config file, readable
 by its owner only (0600). The key is never printed. `code-arena logout` forgets
 the key; `code-arena models` lists the models the key may use.
 
+Without a key at hand, press Enter at the key's question (or give
+`login --user NAME`): Code Arena signs in with the user name and password as
+Arena's sign-in page does, so its lockout, its directory and its second
+factor hold (the code is asked for when the account has one). Arena then
+makes a key of the person's own for this machine, **Code Arena on NAME**
+(one of that name before it is revoked first), which **Your account → API
+keys** lists, and the web session is signed out again: the key is what Code
+Arena keeps. Someone who signs in with the company's account has no password
+in Arena: they make a key there and paste it.
+
+In the IDE, **Accounts** (the person at the activity bar's foot, above the
+gear) says whose key it works with and on which Arena, signs in with a user
+name and password the same way (Code Arena then starts again with the new
+key, in the same window), signs out (the key it signed in with is revoked at
+Arena and forgotten here), and opens Arena's **Your account** and, for those
+who may see it, **People**. A dot on it says it is signed out or Arena did
+not take the key.
+
 | | Linux and macOS | Windows |
 |---|---|---|
 | settings (`config.json`, `ARENA.md`) | `~/.config/code-arena/` (or `$XDG_CONFIG_HOME`) | `%APPDATA%\code-arena\` |

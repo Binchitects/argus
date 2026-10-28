@@ -119,7 +119,7 @@ public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, RateLimits rateLi
         await db.SaveChangesAsync(ct);
         places.Forget(own.Token);
         // Counted with Rotate's new keys an hour (PeopleService.OwnKeyWaitAsync).
-        await audit.WriteAsync(Made, user.UserName, detail: $"{name}: {Describe(own)}");
+        await audit.WriteAsync(Made, user.UserName, detail: $"{name}: {Describe(own)}", actor: user);
         var made = (await gateway.KeysAsync(user.Email!, ct)).FirstOrDefault(k => k.Token == own.Token)
             ?? new GatewayKey(own.Token, alias, null, 0, false, own.CreatedAt, Rate: rate);
         return (key, View(user, made, own, (await rateLimits.ForAsync(user, ct)).Key));
@@ -166,7 +166,7 @@ public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, RateLimits rateLi
             await gateway.SetKeyBudgetAsync(token, own.MonthlyBudget, ct);
         }
         places.Forget(token);
-        await audit.WriteAsync("person.key_changed", user.UserName, detail: $"{own.Name}: {Describe(own)}");
+        await audit.WriteAsync("person.key_changed", user.UserName, detail: $"{own.Name}: {Describe(own)}", actor: user);
         return View(user, (await gateway.KeysAsync(user.Email!, ct)).First(k => k.Token == token), own, (await rateLimits.ForAsync(user, ct)).Key);
     }
 
@@ -186,7 +186,7 @@ public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, RateLimits rateLi
             await db.SaveChangesAsync(ct);
         }
         places.Forget(token);
-        await audit.WriteAsync("person.key_revoked", user.UserName, detail: own?.Name ?? key.Alias);
+        await audit.WriteAsync("person.key_revoked", user.UserName, detail: own?.Name ?? key.Alias, actor: user);
     }
 
     private async Task<GatewayKey> KeyOfAsync(AppUser user, string token, CancellationToken ct) =>
