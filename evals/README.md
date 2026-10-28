@@ -11,6 +11,8 @@ they live outside `tests/` and are run deliberately.
 | `run_load_test.py --url ... --token ...` | where the single-SQLite index stops scaling: concurrent readers, with and without a writer | `load-test-results.json` |
 | `run_tool_modes.py --models A,B` | the same tasks through Arena's chat with each model's tools direct and as code (run_code): pass, tokens, seconds, calls; the answer key looked up in the packs first | `tool-modes-results.json` |
 | `run_lab_math.py --models A,B [--count 40]` | MATH-500 problems through Arena's chat, each model alone and in a science lab notebook (Mathematics: SymPy, Lean, Python, the lab's check): right on MATH's own grading, seconds, tokens, tool calls | `lab-math-results.json` |
+| `run_lab_quantum.py --models A,B [--count 0]` | Qiskit HumanEval through Arena's chat, each model alone and in a lab notebook (Quantum computing: Qiskit, Aer, Python): passing the set's own tests in the sandbox's image, seconds, tokens, tool calls | `lab-quantum-results.json` |
+| `run_security_review.py --suite owasp\|juliet-java\|juliet-csharp --root DIR` | the security review on the OWASP Benchmark and the Juliet suite, their answers hidden (comments out, names replaced): precision and recall per weakness for the scanners alone, the model alone, the model with the security pack, and both as shipped | `security-review-<suite>-results.json` |
 
 ## The one rule these exist to enforce
 
