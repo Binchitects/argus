@@ -543,3 +543,42 @@
     break-after: page;
   }
 }
+
+/*
+ * What Monaco's widgets (its right-click menu, hovers, the suggestions) use but only VS Code's workbench defines: its
+ * design tokens, on VS Code's scale. Without them a menu has square corners and no border. The menu's border is
+ * menu.border, else (Monaco gives the colour's id, not its variable) nothing: a white menu over a white editor in a light
+ * theme. A theme that sets menu.border still has its own (Monaco's rule comes after this one).
+ */
+.monaco-editor,
+.monaco-diff-editor,
+.monaco-component {
+  --vscode-menu-border: var(--vscode-editorWidget-border, transparent);
+  --vscode-strokeThickness: 1px;
+  --vscode-cornerRadius-small: 4px;
+  --vscode-cornerRadius-medium: 6px;
+  --vscode-cornerRadius-large: 8px;
+  --vscode-cornerRadius-xLarge: 12px;
+  --vscode-cornerRadius-circle: 9999px;
+  --vscode-shadow-md: 0 0 8px var(--vscode-widget-shadow, rgb(0 0 0 / 0.16));
+  --vscode-shadow-lg: 0 0 12px var(--vscode-widget-shadow, rgb(0 0 0 / 0.16));
+  --vscode-shadow-xl: 0 0 20px var(--vscode-widget-shadow, rgb(0 0 0 / 0.16));
+  --vscode-spacing-sizeNone: 0;
+  --vscode-spacing-size20: 2px;
+  --vscode-spacing-size40: 4px;
+  --vscode-spacing-size60: 6px;
+  --vscode-spacing-size80: 8px;
+  --vscode-spacing-size100: 10px;
+  --vscode-spacing-size120: 12px;
+  --vscode-spacing-size160: 16px;
+  --vscode-spacing-size200: 20px;
+  --vscode-spacing-size240: 24px;
+  --vscode-spacing-size280: 28px;
+  --vscode-spacing-size320: 32px;
+  --vscode-spacing-size400: 40px;
+  --vscode-fontWeight-regular: 400;
+  --vscode-fontWeight-semiBold: 600;
+  --vscode-fontSize-body1: 13px;
+  --vscode-fontSize-body2: 12px;
+  --vscode-fontSize-label2: 11px;
+}
