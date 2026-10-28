@@ -25,6 +25,34 @@ public sealed class AnswerFeedback
 }
 
 /// <summary>
+/// What a person said about Arena itself (Send feedback): an idea, a problem, praise or anything else, with the page it was
+/// sent from; read, marked and answered on Admin → Feedback (the answer reaches their bell).
+/// </summary>
+public sealed class ProductFeedback
+{
+    public const string New = "new";
+    public const string Read = "read";
+    public const string Done = "done";
+    public static readonly string[] Kinds = ["idea", "problem", "praise", "other"];
+    public static readonly string[] Statuses = [New, Read, Done];
+
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid UserId { get; set; }
+    /// <summary>idea, problem, praise or other.</summary>
+    public required string Kind { get; set; }
+    public required string Text { get; set; }
+    /// <summary>Where it was sent from: the page's path, or "Code Arena".</summary>
+    public string? Page { get; set; }
+    /// <summary>new, read or done.</summary>
+    public string Status { get; set; } = New;
+    /// <summary>An admin's answer, which the person gets in their bell.</summary>
+    public string? Answer { get; set; }
+    public Guid? AnsweredBy { get; set; }
+    public DateTimeOffset? AnsweredAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
 /// Arena: one question answered by two models, side by side and blind (Model A and
 /// Model B), and the person's vote, after which the names are shown. Votes make the
 /// leaderboard; they stay when the chat is deleted.

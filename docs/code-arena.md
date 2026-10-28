@@ -96,8 +96,9 @@ In the IDE, **Accounts** (the person at the activity bar's foot, above the
 gear) says whose key it works with and on which Arena, signs in with a user
 name and password the same way (Code Arena then starts again with the new
 key, in the same window), signs out (the key it signed in with is revoked at
-Arena and forgotten here), and opens Arena's **Your account** and, for those
-who may see it, **People**. A dot on it says it is signed out or Arena did
+Arena and forgotten here), opens Arena's **Your account** and, for those
+who may see it, **People**, and sends feedback about Arena or Code Arena
+(**Send feedback…**, to Arena's Admin → Feedback, with the person's key). A dot on it says it is signed out or Arena did
 not take the key.
 
 | | Linux and macOS | Windows |

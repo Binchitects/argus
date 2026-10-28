@@ -652,6 +652,7 @@ public static class IdentityWiring
         Chat.MemoryEndpoints.MapMemories(app);
         Chat.SkillEndpoints.MapSkills(app);
         Quality.QualityEndpoints.MapQuality(app);
+        Quality.ProductFeedbackEndpoints.MapProductFeedback(app);
         Chat.CanvasEndpoints.MapCanvases(app);
         Chat.QueuedMessages.MapQueue(app);
         Chat.Tools.ToolEndpoints.MapTools(app);

@@ -83,6 +83,25 @@ internal sealed partial class WebApp
                 }
                 return true;
             }
+            case ("POST", "/api/account/feedback"):
+            {
+                // Send feedback: to Arena with the person's key, as from its own pages (Admin → Feedback reads it).
+                if (_rt.Config.Url is not { Length: > 0 } url || _rt.Config.ApiKey is not { Length: > 0 } key)
+                {
+                    throw new IdeError(409, "signed_out", "Sign in to Arena first: feedback goes there.");
+                }
+                var body = Body(req);
+                using var send = ChatSync.Request(HttpMethod.Post, url.TrimEnd('/') + "/api/code-arena/feedback", key,
+                    new JsonObject { ["kind"] = body.Str("kind"), ["text"] = body.Str("text"), ["page"] = body.Str("page") });
+                using var answer = await _rt.Http.SendAsync(send, ct);
+                var said = await answer.Content.ReadAsStringAsync(ct);
+                if (!answer.IsSuccessStatusCode)
+                {
+                    throw new IdeError((int)answer.StatusCode, "arena", Json.ParseObject(said)?.Str("error") ?? $"Arena answered {(int)answer.StatusCode}.");
+                }
+                await res.JsonAsync(200, Json.ParseObject(said) ?? new JsonObject(), ct);
+                return true;
+            }
             case ("POST", "/api/account/sign-out"):
             {
                 if (!FoldersOpen)

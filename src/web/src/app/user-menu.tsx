@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
-import { BookOpen, Columns2, Download, Gift, LifeBuoy, LogOut, Maximize2, Monitor, Moon, Palette, RectangleHorizontal, Sun, UserRound } from 'lucide-react'
-import { useNavigate } from 'react-router'
+import { BookOpen, Columns2, Download, Gift, LifeBuoy, LogOut, Maximize2, MessageSquareHeart, Monitor, Moon, Palette, RectangleHorizontal, Sun, UserRound } from 'lucide-react'
+import { useState } from 'react'
+import { useLocation, useNavigate } from 'react-router'
+import { SendFeedbackDialog } from '@/components/app/send-feedback'
 import { Avatar } from '@/components/ui/avatar'
 import {
   DropdownMenu,
@@ -15,7 +17,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { infoQuery, supportHref, type Me } from '@/lib/api'
+import { api, infoQuery, supportHref, type Me } from '@/lib/api'
 import { useInstall } from '@/lib/pwa'
 import { useTheme, type ThemePreference } from '@/lib/theme'
 import { setWidth, useWidth, type WidthPreference } from '@/lib/width'
@@ -29,7 +31,10 @@ export function UserMenu({ me, onWhatsNew }: { me: Me; onWhatsNew?: () => void }
   const support = useQuery(infoQuery).data?.supportContact
   const supportLink = support ? supportHref(support) : null
   const { canInstall, install } = useInstall()
+  const location = useLocation()
+  const [feedback, setFeedback] = useState(false)
   return (
+    <>
     <DropdownMenu>
       <DropdownMenuTrigger className="rounded-full outline-none focus-visible:ring-[3px] focus-visible:ring-ring" aria-label={`Account menu for ${me.displayName}`}>
         <Avatar name={me.displayName || me.userName} />
@@ -87,6 +92,9 @@ export function UserMenu({ me, onWhatsNew }: { me: Me; onWhatsNew?: () => void }
             </DropdownMenuRadioGroup>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
+        <DropdownMenuItem onSelect={() => setFeedback(true)}>
+          <MessageSquareHeart /> Send feedback
+        </DropdownMenuItem>
         {support && (
           <DropdownMenuItem onSelect={() => supportLink && window.open(supportLink, '_blank', 'noopener')} disabled={!supportLink}>
             <LifeBuoy /> {supportLink ? 'Get help' : `Help: ${support}`}
@@ -103,5 +111,7 @@ export function UserMenu({ me, onWhatsNew }: { me: Me; onWhatsNew?: () => void }
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+    {feedback && <SendFeedbackDialog page={location.pathname} send={(body) => api('/api/feedback', { body })} onClose={() => setFeedback(false)} />}
+    </>
   )
 }

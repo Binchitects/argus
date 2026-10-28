@@ -178,11 +178,17 @@ describe('feedback', () => {
     renderApp('/chat/c1')
     const answer = await screen.findByRole('region', { name: 'Answer' })
     const up = within(answer).getByRole('button', { name: 'Good answer' })
+    // Up is kept at once, and opens a box for what was good.
     await userEvent.click(up)
     await waitFor(() => expect(up).toHaveAttribute('aria-pressed', 'true'))
-    expect(calls.filter((c) => c.method === 'PUT').map((c) => c.body)).toEqual([{ up: true }])
-    // The thumb that is on takes it back.
+    const good = await screen.findByRole('dialog', { name: 'What was good' })
+    expect(within(good).queryByRole('button', { name: 'Too long' })).toBeNull()
+    await userEvent.type(within(good).getByRole('textbox', { name: 'Tell more' }), 'Clear and short.')
+    await userEvent.click(within(good).getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT').map((c) => c.body)).toEqual([{ up: true }, { up: true, reason: null, comment: 'Clear and short.', share: false }]))
+    // Taken back from its box.
     await userEvent.click(up)
+    await userEvent.click(within(await screen.findByRole('dialog', { name: 'What was good' })).getByRole('button', { name: 'Take back' }))
     await waitFor(() => expect(up).toHaveAttribute('aria-pressed', 'false'))
     expect(calls.some((c) => c.method === 'DELETE')).toBe(true)
 
@@ -194,7 +200,12 @@ describe('feedback', () => {
     await userEvent.click(within(why).getByRole('checkbox', { name: 'Share this chat with the admins' }))
     await userEvent.click(within(why).getByRole('button', { name: 'Send' }))
     await waitFor(() =>
-      expect(calls.filter((c) => c.method === 'PUT').map((c) => c.body)).toEqual([{ up: true }, { up: false }, { up: false, reason: 'too_long', comment: 'Half would do.', share: true }]),
+      expect(calls.filter((c) => c.method === 'PUT').map((c) => c.body)).toEqual([
+        { up: true },
+        { up: true, reason: null, comment: 'Clear and short.', share: false },
+        { up: false },
+        { up: false, reason: 'too_long', comment: 'Half would do.', share: true },
+      ]),
     )
     expect(within(answer).getByRole('button', { name: 'Bad answer' })).toHaveAttribute('aria-pressed', 'true')
   })

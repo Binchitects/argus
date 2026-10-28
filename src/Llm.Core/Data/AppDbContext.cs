@@ -74,6 +74,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Studio.WorkflowRunStep> WorkflowRunSteps => Set<Studio.WorkflowRunStep>();
     public DbSet<Code.CodeFix> CodeFixes => Set<Code.CodeFix>();
     public DbSet<Identity.OwnKey> OwnKeys => Set<Identity.OwnKey>();
+    public DbSet<ProductFeedback> ProductFeedback => Set<ProductFeedback>();
     public DbSet<Code.StudioWorkspace> StudioWorkspaces => Set<Code.StudioWorkspace>();
     public DbSet<Code.BusinessSystem> BusinessSystems => Set<Code.BusinessSystem>();
     public DbSet<Meetings.Meeting> Meetings => Set<Meetings.Meeting>();
@@ -750,6 +751,18 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Error).HasMaxLength(2000);
             e.HasIndex(x => new { x.RunId, x.Path }).IsUnique();
             e.HasOne<Studio.WorkflowRun>().WithMany().HasForeignKey(x => x.RunId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<ProductFeedback>(e =>
+        {
+            e.ToTable("product_feedback");
+            e.Property(x => x.Kind).HasMaxLength(16);
+            e.Property(x => x.Text).HasMaxLength(4000);
+            e.Property(x => x.Page).HasMaxLength(500);
+            e.Property(x => x.Status).HasMaxLength(16);
+            e.Property(x => x.Answer).HasMaxLength(4000);
+            e.HasIndex(x => new { x.Status, x.CreatedAt });
+            e.HasIndex(x => new { x.UserId, x.CreatedAt });
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<Identity.OwnKey>(e =>
         {

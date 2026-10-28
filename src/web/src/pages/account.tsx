@@ -8,6 +8,7 @@ import { useOutletContext } from 'react-router'
 import { z } from 'zod'
 import { ApiKey } from '@/components/app/api-key'
 import { OwnKeys } from '@/components/app/own-keys'
+import { YourFeedback } from '@/components/app/your-feedback'
 import { Connections } from '@/components/app/connections'
 import { MemoryManager } from '@/components/app/memory'
 import { PageHeader } from '@/components/app/page-header'
@@ -56,6 +57,7 @@ export function AccountPage() {
           <CodeHosts />
           <PushDevices />
           <AskForAccess />
+          <YourFeedback />
           {me.source === 'oidc' ? (
             <Card>
               <CardHeader>

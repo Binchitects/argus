@@ -98,6 +98,7 @@ export const routes: RouteObject[] = [
               { path: 'explore', ...lazy(() => import('@/pages/admin/argus-explore').then((m) => ({ Component: m.ExplorePage }))) },
               { path: 'monitoring', ...lazy(() => import('@/pages/admin/monitoring').then((m) => ({ Component: m.MonitoringPage }))) },
               { path: 'line', ...lazy(() => import('@/pages/admin/line').then((m) => ({ Component: m.LinePage }))) },
+              { path: 'feedback', ...lazy(() => import('@/pages/admin/feedback').then((m) => ({ Component: m.FeedbackPage }))) },
               { path: 'dashboards', ...lazy(() => import('@/pages/admin/dashboards').then((m) => ({ Component: m.DashboardsPage }))) },
               { path: 'dashboards/:uid', ...lazy(() => import('@/pages/admin/dashboards').then((m) => ({ Component: m.DashboardPage }))) },
               { path: 'logs', ...lazy(() => import('@/pages/admin/logs').then((m) => ({ Component: m.LogsPage }))) },

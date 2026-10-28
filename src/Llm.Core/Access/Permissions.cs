@@ -39,6 +39,7 @@ public static class Permissions
     public const string LogsRead = "logs.read";
     public const string MonitoringRead = "monitoring.read";
     public const string HardwareRead = "hardware.read";
+    public const string FeedbackManage = "feedback.manage";
     public const string AlertsManage = "alerts.manage";
     public const string RetentionManage = "retention.manage";
     public const string LegalHoldManage = "legalhold.manage";
@@ -178,6 +179,7 @@ public static class Permissions
         new(LogsRead, "Oversight", "Read the stack's logs and the answers' traces.", true),
         new(MonitoringRead, "Oversight", "See the monitoring dashboards, the quality reports and the stack's state.", true),
         new(HardwareRead, "Oversight", "See the hardware dashboards: the GPUs, CPUs, memory, disks, network, temperatures and power.", true),
+        new(FeedbackManage, "Oversight", "Read what people send about Arena (Send feedback), mark it and answer it.", true),
         new(AlertsManage, "Oversight", "Set alert rules and where they go.", true),
         new(SafeguardsRead, "Safeguards", "See the safeguard rules, what they did, and try texts on the test bench.", true),
         new(SafeguardsManage, "Safeguards", "Make, change, order and remove safeguard rules.", true),

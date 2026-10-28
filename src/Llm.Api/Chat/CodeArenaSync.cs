@@ -116,6 +116,12 @@ public static class CodeArenaSync
         g.MapGet("/security", SecurityAsync);
         g.MapGet("/me", MeAsync);
         g.MapPost("/sign-out", SignOutAsync);
+        g.MapPost("/feedback", async (HttpContext http, McpPeople people, Quality.ProductFeedbackRequest body, AppDbContext db, Notifications.Notifier notifier, Identity.Audit audit, TimeProvider clock) =>
+        {
+            // Send feedback from Code Arena: as from Arena's pages, from "Code Arena" (and its own page there, when it says).
+            var (me, refusal) = await CallerAsync(http, people);
+            return me is null ? refusal! : await Quality.ProductFeedbackEndpoints.SendAsync(me, body with { Page = body.Page is { Length: > 0 } page ? $"Code Arena: {page}" : "Code Arena" }, db, notifier, audit, clock);
+        });
     }
 
     /// <summary>Whose the key is, for Code Arena's Accounts menu: their name, and whether they may see Admin → People.</summary>

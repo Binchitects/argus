@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CircleUserRound } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
+import { SendFeedbackDialog } from '@/components/app/send-feedback'
 import { Button } from '@/components/ui/button'
 import { useConfirm } from '@/components/ui/confirm'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -125,6 +126,7 @@ export function AccountsMenu({ edge }: { edge: 'left' | 'right' }) {
   const confirm = useConfirm()
   const account = useQuery(accountQuery)
   const [signingIn, setSigningIn] = useState(false)
+  const [feedback, setFeedback] = useState(false)
   const a = account.data
   const who = a?.account ? (a.account.displayName ? `${a.account.displayName} (${a.account.userName})` : a.account.userName) : null
   const host = a?.arena ? new URL(a.arena).host : null
@@ -164,6 +166,7 @@ export function AccountsMenu({ edge }: { edge: 'left' | 'right' }) {
           {!a?.codeStudio && <DropdownMenuItem onSelect={() => setSigningIn(true)}>{a?.signedIn ? 'Sign in as someone else…' : 'Sign in with user name and password…'}</DropdownMenuItem>}
           {a?.arena && <DropdownMenuItem onSelect={() => open(`${a.arena!.replace(/\/$/, '')}/account`)}>Your account in Arena</DropdownMenuItem>}
           {a?.arena && a.account?.managesPeople && <DropdownMenuItem onSelect={() => open(`${a.arena!.replace(/\/$/, '')}/admin/people`)}>People (Admin)</DropdownMenuItem>}
+          {a?.signedIn && <DropdownMenuItem onSelect={() => setFeedback(true)}>Send feedback…</DropdownMenuItem>}
           {!a?.codeStudio && a?.signedIn && (
             <>
               <DropdownMenuSeparator />
@@ -173,6 +176,7 @@ export function AccountsMenu({ edge }: { edge: 'left' | 'right' }) {
         </DropdownMenuContent>
       </DropdownMenu>
       {signingIn && <SignInDialog arena={a?.arena ?? null} onClose={() => setSigningIn(false)} />}
+      {feedback && <SendFeedbackDialog page="the IDE" send={(body) => api('/api/account/feedback', { body })} onClose={() => setFeedback(false)} />}
     </>
   )
 }

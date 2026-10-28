@@ -161,13 +161,19 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   selection, and typing that composes (an input method) are the box's own.
   Messages over 32,000 characters (a pasted document) stay in their chat.
   Phones have no arrow keys: nothing changes there.
-- **Rating answers.** Thumbs up or down under each answer. Down asks why:
-  wrong, incomplete, too long, unsafe, ignored instructions or other, and a
-  few words if you like. One rating per answer; rate again to change it, or
-  press the thumb that is on to take it back. Admins see the ratings per model
-  and per assistant (Admin → Quality), with the chat's title, the model and your
-  reason, never its content, unless you tick **Share this chat with the
-  admins** with a down vote: then they can read the chat down to that answer.
+- **Rating answers.** Thumbs up or down under each answer, kept at once.
+  Either opens a box for more: a few words if you like (what was good, or
+  wrong) and **Share this chat with the admins**; a down vote also asks why:
+  wrong, incomplete, too long, unsafe, ignored instructions or other. One
+  rating per answer; rate again to change it, or **Take back** in its box.
+  Admins see the ratings per model and per assistant (Admin → Quality), with
+  the chat's title, the model, your reason and words, never its content,
+  unless you shared the chat: then they can read it down to that answer.
+- **Send feedback** (your menu, top right; and Code Arena's Accounts menu):
+  about Arena itself, an idea, a problem, praise or anything else, with the
+  page you send it from. The admins read it (Admin → Feedback) and may answer:
+  the answer comes to your bell, and **Your account → Your feedback** lists
+  what you sent, whether it was read, and the answers. Twenty a day at most.
 - **Compare (arena mode).** **Compare** beside Deep research sends your next
   question to two models: two you choose, or two at random of those you may
   use that can answer now. They answer one after the other (the engine may
@@ -2113,9 +2119,11 @@ message, the vote, and the names once voted), and until the vote each answer's
 messages say "Model A" or "Model B" for their model. `POST
 /api/chat/arena/{id}/vote` takes `a`, `b`, `tie` or `bad`, once both answers
 are written, and answers with the names. `PUT` and `DELETE
-.../messages/{id}/feedback` rate an answer (`up`, and with a down vote
-`reason`, `comment` and `share`); each message of `GET` carries the person's
-own `feedback`.
+.../messages/{id}/feedback` rate an answer (`up`, `comment` and `share`, and
+with a down vote `reason`); each message of `GET` carries the person's own
+`feedback`. `POST /api/feedback` sends feedback about Arena (`kind`: idea,
+problem, praise or other; `text`; `page`), `GET /api/feedback/mine` lists the
+person's own with their status and answers.
 
 A chat's link is `GET`, `PUT` and `DELETE /api/chat/conversations/{id}/share`
 (`reach`: `Company` or `Groups`, with `groups`; `branch` with an optional

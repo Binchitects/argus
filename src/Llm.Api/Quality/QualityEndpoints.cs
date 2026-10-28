@@ -12,7 +12,7 @@ using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Quality;
 
-/// <summary>Thumbs on an answer. Reason, Comment and Share go with a down vote only.</summary>
+/// <summary>Thumbs on an answer, with words and the chat shared with the admins (either vote) and a reason (a down vote only).</summary>
 public sealed record FeedbackRequest(bool Up, string? Reason = null, string? Comment = null, bool Share = false);
 
 /// <summary>The person's vote on a comparison: a, b, tie or bad (both bad).</summary>
@@ -77,7 +77,8 @@ public static class QualityEndpoints
             db.AnswerFeedback.Add(f);
         }
         f.Up = body.Up;
-        (f.Reason, f.Comment, f.Shared) = body.Up ? (null, null, false) : (reason, comment, body.Share);
+        // Words go with either vote (what was good, or wrong); a reason with a down one only.
+        (f.Reason, f.Comment, f.Shared) = body.Up ? (null, comment, body.Share) : (reason, comment, body.Share);
         f.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
         return Results.Ok(ChatQuality.Shape(f));

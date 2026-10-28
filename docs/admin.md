@@ -869,12 +869,24 @@ advisory, is sent at once to everyone with `reviews.admin` (the security
 team), as well as to the review's person. The page warns when no advisories
 pack is installed, or when the advisories are more than a week old.
 
+### Feedback
+
+**Feedback** (Oversight, with `feedback.manage`, a permission of its own) lists
+what people send about Arena with **Send feedback** (their menu, and Code
+Arena's Accounts menu): an idea, a problem, praise or other, its words, who
+sent it and the page it came from (`Code Arena: …` from Code Arena). New
+ones come to the admins' bell. Mark each read or done, or answer it: the
+answer goes to the person's bell, and their **Your feedback** shows it.
+Sending is audited (`feedback.sent`), and so is handling it
+(`feedback.handled`); a person sends at most twenty a day.
+
 ### Quality
 
 Two things feed it, both from the chat ([chat.md](chat.md)):
 
-- **Thumbs** under each answer, with a reason on a down vote (wrong,
-  incomplete, too long, unsafe, ignored instructions, other) and a few words.
+- **Thumbs** under each answer, with a few words either way, and a reason on
+  a down vote (wrong, incomplete, too long, unsafe, ignored instructions,
+  other).
   An answer counts once it is written (its last message); rated share and
   thumbs up are of the answers written in the range.
 - **Compare** (arena mode): one question to two models, side by side and
