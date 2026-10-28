@@ -97,5 +97,84 @@ public sealed class AiGovernanceTests(AppFixture app)
         Assert.Equal(jpeg, AiMark.Mark(jpeg, "image/png"));
     }
 
+    [Fact]
+    [Trait("Control", "GOV-10")]
+    public void Generated_sound_and_video_say_in_their_metadata_that_a_model_made_them()
+    {
+        static int Syncsafe(byte[] b, int at) => (b[at] << 21) | (b[at + 1] << 14) | (b[at + 2] << 7) | b[at + 3];
+        static uint Big(byte[] b, int at) => (uint)((b[at] << 24) | (b[at + 1] << 16) | (b[at + 2] << 8) | b[at + 3]);
+
+        // An MP3 with no tag: one of its own before the sound, with a PRIV frame owned by XMP.
+        byte[] frames = [0xFF, 0xFB, 0x90, 0x64, 1, 2, 3, 4];
+        var mp3 = AiMark.Mark(frames, "audio/mpeg");
+        Assert.Equal("ID3", Encoding.ASCII.GetString(mp3, 0, 3));
+        Assert.Equal(mp3.Length - frames.Length - 10, Syncsafe(mp3, 6));
+        Assert.Equal("PRIV", Encoding.ASCII.GetString(mp3, 10, 4));
+        Assert.Equal("XMP\0", Encoding.ASCII.GetString(mp3, 20, 4));
+        Assert.Equal(frames, mp3[^frames.Length..]);
+        Assert.True(AiMark.IsMarked(mp3));
+        Assert.Equal(mp3, AiMark.Mark(mp3, "audio/mpeg"));
+        // Its own ID3v2.4 tag: the frame goes first in it (sizes syncsafe), what was there after it.
+        byte[] title = [.. "TIT2"u8, 0, 0, 0, 3, 0, 0, 3, (byte)'H', (byte)'i'];
+        byte[] tagged = [.. "ID3"u8, 4, 0, 0, 0, 0, 0, (byte)title.Length, .. title, .. frames];
+        var v4 = AiMark.Mark(tagged, "audio/mpeg");
+        Assert.Equal("PRIV", Encoding.ASCII.GetString(v4, 10, 4));
+        var frame = Syncsafe(v4, 14);
+        Assert.Equal(title.Length + 10 + frame, Syncsafe(v4, 6));
+        Assert.Equal([.. title, .. frames], v4[(20 + frame)..]);
+        // Unsynchronised, or not an MP3: left as it is.
+        byte[] unsynchronised = [.. "ID3"u8, 4, 0, 0x80, 0, 0, 0, (byte)title.Length, .. title, .. frames];
+        Assert.Equal(unsynchronised, AiMark.Mark(unsynchronised, "audio/mpeg"));
+        Assert.Equal("text"u8.ToArray(), AiMark.Mark("text"u8.ToArray(), "audio/mpeg"));
+
+        // An MP4: a uuid box with XMP's UUID at its end, everything before it (the chunk offsets) as it was.
+        byte[] mp4 = [0, 0, 0, 16, .. "ftypisom"u8, 0, 0, 2, 0, 0, 0, 0, 12, .. "mdat"u8, 1, 2, 3, 4];
+        var movie = AiMark.Mark(mp4, "video/mp4");
+        Assert.Equal(mp4, movie[..mp4.Length]);
+        Assert.Equal((uint)(movie.Length - mp4.Length), Big(movie, mp4.Length));
+        Assert.Equal("uuid", Encoding.ASCII.GetString(movie, mp4.Length + 4, 4));
+        Assert.Equal("BE7ACFCB97A942E89C71999491E3AFAC", Convert.ToHexString(movie, mp4.Length + 8, 16));
+        Assert.True(AiMark.IsMarked(movie));
+        // Its last box runs to the end (size 0): what is added would be in it, so it is left as it is.
+        byte[] open = [.. mp4[..16], 0, 0, 0, 0, .. "mdat"u8, 1, 2, 3, 4];
+        Assert.Equal(open, AiMark.Mark(open, "video/mp4"));
+
+        // A WAV and an AVI: a _PMX chunk at the end (even in length), and the RIFF's size grown by it.
+        foreach (var (form, type) in new[] { ("WAVE", "audio/wav"), ("AVI ", "video/x-msvideo") })
+        {
+            byte[] riff = [.. "RIFF"u8, 16, 0, 0, 0, .. Encoding.ASCII.GetBytes(form), .. "data"u8, 4, 0, 0, 0, 1, 2, 3, 4];
+            var marked = AiMark.Mark(riff, type);
+            Assert.Equal(riff[8..], marked[8..riff.Length]);
+            Assert.Equal((uint)(marked.Length - 8), BitConverter.ToUInt32(marked, 4));
+            Assert.Equal("_PMX", Encoding.ASCII.GetString(marked, riff.Length, 4));
+            Assert.Equal(0, marked.Length % 2);
+            Assert.True(AiMark.IsMarked(marked));
+        }
+
+        // A WebM: a Matroska tag at the end of its segment, and the segment's size grown by it; one of unknown size is not resized.
+        byte[] header = [0x1A, 0x45, 0xDF, 0xA3, 0x84, 0x42, 0x86, 0x81, 0x01];
+        byte[] webm = [.. header, 0x18, 0x53, 0x80, 0x67, 0x01, 0, 0, 0, 0, 0, 0, 5, 0x1F, 0x43, 0xB6, 0x75, 0x80];
+        var clip = AiMark.Mark(webm, "video/webm");
+        Assert.Equal(webm[..13], clip[..13]);
+        var size = 0L;
+        for (var i = 1; i < 8; i++)
+        {
+            size = (size << 8) | clip[13 + i];
+        }
+        Assert.Equal(0x01, clip[13]);
+        Assert.Equal(clip.Length - 21, size);
+        Assert.Equal(webm[21..], clip[21..webm.Length]);
+        Assert.Equal([0x12, 0x54, 0xC3, 0x67], clip[webm.Length..(webm.Length + 4)]);
+        Assert.Contains("DIGITAL_SOURCE_TYPE", Encoding.ASCII.GetString(clip), StringComparison.Ordinal);
+        Assert.True(AiMark.IsMarked(clip));
+        byte[] live = [.. header, 0x18, 0x53, 0x80, 0x67, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x1F, 0x43, 0xB6, 0x75, 0x80];
+        var streamed = AiMark.Mark(live, "video/webm");
+        Assert.Equal(live, streamed[..live.Length]);
+        Assert.True(AiMark.IsMarked(streamed));
+        // Its size says more than the file holds: left as it is.
+        byte[] cut = [.. webm[..20], 9, .. webm[21..]];
+        Assert.Equal(cut, AiMark.Mark(cut, "video/webm"));
+    }
+
     private static global::System.Text.Json.JsonValueKind System_JsonNull() => global::System.Text.Json.JsonValueKind.Null;
 }

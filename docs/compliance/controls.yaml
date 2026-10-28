@@ -995,8 +995,12 @@ controls:
       can be wrong. A picture a model made (in the chat or the media studio)
       says so in its own metadata, as IPTC's digital source type
       trainedAlgorithmicMedia in XMP; a person's picture a model changed (an
-      edit, a cutout) says compositeWithTrainedAlgorithmicMedia. PNG and JPEG
-      carry it; video and sound do not yet.
+      edit, a cutout) says compositeWithTrainedAlgorithmicMedia. Sound and
+      video a model made (speech, voices, music, clips, stories) say so too,
+      where XMP's spec puts it: an MP3's ID3v2 tag, an MP4's uuid box, a WAV's
+      or an AVI's _PMX chunk; WebM, which has no place for XMP, in a Matroska
+      tag. The chat's read-aloud, streamed as it plays, is not kept and not
+      marked.
     frameworks:
       euaiact: [Art.50]
       iso42001: [A.8.2, A.8.5]
@@ -1004,6 +1008,7 @@ controls:
     docs: [compliance/README.md#ai-systems]
     tests:
       - Llm.Tests/AiGovernanceTests.A_generated_picture_says_in_its_metadata_that_a_model_made_or_changed_it
+      - Llm.Tests/AiGovernanceTests.Generated_sound_and_video_say_in_their_metadata_that_a_model_made_them
     operator: >-
       Tell people elsewhere too where your use of AI is not obvious (a
       published text, a voice on the phone), and keep the marks on what you

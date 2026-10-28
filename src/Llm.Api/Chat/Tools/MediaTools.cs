@@ -203,6 +203,8 @@ public sealed class VideoTool(Llm.Api.Media.SdServer server, Operations.Modules 
             }
             var cost = (model.Row.UnitPrice ?? prices.Defaults.PerVideoSecond) * seconds;
             await spendLog.BookVideoAsync(context.Email, Gateway.AnswerCache.HashOf(await chatKey.GetAsync(token)), model.Name, seconds, cost, started, DateTimeOffset.UtcNow, token);
+            // Marked as made by a model, in its own metadata (AI Act Art. 50(2)).
+            video = Llm.Api.Media.AiMark.Mark(video, type);
             var file = new ChatAttachment
             {
                 UserId = context.User.Id, FileName = Path.ChangeExtension(ImageTool.FileName(prompt), type == "video/webm" ? ".webm" : ".avi"),
@@ -266,6 +268,7 @@ public sealed class SpeechTool(ChatModels models, GatewayChat gateway, AppDbCont
             {
                 return new ToolResult(ex.Message, IsError: true);
             }
+            mp3 = Llm.Api.Media.AiMark.Mark(mp3, "audio/mpeg");
             var name = Schema.Str(args, "name") is { Length: > 0 } given ? given : text;
             var file = new ChatAttachment
             {

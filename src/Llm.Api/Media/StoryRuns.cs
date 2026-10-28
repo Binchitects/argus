@@ -111,6 +111,8 @@ public sealed partial class StoryRuns(IServiceScopeFactory scopes, TimeProvider 
 
     private static async Task<Guid> KeepAsync(AppDbContext db, AppUser me, string name, string type, string kind, string origin, byte[] data, double? seconds, CancellationToken ct)
     {
+        // Each is a model's (the shots, their clips, speech and music, the video made of them): marked so (AI Act Art. 50(2)).
+        data = AiMark.Mark(data, type);
         var a = new ChatAttachment { UserId = me.Id, FileName = name, ContentType = type, Size = data.Length, Kind = kind, Data = data, Text = "", Seconds = seconds, Origin = origin };
         db.ChatAttachments.Add(a);
         await db.SaveChangesAsync(ct);

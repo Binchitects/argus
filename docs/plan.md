@@ -2149,8 +2149,9 @@ documents; it says what is the operator's part, as v7.1 does.
    The transparency duties built in: a notice that answers are generated, and
    generated media marked in its metadata as made by an AI.
    Done: Admin → Compliance → AI systems (GOV-09, the `ai-systems` check);
-   the chat's notice and pictures marked in XMP (GOV-10). Left: video and
-   sound marked too.
+   the chat's notice and pictures marked in XMP (GOV-10). Done after v7.4.0:
+   video and sound marked too (MP3, MP4, WAV, AVI in XMP; WebM in a Matroska
+   tag).
 8. **Readiness for each certification**, as a score with what is missing:
    controls met, the operator's parts attested, risks treated, policies
    current, audits' findings closed. Each one exports what its auditor reads:
@@ -2346,8 +2347,9 @@ Arena's own dependencies.
    Done: Fix it on a security review's finding (a weakness with its data's
    path and references, a test first; a package's smallest upgrade; a
    secret taken out), from the branch reviewed, the merge request opened as
-   the person. Left: the scanners and the review run again on the change,
-   and many findings at once.
+   the person. Done after v7.4.0: the scanners and the review run again on
+   the change before its merge request (219c15f9), and many findings at
+   once, a fix and a branch each (9faf60da).
 6. **Where people see it**:
    - **Admin → Security**, and each repository's page for those who may read
      it: findings by severity with the known-exploited first, what is new
@@ -2365,8 +2367,8 @@ Arena's own dependencies.
    SBOMs) and the alerts (to everyone with `reviews.admin`, and the
    review's person). Done: every merge request review (automatic ones too)
    says what the change adds: a vulnerable package the target did not have,
-   and the scanners' findings on its added lines. Left: findings in Code
-   Arena's Problems panel.
+   and the scanners' findings on its added lines. Done after v7.4.0:
+   findings in Code Arena's Problems panel, with Fix beside each (b6c03006).
 7. **Measured, as Argus was.** Recognising: on the Juliet test suite (NIST
    SARD, public domain: C, C++, Java, C#) and the OWASP Benchmark (Java),
    precision and recall per CWE for the scanners alone, the model alone, the
@@ -2374,6 +2376,9 @@ Arena's own dependencies.
    (CVEfixes, its licence checked first), the share fixed with the tests
    passing and the scanners clean. Published in `docs/measurements/`; a
    release that makes either worse says so.
+   Done after v7.4.0: recognising, on the Benchmark and on Juliet for Java
+   and C# ([security-review.md](measurements/security-review.md)). Left:
+   fixing, on CVEfixes (needs a yes).
 8. **Compliance**: the controls it adds to `controls.yaml`: vulnerability
    management (ISO 27001 A.8.8, SOC 2 CC7.1, HIPAA 164.308(a)(1)(ii)(A) and
    (B), GDPR 32(1)(d)), secure coding (A.8.28) and security testing (A.8.29),

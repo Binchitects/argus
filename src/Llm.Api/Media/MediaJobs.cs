@@ -409,12 +409,15 @@ public sealed partial class MediaJobs(IServiceScopeFactory scopes, TimeProvider 
                     await PhaseAsync(db, job, voice is null ? "Speaking" : "Speaking in the voice of the sample");
                     (data, var said) = await server.SpeakAsync(prompt, voice, Math.Clamp(Number(options, "exaggeration") ?? 0.5, 0.25, 1.5), ct);
                     (type, model, call, seconds) = ("audio/mpeg", StudioServer.VoiceModel, Gateway.SpendLog.SpeechCall, said);
+                    // Marked as made by a model, in its own metadata (AI Act Art. 50(2)).
+                    data = AiMark.Mark(data, type);
                     break;
                 default:
                     var length = Math.Clamp(Number(options, "seconds") ?? 30, 5, 240);
                     await PhaseAsync(db, job, $"Making {length:0} seconds of music (about a minute)");
                     (data, var made) = await server.MusicAsync(prompt, lyrics, length, ct);
                     (type, model, call, seconds) = ("audio/mpeg", StudioServer.MusicModel, Gateway.SpendLog.MusicCall, made);
+                    data = AiMark.Mark(data, type);
                     break;
             }
         }

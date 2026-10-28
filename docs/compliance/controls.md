@@ -935,7 +935,7 @@ The register of the company's AI systems (Admin → Compliance → AI systems): 
 
 ### GOV-10: People know when content is made by AI
 
-Under the chat's box, people are told that answers are made by AI and can be wrong. A picture a model made (in the chat or the media studio) says so in its own metadata, as IPTC's digital source type trainedAlgorithmicMedia in XMP; a person's picture a model changed (an edit, a cutout) says compositeWithTrainedAlgorithmicMedia. PNG and JPEG carry it; video and sound do not yet.
+Under the chat's box, people are told that answers are made by AI and can be wrong. A picture a model made (in the chat or the media studio) says so in its own metadata, as IPTC's digital source type trainedAlgorithmicMedia in XMP; a person's picture a model changed (an edit, a cutout) says compositeWithTrainedAlgorithmicMedia. Sound and video a model made (speech, voices, music, clips, stories) say so too, where XMP's spec puts it: an MP3's ID3v2 tag, an MP4's uuid box, a WAV's or an AVI's _PMX chunk; WebM, which has no place for XMP, in a Matroska tag. The chat's read-aloud, streamed as it plays, is not kept and not marked.
 
 **Serves**
 
@@ -948,6 +948,7 @@ Under the chat's box, people are told that answers are made by AI and can be wro
 **Proved by**
 
 - `Llm.Tests/AiGovernanceTests.A_generated_picture_says_in_its_metadata_that_a_model_made_or_changed_it`
+- `Llm.Tests/AiGovernanceTests.Generated_sound_and_video_say_in_their_metadata_that_a_model_made_them`
 
 **The company's part** Tell people elsewhere too where your use of AI is not obvious (a published text, a voice on the phone), and keep the marks on what you publish.
 

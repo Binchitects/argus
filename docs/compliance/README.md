@@ -274,8 +274,10 @@ People know when content is made by AI (GOV-10, the AI Act's Article 50):
 under the chat's box, a line says answers are made by AI and can be wrong;
 and a picture a model made says so in its own metadata (IPTC's digital source
 type in XMP: `trainedAlgorithmicMedia`, or `compositeWithTrainedAlgorithmicMedia`
-for a person's picture a model changed). PNG and JPEG carry the mark; video and
-sound do not yet.
+for a person's picture a model changed). PNG and JPEG carry the mark, and so do
+the sound and video models make: MP3 (in its ID3v2 tag), MP4, WAV and AVI in
+XMP where its spec puts it, and WebM in a Matroska tag (`DIGITAL_SOURCE_TYPE`).
+The chat's read-aloud is streamed as it plays and not kept: it is not marked.
 
 ## Readiness and the auditor's package
 
