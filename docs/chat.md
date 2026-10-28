@@ -970,7 +970,7 @@ to the code host. Starting one needs `review.run`.
    time to fix counts from then.
 2. **The scanners** (where the `scanners` feature is installed): Argus's
    `scan_at` sends the commit, with its history, to opengrep with Arena's own
-   rules (94 of them, each tested on its weak and fixed examples), Bandit,
+   rules (106 of them, each tested on its weak and fixed examples), Bandit,
    gitleaks and Trivy's checks of configuration. They run on a network of
    their own with no way out, fetch nothing and run nothing they are sent.
    A secret's text never comes back, only where it is (and the commit, in
@@ -1042,6 +1042,15 @@ say so.
   step as it is taken, then the diff, what the tests said, and the agent's
   account. **Another round** asks for more on the same change. **Stop** ends
   it.
+- **Checked after the change.** A security finding's fix is checked before
+  you open its merge request. The scanners (where the `scanners` feature is
+  installed) read the files it changed and the finding's, before the change
+  and after it. The page says whether they still find the weakness where it
+  was, and which findings the change brings that were not there before. The
+  security review's tracing question is asked again at the sink's line, or at
+  the call of its kind that took its place: still vulnerable, fixed, or the
+  call gone. A package's fix is checked when its merge request is reviewed.
+  What the checks said goes into the merge request's description.
 - **The merge request.** **Open the merge request as you** commits the change
   to a new branch, `fix/…`, made from the commit it read, and opens a merge
   request into the branch it started from, with the agent's account. It is

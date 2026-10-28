@@ -800,6 +800,29 @@ public static partial class ArgusServer
             return Json(new JsonObject { ["status"] = "started", ["action"] = "renew", ["name"] = name });
         });
 
+        // A change not committed anywhere (a fix's, before its merge request) through the scanners: the app sends its files.
+        app.MapPost(AdminPrefix + "scan-files", async (HttpRequest request) =>
+        {
+            if (!Authorised(request)) return Forbidden();
+            var body = await BodyOrEmpty(request);
+            if (body["files"] is not JsonObject given || given.Any(f => f.Value is not JsonValue v || !v.TryGetValue<string>(out _)))
+                return Json(new JsonObject { ["error"] = "files is an object of paths and their text" }, 400);
+            var files = given.ToDictionary(f => f.Key, f => f.Value!.GetValue<string>(), StringComparer.Ordinal);
+            var tools = (body["tools"]?.ToString() ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            try
+            {
+                return Json(await Task.Run(() => Scanning.Scanners.ScanFiles(files, tools)));
+            }
+            catch (Scanning.ScannersUnavailable exc)
+            {
+                return Json(new JsonObject { ["error"] = exc.Message }, 503);
+            }
+            catch (ToolError exc)
+            {
+                return Json(new JsonObject { ["error"] = exc.Message }, 400);
+            }
+        });
+
         // Loading from the pack library is a link, not a download: instant, so no job.
         app.MapPost(AdminPrefix + "packs/load", async (HttpRequest request) =>
         {

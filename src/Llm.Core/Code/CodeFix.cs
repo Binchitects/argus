@@ -40,6 +40,11 @@ public sealed class CodeFix
     public string Diff { get; set; } = "";
     /// <summary>The tests' last run: its command, whether it passed, its output.</summary>
     public string? Tests { get; set; }
+    /// <summary>
+    /// A security fix's change checked before its merge request (JSON): what the scanners find in it, before and after, and
+    /// whether the security review still reads the weakness where it was.
+    /// </summary>
+    public string? Checks { get; set; }
     public string? Model { get; set; }
     public string? MergeRequestUrl { get; set; }
     public string? Error { get; set; }

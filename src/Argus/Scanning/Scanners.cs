@@ -68,41 +68,83 @@ public static class Scanners
                 throw new ToolError($"The commit is larger than a scan reads ({MostBytes / 1024 / 1024} MB).");
             var query = $"commit={sha}&tools={string.Join(',', asked)}" + (withHistory ? $"&ref={Uri.EscapeDataString(reference!)}" : "");
             using var body = new StreamContent(File.OpenRead(file));
-            body.Headers.ContentType = new MediaTypeHeaderValue(withHistory ? "application/x-git-bundle" : "application/x-tar");
-            using var request = new HttpRequestMessage(HttpMethod.Post, $"{url}/scan?{query}") { Content = body };
-            HttpResponseMessage response;
-            try
-            {
-                response = Http.Send(request, HttpCompletionOption.ResponseContentRead);
-            }
-            catch (Exception exc) when (exc is HttpRequestException or TaskCanceledException or IOException)
-            {
-                throw new ScannersUnavailable($"The security scanners at {url} could not be reached: {exc.Message}", exc);
-            }
-            using (response)
-            {
-                var text = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-                JsonNode? answer;
-                try
-                {
-                    answer = JsonNode.Parse(text);
-                }
-                catch (System.Text.Json.JsonException)
-                {
-                    answer = null;
-                }
-                if (response.StatusCode == HttpStatusCode.OK && answer is JsonObject found)
-                    return found;
-                var why = answer?["error"]?.ToString() ?? PyStr.Prefix(text, 300);
-                throw response.StatusCode == HttpStatusCode.ServiceUnavailable
-                    ? new ScannersUnavailable($"The security scanners are busy with other scans: try again later ({why}).")
-                    : new ScannersUnavailable($"The security scanners could not scan {PyStr.Prefix(sha, 12)}: {why}");
-            }
+            return Send(url, query, body, withHistory ? "application/x-git-bundle" : "application/x-tar", sha);
         }
         finally
         {
             if (reference is not null) Mirror.RunGit(mirror, ["update-ref", "-d", reference]);
             if (File.Exists(file)) File.Delete(file);
+        }
+    }
+
+    /// <summary>The most files, and bytes, a change not yet committed is scanned with.</summary>
+    public const int MostFiles = 200;
+    public const long MostFileBytes = 20L * 1024 * 1024;
+
+    /// <summary>
+    /// Files not committed anywhere (a fix's change before its merge request), by path, scanned as they are: a tar of
+    /// them alone, no history. The scanners name a scan by a commit; the tar's own hash stands for one.
+    /// </summary>
+    public static JsonObject ScanFiles(IReadOnlyDictionary<string, string> files, IReadOnlyList<string>? tools)
+    {
+        var url = BaseUrl ?? throw new ScannersUnavailable(
+            "No security scanners are installed here: an admin turns the scanners feature on (installer.sh repair --with scanners).");
+        var asked = tools is { Count: > 0 } ? tools : Known;
+        if (asked.FirstOrDefault(t => !Known.Contains(t)) is { } unknown)
+            throw new ToolError($"tools are some of {string.Join(", ", Known)}, not {PyStr.Repr(unknown)}.");
+        if (files.Count is 0 or > MostFiles)
+            throw new ToolError($"Send 1 to {MostFiles} files to scan.");
+        var tar = new MemoryStream();
+        long total = 0;
+        using (var writer = new System.Formats.Tar.TarWriter(tar, System.Formats.Tar.TarEntryFormat.Pax, leaveOpen: true))
+        {
+            foreach (var (path, text) in files.OrderBy(f => f.Key, StringComparer.Ordinal))
+            {
+                if (path.Length is 0 or > 1000 || path.StartsWith('/') || path.Contains('\\') || path.Split('/').Any(p => p is "" or "." or ".."))
+                    throw new ToolError($"{PyStr.Repr(path)} is not a path inside the repository.");
+                var data = System.Text.Encoding.UTF8.GetBytes(text);
+                if ((total += data.Length) > MostFileBytes)
+                    throw new ToolError($"The files are larger than a change is scanned with ({MostFileBytes / 1024 / 1024} MB).");
+                writer.WriteEntry(new System.Formats.Tar.PaxTarEntry(System.Formats.Tar.TarEntryType.RegularFile, path) { DataStream = new MemoryStream(data) });
+            }
+        }
+        var sha = Convert.ToHexStringLower(System.Security.Cryptography.SHA1.HashData(tar.ToArray()));
+        tar.Position = 0;
+        using var body = new StreamContent(tar);
+        return Send(url, $"commit={sha}&tools={string.Join(',', asked)}", body, "application/x-tar", sha);
+    }
+
+    static JsonObject Send(string url, string query, HttpContent body, string type, string sha)
+    {
+        body.Headers.ContentType = new MediaTypeHeaderValue(type);
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{url}/scan?{query}") { Content = body };
+        HttpResponseMessage response;
+        try
+        {
+            response = Http.Send(request, HttpCompletionOption.ResponseContentRead);
+        }
+        catch (Exception exc) when (exc is HttpRequestException or TaskCanceledException or IOException)
+        {
+            throw new ScannersUnavailable($"The security scanners at {url} could not be reached: {exc.Message}", exc);
+        }
+        using (response)
+        {
+            var text = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+            JsonNode? answer;
+            try
+            {
+                answer = JsonNode.Parse(text);
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                answer = null;
+            }
+            if (response.StatusCode == HttpStatusCode.OK && answer is JsonObject found)
+                return found;
+            var why = answer?["error"]?.ToString() ?? PyStr.Prefix(text, 300);
+            throw response.StatusCode == HttpStatusCode.ServiceUnavailable
+                ? new ScannersUnavailable($"The security scanners are busy with other scans: try again later ({why}).")
+                : new ScannersUnavailable($"The security scanners could not scan {PyStr.Prefix(sha, 12)}: {why}");
         }
     }
 }

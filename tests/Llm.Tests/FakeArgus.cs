@@ -66,6 +66,8 @@ public sealed class FakeArgus : HttpMessageHandler
             ("POST", "/admin/repos/discover") => Json(HttpStatusCode.OK, """{"new_repos":"include","global_branches":[],"repos":[]}"""),
             ("POST", "/admin/index") when IndexRunning => Json(HttpStatusCode.Conflict, """{"error":"an index run is already in progress","started":1790000000}"""),
             ("POST", "/admin/index") => Json(HttpStatusCode.OK, """{"status":"started","branches":[],"allow_partial":false}"""),
+            ("POST", "/admin/scan-files") => ScanFiles is { } scan ? Json(HttpStatusCode.OK, scan(body!.Value))
+                : Json(HttpStatusCode.ServiceUnavailable, """{"error":"No security scanners are installed here: an admin turns the scanners feature on (installer.sh repair --with scanners)."}"""),
             ("GET", "/admin/packs") when PacksAnswer is { } packs => Json(HttpStatusCode.OK, packs),
             ("GET", "/admin/packs") => Json(HttpStatusCode.OK, """
                 {"packs":[{"name":"dotnet-docs","version":"1.2.0","model":"nomic-embed-text","dim":768,"size_bytes":1048576,"license":"MIT","commit":"abc","compatible":true,"incompatible_reason":null}],
@@ -115,6 +117,9 @@ public sealed class FakeArgus : HttpMessageHandler
 
     /// <summary>/admin/packs' answer instead of the usual one (a test's packs).</summary>
     public string? PacksAnswer { get; set; }
+
+    /// <summary>/admin/scan-files' answer by what it is sent (the scanners' JSON); none: no scanners are installed.</summary>
+    public Func<JsonElement, string>? ScanFiles { get; set; }
 
     /// <summary>Tools answered by what they are asked (their arguments to the structured content, JSON): before <see cref="Answers"/>.</summary>
     public System.Collections.Concurrent.ConcurrentDictionary<string, Func<JsonElement, string>> Handlers { get; } = new();

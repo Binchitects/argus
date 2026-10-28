@@ -26,7 +26,7 @@ interface FixBrief {
   project: string
   branch: string
   title: string
-  source: 'finding' | 'issue' | 'pipeline' | 'ask'
+  source: 'finding' | 'security' | 'issue' | 'pipeline' | 'ask'
   status: FixStatus
   step: string | null
   mergeRequestUrl: string | null
@@ -42,7 +42,23 @@ interface Fix extends FixBrief {
   model: string | null
   log: { tool: string; about: string; result: string }[]
   tests: { command: string; passed: boolean | null; output: string | null } | null
+  checks: Checks | null
   files: { path: string; deleted: boolean }[]
+}
+
+interface ScannerHit {
+  path: string
+  line: number
+  rule: string
+  cwe: string
+  title: string
+}
+
+/** A security fix's change, checked before its merge request: the scanners before and after it, and the review asked again. */
+interface Checks {
+  note?: string
+  scanners?: { error?: string; tools?: string; still?: ScannerHit[]; new?: ScannerHit[] }
+  review?: { error?: string; verdict?: 'fixed' | 'still' | 'gone'; line?: number; why?: string }
 }
 
 const statusLabels: Record<FixStatus, string> = { working: 'At work', ready: 'Ready', failed: 'Failed', opened: 'Merge request open', stopped: 'Stopped' }
@@ -214,6 +230,67 @@ export function FixesPage() {
 }
 
 /** A unified diff, its lines coloured: what goes, what comes, and each file's name. */
+/** What checking a security fix's change found: whether the scanners and the review still find the weakness, and what is new. */
+export function ChecksView({ checks }: { checks: Checks }) {
+  const s = checks.scanners
+  const r = checks.review
+  return (
+    <section aria-label="Checked after the change" className="grid gap-2 rounded-xl border p-3 text-sm">
+      <h2 className="text-sm font-semibold">Checked after the change</h2>
+      {checks.note && <p className="text-muted-foreground">{checks.note}</p>}
+      {s && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-medium">The scanners</span>
+          {s.error ? (
+            <span className="text-muted-foreground">could not check it: {s.error}</span>
+          ) : (s.still?.length ?? 0) > 0 ? (
+            <>
+              <Badge variant="destructive">still find it</Badge>
+              <span className="text-muted-foreground">
+                {s.still!.map((h) => `line ${h.line} (${h.rule})`).join(', ')}
+              </span>
+            </>
+          ) : (
+            <Badge variant="success">no longer find it</Badge>
+          )}
+          {s.tools && <code className="text-xs text-muted-foreground">{s.tools}</code>}
+        </div>
+      )}
+      {s?.new && s.new.length > 0 && (
+        <div className="grid gap-1">
+          <span className="font-medium">New with the change</span>
+          <ul className="grid gap-1" aria-label="New scanner findings">
+            {s.new.map((h) => (
+              <li key={`${h.path}:${h.line}:${h.rule}`} className="flex flex-wrap items-center gap-2">
+                <Badge variant="warning">{h.cwe || h.rule}</Badge>
+                <span className="[overflow-wrap:anywhere]">
+                  {h.path}:{h.line} {h.title}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {r && (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-medium">The security review</span>
+          {r.error ? (
+            <span className="text-muted-foreground">could not read it again: {r.error}</span>
+          ) : (
+            <>
+              <Badge variant={r.verdict === 'still' ? 'destructive' : 'success'}>
+                {r.verdict === 'still' ? 'still reads it as vulnerable' : r.verdict === 'fixed' ? 'reads it as fixed' : 'finds the call gone'}
+              </Badge>
+              {r.line ? <span className="text-muted-foreground">line {r.line}</span> : null}
+              {r.why && <span className="basis-full text-muted-foreground">{r.why}</span>}
+            </>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
 export function DiffView({ diff }: { diff: string }) {
   if (!diff.trim()) return <p className="text-sm text-muted-foreground">No change yet.</p>
   return (
@@ -318,6 +395,7 @@ export function FixPage() {
             </h2>
             <DiffView diff={f.diff} />
           </section>
+          {f.checks && <ChecksView checks={f.checks} />}
           {f.tests && (
             <section aria-label="The tests" className="grid gap-1.5">
               <h2 className="flex items-center gap-2 text-sm font-semibold">

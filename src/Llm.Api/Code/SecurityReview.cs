@@ -510,7 +510,7 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
         "parameterised call, an allow-list, encoding, a framework's protection, the data being the program's own) prevents it. When " +
         "unsure, it is not real. Answer with JSON only: {\"real\": true|false, \"why\": \"one or two sentences\"}.";
 
-    private static string Question(Candidate c, string context, string callers, List<ScannerHit> flags) =>
+    public static string Question(Candidate c, string context, string callers, List<ScannerHit> flags) =>
         $"Repository file {c.Path}, the call at line {c.Line} is {c.Sink.What} (as {c.Sink.Cwe} would be): `{Cut(c.Text.Trim(), 300)}`\n\n" +
         $"```\n{Cut(context, 12_000)}```\n\n{Cut(callers, 10_000)}" +
         (flags.Count == 0 ? "" : "\n\nScanners matched a pattern here (a pattern is not proof: judge the code):\n" +

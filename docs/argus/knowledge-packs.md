@@ -286,6 +286,12 @@ Findings on the same line are folded into one, with every scanner and rule
 named. gosec and the .NET analyzers are not there: they build the project,
 which fetches its packages.
 
+A change not committed anywhere yet (Fix it's, before its merge request) is
+scanned from its files: the app posts them to `/admin/scan-files` (Argus's
+admin token, never a model's tool), up to 200 files and 20 MB, paths inside
+the repository only, and Argus sends them to the scanners as a tar, with no
+history.
+
 ## Using packs
 
 Everything below works without a GitLab config. `--packs-dir` exists precisely

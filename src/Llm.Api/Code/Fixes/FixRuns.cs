@@ -135,6 +135,11 @@ public sealed partial class FixRuns(IServiceScopeFactory scopes, TimeProvider cl
             {
                 fix.Tests = new JsonObject { ["command"] = outcome.TestsCommand, ["passed"] = outcome.TestsPassed, ["output"] = outcome.TestsOutput is { Length: > 8000 } o ? o[^8000..] : outcome.TestsOutput }.ToJsonString();
             }
+            if (outcome.Error is null && w.Changes.Count > 0 && fix.Source == "security")
+            {
+                await Step("Checking the change");
+                fix.Checks = (await FixChecks.SecurityAsync(services, fix, w, me, ct))?.ToJsonString();
+            }
             await End(outcome.Error is null && w.Changes.Count > 0 ? CodeFix.Ready : CodeFix.Failed, outcome.Error ?? (w.Changes.Count == 0 ? "Nothing was changed." : null));
             db.Notifications.Add(new Notification
             {

@@ -264,7 +264,7 @@ public static partial class FixEndpoints
         return Results.Ok(new
         {
             f.Id, f.Project, f.Branch, f.BaseSha, f.Title, f.Ask, f.Source, f.SourceId, f.Status, f.Step, f.Summary, f.Diff, f.Model, f.MergeRequestUrl, f.Error, f.CreatedAt, f.UpdatedAt,
-            log = JsonNode.Parse(f.Log), tests = f.Tests is { } t ? JsonNode.Parse(t) : null,
+            log = JsonNode.Parse(f.Log), tests = f.Tests is { } t ? JsonNode.Parse(t) : null, checks = f.Checks is { } c ? JsonNode.Parse(c) : null,
             files = changes.Select(c => new { path = c.Key, deleted = c.Value is null }),
         });
     }
@@ -349,7 +349,8 @@ public static partial class FixEndpoints
             var mr = await gitlab.PostAsync(token, $"{GitLabAsPerson.Project(f.Project)}/merge_requests", new JsonObject
             {
                 ["source_branch"] = branch, ["target_branch"] = f.Branch, ["title"] = title, ["remove_source_branch"] = true,
-                ["description"] = $"{f.Summary}\n\n---\n*Made with Fix it in Argus Arena, opened by {me.DisplayName}.*",
+                ["description"] = $"{f.Summary}" + (FixChecks.Describe(f.Checks is { } checks ? JsonNode.Parse(checks) as JsonObject : null) is { Length: > 0 } said ? $"\n\n**Checked after the change:** {said}" : "") +
+                    $"\n\n---\n*Made with Fix it in Argus Arena, opened by {me.DisplayName}.*",
             }, ct);
             f.MergeRequestUrl = mr["web_url"]?.GetValue<string>();
         }

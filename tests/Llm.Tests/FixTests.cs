@@ -153,6 +153,92 @@ public sealed class FixTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "VUL-01")]
+    public async Task A_security_fixs_change_is_checked_by_the_scanners_and_the_review_before_its_merge_request()
+    {
+        await using var f = NewApp();
+        var kim = await PersonAsync(f);
+        await kim.Http.PutAsJsonAsync(new Uri("/api/fixes/token", UriKind.Relative), new { token = "person-token" });
+        var me = (await kim.JsonAsync(await kim.GetAsync("/api/auth/me"))).GetProperty("id").GetGuid();
+        const string sink = "    cursor.execute(f\"SELECT * FROM users WHERE name = '{name}'\")  # [vuln]";
+        app.Mcp.FixFiles["app/views.py"] = $"from flask import request\n\ndef find(cursor):\n    name = request.args['name']\n{sink}\n    return cursor.fetchall()\n";
+        var sent = new System.Collections.Concurrent.ConcurrentQueue<JsonElement>();
+        // The scanners find the query built from a string while it is there, and eval wherever it is.
+        app.Argus.ScanFiles = body =>
+        {
+            sent.Enqueue(body.Clone());
+            var hits = new List<string>();
+            foreach (var file in body.GetProperty("files").EnumerateObject())
+            {
+                var lines = file.Value.GetString()!.Split('\n');
+                for (var i = 0; i < lines.Length; i++)
+                {
+                    if (lines[i].Contains("[vuln]", StringComparison.Ordinal) || lines[i].Contains("eval(", StringComparison.Ordinal))
+                    {
+                        var eval = lines[i].Contains("eval(", StringComparison.Ordinal);
+                        hits.Add($$"""{"tools":["opengrep"],"rules":["{{(eval ? "python-eval" : "python-sql-built-from-strings")}}"],"path":"{{file.Name}}","line":{{i + 1}},"cwe":"{{(eval ? "CWE-95" : "CWE-89")}}","title":"{{(eval ? "Code run from data" : "A query built from strings")}}","code":"x"}""");
+                    }
+                }
+            }
+            return $$"""{"tools":[{"name":"opengrep","ran":true}],"findings":[{{string.Join(",", hits)}}],"more":0}""";
+        };
+        try
+        {
+            Guid finding;
+            using (var scope = f.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+                var scan = new Llm.Core.Code.SecurityScan { UserId = me, Project = "group/app", Ref = "main", Status = "done", FinishedAt = DateTimeOffset.UtcNow };
+                var weakness = new Llm.Core.Code.SecurityFinding
+                {
+                    Path = "app/views.py", Line = 5, SinkCode = sink.Trim(), Cwe = "CWE-89", CweTitle = "CWE-89: SQL Injection", Severity = "high", Title = "SQL built from the request",
+                    Pages = "[]", Verified = true, FoundBy = [Llm.Core.Code.SecurityFinding.Model],
+                };
+                scan.Findings.Add(weakness);
+                db.SecurityScans.Add(scan);
+                await db.SaveChangesAsync();
+                finding = weakness.Id;
+            }
+            const string fixes = """[script [[{"name":"replace","arguments":{"path":"app/views.py","old":"cursor.execute(f\"SELECT * FROM users WHERE name = '{name}'\")  # [vuln]","new":"cursor.execute(\"SELECT * FROM users WHERE name = ?\", (name,))"}},{"name":"write_file","arguments":{"path":"app/debug.py","content":"def run(x):\n    return eval(x)\n"}}],[{"name":"finish","arguments":{"summary":"A parameter now."}}]]]""";
+            const string misses = """[script [[{"name":"replace","arguments":{"path":"app/views.py","old":"return cursor.fetchall()","new":"return list(cursor.fetchall())"}}],[{"name":"finish","arguments":{"summary":"Tidied."}}]]]""";
+            var good = await DoneAsync(kim, f, (await kim.JsonAsync(await kim.PostAsync("/api/fixes", new { securityFindingId = finding, ask = fixes }))).GetProperty("id").GetGuid());
+            Assert.Equal("ready", good.GetProperty("status").GetString());
+            var checks = good.GetProperty("checks");
+            Assert.Equal(0, checks.GetProperty("scanners").GetProperty("still").GetArrayLength());
+            var added = Assert.Single(checks.GetProperty("scanners").GetProperty("new").EnumerateArray());
+            Assert.Equal(("app/debug.py", 2, "python-eval"), (added.GetProperty("path").GetString(), added.GetProperty("line").GetInt32(), added.GetProperty("rule").GetString()));
+            Assert.Equal(("fixed", 5), (checks.GetProperty("review").GetProperty("verdict").GetString(), checks.GetProperty("review").GetProperty("line").GetInt32()));
+            // The scanners read the files before the change and after it: the finding's and those it changed.
+            Assert.Contains(sent, b => b.GetProperty("files").TryGetProperty("app/views.py", out var v) && v.GetString()!.Contains("[vuln]", StringComparison.Ordinal) && !b.GetProperty("files").TryGetProperty("app/debug.py", out _));
+            Assert.Contains(sent, b => b.GetProperty("files").TryGetProperty("app/debug.py", out _));
+
+            var bad = await DoneAsync(kim, f, (await kim.JsonAsync(await kim.PostAsync("/api/fixes", new { securityFindingId = finding, ask = misses }))).GetProperty("id").GetGuid());
+            var still = bad.GetProperty("checks");
+            Assert.Equal(5, Assert.Single(still.GetProperty("scanners").GetProperty("still").EnumerateArray()).GetProperty("line").GetInt32());
+            Assert.Equal("still", still.GetProperty("review").GetProperty("verdict").GetString());
+
+            // What the checks found goes into the merge request.
+            await kim.PostAsync($"/api/fixes/{good.GetProperty("id").GetGuid()}/merge-request", new { title = "Parameterise the query" });
+            var opened = JsonDocument.Parse(app.Mcp.GitLabCalls.Last(c => c.PathAndQuery == "/api/v4/projects/group%2Fapp/merge_requests").Body!).RootElement;
+            var description = opened.GetProperty("description").GetString()!;
+            Assert.Contains("**Checked after the change:** The scanners (opengrep,bandit) no longer find it.", description, StringComparison.Ordinal);
+            Assert.Contains("app/debug.py:2 Code run from data", description, StringComparison.Ordinal);
+            Assert.Contains("The security review reads line 5 as no longer vulnerable.", description, StringComparison.Ordinal);
+
+            // No scanners installed: the check says so, and the fix is still ready.
+            app.Argus.ScanFiles = null;
+            var unscanned = await DoneAsync(kim, f, (await kim.JsonAsync(await kim.PostAsync("/api/fixes", new { securityFindingId = finding, ask = misses }))).GetProperty("id").GetGuid());
+            Assert.Equal("ready", unscanned.GetProperty("status").GetString());
+            Assert.Contains("No security scanners are installed here", unscanned.GetProperty("checks").GetProperty("scanners").GetProperty("error").GetString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            app.Argus.ScanFiles = null;
+            app.Mcp.FixFiles.Remove("app/views.py");
+        }
+    }
+
+    [Fact]
     public async Task The_workspace_reads_changes_and_shows_a_unified_diff()
     {
         var w = Workspace.FromArchive(FakeMcp.Archive(new Dictionary<string, string> { ["a.txt"] = "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n", ["b.txt"] = "x\n" }));

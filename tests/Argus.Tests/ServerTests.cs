@@ -266,6 +266,63 @@ public sealed class ServerTests : IDisposable
         return (resp.StatusCode, JsonNode.Parse(await resp.Content.ReadAsStringAsync())!);
     }
 
+    /// <summary>The scanners as a test sees them: what each scan sent, and the answer given back.</summary>
+    sealed class FakeScanners(string answer) : HttpMessageHandler
+    {
+        public readonly List<(string Query, byte[] Body)> Sent = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) => Task.FromResult(Send(request, cancellationToken));
+
+        protected override HttpResponseMessage Send(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Sent.Add((request.RequestUri!.Query, request.Content!.ReadAsByteArrayAsync(cancellationToken).GetAwaiter().GetResult()));
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(answer) };
+        }
+    }
+
+    [Fact]
+    public async Task A_change_not_committed_is_scanned_from_the_files_the_app_sends()
+    {
+        var files = new Dictionary<string, string> { ["src/Orders.cs"] = "class Orders {}\n", ["src/db/Query.cs"] = "class Query {}\n" };
+        Assert.Equal(HttpStatusCode.Forbidden, (await _http.PostAsync("/admin/scan-files", new StringContent("{}"))).StatusCode);
+        Environment.SetEnvironmentVariable("ARGUS_SCANNERS_URL", null);
+        var (none, said) = await AdminSend(HttpMethod.Post, "/admin/scan-files", new { files });
+        Assert.Equal((HttpStatusCode.ServiceUnavailable, true), (none, said["error"]!.GetValue<string>().Contains("No security scanners", StringComparison.Ordinal)));
+
+        var scanners = new FakeScanners("""{"commit": "x", "history": false, "tools": [{"name": "opengrep", "ran": true}], "findings": [], "more": 0}""");
+        Environment.SetEnvironmentVariable("ARGUS_SCANNERS_URL", "http://scanners.test:7800");
+        Scanning.Scanners.Client = new HttpClient(scanners);
+        try
+        {
+            var (status, answer) = await AdminSend(HttpMethod.Post, "/admin/scan-files", new { files, tools = "opengrep" });
+            Assert.Equal(HttpStatusCode.OK, status);
+            Assert.Equal("opengrep", answer["tools"]![0]!["name"]!.GetValue<string>());
+            var (query, body) = Assert.Single(scanners.Sent);
+            Assert.Matches("commit=[0-9a-f]{40}&tools=opengrep$", query);
+            var sent = new Dictionary<string, string>();
+            using (var reader = new System.Formats.Tar.TarReader(new MemoryStream(body)))
+            {
+                while (reader.GetNextEntry() is { } entry)
+                {
+                    sent[entry.Name] = new StreamReader(entry.DataStream!).ReadToEnd();
+                }
+            }
+            Assert.Equal(files, sent);
+
+            // Paths outside the repository, too many files, and tools not known are refused before anything is sent.
+            Assert.Equal(HttpStatusCode.BadRequest, (await AdminSend(HttpMethod.Post, "/admin/scan-files", new { files = new Dictionary<string, string> { ["../etc/passwd"] = "x" } })).Status);
+            Assert.Equal(HttpStatusCode.BadRequest, (await AdminSend(HttpMethod.Post, "/admin/scan-files", new { files = Enumerable.Range(0, 201).ToDictionary(i => $"f{i}.cs", _ => "x") })).Status);
+            Assert.Equal(HttpStatusCode.BadRequest, (await AdminSend(HttpMethod.Post, "/admin/scan-files", new { files, tools = "semgrep" })).Status);
+            Assert.Equal(HttpStatusCode.BadRequest, (await AdminSend(HttpMethod.Post, "/admin/scan-files", new { files = new { a = 1 } })).Status);
+            Assert.Single(scanners.Sent);
+        }
+        finally
+        {
+            Scanning.Scanners.Client = null;
+            Environment.SetEnvironmentVariable("ARGUS_SCANNERS_URL", null);
+        }
+    }
+
     [Fact]
     public async Task Repositories_are_listed_with_their_branches_chosen_in_and_out_and_new_ones_follow_the_policy()
     {

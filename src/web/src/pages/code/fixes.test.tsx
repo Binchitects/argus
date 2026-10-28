@@ -60,4 +60,37 @@ describe('Fix it', () => {
     await waitFor(() => expect(opened).toHaveBeenCalledWith('https://gitlab.test/group/app/-/merge_requests/12', '_blank', 'noopener'))
     expect(calls.find((c) => c.path === '/api/fixes/x1/merge-request')?.body).toEqual({ title: 'Make add() add' })
   })
+
+  it('says what checking a security fix found: the scanners, what is new, and the review asked again', async () => {
+    fakeApi(member, {
+      'GET /api/fixes/x1': () => ({
+        json: {
+          ...ready, source: 'security',
+          checks: {
+            scanners: { tools: 'opengrep,bandit', still: [], new: [{ path: 'app/debug.py', line: 2, rule: 'python-eval', cwe: 'CWE-95', title: 'Code run from data' }] },
+            review: { verdict: 'fixed', line: 5, why: 'name is a parameter now' },
+          },
+        },
+      }),
+    })
+    renderApp('/code/fixes/x1')
+    const checked = await screen.findByRole('region', { name: 'Checked after the change' })
+    expect(checked).toHaveTextContent('no longer find it')
+    expect(within(checked).getByRole('list', { name: 'New scanner findings' })).toHaveTextContent('app/debug.py:2 Code run from data')
+    expect(checked).toHaveTextContent('reads it as fixed')
+    expect(checked).toHaveTextContent('line 5')
+  })
+
+  it('says when the scanners and the review still find the weakness', async () => {
+    fakeApi(member, {
+      'GET /api/fixes/x1': () => ({
+        json: { ...ready, source: 'security', checks: { scanners: { tools: 'opengrep,bandit', still: [{ path: 'app/views.py', line: 5, rule: 'python-sql', cwe: 'CWE-89', title: 'SQL' }], new: [] }, review: { verdict: 'still', line: 5, why: 'SQL built from the request' } } },
+      }),
+    })
+    renderApp('/code/fixes/x1')
+    const checked = await screen.findByRole('region', { name: 'Checked after the change' })
+    expect(checked).toHaveTextContent('still find it')
+    expect(checked).toHaveTextContent('line 5 (python-sql)')
+    expect(checked).toHaveTextContent('still reads it as vulnerable')
+  })
 })
