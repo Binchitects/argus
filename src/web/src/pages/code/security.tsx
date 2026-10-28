@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { BookOpen, Download, FileCog, KeyRound, Package, ScanSearch, ShieldAlert, ShieldCheck } from 'lucide-react'
+import { BookOpen, Download, FileCog, KeyRound, Package, ScanSearch, ShieldAlert, ShieldCheck, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -134,7 +134,17 @@ export function SecurityReviews() {
   )
 }
 
-function FindingCard({ f, since, onDecide }: { f: SecurityFinding; since?: string | null; onDecide: (state: SecurityFinding['state'], why?: string, until?: string) => Promise<void> }) {
+function FindingCard({
+  f,
+  since,
+  onDecide,
+  onFix,
+}: {
+  f: SecurityFinding
+  since?: string | null
+  onDecide: (state: SecurityFinding['state'], why?: string, until?: string) => Promise<void>
+  onFix: () => void
+}) {
   const [asking, setAsking] = useState<'accepted' | 'wrong' | null>(null)
   const [why, setWhy] = useState('')
   const [until, setUntil] = useState(() => new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10))
@@ -261,6 +271,9 @@ function FindingCard({ f, since, onDecide }: { f: SecurityFinding; since?: strin
       <div className="flex flex-wrap gap-2">
         {f.state === 'open' ? (
           <>
+            <Button size="sm" variant="outline" onClick={onFix} title="An agent makes the change from the branch reviewed, and opens the merge request as you">
+              <Wrench /> Fix it
+            </Button>
             <Button size="sm" variant="outline" onClick={() => void onDecide('fixed')}>
               <ShieldCheck /> Fixed
             </Button>
@@ -315,6 +328,7 @@ export function SecurityScanPage() {
   const { id = '' } = useParams()
   const queryClient = useQueryClient()
   const scan = useQuery(securityScanQuery(id))
+  const navigate = useNavigate()
   const [by, setBy] = useState<Found>('all')
   if (scan.error) return <QueryError error={scan.error} retry={() => scan.refetch()} />
   if (!scan.data) return <Skeleton className="h-64" />
@@ -334,7 +348,19 @@ export function SecurityScanPage() {
   const doubted = code.filter((f) => f.verified === false)
   const secrets = d.findings.filter((f) => f.kind === 'secret')
   const config = d.findings.filter((f) => f.kind === 'config')
-  const card = (f: SecurityFinding) => <FindingCard key={f.id} f={f} since={s.finishedAt} onDecide={(state, why, until) => decide(f.id, state, why, until)} />
+  // Fix it: an agent's change for the finding, from the branch reviewed; the person's own GitLab token is needed.
+  const fix = async (findingId: string) => {
+    try {
+      const made = await api<{ id: string }>('/api/fixes', { body: { securityFindingId: findingId } })
+      navigate(`/code/fixes/${made.id}`)
+    } catch (e) {
+      toast.error(errorMessage(e))
+      navigate('/code/fixes')
+    }
+  }
+  const card = (f: SecurityFinding) => (
+    <FindingCard key={f.id} f={f} since={s.finishedAt} onDecide={(state, why, until) => decide(f.id, state, why, until)} onFix={() => void fix(f.id)} />
+  )
   const age = s.advisoriesAsOf ? Math.floor((Date.now() - new Date(`${s.advisoriesAsOf}T00:00:00Z`).getTime()) / 86_400_000) : null
   return (
     <>

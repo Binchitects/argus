@@ -95,6 +95,64 @@ public sealed class FixTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "VUL-01")]
+    public async Task A_security_findings_fix_starts_from_the_branch_reviewed_with_the_weakness_its_references_and_a_test_first()
+    {
+        await using var f = NewApp();
+        var kim = await PersonAsync(f);
+        await kim.Http.PutAsJsonAsync(new Uri("/api/fixes/token", UriKind.Relative), new { token = "person-token" });
+        var me = (await kim.JsonAsync(await kim.GetAsync("/api/auth/me"))).GetProperty("id").GetGuid();
+        Guid code, package, secret, others;
+        using (var scope = f.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+            var scan = new Llm.Core.Code.SecurityScan { UserId = me, Project = "group/app", Ref = "main", Commit = "abc1234567890", Status = "done", FinishedAt = DateTimeOffset.UtcNow };
+            var weakness = new Llm.Core.Code.SecurityFinding
+            {
+                Path = "app/views.py", Line = 25, SinkCode = "cursor.execute(f\"SELECT * FROM users WHERE name = '{name}'\")", Cwe = "CWE-89", CweTitle = "CWE-89: SQL Injection",
+                Severity = "high", Title = "SQL built from the request", Source = "views.py:20 request.args['name']", Flow = "request.args['name']\nname\ncursor.execute(f\"...\")",
+                Exploit = "name = ' OR '1'='1", Fix = "Pass name as a parameter.", Verified = true,
+                Pages = """[{"title": "CWE-89: SQL Injection", "url": "https://cwe.mitre.org/data/definitions/89.html"}, {"title": "SQL Injection Prevention Cheat Sheet", "url": "https://cheatsheetseries.owasp.org/x.html"}]""",
+            };
+            var vulnerable = new Llm.Core.Code.SecurityFinding
+            {
+                Kind = Llm.Core.Code.SecurityFinding.Dependency, Path = "web/package-lock.json", Line = 12, SinkCode = "qs 6.10.1 (npm)", Cwe = "CWE-1321", Severity = "high",
+                Title = "qs vulnerable to Prototype Pollution", Source = "GHSA-hrpp-h998-j3pp, CVE-2022-24999", Flow = "qs comes in through express", Fix = "Upgrade qs to 6.10.3 or later.", Verified = true,
+            };
+            var key = new Llm.Core.Code.SecurityFinding { Kind = Llm.Core.Code.SecurityFinding.Secret, Path = "config/app.env", Line = 2, Cwe = "CWE-798", Severity = "high", Title = "A secret", Rule = "aws-access-token", Commit = "c0ffee000000000" };
+            scan.Findings.AddRange([weakness, vulnerable, key]);
+            var theirs = new Llm.Core.Code.SecurityScan { UserId = Guid.NewGuid(), Project = "group/other", Status = "done" };
+            var notMine = new Llm.Core.Code.SecurityFinding { Path = "x.py", Cwe = "CWE-89", Severity = "high", Title = "x" };
+            theirs.Findings.Add(notMine);
+            db.Users.Add(new Llm.Core.Identity.AppUser { Id = theirs.UserId, UserName = "someone" + Guid.NewGuid().ToString("N")[..6] });
+            db.SecurityScans.AddRange(scan, theirs);
+            await db.SaveChangesAsync();
+            (code, package, secret, others) = (weakness.Id, vulnerable.Id, key.Id, notMine.Id);
+        }
+
+        var started = await kim.JsonAsync(await kim.PostAsync("/api/fixes", new { securityFindingId = code }));
+        var fix = await kim.JsonAsync(await kim.GetAsync($"/api/fixes/{started.GetProperty("id").GetGuid()}"));
+        Assert.Equal(("security", "group/app", "main", "CWE-89 SQL built from the request"),
+            (fix.GetProperty("source").GetString(), fix.GetProperty("project").GetString(), fix.GetProperty("branch").GetString(), fix.GetProperty("title").GetString()));
+        var ask = fix.GetProperty("ask").GetString()!;
+        Assert.Contains("Fix this security weakness in app/views.py at line 25: CWE-89 (CWE-89: SQL Injection), high.", ask, StringComparison.Ordinal);
+        Assert.Contains("Where outside data comes in: views.py:20 request.args['name']", ask, StringComparison.Ordinal);
+        Assert.Contains("First write a test that shows the weakness", ask, StringComparison.Ordinal);
+        Assert.Contains("- SQL Injection Prevention Cheat Sheet: https://cheatsheetseries.owasp.org/x.html", ask, StringComparison.Ordinal);
+        Assert.Contains("read commit abc123456789", ask, StringComparison.Ordinal);
+
+        var upgrade = await kim.JsonAsync(await kim.PostAsync("/api/fixes", new { securityFindingId = package }));
+        Assert.Equal("Upgrade qs: qs vulnerable to Prototype Pollution", upgrade.GetProperty("title").GetString());
+        await f.Services.GetRequiredService<FixRuns>().Finished(started.GetProperty("id").GetGuid()).WaitAsync(TimeSpan.FromSeconds(30));
+        await f.Services.GetRequiredService<FixRuns>().Finished(upgrade.GetProperty("id").GetGuid()).WaitAsync(TimeSpan.FromSeconds(30));
+        var secretAsk = (await kim.JsonAsync(await kim.GetAsync($"/api/fixes/{(await kim.JsonAsync(await kim.PostAsync("/api/fixes", new { securityFindingId = secret }))).GetProperty("id").GetGuid()}"))).GetProperty("ask").GetString()!;
+        Assert.Contains("in the history at commit c0ffee000000", secretAsk, StringComparison.Ordinal);
+        Assert.Contains("must revoke it", secretAsk, StringComparison.Ordinal);
+        // Another person's review is not theirs to fix from.
+        await StatusAssert.Is(HttpStatusCode.NotFound, await kim.PostAsync("/api/fixes", new { securityFindingId = others }));
+    }
+
+    [Fact]
     public async Task The_workspace_reads_changes_and_shows_a_unified_diff()
     {
         var w = Workspace.FromArchive(FakeMcp.Archive(new Dictionary<string, string> { ["a.txt"] = "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n", ["b.txt"] = "x\n" }));

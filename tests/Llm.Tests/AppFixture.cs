@@ -31,7 +31,11 @@ public sealed class AppFixture : IAsyncLifetime
     // as the stack runs it, 1 GB of shared memory for parallel queries (Docker's 64 MB runs out with so many at once).
     private readonly PostgreSqlContainer? _postgres = External is null
         ? new PostgreSqlBuilder("pgvector/pgvector:0.8.0-pg16").WithCommand("-c", "max_connections=1000")
-            .WithCreateParameterModifier(p => p.HostConfig.ShmSize = 1L << 30).Build()
+            .WithCreateParameterModifier(p =>
+            {
+                p.HostConfig ??= new();
+                p.HostConfig.ShmSize = 1L << 30;
+            }).Build()
         : null;
     private string Server => External ?? _postgres!.GetConnectionString();
     private readonly string _webRoot = Directory.CreateTempSubdirectory("llm-webroot-").FullName;

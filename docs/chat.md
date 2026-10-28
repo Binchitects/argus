@@ -1014,8 +1014,13 @@ say so.
   request with it, as you: never with the app's account or Argus's (which
   only read). The token is checked with GitLab, kept encrypted, and never
   shown again.
-- **Starting one.** Press **Fix it** on a review's finding: it starts from
-  the reviewed branch. Or, under **Code → Fix it**, name the project and say
+- **Starting one.** Press **Fix it** on a review's finding, or on a security
+  review's: it starts from the reviewed branch. For a weakness in the code,
+  the agent is given where it is, the data's path and the references (the
+  CWE, the cheat sheet). It writes a test that shows the weakness first, where
+  one can be written, then makes the change the references describe. A
+  vulnerable package is upgraded the smallest step that fixes it, and a
+  secret is taken out of the code (revoking it is yours). Or, under **Code → Fix it**, name the project and say
   what to fix, in words, an issue's number (its title and text are read), or
   a failed pipeline's (the end of its failed jobs' logs is read, and the
   pipeline's branch is the start).

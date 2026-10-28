@@ -52,7 +52,7 @@ describe('code security', () => {
       }),
       'PUT /api/code/security/s1/findings/f1': () => ({ status: 204 }),
     })
-    renderApp('/code/security/s1')
+    const { router } = renderApp('/code/security/s1')
     const list = await screen.findByRole('list', { name: 'Weaknesses' })
     const card = within(list).getByText('SQL built from the request').closest('li')!
     expect(within(card).getByRole('link', { name: 'CWE-89' })).toHaveAttribute('href', 'https://cwe.mitre.org/data/definitions/89.html')
@@ -84,6 +84,21 @@ describe('code security', () => {
       expect(body.why).toBe('Internal tool only')
       expect(new Date(body.until).getTime()).toBeGreaterThan(Date.now())
     })
+    expect(router.state.location.pathname).toBe('/code/security/s1')
+  })
+
+  it('starts Fix it on a finding, from the branch reviewed', async () => {
+    const calls = fakeApi(member, {
+      'GET /api/code/security/s1': () => ({ json: { scan: brief, summary: null, model: 'Main', by: 'Mo', mine: true, findings: [finding('f1', {})] } }),
+      'POST /api/fixes': () => ({ status: 202, json: { id: 'x1' } }),
+      'GET /api/fixes/x1': () => ({ json: { id: 'x1', project: 'g/shop', branch: 'main', title: 'CWE-89 SQL', ask: '', source: 'security', status: 'working', step: 'Starting', log: [], files: [] } }),
+      'GET /api/fixes/token': () => ({ json: { linked: true } }),
+    })
+    const { router } = renderApp('/code/security/s1')
+    const list = await screen.findByRole('list', { name: 'Weaknesses' })
+    await userEvent.click(within(list).getByRole('button', { name: 'Fix it' }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/code/fixes/x1'))
+    expect(calls.find((c) => c.path === '/api/fixes' && c.method === 'POST')?.body).toEqual({ securityFindingId: 'f1' })
   })
 
   it('shows what the scanners found beside the model, secrets and configuration apart, and filters by who found it', async () => {

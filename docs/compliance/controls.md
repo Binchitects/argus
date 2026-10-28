@@ -1031,6 +1031,7 @@ Code Studio → Security reviews a repository at a commit, read with the person'
 - `Llm.Tests/SecurityReviewTests.A_repository_is_reviewed_as_its_person_and_only_cited_weaknesses_the_pack_knows_are_kept`
 - `Llm.Tests/SecurityReviewTests.The_vulnerabilities_check_counts_what_is_past_its_time_to_fix`
 - `Llm.Tests/SecurityReviewTests.When_the_advisories_are_renewed_a_reviews_packages_are_checked_again_at_the_commit_it_read`
+- `Llm.Tests/FixTests.A_security_findings_fix_starts_from_the_branch_reviewed_with_the_weakness_its_references_and_a_test_first`
 
 **Watched by** `app:vulnerabilities` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
 

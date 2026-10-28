@@ -2312,6 +2312,11 @@ Arena's own dependencies.
    stays read only). For a dependency: the smallest upgrade that fixes it,
    the lock file updated, the build and the tests run. Many findings at once:
    one branch each, for people to take or leave.
+   Done: Fix it on a security review's finding (a weakness with its data's
+   path and references, a test first; a package's smallest upgrade; a
+   secret taken out), from the branch reviewed, the merge request opened as
+   the person. Left: the scanners and the review run again on the change,
+   and many findings at once.
 6. **Where people see it**:
    - **Admin → Security**, and each repository's page for those who may read
      it: findings by severity with the known-exploited first, what is new

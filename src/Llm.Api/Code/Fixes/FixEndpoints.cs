@@ -14,8 +14,9 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Llm.Api.Code.Fixes;
 
-/// <summary>What to fix: a review finding, a GitLab issue, a failed pipeline, or words; in a project, from a branch.</summary>
-public sealed record NewFix(Guid? FindingId = null, string? Project = null, string? Branch = null, string? Ask = null, int? Issue = null, long? Pipeline = null);
+/// <summary>What to fix: a review finding, a security review's finding, a GitLab issue, a failed pipeline, or words; in a project, from a branch.</summary>
+public sealed record NewFix(Guid? FindingId = null, string? Project = null, string? Branch = null, string? Ask = null, int? Issue = null, long? Pipeline = null,
+    Guid? SecurityFindingId = null);
 
 public sealed record MoreFix(string? Ask);
 
@@ -107,7 +108,7 @@ public static partial class FixEndpoints
 
     /// <summary>A fix started: what it is for, read now (the finding, the issue, the failed jobs' logs), and the branch it starts from.</summary>
     private static async Task<IResult> CreateAsync(NewFix body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, GitLabAsPerson gitlab, FixRuns runs,
-        CancellationToken ct)
+        AccessService access, CancellationToken ct)
     {
         var me = await Me(p, users);
         if (await gitlab.TokenAsync(me.Id, ct) is not { } token)
@@ -122,7 +123,21 @@ public static partial class FixEndpoints
         string? sourceId = null;
         try
         {
-            if (body.FindingId is { } findingId)
+            if (body.SecurityFindingId is { } securityId)
+            {
+                var finding = await db.SecurityFindings.AsNoTracking().SingleOrDefaultAsync(f => f.Id == securityId, ct);
+                var scan = finding is null ? null : await db.SecurityScans.AsNoTracking().SingleOrDefaultAsync(s => s.Id == finding.ScanId, ct);
+                if (finding is null || scan is null || (scan.UserId != me.Id && !await access.MayAsync(me, Core.Access.Permissions.ReviewsAdmin, ct)))
+                {
+                    return Results.NotFound();
+                }
+                project = scan.Project;
+                branch = scan.Ref ?? await DefaultBranchAsync(gitlab, token, project, ct);
+                title = finding.Kind == SecurityFinding.Dependency ? $"Upgrade {finding.SinkCode.Split(' ')[0]}: {finding.Title}" : $"{finding.Cwe} {finding.Title}".Trim();
+                ask = SecurityAsk(finding, scan) + (body.Ask is { Length: > 0 } more ? $"\n\n{more}" : "");
+                (source, sourceId) = ("security", finding.Id.ToString());
+            }
+            else if (body.FindingId is { } findingId)
             {
                 var finding = await db.ReviewFindings.AsNoTracking().SingleOrDefaultAsync(f => f.Id == findingId, ct);
                 var review = finding is null ? null : await db.CodeReviews.AsNoTracking().SingleOrDefaultAsync(r => r.Id == finding.ReviewId && r.UserId == me.Id, ct);
@@ -188,6 +203,48 @@ public static partial class FixEndpoints
         await db.SaveChangesAsync(ct);
         runs.Go(fix.Id);
         return Results.Accepted($"/api/fixes/{fix.Id}", Brief(fix));
+    }
+
+    /// <summary>
+    /// What the agent is asked for a security review's finding: the weakness as the review found it (where, the data's path,
+    /// the references), a test that shows it first where one can, the change the references describe, and the tests run; a
+    /// vulnerable package upgraded the smallest step that fixes it; a secret taken out of the code (and revoked by the person).
+    /// </summary>
+    public static string SecurityAsk(SecurityFinding f, SecurityScan scan)
+    {
+        var pages = (JsonNode.Parse(f.Pages) as JsonArray ?? []).OfType<JsonObject>()
+            .Select(p => $"- {p["title"]}{(p["url"]?.ToString() is { Length: > 0 } url ? $": {url}" : "")}").ToList();
+        var references = pages.Count > 0 ? $"\n\nWhat it rests on (read them):\n{string.Join('\n', pages)}" : "";
+        var reviewed = scan.Commit is { } c ? $" The security review read commit {c[..Math.Min(12, c.Length)]}; the branch may have moved since: if the weakness is gone, say so and change nothing." : "";
+        var where = $"{f.Path}{(f.Line > 0 ? $" at line {f.Line}" : "")}";
+        return f.Kind switch
+        {
+            SecurityFinding.Dependency =>
+                $"A package this project uses has a known vulnerability: {f.SinkCode}, in {where}. {f.Title} ({f.Severity}, {f.Source}). {f.Flow}." +
+                (f.Exploited ? " It is on CISA's list of known exploited vulnerabilities." : "") + $"\n\n{f.Fix}\n\n" +
+                "Change the version where the project asks for it (its manifest). Update the lock file too only where it can be done exactly by hand; " +
+                "when the package manager must regenerate it, say so. When the package comes in through another, upgrade that one, or pin a safe " +
+                "version the way the ecosystem allows (npm overrides, Yarn resolutions, a NuGet PackageReference, a Maven dependencyManagement entry). " +
+                "Run the tests that can run here." + reviewed + references,
+            SecurityFinding.Secret =>
+                $"A secret ({f.Rule ?? "a credential"}) is in {where}{(f.Commit is { } at ? $", in the history at commit {at[..Math.Min(12, at.Length)]}" : "")}. " +
+                "Take it out of the code: read it from the environment or the project's secret store instead, leaving a placeholder or an example " +
+                "with no real value, and never write the secret anywhere, not in a test, a comment or the summary. Say in the summary that the person " +
+                "must revoke it and make a new one: whoever could read the repository has it, and taking it out of the code does not take it back." + reviewed,
+            SecurityFinding.Config =>
+                $"Fix this configuration finding in {where} ({f.Rule}): {f.Title}.\n\n{f.Fix}\n\nKeep what the configuration is for working, and say what changes for whoever runs it." + reviewed,
+            _ =>
+                $"Fix this security weakness in {where}: {f.Cwe} ({f.CweTitle}), {f.Severity}. {f.Title}\n\n" +
+                (f.SinkCode.Length > 0 ? $"The line, as the review read it:\n```\n{f.SinkCode}\n```\n" : "") +
+                (f.Source is { Length: > 0 } src ? $"Where outside data comes in: {src}\n" : "") +
+                (f.Flow.Length > 0 ? $"Its path to the sink:\n{f.Flow}\n" : "") +
+                (f.Exploit.Length > 0 ? $"How it could be exploited: {f.Exploit}\n" : "") +
+                (f.Fix.Length > 0 ? $"The fix the review suggests: {f.Fix}\n" : "") +
+                "\nFirst write a test that shows the weakness where one can be written (a request that injects, a path that escapes its folder, a " +
+                "redirect that leaves the site), and see it fail. Then make the change the references describe: a parameterised query rather than an " +
+                "escaped string, an allow-list rather than a deny-list, encoding where the data is written. Run the tests, the new one with them." +
+                reviewed + references,
+        };
     }
 
     [GeneratedRegex(@"^[A-Za-z0-9_.\-]+(/[A-Za-z0-9_.\-]+)+$")]
