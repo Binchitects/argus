@@ -128,15 +128,23 @@ public class Samples {
     }
 
     void crypto() throws Exception {
-        // ruleid: java-weak-crypto
+        // ruleid: java-weak-hash
         MessageDigest.getInstance("MD5");
+        // ruleid: java-weak-hash
+        java.security.MessageDigest.getInstance("SHA1", "SUN");
+        // ok: java-weak-hash
+        java.security.MessageDigest.getInstance("SHA-512");
         // ruleid: java-weak-crypto
         Cipher.getInstance("AES/ECB/PKCS5Padding");
+        // ruleid: java-weak-crypto
+        javax.crypto.Cipher.getInstance("DES/CBC/PKCS5Padding", java.security.Security.getProvider("SunJCE"));
+        // ok: java-weak-crypto
+        javax.crypto.Cipher.getInstance("AES/CBC/PKCS5Padding");
         // ruleid: java-weak-crypto
         Cipher.getInstance("AES");
         // ok: java-weak-crypto
         Cipher.getInstance("AES/GCM/NoPadding");
-        // ok: java-weak-crypto
+        // ok: java-weak-crypto, java-weak-hash
         MessageDigest.getInstance("SHA-256");
     }
 
@@ -148,6 +156,76 @@ public class Samples {
         int jitter = random.nextInt(100);
         // ok: java-predictable-secret
         String apiKey = Long.toHexString(new SecureRandom().nextLong());
+    }
+
+    void remembered(HttpServletRequest req, HttpServletResponse resp) {
+        double value = new java.util.Random().nextDouble();
+        String remember = Double.toString(value).substring(2);
+        // ruleid: java-predictable-value-kept
+        javax.servlet.http.Cookie cookie = new javax.servlet.http.Cookie("rememberMe", remember);
+        // ruleid: java-predictable-value-kept
+        req.getSession().setAttribute("rememberMe", remember);
+        byte[] bytes = new byte[16];
+        new SecureRandom().nextBytes(bytes);
+        // ok: java-predictable-value-kept
+        req.getSession().setAttribute("rememberMe", java.util.Base64.getEncoder().encodeToString(bytes));
+    }
+
+    void outside(HttpServletRequest request, HttpServletResponse response, java.sql.Connection conn) throws Exception {
+        String header = request.getHeaders("referer").nextElement();
+        String bar = new Helper().doSomething(header);
+        // ruleid: java-path-from-request
+        java.io.FileInputStream in = new java.io.FileInputStream(new java.io.File("/srv/files/", bar));
+        // ruleid: java-path-from-request
+        java.nio.file.Files.newInputStream(java.nio.file.Paths.get("/srv/files/" + bar));
+        Runtime r = Runtime.getRuntime();
+        // ruleid: java-command-from-request, java-command-from-data
+        r.exec("echo " + bar);
+        // ruleid: java-sql-from-request
+        conn.prepareCall("{call lookup('" + bar + "')}");
+        // ruleid: java-html-from-request
+        response.getWriter().format(java.util.Locale.US, bar, "x");
+        // ok: java-html-from-request
+        response.getWriter().print(org.owasp.esapi.ESAPI.encoder().encodeForHTML(bar));
+        javax.naming.directory.DirContext ctx = new javax.naming.directory.InitialDirContext();
+        // ruleid: java-ldap-from-request
+        ctx.search("ou=users", "(uid=" + bar + ")", new javax.naming.directory.SearchControls());
+        // ok: java-ldap-from-request
+        ctx.search("ou=users", "(uid={0})", new Object[] {bar}, new javax.naming.directory.SearchControls());
+        javax.xml.xpath.XPath xp = javax.xml.xpath.XPathFactory.newInstance().newXPath();
+        // ruleid: java-xpath-from-request
+        xp.evaluate("/users/user[@name='" + bar + "']", new org.xml.sax.InputSource(in));
+        // ruleid: java-session-from-request
+        request.getSession().setAttribute("userid", bar);
+        // ok: java-session-from-request
+        request.getSession().setAttribute("userid", "guest");
+    }
+
+    void socket(java.sql.Statement st) throws Exception {
+        java.net.Socket socket = new java.net.Socket("host.example.org", 39544);
+        BufferedReader reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), "UTF-8"));
+        String data = reader.readLine();
+        // ruleid: java-sql-from-request, java-sql-built-from-strings
+        st.executeQuery("SELECT * FROM users WHERE name = '" + data + "'");
+    }
+
+    void cookies(HttpServletResponse response) {
+        javax.servlet.http.Cookie open = new javax.servlet.http.Cookie("session", "x");
+        // ruleid: java-cookie-not-secure
+        open.setSecure(false);
+        // ruleid: java-cookie-not-secure
+        response.addCookie(open);
+        javax.servlet.http.Cookie closed = new javax.servlet.http.Cookie("session", "x");
+        closed.setSecure(true);
+        closed.setHttpOnly(true);
+        // ok: java-cookie-not-secure
+        response.addCookie(closed);
+    }
+
+    static class Helper {
+        String doSomething(String param) {
+            return param.split(" ")[0];
+        }
     }
 
     void security(HttpSecurity http) throws Exception {

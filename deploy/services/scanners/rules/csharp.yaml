@@ -63,10 +63,30 @@ rules:
           - pattern: $CTX.Request.Headers[...]
           - pattern: Request.Body
           - pattern: $CTX.Request.Body
+          - patterns:
+              - pattern-either:
+                  - pattern: (System.Web.HttpRequest $R).$GET
+                  - pattern: (Microsoft.AspNetCore.Http.HttpRequest $R).$GET
+              - metavariable-regex:
+                  metavariable: $GET
+                  regex: ^(Query|QueryString|Form|Headers|Cookies|Params|RouteValues|ServerVariables|Body|InputStream)$
+          # Outside data that is not a request: a socket's stream, a download, the console, the command line.
+          - pattern: (System.Net.Sockets.TcpClient $T).GetStream()
+          - pattern: (System.Net.Sockets.Socket $S).Receive(...)
+          - pattern: (System.Net.WebClient $W).$GET(...)
+          - pattern: Console.ReadLine()
+          - patterns:
+              - pattern-inside: |
+                  static void Main(string[] $ARGS) { ... }
+              - pattern: $ARGS
     pattern-sinks:
       - patterns:
           - pattern-either:
-              - pattern: new $CMD($Q, ...)
+              - patterns:
+                  - pattern: new $CMD($Q, ...)
+                  - metavariable-regex:
+                      metavariable: $CMD
+                      regex: ^(SqlCommand|NpgsqlCommand|MySqlCommand|SqliteCommand|OracleCommand|OleDbCommand|OdbcCommand|SQLiteCommand|SqlDataAdapter)$
               - pattern: $C.CommandText = $Q
               - pattern: $DB.FromSqlRaw($Q, ...)
               - pattern: $DB.ExecuteSqlRaw($Q, ...)
@@ -167,6 +187,21 @@ rules:
       iterations, or Argon2).
     metadata: { cwe: CWE-327, severity: low, confidence: medium }
     pattern-either:
+      - pattern: DES.Create(...)
+      - pattern: TripleDES.Create(...)
+      - pattern: RC2.Create(...)
+      - pattern: new DESCryptoServiceProvider(...)
+      - pattern: new TripleDESCryptoServiceProvider(...)
+      - pattern: $A.Mode = CipherMode.ECB
+
+  - id: csharp-weak-hash
+    languages: [csharp]
+    severity: INFO
+    message: >-
+      A broken hash: MD5 and SHA-1 collide at will, so neither proves data unchanged nor stands for a password. Use
+      SHA-256 or better, and for passwords a password hash (PBKDF2 with many iterations, or Argon2).
+    metadata: { cwe: CWE-328, severity: low, confidence: high }
+    pattern-either:
       - pattern: MD5.Create(...)
       - pattern: SHA1.Create(...)
       - pattern: MD5.HashData(...)
@@ -174,12 +209,11 @@ rules:
       - pattern: new MD5CryptoServiceProvider(...)
       - pattern: new SHA1CryptoServiceProvider(...)
       - pattern: new SHA1Managed(...)
-      - pattern: DES.Create(...)
-      - pattern: TripleDES.Create(...)
-      - pattern: RC2.Create(...)
-      - pattern: new DESCryptoServiceProvider(...)
-      - pattern: new TripleDESCryptoServiceProvider(...)
-      - pattern: $A.Mode = CipherMode.ECB
+      - patterns:
+          - pattern: HashAlgorithm.Create("$ALG")
+          - metavariable-regex:
+              metavariable: $ALG
+              regex: (?i)^(MD5|SHA1|SHA)$
 
   - id: csharp-predictable-secret
     languages: [csharp]
@@ -197,7 +231,7 @@ rules:
           - pattern: $NAME = <... Random.Shared.$M(...) ...>;
       - metavariable-regex:
           metavariable: $NAME
-          regex: (?i).*(token|secret|password|passwd|nonce|otp|salt|apikey|api_key|sessionid|resetcode).*
+          regex: (?i).*(token|secret|password|passwd|nonce|otp|salt|apikey|api_key|key$|session|remember|csrf|resetcode).*
 
   - id: csharp-jwt-signature-not-required
     languages: [csharp]
@@ -230,6 +264,19 @@ rules:
               - pattern: PhysicalFile($P, ...)
               - pattern: new FileStream($P, ...)
               - pattern: Directory.$F($P, ...)
+              - pattern: new FileInfo($P)
+              - pattern: new DirectoryInfo($P)
+          - focus-metavariable: $P
+      - patterns:
+          - pattern-either:
+              - pattern: new StreamReader($P, ...)
+              - pattern: new StreamWriter($P, ...)
+          - metavariable-pattern:
+              metavariable: $P
+              pattern-either:
+                - pattern: $A + $B
+                - pattern: Path.Combine(...)
+                - pattern: (string $S)
           - focus-metavariable: $P
 
   - id: csharp-redirect-from-request
@@ -266,3 +313,107 @@ rules:
               - pattern: new HttpRequestMessage($M, $U)
               - pattern: WebRequest.Create($U)
           - focus-metavariable: $U
+
+  - id: csharp-html-from-request
+    mode: taint
+    languages: [csharp]
+    severity: WARNING
+    message: >-
+      Data from outside is written into the page unencoded, where it runs as script (cross-site scripting). Encode
+      it for HTML (HttpUtility.HtmlEncode, HtmlEncoder.Default.Encode), or let Razor write it.
+    metadata: { cwe: CWE-79, severity: medium, confidence: high }
+    pattern-sources: *csharp-request
+    pattern-sanitizers:
+      - pattern: HttpUtility.HtmlEncode(...)
+      - pattern: HttpUtility.HtmlAttributeEncode(...)
+      - pattern: WebUtility.HtmlEncode(...)
+      - pattern: HtmlEncoder.Default.Encode(...)
+      - pattern: $SERVER.HtmlEncode(...)
+      - pattern: AntiXssEncoder.HtmlEncode(...)
+    pattern-sinks:
+      - pattern-either:
+          - pattern: (System.Web.HttpResponse $R).Write(...)
+          - pattern: (Microsoft.AspNetCore.Http.HttpResponse $R).WriteAsync(...)
+          - pattern: Response.Write(...)
+          - pattern: (System.Web.HttpResponse $R).StatusDescription = $X
+          - pattern: (System.Web.HttpResponse $R).AddHeader(...)
+
+  - id: csharp-ldap-from-request
+    mode: taint
+    languages: [csharp]
+    severity: ERROR
+    message: >-
+      Data from outside reaches an LDAP search filter: ( ) * and | in it change what is searched for (LDAP injection).
+      Encode each value for a filter (the AntiXSS library's Encoder.LdapFilterEncode) before putting it in.
+    metadata: { cwe: CWE-90, severity: high, confidence: high }
+    pattern-sources: *csharp-request
+    pattern-sanitizers:
+      - pattern: Encoder.LdapFilterEncode(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: (System.DirectoryServices.DirectorySearcher $S).Filter = $F
+              - pattern: new DirectorySearcher($E, $F, ...)
+              - pattern: new SearchRequest($BASE, $F, ...)
+          - focus-metavariable: $F
+
+  - id: csharp-xpath-from-request
+    mode: taint
+    languages: [csharp]
+    severity: ERROR
+    message: >-
+      Data from outside reaches an XPath expression: a quote in it changes what the query selects (XPath injection).
+      Compile the expression once with a variable (XsltArgumentList, a custom XsltContext) and pass the value to it.
+    metadata: { cwe: CWE-643, severity: high, confidence: high }
+    pattern-sources: *csharp-request
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: (System.Xml.XPath.XPathNavigator $N).$M($Q, ...)
+              - pattern: (System.Xml.XmlNode $N).$M($Q, ...)
+              - pattern: (System.Xml.XmlDocument $N).$M($Q, ...)
+              - pattern: XPathExpression.Compile($Q, ...)
+          - metavariable-regex:
+              metavariable: $M
+              regex: ^(Compile|Evaluate|Select|SelectSingleNode|SelectNodes|Matches)$
+          - focus-metavariable: $Q
+
+  - id: csharp-code-from-request
+    mode: taint
+    languages: [csharp]
+    severity: ERROR
+    message: >-
+      Data from outside becomes code that is compiled and run: it runs what the data says. Never compile text built
+      from outside data; pick among fixed operations instead.
+    metadata: { cwe: CWE-94, severity: critical, confidence: high }
+    pattern-sources: *csharp-request
+    pattern-propagators:
+      - pattern: $SB.Append($X)
+        from: $X
+        to: $SB
+      - pattern: $SB.AppendLine($X)
+        from: $X
+        to: $SB
+    pattern-sinks:
+      - pattern-either:
+          - pattern: $P.CompileAssemblyFromSource(...)
+          - pattern: CSharpScript.EvaluateAsync(...)
+          - pattern: CSharpScript.RunAsync(...)
+          - pattern: CSharpScript.Create(...)
+          - pattern: Assembly.Load(...)
+
+  - id: csharp-cookie-not-secure
+    languages: [csharp]
+    severity: WARNING
+    message: >-
+      A cookie sent without its Secure flag also goes over plain HTTP, where anyone on the way reads it. Set Secure
+      (and HttpOnly) to true before adding it.
+    metadata: { cwe: CWE-614, severity: medium, confidence: medium }
+    pattern-either:
+      - pattern: $C.Secure = false
+      - pattern: 'new CookieOptions { ..., Secure = false, ... }'
+      - patterns:
+          - pattern: $RESP.Cookies.Add($C);
+          - pattern-not-inside: |
+              $C.Secure = true;
+              ...

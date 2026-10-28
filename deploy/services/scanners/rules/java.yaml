@@ -38,13 +38,26 @@ rules:
     metadata: { cwe: CWE-89, severity: critical, confidence: high }
     pattern-sources: &java-request
       - pattern-either:
-          - pattern: (HttpServletRequest $R).getParameter(...)
-          - pattern: (HttpServletRequest $R).getParameterValues(...)
-          - pattern: (HttpServletRequest $R).getHeader(...)
-          - pattern: (HttpServletRequest $R).getQueryString()
-          - pattern: (HttpServletRequest $R).getCookies()
-          - pattern: (HttpServletRequest $R).getInputStream()
-          - pattern: (HttpServletRequest $R).getReader()
+          - patterns:
+              - pattern: (javax.servlet.http.HttpServletRequest $R).$GET(...)
+              - metavariable-regex:
+                  metavariable: $GET
+                  regex: ^(getParameter|getParameterValues|getParameterMap|getParameterNames|getHeader|getHeaders|getHeaderNames|getQueryString|getCookies|getInputStream|getReader|getPart|getParts|getPathInfo)$
+          - patterns:
+              - pattern: (jakarta.servlet.http.HttpServletRequest $R).$GET(...)
+              - metavariable-regex:
+                  metavariable: $GET
+                  regex: ^(getParameter|getParameterValues|getParameterMap|getParameterNames|getHeader|getHeaders|getHeaderNames|getQueryString|getCookies|getInputStream|getReader|getPart|getParts|getPathInfo)$
+          # Outside data that is not a request: a socket's or a URL's stream, the console, the command line.
+          - pattern: (java.net.Socket $S).getInputStream()
+          - pattern: (java.net.URLConnection $U).getInputStream()
+          - pattern: (java.net.HttpURLConnection $U).getInputStream()
+          - pattern: System.in
+          - pattern: (java.io.Console $C).readLine(...)
+          - patterns:
+              - pattern-inside: |
+                  public static void main(String[] $ARGS) { ... }
+              - pattern: $ARGS
           - patterns:
               - pattern-inside: |
                   $RET $M(..., @RequestParam $T $P, ...) { ... }
@@ -64,14 +77,10 @@ rules:
     pattern-sinks:
       - patterns:
           - pattern-either:
-              - pattern: $S.executeQuery($Q, ...)
-              - pattern: $S.executeUpdate($Q, ...)
-              - pattern: $S.execute($Q, ...)
-              - pattern: $C.prepareStatement($Q, ...)
-              - pattern: $EM.createQuery($Q, ...)
-              - pattern: $EM.createNativeQuery($Q, ...)
-              - pattern: $J.queryForObject($Q, ...)
-              - pattern: $J.queryForList($Q, ...)
+              - pattern: $S.$RUN($Q, ...)
+          - metavariable-regex:
+              metavariable: $RUN
+              regex: ^(executeQuery|executeUpdate|execute|executeLargeUpdate|addBatch|prepareStatement|prepareCall|nativeSQL|createQuery|createNativeQuery|queryForObject|queryForList|queryForMap|queryForRowSet|queryForLong|queryForInt|query|update|batchUpdate)$
           - focus-metavariable: $Q
 
   - id: java-command-from-data
@@ -83,9 +92,12 @@ rules:
     metadata: { cwe: CWE-78, severity: high, confidence: medium }
     pattern-either:
       - patterns:
-          - pattern: Runtime.getRuntime().exec($X, ...)
-          - pattern-not: Runtime.getRuntime().exec("...", ...)
-          - pattern-not: Runtime.getRuntime().exec(new String[] {"...", ...}, ...)
+          - pattern-either:
+              - pattern: Runtime.getRuntime().exec($X, ...)
+              - pattern: (Runtime $R).exec($X, ...)
+              - pattern: (java.lang.Runtime $R).exec($X, ...)
+          - pattern-not: $RT.exec("...", ...)
+          - pattern-not: $RT.exec(new String[] {"...", ...}, ...)
       - pattern: new ProcessBuilder("sh", "-c", $X)
       - pattern: new ProcessBuilder("/bin/sh", "-c", $X)
       - pattern: new ProcessBuilder("bash", "-c", $X)
@@ -105,7 +117,12 @@ rules:
       - patterns:
           - pattern-either:
               - pattern: Runtime.getRuntime().exec($C, ...)
+              - pattern: (Runtime $R).exec($C, ...)
+              - pattern: (java.lang.Runtime $R).exec($C, ...)
               - pattern: new ProcessBuilder(..., $C, ...)
+              - pattern: new java.lang.ProcessBuilder(..., $C, ...)
+              - pattern: (ProcessBuilder $P).command(..., $C, ...)
+              - pattern: (java.lang.ProcessBuilder $P).command(..., $C, ...)
           - focus-metavariable: $C
 
   - id: java-unsafe-deserialization
@@ -192,21 +209,34 @@ rules:
       means) shows the plaintext's patterns. Use SHA-256 or better, AES/GCM/NoPadding, and for passwords a password
       hash (PBKDF2, bcrypt, Argon2).
     metadata: { cwe: CWE-327, severity: low, confidence: medium }
-    pattern-either:
-      - pattern: MessageDigest.getInstance("MD5")
-      - pattern: MessageDigest.getInstance("SHA-1")
-      - pattern: MessageDigest.getInstance("SHA1")
-      - pattern: Cipher.getInstance("AES")
-      - patterns:
-          - pattern: Cipher.getInstance("$ALG")
-          - metavariable-regex:
-              metavariable: $ALG
-              regex: (?i)^(DES|DESede|RC2|RC4|Blowfish|.*/ECB/.*)
-      - patterns:
+    patterns:
+      - pattern-either:
           - pattern: Cipher.getInstance("$ALG", ...)
+          - pattern: javax.crypto.Cipher.getInstance("$ALG", ...)
+      - metavariable-regex:
+          metavariable: $ALG
+          regex: (?i)^(AES|DES|DESede|TripleDES|RC2|RC4|ARCFOUR|Blowfish|.*/ECB(/.*)?)$|^(DES|DESede|RC2|RC4|Blowfish)/
+
+  - id: java-weak-hash
+    languages: [java]
+    severity: INFO
+    message: >-
+      A broken hash: MD5 and SHA-1 collide at will, so neither proves data unchanged nor stands for a password. Use
+      SHA-256 or better, and for passwords a password hash (PBKDF2, bcrypt, Argon2).
+    metadata: { cwe: CWE-328, severity: low, confidence: high }
+    pattern-either:
+      - patterns:
+          - pattern-either:
+              - pattern: MessageDigest.getInstance("$ALG", ...)
+              - pattern: java.security.MessageDigest.getInstance("$ALG", ...)
           - metavariable-regex:
               metavariable: $ALG
-              regex: (?i)^(DES|DESede|RC2|RC4|Blowfish|.*/ECB/.*)
+              regex: (?i)^(MD2|MD4|MD5|SHA|SHA-?1)$
+      - pattern: DigestUtils.md5(...)
+      - pattern: DigestUtils.md5Hex(...)
+      - pattern: DigestUtils.sha1(...)
+      - pattern: DigestUtils.sha1Hex(...)
+      - pattern: DigestUtils.shaHex(...)
 
   - id: java-predictable-secret
     languages: [java]
@@ -216,13 +246,39 @@ rules:
     metadata: { cwe: CWE-338, severity: medium, confidence: medium }
     patterns:
       - pattern-either:
-          - pattern: $T $NAME = <... (Random $R).$M(...) ...>;
+          - pattern: $T $NAME = <... (java.util.Random $R).$M(...) ...>;
           - pattern: $T $NAME = <... new Random().$M(...) ...>;
           - pattern: $T $NAME = <... Math.random() ...>;
           - pattern: $T $NAME = <... ThreadLocalRandom.current().$M(...) ...>;
       - metavariable-regex:
           metavariable: $NAME
-          regex: (?i).*(token|secret|password|passwd|nonce|otp|salt|apikey|api_key|sessionid|resetcode).*
+          regex: (?i).*(token|secret|password|passwd|nonce|otp|salt|apikey|api_key|key$|session|remember|csrf|resetcode).*
+
+  - id: java-predictable-value-kept
+    mode: taint
+    languages: [java]
+    severity: WARNING
+    message: >-
+      A value from java.util.Random or Math.random() becomes a cookie, a session's value or a header, where it stands
+      for someone: it is predictable from earlier output. Use SecureRandom.
+    metadata: { cwe: CWE-330, severity: medium, confidence: high }
+    pattern-sources:
+      - pattern-either:
+          - pattern: new Random(...).$M(...)
+          - pattern: new java.util.Random(...).$M(...)
+          - pattern: (java.util.Random $R).$M(...)
+          - pattern: Math.random()
+          - pattern: java.lang.Math.random()
+          - pattern: ThreadLocalRandom.current().$M(...)
+    pattern-sinks:
+      - pattern-either:
+          - pattern: new Cookie(...)
+          - pattern: new javax.servlet.http.Cookie(...)
+          - pattern: $REQ.getSession().setAttribute(...)
+          - pattern: $REQ.getSession().putValue(...)
+          - pattern: (javax.servlet.http.HttpSession $S).setAttribute(...)
+          - pattern: (javax.servlet.http.HttpServletResponse $R).addHeader(...)
+          - pattern: (javax.servlet.http.HttpServletResponse $R).setHeader(...)
 
   - id: java-path-from-request
     mode: taint
@@ -241,12 +297,20 @@ rules:
           - pattern-either:
               - pattern: new File($F, ...)
               - pattern: new File($D, $F)
-              - pattern: new FileInputStream($F)
-              - pattern: new FileOutputStream($F, ...)
-              - pattern: new FileReader($F)
-              - pattern: Paths.get($F, ...)
-              - pattern: Path.of($F, ...)
+              - pattern: new java.io.File($F, ...)
+              - pattern: new java.io.File($D, $F)
+              - patterns:
+                  - pattern: new $STREAM($F, ...)
+                  - metavariable-regex:
+                      metavariable: $STREAM
+                      regex: ^(java\.io\.)?(FileInputStream|FileOutputStream|FileReader|FileWriter|RandomAccessFile|PrintWriter|PrintStream)$
+              - pattern: Paths.get(..., $F, ...)
+              - pattern: java.nio.file.Paths.get(..., $F, ...)
+              - pattern: Path.of(..., $F, ...)
+              - pattern: java.nio.file.Path.of(..., $F, ...)
               - pattern: Files.$M($F, ...)
+              - pattern: java.nio.file.Files.$M($F, ...)
+              - pattern: (java.nio.file.Path $P).resolve($F)
           - focus-metavariable: $F
 
   - id: java-redirect-from-request
@@ -261,7 +325,8 @@ rules:
     pattern-sinks:
       - patterns:
           - pattern-either:
-              - pattern: (HttpServletResponse $R).sendRedirect($U)
+              - pattern: (javax.servlet.http.HttpServletResponse $R).sendRedirect($U)
+              - pattern: (jakarta.servlet.http.HttpServletResponse $R).sendRedirect($U)
               - pattern: '"redirect:" + $U'
           - focus-metavariable: $U
 
@@ -293,19 +358,96 @@ rules:
     metadata: { cwe: CWE-79, severity: medium, confidence: high }
     pattern-sources: *java-request
     pattern-sanitizers:
-      - pattern: Encode.forHtml(...)
+      - pattern: Encode.$FOR(...)
+      - pattern: $E.encodeForHTML(...)
+      - pattern: $E.encodeForHTMLAttribute(...)
+      - pattern: $E.encodeForJavaScript(...)
       - pattern: StringEscapeUtils.escapeHtml4(...)
+      - pattern: StringEscapeUtils.escapeHtml(...)
       - pattern: HtmlUtils.htmlEscape(...)
     pattern-sinks:
       - patterns:
           - pattern-either:
-              - pattern: (HttpServletResponse $R).getWriter().print($X)
-              - pattern: (HttpServletResponse $R).getWriter().println($X)
-              - pattern: (HttpServletResponse $R).getWriter().write($X)
-              - pattern: (PrintWriter $W).print($X)
-              - pattern: (PrintWriter $W).println($X)
-              - pattern: (PrintWriter $W).write($X)
-          - focus-metavariable: $X
+              - pattern: (javax.servlet.http.HttpServletResponse $R).getWriter().$WRITE(...)
+              - pattern: (jakarta.servlet.http.HttpServletResponse $R).getWriter().$WRITE(...)
+              - pattern: (java.io.PrintWriter $W).$WRITE(...)
+          - metavariable-regex:
+              metavariable: $WRITE
+              regex: ^(print|println|write|printf|format|append)$
+
+  - id: java-ldap-from-request
+    mode: taint
+    languages: [java]
+    severity: ERROR
+    message: >-
+      Data from outside reaches an LDAP search filter: ( ) * and | in it change what is searched for (LDAP injection).
+      Encode each value for a filter (ESAPI's encodeForLDAP, Spring's LdapEncoder.filterEncode), or pass it as one
+      of the search's filter arguments ({0}).
+    metadata: { cwe: CWE-90, severity: high, confidence: high }
+    pattern-sources: *java-request
+    pattern-sanitizers:
+      - pattern: $E.encodeForLDAP(...)
+      - pattern: LdapEncoder.filterEncode(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: (javax.naming.directory.DirContext $C).search($BASE, $F, ...)
+              - pattern: (javax.naming.directory.InitialDirContext $C).search($BASE, $F, ...)
+              - pattern: (javax.naming.ldap.LdapContext $C).search($BASE, $F, ...)
+              - pattern: (javax.naming.ldap.InitialLdapContext $C).search($BASE, $F, ...)
+              - pattern: (org.springframework.ldap.core.LdapTemplate $T).search($BASE, $F, ...)
+          - focus-metavariable: $F
+
+  - id: java-xpath-from-request
+    mode: taint
+    languages: [java]
+    severity: ERROR
+    message: >-
+      Data from outside reaches an XPath expression: a quote in it changes what the query selects (XPath injection).
+      Bind the value as an XPath variable (XPathVariableResolver), or encode it for XPath.
+    metadata: { cwe: CWE-643, severity: high, confidence: high }
+    pattern-sources: *java-request
+    pattern-sanitizers:
+      - pattern: $E.encodeForXPath(...)
+    pattern-sinks:
+      - patterns:
+          - pattern-either:
+              - pattern: (javax.xml.xpath.XPath $X).evaluate($Q, ...)
+              - pattern: (javax.xml.xpath.XPath $X).compile($Q)
+              - pattern: (javax.xml.xpath.XPath $X).evaluateExpression($Q, ...)
+          - focus-metavariable: $Q
+
+  - id: java-session-from-request
+    mode: taint
+    languages: [java]
+    severity: WARNING
+    message: >-
+      Data from the request is kept in the session as is, where the rest of the application trusts it as its own
+      (a trust boundary crossed). Check it first, and keep in the session only what the server decided.
+    metadata: { cwe: CWE-501, severity: medium, confidence: medium }
+    pattern-sources: *java-request
+    pattern-sinks:
+      - pattern-either:
+          - pattern: $REQ.getSession().setAttribute(...)
+          - pattern: $REQ.getSession().putValue(...)
+          - pattern: (javax.servlet.http.HttpSession $S).setAttribute(...)
+          - pattern: (javax.servlet.http.HttpSession $S).putValue(...)
+
+  - id: java-cookie-not-secure
+    languages: [java]
+    severity: WARNING
+    message: >-
+      A cookie sent without its Secure flag also goes over plain HTTP, where anyone on the way reads it. Call
+      setSecure(true) (and setHttpOnly(true)) before adding it.
+    metadata: { cwe: CWE-614, severity: medium, confidence: medium }
+    pattern-either:
+      - pattern: (javax.servlet.http.Cookie $C).setSecure(false)
+      - pattern: (jakarta.servlet.http.Cookie $C).setSecure(false)
+      - patterns:
+          - pattern: (javax.servlet.http.HttpServletResponse $R).addCookie($C);
+          - pattern-not-inside: |
+              $C.setSecure(true);
+              ...
 
   - id: java-spring-csrf-disabled
     languages: [java]

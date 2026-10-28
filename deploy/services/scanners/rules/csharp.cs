@@ -108,12 +108,16 @@ public class Samples : Controller
 
     public void Crypto(byte[] data)
     {
-        // ruleid: csharp-weak-crypto
+        // ruleid: csharp-weak-hash
         using var md5 = MD5.Create();
-        // ruleid: csharp-weak-crypto
+        // ruleid: csharp-weak-hash
         var sha1 = SHA1.HashData(data);
-        // ok: csharp-weak-crypto
+        // ok: csharp-weak-crypto, csharp-weak-hash
         var sha256 = SHA256.HashData(data);
+        // ruleid: csharp-weak-crypto
+        using var des = DES.Create();
+        // ok: csharp-weak-crypto
+        using var aes = Aes.Create();
     }
 
     public void Secrets()
@@ -173,5 +177,76 @@ public class Samples : Controller
     {
         // ok: csharp-request-to-url-from-request
         return await http.GetStringAsync("https://example.com/status");
+    }
+
+    // System.Web's request, and outside data that is not a request.
+    public void Web(System.Web.HttpRequest req, System.Web.HttpResponse resp, SqlConnection conn)
+    {
+        string data = req.QueryString["id"];
+        // ruleid: csharp-html-from-request
+        resp.Write("<br>Hello " + data);
+        // ok: csharp-html-from-request
+        resp.Write("<br>Hello " + System.Web.HttpUtility.HtmlEncode(data));
+        // ruleid: csharp-redirect-from-request
+        resp.Redirect(data);
+        var de = new System.DirectoryServices.DirectoryEntry("LDAP://example.org");
+        var search = new System.DirectoryServices.DirectorySearcher(de);
+        // ruleid: csharp-ldap-from-request
+        search.Filter = "(&(objectClass=user)(employeename=" + data + "))";
+        // ok: csharp-ldap-from-request
+        search.Filter = "(&(objectClass=user)(employeename=guest))";
+        var doc = new XmlDocument();
+        System.Xml.XPath.XPathNavigator nav = doc.CreateNavigator();
+        // ruleid: csharp-xpath-from-request
+        var secret = (string)nav.Evaluate("//users/user[name/text()='" + data + "']/secret/text()");
+        // ok: csharp-xpath-from-request
+        var plain = (string)nav.Evaluate("//users/user[name/text()='guest']/secret/text()");
+    }
+
+    public void Socket(SqlConnection conn)
+    {
+        string data;
+        using (var tcpConn = new System.Net.Sockets.TcpClient("host.example.org", 39544))
+        {
+            System.Net.Sockets.TcpClient client = tcpConn;
+            using (StreamReader sr = new StreamReader(client.GetStream()))
+            {
+                data = sr.ReadLine();
+            }
+        }
+        using (SqlCommand command = new SqlCommand(null, conn))
+        {
+            // ruleid: csharp-sql-from-request, csharp-sql-built-from-strings
+            command.CommandText = "insert into users (status) values ('updated') where name='" + data + "'";
+        }
+        string root = "C:\\uploads\\";
+        // ruleid: csharp-path-from-request
+        using (StreamReader sr = new StreamReader(root + data)) { }
+        var code = new System.Text.StringBuilder("public class Calculator { public int Sum() { return 10 + ");
+        code.Append(data);
+        code.Append("; } }");
+        var provider = System.CodeDom.Compiler.CodeDomProvider.CreateProvider("CSharp");
+        // ruleid: csharp-code-from-request
+        provider.CompileAssemblyFromSource(new System.CodeDom.Compiler.CompilerParameters(), code.ToString());
+    }
+
+    public void Console2(SqlConnection conn)
+    {
+        string data = Console.ReadLine();
+        // ruleid: csharp-command-from-data
+        Process.Start(data);
+    }
+
+    public void Cookies(System.Web.HttpResponse resp)
+    {
+        var open = new System.Web.HttpCookie("SecretMessage", "test");
+        // ruleid: csharp-cookie-not-secure
+        resp.Cookies.Add(open);
+        var closed = new System.Web.HttpCookie("SecretMessage", "test");
+        closed.Secure = true;
+        // ok: csharp-cookie-not-secure
+        resp.Cookies.Add(closed);
+        // ruleid: csharp-cookie-not-secure
+        closed.Secure = false;
     }
 }
