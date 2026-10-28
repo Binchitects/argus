@@ -1986,6 +1986,17 @@ say, except what is left for later:
 - Fix it running the scanners and the review again on its change, and many
   findings fixed at once, one branch each.
 
+Since done (2026-10-28, downloads approved that day): the security review
+measured on Juliet for Java and C# and the OWASP Benchmark
+([security-review.md](measurements/security-review.md)), and what the
+measuring found fixed (the rules broadened, the prompt's example copied, a
+scanner's match the model clears kept open); the security review's findings
+in Code Arena's Problems with Fix; Fix it checking its change with the
+scanners and the review; Fix them for many findings at once. Left: the
+review's own sinks for the forms the measuring showed they miss (C#'s
+`new StreamReader(` and `Response.Write`, Java's `new java.io.File(`,
+LDAP and XPath); Fix it measured on real CVE fixes (CVEfixes, needs a yes).
+
 The person asked (2026-10-27, after v7.3.0) for "full GRC and related
 evaluation certifications requirement", and for quantum computing and the
 sciences around it in the science lab, both in this release with the security
