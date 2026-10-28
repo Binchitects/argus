@@ -3,6 +3,7 @@ using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using System.Text.Json;
 
 namespace Llm.Tests;
@@ -104,6 +105,106 @@ public sealed class DownloadTests(AppFixture app)
             Assert.Equal(1, code);
             Assert.Contains("does not match its SHA-256: nothing installed", output, StringComparison.Ordinal);
             Assert.False(File.Exists(Path.Combine(dir, "bin", "code-arena")));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    /// <summary>A CA, and a code-signing certificate it signs, as scripts/sign-code-arena.sh makes them.</summary>
+    private static (X509Certificate2 Ca, X509Certificate2 Leaf) CodeSigning(string name)
+    {
+        using var caKey = RSA.Create(2048);
+        var caRequest = new CertificateRequest($"CN={name} CA", caKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        caRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, true, 0, true));
+        caRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign, true));
+        var ca = caRequest.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
+        var key = RSA.Create(2048);
+        var request = new CertificateRequest($"CN=Code Arena ({name})", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+        request.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, true));
+        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([new Oid("1.3.6.1.5.5.7.3.3")], false));
+        using var issued = request.Create(ca, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddMonths(6), [5, 6, 7, 8]);
+        return (ca, issued.CopyWithPrivateKey(key));
+    }
+
+    [Fact]
+    public async Task Signed_builds_are_served_with_their_signature_and_installed_only_when_the_CA_the_machine_trusts_signed_them()
+    {
+        var dir = Directory.CreateTempSubdirectory("signed-").FullName;
+        try
+        {
+            var builds = Path.Combine(dir, "code-arena");
+            var signed = Path.Combine(dir, "signature");
+            var served = Path.Combine(dir, "served", "api", "downloads", "code-arena");
+            Directory.CreateDirectory(Path.Combine(builds, "linux-x64"));
+            Directory.CreateDirectory(Path.Combine(builds, "win-x64"));
+            Directory.CreateDirectory(signed);
+            Directory.CreateDirectory(served);
+            await File.WriteAllTextAsync(Path.Combine(builds, "linux-x64", "code-arena"), "#!/bin/sh\necho code-arena 9.9.9\n");
+            var sum = Convert.ToHexStringLower(SHA256.HashData(await File.ReadAllBytesAsync(Path.Combine(builds, "linux-x64", "code-arena"))));
+            await File.WriteAllTextAsync(Path.Combine(builds, "win-x64", "code-arena.exe"), "MZ pretend!");
+            var winSum = Convert.ToHexStringLower(SHA256.HashData(await File.ReadAllBytesAsync(Path.Combine(builds, "win-x64", "code-arena.exe"))));
+            var sums = Encoding.ASCII.GetBytes($"{sum}  linux-x64/code-arena\n{winSum}  win-x64/code-arena.exe\n");
+            await File.WriteAllBytesAsync(Path.Combine(builds, "SHA256SUMS"), sums);
+            var (ca, leaf) = CodeSigning("test");
+            await File.WriteAllBytesAsync(Path.Combine(signed, "SHA256SUMS"), sums);
+            await File.WriteAllBytesAsync(Path.Combine(signed, "SHA256SUMS.sig"), leaf.GetRSAPrivateKey()!.SignData(sums, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
+            await File.WriteAllTextAsync(Path.Combine(signed, "code-signing.crt"), leaf.ExportCertificatePem() + "\n" + ca.ExportCertificatePem() + "\n");
+            await using var f = app.Create(app.ConnectionStringFor("signed_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
+                new Dictionary<string, string?> { ["Downloads:Directory"] = dir, ["Downloads:SignatureDirectory"] = signed });
+            using var http = f.CreateClient();
+
+            var list = JsonDocument.Parse(await http.GetStringAsync("/api/downloads/code-arena")).RootElement;
+            Assert.Equal(("Code Arena (test)", "test CA"), (list.GetProperty("signature").GetProperty("signer").GetString(), list.GetProperty("signature").GetProperty("issuer").GetString()));
+            Assert.Equal(sums, await http.GetByteArrayAsync("/api/downloads/code-arena/SHA256SUMS"));
+            foreach (var file in new[] { "SHA256SUMS", "SHA256SUMS.sig", "code-signing.crt" })
+            {
+                await File.WriteAllBytesAsync(Path.Combine(served, file), await http.GetByteArrayAsync($"/api/downloads/code-arena/{file}"));
+            }
+            File.Copy(Path.Combine(builds, "linux-x64", "code-arena"), Path.Combine(served, "linux-x64"));
+            var sh = await http.GetStringAsync("/api/downloads/code-arena/install.sh");
+            Assert.Contains("is not the one this Arena's CA signed", sh, StringComparison.Ordinal);
+            var ps1 = await http.GetStringAsync("/api/downloads/code-arena/install.ps1");
+            Assert.Contains("[System.Security.Cryptography.X509Certificates.X509Chain]::new()", ps1, StringComparison.Ordinal);
+            Assert.Contains($"-contains '{winSum}  win-x64/code-arena.exe'", ps1, StringComparison.Ordinal);
+
+            if (OperatingSystem.IsLinux() && System.Runtime.InteropServices.RuntimeInformation.OSArchitecture == System.Runtime.InteropServices.Architecture.X64
+                && File.Exists("/usr/bin/openssl"))
+            {
+                async Task<(int Code, string Out)> RunAsync(X509Certificate2 trusted)
+                {
+                    var file = Path.Combine(dir, "install.sh");
+                    await File.WriteAllTextAsync(file, sh.Replace($"https://{AppFixture.Domain}", "file://" + Path.Combine(dir, "served"), StringComparison.Ordinal));
+                    await File.WriteAllTextAsync(Path.Combine(dir, "trusted.crt"), trusted.ExportCertificatePem() + "\n");
+                    var start = new System.Diagnostics.ProcessStartInfo("sh", file) { RedirectStandardOutput = true, RedirectStandardError = true };
+                    start.Environment["CODE_ARENA_DIR"] = Path.Combine(dir, "bin");
+                    start.Environment["CODE_ARENA_CA"] = Path.Combine(dir, "trusted.crt");
+                    using var run = System.Diagnostics.Process.Start(start)!;
+                    var said = await run.StandardOutput.ReadToEndAsync() + await run.StandardError.ReadToEndAsync();
+                    await run.WaitForExitAsync();
+                    return (run.ExitCode, said);
+                }
+                var (code, output) = await RunAsync(ca);
+                Assert.True(code == 0, output);
+                Assert.Contains("Signed by", output, StringComparison.Ordinal);
+                Assert.True(File.Exists(Path.Combine(dir, "bin", "code-arena")));
+
+                // Signed by a CA the machine does not trust for this Arena: not installed.
+                File.Delete(Path.Combine(dir, "bin", "code-arena"));
+                (code, output) = await RunAsync(CodeSigning("other").Ca);
+                Assert.Equal(1, code);
+                Assert.Contains("is not the one this Arena's CA signed", output, StringComparison.Ordinal);
+                Assert.False(File.Exists(Path.Combine(dir, "bin", "code-arena")));
+            }
+
+            // A signature of another list (made before an upgrade changed the builds) signs nothing.
+            await File.WriteAllTextAsync(Path.Combine(builds, "SHA256SUMS"), $"{new string('f', 64)}  linux-x64/code-arena\n");
+            list = JsonDocument.Parse(await http.GetStringAsync("/api/downloads/code-arena")).RootElement;
+            Assert.Equal(JsonValueKind.Null, list.GetProperty("signature").ValueKind);
+            Assert.Equal(HttpStatusCode.NotFound, (await http.GetAsync("/api/downloads/code-arena/SHA256SUMS.sig")).StatusCode);
+            Assert.Contains("does not sign its builds", await http.GetStringAsync("/api/downloads/code-arena/install.sh"), StringComparison.Ordinal);
         }
         finally
         {

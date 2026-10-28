@@ -384,6 +384,18 @@ dc() {
   # The features on, as .env names them (said outright: the same list compose would read there).
   (cd "$DEPLOY" && env COMPOSE_PROJECT_NAME="$PROJECT" COMPOSE_PROFILES="$(env_get COMPOSE_PROFILES)" ${cf:+COMPOSE_FILE="$cf"} "$ENGINE" compose "$@")
 }
+# Code Arena's builds, as the app serves them, signed with a code-signing certificate of the stack's
+# CA (scripts/sign-code-arena.sh, on the host: no container sees the key). Never fatal: an unsigned
+# build still installs by its SHA-256.
+sign_builds() {
+  [[ -f "$DEPLOY/certs/ca.key" || -f "$DEPLOY/signing/code-signing.crt" ]] || return 0
+  local cf said; cf="$(compose_files)"
+  if said="$(cd "$DEPLOY" && env ENGINE="$ENGINE" COMPOSE_PROJECT_NAME="$PROJECT" COMPOSE_PROFILES="$(env_get COMPOSE_PROFILES)" ${cf:+COMPOSE_FILE="$cf"} sh scripts/sign-code-arena.sh 2>&1)"; then
+    ok "${said##*$'\n'}"
+  else
+    note "Code Arena's builds are not signed: ${said##*$'\n'}"
+  fi
+}
 # Down, once more if the first fails (rootless Podman's network teardown sometimes does).
 dc_down() { dc down "$@" >/dev/null 2>&1 || { sleep 3; dc down "$@" >/dev/null 2>&1; }; }
 # The same compose command, for a person to type in DEPLOY.
@@ -2001,6 +2013,7 @@ cmd_install() {
   fix_started
   wait_healthy || die "the stack is not healthy; repair (or install again) after the cause is fixed"
   check_versions "$BVERSION" || die "the stack does not run $BVERSION as it should; see above"
+  sign_builds
   record_state
   record_kept ${SYNC_KEPT[@]+"${SYNC_KEPT[@]}"} ${SYNC_BESIDE[@]+"${SYNC_BESIDE[@]}"}
   state_set target ""
@@ -2514,6 +2527,7 @@ cmd_upgrade() {
     remove_off_containers do
     wait_healthy || return 1
     check_versions "$BVERSION" || return 1
+    sign_builds
   }
   if ( upgrade_steps ); then :; else failed=1; fi
   BACKUP="$(marker_get backup)"
@@ -2753,6 +2767,7 @@ cmd_repair() {
     return 0
   fi
   if wait_healthy && check_versions "${iv:-$BVERSION}" && [[ $fix_failed -eq 0 ]]; then
+    sign_builds
     [[ -n "$BUNDLE" && -n "$(state_get version)" ]] && record_images
     remove_off_images do
     say ""; say "Repaired: $problems finding(s) dealt with; every service is up and healthy. Features: $(feat_count)."

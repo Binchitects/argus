@@ -14,6 +14,10 @@ export const KEY = 'LLM_SERVICE_API_KEY'
 /** The name the page saves the site's CA certificate under, in the person's home folder. */
 export const CA_FILE = 'arena-ca.crt'
 
+/** The install line's word on the signature: whose certificate signed the builds, which the installer checks with the CA your machine trusts. */
+const signedBy = (c: { codeArena: { signature?: { signer: string; issuer: string } | null } | null }) =>
+  c.codeArena?.signature ? ` and that ${c.codeArena.signature.issuer} signed it (${c.codeArena.signature.signer}; trust that CA first)` : ''
+
 /** A build of Code Arena the app serves (/api/downloads/code-arena). */
 export interface CodeArenaBuild {
   rid: string
@@ -38,7 +42,8 @@ export interface Context {
   /** This Arena's own address, https://DOMAIN. */
   origin: string
   /** Code Arena's builds; null when none could be listed. */
-  codeArena: { version: string; builds: CodeArenaBuild[] } | null
+  /** signature: who signed the builds' list (the stack's CA's code-signing certificate); null: not signed. */
+  codeArena: { version: string; builds: CodeArenaBuild[]; signature?: { signer: string; issuer: string; expires: string } | null } | null
   /** The system the commands are for: a Unix shell (Linux, macOS) or Windows PowerShell. */
   os: System
   /** True when the site's certificate comes from a private CA that tools must be told to trust. */
@@ -155,12 +160,12 @@ export const tools: Tool[] = [
       return [
         unix(c)
           ? {
-              text: `Install it in one line (version ${c.codeArena!.version}): the build for your machine, checked against its SHA-256, in ~/.local/bin.`,
+              text: `Install it in one line (version ${c.codeArena!.version}): the build for your machine, checked against its SHA-256${signedBy(c)}, in ~/.local/bin.`,
               file: 'shell',
               code: `curl -fsSL ${c.origin}/api/downloads/code-arena/install.sh | sh`,
             }
           : {
-              text: `Install it in one line (version ${c.codeArena!.version}), in PowerShell: the build checked against its SHA-256, on your PATH.`,
+              text: `Install it in one line (version ${c.codeArena!.version}), in PowerShell: the build checked against its SHA-256${signedBy(c)}, on your PATH.`,
               file: 'powershell',
               code: `irm ${c.origin}/api/downloads/code-arena/install.ps1 | iex`,
             },

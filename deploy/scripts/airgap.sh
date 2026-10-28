@@ -163,7 +163,7 @@ if [[ $ACTION == pack ]]; then
 
   # This folder's files, relative to it, without secrets, backups, models or keys.
   deploy_files() {
-    local -a prune=(-name backups -o -name certs -o -name .deploytest -o -name __pycache__ -o -name .cache -o -name .git -o -name '.airgap-*')
+    local -a prune=(-name backups -o -name certs -o -name signing -o -name .deploytest -o -name __pycache__ -o -name .cache -o -name .git -o -name '.airgap-*')
     local d
     for d in "$BACKUP_DIR" "$MODELS_DIR"; do
       [[ "$d" == "$ROOT"/* ]] && prune+=(-o -path "./${d#"$ROOT"/}")
@@ -235,7 +235,7 @@ if [[ $ACTION == pack ]]; then
     for ref in "${IMAGES[@]}"; do
       if "$ENGINE" image inspect "$ref" >/dev/null 2>&1; then say "    $ref"; else say "    $ref   NOT ON THIS HOST: build or pull it first"; fi
     done
-    say "  deploy/: ${#FILES[@]} files (left out: .env, backups, models, certs/ and config/traefik/certificate.yml)"
+    say "  deploy/: ${#FILES[@]} files (left out: .env, backups, models, certs/, signing/ and config/traefik/certificate.yml)"
     say "  models: the files in $MODELS_DIR the app registered (the ${PROJECT}_engine volume's models.ini) and the picture, video, embedding and decision files there,"
     if [[ $WITH_MODELS -eq 1 ]]; then say "    copied into the bundle (--models)"; else say "    listed in models/MODELS (--models copies them)"; fi
     if "$ENGINE" volume inspect "${PROJECT}_audio" >/dev/null 2>&1; then say "  audio: the ${PROJECT}_audio volume (the speech server's models)"; else say "  audio: no ${PROJECT}_audio volume: the bundle will have no speech models"; fi

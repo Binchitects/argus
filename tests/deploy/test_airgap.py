@@ -41,6 +41,7 @@ class AirgapTests(unittest.TestCase):
         s.write("backups/.gitkeep", "")
         s.write("certs/README.md", "certificates\n")
         s.write("certs/tls.key", "PRIVATE KEY\n")
+        s.write("signing/code-signing.key", "PRIVATE KEY\n")
         s.write("config/traefik/routes.yml", "http: {}\n")
         s.write("config/traefik/certificate.yml", "tls: {}\n")
         s.write("config/litellm.yaml", "model_list: []\n")
@@ -114,8 +115,8 @@ class AirgapTests(unittest.TestCase):
         for kept in ("docker-compose.yml", "podman.yml", ".env.example", "certs/README.md", "models/.gitkeep", "backups/.gitkeep",
                      "config/traefik/routes.yml", "config/litellm.yaml", "argus-standalone/env-samples/gpu.env", "scripts/airgap.sh"):
             self.assertIn(kept, deploy)
-        for left in (".env", ".env.old", "backups/2026-01-01_000000/postgres.sql.gz", "certs/tls.key", "config/traefik/certificate.yml",
-                     "argus-standalone/.env", "scripts/__pycache__/x.pyc", "old-bundle.tar", "models/big/Big-00001-of-00002.gguf"):
+        for left in (".env", ".env.old", "backups/2026-01-01_000000/postgres.sql.gz", "certs/tls.key", "signing/code-signing.key",
+                     "config/traefik/certificate.yml", "argus-standalone/.env", "scripts/__pycache__/x.pyc", "old-bundle.tar", "models/big/Big-00001-of-00002.gguf"):
             self.assertNotIn(left, deploy)
         # Links are followed: the file goes in, not the link.
         self.assertEqual(self.read("deploy/config/alertmanager.yml"), "route: {}\n")

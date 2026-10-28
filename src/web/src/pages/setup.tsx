@@ -15,7 +15,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { api, errorMessage } from '@/lib/api'
 import { serviceUrl } from '@/app/nav'
-import { arenaMcp, CA_FILE, caShell, KEY, tools, type CodeArenaBuild, type Context, type Step, type System, type Tool } from './setup-tools'
+import { arenaMcp, CA_FILE, caShell, KEY, tools, type Context, type Step, type System, type Tool } from './setup-tools'
 
 interface ChatConfig {
   model: string | null
@@ -57,7 +57,7 @@ export function ConnectPage() {
   const mcp = useQuery({ queryKey: ['account', 'mcp'], queryFn: ({ signal }) => api<McpInfo>('/api/account/mcp', { signal }) })
   const codeArena = useQuery({
     queryKey: ['downloads', 'code-arena'],
-    queryFn: ({ signal }) => api<{ version: string; builds: CodeArenaBuild[] }>('/api/downloads/code-arena', { signal }),
+    queryFn: ({ signal }) => api<NonNullable<Context['codeArena']>>('/api/downloads/code-arena', { signal }),
   })
   const certificate = useQuery({
     queryKey: ['downloads', 'certificate'],

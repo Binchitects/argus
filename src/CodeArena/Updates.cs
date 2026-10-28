@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using System.Text.Json.Nodes;
 
 namespace CodeArena;
@@ -9,7 +11,8 @@ namespace CodeArena;
 /// Code Arena's own updates, from the Arena it is signed in to. Arena serves the builds of its own version (Connect your
 /// tools, /api/downloads/code-arena), so a newer one there is the one to run. A session's start looks, at most once a day,
 /// in the background and within a few seconds, and says so; code-arena update downloads the build for this system,
-/// checks its size and SHA-256, and puts it in this program's place (it runs from the next start).
+/// checks its size and SHA-256 and, when Arena signs its builds (scripts/sign-code-arena.sh), that its CA signed it, and
+/// puts it in this program's place (it runs from the next start).
 /// </summary>
 internal static class Updates
 {
@@ -17,7 +20,8 @@ internal static class Updates
     public static readonly TimeSpan Every = TimeSpan.FromDays(1), Wait = TimeSpan.FromSeconds(5);
 
     /// <summary>A newer build Arena serves for this system.</summary>
-    public sealed record Available(string Version, string Rid, string Url, string? Sha256, long Size);
+    /// <param name="Signed">Arena signs its builds: the list of them, with a code-signing certificate of its CA.</param>
+    public sealed record Available(string Version, string Rid, string Url, string? Sha256, long Size, bool Signed = false);
 
     /// <summary>This program's system, as Arena names its builds (linux-x64, osx-arm64, win-x64…).</summary>
     public static string Rid => RuntimeInformation.RuntimeIdentifier;
@@ -41,7 +45,7 @@ internal static class Updates
                 return null;
             }
             var build = (body["builds"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(b => b.Str("rid") == Rid);
-            return build is null ? null : new Available(version, Rid, $"{root}/{Rid}", build.Str("sha256"), build.Long("size") ?? 0);
+            return build is null ? null : new Available(version, Rid, $"{root}/{Rid}", build.Str("sha256"), build.Long("size") ?? 0, body["signature"] is JsonObject);
         }
         catch (Exception e) when (e is HttpRequestException or OperationCanceledException && !ct.IsCancellationRequested)
         {
@@ -105,7 +109,9 @@ internal static class Updates
     /// Puts Arena's newer build in this program's place: downloaded beside it, checked (size and SHA-256), made runnable, then
     /// renamed over it (on Windows the running one moves aside first, as code-arena.exe.old). What it did, or why it did not.
     /// </summary>
-    public static async Task<(bool Done, string Said)> UpdateAsync(Config config, HttpClient http, Action<string> progress, CancellationToken ct, string? exe = null)
+    /// <param name="caFile">The CA this machine trusts for Arena (--ca, the config's, ARENA_CA_CERT); null: the system's.</param>
+    public static async Task<(bool Done, string Said)> UpdateAsync(Config config, HttpClient http, Action<string> progress, CancellationToken ct, string? exe = null,
+        string? caFile = null)
     {
         exe ??= Environment.ProcessPath;
         if (exe is null || !Path.GetFileNameWithoutExtension(exe).Equals("code-arena", StringComparison.OrdinalIgnoreCase))
@@ -145,6 +151,11 @@ internal static class Updates
                 File.Delete(temporary);
                 return (false, $"The download did not match what Arena lists ({length:N0} bytes, SHA-256 {sum[..12]}…): nothing changed. Try again.");
             }
+            if (found.Signed && await SignatureProblemAsync(http, found.Url[..found.Url.LastIndexOf('/')], $"{found.Rid}/{Path.GetFileName(exe)}", sum, caFile, ct) is { } problem)
+            {
+                File.Delete(temporary);
+                return (false, $"The download is not the one Arena's CA signed ({problem}): nothing changed.");
+            }
             if (!OperatingSystem.IsWindows())
             {
                 File.SetUnixFileMode(temporary, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead
@@ -158,7 +169,7 @@ internal static class Updates
                 File.Move(exe, aside);
                 File.Move(temporary, exe);
             }
-            return (true, $"Code Arena {Cli.Version} → {found.Version}: the next start runs it.");
+            return (true, $"Code Arena {Cli.Version} → {found.Version}{(found.Signed ? ", signed by Arena's CA" : "")}: the next start runs it.");
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or HttpRequestException)
         {
@@ -171,6 +182,74 @@ internal static class Updates
                 // Left beside it: the next update writes over it.
             }
             return (false, $"Code Arena could not be replaced ({e.Message}): nothing changed.");
+        }
+    }
+
+    /// <summary>Why a build is not one Arena's CA signed, or null when it is: the builds' list, its signature and the certificate, from Arena.</summary>
+    private static async Task<string?> SignatureProblemAsync(HttpClient http, string root, string entry, string sum, string? caFile, CancellationToken ct)
+    {
+        byte[] sums, signature;
+        string pem;
+        try
+        {
+            sums = await http.GetByteArrayAsync(new Uri(root + "/SHA256SUMS"), ct);
+            signature = await http.GetByteArrayAsync(new Uri(root + "/SHA256SUMS.sig"), ct);
+            pem = await http.GetStringAsync(new Uri(root + "/code-signing.crt"), ct);
+        }
+        catch (HttpRequestException e)
+        {
+            return $"Arena did not give the signature: {e.Message}";
+        }
+        return SignatureProblem(sums, signature, pem, entry, sum, caFile);
+    }
+
+    /// <summary>
+    /// Why a build is not the one signed, or null when it is: the certificate (the first of <paramref name="pem"/>, the rest
+    /// its chain) for code signing, from a CA this machine trusts (<paramref name="caFile"/>, else the system's); the list
+    /// signed with its key (RSA, SHA-256); this build's SHA-256 in the list, as sha256sum writes it.
+    /// </summary>
+    internal static string? SignatureProblem(byte[] sums, byte[] signature, string pem, string entry, string sum, string? caFile)
+    {
+        var certs = new X509Certificate2Collection();
+        try
+        {
+            certs.ImportFromPem(pem);
+            if (certs.Count == 0)
+            {
+                return "no certificate came with it";
+            }
+            var leaf = certs[0];
+            using var chain = new X509Chain();
+            chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+            chain.ChainPolicy.ApplicationPolicy.Add(new Oid("1.3.6.1.5.5.7.3.3"));
+            chain.ChainPolicy.ExtraStore.AddRange(certs.Skip(1).ToArray());
+            if (caFile is not null)
+            {
+                chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+                chain.ChainPolicy.CustomTrustStore.ImportFromPemFile(caFile);
+            }
+            if (!chain.Build(leaf))
+            {
+                return $"its certificate, {leaf.GetNameInfo(X509NameType.SimpleName, false)}, is not one for code signing from a CA this machine trusts for Arena: " +
+                    string.Join("; ", chain.ChainStatus.Select(s => s.StatusInformation.Trim()).Where(s => s.Length > 0).Distinct());
+            }
+            using var key = leaf.GetRSAPublicKey();
+            if (key is null || !key.VerifyData(sums, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1))
+            {
+                return "the builds' list is not the one its certificate signed";
+            }
+            return Encoding.ASCII.GetString(sums).Split('\n').Any(l => l.TrimEnd('\r') == $"{sum}  {entry}") ? null : $"{entry} is not in the list signed";
+        }
+        catch (CryptographicException e)
+        {
+            return $"its signature could not be read: {e.Message}";
+        }
+        finally
+        {
+            foreach (var c in certs)
+            {
+                c.Dispose();
+            }
         }
     }
 }

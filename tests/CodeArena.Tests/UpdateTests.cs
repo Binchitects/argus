@@ -1,3 +1,7 @@
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using System.Text;
+
 namespace CodeArena.Tests;
 
 /// <summary>Code Arena's updates from its Arena: a newer build said at the start (once a day), and code-arena update putting it in place.</summary>
@@ -51,6 +55,59 @@ public sealed class UpdateTests : IDisposable
         // Run from its source: not replaced.
         Assert.Equal(1, await h.RunUpdate(Path.Combine(h.Root, "dotnet")));
         Assert.Contains("runs from its source", h.Err, StringComparison.Ordinal);
+    }
+
+    /// <summary>A CA, and a certificate it signs for code signing (or, with <paramref name="usage"/>, for something else).</summary>
+    private static (X509Certificate2 Ca, X509Certificate2 Leaf) Pki(string usage = "1.3.6.1.5.5.7.3.3")
+    {
+        using var caKey = RSA.Create(2048);
+        var caRequest = new CertificateRequest("CN=Test CA", caKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        caRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, true, 0, true));
+        caRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign, true));
+        var ca = caRequest.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
+        var key = RSA.Create(2048);
+        var request = new CertificateRequest("CN=Code Arena (test)", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension([new Oid(usage)], false));
+        using var issued = request.Create(ca, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddMonths(6), [1, 2, 3, 4]);
+        return (ca, issued.CopyWithPrivateKey(key));
+    }
+
+    [Fact]
+    public void A_signed_build_is_the_one_whose_list_its_CAs_code_signing_certificate_signed()
+    {
+        var (ca, leaf) = Pki();
+        var caFile = Path.Combine(Path.GetTempPath(), $"ca-{Guid.NewGuid():N}.crt");
+        File.WriteAllText(caFile, ca.ExportCertificatePem());
+        try
+        {
+            var sum = new string('a', 64);
+            var sums = Encoding.ASCII.GetBytes($"{new string('b', 64)}  linux-x64/code-arena\n{sum}  win-x64/code-arena.exe\n");
+            var signature = leaf.GetRSAPrivateKey()!.SignData(sums, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            var pem = leaf.ExportCertificatePem() + "\n" + ca.ExportCertificatePem();
+            Assert.Null(Updates.SignatureProblem(sums, signature, pem, "win-x64/code-arena.exe", sum, caFile));
+
+            // A list changed after it was signed, a build not in it, another build's sum.
+            var changed = Encoding.ASCII.GetBytes(Encoding.ASCII.GetString(sums).Replace(sum, new string('c', 64), StringComparison.Ordinal));
+            Assert.Contains("not the one its certificate signed", Updates.SignatureProblem(changed, signature, pem, "win-x64/code-arena.exe", new string('c', 64), caFile));
+            Assert.Contains("is not in the list signed", Updates.SignatureProblem(sums, signature, pem, "osx-arm64/code-arena", sum, caFile));
+            Assert.Contains("is not in the list signed", Updates.SignatureProblem(sums, signature, pem, "win-x64/code-arena.exe", new string('b', 64), caFile));
+
+            // A CA this machine does not trust for Arena (its own CA bundled is not trust), or a certificate not for code signing.
+            var (otherCa, _) = Pki();
+            var otherFile = caFile + ".other";
+            File.WriteAllText(otherFile, otherCa.ExportCertificatePem());
+            Assert.Contains("from a CA this machine trusts", Updates.SignatureProblem(sums, signature, pem, "win-x64/code-arena.exe", sum, otherFile));
+            File.Delete(otherFile);
+            var (serverCa, server) = Pki("1.3.6.1.5.5.7.3.1");
+            File.WriteAllText(caFile, serverCa.ExportCertificatePem());
+            var serverSigned = server.GetRSAPrivateKey()!.SignData(sums, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+            Assert.Contains("for code signing", Updates.SignatureProblem(sums, serverSigned, server.ExportCertificatePem(), "win-x64/code-arena.exe", sum, caFile));
+        }
+        finally
+        {
+            File.Delete(caFile);
+        }
     }
 
     [Fact]

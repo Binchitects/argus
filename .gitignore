@@ -37,6 +37,8 @@ config.local.yaml
 # Traefik's certificate and the file naming it (scripts/make-cert.sh): keys, never committed
 deploy/certs/*
 !deploy/certs/README.md
+# The key that signs the Code Arena builds (scripts/sign-code-arena.sh).
+deploy/signing/
 deploy/config/traefik/certificate.yml
 # Unanchored `config.yaml` is not ignored: the stack bind-mounts two committed ones.
 

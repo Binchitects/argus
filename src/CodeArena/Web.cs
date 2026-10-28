@@ -378,7 +378,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 await res.JsonAsync(200, WindowJson(), ct);
                 return;
             case ("POST", "/api/update"):
-                var (done, said) = await Updates.UpdateAsync(_rt.Config, _rt.Http, _ => { }, ct);
+                var (done, said) = await Updates.UpdateAsync(_rt.Config, _rt.Http, _ => { }, ct, caFile: Net.CaFile(null, _rt.Config.Ca, _rt.Env.Env));
                 if (done)
                 {
                     _updated = said;

@@ -530,8 +530,9 @@ internal static partial class Cli
             return 1;
         }
         config.ApplyEnvironment(env.Env);
-        using var http = Net.Client(Net.CaFile(o.Ca, config.Ca, env.Env));
-        var (done, said) = await Updates.UpdateAsync(config, http, ui.Info, ct, env.Exe);
+        var ca = Net.CaFile(o.Ca, config.Ca, env.Env);
+        using var http = Net.Client(ca);
+        var (done, said) = await Updates.UpdateAsync(config, http, ui.Info, ct, env.Exe, ca);
         if (done)
         {
             ui.Line(said);

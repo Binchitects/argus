@@ -50,6 +50,22 @@ in this program's place (on Windows the running one moves aside as
 `code-arena.exe.old`); the next start runs it. `"updateCheck": false` in
 `config.json` stops the daily look.
 
+**Signed by the server's CA.** When the stack has a CA of its own
+(`scripts/make-cert.sh`), the installer signs the builds it serves on each
+install, upgrade and repair (`scripts/sign-code-arena.sh`, on the host: no
+container sees the key): a code-signing certificate from that CA signs the
+list of the builds and their SHA-256 (`SHA256SUMS`, its signature
+`SHA256SUMS.sig`, and the certificate `code-signing.crt`, all under
+`/api/downloads/code-arena/`). Then `install.sh` (with `openssl`),
+`install.ps1` and `code-arena update` check that the build is in the list that
+certificate signed, and that the certificate is for code signing from a CA
+this machine trusts (`CODE_ARENA_CA`, `--ca` or `ARENA_CA_CERT`, else the
+system's): a build swapped on the server, even with its listed SHA-256
+changed to match, is refused. A company's own code-signing certificate goes in
+`deploy/signing/` (`code-signing.crt` and `.key`) instead. Connect your tools
+says who signed them. Windows' own Authenticode signature (the publisher
+Explorer shows) is not made: it needs a certificate Windows trusts for that.
+
 The systems: `linux-x64`, `linux-arm64`, `osx-arm64` (Apple silicon),
 `osx-x64` and `win-x64` (`code-arena.exe`). `/api/downloads/code-arena` lists
 them with their SHA-256.

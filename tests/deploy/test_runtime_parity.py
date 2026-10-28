@@ -50,6 +50,7 @@ ALLOWED: dict[tuple[str, str, str], str] = {
     ("env", "postgres", "PGDATA"): "a volume's root is not empty on some storage (lost+found)",
     # Mounts.
     ("mount", "app", "/backups"): "backup.sh's backups, for Admin -> Storage: compose only",
+    ("mount", "app", "/downloads-signature"): "Code Arena's signature, made on the host with the CA's key (sign-code-arena.sh): compose only",
     ("mount", "app", "/db-ca"): "externalDatabase.caSecret; compose mounts the CA in the override",
     ("mount", "llamacpp", "/dev/shm"): "compose's shm_size, as an emptyDir in memory",
     ("mount", "vllm", "/dev/shm"): "compose's shm_size, as an emptyDir in memory",

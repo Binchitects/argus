@@ -122,6 +122,8 @@ services:
       - lean:/lean
       # The audit log's daily anchors, kept apart from the database (docs/compliance).
       - audit:/audit
+      # The Code Arena builds' signature, made on the host with the CA's key (scripts/sign-code-arena.sh).
+      - code-arena-signature:/downloads-signature:ro
       # scripts/backup.sh's backups, for Admin -> Storage: their sizes and how each ended.
       # Read only: they hold .env and the compose files a restore puts back, so the app
       # never changes or deletes them (scripts/backup.sh --prune removes old ones).
@@ -648,6 +650,8 @@ volumes:
   # The audit log's anchors: its newest entry and hash each day, where changing the database does not reach.
   audit:
     driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/audit" }
+  code-arena-signature:
+    driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/code-arena-signature" }
   sandbox:
     driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/sandbox" }
   # Code Studio's workspaces: each a clone, its engine's home and what the person has not pushed yet.

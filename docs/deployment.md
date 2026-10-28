@@ -118,6 +118,14 @@ Traefik does TLS and nothing else does.
   Run it again to renew: the same CA signs the new certificate, so nothing
   needs trusting again. `config/traefik/README.md` has the details.
 
+  The same CA signs the Code Arena builds the stack serves: on install, upgrade
+  and repair the installer runs `scripts/sign-code-arena.sh`, which makes a
+  code-signing certificate from it (`signing/code-signing.crt` and `.key`, 3
+  years, kept out of every container and of airgap bundles) and signs the
+  builds' list into `DATA_DIR/code-arena-signature/`, which the app serves.
+  Run it by hand after changing the builds; `--check` says whether what is
+  served is signed ([code-arena.md](code-arena.md#getting-it)).
+
   People get the CA from **Connect your tools**: when no public CA vouches for
   the site, the page offers the certificate to download (with its SHA-256 to
   compare), how to install it on Linux, macOS and Windows, and in each tool's
@@ -478,6 +486,7 @@ how). **no**: missing, with the reason.
 | `engine`, `directory`, `sandbox` | volumes | the same | claims, ReadWriteMany across nodes |
 | `media-status`, `vllm-status` | in memory (tmpfs) | the same | differs: small claims, kept on disk |
 | `argus`, `audio`, `prometheus`, `alertmanager`, `loki`, `postgres` | volumes | the same | claims, kept when the release goes |
+| `code-arena-signature` (the Code Arena builds' signature) | a folder of `DATA_DIR`, written by `scripts/sign-code-arena.sh` on the host | the same | no: there is no host with the CA's key; the builds are served unsigned, checked by their SHA-256 |
 | `acme`, the certificates | Traefik's | the same | differs: the TLS Secret (`ingress.tlsSecret`) |
 | the pack library | `packs/` or `ARGUS_PACK_LIBRARY_DIR` | the same | `argus.packLibraryClaim` (empty: none) |
 | `/backups` in the app | `BACKUP_DIR`, read only | the same | no: backups are the cluster's |
