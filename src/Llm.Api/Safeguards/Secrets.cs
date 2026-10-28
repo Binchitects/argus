@@ -78,6 +78,11 @@ public static partial class Secrets
                 {
                     continue;
                 }
+                // Quoted, code that builds a string around a value (PASSWORD='" + bar + "') is not a password either.
+                if (quoted is not null && Concatenated().IsMatch(quoted.Value))
+                {
+                    continue;
+                }
                 // Unquoted, a name in code (config.password, newPassword) is not a password: a literal has
                 // something besides letters, or ends a connection string's part (Password=...;).
                 if (quoted is null && (CodeName().IsMatch(value.Value) ||
@@ -185,4 +190,8 @@ public static partial class Secrets
 
     [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$", RegexOptions.CultureInvariant)]
     private static partial Regex CodeName();
+
+    /// <summary>A quoted value that opens or closes on the other quote and a concatenation (+, ., ||, &amp;): code, not a literal.</summary>
+    [GeneratedRegex(@"^\s*[""']\s*(?:\+|\.|\|\||&)|(?:\+|\.|\|\||&)\s*[""']\s*$", RegexOptions.CultureInvariant)]
+    private static partial Regex Concatenated();
 }

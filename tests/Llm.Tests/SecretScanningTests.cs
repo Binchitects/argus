@@ -194,6 +194,11 @@ public sealed class SecretScanningTests(AppFixture app)
         Assert.Empty(Kinds("Forgot your password? Reset it under Account."));
         Assert.Empty(Kinds("password=********"));
         Assert.Empty(Kinds("ask the task-runner about sk-learn"));
+        // Code that builds a query around a value: the quotes hold the concatenation, not a password.
+        Assert.Empty(Kinds("String sql = \"SELECT * FROM USERS WHERE USERNAME='foo' AND PASSWORD='\" + bar + \"'\";"));
+        Assert.Empty(Kinds("$q = \"SELECT id FROM users WHERE password='\" . $pass . \"'\";"));
+        Assert.Empty(Kinds("const q = 'SELECT 1 FROM t WHERE pwd=\"' + pw + '\"';"));
+        Assert.Equal(["password"], Kinds("UPDATE users SET PASSWORD='hunter22' WHERE id = 1"));
         Assert.Equal(["Google API key"], Kinds("key=" + "AIza" + new string('x', 35)));
         Assert.Equal(["Stripe key"], Kinds("sk_" + "live_" + new string('a', 24)));
         Assert.Equal(["Hugging Face token"], Kinds("hf_" + new string('b', 32)));
