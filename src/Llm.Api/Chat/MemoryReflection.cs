@@ -131,9 +131,10 @@ public sealed partial class MemoryReflection(IServiceScopeFactory scopes, Operat
         // The skills used here: chosen with / (their call kept on the question), or by the model (use_skill).
         var usedNames = said.Select(m => SkillLibrary.Kept(m.Skill)?.Name).OfType<string>()
             .Concat(said.Where(m => m.ToolCallsJson?.Contains(Tools.SkillTool.Function, StringComparison.Ordinal) == true)
-                .SelectMany(m => (JsonNode.Parse(m.ToolCallsJson!) as JsonArray ?? []).OfType<JsonObject>())
+                .SelectMany(m => (TryParse(m.ToolCallsJson) as JsonArray ?? []).OfType<JsonObject>())
                 .Where(c => c["function"]?["name"]?.GetValue<string>() == Tools.SkillTool.Function)
-                .Select(c => JsonNode.Parse(c["function"]?["arguments"]?.GetValue<string>() ?? "{}")?["name"]?.GetValue<string>()).OfType<string>())
+                // A call's arguments as the model wrote them, which may be cut short: not JSON, no name.
+                .Select(c => TryParse(c["function"]?["arguments"]?.GetValue<string>())?["name"]?.GetValue<string>()).OfType<string>())
             .Select(n => n.Trim().TrimStart('/')).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var access = services.GetRequiredService<Access.AccessService>();
         var usable = await SkillEndpoints.UsableAsync(person, access, db, ct);
@@ -177,7 +178,8 @@ public sealed partial class MemoryReflection(IServiceScopeFactory scopes, Operat
             return;
         }
         var (start, end) = (answer.IndexOf('{'), answer.LastIndexOf('}'));
-        var parsed = start < 0 || end <= start ? null : JsonNode.Parse(answer[start..(end + 1)]);
+        // An answer that is not JSON proposes nothing (asking again would cost as much, every pass).
+        var parsed = start < 0 || end <= start ? null : TryParse(answer[start..(end + 1)]);
         var proposals = (parsed?["memories"] as JsonArray ?? []).OfType<JsonObject>().Take(MostProposed).ToList();
         var waiting = new List<string>();
         var keptNow = new List<string>();
@@ -259,4 +261,21 @@ public sealed partial class MemoryReflection(IServiceScopeFactory scopes, Operat
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Memory reflection on chat {Chat} failed: read again next pass")]
     private static partial void LogChatFailed(ILogger logger, Guid chat, Exception ex);
+
+    /// <summary>JSON as written, or null when it is not (cut short, a model's slip).</summary>
+    private static JsonNode? TryParse(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+        try
+        {
+            return JsonNode.Parse(json);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 }

@@ -86,6 +86,25 @@ public sealed class MemoryReflectionTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_chat_with_a_skill_call_cut_short_is_still_read()
+    {
+        var (f, clock) = NewApp();
+        await using var _f = f;
+        var (b, _, _) = await PersonAsync(f);
+        var id = await ChatAsync(b, """I always deploy with Podman, never Docker. [propose {"text":"Deploys with Podman, never Docker.","kind":"howto","scope":"person"}]""");
+        // An answer whose use_skill call the model wrote cut short: its arguments are not JSON.
+        await using (var scope = f.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+            var last = await db.ChatMessages.Where(m => m.ConversationId == id).OrderByDescending(m => m.Sequence).FirstAsync();
+            last.ToolCallsJson = $$$"""[{"id":"c1","type":"function","function":{"name":"{{{Llm.Api.Chat.Tools.SkillTool.Function}}}","arguments":"{\"name\": \"rel"}}]""";
+            await db.SaveChangesAsync();
+        }
+        Assert.Equal(1, await ReflectAsync(f, clock));
+        Assert.Single(await MemoriesAsync(b));
+    }
+
+    [Fact]
     public async Task Kept_on_its_own_a_proposal_that_says_otherwise_replaces_the_old_memory()
     {
         var (f, clock) = NewApp();
