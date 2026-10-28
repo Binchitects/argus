@@ -189,7 +189,7 @@ internal sealed class IdeFiles(Workspace workspace)
             result["tooLarge"] = true;
             return result;
         }
-        if (Text(File.ReadAllBytes(full)) is { } text)
+        if (Text(ReadShared(full)) is { } text)
         {
             result["text"] = text;
         }
@@ -236,12 +236,38 @@ internal sealed class IdeFiles(Workspace workspace)
         {
             throw new IdeError(413, "too_large", $"{Show(full)} is bigger than {MaxMediaBytes / 1024 / 1024} MB.");
         }
-        return (File.ReadAllBytes(full), type);
+        return (ReadShared(full), type);
     }
 
     /// <summary>A file's bytes as the editor's text, its byte-order mark left out; null when they are binary (a NUL byte, or not UTF-8).</summary>
+    /// <summary>A file's bytes, read while others may have it open (Windows would refuse the read otherwise).</summary>
+    private static byte[] ReadShared(string full)
+    {
+        using var stream = Files.OpenShared(full);
+        using var copy = new MemoryStream();
+        stream.CopyTo(copy);
+        return copy.ToArray();
+    }
+
+    /// <summary>A Unicode encoding that throws on bytes it cannot read, as <see cref="Strict"/> does for UTF-8.</summary>
+    private static Encoding UnicodeEncodingStrict(Encoding unicode) => unicode is UTF32Encoding
+        ? new UTF32Encoding(unicode.GetPreamble() is [0x00, ..], byteOrderMark: true, throwOnInvalidCharacters: true)
+        : new UnicodeEncoding(unicode.GetPreamble() is [0xFE, ..], byteOrderMark: true, throwOnInvalidBytes: true);
+
     public static string? Text(ReadOnlySpan<byte> bytes)
     {
+        // UTF-16 or UTF-32 by its mark (saved back so, Files.WriteText).
+        if (Files.Unicode(bytes) is { } unicode)
+        {
+            try
+            {
+                return UnicodeEncodingStrict(unicode).GetString(bytes[unicode.Preamble.Length..]);
+            }
+            catch (DecoderFallbackException)
+            {
+                return null;
+            }
+        }
         var bom = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
         var body = bytes[(bom ? 3 : 0)..];
         if (body.IndexOf((byte)0) >= 0)

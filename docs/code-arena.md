@@ -1416,11 +1416,11 @@ On the person's machine:
 | tool | what it does |
 |---|---|
 | `read_file` | a text file with line numbers, 2,000 lines at a time (`offset`, `limit`) |
-| `write_file` | creates or replaces a file |
+| `write_file` | creates or replaces a file; Windows line endings are kept |
 | `edit_file` | replaces an exact piece of a file; it must match once (or `replace_all`), whitespace included; an empty `old_string` makes a new file. Windows line endings are kept |
 | `list_dir`, `glob` | folders and file names (`**/*.cs`, `*.{ts,tsx}`); `.gitignore` is respected |
 | `grep` | file contents by regular expression, with context lines; binary and ignored files skipped, and those it cannot read, named pipes and links that lead outside |
-| `run_shell` | a command in bash (sh when missing; `cmd.exe` on Windows; `"shell"` in the file for another), 120 s by default, at most 600; long output is cut in the middle. With `no_time_limit`, it runs in the background until it ends (below) |
+| `run_shell` | a command in bash (sh when missing; on Windows Git's bash when Git for Windows is installed, else PowerShell 7, else `cmd.exe`; `"shell"` in the file for another), 120 s by default, at most 600; long output is cut in the middle. With `no_time_limit`, it runs in the background until it ends (below) |
 | `command_output` | the state and the latest output of a command run with no time limit; `wait` waits until it ends |
 | `stop_command` | stops a command run with no time limit; it always asks the person first, `yolo` too |
 | `git` | status, diff, log, show, blame, branch: reading only (commits go through `run_shell`), inside the working directory: `diff --no-index` is refused, and so is a file outside it named anywhere in the arguments (`blame --contents FILE`, `-S FILE`), by name or through a link that leads out. It never asks, so the repository's own settings run nothing in it: no fsmonitor, hook, clean or smudge filter, merge driver (`--remerge-diff`), text conversion (so not `status -v`), external diff or signature checker, no submodule looked into (their changes are not shown), and no network (a partial clone does not fetch). Nor do they send it elsewhere: a work tree other than the folder that holds `.git` (`core.worktree`), or a `.git` that leads to another repository's folder, is refused (a worktree of another checkout and a submodule, which git made so, are read), and a `blame.ignoreRevsFile` outside is not read. The file list `grep` and `glob` (and the IDE's search and quick open) take from git is read the same way |
@@ -1430,6 +1430,14 @@ On the person's machine:
 | `task` | a sub-agent (below) |
 | `run_steps` | 2 to 4 steps of the plan that wait for nothing not done, at once ([below](#steps-at-once)) |
 | `run_code` | a Python program that calls the session's tools as functions ([below](#code-mode)) |
+
+The files are read as they are while other programs hold them open (on
+Windows a build, a server's log or an editor would otherwise make the read
+fail), in UTF-8 or, by their byte-order mark, UTF-16 and UTF-32 (Windows
+PowerShell's `>` writes UTF-16): such a file is read, searched and edited as
+text, and written back in its own encoding. `write_file` keeps a file's
+Windows line endings, as `edit_file` does. On Windows a path as Git's bash
+writes it (`/c/Users/me/shop`) is taken as `C:/Users/me/shop`.
 
 **Your own subscriptions.** Claude Code (`claude`, a Claude Pro or Max
 subscription), Codex CLI (`codex`, ChatGPT Plus or Pro) and Gemini CLI

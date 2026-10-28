@@ -109,8 +109,15 @@ internal sealed class Workspace
         return full;
     }
 
-    // Without a trailing separator: "./" is the folder itself, not something in it.
-    private string Full(string path) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(Home(path), Root));
+    // Without a trailing separator: "./" is the folder itself, not something in it. On Windows, a path as Git Bash writes
+    // it (/c/Users/...) is the drive's.
+    private string Full(string path) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(Home(OperatingSystem.IsWindows() ? FromBash(path) : path), Root));
+
+    /// <summary>A path as Git Bash (MSYS) writes it, /c/Users/me, as Windows does, C:/Users/me; any other as it is.</summary>
+    internal static string FromBash(string path) =>
+        path.Length >= 2 && path[0] == '/' && char.IsAsciiLetter(path[1]) && (path.Length == 2 || path[2] == '/')
+            ? $"{char.ToUpperInvariant(path[1])}:/{(path.Length > 3 ? path[3..] : "")}"
+            : path;
 
     public bool Inside(string full) => Roots.Any(r => Within(full, r));
 
@@ -349,10 +356,11 @@ internal static class Files
         }
         try
         {
-            using var stream = File.OpenRead(file);
+            using var stream = OpenShared(file);
             Span<byte> head = stackalloc byte[8000];
             var n = stream.Read(head);
-            return head[..n].Contains((byte)0);
+            // UTF-16 or UTF-32 with its byte-order mark (Windows PowerShell's > writes UTF-16) is text, NUL bytes and all.
+            return Unicode(head[..n]) is null && head[..n].Contains((byte)0);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
@@ -476,18 +484,61 @@ internal static class Files
         }
     }
 
-    /// <summary>A file's text, and whether it began with a byte-order mark (kept when it is written back). A named pipe or a device is refused, not waited on.</summary>
+    /// <summary>A text file's lines (\n, \r\n or \r between them), read while others may have it open; UTF-16 and UTF-32 by their marks.</summary>
+    public static string[] ReadLines(string file)
+    {
+        using var reader = new StreamReader(OpenShared(file), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        var lines = new List<string>();
+        while (reader.ReadLine() is { } line)
+        {
+            lines.Add(line);
+        }
+        return [.. lines];
+    }
+
+    /// <summary>
+    /// A file opened to read while others may have it open to write or delete (on Windows a build, a server's log or an
+    /// editor holding a file would otherwise make the read fail).
+    /// </summary>
+    public static FileStream OpenShared(string file) => new(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+
+    /// <summary>The Unicode encoding a byte-order mark at the start names, other than UTF-8's; null without one.</summary>
+    public static Encoding? Unicode(ReadOnlySpan<byte> head) => head switch
+    {
+        [0xFF, 0xFE, 0x00, 0x00, ..] => new UTF32Encoding(bigEndian: false, byteOrderMark: true),
+        [0x00, 0x00, 0xFE, 0xFF, ..] => new UTF32Encoding(bigEndian: true, byteOrderMark: true),
+        [0xFF, 0xFE, ..] => new UnicodeEncoding(bigEndian: false, byteOrderMark: true),
+        [0xFE, 0xFF, ..] => new UnicodeEncoding(bigEndian: true, byteOrderMark: true),
+        _ => null,
+    };
+
+    /// <summary>
+    /// A file's text, and whether it began with a byte-order mark (kept when it is written back): UTF-8, or UTF-16 and
+    /// UTF-32 by their marks. A named pipe or a device is refused, not waited on.
+    /// </summary>
     public static (string Text, bool Bom) ReadText(string file)
     {
         if (!Regular(file))
         {
             throw new IOException($"{Path.GetFileName(file)} is not a regular file (a named pipe, a socket or a device): it is not read.");
         }
-        var bytes = File.ReadAllBytes(file);
+        byte[] bytes;
+        using (var stream = OpenShared(file))
+        using (var copy = new MemoryStream())
+        {
+            stream.CopyTo(copy);
+            bytes = copy.ToArray();
+        }
+        if (Unicode(bytes) is { } unicode)
+        {
+            var mark = unicode.Preamble.Length;
+            return (unicode.GetString(bytes, mark, bytes.Length - mark), true);
+        }
         var bom = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
         return (Encoding.UTF8.GetString(bytes, bom ? 3 : 0, bytes.Length - (bom ? 3 : 0)), bom);
     }
 
+    /// <summary>A file's text written: in UTF-16 or UTF-32 when the file there is (by its mark), else UTF-8, with its mark when asked.</summary>
     public static void WriteText(string file, string text, bool bom)
     {
         var dir = Path.GetDirectoryName(file);
@@ -495,7 +546,28 @@ internal static class Files
         {
             Directory.CreateDirectory(dir);
         }
-        File.WriteAllText(file, text, new UTF8Encoding(bom));
+        Encoding? unicode = null;
+        if (File.Exists(file))
+        {
+            try
+            {
+                using var stream = OpenShared(file);
+                Span<byte> head = stackalloc byte[4];
+                unicode = Unicode(head[..stream.Read(head)]);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                // Written as UTF-8: the write says why if it cannot be.
+            }
+        }
+        File.WriteAllText(file, text, unicode ?? new UTF8Encoding(bom));
+    }
+
+    /// <summary>Whether a text's lines end with \r\n (most of them do), as files checked out on Windows have them.</summary>
+    public static bool Crlf(string text)
+    {
+        var crlf = text.AsSpan().Count("\r\n");
+        return crlf > 0 && crlf * 2 >= text.AsSpan().Count('\n');
     }
 
     public static string Size(long bytes) => bytes switch

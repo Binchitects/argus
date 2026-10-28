@@ -274,7 +274,7 @@ internal static class LocalTools
         var sb = new StringBuilder();
         var number = 0;
         var shown = 0;
-        using (var reader = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
+        using (var reader = new StreamReader(Files.OpenShared(path), Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
         {
             while (await reader.ReadLineAsync(ct) is { } line)
             {
@@ -318,6 +318,11 @@ internal static class LocalTools
         if (File.Exists(path))
         {
             (before, bom) = Files.ReadText(path);
+            // A file with Windows line endings keeps them when written with plain newlines (else every line would change).
+            if (Files.Crlf(before) && !content.Contains("\r\n", StringComparison.Ordinal))
+            {
+                content = content.Replace("\n", "\r\n");
+            }
         }
         c.BeforeWrite?.Invoke(path);
         Files.WriteText(path, content, bom);
@@ -490,7 +495,7 @@ internal static class LocalTools
             string[] lines;
             try
             {
-                lines = File.ReadAllLines(file);
+                lines = Files.ReadLines(file);
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
@@ -563,18 +568,35 @@ internal static class LocalTools
         return Task.FromResult(new ToolResult(text) { Display = $"{Plural(matches, "match", "matches")} in {Plural(matchedFiles, "file")}" });
     }
 
-    /// <summary>The shell run_shell uses: the configured one, else bash (sh when missing); cmd.exe on Windows.</summary>
-    public static string ShellName(string? configured)
+    /// <summary>
+    /// The shell run_shell uses: the configured one, else bash (sh when missing). On Windows, Git's bash when Git for
+    /// Windows is installed (models write bash: ls, grep, head and pipes, which cmd.exe has not), else PowerShell 7, else
+    /// cmd.exe.
+    /// </summary>
+    public static string ShellName(string? configured) =>
+        configured is { Length: > 0 } ? configured
+        : OperatingSystem.IsWindows() ? WindowsShell(Environment.GetEnvironmentVariable, File.Exists)
+        : File.Exists("/bin/bash") ? "/bin/bash" : "/bin/sh";
+
+    /// <summary>
+    /// Windows's shell for run_shell: Git's bash (where Git for Windows puts it, or beside the git on PATH; never
+    /// System32's bash.exe, which is WSL's), else pwsh.exe, else cmd.exe.
+    /// </summary>
+    internal static string WindowsShell(Func<string, string?> env, Func<string, bool> exists)
     {
-        if (configured is { Length: > 0 })
+        // Windows's paths, joined and cut at \ whatever system the code runs on.
+        static string Join(params string[] parts) => string.Join('\\', parts.Select((x, i) => i == 0 ? x.TrimEnd('\\', '/') : x.Trim('\\', '/')));
+        static string Parent(string dir) => dir.TrimEnd('\\', '/') is var d && d.LastIndexOfAny(['\\', '/']) is var at and > 0 ? d[..at] : d;
+        var path = (env("PATH") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        // Git on PATH is ...\Git\cmd or ...\Git\bin; its bash is ...\Git\bin\bash.exe.
+        var beside = path.Where(d => exists(Join(d, "git.exe"))).Select(d => Join(Parent(d), "bin", "bash.exe"));
+        var installed = new[] { env("ProgramFiles"), env("ProgramW6432"), env("ProgramFiles(x86)"), env("LOCALAPPDATA") is { } local ? Join(local, "Programs") : null }
+            .OfType<string>().Select(d => Join(d, "Git", "bin", "bash.exe"));
+        if (installed.Concat(beside).FirstOrDefault(exists) is { } bash)
         {
-            return configured;
+            return bash;
         }
-        if (OperatingSystem.IsWindows())
-        {
-            return "cmd.exe";
-        }
-        return File.Exists("/bin/bash") ? "/bin/bash" : "/bin/sh";
+        return path.Select(d => Join(d, "pwsh.exe")).FirstOrDefault(exists) ?? "cmd.exe";
     }
 
     /// <summary>The shell running one command in the working directory.</summary>

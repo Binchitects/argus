@@ -46,7 +46,7 @@ internal static partial class Mentions
             }
             try
             {
-                var all = Lines(File.ReadAllText(workspace.Resolve(Path)));
+                var all = Lines(Files.ReadText(workspace.Resolve(Path)).Text);
                 var last = Math.Min(EndLine, all.Length);
                 return StartLine > last ? this : this with { Text = string.Join('\n', all[(StartLine - 1)..last]), EndLine = last, Unsaved = false };
             }
@@ -183,14 +183,13 @@ internal static partial class Mentions
             string text;
             try
             {
-                var bytes = File.ReadAllBytes(full);
-                if (bytes.Take(8000).Contains((byte)0))
+                if (Files.LooksBinary(full))
                 {
-                    sb.Append($"\n<file path=\"{path}\">(binary, {bytes.Length:N0} bytes: not shown)</file>");
+                    sb.Append($"\n<file path=\"{path}\">(binary, {new FileInfo(full).Length:N0} bytes: not shown)</file>");
                     files.Add(path);
                     continue;
                 }
-                text = Encoding.UTF8.GetString(bytes);
+                text = Files.ReadText(full).Text;
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException)
             {
@@ -259,7 +258,7 @@ internal static partial class Mentions
             }
             try
             {
-                var all = Lines(File.ReadAllText(full));
+                var all = Lines(Files.ReadText(full).Text);
                 var last = Math.Min(piece.EndLine, all.Length);
                 if (piece.StartLine > last)
                 {
