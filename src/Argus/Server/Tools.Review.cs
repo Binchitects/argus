@@ -29,6 +29,8 @@ public sealed partial class Tools
 
     /// <summary>The most lock files and manifests one deps_check reads.</summary>
     public const int MostManifests = 400;
+    /// <summary>The most files one scan_at narrowed to `paths` sends.</summary>
+    public const int MostScanPaths = 500;
 
     /// <summary>The most diff text one answer carries; the files past it are listed without their text.</summary>
     public const int DiffBudget = 150_000;
@@ -547,15 +549,21 @@ public sealed partial class Tools
     /// The security scanners on a project at a ref (the scanners feature): its files, and its history for gitleaks,
     /// sent from the project's mirror; what they found, each finding with the scanners and rules that found it.
     /// </summary>
-    public JsonNode ScanAt(Identity who, string project, string? rev, long? iid, bool history, string? tools)
+    public JsonNode ScanAt(Identity who, string project, string? rev, long? iid, bool history, string? tools, string? paths = null)
     {
         var p = Readable(who, project);
         if (p.Foreign) throw new ToolError($"scan_at scans Argus's copies of GitLab projects; {p.Path} has none.");
         var asked = string.IsNullOrWhiteSpace(tools) ? null : tools.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var only = string.IsNullOrWhiteSpace(paths) ? null : paths.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(CleanPath).Distinct().ToList();
+        if (only is { Count: > MostScanPaths }) throw new ToolError($"paths names at most {MostScanPaths} files.");
         try
         {
             var (mirror, sha, label) = At(p, rev, iid);
-            var result = Scanning.Scanners.Scan(mirror, sha, history, asked);
+            var present = only is null ? null : CodeAt.ListFiles(mirror, sha).ToHashSet(StringComparer.Ordinal);
+            if (only is not null) only = [.. only.Where(present!.Contains)];
+            if (only is { Count: 0 })
+                return new JsonObject { ["project"] = p.Path, ["ref"] = label, ["sha"] = sha, ["tools"] = new JsonArray(), ["findings"] = new JsonArray(), ["more"] = 0, ["note"] = "None of the files named is at that commit." };
+            var result = Scanning.Scanners.Scan(mirror, sha, history, asked, only);
             result["project"] = p.Path;
             result["ref"] = label;
             result["sha"] = sha;
@@ -614,8 +622,8 @@ public sealed partial class Tools
             "sbom" => WithAudit(who, tool, Audited(new JsonObject { ["ref"] = a.OptStr("ref"), ["iid"] = a.OptInt("iid") }),
                 () => SbomAt(who, project, a.OptStr("ref"), a.OptInt("iid"))),
             "scan_at" => WithAudit(who, tool,
-                Audited(new JsonObject { ["ref"] = a.OptStr("ref"), ["iid"] = a.OptInt("iid"), ["history"] = a.Bool("history"), ["tools"] = a.OptStr("tools") }),
-                () => ScanAt(who, project, a.OptStr("ref"), a.OptInt("iid"), a.Bool("history"), a.OptStr("tools"))),
+                Audited(new JsonObject { ["ref"] = a.OptStr("ref"), ["iid"] = a.OptInt("iid"), ["history"] = a.Bool("history"), ["tools"] = a.OptStr("tools"), ["paths"] = PyStr.Prefix(a.OptStr("paths") ?? "", 200) }),
+                () => ScanAt(who, project, a.OptStr("ref"), a.OptInt("iid"), a.Bool("history"), a.OptStr("tools"), a.OptStr("paths"))),
             "issue_list" => WithAudit(who, tool,
                 Audited(new JsonObject { ["state"] = a.OptStr("state"), ["search"] = a.OptStr("search"), ["labels"] = a.OptStr("labels"), ["limit"] = a.Int("limit") }),
                 () => IssueList(who, project, a.OptStr("state") ?? "opened", a.OptStr("search"), a.OptStr("labels"), a.Int("limit"))),

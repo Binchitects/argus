@@ -154,7 +154,7 @@ public sealed class FakeArgus : HttpMessageHandler
                 $$"""{"content":[{"type":"text","text":"(structured)"}],"structuredContent":{{handler(p.GetProperty("arguments"))}},"isError":false}""",
             "tools/call" when Answers.TryGetValue(p.GetProperty("name").GetString()!, out var answer) =>
                 $$"""{"content":[{"type":"text","text":"(structured)"}],"structuredContent":{{answer}},"isError":false}""",
-            "tools/call" => p.GetProperty("arguments").GetProperty("name").GetString() == "SecretThing"
+            "tools/call" => p.GetProperty("arguments").TryGetProperty("name", out var named) && named.GetString() == "SecretThing"
                 ? """{"content":[{"type":"text","text":"Nothing you have access to matches this, but it does exist in 1 repository you cannot read:\n- secret/vault (2 matches) -- maintainers: alice\nTell the person asking that they do not have access, and that they can ask a maintainer listed above to add them in GitLab with at least Reporter access. Argus picks the change up within 10 minutes."}],"isError":false}"""
                 // As FastMCP answers a list: one text block per row, and the list itself as structuredContent.
                 : """

@@ -100,6 +100,10 @@ public sealed partial class ReviewEngine(IServiceScopeFactory scopes, IHostAppli
                 await StepAsync(db, review, $"Reviewing {units[i].Path} ({i + 1} of {units.Count})", ct);
                 found.AddRange(await ReviewUnitAsync(services, review, user.Email!, model, description, units[i], ct));
             }
+            await StepAsync(db, review, "Checking what it adds to the repository's security", ct);
+            var (packages, scanned) = await SecurityDeltaAsync(session, review, files, ct);
+            // A scanner's match is a pattern: the second pass puts it to the test as it does the model's own.
+            found.AddRange(scanned);
             // The second pass: each finding, the most severe first, put to a reviewer told to refute it.
             var ordered = found.OrderBy(f => Rank(f.Severity)).ToList();
             for (var i = 0; i < ordered.Count && i < MostVerified; i++)
@@ -108,6 +112,8 @@ public sealed partial class ReviewEngine(IServiceScopeFactory scopes, IHostAppli
                 var unit = units.FirstOrDefault(u => u.Path == ordered[i].Path);
                 await VerifyAsync(services, review, user.Email!, model, ordered[i], unit, ct);
             }
+            // A package an advisory affects is a fact deps_check matched: no second pass.
+            ordered = [.. packages.OrderBy(f => Rank(f.Severity)), .. ordered];
             review.Findings.AddRange(ordered);
             db.ReviewFindings.AddRange(ordered.Select(f => { f.ReviewId = review.Id; return f; }));
             await StepAsync(db, review, "Writing the summary", ct);
@@ -294,6 +300,131 @@ public sealed partial class ReviewEngine(IServiceScopeFactory scopes, IHostAppli
             }
         }
         return sb.ToString();
+    }
+
+    /// <summary>A file that says which packages a project uses (a lock file or a manifest): a change to one is checked against the advisories.</summary>
+    [GeneratedRegex(@"(^|/)(package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|package\.json|packages\.lock\.json|[^/]+\.(cs|fs|vb)proj|Directory\.Packages\.props|requirements[^/]*\.txt|poetry\.lock|pyproject\.toml|uv\.lock|Pipfile\.lock|go\.mod|go\.sum|Cargo\.lock|Cargo\.toml|pom\.xml|build\.gradle(\.kts)?|gradle\.lockfile|Gemfile\.lock|composer\.lock)$")]
+    private static partial Regex Manifest();
+
+    /// <summary>The lines each file's diff adds, by their number in the new file.</summary>
+    public static Dictionary<string, HashSet<int>> AddedLines(IEnumerable<(string Path, string Diff)> files)
+    {
+        var added = new Dictionary<string, HashSet<int>>(StringComparer.Ordinal);
+        foreach (var (path, diff) in files)
+        {
+            var line = 0;
+            var lines = new HashSet<int>();
+            foreach (var raw in diff.Split('\n'))
+            {
+                if (Hunk().Match(raw) is { Success: true } m)
+                {
+                    line = int.Parse(m.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+                }
+                else if (raw.StartsWith('+') && !raw.StartsWith("+++", StringComparison.Ordinal))
+                {
+                    lines.Add(line++);
+                }
+                else if (raw.StartsWith(' '))
+                {
+                    line++;
+                }
+            }
+            if (lines.Count > 0)
+            {
+                added[path] = lines;
+            }
+        }
+        return added;
+    }
+
+    private static string SeverityOf(string security, bool exploited) => exploited || security == "critical" ? "critical" : security == "high" ? "major" : security == "medium" ? "minor" : "nit";
+
+    private static IEnumerable<JsonObject> Rows(JsonNode? node) => (node as JsonArray ?? (node as JsonObject)?["result"] as JsonArray ?? []).OfType<JsonObject>();
+
+    /// <summary>
+    /// What the change adds to the repository's security, with no model: each package version an advisory affects that the
+    /// target did not have (deps_check at both ends, when a lock file or a manifest changed), and what the scanners find on
+    /// the lines it adds (scan_at on its files, where the scanners are installed). Neither is there without its Argus tool,
+    /// and the review goes on without it.
+    /// </summary>
+    private static async Task<(List<ReviewFinding> Packages, List<ReviewFinding> Scanned)> SecurityDeltaAsync(McpSession session, CodeReview review,
+        List<(string Path, string Diff)> files, CancellationToken ct)
+    {
+        JsonObject AtHead(JsonObject args)
+        {
+            args["project"] = review.Project;
+            if (review.Iid is { } iid)
+            {
+                args["iid"] = iid;
+            }
+            else
+            {
+                args["ref"] = review.ToRef;
+            }
+            return args;
+        }
+        var packages = new List<ReviewFinding>();
+        if (files.Any(f => Manifest().IsMatch(f.Path)) && review.FromRef is { Length: > 0 } target)
+        {
+            try
+            {
+                var head = await CallAsync(session, "deps_check", AtHead([]), ct);
+                var before = await CallAsync(session, "deps_check", new JsonObject { ["project"] = review.Project, ["ref"] = target }, ct);
+                var had = Rows(before["findings"]).Select(f => $"{f["advisory"]}|{f["package"]}|{f["version"]}").ToHashSet(StringComparer.Ordinal);
+                foreach (var f in Rows(head["findings"]).Where(f => !had.Contains($"{f["advisory"]}|{f["package"]}|{f["version"]}")))
+                {
+                    var exploited = f["exploited"] is JsonValue e && e.TryGetValue<bool>(out var x) && x;
+                    var upgrade = f["upgrade_to"]?.ToString();
+                    var how = f["direct"] is JsonValue d && d.TryGetValue<bool>(out var direct) && direct ? "asked for directly" : $"brought in by {f["via"]?.ToString() ?? "another package"}";
+                    packages.Add(new ReviewFinding
+                    {
+                        Path = Cut(f["file"]?.ToString() ?? "", 1_000), Line = f["line"] is JsonValue l && l.TryGetValue<int>(out var line) && line > 0 ? line : null,
+                        Severity = SeverityOf(f["severity"]?.ToString() ?? "", exploited), Category = "security",
+                        Title = Cut($"Adds {f["package"]} {f["version"]}, affected by {f["advisory"]} ({f["severity"]})", 300),
+                        Body = Cut($"{f["summary"]} The package is {how}." + (exploited ? " It is on CISA's list of known exploited vulnerabilities." : "") +
+                            (upgrade is not null ? $" {upgrade} fixes it." : " No fixed version is known.") + $" {f["url"]}", 4_000),
+                        Suggestion = upgrade is not null ? $"{f["package"]} {upgrade}" : null,
+                        Verified = true, VerifyNote = "Matched against the advisories by deps_check, with no model.",
+                    });
+                }
+            }
+            catch (Exception ex) when (ex is ReviewException or McpException)
+            {
+                // No advisories pack, lock files Argus cannot read, or an Argus without the tool: the review goes on with the code.
+            }
+        }
+        var scanned = new List<ReviewFinding>();
+        var added = AddedLines(files);
+        if (added.Count > 0)
+        {
+            try
+            {
+                var result = await CallAsync(session, "scan_at", AtHead(new JsonObject { ["history"] = false, ["paths"] = string.Join('\n', added.Keys.Take(500)) }), ct);
+                foreach (var f in Rows(result["findings"]))
+                {
+                    var path = f["path"]?.ToString() ?? "";
+                    var line = f["line"] is JsonValue l && l.TryGetValue<int>(out var n) ? n : 0;
+                    if (!added.TryGetValue(path, out var lines) || !lines.Contains(line))
+                    {
+                        continue;
+                    }
+                    var secret = f["kind"]?.ToString() == "secret";
+                    var tools = string.Join(", ", (f["tools"] as JsonArray ?? []).Select(t => t?.ToString()));
+                    var rules = string.Join(", ", (f["rules"] as JsonArray ?? []).Select(t => t?.ToString()));
+                    scanned.Add(new ReviewFinding
+                    {
+                        Path = Cut(path, 1_000), Line = line, Severity = secret ? "critical" : SeverityOf(f["severity"]?.ToString() ?? "", false), Category = "security",
+                        Title = Cut(f["title"]?.ToString() ?? rules, 300),
+                        Body = Cut($"{f["message"]} ({(f["cwe"]?.ToString() is { Length: > 0 } cwe ? cwe + ", " : "")}{tools}: {rules})", 4_000),
+                    });
+                }
+            }
+            catch (Exception ex) when (ex is ReviewException or McpException)
+            {
+                // No scanners here: the model's review stands alone.
+            }
+        }
+        return (packages, scanned);
     }
 
     /// <summary>The parts reviewed one by one: a file each, a large file in parts at its hunks.</summary>

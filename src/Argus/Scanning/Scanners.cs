@@ -37,7 +37,7 @@ public static class Scanners
     static HttpClient Http => Client ?? SharedClient.Value;
 
     /// <summary>The scanners' answer for the commit: each tool's run and the findings, the most severe first.</summary>
-    public static JsonObject Scan(string mirror, string sha, bool history, IReadOnlyList<string>? tools)
+    public static JsonObject Scan(string mirror, string sha, bool history, IReadOnlyList<string>? tools, IReadOnlyList<string>? paths = null)
     {
         var url = BaseUrl ?? throw new ScannersUnavailable(
             "No security scanners are installed here: an admin turns the scanners feature on (installer.sh repair --with scanners).");
@@ -45,7 +45,8 @@ public static class Scanners
         if (asked.FirstOrDefault(t => !Known.Contains(t)) is { } unknown)
             throw new ToolError($"tools are some of {string.Join(", ", Known)}, not {PyStr.Repr(unknown)}.");
         var file = Path.Combine(Path.GetTempPath(), $"argus-scan-{Guid.NewGuid():N}");
-        var withHistory = history && asked.Contains("gitleaks");
+        // Only some files (a change's): those alone are sent, with no history.
+        var withHistory = history && asked.Contains("gitleaks") && paths is not { Count: > 0 };
         string? reference = null;
         try
         {
@@ -61,7 +62,8 @@ public static class Scanners
                     withHistory = false;
                 }
             }
-            if (!withHistory) Mirror.Git(mirror, ["archive", "--format=tar", "-o", file, sha]);
+            if (!withHistory)
+                Mirror.Git(mirror, ["archive", "--format=tar", "-o", file, sha, .. paths is { Count: > 0 } only ? ["--", .. only.Select(p => $":(literal){p}")] : Array.Empty<string>()]);
             if (new FileInfo(file).Length > MostBytes)
                 throw new ToolError($"The commit is larger than a scan reads ({MostBytes / 1024 / 1024} MB).");
             var query = $"commit={sha}&tools={string.Join(',', asked)}" + (withHistory ? $"&ref={Uri.EscapeDataString(reference!)}" : "");

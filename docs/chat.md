@@ -866,6 +866,12 @@ Access), and write nothing to GitLab: no comments, no approvals.
   verdict (looks good, comments, changes suggested). The bell says when it
   is ready. A branch without a merge request is reviewed against the one it
   goes into.
+- **What it adds to security**, with no model: when a lock file or a
+  manifest changed, each package version an advisory affects that the
+  target branch did not have (from deps_check at both ends, with the version
+  that fixes it). Where the scanners feature is installed, what they find
+  on the lines the change adds, in its files alone (a secret is critical);
+  each scanner's match goes through the second pass like the model's.
 - **Findings** sit on a file and line, with a severity (critical, major,
   minor, nit), why it matters and a fix. Mark them **Resolved** or
   **Dismiss** them.

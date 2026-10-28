@@ -1034,6 +1034,7 @@ Code Studio → Security reviews a repository at a commit, read with the person'
 - `Llm.Tests/FixTests.A_security_findings_fix_starts_from_the_branch_reviewed_with_the_weakness_its_references_and_a_test_first`
 - `Llm.Tests/SecurityReviewTests.Admin_security_shows_each_repositorys_latest_review_what_cannot_wait_this_week_and_the_risks_accepted`
 - `Llm.Tests/SecurityReviewTests.What_people_decided_is_remembered_for_the_repositorys_next_review_and_a_fixed_one_found_again_is_open`
+- `Llm.Tests/ReviewTests.A_merge_request_that_adds_a_vulnerable_package_or_a_scanners_finding_says_so`
 
 **Watched by** `app:vulnerabilities` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
 

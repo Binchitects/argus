@@ -90,6 +90,52 @@ public sealed class ReviewTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "VUL-01")]
+    public async Task A_merge_request_that_adds_a_vulnerable_package_or_a_scanners_finding_says_so()
+    {
+        const string app_py = "@@ -1,2 +1,3 @@\\n import os\\n+os.system(\\\"ping \\\" + host)\\n def main(): pass\\n";
+        const string lock_ = "@@ -5,3 +5,3 @@\\n   \\\"node_modules/qs\\\": {\\n-    \\\"version\\\": \\\"6.11.0\\\"\\n+    \\\"version\\\": \\\"6.10.1\\\"\\n   },\\n";
+        app.Argus.Answers["mr_get"] = """{"iid": 8, "title": "Ping the host", "author": "dev", "source_branch": "ping", "target_branch": "main", "web_url": "https://gitlab.test/g/app/-/merge_requests/8", "description": "Adds a ping.", "diff_refs": {"base_sha": "aaa", "start_sha": "aaa", "head_sha": "ccc"}}""";
+        app.Argus.Answers["mr_diff"] = $$"""{"project": "g/app", "iid": 8, "files": [{"old_path": "app.py", "new_path": "app.py", "diff": "{{app_py}}"}, {"old_path": "web/package-lock.json", "new_path": "web/package-lock.json", "diff": "{{lock_}}"}]}""";
+        app.Argus.Answers["ci_status"] = """{"project": "g/app", "note": "No pipeline."}""";
+        const string old = """{"ecosystem": "npm", "package": "minimist", "version": "1.2.5", "direct": false, "via": "x", "file": "web/package-lock.json", "line": 30, "advisory": "GHSA-xvch-5gv4-984h", "aliases": [], "severity": "critical", "cwes": [], "exploited": false, "summary": "Prototype pollution in minimist", "fixed_in": "1.2.6", "upgrade_to": "1.2.6", "url": "https://github.com/advisories/GHSA-xvch-5gv4-984h"}""";
+        const string added = """{"ecosystem": "npm", "package": "qs", "version": "6.10.1", "direct": true, "via": null, "file": "web/package-lock.json", "line": 6, "advisory": "GHSA-hrpp-h998-j3pp", "aliases": ["CVE-2022-24999"], "severity": "high", "cwes": ["CWE-1321"], "exploited": false, "summary": "qs vulnerable to Prototype Pollution.", "fixed_in": "6.10.3", "upgrade_to": "6.10.3", "url": "https://github.com/advisories/GHSA-hrpp-h998-j3pp"}""";
+        app.Argus.Handlers["deps_check"] = args => args.TryGetProperty("iid", out _)
+            ? $$"""{"findings": [{{old}}, {{added}}], "advisories": [{"as_of": "2026-10-28"}]}"""
+            : $$"""{"findings": [{{old}}], "advisories": [{"as_of": "2026-10-28"}]}""";
+        app.Argus.Handlers["scan_at"] = _ => """
+            {"tools": [{"name": "opengrep", "ran": true}], "more": 0, "findings": [
+              {"tools": ["opengrep", "bandit"], "rules": ["python-command-from-strings"], "kind": "code", "path": "app.py", "line": 2, "cwe": "CWE-78", "severity": "high", "title": "A shell runs a command built from data", "message": "Pass the program and its arguments as a list."},
+              {"tools": ["opengrep"], "rules": ["python-weak-hash"], "kind": "code", "path": "app.py", "line": 3, "cwe": "CWE-328", "severity": "low", "title": "MD5 is broken", "message": "Use SHA-256."}]}
+            """;
+        try
+        {
+            var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
+            var (_, email, me) = await PersonAsync(admin);
+            var res = await me.PostAsync("/api/code/reviews", new { project = "g/app", iid = 8 });
+            var done = await DoneAsync(me, (await me.JsonAsync(res)).GetProperty("id").GetGuid());
+            var security = done.GetProperty("findings").EnumerateArray().Where(f => f.GetProperty("category").GetString() == "security").ToList();
+            // The package the change brings, not the one the target had; and the scanners' finding on a line it adds, not on one it kept.
+            var package = security.Single(f => f.GetProperty("path").GetString() == "web/package-lock.json");
+            Assert.Equal(("Adds qs 6.10.1, affected by GHSA-hrpp-h998-j3pp (high)", "major", true, "qs 6.10.3"),
+                (package.GetProperty("title").GetString(), package.GetProperty("severity").GetString(), package.GetProperty("verified").GetBoolean(), package.GetProperty("suggestion").GetString()));
+            var command = Assert.Single(security, f => f.GetProperty("path").GetString() == "app.py");
+            Assert.Equal((2, "A shell runs a command built from data"), (command.GetProperty("line").GetInt32(), command.GetProperty("title").GetString()));
+            Assert.Contains("CWE-78, opengrep, bandit", command.GetProperty("body").GetString(), StringComparison.Ordinal);
+            Assert.DoesNotContain(security, f => f.GetProperty("title").GetString()!.Contains("minimist", StringComparison.Ordinal));
+            // The change's files alone were scanned, as its person, at the merge request's head.
+            var scan = app.Argus.McpCalls.Last(c => c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "scan_at" && c.Email == email);
+            var args = scan.Params!.Value.GetProperty("arguments");
+            Assert.Equal((8, false, "app.py\nweb/package-lock.json"), (args.GetProperty("iid").GetInt32(), args.GetProperty("history").GetBoolean(), args.GetProperty("paths").GetString()));
+        }
+        finally
+        {
+            app.Argus.Handlers.TryRemove("deps_check", out _);
+            app.Argus.Handlers.TryRemove("scan_at", out _);
+        }
+    }
+
+    [Fact]
     public async Task The_chat_reviews_a_merge_request_with_its_tool_and_reads_the_review_again()
     {
         GitLab();

@@ -428,6 +428,23 @@ public sealed class ReviewToolsTests : IAsyncLifetime
             }
             Assert.Equal(leftBefore, Directory.GetFiles(Path.GetTempPath(), "argus-scan-*").Length);
 
+            // A change's files alone: only those that are there, as a tar, never the history.
+            await Answer("scan_at", new { project = "root/eal-core", iid = 1, paths = "src/decoder.c\nno/such/file.c" });
+            var (onlyQuery, onlyType, onlyTar) = scanners.Sent[2];
+            Assert.Equal("application/x-tar", onlyType);
+            Assert.DoesNotContain("ref=", onlyQuery, StringComparison.Ordinal);
+            using (var reader = new System.Formats.Tar.TarReader(new MemoryStream(onlyTar)))
+            {
+                var names = new List<string>();
+                while (reader.GetNextEntry() is { } entry) if (entry.EntryType is System.Formats.Tar.TarEntryType.RegularFile or System.Formats.Tar.TarEntryType.V7RegularFile) names.Add(entry.Name);
+                Assert.Equal(["src/decoder.c"], names);
+            }
+            var nothing = await Answer("scan_at", new { project = "root/eal-core", paths = "no/such/file.c" });
+            Assert.Equal("None of the files named is at that commit.", nothing["note"]!.GetValue<string>());
+            Assert.Equal(3, scanners.Sent.Count);
+            var escape = await Call("scan_at", new { project = "root/eal-core", paths = "../etc/passwd" });
+            Assert.True(escape["isError"]!.GetValue<bool>());
+
             var unknown = await Call("scan_at", new { project = "root/eal-core", tools = "semgrep" });
             Assert.Contains("tools are some of opengrep, bandit, gitleaks, trivy", unknown["content"]![0]!["text"]!.GetValue<string>(), StringComparison.Ordinal);
 

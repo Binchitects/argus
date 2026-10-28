@@ -2335,8 +2335,10 @@ Arena's own dependencies.
    Done: Admin → Security (each repository's latest review, the
    known-exploited, past due, new and fixed this week, risks accepted, the
    SBOMs) and the alerts (to everyone with `reviews.admin`, and the
-   review's person). Left: findings in Code Arena's Problems panel, and
-   automatic reviews saying what a merge request adds.
+   review's person). Done: every merge request review (automatic ones too)
+   says what the change adds: a vulnerable package the target did not have,
+   and the scanners' findings on its added lines. Left: findings in Code
+   Arena's Problems panel.
 7. **Measured, as Argus was.** Recognising: on the Juliet test suite (NIST
    SARD, public domain: C, C++, Java, C#) and the OWASP Benchmark (Java),
    precision and recall per CWE for the scanners alone, the model alone, the
