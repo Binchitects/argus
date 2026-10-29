@@ -13,6 +13,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { toast } from '@/components/ui/toaster'
 import { ApiError, errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { Breadcrumbs } from './breadcrumbs'
 import { asks, chatBridge, type Piece } from './bridge'
 import { Markdown } from '@/pages/chat/markdown'
 import { allCommands, onCommandsChange, runCommand } from './commands'
@@ -28,7 +29,7 @@ import { monacoDefaults, monacoKeybinding } from './keys'
 import { installFormatting, lineEdit, minimalEdit, offerFormatting } from './format'
 import { installDirtyDiff, type DiffDecorations } from './dirty-diff'
 import { saveParticipants } from './save-participants'
-import { useSettings, workspaceSettingsPath } from './settings'
+import { useSetting, useSettings, workspaceSettingsPath } from './settings'
 import { settingsSchema } from './settings-schema'
 import { useMonacoTheme } from './theme'
 import { diffOptionsOf, editorOptionsOf, isUserFile } from './editor-options'
@@ -1482,6 +1483,7 @@ function QuickOpen() {
 /** The tabs, the editor or the diff of the active one, and a few words when nothing is open. */
 export function EditorArea() {
   const ed = useEditor()
+  const crumbsOn = useSetting<boolean>('breadcrumbs.enabled') !== false
   const { tabs, active, bindEditor, bindDiff } = ed
   const changes = useQuery(changesQuery)
   const change = active?.kind === 'diff' && active.source === 'agent' ? changes.data?.find((c) => c.path === active.path) : undefined
@@ -1558,17 +1560,24 @@ export function EditorArea() {
           })}
         </div>
       )}
-      {active?.kind === 'file' && (
+      {active?.kind === 'file' && crumbsOn && !isUserFile(active.path) && (
+        <Breadcrumbs
+          path={active.path}
+          end={
+            active.languageId === 'markdown' && (
+              <button type="button" onClick={() => void ed.openPreview(active.path)} className="ml-auto flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent hover:text-foreground" title="Open Preview (Ctrl+Shift+V)">
+                <Eye className="size-3.5" aria-hidden="true" />
+                Preview
+              </button>
+            )
+          }
+        />
+      )}
+      {active?.kind === 'file' && isUserFile(active.path) && (
         <div className="flex h-8 shrink-0 items-center gap-2 border-b px-3 text-xs text-muted-foreground">
           <span className="min-w-0 truncate font-mono" title={active.path}>
-            {isUserFile(active.path) ? `User › ${active.path.slice(5)}` : active.path.split('/').join(' › ')}
+            User › {active.path.slice(5)}
           </span>
-          {active.languageId === 'markdown' && (
-            <button type="button" onClick={() => void ed.openPreview(active.path)} className="ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent hover:text-foreground" title="Open Preview (Ctrl+Shift+V)">
-              <Eye className="size-3.5" aria-hidden="true" />
-              Preview
-            </button>
-          )}
         </div>
       )}
       {active?.kind === 'diff' && <CompareToolbar tab={active} change={change} />}

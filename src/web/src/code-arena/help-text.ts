@@ -231,4 +231,5 @@ export const regions: Record<string, Part> = {
   Output: 'output',
   'Keyboard Shortcuts': 'keybindings',
   Outline: 'explorer',
+  Breadcrumbs: 'editor',
 }

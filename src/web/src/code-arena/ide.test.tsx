@@ -909,6 +909,20 @@ describe('Code Arena, the IDE', () => {
     await waitFor(() => expect(editor().revealed).toBe(3))
   })
 
+  it('shows breadcrumbs over the editor: a folder lists its files, and the symbols the cursor is in', async () => {
+    backend({
+      'POST /api/outline': () => ({ json: { symbols: [{ name: 'total', kind: 'const', qualified: 'total', parent: null, start: 1, end: 1, signature: 'const total = 1' }], language: 'typescript' } }),
+    })
+    renderIde()
+    await openApp()
+    const crumbs = await screen.findByRole('navigation', { name: 'Breadcrumbs' })
+    expect(crumbs).toHaveTextContent('srcapp.ts')
+    act(() => editor().cursor[0]!({ position: { lineNumber: 1, column: 3 } }))
+    expect(await within(crumbs).findByRole('button', { name: 'total: the symbols beside it' })).toBeInTheDocument()
+    await userEvent.click(within(crumbs).getByRole('button', { name: 'src: its files' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'app.ts' }))
+  })
+
   it("previews a Markdown file in a tab of its own that follows its text, its pictures from the folder", async () => {
     backend()
     renderIde()
@@ -3301,6 +3315,10 @@ describe('Code Arena, the help', () => {
     const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
     await screen.findByRole('tree', { name: 'Files' })
     const seen = new Set(regionsShown())
+    // A file open: the breadcrumbs over it.
+    await openApp()
+    await screen.findByRole('navigation', { name: 'Breadcrumbs' })
+    for (const r of regionsShown()) seen.add(r)
     // Every view of the side bar, and the terminal panel, drawn once.
     for (const name of ['Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Chat']) {
       await userEvent.click(within(bar).getByRole('button', { name }))

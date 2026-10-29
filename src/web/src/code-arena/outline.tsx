@@ -1,10 +1,9 @@
 import { ChevronDown, ChevronRight, ChevronsDownUp } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
-import { errorMessage } from '@/lib/api'
+import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { useEditor } from './editor-state'
-import { outlineOf, type OutlineSymbol } from './ide-api'
-import { innermost, nest, type Node } from './outline-tree'
+import { useOutline } from './outline-data'
+import { innermost, type Node } from './outline-tree'
 
 const kindMark: Record<string, string> = {
   namespace: '{}', class: 'C', struct: 'S', interface: 'I', record: 'R', enum: 'E', method: 'm', function: 'ƒ', constructor: 'c', property: 'p', field: 'f',
@@ -20,32 +19,7 @@ export function Outline() {
   const path = ed.active?.kind === 'file' && ed.active.status === 'ready' ? ed.active.path : null
   const [open, setOpen] = useState(true)
   const [shut, setShut] = useState<Set<string>>(new Set())
-  const [read, setRead] = useState<{ path: string; symbols: OutlineSymbol[]; error?: string } | null>(null)
-  useEffect(() => {
-    if (!path || !open) return
-    let gone = false
-    let wait = 0
-    let listen: { dispose(): void } | null = null
-    const ask = (text: string) =>
-      outlineOf(path, text).then(
-        (r) => !gone && setRead({ path, symbols: r.symbols }),
-        (e: unknown) => !gone && setRead({ path, symbols: [], error: errorMessage(e) }),
-      )
-    void ed.modelFor(path).then((model) => {
-      if (gone || !model) return
-      void ask(model.getValue())
-      listen = model.onDidChangeContent(() => {
-        clearTimeout(wait)
-        wait = window.setTimeout(() => !model.isDisposed() && void ask(model.getValue()), 300)
-      })
-    })
-    return () => {
-      gone = true
-      clearTimeout(wait)
-      listen?.dispose()
-    }
-  }, [ed, path, open])
-  const tree = useMemo(() => (read && read.path === path ? nest(read.symbols) : []), [read, path])
+  const { tree, read, error } = useOutline(path, open)
   const here = ed.cursor ? innermost(tree, ed.cursor.line) : null
   const rows: { node: Node; level: number }[] = []
   const walk = (nodes: Node[], level: number) => {
@@ -71,8 +45,8 @@ export function Outline() {
       {open && (
         <div className="min-h-0 overflow-auto pb-2 text-[0.8125rem]">
           {!path && <p className="px-3 py-1 text-muted-foreground">No file is open.</p>}
-          {path && read?.error && <p className="px-3 py-1 text-muted-foreground">{read.error}</p>}
-          {path && read && read.path === path && !read.error && tree.length === 0 && <p className="px-3 py-1 text-muted-foreground">No symbols in this file.</p>}
+          {path && error && <p className="px-3 py-1 text-muted-foreground">{error}</p>}
+          {path && read && !error && tree.length === 0 && <p className="px-3 py-1 text-muted-foreground">No symbols in this file.</p>}
           {rows.length > 0 && (
             <ul role="tree" aria-label={`Symbols of ${path}`}>
               {rows.map(({ node, level }) => {
