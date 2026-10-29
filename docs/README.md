@@ -29,6 +29,7 @@ developers', and Argus run alone); a test fails until it is. Only
 | page | what it covers |
 |---|---|
 | [deployment.md](deployment.md) | deploying: the samples and secrets, addresses, connecting tools, a host with no network (the offline installer: install, upgrade from 5.2.0, repair, remove), switching the model, the traps |
+| [scripts.md](scripts.md) | `arenactl`, the one command, and every script: what each is for, installing from a checkout or with the offline installer (with its dependencies), Code Arena's packages, the certificate and signature, the checks and tests, and what to do when one fails |
 | [configuration.md](configuration.md) | every `.env` variable and every file under `deploy/config/` |
 | [architecture.md](architecture.md) | every service, how a request flows through them, where state lives, and what each failure looks like |
 | [authentication.md](authentication.md) | who signs in where, and how identity reaches each service |

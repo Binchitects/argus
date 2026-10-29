@@ -76,7 +76,9 @@
 #                        in .env
 #   --cpu-only           no NVIDIA GPU: the features that need one are off unless --with names them
 #   --with A,B  --without A,B   features on and off (install, upgrade and repair; installer.sh features)
-#   --make-cert          a certificate of the deployment's own (scripts/make-cert.sh)
+#   --no-cert            no certificate of the deployment's own: by default install, upgrade and repair make
+#                        one (scripts/make-cert.sh: a CA of its own, which also signs Code Arena's builds)
+#                        unless --acme-email (Let's Encrypt) or one is there already; Traefik's own then
 #   --hosts              the stack's names in /etc/hosts (scripts/setup-hosts.sh; needs root)
 #   --skip-requirements  go on when a requirement is not met
 #   --install-requirements  put the requirements right without asking (on a terminal it asks)
@@ -218,7 +220,7 @@ case "$CMD" in
 esac
 DIR="" BUNDLE_ARG="" ENGINE="" PROJECT_ARG="" YES=0 DRY=0 LOG_ARG="" TIMEOUT=15
 DOMAIN_ARG="" EMAIL_ARG="" MODELS_ARG="" DATA_ARG="" MODEL_ARG="" HTTP_ARG="" HTTPS_ARG="" ACME_ARG="" GITLAB_ARG="" GITLAB_TOKEN_FILE=""
-CPU_ONLY=0 WITH_ARG="" WITHOUT_ARG="" KEEP_IMAGES=0 MAKE_CERT=0 HOSTS=0 SKIP_REQ=0 FIX_REQ=0 PURGE=0 CONFIRM_ARG="" FINAL_BACKUP="" ROLLBACK=0 DEFAULTS_ARG=""
+CPU_ONLY=0 WITH_ARG="" WITHOUT_ARG="" KEEP_IMAGES=0 NO_CERT=0 HOSTS=0 SKIP_REQ=0 FIX_REQ=0 PURGE=0 CONFIRM_ARG="" FINAL_BACKUP="" ROLLBACK=0 DEFAULTS_ARG=""
 only() { local c; for c in "${@:2}"; do [[ $CMD == "$c" ]] && return 0; done; usage_error "$1 is for ${*:2}"; }
 value() { [[ $2 -gt 1 ]] || usage_error "$1 needs a value"; }
 while [[ $# -gt 0 ]]; do
@@ -248,7 +250,7 @@ while [[ $# -gt 0 ]]; do
     --with) only "$1" install upgrade repair; value "$1" $#; WITH_ARG="${WITH_ARG:+$WITH_ARG,}$2"; shift ;;
     --without) only "$1" install upgrade repair; value "$1" $#; WITHOUT_ARG="${WITHOUT_ARG:+$WITHOUT_ARG,}$2"; shift ;;
     --keep-images) only "$1" repair; KEEP_IMAGES=1 ;;
-    --make-cert) only "$1" install; MAKE_CERT=1 ;;
+    --no-cert) only "$1" install upgrade repair; NO_CERT=1 ;;
     --hosts) only "$1" install; HOSTS=1 ;;
     --skip-requirements) only "$1" install; SKIP_REQ=1 ;;
     --fix) only "$1" requirements; FIX_REQ=1 ;;
@@ -284,9 +286,11 @@ fi
 PARTIAL="${ARENA_BUNDLE_PARTIAL:-0}"
 RUNFILE="${ARENA_BUNDLE_RUN:-}"
 bundle_get() { sed -n "s/^$1: //p" "$BUNDLE/MANIFEST" 2>/dev/null | head -n1; }
-BVERSION="" UPGRADES_FROM="" BLEFT=""
+BVERSION="" UPGRADES_FROM="" BLEFT="" SOURCE=""
 if [[ -n "$BUNDLE" ]]; then
   BVERSION="$(bundle_get version)"; UPGRADES_FROM="$(bundle_get upgrades-from)"; BLEFT="$(bundle_get left-out)"
+  # From a checkout (arenactl install): the images are the engine's, and a missing one is built or pulled from it.
+  [[ "$(bundle_get images-in)" == engine ]] && SOURCE="$(bundle_get source)"
   valid_version "$BVERSION" || die "the bundle's MANIFEST names no version it can use: \"$BVERSION\""
   valid_version "$UPGRADES_FROM" || die "the bundle's MANIFEST says no version it upgrades from"
 fi
@@ -383,6 +387,21 @@ dc() {
   local cf; cf="$(compose_files)"
   # The features on, as .env names them (said outright: the same list compose would read there).
   (cd "$DEPLOY" && env COMPOSE_PROJECT_NAME="$PROJECT" COMPOSE_PROFILES="$(env_get COMPOSE_PROFILES)" ${cf:+COMPOSE_FILE="$cf"} "$ENGINE" compose "$@")
+}
+# The stack's certificate: one of a CA of the deployment's own (scripts/make-cert.sh), unless Let's Encrypt
+# makes it (ACME_EMAIL), one is there already, or --no-cert. The CA also signs Code Arena's builds (sign_builds).
+ensure_cert() {   # ensure_cert plan|do
+  [[ $NO_CERT -eq 1 ]] && return 0
+  # One there already (its certificate, its key, or Traefik told of another) is the host's: never made over it.
+  [[ -n "$(env_get ACME_EMAIL)" || -e "$DEPLOY/certs/tls.crt" || -e "$DEPLOY/certs/tls.key" || -e "$DEPLOY/config/traefik/certificate.yml" ]] && return 0
+  local domain="${NEW_DOMAIN:-$(env_get DOMAIN)}"
+  if [[ $1 == plan ]]; then would "make a certificate for $domain from a CA of its own (scripts/make-cert.sh); --no-cert leaves Traefik's own"; return 0; fi
+  step "certificate"
+  if (cd "$DEPLOY" && sh scripts/make-cert.sh --domain "$domain" >/dev/null); then
+    ok "certs/tls.crt for $domain and *.$domain, from certs/ca.crt: trust that CA on the machines and tools that use the stack"
+  else
+    bad "scripts/make-cert.sh failed: Traefik serves its own certificate until it is run again (installer.sh repair)"
+  fi
 }
 # Code Arena's builds, as the app serves them, signed with a code-signing certificate of the stack's
 # CA (scripts/sign-code-arena.sh, on the host: no container sees the key). Never fatal: an unsigned
@@ -676,7 +695,98 @@ tool_package() {
 fix_tools() { local p=() t; for t in "$@"; do p+=("$(tool_package "$t")"); done; pkg_install "${p[@]}" ca-certificates; }
 
 # Docker: Docker's own repository (the engine, buildx and compose as plugins), else the system's.
+# The bundle's dependencies (make-installer.sh --deps): name<TAB>version<TAB>file<TAB>arch<TAB>sha256 in deps/DEPS.
+dep_file() {   # dep_file NAME -> its file in the bundle, for this machine
+  local arch; case "$(uname -m)" in x86_64) arch=amd64 ;; aarch64) arch=arm64 ;; *) return 1 ;; esac
+  [[ -n "$BUNDLE" && -f "$BUNDLE/deps/DEPS" ]] || return 1
+  awk -F'\t' -v n="$1" -v a="$arch" -v b="$BUNDLE/deps" '$1 == n && $4 == a { print b "/" $3; exit }' "$BUNDLE/deps/DEPS" | grep .
+}
+# Docker's static binaries from the bundle, with systemd's units as Docker ships them (any Linux, no network).
+fix_docker_bundled() {
+  local tgz tmp; tgz="$(dep_file docker)" || return 1
+  command -v systemctl >/dev/null || { bad "Docker's static binaries need systemd to start them"; return 1; }
+  tmp="$(mktemp -d)" || return 1
+  tar -xzf "$tgz" -C "$tmp" || { rm -rf "$tmp"; return 1; }
+  as_root install -m 0755 "$tmp"/docker/* /usr/local/bin/ || { rm -rf "$tmp"; return 1; }
+  rm -rf "$tmp"
+  as_root tee /etc/systemd/system/containerd.service >/dev/null <<'UNIT' || return 1
+[Unit]
+Description=containerd container runtime
+After=network.target local-fs.target
+[Service]
+ExecStartPre=-/sbin/modprobe overlay
+ExecStart=/usr/local/bin/containerd
+Type=notify
+Delegate=yes
+KillMode=process
+Restart=always
+RestartSec=5
+LimitNPROC=infinity
+LimitCORE=infinity
+TasksMax=infinity
+OOMScoreAdjust=-999
+[Install]
+WantedBy=multi-user.target
+UNIT
+  as_root tee /etc/systemd/system/docker.socket >/dev/null <<'UNIT' || return 1
+[Unit]
+Description=Docker Socket for the API
+[Socket]
+ListenStream=/run/docker.sock
+SocketMode=0660
+SocketUser=root
+SocketGroup=docker
+[Install]
+WantedBy=sockets.target
+UNIT
+  as_root tee /etc/systemd/system/docker.service >/dev/null <<'UNIT' || return 1
+[Unit]
+Description=Docker Application Container Engine
+After=network-online.target containerd.service docker.socket
+Wants=network-online.target containerd.service
+Requires=docker.socket
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock
+ExecReload=/bin/kill -s HUP $MAINPID
+TimeoutStartSec=0
+RestartSec=2
+Restart=always
+LimitNPROC=infinity
+LimitCORE=infinity
+TasksMax=infinity
+Delegate=yes
+KillMode=process
+OOMScoreAdjust=-500
+[Install]
+WantedBy=multi-user.target
+UNIT
+  as_root groupadd -f docker || return 1
+  as_root systemctl daemon-reload && as_root systemctl enable --now containerd docker.socket docker || return 1
+  fix_compose_bundled || :
+  ok "Docker $(awk -F'\t' '$1 == "docker" { print $2; exit }' "$BUNDLE/deps/DEPS") from the bundle (/usr/local/bin, systemd's units)"
+}
+fix_compose_bundled() {
+  local f; f="$(dep_file docker-compose)" || return 1
+  as_root install -D -m 0755 "$f" /usr/local/lib/docker/cli-plugins/docker-compose
+}
+# NVIDIA's container toolkit from the bundle's packages: Debian's, else Red Hat's and SUSE's.
+fix_toolkit_bundled() {
+  local f tmp kind; [[ $PKG == apt ]] && kind=deb || kind=rpm
+  f="$(dep_file "nvidia-container-toolkit-$kind")" || return 1
+  tmp="$(mktemp -d)" || return 1
+  tar -xzf "$f" -C "$tmp" || { rm -rf "$tmp"; return 1; }
+  # Only the four the toolkit is (NVIDIA's archive also holds -dev, -static, debug and old systems' packages).
+  local pkgs; pkgs="$(find "$tmp" -type f -name "*.$kind" | grep -E "/(libnvidia-container1|libnvidia-container-tools|nvidia-container-toolkit-base|nvidia-container-toolkit)[_-][0-9][^/]*\.$kind\$" | sort)"
+  [[ -n "$pkgs" ]] || { rm -rf "$tmp"; bad "the bundle's toolkit archive has no $kind packages"; return 1; }
+  if [[ $kind == deb ]]; then as_root dpkg -i $pkgs || { rm -rf "$tmp"; return 1; }
+  else as_root rpm -Uvh --replacepkgs $pkgs || { rm -rf "$tmp"; return 1; }; fi
+  rm -rf "$tmp"
+  ok "NVIDIA's container toolkit from the bundle"
+}
 fix_docker() {
+  # The bundle's own first: nothing from the network.
+  fix_docker_bundled && return 0
   if reaches https://download.docker.com/linux/; then
     case "$PKG" in
       apt)
@@ -714,6 +824,7 @@ fix_docker_system() {
   esac
 }
 fix_compose() {   # Docker's compose plugin (Podman uses it too)
+  fix_compose_bundled && return 0
   case "$PKG" in
     apt) pkg_install docker-compose-plugin 2>/dev/null || pkg_install docker-compose-v2 ;;
     dnf) pkg_install docker-compose-plugin 2>/dev/null || pkg_install docker-compose ;;
@@ -735,6 +846,7 @@ fix_podman_socket() {   # the user's own Podman socket, kept running without a s
 fix_docker_group() { as_root usermod -aG docker "${SUDO_USER:-$(id -un)}"; }
 # NVIDIA's container toolkit from NVIDIA's repository, else the system's, then wired into the engine.
 fix_toolkit() {
+  if fix_toolkit_bundled; then fix_toolkit_wiring; return; fi
   if reaches https://nvidia.github.io/libnvidia-container/gpgkey; then
     case "$PKG" in
       apt)
@@ -976,17 +1088,20 @@ state_image_pre() { awk -F'\t' -v r="$1" '$1 == r { print $3 }' "$STATE/IMAGES" 
 # images tagged as compose names them. fresh: an image already here is recorded as not ours.
 load_images() {   # load_images fresh|upgrade|repair
   local ref file have pre n=0 skipped=0 tmp svc id out need
-  step "images ($ENGINE load; nothing is pulled)"
+  if [[ -n "$SOURCE" ]]; then step "images (in $ENGINE already: built and pulled from $SOURCE)"; else step "images ($ENGINE load; nothing is pulled)"; fi
   tmp="$STATE/IMAGES.new"; : > "$tmp" || die "cannot write $tmp"
   # Only those of the core and the features on (FEATURES_ON).
   need=" $(needed_refs ${FEATURES_ON[@]+"${FEATURES_ON[@]}"} | tr '\n' ' ') "
+  [[ -n "$SOURCE" ]] && source_images "$need"
   while IFS=$'\t' read -r ref file _ _ _; do
     [[ -n "$ref" && ( "$need" == *" $ref "* || "${ref#docker.io/library/}" == "$HELPER" ) ]] || continue
     have="$(image_id "$ref")"
     pre="$(state_image_pre "$ref")"
     if [[ -z "$pre" ]]; then pre=0; [[ $1 == fresh && -n "$have" ]] && pre=1; fi
-    if [[ -n "$have" && "$have" == "$(state_image_id "$ref")" ]]; then
+    if [[ -n "$have" && ( "$have" == "$(state_image_id "$ref")" || $file == - ) ]]; then
       skipped=$((skipped + 1))
+    elif [[ $file == - ]]; then
+      die "$ref is not in $ENGINE (python3 $SOURCE/arenactl build, then again)"
     else
       [[ -f "$BUNDLE/images/$file" ]] || die "the bundle has no images/$file (unpacked only in part?)"
       if ! out="$(E load -q -i "$BUNDLE/images/$file" 2>&1)"; then
@@ -1009,6 +1124,25 @@ load_images() {   # load_images fresh|upgrade|repair
     printf '%s\t%s\t0\n' "$(compose_image "$svc")" "$id" >> "$tmp"
   done < <(bundle_release)
   ok "$n loaded, $skipped there already; the release's own tagged for $PROJECT ($(bundle_release | while IFS=$'\t' read -r svc ref; do [[ "$need" == *" $ref "* ]] && echo "$svc"; done | paste -sd' ' -))"
+}
+# A checkout's bundle: what the features on need and the engine lacks, built (the release's own, then tagged
+# arena-SERVICE:VERSION as a .run's are) or pulled, by arenactl in the checkout it was made from.
+source_images() {   # source_images " REF REF ... "
+  local ref svc svcs=() pull=()
+  while IFS=$'\t' read -r svc ref; do
+    [[ -n "$svc" && "$1" == *" $ref "* && -z "$(image_id "$ref")" ]] && svcs+=("$svc")
+  done < "$BUNDLE/images/SERVICES"
+  [[ -z "$(image_id "$HELPER")" ]] && pull+=("$HELPER")
+  [[ ${#svcs[@]} -eq 0 && ${#pull[@]} -eq 0 ]] && return 0
+  [[ -f "$SOURCE/arenactl" ]] || die "the images of ${svcs[*]} are not in $ENGINE, and $SOURCE (the checkout this bundle was made from) is not there to build them"
+  for ref in ${pull[@]+"${pull[@]}"}; do E pull -q "$ref" >/dev/null || die "$ENGINE pull $ref failed"; done
+  if [[ ${#svcs[@]} -gt 0 ]]; then
+    say "  building or pulling: ${svcs[*]}"
+    python3 "$SOURCE/arenactl" build --engine "$ENGINE" --all --services "$(IFS=,; echo "${svcs[*]}")" || die "building ${svcs[*]} failed (above)"
+    while IFS=$'\t' read -r svc ref; do
+      [[ -n "$svc" && " ${svcs[*]} " == *" $svc "* && -z "$(image_id "$ref")" && -n "$(image_id "arena-$svc")" ]] && { E tag "arena-$svc" "$ref" || die "tagging arena-$svc as $ref failed"; }
+    done < "$BUNDLE/images/RELEASE"
+  fi
 }
 record_images() {   # what load_images found and loaded, added to the state's image list (the new row wins)
   [[ -s "$STATE/IMAGES.new" ]] || return 0
@@ -1959,7 +2093,7 @@ cmd_install() {
     make_data_dirs plan
     place_models plan
     fill_audio plan
-    [[ $MAKE_CERT -eq 1 ]] && would "make a certificate for $NEW_DOMAIN (scripts/make-cert.sh)"
+    [[ $NO_CERT -eq 0 && -z "$ACME_ARG" && ! -e "$DEPLOY/certs/tls.crt" && ! -e "$DEPLOY/certs/tls.key" ]] && would "make a certificate for $NEW_DOMAIN from a CA of its own (scripts/make-cert.sh), which signs Code Arena's builds too; --no-cert leaves Traefik's own"
     [[ $HOSTS -eq 1 ]] && would "add the names to /etc/hosts (scripts/setup-hosts.sh)"
     would "start it ($ENGINE compose up -d --pull never), wait until every service is healthy and check the versions"
     return 0
@@ -1994,11 +2128,7 @@ cmd_install() {
   step "models"
   place_models do
   fill_audio do
-  if [[ $MAKE_CERT -eq 1 ]]; then
-    step "certificate"
-    if [[ -f "$DEPLOY/certs/tls.crt" ]]; then note "certs/tls.crt is there: kept"
-    else (cd "$DEPLOY" && sh scripts/make-cert.sh --domain "$NEW_DOMAIN") || die "scripts/make-cert.sh failed"; fi
-  fi
+  ensure_cert do
   if [[ $HOSTS -eq 1 ]]; then
     step "/etc/hosts"
     if [[ $EUID -eq 0 ]]; then (cd "$DEPLOY" && bash scripts/setup-hosts.sh) || bad "scripts/setup-hosts.sh failed"
@@ -2441,6 +2571,7 @@ cmd_upgrade() {
     move_volumes plan
     place_models plan
     fill_audio plan
+    ensure_cert plan
     would "start $BVERSION (the app and Argus migrate their data as they start), wait until every service is healthy, check every service's version"
     would "on a failure: roll back by itself to $FROM (its files, its images, and the data from the backup, the data as it is kept first)"
     return 0
@@ -2527,6 +2658,7 @@ cmd_upgrade() {
     remove_off_containers do
     wait_healthy || return 1
     check_versions "$BVERSION" || return 1
+    ensure_cert do
     sign_builds
   }
   if ( upgrade_steps ); then :; else failed=1; fi
@@ -2763,10 +2895,12 @@ cmd_repair() {
   fi
 
   if [[ $act == plan ]]; then
+    ensure_cert plan
     say ""; say "$problems finding(s); the repair would act on them as above."
     return 0
   fi
   if wait_healthy && check_versions "${iv:-$BVERSION}" && [[ $fix_failed -eq 0 ]]; then
+    ensure_cert do
     sign_builds
     [[ -n "$BUNDLE" && -n "$(state_get version)" ]] && record_images
     remove_off_images do

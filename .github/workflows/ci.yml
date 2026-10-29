@@ -53,7 +53,7 @@ jobs:
       - name: The package for Linux, and its program starts
         run: |
           (cd src/web && npm ci)
-          tools/package-code-arena.sh --online linux-x64
+          python3 arenactl code-arena linux-x64
           (cd dist && sha256sum -c SHA256SUMS)
           dist/code-arena/linux-x64/code-arena --version
           dist/code-arena/linux-x64/code-arena --help

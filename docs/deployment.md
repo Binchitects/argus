@@ -29,7 +29,21 @@ and no setup scripts.
 
 ## Deploy
 
-On a Linux host with Docker (or Podman, below) and an NVIDIA GPU with the
+The short way, on a Linux host, from a clone of the repository:
+
+```bash
+git clone https://github.com/Binchitects/argus && cd argus
+./arenactl doctor --for install    # what the host lacks, each with what to do
+./arenactl install                 # the images built, then the installer: .env, certificate, start
+```
+
+It checks the host and offers to install what is missing (Docker and its
+compose plugin, NVIDIA's driver and toolkit), asks the domain and the rest,
+and waits until the stack is healthy. For a host with no network,
+`./arenactl bundle --with-deps` makes one file with everything, the host's
+dependencies included ([scripts.md](scripts.md)).
+
+By hand, on a Linux host with Docker (or Podman, below) and an NVIDIA GPU with the
 container toolkit:
 
 ```bash
@@ -101,7 +115,8 @@ Traefik does TLS and nothing else does.
   their check turned off (`curl -k`, `NODE_TLS_REJECT_UNAUTHORIZED=0`).
 - **`ACME_EMAIL` in `.env`**: certificates from Let's Encrypt for the three
   names. They must resolve to this machine from the internet, with port 443 open.
-- **A certificate of your own**: `scripts/make-cert.sh` makes one with openssl,
+- **A certificate of your own** (what the installer makes by default):
+  `scripts/make-cert.sh` makes one with openssl,
   signed by a CA of the deployment's own, for `DOMAIN`, `gateway.DOMAIN`,
   `argus.DOMAIN` and `*.DOMAIN`, or installs a company's (`--cert FILE --key FILE
   [--chain FILE]`). The files go to `certs/` (mounted into Traefik at `/certs`)
@@ -691,9 +706,9 @@ of another version, the image publishes with nuget.org's; only with neither
 is it built without Code Arena, the page saying so and the build log listing
 the packs to fetch. People on a private CA sign in with
 `code-arena login --url https://DOMAIN --ca ca.crt` (give them `certs/ca.crt`).
-To hand it out another way, `tools/package-code-arena.sh` packs each system
-with its README and licence into `dist/` (with `SHA256SUMS`), from the same
-offline folder. Details: [code-arena.md](code-arena.md).
+To hand it out another way, `./arenactl code-arena` packs each system with
+its README and licence into `dist/` (with `SHA256SUMS`), on Linux, macOS or
+Windows. Details: [code-arena.md](code-arena.md).
 
 ## Upgrading from v3
 
@@ -906,7 +921,7 @@ deploy/scripts/make-installer.sh --dry-run          # what it would hold
 |---|---|
 | `--models`, `--models-dir DIR` | the models too, as `airgap.sh --models`; without it they are listed, and only the embedding model goes in |
 | `--packs` | the knowledge packs in `packs/` |
-| `--code-arena DIR` | Code Arena's packages (default `dist/`, which `tools/package-code-arena.sh` fills) |
+| `--code-arena DIR` | Code Arena's packages (default `dist/`, which `./arenactl code-arena` fills, and this when it is empty) |
 | `--without A,B` | features whose images stay out: a smaller file for hosts without them (`chat-models,pictures,video,gpu-monitoring,power-limits` for hosts with no GPU); the installer then cannot turn them on |
 | `--podman`, `--project NAME` | the images in Podman's store; the compose project they were built under (default `arena`) |
 | `--version V`, `--out DIR` | the release (default `VERSION`); where the file goes (default `dist/`) |
@@ -947,7 +962,7 @@ as the driver changes), the ports opened and the limits raised, each step
 checked again after. A missing NVIDIA driver is installed too, and the
 installer stops for the reboot it needs (exit 7: run it again after).
 `installer.sh requirements` checks a host before anything else (`--fix` puts it
-right; `scripts/install-requirements.sh` is the same). After the images load, a
+right; `./arenactl requirements` is the same from a checkout). After the images load, a
 container runs `nvidia-smi` to prove the GPU reaches it. Then it asks the domain, the admin's e-mail, where models live, the
 **default models** (download them from Hugging Face once, at the first start;
 copy them from a folder, the model library's layout, with `audio.tar.gz` for the
@@ -975,8 +990,11 @@ on the terminal and never in the log: it is `ADMIN_PASSWORD` in `.env` (0600).
   models later.
 - `MODEL` is a `.gguf` file in `MODELS_DIR` (the bundle's with `--models`): a
   Hugging Face name (`repo:quant`) needs the network and is refused.
-- `--make-cert` makes a certificate (`scripts/make-cert.sh`); `--hosts` adds the
-  names to `/etc/hosts` (`scripts/setup-hosts.sh`, as root).
+- Install, upgrade and repair make a certificate from a CA of the deployment's
+  own (`scripts/make-cert.sh`), and sign Code Arena's builds with it, unless
+  `--acme-email` (Let's Encrypt), a certificate or key is there already (never
+  made over), or `--no-cert`; `--hosts` adds the names to `/etc/hosts`
+  (`scripts/setup-hosts.sh`, as root).
 - The folder defaults to `/srv/arena` as root, else `~/arena`. Beside
   `deploy/` the installer writes the docs, the licences, `VERSION` and Code
   Arena's packages, but never over a file or folder it did not write there (a

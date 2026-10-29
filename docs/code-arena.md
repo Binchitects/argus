@@ -90,7 +90,7 @@ A release also comes as packages, one per system:
 `code-arena-<version>-<rid>.tar.gz` (a `.zip` for Windows), each holding the
 program, a `README.txt` (how to run it, sign in, the IDE, the terminal, the
 licence), `LICENSE.md` and `LICENSING.md`, with a `SHA256SUMS` for them all.
-`tools/package-code-arena.sh` builds them (below).
+`./arenactl code-arena` builds them (below).
 
 ## Signing in
 
@@ -2229,9 +2229,11 @@ stage), from .NET's runtime packs, which are not part of the SDK:
   `tools/dn`. It checks the packs first: when one is missing for a system
   asked for, it lists them at the version to fetch, builds nothing and exits
   with 3. Copy the files to people any way you like.
-- **Packages for a release**: `tools/package-code-arena.sh [rid ...]` runs the
-  publish script (offline, from `tools/offline-nuget`; `--online` fetches the
-  packs instead), then packs each system as
+- **Packages for a release**: `./arenactl code-arena [rid ...]`, on Linux,
+  macOS or Windows, builds the IDE's page (with Node.js 20+, else in Node's
+  container), publishes each system (with the .NET SDK 10, else in its
+  container; the packs from nuget.org, or `--offline` from
+  `tools/offline-nuget`), then packs each system as
   `dist/code-arena-<version>-<rid>.tar.gz` (`.zip` for `win-x64`): a folder
   with the program, `README.txt`, `LICENSE.md` and `LICENSING.md`. It writes
   `dist/SHA256SUMS` for every package of the version (`VERSION`'s) in `dist/`,

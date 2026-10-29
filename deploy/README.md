@@ -1,5 +1,16 @@
 # Argus Arena: the deployment
 
+From the repository's root, on Linux:
+
+```bash
+./arenactl doctor --for install   # what this host lacks, and how to get it
+./arenactl install                # builds the images, then installs, with .env and the certificate made
+```
+
+[docs/scripts.md](../docs/scripts.md) has every command: the offline
+installer (`./arenactl bundle --with-deps`), upgrades, repairs, backups, the
+checks. By hand instead:
+
 ```bash
 cp .env.example .env      # the domain, the models folder, the first model, six secrets
 docker compose up -d      # https://llm.localhost

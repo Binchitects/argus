@@ -122,6 +122,18 @@ class AirgapTests(unittest.TestCase):
         self.assertEqual(self.read("deploy/config/alertmanager.yml"), "route: {}\n")
         self.assertNotIn("a-secret-value", "".join(self.read(f"deploy/{f}") for f in deploy if not f.endswith(".gguf")))
 
+    def test_The_stacks_data_in_this_folder_stays_out_even_where_it_cannot_be_read(self):
+        # DATA_DIR inside the deploy folder (./data), with a file only the database's user may read.
+        self.s.write("data/postgres/PG_VERSION", "16\n")
+        locked = self.s.write("data/acme/acme.json", "{}")
+        locked.chmod(0)
+        try:
+            r = self.pack()
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertFalse([n for n in self.members() if n.startswith("arena-airgap/deploy/data/")])
+        finally:
+            locked.chmod(0o600)
+
     def test_The_registered_models_are_listed_and_copied_only_with_models(self):
         self.pack()
         rows = [line.split("\t") for line in self.read("models/MODELS").splitlines()[1:]]

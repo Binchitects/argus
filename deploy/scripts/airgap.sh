@@ -10,6 +10,9 @@
 #   --into DIR        load: where deploy/ goes (default ./arena, so ./arena/deploy)
 #   --podman          Podman's images and volumes in place of Docker's
 #   --stage DIR       pack: the bundle's files in DIR/arena-airgap, not a tar (make-installer.sh)
+#   --images-in-engine  pack, with --stage: the images named but not saved (IMAGES' file is -), no speech
+#                     models, the models listed only: an installer run from a checkout (arenactl install)
+#                     takes them from the engine, where they were built or pulled
 #   --dry-run         the plan; nothing is written, loaded or run
 #
 # COMPOSE_FILE, when set, names the compose files (Podman too); else docker-compose.yml,
@@ -78,7 +81,7 @@ case "$ACTION" in
   "") usage_error "say pack or load" ;;
   *) usage_error "unknown action: $ACTION" ;;
 esac
-ENGINE=docker; WITH_MODELS=0; DRY=0; INTO=""; MODELS_ARG=""; TARGET=""; STAGE_ARG=""
+ENGINE=docker; WITH_MODELS=0; DRY=0; INTO=""; MODELS_ARG=""; TARGET=""; STAGE_ARG=""; IN_ENGINE=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --models) WITH_MODELS=1 ;;
@@ -87,6 +90,7 @@ while [[ $# -gt 0 ]]; do
     --into) [[ $# -gt 1 ]] || usage_error "--into needs a directory"; INTO="$2"; shift ;;
     --models-dir) [[ $# -gt 1 ]] || usage_error "--models-dir needs a directory"; MODELS_ARG="$2"; shift ;;
     --stage) [[ $# -gt 1 ]] || usage_error "--stage needs a directory"; STAGE_ARG="$2"; shift ;;
+    --images-in-engine) IN_ENGINE=1 ;;
     -h|--help) usage ;;
     -*) usage_error "unknown option: $1" ;;
     *) [[ -z "$TARGET" ]] || usage_error "one bundle at a time"; TARGET="$1" ;;
@@ -101,6 +105,8 @@ if [[ -n "$STAGE_ARG" ]]; then
   # Only for the plan's and the messages' sake: nothing is written there.
   TARGET="$STAGE_ARG/arena-airgap.tar"
 fi
+[[ $IN_ENGINE -eq 1 && -z "$STAGE_ARG" ]] && usage_error "--images-in-engine is for pack --stage"
+[[ $IN_ENGINE -eq 1 ]] && WITH_MODELS=0
 [[ -n "$TARGET" ]] || usage_error "$ACTION needs a bundle: $ACTION ... FILE.tar"
 [[ "$TARGET" == *.tar ]] || usage_error "the bundle is a .tar: $TARGET"
 [[ $ACTION == pack && -n "$INTO" ]] && usage_error "--into is for load"
@@ -137,6 +143,9 @@ if [[ $ACTION == pack ]]; then
   case "$MODELS_DIR" in /*) ;; *) MODELS_DIR="$ROOT/${MODELS_DIR#./}" ;; esac
   BACKUP_DIR="$(env_get BACKUP_DIR)"; BACKUP_DIR="${BACKUP_DIR:-./backups}"
   case "$BACKUP_DIR" in /*) ;; *) BACKUP_DIR="$ROOT/${BACKUP_DIR#./}" ;; esac
+  # The stack's data (DATA_DIR), when it lives in this folder: the database's files are not the deploy's.
+  DATA_DIR="$(env_get DATA_DIR)"
+  case "$DATA_DIR" in "") ;; /*) ;; *) DATA_DIR="$ROOT/${DATA_DIR#./}" ;; esac
 
   # The images the stack runs, as compose resolves them (modules left out are not named).
   # The secrets only fill the file in: an image never depends on them.
@@ -163,9 +172,10 @@ if [[ $ACTION == pack ]]; then
 
   # This folder's files, relative to it, without secrets, backups, models or keys.
   deploy_files() {
-    local -a prune=(-name backups -o -name certs -o -name signing -o -name .deploytest -o -name __pycache__ -o -name .cache -o -name .git -o -name '.airgap-*')
+    local -a prune=(-name backups -o -name certs -o -name signing -o -name .deploytest -o -name __pycache__ -o -name .cache -o -name .git -o -name '.airgap-*' -o -path ./data)
     local d
-    for d in "$BACKUP_DIR" "$MODELS_DIR"; do
+    for d in "$BACKUP_DIR" "$MODELS_DIR" "$DATA_DIR"; do
+      [[ -n "$d" ]] || continue
       [[ "$d" == "$ROOT"/* ]] && prune+=(-o -path "./${d#"$ROOT"/}")
     done
     {
@@ -258,12 +268,19 @@ if [[ $ACTION == pack ]]; then
   # Podman's progress lines are noise in a log; Docker's save prints none.
   QUIET=(); [[ $ENGINE == podman ]] && QUIET=(-q)
   for ref in "${IMAGES[@]}"; do
+    if [[ $IN_ENGINE -eq 1 ]]; then
+      # Named only: the installer takes it from the engine (or has it built or pulled there).
+      id="$("$ENGINE" image inspect --format '{{.Id}}' "$ref" 2>/dev/null)" || id=-
+      printf '%s\t-\t%s\n' "$ref" "$id" >> "$B/images/IMAGES"
+      continue
+    fi
     id="$("$ENGINE" image inspect --format '{{.Id}}' "$ref" 2>/dev/null)" || die "$ref is not on this host: build or pull it first (this script pulls nothing)"
     file="$(image_file "$ref")"
     "$ENGINE" save ${QUIET[@]+"${QUIET[@]}"} -o "$B/images/$file" "$ref" || die "$ENGINE save $ref failed"
     printf '%s\t%s\t%s\n' "$ref" "$file" "$id" >> "$B/images/IMAGES"
     printf '  %-60s %8s\n' "$ref" "$(human "$(stat -c %s "$B/images/$file")")"
   done
+  [[ $IN_ENGINE -eq 1 ]] && say "  ${#IMAGES[@]} named, in $ENGINE (not saved)"
 
   say "==> deploy/"
   for f in "${FILES[@]}"; do
@@ -273,9 +290,11 @@ if [[ $ACTION == pack ]]; then
   say "  $(find "$B/deploy" -type f | wc -l) files (no .env, backups, models or certificate keys)"
 
   say "==> models"
-  INI="$(engine_file models.ini)" || INI=""
-  KEPT="$(engine_file keep | head -n1)" || KEPT=""
-  [[ -n "$INI" ]] || say "  the app has registered no chat model (no models.ini in ${PROJECT}_engine)"
+  # A checkout's bundle (--images-in-engine) lists none: the models are this host's, not the release's.
+  if [[ $IN_ENGINE -eq 1 ]]; then INI=""; say "  none listed (from a checkout: the models come as the installer asks)"
+  else INI="$(engine_file models.ini)" || INI=""; fi
+  KEPT=""; [[ $IN_ENGINE -eq 1 ]] || KEPT="$(engine_file keep | head -n1)" || KEPT=""
+  [[ -n "$INI" || $IN_ENGINE -eq 1 ]] || say "  the app has registered no chat model (no models.ini in ${PROJECT}_engine)"
   FIRST="$(first_model "$INI" "$KEPT")"
   printf 'kind\tbytes\tpath\n' > "$B/models/MODELS"
   n=0; total=0; missing=0
@@ -294,12 +313,14 @@ if [[ $ACTION == pack ]]; then
       say "  missing from $MODELS_DIR: $path"
     fi
     printf '%s\t%s\t%s\n' "$kind" "$size" "$path" >> "$B/models/MODELS"
-  done < <(library_files "$INI" | awk '!seen[$2]++')
+  done < <([[ $IN_ENGINE -eq 1 ]] || library_files "$INI" | awk '!seen[$2]++')
   say "  $n file(s), $(human "$total"), $([[ $WITH_MODELS -eq 1 ]] && echo "copied" || echo "listed (--models copies them)")$([[ $missing -gt 0 ]] && echo "; $missing missing")"
 
   say "==> audio"
   AUDIO=no
-  if "$ENGINE" volume inspect "${PROJECT}_audio" >/dev/null 2>&1; then
+  if [[ $IN_ENGINE -eq 1 ]]; then
+    say "  none: the speech server fetches its models, or they come with the default models"
+  elif "$ENGINE" volume inspect "${PROJECT}_audio" >/dev/null 2>&1; then
     owner=""; [[ $ENGINE == docker ]] && owner=" && chown $(id -u):$(id -g) /out/audio.tar.gz"
     "$ENGINE" run --rm --pull never --network none -v "${PROJECT}_audio:/src:ro" -v "$B/audio:/out" "$HELPER" \
       sh -c "tar -czf /out/audio.tar.gz --numeric-owner -C /src .$owner" || die "archiving the ${PROJECT}_audio volume failed"

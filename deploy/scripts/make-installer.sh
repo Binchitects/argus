@@ -17,9 +17,17 @@
 #   --models-dir DIR   the model library (as airgap.sh: MODELS_DIR in .env, else ./models)
 #   --packs            the knowledge packs in packs/ (*.arguspack)
 #   --code-arena DIR   Code Arena's packages (default dist/: code-arena-*.tar.gz and .zip,
-#                      which tools/package-code-arena.sh makes)
+#                      which ./arenactl code-arena makes, and this when there are none)
 #   --without A,B      features (deploy/features) whose images are left out: a smaller bundle;
 #                      the installer then cannot turn them on
+#   --deps DIR         the host's dependencies, put in deps/ (./arenactl deps fetches them: Docker's
+#                      static binaries, its compose plugin, NVIDIA's container toolkit): the installer
+#                      installs them from the bundle where the host lacks them, with no network
+#   --no-known         without a git tag of the oldest release (a download, a shallow clone): known/ is
+#                      left out, and an upgrade from it keeps every file it finds changed
+#   --images-in-engine the images named, not saved: they stay in the engine, built or pulled there
+#                      (arenactl install, from a checkout); no speech models, Code Arena or .run
+#   --stage-only DIR   the bundle unpacked into DIR/argus-arena-VERSION, not a .run
 #   --dry-run          the plan; nothing is written or saved
 #
 # The bundle, argus-arena-VERSION/ inside the file:
@@ -31,6 +39,7 @@
 #                  id, bytes, bytes unpacked; RELEASE: the release's own (service, reference),
 #                  tagged arena-SERVICE:VERSION; SERVICES: each service's image (service,
 #                  reference), which the installer loads only for the features on
+#   deps/          with --deps: DEPS (name, version, file, arch, sha256) and the files it names
 #   deploy/        as airgap.sh packs it (no .env, backups, models or keys), without an
 #                  override, and only the files git has when this is a checkout
 #   known/         each release's deploy files' checksums since 5.2.0, from its git tag: an
@@ -76,6 +85,7 @@ vercmp() {
 }
 
 OUT_ARG="" VERSION_ARG="" PROJECT=arena ENGINE=docker WITH_MODELS=0 MODELS_ARG="" PACKS=0 CA_ARG="" WITHOUT="" LEAVE="" DRY=0
+DEPS_ARG="" NO_KNOWN=0 IN_ENGINE=0 STAGE_ONLY=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --out) [[ $# -gt 1 ]] || usage_error "--out needs a folder"; OUT_ARG="$2"; shift ;;
@@ -87,6 +97,10 @@ while [[ $# -gt 0 ]]; do
     --packs) PACKS=1 ;;
     --code-arena) [[ $# -gt 1 ]] || usage_error "--code-arena needs a folder"; CA_ARG="$2"; shift ;;
     --without) [[ $# -gt 1 ]] || usage_error "--without needs features"; WITHOUT="${WITHOUT:+$WITHOUT,}$2"; shift ;;
+    --deps) [[ $# -gt 1 ]] || usage_error "--deps needs a folder"; DEPS_ARG="$2"; shift ;;
+    --no-known) NO_KNOWN=1 ;;
+    --images-in-engine) IN_ENGINE=1 ;;
+    --stage-only) [[ $# -gt 1 ]] || usage_error "--stage-only needs a folder"; STAGE_ONLY="$2"; shift ;;
     --dry-run) DRY=1 ;;
     -h|--help) usage ;;
     *) usage_error "unknown option: $1" ;;
@@ -94,6 +108,9 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 [[ "$PROJECT" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || usage_error "--project: lowercase letters, digits, - and _"
+[[ -z "$DEPS_ARG" || -f "$DEPS_ARG/DEPS" ]] || usage_error "--deps $DEPS_ARG: no DEPS there (./arenactl deps fetches them)"
+[[ -z "$STAGE_ONLY" || -d "$STAGE_ONLY" ]] || usage_error "--stage-only: no folder $STAGE_ONLY"
+[[ $IN_ENGINE -eq 1 && -z "$STAGE_ONLY" ]] && usage_error "--images-in-engine is for --stage-only (a .run carries its images)"
 [[ -z "$WITHOUT" || "$WITHOUT" =~ ^[a-z0-9,-]+$ ]] || usage_error "--without names features: a,b,c"
 # The services of the features left out, from deploy/features ("id | default | services | ...").
 [[ -f "$ROOT/features" ]] || die "no deploy/features in $ROOT"
@@ -111,7 +128,7 @@ OUT_DIR="$(abspath "${OUT_ARG:-$REPO/dist}")"
 CA_DIR="$(abspath "${CA_ARG:-$REPO/dist}")"
 RUN="$OUT_DIR/argus-arena-$VERSION-offline.run"
 TOP="argus-arena-$VERSION"
-[[ -e "$RUN" ]] && die "$RUN is there already"
+[[ -z "$STAGE_ONLY" && -e "$RUN" ]] && die "$RUN is there already"
 COMMIT="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 [[ $COMMIT != unknown && -n "$(git -C "$REPO" status --porcelain -- deploy 2>/dev/null)" ]] && COMMIT="$COMMIT+changes"
 export PODMAN_COMPOSE_WARNING_LOGS=false
@@ -121,7 +138,8 @@ CREATED_TAGS=()
 cleanup() {
   local t
   for t in ${CREATED_TAGS[@]+"${CREATED_TAGS[@]}"}; do "$ENGINE" image rm "$t" >/dev/null 2>&1; done
-  rm -rf "$WORK" "${STAGE:-/nonexistent-stage}"
+  rm -rf "$WORK"
+  [[ -z "$STAGE_ONLY" ]] && rm -rf "${STAGE:-/nonexistent-stage}"
 }
 trap cleanup EXIT
 # Compose, for the release as it ships: docker-compose.yml alone, every profile but off, and
@@ -153,13 +171,16 @@ left() { [[ ",$LEAVE," == *",$1,"* ]]; }
 AIRGAP_ENV=(env COMPOSE_PROJECT_NAME="$PROJECT" COMPOSE_FILE="$ROOT/docker-compose.yml:$WORK/release.yml" COMPOSE_PROFILES="$PROFILES")
 AIRGAP=(bash "$ROOT/scripts/airgap.sh" pack)
 [[ $ENGINE == podman ]] && AIRGAP+=(--podman)
+[[ $IN_ENGINE -eq 1 ]] && AIRGAP+=(--images-in-engine)
 [[ $WITH_MODELS -eq 1 ]] && AIRGAP+=(--models)
 [[ -n "$MODELS_ARG" ]] && AIRGAP+=(--models-dir "$MODELS_ARG")
 # Code Arena's packages of this release (older ones in dist/ stay out); made here when there are none and they
 # come from dist/: the .NET packs fetched at the SDK's version, then every system published and packed.
 ca_files() { CA_FILES=(); for f in "$CA_DIR"/code-arena-"$VERSION"-*.tar.gz "$CA_DIR"/code-arena-"$VERSION"-*.zip; do [[ -f "$f" ]] && CA_FILES+=("$f"); done; }
 ca_files
-CA_MAKE=0; [[ ${#CA_FILES[@]} -eq 0 && -z "$CA_ARG" && -x "$REPO/tools/package-code-arena.sh" ]] && CA_MAKE=1
+# A checkout's bundle carries none: the app's image serves Code Arena's builds already.
+[[ $IN_ENGINE -eq 1 ]] && CA_FILES=()
+CA_MAKE=0; [[ ${#CA_FILES[@]} -eq 0 && -z "$CA_ARG" && $IN_ENGINE -eq 0 && -f "$REPO/arenactl" ]] && CA_MAKE=1
 PACK_FILES=(); [[ $PACKS -eq 1 ]] && for f in "$REPO"/packs/*.arguspack; do [[ -f "$f" ]] && PACK_FILES+=("$f"); done
 # The model library, as airgap.sh finds it.
 MODELS_DIR="${MODELS_ARG:-$(sed -n 's/^MODELS_DIR=//p' "$ROOT/.env" 2>/dev/null | tail -n1 | sed -e 's/^"//' -e 's/"$//')}"
@@ -181,8 +202,8 @@ if git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
   done
 fi
 KNOWN_MISSING=""
-if [[ "$(vercmp "$VERSION" "$UPGRADES_FROM")" == 1 ]] && ! printf '%s\n' ${KNOWN[@]+"${KNOWN[@]}"} | cut -f2 | grep -qxF "$UPGRADES_FROM"; then
-  KNOWN_MISSING="no git tag of $UPGRADES_FROM in $REPO (v$UPGRADES_FROM): its deploy files' checksums cannot go in known/. Fetch the tags first (git fetch --tags; a shallow CI clone: fetch-depth 0)"
+if [[ $NO_KNOWN -eq 0 && "$(vercmp "$VERSION" "$UPGRADES_FROM")" == 1 ]] && ! printf '%s\n' ${KNOWN[@]+"${KNOWN[@]}"} | cut -f2 | grep -qxF "$UPGRADES_FROM"; then
+  KNOWN_MISSING="no git tag of $UPGRADES_FROM in $REPO (v$UPGRADES_FROM): its deploy files' checksums cannot go in known/. Fetch the tags first (git fetch --tags; a shallow CI clone: fetch-depth 0), or --no-known"
 fi
 
 if [[ $DRY -eq 1 ]]; then
@@ -197,17 +218,17 @@ if [[ $DRY -eq 1 ]]; then
   say "  the embedding model ($EMBED_FILE): $(case "$EMBEDDING" in packed) echo "from $MODELS_DIR" ;; missing) echo "NOT IN $MODELS_DIR: the embedding server would wait for it on the other host" ;; *) echo "$EMBEDDING" ;; esac)"
   say "  then gzipped, with installer.sh, docs/, LICENSE.md, LICENSING.md, VERSION, known/ ($(printf '%s\n' ${KNOWN[@]+"${KNOWN[@]}"} | cut -f2 | paste -sd' ' -))"
   [[ -n "$KNOWN_MISSING" ]] && say "  known/: NOT MADE: $KNOWN_MISSING"
-  say "  Code Arena's packages: ${#CA_FILES[@]} of $VERSION in $CA_DIR$([[ $CA_MAKE -eq 1 ]] && echo " (none: made first, tools/fetch-code-arena-packs.sh then tools/package-code-arena.sh)")"
+  say "  Code Arena's packages: ${#CA_FILES[@]} of $VERSION in $CA_DIR$([[ $CA_MAKE -eq 1 ]] && echo " (none: made first, ./arenactl code-arena)")"
+  [[ -n "$DEPS_ARG" ]] && say "  the host's dependencies, from $DEPS_ARG: $(cut -f1,2 "$DEPS_ARG/DEPS" | tr '\t' ' ' | paste -sd, -)"
   say "  knowledge packs: $([[ $PACKS -eq 1 ]] && echo "${#PACK_FILES[@]} from packs/" || echo "none (--packs)")"
   exit 0
 fi
 
-mkdir -p "$OUT_DIR" || die "cannot make $OUT_DIR"
+[[ -n "$STAGE_ONLY" ]] || mkdir -p "$OUT_DIR" || die "cannot make $OUT_DIR"
 say "make-installer: Argus Arena $VERSION ($COMMIT), from $ENGINE's store"
 if [[ $CA_MAKE -eq 1 ]]; then
   say "==> Code Arena's packages of $VERSION: none in $CA_DIR, made now"
-  "$REPO/tools/fetch-code-arena-packs.sh" || say "  the .NET packs could not be fetched: published from those in tools/offline-nuget"
-  "$REPO/tools/package-code-arena.sh" || die "Code Arena could not be packed (tools/package-code-arena.sh): fill tools/offline-nuget (its README), or pass --code-arena DIR"
+  python3 "$REPO/arenactl" code-arena --out "$CA_DIR" || die "Code Arena could not be packed (./arenactl code-arena; ./arenactl doctor --for code-arena says what it needs), or pass --code-arena DIR"
   ca_files
 fi
 say "==> the release's own images, as arena-SERVICE:$VERSION"
@@ -216,10 +237,17 @@ for s in "${BUILT[@]}"; do
   src="$PROJECT-$s" dst="arena-$s:$VERSION"
   # Podman: the name Docker gives it too, so either engine finds it by its short name.
   [[ $ENGINE == podman ]] && dst="docker.io/library/$dst"
-  id="$("$ENGINE" image inspect --format '{{.Id}}' "$src" 2>/dev/null)" || die "$src is not on this host: build it first ($ENGINE compose build $s)"
+  if ! id="$("$ENGINE" image inspect --format '{{.Id}}' "$src" 2>/dev/null)"; then
+    # From a checkout, a feature not built yet is built when the installer turns it on.
+    [[ $IN_ENGINE -eq 1 ]] && { say "  $src: not built yet (built when its feature is turned on)"; continue; }
+    die "$src is not on this host: build it first (./arenactl build --all, or $ENGINE compose build $s)"
+  fi
   have="$("$ENGINE" image inspect --format '{{.Id}}' "$dst" 2>/dev/null)"
-  if [[ -z "$have" ]]; then "$ENGINE" tag "$src" "$dst" || die "tagging $src as $dst failed"; CREATED_TAGS+=("$dst")
-  elif [[ "$have" != "$id" ]]; then die "$dst is here already and is not $src: remove that tag first ($ENGINE image rm $dst)"; fi
+  # The installer of a checkout's bundle tags them as it loads them; a .run's are saved by these tags.
+  if [[ -z "$have" ]]; then "$ENGINE" tag "$src" "$dst" || die "tagging $src as $dst failed"; [[ $IN_ENGINE -eq 1 ]] || CREATED_TAGS+=("$dst")
+  elif [[ "$have" != "$id" ]]; then
+    [[ $IN_ENGINE -eq 1 ]] && { "$ENGINE" tag "$src" "$dst" || die "tagging $src as $dst failed"; } || die "$dst is here already and is not $src: remove that tag first ($ENGINE image rm $dst)"
+  fi
   say "  $src -> arena-$s:$VERSION"
 done
 
@@ -227,7 +255,12 @@ done
 [[ -z "$KNOWN_MISSING" ]] || die "$KNOWN_MISSING"
 
 # The free space for the staging folder and the file: the images, twice over.
-STAGE="$(mktemp -d "$OUT_DIR/.make-installer.XXXXXX")" || die "cannot make a work folder in $OUT_DIR"
+if [[ -n "$STAGE_ONLY" ]]; then
+  STAGE="$(cd "$STAGE_ONLY" && pwd)"
+  [[ -e "$STAGE/$TOP" ]] && die "$STAGE/$TOP is there already"
+else
+  STAGE="$(mktemp -d "$OUT_DIR/.make-installer.XXXXXX")" || die "cannot make a work folder in $OUT_DIR"
+fi
 "${AIRGAP_ENV[@]}" "${AIRGAP[@]}" --stage "$STAGE" || die "airgap.sh could not pack the bundle"
 B="$STAGE/$TOP"
 mv "$STAGE/arena-airgap" "$B" || die "cannot rename the bundle's folder"
@@ -249,6 +282,8 @@ GZ=(gzip -6); command -v pigz >/dev/null && GZ=(pigz -6)
 : > "$B/images/IMAGES.new"
 while IFS=$'\t' read -r ref file id; do
   [[ -n "$ref" ]] || continue
+  # Named only (--images-in-engine): the engine has it, or it is built or pulled when needed.
+  if [[ $file == - ]]; then printf '%s\t-\t%s\t0\t0\n' "$ref" "$id" >> "$B/images/IMAGES.new"; continue; fi
   raw="$(stat -c %s "$B/images/$file")"
   "${GZ[@]}" "$B/images/$file" || die "gzipping $file failed (disk full?)"
   printf '%s\t%s\t%s\t%s\t%s\n' "$ref" "$file.gz" "$id" "$(stat -c %s "$B/images/$file.gz")" "$raw" >> "$B/images/IMAGES.new"
@@ -282,7 +317,19 @@ if [[ ${#CA_FILES[@]} -gt 0 ]]; then
   (cd "$B/code-arena" && sha256sum -- * > SHA256SUMS)
   say "  ${#CA_FILES[@]} from $CA_DIR"
 else
-  say "  none in $CA_DIR (tools/package-code-arena.sh makes them): the app's image still carries them for download"
+  say "  none in $CA_DIR (./arenactl code-arena makes them): the app's image still carries them for download"
+fi
+if [[ -n "$DEPS_ARG" ]]; then
+  say "==> the host's dependencies (deps/)"
+  mkdir -p "$B/deps"
+  while IFS=$'\t' read -r name ver file arch sum; do
+    [[ -n "$name" ]] || continue
+    [[ "$(sha256sum "$DEPS_ARG/$file" | cut -d' ' -f1)" == "$sum" ]] || die "deps: $file does not match its checksum in $DEPS_ARG/DEPS (./arenactl deps --refresh)"
+    mkdir -p "$B/deps/$(dirname "$file")"
+    ln "$DEPS_ARG/$file" "$B/deps/$file" 2>/dev/null || cp -p "$DEPS_ARG/$file" "$B/deps/$file" || die "copying $file failed"
+    say "  $name $ver ($arch): $(human "$(stat -c %s "$B/deps/$file")")"
+  done < "$DEPS_ARG/DEPS"
+  cp -p "$DEPS_ARG/DEPS" "$B/deps/DEPS"
 fi
 if [[ $PACKS -eq 1 ]]; then
   say "==> knowledge packs"
@@ -301,7 +348,7 @@ for kv in ${KNOWN[@]+"${KNOWN[@]}"}; do
   done > "$B/known/$v.sha256"
   say "  $v ($tag): $(wc -l < "$B/known/$v.sha256") files"
 done
-[[ ${#KNOWN[@]} -gt 0 ]] || say "  none: $VERSION is the oldest release an upgrade starts from"
+[[ ${#KNOWN[@]} -gt 0 ]] || say "  none: $([[ $NO_KNOWN -eq 1 ]] && echo "no git tags here (--no-known): an upgrade keeps every file it finds changed, with the release's beside it" || echo "$VERSION is the oldest release an upgrade starts from")"
 
 say "==> the embedding model (the embedding server waits for it; the app would fetch it, which needs the network)"
 if [[ $EMBEDDING == packed && ! -f "$B/models/library/$EMBED_FILE" ]]; then
@@ -334,9 +381,16 @@ ai() { sed -n "s/^$1: //p" <<<"$AIRGAP_MANIFEST" | head -n1; }
   echo "audio: $(ai audio)"
   echo "packs: ${#PACK_FILES[@]}"
   echo "code-arena: ${#CA_FILES[@]}"
+  echo "deps: $([[ -f "$B/deps/DEPS" ]] && cut -f1 "$B/deps/DEPS" | paste -sd' ' - || echo none)"
+  # From a checkout (arenactl install): the images are the engine's, and missing ones are built from it.
+  [[ $IN_ENGINE -eq 1 ]] && { echo "images-in: engine"; echo "source: $REPO"; }
 } > "$B/MANIFEST"
 (cd "$B" && find . -type f ! -name SHA256SUMS -printf '%P\n' | sort | xargs -d '\n' sha256sum > SHA256SUMS) || die "checksums failed"
 (cd "$B" && sha256sum -c --quiet --strict SHA256SUMS) || die "the bundle does not verify"
+if [[ -n "$STAGE_ONLY" ]]; then
+  say "==> $B (unpacked; bash $B/installer.sh COMMAND ...)"
+  exit 0
+fi
 
 say "==> $RUN"
 # The small part first: the installer, what it reads to plan, and the text files.

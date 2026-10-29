@@ -125,6 +125,47 @@ class RequirementsTests(unittest.TestCase):
         self.assertIn("nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml", calls, r.stdout + r.stderr)
         self.assertIn("systemctl enable --now nvidia-cdi-refresh.path", calls)
 
+    def test_Fix_installs_docker_compose_and_the_toolkit_from_the_bundles_deps_with_no_network(self):
+        # A bundle with deps/ (make-installer.sh --deps): Docker's static binaries, its compose plugin, NVIDIA's packages.
+        bundle = self.s.dir / "bundle"
+        (bundle / "deps" / "docker").mkdir(parents=True)
+        (bundle / "deps" / "nvidia").mkdir()
+        work = self.s.dir / "work"
+        (work / "docker").mkdir(parents=True)
+        for b in ("dockerd", "docker", "containerd", "runc"):
+            (work / "docker" / b).write_text("#!/bin/sh\n")
+        subprocess.run(["tar", "-czf", str(bundle / "deps" / "docker" / "docker-28.5.1.tgz"), "-C", str(work), "docker"], check=True)
+        (bundle / "deps" / "docker" / "docker-compose").write_text("#!/bin/sh\n")
+        (work / "pkgs").mkdir()
+        (work / "pkgs" / "nvidia-container-toolkit_1.18.0-1_amd64.deb").write_text("deb\n")
+        subprocess.run(["tar", "-czf", str(bundle / "deps" / "nvidia" / "nvidia-container-toolkit_1.18.0_deb_amd64.tar.gz"), "-C", str(work / "pkgs"), "."], check=True)
+        arch = {"x86_64": "amd64", "aarch64": "arm64"}[os.uname().machine]
+        (bundle / "deps" / "DEPS").write_text(
+            f"docker\t28.5.1\tdocker/docker-28.5.1.tgz\t{arch}\t-\n"
+            f"docker-compose\t2.40.0\tdocker/docker-compose\t{arch}\t-\n"
+            f"nvidia-container-toolkit-deb\t1.18.0\tnvidia/nvidia-container-toolkit_1.18.0_deb_amd64.tar.gz\t{arch}\t-\n")
+        (bundle / "MANIFEST").write_text("format: argus-arena-offline 1\nversion: 9.9.9\nupgrades-from: 5.2.0\n")
+        self.s.bin.joinpath("nvidia-smi").write_text('#!/bin/sh\necho "GPU 0: Fake GPU (UUID: GPU-0)"\n')
+        self.s.bin.joinpath("nvidia-smi").chmod(0o755)
+        self.fake("groupadd", 'echo "groupadd $*" >> "$CALLS"')
+        # dpkg installs the toolkit by making nvidia-ctk, which logs what it is asked.
+        self.fake("dpkg", 'echo "dpkg $*" >> "$CALLS"\n'
+                  f'printf \'#!/bin/sh\\necho "nvidia-ctk $*" >> "$CALLS"\\n\' > "{self.s.bin}/nvidia-ctk"; chmod +x "{self.s.bin}/nvidia-ctk"')
+        # No Docker on this host: it, its compose plugin and the toolkit all come from the bundle.
+        (self.s.bin / "docker").unlink()
+        r = self.run_req("--fix", "--yes", "--bundle", str(bundle))
+        out = r.stdout + r.stderr
+        calls = self.logged()
+        self.assertRegex(calls, r"sudo install -m 0755 \S+/docker/containerd \S+/docker/docker \S+/docker/dockerd \S+/docker/runc /usr/local/bin/", out)
+        self.assertIn("sudo tee /etc/systemd/system/docker.service", calls)
+        self.assertIn("systemctl enable --now containerd docker.socket docker", calls)
+        self.assertRegex(calls, r"sudo install -D -m 0755 \S+/deps/docker/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose")
+        self.assertIn("Docker 28.5.1 from the bundle", out)
+        self.assertRegex(calls, r"dpkg -i \S+/nvidia-container-toolkit_1\.18\.0-1_amd64\.deb")
+        self.assertIn("NVIDIA's container toolkit from the bundle", out)
+        # Nothing was fetched: curl is never asked for Docker's repository.
+        self.assertNotIn("download.docker.com", calls)
+
     def test_Install_does_not_change_the_host_unattended_unless_asked(self):
         r = self.s.run("installer.sh", "install", "--yes", "--skip-requirements", "--dry-run", "--install-requirements")
         # --install-requirements is install's; requirements' own is --fix.

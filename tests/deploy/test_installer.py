@@ -299,6 +299,48 @@ class MakeInstallerArgumentTests(unittest.TestCase):
         self.assertFalse(self.s.called("save") or self.s.called("tag"))
 
 
+class SourceBundleTests(unittest.TestCase):
+    """make-installer.sh --images-in-engine --stage-only: a checkout's bundle (arenactl install), its images named, not saved."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.r = Release()
+        cls.stage = cls.r.s.dir / "source-stage"
+        cls.stage.mkdir()
+        # Images built from a checkout say its version once tagged as the release's.
+        cls.made = cls.r.s.run("make-installer.sh", "--images-in-engine", "--stage-only", str(cls.stage), "--no-known", extra={"FAKE_TAG_VERSION": "1"})
+        cls.b = cls.stage / "argus-arena-9.9.9"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.r.s.cleanup()
+
+    def test_It_names_the_images_without_saving_them_and_says_which_checkout_it_came_from(self):
+        self.assertEqual(self.made.returncode, 0, self.made.stdout + self.made.stderr)
+        rows = [line.split("\t") for line in (self.b / "images" / "IMAGES").read_text().splitlines()]
+        self.assertTrue(rows)
+        self.assertTrue(all(r[1] == "-" for r in rows), rows)
+        self.assertEqual([p.name for p in (self.b / "images").iterdir() if p.name.endswith((".tar", ".tar.gz"))], [])
+        manifest = (self.b / "MANIFEST").read_text()
+        self.assertIn("images-in: engine\n", manifest)
+        self.assertIn(f"source: {self.r.repo}\n", manifest)
+        # Nothing of a .run: no speech models, no Code Arena packages (the app's image serves them).
+        self.assertFalse((self.b / "code-arena").exists())
+        self.assertFalse(list((self.b / "audio").glob("*")))
+        r = subprocess.run(["bash", str(self.b / "installer.sh"), "verify"], env=self.r.env(), capture_output=True, text=True, timeout=120)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_It_installs_from_the_images_the_engine_has(self):
+        d = self.r.s.dir / "from-source"
+        r = subprocess.run(["bash", str(self.b / "installer.sh"), "install", "--dir", str(d), "--yes", "--cpu-only", "--skip-requirements",
+                            "--timeout", "5s", "--domain", "arena.test", "--https-port", "18443", "--http-port", "18080"],
+                           cwd=self.r.s.dir, env=self.r.env({"FAKE_TAG_VERSION": "1"}), capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("images (in docker already: built and pulled from", r.stdout)
+        self.assertNotIn("loaded arena-", r.stdout)
+        self.assertTrue((d / "deploy" / "certs" / "tls.crt").is_file())
+
+
 class InstallerTests(unittest.TestCase):
     """installer.sh's commands, each test on a fresh copy of one release's bundle."""
 
@@ -502,8 +544,13 @@ class InstallerTests(unittest.TestCase):
 
     # ---------------------------------------------------------------- install
 
+    def test_Install_with_no_cert_leaves_traefik_its_own(self):
+        self.install("--no-cert")
+        self.assertFalse((self.dir / "deploy" / "certs" / "tls.crt").exists())
+
     def test_Install_writes_the_folder_env_and_override_and_starts_it(self):
-        r = self.install("--make-cert")
+        # A certificate of its own CA by default (--no-cert leaves Traefik's own).
+        r = self.install()
         deploy = self.dir / "deploy"
         env = (deploy / ".env").read_text()
         self.assertEqual(oct((deploy / ".env").stat().st_mode & 0o777), "0o600")

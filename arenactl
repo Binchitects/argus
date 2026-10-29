@@ -1,0 +1,942 @@
+#!/usr/bin/env python3
+"""arenactl: Argus Arena's one command, from a checkout of its repository.
+
+    ./arenactl doctor [--for TASK]       what this machine has for a task, and how to get the rest
+    ./arenactl install [options]         install from this checkout: builds the images, then the installer
+    ./arenactl upgrade|repair [options]  the same for an installation there already
+    ./arenactl status|remove|verify|features|requirements [options]   the installer's own commands
+    ./arenactl build [--with A,B] [--without A,B] [--all]   the stack's images (built and pulled)
+    ./arenactl code-arena [RID ...] [--offline]             Code Arena's packages for each system, in dist/
+    ./arenactl deps [--arch amd64|arm64]                    Docker, Compose and NVIDIA's toolkit, for a bundle
+    ./arenactl bundle [--with-deps] [--models] [--packs]    the offline installer: dist/argus-arena-VERSION-offline.run
+    ./arenactl cert|sign|backup|restore|hosts|kube [args]   the operator's scripts, for an installation
+    ./arenactl check NAME [args]          the live checks (functional, compliance, recovery, gpu, ...)
+    ./arenactl test [SUITE ...]           the test suites (app, code-arena, argus, web, deploy)
+    ./arenactl scripts                    every script in the repository, by what it is for
+
+Python 3.8 or newer and nothing else to install for itself: on Windows, `python arenactl ...`.
+Building and packaging work on Linux, macOS and Windows; installing runs on Linux (the stack is
+Linux containers). docs/scripts.md says more, with every option.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import platform
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+import urllib.request
+import zipfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+DEPLOY = ROOT / "deploy"
+SCRIPTS = DEPLOY / "scripts"
+TOOLS = ROOT / "tools"
+DIST = ROOT / "dist"
+VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip() if (ROOT / "VERSION").exists() else "0.0.0"
+WINDOWS = os.name == "nt"
+RIDS = ["linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64"]
+DOTNET_SDK_IMAGE = "mcr.microsoft.com/dotnet/sdk:10.0"
+NODE_IMAGE = "node:22-alpine"
+# The secrets compose insists on, as placeholders: an image never depends on them (make-installer.sh does the same).
+PLACEHOLDERS = ["APP_KEY", "DB_PASSWORD", "GATEWAY_KEY", "ENGINE_KEY", "ARGUS_KEY"]
+
+
+# ----------------------------------------------------------------------------- output
+def say(msg: str = "") -> None:
+    print(msg, flush=True)
+
+
+def step(msg: str) -> None:
+    print(f"==> {msg}", flush=True)
+
+
+def warn(msg: str) -> None:
+    print(f"arenactl: WARNING: {msg}", file=sys.stderr, flush=True)
+
+
+class Stop(Exception):
+    """A clear reason to stop, said once, with what to do."""
+
+    def __init__(self, msg: str, code: int = 1):
+        super().__init__(msg)
+        self.code = code
+
+
+def human(n: float) -> str:
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1024 or unit == "TB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} TB"
+
+
+def run(cmd: list[str], cwd: Path | None = None, env: dict | None = None, check: bool = True, quiet: bool = False, input: str | None = None) -> int:
+    if not quiet:
+        say("  $ " + " ".join(cmd))
+    full = None if env is None else {**os.environ, **env}
+    r = subprocess.run(cmd, cwd=cwd, env=full, input=input, text=input is not None)
+    if check and r.returncode != 0:
+        raise Stop(f"{Path(cmd[0]).name} failed (exit {r.returncode}): {' '.join(cmd)}", r.returncode)
+    return r.returncode
+
+
+def output(cmd: list[str], cwd: Path | None = None, env: dict | None = None) -> str | None:
+    try:
+        full = None if env is None else {**os.environ, **env}
+        r = subprocess.run(cmd, cwd=cwd, env=full, capture_output=True, text=True, timeout=120)
+        return r.stdout if r.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def version_of(text: str | None) -> tuple[int, ...]:
+    m = re.search(r"(\d+)\.(\d+)(?:\.(\d+))?", text or "")
+    return tuple(int(x or 0) for x in m.groups()) if m else ()
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def free_bytes(path: Path) -> int:
+    p = path
+    while not p.exists():
+        p = p.parent
+    return shutil.disk_usage(p).free
+
+
+def linux_only(what: str) -> None:
+    if platform.system() != "Linux":
+        raise Stop(f"{what} runs on Linux, where the stack runs (this is {platform.system()}): copy the bundle there "
+                   f"(./arenactl bundle makes it) and run it with sh argus-arena-{VERSION}-offline.run install", 3)
+
+
+# ----------------------------------------------------------------------------- the container engine
+class Engine:
+    """Docker, else Podman: whichever answers. Building, bundling and installing need one."""
+
+    def __init__(self, name: str | None = None):
+        self.name = name or self.pick()
+
+    @staticmethod
+    def answers(name: str) -> bool:
+        return shutil.which(name) is not None and output([name, "info"]) is not None
+
+    @classmethod
+    def pick(cls) -> str | None:
+        for name in ("docker", "podman"):
+            if cls.answers(name):
+                return name
+        return None
+
+    @property
+    def ok(self) -> bool:
+        return self.name is not None
+
+    def need(self) -> str:
+        if not self.name:
+            raise Stop("neither Docker nor Podman answers here (installed, and its daemon or socket running?): ./arenactl doctor says how to get one", 3)
+        return self.name
+
+    def compose(self) -> list[str]:
+        return [self.need(), "compose"]
+
+    def has_image(self, ref: str) -> bool:
+        return output([self.need(), "image", "inspect", ref]) is not None
+
+    def user_args(self) -> list[str]:
+        # The files a container writes into the checkout are this user's (Docker on Linux would make them root's).
+        if self.name == "docker" and hasattr(os, "getuid"):
+            return ["-u", f"{os.getuid()}:{os.getgid()}"]
+        return []
+
+
+# ----------------------------------------------------------------------------- features (deploy/features)
+def features() -> list[dict]:
+    """id | default | services | needs | requires | title, as deploy/features lists them."""
+    rows = []
+    for line in (DEPLOY / "features").read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        parts = [p.strip() for p in line.split("|")]
+        if len(parts) < 6:
+            continue
+        rows.append({"id": parts[0], "default": parts[1] == "on", "services": [] if parts[2] == "-" else parts[2].split(),
+                     "needs": [] if parts[3] == "-" else parts[3].split(","), "requires": [] if parts[4] == "-" else parts[4].split(","), "title": parts[5]})
+    return rows
+
+
+def choose_features(with_: str | None, without: str | None, all_: bool = False, cpu_only: bool = False) -> list[str]:
+    rows = {f["id"]: f for f in features()}
+    asked = {n for n in (with_ or "").split(",") if n}
+    left = {n for n in (without or "").split(",") if n}
+    for name in asked | left:
+        if name not in rows:
+            raise Stop(f"--with/--without {name}: no such feature (deploy/features: {', '.join(rows)})", 2)
+
+    def hold(ids: set[str]) -> set[str]:
+        # As the installer: a feature whose requirements are off goes too.
+        ids = set(ids)
+        while any(not set(rows[i]["requires"]) <= ids for i in ids):
+            ids = {i for i in ids if set(rows[i]["requires"]) <= ids}
+        return ids
+
+    on = set(rows) if all_ else {i for i, f in rows.items() if f["default"]}
+    if cpu_only:
+        on -= {i for i, f in rows.items() if "gpu" in f["needs"] and i not in asked}
+    on = hold(on)
+    # A feature asked for brings those it requires.
+    todo = list(asked)
+    while todo:
+        i = todo.pop()
+        if i not in on:
+            on.add(i)
+            todo += rows[i]["requires"]
+    return sorted(hold(on - left))
+
+
+class Compose:
+    """The release's compose file with placeholder secrets: enough to build, pull and list its images."""
+
+    def __init__(self, engine: Engine, profiles: list[str], project: str = "arena"):
+        self.engine = engine
+        self.profiles = profiles
+        self.project = project
+        self.dir = Path(tempfile.mkdtemp(prefix="arenactl-"))
+        (self.dir / "placeholder.env").write_text("".join(f"{k}=placeholder\n" for k in PLACEHOLDERS) + "DATA_DIR=/placeholder\n", encoding="utf-8")
+
+    def env(self) -> dict:
+        return {"COMPOSE_PROFILES": ",".join(self.profiles), "COMPOSE_PROJECT_NAME": self.project, "COMPOSE_FILE": ""}
+
+    def cmd(self, *args: str) -> list[str]:
+        files = ["-f", "docker-compose.yml"] + (["-f", "podman.yml"] if self.engine.name == "podman" else [])
+        return [*self.engine.compose(), "--env-file", str(self.dir / "placeholder.env"), *files, *args]
+
+    def run(self, *args: str) -> None:
+        run(self.cmd(*args), cwd=DEPLOY, env=self.env())
+
+    def config(self) -> dict:
+        out = output(self.cmd("config", "--format", "json"), cwd=DEPLOY, env=self.env())
+        if out is None:
+            raise Stop("compose could not read deploy/docker-compose.yml (an old compose? version 2.20 or newer is needed)")
+        return json.loads(out)
+
+    def close(self) -> None:
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+
+# ----------------------------------------------------------------------------- doctor
+HOW = {
+    "docker": {"Linux": "./arenactl requirements --fix installs Docker from Docker's packages (or https://docs.docker.com/engine/install/)",
+               "Darwin": "Docker Desktop: https://docs.docker.com/desktop/setup/install/mac-install/",
+               "Windows": "Docker Desktop: https://docs.docker.com/desktop/setup/install/windows-install/"},
+    "compose": {"Linux": "Docker's compose plugin, 2.20 or newer (./arenactl requirements --fix installs it)", "Darwin": "comes with Docker Desktop", "Windows": "comes with Docker Desktop"},
+    "dotnet": {"any": ".NET SDK 10 (https://dotnet.microsoft.com/download/dotnet/10.0); without it, Docker or Podman builds in the SDK's container"},
+    "node": {"any": "Node.js 20 or newer with npm (https://nodejs.org); without it, Docker or Podman builds the page in Node's container"},
+    "git": {"Linux": "your package manager: apt install git, dnf install git", "Darwin": "xcode-select --install", "Windows": "https://git-scm.com/download/win"},
+    "openssl": {"Linux": "apt install openssl, dnf install openssl", "any": "OpenSSL"},
+}
+
+
+def how(tool: str) -> str:
+    h = HOW.get(tool, {})
+    return h.get(platform.system()) or h.get("any") or ""
+
+
+def doctor_checks(task: str, engine: Engine) -> list[tuple[str, bool, str, bool]]:
+    """(what, ok, detail or how, needed) for a task: build, code-arena, bundle, install or all."""
+    rows: list[tuple[str, bool, str, bool]] = []
+    tasks = {"build", "code-arena", "bundle", "install"} if task == "all" else {task} | ({"build", "code-arena"} if task == "bundle" else set())
+    py = sys.version_info
+    rows.append(("Python 3.8+", py >= (3, 8), f"{py.major}.{py.minor}", True))
+    engine_needed = bool(tasks & {"build", "bundle", "install"})
+    if engine.ok:
+        ver = output([engine.name, "version", "--format", "{{.Server.Version}}"]) or output([engine.name, "--version"])
+        rows.append((f"container engine ({engine.name})", True, (ver or "").strip(), engine_needed))
+        cv = output([*engine.compose(), "version", "--short"]) or output([*engine.compose(), "version"])
+        rows.append(("compose 2.20+", version_of(cv) >= (2, 20), (cv or "missing").strip() + ("" if version_of(cv) >= (2, 20) else f": {how('compose')}"), engine_needed))
+    else:
+        installed = [n for n in ("docker", "podman") if shutil.which(n)]
+        detail = f"{' and '.join(installed)} installed, but its daemon does not answer (start it; on Linux: sudo systemctl start docker, or add yourself to the docker group)" if installed else how("docker")
+        rows.append(("container engine (Docker or Podman)", False, detail, engine_needed))
+    if tasks & {"code-arena"}:
+        dv = output(["dotnet", "--list-sdks"])
+        sdk10 = any(version_of(line) >= (10,) for line in (dv or "").splitlines())
+        rows.append((".NET SDK 10", sdk10 or engine.ok, "installed" if sdk10 else ("not installed: builds in the SDK's container" if engine.ok else how("dotnet")), True))
+        nv = output(["node", "--version"])
+        node = version_of(nv) >= (20,) and shutil.which("npm") is not None
+        page = (ROOT / "src" / "CodeArena" / "web" / "code-arena.html").exists()
+        rows.append(("Node.js 20+ and npm (Code Arena's page)", node or engine.ok or page, nv.strip() if node else ("not installed: built in Node's container" if engine.ok else ("not installed: the page built already is used" if page else how("node"))), True))
+    if tasks & {"bundle"}:
+        rows.append(("git (each release's files, for upgrades)", shutil.which("git") is not None and (ROOT / ".git").exists(),
+                     "a clone of the repository" if (ROOT / ".git").exists() else "not a git clone: the bundle cannot tell files a host changed on an upgrade from 5.2.0 (fresh installs are fine)", False))
+        for tool in ("bash", "tar", "gzip", "sha256sum"):
+            rows.append((tool, shutil.which(tool) is not None, "" if shutil.which(tool) else "the bundle is made on Linux (or WSL2), with GNU tools", True))
+    if tasks & {"build", "bundle"}:
+        free = free_bytes(ROOT)
+        need = 120 << 30 if "bundle" in tasks else 60 << 30
+        rows.append((f"free disk here ({human(need)}+)", free >= need, f"{human(free)} free in {ROOT}", True))
+        if engine.ok and engine.name == "docker":
+            root = (output(["docker", "info", "--format", "{{.DockerRootDir}}"]) or "").strip()
+            if root and Path(root).exists():
+                ef = free_bytes(Path(root))
+                rows.append((f"free disk for images ({human(need)}+)", ef >= need, f"{human(ef)} free in {root}", True))
+    if tasks & {"install"}:
+        rows.append(("Linux", platform.system() == "Linux", platform.system(), True))
+        rows.append(("openssl", shutil.which("openssl") is not None, "" if shutil.which("openssl") else how("openssl"), True))
+    return rows
+
+
+def cmd_doctor(a) -> int:
+    engine = Engine()
+    rows = doctor_checks(a.for_, engine)
+    say(f"Argus Arena {VERSION}, for {a.for_}: {platform.system()} {platform.machine()}")
+    bad = 0
+    for what, ok, detail, needed in rows:
+        mark = "ok     " if ok else ("MISSING" if needed else "note   ")
+        bad += 0 if ok or not needed else 1
+        say(f"  {mark} {what}{': ' + detail if detail else ''}")
+    if a.for_ in ("install", "all") and platform.system() == "Linux":
+        say("")
+        step("the host, as the installer checks it (installer.sh requirements)")
+        rc = run(["bash", str(SCRIPTS / "installer.sh"), "requirements", *a.rest], check=False, quiet=True)
+        bad += 0 if rc == 0 else 1
+    say("")
+    say("Everything needed is here." if bad == 0 else f"{bad} thing(s) needed are missing (above, each with what to do).")
+    return 0 if bad == 0 else 1
+
+
+# ----------------------------------------------------------------------------- build
+def build_images(engine: Engine, profiles: list[str], pull: bool = True, services: list[str] | None = None) -> None:
+    compose = Compose(engine, profiles)
+    try:
+        cfg = compose.config()
+        svcs = cfg.get("services", {})
+        names = services or sorted(svcs)
+        built = [s for s in names if s in svcs and svcs[s].get("build")]
+        others = [s for s in names if s in svcs and not svcs[s].get("build")]
+        step(f"the release's own images: {len(built)} built ({engine.name} compose build)")
+        if built:
+            compose.run("build", *built)
+        if pull and others:
+            missing = [s for s in others if not engine.has_image(svcs[s].get("image", ""))]
+            step(f"the other images: {len(others)}, {len(missing)} pulled")
+            if missing:
+                compose.run("pull", *missing)
+    finally:
+        compose.close()
+
+
+def cmd_build(a) -> int:
+    engine = Engine(a.engine)
+    profiles = choose_features(a.with_, a.without, a.all)
+    say(f"Building Argus Arena {VERSION}'s images with {engine.need()}; features: {', '.join(profiles)}")
+    build_images(engine, profiles, pull=not a.no_pull, services=a.services.split(",") if a.services else None)
+    say("Built.")
+    return 0
+
+
+# ----------------------------------------------------------------------------- Code Arena
+README = """Code Arena {version} for {system}
+
+An IDE in your browser around a coding agent, on your company's Argus Arena:
+your project's files, an editor, search, terminals and the agent's chat, on
+your own machine. Nothing else needs to be installed.
+
+Install
+{install}
+
+Sign in, once
+  {exe} login --url https://DOMAIN
+  It asks for your API key (in Arena: Your account, then API key), checks it
+  and keeps it in its config folder, readable by you only. With a company CA,
+  add --ca ca.crt. {exe} logout forgets the key.
+
+The IDE
+  cd your-project
+  {exe}              (or: {exe} web)
+  It prints an address on 127.0.0.1 carrying this run's key and opens your
+  browser there. Only this machine can open it, and only with that key.
+  Ctrl+C in the terminal stops it. --port N picks the port, --no-open leaves
+  the browser closed, --continue carries on with the folder's last session.
+  On another machine over SSH: {exe} --port 8765 --no-open there, then
+  ssh -L 8765:127.0.0.1:8765 that-machine here, and open the address printed.
+
+  In the IDE: the Explorer (the folder's files), editor tabs, the agent's
+  changes with a diff to accept or revert, search across the files,
+  terminals (your own shell, in the project folder, as powerful as any) and
+  the agent's chat beside them, with its mode and model.
+
+The agent in this terminal instead
+  {exe} chat                    a conversation here (/help lists the commands)
+  {exe} "why is the build red?" a conversation that starts with this
+  {exe} -p "list the TODOs"     answer once, print the answer, exit
+  At its prompt the up arrow brings back what you sent in this folder, and
+  Esc goes back to what you were typing.
+
+Updates
+  {exe} update installs the newer build your Arena serves; Arena tells you
+  in your bell when yours is old.
+
+Licence
+  Copyright (C) 2026 Binchitects and contributors. There is no warranty.
+  Code Arena is offered under the AGPL-3.0-only (LICENSE.md) with the
+  additional terms in LICENSING.md, or under a commercial license from
+  Binchitects. Source: https://github.com/Binchitects/argus
+  {exe} --version prints the version, the licence and the source.
+"""
+
+
+def readme(rid: str, exe: str) -> str:
+    if rid.startswith("linux-"):
+        system, install = f"Linux ({rid[6:]})", "  chmod +x code-arena && mkdir -p ~/.local/bin && mv code-arena ~/.local/bin/"
+    elif rid.startswith("osx-"):
+        system = "macOS (" + ("Apple silicon" if rid == "osx-arm64" else "Intel") + ")"
+        install = ("  chmod +x code-arena && mkdir -p ~/.local/bin && mv code-arena ~/.local/bin/\n"
+                   "  macOS marks files from the internet: xattr -d com.apple.quarantine code-arena\n"
+                   "  (the build is not notarized by Apple).")
+    else:
+        system = "Windows (x64)"
+        install = ("  Put code-arena.exe in a folder on your PATH. If SmartScreen stops it:\n"
+                   "  More info, then Run anyway (or unblock it in the file's properties).")
+    return README.format(version=VERSION, system=system, install=install, exe=exe)
+
+
+def dotnet_cmd(engine: Engine) -> tuple[list[str], str]:
+    """How to run the .NET SDK 10: installed, else in its container with this checkout mounted."""
+    sdks = output(["dotnet", "--list-sdks"]) or ""
+    if any(version_of(line) >= (10,) for line in sdks.splitlines()):
+        return ["dotnet"], "/"
+    name = engine.need()
+    # NuGet's cache in a volume of the engine's own, kept between runs (a folder of the host's is not always the
+    # engine's host's: arenactl itself in a container). As root in there; what it writes into the checkout is
+    # handed back to this user after (Docker on Linux; Podman and Docker Desktop map it already).
+    owner = engine.user_args()[1] if engine.user_args() else ""
+    chown = f'; rc=$?; find /repo/src /repo/dist -user 0 -exec chown {owner} {{}} + 2>/dev/null; exit $rc' if owner else ""
+    return [name, "run", "--rm", "-e", "DOTNET_CLI_TELEMETRY_OPTOUT=1", "-e", "DOTNET_NOLOGO=1", "-v", "arenactl-nuget:/root/.nuget",
+            "-v", f"{ROOT}:/repo", "-w", "/repo", DOTNET_SDK_IMAGE, "sh", "-c", 'dotnet "$@"' + chown, "dotnet"], "/repo"
+
+
+def build_page(engine: Engine) -> None:
+    """Code Arena's web page (code-arena web), built from src/web into src/CodeArena/web, which the program embeds."""
+    web = ROOT / "src" / "web"
+    page = ROOT / "src" / "CodeArena" / "web"
+    configs = [["--config", "vite.code-arena.config.ts"], ["--config", "vite.preview.config.ts", "--outDir", "../CodeArena/web"]]
+    nv = output(["node", "--version"])
+    npm = shutil.which("npm")
+    if version_of(nv) >= (20,) and npm:
+        step(f"Code Arena's page (node {nv.strip()})")
+        if not (web / "node_modules" / "vite" / "bin" / "vite.js").exists():
+            run([npm, "ci", "--no-audit", "--no-fund"], cwd=web)
+        for c in configs:
+            run(["node", "node_modules/vite/bin/vite.js", "build", *c, "--logLevel", "warn"], cwd=web)
+    elif engine.ok:
+        step(f"Code Arena's page (in {NODE_IMAGE}: no Node.js 20+ here)")
+        # Built in a copy inside the container (without the host's node_modules, another system's binaries); only the
+        # page comes back into the checkout.
+        script = ("mkdir -p /tmp/w/src && cd /repo/src && tar cf - --exclude=web/node_modules web | tar xf - -C /tmp/w/src && cd /tmp/w/src/web "
+                  "&& npm ci --no-audit --no-fund && "
+                  + " && ".join(f"node node_modules/vite/bin/vite.js build {' '.join(c)} --logLevel warn" for c in configs)
+                  + " && rm -rf /repo/src/CodeArena/web && cp -r /tmp/w/src/CodeArena/web /repo/src/CodeArena/web")
+        run([engine.name, "run", "--rm", *engine.user_args(), "-e", "HOME=/tmp", "-e", "npm_config_cache=/tmp/.npm", "-v", f"{ROOT}:/repo",
+             NODE_IMAGE, "sh", "-c", script])
+    elif (page / "code-arena.html").exists():
+        say("==> Code Arena's page: built already (no Node.js 20+ or container engine to build it again)")
+    else:
+        raise Stop(f"Code Arena's page needs Node.js 20+ ({how('node')}) or Docker; --no-web builds without it")
+
+
+def cmd_code_arena(a) -> int:
+    rids = a.rids or RIDS
+    for r in rids:
+        if r not in RIDS:
+            raise Stop(f"no system {r} (systems: {' '.join(RIDS)})", 2)
+    engine = Engine(a.engine)
+    out = Path(a.out).resolve() if a.out else DIST
+    say(f"Code Arena {VERSION} for {', '.join(rids)}, into {out}")
+    if a.no_web:
+        shutil.rmtree(ROOT / "src" / "CodeArena" / "web", ignore_errors=True)
+    else:
+        build_page(engine)
+    dotnet, base = dotnet_cmd(engine)
+    rel = (lambda p: str(p)) if base == "/" else (lambda p: "/repo/" + p.relative_to(ROOT).as_posix())
+    sources: list[str] = []
+    if a.offline:
+        runtime = (output([*dotnet, "msbuild", rel(ROOT / "src/CodeArena/CodeArena.csproj"), "-getProperty:BundledNETCoreAppPackageVersion"], cwd=ROOT) or "").strip().splitlines()
+        runtime = runtime[-1].strip() if runtime else ""
+        if not re.fullmatch(r"\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?", runtime):
+            raise Stop(f"the .NET SDK did not say which runtime it publishes with: {runtime!r}")
+        have = {p.name.lower() for p in (TOOLS / "offline-nuget").glob("*.nupkg")}
+        missing = [f"microsoft.netcore.app.{k}.{r}.{runtime}.nupkg" for r in rids for k in ("runtime", "host") if f"microsoft.netcore.app.{k}.{r}.{runtime}.nupkg" not in have]
+        if missing:
+            raise Stop("--offline: tools/offline-nuget lacks " + ", ".join(missing) + " (tools/fetch-code-arena-packs.sh fetches them; without --offline nuget.org is used)", 3)
+        sources = ["--source", rel(TOOLS / "offline-nuget"), "-p:RestoreIgnoreFailedSources=false"]
+    built = DIST / "code-arena"
+    for rid in rids:
+        step(f"Code Arena for {rid}")
+        target = built / rid
+        shutil.rmtree(target, ignore_errors=True)
+        run([*dotnet, "publish", rel(ROOT / "src/CodeArena/CodeArena.csproj"), "-c", "Release", "-r", rid, "-o", rel(target), *sources, "-nologo"], cwd=ROOT)
+        for f in target.iterdir():
+            if f.is_file() and f.name not in ("code-arena", "code-arena.exe"):
+                f.unlink()
+    step("the packages")
+    out.mkdir(parents=True, exist_ok=True)
+    epoch = int(os.environ.get("SOURCE_DATE_EPOCH") or (output(["git", "-C", str(ROOT), "log", "-1", "--format=%ct"]) or str(int(time.time()))).strip())
+    for rid in rids:
+        exe = "code-arena.exe" if rid.startswith("win-") else "code-arena"
+        name = f"code-arena-{VERSION}-{rid}"
+        files = [(f"{name}/{exe}", (built / rid / exe).read_bytes(), 0o755), (f"{name}/LICENSE.md", (ROOT / "LICENSE.md").read_bytes(), 0o644),
+                 (f"{name}/LICENSING.md", (ROOT / "LICENSING.md").read_bytes(), 0o644)]
+        text = readme(rid, exe)
+        files.append((f"{name}/README.txt", (text.replace("\n", "\r\n") if rid.startswith("win-") else text).encode(), 0o644))
+        files.sort()
+        for old in (out / f"{name}.tar.gz", out / f"{name}.zip"):
+            old.unlink(missing_ok=True)
+        # The same files give the same package: no owners, the commit's time on every file.
+        if rid.startswith("win-"):
+            path = out / f"{name}.zip"
+            with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+                stamp = time.gmtime(max(epoch, 315532800))[:6]
+                for arc, data, mode in files:
+                    info = zipfile.ZipInfo(arc, stamp)
+                    info.external_attr = (0o100000 | mode) << 16
+                    info.compress_type = zipfile.ZIP_DEFLATED
+                    z.writestr(info, data)
+        else:
+            path = out / f"{name}.tar.gz"
+            import gzip
+            import io
+            raw = io.BytesIO()
+            with tarfile.open(fileobj=raw, mode="w", format=tarfile.PAX_FORMAT) as t:
+                d = tarfile.TarInfo(name)
+                d.type, d.mode, d.mtime, d.uid, d.gid = tarfile.DIRTYPE, 0o755, epoch, 0, 0
+                t.addfile(d)
+                for arc, data, mode in files:
+                    info = tarfile.TarInfo(arc)
+                    info.size, info.mode, info.mtime, info.uid, info.gid = len(data), mode, epoch, 0, 0
+                    t.addfile(info, io.BytesIO(data))
+            with open(path, "wb") as f, gzip.GzipFile(filename="", mode="wb", fileobj=f, compresslevel=9, mtime=0) as g:
+                g.write(raw.getvalue())
+        say(f"  {path.name}: {human(path.stat().st_size)}")
+    sums = sorted(p for p in out.iterdir() if p.is_file() and re.fullmatch(rf"code-arena-{re.escape(VERSION)}-[a-z0-9-]+\.(tar\.gz|zip)", p.name))
+    (out / "SHA256SUMS").write_text("".join(f"{sha256(p)}  {p.name}\n" for p in sums), encoding="utf-8")
+    say(f"  SHA256SUMS: {len(sums)} packages")
+    return 0
+
+
+# ----------------------------------------------------------------------------- dependencies for a bundle
+def fetch(url: str, dest: Path) -> Path:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    part = dest.with_name(dest.name + ".part")
+    req = urllib.request.Request(url, headers={"User-Agent": f"arenactl/{VERSION}"})
+    with urllib.request.urlopen(req, timeout=120) as r, open(part, "wb") as f:
+        shutil.copyfileobj(r, f, 1 << 20)
+    part.replace(dest)
+    return dest
+
+
+def fetch_text(url: str) -> str:
+    req = urllib.request.Request(url, headers={"User-Agent": f"arenactl/{VERSION}", "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return r.read().decode()
+
+
+def latest_release(repo: str) -> dict:
+    return json.loads(fetch_text(f"https://api.github.com/repos/{repo}/releases/latest"))
+
+
+def cmd_deps(a) -> int:
+    """Docker's static binaries, its compose plugin, and NVIDIA's container toolkit (deb and rpm), for a bundle's deps/."""
+    arch = a.arch
+    out = Path(a.out).resolve() if a.out else DIST / "deps" / arch
+    machine = {"amd64": "x86_64", "arm64": "aarch64"}[arch]
+    rows: list[tuple[str, str, str]] = []
+    step(f"the host's dependencies for a bundle, {arch}, into {out}")
+    # Docker: the newest static release (a tgz of dockerd, containerd, runc and the CLI: any Linux).
+    index = fetch_text(f"https://download.docker.com/linux/static/stable/{machine}/")
+    versions = sorted({tuple(map(int, m)) for m in re.findall(r"docker-(\d+)\.(\d+)\.(\d+)\.tgz", index)})
+    if not versions:
+        raise Stop("download.docker.com listed no static Docker release")
+    dv = ".".join(map(str, versions[-1]))
+    f = out / "docker" / f"docker-{dv}.tgz"
+    if not f.exists() or a.refresh:
+        say(f"  Docker {dv} (static) ...")
+        fetch(f"https://download.docker.com/linux/static/stable/{machine}/docker-{dv}.tgz", f)
+    rows.append(("docker", dv, f.relative_to(out).as_posix()))
+    # Compose: the plugin binary, checked against the release's own checksum.
+    rel = latest_release("docker/compose")
+    cv = rel["tag_name"].lstrip("v")
+    asset = f"docker-compose-linux-{machine}"
+    f = out / "docker" / "docker-compose"
+    if not f.exists() or a.refresh:
+        say(f"  Docker Compose {cv} ...")
+        url = next(x["browser_download_url"] for x in rel["assets"] if x["name"] == asset)
+        fetch(url, f)
+        want = next((x["browser_download_url"] for x in rel["assets"] if x["name"] == asset + ".sha256"), None)
+        if want and fetch_text(want).split()[0] != sha256(f):
+            f.unlink()
+            raise Stop(f"Docker Compose {cv}: the download does not match its checksum")
+    f.chmod(0o755)
+    rows.append(("docker-compose", cv, f.relative_to(out).as_posix()))
+    # NVIDIA's container toolkit: its packages for Debian/Ubuntu and for RHEL/Fedora/SUSE.
+    rel = latest_release("NVIDIA/nvidia-container-toolkit")
+    nv = rel["tag_name"].lstrip("v")
+    for kind, tag in (("deb", "amd64" if arch == "amd64" else "arm64"), ("rpm", machine)):
+        name = next((x for x in rel["assets"] if re.search(rf"_{kind}_{tag}\.tar\.gz$", x["name"])), None)
+        if name is None:
+            warn(f"NVIDIA's container toolkit {nv} has no {kind} packages for {tag}: left out")
+            continue
+        f = out / "nvidia" / name["name"]
+        if not f.exists() or a.refresh:
+            say(f"  NVIDIA container toolkit {nv} ({kind}) ...")
+            fetch(name["browser_download_url"], f)
+        rows.append((f"nvidia-container-toolkit-{kind}", nv, f.relative_to(out).as_posix()))
+    (out / "DEPS").write_text("".join(f"{n}\t{v}\t{p}\t{arch}\t{sha256(out / p)}\n" for n, v, p in rows), encoding="utf-8")
+    total = sum((out / p).stat().st_size for _, _, p in rows)
+    for n, v, p in rows:
+        say(f"  {n} {v}: {p} ({human((out / p).stat().st_size)})")
+    say(f"  {human(total)} in {out}")
+    return 0
+
+
+# ----------------------------------------------------------------------------- the offline bundle
+def release_tag_missing() -> bool:
+    if not (ROOT / ".git").exists() or shutil.which("git") is None:
+        return True
+    return not (output(["git", "-C", str(ROOT), "tag", "-l", "v5.2.0"]) or "").strip()
+
+
+def cmd_bundle(a) -> int:
+    engine = Engine("podman" if a.podman else a.engine)
+    rows = doctor_checks("bundle", engine)
+    missing = [f"{w}: {d}" for w, ok, d, needed in rows if needed and not ok]
+    if missing and not a.dry_run:
+        raise Stop("the bundle needs:\n  " + "\n  ".join(missing) + "\n(./arenactl doctor --for bundle)", 3)
+    linux_only("Making the bundle")
+    profiles = choose_features(None, a.without, all_=True)
+    if not a.no_build and not a.dry_run:
+        build_images(engine, profiles)
+    if not a.code_arena and not list(DIST.glob(f"code-arena-{VERSION}-*")) and not a.dry_run:
+        step("Code Arena's packages: none of this version in dist/, made now")
+        cmd_code_arena(argparse.Namespace(rids=None, offline=False, no_web=False, out=None, engine=engine.name))
+    no_known = False
+    if release_tag_missing():
+        if (ROOT / ".git").exists() and shutil.which("git"):
+            run(["git", "-C", str(ROOT), "fetch", "--tags", "--quiet"], check=False)
+        if release_tag_missing():
+            warn("no git tag v5.2.0 here: the bundle installs and repairs as usual, but an upgrade from 5.2.0 cannot tell "
+                 "the files a host changed from those it was shipped with (it keeps every one it finds changed, with the release's beside it)")
+            no_known = True
+    deps_dir = None
+    if a.with_deps:
+        arch = "arm64" if platform.machine().lower() in ("aarch64", "arm64") else "amd64"
+        deps_dir = DIST / "deps" / arch
+        if not (deps_dir / "DEPS").exists() and not a.dry_run:
+            cmd_deps(argparse.Namespace(arch=arch, out=None, refresh=False))
+    cmd = ["bash", str(SCRIPTS / "make-installer.sh"), "--project", "arena"]
+    if engine.name == "podman":
+        cmd.append("--podman")
+    for flag, value in (("--out", a.out), ("--models-dir", a.models_dir), ("--code-arena", a.code_arena), ("--without", a.without)):
+        if value:
+            cmd += [flag, value]
+    cmd += (["--models"] if a.models else []) + (["--packs"] if a.packs else []) + (["--no-known"] if no_known else []) + (["--dry-run"] if a.dry_run else [])
+    if deps_dir:
+        cmd += ["--deps", str(deps_dir)]
+    step("the bundle (deploy/scripts/make-installer.sh)")
+    return run(cmd, check=False)
+
+
+# ----------------------------------------------------------------------------- the installer, from this checkout
+INSTALLER_COMMANDS = ("install", "upgrade", "repair", "remove", "status", "verify", "features", "requirements")
+
+
+def installation_dir(rest: list[str]) -> Path | None:
+    if "--dir" in rest:
+        i = rest.index("--dir")
+        if i + 1 < len(rest):
+            return Path(rest[i + 1]).expanduser().resolve()
+    for d in (Path("/srv/arena"), Path.home() / "arena"):
+        if (d / "deploy" / "scripts" / "installer.sh").exists():
+            return d
+    return None
+
+
+def option(rest: list[str], name: str) -> str | None:
+    vals = [rest[i + 1] for i, x in enumerate(rest[:-1]) if x == name]
+    return ",".join(vals) if vals else None
+
+
+def cmd_installer(a) -> int:
+    rest = list(a.rest)
+    if a.command in ("install", "upgrade", "repair"):
+        linux_only(a.command.capitalize())
+        engine = Engine("podman" if "--podman" in rest else ("docker" if "--docker" in rest else None))
+        dry = "--dry-run" in rest
+        if a.command in ("upgrade", "repair") and option(rest, "--with") is None:
+            # The features on there, as its .env says: their images are the ones it needs.
+            d = installation_dir(rest)
+            env = (d / "deploy" / ".env") if d else None
+            on = ""
+            if env and env.exists():
+                on = next((ln.split("=", 1)[1].strip().strip('"') for ln in env.read_text(encoding="utf-8").splitlines() if ln.startswith("COMPOSE_PROFILES=")), "")
+            profiles = choose_features(on or None, option(rest, "--without")) if on else choose_features(None, option(rest, "--without"))
+        else:
+            profiles = choose_features(option(rest, "--with"), option(rest, "--without"), cpu_only="--cpu-only" in rest)
+        if not a.no_build and not dry:
+            say(f"{a.command.capitalize()} Argus Arena {VERSION} from this checkout ({ROOT}); its images first, features: {', '.join(profiles)}")
+            build_images(engine, profiles)
+        stage = Path(tempfile.mkdtemp(prefix="arenactl-bundle-", dir=os.environ.get("TMPDIR") or "/var/tmp"))
+        try:
+            step("the installer's bundle from this checkout (its images are the engine's)")
+            mk = ["bash", str(SCRIPTS / "make-installer.sh"), "--images-in-engine", "--stage-only", str(stage)]
+            if engine.name == "podman":
+                mk.append("--podman")
+            if release_tag_missing():
+                mk.append("--no-known")
+            run(mk, quiet=True)
+            top = next(stage.glob("argus-arena-*"))
+            return run(["bash", str(top / "installer.sh"), a.command, *rest], check=False, quiet=True)
+        finally:
+            shutil.rmtree(stage, ignore_errors=True)
+    # The rest act on an installation: its own copy of the installer knows its folder.
+    d = installation_dir(rest)
+    installer = d / "deploy" / "scripts" / "installer.sh" if d and a.command != "requirements" else SCRIPTS / "installer.sh"
+    return run(["bash", str(installer), a.command, *rest], check=False, quiet=True)
+
+
+# ----------------------------------------------------------------------------- the operator's scripts
+OPS = {
+    "cert": ("make-cert.sh", "the stack's certificate: a CA of its own, or the company's (--cert, --key)"),
+    "sign": ("sign-code-arena.sh", "sign the Code Arena builds the app serves with the stack's CA (--check)"),
+    "backup": ("backup.sh", "back up the databases, settings and files (--install-timer: daily)"),
+    "restore": ("backup.sh", "restore a backup: arenactl restore BACKUP_DIR"),
+    "hosts": ("setup-hosts.sh", "the stack's names in /etc/hosts (root)"),
+    "kube": ("kube-install.sh", "install, upgrade, status and remove on Kubernetes with Helm"),
+    "airgap": ("airgap.sh", "carry a running stack to a host with no network (pack, load)"),
+}
+
+CHECKS = {
+    "functional": ("functional-test.py", "the whole stack end to end, as a person and an admin"),
+    "compliance": ("compliance-check.py", "the compliance controls against the running stack"),
+    "recovery": ("recovery-check.py", "the recovery plan's steps, checked"),
+    "sandbox": ("sandbox-check.py", "the sandbox's isolation"),
+    "lean": ("lean-check.py", "the Lean prover in the science lab"),
+    "clients": ("clients-check.py", "the clients (Code Arena, the CLI, MCP) against the stack"),
+    "gpu": ("gpu-check.sh", "the GPU, its driver and the container toolkit"),
+    "dashboards": ("audit-dashboards.py", "every dashboard's queries answer"),
+    "upgrade": ("upgrade-test.py", "an upgrade from the previous release, in a throwaway stack"),
+    "rollback": ("rollback-test.sh", "an upgrade's rollback, in a throwaway stack"),
+    "restore": ("restore-test.sh", "a backup restored into a throwaway stack"),
+    "restore-drill": ("restore-drill.sh", "the monthly restore drill"),
+    "scale": ("scale-test.py", "several app replicas under load"),
+    "bench": ("multiuser-bench.py", "many people chatting at once"),
+    "load": ("people-load.py", "thousands of people signing in and asking"),
+    "benchmark": ("benchmark.py", "the model's speed and quality"),
+    "qwen-code": ("qwen-code-realworld.py", "Qwen Code against the gateway on real tasks"),
+    "argus": ("../../tools/smoke_test.py", "Argus's MCP serves agents: auth, tools, packs, the index (--url, --token)"),
+}
+
+
+def script_cmd(path: Path, args: list[str]) -> list[str]:
+    if path.suffix == ".py":
+        return [sys.executable, str(path), *args]
+    return ["bash" if path.read_text(encoding="utf-8", errors="replace").startswith("#!/usr/bin/env bash") else "sh", str(path), *args]
+
+
+def cmd_ops(a) -> int:
+    script, _ = OPS[a.command]
+    rest = list(a.rest)
+    # The installation's own copy (--dir, else /srv/arena or ~/arena); else this checkout's deploy/.
+    d = installation_dir(rest)
+    if "--dir" in rest:
+        i = rest.index("--dir")
+        del rest[i:i + 2]
+    base = (d / "deploy") if d else DEPLOY
+    if a.command == "restore":
+        rest = ["--restore", *rest]
+    return run(script_cmd(base / "scripts" / script, rest), cwd=base, check=False, quiet=True)
+
+
+def cmd_check(a) -> int:
+    if a.name not in CHECKS:
+        raise Stop("no check " + a.name + "; the checks: " + ", ".join(CHECKS), 2)
+    return run(script_cmd(SCRIPTS / CHECKS[a.name][0], a.rest), cwd=DEPLOY, check=False, quiet=True)
+
+
+# ----------------------------------------------------------------------------- tests
+def cmd_test(a) -> int:
+    suites = a.suites or ["app", "code-arena", "argus", "web", "deploy"]
+    engine = Engine()
+    dotnet, base = (["dotnet"], "/") if any(version_of(x) >= (10,) for x in (output(["dotnet", "--list-sdks"]) or "").splitlines()) else ([str(TOOLS / "dn")], "/repo")
+    projects = {"app": "tests/Llm.Tests", "code-arena": "tests/CodeArena.Tests", "argus": "tests/Argus.Tests"}
+    failed = []
+    for s in suites:
+        step(f"tests: {s}")
+        if s in projects:
+            if dotnet[0] != "dotnet" and not engine.ok:
+                raise Stop(".NET SDK 10, or Docker for its container (tools/dn), is needed for the .NET tests")
+            rc = run([*dotnet, "test", projects[s], *(["--filter", a.filter] if a.filter else [])], cwd=ROOT, check=False)
+        elif s == "web":
+            rc = run(["npm", "test", "--", *([a.filter] if a.filter else [])], cwd=ROOT / "src" / "web", check=False)
+        elif s == "deploy":
+            rc = run([sys.executable, "-m", "unittest", "discover", "-q", *(["-k", a.filter] if a.filter else [])], cwd=ROOT / "tests" / "deploy", check=False)
+        else:
+            raise Stop(f"no test suite {s} (app, code-arena, argus, web, deploy)", 2)
+        if rc:
+            failed.append(s)
+    say("All passed." if not failed else f"Failed: {', '.join(failed)}")
+    return 1 if failed else 0
+
+
+# ----------------------------------------------------------------------------- every script
+def first_line(path: Path) -> str:
+    """What a script says it is for: its header comment's first line, or its docstring's."""
+    doc = False
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines()[:15]:
+        line = line.strip()
+        if line.startswith("#!") or line.startswith("from __future__") or not line:
+            continue
+        if line.startswith('"""'):
+            doc = True
+            line = line[3:]
+        if (doc or line.startswith("#")) and len(line.strip('#" ')) > 3:
+            return line.strip('#" ').rstrip(":")
+    return ""
+
+
+def cmd_scripts(_a) -> int:
+    say("arenactl's commands run these; docs/scripts.md says when to use each.")
+    groups = [("deploy/scripts: running a stack", SCRIPTS), ("tools: building and releasing", TOOLS)]
+    for title, folder in groups:
+        say("")
+        say(title)
+        for p in sorted(folder.iterdir()):
+            if p.is_file() and p.suffix in (".sh", ".py", "") and not p.name.startswith((".", "_")) and p.name != "README.md":
+                say(f"  {p.name:28} {first_line(p)}")
+    return 0
+
+
+# ----------------------------------------------------------------------------- the command line
+def main(argv: list[str]) -> int:
+    p = argparse.ArgumentParser(prog="arenactl", description=__doc__.split("\n\n")[0], formatter_class=argparse.RawDescriptionHelpFormatter,
+                                epilog="Each command's own --help says more; docs/scripts.md has them all.")
+    sub = p.add_subparsers(dest="command", metavar="COMMAND")
+
+    s = sub.add_parser("doctor", help="what this machine has for a task, and how to get the rest")
+    s.add_argument("--for", dest="for_", choices=["build", "code-arena", "bundle", "install", "all"], default="all")
+    s.add_argument("rest", nargs=argparse.REMAINDER, help="for install: the installer's requirements options (--podman, --cpu-only)")
+    s.set_defaults(func=cmd_doctor)
+
+    s = sub.add_parser("build", help="build the stack's images, and pull the others")
+    s.add_argument("--with", dest="with_", help="features on beside the defaults (deploy/features)")
+    s.add_argument("--without", help="features left out")
+    s.add_argument("--all", action="store_true", help="every feature's images (a bundle needs them all)")
+    s.add_argument("--services", help="only these services")
+    s.add_argument("--no-pull", action="store_true", help="build only; pull nothing")
+    s.add_argument("--engine", choices=["docker", "podman"])
+    s.set_defaults(func=cmd_build)
+
+    s = sub.add_parser("code-arena", help="Code Arena's packages for each system (dist/code-arena-VERSION-RID.tar.gz or .zip)")
+    s.add_argument("rids", nargs="*", metavar="RID", help=f"the systems (default all: {' '.join(RIDS)})")
+    s.add_argument("--offline", action="store_true", help="the .NET packs from tools/offline-nuget only, nothing downloaded")
+    s.add_argument("--no-web", action="store_true", help="without the web interface's page")
+    s.add_argument("--out", help="where the packages go (default dist/)")
+    s.add_argument("--engine", choices=["docker", "podman"], help="the engine for the SDK's and Node's containers, without them installed")
+    s.set_defaults(func=cmd_code_arena)
+
+    s = sub.add_parser("deps", help="Docker, Compose and NVIDIA's container toolkit for a bundle (dist/deps/ARCH)")
+    s.add_argument("--arch", choices=["amd64", "arm64"], default="arm64" if platform.machine().lower() in ("aarch64", "arm64") else "amd64")
+    s.add_argument("--out")
+    s.add_argument("--refresh", action="store_true", help="fetch again what is there already")
+    s.set_defaults(func=cmd_deps)
+
+    s = sub.add_parser("bundle", help="the offline installer, dist/argus-arena-VERSION-offline.run")
+    s.add_argument("--with-deps", action="store_true", help="Docker, Compose and NVIDIA's toolkit inside it, installed from it where missing")
+    s.add_argument("--models", action="store_true", help="the models too")
+    s.add_argument("--models-dir")
+    s.add_argument("--packs", action="store_true", help="the knowledge packs in packs/")
+    s.add_argument("--without", help="features left out of the bundle")
+    s.add_argument("--code-arena", help="Code Arena's packages from this folder (default dist/, made when missing)")
+    s.add_argument("--out", help="where the .run goes (default dist/)")
+    s.add_argument("--no-build", action="store_true", help="the images as they are here")
+    s.add_argument("--podman", action="store_true")
+    s.add_argument("--engine", choices=["docker", "podman"])
+    s.add_argument("--dry-run", action="store_true")
+    s.set_defaults(func=cmd_bundle)
+
+    for c in INSTALLER_COMMANDS:
+        s = sub.add_parser(c, help=f"the installer's {c} (deploy/scripts/installer.sh {c} --help)", add_help=False)
+        if c in ("install", "upgrade", "repair"):
+            s.add_argument("--no-build", action="store_true", help="the images as they are in the engine")
+        s.add_argument("rest", nargs=argparse.REMAINDER)
+        s.set_defaults(func=cmd_installer, no_build=False)
+
+    for c, (_, text) in OPS.items():
+        s = sub.add_parser(c, help=text, add_help=False)
+        s.add_argument("rest", nargs=argparse.REMAINDER)
+        s.set_defaults(func=cmd_ops)
+
+    s = sub.add_parser("check", help="a live check of a running stack: " + ", ".join(CHECKS))
+    s.add_argument("name", metavar="NAME")
+    s.add_argument("rest", nargs=argparse.REMAINDER)
+    s.set_defaults(func=cmd_check)
+
+    s = sub.add_parser("test", help="the test suites: app, code-arena, argus, web, deploy")
+    s.add_argument("suites", nargs="*")
+    s.add_argument("--filter")
+    s.set_defaults(func=cmd_test)
+
+    s = sub.add_parser("scripts", help="every script in the repository, by what it is for")
+    s.set_defaults(func=cmd_scripts)
+
+    try:
+        # The commands that pass their options on to a script take them as they come (argparse would read them itself).
+        if argv and argv[0] in INSTALLER_COMMANDS + tuple(OPS) + ("check", "doctor") and not (argv[0] in ("check", "doctor") and argv[1:2] in (["-h"], ["--help"])):
+            cmd, rest = argv[0], list(argv[1:])
+            if cmd == "doctor":
+                task = "all"
+                if "--for" in rest:
+                    i = rest.index("--for")
+                    task = rest[i + 1] if i + 1 < len(rest) else ""
+                    del rest[i:i + 2]
+                if task not in ("build", "code-arena", "bundle", "install", "all"):
+                    raise Stop("--for is build, code-arena, bundle, install or all", 2)
+                return cmd_doctor(argparse.Namespace(for_=task, rest=rest))
+            if cmd == "check":
+                if not rest:
+                    raise Stop("check needs a name: " + ", ".join(CHECKS), 2)
+                return cmd_check(argparse.Namespace(name=rest[0], rest=rest[1:]))
+            if rest[:1] in (["-h"], ["--help"]):
+                target = SCRIPTS / ("installer.sh" if cmd in INSTALLER_COMMANDS else OPS[cmd][0])
+                return run(script_cmd(target, [cmd, "--help"] if cmd in INSTALLER_COMMANDS else ["--help"]), check=False, quiet=True)
+            no_build = "--no-build" in rest
+            ns = argparse.Namespace(command=cmd, rest=[x for x in rest if x != "--no-build"], no_build=no_build)
+            return cmd_installer(ns) if cmd in INSTALLER_COMMANDS else cmd_ops(ns)
+        a = p.parse_args(argv)
+        if not a.command:
+            p.print_help()
+            return 2
+        return a.func(a)
+    except Stop as e:
+        print(f"arenactl: {e}", file=sys.stderr)
+        return e.code
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

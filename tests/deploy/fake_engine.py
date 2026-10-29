@@ -195,6 +195,9 @@ def stateful(args: list[str]) -> int | None:
             return 1
         # podman tag puts a short name under localhost/.
         s["images"]["localhost/" + norm(args[2]) if PODMAN and is_short(args[2]) else store_key(args[2])] = image_id
+        # An image built here and tagged as a release's (a checkout's bundle, FAKE_TAG_VERSION) says that release's version.
+        if os.environ.get("FAKE_TAG_VERSION") and not s["origins"].get(image_id) and VERSION.match(args[2].rsplit(":", 1)[-1]):
+            s["origins"][image_id] = norm(args[2])
         st.save()
         return 0
     if args[:2] in (["image", "rm"], ["rmi"]) or args[0] == "rmi":

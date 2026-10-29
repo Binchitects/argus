@@ -24,7 +24,8 @@ tests/
 deploy/                 the platform: docker-compose (and podman.yml), .env.example, config, scripts
   services/             what compose builds or mounts: sandbox, identity proxy, engine router...
   argus-standalone/     Argus alone: its own compose, config and scripts
-tools/                  dn, fetch-sqlite-vec.sh, build-packs.sh, publish-code-arena.sh, package-code-arena.sh, offline-nuget/, the test GitLab, Hermes add-ons
+tools/                  dn, fetch-sqlite-vec.sh, build-packs.sh, publish-code-arena.sh, offline-nuget/, the test GitLab, Hermes add-ons
+arenactl                the one command: doctor, build, code-arena, bundle, install and the rest (docs/scripts.md)
 clients/                editor and agent configurations (MCP); the arena CLI and its GitLab CI template
 evals/                  evaluation harnesses and their results
 docs/                   this documentation; docs/plan.md is the plan and its phases
@@ -48,8 +49,9 @@ files, one per system, need .NET's runtime packs: `tools/publish-code-arena.sh
 --offline` builds them from `tools/offline-nuget/` into `dist/code-arena/`
 ([code-arena.md](code-arena.md#building-it-admins)), after building the page of
 its IDE from `src/web` (`vite.code-arena.config.ts`, into
-`src/CodeArena/web`, which the program embeds); `tools/package-code-arena.sh`
-then packs them for a release. The page's code is `src/web/src/code-arena/`:
+`src/CodeArena/web`, which the program embeds); `./arenactl code-arena`
+builds and packs them for a release (online by default; `--offline` from
+`tools/offline-nuget/`). The page's code is `src/web/src/code-arena/`:
 the chat's components, Monaco and xterm.js around Code Arena's API
 ([its calls](code-arena.md#the-pages-calls)); its tests run with the web's
 (`npx vitest run src/code-arena`). The terminals' tests start a real `/bin/sh`
@@ -186,11 +188,10 @@ A release is a tag, `vX.Y.Z`, on a commit of `main` whose suites all pass.
 4. An upgrade from the oldest release the bundle takes (5.2.0) keeps every
    person, chat and setting: `scripts/upgrade-test.py --from v5.2.0
    --stop-live`. Each migration applies on that release's schema.
-5. The images: `docker compose build` and `docker compose --profile laya build
-   laya` in `deploy/`.
+5. The images: `./arenactl build --all` (every feature's, built and pulled).
 6. Code Arena: `tools/fetch-code-arena-packs.sh` before the images (the app
    image carries its builds); its packages for the release
-   (`tools/package-code-arena.sh`, into `dist/`) are made by the installer's
+   (`./arenactl code-arena`, into `dist/`) are made by the installer's
    step below when `dist/` has none.
 7. The offline installer: `deploy/scripts/make-installer.sh` (with `--models`
    and `--packs` for a bundle that carries them) writes

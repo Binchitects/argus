@@ -10,7 +10,7 @@ With them here:
 
 - `tools/publish-code-arena.sh --offline` builds every system into
   `dist/code-arena/<rid>/` from this folder only (nothing is downloaded), and
-  `tools/package-code-arena.sh` packs them for a release;
+  `./arenactl code-arena --offline` packs them for a release;
 - the app's image (`src/Llm.Api/Dockerfile`, `CODE_ARENA=auto`) builds them the
   same way and serves them on Connect your tools.
 
