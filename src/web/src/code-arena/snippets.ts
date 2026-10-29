@@ -1,5 +1,6 @@
 import type * as Monaco from 'monaco-editor'
 import { parse } from './jsonc'
+import { monacoLanguageId } from './settings-schema'
 
 // VS Code's snippets (an extension's snippets/*.json, a .code-snippets file): JSON with comments, each snippet by its
 // name with its prefixes, its body (a line or lines) and what it does. Monaco takes the same snippet syntax ($1, ${2:x},
@@ -40,7 +41,7 @@ export function snippetSuggestions(m: Kinds, snippets: Snippet[], model: Monaco.
   const range = { startLineNumber: position.lineNumber, startColumn: word.startColumn, endLineNumber: position.lineNumber, endColumn: position.column }
   const language = model.getLanguageId()
   return snippets
-    .filter((s) => !s.scope || s.scope.includes(language))
+    .filter((s) => !s.scope || s.scope.map(monacoLanguageId).includes(language))
     .flatMap((s) =>
       s.prefixes.map(
         (prefix): Monaco.languages.CompletionItem => ({

@@ -26,6 +26,11 @@ describe("VS Code's snippets", () => {
     expect(readSnippets('[1, 2]')).toEqual([])
   })
 
+  it("takes VS Code's language ids in a snippet's scope as Monaco's", () => {
+    const snippets = readSnippets('{ "Comp": { "prefix": "comp", "body": "export function $1() {}", "scope": "typescriptreact" } }')
+    expect(snippetSuggestions(kinds, snippets, model('typescript', { startColumn: 1, endColumn: 5 }), at(1, 5)).map((s) => (s.label as { label: string }).label)).toEqual(['comp'])
+  })
+
   it('suggests each prefix as a snippet over the word typed, for the languages it is for', () => {
     const snippets = readSnippets('{ "Print": { "prefix": ["log", "print"], "body": ["console.log($1)", "$0"], "description": "Log a value" }, "Py": { "prefix": "main", "body": "if __name__ == \'__main__\':\\n\\t$0", "scope": "python" } }')
     const items = snippetSuggestions(kinds, snippets, model('typescript', { startColumn: 5, endColumn: 7 }), at(3, 7))

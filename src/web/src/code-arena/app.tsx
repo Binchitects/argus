@@ -64,6 +64,7 @@ import { useNotices } from './sync'
 import { About, StatusBar } from './status-bar'
 import { languageServers } from './lsp/servers'
 import { OutputPanel } from './lsp/output'
+import { wholePath } from './whole-path'
 
 // xterm.js loads with the panel, the first time it opens.
 const TerminalPanel = lazy(() => import('./terminals'))
@@ -1073,7 +1074,7 @@ function Workbench({
     ...Array.from({ length: 9 }, (_, i): Command => ({ id: `workbench.action.openEditorAtIndex${i + 1}`, category: 'View', title: i === 8 ? 'Open Last Editor in Group' : `Open Editor at Index ${i + 1}`, hidden: true, run: () => ed.activateIndex(i === 8 ? -1 : i) })),
     { id: 'workbench.action.navigateBack', category: 'Go', title: 'Go Back', run: () => ed.navigate(-1) },
     { id: 'workbench.action.navigateForward', category: 'Go', title: 'Go Forward', run: () => ed.navigate(1) },
-    { id: 'workbench.action.files.copyPathOfActiveFile', category: 'File', title: 'Copy Path of Active File', enabled: () => !!active, run: () => active && copy(`${state.folder}/${active.path}`) },
+    { id: 'workbench.action.files.copyPathOfActiveFile', category: 'File', title: 'Copy Path of Active File', enabled: () => !!active, run: () => active && copy(wholePath(state.folder, active.path)) },
     { id: 'copyRelativeFilePath', category: 'File', title: 'Copy Relative Path of Active File', enabled: () => !!active, run: () => active && copy(active.path) },
     { id: 'workbench.action.editor.changeLanguageMode', category: 'Change Language Mode', title: 'Change Language Mode', enabled: () => file, run: () => void pickLanguage() },
     { id: 'editor.action.toggleWordWrap', category: 'View', title: 'Toggle Word Wrap', enabled: () => file, run: () => ed.toggleWordWrap() },

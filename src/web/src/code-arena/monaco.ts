@@ -6,7 +6,9 @@ import JsonWorker from 'monaco-editor/language/json/json.worker?worker'
 import TsWorker from 'monaco-editor/language/typescript/ts.worker?worker'
 import { keepEditorFormatters } from './format'
 import { globMatch } from './glob'
+import { languageByFirstLine } from './language-detect'
 import { monacoLanguageId } from './settings-schema'
+import { isOutside } from './whole-path'
 
 // Monaco, bundled with the page: its workers are files of the page's own (Vite's
 // ?worker imports), so nothing is fetched from anywhere else, ever. This module
@@ -168,7 +170,7 @@ void document.fonts?.ready.then(() => monaco.editor.remeasureFonts())
 export { monaco }
 
 /** A path outside the folder open (in a folder added to the workspace, or named with @): whole, from / or a drive. */
-export const isOutside = (path: string) => path.startsWith('/') || /^[A-Za-z]:\//.test(path)
+export { isOutside }
 
 /**
  * A file's model's address: its path in the folder, so the language services know what it is (.tsx: with JSX); the
@@ -190,8 +192,11 @@ export const diffUri = (side: 'before' | 'after', path: string) => monaco.Uri.fr
 export const pathOf = (uri: monaco.Uri) => (uri.scheme === 'file' ? uri.path.slice(1) : uri.scheme === 'outside' ? decodeURIComponent(uri.path.slice(1)) : null)
 
 
-/** A file's language by its name: a name Monaco knows (Dockerfile), else its longest known extension (.d.ts before .ts). */
-export function languageOf(path: string, associations: Record<string, string> = {}): { id: string; name: string } {
+/**
+ * A file's language by its name: a name Monaco knows (Dockerfile), else its longest known extension (.d.ts before .ts);
+ * a name that says none, by its first line when given (#!/bin/bash).
+ */
+export function languageOf(path: string, associations: Record<string, string> = {}, firstLine?: string): { id: string; name: string } {
   const name = path.slice(path.lastIndexOf('/') + 1).toLowerCase()
   const languages = monaco.languages.getLanguages()
   let best: { id: string; name: string; length: number } | null = null
@@ -208,8 +213,12 @@ export function languageOf(path: string, associations: Record<string, string> = 
       if (name.endsWith(ext.toLowerCase()) && ext.length > (best?.length ?? 0)) best = { id: l.id, name: label, length: ext.length }
     }
   }
-  return best ? { id: best.id, name: best.name } : { id: 'plaintext', name: 'Plain Text' }
+  if (best) return { id: best.id, name: best.name }
+  const byLine = firstLine ? languageByFirstLine(firstLine, languages) : null
+  const l = byLine ? languages.find((x) => x.id === byLine) : undefined
+  return l ? { id: l.id, name: l.aliases?.[0] ?? l.id } : { id: 'plaintext', name: 'Plain Text' }
 }
+
 
 export const editorFont = {
   fontFamily: "'JetBrains Mono Variable', ui-monospace, 'SFMono-Regular', monospace",

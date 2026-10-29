@@ -5,6 +5,7 @@ import { toast } from '@/components/ui/toaster'
 import { errorMessage } from '@/lib/api'
 import type { MonacoModule } from './editor-state'
 import { contributionsQuery, extensionFileText, extensionFileUrl, noContributions, type Contributions, type KeybindingContribution, type LanguageContribution, type SnippetContribution } from './extensions-api'
+import { monacoLanguageId } from './settings-schema'
 import { fontCharacterOf, iconIdFor, readIconTheme, vscodeLanguageOf, type IconTheme, type IconThemeDocument } from './icon-theme'
 import { parse } from './jsonc'
 import { toLanguageConfiguration } from './language-config'
@@ -340,7 +341,8 @@ function applyToMonaco() {
   }
   const byLanguage = new Map<string, (SnippetContribution & { extension: string; version: string })[]>()
   for (const s of state.contributions.snippets) {
-    const language = s.language || '*'
+    // VS Code's ids (typescriptreact…) are Monaco's language for them.
+    const language = s.language ? monacoLanguageId(s.language) : '*'
     byLanguage.set(language, [...(byLanguage.get(language) ?? []), s])
   }
   for (const [language, files] of byLanguage) {

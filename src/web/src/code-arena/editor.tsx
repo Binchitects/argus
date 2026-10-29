@@ -182,6 +182,9 @@ function installKeymap(m: MonacoModule) {
       .map((r) => ({ keybinding: monacoKeybinding(r.chords, m.monaco), command: r.command, commandArgs: r.args, when: r.whenText }))
       .filter((r): r is { keybinding: number; command: string; commandArgs: unknown; when: string | undefined } => r.keybinding !== null)
     rules = m.monaco.editor.addKeybindingRules([{ keybinding: m.monaco.KeyCode.F1, command: '-editor.action.quickCommand' }, ...list])
+    // The editor's own way to its palette (its context menu's Command Palette) opens the workbench's: the newest command wins.
+    commands.get('editor.action.quickCommand')?.dispose()
+    commands.set('editor.action.quickCommand', m.monaco.editor.registerCommand('editor.action.quickCommand', () => void runCommand('workbench.action.showCommands')))
     m.schemas([
       { uri: 'code-arena://schemas/settings.json', fileMatch: ['User/settings.json', '.vscode/settings.json'], schema: settingsSchema() },
       {
@@ -464,7 +467,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         if (file.text === null) return file.binary ? 'binary' : 'tooLarge'
         const now = files.current.get(path)
         if (now && !now.model.isDisposed()) return now
-        const language = m.languageOf(path, settingsRef.current.get('files.associations'))
+        const newline = file.text.indexOf('\n')
+        const language = m.languageOf(path, settingsRef.current.get('files.associations'), newline < 0 ? file.text : file.text.slice(0, newline))
         const model = m.monaco.editor.createModel(file.text, language.id, m.fileUri(path))
         const v = settingsRef.current.all(language.id)
         indentModel(model, v)

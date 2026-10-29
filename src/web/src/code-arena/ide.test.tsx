@@ -1821,6 +1821,12 @@ describe('Code Arena, the IDE', () => {
     renderIde()
     await openApp()
 
+    // The editor's own Command Palette (its context menu's) is the workbench's.
+    act(() => fakes.commands.get('editor.action.quickCommand')!(null))
+    expect(await screen.findByRole('dialog', { name: 'Commands' })).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Commands' })).not.toBeInTheDocument())
+
     // Ctrl+Shift+P: the workbench's commands and the editor's, narrowed by what is typed.
     await userEvent.keyboard('{Control>}{Shift>}p{/Shift}{/Control}')
     const palette = await screen.findByRole('dialog', { name: 'Commands' })

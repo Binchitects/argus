@@ -348,7 +348,11 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   are the folders they are in. A file deleted with unsaved changes keeps its
   tab (the question says so): saving it makes the file again.
 - **editor**: tabs with Monaco, highlighting by the file's name (or
-  `files.associations`), set up by the settings (below). A dot marks unsaved
+  `files.associations`; a name that says nothing, by its first line: a
+  `#!` line's program, `<?php`), set up by the settings (below). The editor's
+  right-click **Command Palette** opens the workbench's, and **Copy Path of
+  Active File** gives the whole path in the system's own form, a file in an
+  added folder's too. A dot marks unsaved
   changes and **Ctrl+S** saves (**Ctrl+K S** saves them all). A
   file changed on disk since it was opened is not written over unseen: saving
   asks first. Closing a tab with unsaved changes asks Save, Don't save or
