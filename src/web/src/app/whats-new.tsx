@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ArrowRight, Atom, BadgeCheck, ExternalLink, ScanSearch, Server, ShieldAlert, Wrench, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, ArrowRight, BadgeCheck, Cpu, ExternalLink, KeyRound, LineChart, ListOrdered, ListTodo, MessageSquareHeart, ScrollText, type LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
@@ -29,50 +29,65 @@ interface Tour {
 }
 
 const latestTour: Tour = {
-  release: '7.4',
-  title: "What's new in Argus Arena 7.4",
+  release: '7.5',
+  title: "What's new in Argus Arena 7.5",
   slides: [
     {
-      icon: ShieldAlert,
-      title: 'Security reviews',
-      text: "Code Studio → Security reads a repository as you: each weakness quotes its line, names its CWE and traces the data to it, with the pages it rests on; a second pass tries to refute it. Its packages are matched against GitHub's advisories, known-exploited first, with the smallest upgrade.",
-      to: '/code',
-      action: 'Review a repository',
+      icon: ListTodo,
+      title: 'Checklists',
+      text: 'Write a checklist once (your definition of done, a release\'s steps) and turn it on in a chat or in Code Arena: the model works through it and ticks each item with what it did, and the list is the same in both.',
+      to: '/checklists',
+      action: 'Open Checklists',
     },
     {
-      icon: Wrench,
-      title: 'Fix it, for security too',
-      text: "Fix it on a security finding: the agent writes a test that shows the weakness, makes the change the cheat sheet describes, and opens the merge request as you. A merge request's review now says when it brings a vulnerable package or a scanner's finding.",
-      to: '/code',
-      action: 'Open Code Studio',
-    },
-    {
-      icon: ScanSearch,
-      title: 'Security across the company',
-      text: 'Admin → Security: every repository at a glance, what cannot wait, what changed this week, the risks accepted. The advisories are renewed every day, and old reviews are checked again against them: a new CVE in old code is found without a push.',
-      to: '/admin/security',
-      action: 'Open Security',
-      permission: 'reviews.admin',
+      icon: KeyRound,
+      title: 'API keys of your own',
+      text: 'Account → API keys: a key for each tool or script, named, each with its own limits under yours, its own requests at once and a monthly budget, and each revoked on its own.',
+      to: '/account',
+      action: 'Make a key',
     },
     {
       icon: BadgeCheck,
-      title: 'GRC and the certifications',
-      text: "Fourteen frameworks, each clause mapped: ISO 27001 and 42001, SOC 2, NIST's, the EU AI Act and more. The risk register, the Statements of Applicability, policies, audits, suppliers, AI systems, and how ready you are for each certification, with its auditor's package.",
-      to: '/admin/compliance',
-      action: 'Open Compliance',
-      permission: 'compliance.read',
+      title: 'Code Arena, signed',
+      text: "Sign in to Code Arena with your user name and password, open and add folders, and reference files outside the folder with @. Its downloads are signed by your server's own CA, and its installers and code-arena update check that before they install.",
+      to: '/help/code-arena',
+      action: 'Read about Code Arena',
     },
     {
-      icon: Atom,
-      title: 'Quantum computing in the lab',
-      text: 'Run circuits on simulators with noise, check that two circuits are the same, sample error-correcting codes, follow a qubit as it decays, run VQE and QAOA, and compute molecules with quantum chemistry: drawn and charted in the notebook.',
-      to: '/lab',
-      action: 'Open the lab',
+      icon: MessageSquareHeart,
+      title: 'Say what you think',
+      text: 'Rate any answer and say why, or Send feedback from the account menu about Arena itself: both reach the people who run it.',
+      to: '/',
+      action: 'Open the chat',
     },
     {
-      icon: Server,
-      title: 'Only what you need',
-      text: 'Every part of the stack is a feature, turned on or off when installing, upgrading or repairing (installer.sh features lists them, with their sizes); what is off runs nothing and leaves the menus.',
+      icon: LineChart,
+      title: 'A dashboard for each role',
+      text: 'LLM and users, System and Hardware, each with its own permission. Usage by group shows each group\'s requests, tokens and spend with its members.',
+      to: '/admin/dashboards',
+      action: 'Open Dashboards',
+      permission: 'usage.read',
+    },
+    {
+      icon: ListOrdered,
+      title: 'Fair when it is busy',
+      text: "Requests at once for each person and group, API keys' requests in the same fair line as the chat's, and a longest line past which a request is told to try again. Admin → Line shows who runs and who waits, in order.",
+      to: '/admin/line',
+      action: 'Open the line',
+      permission: 'usage.read',
+    },
+    {
+      icon: ScrollText,
+      title: 'The prompt log',
+      text: 'Every prompt and answer, the chat\'s and the API\'s, searchable by those with its own permission, and each search audited. Kept as long as the retention settings say.',
+      to: '/admin/prompts',
+      action: 'Open the prompt log',
+      permission: 'prompts.review',
+    },
+    {
+      icon: Cpu,
+      title: 'SGLang beside vLLM',
+      text: 'A third engine, chosen at install, upgrade or repair: SGLang runs one server a model on its GPUs, as vLLM does. Models on disk are listed with what uses them, and removed with their files.',
       to: '/help/deployment',
       action: 'Read how',
       permission: 'settings.read',

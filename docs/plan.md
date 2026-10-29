@@ -2398,9 +2398,23 @@ gosec, gitleaks and Trivy for the sandbox image, the Juliet suite and the
 OWASP Benchmark; each one's size said when asked.
 
 
-### v7.5 — A model of your own
+### v7.5.0 — Many people at once, Code Arena signed, and SGLang (2026-10-29)
 
-Moved from v7.3, which shipped the science lab and the Kubernetes install.
+Shipped the requests of 2026-10-28 instead of the model lab: a fair line with
+requests at once per person and group and the longest line; dashboards for
+each role and usage by group; API keys of one's own; the prompt log; feedback
+on answers and for Arena; checklists in the chat and Code Arena; shared code
+reviews; app versions on publish; models on disk; Code Arena's password
+sign-in, folders, `@` outside and Windows tools, signed by the server's CA;
+and SGLang as a third engine (chosen at install, upgrade and repair). The
+llama.cpp "leak" was its prompt cache, sized in Settings. Left: SGLang and
+vLLM on a real GPU server (bring-up, a smoke test per model, numbers), with
+the groundwork below.
+
+### v7.6 — A model of your own
+
+Moved from v7.3, which shipped the science lab and the Kubernetes install, and
+from v7.5, which shipped the requests of 2026-10-28.
 
 1. **Model lab.** Teach a small model the company's words on the local GPU
    (a LoRA from chosen knowledge sources, prompts and good answers), then
@@ -2412,8 +2426,8 @@ Moved from v7.3, which shipped the science lab and the Kubernetes install.
 
 ### Groundwork, in between
 
-1. The vLLM image on a real GPU server: bring-up, a smoke test per model,
-   numbers, and the people load tests there; DCGM's image.
+1. The vLLM and SGLang images on a real GPU server: bring-up, a smoke test per
+   model, numbers, and the people load tests there; DCGM's image.
 2. `argus graph-eval` with the owners' links of the company's repositories,
    and the priors calibrated from it.
 3. Reviews: plain git repositories, comparing two refs on Gitea, and

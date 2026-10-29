@@ -15,6 +15,108 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v7.5.0 (2026-10-29)
+
+Arena for many people at once: a fair line when it is busy, a dashboard for
+each role, API keys of one's own, a prompt log, feedback on every answer and
+checklists the model works through, in the chat and in Code Arena. Code
+Arena signs in with a password and is signed by the server's own CA; SGLang
+joins llama.cpp and vLLM as an engine chosen at install.
+
+### :rocket: Epics and highlights
+
+- **Fair when it is busy**: requests at once for each person and each group
+  (Admin → People and Groups), and for everyone together (Settings → Chat). An
+  API key's requests wait in the same fair line as the chat's, and past the
+  longest line (`Chat:QueueLength`) a request is told at once to try again
+  later. Admin → Line shows who has a request running and who waits, in
+  order. API completions now go through the app whenever it is up: before,
+  with the answer cache off, the gateway's health check sent them straight to
+  LiteLLM, past the line, the keys' own limits and the prompt log
+- **A dashboard for each role**: LLM and users, System, and Hardware, each
+  with its own permission (`usage.read`, `monitoring.read`,
+  `hardware.read`). Admin → Usage by group: each group's requests, tokens,
+  cache share and spend, with the members who used it
+- **API keys of your own**: Account → API keys makes a key for each tool or
+  script (up to 20), named, each with its own requests and tokens a minute
+  under the person's, its own requests at once and a monthly budget, changed
+  or revoked on its own. Five new keys an hour at most
+- **The prompt log**: every prompt and answer, the chat's and the API's
+  (answers from the cache too), searchable in Admin → Prompt log by those with
+  `prompts.review`, each search audited. Kept as long as Settings → Retention
+  says (90 days by default); people's own data export and erasure include it
+- **Feedback**: a box on every answer (what was wrong, what was good), and
+  Send feedback in the account menu for Arena itself; Admin → Feedback reads
+  them and answers, and the answer reaches the person's bell
+- **Checklists**: a person's own lists (a definition of done, a release's
+  steps), turned on in a chat or a Code Arena session. The model works
+  through it with `checklist_check`, ticking each item with what it did; the
+  same run shows in both, and `/checklist` turns it on in Code Arena
+- **Code Arena, signed**: `scripts/sign-code-arena.sh` makes a code-signing
+  certificate from the stack's own CA and signs the builds the server serves;
+  `install.sh`, `install.ps1` and `code-arena update` check the signature
+  against the server's CA before they install. The installer signs on
+  install, upgrade and repair. The signing key never enters a container or a
+  bundle
+- **Code Arena**: sign in with your user name and password, an Accounts menu
+  and the Settings and People buttons; Open Folder, Open Recent and Add Folder
+  to Workspace; `@` references to files and folders outside the working
+  directory; and its tools on Windows (files held open by others, UTF-16 and
+  CRLF files, Git Bash for the shell, `/c/` paths)
+- **SGLang beside vLLM**: the `sglang` feature (`installer.sh --with sglang`
+  on install, upgrade or repair; `sglang.enabled` on Kubernetes) runs SGLang
+  under the same supervisor as vLLM, one server a model from the library's
+  Hugging Face snapshots on its own GPUs. Admin → Models chooses the engine;
+  the app writes SGLang's own flags, reads its `sglang:*` metrics, and puts
+  the chat ahead of API keys inside it as on vLLM. The image is
+  `lmsysorg/sglang:v0.5.21-cu130-runtime` (a ROCm one with `rocm.yml`), or
+  arena-sglang built from PyPI (`sglang-build.yml`). The RAM llama.cpp seemed
+  to leak is its prompt cache, 8 GB a loaded model by default (Settings →
+  *RAM for chats that lost their slot*)
+
+### :sparkles: New features & Enhancements
+
+- Admin → Models → On disk: every model file, Hugging Face snapshot and
+  picture or video model's file in the library, with the models that use it
+  and the servers that keep it, removed with the folders it leaves; removing
+  a model can remove its files too
+- Arena Apps: publishing again from a chat makes a new version of the app it
+  published before, with what changed, instead of a new app
+- Code reviews can be shared with groups or people, who read them only while
+  Argus can read the repository as them; the people named are told
+- Fix them: many security findings fixed at once, each its own fix and
+  branch; a security fix's change is checked by the scanners and the review
+  before its merge request, and a file the checks cannot read is said
+- Code Arena's Problems panel lists the security review's findings, and Fix
+  gives the agent the finding
+- The scanners' rules cover LDAP, XPath, sessions, cookies, hashes and code
+  run from text, and data from beyond requests
+- Measurements: the security review on the Juliet test suite (Java and C#)
+  and the OWASP Benchmark, and the quantum lab on Qiskit HumanEval
+  ([docs/measurements](docs/measurements))
+- Generated sound and video say a model made them (GOV-10, the AI Act's
+  Article 50), as pictures already did
+- The science lab runs an answer's code as written before it ends
+- The LLM overview dashboard and two new alerts (`SglangKvCacheFull`,
+  `SglangRequestsWaiting`) read SGLang's series
+
+### :bug: Bugs fixed
+
+- A background key sync that read a person's keys before one of their own
+  keys was made or changed wrote stale limits over it until the next sync;
+  each person's key limits now have one writer at a time
+- Code Arena's editor menu had no border or corners on its background
+- After a tool call, the chat and Code Arena did not show that they were
+  waiting for the model
+- Memory's reflection skipped a chat whose tool call was cut short
+- A scan's answer was lost when the scanners' tar had padding at its end
+- The safeguards took SQL built around a column named password for a
+  password
+- The dashboards' average wait showed nothing, not 0, before anything had
+  waited
+- Two CI flakes: the bell's count and list now come from one snapshot, and
+  the vLLM test writes its desired state renamed into place
+
 ## v7.4.0 (2026-10-28)
 
 Security reviews of your repositories, grounded in what is known of weaknesses

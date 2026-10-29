@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-7.4.0-5b8cff">
+  <img alt="version" src="https://img.shields.io/badge/version-7.5.0-5b8cff">
   <img alt="self-hosted" src="https://img.shields.io/badge/self--hosted-on%20your%20GPUs-7c4dff">
   <img alt="offline" src="https://img.shields.io/badge/installs-air--gapped-2ea043">
   <img alt="licence" src="https://img.shields.io/badge/licence-AGPL--3.0%20%7C%20commercial-555">
@@ -139,11 +139,14 @@ AI systems, and how ready you are for each certification.
 <td colspan="2" valign="top">
 
 ### 🛡️ Yours to run
-SSO, LDAP and two-factor sign-in; a key and a budget for each person; groups
-decide models and tools. An audit log nobody changes unseen, live checks of
-every control and the evidence in one download. Ten dashboards, an installer
-for offline hosts in one file that installs only the features you choose, and
-a Helm chart for Kubernetes that rolls without a gap and grows with its load.
+SSO, LDAP and two-factor sign-in; API keys of one's own, each with its limits
+and budget; groups decide models and tools, and a fair line keeps everyone
+moving when it is busy. An audit log nobody changes unseen, a prompt log
+behind its own permission, live checks of every control and the evidence in
+one download. A dashboard for each role, llama.cpp, vLLM or SGLang as the
+engine, an installer for offline hosts in one file that installs only the
+features you choose, and a Helm chart for Kubernetes that rolls without a gap
+and grows with its load.
 
 </td>
 </tr>
