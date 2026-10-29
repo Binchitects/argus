@@ -42,9 +42,27 @@ public sealed class PromptLogEntry
     public string? Answer { get; set; }
     public int? PromptTokens { get; set; }
     public int? CompletionTokens { get; set; }
-    /// <summary>The gateway's status for it (200 for an answer).</summary>
+    /// <summary>The gateway's status for it (200 for an answer; 0 while it waits or runs).</summary>
     public int Status { get; set; }
+    /// <summary>Where it is: <see cref="Waiting"/>, <see cref="Running"/>, <see cref="Done"/>, <see cref="Failed"/>, <see cref="Stopped"/> or <see cref="Refused"/>.</summary>
+    public string State { get; set; } = Done;
+    /// <summary>Why it failed or was refused, as the caller was told.</summary>
+    public string? Error { get; set; }
+    /// <summary>From its arrival to its end, the wait for its turn included.</summary>
+    public int? DurationMs { get; set; }
     public DateTimeOffset At { get; set; } = DateTimeOffset.UtcNow;
+
+    /// <summary>In line for its turn (the key's, the model's).</summary>
+    public const string Waiting = "waiting";
+    /// <summary>With the model, being answered.</summary>
+    public const string Running = "running";
+    public const string Done = "done";
+    /// <summary>The model or the gateway answered with an error, or could not be reached.</summary>
+    public const string Failed = "failed";
+    /// <summary>The caller went away before the answer was whole: what had come is kept.</summary>
+    public const string Stopped = "stopped";
+    /// <summary>Not let in: the line was full, or it waited past the limit.</summary>
+    public const string Refused = "refused";
 }
 
 /// <summary>

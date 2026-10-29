@@ -2081,6 +2081,13 @@ namespace Llm.Core.Data.Migrations
                     b.Property<int?>("CompletionTokens")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("DurationMs")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
                     b.Property<string>("KeyToken")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
@@ -2097,6 +2104,13 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<int?>("PromptTokens")
                         .HasColumnType("integer");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("done");
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");

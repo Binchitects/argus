@@ -918,20 +918,31 @@ Sending is audited (`feedback.sent`), and so is handling it
 
 **Prompt log** (Oversight, with `prompts.review`, a permission of its own that
 no built-in role but the admins' has; the Auditor's `.read` permissions do not
-include it) shows everyone's questions and the answers they got, newest first:
+include it) shows everyone's questions and the answers they got, newest first,
+whatever became of them. Each has a state: **Waiting** (in line for its turn),
+**Running**, **Done**, **Failed** (with the error the asker got), **Stopped**
+(the asker stopped it or went away; what had come is shown) or **Refused** (the
+line was full, or it waited past its limit, with the message the asker got).
+While any shown is waiting or running, the page looks again every 5 seconds.
 
 - **Chat**: each question in a chat (Code Arena's sessions kept in Arena and
   rooms among them) with the model's answer, its chat's title, whether the
-  chat was deleted, and the answer's tokens. These are read from the chats
-  themselves, so they are there as long as the chats are kept.
-- **API**: each chat completion asked with an API key, its last question and
-  the whole answer as it went out (cut at 20,000 characters each, one from
-  the answer cache too), and its tokens. **Settings → Data retention → Keep API requests in the prompt log
+  chat was deleted, the answer's tokens and how long it took. Its state is its
+  answer's: running while its chat answers it, failed when a round failed (or
+  no answer was kept), stopped when the person stopped it. These are read from
+  the chats themselves, so they are there as long as the chats are kept.
+- **API**: each chat completion asked with an API key, from the moment it
+  arrives: its last question and the whole answer as it went out (cut at
+  20,000 characters each, one from the answer cache too), its tokens and the
+  time from its arrival to its end, its wait for a turn included. **Settings → Data retention → Keep API requests in the prompt log
   for** (90 days by default, 0 forever) keeps them; **Settings → API keys → Prompt log of API
   requests** off keeps none. Deleting a person deletes theirs.
 
 Search by words (in the question, and in an API answer), by person (user name
-or email) and by where (all, chat, API); **Older** goes on 50 at a time. Every
+or email), by state and by where (all, chat, API); **Older** goes on 50 at a
+time (with a state chosen, each page looks through the newest 1,000 chat
+questions for it). A long question or answer shows its start; **Show all**
+opens the whole of it. Every
 search is in the audit log as `prompts.viewed`, with what was searched for and
 how many were shown. **Your account → Your data** tells each person that their
 questions can be read this way.

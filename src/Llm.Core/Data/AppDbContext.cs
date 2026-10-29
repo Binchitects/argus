@@ -784,6 +784,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Model).HasMaxLength(200);
             e.Property(x => x.Prompt).HasMaxLength(PromptLogEntry.MaxText);
             e.Property(x => x.Answer).HasMaxLength(PromptLogEntry.MaxText);
+            e.Property(x => x.State).HasMaxLength(16).HasDefaultValue(PromptLogEntry.Done);
+            e.Property(x => x.Error).HasMaxLength(2000);
             e.HasIndex(x => x.At);
             e.HasIndex(x => new { x.UserId, x.At });
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);

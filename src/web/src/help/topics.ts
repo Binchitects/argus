@@ -1037,11 +1037,11 @@ export const topics = {
 
   prompts: {
     title: 'Prompt log',
-    about: "Everyone's questions and the answers they got, in the chat and with API keys, for those with prompts.review. Every search is in the audit log.",
+    about: "Everyone's questions and the answers they got, in any state, in the chat and with API keys, for those with prompts.review. Every search is in the audit log.",
     admin: true,
     parts: [
-      { name: 'Search', text: 'Words in the question (and in an API answer), a person by user name or email, and where: all, chat or API.' },
-      { name: 'The log', text: 'Each question with its answer, person, model, chat and tokens, newest first; **Older** goes on.' },
+      { name: 'Search', text: 'Words in the question (and in an API answer), a person by user name or email, a state, and where: all, chat or API.' },
+      { name: 'The log', text: 'Each question with its state (waiting, running, done, failed and why, stopped, refused), answer, person, model, chat, tokens and time taken, newest first; **Show all** opens a long one, **Older** goes on.' },
     ],
     tasks: [{ title: 'Look into a complaint about an answer', steps: ['Search by the person and a few words of the question.', 'Read the answer they got.', 'The search itself is audited as prompts.viewed.'] }],
     manual: { doc: 'admin', section: 'prompt-log' },

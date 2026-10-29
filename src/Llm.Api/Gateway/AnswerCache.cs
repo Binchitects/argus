@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Llm.Api.Endpoints;
 using Llm.Api.Identity;
+using Llm.Core.Chat;
 using Llm.Core.Data;
 using Llm.Core.Identity;
 using Llm.Core.Models;
@@ -599,13 +600,34 @@ public static class AnswerCacheEndpoints
             return;
         }
 
+        // The prompt log (Gateway:LogPrompts): the request from its arrival, whatever becomes of it.
+        var logged = cache.Options.LogPrompts && completions && json is not null && key is { Length: > 0 } && await people.ForAsync(key, ct) is { } asker
+            ? prompts.Begin(asker.Id, AnswerCache.HashOf(key), json)
+            : null;
+        using var _closing = logged?.Closing(ct);
+        async Task RefuseAsync(int status, string message, string type)
+        {
+            logged?.End(PromptLogEntry.Refused, status, error: message);
+            http.Response.StatusCode = status;
+            http.Response.Headers.RetryAfter = "30";
+            await http.Response.WriteAsJsonAsync(new { error = new { message, type, code = status.ToString(System.Globalization.CultureInfo.InvariantCulture) } }, ct);
+        }
+
         // The key's turn: as many at once as it may have, the rest waiting in order (never refused at once).
-        using var place = key is { Length: > 0 } ? await line.EnterAsync(key, ct) : null;
+        IDisposable? place;
+        try
+        {
+            place = key is { Length: > 0 } ? await line.EnterAsync(key, ct) : null;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            logged?.End(PromptLogEntry.Stopped, 499, error: "The caller went away while it waited for its turn.");
+            throw;
+        }
+        using var _place = place;
         if (key is { Length: > 0 } && place is null)
         {
-            http.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-            http.Response.Headers.RetryAfter = "30";
-            await http.Response.WriteAsJsonAsync(new { error = new { message = $"This API key's requests waited longer than {line.Timeout.TotalMinutes:0} minutes for their turn: {line.PlacesFor(key)} are answered at once. Try again in a moment.", type = "rate_limit_error", code = "429" } }, ct);
+            await RefuseAsync(StatusCodes.Status429TooManyRequests, $"This API key's requests waited longer than {line.Timeout.TotalMinutes:0} minutes for their turn: {line.PlacesFor(key)} are answered at once. Try again in a moment.", "rate_limit_error");
             return;
         }
         // Its turn in the model's line, with the chat's answers: the model's places, everyone's (Chat:AnswersAtOnce), the
@@ -619,20 +641,22 @@ public static class AnswerCacheEndpoints
             }
             catch (Chat.AnswerGate.BusyException ex)
             {
-                http.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
-                http.Response.Headers.RetryAfter = "30";
-                await http.Response.WriteAsJsonAsync(new { error = new { message = ex.Message, type = "service_busy", code = "503" } }, ct);
+                await RefuseAsync(StatusCodes.Status503ServiceUnavailable, ex.Message, "service_busy");
                 return;
             }
             catch (Chat.AnswerGate.TooLongException ex)
             {
-                http.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-                http.Response.Headers.RetryAfter = "30";
-                await http.Response.WriteAsJsonAsync(new { error = new { message = ex.Message, type = "rate_limit_error", code = "429" } }, ct);
+                await RefuseAsync(StatusCodes.Status429TooManyRequests, ex.Message, "rate_limit_error");
                 return;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                logged?.End(PromptLogEntry.Stopped, 499, error: "The caller went away while it waited for its turn.");
+                throw;
             }
         }
         using var _turn = turn;
+        logged?.Running();
         // The agent's session goes back to the engine slot that holds its start (and its cache, from disk when it lost it),
         // as a chat's conversation does: each turn reads only what is new.
         using var sending = completions && key is { Length: > 0 } && json?["model"] is JsonValue pm && pm.TryGetValue<string>(out var pinned) && SessionOf(key, json) is { } session
@@ -677,6 +701,7 @@ public static class AnswerCacheEndpoints
         }
         catch (HttpRequestException)
         {
+            logged?.End(PromptLogEntry.Failed, StatusCodes.Status502BadGateway, error: "The model gateway is not reachable right now.");
             http.Response.StatusCode = StatusCodes.Status502BadGateway;
             await http.Response.WriteAsJsonAsync(new { error = new { message = "The model gateway is not reachable right now.", type = "gateway_unreachable", code = "502" } }, ct);
             return;
@@ -697,36 +722,55 @@ public static class AnswerCacheEndpoints
             }
             http.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
             var keep = lookup is not null && res.IsSuccessStatusCode ? new MemoryStream() : null;
-            // The prompt log (Gateway:LogPrompts): the answer as it went out, whole, for its person's request.
-            var logged = cache.Options.LogPrompts && completions && json is not null && key is { Length: > 0 } && await people.ForAsync(key, ct) is { } asker ? (asker, new MemoryStream()) : default;
+            // The prompt log: the answer as it went out, whole (or as far as it went), or the error the caller got.
+            var written = logged is not null ? new MemoryStream() : null;
+            var sse = res.Content.Headers.ContentType?.MediaType == "text/event-stream" || streamed;
             await using var upstream = await res.Content.ReadAsStreamAsync(ct);
             var buffer = new byte[16 * 1024];
             int n;
-            // Each piece goes on as it comes: a streamed answer reaches the caller word by word.
-            while ((n = await upstream.ReadAsync(buffer, ct)) > 0)
+            try
             {
-                await http.Response.Body.WriteAsync(buffer.AsMemory(0, n), ct);
-                await http.Response.Body.FlushAsync(ct);
-                if (logged.Item2 is { } log && log.Length + n <= MostLoggedAnswer)
+                // Each piece goes on as it comes: a streamed answer reaches the caller word by word.
+                while ((n = await upstream.ReadAsync(buffer, ct)) > 0)
                 {
-                    log.Write(buffer, 0, n);
-                }
-                if (keep is not null)
-                {
-                    if (keep.Length + n > MostCachedAnswer)
+                    await http.Response.Body.WriteAsync(buffer.AsMemory(0, n), ct);
+                    await http.Response.Body.FlushAsync(ct);
+                    if (written is not null && written.Length + n <= MostLoggedAnswer)
                     {
-                        keep = null;
+                        written.Write(buffer, 0, n);
                     }
-                    else
+                    if (keep is not null)
                     {
-                        keep.Write(buffer, 0, n);
+                        if (keep.Length + n > MostCachedAnswer)
+                        {
+                            keep = null;
+                        }
+                        else
+                        {
+                            keep.Write(buffer, 0, n);
+                        }
                     }
                 }
             }
-            var sse = res.Content.Headers.ContentType?.MediaType == "text/event-stream" || streamed;
-            if (logged.Item2 is { } written)
+            catch (Exception ex) when (logged is not null && (ex is OperationCanceledException or IOException || ct.IsCancellationRequested))
             {
-                prompts.Record(logged.Item1.Id, AnswerCache.HashOf(key!), json!, res.IsSuccessStatusCode ? AnswerCache.Assemble(Encoding.UTF8.GetString(written.ToArray()), sse) : null, (int)res.StatusCode);
+                // The caller went away (or the gateway broke off): what had come is kept.
+                var partial = written is not null && res.IsSuccessStatusCode ? AnswerCache.Assemble(Encoding.UTF8.GetString(written.ToArray()), sse) : null;
+                logged.End(ct.IsCancellationRequested ? PromptLogEntry.Stopped : PromptLogEntry.Failed, ct.IsCancellationRequested ? 499 : (int)res.StatusCode,
+                    error: ct.IsCancellationRequested ? "The caller went away before the answer was whole." : $"The answer broke off: {ex.Message}", completion: partial);
+                throw;
+            }
+            if (logged is not null && written is not null)
+            {
+                var text = Encoding.UTF8.GetString(written.ToArray());
+                if (res.IsSuccessStatusCode)
+                {
+                    logged.End(PromptLogEntry.Done, (int)res.StatusCode, completion: AnswerCache.Assemble(text, sse));
+                }
+                else
+                {
+                    logged.End(PromptLogEntry.Failed, (int)res.StatusCode, error: PromptLogWriter.ErrorOf(text) ?? $"The gateway answered {(int)res.StatusCode}.");
+                }
             }
             if (keep is not null && AnswerCache.Assemble(Encoding.UTF8.GetString(keep.ToArray()), sse) is { } answer)
             {
