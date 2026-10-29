@@ -102,7 +102,27 @@ public sealed class AgentTests : IDisposable
         Assert.True(json["usage"]!["prompt_tokens"]!.GetValue<long>() > 0);
         Assert.True(json["usage"]!["cached_tokens"]!.GetValue<long>() > 0);
         Assert.Equal(1, json["usage"]!["requests"]!.GetValue<int>());
+        Assert.Empty(json["usage"]!["tool_calls"]!.AsObject());
         Assert.True(File.Exists(Path.Combine(h.Paths.SessionsDir, json["session"]!.GetValue<string>() + ".jsonl")));
+    }
+
+    [Fact]
+    public async Task One_shot_json_counts_the_tools_called_and_what_they_gave_the_model()
+    {
+        var asked = 0;
+        _gateway.Answer = req => ++asked switch
+        {
+            1 => Reply.Call(("grep", """{"pattern":"alpha"}"""), ("grep", """{"pattern":"beta"}""")),
+            2 => Reply.Call(("read_file", """{"path":"notes.txt"}""")),
+            _ => Reply.Say("done"),
+        };
+        using var h = new Harness(_gateway, _mcp);
+        h.Write("notes.txt", "alpha\nbeta\n");
+        Assert.Equal(0, await h.Run("", "-p", "find them", "--output", "json"));
+        var usage = JsonNode.Parse(h.Out)!["usage"]!;
+        Assert.Equal((2, 1), (usage["tool_calls"]!["grep"]!.GetValue<int>(), usage["tool_calls"]!["read_file"]!.GetValue<int>()));
+        Assert.True(usage["tool_chars"]!.GetValue<long>() > 0);
+        Assert.Equal(3, usage["requests"]!.GetValue<int>());
     }
 
     [Fact]

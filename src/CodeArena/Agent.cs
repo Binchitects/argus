@@ -102,7 +102,16 @@ internal sealed class Spend
     public long Completion;
     public int Requests;
     public decimal? Cost;
+    /// <summary>The tools called, each by name, and the characters of their results that reached the model.</summary>
+    public System.Collections.Concurrent.ConcurrentDictionary<string, int> Tools { get; } = new(StringComparer.Ordinal);
+    public long ToolChars;
     private readonly object _gate = new();
+
+    public void Called(string tool, int chars)
+    {
+        Tools.AddOrUpdate(tool, 1, (_, n) => n + 1);
+        Interlocked.Add(ref ToolChars, chars);
+    }
 
     public void Add(TokenUsage u, ModelInfo model)
     {
@@ -364,6 +373,9 @@ internal sealed class Agent
     // The steps of the turn going on, and of the one before it.
     private int _stepsInTurn, _lastTurnSteps;
 
+    /// <summary>The turn's spend, which also counts the tools it called.</summary>
+    private Spend? _spending;
+
     /// <summary>
     /// The memories that matter to the person's message (Arena's recall, else the files'), not among those given already
     /// this session; said in a note before the message (Code Arena's own: never synced to the web chat). Null: no memory.
@@ -378,6 +390,7 @@ internal sealed class Agent
     private async Task<string> RunTurnAsync(string? input, Spend turn, CancellationToken ct, bool takeIn, IReadOnlyList<Mentions.Piece>? pieces, string? quote,
         (string Section, JsonArray Pictures)? uploaded, bool composed = false, string? subject = null)
     {
+        _spending = turn;
         if (input is not null)
         {
             _followUps = 0;
@@ -1063,6 +1076,7 @@ internal sealed class Agent
                 text = text[..(limit * 2 / 3)] + $"\n\n… ({text.Length - limit:N0} characters cut: ask for less, e.g. a line range or a narrower search) …\n\n" + text[^(limit / 3)..];
             }
             Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = planned[i].Id, ["content"] = text });
+            _spending?.Called(planned[i].Name, text.Length);
         }
         // Pictures a tool took (a screenshot) follow the results, as the person's message: a tool's result is text only.
         var pictures = results.Where(r => r.Pictures is { Count: > 0 }).SelectMany(r => r.Pictures!).ToList();

@@ -979,6 +979,9 @@ internal static partial class Cli
                     ["cached_tokens"] = turn.Cached,
                     ["completion_tokens"] = turn.Completion,
                     ["requests"] = turn.Requests,
+                    // The tools called, by name, and how much of their results the model read.
+                    ["tool_calls"] = new JsonObject(turn.Tools.OrderBy(t => t.Key, StringComparer.Ordinal).Select(t => KeyValuePair.Create(t.Key, (JsonNode?)t.Value))),
+                    ["tool_chars"] = turn.ToolChars,
                 },
             };
             if (error is not null)
