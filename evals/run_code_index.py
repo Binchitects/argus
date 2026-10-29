@@ -236,13 +236,15 @@ def home_for(arm: str, model: str, base: pathlib.Path, url: str, key: str) -> pa
     return home
 
 
-def run_one(program: str, repo: pathlib.Path, task: dict, arm: str, model: str, base: pathlib.Path, url: str, key: str, head: str) -> dict:
+def run_one(program: str, repo: pathlib.Path, task: dict, arm: str, model: str, base: pathlib.Path, url: str, key: str, head: str, mode: str) -> dict:
     subprocess.run(["git", "-C", str(repo), "checkout", "--quiet", "--force", head if task["at"] == "HEAD" else task["at"]], check=True)
     subprocess.run(["git", "-C", str(repo), "clean", "-fdq"], check=True)
     home = home_for(arm, model, base, url, key)
     started = time.monotonic()
     try:
-        done = subprocess.run([program, "-p", task["prompt"], "--output", "json", "--permission-mode", "plan"], cwd=repo,
+        # Ask mode: nothing is changed unasked, and -p asks no one, so an edit is declined (plan mode had small models
+        # writing plans for approval, round after round, instead of answering).
+        done = subprocess.run([program, "-p", task["prompt"], "--output", "json", "--permission-mode", mode], cwd=repo,
                               env={**os.environ, "CODE_ARENA_HOME": str(home)}, capture_output=True, text=True, timeout=TIMEOUT)
         seconds = time.monotonic() - started
         try:
@@ -254,7 +256,7 @@ def run_one(program: str, repo: pathlib.Path, task: dict, arm: str, model: str, 
     finally:
         shutil.rmtree(home, ignore_errors=True)
     usage = result.get("usage") or {}
-    return {"task": task["id"], "family": task["family"], "split": task["split"], "arm": arm, "model": model, "seconds": round(seconds, 1),
+    return {"task": task["id"], "family": task["family"], "split": task["split"], "arm": arm, "model": model, "mode": mode, "seconds": round(seconds, 1),
             "error": result.get("error") if result.get("is_error") else None, **grade(task, result.get("result") or ""),
             "prompt_tokens": usage.get("prompt_tokens"), "cached_tokens": usage.get("cached_tokens"), "completion_tokens": usage.get("completion_tokens"),
             "requests": usage.get("requests"), "tool_calls": usage.get("tool_calls"), "tool_chars": usage.get("tool_chars")}
@@ -375,6 +377,8 @@ def main() -> int:
     run.add_argument("--models", required=True, help="models, comma separated")
     run.add_argument("--runs", type=int, default=3, help="runs of each task per arm and model")
     run.add_argument("--family", default="", help="only this family")
+    run.add_argument("--split", default="", help="only dev or test tasks")
+    run.add_argument("--mode", default="ask", help="the permission mode Code Arena runs in (ask: edits are declined)")
     run.add_argument("--limit", type=int, default=0, help="only the first N tasks (a smoke run)")
     run.add_argument("--url", default="https://llm.localhost", help="Arena's address")
     run.add_argument("--verify-tls", action="store_true", help="check the stack's certificate")
@@ -402,7 +406,7 @@ def main() -> int:
         (ROOT / "evals" / "code-index-retrieval.json").write_text(json.dumps({"head": kept["head"], "budget": args.budget, "rows": rows}, indent=1) + "\n")
         print(summary(rows))
         return 0
-    chosen = [t for t in kept["tasks"] if not args.family or t["family"] == args.family]
+    chosen = [t for t in kept["tasks"] if (not args.family or t["family"] == args.family) and (not args.split or t["split"] == args.split)]
     if args.limit:
         chosen = chosen[:args.limit]
     results = json.loads(OUT.read_text()) if OUT.exists() else {"runs": []}
@@ -413,7 +417,7 @@ def main() -> int:
             for arm in args.arms.split(","):
                 for task in chosen:
                     for n in range(args.runs):
-                        row = run_one(str(pathlib.Path(args.program).resolve()), repo, task, arm, model, base, args.url, person["apiKey"], kept["head"])
+                        row = run_one(str(pathlib.Path(args.program).resolve()), repo, task, arm, model, base, args.url, person["apiKey"], kept["head"], args.mode)
                         row["run"] = n
                         results["runs"].append(row)
                         print(f"{model} {arm} {task['id']} #{n}: {'pass' if row['pass'] else 'fail'} · {row['prompt_tokens']} in · "
