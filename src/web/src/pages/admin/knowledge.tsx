@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { BookOpen, Cloud, ExternalLink, Files, FileText, FolderOpen, FolderUp, Globe, GitBranch, Library, Pencil, PlugZap, Plus, RefreshCw, Trash2, Upload } from 'lucide-react'
+import { Archive, BookOpen, Cloud, ExternalLink, Files, FileText, FolderOpen, FolderUp, GitBranch, GitFork, Globe, HardDrive, Library, NotebookText, Pencil, PlugZap, Plus, RefreshCw, Rss, Ticket, Trash2, Upload } from 'lucide-react'
 import { useId, useRef, useState, type DragEvent } from 'react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -21,7 +21,7 @@ import { ago, count, formatValue } from '@/lib/format'
 import { AccessPicker, type Audience } from './access-picker'
 import { groupsQuery } from './groups-api'
 
-type Kind = 'gitlab' | 'folder' | 'website' | 'confluence' | 'sharepoint' | 'upload'
+type Kind = 'gitlab' | 'folder' | 'website' | 'confluence' | 'sharepoint' | 'upload' | 'github' | 'jira' | 'notion' | 'feed' | 'webdav' | 's3'
 
 export interface KnowledgeSource {
   id: string
@@ -34,11 +34,11 @@ export interface KnowledgeSource {
   maxPages: number
   audience: Audience
   groups: { id: string; name: string }[]
-  /** Confluence: the space keys read; null: every space the account may read. */
+  /** Confluence: the space keys read; Jira: the project keys; null: all the account may read. */
   spaces: string | null
   blogPosts: boolean
   sitePages: boolean
-  /** Confluence Cloud: the account's email; SharePoint: the app's client ID. */
+  /** Confluence and Jira Cloud: the account's email; SharePoint: the app's client ID; GitHub: the API's address; WebDAV: the user; S3: the access key ID. */
   account: string | null
   tenant: string | null
   /** A token or client secret is saved (it is never sent back). */
@@ -82,10 +82,19 @@ const kinds: Record<Kind, { label: string; icon: typeof Globe }> = {
   confluence: { label: 'Confluence', icon: BookOpen },
   sharepoint: { label: 'SharePoint', icon: Cloud },
   upload: { label: 'Uploaded files', icon: Files },
+  github: { label: 'GitHub or Gitea', icon: GitFork },
+  jira: { label: 'Jira', icon: Ticket },
+  notion: { label: 'Notion', icon: NotebookText },
+  feed: { label: 'Feed', icon: Rss },
+  webdav: { label: 'WebDAV', icon: HardDrive },
+  s3: { label: 'S3 bucket', icon: Archive },
 }
 
 /** Confluence and SharePoint: who may read is their own permissions; the admin chooses only for what those cannot tell. */
 const mirrors = (kind: Kind) => kind === 'confluence' || kind === 'sharepoint'
+
+/** The kinds whose connection the form can test before saving. */
+const testable = (kind: Kind) => mirrors(kind) || ['github', 'jira', 'notion', 'feed', 'webdav', 's3'].includes(kind)
 
 const knowledgeQuery = {
   queryKey: ['admin', 'knowledge'] as const,
@@ -109,7 +118,7 @@ export function KnowledgePage() {
     <>
       <PageHeader
         title="Knowledge"
-        description="The company's documents the chat searches (Company knowledge, a tool in Admin → Tools), each person only what they may read: GitLab wikis and issues, Confluence, SharePoint and OneDrive, folders, websites, and files uploaded here (scans and pictures read by OCR)."
+        description="The company's documents the chat searches (Company knowledge, a tool in Admin → Tools), each person only what they may read: GitLab, GitHub and Gitea, Confluence, Jira, Notion, SharePoint and OneDrive, WebDAV, S3 buckets, folders, websites, feeds, and files uploaded here (scans and pictures read by OCR)."
         actions={
           <Button onClick={() => setAdding(true)}>
             <Plus /> Add a source
@@ -125,7 +134,7 @@ export function KnowledgePage() {
         )}
         {k.sources.length === 0 ? (
           <EmptyState icon={Library} title="No sources yet" action={<Button onClick={() => setAdding(true)}><Plus /> Add a source</Button>}>
-            Add a GitLab project or group (its wiki and issues, read by its members), Confluence spaces or SharePoint sites (read by whom they let read), a folder mounted under {k.folderRoot}, or a website. Each is read again every {every(k.syncEvery)}.
+            Add a GitLab project or group (its wiki and issues, read by its members), Confluence spaces or SharePoint sites (read by whom they let read), GitHub or Gitea repositories, Jira projects, Notion pages, a WebDAV folder, an S3 bucket, a folder mounted under {k.folderRoot}, a website or feeds, or upload files. Each is read again every {every(k.syncEvery)}.
           </EmptyState>
         ) : (
           <div className="stagger grid gap-4 xl:grid-cols-2">
@@ -198,7 +207,10 @@ function SourceCard({ source, onDocuments, onEdit, onFiles }: { source: Knowledg
             {source.name} <Badge variant="outline">{kinds[source.kind].label}</Badge> <StateBadge source={source} />
           </CardTitle>
           <CardDescription className="font-mono text-xs break-all whitespace-pre-line">
-            {source.location}
+            {source.kind === 'notion' ? 'Pages shared with the integration' : source.location}
+            {source.kind === 'github' && ` · documentation${source.issues ? ' and issues' : ''}${source.account ? ` · ${source.account}` : ''}`}
+            {source.kind === 'jira' && ` · ${source.spaces ? `projects ${source.spaces}` : 'every project it may browse'} · ${source.account ? 'Cloud' : 'Data Center'}`}
+            {source.kind === 's3' && ` · region ${source.tenant ?? 'us-east-1'}`}
             {source.kind === 'gitlab' && ` · ${[source.wiki && 'wiki', source.issues && 'issues'].filter(Boolean).join(' and ')}`}
             {source.kind === 'website' && ` · ${source.hosts ?? 'its own host'}, up to ${count(source.maxPages)} pages`}
             {source.kind === 'confluence' && ` · ${source.spaces ? `spaces ${source.spaces}` : 'every space it may read'}${source.blogPosts ? ', blog posts too' : ''} · ${source.account ? 'Cloud' : 'Data Center'}`}
@@ -334,6 +346,16 @@ function bodyOf(d: Draft): Record<string, unknown> {
       return { name: d.name, kind: d.kind, location: d.location, account: d.account, spaces: d.spaces, blogPosts: d.blogPosts, ...secret, ...readers }
     case 'sharepoint':
       return { name: d.name, kind: d.kind, location: d.location, tenant: d.tenant, account: d.account, sitePages: d.sitePages, ...secret, ...readers }
+    case 'github':
+      return { name: d.name, kind: d.kind, location: d.location, account: d.account, issues: d.issues, ...secret, ...readers }
+    case 'jira':
+      return { name: d.name, kind: d.kind, location: d.location, account: d.account, spaces: d.spaces, ...secret, ...readers }
+    case 'notion':
+      return { name: d.name, kind: d.kind, ...secret, ...readers }
+    case 'webdav':
+      return { name: d.name, kind: d.kind, location: d.location, account: d.account, ...secret, ...readers }
+    case 's3':
+      return { name: d.name, kind: d.kind, location: d.location, account: d.account, tenant: d.tenant, ...secret, ...readers }
     default:
       return { name: d.name, kind: d.kind, location: d.location, ...readers }
   }
@@ -401,8 +423,14 @@ function SourceDialog({ open, source, folderRoot, onClose }: { open: boolean; so
                   <SelectItem value="gitlab">GitLab project or group</SelectItem>
                   <SelectItem value="confluence">Confluence</SelectItem>
                   <SelectItem value="sharepoint">SharePoint or OneDrive</SelectItem>
+                  <SelectItem value="github">GitHub or Gitea</SelectItem>
+                  <SelectItem value="jira">Jira</SelectItem>
+                  <SelectItem value="notion">Notion</SelectItem>
+                  <SelectItem value="webdav">WebDAV (Nextcloud, ownCloud, a NAS)</SelectItem>
+                  <SelectItem value="s3">S3 bucket (Amazon S3, MinIO, Ceph)</SelectItem>
                   <SelectItem value="folder">Folder</SelectItem>
                   <SelectItem value="website">Website</SelectItem>
+                  <SelectItem value="feed">RSS or Atom feeds</SelectItem>
                   <SelectItem value="upload">Files uploaded here</SelectItem>
                 </SelectContent>
               </Select>
@@ -414,7 +442,7 @@ function SourceDialog({ open, source, folderRoot, onClose }: { open: boolean; so
               maxLength={100}
               value={draft.name}
               onChange={(e) => set({ name: e.target.value })}
-              placeholder={{ gitlab: 'Engineering wiki', folder: 'Handbook', website: 'Product docs', confluence: 'Company wiki', sharepoint: 'Engineering site', upload: 'Company files' }[draft.kind]}
+              placeholder={{ gitlab: 'Engineering wiki', folder: 'Handbook', website: 'Product docs', confluence: 'Company wiki', sharepoint: 'Engineering site', upload: 'Company files', github: 'Open-source docs', jira: 'Support tickets', notion: 'Team notes', feed: 'Engineering blog', webdav: 'Shared drive', s3: 'Archived reports' }[draft.kind]}
             />
           </Field>
           {draft.kind === 'gitlab' && (
@@ -476,6 +504,82 @@ function SourceDialog({ open, source, folderRoot, onClose }: { open: boolean; so
               </span>
             </>
           )}
+          {draft.kind === 'github' && (
+            <>
+              <Field label="Repositories" hint="owner/repo, one a line; owner alone takes every repository of an organisation or a person. Their documentation is read (Markdown, text, and docs/), not their code.">
+                <Textarea required rows={3} className="font-mono text-xs" value={draft.location} onChange={(e) => set({ location: e.target.value })} placeholder="acme/handbook" />
+              </Field>
+              <Field label="API address (optional)" hint="Empty for GitHub. Gitea or Forgejo: https://gitea.example.com/api/v1. GitHub Enterprise: https://github.example.com/api/v3.">
+                <Input type="url" className="font-mono" value={draft.account} onChange={(e) => set({ account: e.target.value })} placeholder="https://api.github.com" />
+              </Field>
+              <Field label="Token (optional for public repositories)" hint="Read only: a fine-grained token with Contents and Issues read. Stored encrypted; never shown again.">
+                <Input type="password" autoComplete="off" value={draft.secret} onChange={(e) => set({ secret: e.target.value })} placeholder={saved} />
+              </Field>
+              <span className="flex items-center gap-2 text-sm">
+                <Checkbox id={`${id}-gh-issues`} checked={draft.issues} onCheckedChange={(v) => set({ issues: v === true })} />
+                <label htmlFor={`${id}-gh-issues`}>Issues and their comments (not pull requests)</label>
+              </span>
+            </>
+          )}
+          {draft.kind === 'jira' && (
+            <>
+              <Field label="Site address" hint="Cloud: https://your-site.atlassian.net. Data Center: its address.">
+                <Input required type="url" value={draft.location} onChange={(e) => set({ location: e.target.value })} placeholder="https://your-site.atlassian.net" />
+              </Field>
+              <Field label="Account's email (Cloud)" hint="With its API token. Empty for Data Center, which takes a personal access token.">
+                <Input type="email" value={draft.account} onChange={(e) => set({ account: e.target.value })} placeholder="knowledge-bot@example.com" />
+              </Field>
+              <Field label="API token or personal access token" hint="An account that may only browse is enough. Stored encrypted; never shown again.">
+                <Input type="password" autoComplete="off" required={!source?.secretSet} value={draft.secret} onChange={(e) => set({ secret: e.target.value })} placeholder={saved} />
+              </Field>
+              <Field label="Projects (optional)" hint="Their keys, comma separated. Empty: every project the account may browse.">
+                <Input className="font-mono" value={draft.spaces} onChange={(e) => set({ spaces: e.target.value })} placeholder="OPS, SUP" />
+              </Field>
+            </>
+          )}
+          {draft.kind === 'notion' && (
+            <Field label="Integration secret" hint="An internal integration (notion.so/profile/integrations) with Read content; then share pages with it (… → Connections). Stored encrypted; never shown again.">
+              <Input type="password" autoComplete="off" required={!source?.secretSet} value={draft.secret} onChange={(e) => set({ secret: e.target.value })} placeholder={saved} />
+            </Field>
+          )}
+          {draft.kind === 'feed' && (
+            <Field label="Feeds" hint="Their addresses, one a line. Each item is a document.">
+              <Textarea required rows={3} className="font-mono text-xs" value={draft.location} onChange={(e) => set({ location: e.target.value })} placeholder="https://blog.example.com/feed.xml" />
+            </Field>
+          )}
+          {draft.kind === 'webdav' && (
+            <>
+              <Field label="Folder address" hint="Nextcloud: https://cloud.example.com/remote.php/dav/files/USER/Folder. Its files and subfolders are read as uploaded files are.">
+                <Input required type="url" className="font-mono" value={draft.location} onChange={(e) => set({ location: e.target.value })} placeholder="https://cloud.example.com/remote.php/dav/files/bot/Handbook" />
+              </Field>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="User">
+                  <Input required value={draft.account} onChange={(e) => set({ account: e.target.value })} />
+                </Field>
+                <Field label="Password or app password" hint="Stored encrypted; never shown again.">
+                  <Input type="password" autoComplete="off" required={!source?.secretSet} value={draft.secret} onChange={(e) => set({ secret: e.target.value })} placeholder={saved} />
+                </Field>
+              </div>
+            </>
+          )}
+          {draft.kind === 's3' && (
+            <>
+              <Field label="Endpoint, bucket and prefix" hint="Path-style. Amazon: https://s3.REGION.amazonaws.com/bucket/prefix/. MinIO: https://minio.example.com:9000/bucket/.">
+                <Input required type="url" className="font-mono" value={draft.location} onChange={(e) => set({ location: e.target.value })} placeholder="https://s3.eu-west-1.amazonaws.com/docs-bucket/handbook/" />
+              </Field>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Access key ID">
+                  <Input required className="font-mono" value={draft.account} onChange={(e) => set({ account: e.target.value })} />
+                </Field>
+                <Field label="Region (optional)" hint="Empty: us-east-1.">
+                  <Input className="font-mono" value={draft.tenant} onChange={(e) => set({ tenant: e.target.value })} placeholder="eu-west-1" />
+                </Field>
+              </div>
+              <Field label="Secret access key" hint="A key that may only list and read the bucket (s3:ListBucket, s3:GetObject). Stored encrypted; never shown again.">
+                <Input type="password" autoComplete="off" required={!source?.secretSet} value={draft.secret} onChange={(e) => set({ secret: e.target.value })} placeholder={saved} />
+              </Field>
+            </>
+          )}
           {draft.kind === 'folder' && (
             <Field label="Folder" hint={`Mount it under ${folderRoot}, read-only, in docker-compose.override.yml. Text, Markdown, HTML, PDF and Office files are read.`}>
               <Input required className="font-mono" value={draft.location} onChange={(e) => set({ location: e.target.value })} placeholder={`${folderRoot}/handbook`} />
@@ -517,7 +621,7 @@ function SourceDialog({ open, source, folderRoot, onClose }: { open: boolean; so
           )}
           {tested && <Alert variant={tested.ok ? 'success' : 'destructive'}>{tested.message}</Alert>}
           <DialogFooter>
-            {mirrors(draft.kind) && (
+            {testable(draft.kind) && (
               <Button type="button" variant="outline" className="sm:mr-auto" loading={test.isPending} onClick={() => test.mutate()}>
                 <PlugZap /> Test connection
               </Button>

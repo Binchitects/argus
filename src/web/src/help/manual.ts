@@ -139,7 +139,7 @@ export const manualGroups: ManualGroup[] = [
       doc('settings.md', 'Settings', 'The Settings page: what applies at once or after a restart, secrets, what groups can set.', 'admins', settings),
       doc('authentication.md', 'Sign-in', 'Who signs in where: local accounts, the directory, company sign-in, SCIM, 2FA.', 'admins', authentication),
       doc('compliance/README.md', 'Compliance', 'Fourteen frameworks, from ISO 27001 and SOC 2 to the EU AI Act: what Arena covers and the company does, the controls, and the checks that keep them.', 'admins', compliance),
-      doc('knowledge.md', 'Company knowledge', 'GitLab, Confluence, SharePoint, folders and websites, searched by each person within their rights.', 'admins', knowledge),
+      doc('knowledge.md', 'Company knowledge', 'GitLab, GitHub, Confluence, Jira, Notion, SharePoint, WebDAV, S3, folders, websites, feeds and uploads, searched by each person within their rights.', 'admins', knowledge),
       doc('plugins.md', 'Plugins and APIs', 'Installing plugins, each person\'s own account, the manifest, a catalog.', 'admins', plugins),
       doc('deployment.md', 'Deploying', 'The samples and secrets, addresses, a host with no network, switching the model, the traps.', 'admins', deployment),
       doc('scripts.md', 'Scripts and arenactl', 'The one command: checking a machine, installing from a checkout or the offline installer, Code Arena\'s packages, the checks.', 'admins', scripts),

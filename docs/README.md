@@ -40,7 +40,7 @@ developers', and Argus run alone); a test fails until it is. Only
 | [plugins.md](plugins.md) | plugins and APIs as tools: installing, each person's own account, the manifest, a catalog |
 | [ci.md](ci.md) | the API in CI: a review of each merge request and an explanation of each failed pipeline, from your own GitLab pipeline, with the `arena` CLI |
 | [mcp.md](mcp.md) | Arena MCP: each person's chat tools for their own agent at `/mcp`, signed in with their API key |
-| [knowledge.md](knowledge.md) | company knowledge: GitLab wikis and issues, Confluence, SharePoint and OneDrive, folders, websites and uploaded files (scans and pictures by OCR, older Office files, e-mails, EPUB, zip archives), searched by each person within their rights; long files by their passages |
+| [knowledge.md](knowledge.md) | company knowledge: GitLab wikis and issues, GitHub and Gitea, Confluence, Jira, Notion, SharePoint and OneDrive, WebDAV, S3, folders, websites, feeds and uploaded files (scans and pictures by OCR, older Office files, e-mails, EPUB, zip archives), searched by each person within their rights; long files by their passages |
 | [integrations.md](integrations.md) | where people already are: Slack, Mattermost and Teams bots, email in, the installable app with push notifications, the browser extension |
 | [code-arena.md](code-arena.md) | Code Arena, our own coding agent and its IDE: getting it offline, signing in, the IDE (code-arena) and its terminals, modes, tools, ARENA.md, sessions, MCP servers, building and packaging it |
 | [cpu-temperature.md](cpu-temperature.md) | how CPU temperature reaches the dashboards, on Linux and on Windows |

@@ -230,4 +230,34 @@ describe('admin knowledge', () => {
       }),
     )
   })
+
+  it('adds an S3 bucket after testing it, and shows a GitHub source with its issues', async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/knowledge': () => page([source({ id: 'h1', name: 'Handbook repo', kind: 'github', location: 'acme/handbook', issues: true })]),
+      'GET /api/admin/groups': () => ({ json: [] }),
+      'POST /api/admin/knowledge/test': () => ({ json: { message: 'The bucket lists 3 objects under its prefix.' } }),
+      'POST /api/admin/knowledge': () => ({ status: 201, json: { id: 'b1', name: 'Reports' } }),
+    })
+    renderApp('/admin/knowledge')
+    const repo = await screen.findByRole('region', { name: 'Handbook repo' })
+    expect(within(repo).getByText('GitHub or Gitea')).toBeInTheDocument()
+    expect(within(repo).getByText(/documentation and issues/)).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: /Add a source/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add a knowledge source' })
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'Kind' }))
+    await userEvent.click(await screen.findByRole('option', { name: /S3 bucket/ }))
+    await userEvent.type(within(dialog).getByLabelText('Name'), 'Reports')
+    await userEvent.type(within(dialog).getByLabelText('Endpoint, bucket and prefix'), 'https://minio.example.test:9000/reports/2026/')
+    await userEvent.type(within(dialog).getByLabelText('Access key ID'), 'AKIDTEST')
+    await userEvent.type(within(dialog).getByLabelText('Secret access key'), 'the-key')
+    const expected = {
+      name: 'Reports', kind: 's3', location: 'https://minio.example.test:9000/reports/2026/', account: 'AKIDTEST', tenant: '', secret: 'the-key', audience: 'Everyone', groups: [],
+    }
+    await userEvent.click(within(dialog).getByRole('button', { name: /Test connection/ }))
+    expect(await within(dialog).findByText('The bucket lists 3 objects under its prefix.')).toBeInTheDocument()
+    expect(calls.find((c) => c.path === '/api/admin/knowledge/test')?.body).toEqual(expected)
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/admin/knowledge')?.body).toEqual(expected))
+  })
 })

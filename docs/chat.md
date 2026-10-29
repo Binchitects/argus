@@ -296,8 +296,9 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   on in new chats. The model calls a tool when a question needs it.
   - **Argus**: the code you can read in GitLab (below).
   - **Company knowledge**: the company's documents you may read (GitLab
-    wikis and issues, Confluence, SharePoint and OneDrive, folders, websites
-    an admin added under Admin → Knowledge), found by meaning; the model
+    wikis and issues, GitHub, Confluence, Jira, Notion, SharePoint and
+    OneDrive, WebDAV, S3, folders, websites, feeds and uploads an admin added
+    under Admin → Knowledge), found by meaning; the model
     cites each passage with its title and link. A project's wiki is found
     only by its members in GitLab, a Confluence page only by whom Confluence
     lets view it. See [knowledge.md](knowledge.md).

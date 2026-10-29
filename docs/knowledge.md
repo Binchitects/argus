@@ -1,7 +1,8 @@
 # Company knowledge
 
 The chat searches the company's own documents: GitLab wikis and issues,
-Confluence, SharePoint and OneDrive, folders and websites. Each person finds
+GitHub and Gitea, Confluence, Jira, Notion, SharePoint and OneDrive, WebDAV
+folders, S3 buckets, folders, websites, feeds and uploaded files. Each person finds
 only what they may read, with the title and link to cite. Argus stays the
 code path; this is the documents path.
 
@@ -41,6 +42,12 @@ is removed that time).
 | **Website** | Pages reached from the first page through their links, on its hosts only (or the hosts you list), up to **Most pages** (200; at most 2,000), minding the site's `robots.txt`. PDFs and documents linked from it too. | The groups you choose (or everyone, or admins), as rules on the source. |
 | **Confluence** | Cloud, or Data Center and Server: the spaces you list, or every space the account may read; their pages, and their blog posts if you choose. | Whoever may view the space and the page in Confluence, read restrictions included ([below](#confluence)). Where Confluence does not tell, the groups you choose. |
 | **SharePoint** | Sites and document libraries (a OneDrive too) by their addresses: their files (Word, PowerPoint, Excel, PDF, text, Markdown and the rest the chat reads), and the sites' pages if you choose. | Each file's permissions in SharePoint ([below](#sharepoint-and-onedrive)). Where Graph cannot tell, the groups you choose. |
+| **GitHub or Gitea** | Repositories (`owner/repo` a line, or `owner` for all of an organisation's or a person's, not archived ones): their documentation on the default branch (Markdown, reStructuredText, AsciiDoc and text files anywhere, every file under `docs/` or `doc/`), not their code; their issues with their comments if you choose, not pull requests. GitHub Enterprise and Gitea or Forgejo by their API's address. | The groups you choose (or everyone, or admins). |
+| **Jira** | Cloud, or Data Center: the issues of the projects you list (or every project the account may browse), each with its description, status, people and comments, linked to the issue. | The groups you choose (or everyone, or admins). |
+| **Notion** | The pages shared with an internal integration, their blocks' text two levels deep. | The groups you choose (or everyone, or admins). |
+| **WebDAV** | A folder of Nextcloud, ownCloud, a NAS or any WebDAV server, its subfolders too, read as uploaded files are. | The groups you choose (or everyone, or admins). |
+| **S3 bucket** | Amazon S3, MinIO, Ceph, Wasabi or R2: the objects under a prefix, read as uploaded files are; every request signed (Signature Version 4). | The groups you choose (or everyone, or admins). |
+| **Feeds** | RSS and Atom feeds: each item a document, with its title, date, link and text. | The groups you choose (or everyone, or admins). |
 
 Each card shows the state of the last sync (synced, syncing, failed, or
 synced with problems), why it failed, how many documents and passages the
@@ -240,6 +247,35 @@ own hosts replace the chat's allowed sites for its crawl. A page that answers
 404 or 410 goes; one that fails otherwise stays as it was until it can be
 read.
 
+### Other services
+
+Each takes an account that only reads, and its secret is stored encrypted
+(never shown again). **Test connection** tries it before you save.
+
+- **GitHub or Gitea**: a fine-grained token with Contents and Issues read
+  (none for public repositories). The API's address is empty for GitHub,
+  `https://github.example.com/api/v3` for GitHub Enterprise, and
+  `https://gitea.example.com/api/v1` for Gitea or Forgejo.
+- **Jira**: Cloud takes the account's email and an API token
+  (id.atlassian.com → Security → API tokens); Data Center takes a personal
+  access token and no email. Projects are their keys, comma separated.
+- **Notion**: make an internal integration (notion.so/profile/integrations)
+  with **Read content** only, then share each page or its parent with it
+  (… → Connections). The source reads what is shared, nothing else.
+- **WebDAV**: the folder's address and a user with an app password
+  (Nextcloud: Settings → Security → Devices and sessions). Nextcloud's address is
+  `https://cloud.example.com/remote.php/dav/files/USER/Folder`.
+- **S3**: path-style, endpoint then bucket then prefix
+  (`https://s3.eu-west-1.amazonaws.com/bucket/handbook/`,
+  `https://minio.example.com:9000/bucket/`), the access key ID, the region
+  (us-east-1 when empty) and the secret access key. A key with only
+  `s3:ListBucket` and `s3:GetObject` on the bucket is enough.
+- **Feeds**: their addresses, one a line; no secret.
+
+These services do not say who may read what in a form Argus Arena mirrors, so
+the groups you choose read the whole source: give a source to whom may read
+all of it, and make one source per audience.
+
 ## The wiki
 
 **Wiki** (in everyone's menu) finds and reads what the company knows with no
@@ -343,13 +379,13 @@ environment), for odd setups only:
 
 ## What comes next
 
-Google Drive and Jira, each a connector of its own (`IKnowledgeConnector` in
+Google Drive, each a connector of its own (`IKnowledgeConnector` in
 `src/Llm.Api/Knowledge`: a kind, a check of its settings, and its documents
 with their readers; `IConnectionTest` for Test connection). Plugins will be
 able to bring a connector (`knowledge:` in the manifest).
 
-The Confluence and SharePoint connectors are proven against fakes of their
-APIs, not yet against a live Confluence or tenant.
+The Confluence, SharePoint, GitHub, Jira, Notion, WebDAV and S3 connectors are
+proven against fakes of their APIs, not yet against the live services.
 
 ## How it is tested
 
@@ -379,6 +415,12 @@ point the same way), a folder and a fake website:
   deleted file goes, failing half way reads the same changes again, a link
   Graph no longer knows reads the library whole; Test connection, and
   secrets stored encrypted and never sent back;
+- other services (`ServiceConnectorTests.cs`, against fakes of their APIs):
+  GitHub gives its documentation and issues, not its code or pull requests,
+  with the token on every request; Jira each issue with its comments and
+  link, asked for the projects listed; Notion the pages shared with the
+  integration; a feed each item; WebDAV a folder's files and subfolders'; S3
+  the objects under the prefix, every request signed;
 - a project of 60 files answers about any of them from its passages, with
   no file inlined; a long attachment goes as its start and the passage that
   answers.

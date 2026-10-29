@@ -811,11 +811,11 @@ export const topics = {
 
   knowledge: {
     title: 'Knowledge',
-    about: 'The company\'s documents the chat searches, each person only what they may read: GitLab wikis and issues, Confluence, SharePoint and OneDrive, folders and websites.',
+    about: 'The company\'s documents the chat searches, each person only what they may read: GitLab wikis and issues, GitHub and Gitea, Confluence, Jira, Notion, SharePoint and OneDrive, WebDAV, S3 buckets, folders, websites, feeds and uploaded files.',
     admin: true,
     parts: [
       { name: 'Sources', text: 'Each source with its last sync, its documents and passages, and who may read it. **Sync now**, **Documents**, **Settings** and **Remove**.' },
-      { name: 'Add a source', text: 'A GitLab project or group, Confluence, SharePoint or OneDrive, a folder mounted under /knowledge, or a website. Confluence and SharePoint have **Test connection**.' },
+      { name: 'Add a source', text: 'A GitLab project or group, GitHub or Gitea repositories, Confluence, Jira, Notion, SharePoint or OneDrive, a WebDAV folder, an S3 bucket, a folder mounted under /knowledge, a website, feeds, or files uploaded here. Services with a sign-in have **Test connection**.' },
       { name: 'Who may read it', text: 'GitLab, Confluence and SharePoint keep their own rights; for a folder or a website you choose the groups.' },
     ],
     tasks: [{ title: 'Add a Confluence space', steps: ['Press **Add a source** and choose **Confluence**.', 'Give the site\'s address, a reading account and its API token, and the space keys.', 'Press **Test connection**, then add it. It syncs, and the chat finds it with the **Company knowledge** tool.'] }],

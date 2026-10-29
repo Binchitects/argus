@@ -14,6 +14,13 @@ public static class KnowledgeWiring
         services.AddScoped<IKnowledgeConnector>(sp => sp.GetRequiredService<GitLabConnector>());
         services.AddScoped<IKnowledgeConnector, FolderConnector>();
         services.AddScoped<IKnowledgeConnector, UploadConnector>();
+        services.AddScoped<IKnowledgeConnector, GitHubConnector>();
+        services.AddScoped<IKnowledgeConnector, JiraConnector>();
+        services.AddScoped<IKnowledgeConnector, NotionConnector>();
+        services.AddScoped<IKnowledgeConnector, FeedConnector>();
+        services.AddScoped<IKnowledgeConnector, WebDavConnector>();
+        services.AddScoped<IKnowledgeConnector, S3Connector>();
+        services.AddHttpClient(ServiceConnector.Client, c => c.Timeout = TimeSpan.FromMinutes(2));
         services.AddSingleton<DocumentReader>();
         services.AddScoped<IKnowledgeConnector, WebsiteConnector>();
         services.AddHttpClient(ConfluenceConnector.Client, c => c.Timeout = TimeSpan.FromMinutes(1));

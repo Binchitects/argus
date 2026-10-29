@@ -23,7 +23,7 @@ public sealed record SourceRequest(
 /// <summary>Admin → Knowledge: the sources, how their syncs went, what they hold and who may read it; adding, changing, testing, Sync now, removing.</summary>
 public static class KnowledgeEndpoints
 {
-    public static readonly string[] Kinds = ["gitlab", "folder", "website", "confluence", "sharepoint", "upload"];
+    public static readonly string[] Kinds = ["gitlab", "folder", "website", "confluence", "sharepoint", "upload", "github", "jira", "notion", "feed", "webdav", "s3"];
 
     /// <summary>The most files one upload takes.</summary>
     public const int FilesAtOnce = 200;
@@ -209,11 +209,11 @@ public static class KnowledgeEndpoints
         }
         if (!Kinds.Contains(source.Kind))
         {
-            return AuthEndpoints.Problem(400, "kind", "A source is a GitLab project or group, a folder, a website, Confluence, SharePoint, or files uploaded here.");
+            return AuthEndpoints.Problem(400, "kind", $"A source is one of: {string.Join(", ", Kinds)}.");
         }
-        if (source.Kind == "upload" && source.Location.Length == 0)
+        if (source.Kind is "upload" or "notion" && source.Location.Length == 0)
         {
-            source.Location = "Uploaded files";
+            source.Location = source.Kind == "upload" ? "Uploaded files" : NotionConnector.Api;
         }
         if (source.Location.Length is 0 or > 2000)
         {
@@ -223,6 +223,11 @@ public static class KnowledgeEndpoints
                 "folder" => "Say which folder.",
                 "confluence" => "Give the Confluence site's address.",
                 "sharepoint" => "Give the sites or libraries to read, by their addresses, one a line.",
+                "github" => "Give the repositories, owner/repo one a line, or an owner for all of theirs.",
+                "jira" => "Give the Jira site's address.",
+                "feed" => "Give the feeds' addresses, one a line.",
+                "webdav" => "Give the folder's WebDAV address.",
+                "s3" => "Give the endpoint and the bucket: https://s3.amazonaws.com/bucket/prefix/.",
                 _ => "Give the first page's address.",
             });
         }
