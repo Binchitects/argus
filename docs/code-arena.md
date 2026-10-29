@@ -354,7 +354,11 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   a video opens in a tab of its own, as it is: a picture centred on a
   checkerboard with its size (a click switches between fitting the tab and its
   own size), sound and video with their controls; changed on disk, it shows
-  again. **Copy Path of
+  again. A Markdown file's **Preview** (the button over it, **Ctrl+Shift+V**,
+  or **Ctrl+K V**) opens in a tab of its own that follows the text as it is
+  typed: a link to another of the folder's files opens it, a `#heading` scrolls
+  to it, a web address opens a tab of the browser, and a picture beside the
+  file shows from the folder; **Markdown: Show Source** goes back. **Copy Path of
   Active File** gives the whole path in the system's own form, a file in an
   added folder's too. A dot marks unsaved
   changes and **Ctrl+S** saves (**Ctrl+K S** saves them all). A

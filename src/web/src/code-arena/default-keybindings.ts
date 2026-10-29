@@ -16,6 +16,8 @@ export const defaultKeybindings: RuleJson[] = [
   { key: 'ctrl+g', command: 'workbench.action.gotoLine', mac: 'ctrl+g' },
   { key: 'ctrl+shift+o', command: 'workbench.action.gotoSymbol', when: 'editorIsOpen' },
   { key: 'ctrl+t', command: 'workbench.action.showAllSymbols' },
+  { key: 'ctrl+shift+v', command: 'markdown.showPreview', when: "resourceLangId == 'markdown'" },
+  { key: 'ctrl+k v', command: 'markdown.showPreviewToSide', when: "resourceLangId == 'markdown'" },
   { key: 'ctrl+alt+shift+o', command: 'workbench.action.showAllSymbols' },
   { key: 'ctrl+,', command: 'workbench.action.openSettings' },
   { key: 'ctrl+k ctrl+s', command: 'workbench.action.openGlobalKeybindings' },

@@ -886,6 +886,26 @@ describe('Code Arena, the IDE', () => {
     expect(await screen.findByRole('dialog', { name: 'Commands' })).toBeInTheDocument()
   })
 
+  it("previews a Markdown file in a tab of its own that follows its text, its pictures from the folder", async () => {
+    backend()
+    renderIde()
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'README.md' }))
+    await waitFor(() => expect(editor().model?.value).toBe('# Shop\n'))
+    await userEvent.click(screen.getByRole('button', { name: 'Preview' }))
+    const preview = await screen.findByRole('document', { name: 'Preview README.md' })
+    expect(within(preview).getByRole('heading', { name: 'Shop' })).toBeInTheDocument()
+    expect(screen.getAllByRole('tab', { name: 'README.md' })).toHaveLength(2)
+
+    // Typed in the file: the preview follows, a picture beside it shown from the folder.
+    act(() => editor().model!.setValue('# Shop\n\n## Paying\n\n![logo](img/logo.png)\n'))
+    expect(await within(preview).findByRole('heading', { name: 'Paying' })).toBeInTheDocument()
+    expect(within(preview).getByRole('img', { name: 'logo' }).getAttribute('src')).toContain('/api/media?path=img%2Flogo.png')
+    // A link to another of the folder's files opens it in the editor.
+    act(() => editor().model!.setValue('# Shop\n\nSee [the app](src/app.ts).\n'))
+    await userEvent.click(await within(preview).findByRole('link', { name: 'the app' }))
+    expect(await screen.findByRole('tab', { name: 'app.ts' })).toBeInTheDocument()
+  })
+
   it('shows a picture and a video in tabs of their own, from their address, never read as text', async () => {
     const { calls } = backend({
       'GET /api/files': (_, __, url) =>

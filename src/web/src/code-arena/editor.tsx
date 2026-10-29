@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { FileCode2, FileDiff, FileImage, FileText, FolderOpen, GitCompareArrows, Keyboard, Settings2, X } from 'lucide-react'
+import { Eye, FileCode2, FileDiff, FileImage, FileText, FolderOpen, GitCompareArrows, Keyboard, Settings2, X } from 'lucide-react'
 import type * as Monaco from 'monaco-editor'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ContextMenu } from 'radix-ui'
@@ -14,6 +14,7 @@ import { toast } from '@/components/ui/toaster'
 import { ApiError, errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { asks, chatBridge, type Piece } from './bridge'
+import { Markdown } from '@/pages/chat/markdown'
 import { allCommands, onCommandsChange, runCommand } from './commands'
 import { installCompletions } from './completion'
 import { compareId, renamed, revertChanges, sideLabel, sidePath, takeChanges, touched, type LineChange, type Side } from './compare'
@@ -41,7 +42,7 @@ const diffId = (path: string, source: DiffSource = 'agent') => `${source === 'gi
 
 /** The files a tab holds in the editor: a file tab's own, a compare's live sides. */
 const fileSidesOf = (t: Tab): string[] =>
-  t.kind === 'file' ? [t.path] : [t.left, t.right].flatMap((x) => (x?.kind === 'file' ? [x.path] : []))
+  t.kind === 'file' || t.kind === 'preview' ? [t.path] : [t.left, t.right].flatMap((x) => (x?.kind === 'file' ? [x.path] : []))
 
 /** A compare tab's id for its sides: the agent's and git's as they were, any other by its sides. */
 const idOf = (t: Pick<Tab, 'source' | 'path' | 'left' | 'right'>) => (t.source === 'compare' || !t.source ? compareId(t.left!, t.right!) : diffId(t.path, t.source))
@@ -657,6 +658,22 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    /** A Markdown file's preview: a tab of its own beside the file's, its model kept while either is open. */
+    const openPreview = async (path: string) => {
+      const id = `preview:${path}`
+      if (has(id)) {
+        activate(id)
+        return
+      }
+      add({ id, kind: 'preview', path, status: 'ready', dirty: false })
+      await loadFile(path).catch(() => undefined)
+    }
+
+    const modelFor = async (path: string) => {
+      const f = await loadFile(path).catch(() => null)
+      return f && typeof f !== 'string' ? f.model : null
+    }
+
     /** The Settings or the Keyboard Shortcuts editor: one tab each, shown again when open. */
     const openPage = (kind: 'settings' | 'keybindings', query = '') => {
       setPageQuery(query)
@@ -1129,6 +1146,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       compare,
       changeAction,
       openPage,
+      openPreview,
+      modelFor,
       swapSides,
       diffEditor: () => diffEditor.current,
       modelsOf,
@@ -1503,6 +1522,8 @@ export function EditorArea() {
                     <Keyboard className="size-3.5 shrink-0" aria-hidden="true" />
                   ) : t.kind === 'media' ? (
                     <FileImage className="size-3.5 shrink-0" aria-hidden="true" />
+                  ) : t.kind === 'preview' ? (
+                    <Eye className="size-3.5 shrink-0" aria-hidden="true" />
                   ) : (
                     <FileCode2 className="size-3.5 shrink-0" aria-hidden="true" />
                   )}
@@ -1542,6 +1563,12 @@ export function EditorArea() {
           <span className="min-w-0 truncate font-mono" title={active.path}>
             {isUserFile(active.path) ? `User › ${active.path.slice(5)}` : active.path.split('/').join(' › ')}
           </span>
+          {active.languageId === 'markdown' && (
+            <button type="button" onClick={() => void ed.openPreview(active.path)} className="ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent hover:text-foreground" title="Open Preview (Ctrl+Shift+V)">
+              <Eye className="size-3.5" aria-hidden="true" />
+              Preview
+            </button>
+          )}
         </div>
       )}
       {active?.kind === 'diff' && <CompareToolbar tab={active} change={change} />}
@@ -1562,6 +1589,7 @@ export function EditorArea() {
           </Suspense>
         )}
         {active?.kind === 'media' && <MediaPreview key={active.id} tab={active} />}
+        {active?.kind === 'preview' && <MarkdownPreview key={active.id} path={active.path} />}
         {!active && <Welcome />}
         {active?.status === 'loading' && (
           <div className="absolute inset-0 grid place-items-center bg-background">
@@ -1585,6 +1613,91 @@ export function EditorArea() {
 }
 
 /**
+ * A Markdown file as it reads, following its text as it is edited (150 ms after typing pauses). A link to another file
+ * opens it in the editor, a #heading scrolls to it, a web address opens a tab of the browser; a picture beside the file
+ * shows from the folder.
+ */
+function MarkdownPreview({ path }: { path: string }) {
+  const ed = useEditor()
+  const [text, setText] = useState<string | null>(null)
+  const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    let gone = false
+    let wait = 0
+    let listen: { dispose(): void } | null = null
+    void ed.modelFor(path).then((model) => {
+      if (gone) return
+      if (!model) {
+        setText('')
+        return
+      }
+      setText(model.getValue())
+      listen = model.onDidChangeContent(() => {
+        clearTimeout(wait)
+        wait = window.setTimeout(() => setText(model.getValue()), 150)
+      })
+    })
+    return () => {
+      gone = true
+      clearTimeout(wait)
+      listen?.dispose()
+    }
+  }, [ed, path])
+  const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''
+  // Pictures named beside the file come from the folder (an answer's never do: the sanitizer leaves their words).
+  const shown = useMemo(
+    () =>
+      text?.replace(/(!\[[^\]]*\]\()([^)\s]+)((?:\s+"[^"]*")?\))/g, (all, open: string, src: string, close: string) =>
+        /^(?:[a-z][a-z0-9+.-]*:|\/|#)/i.test(src) ? all : `${open}${rawFileUrl(joinPath(dir, decodeURI(src)))}${close}`,
+      ) ?? null,
+    [text, dir],
+  )
+  // Its links (clicked, or Enter on one): a #heading scrolls to it, another file opens in the editor.
+  useEffect(() => {
+    const el = box.current
+    if (!el) return
+    const click = (e: MouseEvent) => {
+      const a = (e.target as HTMLElement).closest('a')
+      const href = a?.getAttribute('href')
+      if (!a || !href || /^[a-z][a-z0-9+.-]*:/i.test(href)) return
+      e.preventDefault()
+      if (href.startsWith('#')) {
+        const id = decodeURIComponent(href.slice(1))
+        const heading = [...el.querySelectorAll('h1, h2, h3, h4, h5, h6')].find((h) => h.id === id || slug(h.textContent ?? '') === id)
+        heading?.scrollIntoView({ block: 'start' })
+        return
+      }
+      const file = href.split('#')[0]
+      if (file) void ed.open(joinPath(dir, decodeURI(file)))
+    }
+    el.addEventListener('click', click)
+    return () => el.removeEventListener('click', click)
+  }, [ed, dir, text])
+  if (text === null) return <Spinner label={`Opening ${nameOf(path)}`} />
+  return (
+    <div ref={box} className="absolute inset-0 overflow-auto bg-background px-8 py-6" aria-label={`Preview ${nameOf(path)}`} role="document">
+      <article className="mx-auto max-w-3xl">
+        <Markdown text={shown ?? ''} />
+      </article>
+    </div>
+  )
+}
+
+/** A heading's anchor as GitHub and VS Code make it: lower case, spaces as -, punctuation gone. */
+const slug = (text: string) => text.trim().toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, '').replace(/\s/g, '-')
+
+/** A path relative to a folder of the working directory, ./ and ../ worked out. */
+function joinPath(dir: string, relative: string): string {
+  const parts = relative.startsWith('/') ? [] : dir.split('/').filter(Boolean)
+  for (const p of relative.split('/')) {
+    if (p === '' || p === '.') continue
+    if (p === '..') parts.pop()
+    else parts.push(p)
+  }
+  return parts.join('/')
+}
+
+/**
  * A picture, sound or video in a tab of its own, as VS Code's preview shows one: a picture centred on a checkerboard, its
  * size said, a click between fitting the tab and its own size; sound and video with their controls.
  */
@@ -1597,7 +1710,15 @@ function MediaPreview({ tab }: { tab: Tab }) {
   if (kind === 'sound' || kind === 'video') {
     return (
       <div className="absolute inset-0 grid place-items-center overflow-auto bg-background p-6">
-        {kind === 'sound' ? <audio controls src={src} aria-label={name} className="w-full max-w-xl" /> : <video controls src={src} aria-label={name} className="max-h-full max-w-full" />}
+        {kind === 'sound' ? (
+          <audio controls src={src} aria-label={name} className="w-full max-w-xl">
+            <track kind="captions" />
+          </audio>
+        ) : (
+          <video controls src={src} aria-label={name} className="max-h-full max-w-full">
+            <track kind="captions" />
+          </video>
+        )}
       </div>
     )
   }
@@ -1606,14 +1727,14 @@ function MediaPreview({ tab }: { tab: Tab }) {
       className="absolute inset-0 grid place-items-center overflow-auto p-6"
       style={{ backgroundImage: 'repeating-conic-gradient(var(--muted) 0% 25%, transparent 0% 50%)', backgroundSize: '16px 16px' }}
     >
-      <img
-        src={src}
-        alt={name}
-        onLoad={(e) => setSize({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })}
-        onClick={() => setWhole((w) => !w)}
-        title={whole ? 'Click to fit' : 'Click for its own size'}
-        className={whole ? 'max-w-none cursor-zoom-out' : 'max-h-full max-w-full cursor-zoom-in object-contain'}
-      />
+      <button type="button" onClick={() => setWhole((w) => !w)} title={whole ? 'Fit the tab' : 'Its own size'} className="contents">
+        <img
+          src={src}
+          alt={name}
+          onLoad={(e) => setSize({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })}
+          className={whole ? 'max-w-none cursor-zoom-out' : 'max-h-full max-w-full cursor-zoom-in object-contain'}
+        />
+      </button>
       {size && (
         <p className="absolute right-2 bottom-2 rounded bg-background/80 px-2 py-0.5 text-xs text-muted-foreground">
           {size.width} × {size.height}
