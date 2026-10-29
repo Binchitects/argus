@@ -413,7 +413,7 @@ def main() -> int:
             for arm in args.arms.split(","):
                 for task in chosen:
                     for n in range(args.runs):
-                        row = run_one(args.program, repo, task, arm, model, base, args.url, person["apiKey"], kept["head"])
+                        row = run_one(str(pathlib.Path(args.program).resolve()), repo, task, arm, model, base, args.url, person["apiKey"], kept["head"])
                         row["run"] = n
                         results["runs"].append(row)
                         print(f"{model} {arm} {task['id']} #{n}: {'pass' if row['pass'] else 'fail'} · {row['prompt_tokens']} in · "
