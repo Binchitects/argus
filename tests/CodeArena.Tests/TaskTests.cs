@@ -308,6 +308,15 @@ public sealed class TaskTests : IDisposable
         Assert.Matches(watch.Begins!, "[10:00:00 AM] File change detected. Starting incremental compilation...");
         Assert.Matches(watch.Ends!, "[10:00:01 AM] Found 1 error. Watching for file changes.");
         Assert.Single(_problems.Read("src/a.ts(1,5): error TS2304: Cannot find name 'b'.\n", [watch], "task:watch"));
+        // tsc's own pretty form, in colour, with its code frame and its count: one error.
+        var pretty = "\u001b[96msrc/a.ts\u001b[0m:\u001b[93m1\u001b[0m:\u001b[93m5\u001b[0m - \u001b[91merror\u001b[0m\u001b[90m TS2304: \u001b[0mCannot find name 'b'.\n\n"
+            + "\u001b[7m1\u001b[0m let a = b\n\u001b[7m \u001b[0m \u001b[91m        ~\u001b[0m\n\nFound 1 error in src/a.ts\u001b[90m:1\u001b[0m\n";
+        foreach (var matcher in new[] { "$tsc", "$tsc-watch" })
+        {
+            Assert.Equal([("src/a.ts", 1, 5, "error", (string?)"TS2304", "Cannot find name 'b'.")],
+                _problems.Read(pretty, [Problems.Named(matcher)!], "task:tsc").Select(p => (p.Path, p.Line, p.Column, p.Severity, p.Code, p.Message)));
+        }
+        Assert.Equal("info", _problems.Read("src/a.ts:1:1 - suggestion TS80001: File is a CommonJS module.\n", [Problems.Named("$tsc")!], "task:tsc").Single().Severity);
         Assert.Null(Problems.Named("$nope"));
     }
 

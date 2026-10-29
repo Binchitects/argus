@@ -198,6 +198,10 @@ internal sealed partial class Problems(Workspace workspace, Config config, Works
     [GeneratedRegex(@"^\s*(?<path>[^\s:][^:]*?\.go):(?<line>\d+)(?::(?<col>\d+))?:\s*(?<msg>.+?)\s*$")]
     private static partial Regex GoLine();
 
+    // path:line:col - error TS2304: message  (tsc's own form, --pretty: its colours are taken off first)
+    [GeneratedRegex(@"^\s*(?<path>[^\s:][^:]*?):(?<line>\d+):(?<col>\d+)\s+-\s+(?<sev>error|warning|suggestion|message)\s+(?<code>TS\d+)\s*:\s*(?<msg>.*?)\s*$")]
+    private static partial Regex TscPretty();
+
     // tsc --watch: a round of compiling begins, and ends.
     [GeneratedRegex(@"(?:Starting compilation in watch mode|File change detected\. Starting incremental compilation)\.\.\.")]
     private static partial Regex TscWatchBegins();
@@ -209,13 +213,14 @@ internal sealed partial class Problems(Workspace workspace, Config config, Works
     [GeneratedRegex(@"\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1B]*(?:\x07|\x1B\\)|[@-Z\\-_])")]
     private static partial Regex Escapes();
 
-    private static readonly ProblemMatcher Check = new(CheckSource, [Parenthesised(), Colons()]);
+    private static readonly ProblemMatcher Check = new(CheckSource, [Parenthesised(), TscPretty(), Colons()]);
 
     /// <summary>The problem matchers of VS Code's this reads, by the check's own forms; null for one it does not.</summary>
     public static ProblemMatcher? Named(string name) => name switch
     {
-        "$msCompile" or "$tsc" => new(name, [Parenthesised()]),
-        "$tsc-watch" => new(name, [Parenthesised()], Begins: TscWatchBegins(), Ends: TscWatchEnds()),
+        "$msCompile" => new(name, [Parenthesised()]),
+        "$tsc" => new(name, [Parenthesised(), TscPretty()]),
+        "$tsc-watch" => new(name, [Parenthesised(), TscPretty()], Begins: TscWatchBegins(), Ends: TscWatchEnds()),
         "$gcc" => new(name, [Colons()]),
         "$eslint-compact" => new(name, [EslintCompact()]),
         "$go" => new(name, [GoLine()]),
@@ -286,7 +291,7 @@ internal sealed partial class Problems(Workspace workspace, Config config, Works
         {
             "error" or "fatal error" => "error",
             "warning" => "warning",
-            "note" or "info" => "info",
+            "note" or "info" or "suggestion" or "message" => "info",
             // No word: ESLint's unix form says it in brackets; a linter's rule code (ruff's F401) is a warning; the rest
             // (go vet, Go's compiler) are errors.
             _ when message.Contains("[Error/", StringComparison.Ordinal) => "error",

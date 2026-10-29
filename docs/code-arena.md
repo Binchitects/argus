@@ -777,8 +777,9 @@ and `process` tasks (and `npm` and `typescript` ones) with `options`, `group`
 (`build`, `test`, `isDefault`), `dependsOn` (at once, or in order with
 `"dependsOrder": "sequence"`), a system's part, `isBackground` (ready when its
 matcher's `background.endsPattern` shows) and `problemMatcher` (`$msCompile`,
-`$tsc`, `$tsc-watch`, `$gcc`, `$eslint-compact`, `$go`, or a pattern of one
-line: what they find joins Problems). The project's files give more: `dotnet:
+`$tsc`, `$tsc-watch` (tsc's plain and its coloured pretty output alike),
+`$gcc`, `$eslint-compact`, `$go`, or a pattern of one line: what they find
+joins Problems). The project's files give more: `dotnet:
 build` and `test` (with `-c Debug` or `-c Release`), `npm: <script>`, `cargo:
 build` and `test`, `go: build` and `test`, `make` targets, `cmake: configure`,
 `build` and `test`, `python: pytest`. **Tasks: Run Task**, **Run Build Task**
