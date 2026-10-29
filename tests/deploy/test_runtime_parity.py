@@ -54,6 +54,7 @@ ALLOWED: dict[tuple[str, str, str], str] = {
     ("mount", "app", "/db-ca"): "externalDatabase.caSecret; compose mounts the CA in the override",
     ("mount", "llamacpp", "/dev/shm"): "compose's shm_size, as an emptyDir in memory",
     ("mount", "vllm", "/dev/shm"): "compose's shm_size, as an emptyDir in memory",
+    ("mount", "sglang", "/dev/shm"): "compose's shm_size, as an emptyDir in memory",
     ("mount", "postgres", "/dev/shm"): "compose's shm_size, as an emptyDir in memory",
     ("mount", "imagegen", "/tmp"): "the chart gives every read-only pod a /tmp; compose's imagegen needs none",
     ("mount", "prometheus", "/tmp"): "the scrape tokens' files: an emptyDir in the chart, the container's own /tmp in compose",
@@ -138,7 +139,7 @@ def helm_rendered() -> dict[str, dict[str, set[str]]] | None:
         return None
     if helm is None:
         return None
-    on = ["laya.enabled=true", "scanners.enabled=true", "studio.enabled=true", "workspaces.enabled=true", "blender.enabled=true", "lean.enabled=true", "videogen.enabled=true", "vllm.enabled=true", "valkey.enabled=true", "argus.packLibraryClaim=packs"]
+    on = ["laya.enabled=true", "scanners.enabled=true", "studio.enabled=true", "workspaces.enabled=true", "blender.enabled=true", "lean.enabled=true", "videogen.enabled=true", "vllm.enabled=true", "sglang.enabled=true", "valkey.enabled=true", "argus.packLibraryClaim=packs"]
     out: dict[str, dict[str, set[str]]] = {}
     # This chart's Postgres, and an external one with a CA of its own: together, every variable a pod can be given.
     # The output holds the Secret it made up: it is read here and never printed.

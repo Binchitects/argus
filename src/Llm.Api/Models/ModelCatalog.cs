@@ -738,8 +738,8 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     public void WriteMax() => Write(MaxFile, options.Value.ModelsMax.ToString(CultureInfo.InvariantCulture) + "\n");
 
     /// <summary>
-    /// Prometheus scrapes each loaded model's metrics: llama.cpp's (/metrics?model=NAME on the router), and each vLLM
-    /// process's own (HOST:PORT/metrics, its vllm:* names), labelled with its model and engine.
+    /// Prometheus scrapes each loaded model's metrics: llama.cpp's (/metrics?model=NAME on the router), and each vLLM or
+    /// SGLang process's own (HOST:PORT/metrics, its vllm:* or sglang:* names), labelled with its model, engine and its kind.
     /// </summary>
     public void WriteTargets(IEnumerable<string> loaded)
     {
@@ -754,7 +754,10 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
                     targets.Add(new JsonObject
                     {
                         ["targets"] = new JsonArray($"{backend.Host}:{e.Port}"),
-                        ["labels"] = new JsonObject { ["model"] = m, ["replica"] = e.Name, ["engine"] = backend.Name, ["tier"] = "optional", ["component"] = "inference" },
+                        ["labels"] = new JsonObject
+                        {
+                            ["model"] = m, ["replica"] = e.Name, ["engine"] = backend.Name, ["kind"] = backend.Kind, ["tier"] = "optional", ["component"] = "inference",
+                        },
                     });
                 }
                 continue;
@@ -831,9 +834,65 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     }
 
     /// <summary>
-    /// A vLLM model's processes on its engine: one per copy (NAME, or NAME@0, NAME@1... with several), each on its run of
-    /// the model's GPUs, on the port it had (a model added never moves another), else the lowest free one.
+    /// SGLang's server's arguments for a model on <paramref name="tp"/> GPUs, as vLLM's are (<see cref="VllmArgs"/>): its
+    /// snapshot, tensor parallel size, context, answers at once (--max-running-requests), share of each GPU
+    /// (--mem-fraction-static), cache type, its metrics, priority with the lower first (the chat's -1 before API keys' 0, as
+    /// on vLLM), and what it chose of quantisation, sleep (the memory saver), speculative decoding (EAGLE-3 with its draft,
+    /// or NEXTN, the model's own MTP layers), a RAM tier for its cache (the hierarchical cache) and default sampling. Its
+    /// radix cache shares every prefix by itself. Never a key, a host or a port: the supervisor owns those.
     /// </summary>
+    public static IReadOnlyList<string> SglangArgs(LocalModel m, string library, int tp)
+    {
+        var inv = CultureInfo.InvariantCulture;
+        var root = library.TrimEnd('/');
+        var args = new List<string>
+        {
+            "--model-path", root + "/" + m.File, "--tp-size", tp.ToString(inv), "--context-length", m.Context.ToString(inv),
+            "--max-running-requests", Math.Max(1, m.Parallel).ToString(inv),
+            "--mem-fraction-static", (m.GpuMemoryUtilization ?? VllmAdvisor.DefaultUtilization).ToString("0.###", inv),
+            // vLLM's fp8 is E4M3; SGLang names it.
+            "--kv-cache-dtype", m.KvType == "fp8" ? "fp8_e4m3" : m.KvType, "--enable-metrics",
+            "--enable-priority-scheduling", "--schedule-low-priority-values-first",
+        };
+        if (m.Quantization is { Length: > 0 } q)
+        {
+            args.AddRange(["--quantization", q]);
+        }
+        if (m.Sleep)
+        {
+            args.Add("--enable-memory-saver");
+        }
+        if (m.SpecDecode is "mtp" or "eagle3")
+        {
+            var steps = Math.Max(1, m.DraftMax);
+            args.AddRange(["--speculative-algorithm", m.SpecDecode == "eagle3" ? "EAGLE3" : "NEXTN", "--speculative-num-steps", steps.ToString(inv),
+                "--speculative-eagle-topk", "1", "--speculative-num-draft-tokens", (steps + 1).ToString(inv)]);
+            if (m.SpecDecode == "eagle3" && m.DraftHead is { Length: > 0 } draft)
+            {
+                args.AddRange(["--speculative-draft-model-path", root + "/" + draft]);
+            }
+        }
+        if (m.KvCpuGb is > 0 and var gb)
+        {
+            args.AddRange(["--enable-hierarchical-cache", "--hicache-size", gb.ToString(inv)]);
+        }
+        var sampling = new JsonObject();
+        if (m.Temperature is { } t) { sampling["temperature"] = t; }
+        if (m.TopP is { } p) { sampling["top_p"] = p; }
+        if (m.TopK is { } k) { sampling["top_k"] = k; }
+        if (m.MinP is { } mp) { sampling["min_p"] = mp; }
+        if (m.PresencePenalty is { } pp) { sampling["presence_penalty"] = pp; }
+        if (sampling.Count > 0)
+        {
+            args.AddRange(["--preferred-sampling-params", sampling.ToJsonString()]);
+        }
+        return args;
+    }
+
+    /// <summary>A model's server's arguments, by its kind: vLLM's or SGLang's.</summary>
+    public static IReadOnlyList<string> ServerArgs(LocalModel m, string library, int tp) =>
+        m.EngineKind == EngineKinds.Sglang ? SglangArgs(m, library, tp) : VllmArgs(m, library, tp);
+
     /// <summary>
     /// LMCache's configuration for a model's copy (LMCACHE_CONFIG_FILE): its RAM tier, its disk tier under /kvcache (the
     /// engine's NVMe; it survives a restart), and the stack's remote store (Engine:LmcacheRemote, a Valkey) when there is one.
@@ -876,21 +935,23 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             // LMCache's file, as the engine sees the presets (/presets/INSTANCE).
             var env = m.KvTier == "lmcache" && presets is not null
                 ? new Dictionary<string, string>(StringComparer.Ordinal) { ["LMCACHE_CONFIG_FILE"] = $"{presets.TrimEnd('/')}/lmcache-{name}.yaml" } : null;
-            entries.Add(new VllmEntry(m.Name, name, port, groups[i], false, VllmArgs(m, library, Math.Max(1, groups[i].Count)), Math.Max(1, m.Parallel), env));
+            entries.Add(new VllmEntry(m.Name, name, port, groups[i], false, ServerArgs(m, library, Math.Max(1, groups[i].Count)), Math.Max(1, m.Parallel), env));
         }
         return entries;
     }
 
     /// <summary>
-    /// Each vLLM engine's presets (its models, as processes), and its desired state brought in step: a model's new settings
-    /// reach its running processes (the supervisor restarts them), a model gone is no longer run. Whether each sleeps is kept.
+    /// Each vLLM and SGLang engine's presets (its models, as processes), and its desired state brought in step: a model's new
+    /// settings reach its running processes (the supervisor restarts them), a model gone is no longer run. Whether each sleeps is kept.
     /// </summary>
     public async Task WriteVllmPresetsAsync(CancellationToken ct = default)
     {
-        var models = await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.Vllm).OrderBy(m => m.CreatedAt).ThenBy(m => m.Name).ToListAsync(ct);
+        var models = await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.Vllm || m.EngineKind == EngineKinds.Sglang)
+            .OrderBy(m => m.CreatedAt).ThenBy(m => m.Name).ToListAsync(ct);
         foreach (var backend in vllm.All)
         {
-            var mine = models.Where(m => (m.Engine is null && backend == vllm.All[0]) || m.Engine == backend.Name).ToList();
+            // A model on the engine it names, else on the first of its kind.
+            var mine = models.Where(m => vllm.For(m.Engine, m.EngineKind) == backend).ToList();
             var before = backend.Presets();
             if (mine.Count == 0 && before.Count == 0 && backend.Desired().Count == 0)
             {
@@ -963,12 +1024,12 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             deployments.Add((m.Name, litellm, info, ["local", m.Name, m.File, m.Context, m.Parallel, m.MaxOutput, m.Projector, projector?.Audio, m.Tools, m.Thinking,
                 price.Input, price.CachedInput, price.Output], m.Parallel));
         }
-        // vLLM's models: each copy at its own port, never sent more at once than its answers at once (--max-num-seqs), a pool when
+        // vLLM's and SGLang's models: each copy at its own port, never sent more at once than its answers at once, a pool when
         // there are several; each copy also under its own name (NAME@i, kept out of every list) for the chat to keep a conversation
         // on one; and the fallback that answers while it cannot.
-        foreach (var m in await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.Vllm).ToListAsync(ct))
+        foreach (var m in await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.Vllm || m.EngineKind == EngineKinds.Sglang).ToListAsync(ct))
         {
-            if (vllm.For(m.Engine) is not { } backend || backend.Presets().Where(e => e.Model == m.Name).ToList() is not { Count: > 0 } entries)
+            if (vllm.For(m.Engine, m.EngineKind) is not { } backend || backend.Presets().Where(e => e.Model == m.Name).ToList() is not { Count: > 0 } entries)
             {
                 continue;
             }
@@ -987,7 +1048,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
                     ["max_parallel_requests"] = Math.Max(1, m.Parallel),
                 };
                 Prices(litellm, price);
-                object?[] print = ["vllm", m.Name, e.Name, backend.Host, e.Port, m.Context, m.Parallel, m.MaxOutput, vision, m.Tools, m.Thinking, m.Fallback,
+                object?[] print = [m.EngineKind, m.Name, e.Name, backend.Host, e.Port, m.Context, m.Parallel, m.MaxOutput, vision, m.Tools, m.Thinking, m.Fallback,
                     price.Input, price.CachedInput, price.Output];
                 deployments.Add((m.Name, litellm, (JsonObject)info.DeepClone(), print, Math.Max(1, m.Parallel)));
                 if (entries.Count > 1)

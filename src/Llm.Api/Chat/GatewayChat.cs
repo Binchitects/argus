@@ -74,9 +74,9 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
             // One copy of the model (the conversation's), or its fallback.
             request["model"] = routed;
         }
-        if (route.KindOf(asked) == Llm.Core.Models.EngineKinds.Vllm && request["priority"] is null)
+        if (Llm.Core.Models.EngineKinds.ServerPerModel(route.KindOf(asked)) && request["priority"] is null)
         {
-            // Inside vLLM the chat goes ahead of API keys (their requests carry none: 0).
+            // Inside vLLM or SGLang the chat goes ahead of API keys (their requests carry none: 0; the lower goes first on both).
             request["priority"] = -1;
         }
         if (route.FallbackOf(asked) is { } fallback && slot.Model != fallback)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-The JSON and HTTP side of supervisor.sh (vLLM's image has python3; the standard library only). Nothing here starts or
+The JSON and HTTP side of supervisor.sh (vLLM's and SGLang's images have python3; the standard library only). Nothing here starts or
 stops a process: the supervisor does, by what this writes.
 
     vllm-helper.py plan MODELS_JSON WORKDIR
@@ -10,7 +10,8 @@ stops a process: the supervisor does, by what this writes.
         line) is left out and said on stderr. Prints the names wanted, one a line.
 
     vllm-helper.py health PORT        exit 0 when http://127.0.0.1:PORT/health answers 200
-    vllm-helper.py post PORT PATH     POST to the server (/sleep?level=1, /wake_up); exit 0 on 200
+    vllm-helper.py post PORT PATH     POST {} to the server (vLLM's /sleep?level=1 and /wake_up, SGLang's
+                                      /release_memory_occupation and /resume_memory_occupation); exit 0 on 200
     vllm-helper.py sleeping PORT      exit 0 when /is_sleeping says it is
 
     vllm-helper.py status FILE KEY=VALUE... [--log LOGFILE]
@@ -56,7 +57,7 @@ def plan(models_json: str, workdir: str) -> int:
         elif not isinstance(args, list) or not all(isinstance(a, str) and "\n" not in a for a in args):
             why = "its arguments are not a list of single-line strings"
         elif any(a.split("=", 1)[0] in FORBIDDEN for a in args):
-            why = "its arguments set what the supervisor owns (the key goes by VLLM_API_KEY, never the command line)"
+            why = "its arguments set what the supervisor owns (the key goes by the environment, never the command line)"
         elif not isinstance(gpus, list) or not all(isinstance(g, int) and g >= 0 for g in gpus):
             why = "its GPUs are not a list of indices"
         elif name in names:
@@ -89,7 +90,10 @@ def plan(models_json: str, workdir: str) -> int:
 
 
 def request(port: str, path: str, method: str = "GET") -> tuple[int, bytes]:
-    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", method=method, data=b"" if method == "POST" else None)
+    # An empty JSON object: SGLang's endpoints read one, vLLM's ignore it.
+    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", method=method, data=b"{}" if method == "POST" else None)
+    if method == "POST":
+        req.add_header("Content-Type", "application/json")
     key = os.environ.get("VLLM_API_KEY")
     if key:
         req.add_header("Authorization", f"Bearer {key}")

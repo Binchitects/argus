@@ -156,6 +156,7 @@ on; its API answers 404; and its background work does not run.
 |---|---|---|---|
 | `chat-models` | yes | `llamacpp` | a GPU |
 | `vllm` | no | `vllm` (with `VLLM_IMAGE`) | a GPU |
+| `sglang` | no | `sglang` (with `SGLANG_IMAGE`) | a GPU |
 | `knowledge` | yes | `embed` | |
 | `argus` | yes | `argus` | a GitLab |
 | `pictures` | yes | `imagegen` | a GPU |
@@ -468,6 +469,7 @@ how). **no**: missing, with the reason.
 | `litellm` | yes | yes | yes |
 | `llamacpp` | yes, every GPU | yes, CDI; no locked-memory limit | differs: `llamacpp.gpus` whole GPUs (`gpuResource`: `nvidia.com/gpu` or `amd.com/gpu`); no `ENGINE_RAM_PROTECT` |
 | `vllm` | off (the `vllm` feature, `VLLM_IMAGE`), every GPU; `fake-gpu.yml`: the fake vLLM, no GPU | the same, CDI; no locked-memory limit | off (`vllm.enabled`); a Deployment per `vllm.instances` entry with its GPUs and node; `vllm.fake` |
+| `sglang` | off (the `sglang` feature, `SGLANG_IMAGE`), every GPU; `fake-gpu.yml`: the fake SGLang, no GPU | the same, CDI; no locked-memory limit | off (`sglang.enabled`); a Deployment per `sglang.instances` entry with its GPUs and node; `sglang.fake` |
 | `embed`, `audio`, `searxng` | yes | yes | yes |
 | `argus` | yes | yes | yes |
 | `imagegen`, `videogen` | yes, every GPU | yes, CDI | differs: whole GPUs each; `videogen` off by default |
@@ -492,7 +494,7 @@ how). **no**: missing, with the reason.
 | `/backups` in the app | `BACKUP_DIR`, read only | the same | no: backups are the cluster's |
 | **Configuration and scripts** | | | |
 | `litellm.yaml` (its 960 s timeouts), `argus.yaml`, `searxng.yml`, `alertmanager.yml`, `loki.yml`, `prometheus/` and its rules | mounted from `config/` | the same | the same files, from the chart's copies |
-| `services/llamacpp/router.sh` (the engine key by `LLAMA_API_KEY`), `services/sd-serve.sh`, `services/cpu-temp-exporter`, `services/vllm/` (the key by `VLLM_API_KEY`), `services/gpu-probe.py`, `tools/fake-vllm` | mounted | the same | the same files, from the chart's copies |
+| `services/llamacpp/router.sh` (the engine key by `LLAMA_API_KEY`), `services/sd-serve.sh`, `services/cpu-temp-exporter`, `services/vllm/` (the key by `VLLM_API_KEY`), `services/sglang/serve.py` (the key by `SGLANG_API_KEY`, handed to SGLang inside its process), `services/gpu-probe.py`, `tools/fake-vllm` | mounted | the same | the same files, from the chart's copies |
 | `promtail.yml`, `traefik/routes.yml` | mounted | the same | no: the cluster's log agent; the Ingress |
 | `services/power-limits.sh` | mounted | no | no |
 | **Secrets** | `.env` | `.env` | the `arena-secrets` Secret, made at install and kept (or `existingSecret`): the same keys |
@@ -522,9 +524,30 @@ how). **no**: missing, with the reason.
   volume; it says what each does in `vllm-status`. The key goes by
   `VLLM_API_KEY`, never a command line. Models come from the library's Hugging
   Face snapshots (Admin → Models → Hugging Face, *snapshot*).
-- **Without a big GPU**, `fake-gpu.yml` (compose and Podman) or `vllm.fake`
-  (Helm) runs the real supervisor over the fake vLLM (`tools/fake-vllm`), on
-  the python image the stack already has, with no GPU.
+- **SGLang** is off until asked for: the `sglang` feature, `--with sglang` on
+  install, upgrade or repair. `SGLANG_IMAGE` is SGLang's own image
+  (`lmsysorg/sglang:v0.5.21-cu130-runtime` by default, about 14 GB;
+  `SGLANG_ROCM_IMAGE` with `rocm.yml`), or arena-sglang, built from PyPI by
+  `sglang-build.yml` where Docker Hub cannot be reached. The same supervisor
+  runs it (`ENGINE_SERVER=sglang`): one SGLang server per model the app wants,
+  on that model's GPUs, from the app's desired state in the `engine` volume, its
+  status in `vllm-status`. The key goes by the environment to
+  `services/sglang/serve.py`, which hands it to SGLang inside its process, never
+  a command line. Kubernetes: `sglang.enabled` (one Deployment per
+  `sglang.instances` entry). Its models are Hugging Face snapshots too; choose
+  the engine as you add one (Admin → Models).
+- **Which engine**: llama.cpp for GGUF files, one machine, layers or experts in
+  RAM when the GPU is short, and a few people at once. vLLM or SGLang for
+  safetensors snapshots, tensor parallel over GPUs, many people at once, copies
+  of a model, and a prefix cache shared by every request. SGLang's radix cache
+  suits many conversations that share long prefixes (agents, the same system
+  prompt); vLLM adds LMCache's tiers on disk and in a shared store. The RAM
+  llama.cpp keeps for conversations that lost their slot (8 GB a loaded model
+  by default) is its prompt cache filling up as designed, not a leak: Admin →
+  Settings → *RAM for chats that lost their slot* sizes it.
+- **Without a big GPU**, `fake-gpu.yml` (compose and Podman) or `vllm.fake` and
+  `sglang.fake` (Helm) runs the real supervisor over the fake vLLM and SGLang
+  (`tools/fake-vllm`), on the python image the stack already has, with no GPU.
 - **AMD GPUs**: `rocm.yml` after the compose files (and after `podman.yml` on
   Podman) gives the engines `/dev/kfd` and `/dev/dri` and ROCm images
   (`LLAMACPP_ROCM_IMAGE`, `VLLM_IMAGE`, `SDCPP_GPU_IMAGE`: check each exists
@@ -535,10 +558,12 @@ how). **no**: missing, with the reason.
   `EMBED_GPU`; a picture model's own GPU first) or the CPU; the app charges
   their memory to that GPU only, and lends only that GPU to a job short of
   room (a vLLM model there sleeps, then wakes).
-- **Several machines**: one `Engine__Vllm__N__Name`/`Host`/`ConfigDir`/`StatusDir`
-  per vLLM machine (its folders on storage both machines see), or a Helm
-  `vllm.instances` entry per node; servers the app does not run are added under
-  Admin → Models → Other GPU servers.
+- **Several machines**: one `Engine__Vllm__N__Name`/`Kind`/`Host`/`ConfigDir`/`StatusDir`
+  per vLLM or SGLang machine (`Kind`: `vllm` or `sglang`; its folders on storage
+  both machines see; listing them replaces this stack's `vllm` and `sglang`, so
+  list those too), or a Helm `vllm.instances` or `sglang.instances` entry per
+  node; servers the app does not run are added under Admin → Models → Other GPU
+  servers.
 
 ### Multi-GPU server: bring-up
 

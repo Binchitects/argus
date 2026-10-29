@@ -18,7 +18,7 @@ import { money } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { AccessPicker, type AccessRule } from './access-picker'
 import { type SavedMediaModel } from './media-model-form'
-import type { EngineInstance } from './engine-api'
+import { serverPerModel, type EngineInstance } from './engine-api'
 import { EngineProblems } from './engine-fields'
 import { engineSlot } from './engine-slot'
 import { ModelDialog, type ModelDialogOpen } from './model-dialog'
@@ -41,8 +41,8 @@ interface ModelRow extends SavedModel {
   /** unloading: told to unload, and not stopped yet; failed: its last load exited with an error (the engine's log says why);
    * missing: the engine does not list it (yet); waiting: a media model whose files are being fetched; off: its server does not run. */
   status: 'loaded' | 'loading' | 'unloading' | 'unloaded' | 'failed' | 'missing' | 'waiting' | 'off' | 'sleeping' | null
-  /** Its engine's kind: llama.cpp's or vLLM's. */
-  engineKind?: 'llamacpp' | 'vllm'
+  /** Its engine's kind: llama.cpp's, vLLM's or SGLang's. */
+  engineKind?: 'llamacpp' | 'vllm' | 'sglang'
   /** Loading or unloading: why ("loaded by ada", "for a chat or an API request", "making room for X", "kept loaded"), and since when. */
   why?: string | null
   since?: string | null
@@ -483,7 +483,7 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
           {priceLine(m) && <p className="mt-1 text-xs text-muted-foreground tabular-nums">{priceLine(m)}</p>}
           {m.cache && <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{cacheLine(m.cache)}</p>}
         </div>
-        <Status status={m.status} why={m.why} since={m.since} draining={m.engineKind === 'vllm'} />
+        <Status status={m.status} why={m.why} since={m.since} draining={serverPerModel(m.engineKind)} />
       </CardHeader>
       <CardContent className="grid gap-4">
         {m.source === 'local' && m.atGateway === false && <Alert variant="warning">Not at the gateway yet: it is added again within a minute.</Alert>}

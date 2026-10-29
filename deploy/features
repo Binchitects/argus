@@ -17,6 +17,7 @@
 #
 chat-models    | on  | llamacpp | gpu | - | Chat models on this host (llama.cpp)
 vllm           | off | vllm | gpu | - | The vLLM engine, for many people at once (VLLM_IMAGE in .env)
+sglang         | off | sglang | gpu | - | The SGLang engine, for many people at once (SGLANG_IMAGE in .env)
 knowledge      | on  | embed | - | - | Company knowledge and search by meaning (the embedding server)
 argus          | on  | argus | gitlab | - | Argus: the company's GitLab indexed, and knowledge packs
 pictures       | on  | imagegen | gpu | - | Pictures made and edited (stable-diffusion.cpp)

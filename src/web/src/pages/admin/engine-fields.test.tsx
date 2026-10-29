@@ -3,8 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { admin, fakeApi, renderApp } from '@/test/utils'
 
-// Admin → Models with vLLM: a snapshot from the library added as a vLLM model (its GPUs by vendor and size, its copies,
-// share, cache, fallback, the advisor's fit), a model asleep or draining, and an engine that is not running.
+// Admin → Models with vLLM and SGLang: a snapshot from the library added as a vLLM model (its GPUs by vendor and size, its
+// copies, share, cache, fallback, the advisor's fit) or an SGLang one, a model asleep or draining, and an engine that is not running.
 
 const everyone = { audience: 'Everyone', groups: [] }
 const gpu = (index: number) => ({ index, name: 'NVIDIA RTX PRO 6000', total: 102.6e9, vendor: 'nvidia', backend: 'cuda' })
@@ -67,6 +67,44 @@ describe('admin models: vLLM', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/models')).toBe(true))
     const sent = calls.find((c) => c.method === 'POST' && c.path === '/api/admin/models')!.body as Record<string, unknown>
     expect(sent).toMatchObject({ name: 'gpt-oss-120b', engineKind: 'vllm', file: 'hf/openai/gpt-oss-120b@main', devices: '2,3', replicas: 2, sleep: false, fallback: 'Qwen', kvType: 'fp8' })
+  })
+
+  it('adds a snapshot as an SGLang model: the engine chosen, its own flags in the hints, no LMCache; an engine whose feature is off is not offered', async () => {
+    const instances = [
+      { name: 'llamacpp', kind: 'llamacpp', managed: true, problem: null, on: true },
+      { name: 'vllm', kind: 'vllm', managed: true, problem: null, on: true },
+      { name: 'sglang', kind: 'sglang', managed: true, problem: null, on: true },
+      { name: 'sglang-b', kind: 'sglang', managed: true, problem: null, on: false },
+    ]
+    const calls = fakeApi(admin, {
+      'GET /api/admin/models': () => ({ json: { engine: engine({ instances }), small: null, models } }),
+      'GET /api/admin/models/library': () => ({ json: [] }),
+      'GET /api/admin/models/library/snapshots': () => ({ json: snapshots }),
+      'GET /api/admin/models/media/files': () => ({ json: [] }),
+      'POST /api/admin/models/advice': () => ({ json: advice }),
+      'POST /api/admin/models': () => ({ status: 201, json: { restarting: true, warning: null } }),
+    })
+    renderApp('/admin/models')
+    await userEvent.click(await screen.findByRole('button', { name: 'Add a model' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add a model' })
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'File or model' }))
+    await userEvent.click(await screen.findByRole('option', { name: /gpt-oss-120b@main · .* · vLLM or SGLang/ }))
+    await userEvent.click(await within(dialog).findByRole('combobox', { name: 'Engine' }))
+    expect(screen.queryByRole('option', { name: /sglang-b/ })).not.toBeInTheDocument()
+    await userEvent.click(await screen.findByRole('option', { name: 'SGLang · sglang' }))
+    const form = await within(dialog).findByRole('form', { name: 'The SGLang model' })
+    expect(within(form).getByText(/--mem-fraction-static/)).toBeInTheDocument()
+    expect(within(form).getByText(/--max-running-requests/)).toBeInTheDocument()
+    await userEvent.click(within(form).getByRole('combobox', { name: 'Cache beyond the GPU' }))
+    expect(await screen.findByRole('option', { name: "SGLang's own (RAM)" })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /LMCache/ })).not.toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(within(form).getByRole('button', { name: 'Add model' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/models')).toBe(true))
+    const sent = calls.find((c) => c.method === 'POST' && c.path === '/api/admin/models')!.body as Record<string, unknown>
+    // The first SGLang engine is the kind's default: none named.
+    expect(sent).toMatchObject({ name: 'gpt-oss-120b', engineKind: 'sglang', file: 'hf/openai/gpt-oss-120b@main' })
+    expect(sent.engine).toBeUndefined()
   })
 
   it('shows a model asleep, one draining, a GPU of another vendor, and an engine that is not running', async () => {

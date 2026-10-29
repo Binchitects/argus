@@ -6,16 +6,17 @@ using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Models;
 
-/// <summary>Configuration section "Engine": llama.cpp in router mode, the vLLM engines, and the files the app shares with them.</summary>
+/// <summary>Configuration section "Engine": llama.cpp in router mode, the vLLM and SGLang engines, and the files the app shares with them.</summary>
 public sealed class EngineOptions
 {
     /// <summary>False only where no engine runs (tests): the other GPU servers' models still reach the gateway.</summary>
     public bool Enabled { get; set; } = true;
-    /// <summary>Whether llama.cpp's router runs (Helm: llamacpp.enabled); false: the models are vLLM's alone.</summary>
+    /// <summary>Whether llama.cpp's router runs (Helm: llamacpp.enabled); false: the models are vLLM's and SGLang's alone.</summary>
     public bool LlamaCpp { get; set; } = true;
     /// <summary>
-    /// The vLLM engines, one per machine (or per Helm instance); none listed: one named "vllm" on this stack. Each has
-    /// its desired state under <see cref="ConfigDir"/>/NAME and its status under <see cref="VllmStatusDir"/>/NAME.
+    /// The engines that run one server a model (vLLM's and SGLang's, by <see cref="VllmEngineOptions.Kind"/>), one per machine
+    /// (or per Helm instance); none listed: this stack's "vllm" and "sglang". Each has its desired state under
+    /// <see cref="ConfigDir"/>/NAME and its status under <see cref="VllmStatusDir"/>/NAME.
     /// </summary>
     public List<VllmEngineOptions> Vllm { get; set; } = [];
     /// <summary>
@@ -28,8 +29,8 @@ public sealed class EngineOptions
     /// <summary>Where the vLLM supervisors say what they do (services/vllm/supervisor.sh's status, each in its own folder).</summary>
     public string VllmStatusDir { get; set; } = "/vllm-status";
 
-    /// <summary>The vLLM engines as configured, else the one of this stack.</summary>
-    public IReadOnlyList<VllmEngineOptions> VllmEngines => Vllm.Count > 0 ? Vllm : [new VllmEngineOptions()];
+    /// <summary>The vLLM and SGLang engines as configured, else this stack's two (each runs only with its feature on).</summary>
+    public IReadOnlyList<VllmEngineOptions> VllmEngines => Vllm.Count > 0 ? Vllm : [new VllmEngineOptions(), new VllmEngineOptions { Name = "sglang", Kind = EngineKinds.Sglang }];
     public string Url { get; set; } = "http://llamacpp:8080";
     /// <summary>ENGINE_KEY.</summary>
     public string? ApiKey { get; set; }
@@ -68,7 +69,7 @@ public sealed class EngineOptions
     public string Backend { get; set; } = "cuda";
     /// <summary>
     /// Where an engine on the GPUs says what they are (services/gpu-probe.py: nvidia-smi, rocm-smi, or nothing), read
-    /// when Prometheus has no GPU figures: a machine with AMD GPUs, or without a GPU exporter.
+    /// when Prometheus has no GPU figures: a machine with AMD GPUs, or without a GPU exporter. Missing: SGLang's own.
     /// </summary>
     public string HardwareFile { get; set; } = "/vllm-status/vllm/hardware.json";
     /// <summary>RAM kept for everything but the engine.</summary>
@@ -355,13 +356,15 @@ public sealed class EngineClient(LlamaCppBackend llama, VllmBackends vllm, Exter
 }
 
 /// <summary>
-/// One vLLM engine: its name (its Service or container), where the app reaches its models (http://HOST:PORT), and the
-/// folders it shares with the app (its desired state, its status); empty folders: those of this stack, by its name.
-/// Another machine's is one more of these, its folders on storage both see (NFS, a ReadWriteMany claim).
+/// One vLLM or SGLang engine: its name (its Service or container), its kind, where the app reaches its models
+/// (http://HOST:PORT), and the folders it shares with the app (its desired state, its status); empty folders: those of
+/// this stack, by its name. Another machine's is one more of these, its folders on storage both see (NFS, a ReadWriteMany claim).
 /// </summary>
 public sealed class VllmEngineOptions
 {
     public string Name { get; set; } = "vllm";
+    /// <summary>What it runs: <see cref="EngineKinds.Vllm"/> or <see cref="EngineKinds.Sglang"/> (its supervisor's ENGINE_SERVER).</summary>
+    public string Kind { get; set; } = EngineKinds.Vllm;
     /// <summary>Its host as the app and the gateway reach it; null: <see cref="Name"/>.</summary>
     public string? Host { get; set; }
     public string? ConfigDir { get; set; }

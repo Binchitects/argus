@@ -1,6 +1,6 @@
-# The engines the app runs on several GPUs (vLLM beside llama.cpp), and the GPUs themselves
-# (docs/multi-gpu-server.md §5.7). On a llama.cpp-only stack the vllm: series do not exist and
-# these stay silent; the DCGM ones need the dcgm profile (or a cluster's DCGM exporter).
+# The engines the app runs on several GPUs (vLLM and SGLang beside llama.cpp), and the GPUs themselves
+# (docs/multi-gpu-server.md §5.7). On a llama.cpp-only stack the vllm: and sglang: series do not exist
+# and these stay silent; the DCGM ones need the dcgm profile (or a cluster's DCGM exporter).
 
 groups:
   - name: engines
@@ -31,6 +31,32 @@ groups:
           component: inference
         annotations:
           summary: "{{ $labels.model_name }} has had requests waiting inside vLLM for over 2 minutes"
+          description: >-
+            {{ $value | printf "%.0f" }} waiting. Lower its answers at once in the app (they set the
+            gateway's limit), or add a copy of the model.
+
+      - alert: SglangKvCacheFull
+        # SGLang's token pool, its totals of its first rank (with priority scheduling each gauge is also per priority).
+        expr: max by (model_name) (sglang:token_usage{tp_rank="0",priority=""}) > 0.95
+        for: 5m
+        labels:
+          severity: warning
+          component: inference
+        annotations:
+          summary: "{{ $labels.model_name }}'s token cache is over 95% full"
+          description: >-
+            SGLang retracts and recomputes answers when its token pool is full: answers slow down.
+            Give it a CPU tier (Admin -> Models, CPU tier), fewer answers at once, a shorter
+            context, or more GPUs.
+
+      - alert: SglangRequestsWaiting
+        expr: min_over_time(sglang:num_queue_reqs{tp_rank="0",priority=""}[2m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+          component: inference
+        annotations:
+          summary: "{{ $labels.model_name }} has had requests waiting inside SGLang for over 2 minutes"
           description: >-
             {{ $value | printf "%.0f" }} waiting. Lower its answers at once in the app (they set the
             gateway's limit), or add a copy of the model.

@@ -101,6 +101,7 @@ spec:
           command: [/bin/sh, /vllm/supervisor.sh]
           env:
             {{- include "arena.secretEnv" (list $ "ENGINE_KEY" "ENGINE_KEY") | nindent 12 }}
+            - { name: ENGINE_SERVER, value: vllm }
             - { name: CUDA_DEVICE_ORDER, value: PCI_BUS_ID }
             - { name: VLLM_PRESETS, value: /presets/{{ .name }} }
             - { name: VLLM_STATUS, value: /status/{{ .name }} }
@@ -135,6 +136,90 @@ spec:
         - { name: kvcache, emptyDir: {} }
         {{- end }}
         - { name: shm, emptyDir: { medium: Memory, sizeLimit: {{ $.Values.vllm.shmSize }} } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .name }}
+  labels: {{- include "arena.labels" $ | nindent 4 }}
+spec:
+  selector: {{- include "arena.selector" (dict "root" $ "name" .name) | nindent 4 }}
+  # The supervisor gives each model a port of its own (from 8001), as the app's desired state says.
+  ports:
+    {{- range $i := until 16 }}
+    - { name: model-{{ $i }}, port: {{ add 8001 $i }}, targetPort: {{ add 8001 $i }} }
+    {{- end }}
+---
+{{- end }}
+{{- end }}
+{{- /*
+SGLang: the same supervisor (ENGINE_SERVER=sglang) running services/sglang/serve.py, SGLang's launcher, one
+Deployment per instance over its own desired state and status, as vLLM's.
+*/}}
+{{- if .Values.sglang.enabled }}
+{{- range .Values.sglang.instances }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .name }}
+  labels: {{- include "arena.labels" $ | nindent 4 }}
+spec:
+  replicas: 1
+  # Its GPUs are free for the next one only once this one has gone.
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: {{- include "arena.selector" (dict "root" $ "name" .name) | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "arena.selector" (dict "root" $ "name" .name) | nindent 8 }}
+    spec:
+      {{- include "arena.podDefaults" $ | nindent 6 }}
+      {{- with .nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: sglang
+          image: {{ include "arena.image" (dict "root" $ "image" (ternary $.Values.images.python $.Values.images.sglang $.Values.sglang.fake)) }}
+          imagePullPolicy: {{ $.Values.images.pullPolicy }}
+          command: [/bin/sh, /vllm/supervisor.sh]
+          env:
+            {{- include "arena.secretEnv" (list $ "ENGINE_KEY" "ENGINE_KEY") | nindent 12 }}
+            - { name: ENGINE_SERVER, value: sglang }
+            - { name: CUDA_DEVICE_ORDER, value: PCI_BUS_ID }
+            - { name: VLLM_PRESETS, value: /presets/{{ .name }} }
+            - { name: VLLM_STATUS, value: /status/{{ .name }} }
+            # SGLang's launcher, which hands the key over inside its process; the fake answers as SGLang through the fake package.
+            - { name: VLLM_BIN, value: {{ ternary "env PYTHONPATH=/fake-vllm/sglang-module python3 /sglang/serve.py" "python3 /sglang/serve.py" $.Values.sglang.fake | quote }} }
+            - { name: HF_HUB_OFFLINE, value: "1" }
+          resources:
+            {{- with $.Values.sglang.resources.requests }}
+            requests: {{- toYaml . | nindent 14 }}
+            {{- end }}
+            {{- if not $.Values.sglang.fake }}
+            limits: { {{ $.Values.gpuResource }}: {{ .gpus }} }
+            {{- end }}
+          volumeMounts:
+            - { name: config, mountPath: /vllm/supervisor.sh, subPath: vllm-supervisor.sh }
+            - { name: config, mountPath: /vllm/vllm-helper.py, subPath: vllm-helper.py }
+            - { name: config, mountPath: /gpu-probe.py, subPath: gpu-probe.py }
+            - { name: config, mountPath: /fake-vllm/fake_vllm.py, subPath: fake_vllm.py }
+            - { name: config, mountPath: /fake-vllm/vllm, subPath: fake-vllm }
+            - { name: config, mountPath: /sglang/serve.py, subPath: sglang-serve.py }
+            - { name: config, mountPath: /fake-vllm/sglang-module/sglang/__init__.py, subPath: fake-sglang-init.py }
+            - { name: config, mountPath: /fake-vllm/sglang-module/sglang/launch_server.py, subPath: fake-sglang-launch.py }
+            - { name: models, mountPath: /library, readOnly: true }
+            - { name: engine, mountPath: /presets, readOnly: true }
+            - { name: status, mountPath: /status }
+            - { name: shm, mountPath: /dev/shm }
+      volumes:
+        - { name: config, configMap: { name: arena-config, defaultMode: 0555 } }
+        {{- include "arena.claim" (list "models" (include "arena.modelsClaim" $)) | nindent 8 }}
+        {{- include "arena.claim" (list "engine" "arena-engine") | nindent 8 }}
+        {{- include "arena.claim" (list "status" "arena-vllm-status") | nindent 8 }}
+        - { name: shm, emptyDir: { medium: Memory, sizeLimit: {{ $.Values.sglang.shmSize }} } }
 ---
 apiVersion: v1
 kind: Service

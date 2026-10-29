@@ -19,13 +19,15 @@ public sealed record EngineCapabilities(string Kind, string Label, bool Managed,
     bool SpillToRam, bool Replicas, IReadOnlyList<string> KvTiers, IReadOnlyList<string> Backends, IReadOnlyList<string> Formats);
 
 /// <summary>
-/// The kinds of engine. A new one (SGLang, say) is a new entry here, a backend in Llm.Api/Models/Engines (IEngineBackend:
-/// list, load, unload, sleep, capacity, health), and its advisor; nothing else asks which kind a model is beyond these.
+/// The kinds of engine. A new one is a new entry here, a backend in Llm.Api/Models (IEngineBackend: list, load, unload,
+/// sleep, capacity, health), and its advisor; nothing else asks which kind a model is beyond these. vLLM and SGLang are
+/// one server a model, run by the same supervisor (<see cref="ServerPerModel"/>): only their arguments and metrics differ.
 /// </summary>
 public static class EngineKinds
 {
     public const string LlamaCpp = "llamacpp";
     public const string Vllm = "vllm";
+    public const string Sglang = "sglang";
     /// <summary>An OpenAI-compatible server the app does not manage (another vLLM, SGLang, TGI, Ollama, a cloud): Admin → Models → Other GPU servers.</summary>
     public const string External = "external";
 
@@ -35,14 +37,24 @@ public static class EngineKinds
     public static readonly EngineCapabilities VllmCapabilities = new(Vllm, "vLLM", Managed: true, TensorParallel: true, Sleep: true,
         PrefixCache: true, SlotPinning: false, SpillToRam: false, Replicas: true, KvTiers: ["cpu"], Backends: ["cuda", "rocm"], Formats: ["safetensors"]);
 
+    /// <summary>SGLang: its radix cache shares every prefix, its memory saver sleeps a model, its hierarchical cache keeps tokens in RAM.</summary>
+    public static readonly EngineCapabilities SglangCapabilities = new(Sglang, "SGLang", Managed: true, TensorParallel: true, Sleep: true,
+        PrefixCache: true, SlotPinning: false, SpillToRam: false, Replicas: true, KvTiers: ["cpu"], Backends: ["cuda", "rocm"], Formats: ["safetensors"]);
+
     public static readonly EngineCapabilities ExternalCapabilities = new(External, "Another server (OpenAI-compatible)", Managed: false, TensorParallel: false,
         Sleep: false, PrefixCache: false, SlotPinning: false, SpillToRam: false, Replicas: false, KvTiers: [], Backends: [], Formats: []);
 
-    public static IReadOnlyList<EngineCapabilities> All { get; } = [LlamaCppCapabilities, VllmCapabilities, ExternalCapabilities];
+    public static IReadOnlyList<EngineCapabilities> All { get; } = [LlamaCppCapabilities, VllmCapabilities, SglangCapabilities, ExternalCapabilities];
 
     /// <summary>A kind's capabilities; null for a kind there is not.</summary>
     public static EngineCapabilities? Of(string? kind) => All.FirstOrDefault(k => k.Kind == kind);
 
     /// <summary>The kinds a model added here can have (the app runs them).</summary>
     public static bool Managed(string? kind) => Of(kind) is { Managed: true };
+
+    /// <summary>
+    /// vLLM and SGLang: one server a model (and a copy), from a Hugging Face snapshot, on its own GPUs, run by the supervisor
+    /// (services/vllm/supervisor.sh) as the app's desired state says, with its answers at once in each copy and no slots.
+    /// </summary>
+    public static bool ServerPerModel(string? kind) => kind is Vllm or Sglang;
 }

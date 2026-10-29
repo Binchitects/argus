@@ -32,6 +32,12 @@ data:
 {{ .Files.Get "files/fake_vllm.py" | indent 4 }}
   fake-vllm: |-
 {{ .Files.Get "files/fake-vllm" | indent 4 }}
+  sglang-serve.py: |-
+{{ .Files.Get "files/sglang-serve.py" | indent 4 }}
+  fake-sglang-init.py: |-
+{{ .Files.Get "files/fake-sglang-init.py" | indent 4 }}
+  fake-sglang-launch.py: |-
+{{ .Files.Get "files/fake-sglang-launch.py" | indent 4 }}
 ---
 apiVersion: v1
 kind: ConfigMap

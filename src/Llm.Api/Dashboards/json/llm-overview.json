@@ -825,7 +825,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(vllm:num_requests_running) or sum(llamacpp:requests_processing)",
+              "expr": "sum(vllm:num_requests_running) or sum(sglang:num_running_reqs{tp_rank=\"0\",priority=\"\"}) or sum(llamacpp:requests_processing)",
               "legendFormat": "running"
             }
           ],
@@ -880,7 +880,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(vllm:num_requests_waiting) or sum(llamacpp:requests_deferred)",
+              "expr": "sum(vllm:num_requests_waiting) or sum(sglang:num_queue_reqs{tp_rank=\"0\",priority=\"\"}) or sum(llamacpp:requests_deferred)",
               "legendFormat": "waiting"
             }
           ],
@@ -936,7 +936,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "max(vllm:gpu_cache_usage_perc) or max(llamacpp:kv_cache_usage_ratio)",
+              "expr": "max(vllm:gpu_cache_usage_perc) or max(sglang:token_usage{tp_rank=\"0\",priority=\"\"}) or max(llamacpp:kv_cache_usage_ratio)",
               "legendFormat": "kv cache"
             }
           ],
@@ -992,7 +992,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(vllm:generation_tokens_total[5m])) or sum(rate(llamacpp:tokens_predicted_total[5m]))",
+              "expr": "sum(rate(vllm:generation_tokens_total[5m])) or sum(rate(sglang:generation_tokens_total[5m])) or sum(rate(llamacpp:tokens_predicted_total[5m]))",
               "legendFormat": "tok/s"
             }
           ],
@@ -1036,17 +1036,17 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "histogram_quantile(0.50, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))",
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m]) or rate(sglang:time_to_first_token_seconds_bucket[5m])))",
               "legendFormat": "vLLM p50 TTFT (s)"
             },
             {
               "refId": "B",
-              "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m]) or rate(sglang:time_to_first_token_seconds_bucket[5m])))",
               "legendFormat": "vLLM p95 TTFT (s)"
             },
             {
               "refId": "C",
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))",
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m]) or rate(sglang:time_to_first_token_seconds_bucket[5m])))",
               "legendFormat": "vLLM p99 TTFT (s)"
             },
             {
@@ -1108,12 +1108,12 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(vllm:num_requests_running) or sum(llamacpp:requests_processing)",
+              "expr": "sum(vllm:num_requests_running) or sum(sglang:num_running_reqs{tp_rank=\"0\",priority=\"\"}) or sum(llamacpp:requests_processing)",
               "legendFormat": "running"
             },
             {
               "refId": "B",
-              "expr": "sum(vllm:num_requests_waiting) or sum(llamacpp:requests_deferred)",
+              "expr": "sum(vllm:num_requests_waiting) or sum(sglang:num_queue_reqs{tp_rank=\"0\",priority=\"\"}) or sum(llamacpp:requests_deferred)",
               "legendFormat": "waiting"
             }
           ],

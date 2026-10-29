@@ -1,0 +1,17 @@
+# The sglang engine from arena-sglang, built here (services/sglang.Dockerfile) instead of lmsysorg/sglang, for a host
+# that cannot pull from Docker Hub:
+#
+#   docker compose -f docker-compose.yml -f sglang-build.yml --profile sglang build sglang
+#   docker compose -f docker-compose.yml -f sglang-build.yml --profile sglang up -d sglang
+#
+# The build downloads SGLang's wheels (PyPI; PyTorch and its CUDA libraries with them), about 8-12 GB. SGLANG_VERSION
+# chooses the release.
+
+services:
+  sglang:
+    image: arena-sglang:${SGLANG_VERSION:-0.5.21}
+    build:
+      context: ./services
+      dockerfile: sglang.Dockerfile
+      args:
+        SGLANG_VERSION: ${SGLANG_VERSION:-0.5.21}

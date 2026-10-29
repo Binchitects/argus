@@ -393,9 +393,9 @@ public sealed partial class EngineWatcher : BackgroundService
         var db = services.GetRequiredService<Llm.Core.Data.AppDbContext>();
         var models = onEngine ? await db.LocalModels.AsNoTracking().ToListAsync(ct) : [];
         var remote = (await db.RemoteServers.AsNoTracking().ToListAsync(ct)).SelectMany(s => s.Models).Select(m => (m.Name, m.Parallel));
-        // A vLLM model serves its answers at once in each copy; it has no slots a conversation keeps (any request reuses any cached prefix).
-        var (places, slots) = Capacity(models.Select(m => (m.Name, m.EngineKind == Llm.Core.Models.EngineKinds.Vllm ? m.Parallel * Math.Max(1, m.Replicas) : m.Parallel)), remote);
-        foreach (var m in models.Where(m => m.EngineKind == Llm.Core.Models.EngineKinds.Vllm))
+        // A vLLM or SGLang model serves its answers at once in each copy; it has no slots a conversation keeps (any request reuses any cached prefix).
+        var (places, slots) = Capacity(models.Select(m => (m.Name, Llm.Core.Models.EngineKinds.ServerPerModel(m.EngineKind) ? m.Parallel * Math.Max(1, m.Replicas) : m.Parallel)), remote);
+        foreach (var m in models.Where(m => Llm.Core.Models.EngineKinds.ServerPerModel(m.EngineKind)))
         {
             slots.Remove(m.Name);
         }
@@ -412,8 +412,8 @@ public sealed partial class EngineWatcher : BackgroundService
             var library = services.GetRequiredService<ModelLibrary>();
             var files = library.List().ToDictionary(e => e.File.Path, e => e.File.Size, StringComparer.Ordinal);
             var sizes = models.Where(m => files.ContainsKey(m.File)).ToDictionary(m => m.Name, m => files[m.File], StringComparer.Ordinal);
-            // A vLLM model's size is its snapshot's weights: the quickest to load again goes first, whatever its engine.
-            foreach (var m in models.Where(m => m.EngineKind == Llm.Core.Models.EngineKinds.Vllm && library.Snapshot(m.File) is { Complete: true }))
+            // A vLLM or SGLang model's size is its snapshot's weights: the quickest to load again goes first, whatever its engine.
+            foreach (var m in models.Where(m => Llm.Core.Models.EngineKinds.ServerPerModel(m.EngineKind) && library.Snapshot(m.File) is { Complete: true }))
             {
                 sizes[m.Name] = VllmAdvisor.WeightBytes(library.FullPath(m.File));
             }
@@ -435,7 +435,7 @@ public sealed partial class EngineWatcher : BackgroundService
         foreach (var m in models)
         {
             IReadOnlyDictionary<int, long> perGpu = new Dictionary<int, long>();
-            if (hw is not null && m.EngineKind == Llm.Core.Models.EngineKinds.Vllm && Hardware.ParseDevices(m.Devices) is { Count: > 0 } gpus)
+            if (hw is not null && Llm.Core.Models.EngineKinds.ServerPerModel(m.EngineKind) && Hardware.ParseDevices(m.Devices) is { Count: > 0 } gpus)
             {
                 perGpu = GpuPlan.Share(m.Name, hw, gpus, m.GpuMemoryUtilization ?? VllmAdvisor.DefaultUtilization).PerGpu;
             }

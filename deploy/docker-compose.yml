@@ -224,6 +224,7 @@ services:
     entrypoint: [/bin/sh, /vllm/supervisor.sh]
     environment:
       ENGINE_KEY: ${ENGINE_KEY}
+      ENGINE_SERVER: vllm
       CUDA_DEVICE_ORDER: PCI_BUS_ID
       # This engine's name: its desired state and status are /presets/vllm and /status/vllm.
       VLLM_PRESETS: /presets/vllm
@@ -244,6 +245,39 @@ services:
     ulimits: { memlock: -1 }
     # Tensor parallel ranks talk through shared memory (NCCL).
     shm_size: ${VLLM_SHM:-16gb}
+
+  # SGLang (Admin -> Models, engine SGLang): one SGLang server per model the app wants, each on its own GPUs, run
+  # by the same supervisor as vLLM's (ENGINE_SERVER=sglang; it follows /presets/sglang/models.json). Off until asked
+  # for: COMPOSE_PROFILES=sglang, with SGLANG_IMAGE an SGLang image (lmsysorg/sglang's, or arena-sglang built by
+  # sglang-build.yml where Docker Hub cannot be reached). fake-gpu.yml runs it with the fake SGLang instead.
+  sglang:
+    <<: [*service, *gpu]
+    image: ${SGLANG_IMAGE:-lmsysorg/sglang:v0.5.21-cu130-runtime}
+    container_name: sglang
+    profiles: [sglang]
+    entrypoint: [/bin/sh, /vllm/supervisor.sh]
+    environment:
+      ENGINE_KEY: ${ENGINE_KEY}
+      ENGINE_SERVER: sglang
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
+      # This engine's name: its desired state and status are /presets/sglang and /status/sglang.
+      VLLM_PRESETS: /presets/sglang
+      VLLM_STATUS: /status/sglang
+      # The SGLang to run (fake-gpu.yml: tools/fake-vllm's, as SGLang).
+      VLLM_BIN: ${SGLANG_BIN:-python3 /sglang/serve.py}
+      # Snapshots come from the library, never fetched by SGLang itself.
+      HF_HUB_OFFLINE: "1"
+    volumes:
+      - ./services/vllm:/vllm:ro
+      - ./services/sglang:/sglang:ro
+      - ./services/gpu-probe.py:/gpu-probe.py:ro
+      - ../tools/fake-vllm:/fake-vllm:ro
+      - ${MODELS_DIR:-./models}:/library:ro
+      - engine:/presets:ro
+      - vllm-status:/status
+    ulimits: { memlock: -1 }
+    # Tensor parallel ranks talk through shared memory (NCCL).
+    shm_size: ${SGLANG_SHM:-16gb}
 
   # Embeddings for Argus and the app's company knowledge, on the CPU. The app fetches the file into MODELS_DIR/embed.
   embed:

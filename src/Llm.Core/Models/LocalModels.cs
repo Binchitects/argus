@@ -12,7 +12,7 @@ public sealed class LocalModel
     /// <summary>Its name at the engine, the gateway and in the chat.</summary>
     public required string Name { get; set; }
     /// <summary>
-    /// Which kind of engine runs it: "llamacpp" (GGUF, any backend, can keep layers in RAM) or "vllm" (safetensors,
+    /// Which kind of engine runs it: "llamacpp" (GGUF, any backend, can keep layers in RAM), "vllm" or "sglang" (safetensors,
     /// tensor parallel over GPUs, sleep). Engines of other machines that the app does not manage are remote servers.
     /// </summary>
     public string EngineKind { get; set; } = EngineKinds.LlamaCpp;
@@ -20,7 +20,7 @@ public sealed class LocalModel
     public string? Engine { get; set; }
     /// <summary>
     /// What it is, relative to the library: a GGUF file (for a split model, its first part) for llama.cpp; a Hugging Face
-    /// snapshot folder (hf/ORG/REPO@REVISION) for vLLM.
+    /// snapshot folder (hf/ORG/REPO@REVISION) for vLLM and SGLang.
     /// </summary>
     public required string File { get; set; }
     /// <summary>A vision projector (mmproj) in the library, for a model that can see.</summary>

@@ -77,6 +77,9 @@ images:
   # vLLM (vllm.enabled): an image you have (NGC's, or arena-vllm built from deploy/services/vllm.Dockerfile and
   # pushed to your registry); nothing is pulled while it is off (docs/multi-gpu-server.md §6).
   vllm: { repository: nvcr.io/nvidia/vllm, tag: 26.09-py3 }
+  # SGLang (sglang.enabled): its own image (ROCm: lmsysorg/sglang v0.5.21-rocm720-mi30x), or arena-sglang built from
+  # deploy/services/sglang.Dockerfile and pushed to your registry; nothing is pulled while it is off.
+  sglang: { repository: lmsysorg/sglang, tag: v0.5.21-cu130-runtime }
   pullPolicy: IfNotPresent
   pullSecrets: []
 
@@ -173,6 +176,19 @@ vllm:
   shmSize: 16Gi
   # LMCache's disk tier (/kvcache): a claim on the node's NVMe (a local-path PV); "": an emptyDir, lost with the pod.
   kvcacheClaim: ""
+  resources: { requests: { cpu: "4", memory: 32Gi } }
+
+# SGLang (Admin -> Models, engine SGLang): one SGLang server per model the app wants, on its GPUs, run by the same
+# supervisor as vLLM's (ENGINE_SERVER=sglang). Each instance is a Deployment of its own with the GPUs it takes.
+# The first is the app's "sglang". With more instances of either engine, list them all to the app (app.env:
+# Engine__Vllm__0__Name and __Kind vllm or sglang, Engine__Vllm__1__..., and so on).
+# fake: tools/fake-vllm as SGLang in its place, on the python image, with no GPU (CI, load tests).
+sglang:
+  enabled: false
+  fake: false
+  instances:
+    - { name: sglang, gpus: 1, nodeSelector: {}, tolerations: [] }
+  shmSize: 16Gi
   resources: { requests: { cpu: "4", memory: 32Gi } }
 
 # Embeddings for Argus, on the CPU.

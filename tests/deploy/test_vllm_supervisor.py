@@ -2,7 +2,8 @@
 deploy/services/vllm/supervisor.sh, run by /bin/sh with tools/fake-vllm as `vllm`: it reconciles the app's desired state
 (models added, removed, changed), runs each on its GPUs only, keeps the key off every command line, puts a model to sleep
 and wakes it, drains on SIGTERM, backs off after a crash or a failed load, refuses an entry that would leak the key, and
-says all of it in its status files.
+says all of it in its status files. With ENGINE_SERVER=sglang it runs SGLang the same way, through services/sglang/serve.py
+(here with the fake sglang package, tools/fake-vllm/sglang-module).
 """
 from __future__ import annotations
 
@@ -22,6 +23,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 SUPERVISOR = REPO / "deploy" / "services" / "vllm" / "supervisor.sh"
 FAKE = REPO / "tools" / "fake-vllm" / "vllm"
+SGLANG_SERVE = REPO / "deploy" / "services" / "sglang" / "serve.py"
+FAKE_SGLANG = REPO / "tools" / "fake-vllm" / "sglang-module"
 KEY = "engine-key-for-supervisor-tests"
 
 
@@ -31,7 +34,7 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
-class SupervisorTests(unittest.TestCase):
+class SupervisorBase(unittest.TestCase):
     def setUp(self):
         self.dir = Path(tempfile.mkdtemp(prefix="vllm-sup-"))
         for d in ("presets", "status", "run"):
@@ -96,6 +99,8 @@ class SupervisorTests(unittest.TestCase):
         return {"name": name, "port": port, "gpus": list(gpus), "sleep": sleep,
                 "args": ["fake/Model", "--max-model-len", "4096", "--enable-sleep-mode", *extra]}
 
+
+class SupervisorTests(SupervisorBase):
     def test_a_model_runs_on_its_gpus_with_the_key_in_its_environment_only_sleeps_wakes_and_goes(self):
         port = free_port()
         self.want(self.model("flash", port, gpus=(1, 2)))
@@ -213,3 +218,56 @@ class SupervisorTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SglangSupervisorTests(SupervisorBase):
+    """The same supervisor running SGLang: its arguments as given, the key handed over inside the process, its memory saver."""
+
+    def run_sglang(self, **env):
+        # As fake-gpu.yml and the chart's sglang.fake run it.
+        self.run_supervisor(ENGINE_SERVER="sglang", VLLM_BIN=f"env PYTHONPATH={FAKE_SGLANG} python3 {SGLANG_SERVE}", **env)
+
+    @staticmethod
+    def sglang(name: str, port: int, gpus=(0,), sleep=False) -> dict:
+        return {"name": name, "port": port, "gpus": list(gpus), "sleep": sleep,
+                "args": ["--model-path", "fake/Model", "--tp-size", str(len(gpus)), "--context-length", "4096", "--max-running-requests", "8",
+                         "--enable-memory-saver", "--enable-metrics", "--enable-priority-scheduling", "--schedule-low-priority-values-first"]}
+
+    def test_sglang_runs_through_its_launcher_with_the_key_off_every_command_line_and_sleeps_by_its_memory_saver(self):
+        port = free_port()
+        self.want(self.sglang("swift", port, gpus=(0, 1)))
+        self.run_sglang()
+        self.until(lambda: self.status("swift").get("phase") == "ready", "swift ready")
+        s = self.status("swift")
+        self.assertEqual((port, [0, 1]), (s["port"], s["gpus"]))
+        # The key works, and is on no command line: serve.py added it inside the process.
+        self.assertEqual(401, self.get(port, "/v1/models", key=None)[0])
+        code, body = self.get(port, "/v1/models")
+        self.assertEqual(("swift", "sglang", 200), (json.loads(body)["data"][0]["id"], json.loads(body)["data"][0]["owned_by"], code))
+        pid = s["pid"]
+        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+        self.assertIn(str(SGLANG_SERVE).encode(), cmdline)
+        self.assertNotIn(b"serve", cmdline[2:3], "SGLang takes no `serve` command")
+        self.assertFalse(any(KEY.encode() in a for a in cmdline), "the key is on the command line")
+        self.assertNotIn(b"ENGINE_KEY", Path(f"/proc/{pid}/environ").read_bytes())
+        self.assertIn(b"CUDA_VISIBLE_DEVICES=0,1", Path(f"/proc/{pid}/environ").read_bytes())
+        # SGLang's metrics: a total and a series per priority for each rank, as the app reads them.
+        metrics = self.get(port, "/metrics", key=None)[1].decode()
+        self.assertIn('sglang:num_running_reqs{engine_type="unified",model_name="swift",moe_ep_rank="0",pp_rank="0",tp_rank="1",priority=""}', metrics)
+        self.assertIn("sglang: starting swift on GPUs 0,1", (self.dir / "status" / "swift.log").read_text())
+
+        # Asleep and awake by its memory saver (POST with a JSON body, which SGLang requires): the same process.
+        self.want(self.sglang("swift", port, gpus=(0, 1), sleep=True))
+        self.until(lambda: self.status("swift").get("phase") == "sleeping", "swift asleep")
+        self.assertFalse(self.status("swift").get("sleep_failed"))
+        self.want(self.sglang("swift", port, gpus=(0, 1), sleep=False))
+        self.until(lambda: self.status("swift").get("phase") == "ready", "swift awake")
+        self.assertEqual(pid, self.status("swift")["pid"])
+
+        self.want()
+        self.until(lambda: not (self.dir / "status" / "swift.json").exists(), "swift gone")
+
+    def test_an_unknown_server_is_refused_at_start(self):
+        self.run_supervisor(ENGINE_SERVER="tgi")
+        self.assertEqual(2, self.proc.wait(timeout=10))
+        self.assertIn("ENGINE_SERVER is vllm or sglang", self.proc.stdout.read())

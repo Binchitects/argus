@@ -1,14 +1,15 @@
-# The vllm engine with a stand-in vLLM, for a stack without a GPU big enough for it (development,
-# CI, load tests): the real supervisor (services/vllm/supervisor.sh) runs tools/fake-vllm, which
-# answers as vLLM does (health, models, streamed answers at a set pace, vLLM's metrics, sleep and
-# wake), on the python image the stack already has, with no GPU.
+# The vllm and sglang engines with stand-ins, for a stack without a GPU big enough for them
+# (development, CI, load tests): the real supervisor (services/vllm/supervisor.sh) runs
+# tools/fake-vllm, which answers as vLLM does (health, models, streamed answers at a set pace, vLLM's
+# metrics, sleep and wake), and as SGLang does through SGLang's own launcher (services/sglang/serve.py,
+# with the fake sglang package), on the python image the stack already has, with no GPU.
 #
-#   docker compose -f docker-compose.yml -f fake-gpu.yml up -d vllm
-#   podman compose -f docker-compose.yml -f podman.yml -f fake-gpu.yml up -d vllm
-#   (Kubernetes: the chart's vllm.fake=true)
+#   docker compose -f docker-compose.yml -f fake-gpu.yml up -d vllm sglang
+#   podman compose -f docker-compose.yml -f podman.yml -f fake-gpu.yml up -d vllm sglang
+#   (Kubernetes: the chart's vllm.fake=true and sglang.fake=true)
 #
-# Admin -> Models then adds vLLM models from the library's snapshots as on a real server. Pace it
-# with FAKE_VLLM_TTFT (seconds to the first token) and FAKE_VLLM_TPS (tokens a second).
+# Admin -> Models then adds vLLM and SGLang models from the library's snapshots as on a real server.
+# Pace them with FAKE_VLLM_TTFT (seconds to the first token) and FAKE_VLLM_TPS (tokens a second).
 
 services:
   vllm:
@@ -20,6 +21,17 @@ services:
       FAKE_VLLM_TTFT: ${FAKE_VLLM_TTFT:-0.2}
       FAKE_VLLM_TPS: ${FAKE_VLLM_TPS:-60}
     # No GPU needed (and none taken from the real engines).
+    deploy: !reset {}
+    devices: !reset []
+    shm_size: 64mb
+  sglang:
+    image: python:3.13-slim
+    profiles: !reset []
+    environment:
+      # SGLang's launcher as on a real server; the fake sglang package answers.
+      VLLM_BIN: env PYTHONPATH=/fake-vllm/sglang-module python3 /sglang/serve.py
+      FAKE_VLLM_TTFT: ${FAKE_VLLM_TTFT:-0.2}
+      FAKE_VLLM_TPS: ${FAKE_VLLM_TPS:-60}
     deploy: !reset {}
     devices: !reset []
     shm_size: 64mb

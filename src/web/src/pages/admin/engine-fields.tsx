@@ -14,7 +14,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { useDebounced } from '@/lib/use-debounced'
 import { cn } from '@/lib/utils'
-import { useFallbacks, useSnapshots, type EngineGpu, type EngineInstance, type EngineModel } from './engine-api'
+import { engineLabel, serverPerModel, useFallbacks, useSnapshots, type EngineGpu, type EngineInstance, type EngineModel } from './engine-api'
 import { bytes } from './model-profile'
 
 export function FallbackField({ self, value, onChange, error }: { self: string | undefined; value: string; onChange: (v: string) => void; error?: string }) {
@@ -106,6 +106,8 @@ interface VllmAdvice {
 
 interface VllmForm {
   name: string
+  /** vLLM or SGLang: the kind of the engine it runs on. */
+  kind: 'vllm' | 'sglang'
   engine: string
   devices: string
   replicas: string
@@ -125,9 +127,10 @@ interface VllmForm {
 
 const lastPart = (path: string) => (path.split('/').pop() ?? path).replace(/@.*$/, '')
 
-function start(saved: EngineModel | null, snapshot: string): VllmForm {
+function start(saved: EngineModel | null, snapshot: string, kind: 'vllm' | 'sglang'): VllmForm {
   return {
     name: saved?.name ?? lastPart(snapshot),
+    kind: saved?.engineKind === 'sglang' ? 'sglang' : saved ? 'vllm' : kind,
     engine: saved?.engine ?? '',
     devices: saved?.devices ?? '',
     replicas: String(saved?.replicas ?? 1),
@@ -146,12 +149,12 @@ function start(saved: EngineModel | null, snapshot: string): VllmForm {
   }
 }
 
-/** What the API takes for a vLLM model: what is empty is cleared (the default), what is set is sent. */
+/** What the API takes for a vLLM or SGLang model: what is empty is cleared (the default), what is set is sent. */
 function request(form: VllmForm, file: string) {
   const n = (s: string) => (s.trim() === '' ? undefined : Number(s))
   const clear = (['devices', 'gpuMemoryUtilization', 'quantization', 'specDecode', 'draftHead', 'kvCpuGb', 'kvTier', 'kvDiskGb', 'fallback', 'engine'] as const).filter((k) => String(form[k]).trim() === '')
   return {
-    engineKind: 'vllm',
+    engineKind: form.kind,
     file,
     engine: form.engine || undefined,
     devices: form.devices || undefined,
@@ -173,10 +176,11 @@ function request(form: VllmForm, file: string) {
 }
 
 /**
- * A vLLM model's part of the model dialog: a Hugging Face snapshot from the library, the GPUs it runs on (by vendor and
- * size; empty: those proposed for this machine), its copies, its share of each GPU, quantisation, cache type, context,
- * answers at once, speculative decoding, a CPU tier for its cache, sleep, and its fallback. The advisor's fit, cache and
- * recommendation show as it is filled in; the API runs the same checks on save.
+ * A vLLM or SGLang model's part of the model dialog: a Hugging Face snapshot from the library, the engine it runs on (vLLM's
+ * or SGLang's, and which machine), the GPUs (by vendor and size; empty: those proposed for this machine), its copies, its
+ * share of each GPU, quantisation, cache type, context, answers at once, speculative decoding, a CPU tier for its cache,
+ * sleep, and its fallback. The advisor's fit, cache and recommendation show as it is filled in; the API runs the same
+ * checks on save.
  */
 export function VllmModelSection({
   saved,
@@ -193,7 +197,9 @@ export function VllmModelSection({
 }) {
   const queryClient = useQueryClient()
   const snapshots = useSnapshots()
-  const [form, setForm] = useState(() => start(saved, snapshot))
+  // The engines that run one server a model, those this stack runs (and the one a saved model is on).
+  const servers = instances.filter((i) => serverPerModel(i.kind) && (i.on !== false || (saved && i.kind === saved.engineKind)))
+  const [form, setForm] = useState(() => start(saved, snapshot, servers[0]?.kind === 'sglang' ? 'sglang' : 'vllm'))
   const [error, setError] = useState<string | null>(null)
   const set = <K extends keyof VllmForm>(k: K, v: VllmForm[K]) => setForm((f) => ({ ...f, [k]: v }))
   const body = useMemo(() => request(form, snapshot), [form, snapshot])
@@ -207,7 +213,16 @@ export function VllmModelSection({
   const a = advice.data
   const errors: Record<string, string> = {}
   for (const p of a?.problems ?? []) if (p.error && !errors[p.field]) errors[p.field] = p.message
-  const vllmEngines = instances.filter((i) => i.kind === 'vllm')
+  const label = engineLabel(form.kind)
+  const firstOf = (kind: string) => servers.find((i) => i.kind === kind)?.name
+  const chosen = form.engine || firstOf(form.kind) || ''
+  const choose = (name: string) => {
+    const i = servers.find((x) => x.name === name)
+    if (!i) return
+    const kind = i.kind === 'sglang' ? 'sglang' : 'vllm'
+    // The first of its kind is the default (no engine named); LMCache is vLLM's alone.
+    setForm((f) => ({ ...f, kind, engine: firstOf(kind) === name ? '' : name, kvTier: kind === 'sglang' && f.kvTier === 'lmcache' ? '' : f.kvTier }))
+  }
   const save = useMutation({
     mutationFn: () =>
       saved
@@ -227,7 +242,7 @@ export function VllmModelSection({
   return (
     <form
       className="grid min-w-0 gap-5"
-      aria-label="The vLLM model"
+      aria-label={`The ${label} model`}
       onSubmit={(ev) => {
         ev.preventDefault()
         setError(null)
@@ -246,16 +261,16 @@ export function VllmModelSection({
         <Field label="Name" hint="Its name in the chat and at the gateway.">
           <Input value={form.name} onChange={(ev) => set('name', ev.target.value)} disabled={!!saved} />
         </Field>
-        {vllmEngines.length > 1 && (
-          <Field label="vLLM engine" hint="The machine (engine) it runs on.">
-            <Select value={form.engine || vllmEngines[0].name} onValueChange={(v) => set('engine', v === vllmEngines[0].name ? '' : v)}>
-              <SelectTrigger>
+        {servers.length > 1 && (
+          <Field label="Engine" hint="vLLM or SGLang, and the machine it runs on.">
+            <Select value={chosen} onValueChange={choose}>
+              <SelectTrigger aria-label="Engine">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {vllmEngines.map((i) => (
+                {servers.map((i) => (
                   <SelectItem key={i.name} value={i.name}>
-                    {i.name}
+                    {engineLabel(i.kind)} · {i.name}
                     {i.problem ? ' (not running)' : ''}
                   </SelectItem>
                 ))}
@@ -275,7 +290,7 @@ export function VllmModelSection({
         <Field label="Copies" hint="Each on its share of the GPUs; a conversation stays on one." error={errors.replicas}>
           <Input inputMode="numeric" value={form.replicas} onChange={(ev) => set('replicas', ev.target.value)} />
         </Field>
-        <Field label="Share of each GPU" hint="0.10 to 0.98; empty: 0.90 (--gpu-memory-utilization)." error={errors.gpuMemoryUtilization}>
+        <Field label="Share of each GPU" hint={`0.10 to 0.98; empty: 0.90 (${form.kind === 'sglang' ? '--mem-fraction-static' : '--gpu-memory-utilization'}).`} error={errors.gpuMemoryUtilization}>
           <Input inputMode="decimal" value={form.gpuMemoryUtilization} onChange={(ev) => set('gpuMemoryUtilization', ev.target.value)} placeholder="0.90" />
         </Field>
         <Field label="Quantisation" hint="Empty: what its config says." error={errors.quantization}>
@@ -284,7 +299,7 @@ export function VllmModelSection({
         <Field label="Context" hint={a?.limits ? `${a.limits.context.min.toLocaleString()} to ${a.limits.context.max.toLocaleString()} tokens.` : 'Tokens.'} error={errors.context}>
           <Input inputMode="numeric" value={form.context} onChange={(ev) => set('context', ev.target.value)} />
         </Field>
-        <Field label="Answers at once" hint="Per copy (--max-num-seqs)." error={errors.parallel}>
+        <Field label="Answers at once" hint={`Per copy (${form.kind === 'sglang' ? '--max-running-requests' : '--max-num-seqs'}).`} error={errors.parallel}>
           <Input inputMode="numeric" value={form.parallel} onChange={(ev) => set('parallel', ev.target.value)} />
         </Field>
         <Field label="Token cache" error={errors.kvType}>
@@ -328,14 +343,18 @@ export function VllmModelSection({
             </Select>
           </Field>
         )}
-        <Field label="Cache beyond the GPU" hint="vLLM's own CPU tier, or LMCache (RAM, local disk that survives a restart, the stack's shared store)." error={errors.kvTier}>
+        <Field
+          label="Cache beyond the GPU"
+          hint={form.kind === 'sglang' ? "SGLang's hierarchical cache, in RAM." : "vLLM's own CPU tier, or LMCache (RAM, local disk that survives a restart, the stack's shared store)."}
+          error={errors.kvTier}
+        >
           <Select value={form.kvTier || 'cpu'} onValueChange={(v) => set('kvTier', v === 'cpu' ? '' : v)}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="cpu">vLLM's own (RAM)</SelectItem>
-              <SelectItem value="lmcache">LMCache (RAM and disk)</SelectItem>
+              <SelectItem value="cpu">{label}'s own (RAM)</SelectItem>
+              {form.kind === 'vllm' && <SelectItem value="lmcache">LMCache (RAM and disk)</SelectItem>}
             </SelectContent>
           </Select>
         </Field>
@@ -360,7 +379,7 @@ export function VllmModelSection({
       </div>
       {e && (
         <Alert variant={e.fit === 'none' ? 'destructive' : 'info'} title={e.fit === 'none' ? 'It would not start' : 'On its GPUs'}>
-          Weights {bytes(e.gpuWeights)}, token cache {bytes(e.gpuCache)} ({e.approximate ? 'rough: vLLM says its own as it starts' : 'all copies'}), {bytes(e.gpuTotal)} of the GPUs
+          Weights {bytes(e.gpuWeights)}, token cache {bytes(e.gpuCache)} ({e.approximate ? `rough: ${label} says its own as it starts` : 'all copies'}), {bytes(e.gpuTotal)} of the GPUs
           {e.gpuBudget ? ` (${bytes(e.gpuBudget)} there for models)` : ''}
           {e.ramTotal ? `; ${bytes(e.ramTotal)} of RAM asleep and in its CPU tier` : ''}.
         </Alert>

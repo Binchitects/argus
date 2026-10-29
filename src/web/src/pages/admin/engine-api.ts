@@ -13,7 +13,7 @@ export interface EngineGpu {
 
 /** A saved model with what only some engines have (Llm.Core EngineKinds). */
 export type EngineModel = SavedModel & {
-  engineKind?: 'llamacpp' | 'vllm'
+  engineKind?: 'llamacpp' | 'vllm' | 'sglang'
   engine?: string | null
   replicas?: number
   gpuMemoryUtilization?: number | null
@@ -26,7 +26,7 @@ export type EngineModel = SavedModel & {
   fallback?: string | null
 }
 
-/** A Hugging Face snapshot in the library, for vLLM. */
+/** A Hugging Face snapshot in the library, for vLLM and SGLang. */
 export interface Snapshot {
   path: string
   repo: string
@@ -44,9 +44,17 @@ export interface EngineInstance {
   kind: string
   managed: boolean
   problem: string | null
+  /** False for this stack's own engine whose feature is off (deploy/features): it runs nothing. */
+  on?: boolean
 }
 
-/** The snapshots in the library (vLLM's models). */
+/** The kinds that run one server a model from a Hugging Face snapshot. */
+export const serverPerModel = (kind: string | undefined) => kind === 'vllm' || kind === 'sglang'
+
+/** A kind's name for people. */
+export const engineLabel = (kind: string | undefined) => (kind === 'sglang' ? 'SGLang' : kind === 'vllm' ? 'vLLM' : 'llama.cpp')
+
+/** The snapshots in the library (vLLM's and SGLang's models). */
 export function useSnapshots() {
   return useQuery({
     queryKey: ['admin', 'models', 'library', 'snapshots'],

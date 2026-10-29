@@ -9,7 +9,7 @@ import { api } from '@/lib/api'
 import { formatValue } from '@/lib/format'
 import { MediaModelSection, type LibraryRow, type SavedMediaModel, type SpeechRow } from './media-model-form'
 import { roleLabel, type MediaMode } from './media-modes'
-import { useSnapshots, type EngineInstance, type EngineModel } from './engine-api'
+import { engineLabel, serverPerModel, useSnapshots, type EngineInstance, type EngineModel } from './engine-api'
 import { VllmModelSection } from './engine-fields'
 import { ChatModelSection, type ChatModelSlot, type SavedModel } from './model-form'
 import { kindLabel, summary, type LibraryFile } from './model-profile'
@@ -166,17 +166,19 @@ export function ModelDialog({
   const mediaFiles = useQuery({ queryKey: ['admin', 'models', 'media', 'files'], queryFn: ({ signal }) => api<LibraryRow[]>('/api/admin/models/media/files', { signal }) })
   const speech = useQuery({ queryKey: ['admin', 'models', 'media', 'speech'], queryFn: ({ signal }) => api<SpeechRow[]>('/api/admin/models/media/speech', { signal }), retry: false })
   const snapshots = useSnapshots()
-  // vLLM's models: the library's Hugging Face snapshots, chat models of their own engine.
-  const vllm = instances.some((i) => i.kind === 'vllm')
+  // vLLM's and SGLang's models: the library's Hugging Face snapshots, chat models of their own engine (one that runs here).
+  const servers = instances.filter((i) => serverPerModel(i.kind) && i.on !== false)
+  const vllm = servers.length > 0
+  const serverNames = [...new Set(servers.map((i) => engineLabel(i.kind)))].join(' or ')
   const all = [
     ...choices(library.data ?? [], mediaFiles.data ?? [], speech.data ?? []),
     ...(vllm ? (snapshots.data ?? []) : []).map((s) => ({
-      value: fileValue(s.path), label: `${s.path} · ${formatValue(s.size, 'bytes')} · vLLM${s.complete ? '' : ` · ${s.why}`}`, group: 'chat' as const, kind: 'chat' as const,
-      why: null, role: '', title: 'vLLM snapshot',
+      value: fileValue(s.path), label: `${s.path} · ${formatValue(s.size, 'bytes')} · ${serverNames}${s.complete ? '' : ` · ${s.why}`}`, group: 'chat' as const, kind: 'chat' as const,
+      why: null, role: '', title: `${serverNames} snapshot`,
     })),
   ]
   const snapshot = source && 'file' in source && (snapshots.data ?? []).some((s) => s.path === source.file) ? source.file : null
-  const vllmModel = edit?.kind === 'chat' && (edit.model as EngineModel).engineKind === 'vllm' ? (edit.model as EngineModel) : null
+  const vllmModel = edit?.kind === 'chat' && serverPerModel((edit.model as EngineModel).engineKind) ? (edit.model as EngineModel) : null
   const value = sourceValue(source)
   const found = all.find((c) => c.value === value)
   // A picture or video model's other file (a text encoder, a decoder) belongs to either: it reads as the one being added.

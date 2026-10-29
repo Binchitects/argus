@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net.Sockets;
 using System.Text;
 using DotNet.Testcontainers.Builders;
@@ -194,6 +195,101 @@ public sealed class VllmBackendTests : IDisposable
     }
 
     [Fact]
+    public void Sglangs_arguments_say_what_the_model_chose_in_its_own_flags_and_never_a_key_host_or_port()
+    {
+        var m = Model("swift");
+        m.EngineKind = EngineKinds.Sglang;
+        m.Quantization = "fp8";
+        m.SpecDecode = "eagle3";
+        m.DraftHead = "hf/org/swift-eagle@abc";
+        m.DraftMax = 3;
+        m.KvCpuGb = 64;
+        m.TopP = 0.9;
+        var args = ModelCatalog.ServerArgs(m, "/library", 2);
+        string After(string flag) => args[args.ToList().IndexOf(flag) + 1];
+        Assert.Equal(("/library/hf/org/swift@abc", "2", "65536", "32", "0.85", "fp8_e4m3", "fp8"),
+            (After("--model-path"), After("--tp-size"), After("--context-length"), After("--max-running-requests"), After("--mem-fraction-static"), After("--kv-cache-dtype"),
+                After("--quantization")));
+        Assert.Contains("--enable-memory-saver", args);
+        Assert.Contains("--enable-metrics", args);
+        Assert.Contains("--enable-priority-scheduling", args);
+        Assert.Contains("--schedule-low-priority-values-first", args);
+        Assert.Equal(("EAGLE3", "3", "1", "4", "/library/hf/org/swift-eagle@abc"),
+            (After("--speculative-algorithm"), After("--speculative-num-steps"), After("--speculative-eagle-topk"), After("--speculative-num-draft-tokens"),
+                After("--speculative-draft-model-path")));
+        Assert.Contains("--enable-hierarchical-cache", args);
+        Assert.Equal("64", After("--hicache-size"));
+        Assert.Equal("""{"top_p":0.9}""", After("--preferred-sampling-params"));
+        // vLLM's own flags are not SGLang's.
+        Assert.DoesNotContain(args, a => a is "--api-key" or "--host" or "--port" or "--served-model-name" or "--max-num-seqs" or "--enable-sleep-mode" or "--enable-prefix-caching");
+        m.SpecDecode = "mtp";
+        Assert.Equal("NEXTN", ModelCatalog.ServerArgs(m, "/library", 2).SkipWhile(a => a != "--speculative-algorithm").ElementAt(1));
+        Assert.Equal("/library/hf/org/x@abc", ModelCatalog.ServerArgs(Model("x"), "/library", 1)[0]);
+    }
+
+    [Fact]
+    public async Task An_sglang_engine_counts_its_totals_of_its_first_rank_and_sleeps_by_its_memory_saver()
+    {
+        var o = Options();
+        o.Vllm = [new VllmEngineOptions { Name = "sglang", Kind = EngineKinds.Sglang, FirstPort = 8101 }];
+        var m = Model("swift", "0,1");
+        m.EngineKind = EngineKinds.Sglang;
+        // SGLang as it writes them with priority scheduling: totals under priority="", one per priority, for each of two ranks.
+        var text = new StringBuilder();
+        foreach (var rank in new[] { "0", "1" })
+        {
+            foreach (var (name, total) in new[] { ("sglang:num_running_reqs", 6), ("sglang:num_queue_reqs", 2) })
+            {
+                text.Append(CultureInfo.InvariantCulture, $"{name}{{model_name=\"swift\",tp_rank=\"{rank}\",priority=\"\"}} {total}\n");
+                text.Append(CultureInfo.InvariantCulture, $"{name}{{model_name=\"swift\",tp_rank=\"{rank}\",priority=\"-1\"}} {total}\n");
+            }
+            text.Append(CultureInfo.InvariantCulture, $"sglang:token_usage{{model_name=\"swift\",tp_rank=\"{rank}\",priority=\"\"}} 0.4\n");
+            text.Append(CultureInfo.InvariantCulture, $"sglang:cache_hit_rate{{model_name=\"swift\",tp_rank=\"{rank}\",priority=\"\"}} 0.6\n");
+            text.Append(CultureInfo.InvariantCulture, $"sglang:prompt_tokens_total{{model_name=\"swift\",tp_rank=\"{rank}\"}} 1000\n");
+        }
+        var backend = new VllmBackends(Microsoft.Extensions.Options.Options.Create(o), new OneClient(new Answer(text.ToString())), TimeProvider.System).All.Single();
+        Assert.Equal((EngineKinds.Sglang, "SGLang"), (backend.Kind, backend.Label));
+        backend.Write(VllmBackend.PresetsFile, ModelCatalog.VllmEntries(m, "/library", new Dictionary<string, int>(), new HashSet<int>(), backend.FirstPort));
+        Assert.Contains("--enable-memory-saver", backend.Presets().Single().Args);
+        Directory.CreateDirectory(backend.StatusDir);
+        File.WriteAllText(Path.Combine(backend.StatusDir, "supervisor.json"), $$"""{"at":{{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}}}""");
+        await backend.LoadAsync("swift", default);
+        var c = (await backend.CapacityAsync("swift", TimeSpan.FromSeconds(5), default))!;
+        // Rank 0's totals alone: neither rank 1's nor the per-priority series count twice.
+        Assert.Equal((32, 6, 2), (c.Count, c.Running, c.Waiting));
+        Assert.Equal(0.4, c.KvUsage);
+        Assert.Equal(0.6, c.PrefixHitRate!.Value, 6);
+        await backend.SleepAsync("swift", true, default);
+        Assert.True(backend.Desired().Single().Sleep);
+        // Its own messages name it.
+        File.Delete(Path.Combine(backend.StatusDir, "supervisor.json"));
+        Assert.Contains("The SGLang engine sglang is not running", backend.Down(), StringComparison.Ordinal);
+        Assert.Contains("COMPOSE_PROFILES=sglang", backend.Down(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void This_stacks_engines_are_vllm_and_sglang_and_a_model_goes_to_the_first_of_its_kind_or_the_one_it_names()
+    {
+        var o = new EngineOptions();
+        Assert.Equal([("vllm", EngineKinds.Vllm), ("sglang", EngineKinds.Sglang)], o.VllmEngines.Select(e => (e.Name, e.Kind)));
+        o.Vllm = [new VllmEngineOptions { Name = "vllm" }, new VllmEngineOptions { Name = "sglang-a", Kind = EngineKinds.Sglang }, new VllmEngineOptions { Name = "sglang-b", Kind = EngineKinds.Sglang }];
+        var all = new VllmBackends(Microsoft.Extensions.Options.Options.Create(o), new OneClient(new Answer("")), TimeProvider.System);
+        Assert.Equal("sglang-a", all.For(null, EngineKinds.Sglang)!.Name);
+        Assert.Equal("sglang-b", all.For("sglang-b", EngineKinds.Sglang)!.Name);
+        Assert.Equal("vllm", all.For(null, EngineKinds.Vllm)!.Name);
+        // A model never runs on an engine of another kind.
+        Assert.Null(all.For("vllm", EngineKinds.Sglang));
+        Assert.Equal(2, all.OfKind(EngineKinds.Sglang).Count());
+    }
+
+    /// <summary>Answers every request with the same Prometheus text.</summary>
+    private sealed class Answer(string text) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(text) });
+    }
+
+    [Fact]
     public void Prometheus_text_is_summed_by_metric()
     {
         var m = VllmBackend.Metrics("# HELP x\nvllm:num_requests_running{a=\"1\"} 2\nvllm:num_requests_running{a=\"2\"} 3.0\nvllm:kv_cache_usage_perc 0.5\nbad line\n");
@@ -210,22 +306,29 @@ public sealed class VllmBackendTests : IDisposable
 
     private static readonly string Repo = Path.GetFullPath(Path.Combine(AppFixture.DashboardsPath, "..", "..", "..", ".."));
 
-    [Fact]
-    public async Task The_real_supervisor_runs_the_fake_vllm_as_the_app_drives_it_in_a_container()
+    [Theory]
+    [InlineData(EngineKinds.Vllm)]
+    [InlineData(EngineKinds.Sglang)]
+    public async Task The_real_supervisor_runs_the_fake_vllm_as_the_app_drives_it_in_a_container(string kind)
     {
         var port = FreePort();
         byte[] From(params string[] path) => File.ReadAllBytes(Path.Combine([Repo, .. path]));
-        // The python image the stack already has; on the host's network, so the model's port is the same here.
+        // The python image the stack already has; on the host's network, so the model's port is the same here. SGLang runs
+        // through its launcher (services/sglang/serve.py), the fake sglang package answering, as fake-gpu.yml runs it.
         await using var container = new ContainerBuilder("python:3.13-slim")
             .WithResourceMapping(From("deploy", "services", "vllm", "supervisor.sh"), "/vllm/supervisor.sh")
             .WithResourceMapping(From("deploy", "services", "vllm", "vllm-helper.py"), "/vllm/vllm-helper.py")
             .WithResourceMapping(From("deploy", "services", "gpu-probe.py"), "/gpu-probe.py")
             .WithResourceMapping(From("tools", "fake-vllm", "fake_vllm.py"), "/fake-vllm/fake_vllm.py")
             .WithResourceMapping(From("tools", "fake-vllm", "vllm"), "/fake-vllm/vllm")
+            .WithResourceMapping(From("deploy", "services", "sglang", "serve.py"), "/sglang/serve.py")
+            .WithResourceMapping(From("tools", "fake-vllm", "sglang-module", "sglang", "__init__.py"), "/fake-vllm/sglang-module/sglang/__init__.py")
+            .WithResourceMapping(From("tools", "fake-vllm", "sglang-module", "sglang", "launch_server.py"), "/fake-vllm/sglang-module/sglang/launch_server.py")
             .WithEnvironment("ENGINE_KEY", "key-for-the-container")
+            .WithEnvironment("ENGINE_SERVER", kind)
             .WithEnvironment("VLLM_PRESETS", "/presets")
             .WithEnvironment("VLLM_STATUS", "/status")
-            .WithEnvironment("VLLM_BIN", "/fake-vllm/vllm")
+            .WithEnvironment("VLLM_BIN", kind == EngineKinds.Sglang ? "env PYTHONPATH=/fake-vllm/sglang-module python3 /sglang/serve.py" : "/fake-vllm/vllm")
             .WithEnvironment("VLLM_TICK", "0.3")
             .WithCreateParameterModifier(p => p.HostConfig!.NetworkMode = "host")
             .WithEntrypoint("/bin/sh", "-c", "chmod +x /fake-vllm/vllm && exec /bin/sh /vllm/supervisor.sh")
@@ -233,10 +336,13 @@ public sealed class VllmBackendTests : IDisposable
         await container.StartAsync();
 
         var o = Options("127.0.0.1");
-        var status = Path.Combine(o.VllmStatusDir, "vllm");
+        o.Vllm = [new VllmEngineOptions { Name = kind, Kind = kind, Host = "127.0.0.1" }];
+        var status = Path.Combine(o.VllmStatusDir, kind);
         Directory.CreateDirectory(status);
         var backend = new VllmBackend(o.VllmEngines[0], o, new HttpClientFactoryOfOne(), TimeProvider.System);
-        var entries = ModelCatalog.VllmEntries(Model("flash", "0"), "/library", new Dictionary<string, int>(), new HashSet<int>(), port);
+        var model = Model("flash", "0");
+        model.EngineKind = kind;
+        var entries = ModelCatalog.VllmEntries(model, "/library", new Dictionary<string, int>(), new HashSet<int>(), port);
         backend.Write(VllmBackend.PresetsFile, entries);
 
         // What the app writes reaches the container, and what the supervisor writes comes back (a shared volume in a stack).

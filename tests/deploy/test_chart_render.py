@@ -19,7 +19,7 @@ REPO = Path(__file__).resolve().parents[2]
 CHART = REPO / "deploy" / "helm" / "argus-arena"
 KIND = REPO / "deploy" / "helm" / "kind-values.yaml"
 ON = ["laya.enabled=true", "scanners.enabled=true", "studio.enabled=true", "workspaces.enabled=true", "blender.enabled=true", "lean.enabled=true", "videogen.enabled=true",
-      "vllm.enabled=true", "valkey.enabled=true", "availability.autoscale.enabled=true", "domain=arena.example.test"]
+      "vllm.enabled=true", "sglang.enabled=true", "valkey.enabled=true", "availability.autoscale.enabled=true", "domain=arena.example.test"]
 SCIENTIFIC = re.compile(r"^-?\d+(\.\d+)?e[+-]?\d+$", re.I)
 STRICT_PATH = re.compile(r"^/[A-Za-z0-9/_-]*$")
 

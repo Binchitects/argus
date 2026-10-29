@@ -1,7 +1,8 @@
 #!/bin/sh
-# vLLM serves one model a process and has no router: this runs one `vllm serve` for each model
-# the app wants, as the app's desired state says, with no Docker socket (the same way
-# llamacpp/router.sh follows models.ini and sd-serve.sh its control file).
+# vLLM and SGLang serve one model a process and have no router: this runs one server for each
+# model the app wants, as the app's desired state says, with no Docker socket (the same way
+# llamacpp/router.sh follows models.ini and sd-serve.sh its control file). ENGINE_SERVER says
+# which: vllm (`vllm serve ARGS`) or sglang (sglang/serve.py ARGS: SGLang's launch_server).
 #
 #   /presets/vllm/models.json   written by the app (Admin -> Models):
 #     {"models": [{"name", "port", "gpus": [0, 1], "sleep": false, "args": ["/library/hf/...", "--tensor-parallel-size", "2", ...]}]}
@@ -11,8 +12,8 @@
 # no longer wanted drains (SIGTERM: vLLM ends the answers it has, up to VLLM_DRAIN seconds, then
 # it is killed); a model whose arguments, port or GPUs changed drains and starts again; one that
 # exits on its own waits 10, 20, 40... seconds (up to 5 minutes) before it starts again, and a
-# change to it starts it at once; "sleep": true puts a ready model to sleep (its weights to RAM,
-# vLLM's sleep mode) and false wakes it.
+# change to it starts it at once; "sleep": true puts a ready model to sleep (its weights to RAM:
+# vLLM's sleep mode, SGLang's memory saver) and false wakes it.
 #
 #   /status/<name>.json   phase (loading, ready, sleeping, draining, failed), pid, port, gpus, since,
 #                         how it last exited, its tries and next try, the last lines of its log
@@ -20,15 +21,21 @@
 #   /status/hardware.json the GPUs it sees (gpu-probe.py: nvidia-smi or rocm-smi), for the app
 #   /status/supervisor.json  its heartbeat, every tick
 #
-# The key (ENGINE_KEY) goes to each server as VLLM_API_KEY, by the environment, never on a command
-# line, where ps shows it to anyone in the container; an entry that puts one there is refused.
+# The key (ENGINE_KEY) goes to each server by the environment (VLLM_API_KEY; SGLANG_API_KEY, which
+# sglang/serve.py hands SGLang inside its process), never on a command line, where ps shows it to
+# anyone in the container; an entry that puts one there is refused.
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 presets=${VLLM_PRESETS:-/presets/vllm}
 models=$presets/models.json
 status=${VLLM_STATUS:-/status}
 run=${VLLM_RUN:-/tmp/vllm-supervisor}
-bin=${VLLM_BIN:-vllm}
+server=${ENGINE_SERVER:-vllm}
+case $server in
+  vllm) bin=${VLLM_BIN:-vllm} ;;
+  sglang) bin=${VLLM_BIN:-python3 /sglang/serve.py} ;;
+  *) echo "supervisor: ENGINE_SERVER is vllm or sglang, not $server" >&2; exit 2 ;;
+esac
 helper=${VLLM_HELPER:-$here/vllm-helper.py}
 probe=${GPU_PROBE:-$here/../gpu-probe.py}
 host=${VLLM_HOST:-0.0.0.0}
@@ -38,8 +45,15 @@ backoff=${VLLM_BACKOFF:-10}
 backoff_max=${VLLM_BACKOFF_MAX:-300}
 stable=${VLLM_STABLE:-300}
 VLLM_API_KEY=${VLLM_API_KEY:-${ENGINE_KEY:?set ENGINE_KEY in .env}}
-export VLLM_API_KEY
+SGLANG_API_KEY=$VLLM_API_KEY
+export VLLM_API_KEY SGLANG_API_KEY
 unset ENGINE_KEY
+# How each puts a model to sleep and wakes it.
+if [ "$server" = sglang ]; then
+  sleep_path=/release_memory_occupation wake_path=/resume_memory_occupation
+else
+  sleep_path=/sleep?level=1 wake_path=/wake_up
+fi
 
 mkdir -p "$status" "$run/want" "$run/state"
 
@@ -49,7 +63,7 @@ st() { cat "$run/state/$1/$2" 2>/dev/null; }
 put() { printf '%s' "$3" > "$run/state/$1/$2"; }
 want() { cat "$run/want/$1/$2" 2>/dev/null; }
 alive() { p=$(st "$1" pid); [ -n "$p" ] && kill -0 "$p" 2>/dev/null; }
-to() { put "$1" phase "$2"; put "$1" since "$(now)"; echo "vllm: $1 $2${3:+ ($3)}"; }
+to() { put "$1" phase "$2"; put "$1" since "$(now)"; echo "$server: $1 $2${3:+ ($3)}"; }
 
 report() {
   n=$1
@@ -61,16 +75,18 @@ report() {
 start() {
   n=$1
   mkdir -p "$run/state/$n"
-  set -- serve
+  if [ "$server" = vllm ]; then set -- serve; else set --; fi
   while IFS= read -r a; do set -- "$@" "$a"; done < "$run/want/$n/args"
   set -- "$@" --served-model-name "$n" --host "$host" --port "$(want "$n" port)"
   gpus=$(want "$n" gpus)
   log=$status/$n.log
-  echo "vllm: starting $n on GPUs ${gpus:-all}, port $(want "$n" port)" >> "$log"
+  echo "$server: starting $n on GPUs ${gpus:-all}, port $(want "$n" port)" >> "$log"
   (
     if [ -n "$gpus" ]; then CUDA_VISIBLE_DEVICES=$gpus HIP_VISIBLE_DEVICES=$gpus; export CUDA_VISIBLE_DEVICES HIP_VISIBLE_DEVICES; fi
     while IFS= read -r kv; do [ -n "$kv" ] && export "${kv?}"; done < "$run/want/$n/env"
-    exec "$bin" "$@"
+    # $bin is split on purpose: "python3 /sglang/serve.py" is a command and its script.
+    # shellcheck disable=SC2086
+    exec $bin "$@"
   ) >> "$log" 2>&1 &
   put "$n" pid "$!"
   put "$n" port "$(want "$n" port)"
@@ -119,11 +135,11 @@ reconcile() {
         if python3 "$helper" health "$port"; then put "$n" ready_at "$(now)"; to "$n" ready; fi ;;
       ready)
         if [ "$(want "$n" sleep)" = true ]; then
-          if python3 "$helper" post "$port" "/sleep?level=1"; then to "$n" sleeping; put "$n" sleep_failed false
+          if python3 "$helper" post "$port" "$sleep_path"; then to "$n" sleeping; put "$n" sleep_failed false
           else put "$n" sleep_failed true; fi
         fi ;;
       sleeping)
-        if [ "$(want "$n" sleep)" != true ] && python3 "$helper" post "$port" /wake_up; then to "$n" ready; fi ;;
+        if [ "$(want "$n" sleep)" != true ] && python3 "$helper" post "$port" "$wake_path"; then to "$n" ready; fi ;;
     esac
     return
   fi
@@ -172,7 +188,7 @@ retire() {
   [ -n "$p" ] && wait "$p" 2>/dev/null
   rm -rf "${run:?}/state/$n"
   rm -f "$status/$n.json"
-  echo "vllm: $n stopped"
+  echo "$server: $n stopped"
 }
 
 shutdown() {

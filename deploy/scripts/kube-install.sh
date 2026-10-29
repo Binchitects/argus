@@ -252,7 +252,7 @@ print("%d %d" % (sum(cpu(x.get("cpu", "0")) for x in a), sum(mem(x.get("memory",
 # deploy/features: each feature's services, default, needs and the features it requires. In the chart a feature
 # is its service's enabled (CHART_KEY), or, for a part of the app, a name in app.features.
 FEATURES_FILE="$HERE/../features"
-declare -A CHART_KEY=([chat-models]=llamacpp [vllm]=vllm [knowledge]=embed [argus]=argus [pictures]=imagegen [video]=videogen
+declare -A CHART_KEY=([chat-models]=llamacpp [vllm]=vllm [sglang]=sglang [knowledge]=embed [argus]=argus [pictures]=imagegen [video]=videogen
   [speech]=audio [sandbox]=sandbox [web-search]=searxng [3d]=blender [lean]=lean [studio]=studio [workspaces]=workspaces
   [laya]=laya [scanners]=scanners [monitoring]=monitoring [ha]=valkey)
 FEAT_IDS=() FEATURES_ON=()

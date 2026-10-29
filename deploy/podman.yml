@@ -19,8 +19,11 @@ services:
     <<: *gpu
     # A user cannot lift the locked-memory limit.
     ulimits: !reset {}
-  # vLLM (the vllm profile): its GPUs through CDI too.
+  # vLLM and SGLang (the vllm and sglang profiles): their GPUs through CDI too.
   vllm:
+    <<: *gpu
+    ulimits: !reset {}
+  sglang:
     <<: *gpu
     ulimits: !reset {}
   imagegen: *gpu

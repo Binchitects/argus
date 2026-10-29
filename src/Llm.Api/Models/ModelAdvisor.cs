@@ -219,13 +219,14 @@ public static class ModelAdvisor
         return new ModelAdvice(p, limits, recommended, estimate, problems, hw);
     }
 
-    /// <summary>The token cache types vLLM takes (--kv-cache-dtype).</summary>
+    /// <summary>The token cache types vLLM and SGLang take (--kv-cache-dtype; fp8 is E4M3, which SGLang names fp8_e4m3).</summary>
     public static readonly string[] VllmCacheTypes = ["fp8", "fp8_e4m3", "fp8_e5m2", "auto"];
 
     /// <summary>
     /// The settings a model has that its engine's kind does not (EngineKinds): llama.cpp runs one copy on its GPUs, without
-    /// vLLM's share of each GPU, quantisation, speculative decoding by EAGLE, or a CPU tier; vLLM has none of llama.cpp's
-    /// placement by layers, experts in RAM, prompt step, YaRN, extra preset lines or projector file.
+    /// vLLM's share of each GPU, quantisation, speculative decoding by EAGLE, or a CPU tier; vLLM and SGLang have none of
+    /// llama.cpp's placement by layers, experts in RAM, prompt step, YaRN, extra preset lines or projector file, and SGLang
+    /// none of LMCache's tiers.
     /// </summary>
     public static IReadOnlyList<ModelProblem> KindProblems(LocalModel m)
     {
@@ -263,7 +264,7 @@ public static class ModelAdvisor
             No(m.Mtp, "mtp", "llama.cpp's MTP switch: choose speculative decoding (mtp or eagle3) instead");
             if (!VllmCacheTypes.Contains(m.KvType))
             {
-                problems.Add(new("kvType", $"vLLM's token cache is {string.Join(", ", VllmCacheTypes)}.", true));
+                problems.Add(new("kvType", $"{kind.Label}'s token cache is {string.Join(", ", VllmCacheTypes)}.", true));
             }
             if (m.GpuMemoryUtilization is < 0.1 or > 0.98)
             {
@@ -281,11 +282,20 @@ public static class ModelAdvisor
             {
                 problems.Add(new("kvCpuGb", "The CPU tier is 0 to 4,096 GB.", true));
             }
-            if (m.KvTier is not (null or "cpu" or "lmcache"))
+            if (kind.Kind == EngineKinds.Sglang)
+            {
+                // SGLang's tier beyond the GPU is its own hierarchical cache in RAM; LMCache is vLLM's.
+                if (m.KvTier is not (null or "cpu"))
+                {
+                    problems.Add(new("kvTier", "SGLang's cache's tier is cpu (its hierarchical cache, in RAM).", true));
+                }
+                No(m.KvDiskGb is > 0, "kvDiskGb", "disk tier for its token cache (its hierarchical cache is in RAM)");
+            }
+            else if (m.KvTier is not (null or "cpu" or "lmcache"))
             {
                 problems.Add(new("kvTier", "The cache's tier is cpu (vLLM's own) or lmcache.", true));
             }
-            if (m.KvDiskGb is > 0 && m.KvTier != "lmcache")
+            if (m.KvDiskGb is > 0 && m.KvTier != "lmcache" && kind.Kind != EngineKinds.Sglang)
             {
                 problems.Add(new("kvDiskGb", "A disk tier needs LMCache (the cache's tier: lmcache).", true));
             }
@@ -295,7 +305,7 @@ public static class ModelAdvisor
             }
             if (m.Parallel is < 1 or > 1024)
             {
-                problems.Add(new("parallel", "Answers at once (max-num-seqs) are 1 to 1,024.", true));
+                problems.Add(new("parallel", "Answers at once are 1 to 1,024.", true));
             }
         }
         return problems;

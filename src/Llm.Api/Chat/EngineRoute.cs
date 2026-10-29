@@ -855,7 +855,7 @@ public sealed partial class EngineRoute
             return (true, []);
         }
         var residents = up.Where(n => n != model && places.ContainsKey(n))
-            .Select(n => new Resident(n, places[n].Kind, places[n].PerGpu, places[n].Kind == Llm.Core.Models.EngineKinds.Vllm))
+            .Select(n => new Resident(n, places[n].Kind, places[n].PerGpu, Llm.Core.Models.EngineKinds.ServerPerModel(places[n].Kind)))
             .Concat(GpuPlan.Reserved(hw)).Append(new Resident(model, me.Kind, me.PerGpu, true));
         var shortOn = GpuPlan.Of(hw, residents).Gpus.Where(g => me.PerGpu.ContainsKey(g.Index) && g.Need > g.Budget).Select(g => g.Index).ToList();
         return (shortOn.Count == 0, shortOn);

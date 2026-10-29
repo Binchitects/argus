@@ -22,6 +22,10 @@ services:
     image: ${LLAMACPP_ROCM_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-rocm}
   vllm:
     <<: *amd
+  # SGLang's own ROCm image (MI300; mi35x for MI350).
+  sglang:
+    <<: *amd
+    image: ${SGLANG_ROCM_IMAGE:-lmsysorg/sglang:v0.5.21-rocm720-mi30x}
   imagegen:
     <<: *amd
     image: ${SDCPP_GPU_IMAGE:-ghcr.io/leejet/stable-diffusion.cpp:master-vulkan}

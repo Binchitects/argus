@@ -148,7 +148,9 @@ public sealed class HardwareProbe(IHttpClientFactory http, IOptions<StackOptions
     {
         try
         {
-            return File.Exists(o.HardwareFile) ? FromFile(File.ReadAllText(o.HardwareFile), o) : null;
+            // The file named, else the one SGLang's supervisor writes (a stack running SGLang without vLLM).
+            var file = File.Exists(o.HardwareFile) ? o.HardwareFile : Path.Combine(o.VllmStatusDir, "sglang", "hardware.json");
+            return File.Exists(file) ? FromFile(File.ReadAllText(file), o) : null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

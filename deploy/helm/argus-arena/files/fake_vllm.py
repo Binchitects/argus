@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-A stand-in for vLLM's OpenAI-compatible server, for tests and for a stack without a big GPU.
+A stand-in for vLLM's OpenAI-compatible server, and for SGLang's (--sglang, which the fake sglang
+package beside it passes: see sglang-module), for tests and for a stack without a big GPU.
 Python's standard library only.
 
 It takes the command line `vllm serve` takes (unknown options are ignored, so the real
@@ -15,8 +16,14 @@ arguments the app writes pass), and answers what the app and the gateway ask of 
     POST /fake/state                 tests only: extra requests running or waiting, KV cache use, prefix hits
 
 The key comes from VLLM_API_KEY (or --api-key, which the supervisor never uses: a command
-line shows to anyone in the container). With a key, /v1/* need it; /health and /metrics
-do not, as in vLLM.
+line shows to anyone in the container; SGLang's launcher hands it over inside its process).
+With a key, /v1/* need it; /health and /metrics do not, as in vLLM and SGLang.
+
+As SGLang (--sglang): --model-path, --context-length, --max-running-requests, --tp-size and
+--enable-memory-saver; its metrics' names (sglang:num_running_reqs, num_queue_reqs, token_usage,
+cache_hit_rate: totals under priority="" and a series per priority, for each tensor parallel
+rank, as SGLang writes them with --enable-priority-scheduling); POST /release_memory_occupation
+and /resume_memory_occupation for sleep, which take a JSON body.
 
     fake_vllm.py serve MODEL --port 8000 [--served-model-name NAME] [--max-model-len N]
         [--max-num-seqs N] [--load-delay S] [--ttft S] [--tps N] [--fail] [--crash-after S]
@@ -49,7 +56,13 @@ def parse(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--max-num-seqs", type=int, default=16)
     p.add_argument("--api-key", default=None)
     p.add_argument("--enable-sleep-mode", action="store_true")
-    p.add_argument("--tensor-parallel-size", type=int, default=1)
+    p.add_argument("--tensor-parallel-size", "--tp-size", type=int, default=1)
+    p.add_argument("--sglang", action="store_true")
+    p.add_argument("--model-path", default=None)
+    p.add_argument("--context-length", type=int, default=None)
+    p.add_argument("--max-running-requests", type=int, default=None)
+    p.add_argument("--enable-memory-saver", action="store_true")
+    p.add_argument("--enable-priority-scheduling", action="store_true")
     p.add_argument("--load-delay", type=float, default=float(os.environ.get("FAKE_VLLM_LOAD_DELAY", "0")))
     p.add_argument("--ttft", type=float, default=float(os.environ.get("FAKE_VLLM_TTFT", "0.05")))
     p.add_argument("--tps", type=float, default=float(os.environ.get("FAKE_VLLM_TPS", "200")))
@@ -57,6 +70,11 @@ def parse(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--fail", action="store_true", default=os.environ.get("FAKE_VLLM_FAIL") == "1")
     p.add_argument("--crash-after", type=float, default=None)
     args, _unknown = p.parse_known_args(argv)
+    if args.sglang:
+        args.model = args.model_path or args.model
+        args.max_model_len = args.context_length or args.max_model_len
+        args.max_num_seqs = args.max_running_requests or args.max_num_seqs
+        args.enable_sleep_mode = args.enable_memory_saver
     return args
 
 
@@ -80,11 +98,36 @@ class State:
         self.requests = 0
         self.sleeping = False
         self.draining = False
-        self.key = os.environ.get("VLLM_API_KEY") or args.api_key
+        # SGLang's launcher hands it the key as --api-key, inside its process (never on the command line ps shows).
+        self.key = args.api_key if args.sglang else os.environ.get("VLLM_API_KEY") or args.api_key
         self.started = time.time()
 
 
+def sglang_metrics(s: State) -> str:
+    """SGLang's names, as it writes them: per tensor parallel rank, and with priority scheduling a total under priority=""
+    and a series for each priority seen (the app counts the totals of rank 0)."""
+    lines = []
+    for name, kind, value in (("sglang:num_running_reqs", "gauge", s.running + s.extra_running),
+                              ("sglang:num_queue_reqs", "gauge", s.waiting + s.extra_waiting),
+                              ("sglang:token_usage", "gauge", s.kv_usage),
+                              ("sglang:cache_hit_rate", "gauge", s.prefix_hits / s.prefix_queries if s.prefix_queries else 0.0),
+                              ("sglang:prompt_tokens_total", "counter", s.prompt_tokens),
+                              ("sglang:generation_tokens_total", "counter", s.generation_tokens)):
+        lines.append(f"# TYPE {name} {kind}")
+        for rank in range(max(1, s.args.tensor_parallel_size)):
+            base = f'engine_type="unified",model_name="{s.name}",moe_ep_rank="0",pp_rank="0",tp_rank="{rank}"'
+            if s.args.enable_priority_scheduling and kind == "gauge":
+                lines.append(f'{name}{{{base},priority=""}} {value}')
+                # A breakdown that adds up to the total: all of it under the chat's priority.
+                lines.append(f'{name}{{{base},priority="-1"}} {value}')
+            else:
+                lines.append(f"{name}{{{base}}} {value}")
+    return "\n".join(lines) + "\n"
+
+
 def metrics(s: State) -> str:
+    if s.args.sglang:
+        return sglang_metrics(s)
     label = f'model_name="{s.name}"'
     blocks = 4096
     lines = [
@@ -142,12 +185,17 @@ def handler(s: State):
             return self.headers.get("Authorization", "") == f"Bearer {s.key}"
 
         def body(self) -> dict:
+            parsed = self.body_json()
+            return parsed if isinstance(parsed, dict) else {}
+
+        def body_json(self):
+            """The request's JSON as sent; None when there is none (SGLang's endpoints refuse that)."""
             n = int(self.headers.get("Content-Length") or 0)
             raw = self.rfile.read(n) if n else b""
             try:
-                return json.loads(raw or b"{}")
+                return json.loads(raw) if raw else None
             except json.JSONDecodeError:
-                return {}
+                return None
 
         def do_GET(self):
             path = urlparse(self.path).path
@@ -160,8 +208,8 @@ def handler(s: State):
                     return self.send(200, metrics(s), "text/plain; version=0.0.4")
             if path == "/v1/models":
                 return self.send(200, json.dumps({"object": "list", "data": [
-                    {"id": s.name, "object": "model", "owned_by": "vllm", "root": s.args.model, "max_model_len": s.args.max_model_len}]}))
-            if path == "/is_sleeping":
+                    {"id": s.name, "object": "model", "owned_by": "sglang" if s.args.sglang else "vllm", "root": s.args.model, "max_model_len": s.args.max_model_len}]}))
+            if path == "/is_sleeping" and not s.args.sglang:
                 return self.send(200, json.dumps({"is_sleeping": s.sleeping}))
             return self.error(404, "Not Found")
 
@@ -170,12 +218,17 @@ def handler(s: State):
             path = url.path
             if not self.authorized():
                 return self.error(401, "Unauthorized")
-            if path == "/sleep":
+            if path == ("/release_memory_occupation" if s.args.sglang else "/sleep"):
+                if s.args.sglang and not isinstance(self.body_json(), dict):
+                    return self.error(422, "Field required: body")
                 if not s.args.enable_sleep_mode:
-                    return self.error(400, "Sleep mode is not enabled (--enable-sleep-mode).")
+                    return self.error(400, "The memory saver is not enabled (--enable-memory-saver)." if s.args.sglang
+                                      else "Sleep mode is not enabled (--enable-sleep-mode).")
                 s.sleeping = True
                 return self.send(200, "")
-            if path == "/wake_up":
+            if path == ("/resume_memory_occupation" if s.args.sglang else "/wake_up"):
+                if s.args.sglang and not isinstance(self.body_json(), dict):
+                    return self.error(422, "Field required: body")
                 s.sleeping = False
                 return self.send(200, "")
             if path == "/fake/state":
@@ -256,11 +309,12 @@ def handler(s: State):
 def main(argv: list[str]) -> int:
     args = parse(argv)
     state = State(args)
-    print(f"INFO fake vLLM: loading {args.model} as {state.name} (tp {args.tensor_parallel_size}, "
+    who = "SGLang" if args.sglang else "vLLM"
+    print(f"INFO fake {who}: loading {args.model} as {state.name} (tp {args.tensor_parallel_size}, "
           f"GPUs {os.environ.get('CUDA_VISIBLE_DEVICES', 'all')})", flush=True)
     time.sleep(args.load_delay)
     if args.fail:
-        print("ERROR fake vLLM: torch.OutOfMemoryError: CUDA out of memory (as asked: --fail)", file=sys.stderr, flush=True)
+        print(f"ERROR fake {who}: torch.OutOfMemoryError: CUDA out of memory (as asked: --fail)", file=sys.stderr, flush=True)
         return 1
     server = ThreadingHTTPServer((args.host, args.port), handler(state))
     server.daemon_threads = True
@@ -277,12 +331,12 @@ def main(argv: list[str]) -> int:
     if args.crash_after is not None:
         def crash():
             time.sleep(args.crash_after)
-            print("ERROR fake vLLM: engine core died (as asked: --crash-after)", file=sys.stderr, flush=True)
+            print(f"ERROR fake {who}: engine core died (as asked: --crash-after)", file=sys.stderr, flush=True)
             os._exit(9)
         threading.Thread(target=crash, daemon=True).start()
-    print(f"INFO fake vLLM: serving {state.name} on {args.host}:{args.port}", flush=True)
+    print(f"INFO fake {who}: serving {state.name} on {args.host}:{args.port}", flush=True)
     server.serve_forever(poll_interval=0.1)
-    print("INFO fake vLLM: stopped", flush=True)
+    print(f"INFO fake {who}: stopped", flush=True)
     return 0
 
 

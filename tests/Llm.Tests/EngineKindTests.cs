@@ -2,12 +2,14 @@ using System.Net;
 using Llm.Api.Models;
 using Llm.Core.Models;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Llm.Tests;
 
 /// <summary>
-/// Each model's engine kind (llama.cpp or vLLM): the settings each kind has and refuses, llama.cpp's presets holding its
-/// models alone and unchanged, a vLLM model from a snapshot folder, and a fallback that must be a model the gateway has.
+/// Each model's engine kind (llama.cpp, vLLM or SGLang): the settings each kind has and refuses, llama.cpp's presets holding
+/// its models alone and unchanged, a vLLM or SGLang model from a snapshot folder on its own engine, and a fallback that must
+/// be a model the gateway has.
 /// </summary>
 [Collection(nameof(AppCollection))]
 public sealed class EngineKindTests(AppFixture app) : IDisposable
@@ -45,7 +47,25 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
             change(m);
             Assert.Contains(ModelAdvisor.KindProblems(m), p => p.Field == field && p.Error);
         }
-        Assert.Contains(ModelAdvisor.KindProblems(new LocalModel { Name = "x", File = "x", EngineKind = "sglang" }), p => p.Field == "engineKind");
+        Assert.Contains(ModelAdvisor.KindProblems(new LocalModel { Name = "x", File = "x", EngineKind = "tgi" }), p => p.Field == "engineKind");
+
+        // SGLang: what vLLM has, but LMCache's tiers (its own hierarchical cache is in RAM).
+        LocalModel S() => new() { Name = "s", File = "hf/a/b@c", EngineKind = EngineKinds.Sglang, KvType = "fp8", Replicas = 2, SpecDecode = "mtp", KvTier = "cpu", KvCpuGb = 32 };
+        Assert.Empty(ModelAdvisor.KindProblems(S()));
+        foreach (var (change, field) in new (Action<LocalModel>, string)[]
+        {
+            (m => m.KvTier = "lmcache", "kvTier"), (m => m.KvDiskGb = 100, "kvDiskGb"), (m => m.CpuMoe = 4, "cpuMoe"), (m => m.KvType = "q8_0", "kvType"),
+        })
+        {
+            var m = S();
+            change(m);
+            Assert.Contains(ModelAdvisor.KindProblems(m), p => p.Field == field && p.Error);
+        }
+        Assert.Contains(ModelAdvisor.KindProblems(new LocalModel { Name = "s", File = "x", EngineKind = EngineKinds.Sglang, KvType = "q8_0" }),
+            p => p.Message.StartsWith("SGLang's token cache", StringComparison.Ordinal));
+        Assert.True(EngineKinds.SglangCapabilities is { Managed: true, TensorParallel: true, Sleep: true, PrefixCache: true, Replicas: true, SlotPinning: false });
+        Assert.Equal(["cpu"], EngineKinds.SglangCapabilities.KvTiers);
+        Assert.True(EngineKinds.ServerPerModel(EngineKinds.Sglang) && EngineKinds.ServerPerModel(EngineKinds.Vllm) && !EngineKinds.ServerPerModel(EngineKinds.LlamaCpp));
         // What each kind can do, for the form.
         Assert.True(EngineKinds.VllmCapabilities is { TensorParallel: true, Sleep: true, PrefixCache: true, SlotPinning: false });
         Assert.True(EngineKinds.LlamaCppCapabilities is { TensorParallel: false, SpillToRam: true, SlotPinning: true });
@@ -138,5 +158,39 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
         await Refused(new { name = "x5", file = "tiny/Tiny-4B-Q4_K_M.gguf", fallback = "nothing-of-the-sort" }, "fallback");
         await Refused(new { name = "x6", engineKind = "external", file = "tiny/Tiny-4B-Q4_K_M.gguf" }, "engineKind");
         await Refused(new { name = "x7", engineKind = "vllm", file = "hf/acme/../../tiny" }, "file");
+    }
+
+    [Fact]
+    public async Task An_sglang_model_goes_to_the_sglang_engine_with_sglangs_arguments_and_to_the_gateway_at_its_port()
+    {
+        await using var f = NewApp();
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var gateway = (FakeGateway)f.Services.GetRequiredService<Llm.Api.Gateway.ILiteLlm>();
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", new
+        {
+            name = "swift", engineKind = "sglang", file = "hf/acme/Flash@abc123", context = 65536, parallel = 48, devices = "0", kvCpuGb = 16, temperature = 0.7,
+        }));
+        // This stack's two engines (Engine:Vllm unset): vllm's presets have none of it, sglang's have it.
+        var presets = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(Config, "sglang", VllmBackend.PresetsFile)))!["models"]!.AsArray();
+        var entry = Assert.Single(presets)!;
+        Assert.Equal(("swift", 8001), (entry["name"]!.GetValue<string>(), entry["port"]!.GetValue<int>()));
+        var args = entry["args"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
+        string After(string flag) => args[args.IndexOf(flag) + 1];
+        Assert.Equal(("/library/hf/acme/Flash@abc123", "65536", "48", "fp8_e4m3", "16"),
+            (After("--model-path"), After("--context-length"), After("--max-running-requests"), After("--kv-cache-dtype"), After("--hicache-size")));
+        Assert.Contains("--schedule-low-priority-values-first", args);
+        Assert.Equal("""{"temperature":0.7}""", After("--preferred-sampling-params"));
+        Assert.False(File.Exists(Path.Combine(Config, "vllm", VllmBackend.PresetsFile)));
+        var row = (await admin.JsonAsync(await admin.GetAsync("/api/admin/models"))).GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == "swift");
+        Assert.Equal("sglang", row.GetProperty("engineKind").GetString());
+        // At the gateway: its own port on the sglang engine, never more at once than its answers at once.
+        var registered = gateway.Managed.Values.Single(m => m.Name == "swift");
+        Assert.Equal("http://sglang:8001/v1", registered.Params["api_base"]!.GetValue<string>());
+        Assert.Equal(48, registered.Params["max_parallel_requests"]!.GetValue<int>());
+
+        // LMCache is vLLM's: refused.
+        var refused = await admin.PostAsync("/api/admin/models", new { name = "swift2", engineKind = "sglang", file = "hf/acme/Flash@abc123", kvTier = "lmcache" });
+        await StatusAssert.Is(HttpStatusCode.BadRequest, refused);
+        Assert.Contains("kvTier", await refused.Content.ReadAsStringAsync(), StringComparison.Ordinal);
     }
 }

@@ -75,7 +75,7 @@ public static class ModelEndpoints
 
     private static async Task<IResult> ListAsync(AppDbContext db, ChatModels gatewayModels, EngineState state, ModelCatalog catalog, ModelLibrary library,
         HardwareProbe hardware, ModelHoursState hours, IOptions<EngineOptions> engine, MediaControl media, SmallModel small, PriceBook prices, ModelPolicy policy, GpuShare gpu,
-        AccessService access, EngineClient engines, ToolModeBook toolModes, CancellationToken ct)
+        AccessService access, EngineClient engines, ToolModeBook toolModes, Operations.Features features, CancellationToken ct)
     {
         var e = engine.Value;
         // How each chat model is given its tools: the admins' choice (set), else the automatic one.
@@ -144,8 +144,8 @@ public static class ModelEndpoints
                 vision = m.Projector is { Length: > 0 }, atGateway = At(m.Name) is not null, access = Access(m.Name),
                 profile = files.GetValueOrDefault(m.File),
                 // What its token cache keeps, and the RAM it takes.
-                // vLLM's: prefix caching for every request, its CPU tier, and what its metrics say now (hit rate, cache use, queue).
-                cache = m.EngineKind == EngineKinds.Vllm
+                // vLLM's and SGLang's: prefix caching for every request, a CPU tier, and what its metrics say now (hit rate, cache use, queue).
+                cache = EngineKinds.ServerPerModel(m.EngineKind)
                     ? TokenCache.OfVllm(m, state.StatusOf(m.Name) == "loaded" ? await engines.CapacityAsync(m.Name, TimeSpan.FromSeconds(1), ct) : null)
                     : TokenCache.Of(m, files.GetValueOrDefault(m.File), onServers.Contains(m.Name), engine.Value.SessionCacheGb),
                 // Its engine, and what only some kinds have (EngineKinds).
@@ -208,8 +208,12 @@ public static class ModelEndpoints
                 plan = e.Enabled ? Plan(kept, local, e, library, hw) : null,
                 // The kinds of engine and what each can do: the form offers a model only its kind's settings.
                 kinds = EngineKinds.All,
-                // Each engine instance (llama.cpp, each vLLM, the servers the app does not run), and why one's models could not be listed.
-                instances = engines.Backends.Select(b => new { b.Name, kind = b.Capabilities.Kind, managed = b.Capabilities.Managed, problem = engines.Problems.GetValueOrDefault(b.Name) }),
+                // Each engine instance (llama.cpp, each vLLM and SGLang, the servers the app does not run), and why one's models could not be
+                // listed. On: this stack's vllm and sglang run with their features; another machine's is there whatever this stack runs.
+                instances = engines.Backends.Select(b => new
+                {
+                    b.Name, kind = b.Capabilities.Kind, managed = b.Capabilities.Managed, problem = engines.Problems.GetValueOrDefault(b.Name), on = features.Runs(b.Name),
+                }),
             },
             // The model for sub-agents and small steps (Settings → Model), and what keeps it from doing them well.
             small = small.Name is { } name ? new { name, warning = await small.WarningAsync(ct) } : null,
@@ -237,10 +241,10 @@ public static class ModelEndpoints
         }));
     }
 
-    /// <summary>The Hugging Face snapshots in the library, for vLLM models: each with its size, whether it is whole, and the models using it.</summary>
+    /// <summary>The Hugging Face snapshots in the library, for vLLM and SGLang models: each with its size, whether it is whole, and the models using it.</summary>
     private static async Task<IResult> SnapshotsAsync(ModelLibrary library, AppDbContext db, CancellationToken ct)
     {
-        var used = await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.Vllm).Select(m => new { m.Name, m.File, m.DraftHead }).ToListAsync(ct);
+        var used = await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.Vllm || m.EngineKind == EngineKinds.Sglang).Select(m => new { m.Name, m.File, m.DraftHead }).ToListAsync(ct);
         return Results.Ok(library.Snapshots().Select(s => new
         {
             s.Path, s.Repo, s.Revision, s.Size, s.Complete, s.Why, s.Architectures,
@@ -256,9 +260,9 @@ public static class ModelEndpoints
             ? saved
             : new LocalModel { Name = "draft", File = "" };
         var file = (body.File ?? model.File).Trim();
-        if ((body.EngineKind ?? model.EngineKind) == EngineKinds.Vllm)
+        if (EngineKinds.ServerPerModel(body.EngineKind ?? model.EngineKind))
         {
-            // A snapshot for vLLM: its own advisor, beside what is kept on the GPUs.
+            // A snapshot for vLLM or SGLang: its own advisor, beside what is kept on the GPUs.
             if (library.Snapshot(file) is not { } snapshot || VllmAdvisor.Read(library.FullPath(snapshot.Path)) is not { } profile)
             {
                 return AuthEndpoints.Problem(400, "file", "Choose a Hugging Face snapshot from the model library.");
@@ -585,15 +589,15 @@ public static class ModelEndpoints
     internal sealed record Placed(IReadOnlyList<string> Kept, IReadOnlyList<LocalModel> Local);
 
     /// <summary>
-    /// The kept vLLM models (but <paramref name="except"/>) as GpuPlan's residents, the RAM they keep (asleep, a CPU tier), and
-    /// with the servers' reserves what that leaves taken on each GPU. A vLLM model takes its share of its GPUs whatever it holds.
+    /// The kept vLLM and SGLang models (but <paramref name="except"/>) as GpuPlan's residents, the RAM they keep (asleep, a CPU
+    /// tier), and with the servers' reserves what that leaves taken on each GPU. Each takes its share of its GPUs whatever it holds.
     /// </summary>
     internal static (List<Resident> Residents, long Ram, Dictionary<int, long> PerGpu) Others(Hardware hw, IReadOnlyList<string> kept, IReadOnlyList<LocalModel> local,
         ModelLibrary library, string? except = null)
     {
         var residents = new List<Resident>();
         long ram = 0;
-        foreach (var m in local.Where(m => m.EngineKind == EngineKinds.Vllm && m.Name != except && kept.Contains(m.Name)))
+        foreach (var m in local.Where(m => EngineKinds.ServerPerModel(m.EngineKind) && m.Name != except && kept.Contains(m.Name)))
         {
             if (Hardware.ParseDevices(m.Devices) is not { Count: > 0 } gpus)
             {
@@ -712,7 +716,7 @@ public static class ModelEndpoints
         {
             return (AuthEndpoints.Problem(400, "fallback", "The fallback is another model the gateway has."), null);
         }
-        if (kind.Kind == EngineKinds.Vllm)
+        if (EngineKinds.ServerPerModel(kind.Kind))
         {
             return ApplyVllm(m, body, file, library, hardware, prices, placed);
         }

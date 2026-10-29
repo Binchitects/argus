@@ -249,6 +249,9 @@ public static class VllmAdvisor
     {
         var problems = new List<ModelProblem>();
         var inv = CultureInfo.InvariantCulture;
+        // vLLM's or SGLang's: one server a model on its GPUs, either way.
+        var kind = EngineKinds.Of(m.EngineKind) is { Kind: EngineKinds.Sglang } sglang ? sglang : EngineKinds.VllmCapabilities;
+        var label = kind.Label;
         var utilization = m.GpuMemoryUtilization ?? DefaultUtilization;
         var replicas = Math.Max(1, m.Replicas);
         var trained = p.TrainedContext;
@@ -274,7 +277,7 @@ public static class VllmAdvisor
         }
         if (p.Approximate)
         {
-            problems.Add(new("memory", "Its attention is compressed and sparse: the cache figures here are rough. vLLM says its real capacity in its log as it starts.", false));
+            problems.Add(new("memory", $"Its attention is compressed and sparse: the cache figures here are rough. {label} says its real capacity in its log as it starts.", false));
         }
         if (hw is null)
         {
@@ -283,7 +286,7 @@ public static class VllmAdvisor
         var devices = GpuPlan.DevicesOf(hw);
         if (devices.Count == 0)
         {
-            problems.Add(new("devices", "vLLM needs GPUs, and this machine's engines have none: run this model's GGUF on llama.cpp instead, or on an engine with GPUs.", true));
+            problems.Add(new("devices", $"{label} needs GPUs, and this machine's engines have none: run this model's GGUF on llama.cpp instead, or on an engine with GPUs.", true));
             return new ModelAdvice(profile, limits, null, null, problems, hw);
         }
         var proposed = Propose(p, hw, replicas, utilization, context, m.KvType, others);
@@ -303,7 +306,7 @@ public static class VllmAdvisor
         }
         if (group.FirstOrDefault(d => !EngineKinds.VllmCapabilities.Backends.Contains(d.Backend)) is { } other)
         {
-            problems.Add(new("devices", $"GPU {other.Index} ({other.Name}) runs on {other.Backend}, which vLLM does not: it takes {string.Join(" or ", EngineKinds.VllmCapabilities.Backends)} GPUs.", true));
+            problems.Add(new("devices", $"GPU {other.Index} ({other.Name}) runs on {other.Backend}, which {label} does not: it takes {string.Join(" or ", kind.Backends)} GPUs.", true));
         }
         if (group.Select(d => d.Vendor).Distinct().Count() > 1)
         {
@@ -339,7 +342,7 @@ public static class VllmAdvisor
             0, 0, ram, hw.RamForModels, p.Layers + 1, p.Layers, 0, p.Experts is > 0 ? p.Layers : 0, fit, p.Approximate);
         if (room <= 0)
         {
-            problems.Add(new("memory", $"Its weights take {G(p.WeightBytes / tp)} of each of its {tp} GPU{(tp == 1 ? "" : "s")}, more than the {utilization:0.00} share of each less {G(Overhead)} for vLLM itself: it would not start. "
+            problems.Add(new("memory", $"Its weights take {G(p.WeightBytes / tp)} of each of its {tp} GPU{(tp == 1 ? "" : "s")}, more than the {utilization:0.00} share of each less {G(Overhead)} for {label} itself: it would not start. "
                 + "Give it more GPUs, a larger share, or a smaller quantisation.", true));
         }
         else
@@ -355,7 +358,7 @@ public static class VllmAdvisor
             }
             else if (((long)Math.Min(context, TypicalContext) * perToken + state) * m.Parallel > room)
             {
-                problems.Add(new("parallel", string.Create(inv, $"{m.Parallel} answers at once of {Math.Min(context, TypicalContext):N0} tokens need more than the {G(room)} of cache: vLLM queues or preempts the rest."), false));
+                problems.Add(new("parallel", string.Create(inv, $"{m.Parallel} answers at once of {Math.Min(context, TypicalContext):N0} tokens need more than the {G(room)} of cache: {label} queues or preempts the rest."), false));
             }
         }
         if (others is { Count: > 0 } && group.Any(d => (long)(d.Total * utilization) > d.Total - d.Reserved - Hardware.FitMargin - others.GetValueOrDefault(d.Index)))

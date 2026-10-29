@@ -153,10 +153,10 @@
 - **llama.cpp (keep).**
   - Serves GGUF, the small models, models partly offloaded to RAM (DeepSeek-class Q2/Q3), the embedder, and router mode for many small models.
   - Already supports per-model `device = CUDA0,…` (`ModelCatalog.cs:538`) and per-GPU fit targets.
-- **SGLang (later, optional).**
-  - Offers HiCache (GPU, host, then L3 storage tiers) and strong MLA/DeepSeek kernels.
-  - But reports show NaN outputs on sm_120 with 0.5.8, and a third engine doubles the matrix.
-  - Keep the abstraction kind-agnostic, and add SGLang only when a model needs it.
+- **SGLang (added, the `sglang` feature).**
+  - Offers its radix cache (every shared prefix reused, suited to agents and a common system prompt), HiCache (GPU, then host RAM) and strong MLA/DeepSeek kernels.
+  - Runs under the same supervisor as vLLM (`ENGINE_SERVER=sglang`, through `services/sglang/serve.py`, which hands it the key inside its process), with the same desired state, status files and gateway registration; only its arguments and metrics differ (`ModelCatalog.SglangArgs`, `sglang:*`).
+  - Pinned at **v0.5.21** (CUDA 13 by default, torch 2.13, as vLLM 0.31). Earlier releases (0.5.8) had NaN outputs on sm_120: smoke-test each model at bring-up, as for vLLM.
 
 ### 3.2 How the app drives vLLM (no Docker socket)
 vLLM serves **one model per process** and has no router mode. Keep the pattern the stack already uses for llama.cpp (`router.sh` watching `models.ini`) and for media (`sd-serve.sh` with `gpu=N` and status files):

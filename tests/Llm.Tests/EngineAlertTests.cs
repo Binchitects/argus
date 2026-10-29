@@ -2,8 +2,8 @@ namespace Llm.Tests;
 
 /// <summary>
 /// The engines' alert rules (config/prometheus/rules/engines.yml) in the stack's own Prometheus (promtool test rules): a
-/// vLLM cache full, requests waiting inside vLLM, preemption, a restart loop, a GPU's Xid and ECC errors; and nothing on a
-/// llama.cpp-only stack.
+/// vLLM or SGLang cache full, requests waiting inside either, preemption, a restart loop, a GPU's Xid and ECC errors; and
+/// nothing on a llama.cpp-only stack.
 /// </summary>
 public sealed class EngineAlertTests(Promtool promtool) : IClassFixture<Promtool>
 {
@@ -49,6 +49,14 @@ public sealed class EngineAlertTests(Promtool promtool) : IClassFixture<Promtool
                     values: '0+10x30'
                   - series: 'process_start_time_seconds{component="inference",model="flash"}'
                     values: '1 2 3 4 5 5 5 5 5 5 5 5'
+                  - series: 'sglang:token_usage{model_name="swift",tp_rank="0",priority=""}'
+                    values: '0.98x30'
+                  - series: 'sglang:token_usage{model_name="swift",tp_rank="0",priority="-1"}'
+                    values: '0.98x30'
+                  - series: 'sglang:token_usage{model_name="calm",tp_rank="1",priority=""}'
+                    values: '0.98x30'
+                  - series: 'sglang:num_queue_reqs{model_name="swift",tp_rank="0",priority=""}'
+                    values: '4x30'
                   - series: 'DCGM_FI_DEV_XID_ERRORS{gpu="2"}'
                     values: '0 0 0 79 79 79 79 79'
                   - series: 'DCGM_FI_DEV_ECC_DBE_VOL_TOTAL{gpu="3"}'
@@ -62,6 +70,14 @@ public sealed class EngineAlertTests(Promtool promtool) : IClassFixture<Promtool
                     alertname: VllmRequestsWaiting
                     exp_alerts:
                       - exp_labels: { severity: warning, component: inference, model_name: flash }
+                  - eval_time: 6m
+                    alertname: SglangKvCacheFull
+                    exp_alerts:
+                      - exp_labels: { severity: warning, component: inference, model_name: swift }
+                  - eval_time: 5m
+                    alertname: SglangRequestsWaiting
+                    exp_alerts:
+                      - exp_labels: { severity: warning, component: inference, model_name: swift, tp_rank: "0" }
                   - eval_time: 12m
                     alertname: VllmPreempting
                     exp_alerts:
@@ -85,6 +101,8 @@ public sealed class EngineAlertTests(Promtool promtool) : IClassFixture<Promtool
                 alert_rule_test:
                   - { eval_time: 10m, alertname: VllmKvCacheFull, exp_alerts: [] }
                   - { eval_time: 10m, alertname: VllmRequestsWaiting, exp_alerts: [] }
+                  - { eval_time: 10m, alertname: SglangKvCacheFull, exp_alerts: [] }
+                  - { eval_time: 10m, alertname: SglangRequestsWaiting, exp_alerts: [] }
                   - { eval_time: 10m, alertname: GpuXidErrors, exp_alerts: [] }
             """;
         var (exit, output) = await promtool.RunAsync("engines.test.yml", test, "test", "rules");

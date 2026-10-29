@@ -35,6 +35,9 @@ COPIES = {
     "files/gpu-probe.py": "services/gpu-probe.py",
     "files/fake_vllm.py": "../tools/fake-vllm/fake_vllm.py",
     "files/fake-vllm": "../tools/fake-vllm/vllm",
+    "files/sglang-serve.py": "services/sglang/serve.py",
+    "files/fake-sglang-init.py": "../tools/fake-vllm/sglang-module/sglang/__init__.py",
+    "files/fake-sglang-launch.py": "../tools/fake-vllm/sglang-module/sglang/launch_server.py",
 }
 for rule in sorted((DEPLOY / "config/prometheus/rules").glob("*.yml")):
     COPIES[f"files/prometheus/rules/{rule.name}"] = f"config/prometheus/rules/{rule.name}"
