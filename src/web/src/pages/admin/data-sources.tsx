@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Database, History, Pencil, Plug, Plus, RefreshCw, Trash2, TriangleAlert } from 'lucide-react'
-import { useId, useState } from 'react'
+import { Database, FileSpreadsheet, History, Pencil, Plug, Plus, RefreshCw, Trash2, TriangleAlert, Upload } from 'lucide-react'
+import { useId, useRef, useState, type DragEvent } from 'react'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
 import { Segmented } from '@/components/app/segmented'
@@ -18,11 +18,36 @@ import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import type { DataTable } from '../data/data-api'
 
+type Kind = 'postgres' | 'mysql' | 'sqlserver' | 'files'
+
+/** Each kind of database: its name, its connection's shape, and an account that may only read, made there. */
+const kinds: Record<Kind, { label: string; connection: string; reader: string }> = {
+  postgres: {
+    label: 'PostgreSQL',
+    connection: 'Host=db.example.com;Port=5432;Database=shop;Username=arena_reader;Password=…',
+    reader: "create role arena_reader login password '…'; grant usage on schema shop to arena_reader; grant select on shop.orders, shop.customers to arena_reader;",
+  },
+  mysql: {
+    label: 'MySQL or MariaDB',
+    connection: 'Server=db.example.com;Port=3306;Database=shop;User ID=arena_reader;Password=…',
+    reader: "create user 'arena_reader'@'%' identified by '…'; grant select on shop.orders to 'arena_reader'@'%'; grant select on shop.customers to 'arena_reader'@'%';",
+  },
+  sqlserver: {
+    label: 'SQL Server',
+    connection: 'Server=db.example.com,1433;Database=shop;User ID=arena_reader;Password=…;Encrypt=True',
+    reader: "create login arena_reader with password = '…'; create user arena_reader for login arena_reader; grant select on dbo.orders to arena_reader; grant showplan to arena_reader;",
+  },
+  files: { label: 'Data files', connection: '', reader: '' },
+}
+
+/** What a data files source takes, as the file picker filters them. */
+const dataFiles = '.csv,.tsv,.tab,.txt,.xlsx,.json,.jsonl,.ndjson'
+
 interface Source {
   id: string
   name: string
   description: string
-  kind: string
+  kind: Kind
   tables: string[]
   notes: string
   reach: 'company' | 'groups'
@@ -38,6 +63,8 @@ interface Probed {
   tables: DataTable[]
   warnings: string[]
   where: string
+  /** MySQL: the account's grants alone decide what a query reads, so every table it may read is open. */
+  grantsOnly?: boolean
 }
 
 interface AskedQuery {
@@ -59,6 +86,7 @@ export function DataSourcesPage() {
   const sources = useQuery({ queryKey: sourcesKey, queryFn: ({ signal }) => api<Source[]>('/api/admin/data-sources', { signal }) })
   const [editing, setEditing] = useState<Source | 'new' | null>(null)
   const [reading, setReading] = useState<Source | null>(null)
+  const [filing, setFiling] = useState<Source | null>(null)
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const again = useMutation({
@@ -76,7 +104,7 @@ export function DataSourcesPage() {
     <>
       <PageHeader
         title="Data sources"
-        description="Databases people may ask in words (Workspace → Data, and the chat's Company data tool). PostgreSQL, read only: every query runs in a read-only transaction, after its plan shows it reads only the tables you open here."
+        description="Databases people may ask in words (Workspace → Data, and the chat's Company data tool): PostgreSQL, MySQL or MariaDB, and SQL Server, read only. PostgreSQL and SQL Server run a query only after its plan shows it reads only the tables you open here; MySQL only with an account that may read nothing else."
         actions={
           <Button onClick={() => setEditing('new')}>
             <Plus /> Connect a database
@@ -96,6 +124,7 @@ export function DataSourcesPage() {
                   <CardTitle className="flex min-w-0 items-center gap-2 text-base">
                     <Database className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                     <span className="truncate">{s.name}</span>
+                    <Badge variant="outline" className="shrink-0 font-normal">{kinds[s.kind]?.label ?? s.kind}</Badge>
                   </CardTitle>
                   <CardDescription className="min-w-0 truncate font-mono text-xs">{s.where}</CardDescription>
                   <CardAction>
@@ -114,6 +143,11 @@ export function DataSourcesPage() {
                     )}
                   </p>
                   <div className="flex flex-wrap gap-2">
+                    {s.kind === 'files' && (
+                      <Button size="sm" variant="outline" onClick={() => setFiling(s)}>
+                        <FileSpreadsheet /> Files
+                      </Button>
+                    )}
                     <Button size="sm" variant="outline" onClick={() => setEditing(s)}>
                       <Pencil /> Change
                     </Button>
@@ -149,6 +183,9 @@ export function DataSourcesPage() {
       <Dialog open={reading !== null} onOpenChange={(o) => !o && setReading(null)}>
         <DialogContent className="sm:max-w-3xl">{reading && <QueriesList source={reading} />}</DialogContent>
       </Dialog>
+      <Dialog open={filing !== null} onOpenChange={(o) => !o && setFiling(null)}>
+        <DialogContent className="sm:max-w-2xl">{filing && <FilesList source={sources.data.find((x) => x.id === filing.id) ?? filing} />}</DialogContent>
+      </Dialog>
     </>
   )
 }
@@ -157,6 +194,7 @@ export function DataSourcesPage() {
 function SourceForm({ source, onClose }: { source: Source | null; onClose: () => void }) {
   const queryClient = useQueryClient()
   const id = useId()
+  const [kind, setKind] = useState<Kind>(source?.kind ?? 'postgres')
   const [name, setName] = useState(source?.name ?? '')
   const [description, setDescription] = useState(source?.description ?? '')
   const [connection, setConnection] = useState('')
@@ -170,11 +208,11 @@ function SourceForm({ source, onClose }: { source: Source | null; onClose: () =>
   const [error, setError] = useState<string | null>(null)
   const groups = useQuery({ queryKey: ['admin', 'groups', 'names'], queryFn: ({ signal }) => api<{ id: string; name: string }[]>('/api/admin/groups', { signal }), enabled: reach === 'groups' })
   const probe = useMutation({
-    mutationFn: () => api<Probed>('/api/admin/data-sources/probe', { body: { connection: connection.trim() || null, id: source?.id } }),
+    mutationFn: () => api<Probed>('/api/admin/data-sources/probe', { body: { connection: connection.trim() || null, id: source?.id, kind } }),
     onSuccess: (p) => {
       setProbed(p)
       setError(null)
-      setTables((t) => t.filter((x) => p.tables.some((y) => y.name === x)))
+      setTables((t) => (p.grantsOnly ? p.tables.map((x) => x.name) : t.filter((x) => p.tables.some((y) => y.name === x))))
     },
     onError: (e) => setError(errorMessage(e)),
   })
@@ -182,7 +220,7 @@ function SourceForm({ source, onClose }: { source: Source | null; onClose: () =>
     mutationFn: () => {
       const body = {
         name: name.trim(), description: description.trim(), connection: connection.trim() || undefined, tables, notes: notes.trim(), reach, groupIds: reach === 'groups' ? groupIds : [],
-        mostRows: Number(mostRows), seconds: Number(seconds),
+        mostRows: Number(mostRows), seconds: Number(seconds), kind: source ? undefined : kind,
       }
       return source ? api(`/api/admin/data-sources/${source.id}`, { method: 'PATCH', body }) : api('/api/admin/data-sources', { body })
     },
@@ -194,6 +232,9 @@ function SourceForm({ source, onClose }: { source: Source | null; onClose: () =>
     onError: (e) => setError(errorMessage(e)),
   })
   const changedConnection = connection.trim().length > 0
+  const grantsOnly = probed?.grantsOnly ?? kind === 'mysql'
+  const k = kinds[kind]
+  const files = kind === 'files'
   return (
     <form
       className="grid max-h-[80vh] gap-4 overflow-y-auto pr-1"
@@ -206,10 +247,28 @@ function SourceForm({ source, onClose }: { source: Source | null; onClose: () =>
       <DialogHeader>
         <DialogTitle>{source ? `Change ${source.name}` : 'Connect a database'}</DialogTitle>
         <DialogDescription>
-          PostgreSQL. Make it a role that may only read what people should ask, for example: <code className="text-xs">create role arena_reader login password '…'; grant usage on schema shop to arena_reader; grant select on shop.orders, shop.customers to arena_reader;</code>
+          {files ? (
+            'CSV, TSV, Excel (.xlsx) and JSON files, each a table (each sheet of a workbook too), in a part of the stack\'s own database that only this source reads. Upload them once it is made (Files).'
+          ) : (
+            <>
+              {k.label}. Make it an account that may only read what people should ask, for example: <code className="text-xs">{k.reader}</code>
+            </>
+          )}
         </DialogDescription>
       </DialogHeader>
       {error && <Alert variant="destructive">{error}</Alert>}
+      {!source && (
+        <Segmented
+          label="Database"
+          value={kind}
+          onChange={(v) => {
+            setKind(v)
+            setProbed(null)
+            setTables([])
+          }}
+          options={(Object.keys(kinds) as Kind[]).map((v) => ({ value: v, label: kinds[v].label }))}
+        />
+      )}
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Name">
           <Input value={name} maxLength={100} onChange={(e) => setName(e.target.value)} placeholder="Shop" />
@@ -218,7 +277,8 @@ function SourceForm({ source, onClose }: { source: Source | null; onClose: () =>
           <Input value={description} maxLength={500} onChange={(e) => setDescription(e.target.value)} placeholder="Orders and customers of the web shop" />
         </Field>
       </div>
-      <Field label={source ? 'A new connection (empty keeps the one saved)' : 'Connection'} hint={source ? `Now: ${source.where}` : 'Host=db.example.com;Port=5432;Database=shop;Username=arena_reader;Password=…'}>
+      {!files && (
+      <Field label={source ? 'A new connection (empty keeps the one saved)' : 'Connection'} hint={source ? `Now: ${source.where}` : k.connection}>
         <div className="flex gap-2">
           <Input type="password" autoComplete="off" value={connection} onChange={(e) => setConnection(e.target.value)} className="font-mono text-xs" />
           <Button type="button" variant="outline" onClick={() => probe.mutate()} loading={probe.isPending} disabled={!source && !changedConnection}>
@@ -226,11 +286,13 @@ function SourceForm({ source, onClose }: { source: Source | null; onClose: () =>
           </Button>
         </div>
       </Field>
-      {probed && (
+      )}
+      {probed && !files && (
         <fieldset className="grid gap-2">
           <legend className="mb-1 text-sm font-medium">
-            Tables open to questions <span className="font-normal text-muted-foreground">({probed.where}, {probed.tables.length} the role may read)</span>
+            Tables open to questions <span className="font-normal text-muted-foreground">({probed.where}, {probed.tables.length} the account may read)</span>
           </legend>
+          {grantsOnly && <p className="text-xs text-muted-foreground">{k.label} does not show which tables a query reads: every table the account may read is open. To keep one out, take its SELECT away from the account.</p>}
           {probed.warnings.map((w) => (
             <p key={w} className="flex gap-1.5 text-xs text-warning-ink">
               <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
@@ -240,7 +302,7 @@ function SourceForm({ source, onClose }: { source: Source | null; onClose: () =>
           <div className="grid max-h-56 gap-1 overflow-y-auto rounded-lg border p-2 sm:grid-cols-2">
             {probed.tables.map((t) => (
               <div key={t.name} className="flex items-center gap-2 text-sm">
-                <Checkbox id={`${id}-${t.name}`} checked={tables.includes(t.name)} onCheckedChange={(on) => setTables(on ? [...tables, t.name] : tables.filter((x) => x !== t.name))} />
+                <Checkbox id={`${id}-${t.name}`} checked={grantsOnly || tables.includes(t.name)} disabled={grantsOnly} onCheckedChange={(on) => setTables(on ? [...tables, t.name] : tables.filter((x) => x !== t.name))} />
                 <label htmlFor={`${id}-${t.name}`} className="min-w-0 truncate font-mono text-xs">
                   {t.name}
                 </label>
@@ -277,11 +339,93 @@ function SourceForm({ source, onClose }: { source: Source | null; onClose: () =>
         <Button type="button" variant="outline" onClick={onClose}>
           Cancel
         </Button>
-        <Button type="submit" loading={save.isPending} disabled={!name.trim() || (!source && !changedConnection) || (reach === 'groups' && groupIds.length === 0)}>
-          {source ? 'Save' : 'Connect'}
+        <Button type="submit" loading={save.isPending} disabled={!name.trim() || (!source && !files && !changedConnection) || (reach === 'groups' && groupIds.length === 0)}>
+          {source ? 'Save' : files ? 'Make it' : 'Connect'}
         </Button>
       </DialogFooter>
     </form>
+  )
+}
+
+/** A data files source's tables, each from a file or a sheet; files dropped or chosen become tables (one of the same name replaced). */
+function FilesList({ source }: { source: Source }) {
+  const queryClient = useQueryClient()
+  const confirm = useConfirm()
+  const pick = useRef<HTMLInputElement>(null)
+  const [over, setOver] = useState(false)
+  const [sending, setSending] = useState(false)
+  const refresh = () => void queryClient.invalidateQueries({ queryKey: sourcesKey })
+  const upload = async (chosen: File[]) => {
+    if (chosen.length === 0) return
+    setSending(true)
+    try {
+      const form = new FormData()
+      for (const f of chosen) form.append('files', f, f.name)
+      const r = await api<{ imported: { table: string; rows: number }[] }>(`/api/admin/data-sources/${source.id}/files`, { body: form })
+      toast.success(`${r.imported.length} ${r.imported.length === 1 ? 'table' : 'tables'} ready`, { description: r.imported.map((i) => `${i.table}: ${i.rows} rows`).join(', ') })
+    } catch (e) {
+      toast.error('The upload stopped', { description: errorMessage(e) })
+    } finally {
+      setSending(false)
+      refresh()
+    }
+  }
+  const drop = (e: DragEvent) => {
+    e.preventDefault()
+    setOver(false)
+    void upload([...e.dataTransfer.files])
+  }
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>{source.name}: files</DialogTitle>
+        <DialogDescription>CSV, TSV, Excel (.xlsx) and JSON, up to 200 MB each. Each becomes a table, its columns typed from their values; a file uploaded again replaces its table.</DialogDescription>
+      </DialogHeader>
+      <div
+        onDragOver={(e) => {
+          e.preventDefault()
+          setOver(true)
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={drop}
+        className={`grid place-items-center gap-3 rounded-xl border-2 border-dashed px-4 py-6 text-center text-sm ${over ? 'border-primary bg-primary/5' : 'border-border'}`}
+      >
+        <Upload className="size-6 text-muted-foreground" aria-hidden="true" />
+        <p className="text-muted-foreground">{sending ? 'Reading the files…' : 'Drop data files here'}</p>
+        <Button variant="outline" size="sm" disabled={sending} onClick={() => pick.current?.click()}>
+          <Upload /> Choose files
+        </Button>
+        <input ref={pick} type="file" multiple hidden accept={dataFiles} aria-label="Data files to upload" onChange={(e) => void upload([...(e.target.files ?? [])])} />
+      </div>
+      {source.schema.length === 0 && <p className="text-sm text-muted-foreground">No tables yet.</p>}
+      <ul className="grid max-h-[45vh] gap-1 overflow-y-auto text-sm" aria-label="Tables">
+        {source.schema.map((t) => (
+          <li key={t.name} className="flex min-w-0 items-center gap-3 rounded-md px-2 py-1.5 hover:bg-accent">
+            <div className="grid min-w-0 flex-1">
+              <span className="truncate font-mono text-xs">{t.name}</span>
+              <span className="truncate text-xs text-muted-foreground">
+                {t.comment ? `${t.comment} · ` : ''}
+                {t.columns.length} {t.columns.length === 1 ? 'column' : 'columns'}: {t.columns.map((c) => c.name).join(', ')}
+              </span>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="text-destructive-ink"
+              aria-label={`Remove ${t.name}`}
+              onClick={async () => {
+                if (await confirm({ title: `Remove ${t.name}?`, description: 'The table goes, and people cannot ask it any more.', confirm: 'Remove', destructive: true })) {
+                  await api(`/api/admin/data-sources/${source.id}/files/${encodeURIComponent(t.name.split('.').pop() ?? t.name)}`, { method: 'DELETE' }).catch((e: unknown) => toast.error(errorMessage(e)))
+                  refresh()
+                }
+              }}
+            >
+              <Trash2 />
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </>
   )
 }
 

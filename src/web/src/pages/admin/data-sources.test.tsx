@@ -35,12 +35,56 @@ describe('data sources', () => {
 
     await waitFor(() => expect(calls.find((c) => c.path === '/api/admin/data-sources' && c.method === 'POST')?.body).toEqual({
       name: 'Shop', description: '', connection: 'Host=db;Database=shop;Username=arena_reader;Password=x', tables: ['shop.orders'], notes: 'In euros.', reach: 'company', groupIds: [],
-      mostRows: 1000, seconds: 15,
+      mostRows: 1000, seconds: 15, kind: 'postgres',
     }))
     const list = await screen.findByRole('list', { name: 'Data sources' })
     expect(within(list).getByText('arena_reader@db/shop')).toBeInTheDocument()
     await userEvent.click(within(list).getByRole('button', { name: /What was asked/ }))
     const asked = await screen.findByRole('dialog', { name: 'What was asked of Shop' })
     expect(within(asked).getByRole('list', { name: 'Queries' })).toHaveTextContent('Ana · ask · 1 row · 9 ms')
+  })
+
+  it('a MySQL database opens every table its account may read', async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/data-sources': () => ({ json: [] }),
+      'POST /api/admin/data-sources/probe': () => ({ json: { tables: tables.slice(0, 2), warnings: [], where: 'arena_reader@db/shop', grantsOnly: true } }),
+      'POST /api/admin/data-sources': () => ({ status: 201, json: {} }),
+    })
+    renderApp('/admin/data-sources')
+    await userEvent.click(await screen.findByRole('button', { name: /Connect a database/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Connect a database' })
+    await userEvent.click(within(dialog).getByRole('radio', { name: 'MySQL or MariaDB' }))
+    expect(within(dialog).getByText(/Server=db.example.com;Port=3306/)).toBeInTheDocument()
+    await userEvent.type(within(dialog).getByLabelText('Name'), 'Shop')
+    await userEvent.type(within(dialog).getByLabelText('Connection'), 'Server=db;Database=shop;User ID=arena_reader;Password=x')
+    await userEvent.click(within(dialog).getByRole('button', { name: /Try it/ }))
+    const orders = await within(dialog).findByRole('checkbox', { name: 'shop.orders' })
+    expect(orders).toBeChecked()
+    expect(orders).toBeDisabled()
+    expect(within(dialog).getByText(/does not show which tables a query reads/)).toBeInTheDocument()
+    expect(calls.find((c) => c.path === '/api/admin/data-sources/probe')?.body).toMatchObject({ kind: 'mysql' })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Connect' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/admin/data-sources' && c.method === 'POST')?.body).toMatchObject({ kind: 'mysql', tables: ['shop.customers', 'shop.orders'] }))
+  })
+
+  it('a data files source takes files as tables, and removes one', async () => {
+    const schema = [{ name: 'files_1.sales', kind: 'table', comment: 'sales.csv', columns: [{ name: 'region', type: 'text', comment: null }, { name: 'revenue', type: 'numeric', comment: null }] }]
+    const source = { id: 'f1', name: 'Sales files', description: '', kind: 'files', tables: ['files_1.sales'], notes: '', reach: 'company', groupIds: [], mostRows: 1000, seconds: 15, schemaReadAt: '', where: 'uploaded files', schema }
+    const calls = fakeApi(admin, {
+      'GET /api/admin/data-sources': () => ({ json: [source] }),
+      'POST /api/admin/data-sources/f1/files': () => ({ json: { imported: [{ table: 'targets', rows: 2 }], source } }),
+      'DELETE /api/admin/data-sources/f1/files/sales': () => ({ status: 204 }),
+    })
+    renderApp('/admin/data-sources')
+    const list = await screen.findByRole('list', { name: 'Data sources' })
+    expect(within(list).getByText('Data files')).toBeInTheDocument()
+    await userEvent.click(within(list).getByRole('button', { name: /Files/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Sales files: files' })
+    expect(within(within(dialog).getByRole('list', { name: 'Tables' })).getByText(/sales.csv · 2 columns: region, revenue/)).toBeInTheDocument()
+    await userEvent.upload(within(dialog).getByLabelText('Data files to upload'), [new File(['Region,Due\nNorth,2026-10-01\n'], 'targets.csv', { type: 'text/csv' })])
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/admin/data-sources/f1/files')?.body).toBeInstanceOf(FormData))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Remove files_1.sales' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/admin/data-sources/f1/files/sales')).toBe(true))
   })
 })

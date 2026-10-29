@@ -1,19 +1,23 @@
 namespace Llm.Core.Insights;
 
 /// <summary>
-/// A database an admin connects for people to ask (Ask your data): read only, the tables named, for everyone or some
-/// groups. Its connection (with its password) is kept protected and never shown again.
+/// A database an admin connects for people to ask (Ask your data): PostgreSQL, MySQL or MariaDB, SQL Server, or data
+/// files uploaded; read only, the tables named, for everyone or some groups. Its connection (with its password) is kept protected and never shown again.
 /// </summary>
 public sealed class DataSource
 {
     public const string Postgres = "postgres";
+    public const string MySql = "mysql";
+    public const string SqlServer = "sqlserver";
+    /// <summary>Data files uploaded (CSV, Excel, JSON), each a table in a schema of the source's own in the stack's database.</summary>
+    public const string Files = "files";
     public const string Company = "company";
     public const string Groups = "groups";
 
     public Guid Id { get; set; } = Guid.CreateVersion7();
     public required string Name { get; set; }
     public string Description { get; set; } = "";
-    /// <summary>"postgres".</summary>
+    /// <summary>"postgres", "mysql" (MariaDB too), "sqlserver" or "files"; it stays what it was made.</summary>
     public string Kind { get; set; } = Postgres;
     public required string ConnectionProtected { get; set; }
     /// <summary>The tables and views people may ask, "schema.name"; nothing else is read.</summary>

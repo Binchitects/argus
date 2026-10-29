@@ -44,7 +44,7 @@ public sealed partial class DataQuestions(AppDbContext db, AccessService access,
         (await SourcesForAsync(me, ct)).FirstOrDefault(s => s.Id == id);
 
     /// <summary>Only the tables people may ask, as the database last described them.</summary>
-    public static List<DataTable> Open(DataSource s) => [.. PostgresData.Parse(s.Schema).Where(t => s.Tables.Contains(t.Name))];
+    public static List<DataTable> Open(DataSource s) => [.. DataEngines.Parse(s.Schema).Where(t => s.Tables.Contains(t.Name))];
 
     /// <summary>Runs SQL on the source read only, and keeps that it was run (by whom, why, how it went).</summary>
     public async Task<DataResult> RunAsync(DataSource s, string sql, AppUser me, string via, string? question, CancellationToken ct)
@@ -53,7 +53,7 @@ public sealed partial class DataQuestions(AppDbContext db, AccessService access,
         var query = new DataQuery { SourceId = s.Id, UserId = me.Id, Question = question is { Length: > 2000 } q ? q[..2000] : question, Sql = sql, Via = via };
         try
         {
-            var result = await PostgresData.RunAsync(Unprotect(s), sql, s.Tables, s.MostRows, s.Seconds, ct);
+            var result = await DataEngines.Of(s).RunAsync(Unprotect(s), sql, s.Tables, s.MostRows, s.Seconds, ct);
             query.Rows = result.Rows.Count;
             return result;
         }
@@ -76,22 +76,23 @@ public sealed partial class DataQuestions(AppDbContext db, AccessService access,
     /// <summary>What the model is told: the database's open tables and the admin's notes, and how to answer.</summary>
     public string Instructions(DataSource s, EarlierQuestion? earlier)
     {
+        var engine = DataEngines.Of(s);
         var today = clock.GetUtcNow().ToString("yyyy-MM-dd (dddd)", CultureInfo.InvariantCulture);
         var notes = s.Notes is { Length: > 0 } n ? $"\nWhat to know about the data:\n{n}\n" : "";
         var before = earlier is { Sql.Length: > 0 }
             ? $"\nThe question before this one was \"{earlier.Question}\", answered with:\n{earlier.Sql}\nThe new question may build on it (\"and by country?\").\n"
             : "";
         return $$"""
-            You answer questions about a PostgreSQL database by writing one query that only reads. The database is "{{s.Name}}"{{(s.Description is { Length: > 0 } d ? $": {d}" : "")}}.
+            You answer questions about a {{engine.Title}} database by writing one query that only reads. The database is "{{s.Name}}"{{(s.Description is { Length: > 0 } d ? $": {d}" : "")}}.
             Today is {{today}}, UTC.
 
             The tables you may read, and nothing else:
-            {{PostgresData.Describe(Open(s))}}{{notes}}{{before}}
+            {{DataEngines.Describe(Open(s))}}{{notes}}{{before}}
             Answer with JSON only, no other words:
             {{Shape}}
 
-            Write the tables with their schema (public.orders). Give the columns short names people read ("Orders", "Month"). At most {{s.MostRows}} rows, in a sensible order.
-            One figure: one row and one column, chart "number". Change over time: one date column first (date_trunc('month', placed_at)::date as "Month"), chart "line". A few groups compared: chart "bar". A list: chart "table".
+            Write the tables {{engine.Names}}. Give the columns short names people read ("Orders", "Month"). At most {{s.MostRows}} rows, in a sensible order.
+            One figure: one row and one column, chart "number". Change over time: one date column first ({{engine.Month}}), chart "line". A few groups compared: chart "bar". A list: chart "table".
             If the tables cannot answer the question, set "sql" to "" and say why in "explanation".
             """;
     }

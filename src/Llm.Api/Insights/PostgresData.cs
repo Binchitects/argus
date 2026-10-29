@@ -1,7 +1,6 @@
 using System.Diagnostics;
-using System.Globalization;
-using System.Text.Json;
 using System.Text.Json.Nodes;
+using Llm.Core.Insights;
 using Npgsql;
 
 namespace Llm.Api.Insights;
@@ -25,14 +24,29 @@ public sealed record DataResult(List<ResultColumn> Columns, List<JsonArray> Rows
 /// lets its own tables be read through it). The role should be one that may only read: a superuser, or one that may read
 /// the server's files or run its programs, is refused.
 /// </summary>
-public static class PostgresData
+public sealed class PostgresData : IDataEngine
 {
-    public const int MostTables = 500;
-    public const int MostSql = 20_000;
-    private const int MostText = 1000;
+    private const int MostTables = DataEngines.MostTables;
 
-    /// <summary>The connection, or why it is not one that can be used.</summary>
-    public static string? CheckConnection(string? connection)
+    public string Kind => DataSource.Postgres;
+    public string Title => "PostgreSQL";
+    public string Names => "with their schema (public.orders), and the columns' short names in double quotes (\"Orders\")";
+    public string Month => "date_trunc('month', placed_at)::date as \"Month\"";
+
+    public string Where(string connection)
+    {
+        try
+        {
+            var b = new NpgsqlConnectionStringBuilder(connection);
+            return $"{b.Username}@{b.Host}{(b.Port is 5432 ? "" : $":{b.Port}")}/{b.Database}";
+        }
+        catch (ArgumentException)
+        {
+            return "";
+        }
+    }
+
+    public string? CheckConnection(string? connection)
     {
         if (string.IsNullOrWhiteSpace(connection))
         {
@@ -99,7 +113,7 @@ public static class PostgresData
     }
 
     /// <summary>The tables and views the role may see, with their columns; and what is worth knowing about the role.</summary>
-    public static async Task<(List<DataTable> Tables, List<string> Warnings)> ReadAsync(string connection, CancellationToken ct)
+    public async Task<(List<DataTable> Tables, List<string> Warnings)> ReadAsync(string connection, CancellationToken ct)
     {
         await using var conn = await OpenAsync(connection, 30, ct);
         await CheckRoleAsync(conn, null, ct);
@@ -150,74 +164,6 @@ public static class PostgresData
         return ([.. tables.Values], warnings);
     }
 
-    /// <summary>Why this is not one query that only reads (more than one statement, not a SELECT), or null; and the query without its last semicolon.</summary>
-    public static (string Sql, string? Problem) CheckSql(string? sql)
-    {
-        var text = (sql ?? "").Trim();
-        if (text.Length == 0)
-        {
-            return (text, "There is no query.");
-        }
-        if (text.Length > MostSql)
-        {
-            return (text, $"A query is at most {MostSql:N0} characters.");
-        }
-        var words = new List<string>();
-        var end = -1;
-        for (var i = 0; i < text.Length; i++)
-        {
-            var ch = text[i];
-            if (ch == '-' && i + 1 < text.Length && text[i + 1] == '-')
-            {
-                while (i < text.Length && text[i] != '\n')
-                {
-                    i++;
-                }
-            }
-            else if (ch == '/' && i + 1 < text.Length && text[i + 1] == '*')
-            {
-                var close = text.IndexOf("*/", i + 2, StringComparison.Ordinal);
-                i = close < 0 ? text.Length : close + 1;
-            }
-            else if (ch is '\'' or '"')
-            {
-                i++;
-                while (i < text.Length && (text[i] != ch || (i + 1 < text.Length && text[i + 1] == ch && ++i > 0)))
-                {
-                    i++;
-                }
-            }
-            else if (ch == '$' && DollarTag(text, i) is { } tag)
-            {
-                var close = text.IndexOf(tag, i + tag.Length, StringComparison.Ordinal);
-                i = close < 0 ? text.Length : close + tag.Length - 1;
-            }
-            else if (ch == ';')
-            {
-                end = i;
-                if (text[(i + 1)..].Trim().Trim(';').Trim().Length > 0)
-                {
-                    return (text, "One query at a time: there is more after its semicolon.");
-                }
-                break;
-            }
-            else if (char.IsLetter(ch) && words.Count < 1)
-            {
-                var start = i;
-                while (i + 1 < text.Length && (char.IsLetterOrDigit(text[i + 1]) || text[i + 1] == '_'))
-                {
-                    i++;
-                }
-                words.Add(text[start..(i + 1)].ToLowerInvariant());
-            }
-        }
-        var query = end >= 0 ? text[..end].TrimEnd() : text;
-        return words.FirstOrDefault() is "select" or "with" or "values" or "table"
-            ? (query, null)
-            : (query, "Only a query that reads (SELECT, or WITH … SELECT) can be run here.");
-    }
-
-    /// <summary>A dollar quote's tag at i ($$ or $name$), or null.</summary>
     /// <summary>
     /// The query as one statement the server parses alone: with a positional parameter Npgsql sends the text as it is
     /// (it splits nothing at semicolons), and PostgreSQL refuses more than one statement in it. So no string the check
@@ -230,28 +176,18 @@ public static class PostgresData
         return cmd;
     }
 
-    private static string? DollarTag(string text, int i)
-    {
-        var j = i + 1;
-        while (j < text.Length && (char.IsLetterOrDigit(text[j]) || text[j] == '_'))
-        {
-            j++;
-        }
-        return j < text.Length && text[j] == '$' && (j == i + 1 || !char.IsDigit(text[i + 1])) ? text[i..(j + 1)] : null;
-    }
-
     /// <summary>
     /// Runs the query read only, after its plan shows it reads only the allowed tables (and the tables of allowed views),
     /// and brings back at most <paramref name="mostRows"/> rows.
     /// </summary>
-    public static async Task<DataResult> RunAsync(string connection, string sql, IReadOnlyCollection<string> allowed, int mostRows, int seconds, CancellationToken ct)
+    public async Task<DataResult> RunAsync(string connection, string sql, IReadOnlyCollection<string> allowed, int mostRows, int seconds, CancellationToken ct)
     {
-        var (query, problem) = CheckSql(sql);
+        var (query, problem) = SqlCheck.One(sql, SqlDialect.Postgres);
         if (problem is not null)
         {
             throw new DataException(problem);
         }
-        var clock = Stopwatch.StartNew();
+        var started = Stopwatch.GetTimestamp();
         await using var conn = await OpenAsync(connection, seconds, ct);
         await using var tx = await conn.BeginTransactionAsync(System.Data.IsolationLevel.RepeatableRead, ct);
         try
@@ -266,24 +202,7 @@ public static class PostgresData
             await CheckReadsAsync(conn, tx, query, allowed, ct);
             await using var cmd = Single(query, conn, tx);
             await using var r = await cmd.ExecuteReaderAsync(ct);
-            var columns = Enumerable.Range(0, r.FieldCount).Select(i => new ResultColumn(r.GetName(i), Kind(r.GetDataTypeName(i)))).ToList();
-            var rows = new List<JsonArray>();
-            var truncated = false;
-            while (await r.ReadAsync(ct))
-            {
-                if (rows.Count >= mostRows)
-                {
-                    truncated = true;
-                    break;
-                }
-                var row = new JsonArray();
-                for (var i = 0; i < r.FieldCount; i++)
-                {
-                    row.Add(Value(r, i));
-                }
-                rows.Add(row);
-            }
-            return new DataResult(columns, rows, truncated, (int)clock.ElapsedMilliseconds);
+            return await DataEngines.RowsAsync(r, KindOf, Value, mostRows, started, ct);
         }
         catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.QueryCanceled)
         {
@@ -383,7 +302,7 @@ public static class PostgresData
     }
 
     /// <summary>A column's kind for the page: number, date, time, bool or text.</summary>
-    private static string Kind(string type) => type switch
+    private static string KindOf(string type) => type switch
     {
         "smallint" or "integer" or "bigint" or "numeric" or "real" or "double precision" or "money" => "number",
         "date" => "date",
@@ -392,63 +311,16 @@ public static class PostgresData
         _ => "text",
     };
 
-    private static JsonValue? Value(NpgsqlDataReader r, int i)
+    private static JsonValue? Value(System.Data.Common.DbDataReader r, int i)
     {
-        if (r.IsDBNull(i))
-        {
-            return null;
-        }
         try
         {
-            return r.GetValue(i) switch
-            {
-                bool b => JsonValue.Create(b),
-                short s => JsonValue.Create(s),
-                int n => JsonValue.Create(n),
-                long l => JsonValue.Create(l),
-                decimal d => JsonValue.Create(d),
-                float f => float.IsFinite(f) ? JsonValue.Create(f) : JsonValue.Create(f.ToString(CultureInfo.InvariantCulture)),
-                double d => double.IsFinite(d) ? JsonValue.Create(d) : JsonValue.Create(d.ToString(CultureInfo.InvariantCulture)),
-                DateTime t => JsonValue.Create(t.Kind == DateTimeKind.Utc ? t.ToString("O", CultureInfo.InvariantCulture) : t.ToString("yyyy-MM-ddTHH:mm:ss.FFFFFFF", CultureInfo.InvariantCulture)),
-                DateTimeOffset t => JsonValue.Create(t.ToString("O", CultureInfo.InvariantCulture)),
-                DateOnly d => JsonValue.Create(d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)),
-                byte[] bytes => JsonValue.Create($"({bytes.Length} bytes)"),
-                var v => JsonValue.Create(Cut(Convert.ToString(v, CultureInfo.InvariantCulture) ?? "")),
-            };
+            return DataEngines.Json(r.GetValue(i));
         }
         catch (InvalidCastException)
         {
             // A type with no .NET value of its own (a range, a custom type): its text.
-            return JsonValue.Create(Cut(r.GetProviderSpecificValue(i)?.ToString() ?? ""));
+            return JsonValue.Create(DataEngines.Cut(r.GetProviderSpecificValue(i)?.ToString() ?? ""));
         }
     }
-
-    private static string Cut(string s) => s.Length > MostText ? s[..MostText] + "…" : s;
-
-    /// <summary>The tables as the model reads them: name, kind, what it is, then its columns and their types.</summary>
-    public static string Describe(IEnumerable<DataTable> tables)
-    {
-        var w = new System.Text.StringBuilder();
-        foreach (var t in tables)
-        {
-            w.Append(t.Name).Append(" (").Append(t.Kind).Append(')');
-            if (t.Comment is { Length: > 0 })
-            {
-                w.Append(": ").Append(t.Comment.ReplaceLineEndings(" "));
-            }
-            w.AppendLine();
-            foreach (var c in t.Columns.Take(80))
-            {
-                w.Append("  ").Append(c.Name).Append(' ').Append(c.Type);
-                if (c.Comment is { Length: > 0 })
-                {
-                    w.Append(" -- ").Append(c.Comment.ReplaceLineEndings(" "));
-                }
-                w.AppendLine();
-            }
-        }
-        return w.ToString();
-    }
-
-    public static List<DataTable> Parse(string schema) => JsonSerializer.Deserialize<List<DataTable>>(schema, JsonSerializerOptions.Web) ?? [];
 }

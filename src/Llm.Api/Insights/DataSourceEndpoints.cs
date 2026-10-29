@@ -4,21 +4,22 @@ using Llm.Api.Identity;
 using Llm.Core.Data;
 using Llm.Core.Insights;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 
 namespace Llm.Api.Insights;
 
 /// <summary>A data source to add or change: a missing value is kept; a connection is given again only to change it.</summary>
+/// <param name="Kind">postgres (the default), mysql or sqlserver; given when it is added, and it stays.</param>
 /// <param name="Reach">company or groups (<paramref name="GroupIds"/>).</param>
 public sealed record DataSourceRequest(string? Name = null, string? Description = null, string? Connection = null, List<string>? Tables = null, string? Notes = null,
-    string? Reach = null, List<Guid>? GroupIds = null, int? MostRows = null, int? Seconds = null);
+    string? Reach = null, List<Guid>? GroupIds = null, int? MostRows = null, int? Seconds = null, string? Kind = null);
 
-/// <summary>A connection to try before it is saved (or a saved source's, read again).</summary>
-public sealed record DataProbe(string? Connection, Guid? Id = null);
+/// <summary>A connection to try before it is saved (or a saved source's, read again), of a kind (a saved source's when not given).</summary>
+public sealed record DataProbe(string? Connection, Guid? Id = null, string? Kind = null);
 
 /// <summary>
-/// Admin → Data sources: the databases people may ask (PostgreSQL), which of their tables, and who may ask them; and
-/// what was asked of them. The connection is kept protected, and never shown again.
+/// Admin → Data sources: the databases people may ask (PostgreSQL, MySQL or MariaDB, SQL Server), which of their tables,
+/// and who may ask them; and what was asked of them. The connection is kept protected, and never shown again.
+/// MySQL's tables open are every table its account may read (<see cref="IDataEngine.GrantsOnly"/>).
 /// </summary>
 public static class DataSourceEndpoints
 {
@@ -31,29 +32,30 @@ public static class DataSourceEndpoints
         g.MapPatch("/{id:guid}", UpdateAsync);
         g.MapPost("/{id:guid}/schema", ReadAgainAsync);
         g.MapDelete("/{id:guid}", RemoveAsync);
+        g.MapPost("/{id:guid}/files", UploadAsync).DisableAntiforgery().WithMetadata(new Microsoft.AspNetCore.Mvc.RequestSizeLimitAttribute(MostUpload))
+            .WithMetadata(new Microsoft.AspNetCore.Mvc.RequestFormLimitsAttribute { MultipartBodyLengthLimit = MostUpload });
+        g.MapDelete("/{id:guid}/files/{table}", RemoveTableAsync);
         g.MapGet("/{id:guid}/queries", QueriesAsync);
     }
 
-    /// <summary>Who the connection signs in as, and where: never its password.</summary>
-    private static string Where(string connection)
-    {
-        try
-        {
-            var b = new NpgsqlConnectionStringBuilder(connection);
-            return $"{b.Username}@{b.Host}{(b.Port is 5432 ? "" : $":{b.Port}")}/{b.Database}";
-        }
-        catch (ArgumentException)
-        {
-            return "";
-        }
-    }
+    private const long MostUpload = 1L * 1024 * 1024 * 1024;
+    private const long MostFile = 200L * 1024 * 1024;
+
+    /// <summary>The stack's own database, where data files go: as its own user (who makes their schemas and roles).</summary>
+    private static string Owner(AppDbContext db) => db.Database.GetConnectionString() ?? throw new DataException("The stack's database has no connection string.");
 
     private static object Brief(DataSource s, DataQuestions questions) => new
     {
         s.Id, s.Name, s.Description, s.Kind, s.Tables, s.Notes, s.Reach, s.GroupIds, s.MostRows, s.Seconds, s.SchemaReadAt, s.CreatedAt, s.UpdatedAt,
-        where = Where(questions.Unprotect(s)),
-        schema = PostgresData.Parse(s.Schema),
+        where = DataEngines.Of(s).Where(questions.Unprotect(s)),
+        schema = DataEngines.Parse(s.Schema),
     };
+
+    /// <summary>The kind asked for, or why it is none here.</summary>
+    private static (IDataEngine? Engine, IResult? Problem) EngineOf(string? kind) =>
+        DataEngines.All.TryGetValue((kind ?? DataSource.Postgres).Trim().ToLowerInvariant(), out var engine)
+            ? (engine, null)
+            : (null, AuthEndpoints.Problem(400, "kind", $"A database here is {string.Join(", ", DataEngines.All.Keys)}."));
 
     private static async Task<IResult> ListAsync(AppDbContext db, DataQuestions questions, CancellationToken ct)
     {
@@ -65,18 +67,24 @@ public static class DataSourceEndpoints
     private static async Task<IResult> ProbeAsync(DataProbe body, AppDbContext db, DataQuestions questions, CancellationToken ct)
     {
         var connection = body.Connection;
-        if (string.IsNullOrWhiteSpace(connection) && body.Id is { } id && await db.DataSources.AsNoTracking().SingleOrDefaultAsync(s => s.Id == id, ct) is { } saved)
+        var saved = body.Id is { } id ? await db.DataSources.AsNoTracking().SingleOrDefaultAsync(s => s.Id == id, ct) : null;
+        if (string.IsNullOrWhiteSpace(connection) && saved is not null)
         {
             connection = questions.Unprotect(saved);
         }
-        if (PostgresData.CheckConnection(connection) is { } bad)
+        var (engine, wrong) = EngineOf(saved?.Kind ?? body.Kind);
+        if (wrong is not null)
+        {
+            return wrong;
+        }
+        if (engine!.CheckConnection(connection) is { } bad)
         {
             return AuthEndpoints.Problem(400, "connection", bad);
         }
         try
         {
-            var (tables, warnings) = await PostgresData.ReadAsync(connection!, ct);
-            return Results.Ok(new { tables, warnings, where = Where(connection!) });
+            var (tables, warnings) = await engine.ReadAsync(connection!, ct);
+            return Results.Ok(new { tables, warnings, where = engine.Where(connection!), grantsOnly = engine.GrantsOnly });
         }
         catch (DataException ex)
         {
@@ -87,6 +95,7 @@ public static class DataSourceEndpoints
     /// <summary>Checks and applies a request; a new connection is read now (a wrong one is found here, not when someone asks).</summary>
     private static async Task<IResult?> ApplyAsync(DataSource s, DataSourceRequest body, AppDbContext db, DataQuestions questions, CancellationToken ct)
     {
+        var engine = DataEngines.Of(s);
         if (body.Name is { } name)
         {
             name = name.Trim();
@@ -110,13 +119,13 @@ public static class DataSourceEndpoints
         }
         if (body.Connection is { Length: > 0 } connection)
         {
-            if (PostgresData.CheckConnection(connection) is { } bad)
+            if (engine.CheckConnection(connection) is { } bad)
             {
                 return AuthEndpoints.Problem(400, "connection", bad);
             }
             try
             {
-                var (tables, _) = await PostgresData.ReadAsync(connection, ct);
+                var (tables, _) = await engine.ReadAsync(connection, ct);
                 s.Schema = System.Text.Json.JsonSerializer.Serialize(tables, System.Text.Json.JsonSerializerOptions.Web);
                 s.SchemaReadAt = DateTimeOffset.UtcNow;
             }
@@ -126,15 +135,23 @@ public static class DataSourceEndpoints
             }
             s.ConnectionProtected = questions.Protect(connection);
         }
+        var known = DataEngines.Parse(s.Schema).Select(t => t.Name).ToHashSet(StringComparer.Ordinal);
         if (body.Tables is { } wanted)
         {
-            var known = PostgresData.Parse(s.Schema).Select(t => t.Name).ToHashSet(StringComparer.Ordinal);
             var unknown = wanted.Where(t => !known.Contains(t)).ToList();
             if (unknown.Count > 0)
             {
                 return AuthEndpoints.Problem(400, "tables", $"The database has no {string.Join(", ", unknown.Take(5))} its role may read.");
             }
+            if (engine.GrantsOnly && !known.SetEquals(wanted))
+            {
+                return AuthEndpoints.Problem(400, "tables", $"{engine.Title} does not show which tables a query reads: every table its account may read is open. To keep one out, take its SELECT away from the account, then read its tables again.");
+            }
             s.Tables = [.. wanted.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)];
+        }
+        else if (engine.GrantsOnly)
+        {
+            s.Tables = [.. known.Order(StringComparer.Ordinal)];
         }
         if (body.Reach is { } reach)
         {
@@ -178,18 +195,40 @@ public static class DataSourceEndpoints
 
     private static async Task<IResult> AddAsync(DataSourceRequest body, AppDbContext db, DataQuestions questions, Audit audit, CancellationToken ct)
     {
-        if (body.Name is null || string.IsNullOrWhiteSpace(body.Connection))
+        var (engine, wrong) = EngineOf(body.Kind);
+        if (wrong is not null)
+        {
+            return wrong;
+        }
+        var files = engine!.Kind == DataSource.Files;
+        if (body.Name is null || (!files && string.IsNullOrWhiteSpace(body.Connection)))
         {
             return AuthEndpoints.Problem(400, "source", "A data source needs a name and its connection.");
         }
-        var s = new DataSource { Name = "", ConnectionProtected = "" };
+        var s = new DataSource { Name = "", ConnectionProtected = "", Kind = engine.Kind };
+        if (files)
+        {
+            // Its schema and role, made now; its tables come as files are uploaded.
+            try
+            {
+                body = body with { Connection = await FilesData.EnsureAsync(Owner(db), s.Id, ct), Tables = null };
+            }
+            catch (DataException ex)
+            {
+                return AuthEndpoints.Problem(400, "files", ex.Message);
+            }
+        }
         if (await ApplyAsync(s, body, db, questions, ct) is { } problem)
         {
+            if (files)
+            {
+                await FilesData.DropAsync(Owner(db), s.Id, CancellationToken.None);
+            }
             return problem;
         }
         db.DataSources.Add(s);
         await db.SaveChangesAsync(ct);
-        await audit.WriteAsync("data.source.add", s.Name, detail: Where(body.Connection));
+        await audit.WriteAsync("data.source.add", s.Name, detail: $"{engine.Title}: {engine.Where(body.Connection ?? "")}");
         return Results.Created($"/api/admin/data-sources/{s.Id}", Brief(s, questions));
     }
 
@@ -198,6 +237,14 @@ public static class DataSourceEndpoints
         if (await db.DataSources.SingleOrDefaultAsync(s => s.Id == id, ct) is not { } s)
         {
             return Results.NotFound();
+        }
+        if (body.Kind is { } kind && !string.Equals(kind.Trim(), s.Kind, StringComparison.OrdinalIgnoreCase))
+        {
+            return AuthEndpoints.Problem(400, "kind", "A data source stays the kind of database it was made: add another for a different one.");
+        }
+        if (s.Kind == DataSource.Files && body.Connection is { Length: > 0 })
+        {
+            return AuthEndpoints.Problem(400, "connection", "Uploaded files live in the stack's own database: there is no connection to give.");
         }
         if (await ApplyAsync(s, body, db, questions, ct) is { } problem)
         {
@@ -218,15 +265,30 @@ public static class DataSourceEndpoints
         }
         try
         {
-            var (tables, warnings) = await PostgresData.ReadAsync(questions.Unprotect(s), ct);
+            var engine = DataEngines.Of(s);
+            if (s.Kind == DataSource.Files)
+            {
+                // Its role made again where it is missing (a restore into another server keeps no roles).
+                s.ConnectionProtected = questions.Protect(await FilesData.EnsureAsync(Owner(db), s.Id, ct));
+            }
+            var (tables, warnings) = await engine.ReadAsync(questions.Unprotect(s), ct);
             s.Schema = System.Text.Json.JsonSerializer.Serialize(tables, System.Text.Json.JsonSerializerOptions.Web);
             s.SchemaReadAt = s.UpdatedAt = DateTimeOffset.UtcNow;
-            await db.SaveChangesAsync(ct);
             var gone = s.Tables.Where(t => tables.All(x => x.Name != t)).ToList();
-            if (gone.Count > 0)
+            if (engine.GrantsOnly)
+            {
+                var added = tables.Select(t => t.Name).Where(t => !s.Tables.Contains(t)).ToList();
+                if (added.Count > 0)
+                {
+                    warnings.Add($"Now open to questions too, as the account may read them: {string.Join(", ", added)}.");
+                }
+                s.Tables = [.. tables.Select(t => t.Name).Order(StringComparer.Ordinal)];
+            }
+            else if (gone.Count > 0)
             {
                 warnings.Add($"Open to questions but not there any more: {string.Join(", ", gone)}.");
             }
+            await db.SaveChangesAsync(ct);
             return Results.Ok(new { source = Brief(s, questions), warnings });
         }
         catch (DataException ex)
@@ -243,7 +305,87 @@ public static class DataSourceEndpoints
         }
         db.DataSources.Remove(s);
         await db.SaveChangesAsync(ct);
+        if (s.Kind == DataSource.Files)
+        {
+            await FilesData.DropAsync(Owner(db), s.Id, ct);
+        }
         await audit.WriteAsync("data.source.remove", s.Name);
+        return Results.NoContent();
+    }
+
+    /// <summary>The source's tables read again after a change to them: every one open.</summary>
+    private static async Task<List<DataTable>> RefreshAsync(DataSource s, AppDbContext db, DataQuestions questions, CancellationToken ct)
+    {
+        var (tables, _) = await DataEngines.Of(s).ReadAsync(questions.Unprotect(s), ct);
+        s.Schema = System.Text.Json.JsonSerializer.Serialize(tables, System.Text.Json.JsonSerializerOptions.Web);
+        s.Tables = [.. tables.Select(t => t.Name).Order(StringComparer.Ordinal)];
+        s.SchemaReadAt = s.UpdatedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return tables;
+    }
+
+    /// <summary>Data files into a files source: each file, or each sheet of a workbook, a table (one of the same name replaced).</summary>
+    private static async Task<IResult> UploadAsync(Guid id, HttpRequest request, AppDbContext db, DataQuestions questions, Audit audit, CancellationToken ct)
+    {
+        if (await db.DataSources.SingleOrDefaultAsync(s => s.Id == id && s.Kind == DataSource.Files, ct) is not { } s)
+        {
+            return Results.NotFound();
+        }
+        if (!request.HasFormContentType)
+        {
+            return AuthEndpoints.Problem(400, "files", "Send the files as a form (multipart/form-data).");
+        }
+        var form = await request.ReadFormAsync(ct);
+        if (form.Files.Count is 0 or > 50)
+        {
+            return AuthEndpoints.Problem(400, "files", "Send from 1 to 50 files at a time.");
+        }
+        var imported = new List<FilesData.Imported>();
+        try
+        {
+            foreach (var file in form.Files)
+            {
+                var name = Path.GetFileName(file.FileName);
+                if (file.Length is 0 or > MostFile)
+                {
+                    return AuthEndpoints.Problem(400, "files", $"{name} is empty or over {MostFile / (1024 * 1024)} MB.");
+                }
+                using var ms = new MemoryStream();
+                await file.CopyToAsync(ms, ct);
+                var sheets = TabularFiles.Read(name, ms.ToArray());
+                if (sheets.Count == 0)
+                {
+                    return AuthEndpoints.Problem(400, "files", $"{name} has no rows with a header.");
+                }
+                foreach (var sheet in sheets)
+                {
+                    imported.Add(await FilesData.ImportAsync(Owner(db), s.Id, sheet, sheets.Count == 1 ? name : $"{name}, sheet {sheet.Name}", ct));
+                }
+            }
+            await RefreshAsync(s, db, questions, ct);
+        }
+        catch (DataException ex)
+        {
+            return AuthEndpoints.Problem(400, "files", ex.Message);
+        }
+        await audit.WriteAsync("data.source.files", s.Name, detail: string.Join(", ", imported.Select(i => $"{i.Table} ({i.Rows} rows)")));
+        return Results.Ok(new { imported, source = Brief(s, questions) });
+    }
+
+    private static async Task<IResult> RemoveTableAsync(Guid id, string table, AppDbContext db, DataQuestions questions, Audit audit, CancellationToken ct)
+    {
+        if (await db.DataSources.SingleOrDefaultAsync(s => s.Id == id && s.Kind == DataSource.Files, ct) is not { } s)
+        {
+            return Results.NotFound();
+        }
+        var name = table.Contains('.', StringComparison.Ordinal) ? table[(table.IndexOf('.', StringComparison.Ordinal) + 1)..] : table;
+        if (!s.Tables.Contains($"{FilesData.SchemaOf(s.Id)}.{name}"))
+        {
+            return Results.NotFound();
+        }
+        await FilesData.DropTableAsync(Owner(db), s.Id, name, ct);
+        await RefreshAsync(s, db, questions, ct);
+        await audit.WriteAsync("data.source.files", s.Name, detail: $"removed {name}");
         return Results.NoContent();
     }
 

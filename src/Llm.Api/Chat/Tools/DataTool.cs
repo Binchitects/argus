@@ -27,7 +27,7 @@ public sealed class DataTool(DataQuestions questions, AppDbContext db) : IChatTo
         await db.DataSources.AnyAsync(s => s.Tables.Count > 0, ct) ? null : "No database is open to questions yet: an admin connects one (Admin → Data sources).";
 
     private const string Instructions =
-        "You can read the company's databases (data_* functions), PostgreSQL, read only.\n" +
+        "You can read the company's databases (data_* functions), read only: PostgreSQL, MySQL or MariaDB, or SQL Server, each said with its tables.\n" +
         "- First data_tables, to see the databases you may ask, their tables and columns. Then data_query with one SELECT; use only the tables listed, with their schema.\n" +
         "- Say what the numbers show in plain words, then the rows as a Markdown table when there are a few; show the SQL in a ```sql block so the person can check it.\n" +
         "- When a query fails, read why and fix it; do not guess numbers the query did not return.";
@@ -36,7 +36,7 @@ public sealed class DataTool(DataQuestions questions, AppDbContext db) : IChatTo
     [
         Schema.Function("data_tables", "Lists the databases you may ask, and their tables with columns and types.", []),
         Schema.Function("data_query", "Runs one read-only SQL query (SELECT or WITH … SELECT) on a database and returns its rows (the first 50 here).",
-            new JsonObject { ["database"] = Schema.Text("The database's name, as data_tables lists it."), ["sql"] = Schema.Text("One SELECT statement, PostgreSQL.") }, "database", "sql"),
+            new JsonObject { ["database"] = Schema.Text("The database's name, as data_tables lists it."), ["sql"] = Schema.Text("One SELECT statement, in the database's own SQL (as data_tables says).") }, "database", "sql"),
     ];
 
     public Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct) =>
@@ -54,12 +54,14 @@ public sealed class DataTool(DataQuestions questions, AppDbContext db) : IChatTo
             var w = new StringBuilder();
             foreach (var s in sources)
             {
-                w.Append("Database \"").Append(s.Name).Append('"').Append(s.Description is { Length: > 0 } d ? $": {d}" : "").AppendLine();
+                var engine = DataEngines.Of(s);
+                w.Append("Database \"").Append(s.Name).Append("\" (").Append(engine.Title).Append(')').Append(s.Description is { Length: > 0 } d ? $": {d}" : "").AppendLine();
+                w.Append("Write the tables ").Append(engine.Names).AppendLine(".");
                 if (s.Notes is { Length: > 0 } notes)
                 {
                     w.Append("What to know: ").AppendLine(notes);
                 }
-                w.AppendLine(PostgresData.Describe(DataQuestions.Open(s)));
+                w.AppendLine(DataEngines.Describe(DataQuestions.Open(s)));
             }
             return new ToolResult(w.ToString());
         }

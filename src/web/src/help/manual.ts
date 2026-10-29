@@ -108,7 +108,7 @@ export const manualGroups: ManualGroup[] = [
     title: 'Using it',
     docs: [
       doc('chat.md', 'Chat', 'Models, thinking, files, tools, assistants, prompts, scheduled tasks and what each person sees.', 'everyone', chat),
-      doc('data.md', 'Ask your data', 'The company\'s databases asked in words: the SQL shown and explained, charts, boards; connecting a database read only.', 'everyone', data),
+      doc('data.md', 'Ask your data', 'The company\'s databases asked in words: the SQL shown and explained, charts, boards; connecting PostgreSQL, MySQL or SQL Server read only.', 'everyone', data),
       doc('media.md', 'Media studio', 'Pictures from words, changed where painted, varied, enlarged and set moving; vector drawings that move.', 'everyone', media),
       doc('decks.md', 'Decks', 'Slides from a few words, changed by asking, presented, downloaded as PowerPoint or PDF; the company\'s template.', 'everyone', decks),
       doc('studio.md', 'Agent Studio', 'Workflows that do the work as you: triggers, steps, approvals, runs to replay, forms to share.', 'everyone', studio),

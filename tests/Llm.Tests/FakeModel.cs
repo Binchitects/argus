@@ -415,7 +415,7 @@ public sealed class FakeModel : HttpMessageHandler
         }
         // Ask your data: the SQL a "[sql:…]" marker in the question says, chart "[chart:…]" (table by default); asked again
         // after a failure, the "[fix:…]" marker's SQL, else the same again. "[cannot]": no SQL, and why.
-        if (system0.StartsWith("You answer questions about a PostgreSQL database", StringComparison.Ordinal))
+        if (system0.StartsWith("You answer questions about a ", StringComparison.Ordinal) && system0.Contains(" database by writing one query", StringComparison.Ordinal))
         {
             var question = messages.AsArray().First(m => m!["role"]?.GetValue<string>() == "user")!["content"]!.GetValue<string>();
             string Marker(string name) => System.Text.RegularExpressions.Regex.Match(question, $@"\[{name}:(.*?)\](?!\])") is { Success: true } m ? m.Groups[1].Value : "";

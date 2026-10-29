@@ -64,25 +64,47 @@ result.
 
 **Administration → Data sources** needs the `data.manage` permission.
 
-First, make a PostgreSQL role that may only read what people should ask,
-for example:
+Three kinds of database can be connected: **PostgreSQL**, **MySQL or
+MariaDB**, and **SQL Server** (Azure SQL too); and data files can be
+uploaded as a database of their own ([below](#data-files)). First, make an account that
+may only read what people should ask, for example:
 
 ```sql
+-- PostgreSQL
 create role arena_reader login password '…';
 grant usage on schema shop to arena_reader;
 grant select on shop.orders, shop.customers to arena_reader;
+
+-- MySQL or MariaDB: granted to the user itself, not through a role
+create user 'arena_reader'@'%' identified by '…';
+grant select on shop.orders to 'arena_reader'@'%';
+grant select on shop.customers to 'arena_reader'@'%';
+
+-- SQL Server: SHOWPLAN lets each query's plan be read before it runs
+create login arena_reader with password = '…';
+create user arena_reader for login arena_reader;
+grant select on dbo.orders to arena_reader;
+grant select on dbo.customers to arena_reader;
+grant showplan to arena_reader;
+-- an open view: let its references be read
+grant view definition on dbo.big_orders to arena_reader;
 ```
 
 Then:
 
-1. Press **Connect a database** and give a name.
+1. Press **Connect a database**, choose its kind and give a name.
 2. Give the connection, for example
-   `Host=db.example.com;Port=5432;Database=shop;Username=arena_reader;Password=…`.
+   `Host=db.example.com;Port=5432;Database=shop;Username=arena_reader;Password=…`
+   (PostgreSQL), `Server=db.example.com;Port=3306;Database=shop;User ID=arena_reader;Password=…`
+   (MySQL), or `Server=db.example.com,1433;Database=shop;User ID=arena_reader;Password=…;Encrypt=True`
+   (SQL Server).
    It is kept encrypted and never shown again: the page shows only who it
    signs in as and where.
 3. Press **Try it** to list the tables and views the role may read.
 4. Tick the tables that are **open to questions**. Nothing else is read,
-   even when the role may read more.
+   even when the role may read more. MySQL's plans do not say which
+   database a table is in, so there every table the account may read is
+   open: to keep one out, take its `SELECT` away from the account.
 5. Add **What the model should know**: units, what a status means, which
    dates count. The model reads this with every question.
 6. Choose **Who may ask it**: everyone, or some groups.
@@ -94,9 +116,34 @@ opened stay as they were. **What was asked** lists the latest 100 queries:
 who ran them, the question, the SQL, the row count, how long each took,
 and any error. Removing a source also removes the charts pinned from it.
 
+### Data files
+
+A **Data files** source needs no database: choose it, give a name, and make
+it. Then **Files** takes CSV, TSV, Excel (`.xlsx`) and JSON or JSON Lines
+files, up to 200 MB each, dropped or chosen:
+
+- each file is a table, and each sheet of a workbook with more than one;
+  the first row (or the objects' keys) names the columns, the header kept as
+  the column's comment for the model;
+- each column is typed by its values: truth (`true`, `yes`), whole numbers,
+  numbers, dates (`2026-10-01`, or an Excel date cell), times, or text. A
+  number with a leading zero (a postcode) stays text;
+- a CSV's delimiter is found from its first line (comma, semicolon, tab or
+  bar); text is read as UTF-8, else Latin-1;
+- a file uploaded again replaces its table; a table removed goes.
+
+The tables live in the stack's own PostgreSQL, in a schema of the source's
+own (`files_…`), read through a login role of its own that may read only that
+schema, with every check PostgreSQL has below. The stack's database user must
+be allowed to make roles (`CREATEROLE`; the bundled PostgreSQL's is). A
+restore into another server keeps the tables but not the role: **Read its
+tables again** makes it again. Removing the source drops its schema and its
+role. Older Excel (`.xls`) and OpenDocument (`.ods`) files are refused: save
+them as `.xlsx` or `.csv`.
+
 ### What keeps it read only
 
-Each query:
+On PostgreSQL, each query:
 
 - runs on a connection of its own (no pool), in a `READ ONLY` transaction
   with a statement timeout and a lock timeout, and is never committed;
@@ -119,5 +166,34 @@ People need the `feature.data` permission to ask a database or see a board.
 Everyone holds it unless an admin denies it. The chat's **Company data**
 tool is off in new chats until an admin turns it on (Admin → Tools).
 
-Only PostgreSQL can be connected for now. MySQL and SQL Server need drivers
-the app does not ship yet.
+On **SQL Server**, each query:
+
+- runs on a connection of its own, asking for a readable replica where there
+  is one (`ApplicationIntent=ReadOnly`), with a lock timeout and a command
+  timeout, in a transaction that is rolled back;
+- is read first as its plan (`SET SHOWPLAN_XML ON`, which runs nothing). The
+  plan must be exactly one statement, a `SELECT` (so a write after `WITH`, or
+  two statements without a semicolon, are refused). Every table it reads
+  must be in this database and open, or read by an open view (its references
+  read with `sys.dm_sql_referenced_entities`). A linked server, `OPENROWSET`
+  or `OPENQUERY` (remote operators), and a function of the database's own
+  that SQL Server does not inline, are refused; one it inlines shows the
+  tables it reads in the plan, and those are checked.
+
+The login is refused when it is `sysadmin` or controls the server, owns the
+database, may bulk-load files, or lacks `SHOWPLAN`. **Try it** warns when it
+may change tables.
+
+On **MySQL or MariaDB**, the account is the guard. It is refused unless it
+has only `SELECT` (and `SHOW VIEW`), granted to it directly and never on
+`*.*` or the system's schemas (`mysql`, `sys`, `performance_schema`): so no
+`FILE`, no `SUPER` and no write anywhere. Before each query the tables it may
+read are listed again, and one not open stops the query. Each query also:
+
+- runs with roles set aside (`SET ROLE NONE`), a known SQL mode (backslashes
+  escape in strings, as the check reads them), a read-only session and
+  transaction, `max_execution_time` (MySQL) or `max_statement_time`
+  (MariaDB), and short lock waits;
+- is one statement that reads: the check knows MySQL's `#` and `-- `
+  comments and its backslash escapes, and refuses a `/*! … */` comment, which
+  MySQL runs.
