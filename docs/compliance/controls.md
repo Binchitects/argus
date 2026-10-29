@@ -128,7 +128,7 @@ People come from the company's directory (LDAP or Active Directory), OIDC or SAM
 
 ### IAM-05: Least privilege, by roles and rules
 
-What a person may do comes from roles (built in, or made by the company) held directly, through a group or by everyone, and from rules that give or take a feature; admin roles can be scoped to some groups. The checker says why a person may or may not do something.
+What a person may do comes from roles (built in, or made by the company) held directly, through a group or by everyone, and from rules that give or take a feature; admin roles can be scoped to some groups. The checker says why a person may or may not do something. The wiki finds and shows each person only the documents they may read.
 
 **Serves**
 
@@ -150,6 +150,7 @@ What a person may do comes from roles (built in, or made by the company) held di
 - `Llm.Tests/EndpointAccessTests.A_role_reaches_the_reads_of_its_permissions_and_no_others`
 - `Llm.Tests/EndpointAccessTests.Each_built_in_role_holds_exactly_its_permissions`
 - `Llm.Tests/AccessEndpointsTests.A_rule_takes_a_feature_from_a_group_and_the_checker_says_why`
+- `Llm.Tests/WikiTests.People_find_and_read_the_documents_they_may_read_and_nothing_else`
 
 **The company's part** Decide who holds which role, and review it.
 

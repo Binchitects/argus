@@ -13,7 +13,7 @@ namespace Llm.Tests;
 public sealed class WikiTests(AppFixture app)
 {
     [Fact]
-    [Trait("Control", "DAT-04")]
+    [Trait("Control", "IAM-05")]
     public async Task People_find_and_read_the_documents_they_may_read_and_nothing_else()
     {
         await using var f = app.Create(app.ConnectionStringFor("wiki_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), new Dictionary<string, string?>

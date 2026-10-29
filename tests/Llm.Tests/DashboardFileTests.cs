@@ -204,14 +204,20 @@ public sealed partial class DashboardFileTests(Promtool promtool) : IClassFixtur
     [Fact]
     public async Task Gpus_are_told_apart_by_their_index_and_model_only_on_a_machine_with_more_than_one()
     {
-        var targets = PromTargets().Where(x => x.Target.Expr!.Contains("nvidia_smi_", StringComparison.Ordinal)).ToList();
+        // A total over every GPU (a sum, an average, the hottest; how many of each model) is one series, with no GPU to tell apart.
+        static bool Total(string e) => Regex.IsMatch(e, @"^(sum|avg|max|min|count)( by \(name\))? ?\(") && !e.Contains("uuid", StringComparison.Ordinal);
+        var targets = PromTargets().Where(x => x.Target.Expr!.Contains("nvidia_smi_", StringComparison.Ordinal) && !Total(x.Target.Expr!)).ToList();
         Assert.True(targets.Count > 20, $"only {targets.Count} nvidia-smi queries");
         // Every nvidia-smi query ends in the same naming of its GPU, and its legend shows it.
         var naming = targets[0].Target.Expr![targets[0].Target.Expr!.IndexOf(" * on (instance, uuid) group_left (gpu) (", StringComparison.Ordinal)..];
+        var asColumn = naming.Replace("or on (instance, uuid) nvidia_smi_gpu_info)",
+            "or on (instance, uuid) label_replace(nvidia_smi_gpu_info, \"gpu\", \"$1\", \"name\", \"^(?:NVIDIA )?(.+)$\"))", StringComparison.Ordinal);
         foreach (var (d, p, t) in targets)
         {
-            Assert.True(t.Expr!.EndsWith(naming, StringComparison.Ordinal), $"{d.Uid} / {p.Title}: the GPU is not named: {t.Expr}");
-            Assert.True(t.LegendFormat?.Contains("{{gpu}}", StringComparison.Ordinal) == true, $"{d.Uid} / {p.Title}: the legend \"{t.LegendFormat}\" leaves out the GPU");
+            // One series a GPU by its name ("max by (gpu)"), a single GPU named too (by its model), for a table's queries to merge on it.
+            var byName = t.Expr!.StartsWith("max by (gpu) (", StringComparison.Ordinal) && t.Expr.EndsWith(asColumn + ")", StringComparison.Ordinal);
+            Assert.True(byName || t.Expr!.EndsWith(naming, StringComparison.Ordinal), $"{d.Uid} / {p.Title}: the GPU is not named: {t.Expr}");
+            Assert.True(t.Format == "table" || t.LegendFormat?.Contains("{{gpu}}", StringComparison.Ordinal) == true, $"{d.Uid} / {p.Title}: the legend \"{t.LegendFormat}\" leaves out the GPU");
         }
         // "one": a single GPU keeps its legends short ("temp", not "temp GPU 0 · ..."). "two": two
         // of one model, told apart by the index nvidia-smi gives them. "mixed": the vendor's
