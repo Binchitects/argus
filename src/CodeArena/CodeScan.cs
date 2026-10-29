@@ -36,7 +36,8 @@ internal static class CodeTokens
 {
     private static readonly string[] Pairs = ["=>", "?.", "::", "??", "->", "<=", ">=", "==", "!="];
 
-    public static List<CodeToken> Of(string blanked, bool hashComments = false)
+    /// <param name="quotes">The text keeps its plain strings (CodeText's keepStrings): each is one mark, "…", so a statement that ends with one is seen to end.</param>
+    public static List<CodeToken> Of(string blanked, bool hashComments = false, bool quotes = false)
     {
         var tokens = new List<CodeToken>(blanked.Length / 4);
         var line = 1;
@@ -80,9 +81,28 @@ internal static class CodeTokens
             }
             if (char.IsDigit(c))
             {
+                var start = i;
                 while (i + 1 < blanked.Length && (char.IsLetterOrDigit(blanked[i + 1]) || blanked[i + 1] is '.' or '_'))
                 {
                     i++;
+                }
+                tokens.Add(new CodeToken("0", line, start, false));
+                continue;
+            }
+            if (quotes && c is '"' or '\'')
+            {
+                var start = i;
+                for (i++; i < blanked.Length && blanked[i] != c && blanked[i] != '\n'; i++)
+                {
+                    if (blanked[i] == '\\')
+                    {
+                        i++;
+                    }
+                }
+                tokens.Add(new CodeToken("\"…\"", line, start, false));
+                if (i < blanked.Length && blanked[i] == '\n')
+                {
+                    i--;
                 }
                 continue;
             }
@@ -609,4 +629,389 @@ internal sealed class CSharpScanner : ICodeScanner
     /// <summary>Both branches of an #if may declare the same member: once is enough.</summary>
     private static List<CodeSymbol> Dedupe(List<CodeSymbol> symbols) =>
         [.. symbols.GroupBy(s => (s.Kind, s.Qualified, s.Signature)).Select(g => g.First()).OrderBy(s => s.Start).ThenBy(s => -s.End)];
+}
+
+/// <summary>
+/// TypeScript and JavaScript (with JSX): functions (declared, async, generators), classes and their members (methods,
+/// accessors, constructors, fields, arrow-function properties), interfaces and their members, type aliases, enums,
+/// namespaces, and what a const or let at the top binds (an arrow function or function expression is a function; a
+/// PascalCase one is a component); the modules imported and re-exported (import, export … from, require, import());
+/// and every name used in code, a JSX element's name as a call. Object literals' methods are left out.
+/// </summary>
+internal sealed partial class TypeScriptScanner(string lang = "typescript") : ICodeScanner
+{
+    public int Version => 1;
+
+    private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
+    {
+        "abstract", "as", "async", "await", "break", "case", "catch", "class", "const", "constructor", "continue", "debugger", "declare", "default", "delete",
+        "do", "else", "enum", "export", "extends", "false", "finally", "for", "from", "function", "get", "if", "implements", "import", "in", "instanceof",
+        "interface", "keyof", "let", "module", "namespace", "new", "null", "of", "override", "private", "protected", "public", "readonly", "return", "satisfies",
+        "set", "static", "super", "switch", "this", "throw", "true", "try", "type", "typeof", "undefined", "var", "void", "while", "with", "yield", "accessor",
+    };
+
+    private static readonly HashSet<string> Statements = new(StringComparer.Ordinal)
+    {
+        "if", "for", "while", "switch", "catch", "else", "do", "try", "finally", "with", "return", "throw", "yield", "await", "case", "default",
+    };
+
+    private sealed class Container(string kind, string? name, string? qualified, int startOffset, bool members)
+    {
+        public string Kind { get; } = kind;
+        public string? Name { get; } = name;
+        public string? Qualified { get; } = qualified;
+        public int StartOffset { get; } = startOffset;
+        public bool Members { get; } = members;
+        public int Index { get; set; } = -1;
+    }
+
+    [System.Text.RegularExpressions.GeneratedRegex("""(?:\bfrom|\bimport|\brequire\s*\(|\bimport\s*\()\s*["']([^"'\n]+)["']""")]
+    private static partial System.Text.RegularExpressions.Regex Specifier();
+
+    public ScannedFile Scan(string text)
+    {
+        var blanked = Argus.Util.CodeText.Blank(lang, text);
+        var withStrings = Argus.Util.CodeText.Blank(lang, text, keepStrings: true);
+        var tokens = CodeTokens.Of(withStrings, hashComments: true, quotes: true);
+        var lines = text.Split('\n');
+        var symbols = new List<CodeSymbol>();
+        var uses = new List<CodeUse>();
+        var imports = Specifier().Matches(withStrings).Select(m => m.Groups[1].Value).Distinct(StringComparer.Ordinal).ToList();
+        var stack = new List<Container>();
+        var parens = 0;
+        var inline = 0;
+        var head = new List<CodeToken>();
+
+        string Prefix() => string.Join('.', stack.Where(c => c.Kind is "type" or "namespace").Select(c => c.Name));
+
+        void Add(string kind, string name, CodeToken first, int endLine, int endOffset, int signatureEnd, Container? into = null)
+        {
+            var holder = stack.LastOrDefault(c => c.Kind != "block");
+            var prefix = Prefix();
+            if (into is not null)
+            {
+                into.Index = symbols.Count;
+            }
+            symbols.Add(new CodeSymbol(kind, name, prefix.Length > 0 ? $"{prefix}.{name}" : name, CodeTokens.Signature(text, first.Offset, signatureEnd), first.Line, endLine,
+                holder?.Qualified, DocBlock(lines, first.Line) ?? CodeTokens.DocAbove(lines, first.Line), CodeTokens.Hash(blanked, first.Offset, endOffset)));
+        }
+
+        for (var i = 0; i < tokens.Count; i++)
+        {
+            var t = tokens[i];
+            if (t.Word && !Keywords.Contains(t.Text))
+            {
+                var next = i + 1 < tokens.Count ? tokens[i + 1] : default;
+                var jsx = i > 0 && tokens[i - 1].Is("<") && char.IsUpper(t.Text[0]) && (next.Word || next.Is(">") || next.Is("/") || next.Is("."));
+                var call = next.Is("(") || jsx || (next.Is("<") && CSharpScanner.GenericCall(tokens, i + 1));
+                var receiver = i >= 2 && (tokens[i - 1].Is(".") || tokens[i - 1].Is("?.")) && tokens[i - 2].Word ? tokens[i - 2].Text : null;
+                uses.Add(new CodeUse(t.Text, t.Line, call, receiver));
+            }
+            if (inline > 0)
+            {
+                inline += t.Is("{") ? 1 : t.Is("}") ? -1 : 0;
+                parens += t.Is("(") ? 1 : t.Is(")") && parens > 0 ? -1 : 0;
+                head.Add(t);
+                continue;
+            }
+            if (t.Is("(") || t.Is("["))
+            {
+                parens++;
+                head.Add(t);
+                continue;
+            }
+            if (t.Is(")") || t.Is("]"))
+            {
+                parens = Math.Max(0, parens - 1);
+                head.Add(t);
+                continue;
+            }
+            if (parens > 0 && !t.Is("{") && !t.Is("}"))
+            {
+                head.Add(t);
+                continue;
+            }
+            if (t.Is("{"))
+            {
+                // An object literal, a destructuring, a body of an arrow in an expression, an import's braces: part of what holds it.
+                if (parens > 0 || Expression(head, stack.LastOrDefault()))
+                {
+                    if (stack.LastOrDefault() is not { Members: false } && FunctionValue(head) is { } bound && !Assigned(stack))
+                    {
+                        // const f = (…) => { … }: a function, its body to its brace.
+                        var c = new Container("member", bound.Name, null, (head.Count > 0 ? head[0] : t).Offset, false);
+                        Add(bound.Kind, bound.Name, head.Count > 0 ? head[0] : t, t.Line, t.Offset, t.Offset, c);
+                        stack.Add(c);
+                        head.Clear();
+                        continue;
+                    }
+                    inline = 1;
+                    head.Add(t);
+                    continue;
+                }
+                stack.Add(Open(head, t));
+                head.Clear();
+                continue;
+            }
+            if (t.Is("}"))
+            {
+                // A last member with no semicolon ends at the brace: interface I { read(): string }
+                if (head.Count > 0)
+                {
+                    Statement(head, head[^1]);
+                }
+                if (stack.Count > 0)
+                {
+                    var c = stack[^1];
+                    stack.RemoveAt(stack.Count - 1);
+                    if (c.Index >= 0)
+                    {
+                        symbols[c.Index] = symbols[c.Index] with { End = t.Line, Hash = CodeTokens.Hash(blanked, c.StartOffset, t.Offset + 1) };
+                    }
+                }
+                head.Clear();
+                continue;
+            }
+            if (t.Is(";") || (t.Line > (head.Count > 0 ? head[^1].Line : t.Line) && head.Count > 0 && EndsStatement(head, t)))
+            {
+                Statement(head, t.Is(";") ? t : head[^1]);
+                head.Clear();
+                if (t.Is(";"))
+                {
+                    continue;
+                }
+            }
+            head.Add(t);
+        }
+        // The last statement, with no semicolon at the file's end.
+        if (head.Count > 0 && inline == 0)
+        {
+            Statement(head, head[^1]);
+        }
+        var approximate = tokens.Count(x => x.Is("{")) != tokens.Count(x => x.Is("}"));
+        return new ScannedFile([.. symbols.GroupBy(s => (s.Kind, s.Qualified, s.Start)).Select(g => g.First()).OrderBy(s => s.Start)], imports, uses, approximate);
+
+        Container Open(List<CodeToken> h, CodeToken brace)
+        {
+            var holder = stack.LastOrDefault();
+            var inMembers = holder is null || holder.Members;
+            var at = Modifiers(h);
+            var startTok = h.Count > 0 ? h[0] : brace;
+            if (at.Count == 0)
+            {
+                return new Container("block", null, null, brace.Offset, false);
+            }
+            var word = at[0].Text;
+            if (inMembers && word is "class" or "interface" or "enum" && at.Count > 1 && at[1].Word)
+            {
+                var c = new Container("type", at[1].Text, null, startTok.Offset, word != "enum");
+                Add(word, at[1].Text, startTok, brace.Line, brace.Offset, brace.Offset, c);
+                return c;
+            }
+            if (inMembers && word is "namespace" or "module" && at.Count > 1 && at[1].Word)
+            {
+                var c = new Container("namespace", at[1].Text, null, startTok.Offset, true);
+                Add("namespace", at[1].Text, startTok, brace.Line, brace.Offset, brace.Offset, c);
+                return c;
+            }
+            if (word == "function" || (word == "async" && at.Count > 1 && at[1].Is("function")))
+            {
+                var f = at.FindIndex(x => x.Is("function"));
+                var nameAt = f + 1 < at.Count && at[f + 1].Is("*") ? f + 2 : f + 1;
+                if (nameAt < at.Count && at[nameAt].Word)
+                {
+                    var name = at[nameAt].Text;
+                    var c = new Container("member", name, null, startTok.Offset, false);
+                    Add(char.IsUpper(name[0]) && lang != "typescript-plain" ? "component" : "function", name, startTok, brace.Line, brace.Offset, brace.Offset, c);
+                    return c;
+                }
+            }
+            if (inMembers && holder is { Kind: "type" } && Member(at) is { } m)
+            {
+                var c = new Container("member", m, null, startTok.Offset, false);
+                Add(m == "constructor" ? "constructor" : at.Any(x => x.Is("get") || x.Is("set")) && at.Count > 1 && at[1].Word ? "accessor" : "method", m, startTok, brace.Line, brace.Offset, brace.Offset, c);
+                return c;
+            }
+            return new Container("block", null, null, brace.Offset, false);
+        }
+
+        void Statement(List<CodeToken> h, CodeToken end)
+        {
+            var holder = stack.LastOrDefault();
+            if (h.Count == 0 || (holder is not null && !holder.Members))
+            {
+                return;
+            }
+            var at = Modifiers(h);
+            if (at.Count == 0)
+            {
+                return;
+            }
+            var startTok = h[0];
+            if (at[0].Is("type") && at.Count > 1 && at[1].Word)
+            {
+                Add("type", at[1].Text, startTok, end.Line, end.Offset + 1, end.Offset + 1);
+                return;
+            }
+            if (at[0].Text is "const" or "let" or "var" && at.Count > 1 && at[1].Word && holder is null or { Kind: "namespace" })
+            {
+                if (FunctionValue(h) is { } f)
+                {
+                    Add(f.Kind, f.Name, startTok, end.Line, end.Offset + 1, at.FindIndex(x => x.Is("=>")) is var a and > 0 ? at[a].Offset : end.Offset + 1);
+                }
+                else
+                {
+                    Add("const", at[1].Text, startTok, end.Line, end.Offset + 1, at.FindIndex(x => x.Is("=")) is var q and > 0 ? at[q].Offset : end.Offset + 1);
+                }
+                return;
+            }
+            if (holder is { Kind: "type" })
+            {
+                // An interface's method or property, a class's field or arrow-function property, an abstract method.
+                var name = at[0].Is("#") && at.Count > 1 ? "#" + at[1].Text : at[0].Text;
+                if (at[0].Word && !Keywords.Contains(at[0].Text) || at[0].Is("#") || at[0].Text is "get" or "set" && at.Count > 1 && at[1].Word)
+                {
+                    var arrow = at.Any(x => x.Is("=>")) && at.FindIndex(x => x.Is("=")) is var e && e > 0;
+                    var kind = arrow || (at.Count > 1 && (at[1].Is("(") || at[1].Is("<") || at[1].Is("?") && at.Count > 2 && at[2].Is("("))) ? "method" : "property";
+                    Add(kind, name, startTok, end.Line, end.Offset + 1, end.Offset + 1);
+                }
+            }
+        }
+    }
+
+    /// <summary>The head without export, default, declare, abstract and the access words, and decorators.</summary>
+    private static List<CodeToken> Modifiers(List<CodeToken> head)
+    {
+        var at = new List<CodeToken>(head);
+        while (at.Count > 0)
+        {
+            if (at[0].Is("@") && at.Count > 1)
+            {
+                // @Decorator or @Decorator(…)
+                var skip = 2;
+                if (skip < at.Count && at[skip].Is("("))
+                {
+                    var depth = 0;
+                    for (; skip < at.Count; skip++)
+                    {
+                        depth += at[skip].Is("(") ? 1 : at[skip].Is(")") ? -1 : 0;
+                        if (depth == 0)
+                        {
+                            skip++;
+                            break;
+                        }
+                    }
+                }
+                at.RemoveRange(0, Math.Min(skip, at.Count));
+                continue;
+            }
+            if (at[0].Text is "export" or "default" or "declare" or "abstract" or "public" or "private" or "protected" or "static" or "readonly" or "override" or "accessor")
+            {
+                at.RemoveAt(0);
+                continue;
+            }
+            break;
+        }
+        return at;
+    }
+
+    /// <summary>A class member's name before its parameter list: name(…), async name(…), get name(), *name(), #name(…), name&lt;T&gt;(…).</summary>
+    private static string? Member(List<CodeToken> at)
+    {
+        var i = 0;
+        while (i < at.Count && at[i].Text is "async" or "*" or "get" or "set" && i + 1 < at.Count && (at[i + 1].Word || at[i + 1].Is("#") || at[i + 1].Is("*")))
+        {
+            i++;
+        }
+        var name = i < at.Count && at[i].Is("#") && i + 1 < at.Count ? "#" + at[++i].Text : i < at.Count && at[i].Word ? at[i].Text : null;
+        if (name is null || Statements.Contains(name) || name is "function")
+        {
+            return null;
+        }
+        var next = i + 1 < at.Count ? at[i + 1] : default;
+        return next.Is("(") || next.Is("<") || (next.Is("?") && i + 2 < at.Count && at[i + 2].Is("(")) ? name : null;
+    }
+
+    /// <summary>What a const, let or var binds, when it is a function: an arrow function or a function expression, a component when PascalCase.</summary>
+    private static (string Kind, string Name)? FunctionValue(List<CodeToken> head)
+    {
+        var at = Modifiers(head);
+        if (at.Count < 3 || at[0].Text is not ("const" or "let" or "var") || !at[1].Word)
+        {
+            return null;
+        }
+        var eq = at.FindIndex(x => x.Is("="));
+        if (eq < 0)
+        {
+            return null;
+        }
+        var rest = at[(eq + 1)..];
+        var isFunction = rest.Any(x => x.Is("=>")) && (rest[0].Is("(") || rest[0].Is("<") || rest[0].Is("async") || (rest[0].Word && rest.Count > 1 && rest[1].Is("=>")))
+            || rest.Count > 0 && (rest[0].Is("function") || rest[0].Is("async") && rest.Count > 1 && rest[1].Is("function"))
+            // A function wrapped: memo((props) => …), forwardRef(function …), useCallback(() => …).
+            || rest.Count > 2 && rest[0].Word && rest[1].Is("(") && rest.Skip(2).Any(x => x.Is("=>") || x.Is("function"));
+        return isFunction ? (char.IsUpper(at[1].Text[0]) ? "component" : "function", at[1].Text) : null;
+    }
+
+    /// <summary>A brace that opens an expression's block (an object, a destructuring, an arrow's body) rather than a declaration's.</summary>
+    private static bool Expression(List<CodeToken> head, Container? holder)
+    {
+        var at = Modifiers(head);
+        if (at.Count == 0)
+        {
+            return false;
+        }
+        if (at[0].Text is "import" or "export" || at[^1].Is("=") || at[^1].Is("=>") || at[^1].Is(":") || at[^1].Is("return") || at[^1].Is(",") || at[^1].Is("?") || at[^1].Is("("))
+        {
+            return true;
+        }
+        // A class field's object: name = { … }; a type alias: type T = { … }.
+        return at.Any(x => x.Is("=")) && !(holder is { Kind: "type" } && Member(at) is not null);
+    }
+
+    /// <summary>Whether the stack is inside an expression already (an arrow function is a member only at the top or a namespace's top).</summary>
+    private static bool Assigned(List<Container> stack) => stack.Any(c => c.Kind == "member");
+
+    /// <summary>
+    /// A statement that ends at its line's end without a semicolon (JavaScript's semicolons are optional): a new line that
+    /// starts a new statement after one that is complete.
+    /// </summary>
+    private static bool EndsStatement(List<CodeToken> head, CodeToken next)
+    {
+        var last = head[^1];
+        // The line ends with a value (a name, a number, a string, a closing bracket), not with what continues it (an operator, a comma).
+        var value = (last.Word && last.Text is not ("as" or "satisfies" or "in" or "instanceof" or "of" or "extends" or "implements" or "from" or "new" or "typeof" or "keyof"
+            or "return" or "await" or "yield" or "export" or "default" or "async" or "static" or "readonly" or "const" or "let" or "var" or "type" or "import"))
+            || last.Text is "0" or "\"…\"" or ")" or "]" or "}";
+        // And the next line starts a statement: a word (not one that continues an expression), a private name, a decorator, a generator.
+        var starts = (next.Word && next.Text is not ("as" or "satisfies" or "in" or "instanceof" or "of" or "extends" or "implements" or "from" or "and" or "or"))
+            || next.Is("#") || next.Is("@") || next.Is("*");
+        return value && starts;
+    }
+
+    /// <summary>The first line of a /** … */ block just above a line.</summary>
+    private static string? DocBlock(string[] lines, int line)
+    {
+        var i = line - 2;
+        while (i >= 0 && lines[i].Trim().StartsWith('@'))
+        {
+            i--;
+        }
+        if (i < 0 || !lines[i].Trim().EndsWith("*/", StringComparison.Ordinal))
+        {
+            return null;
+        }
+        var j = i;
+        while (j >= 0 && !lines[j].Contains("/**", StringComparison.Ordinal))
+        {
+            j--;
+        }
+        if (j < 0)
+        {
+            return null;
+        }
+        var words = string.Join(' ', lines[j..(i + 1)].Select(l => l.Trim().TrimStart('/', '*').TrimEnd('/', '*').Trim()).Where(l => l.Length > 0 && !l.StartsWith('@')));
+        var first = words.Split(". ")[0].Trim();
+        return first.Length == 0 ? null : first.Length > 200 ? first[..199] + "…" : first;
+    }
 }
