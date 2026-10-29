@@ -371,3 +371,62 @@ describe('alerts', () => {
     expect(screen.getByText('Nothing fired')).toBeInTheDocument()
   })
 })
+
+describe('dashboards on any machine', () => {
+  const empty = { json: { intervalMs: 1000, results: [{ refId: 'A', format: 'time_series', table: null, series: [], error: null }] } }
+  const table = (ref: string, rows: [string, number][]) => ({
+    refId: ref, format: 'table', series: null, error: null,
+    table: { capped: false, columns: [{ name: 'Time', type: 'time' }, { name: 'gpu', type: 'string' }, { name: `Value #${ref}`, type: 'number' }], rows: rows.map(([g, v]) => ['2026-10-29T00:00:00Z', g, v]) },
+  })
+  const panel = (key: number, type: string, title: string, y: number, extra = {}) => ({ key, type, title, gridPos: { x: 0, y, w: 12, h: 6 }, supported: true, datasources: ['prometheus'], ...extra })
+
+  it('says why a section is empty instead of its panels, and leaves out a panel with nothing to show', async () => {
+    fakeApi(admin, {
+      'GET /api/dashboards/hw': () => ({
+        json: {
+          uid: 'hw', title: 'Hardware', time: { from: 'now-1h', to: 'now' },
+          panels: [
+            panel(0, 'row', 'CPU', 0),
+            panel(1, 'stat', 'CPU busy', 1),
+            panel(2, 'gauge', 'Hottest GPU', 1, { options: { hideWhenEmpty: true } }),
+            panel(3, 'row', 'GPUs', 7, { emptyText: 'No GPU reports here, so the models run on the CPU.' }),
+            panel(4, 'timeseries', 'Busy, each GPU', 8),
+          ],
+        },
+      }),
+      'POST /api/dashboards/hw/panels/1/query': () => ({ json: { intervalMs: 1000, results: [{ refId: 'A', format: 'time_series', table: null, series: [{ name: 'cpu', points: [[1, 42]] }], error: null }] } }),
+      'POST /api/dashboards/hw/panels/2/query': () => empty,
+      'POST /api/dashboards/hw/panels/4/query': () => empty,
+    })
+    renderApp('/admin/dashboards/hw')
+    expect(await screen.findByText('No GPU reports here, so the models run on the CPU.')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Busy, each GPU', hidden: true })).not.toBeVisible()
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Hottest GPU', hidden: true })).not.toBeVisible())
+    expect(screen.getByRole('region', { name: 'CPU busy' })).toBeVisible()
+  })
+
+  it('puts each GPU on one line of a merged table, renamed, with a bar for how busy it is', async () => {
+    fakeApi(admin, {
+      'GET /api/dashboards/gpus': () => ({
+        json: {
+          uid: 'gpus', title: 'GPUs', time: { from: 'now-1h', to: 'now' },
+          panels: [
+            panel(0, 'table', 'Each GPU', 0, {
+              fieldConfig: { defaults: {}, overrides: [{ matcher: { id: 'byName', options: 'Busy' }, properties: [{ id: 'unit', value: 'percentunit' }, { id: 'custom.cellOptions', value: { type: 'gauge' } }] }] },
+              transformations: [{ id: 'merge', options: {} }, { id: 'organize', options: { renameByName: { gpu: 'GPU', 'Value #A': 'Busy', 'Value #B': 'Temperature' } } }],
+            }),
+          ],
+        },
+      }),
+      'POST /api/dashboards/gpus/panels/0/query': () => ({ json: { intervalMs: 1000, results: [table('A', [['GPU 0', 0.5], ['GPU 1', 0.25]]), table('B', [['GPU 1', 61], ['GPU 0', 70]])] } }),
+    })
+    renderApp('/admin/dashboards/gpus')
+    const grid = await screen.findByRole('table', { name: 'Each GPU' })
+    expect(within(grid).getAllByRole('columnheader').map((h) => h.textContent?.trim())).toEqual(['GPU', 'Busy', 'Temperature'])
+    const rows = within(grid).getAllByRole('row').slice(1)
+    expect(rows.map((r) => within(r).getAllByRole('cell').map((c) => c.textContent))).toEqual([
+      ['GPU 0', '50.0%', '70'],
+      ['GPU 1', '25.0%', '61'],
+    ])
+  })
+})

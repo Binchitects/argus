@@ -21,6 +21,8 @@ export interface PanelDef {
   title?: string
   description?: string
   gridPos?: GridPos
+  /** A row's, the app's own: what its section says instead of its panels while none of them has data (no GPU here). */
+  emptyText?: string
   supported: boolean
   datasources: string[]
   fieldConfig?: {
@@ -48,8 +50,13 @@ export interface PanelDef {
     wrapLogMessage?: boolean
     sortOrder?: string
     enableLogDetails?: boolean
+    /** The app's own: the panel is left out while its queries have no data (a sensor this machine does not have). */
+    hideWhenEmpty?: boolean
   }
-  transformations?: { id: string; options?: { excludeByName?: Record<string, boolean>; renameByName?: Record<string, string>; indexByName?: Record<string, number> } }[]
+  transformations?: {
+    id: string
+    options?: { excludeByName?: Record<string, boolean>; renameByName?: Record<string, string>; indexByName?: Record<string, number> }
+  }[]
 }
 
 export interface VariableDef {

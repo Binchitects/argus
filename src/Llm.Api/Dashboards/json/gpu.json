@@ -14,7 +14,8 @@
   "panels": [
     {
       "type": "row",
-      "title": "nvidia-smi exporter (profile: smi)",
+      "title": "Each GPU now",
+      "emptyText": "No NVIDIA GPU reports here (nvidia-smi's exporter has nothing): a machine without one runs its models on the CPU, which the Hardware dashboard shows.",
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
       "collapsed": false,
       "panels": []
@@ -191,7 +192,8 @@
     },
     {
       "type": "row",
-      "title": "GPU detail (nvidia-smi exporter: clocks, throttling, PCIe, fans, ECC)",
+      "title": "GPU detail: clocks, slowdowns, PCIe, fans, memory errors",
+      "emptyText": "No NVIDIA GPU reports here (nvidia-smi's exporter has nothing): a machine without one runs its models on the CPU, which the Hardware dashboard shows.",
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 23 },
       "collapsed": false,
       "panels": []
@@ -302,7 +304,8 @@
     },
     {
       "type": "row",
-      "title": "DCGM exporter (profile dcgm: data-centre detail, bare-metal Linux with NVIDIA's registry reachable; empty without it)",
+      "title": "Data-centre detail (DCGM)",
+      "emptyText": "NVIDIA's DCGM exporter is not running, so SM activity, tensor cores, XID errors, ECC, retired pages and NVLink are not measured. Turn it on with the dcgm profile (./install.sh --with dcgm, or dcgm in COMPOSE_PROFILES in deploy/.env); it runs on bare-metal Linux with the NVIDIA driver, and its image comes from nvcr.io.",
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 48 },
       "collapsed": true,
       "panels": [

@@ -23,6 +23,12 @@ describe('format', () => {
 
 
 describe('formatValue (Grafana units)', () => {
+  it('says a long time in its two largest units', () => {
+    expect(formatValue(349523, 'dtdurations')).toBe('4 days 1 hour')
+    expect(formatValue(7200, 'dtdurations')).toBe('2 hours')
+    expect(formatValue(1205, 'dtdurations')).toBe('20 minutes 5 seconds')
+    expect(formatValue(0, 'dtdurations')).toBe('0 seconds')
+  })
   it('formats the units the dashboards use', () => {
     expect(formatValue(1234567)).toBe('1.23 M')
     expect(formatValue(0.000102)).toBe('0.000102')

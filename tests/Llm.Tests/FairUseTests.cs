@@ -116,6 +116,32 @@ public sealed class FairUseTests(AppFixture app)
     }
 
     [Fact]
+    public void Where_each_loaded_model_sits_is_told_by_gpu_and_ram_and_a_model_of_unknown_size_still_shows()
+    {
+        var state = new Llm.Api.Models.EngineState(TimeProvider.System);
+        state.Set([new("split", "loaded"), new("tp", "loaded"), new("asleep", "unloaded"), new("env-model", "loaded")], 0);
+        state.Hardware = FakeHardware.Four96();
+        state.Places = new Dictionary<string, Llm.Api.Models.EngineState.ModelPlace>
+        {
+            ["split"] = new("llamacpp", new Dictionary<int, long> { [0] = 10, [1] = 12 }, Ram: 5),
+            ["tp"] = new("vllm", new Dictionary<int, long> { [2] = 70, [3] = 70 }),
+            ["asleep"] = new("llamacpp", new Dictionary<int, long> { [0] = 1 }),
+        };
+        var text = LineMetrics.RenderPlaces(state);
+        Assert.Contains("arena_model_memory_bytes{model=\"split\",engine=\"llamacpp\",on=\"GPU 0\"} 10", text, StringComparison.Ordinal);
+        Assert.Contains("arena_model_memory_bytes{model=\"split\",engine=\"llamacpp\",on=\"GPU 1\"} 12", text, StringComparison.Ordinal);
+        Assert.Contains("arena_model_memory_bytes{model=\"split\",engine=\"llamacpp\",on=\"RAM\"} 5", text, StringComparison.Ordinal);
+        Assert.Contains("arena_model_memory_bytes{model=\"tp\",engine=\"vllm\",on=\"GPU 3\"} 70", text, StringComparison.Ordinal);
+        // The .env model: no place known on a machine with GPUs.
+        Assert.Contains("arena_model_memory_bytes{model=\"env-model\",engine=\"llamacpp\",on=\"not known\"} 0", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("asleep", text, StringComparison.Ordinal);
+
+        // A machine without GPUs: what the app does not know the size of is still in RAM.
+        state.Hardware = FakeHardware.CpuOnly;
+        Assert.Contains("arena_model_memory_bytes{model=\"env-model\",engine=\"llamacpp\",on=\"RAM\"} 0", LineMetrics.RenderPlaces(state), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Someone_who_gives_up_waiting_leaves_the_line()
     {
         var gate = Gate(perPerson: 1, atOnce: 1);

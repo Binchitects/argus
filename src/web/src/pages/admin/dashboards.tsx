@@ -29,7 +29,7 @@ const areas: { key: Listed['area']; title: string; who: string }[] = [
 const about: Record<string, { icon: typeof LineChart; text: string }> = {
   'llm-users': { icon: Users, text: 'The model at work and the people using it: requests, tokens, speed and cost, the line, and who uses what.' },
   system: { icon: Activity, text: "The stack's services: their health and alerts, their traffic and errors, the line, and the host they run on." },
-  hardware: { icon: Cpu, text: 'The machine: GPUs, CPUs, memory, disks, network, temperatures and power.' },
+  hardware: { icon: Cpu, text: 'The machine, with one GPU, many or none: what it has, how busy it is, where the models run and what holds them back.' },
   'llm-overview': { icon: LineChart, text: 'Requests, tokens, cost and latency at the gateway, and the engine behind it.' },
   'stack-performance': { icon: Gauge, text: 'Throughput, time to first token, queues and the cache: how fast the model answers.' },
   'stack-health': { icon: Activity, text: 'Which services answer, the alerts firing now, and Prometheus itself.' },

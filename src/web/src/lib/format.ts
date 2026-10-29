@@ -61,6 +61,23 @@ export function formatValue(v: unknown, unit?: string, decimals?: number | null)
       return v < 1 ? `${fixed(v * 1000, 0)} ms` : `${fixed(v, decimals ?? 2)} s`
     case 'ms':
       return v >= 1000 ? `${fixed(v / 1000, decimals ?? 2)} s` : `${fixed(v, decimals ?? 0)} ms`
+    // A long time in its largest unit and the one below it: "4 days 1 hour", "3 hours", "20 minutes 5 seconds".
+    case 'dtdurations': {
+      const units: [number, string][] = [
+        [86400, 'day'],
+        [3600, 'hour'],
+        [60, 'minute'],
+        [1, 'second'],
+      ]
+      const total = Math.max(0, Math.round(v))
+      const i = units.findIndex(([size]) => total >= size)
+      if (i < 0) return '0 seconds'
+      const say = (n: number, name: string) => `${n} ${name}${n === 1 ? '' : 's'}`
+      const [size, name] = units[i]!
+      const next = units[i + 1]
+      const rest = next ? Math.floor((total % size) / next[0]) : 0
+      return rest && next ? `${say(Math.floor(total / size), name)} ${say(rest, next[1])}` : say(Math.floor(total / size), name)
+    }
     // The machine's own readings: a temperature, a power draw, a clock speed (Hz, or MHz as Windows reports it), a disk or network rate.
     case 'celsius':
       return `${fixed(v, decimals ?? (Number.isInteger(v) ? 0 : 1))} °C`

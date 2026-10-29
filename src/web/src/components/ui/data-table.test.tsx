@@ -1,7 +1,7 @@
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import { DataTable, SortHeader, selectColumn, type ColumnDef } from './data-table'
+import { DataTable, SortHeader, one, selectColumn, type ColumnDef } from './data-table'
 import { Providers } from '@/app/providers'
 
 interface Row {
@@ -69,5 +69,11 @@ describe('data table', () => {
       </Providers>,
     )
     expect(screen.getByText('No events yet.')).toBeInTheDocument()
+  })
+})
+
+describe('the noun for one row', () => {
+  it('says one of each as one', () => {
+    expect(['rows', 'people', 'repositories', 'model files', 'times', 'classes', 'boxes', 'cases'].map(one)).toEqual(['row', 'person', 'repository', 'model file', 'time', 'class', 'box', 'case'])
   })
 })

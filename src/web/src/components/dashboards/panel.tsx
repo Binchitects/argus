@@ -2,7 +2,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import DOMPurify from 'dompurify'
 import { Info, Table2, TrendingUp } from 'lucide-react'
 import { marked } from 'marked'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { DataTable, type ColumnDef } from '@/components/ui/data-table'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -15,14 +15,26 @@ import { intervalFor, resolve, type TimeRange } from '@/lib/time'
 import { cn } from '@/lib/utils'
 import { LogsPanel } from './logs-panel'
 import { reduceEach } from './reduce'
-import type { Column, PanelData, PanelDef } from './types'
+import { merge } from './tables'
+import type { Column, PanelData, PanelDef, Threshold } from './types'
 import type { Chosen } from './variables'
 import { thresholdColor, tone } from './colors'
 import { ems, fitting } from './fit'
 import { Gauge, Sparkline } from './visuals'
 
-/** level: its title's heading level (3 under a row's heading, 2 when the panel has none above it). */
-export function PanelView({ uid, panel, range, tick, vars = {}, level = 3 }: { uid: string; panel: PanelDef; range: TimeRange; tick: number; vars?: Chosen; level?: 2 | 3 }) {
+/**
+ * level: its title's heading level (3 under a row's heading, 2 when the panel has none above it). onEmpty: told whether
+ * its queries came back with nothing (never for a text panel), for a panel or section shown only with data.
+ */
+export function PanelView({ uid, panel, range, tick, vars = {}, level = 3, onEmpty }: {
+  uid: string
+  panel: PanelDef
+  range: TimeRange
+  tick: number
+  vars?: Chosen
+  level?: 2 | 3
+  onEmpty?: (empty: boolean) => void
+}) {
   if (panel.type === 'text') {
     return (
       <Frame panel={panel} level={level}>
@@ -34,7 +46,7 @@ export function PanelView({ uid, panel, range, tick, vars = {}, level = 3 }: { u
       </Frame>
     )
   }
-  return <QueryPanel uid={uid} panel={panel} range={range} tick={tick} vars={vars} level={level} />
+  return <QueryPanel uid={uid} panel={panel} range={range} tick={tick} vars={vars} level={level} onEmpty={onEmpty} />
 }
 
 function Frame({ panel, action, children, className, compact, level = 3 }: { panel: PanelDef; action?: ReactNode; children: ReactNode; className?: string; compact?: boolean; level?: 2 | 3 }) {
@@ -65,7 +77,15 @@ function Frame({ panel, action, children, className, compact, level = 3 }: { pan
   )
 }
 
-function QueryPanel({ uid, panel, range, tick, vars, level }: { uid: string; panel: PanelDef; range: TimeRange; tick: number; vars: Chosen; level: 2 | 3 }) {
+function QueryPanel({ uid, panel, range, tick, vars, level, onEmpty }: {
+  uid: string
+  panel: PanelDef
+  range: TimeRange
+  tick: number
+  vars: Chosen
+  level: 2 | 3
+  onEmpty?: (empty: boolean) => void
+}) {
   const [asTable, setAsTable] = useState(false)
   const data = useQuery({
     queryKey: ['panel', uid, panel.key, range.from, range.to, tick, JSON.stringify(vars)],
@@ -91,6 +111,14 @@ function QueryPanel({ uid, panel, range, tick, vars, level }: { uid: string; pan
   const isChart = panel.type === 'timeseries' || panel.type === 'barchart'
   const isStat = panel.type === 'stat' || panel.type === 'gauge'
   const hasSeries = (data.data?.results ?? []).some((r) => (r.series?.length ?? 0) > 0)
+  // Nothing came back: no series, rows, lines or values (a query in error is not empty, so its message is seen).
+  const empty =
+    !!data.data &&
+    !error &&
+    data.data.results.every(
+      (r) => !r.series?.some((s) => s.points.some((p) => p[1] !== null)) && !r.table?.rows.length && !r.logs?.length,
+    )
+  useEffect(() => onEmpty?.(empty), [empty, onEmpty])
 
   let body: ReactNode = null
   if (!panel.supported) {
@@ -159,7 +187,9 @@ function QueryPanel({ uid, panel, range, tick, vars, level }: { uid: string; pan
         // A value per series. Many of them (a sensor per core) must not make the row taller than a chart
         // beside it: past two they drop their sparklines, and on a wide screen the list scrolls at a chart's height.
         const many = values.length > 2
-        const text = (v: (typeof values)[number]) => (v.value === null ? (defaults?.noValue ?? '—') : formatValue(v.value, unit, decimals))
+        // Grafana's text modes: the value (the default), or the series' name in its place (a CPU's model).
+        const text = (v: (typeof values)[number]) =>
+          panel.options?.textMode === 'name' ? v.name : v.value === null ? (defaults?.noValue ?? '—') : formatValue(v.value, unit, decimals)
         const em = Math.max(...values.map((v) => ems(text(v))))
         const list = (
           <div className={cn('grid gap-3', values.length > 1 && 'grid-cols-[repeat(auto-fit,minmax(min(7rem,100%),1fr))]')}>
@@ -171,17 +201,20 @@ function QueryPanel({ uid, panel, range, tick, vars, level }: { uid: string; pan
                 // and every value of the panel by as much, so they stay one size.
                 <div key={v.name} className={cn('grid min-w-0 gap-1 rounded-lg @container', background && `${t.fill} px-3 py-2`)}>
                   {/* Two lines before it is cut, and whole on hover: a narrow cell keeps more than the start of a name. */}
-                  {values.length > 1 && (
+                  {(values.length > 1 || panel.options?.textMode === 'value_and_name') && (
                     <p className="line-clamp-2 text-xs break-words text-muted-foreground" title={v.name}>
                       {v.name}
                     </p>
                   )}
                   <div
                     className={cn(
-                      'text-[length:min(1.5rem,var(--fit))] leading-[1.333] font-semibold tracking-tight whitespace-nowrap tabular-nums xl:text-[length:min(1.75rem,var(--fit))]',
+                      panel.options?.textMode === 'name'
+                        ? 'line-clamp-2 text-base leading-snug font-semibold break-words'
+                        : 'text-[length:min(1.5rem,var(--fit))] leading-[1.333] font-semibold tracking-tight whitespace-nowrap tabular-nums xl:text-[length:min(1.75rem,var(--fit))]',
                       panel.options?.colorMode !== 'none' && t?.ink,
                     )}
-                    style={fitting(em, '100cqi')}
+                    style={panel.options?.textMode === 'name' ? undefined : fitting(em, '100cqi')}
+                    title={panel.options?.textMode === 'name' ? v.name : undefined}
                     aria-label={values.length > 1 ? `${panel.title}: ${v.name}` : panel.title}
                   >
                     {text(v)}
@@ -219,7 +252,9 @@ function QueryPanel({ uid, panel, range, tick, vars, level }: { uid: string; pan
         />
       )
     } else {
-      const t = results.find((r) => r.table)?.table
+      const tables = results.flatMap((r) => (r.table ? [r.table] : []))
+      // With Grafana's merge, every query's table as one (a GPU's figures on its line); else the first.
+      const t = panel.transformations?.some((x) => x.id === 'merge') && tables.length ? { ...merge(tables), capped: tables.some((x) => x.capped) } : tables[0]
       const shaped = t ? organize(t.columns, t.rows, panel) : null
       body = shaped && t ? <ResultTable columns={shaped.columns} rows={shaped.rows} panel={panel} capped={t.capped} /> : <p className="text-sm text-muted-foreground">No data.</p>
     }
@@ -259,23 +294,57 @@ function organize(columns: Column[], rows: unknown[][], panel: PanelDef): { colu
   }
 }
 
-function columnUnit(panel: PanelDef, column: string): { unit?: string; decimals?: number } {
-  const out: { unit?: string; decimals?: number } = {}
+interface ColumnLook {
+  unit?: string
+  decimals?: number
+  min?: number
+  max?: number
+  thresholds?: Threshold[]
+  /** Grafana's cell types: a bar from min to max ("gauge"), or the text in its threshold's colour ("color-text"). */
+  cell?: string
+}
+
+/** A column's unit, range, thresholds and cell type, from its override (byName). */
+function columnLook(panel: PanelDef, column: string): ColumnLook {
+  const out: ColumnLook = {}
   for (const o of panel.fieldConfig?.overrides ?? []) {
     if (o.matcher.id !== 'byName' || o.matcher.options !== column) continue
     for (const p of o.properties) {
       if (p.id === 'unit') out.unit = String(p.value)
       if (p.id === 'decimals') out.decimals = Number(p.value)
+      if (p.id === 'min') out.min = Number(p.value)
+      if (p.id === 'max') out.max = Number(p.value)
+      if (p.id === 'thresholds') out.thresholds = (p.value as { steps?: Threshold[] } | null)?.steps
+      if (p.id === 'custom.cellOptions') out.cell = (p.value as { type?: string } | null)?.type
     }
   }
   return out
+}
+
+/** A number in a table's cell: as text, in its threshold's colour, or with a bar for how full it is. */
+function Cell({ value, look }: { value: unknown; look: ColumnLook }) {
+  const text = formatValue(value, look.unit, look.decimals)
+  if (typeof value !== 'number' || !look.cell || look.cell === 'auto') return <>{text}</>
+  const t = tone(thresholdColor(value, look.thresholds))
+  if (look.cell === 'color-text') return <span className={t?.ink}>{text}</span>
+  const min = look.min ?? 0
+  const max = look.max ?? (look.unit === 'percentunit' ? 1 : 100)
+  const ratio = Math.min(1, Math.max(0, (value - min) / (max - min || 1)))
+  return (
+    <span className="inline-flex items-center justify-end gap-2">
+      <span className="h-1.5 w-16 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+        <span className="block h-full rounded-full" style={{ width: `${ratio * 100}%`, background: t?.stroke ?? 'var(--primary)' }} />
+      </span>
+      <span className={cn('min-w-[3.5em]', t?.ink)}>{text}</span>
+    </span>
+  )
 }
 
 const right = { className: 'text-right tabular-nums' }
 
 function ResultTable({ columns, rows, panel, capped }: { columns: Column[]; rows: unknown[][]; panel: PanelDef; capped: boolean }) {
   if (!rows.length) return <p className="py-6 text-center text-sm text-muted-foreground">No rows in this time range.</p>
-  const fmt = columns.map((c) => columnUnit(panel, c.name))
+  const looks = columns.map((c) => columnLook(panel, c.name))
   const defs: ColumnDef<unknown[]>[] = columns.map((c, j) => ({
     id: `c${j}`,
     header: c.name,
@@ -283,7 +352,7 @@ function ResultTable({ columns, rows, panel, capped }: { columns: Column[]; rows
     meta: c.type === 'number' ? right : { className: 'whitespace-nowrap' },
     cell: ({ row }) => {
       const v = row.original[j]
-      return c.type === 'time' && typeof v === 'string' ? new Date(v).toLocaleString() : formatValue(v, fmt[j]!.unit, fmt[j]!.decimals)
+      return c.type === 'time' && typeof v === 'string' ? new Date(v).toLocaleString() : <Cell value={v} look={looks[j]!} />
     },
   }))
   return (

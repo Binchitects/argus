@@ -1,7 +1,7 @@
 {
   "uid": "hardware",
   "title": "Hardware",
-  "description": "The machine: GPUs, CPUs, memory, disks, network, temperatures and power.",
+  "description": "The machine, for one GPU, many, or none: what it has, how busy it is, where the models run, and what holds them back (heat, memory, the CPU).",
   "permission": "hardware.read",
   "area": "hardware",
   "main": true,
@@ -11,7 +11,7 @@
   ],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "editable": true,
   "refresh": "30s",
   "time": {
@@ -24,7 +24,7 @@
   "panels": [
     {
       "type": "row",
-      "title": "At a glance",
+      "title": "This machine",
       "collapsed": false,
       "panels": [],
       "gridPos": {
@@ -35,30 +35,330 @@
       }
     },
     {
-      "type": "gauge",
-      "title": "CPU busy",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 0,
-        "y": 1
-      },
+      "type": "stat",
+      "title": "CPU",
       "targets": [
         {
           "refId": "A",
-          "expr": "100 * (1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))",
-          "legendFormat": "cpu"
+          "expr": "count by (model_name) (node_cpu_info)",
+          "legendFormat": "{{model_name}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "hideWhenEmpty": true,
+        "textMode": "name"
+      },
+      "description": "The processor's model, as the kernel names it (node-exporter's CPU info).",
+      "gridPos": {
+        "h": 3,
+        "w": 6,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Cores",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count(count by (package, core) (node_cpu_info))",
+          "legendFormat": "physical cores"
+        },
+        {
+          "refId": "B",
+          "expr": "count(node_cpu_seconds_total{mode=\"idle\"})",
+          "legendFormat": "threads"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "textMode": "value_and_name"
+      },
+      "description": "Physical cores, and the threads the system schedules on them (logical CPUs). A model on the CPU runs a thread per physical core.",
+      "gridPos": {
+        "h": 3,
+        "w": 4,
+        "x": 6,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "RAM",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "node_memory_MemTotal_bytes",
+          "legendFormat": "RAM"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none"
+      },
+      "description": "The machine's memory.",
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 10,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "GPUs",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "count by (name) (nvidia_smi_gpu_info)",
+          "legendFormat": "{{name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "hideWhenEmpty": true,
+        "textMode": "value_and_name"
+      },
+      "description": "The GPUs nvidia-smi reports, by model.",
+      "gridPos": {
+        "h": 3,
+        "w": 5,
+        "x": 13,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "VRAM",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(nvidia_smi_memory_total_bytes)",
+          "legendFormat": "VRAM"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "hideWhenEmpty": true
+      },
+      "description": "All the GPUs' memory together.",
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 18,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Up for",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - node_boot_time_seconds",
+          "legendFormat": "up"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "dtdurations"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none"
+      },
+      "description": "Since the machine last started.",
+      "gridPos": {
+        "h": 3,
+        "w": 3,
+        "x": 21,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "row",
+      "title": "At a glance",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 4
+      }
+    },
+    {
+      "type": "gauge",
+      "title": "CPU busy",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m]))",
+          "legendFormat": "CPU busy"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
           "min": 0,
-          "max": 100,
+          "max": 1,
           "decimals": 1,
           "thresholds": {
             "mode": "absolute",
@@ -69,11 +369,11 @@
               },
               {
                 "color": "yellow",
-                "value": 70
+                "value": 0.7
               },
               {
                 "color": "red",
-                "value": 90
+                "value": 0.9
               }
             ]
           }
@@ -88,6 +388,17 @@
           "fields": "",
           "values": false
         }
+      },
+      "description": "All cores together, over the last 5 minutes. A model running on the CPU keeps this high while it answers.",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 0,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       }
     },
     {
@@ -97,24 +408,18 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 4,
-        "y": 1
-      },
       "targets": [
         {
           "refId": "A",
-          "expr": "100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)",
+          "expr": "1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes",
           "legendFormat": "memory"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "percent",
+          "unit": "percentunit",
           "min": 0,
-          "max": 100,
+          "max": 1,
           "decimals": 1,
           "thresholds": {
             "mode": "absolute",
@@ -125,11 +430,11 @@
               },
               {
                 "color": "yellow",
-                "value": 80
+                "value": 0.8
               },
               {
                 "color": "red",
-                "value": 92
+                "value": 0.92
               }
             ]
           }
@@ -145,26 +450,22 @@
           "values": false
         }
       },
-      "description": "Memory that programs hold and the system cannot take back (100% minus MemAvailable). The models' files that the engine maps sit in the page cache, not here: Memory below shows it. When a model is bigger than RAM and the GPU, that page cache is full and the model is read from disk as it runs (Admin -> Models)."
-    },
-    {
-      "type": "gauge",
-      "title": "GPU utilisation",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
+      "description": "Memory that programs hold and the system cannot take back (100% minus MemAvailable). The models' files that the engine maps sit in the page cache, not here: Memory below shows it. When a model is bigger than RAM and the GPU, that page cache is full and the model is read from disk as it runs (Admin -> Models).",
       "gridPos": {
         "h": 5,
         "w": 4,
-        "x": 8,
-        "y": 1
-      },
+        "x": 4,
+        "y": 5
+      }
+    },
+    {
+      "type": "gauge",
+      "title": "GPUs busy",
       "targets": [
         {
           "refId": "A",
-          "expr": "nvidia_smi_utilization_gpu_ratio * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
-          "legendFormat": "{{gpu}}"
+          "expr": "avg(nvidia_smi_utilization_gpu_ratio)",
+          "legendFormat": "GPUs busy"
         }
       ],
       "fieldConfig": {
@@ -172,6 +473,7 @@
           "unit": "percentunit",
           "min": 0,
           "max": 1,
+          "decimals": 1,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -195,28 +497,29 @@
           ],
           "fields": "",
           "values": false
-        }
+        },
+        "hideWhenEmpty": true
+      },
+      "description": "The GPUs' average. Each GPU's own is under GPUs below.",
+      "gridPos": {
+        "h": 5,
+        "w": 3,
+        "x": 8,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       }
     },
     {
       "type": "gauge",
       "title": "VRAM used",
-      "description": "vLLM pre-allocates gpu-memory-utilization of the card at startup, so expect this to sit high and flat while it is running.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 12,
-        "y": 1
-      },
       "targets": [
         {
           "refId": "A",
-          "expr": "nvidia_smi_memory_used_bytes / nvidia_smi_memory_total_bytes * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
-          "legendFormat": "{{gpu}}"
+          "expr": "sum(nvidia_smi_memory_used_bytes) / sum(nvidia_smi_memory_total_bytes)",
+          "legendFormat": "VRAM used"
         }
       ],
       "fieldConfig": {
@@ -224,6 +527,7 @@
           "unit": "percentunit",
           "min": 0,
           "max": 1,
+          "decimals": 1,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -237,7 +541,7 @@
               },
               {
                 "color": "red",
-                "value": 0.98
+                "value": 0.97
               }
             ]
           }
@@ -251,34 +555,37 @@
           ],
           "fields": "",
           "values": false
-        }
+        },
+        "hideWhenEmpty": true
+      },
+      "description": "All the GPUs' memory together. vLLM and SGLang take their share of a GPU when they start, so a GPU they run on sits high and flat.",
+      "gridPos": {
+        "h": 5,
+        "w": 3,
+        "x": 11,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       }
     },
     {
       "type": "gauge",
-      "title": "GPU temperature",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 16,
-        "y": 1
-      },
+      "title": "Hottest GPU",
       "targets": [
         {
           "refId": "A",
-          "expr": "nvidia_smi_temperature_gpu * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
-          "legendFormat": "{{gpu}}"
+          "expr": "max(nvidia_smi_temperature_gpu)",
+          "legendFormat": "Hottest GPU"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "celsius",
-          "min": 20,
+          "min": 0,
           "max": 100,
+          "decimals": 0,
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -288,15 +595,11 @@
               },
               {
                 "color": "yellow",
-                "value": 75
-              },
-              {
-                "color": "orange",
-                "value": 83
+                "value": 80
               },
               {
                 "color": "red",
-                "value": 90
+                "value": 88
               }
             ]
           }
@@ -310,237 +613,403 @@
           ],
           "fields": "",
           "values": false
-        }
-      }
-    },
-    {
-      "type": "stat",
-      "title": "GPU power",
+        },
+        "hideWhenEmpty": true
+      },
+      "description": "The hottest GPU now. Past about 85 °C most cards slow themselves down.",
+      "gridPos": {
+        "h": 5,
+        "w": 3,
+        "x": 14,
+        "y": 5
+      },
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 5,
-        "w": 4,
-        "x": 20,
-        "y": 1
-      },
+      }
+    },
+    {
+      "type": "gauge",
+      "title": "Hottest CPU sensor",
       "targets": [
         {
           "refId": "A",
-          "expr": "nvidia_smi_power_draw_watts * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
-          "legendFormat": "draw {{gpu}}"
-        },
-        {
-          "refId": "B",
-          "expr": "nvidia_smi_power_limit_watts * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
-          "legendFormat": "limit {{gpu}}"
+          "expr": "max(cpu_temperature_celsius)",
+          "legendFormat": "Hottest CPU sensor"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "watt",
+          "unit": "celsius",
+          "min": 0,
+          "max": 105,
           "decimals": 0,
-          "color": {
-            "mode": "fixed",
-            "fixedColor": "orange"
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 85
+              },
+              {
+                "color": "red",
+                "value": 95
+              }
+            ]
           }
         },
         "overrides": []
       },
       "options": {
-        "graphMode": "area",
-        "colorMode": "value",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
           ],
           "fields": "",
           "values": false
+        },
+        "hideWhenEmpty": true
+      },
+      "description": "The hottest CPU sensor now (cpu-temp-exporter).",
+      "gridPos": {
+        "h": 5,
+        "w": 3,
+        "x": 17,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "GPU power",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(nvidia_smi_power_draw_watts)",
+          "legendFormat": "drawing"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(nvidia_smi_power_limit_watts)",
+          "legendFormat": "limit"
         }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "hideWhenEmpty": true,
+        "textMode": "value_and_name"
+      },
+      "description": "What all the GPUs draw now, and their limits together.",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 20,
+        "y": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       }
     },
     {
       "type": "row",
-      "title": "GPU",
+      "title": "Where the models run",
       "collapsed": false,
       "panels": [],
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 6
+        "y": 10
       }
     },
     {
-      "type": "timeseries",
-      "title": "GPU utilisation vs memory bandwidth",
-      "description": "LLM decode is memory-bandwidth bound, so the memory line running higher than compute is normal and healthy.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 7
-      },
+      "type": "table",
+      "title": "Loaded models",
       "targets": [
         {
           "refId": "A",
-          "expr": "nvidia_smi_utilization_gpu_ratio * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
-          "legendFormat": "compute {{gpu}}"
-        },
-        {
-          "refId": "B",
-          "expr": "nvidia_smi_utilization_memory_ratio * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
-          "legendFormat": "memory bw {{gpu}}"
+          "expr": "sum by (model, engine, on) (arena_model_memory_bytes)",
+          "instant": true,
+          "format": "table"
         }
       ],
+      "description": "Each loaded model, where it sits (its GPUs, or RAM) and the memory the app reckons it takes there: a model split over several GPUs has a line for each. 0 where the app does not know its size (the model named in .env).",
       "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "min": 0,
-          "max": 1,
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 15,
-            "lineWidth": 2,
-            "showPoints": "never"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        }
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "VRAM",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 7
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "nvidia_smi_memory_used_bytes * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
-          "legendFormat": "used {{gpu}}"
-        },
-        {
-          "refId": "B",
-          "expr": "nvidia_smi_memory_free_bytes * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
-          "legendFormat": "free {{gpu}}"
-        },
-        {
-          "refId": "C",
-          "expr": "nvidia_smi_memory_total_bytes * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
-          "legendFormat": "total {{gpu}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "bytes",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
-            "showPoints": "never"
-          }
-        },
+        "defaults": {},
         "overrides": [
           {
             "matcher": {
-              "id": "byRegexp",
-              "options": "total.*"
+              "id": "byName",
+              "options": "Memory"
             },
             "properties": [
               {
-                "id": "custom.fillOpacity",
-                "value": 0
-              },
-              {
-                "id": "custom.lineStyle",
-                "value": {
-                  "fill": "dash",
-                  "dash": [
-                    8,
-                    8
-                  ]
-                }
-              },
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "text"
-                }
+                "id": "unit",
+                "value": "bytes"
               }
             ]
           }
         ]
       },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "model": "Model",
+              "engine": "Engine",
+              "on": "On",
+              "Value": "Memory"
+            },
+            "indexByName": {
+              "model": 0,
+              "engine": 1,
+              "on": 2,
+              "Value": 3
+            }
+          }
         }
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "GPU temperature and fan",
-      "description": "The pattern to watch for: temperature climbing into the throttle zone while power draw DROPS. That is the card down-clocking, and it shows up as falling tokens/sec on the LLM dashboard.",
+      ],
+      "options": {
+        "noValue": "No model is loaded."
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 11
+      },
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      },
+      }
+    },
+    {
+      "type": "row",
+      "title": "GPUs",
+      "collapsed": false,
+      "panels": [],
       "gridPos": {
-        "h": 8,
-        "w": 8,
+        "h": 1,
+        "w": 24,
         "x": 0,
-        "y": 15
+        "y": 17
       },
+      "emptyText": "No GPU reports here, so the models run on the CPU: the CPU and Memory sections below are what set their speed. A machine with NVIDIA GPUs shows each of them here once the gpu-exporter runs (it does wherever the NVIDIA driver is installed)."
+    },
+    {
+      "type": "table",
+      "title": "Each GPU",
       "targets": [
         {
           "refId": "A",
-          "expr": "nvidia_smi_temperature_gpu * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
-          "legendFormat": "temp {{gpu}}"
+          "expr": "max by (gpu) ((nvidia_smi_utilization_gpu_ratio) * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) label_replace(nvidia_smi_gpu_info, \"gpu\", \"$1\", \"name\", \"^(?:NVIDIA )?(.+)$\")))",
+          "instant": true,
+          "format": "table"
         },
         {
           "refId": "B",
-          "expr": "100 * nvidia_smi_fan_speed_ratio * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
-          "legendFormat": "fan % {{gpu}}"
+          "expr": "max by (gpu) ((nvidia_smi_memory_used_bytes / nvidia_smi_memory_total_bytes) * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) label_replace(nvidia_smi_gpu_info, \"gpu\", \"$1\", \"name\", \"^(?:NVIDIA )?(.+)$\")))",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "C",
+          "expr": "max by (gpu) ((nvidia_smi_memory_used_bytes) * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) label_replace(nvidia_smi_gpu_info, \"gpu\", \"$1\", \"name\", \"^(?:NVIDIA )?(.+)$\")))",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "D",
+          "expr": "max by (gpu) ((nvidia_smi_memory_total_bytes) * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) label_replace(nvidia_smi_gpu_info, \"gpu\", \"$1\", \"name\", \"^(?:NVIDIA )?(.+)$\")))",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "E",
+          "expr": "max by (gpu) ((nvidia_smi_temperature_gpu) * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) label_replace(nvidia_smi_gpu_info, \"gpu\", \"$1\", \"name\", \"^(?:NVIDIA )?(.+)$\")))",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "F",
+          "expr": "max by (gpu) ((nvidia_smi_power_draw_watts) * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) label_replace(nvidia_smi_gpu_info, \"gpu\", \"$1\", \"name\", \"^(?:NVIDIA )?(.+)$\")))",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "G",
+          "expr": "max by (gpu) ((nvidia_smi_pcie_link_gen_current) * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) label_replace(nvidia_smi_gpu_info, \"gpu\", \"$1\", \"name\", \"^(?:NVIDIA )?(.+)$\")))",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "H",
+          "expr": "max by (gpu) ((nvidia_smi_pcie_link_width_current) * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) label_replace(nvidia_smi_gpu_info, \"gpu\", \"$1\", \"name\", \"^(?:NVIDIA )?(.+)$\")))",
+          "instant": true,
+          "format": "table"
+        },
+        {
+          "refId": "I",
+          "expr": "max by (gpu) ((nvidia_smi_clocks_event_reasons_hw_thermal_slowdown + nvidia_smi_clocks_event_reasons_sw_thermal_slowdown + nvidia_smi_clocks_event_reasons_hw_power_brake_slowdown) * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) label_replace(nvidia_smi_gpu_info, \"gpu\", \"$1\", \"name\", \"^(?:NVIDIA )?(.+)$\")))",
+          "instant": true,
+          "format": "table"
         }
       ],
+      "description": "One line per GPU, now. Busy and VRAM fill their bars; Slowed down is 1 while the GPU holds its clocks back for heat or a power brake (the normal power limit is not counted); power limits and fans are on GPU Hardware. PCIe below its card's best (a gen or lanes lower than the others) slows loading and multi-GPU work.",
       "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 8,
-            "lineWidth": 2,
-            "showPoints": "never"
-          }
-        },
+        "defaults": {},
         "overrides": [
           {
             "matcher": {
-              "id": "byRegexp",
-              "options": "temp.*"
+              "id": "byName",
+              "options": "Busy"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge"
+                }
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 1
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "blue",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 0.3
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "VRAM"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "percentunit"
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "gauge"
+                }
+              },
+              {
+                "id": "min",
+                "value": 0
+              },
+              {
+                "id": "max",
+                "value": 1
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 0.9
+                    },
+                    {
+                      "color": "red",
+                      "value": 0.97
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "VRAM used"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "VRAM total"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Temperature"
             },
             "properties": [
               {
@@ -548,240 +1017,322 @@
                 "value": "celsius"
               },
               {
-                "id": "max",
-                "value": 100
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "yellow",
+                      "value": 80
+                    },
+                    {
+                      "color": "red",
+                      "value": 88
+                    }
+                  ]
+                }
               }
             ]
           },
           {
             "matcher": {
-              "id": "byRegexp",
-              "options": "fan.*"
+              "id": "byName",
+              "options": "Power"
             },
             "properties": [
               {
                 "id": "unit",
-                "value": "percent"
-              },
-              {
-                "id": "max",
-                "value": 100
+                "value": "watt"
               }
             ]
-          }
-        ]
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        }
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "GPU power draw vs limit",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 15
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "nvidia_smi_power_draw_watts * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
-          "legendFormat": "draw {{gpu}}"
-        },
-        {
-          "refId": "B",
-          "expr": "nvidia_smi_power_limit_watts * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
-          "legendFormat": "limit {{gpu}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "watt",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 12,
-            "lineWidth": 2,
-            "showPoints": "never"
-          }
-        },
-        "overrides": [
+          },
           {
             "matcher": {
-              "id": "byRegexp",
-              "options": "limit.*"
+              "id": "byName",
+              "options": "PCIe gen"
             },
             "properties": [
               {
-                "id": "custom.fillOpacity",
+                "id": "decimals",
                 "value": 0
-              },
-              {
-                "id": "custom.lineStyle",
-                "value": {
-                  "fill": "dash",
-                  "dash": [
-                    8,
-                    8
-                  ]
-                }
-              },
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "red"
-                }
               }
             ]
-          }
-        ]
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        }
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "GPU clocks",
-      "description": "SM clock dropping while utilisation stays high is the signature of throttling.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 15
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "nvidia_smi_clocks_current_sm_clock_hz * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
-          "legendFormat": "SM {{gpu}}"
-        },
-        {
-          "refId": "B",
-          "expr": "nvidia_smi_clocks_current_memory_clock_hz * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
-          "legendFormat": "memory {{gpu}}"
-        },
-        {
-          "refId": "C",
-          "expr": "nvidia_smi_clocks_max_sm_clock_hz * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
-          "legendFormat": "SM max {{gpu}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "hertz",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 8,
-            "lineWidth": 2,
-            "showPoints": "never"
-          }
-        },
-        "overrides": [
+          },
           {
             "matcher": {
-              "id": "byRegexp",
-              "options": ".*max.*"
+              "id": "byName",
+              "options": "PCIe lanes"
             },
             "properties": [
               {
-                "id": "custom.fillOpacity",
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Slowed down"
+            },
+            "properties": [
+              {
+                "id": "decimals",
                 "value": 0
               },
               {
-                "id": "custom.lineStyle",
+                "id": "custom.cellOptions",
                 "value": {
-                  "fill": "dash",
-                  "dash": [
-                    8,
-                    8
-                  ]
+                  "type": "color-text"
                 }
               },
               {
-                "id": "color",
+                "id": "thresholds",
                 "value": {
-                  "mode": "fixed",
-                  "fixedColor": "text"
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "red",
+                      "value": 1
+                    }
+                  ]
                 }
               }
             ]
           }
         ]
       },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
+      "transformations": [
+        {
+          "id": "merge",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "renameByName": {
+              "gpu": "GPU",
+              "Value #A": "Busy",
+              "Value #B": "VRAM",
+              "Value #C": "VRAM used",
+              "Value #D": "VRAM total",
+              "Value #E": "Temperature",
+              "Value #F": "Power",
+              "Value #G": "PCIe gen",
+              "Value #H": "PCIe lanes",
+              "Value #I": "Slowed down"
+            },
+            "indexByName": {
+              "gpu": 0,
+              "Value #A": 1,
+              "Value #B": 2,
+              "Value #C": 3,
+              "Value #D": 4,
+              "Value #E": 5,
+              "Value #F": 6,
+              "Value #G": 7,
+              "Value #H": 8,
+              "Value #I": 9
+            }
+          }
         }
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "Throttle reasons",
-      "description": "1 = actively throttling. `sw_power_cap` is the normal power limiter doing its job; the thermal reasons mean the card is too hot and you are losing throughput.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
+      ],
       "gridPos": {
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 18
       },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Busy, each GPU",
       "targets": [
         {
           "refId": "A",
-          "expr": "nvidia_smi_clocks_event_reasons_hw_thermal_slowdown * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
-          "legendFormat": "hw thermal {{gpu}}"
-        },
-        {
-          "refId": "B",
-          "expr": "nvidia_smi_clocks_event_reasons_sw_thermal_slowdown * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
-          "legendFormat": "sw thermal {{gpu}}"
-        },
-        {
-          "refId": "C",
-          "expr": "nvidia_smi_clocks_event_reasons_sw_power_cap * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
-          "legendFormat": "sw power cap {{gpu}}"
-        },
-        {
-          "refId": "D",
-          "expr": "nvidia_smi_clocks_event_reasons_hw_power_brake_slowdown * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) nvidia_smi_gpu_info)",
-          "legendFormat": "hw power brake {{gpu}}"
+          "expr": "max by (gpu) ((nvidia_smi_utilization_gpu_ratio) * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) label_replace(nvidia_smi_gpu_info, \"gpu\", \"$1\", \"name\", \"^(?:NVIDIA )?(.+)$\")))",
+          "legendFormat": "{{gpu}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
-          "min": 0,
-          "max": 1,
           "custom": {
-            "drawStyle": "line",
-            "lineInterpolation": "stepAfter",
-            "fillOpacity": 40,
             "lineWidth": 1,
-            "showPoints": "never"
+            "fillOpacity": 10
+          },
+          "unit": "percentunit",
+          "max": 1,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "description": "How much of the time each GPU was computing. Answering a chat is limited by memory speed, so a GPU that answers can show well under 100%.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 25
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "VRAM used, each GPU",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (gpu) ((nvidia_smi_memory_used_bytes / nvidia_smi_memory_total_bytes) * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) label_replace(nvidia_smi_gpu_info, \"gpu\", \"$1\", \"name\", \"^(?:NVIDIA )?(.+)$\")))",
+          "legendFormat": "{{gpu}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10
+          },
+          "unit": "percentunit",
+          "max": 1,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "description": "vLLM pre-allocates gpu-memory-utilization of the card at startup, so expect this to sit high and flat while it is running.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 25
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Temperature, each GPU",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (gpu) ((nvidia_smi_temperature_gpu) * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) label_replace(nvidia_smi_gpu_info, \"gpu\", \"$1\", \"name\", \"^(?:NVIDIA )?(.+)$\")))",
+          "legendFormat": "{{gpu}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10
+          },
+          "unit": "celsius"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "description": "Past about 85 °C a card slows itself down; Slowed down, beside, shows when it does.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 33
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Power, each GPU",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (gpu) ((nvidia_smi_power_draw_watts) * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) label_replace(nvidia_smi_gpu_info, \"gpu\", \"$1\", \"name\", \"^(?:NVIDIA )?(.+)$\")))",
+          "legendFormat": "{{gpu}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10
+          },
+          "unit": "watt"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "description": "What each GPU draws. Its limit is in Each GPU above; a GPU at its limit while busy is held back by it (normal).",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 33
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Slowed down, each GPU",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (gpu) ((nvidia_smi_clocks_event_reasons_hw_thermal_slowdown + nvidia_smi_clocks_event_reasons_sw_thermal_slowdown + nvidia_smi_clocks_event_reasons_hw_power_brake_slowdown) * on (instance, uuid) group_left (gpu) (label_replace(label_join(count_values by (instance, uuid) (\"gpu\", nvidia_smi_index) * on (instance, uuid) group_left (name) nvidia_smi_gpu_info, \"gpu\", \" \", \"gpu\", \"name\"), \"gpu\", \"GPU $1 · $2\", \"gpu\", \"^([0-9]+) (?:NVIDIA )?(.+)$\") and on (instance) count by (instance) (nvidia_smi_gpu_info) > 1 or on (instance, uuid) label_replace(nvidia_smi_gpu_info, \"gpu\", \"$1\", \"name\", \"^(?:NVIDIA )?(.+)$\")))",
+          "legendFormat": "{{gpu}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10
           }
         },
         "overrides": []
@@ -789,23 +1340,37 @@
       "options": {
         "legend": {
           "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
+          "placement": "bottom"
         }
+      },
+      "description": "1 while a GPU holds its clocks back for heat or a power brake: it answers slower then. Thermal slowdowns mean better cooling or a lower power limit (Admin → Hardware).",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 33
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       }
     },
     {
       "type": "text",
-      "title": "Data-centre detail (DCGM)",
+      "title": "",
       "options": {
         "mode": "markdown",
-        "content": "SM activity, tensor cores, XID errors, ECC, retired pages and NVLink come from NVIDIA's DCGM exporter, the **dcgm** profile: `COMPOSE_PROFILES=dcgm` in `deploy/.env` (the installer offers it where NVIDIA's registry, nvcr.io, is reachable). Then the **GPU Hardware** dashboard shows them; without it its DCGM panels are empty."
+        "content": "Clocks, PCIe traffic, fans, memory errors and NVIDIA's data-centre detail (DCGM): the [GPU Hardware](/admin/dashboards/gpu-hardware) dashboard."
       },
       "gridPos": {
-        "h": 3,
+        "h": 2,
         "w": 24,
         "x": 0,
-        "y": 30
+        "y": 41
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       }
     },
     {
@@ -817,22 +1382,16 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 33
+        "y": 43
       }
     },
     {
       "type": "timeseries",
-      "title": "CPU by mode",
+      "title": "CPU busy, by kind of work",
       "description": "During GPU inference the CPU should be mostly idle. Sustained `user` or `system` load often means the model fell back to CPU, or tokenisation is the bottleneck.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 34
       },
       "targets": [
         {
@@ -862,96 +1421,124 @@
           "placement": "bottom",
           "showLegend": true
         }
-      }
-    },
-    {
-      "type": "timeseries",
-      "title": "Per-core utilisation",
-      "description": "A single saturated core alongside idle ones usually means a single-threaded bottleneck rather than genuine CPU pressure.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
       },
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 12,
-        "y": 34
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "100 * (1 - avg by (cpu) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))",
-          "legendFormat": "core {{cpu}}"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "min": 0,
-          "max": 100,
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 0,
-            "lineWidth": 1,
-            "showPoints": "never"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": false
-        }
+        "x": 0,
+        "y": 44
       }
     },
     {
       "type": "timeseries",
-      "title": "Load average",
-      "description": "Runnable and waiting tasks. Above the logical CPUs line, work is queuing for the CPU.",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 0,
-        "y": 42
-      },
+      "title": "Cores: busiest, average, quietest",
       "targets": [
         {
           "refId": "A",
-          "expr": "node_load1",
-          "legendFormat": "1m"
+          "expr": "max(1 - rate(node_cpu_seconds_total{mode=\"idle\"}[5m]))",
+          "legendFormat": "busiest core"
         },
         {
           "refId": "B",
-          "expr": "node_load5",
-          "legendFormat": "5m"
+          "expr": "avg(1 - rate(node_cpu_seconds_total{mode=\"idle\"}[5m]))",
+          "legendFormat": "average"
         },
         {
           "refId": "C",
-          "expr": "node_load15",
-          "legendFormat": "15m"
-        },
-        {
-          "refId": "D",
-          "expr": "count(count by (cpu) (node_cpu_seconds_total))",
-          "legendFormat": "logical CPUs"
+          "expr": "min(1 - rate(node_cpu_seconds_total{mode=\"idle\"}[5m]))",
+          "legendFormat": "quietest core"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
-          "decimals": 2,
           "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 8,
-            "lineWidth": 2,
-            "showPoints": "never"
+            "lineWidth": 1,
+            "fillOpacity": 10
+          },
+          "unit": "percentunit",
+          "max": 1,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "description": "Three lines however many cores the machine has. Busiest far above average: one thread does the work (a single-threaded step). All three high: the CPU is the limit. Each core's own: Show as table.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 44
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Waiting for a CPU",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(node_pressure_cpu_waiting_seconds_total[5m])",
+          "legendFormat": "some task waited"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10
+          },
+          "unit": "percentunit",
+          "max": 1,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "description": "The share of time at least one task was ready to run but waited for a CPU (the kernel's pressure figures). Above about 20% for long, the CPU is what holds the work back.",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 52
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Load per CPU",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "node_load1 / scalar(count(node_cpu_seconds_total{mode=\"idle\"}))",
+          "legendFormat": "1 minute"
+        },
+        {
+          "refId": "B",
+          "expr": "node_load15 / scalar(count(node_cpu_seconds_total{mode=\"idle\"}))",
+          "legendFormat": "15 minutes"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10
           }
         },
         "overrides": []
@@ -959,64 +1546,75 @@
       "options": {
         "legend": {
           "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
+          "placement": "bottom"
         }
+      },
+      "description": "The load average divided by the logical CPUs: 1 is every CPU busy, above 1 work queues for them.",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 52
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       }
     },
     {
       "type": "timeseries",
       "title": "CPU clock",
-      "description": "The cores' clock: the average, and the fastest core. Low under load means it is held back (heat, power).",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
       "targets": [
         {
           "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "avg(node_cpu_scaling_frequency_hertz)",
+          "expr": "avg(avg_over_time(node_cpu_scaling_frequency_hertz[1m]))",
           "legendFormat": "average"
         },
         {
           "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "max(node_cpu_scaling_frequency_hertz)",
+          "expr": "max(avg_over_time(node_cpu_scaling_frequency_hertz[1m]))",
           "legendFormat": "fastest core"
+        },
+        {
+          "refId": "C",
+          "expr": "max(node_cpu_frequency_max_hertz)",
+          "legendFormat": "its most"
         }
       ],
       "fieldConfig": {
         "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10
+          },
           "unit": "hertz"
         },
         "overrides": []
       },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "description": "The cores' clock over each minute, against the most it can reach. Low under load means it is held back (heat, power).",
       "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 8,
-        "y": 42
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 52
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       }
     },
     {
       "type": "timeseries",
-      "title": "Host CPU temperature over time",
+      "title": "CPU temperature",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 16,
-        "y": 42
       },
       "targets": [
         {
@@ -1048,20 +1646,27 @@
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
-        }
+        },
+        "hideWhenEmpty": true
       },
-      "description": "The hottest CPU sensor and the average of all of them, from the cpu-temp-exporter: two lines whatever the core count. A gap between them is one core or one die running hot; CPU temperature per sensor, below, shows which. Linux reads coretemp/k10temp via hwmon; Windows scrapes LibreHardwareMonitor on the host."
+      "description": "The hottest CPU sensor and the average of all of them, from the cpu-temp-exporter: two lines whatever the core count. A gap between them is one core or one die running hot; CPU temperature per sensor, below, shows which. Linux reads coretemp/k10temp via hwmon; Windows scrapes LibreHardwareMonitor on the host.",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 52
+      }
     },
     {
       "type": "row",
-      "title": "Memory, disks and network",
+      "title": "Memory",
       "collapsed": false,
       "panels": [],
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 49
+        "y": 60
       }
     },
     {
@@ -1070,12 +1675,6 @@
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 0,
-        "y": 50
       },
       "targets": [
         {
@@ -1147,51 +1746,112 @@
           "placement": "bottom",
           "showLegend": true
         }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 61
       }
     },
     {
       "type": "timeseries",
-      "title": "Swap",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 8,
-        "y": 50
-      },
+      "title": "Swapping",
       "targets": [
         {
           "refId": "A",
-          "expr": "node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes",
-          "legendFormat": "swap used"
+          "expr": "rate(node_vmstat_pswpin[5m]) * 4096",
+          "legendFormat": "read back from swap"
         },
         {
           "refId": "B",
-          "expr": "node_memory_SwapTotal_bytes",
-          "legendFormat": "swap total"
+          "expr": "rate(node_vmstat_pswpout[5m]) * 4096",
+          "legendFormat": "written to swap"
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "bytes",
           "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
-            "showPoints": "never"
-          }
+            "lineWidth": 1,
+            "fillOpacity": 10
+          },
+          "unit": "Bps"
         },
         "overrides": []
       },
       "options": {
         "legend": {
           "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
+          "placement": "bottom"
         }
+      },
+      "description": "Memory moved to and from the swap disk. Lasting swapping slows a model on the CPU many times over: lower its context or load a smaller model.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 61
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Waiting for memory",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(node_pressure_memory_waiting_seconds_total[5m])",
+          "legendFormat": "some task waited"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(node_pressure_memory_stalled_seconds_total[5m])",
+          "legendFormat": "every task waited"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10
+          },
+          "unit": "percentunit",
+          "max": 1,
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "description": "The share of time tasks waited for memory to be freed (the kernel's pressure figures). Above a few percent, RAM is too small for what runs.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 61
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "row",
+      "title": "Disks and network",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 69
       }
     },
     {
@@ -1200,12 +1860,6 @@
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 16,
-        "y": 50
       },
       "targets": [
         {
@@ -1251,6 +1905,12 @@
           "placement": "bottom",
           "showLegend": true
         }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 70
       }
     },
     {
@@ -1259,12 +1919,6 @@
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 0,
-        "y": 57
       },
       "targets": [
         {
@@ -1296,6 +1950,12 @@
           "placement": "bottom",
           "showLegend": true
         }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 70
       }
     },
     {
@@ -1304,12 +1964,6 @@
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 8,
-        "y": 57
       },
       "targets": [
         {
@@ -1341,21 +1995,21 @@
           "placement": "bottom",
           "showLegend": true
         }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 70
       }
     },
     {
       "type": "timeseries",
-      "title": "NVMe temperature over time",
+      "title": "NVMe temperature",
       "description": "Each NVMe drive's composite temperature (SMART temp1) from node-exporter's hwmon collector, which reads the kernel's own nvme sensors -- node-exporter already mounts the host /sys, so no extra exporter is needed. A drive is named by its device, then the model it reports (node_nvme_info), as in nvme0 · <model>, or by its device alone when it reports no model. Some drives also report their NAND and controller as temp2/temp3, which the composite lags under sustained writes. SATA drives have no sensor here.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 16,
-        "y": 57
       },
       "targets": [
         {
@@ -1382,7 +2036,14 @@
           "displayMode": "list",
           "placement": "bottom",
           "showLegend": true
-        }
+        },
+        "hideWhenEmpty": true
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 70
       }
     }
   ]

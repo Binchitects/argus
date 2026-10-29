@@ -163,6 +163,7 @@ spec:
             - --path.procfs=/host/proc
             - --path.sysfs=/host/sys
             - --path.rootfs=/rootfs
+            - --collector.cpu.info
             - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|rootfs/var/lib/(docker|kubelet|containerd))($|/)
           ports: [{ name: http, containerPort: 9100 }]
           securityContext: { readOnlyRootFilesystem: true, allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }

@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Pause, Play, RefreshCw } from 'lucide-react'
-import { useEffect, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import { useSearchParams } from 'react-router'
 import { QueryError } from '@/components/app/query-state'
 import { RangeSelect } from '@/components/app/range-select'
@@ -19,7 +19,9 @@ import { Variables, type Chosen } from './variables'
  * The time range is the last hour unless the file says another; one chosen goes
  * in the address (Grafana's from and to), so a link opens the same view. Its
  * menu is as wide as its label, but no wider than the page: a long one is cut
- * short.
+ * short. A panel marked hideWhenEmpty is left out while it has no data (a sensor
+ * this machine lacks); a row with emptyText says it instead of its panels while
+ * none of them has data (the GPU section of a machine without one).
  */
 export function DashboardView({ uid }: { uid: string }) {
   const def = useQuery({ queryKey: ['dashboard', uid], queryFn: ({ signal }) => api<DashboardDef>(`/api/dashboards/${uid}`, { signal }) })
@@ -80,27 +82,50 @@ export function DashboardView({ uid }: { uid: string }) {
         )}
       </div>
       {sections.map((s, i) => (
-        <section key={i} className="grid gap-3" aria-label={s.title}>
-          {s.title && <h2 className="text-base font-semibold">{s.title}</h2>}
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-24">
-            {s.panels.map((p) => (
-              <div key={p.key} className="min-w-0 lg:col-span-(--w)" style={{ '--w': p.gridPos?.w ?? 24 } as CSSProperties}>
-                <PanelView uid={uid} panel={p} range={current} tick={tick} vars={vars} level={s.title ? 3 : 2} />
-              </div>
-            ))}
-          </div>
-        </section>
+        <Section key={i} uid={uid} section={s} range={current} tick={tick} vars={vars} />
       ))}
     </div>
   )
 }
 
+interface SectionDef {
+  title?: string
+  emptyText?: string
+  panels: PanelDef[]
+}
+
+function Section({ uid, section: s, range, tick, vars }: { uid: string; section: SectionDef; range: ReturnType<typeof dashboardRange>; tick: number; vars: Chosen }) {
+  // Which panels came back with nothing; the panels stay mounted while hidden, so data that comes back shows them again.
+  const [empty, setEmpty] = useState<Record<number, boolean>>({})
+  const report = useCallback((key: number, is: boolean) => setEmpty((e) => (e[key] === is ? e : { ...e, [key]: is })), [])
+  const queried = s.panels.filter((p) => p.type !== 'text')
+  const none = !!s.emptyText && queried.length > 0 && queried.every((p) => empty[p.key] === true)
+  return (
+    <section className="grid gap-3" aria-label={s.title}>
+      {s.title && <h2 className="text-base font-semibold">{s.title}</h2>}
+      {none && <p className="rounded-xl border border-dashed bg-card px-4 py-3 text-sm text-muted-foreground">{s.emptyText}</p>}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-24" hidden={none}>
+        {s.panels.map((p) => (
+          <div
+            key={p.key}
+            className="min-w-0 lg:col-span-(--w)"
+            hidden={!!p.options?.hideWhenEmpty && empty[p.key] === true}
+            style={{ '--w': p.gridPos?.w ?? 24 } as CSSProperties}
+          >
+            <PanelView uid={uid} panel={p} range={range} tick={tick} vars={vars} level={s.title ? 3 : 2} onEmpty={(is) => report(p.key, is)} />
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 /** Grafana rows become headings; panels keep Grafana's top-to-bottom, left-to-right order. */
-function split(panels: PanelDef[]): { title?: string; panels: PanelDef[] }[] {
-  const out: { title?: string; panels: PanelDef[] }[] = [{ panels: [] }]
+function split(panels: PanelDef[]): SectionDef[] {
+  const out: SectionDef[] = [{ panels: [] }]
   const ordered = [...panels].sort((a, b) => (a.gridPos?.y ?? 0) - (b.gridPos?.y ?? 0) || (a.gridPos?.x ?? 0) - (b.gridPos?.x ?? 0))
   for (const p of ordered) {
-    if (p.type === 'row') out.push({ title: p.title, panels: [] })
+    if (p.type === 'row') out.push({ title: p.title, emptyText: p.emptyText, panels: [] })
     else out[out.length - 1]!.panels.push(p)
   }
   return out.filter((s) => s.panels.length || s.title)

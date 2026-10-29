@@ -253,7 +253,7 @@ export function DataTable<T>({
       {total > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
           <span>
-            {total} {noun}
+            {total} {total === 1 ? one(noun) : noun}
             {table.getPageCount() > 1 && ` · page ${pageIndex + 1} of ${table.getPageCount()}`}
             {footer && <> · {footer}</>}
           </span>
@@ -271,4 +271,12 @@ export function DataTable<T>({
       )}
     </div>
   )
+}
+
+/** The table's noun for one row: "1 person", "1 repository", "1 model file". */
+export function one(noun: string): string {
+  if (noun.endsWith('people')) return `${noun.slice(0, -6)}person`
+  if (noun.endsWith('ies')) return `${noun.slice(0, -3)}y`
+  if (noun.endsWith('sses') || noun.endsWith('xes')) return noun.slice(0, -2)
+  return noun.endsWith('s') ? noun.slice(0, -1) : noun
 }

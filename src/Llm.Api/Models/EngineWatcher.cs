@@ -435,6 +435,7 @@ public sealed partial class EngineWatcher : BackgroundService
         foreach (var m in models)
         {
             IReadOnlyDictionary<int, long> perGpu = new Dictionary<int, long>();
+            long ram = 0;
             if (hw is not null && Llm.Core.Models.EngineKinds.ServerPerModel(m.EngineKind) && Hardware.ParseDevices(m.Devices) is { Count: > 0 } gpus)
             {
                 perGpu = GpuPlan.Share(m.Name, hw, gpus, m.GpuMemoryUtilization ?? VllmAdvisor.DefaultUtilization).PerGpu;
@@ -443,13 +444,14 @@ public sealed partial class EngineWatcher : BackgroundService
                 && ModelAdvisor.Advise(m, file, entries, hw).Estimate is { Fit: not "unknown" } e)
             {
                 perGpu = GpuPlan.Spread(m.Name, "llamacpp", hw, Hardware.ParseDevices(m.Devices), e.GpuTotal).PerGpu;
+                ram = e.RamTotal;
             }
             else if (Hardware.ParseDevices(m.Devices) is { Count: > 0 } named)
             {
                 // Its size not known: at least where it sits.
                 perGpu = named.ToDictionary(g => g, _ => 0L);
             }
-            places[m.Name] = new EngineState.ModelPlace(m.EngineKind, perGpu, m.Fallback, Math.Max(1, m.Replicas));
+            places[m.Name] = new EngineState.ModelPlace(m.EngineKind, perGpu, m.Fallback, Math.Max(1, m.Replicas), ram);
         }
         return places;
     }

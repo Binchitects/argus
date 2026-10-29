@@ -103,9 +103,10 @@ public sealed class EngineState(TimeProvider clock)
 
     /// <summary>
     /// Where a model sits, for room-making per GPU: its engine's kind, what it keeps on each of its GPUs (a vLLM model its
-    /// share, a llama.cpp model its estimate spread over its GPUs), its fallback, and its copies.
+    /// share, a llama.cpp model its estimate spread over its GPUs), its fallback, its copies, and what it keeps in RAM (a
+    /// llama.cpp model's estimate: all of it on a machine without GPUs; 0 when not known).
     /// </summary>
-    public sealed record ModelPlace(string Kind, IReadOnlyDictionary<int, long> PerGpu, string? Fallback = null, int Replicas = 1);
+    public sealed record ModelPlace(string Kind, IReadOnlyDictionary<int, long> PerGpu, string? Fallback = null, int Replicas = 1, long Ram = 0);
 
     /// <summary>Each engine model's place (the watcher keeps it, with <see cref="Hardware"/>).</summary>
     public IReadOnlyDictionary<string, ModelPlace> Places { get; set; } = new Dictionary<string, ModelPlace>(StringComparer.Ordinal);
