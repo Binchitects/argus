@@ -158,8 +158,6 @@ services:
     <<: *service
     image: ghcr.io/berriai/litellm:main-stable
     container_name: litellm
-    # The workspaces' agents call the gateway too, with their own keys.
-    networks: [default, workspaces]
     command: [--config, /app/arena.yaml, --port, "4000"]
     environment:
       LITELLM_MASTER_KEY: ${GATEWAY_KEY}
@@ -485,8 +483,8 @@ services:
   # Code Studio's workspaces: Code Arena's own engine per workspace (a clone of a project the person works on in the
   # browser's IDE), each as its own user with limits (services/workspaces/supervisor.py). Off unless COMPOSE_PROFILES
   # names workspaces. No Docker socket; only the capabilities to switch users and clean up after them. Its network
-  # reaches the app (the IDE's requests come through it), the gateway, Argus (with the person's own key) and the
-  # internet (the code host, package registries), not the stack's databases, engines or browser.
+  # reaches the app (the IDE's requests come through it, and its agents' model calls), Argus (with the person's own key)
+  # and the internet (the code host, package registries), not the stack's databases, gateway, engines or browser.
   workspaces:
     <<: *service
     build: { context: .., dockerfile: deploy/services/workspaces/Dockerfile }

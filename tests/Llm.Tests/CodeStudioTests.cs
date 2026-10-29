@@ -113,6 +113,8 @@ public sealed class CodeStudioTests(AppFixture app)
         var spec = JsonNode.Parse(put.Body!)!;
         Assert.Equal(("https://gitlab.test/group/app.git", "main", "person-token", "kim", "http://app:8080"),
             (spec["repo"]!.GetValue<string>(), spec["branch"]!.GetValue<string>(), spec["git_token"]!.GetValue<string>(), spec["git_user"]!.GetValue<string>(), spec["arena_url"]!.GetValue<string>()));
+        // Its agent asks models through the app (the key's line and the prompt log), not past it.
+        Assert.Equal("http://app:8080", spec["gateway_url"]!.GetValue<string>());
         // Its agent's own key at the gateway, the person's.
         var key = gateway.Keys.Values.Single(k => k.Alias == $"studio:{id:N}");
         Assert.Equal((email, key.Secret), (key.Email, spec["api_key"]!.GetValue<string>()));

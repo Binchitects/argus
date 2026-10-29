@@ -22,9 +22,11 @@ public sealed class WorkspacesOptions
     public string? Url { get; set; }
     public string? Key { get; set; }
     public string EngineHost { get; set; } = "workspaces";
-    /// <summary>The app, as the workspaces reach it (its API and the code arena's routes, with the workspace's key).</summary>
+    /// <summary>
+    /// The app, as the workspaces reach it: its API and the code arena's routes, and the model API (the gateway is the
+    /// app's, so a workspace's agent goes through the key's line, the prompt log and slot pinning as API keys do).
+    /// </summary>
     public string ArenaUrl { get; set; } = "http://app:8080";
-    public string GatewayUrl { get; set; } = "http://litellm:4000";
     public string ArgusUrl { get; set; } = "http://argus:7700/mcp";
     /// <summary>A workspace unused this long sleeps: its engine stops, its files stay.</summary>
     public TimeSpan Idle { get; set; } = TimeSpan.FromMinutes(30);
@@ -136,7 +138,7 @@ public sealed class StudioWorkspaces(AppDbContext db, IHttpClientFactory http, I
         var spec = new JsonObject
         {
             ["repo"] = $"{gitlab.BaseUrl}/{workspace.Project}.git", ["branch"] = workspace.Branch, ["git_user"] = login is { Length: > 0 } ? login : "oauth2", ["git_token"] = token,
-            ["arena_url"] = o.ArenaUrl, ["api_key"] = SettingsCrypto.Decrypt(workspace.KeyCipher!, DataKey), ["gateway_url"] = o.GatewayUrl,
+            ["arena_url"] = o.ArenaUrl, ["api_key"] = SettingsCrypto.Decrypt(workspace.KeyCipher!, DataKey), ["gateway_url"] = o.ArenaUrl,
             ["mcp_url"] = o.ArenaUrl.TrimEnd('/') + "/mcp", ["argus_url"] = o.ArgusUrl,
         };
         using var res = await Service().PutAsJsonAsync($"v1/workspaces/{workspace.Id:N}", spec, ct);
