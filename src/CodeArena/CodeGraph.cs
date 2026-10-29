@@ -41,6 +41,9 @@ internal sealed class FileNow
     /// <summary>The text with comments and strings blanked: where declared types are looked for.</summary>
     public required string Code { get; init; }
     public required ScannedFile Scanned { get; init; }
+    /// <summary>Its lines, split once.</summary>
+    public string[] Lines => _lines ??= Text.Split('\n');
+    private string[]? _lines;
     /// <summary>Each symbol's name on the line that declares it: not a use.</summary>
     public HashSet<(string Name, int Line)> Declared { get; } = [];
     /// <summary>C#: the namespaces its usings (and the project's global ones) bring in.</summary>

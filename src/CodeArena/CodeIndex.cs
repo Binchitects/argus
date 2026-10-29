@@ -166,6 +166,7 @@ internal sealed class CodeIndex
     private readonly object _gate = new();
     private Dictionary<string, IndexedFile> _files = new(StringComparer.Ordinal);
     private CodeGraph? _graph;
+    private CodeSearch? _search;
 
     public CodeIndex(string root, string file)
     {
@@ -213,6 +214,69 @@ internal sealed class CodeIndex
         {
             return _graph ??= new CodeGraph(this, _files.Values);
         }
+    }
+
+    /// <summary>The answers by words and by name over the files as the index has them now; made again after a sync changes them.</summary>
+    public CodeSearch Search()
+    {
+        lock (_gate)
+        {
+            return _search ??= new CodeSearch(this, _files.Values);
+        }
+    }
+
+    /// <summary>
+    /// One file read again when its size or time changed and its bytes did (before it is cited); a file gone is taken out.
+    /// New files come in with a sync, which decides what the index covers. True when the record changed.
+    /// </summary>
+    public bool Refresh(string path)
+    {
+        var kept = FileAt(path);
+        if (kept is null || kept.Tags.HasFlag(CodeFileTags.Sensitive))
+        {
+            return false;
+        }
+        var full = FullOf(path);
+        var info = new FileInfo(full);
+        if (info.Exists && info.Length == kept.Size && info.LastWriteTimeUtc == kept.Modified)
+        {
+            return false;
+        }
+        IndexedFile? next = null;
+        if (info.Exists && info.Length <= CodeFiles.MostTextBytes)
+        {
+            byte[] bytes;
+            try
+            {
+                bytes = System.IO.File.ReadAllBytes(full);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                return false;
+            }
+            var sha = Convert.ToHexStringLower(SHA256.HashData(bytes))[..16];
+            if (sha == kept.Sha)
+            {
+                kept.Size = info.Length;
+                kept.Modified = info.LastWriteTimeUtc;
+                return false;
+            }
+            next = Read(new CodeFile(path, full, kept.Lang, info.Length, info.LastWriteTimeUtc, kept.Tags & ~CodeFileTags.Generated), Encoding.UTF8.GetString(bytes), sha);
+        }
+        lock (_gate)
+        {
+            if (next is null)
+            {
+                _files.Remove(path);
+            }
+            else
+            {
+                _files[path] = next;
+            }
+            _graph = null;
+            _search = null;
+        }
+        return true;
     }
 
     /// <summary>What a language's scanner finds in a text; null for a language none reads.</summary>
@@ -274,6 +338,7 @@ internal sealed class CodeIndex
             if (read > 0 || before.Count != next.Count || before.Keys.Any(k => !next.ContainsKey(k)))
             {
                 _graph = null;
+                _search = null;
             }
         }
         LastScanned = read;
