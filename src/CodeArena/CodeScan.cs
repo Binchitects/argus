@@ -1015,3 +1015,190 @@ internal sealed partial class TypeScriptScanner(string lang = "typescript") : IC
         return first.Length == 0 ? null : first.Length > 200 ? first[..199] + "…" : first;
     }
 }
+
+/// <summary>
+/// Python: classes, functions and methods (async too, nested ones under what holds them), each from its first decorator to
+/// its last line indented deeper than its header; module constants (UPPER_CASE) and the __main__ block; the modules imported
+/// (import a.b, from .c import d); and every name used in code. A docstring's first line is the doc.
+/// </summary>
+internal sealed partial class PythonScanner : ICodeScanner
+{
+    public int Version => 1;
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^(\s*)(async\s+def|def|class)\s+([A-Za-z_]\w*)")]
+    private static partial System.Text.RegularExpressions.Regex Header();
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^([A-Z][A-Z0-9_]*)\s*(?::[^=]+)?=(?!=)")]
+    private static partial System.Text.RegularExpressions.Regex Constant();
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"^\s*(?:from\s+(\.*[\w.]*)\s+import\b|import\s+([\w.]+(?:\s*,\s*[\w.]+)*))")]
+    private static partial System.Text.RegularExpressions.Regex Import();
+
+    private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
+    {
+        "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class", "continue", "def", "del", "elif", "else", "except", "finally", "for",
+        "from", "global", "if", "import", "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while", "with", "yield", "self", "cls",
+    };
+
+    public ScannedFile Scan(string text)
+    {
+        var blanked = Argus.Util.CodeText.Blank("python", text);
+        var lines = text.Split('\n');
+        var code = blanked.Split('\n');
+        var symbols = new List<CodeSymbol>();
+        var imports = new List<string>();
+        // What holds each line: the open definitions, with their indentation.
+        var open = new List<(int Indent, string Qualified, int Index)>();
+        var offsets = new int[code.Length + 1];
+        for (var i = 0; i < code.Length; i++)
+        {
+            offsets[i + 1] = offsets[i] + code[i].Length + 1;
+        }
+        static int IndentOf(string line) => line.Length - line.TrimStart(' ', '\t').Length;
+        bool Blank(int i) => code[i].Trim().Length == 0;
+
+        // The last line of a block: the last non-blank line indented deeper than its header.
+        int EndOf(int header, int indent)
+        {
+            var end = header;
+            for (var j = header + 1; j < code.Length; j++)
+            {
+                if (Blank(j))
+                {
+                    continue;
+                }
+                if (IndentOf(code[j]) <= indent)
+                {
+                    break;
+                }
+                end = j;
+            }
+            return end;
+        }
+
+        for (var i = 0; i < code.Length; i++)
+        {
+            if (Blank(i))
+            {
+                continue;
+            }
+            var indent = IndentOf(code[i]);
+            while (open.Count > 0 && open[^1].Indent >= indent)
+            {
+                open.RemoveAt(open.Count - 1);
+            }
+            var line = code[i];
+            if (indent == 0 && Import().Match(line) is { Success: true } im)
+            {
+                imports.AddRange(im.Groups[1].Success && im.Groups[1].Length > 0 ? [im.Groups[1].Value]
+                    : im.Groups[2].Value.Split(',').Select(p => p.Trim().Split(' ')[0]).Where(p => p.Length > 0));
+                continue;
+            }
+            if (Header().Match(line) is { Success: true } m)
+            {
+                var keyword = m.Groups[2].Value;
+                var name = m.Groups[3].Value;
+                // Its decorators are part of it.
+                var start = i;
+                while (start > 0 && lines[start - 1].TrimStart().StartsWith('@') && IndentOf(lines[start - 1]) == indent)
+                {
+                    start--;
+                }
+                var end = EndOf(i, indent);
+                var parent = open.Count > 0 ? open[^1].Qualified : null;
+                var holderIsClass = open.Count > 0 && symbols[open[^1].Index].Kind == "class";
+                var kind = keyword == "class" ? "class" : holderIsClass ? "method" : open.Count > 0 ? "function" : "function";
+                var qualified = parent is null ? name : $"{parent}.{name}";
+                var signature = CodeTokens.Signature(text, offsets[i] + indent, LineEnd(lines, i, offsets));
+                symbols.Add(new CodeSymbol(kind, name, qualified, signature, start + 1, end + 1, parent, Docstring(lines, i, end),
+                    CodeTokens.Hash(blanked, offsets[start], offsets[end] + code[end].Length)));
+                open.Add((indent, qualified, symbols.Count - 1));
+                continue;
+            }
+            if (indent == 0 && Constant().Match(line) is { Success: true } c)
+            {
+                // Its value may span lines in brackets: to where they close.
+                var end = i;
+                var depth = 0;
+                for (var j = i; j < code.Length && j < i + 2000; j++)
+                {
+                    depth += code[j].Count(ch => ch is '(' or '[' or '{') - code[j].Count(ch => ch is ')' or ']' or '}');
+                    end = j;
+                    if (depth <= 0)
+                    {
+                        break;
+                    }
+                }
+                symbols.Add(new CodeSymbol("const", c.Groups[1].Value, c.Groups[1].Value, CodeTokens.Signature(text, offsets[i], offsets[i] + lines[i].Length), i + 1, end + 1,
+                    null, null, CodeTokens.Hash(blanked, offsets[i], offsets[end] + code[end].Length)));
+                continue;
+            }
+            if (indent == 0 && line.TrimStart().StartsWith("if __name__", StringComparison.Ordinal))
+            {
+                var end = EndOf(i, 0);
+                symbols.Add(new CodeSymbol("main", "__main__", "__main__", lines[i].Trim(), i + 1, end + 1, null, null, CodeTokens.Hash(blanked, offsets[i], offsets[end] + code[end].Length)));
+            }
+        }
+        var tokens = CodeTokens.Of(blanked, hashComments: true);
+        var uses = new List<CodeUse>();
+        for (var i = 0; i < tokens.Count; i++)
+        {
+            var t = tokens[i];
+            if (t.Word && !Keywords.Contains(t.Text))
+            {
+                var next = i + 1 < tokens.Count ? tokens[i + 1] : default;
+                var receiver = i >= 2 && tokens[i - 1].Is(".") && tokens[i - 2].Word ? tokens[i - 2].Text : null;
+                uses.Add(new CodeUse(t.Text, t.Line, next.Is("("), receiver));
+            }
+        }
+        return new ScannedFile(symbols, imports, uses);
+    }
+
+    /// <summary>A header's end: its colon, over the lines its parameters span.</summary>
+    private static int LineEnd(string[] lines, int i, int[] offsets)
+    {
+        var depth = 0;
+        for (var j = i; j < lines.Length && j < i + 30; j++)
+        {
+            foreach (var (ch, k) in lines[j].Select((ch, k) => (ch, k)))
+            {
+                depth += ch is '(' or '[' ? 1 : ch is ')' or ']' ? -1 : 0;
+                if (ch == ':' && depth == 0 && j >= i)
+                {
+                    return offsets[j] + k + 1;
+                }
+            }
+        }
+        return offsets[i] + lines[i].Length;
+    }
+
+    /// <summary>The first line of a definition's docstring, the first statement of its body.</summary>
+    private static string? Docstring(string[] lines, int header, int end)
+    {
+        for (var j = header + 1; j <= end && j < lines.Length; j++)
+        {
+            var t = lines[j].Trim();
+            if (t.Length == 0)
+            {
+                continue;
+            }
+            foreach (var quote in new[] { "\"\"\"", "'''", "\"", "'" })
+            {
+                var at = t.IndexOf(quote, StringComparison.Ordinal);
+                if (at is 0 or 1 && (at == 0 || char.IsLetter(t[0])))
+                {
+                    var words = t[(at + quote.Length)..];
+                    var close = words.IndexOf(quote, StringComparison.Ordinal);
+                    words = (close >= 0 ? words[..close] : words).Trim();
+                    if (words.Length == 0 && j + 1 <= end)
+                    {
+                        words = lines[j + 1].Trim();
+                    }
+                    return words.Length == 0 ? null : words.Length > 200 ? words[..199] + "…" : words;
+                }
+            }
+            return null;
+        }
+        return null;
+    }
+}
