@@ -67,7 +67,7 @@ public sealed class WorkflowRunStep
     public required string StepId { get; set; }
     public required string Kind { get; set; }
     public string Name { get; set; } = "";
-    /// <summary>running, waiting (an approval), done, failed or skipped.</summary>
+    /// <summary>running, waiting (an approval, a wait), done, failed or skipped.</summary>
     public string Status { get; set; } = "running";
     /// <summary>What it was given, its templates filled in: a prompt, a tool's arguments, a message.</summary>
     public string Input { get; set; } = "";
@@ -80,4 +80,6 @@ public sealed class WorkflowRunStep
     public string? Error { get; set; }
     public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? FinishedAt { get; set; }
+    /// <summary>A wait step: when the run goes on.</summary>
+    public DateTimeOffset? ResumeAt { get; set; }
 }

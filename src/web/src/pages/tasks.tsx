@@ -23,6 +23,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { configQuery } from './chat/api'
 import { blankSchedule, cronOf, describe, scheduleOf, weekdays, type Repeat, type Schedule } from './tasks-schedule'
+import { gitlabEvents as studioGitlabEvents } from './studio/studio-api'
 
 interface Run {
   id: string
@@ -63,11 +64,7 @@ interface Task {
 
 type Trigger = 'schedule' | 'webhook' | 'gitlab'
 
-const gitlabEvents: { value: string; label: string }[] = [
-  { value: 'merge_request', label: 'A merge request opened or updated' },
-  { value: 'pipeline_failed', label: 'A pipeline failed' },
-  { value: 'issue', label: 'An issue opened' },
-]
+const gitlabEvents: { value: string; label: string }[] = studioGitlabEvents.map(([value, label]) => ({ value, label }))
 
 /** "On a schedule" in words, or what runs it. */
 function runsOn(t: Task) {

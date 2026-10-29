@@ -456,7 +456,7 @@ public static class StudioEndpoints
             {
                 return Results.BadRequest(new { error = "the event is not a JSON object" });
             }
-            e = await Triggers.FromGitLabAsync(o, trigger.Events ?? [], bot, ct);
+            e = await Triggers.FromGitLabAsync(o, trigger.Events ?? [], bot, ct, new GitLabFilter(trigger.Branches, trigger.Labels, trigger.Keyword));
         }
         else
         {
@@ -467,6 +467,10 @@ public static class StudioEndpoints
             return Results.Ok(new { status = "ignored", reason = "not an event this workflow takes" });
         }
         var input = new JsonObject { ["text"] = e.Text };
+        if (e.Facts is not null)
+        {
+            input["gitlab"] = e.Facts;
+        }
         if (payload is not null && body.Length <= 200_000)
         {
             input["event"] = payload;

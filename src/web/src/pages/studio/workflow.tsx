@@ -226,7 +226,7 @@ function Editor({ workflow }: { workflow: Workflow }) {
                 <StepEditor
                   key={step.id}
                   step={step}
-                  values={valuesBefore(flow.steps, selected, fields)}
+                  values={valuesBefore(flow.steps, selected, fields, flow.trigger.kind)}
                   onChange={(s) => change({ ...flow, steps: updateStep(flow.steps, selected, () => s) })}
                   onRemove={() => {
                     change({ ...flow, steps: removeStep(flow.steps, selected) })

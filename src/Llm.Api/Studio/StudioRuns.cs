@@ -125,6 +125,7 @@ public sealed partial class StudioRuns(IServiceScopeFactory scopes, TimeProvider
             try
             {
                 await DueAsync(stoppingToken);
+                await WaitedAsync(stoppingToken);
                 await AbandonedAsync(stoppingToken);
             }
             catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
@@ -153,6 +154,27 @@ public sealed partial class StudioRuns(IServiceScopeFactory scopes, TimeProvider
             }
         }
         return started;
+    }
+
+    /// <summary>The wait steps whose time has come: each claimed (done) before its run goes on, so one replica takes it on.</summary>
+    public async Task<int> WaitedAsync(CancellationToken ct)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var now = clock.GetUtcNow();
+        var due = await db.WorkflowRunSteps.AsNoTracking().Where(s => s.Kind == "wait" && s.Status == "waiting" && s.ResumeAt <= now).Take(20).ToListAsync(ct);
+        var resumed = 0;
+        foreach (var s in due)
+        {
+            if (await db.WorkflowRunSteps.Where(x => x.Id == s.Id && x.Status == "waiting").ExecuteUpdateAsync(u => u
+                .SetProperty(x => x.Status, "done").SetProperty(x => x.Output, $"Waited {s.Input}.").SetProperty(x => x.FinishedAt, now), ct) == 1
+                && await db.WorkflowRuns.AnyAsync(r => r.Id == s.RunId && r.Status == WorkflowRun.Waiting, ct))
+            {
+                Go(s.RunId);
+                resumed++;
+            }
+        }
+        return resumed;
     }
 
     /// <summary>When a schedule runs a workflow next after this moment, or null (no schedule).</summary>

@@ -9,7 +9,8 @@ import { Input, Textarea } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { listQuery } from '../chat/api'
-import { functionsQuery, opLabels, stepLabels, toolsQuery, triggerLabels, type FlowField, type FlowStep, type FlowTrigger, type TriggerKind } from './studio-api'
+import { sourcesQuery } from '../data/data-api'
+import { functionsQuery, gitlabEvents, opLabels, stepLabels, toolsQuery, triggerLabels, type FlowField, type FlowStep, type FlowTrigger, type TriggerKind } from './studio-api'
 
 /** A field whose text may hold values of the run ({{s1.text}}): a menu puts one in where the cursor is. */
 function Template({ label, value, onChange, values, rows = 3, hint }: { label: string; value: string; onChange: (v: string) => void; values: { label: string; value: string }[]; rows?: number; hint?: string }) {
@@ -68,11 +69,37 @@ function Rooms({ value, onChange }: { value: string | null | undefined; onChange
   )
 }
 
+/** A list of names and their values (an http step's headers), each value a template. */
+function Pairs({ label, value, onChange, values }: { label: string; value: Record<string, string>; onChange: (v: Record<string, string>) => void; values: { label: string; value: string }[] }) {
+  const entries = Object.entries(value)
+  const rename = (from: string, to: string) => onChange(Object.fromEntries(entries.map(([k, v]) => [k === from ? to : k, v])))
+  return (
+    <fieldset className="grid gap-2">
+      <legend className="mb-1 text-sm font-medium">{label}</legend>
+      {entries.map(([name, v], i) => (
+        <div key={i} className="grid gap-1 rounded-lg border p-2">
+          <div className="flex gap-2">
+            <Input aria-label="Header name" value={name} placeholder="Authorization" className="font-mono text-xs" onChange={(e) => rename(name, e.target.value)} />
+            <Button type="button" variant="ghost" size="icon-sm" aria-label={`Take out ${name}`} onClick={() => onChange(Object.fromEntries(entries.filter(([k]) => k !== name)))}>
+              <X />
+            </Button>
+          </div>
+          <Template label={`${name || 'Header'}'s value`} value={v} rows={1} values={values} onChange={(nv) => onChange({ ...value, [name]: nv })} />
+        </div>
+      ))}
+      <Button type="button" size="sm" variant="outline" className="w-fit" onClick={() => onChange({ ...value, [`X-Header-${entries.length + 1}`]: '' })}>
+        <Plus /> A header
+      </Button>
+    </fieldset>
+  )
+}
+
 /** A step's settings, by its kind. */
 export function StepEditor({ step, values, onChange, onRemove }: { step: FlowStep; values: { label: string; value: string }[]; onChange: (s: FlowStep) => void; onRemove: () => void }) {
   const uid = useId()
   const tools = useQuery(toolsQuery)
   const functions = useQuery({ ...functionsQuery(step.tool ?? ''), enabled: step.kind === 'tool' && !!step.tool })
+  const sources = useQuery({ ...sourcesQuery, enabled: step.kind === 'data' })
   const set = (change: Partial<FlowStep>) => onChange({ ...step, ...change })
   const chosen = functions.data?.find((f) => f.name === step.function)
   return (
@@ -214,6 +241,113 @@ export function StepEditor({ step, values, onChange, onRemove }: { step: FlowSte
       {(step.kind === 'text' || step.kind === 'comment') && (
         <Template label="Text" value={step.text ?? ''} onChange={(v) => set({ text: v })} values={values} rows={5} hint={step.kind === 'comment' ? 'On the merge request or issue that started the run (a GitLab trigger).' : undefined} />
       )}
+      {step.kind === 'text' && (
+        <div className="flex items-center gap-2 text-sm">
+          <Switch id={`${uid}-tjson`} checked={!!step.json} onCheckedChange={(on) => set({ json: on })} />
+          <label htmlFor={`${uid}-tjson`}>It is JSON (read its parts as {`{{${step.id}.json.…}}`})</label>
+        </div>
+      )}
+      {step.kind === 'knowledge' && (
+        <Template label="Look for" value={step.prompt ?? ''} onChange={(v) => set({ prompt: v })} values={values} rows={2} hint="The company's documents you may read, nearest these words first: titles, links and passages." />
+      )}
+      {step.kind === 'data' && (
+        <>
+          <Field label="Data source" hint={sources.data?.length === 0 ? 'No data source is open to you.' : 'One you may ask (Workspace → Data).'}>
+            <Select value={step.sourceId ?? ''} onValueChange={(v) => set({ sourceId: v })}>
+              <SelectTrigger>
+                <SelectValue placeholder="Choose a data source" />
+              </SelectTrigger>
+              <SelectContent>
+                {(sources.data ?? []).map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+          <Template label="Question" value={step.prompt ?? ''} onChange={(v) => set({ prompt: v })} values={values} rows={2} hint="In words: the model writes the SQL. Or give the SQL below, run as it is." />
+          <Template label="SQL (optional)" value={step.sql ?? ''} onChange={(v) => set({ sql: v })} values={values} rows={3} hint={`Rows come back as {{${step.id}.json.rows}}, each by its columns' names.`} />
+        </>
+      )}
+      {step.kind === 'http' && (
+        <>
+          <div className="grid gap-3 sm:grid-cols-[7rem_minmax(0,1fr)]">
+            <Field label="Method">
+              <Select value={step.method ?? 'GET'} onValueChange={(v) => set({ method: v as FlowStep['method'] })}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {m}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Template label="Address" value={step.url ?? ''} onChange={(v) => set({ url: v })} values={values} rows={1} />
+          </div>
+          <Pairs label="Headers" value={step.arguments ?? {}} onChange={(v) => set({ arguments: v })} values={values} />
+          {step.method && step.method !== 'GET' && <Template label="Body" value={step.text ?? ''} onChange={(v) => set({ text: v })} values={values} rows={4} hint="JSON goes as application/json, other text as text/plain." />}
+          <p className="text-xs text-muted-foreground">Public addresses only (never the stack's or the office's), the chat's allowed sites, 30 seconds. Headers are kept in the workflow as written: whoever may change it reads them.</p>
+        </>
+      )}
+      {step.kind === 'code' && (
+        <Template label="Python" value={step.text ?? ''} onChange={(v) => set({ text: v })} values={values} rows={8} hint="In the sandbox, with no network, at most 2 minutes. The run's values are in input.json beside it; what it prints is its answer (JSON too)." />
+      )}
+      {step.kind === 'wait' && (
+        <Field label="Minutes" hint="The run waits, then goes on (at most a week).">
+          <Input type="number" min={1} max={10080} value={step.minutes ?? 60} onChange={(e) => set({ minutes: Math.max(1, Math.min(10080, Number(e.target.value) || 1)) })} />
+        </Field>
+      )}
+      {step.kind === 'stop' && (
+        <>
+          <Field label="It ends">
+            <Select value={step.outcome ?? 'done'} onValueChange={(v) => set({ outcome: v as FlowStep['outcome'] })}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="done">Done</SelectItem>
+                <SelectItem value="failed">Failed (you are told)</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Template label="Why (optional)" value={step.text ?? ''} onChange={(v) => set({ text: v })} values={values} rows={2} />
+        </>
+      )}
+      {step.kind === 'notify' && (
+        <>
+          <Template label="Title" value={step.subject ?? ''} onChange={(v) => set({ subject: v })} values={values} rows={1} />
+          <Template label="Text" value={step.text ?? ''} onChange={(v) => set({ text: v })} values={values} hint="To you, in the bell (and on your phone, where you turned that on)." />
+        </>
+      )}
+      {step.kind === 'gitlab' && (
+        <>
+          <Field label="Action">
+            <Select value={step.action ?? 'comment'} onValueChange={(v) => set({ action: v as FlowStep['action'] })}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="comment">Comment</SelectItem>
+                <SelectItem value="label">Add labels</SelectItem>
+                <SelectItem value="issue">Open an issue</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Template label="Project (optional)" value={step.project ?? ''} onChange={(v) => set({ project: v })} values={values} rows={1} hint="Its path; empty: the event's." />
+            {step.action !== 'issue' && <Template label="Merge request or issue (optional)" value={step.target ?? ''} onChange={(v) => set({ target: v })} values={values} rows={1} hint="!12 or #34; empty: the event's." />}
+          </div>
+          {step.action === 'issue' && <Template label="Title" value={step.subject ?? ''} onChange={(v) => set({ subject: v })} values={values} rows={1} />}
+          {(step.action === 'label' || step.action === 'issue') && <Template label="Labels" value={step.labels ?? ''} onChange={(v) => set({ labels: v })} values={values} rows={1} hint="Comma separated." />}
+          {step.action !== 'label' && <Template label={step.action === 'issue' ? 'Description' : 'Comment'} value={step.text ?? ''} onChange={(v) => set({ text: v })} values={values} rows={5} />}
+          <p className="text-xs text-muted-foreground">With the app's GitLab bot (Settings → Scheduled tasks); each action is in the audit log.</p>
+        </>
+      )}
     </div>
   )
 }
@@ -265,15 +399,30 @@ export function TriggerEditor({ trigger, onChange, hook, onSecret }: { trigger: 
         </>
       )}
       {trigger.kind === 'gitlab' && (
-        <fieldset className="grid gap-1.5">
-          <legend className="mb-1 text-sm font-medium">Events</legend>
-          {[['merge_request', 'A merge request opens or changes'], ['pipeline_failed', 'A pipeline fails'], ['issue', 'An issue opens or changes']].map(([k, label]) => (
-            <div key={k} className="flex items-center gap-2 text-sm">
-              <Checkbox id={`${uid}-${k}`} checked={trigger.events?.includes(k!) ?? false} onCheckedChange={(on) => set({ events: on ? [...(trigger.events ?? []), k!] : (trigger.events ?? []).filter((x) => x !== k) })} />
-              <label htmlFor={`${uid}-${k}`}>{label}</label>
+        <>
+          <fieldset className="grid gap-1.5">
+            <legend className="mb-1 text-sm font-medium">Events</legend>
+            <div className="grid gap-1.5 sm:grid-cols-2">
+              {gitlabEvents.map(([k, label]) => (
+                <div key={k} className="flex items-center gap-2 text-sm">
+                  <Checkbox id={`${uid}-${k}`} checked={trigger.events?.includes(k) ?? false} onCheckedChange={(on) => set({ events: on ? [...(trigger.events ?? []), k] : (trigger.events ?? []).filter((x) => x !== k) })} />
+                  <label htmlFor={`${uid}-${k}`}>{label}</label>
+                </div>
+              ))}
             </div>
-          ))}
-        </fieldset>
+          </fieldset>
+          <Field label="Branches (optional)" hint="Globs, comma separated: main, release/*. A merge request's target, a push's, a pipeline's, a job's or a deployment's branch. Empty: all.">
+            <Input value={trigger.branches ?? ''} maxLength={500} onChange={(e) => set({ branches: e.target.value })} className="font-mono text-xs" placeholder="main, release/*" />
+          </Field>
+          <Field label="Labels (optional)" hint="A merge request or issue with one of these, comma separated. Empty: any.">
+            <Input value={trigger.labels ?? ''} maxLength={500} onChange={(e) => set({ labels: e.target.value })} placeholder="needs-review, bug" />
+          </Field>
+          {trigger.events?.includes('comment') && (
+            <Field label="A comment holds (optional)" hint="Words, comma separated, one of which a comment must hold: a mention such as @arena. The app's own comments never start it.">
+              <Input value={trigger.keyword ?? ''} maxLength={200} onChange={(e) => set({ keyword: e.target.value })} placeholder="@arena" />
+            </Field>
+          )}
+        </>
       )}
       {(trigger.kind === 'webhook' || trigger.kind === 'gitlab') && hook && (
         <div className="grid gap-1.5 rounded-lg border bg-muted/40 p-3 text-xs">

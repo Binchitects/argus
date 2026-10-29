@@ -7097,6 +7097,9 @@ namespace Llm.Core.Data.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("character varying(500)");
 
+                    b.Property<DateTimeOffset?>("ResumeAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid>("RunId")
                         .HasColumnType("uuid");
 
@@ -7114,6 +7117,9 @@ namespace Llm.Core.Data.Migrations
                         .HasColumnType("character varying(50)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ResumeAt")
+                        .HasFilter("\"Status\" = 'waiting' AND \"ResumeAt\" IS NOT NULL");
 
                     b.HasIndex("RunId", "Path")
                         .IsUnique();

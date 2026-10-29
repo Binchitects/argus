@@ -15,10 +15,13 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Llm.Api.Studio;
 
-/// <summary>Why a run ends before its last step: a step that failed, or an approval turned down.</summary>
-public sealed class FlowEndException(string message, bool stopped = false) : Exception(message)
+/// <summary>Why a run ends before its last step: a step that failed, an approval turned down, or a stop step (done or failed).</summary>
+public sealed class FlowEndException(string message, bool stopped = false, bool done = false) : Exception(message)
 {
     public bool Stopped { get; } = stopped;
+
+    /// <summary>A stop step ended the run well.</summary>
+    public bool Done { get; } = done;
 }
 
 /// <summary>
@@ -26,8 +29,10 @@ public sealed class FlowEndException(string message, bool stopped = false) : Exc
 /// an approval): a step already done gives what it gave then and is not run again, so a run goes on where it waited.
 /// </summary>
 public sealed class FlowRunner(AppDbContext db, OneQuestion one, AnswerJobs jobs, ToolRegistry registry, AccessService access, Mailer mailer, GitLabBot gitlab,
-    QueuedMessages queue, StudioRuns runs, Audit audit, TimeProvider clock)
+    QueuedMessages queue, StudioRuns runs, Audit audit, TimeProvider clock, Insights.DataQuestions questions, Knowledge.KnowledgeSearch knowledge, SandboxClient sandbox,
+    WebFetcher web, IHttpClientFactory http)
 {
+    private const int MostBody = 1024 * 1024;
     /// <summary>The most steps one run takes (each turn of a loop counts).</summary>
     public const int MostTaken = 300;
     private const int MostOutput = 50_000;
@@ -73,7 +78,7 @@ public sealed class FlowRunner(AppDbContext db, OneQuestion one, AnswerJobs jobs
             }
             catch (FlowEndException end)
             {
-                (status, error) = (end.Stopped ? WorkflowRun.Stopped : WorkflowRun.Failed, end.Message);
+                (status, error) = end.Done ? (WorkflowRun.Done, null) : (end.Stopped ? WorkflowRun.Stopped : WorkflowRun.Failed, end.Message);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -128,7 +133,7 @@ public sealed class FlowRunner(AppDbContext db, OneQuestion one, AnswerJobs jobs
         ct.ThrowIfCancellationRequested();
         _kept.TryGetValue(path, out var kept);
         // Done before (the run goes on after an approval): what it gave then.
-        if (kept is { Status: "done" or "skipped" } && step.Kind is not ("condition" or "loop" or "approval"))
+        if (kept is { Status: "done" or "skipped" } && step.Kind is not ("condition" or "loop" or "approval" or "stop"))
         {
             return new Outcome(Value(kept));
         }
@@ -195,6 +200,26 @@ public sealed class FlowRunner(AppDbContext db, OneQuestion one, AnswerJobs jobs
                 }
                 return new Outcome(new JsonObject(), true);
             }
+            case "wait":
+            {
+                // Waits where it is kept: the runs' sweep goes on with it when its time comes, on any replica.
+                if (kept is null)
+                {
+                    var minutes = Math.Clamp(step.Minutes ?? 1, 1, FlowModel.MostMinutes);
+                    kept = await KeepAsync(step, path, $"{minutes} {(minutes == 1 ? "minute" : "minutes")}", ct);
+                    kept.Status = "waiting";
+                    kept.ResumeAt = clock.GetUtcNow().AddMinutes(minutes);
+                    await db.SaveChangesAsync(ct);
+                }
+                return new Outcome(new JsonObject(), true);
+            }
+            case "stop":
+            {
+                var reason = FlowModel.Fill(step.Text, values).Trim() is { Length: > 0 } r ? r : step.Outcome == "failed" ? "It stopped here, failed." : "It ended here.";
+                kept ??= await KeepAsync(step, path, reason, ct);
+                await DoneAsync(kept, reason, null, null, ct);
+                throw new FlowEndException(reason, done: step.Outcome != "failed");
+            }
         }
         var input = Input(step, values);
         kept ??= await KeepAsync(step, path, input, ct);
@@ -219,7 +244,15 @@ public sealed class FlowRunner(AppDbContext db, OneQuestion one, AnswerJobs jobs
     /// <summary>What a step is given, its templates filled: the prompt, the tool's arguments, the message.</summary>
     private static string Input(FlowStep step, Dictionary<string, JsonNode?> values) => step.Kind switch
     {
-        "ask" or "agent" => FlowModel.Fill(step.Prompt, values),
+        "ask" or "agent" or "knowledge" => FlowModel.Fill(step.Prompt, values),
+        "data" => string.IsNullOrWhiteSpace(step.Sql) ? FlowModel.Fill(step.Prompt, values) : FlowModel.Fill(step.Sql, values),
+        "http" => $"{step.Method ?? "GET"} {FlowModel.Fill(step.Url, values)}\n\n{FlowModel.Fill(step.Text, values)}".Trim(),
+        "gitlab" => step.Action switch
+        {
+            "label" => $"Label {FlowModel.Fill(step.Target, values)} {FlowModel.Fill(step.Labels, values)}".Trim(),
+            "issue" => $"{FlowModel.Fill(step.Subject, values)}\n\n{FlowModel.Fill(step.Text, values)}".Trim(),
+            _ => FlowModel.Fill(step.Text, values),
+        },
         "tool" => new JsonObject((step.Arguments ?? []).Select(a => KeyValuePair.Create(a.Key, Argument(FlowModel.Fill(a.Value, values))))).ToJsonString(FlowModel.Json),
         "email" => $"{FlowModel.Fill(step.Subject, values)}\n\n{FlowModel.Fill(step.Text, values)}".Trim(),
         _ => FlowModel.Fill(step.Text, values),
@@ -289,7 +322,28 @@ public sealed class FlowRunner(AppDbContext db, OneQuestion one, AnswerJobs jobs
             case "tool":
                 return await ToolAsync(step, input, ct);
             case "text":
-                return (input, null, null);
+                return (input, step.Json ? FlowModel.JsonIn(input) ?? throw new FlowEndException("Its text is not JSON.") : null, null);
+            case "notify":
+            {
+                var title = FlowModel.Fill(step.Subject, values).Trim() is { Length: > 0 } t ? t : _workflow.Name;
+                db.Notifications.Add(new Notification
+                {
+                    UserId = _owner.Id, Kind = "workflow", Title = title.Length > 200 ? title[..200] : title, Body = Notifications.NewsText.Plain(input.Length > 2000 ? input[..2000] : input),
+                    Link = $"/studio/{_workflow.Id}?run={_run.Id}", CreatedAt = clock.GetUtcNow(),
+                });
+                await db.SaveChangesAsync(ct);
+                return ($"Told {(_owner.DisplayName is { Length: > 0 } d ? d : _owner.UserName)}: {title}", null, null);
+            }
+            case "code":
+                return await CodeAsync(input, values, ct);
+            case "knowledge":
+                return await KnowledgeAsync(input, ct);
+            case "data":
+                return await DataAsync(step, input, ct);
+            case "http":
+                return await HttpAsync(step, values, ct);
+            case "gitlab":
+                return await GitLabAsync(step, values, ct);
             case "room":
                 return await RoomAsync(step.RoomId!.Value, input, ct);
             case "email":
@@ -413,6 +467,228 @@ public sealed class FlowRunner(AppDbContext db, OneQuestion one, AnswerJobs jobs
             throw new FlowEndException(result.Text);
         }
         return (result.Text, FlowModel.JsonIn(result.Text) is { } j && result.Text.TrimStart() is ['{' or '[', ..] ? j : null, null);
+    }
+
+    private static string Tail(string s) => s.Length > 1500 ? "…" + s[^1500..] : s;
+
+    /// <summary>Python in the sandbox (no network), the run's values in input.json beside it: what it prints, and its JSON when it prints JSON.</summary>
+    private async Task<(string, JsonNode?, string?)> CodeAsync(string code, Dictionary<string, JsonNode?> values, CancellationToken ct)
+    {
+        if (!await registry.MayUseAsync(await access.MembershipAsync(_owner, ct), "python", ct))
+        {
+            throw new FlowEndException("Its owner may not use Python, or it is off.");
+        }
+        if (sandbox.Unavailable() is { } why)
+        {
+            throw new FlowEndException(why);
+        }
+        var given = new JsonObject(values.Select(v => KeyValuePair.Create(v.Key, v.Value?.DeepClone())));
+        var result = await sandbox.RunAsync(code, [new SandboxFile("input.json", Encoding.UTF8.GetBytes(given.ToJsonString()))], 120, ct);
+        if (result.Error is { Length: > 0 } error)
+        {
+            throw new FlowEndException(error);
+        }
+        if (result.TimedOut)
+        {
+            throw new FlowEndException("The code ran longer than 2 minutes.");
+        }
+        if (result.ExitCode is not 0)
+        {
+            throw new FlowEndException($"The code failed (exit {result.ExitCode}): {Tail(result.Stderr.Trim())}");
+        }
+        var text = result.Stdout.Trim();
+        return (text, text is ['{' or '[', ..] ? FlowModel.JsonIn(text) : null, null);
+    }
+
+    /// <summary>The company's documents the owner may read, nearest the words first: their titles, links and passages.</summary>
+    private async Task<(string, JsonNode?, string?)> KnowledgeAsync(string query, CancellationToken ct)
+    {
+        List<Knowledge.Passage> found;
+        try
+        {
+            found = await knowledge.SearchAsync(_owner, query, 8, ct);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            throw new FlowEndException($"Company knowledge cannot be searched now: {ex.Message}");
+        }
+        var json = new JsonArray([.. found.Select(p => (JsonNode)new JsonObject { ["title"] = p.Title, ["url"] = p.Url, ["source"] = p.Source, ["text"] = p.Text })]);
+        var text = found.Count == 0 ? "Nothing found." : string.Join("\n\n", found.Select(p => $"## {p.Title}{(p.Url is { Length: > 0 } u ? $" ({u})" : "")}\n\n{p.Text}"));
+        return (text, json, null);
+    }
+
+    /// <summary>A data source the owner may ask, by a question in words (the model writes the SQL) or by SQL: its rows, as a table and as JSON.</summary>
+    private async Task<(string, JsonNode?, string?)> DataAsync(FlowStep step, string asked, CancellationToken ct)
+    {
+        if (!await access.MayAsync(_owner, Core.Access.Permissions.Data, ct) || await questions.SourceForAsync(step.SourceId!.Value, _owner, ct) is not { } source)
+        {
+            throw new FlowEndException("Its owner may not ask that data source, or it is gone.");
+        }
+        Insights.DataResult result;
+        string sql;
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(step.Sql))
+            {
+                (sql, result) = (asked, await questions.RunAsync(source, asked, _owner, "workflow", null, ct));
+            }
+            else
+            {
+                var (answer, problem) = await questions.AskAsync(source, _owner, asked, null, "workflow", ct);
+                if (problem is not null)
+                {
+                    throw new FlowEndException(await ProblemText(problem));
+                }
+                if (answer!.Result is null)
+                {
+                    throw new FlowEndException(answer.Error ?? answer.Explanation);
+                }
+                (sql, result) = (answer.Sql, answer.Result);
+            }
+        }
+        catch (Insights.DataException ex)
+        {
+            throw new FlowEndException(ex.Message);
+        }
+        var names = result.Columns.Select(c => c.Name).ToList();
+        var rows = new JsonArray([.. result.Rows.Select(r => (JsonNode)new JsonObject(names.Select((n, i) => KeyValuePair.Create(n, r[i]?.DeepClone()))))]);
+        var table = new StringBuilder("| ").AppendJoin(" | ", names).Append(" |\n|").AppendJoin("", names.Select(_ => " --- |")).Append('\n');
+        foreach (var r in result.Rows.Take(50))
+        {
+            table.Append("| ").AppendJoin(" | ", r.Select(v => FlowModel.Show(v).Replace("|", "\\|", StringComparison.Ordinal).ReplaceLineEndings(" "))).Append(" |\n");
+        }
+        if (result.Rows.Count > 50 || result.Truncated)
+        {
+            table.Append(CultureInfo.InvariantCulture, $"\n({result.Rows.Count}{(result.Truncated ? "+" : "")} rows; the first 50 here)\n");
+        }
+        return (table.ToString(), new JsonObject { ["sql"] = sql, ["columns"] = new JsonArray([.. names.Select(n => (JsonNode)n)]), ["rows"] = rows }, null);
+    }
+
+    private static readonly string[] Unsent = ["host", "content-length", "transfer-encoding", "connection", "cookie"];
+
+    /// <summary>
+    /// A request to a public address (never the stack's or the office's, whatever a name points to; the chat's allowed
+    /// sites apply), its headers and body filled: what came back, as JSON when it is.
+    /// </summary>
+    private async Task<(string, JsonNode?, string?)> HttpAsync(FlowStep step, Dictionary<string, JsonNode?> values, CancellationToken ct)
+    {
+        var method = step.Method ?? "GET";
+        var address = FlowModel.Fill(step.Url, values).Trim();
+        if (!Uri.TryCreate(address, UriKind.Absolute, out var url))
+        {
+            throw new FlowEndException($"{address} is not an address.");
+        }
+        if (await web.RefusalAsync(url, ct) is { } refused)
+        {
+            throw new FlowEndException(refused);
+        }
+        using var request = new HttpRequestMessage(new HttpMethod(method), url);
+        var body = FlowModel.Fill(step.Text, values);
+        if (method != "GET" && body.Length > 0)
+        {
+            request.Content = new StringContent(body, Encoding.UTF8, body.TrimStart() is ['{' or '[', ..] ? "application/json" : "text/plain");
+        }
+        foreach (var (name, value) in step.Arguments ?? [])
+        {
+            var header = name.Trim();
+            if (header.Length == 0 || Unsent.Contains(header, StringComparer.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            var filled = FlowModel.Fill(value, values);
+            if (!request.Headers.TryAddWithoutValidation(header, filled) && request.Content is not null)
+            {
+                request.Content.Headers.Remove(header);
+                request.Content.Headers.TryAddWithoutValidation(header, filled);
+            }
+        }
+        await audit.WriteAsync("workflow.http", _workflow.Name, detail: $"{method} {url.GetLeftPart(UriPartial.Path)}", actor: _owner);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(30));
+        try
+        {
+            using var res = await http.CreateClient(WebFetcher.Client).SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            await using var stream = await res.Content.ReadAsStreamAsync(timeout.Token);
+            var buffer = new byte[MostBody];
+            var read = 0;
+            while (read < buffer.Length && await stream.ReadAsync(buffer.AsMemory(read), timeout.Token) is > 0 and var n)
+            {
+                read += n;
+            }
+            var text = Encoding.UTF8.GetString(buffer, 0, read);
+            if (!res.IsSuccessStatusCode)
+            {
+                throw new FlowEndException($"{url.Host} answered {(int)res.StatusCode} {res.ReasonPhrase}: {Short(text)}");
+            }
+            return (text, text.TrimStart() is ['{' or '[', ..] ? FlowModel.JsonIn(text) : null, null);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or WebAccessException || (ex is TaskCanceledException && !ct.IsCancellationRequested))
+        {
+            throw new FlowEndException(ex is TaskCanceledException ? $"{url.Host} did not answer in 30 seconds." : $"{url.Host} could not be reached: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Acts in GitLab with the app's bot: a comment, labels added, an issue opened. The project and merge request or issue
+    /// are the step's, or else those of the event that started the run.
+    /// </summary>
+    private async Task<(string, JsonNode?, string?)> GitLabAsync(FlowStep step, Dictionary<string, JsonNode?> values, CancellationToken ct)
+    {
+        var reply = _run.Reply is null ? null : JsonSerializer.Deserialize<GitLabTarget>(_run.Reply, FlowModel.Json);
+        var named = FlowModel.Fill(step.Project, values).Trim();
+        var project = named.Length > 0 ? Uri.EscapeDataString(named)
+            : reply?.Project.ToString(CultureInfo.InvariantCulture) ?? throw new FlowEndException("Name its project: no GitLab event started this run.");
+        var which = FlowModel.Fill(step.Target, values).Trim();
+        (string Kind, string Id)? target = which switch
+        {
+            ['!', .. var n] when long.TryParse(n, CultureInfo.InvariantCulture, out _) => ("merge_requests", n),
+            ['#', .. var n] when long.TryParse(n, CultureInfo.InvariantCulture, out _) => ("issues", n),
+            "" when named.Length == 0 && reply is not null => (reply.Kind, reply.Id),
+            "" => null,
+            _ => throw new FlowEndException($"{which} is neither a merge request (!12) nor an issue (#34)."),
+        };
+        var labels = string.Join(',', (FlowModel.Fill(step.Labels, values)).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        try
+        {
+            switch (step.Action)
+            {
+                case "comment":
+                {
+                    if (target is not { } t)
+                    {
+                        throw new FlowEndException("Name the merge request (!12) or issue (#34) to comment on.");
+                    }
+                    await gitlab.NoteAsync(project, t.Kind, t.Id, $"{FlowModel.Fill(step.Text, values)}\n\n---\n*{_workflow.Name}, {Triggers.Signature} {_owner.DisplayName}*", ct);
+                    await audit.WriteAsync("workflow.gitlab_comment", _workflow.Name, detail: $"project {(named.Length > 0 ? named : project)}, {t.Kind} {t.Id}", actor: _owner);
+                    return ($"Commented on {(t.Kind == "issues" ? "#" : t.Kind == "merge_requests" ? "!" : "commit ")}{t.Id}.", null, null);
+                }
+                case "label":
+                {
+                    if (target is not { Kind: "merge_requests" or "issues" } t)
+                    {
+                        throw new FlowEndException("Labels go on a merge request (!12) or an issue (#34).");
+                    }
+                    await gitlab.SendAsync(HttpMethod.Put, $"/projects/{project}/{t.Kind}/{t.Id}", new JsonObject { ["add_labels"] = labels }, ct);
+                    await audit.WriteAsync("workflow.gitlab_label", _workflow.Name, detail: $"project {(named.Length > 0 ? named : project)}, {t.Kind} {t.Id}: {labels}", actor: _owner);
+                    return ($"Labelled {(t.Kind == "issues" ? "#" : "!")}{t.Id}: {labels}.", null, null);
+                }
+                default:
+                {
+                    var made = await gitlab.SendAsync(HttpMethod.Post, $"/projects/{project}/issues", new JsonObject
+                    {
+                        ["title"] = FlowModel.Fill(step.Subject, values).Trim(), ["description"] = $"{FlowModel.Fill(step.Text, values)}\n\n---\n*{_workflow.Name}, {Triggers.Signature} {_owner.DisplayName}*",
+                        ["labels"] = labels,
+                    }, ct);
+                    var url = made?["web_url"]?.GetValue<string>();
+                    await audit.WriteAsync("workflow.gitlab_issue", _workflow.Name, detail: $"project {(named.Length > 0 ? named : project)}: {url}", actor: _owner);
+                    return ($"Opened #{made?["iid"]}: {url}", made?.DeepClone(), url);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+        {
+            throw new FlowEndException($"GitLab did not take it: {ex.Message}");
+        }
     }
 
     /// <summary>Said in a room as the owner, for its people (not to the model): the owner may write in it.</summary>

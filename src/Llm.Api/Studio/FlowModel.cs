@@ -25,9 +25,13 @@ public sealed class FlowTrigger
     /// <summary>A schedule: five-field cron in <see cref="TimeZone"/>.</summary>
     public string? Cron { get; set; }
     public string TimeZone { get; set; } = "UTC";
-    /// <summary>GitLab: merge_request, pipeline_failed, issue.</summary>
+    /// <summary>GitLab: some of <see cref="Schedules.Triggers.GitLabEvents"/>.</summary>
     public List<string>? Events { get; set; }
-    /// <summary>A room: its id, and the word a message starts with to run it (#triage).</summary>
+    /// <summary>GitLab: the branches it takes (globs, comma separated: main, release/*); empty: every branch.</summary>
+    public string? Branches { get; set; }
+    /// <summary>GitLab: the labels a merge request or issue has one of (comma separated); empty: any.</summary>
+    public string? Labels { get; set; }
+    /// <summary>A room: its id, and the word a message starts with to run it (#triage). GitLab: the words a comment holds (@arena).</summary>
     public Guid? RoomId { get; set; }
     public string? Keyword { get; set; }
     /// <summary>A form (or a run by hand): its fields.</summary>
@@ -35,9 +39,11 @@ public sealed class FlowTrigger
 }
 
 /// <summary>
-/// A step. ask: one question to a model; agent: the model with tools, as a chat; tool: one tool's function; condition: then
-/// or else; loop: its steps for each item; approval: waits for its owner; text: words made of the others; room, email,
-/// comment, file: what it gives out.
+/// A step. ask: one question to a model; agent: the model with tools, as a chat; tool: one tool's function; code: Python in
+/// the sandbox; data: a question (or SQL) to a data source; knowledge: the company's documents searched; http: a request to
+/// a public address; condition: then or else; loop: its steps for each item; approval: waits for its owner; wait: waits a
+/// while; stop: ends the run; text: words made of the others (JSON too); room, email, notify, comment, gitlab, file: what it
+/// gives out.
 /// </summary>
 public sealed class FlowStep
 {
@@ -68,6 +74,24 @@ public sealed class FlowStep
     public string? Text { get; set; }
     public string? Subject { get; set; }
     public string? FileName { get; set; }
+    /// <summary>gitlab: comment, label or issue.</summary>
+    public string? Action { get; set; }
+    /// <summary>gitlab: the project (its path or ID); empty: the one whose event started the run.</summary>
+    public string? Project { get; set; }
+    /// <summary>gitlab: the merge request (!12) or issue (#34); empty: the one whose event started the run.</summary>
+    public string? Target { get; set; }
+    /// <summary>gitlab: labels, comma separated (to add, or on the issue made).</summary>
+    public string? Labels { get; set; }
+    /// <summary>http: the address and its method (GET, POST, PUT, PATCH, DELETE); its headers are <see cref="Arguments"/>, its body <see cref="Text"/>.</summary>
+    public string? Url { get; set; }
+    public string? Method { get; set; }
+    /// <summary>data: the data source asked, with <see cref="Prompt"/> (in words) or <see cref="Sql"/>.</summary>
+    public Guid? SourceId { get; set; }
+    public string? Sql { get; set; }
+    /// <summary>wait: how many minutes.</summary>
+    public int? Minutes { get; set; }
+    /// <summary>stop: done (the run ends well) or failed.</summary>
+    public string? Outcome { get; set; }
 }
 
 public sealed class Flow
@@ -80,7 +104,12 @@ public sealed class Flow
 public static partial class FlowModel
 {
     public static readonly string[] Triggers = ["manual", "schedule", "webhook", "gitlab", "room", "form"];
-    public static readonly string[] Kinds = ["ask", "agent", "tool", "condition", "loop", "approval", "text", "room", "email", "comment", "file"];
+    public static readonly string[] Kinds =
+        ["ask", "agent", "tool", "code", "data", "knowledge", "http", "condition", "loop", "approval", "wait", "stop", "text", "room", "email", "notify", "comment", "gitlab", "file"];
+    public static readonly string[] GitLabActions = ["comment", "label", "issue"];
+    public static readonly string[] Methods = ["GET", "POST", "PUT", "PATCH", "DELETE"];
+    /// <summary>The longest a wait step waits: a week.</summary>
+    public const int MostMinutes = 7 * 24 * 60;
     public static readonly string[] Ops = ["contains", "not_contains", "equals", "not_equals", "greater", "less", "empty", "not_empty"];
     public const int MostSteps = 60;
     public const int MostTurns = 50;
@@ -124,6 +153,10 @@ public static partial class FlowModel
         {
             return $"A GitLab trigger takes some of: {string.Join(", ", Schedules.Triggers.GitLabEvents)}.";
         }
+        if (t.Branches?.Length > 500 || t.Labels?.Length > 500 || t.Keyword?.Length > 200)
+        {
+            return "A trigger's branches and labels are at most 500 characters, its words 200.";
+        }
         foreach (var f in t.Fields ?? [])
         {
             if (!FieldName().IsMatch(f.Name) || f.Name == "text" || f.Kind is not ("text" or "long" or "choice") || (f.Kind == "choice" && f.Choices is not { Count: > 0 }))
@@ -155,7 +188,17 @@ public static partial class FlowModel
                 "condition" when !Ops.Contains(s.Op) => $"its test is one of: {string.Join(", ", Ops)}",
                 "loop" when string.IsNullOrWhiteSpace(s.Over) || s.Steps is not { Count: > 0 } => "it needs what to go over and steps to run for each",
                 "room" when s.RoomId is null || string.IsNullOrWhiteSpace(s.Text) => "it needs its room and what to say",
-                "text" or "email" or "comment" or "file" when string.IsNullOrWhiteSpace(s.Text) => "it needs its text",
+                "text" or "email" or "comment" or "file" or "notify" when string.IsNullOrWhiteSpace(s.Text) => "it needs its text",
+                "code" when string.IsNullOrWhiteSpace(s.Text) => "it needs its code",
+                "knowledge" when string.IsNullOrWhiteSpace(s.Prompt) => "it needs what to look for",
+                "data" when s.SourceId is null || (string.IsNullOrWhiteSpace(s.Prompt) && string.IsNullOrWhiteSpace(s.Sql)) => "it needs a data source, and a question or SQL",
+                "http" when string.IsNullOrWhiteSpace(s.Url) || !Methods.Contains(s.Method ?? "GET") => $"it needs an address, and a method of: {string.Join(", ", Methods)}",
+                "wait" when s.Minutes is not (>= 1 and <= MostMinutes) => $"it waits 1 to {MostMinutes} minutes",
+                "stop" when s.Outcome is not (null or "done" or "failed") => "it ends the run done or failed",
+                "gitlab" when !GitLabActions.Contains(s.Action) => $"its action is one of: {string.Join(", ", GitLabActions)}",
+                "gitlab" when s.Action == "comment" && string.IsNullOrWhiteSpace(s.Text) => "it needs what to comment",
+                "gitlab" when s.Action == "label" && string.IsNullOrWhiteSpace(s.Labels) => "it needs the labels to add",
+                "gitlab" when s.Action == "issue" && string.IsNullOrWhiteSpace(s.Subject) => "it needs the issue's title",
                 _ => null,
             };
             if (problem is not null)

@@ -139,7 +139,8 @@ public sealed class StudioTests(AppFixture app)
         }));
         var hookId = hooked.GetProperty("workflow").GetProperty("id").GetGuid();
         var secret = hooked.GetProperty("secret").GetString()!;
-        var anonymous = new TestBrowser(f);
+        // Posted as another system posts: no session and no X-Requested-With, only the secret.
+        var anonymous = new { Http = f.CreateClient() };
         using (var wrong = new HttpRequestMessage(HttpMethod.Post, $"/api/studio/hooks/{hookId}") { Content = JsonContent.Create(new { order = 7 }) })
         {
             wrong.Headers.Add("X-Hook-Secret", "nope");
@@ -148,7 +149,7 @@ public sealed class StudioTests(AppFixture app)
         using (var right = new HttpRequestMessage(HttpMethod.Post, $"/api/studio/hooks/{hookId}") { Content = JsonContent.Create(new { order = 7 }) })
         {
             right.Headers.Add("X-Hook-Secret", secret);
-            var accepted = await anonymous.JsonAsync(await anonymous.Http.SendAsync(right));
+            var accepted = JsonDocument.Parse(await (await anonymous.Http.SendAsync(right)).Content.ReadAsStringAsync()).RootElement;
             var run = await EndedAsync(ana, f, accepted.GetProperty("run").GetGuid());
             Assert.Equal(("webhook", "Got 7"), (run.GetProperty("trigger").GetString(), Steps(run)[0].Output));
         }
@@ -240,6 +241,9 @@ public sealed class StudioTests(AppFixture app)
         Assert.Equal(["one", "two"], FlowModel.Items("- one\n- two\n", values).Select(i => i!.GetValue<string>()));
         Assert.True(FlowModel.Test("12", "greater", "3"));
         Assert.False(FlowModel.Test("abc", "equals", "ABD"));
-        Assert.All(StudioTemplates.All.Where(t => t.Flow.Trigger.Kind != "room"), t => Assert.Null(FlowModel.Check(t.Flow)));
+        // Every template is a workflow that may be kept, but for what only its maker can choose: a room, a data source.
+        static bool Chosen(StudioTemplate t) => t.Flow.Trigger.Kind == "room" || FlowModel.All(t.Flow.Steps).Any(s => s.Kind == "data");
+        Assert.All(StudioTemplates.All.Where(t => !Chosen(t)), t => Assert.Null(FlowModel.Check(t.Flow)));
+        Assert.Contains("data source", FlowModel.Check(StudioTemplates.All.Single(t => t.Key == "report").Flow), StringComparison.Ordinal);
     }
 }

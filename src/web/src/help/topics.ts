@@ -322,6 +322,8 @@ export const topics = {
       { name: 'The panel', text: 'What is chosen: its settings. **{}** puts a value in a text: the input, a field, what a step before gave.' },
       { name: 'On, Save, Run now', text: '**On** lets its trigger run it; **Save** keeps the changes; **Run now** runs it, with words or its fields.' },
       { name: 'Runs', text: 'Every run; open one to **Replay** it on the canvas or read its **Timeline**. A run that asks you waits for **Yes, go on** or **No, stop it**.' },
+      { name: 'Steps', text: 'Think (a model, an agent, a tool, Python), find (company knowledge, a data source, a web address), decide (if, for each, ask me first, wait, end the run), give out (text, a room, email, notify, GitLab, a file).' },
+      { name: 'GitLab events', text: 'Merge requests opened, approved, merged or closed; pipelines and jobs; issues; comments; pushes and tags; releases, deployments and wiki pages. Kept to some branches, labels, or the words a comment holds; the app\'s own comments never start a run.' },
     ],
     tasks: [{ title: 'Ask before it posts', steps: ['Press **+** before the step that posts.', 'Choose **Ask me first** and write the question, with the draft in it ({{draft.text}}).', 'Save. Each run now waits for your yes, and a notification tells you.'] }],
     manual: { doc: 'studio', section: 'steps' },
@@ -824,12 +826,12 @@ export const topics = {
 
   'data-sources': {
     title: 'Data sources',
-    about: 'The databases people may ask in words (PostgreSQL), which of their tables, and who; and what was asked of them. Every query runs read only.',
+    about: 'The databases people may ask in words (PostgreSQL, MySQL or MariaDB, SQL Server, and data files uploaded: CSV, Excel, JSON), which of their tables, and who; and what was asked of them. Every query runs read only.',
     admin: true,
     parts: [
       { name: 'A source', text: 'Who its connection signs in as and where, the tables open to questions, and who may ask it. **Change**, **What was asked** (the latest queries: who, the question, the SQL), **Read its tables again**, and **Remove**.' },
       { name: 'Connect a database', text: 'A name, the connection (kept encrypted, never shown again), **Try it** to list the tables its role may read, the tables to open, what the model should know, who may ask it, and the limits on rows and seconds.' },
-      { name: 'Read only', text: 'Each query is one statement in a read-only transaction, never committed, after its plan shows it reads only the open tables. A superuser, or a role that may read the server\'s files, is refused.' },
+      { name: 'Read only', text: 'Each query is one statement, never committed. PostgreSQL and SQL Server run it only after its plan shows it reads only the open tables; MySQL only with an account that may read nothing else (every table it may read is open). A superuser, a sysadmin or owner, or an account that may read the server\'s files, is refused.' },
     ],
     tasks: [{ title: 'Open the shop\'s orders to the sales team', steps: ['Make a role that may only read: grant select on the tables to it.', 'Press **Connect a database**, give the connection and press **Try it**.', 'Tick the orders and customers tables, note that totals are in euros, choose **Some groups** and the sales team.', 'Press **Connect**: they find it under Workspace → Data.'] }],
     manual: { doc: 'data', section: 'connecting-a-database-admins' },

@@ -142,6 +142,9 @@ public sealed class FakeMcp : HttpMessageHandler
                 ("GET", "/api/v4/projects/7/jobs/41/trace") => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("compiling...\nerror: undefined reference to DecodeFrame\n") },
                 ("POST", "/api/v4/projects/7/merge_requests/3/notes") or ("POST", "/api/v4/projects/7/repository/commits/abc123def/comments") =>
                     Json(HttpStatusCode.Created, """{"id":99}"""),
+                // Agent Studio's GitLab steps: labels added, an issue opened.
+                ("PUT", "/api/v4/projects/7/merge_requests/3") => Json(HttpStatusCode.OK, """{"iid":3}"""),
+                ("POST", "/api/v4/projects/group%2Fapp/issues") => Json(HttpStatusCode.Created, """{"iid":5,"web_url":"https://gitlab.test/group/app/-/issues/5"}"""),
                 _ => Json(HttpStatusCode.NotFound, """{"message":"404 Not Found"}"""),
             };
         }

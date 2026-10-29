@@ -77,5 +77,53 @@ public static class StudioTemplates
                 new FlowStep { Id = "all", Kind = "text", Name = "Together", Text = "{{each.text}}" },
             ],
         }),
+        new("mention", "Answer a mention in GitLab", "When someone writes @arena in a comment on a merge request or issue: an answer from the code and the company's documents, as a comment.", new Flow
+        {
+            Trigger = new FlowTrigger { Kind = "gitlab", Events = ["comment"], Keyword = "@arena" },
+            Steps =
+            [
+                new FlowStep { Id = "docs", Kind = "knowledge", Name = "Look it up", Prompt = "{{input.gitlab.title}} {{input.text}}" },
+                new FlowStep
+                {
+                    Id = "answer", Kind = "agent", Name = "Answer it", Tools = ["argus"],
+                    Prompt = "Answer the question in this comment, short and with links, from the code and these documents.\n\n{{input.text}}\n\nDocuments:\n{{docs.text}}",
+                },
+                new FlowStep { Id = "reply", Kind = "gitlab", Name = "Answer in GitLab", Action = "comment", Text = "{{answer.text}}" },
+            ],
+        }),
+        new("shipped", "Label and announce merges", "When a merge request is merged into main or a release branch: labelled shipped, release notes drafted, and a room told.", new Flow
+        {
+            Trigger = new FlowTrigger { Kind = "gitlab", Events = ["merge_request_merged"], Branches = "main, release/*" },
+            Steps =
+            [
+                new FlowStep { Id = "label", Kind = "gitlab", Name = "Label it", Action = "label", Labels = "shipped" },
+                new FlowStep { Id = "notes", Kind = "ask", Name = "Release notes", Model = "small", Prompt = "Write one line of release notes, for users, about this change:\n\n{{input.text}}" },
+                new FlowStep { Id = "tell", Kind = "notify", Name = "Tell me", Subject = "Shipped: {{input.gitlab.title}}", Text = "{{notes.text}}\n{{input.gitlab.url}}" },
+            ],
+        }),
+        new("pipeline", "Explain a failed pipeline", "When a pipeline fails on main: why, from its jobs' logs, as a comment; and an issue when it fails again an hour later.", new Flow
+        {
+            Trigger = new FlowTrigger { Kind = "gitlab", Events = ["pipeline_failed"], Branches = "main" },
+            Steps =
+            [
+                new FlowStep { Id = "why", Kind = "ask", Name = "Why it failed", Prompt = "Why did this pipeline fail? The likely cause and the fix, short.\n\n{{input.text}}" },
+                new FlowStep { Id = "comment", Kind = "comment", Name = "Comment in GitLab", Text = "{{why.text}}" },
+                new FlowStep
+                {
+                    Id = "issue", Kind = "gitlab", Name = "Open an issue", Action = "issue", Subject = "Pipeline failed on {{input.gitlab.branch}}", Labels = "ci",
+                    Text = "{{why.text}}\n\n{{input.gitlab.url}}",
+                },
+            ],
+        }),
+        new("report", "Weekly data report", "Every Monday at 9: a question to a data source, a chart's numbers in words, by email (choose the data source).", new Flow
+        {
+            Trigger = new FlowTrigger { Kind = "schedule", Cron = "0 9 * * 1", TimeZone = "UTC" },
+            Steps =
+            [
+                new FlowStep { Id = "numbers", Kind = "data", Name = "Ask the data", Prompt = "Totals by week for the last four weeks" },
+                new FlowStep { Id = "words", Kind = "ask", Name = "In words", Model = "small", Prompt = "Say in three sentences what these numbers show:\n\n{{numbers.text}}" },
+                new FlowStep { Id = "mail", Kind = "email", Name = "Email it", Subject = "Weekly report, {{now}}", Text = "{{words.text}}\n\n{{numbers.text}}" },
+            ],
+        }),
     ];
 }

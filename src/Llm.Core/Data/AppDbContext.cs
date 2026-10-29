@@ -777,6 +777,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Link).HasMaxLength(500);
             e.Property(x => x.Error).HasMaxLength(2000);
             e.HasIndex(x => new { x.RunId, x.Path }).IsUnique();
+            // The waits' sweep reads only the steps that wait for a time.
+            e.HasIndex(x => x.ResumeAt).HasFilter("\"Status\" = 'waiting' AND \"ResumeAt\" IS NOT NULL");
             e.HasOne<Studio.WorkflowRun>().WithMany().HasForeignKey(x => x.RunId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<PromptLogEntry>(e =>

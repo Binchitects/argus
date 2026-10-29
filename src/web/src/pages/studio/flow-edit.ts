@@ -1,4 +1,4 @@
-import type { FlowStep, RunStep, StepKind } from './studio-api'
+import type { FlowStep, RunStep, StepKind, TriggerKind } from './studio-api'
 
 /** Where a step is: its index in the top lane, then in which inner lane (then, else, a loop's steps) and its index there. */
 export type Loc = (number | 'then' | 'else' | 'steps')[]
@@ -97,21 +97,44 @@ export function newStep(kind: StepKind, steps: FlowStep[]): FlowStep {
       return { id, kind, subject: '', text: '' }
     case 'file':
       return { id, kind, fileName: 'result.md', text: '' }
+    case 'knowledge':
+      return { id, kind, prompt: '{{input.text}}' }
+    case 'data':
+      return { id, kind, sourceId: null, prompt: '{{input.text}}' }
+    case 'http':
+      return { id, kind, method: 'GET', url: 'https://', arguments: {} }
+    case 'code':
+      return { id, kind, text: "import json\nvalues = json.load(open('input.json'))\nprint(values['input']['text'])" }
+    case 'wait':
+      return { id, kind, minutes: 60 }
+    case 'stop':
+      return { id, kind, outcome: 'done', text: '' }
+    case 'gitlab':
+      return { id, kind, action: 'comment', text: '' }
+    case 'notify':
+      return { id, kind, subject: '', text: '' }
     default:
       return { id, kind, text: '' }
   }
 }
 
 /** The values a step may use: the run's input, its fields, the steps before it (and a loop's item, inside one). */
-export function valuesBefore(steps: FlowStep[], loc: Loc, fields: string[]): { label: string; value: string }[] {
+export function valuesBefore(steps: FlowStep[], loc: Loc, fields: string[], trigger?: TriggerKind): { label: string; value: string }[] {
   const out = [{ label: 'The input', value: '{{input.text}}' }, { label: 'Who started it', value: '{{input.by}}' }, ...fields.map((f) => ({ label: `Field ${f}`, value: `{{input.${f}}}` }))]
+  if (trigger === 'gitlab') {
+    for (const [label, key] of [['The event', 'event'], ['The project', 'project'], ['The branch', 'branch'], ['Its title', 'title'], ['Its link', 'url'], ['Its number', 'iid'], ['Who did it', 'author'], ['Its labels', 'labels']] as const) {
+      out.push({ label, value: `{{input.gitlab.${key}}}` })
+    }
+  }
   let lane = steps
   for (let i = 0; i < loc.length; i++) {
     const part = loc[i]!
     if (typeof part !== 'number') continue
     for (const s of lane.slice(0, part)) {
       out.push({ label: `${s.name || s.id}'s answer`, value: `{{${s.id}.text}}` })
-      if (s.kind === 'ask' && s.json) out.push({ label: `${s.name || s.id}'s JSON`, value: `{{${s.id}.json}}` })
+      if ((s.kind === 'ask' || s.kind === 'text') && s.json) out.push({ label: `${s.name || s.id}'s JSON`, value: `{{${s.id}.json}}` })
+      if (s.kind === 'data') out.push({ label: `${s.name || s.id}'s first row`, value: `{{${s.id}.json.rows.0}}` }, { label: `${s.name || s.id}'s rows`, value: `{{${s.id}.json.rows}}` })
+      if (s.kind === 'knowledge' || s.kind === 'http' || s.kind === 'code' || (s.kind === 'gitlab' && s.action === 'issue')) out.push({ label: `${s.name || s.id}'s JSON`, value: `{{${s.id}.json}}` })
     }
     const here = lane[part]
     const next = loc[i + 1]
