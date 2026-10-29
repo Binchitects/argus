@@ -510,7 +510,12 @@ internal sealed partial class Runtime : IAsyncDisposable
         {
             Workspace = Workspace, Ui = Ui, Shell = Config.Shell, Jobs = Jobs, Memory = Memory, SessionsDir = Env.Paths.SessionsDir, Sandbox = Sandbox,
             Code = CodeIndex, Shown = [], MayRead = MayRead,
-            BeforeWrite = Checkpoints.BeforeWrite, Planning = () => Permissions.Mode == Mode.Plan,
+            BeforeWrite = path =>
+            {
+                Checkpoints.BeforeWrite(path);
+                CodeIndex?.Touch();
+            },
+            Planning = () => Permissions.Mode == Mode.Plan,
             StepBegan = Checkpoints.BeginStep,
             // A step's check that is a command (its first word a program here) is run before the step is done; its run is
             // recorded on the step.
@@ -518,6 +523,8 @@ internal sealed partial class Runtime : IAsyncDisposable
         };
         Context.CommandRan = (command, passed, output) =>
         {
+            // A command may have changed any file (a checkout, a formatter): the index syncs before its next answer.
+            CodeIndex?.Touch();
             var plan = Context.Plan.Ran(command, passed, output, DateTimeOffset.UtcNow);
             if (!ReferenceEquals(plan, Context.Plan))
             {

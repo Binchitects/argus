@@ -228,6 +228,8 @@ The hats mean normalised by the maximum. These weights are only a starting point
 **Expected size for this repository** (2,455 tracked files, 42 MB of cs/ts/tsx/py text, 975k lines): about 10 MB on disk and under 60 MB in memory. Commit 8 measures both.
 
 ### Incremental updates
+**As built (commit 13):** every question syncs by size and time first, at most once a second, and at once after the agent wrote a file (`BeforeWrite`) or a command ran (`CommandRan`); a sync here lists 2,461 files and stats them in 0.1 s, and reads again only what changed (500 changed files are read in the same question, and a name answer over them stays complete). The IDE needs no DiskWatch cursor for it: the cursor below stays an option if a large repository makes the per-question sync slow.
+
 - **At session start:** load the file, then sync in the background, on at most ProcessorCount/2 threads.
   - The file list comes from `Workspace.FilesUnder`, so the index sees the same files grep sees (Workspace.cs:143-156, which uses `git ls-files --cached --others --exclude-standard`).
   - Each file's size and modification time are compared with its record. A difference triggers a SHA-256 check, and a re-parse only when the hash differs.

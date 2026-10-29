@@ -4,8 +4,8 @@ namespace CodeArena;
 
 /// <summary>
 /// A session's code index: opened in the background as the session starts (read from disk, then synced), brought in step
-/// with the folder before each question (by size and time, at most once a second), written back after changes (at most
-/// every ten seconds, and when the session ends).
+/// with the folder before each question (by size and time, at most once a second, and at once after the agent wrote a file
+/// or ran a command), written back after changes (at most every ten seconds, and when the session ends).
 /// </summary>
 internal sealed class CodeIndexHost : IDisposable
 {
@@ -19,6 +19,7 @@ internal sealed class CodeIndexHost : IDisposable
     private DateTime _synced;
     private DateTime _saved = DateTime.UtcNow;
     private bool _dirty;
+    private volatile bool _stale;
 
     public CodeIndexHost(string dataDir, Workspace workspace)
     {
@@ -26,6 +27,12 @@ internal sealed class CodeIndexHost : IDisposable
         _workspace = workspace;
         _opened = Open(rebuild: false);
     }
+
+    /// <summary>How long a sync holds before the next question syncs again, when nothing marked the folder changed.</summary>
+    public TimeSpan SyncEvery { get; init; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>The folder may have changed (the agent wrote a file, a command ran): the next question syncs first, whenever the last sync was.</summary>
+    public void Touch() => _stale = true;
 
     /// <summary>Off for this session (/index off): the tools say so, and grep is used.</summary>
     public bool Off { get; set; }
@@ -65,8 +72,9 @@ internal sealed class CodeIndexHost : IDisposable
         var index = _opened.Result;
         lock (_gate)
         {
-            if (DateTime.UtcNow - _synced >= TimeSpan.FromSeconds(1))
+            if (_stale || DateTime.UtcNow - _synced >= SyncEvery)
             {
+                _stale = false;
                 var sync = index.Sync(_workspace, _workspace.Roots, ct);
                 _synced = DateTime.UtcNow;
                 LastSync = sync;

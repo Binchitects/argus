@@ -179,7 +179,7 @@ internal sealed partial class CodeGraph
     /// The uses of a symbol across the folder (calls and references, in code): each use of its name, in the files that use the
     /// name, tied to it; and how many uses of the name could be tied to nothing for certain (more than three declare it).
     /// </summary>
-    public (List<CodeEdge> Uses, int Unresolved) UsesOf(SymbolRef target, int mostFiles = 400)
+    public (List<CodeEdge> Uses, int Unresolved) UsesOf(SymbolRef target, int mostFiles = int.MaxValue)
     {
         var name = target.Symbol.Name;
         var family = Family(target.File.Lang);
