@@ -350,7 +350,11 @@ The page is laid out as VS Code is, in Argus Arena's design system:
 - **editor**: tabs with Monaco, highlighting by the file's name (or
   `files.associations`; a name that says nothing, by its first line: a
   `#!` line's program, `<?php`), set up by the settings (below). The editor's
-  right-click **Command Palette** opens the workbench's, and **Copy Path of
+  right-click **Command Palette** opens the workbench's. A picture, a sound or
+  a video opens in a tab of its own, as it is: a picture centred on a
+  checkerboard with its size (a click switches between fitting the tab and its
+  own size), sound and video with their controls; changed on disk, it shows
+  again. **Copy Path of
   Active File** gives the whole path in the system's own form, a file in an
   added folder's too. A dot marks unsaved
   changes and **Ctrl+S** saves (**Ctrl+K S** saves them all). A

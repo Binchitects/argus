@@ -855,6 +855,29 @@ describe('Code Arena, the IDE', () => {
     expect(screen.getByRole('textbox', { name: 'Search' })).toHaveFocus()
   })
 
+  it('shows a picture and a video in tabs of their own, from their address, never read as text', async () => {
+    const { calls } = backend({
+      'GET /api/files': (_, __, url) =>
+        url.searchParams.get('path')
+          ? { json: { path: url.searchParams.get('path'), entries: [] } }
+          : { json: { path: '.', entries: [{ name: 'logo.png', path: 'logo.png', kind: 'file', size: 2048 }, { name: 'intro.mp4', path: 'intro.mp4', kind: 'file', size: 4096 }] } },
+    })
+    renderIde()
+    const tree = await screen.findByRole('tree', { name: 'Files' })
+    await userEvent.click(await within(tree).findByRole('treeitem', { name: 'logo.png' }))
+    const picture = await screen.findByRole('img', { name: 'logo.png' })
+    expect(picture.getAttribute('src')).toContain('/api/media?path=logo.png')
+    expect(screen.getByRole('tab', { name: 'logo.png' })).toBeInTheDocument()
+    // A click between fitting the tab and its own size.
+    expect(picture).toHaveClass('cursor-zoom-in')
+    await userEvent.click(picture)
+    expect(picture).toHaveClass('cursor-zoom-out')
+
+    await userEvent.click(within(tree).getByRole('treeitem', { name: 'intro.mp4' }))
+    expect((await screen.findByLabelText('intro.mp4', { selector: 'video' })).getAttribute('src')).toContain('/api/media?path=intro.mp4')
+    expect(calls.filter((c) => /^\/api\/file\?path=(logo|intro)/.test(c.path))).toEqual([])
+  })
+
   it('lists the folder, opens folders as they are expanded, marks the agent’s changes and opens a file in Monaco', async () => {
     const { calls } = backend()
     renderIde()

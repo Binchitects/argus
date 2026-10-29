@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { FileCode2, FileDiff, FileText, FolderOpen, GitCompareArrows, Keyboard, Settings2, X } from 'lucide-react'
+import { FileCode2, FileDiff, FileImage, FileText, FolderOpen, GitCompareArrows, Keyboard, Settings2, X } from 'lucide-react'
 import type * as Monaco from 'monaco-editor'
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ContextMenu } from 'radix-ui'
@@ -18,8 +18,8 @@ import { allCommands, onCommandsChange, runCommand } from './commands'
 import { installCompletions } from './completion'
 import { compareId, renamed, revertChanges, sideLabel, sidePath, takeChanges, touched, type LineChange, type Side } from './compare'
 import { CompareToolbar } from './compare-toolbar'
-import { EditorContext, loadMonaco, rankFiles, useEditor, type DiffModels, type DiffSource, type EditorApi, type FileModel, type MonacoModule, type Reveal, type SaveReason, type Tab, type Unsaved } from './editor-state'
-import { acceptChange, allFilesQuery, changesQuery, changeTexts, gitShow, gitStageText, gitStatusQuery, nameOf, readFile, revertChange, userFileQuery, within, writeFile, writeUserFile, type Change, type CheckProblem, type OpenedFile, type Saved, type UserFileName } from './ide-api'
+import { EditorContext, loadMonaco, mediaKind, rankFiles, useEditor, type DiffModels, type DiffSource, type EditorApi, type FileModel, type MonacoModule, type Reveal, type SaveReason, type Tab, type Unsaved } from './editor-state'
+import { acceptChange, allFilesQuery, changesQuery, changeTexts, gitShow, gitStageText, gitStatusQuery, nameOf, rawFileUrl, readFile, revertChange, userFileQuery, within, writeFile, writeUserFile, type Change, type CheckProblem, type OpenedFile, type Saved, type UserFileName } from './ide-api'
 import { addDebugActions, installDebugEditor } from './debug/editor-debug'
 import { installExtensions } from './extensions'
 import { bindEditorContext, keymap, useKeyFor } from './keyboard'
@@ -412,6 +412,11 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       if (has(id)) {
         if (behind) await loadFile(path).catch(() => undefined)
         else activate(id)
+        return
+      }
+      if (mediaKind(path)) {
+        // Shown as it is, from its address: never read as text.
+        add({ id, kind: 'media', path, status: 'ready', dirty: false, mediaVersion: 0 }, !behind)
         return
       }
       const load = Symbol(path)
@@ -864,6 +869,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
 
     /** Files changed on disk: the files the editor holds, then the compares of them (their other sides read again). */
     const refresh = async (path?: string) => {
+      // A picture, sound or video changed on disk: fetched again.
+      for (const t of tabsRef.current.filter((x) => x.kind === 'media' && (path === undefined || x.path === path))) update(t.id, { mediaVersion: (t.mediaVersion ?? 0) + 1 })
       for (const f of [...files.current.values()].filter((x) => path === undefined || x.path === path)) {
         try {
           await refreshFile(f)
@@ -1413,6 +1420,8 @@ export function EditorArea() {
                     <Settings2 className="size-3.5 shrink-0" aria-hidden="true" />
                   ) : t.kind === 'keybindings' ? (
                     <Keyboard className="size-3.5 shrink-0" aria-hidden="true" />
+                  ) : t.kind === 'media' ? (
+                    <FileImage className="size-3.5 shrink-0" aria-hidden="true" />
                   ) : (
                     <FileCode2 className="size-3.5 shrink-0" aria-hidden="true" />
                   )}
@@ -1471,6 +1480,7 @@ export function EditorArea() {
             <KeybindingsEditor />
           </Suspense>
         )}
+        {active?.kind === 'media' && <MediaPreview key={active.id} tab={active} />}
         {!active && <Welcome />}
         {active?.status === 'loading' && (
           <div className="absolute inset-0 grid place-items-center bg-background">
@@ -1490,6 +1500,45 @@ export function EditorArea() {
         )}
       </div>
     </section>
+  )
+}
+
+/**
+ * A picture, sound or video in a tab of its own, as VS Code's preview shows one: a picture centred on a checkerboard, its
+ * size said, a click between fitting the tab and its own size; sound and video with their controls.
+ */
+function MediaPreview({ tab }: { tab: Tab }) {
+  const [whole, setWhole] = useState(false)
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null)
+  const kind = mediaKind(tab.path)
+  const src = `${rawFileUrl(tab.path)}&v=${tab.mediaVersion ?? 0}`
+  const name = nameOf(tab.path)
+  if (kind === 'sound' || kind === 'video') {
+    return (
+      <div className="absolute inset-0 grid place-items-center overflow-auto bg-background p-6">
+        {kind === 'sound' ? <audio controls src={src} aria-label={name} className="w-full max-w-xl" /> : <video controls src={src} aria-label={name} className="max-h-full max-w-full" />}
+      </div>
+    )
+  }
+  return (
+    <div
+      className="absolute inset-0 grid place-items-center overflow-auto p-6"
+      style={{ backgroundImage: 'repeating-conic-gradient(var(--muted) 0% 25%, transparent 0% 50%)', backgroundSize: '16px 16px' }}
+    >
+      <img
+        src={src}
+        alt={name}
+        onLoad={(e) => setSize({ width: e.currentTarget.naturalWidth, height: e.currentTarget.naturalHeight })}
+        onClick={() => setWhole((w) => !w)}
+        title={whole ? 'Click to fit' : 'Click for its own size'}
+        className={whole ? 'max-w-none cursor-zoom-out' : 'max-h-full max-w-full cursor-zoom-in object-contain'}
+      />
+      {size && (
+        <p className="absolute right-2 bottom-2 rounded bg-background/80 px-2 py-0.5 text-xs text-muted-foreground">
+          {size.width} × {size.height}
+        </p>
+      )}
+    </div>
   )
 }
 

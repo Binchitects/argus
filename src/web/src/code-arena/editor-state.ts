@@ -40,8 +40,8 @@ export type DiffSource = 'agent' | 'git' | 'staged' | 'compare'
 export interface Tab {
   /** The path for a file; "diff:" and the path for the agent's changes, "git:" and the path for those since the last commit. */
   id: string
-  /** A file, a compare, or one of the workbench's own pages (the Settings and Keyboard Shortcuts editors). */
-  kind: 'file' | 'diff' | 'settings' | 'keybindings'
+  /** A file, a picture, sound or video (shown as it is), a compare, or one of the workbench's own pages (Settings, Keyboard Shortcuts). */
+  kind: 'file' | 'media' | 'diff' | 'settings' | 'keybindings'
   /** A diff's: what it compares (the agent's changes when not said). */
   source?: DiffSource
   /** A diff's sides: the left (original) and the right (modified). */
@@ -57,6 +57,21 @@ export interface Tab {
   language?: string
   /** The language's id (Monaco's, VS Code's: typescript, python…), for its settings. */
   languageId?: string
+  /** A picture's, sound's or video's: how many times it changed on disk while open (its address changes, so it is fetched again). */
+  mediaVersion?: number
+}
+
+/** The pictures, sound and video a tab shows as they are, by extension (the server's own list: no SVG, which may hold a script). */
+const mediaKinds: Record<string, 'picture' | 'sound' | 'video'> = {
+  ...Object.fromEntries(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'avif'].map((e) => [e, 'picture' as const])),
+  ...Object.fromEntries(['mp3', 'wav', 'ogg', 'oga', 'opus', 'flac', 'm4a', 'aac', 'weba'].map((e) => [e, 'sound' as const])),
+  ...Object.fromEntries(['mp4', 'webm', 'ogv', 'mov'].map((e) => [e, 'video' as const])),
+}
+
+/** Whether a file is a picture, a sound or a video a tab shows; null for any other (text, or a binary file the editor says it cannot open). */
+export function mediaKind(path: string): 'picture' | 'sound' | 'video' | null {
+  const dot = path.lastIndexOf('.')
+  return dot > path.lastIndexOf('/') ? (mediaKinds[path.slice(dot + 1).toLowerCase()] ?? null) : null
 }
 
 /** Why a file is saved: by the person (Ctrl+S, the menu), or by "files.autoSave" (after a delay, the focus or the window leaving). */
