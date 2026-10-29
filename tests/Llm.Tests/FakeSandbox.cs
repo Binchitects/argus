@@ -122,6 +122,25 @@ public sealed class FakeSandbox : IAsyncDisposable
                 await File.WriteAllBytesAsync(Path.Combine(draft, "files", "frame-02.jpg"), [0xFF, 0xD8, 0xFF, 2]);
             }
         }
+        // Knowledge's reading of pictures, scans and older Office files (DocumentReader): what OCR would read, by the file's name.
+        if (code.Contains("pytesseract", StringComparison.Ordinal) && File.Exists(Path.Combine(job, "files", "spec.json")))
+        {
+            var ocr = JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(job, "files", "spec.json")))!;
+            var kind = ocr["kind"]!.GetValue<string>();
+            var answer = new JsonObject { ["text"] = "", ["pages"] = new JsonObject() };
+            if (kind == "pdf")
+            {
+                foreach (var p in ocr["pages"]!.AsArray())
+                {
+                    answer["pages"]![p!.GetValue<int>().ToString(CultureInfo.InvariantCulture)] = $"Page {p} read by OCR ({ocr["langs"]})";
+                }
+            }
+            else
+            {
+                answer["text"] = kind == "picture" ? $"A picture read by OCR ({ocr["langs"]}): Invoice 4711" : $"Converted by LibreOffice: {ocr["file"]}";
+            }
+            await File.WriteAllTextAsync(Path.Combine(draft, "files", "result.json"), answer.ToJsonString());
+        }
         if (code.Contains("# canvas pdf", StringComparison.Ordinal) && File.Exists(Path.Combine(job, "files", "canvas.docx")))
         {
             await File.WriteAllTextAsync(Path.Combine(draft, "files", "canvas.pdf"), $"%PDF-1.7\n% from {new FileInfo(Path.Combine(job, "files", "canvas.docx")).Length} bytes\n%%EOF\n");

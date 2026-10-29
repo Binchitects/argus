@@ -36,7 +36,8 @@ is removed that time).
 | Kind | What is read | Who may read it |
 |---|---|---|
 | **GitLab** | A project, or every project of a group and its subgroups (not archived ones): the wiki pages, and the issues with their comments. Confidential issues and internal notes never. | Each project's members in GitLab: active, Guest and up, inherited ones too. |
-| **Folder** | Every file under a folder mounted below `/knowledge` (subfolders too): text, Markdown, HTML, PDF, Word, Excel, PowerPoint and OpenDocument, as the chat reads attachments. Hidden files and folders and links are skipped; files over 50 MB too. | The groups you choose (or everyone, or admins), as rules on the source. |
+| **Files uploaded here** | Files you drop on the source (**Files**), a whole folder with its folders' names too: every kind below ([Files and what is read](#files-and-what-is-read)), a zip archive's files each as a document of its own. Up to 200 MB a file; kept in the database, so backups carry them. | The groups you choose (or everyone, or admins), as rules on the source. |
+| **Folder** | Every file under a folder mounted below `/knowledge` (subfolders too), read as uploaded files are. Hidden files and folders and links are skipped; files over 50 MB too. | The groups you choose (or everyone, or admins), as rules on the source. |
 | **Website** | Pages reached from the first page through their links, on its hosts only (or the hosts you list), up to **Most pages** (200; at most 2,000), minding the site's `robots.txt`. PDFs and documents linked from it too. | The groups you choose (or everyone, or admins), as rules on the source. |
 | **Confluence** | Cloud, or Data Center and Server: the spaces you list, or every space the account may read; their pages, and their blog posts if you choose. | Whoever may view the space and the page in Confluence, read restrictions included ([below](#confluence)). Where Confluence does not tell, the groups you choose. |
 | **SharePoint** | Sites and document libraries (a OneDrive too) by their addresses: their files (Word, PowerPoint, Excel, PDF, text, Markdown and the rest the chat reads), and the sites' pages if you choose. | Each file's permissions in SharePoint ([below](#sharepoint-and-onedrive)). Where Graph cannot tell, the groups you choose. |
@@ -184,6 +185,37 @@ What is not mirrored, and goes to **Where SharePoint cannot tell**:
 - **Site pages**: Graph does not give their permissions.
 - People Graph names without an email (when the app lacks User.Read.All).
 
+### Files and what is read
+
+Uploaded files, a folder's files and SharePoint's files are read alike:
+
+- text, Markdown, code, CSV, JSON, YAML and logs as they are; HTML as its
+  readable text;
+- Word, Excel, PowerPoint and OpenDocument files;
+- PDFs by their text, and **the pages without text (scans) by OCR**;
+- **pictures** (PNG, JPEG, TIFF with all its pages, BMP, GIF, WebP, HEIC) by OCR;
+- **older Office files and the like** (`.doc`, `.xls`, `.ppt`, RTF, WordPerfect,
+  Visio, Publisher, Hangul...) converted by LibreOffice, their scanned pages
+  by OCR;
+- **e-mails** (`.eml`): subject, from, to and date, then the text (the plain
+  part, else the HTML part's text), quoted-printable and base64 decoded;
+- **EPUB** books, chapter by chapter;
+- a **zip archive**'s files, each as a document of its own
+  (`handbook.zip/hr/leave.docx`), hidden files and `__MACOSX` left out.
+
+OCR and conversion run in the **sandbox** (the `sandbox` feature: Tesseract,
+LibreOffice and poppler there, with no network), in the languages of
+`Knowledge:OcrLanguages` (`eng+fas+ara` by default: English, Persian and
+Arabic; Chinese is there too, `chi_sim` and `chi_tra`). A scanned PDF's pages
+are drawn at 200 dpi and read twelve at a time, up to 300 pages. Without the
+sandbox such a file is named in the source's problems and read at the next
+sync after the sandbox runs; the rest is read as usual. Audio and video are
+not read yet.
+
+Every upload and removal is in the audit log (`knowledge.files_added`,
+`knowledge.file_removed`). A file uploaded again by the same name replaces
+the old one; a file is read again only when its content changed.
+
 ### A folder
 
 Mount it read-only under `/knowledge` in `docker-compose.override.yml`, and
@@ -283,6 +315,7 @@ environment), for odd setups only:
 | `EmbedKey` | empty | a bearer key for a server outside the stack |
 | `DocumentPrefix`, `QueryPrefix` | `search_document: `, `search_query: ` | what nomic-embed-text wants; empty for a model that wants none |
 | `FolderRoot` | `/knowledge` | where folders must be |
+| `OcrLanguages` | `eng+fas+ara` | the languages OCR reads, Tesseract's names joined with `+` (the sandbox has `eng`, `fas`, `ara`, `chi_sim`, `chi_tra`) |
 | `IndexWait` | 15 seconds | how long an answer waits for its files to be embedded |
 | `PgVector` | true | false compares in plain SQL |
 

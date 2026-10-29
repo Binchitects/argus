@@ -20,6 +20,9 @@ public sealed class KnowledgeOptions
     public TimeSpan SyncEvery { get; set; } = TimeSpan.FromHours(1);
     /// <summary>Folders a folder source may read are under this one (mounted by the admin).</summary>
     public string FolderRoot { get; set; } = "/knowledge";
+
+    /// <summary>The languages OCR reads pictures and scans in (Tesseract's names, joined with +): those the sandbox has.</summary>
+    public string OcrLanguages { get; set; } = "eng+fas+ara";
     /// <summary>The passages of a chat's long files and a project's files that go with each question, in characters.</summary>
     public int PassageChars { get; set; } = 12_000;
     /// <summary>Longest an answer waits for its files to be embedded; those not ready go in as before.</summary>

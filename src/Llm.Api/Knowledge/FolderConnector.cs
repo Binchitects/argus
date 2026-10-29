@@ -10,11 +10,11 @@ namespace Llm.Api.Knowledge;
 
 /// <summary>
 /// A folder the app can read: one the admin mounts under the folder root (/knowledge, in
-/// docker-compose.override.yml), and nothing outside it. Its files, subfolders too, as the chat reads
-/// attachments (text, Markdown, HTML, PDF, Office and OpenDocument files); hidden files and links are
-/// skipped. Who may read them is who the admin chose.
+/// docker-compose.override.yml), and nothing outside it. Its files, subfolders too, as <see cref="DocumentReader"/> reads
+/// them (text, Markdown, HTML, PDF with its scanned pages, Office, OpenDocument and older Office files, e-mails, EPUB, and
+/// pictures by OCR); hidden files and links are skipped. Who may read them is who the admin chose.
 /// </summary>
-public sealed class FolderConnector(IOptionsMonitor<KnowledgeOptions> options) : IKnowledgeConnector
+public sealed class FolderConnector(IOptionsMonitor<KnowledgeOptions> options, DocumentReader reader) : IKnowledgeConnector
 {
     public const int MaxFiles = 20_000;
     private const long MaxBytes = 50 * 1024 * 1024;
@@ -71,8 +71,16 @@ public sealed class FolderConnector(IOptionsMonitor<KnowledgeOptions> options) :
             var version = string.Create(CultureInfo.InvariantCulture, $"{info.LastWriteTimeUtc.Ticks}:{info.Length}");
             yield return new FoundDocument(relative, relative, null, version, readers, async token =>
             {
-                var bytes = await File.ReadAllBytesAsync(file, token);
-                return Read(relative, bytes);
+                var read = await reader.ReadAsync(relative, await File.ReadAllBytesAsync(file, token), token);
+                if (read.Problem is { } problem)
+                {
+                    lock (pass.Problems)
+                    {
+                        pass.Problems.Add(problem);
+                    }
+                }
+                // Not read at all (the sandbox off): not kept as empty, so a later sync reads it.
+                return read.Problem is not null && read.Text.Length == 0 ? null : read.Text;
             });
         }
         await Task.CompletedTask;

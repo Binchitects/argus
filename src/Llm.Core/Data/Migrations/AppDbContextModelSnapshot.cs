@@ -1505,6 +1505,50 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("knowledge_documents", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Chat.KnowledgeFile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<byte[]>("Bytes")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<string>("ContentType")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("Sha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<long>("Size")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("SourceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("UploadedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("UploadedById")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceId", "Path")
+                        .IsUnique();
+
+                    b.ToTable("knowledge_files", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Chat.KnowledgeReaders", b =>
                 {
                     b.Property<Guid>("SourceId")
@@ -7765,6 +7809,15 @@ namespace Llm.Core.Data.Migrations
                         .WithMany()
                         .HasForeignKey("SourceId")
                         .OnDelete(DeleteBehavior.Cascade);
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.KnowledgeFile", b =>
+                {
+                    b.HasOne("Llm.Core.Chat.KnowledgeSource", null)
+                        .WithMany()
+                        .HasForeignKey("SourceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("Llm.Core.Chat.KnowledgeReaders", b =>

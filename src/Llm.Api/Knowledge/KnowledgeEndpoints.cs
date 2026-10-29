@@ -8,6 +8,7 @@ using Llm.Core.Chat;
 using Llm.Core.Data;
 using Llm.Core.Identity;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 
@@ -22,7 +23,10 @@ public sealed record SourceRequest(
 /// <summary>Admin → Knowledge: the sources, how their syncs went, what they hold and who may read it; adding, changing, testing, Sync now, removing.</summary>
 public static class KnowledgeEndpoints
 {
-    public static readonly string[] Kinds = ["gitlab", "folder", "website", "confluence", "sharepoint"];
+    public static readonly string[] Kinds = ["gitlab", "folder", "website", "confluence", "sharepoint", "upload"];
+
+    /// <summary>The most files one upload takes.</summary>
+    public const int FilesAtOnce = 200;
 
     /// <summary>The kinds whose readers are their own permissions, mirrored; the admin's choice is for what those cannot tell.</summary>
     public static bool Mirrors(string kind) => kind is "confluence" or "sharepoint";
@@ -39,6 +43,9 @@ public static class KnowledgeEndpoints
             ["POST /api/admin/knowledge/test"] = Llm.Core.Access.Permissions.KnowledgeSync,
             ["POST /api/admin/knowledge/{id:guid}/test"] = Llm.Core.Access.Permissions.KnowledgeSync,
             ["DELETE /api/admin/knowledge/{id:guid}"] = Llm.Core.Access.Permissions.KnowledgeDelete,
+            ["GET /api/admin/knowledge/{id:guid}/files"] = Llm.Core.Access.Permissions.KnowledgeRead,
+            ["POST /api/admin/knowledge/{id:guid}/files"] = Llm.Core.Access.Permissions.KnowledgeEdit,
+            ["DELETE /api/admin/knowledge/{id:guid}/files/{file:guid}"] = Llm.Core.Access.Permissions.KnowledgeEdit,
         });
         g.MapGet("", ListAsync);
         g.MapPost("", CreateAsync);
@@ -48,6 +55,106 @@ public static class KnowledgeEndpoints
         g.MapPost("/{id:guid}/test", TestSavedAsync);
         g.MapDelete("/{id:guid}", DeleteAsync);
         g.MapGet("/{id:guid}/documents", DocumentsAsync);
+        g.MapGet("/{id:guid}/files", FilesAsync);
+        // Large uploads: a source of scans and archives (KnowledgeFile.MaxBytes a file, FilesAtOnce at a time).
+        g.MapPost("/{id:guid}/files", UploadAsync).DisableAntiforgery().WithMetadata(new RequestSizeLimitAttribute(4L * 1024 * 1024 * 1024))
+            .WithMetadata(new RequestFormLimitsAttribute { MultipartBodyLengthLimit = 4L * 1024 * 1024 * 1024 });
+        g.MapDelete("/{id:guid}/files/{file:guid}", DeleteFileAsync);
+    }
+
+    private static async Task<IResult> FilesAsync(Guid id, AppDbContext db, CancellationToken ct)
+    {
+        if (!await db.KnowledgeSources.AnyAsync(s => s.Id == id && s.Kind == "upload", ct))
+        {
+            return Results.NotFound();
+        }
+        var files = await db.KnowledgeFiles.AsNoTracking().Where(f => f.SourceId == id).OrderBy(f => f.Path)
+            .Select(f => new { f.Id, f.Path, f.ContentType, f.Size, f.UploadedAt, f.UploadedById }).ToListAsync(ct);
+        var people = files.Select(f => f.UploadedById).OfType<Guid>().Distinct().ToList();
+        var names = await db.Users.AsNoTracking().Where(u => people.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.DisplayName ?? u.UserName, ct);
+        // Each file's documents, as read: an archive's are its files, each "file.zip/...".
+        var read = await db.KnowledgeDocuments.AsNoTracking().Where(d => d.SourceId == id)
+            .Select(d => new { d.Key, Passages = db.KnowledgeChunks.Count(c => c.DocumentId == d.Id) }).ToListAsync(ct);
+        return Results.Ok(files.Select(f => new
+        {
+            f.Id, f.Path, f.ContentType, f.Size, f.UploadedAt, uploadedBy = f.UploadedById is { } u ? names.GetValueOrDefault(u) : null,
+            documents = read.Count(d => d.Key == f.Path || d.Key.StartsWith(f.Path + "/", StringComparison.Ordinal)),
+            passages = read.Where(d => d.Key == f.Path || d.Key.StartsWith(f.Path + "/", StringComparison.Ordinal)).Sum(d => d.Passages),
+        }));
+    }
+
+    /// <summary>
+    /// Files into an upload source, many at once (a folder's names kept: "contracts/2026/acme.pdf"); one there already by that
+    /// name is replaced. Read at once: the sync starts.
+    /// </summary>
+    private static async Task<IResult> UploadAsync(Guid id, HttpRequest request, AppDbContext db, KnowledgeSync sync, Audit audit, ClaimsPrincipal principal,
+        UserManager<AppUser> users, CancellationToken ct)
+    {
+        if (await db.KnowledgeSources.AsNoTracking().SingleOrDefaultAsync(s => s.Id == id && s.Kind == "upload", ct) is not { } source)
+        {
+            return Results.NotFound();
+        }
+        if (!request.HasFormContentType)
+        {
+            return AuthEndpoints.Problem(400, "files", "Send the files as a form (multipart/form-data).");
+        }
+        var form = await request.ReadFormAsync(ct);
+        if (form.Files.Count is 0 or > FilesAtOnce)
+        {
+            return AuthEndpoints.Problem(400, "files", $"Send from 1 to {FilesAtOnce} files at a time.");
+        }
+        var me = await users.GetUserAsync(principal);
+        var added = new List<string>();
+        foreach (var file in form.Files)
+        {
+            var path = CleanPath(file.FileName);
+            if (path is null)
+            {
+                return AuthEndpoints.Problem(400, "files", $"{file.FileName} is not a name a file can have here.");
+            }
+            if (file.Length is 0 or > KnowledgeFile.MaxBytes)
+            {
+                return AuthEndpoints.Problem(400, "files", $"{path} is empty or over {KnowledgeFile.MaxBytes / (1024 * 1024)} MB.");
+            }
+            using var ms = new MemoryStream();
+            await file.CopyToAsync(ms, ct);
+            var bytes = ms.ToArray();
+            var sha = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
+            await db.KnowledgeFiles.Where(f => f.SourceId == id && f.Path == path).ExecuteDeleteAsync(ct);
+            db.KnowledgeFiles.Add(new KnowledgeFile
+            {
+                SourceId = id, Path = path, ContentType = file.ContentType, Size = bytes.Length, Sha256 = sha, Bytes = bytes, UploadedById = me?.Id,
+            });
+            await db.SaveChangesAsync(ct);
+            db.ChangeTracker.Clear();
+            added.Add(path);
+        }
+        sync.Now(id);
+        await audit.WriteAsync("knowledge.files_added", source.Name, detail: $"{added.Count} file(s): {string.Join(", ", added.Take(20))}{(added.Count > 20 ? ", ..." : "")}", actor: me);
+        return Results.Ok(new { added });
+    }
+
+    /// <summary>A name as the folders it was uploaded in give it, without ways out (.., absolute paths) or hidden parts; null when nothing is left.</summary>
+    public static string? CleanPath(string name)
+    {
+        var parts = name.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(p => p is not ("." or "..") && !p.StartsWith('.')).Select(p => new string([.. p.Where(c => !char.IsControl(c))])).Where(p => p.Length > 0).ToList();
+        var path = string.Join('/', parts);
+        return path.Length is 0 or > 1000 ? null : path;
+    }
+
+    private static async Task<IResult> DeleteFileAsync(Guid id, Guid file, AppDbContext db, KnowledgeSync sync, Audit audit, ClaimsPrincipal principal, UserManager<AppUser> users,
+        CancellationToken ct)
+    {
+        if (await db.KnowledgeFiles.AsNoTracking().Where(f => f.Id == file && f.SourceId == id).Select(f => f.Path).SingleOrDefaultAsync(ct) is not { } path)
+        {
+            return Results.NotFound();
+        }
+        await db.KnowledgeFiles.Where(f => f.Id == file).ExecuteDeleteAsync(ct);
+        // Its documents go at the next sync, which starts now.
+        sync.Now(id);
+        await audit.WriteAsync("knowledge.file_removed", path, actor: await users.GetUserAsync(principal));
+        return Results.NoContent();
     }
 
     private static async Task<IResult> ListAsync(AppDbContext db, Embedder embedder, Schedules.GitLabBot bot, IOptionsMonitor<KnowledgeOptions> options, AccessService access,
@@ -102,7 +209,11 @@ public static class KnowledgeEndpoints
         }
         if (!Kinds.Contains(source.Kind))
         {
-            return AuthEndpoints.Problem(400, "kind", "A source is a GitLab project or group, a folder, or a website.");
+            return AuthEndpoints.Problem(400, "kind", "A source is a GitLab project or group, a folder, a website, Confluence, SharePoint, or files uploaded here.");
+        }
+        if (source.Kind == "upload" && source.Location.Length == 0)
+        {
+            source.Location = "Uploaded files";
         }
         if (source.Location.Length is 0 or > 2000)
         {

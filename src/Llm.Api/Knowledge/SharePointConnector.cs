@@ -23,7 +23,7 @@ namespace Llm.Api.Knowledge;
 /// directory groups (by the group's name or ID, as the company sign-in's groups claim). What Graph cannot tell (a
 /// SharePoint group like a site's Members, a site page) is read by whom the admin chose, and the admin page says so.
 /// </summary>
-public sealed partial class SharePointConnector(IHttpClientFactory http, IOptions<AuthOptions> auth, AppDbContext db, TimeProvider clock)
+public sealed partial class SharePointConnector(IHttpClientFactory http, IOptions<AuthOptions> auth, AppDbContext db, TimeProvider clock, DocumentReader reader)
     : IKnowledgeConnector, IConnectionTest
 {
     public const string Client = "graph";
@@ -443,7 +443,9 @@ public sealed partial class SharePointConnector(IHttpClientFactory http, IOption
             {
                 return null;
             }
-            return FolderConnector.Read(name, await response.Content.ReadAsByteArrayAsync(ct));
+            // Read as an uploaded file is: a scan or a picture by OCR, an older Office file converted.
+            var read = await reader.ReadAsync(name, await response.Content.ReadAsByteArrayAsync(ct), ct);
+            return read.Problem is not null && read.Text.Length == 0 ? null : read.Text;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
         {

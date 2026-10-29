@@ -83,6 +83,27 @@ public sealed class KnowledgeDocument
     public DateTimeOffset SyncedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
+/// <summary>
+/// A file uploaded into a source of kind "upload" (Admin → Knowledge): kept here whole, read like a folder's files (an
+/// archive's files each on its own), with text read from pictures and scans.
+/// </summary>
+public sealed class KnowledgeFile
+{
+    public const long MaxBytes = 200L * 1024 * 1024;
+
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid SourceId { get; set; }
+    /// <summary>Its name, with the folders it was uploaded in ("contracts/2026/acme.pdf").</summary>
+    public required string Path { get; set; }
+    public string? ContentType { get; set; }
+    public long Size { get; set; }
+    /// <summary>Its SHA-256, in hex: the same file uploaded again is not read again.</summary>
+    public required string Sha256 { get; set; }
+    public required byte[] Bytes { get; set; }
+    public Guid? UploadedById { get; set; }
+    public DateTimeOffset UploadedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
 /// <summary>A passage of a document, about 1,000 characters cut at headings and paragraphs, with its embedding.</summary>
 public sealed class KnowledgeChunk
 {

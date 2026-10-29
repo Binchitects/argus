@@ -131,6 +131,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<KnowledgeSource> KnowledgeSources => Set<KnowledgeSource>();
     public DbSet<KnowledgeDocument> KnowledgeDocuments => Set<KnowledgeDocument>();
+    public DbSet<KnowledgeFile> KnowledgeFiles => Set<KnowledgeFile>();
     public DbSet<KnowledgeChunk> KnowledgeChunks => Set<KnowledgeChunk>();
     public DbSet<KnowledgeReaders> KnowledgeReaders => Set<KnowledgeReaders>();
     public DbSet<AnswerFeedback> AnswerFeedback => Set<AnswerFeedback>();
@@ -790,6 +791,15 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasIndex(x => x.At);
             e.HasIndex(x => new { x.UserId, x.At });
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<KnowledgeFile>(e =>
+        {
+            e.ToTable("knowledge_files");
+            e.Property(x => x.Path).HasMaxLength(1000);
+            e.Property(x => x.ContentType).HasMaxLength(200);
+            e.Property(x => x.Sha256).HasMaxLength(64);
+            e.HasIndex(x => new { x.SourceId, x.Path }).IsUnique();
+            e.HasOne<KnowledgeSource>().WithMany().HasForeignKey(x => x.SourceId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<Code.CodeArenaClient>(e =>
         {

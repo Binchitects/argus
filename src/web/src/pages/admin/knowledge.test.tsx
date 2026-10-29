@@ -43,6 +43,36 @@ describe('admin knowledge', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/knowledge/s1/sync')).toBe(true))
   })
 
+  it('uploads files and a folder into an upload source, lists what each became, and removes one', async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/knowledge': () => page([source({ id: 'u1', name: 'Company files', kind: 'upload', location: 'Uploaded files', documents: 3, passages: 9 })]),
+      'GET /api/admin/knowledge/u1/files': () => ({
+        json: [
+          { id: 'f1', path: 'scans/receipt.png', contentType: 'image/png', size: 2048, uploadedAt: new Date().toISOString(), uploadedBy: 'Ann', documents: 1, passages: 2 },
+          { id: 'f2', path: 'archive.zip', contentType: 'application/zip', size: 4096, uploadedAt: new Date().toISOString(), uploadedBy: 'Ann', documents: 0, passages: 0 },
+        ],
+      }),
+      'POST /api/admin/knowledge/u1/files': () => ({ json: { added: ['notes.md'] } }),
+      'DELETE /api/admin/knowledge/u1/files/f1': () => ({ status: 204 }),
+      'GET /api/admin/groups': () => ({ json: [] }),
+    })
+    renderApp('/admin/knowledge')
+    const card = await screen.findByRole('region', { name: 'Company files' })
+    await userEvent.click(within(card).getByRole('button', { name: 'Files' }))
+    const list = await screen.findByRole('list', { name: 'Files' })
+    expect(within(list).getByText('scans/receipt.png')).toBeInTheDocument()
+    expect(within(list).getByText(/1 document, 2 passages/)).toBeInTheDocument()
+    expect(within(list).getByText(/not read yet/)).toBeInTheDocument()
+
+    await userEvent.upload(screen.getByLabelText('Files to upload'), [new File(['# Notes'], 'notes.md', { type: 'text/markdown' })])
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/knowledge/u1/files')).toBe(true))
+    expect(calls.find((c) => c.method === 'POST' && c.path === '/api/admin/knowledge/u1/files')?.body).toBeInstanceOf(FormData)
+
+    await userEvent.click(within(list).getByRole('button', { name: 'Remove scans/receipt.png' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/admin/knowledge/u1/files/f1')).toBe(true))
+  })
+
   it('says when the embedder or the GitLab bot is missing', async () => {
     fakeApi(admin, {
       'GET /api/admin/knowledge': () => page([source({ state: 'new', syncedAt: null, documents: 0, passages: 0 })], { embedder: false, problem: 'The embedder (the embed module) is not running.', gitlabBot: false }),

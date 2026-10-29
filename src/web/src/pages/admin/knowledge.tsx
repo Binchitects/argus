@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { BookOpen, Cloud, ExternalLink, FileText, FolderOpen, Globe, GitBranch, Library, Pencil, PlugZap, Plus, RefreshCw, Trash2 } from 'lucide-react'
-import { useId, useState } from 'react'
+import { BookOpen, Cloud, ExternalLink, Files, FileText, FolderOpen, FolderUp, Globe, GitBranch, Library, Pencil, PlugZap, Plus, RefreshCw, Trash2, Upload } from 'lucide-react'
+import { useId, useRef, useState, type DragEvent } from 'react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
@@ -17,11 +17,11 @@ import { Input, Textarea } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
-import { ago, count } from '@/lib/format'
+import { ago, count, formatValue } from '@/lib/format'
 import { AccessPicker, type Audience } from './access-picker'
 import { groupsQuery } from './groups-api'
 
-type Kind = 'gitlab' | 'folder' | 'website' | 'confluence' | 'sharepoint'
+type Kind = 'gitlab' | 'folder' | 'website' | 'confluence' | 'sharepoint' | 'upload'
 
 export interface KnowledgeSource {
   id: string
@@ -81,6 +81,7 @@ const kinds: Record<Kind, { label: string; icon: typeof Globe }> = {
   website: { label: 'Website', icon: Globe },
   confluence: { label: 'Confluence', icon: BookOpen },
   sharepoint: { label: 'SharePoint', icon: Cloud },
+  upload: { label: 'Uploaded files', icon: Files },
 }
 
 /** Confluence and SharePoint: who may read is their own permissions; the admin chooses only for what those cannot tell. */
@@ -100,6 +101,7 @@ export function KnowledgePage() {
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<KnowledgeSource | null>(null)
   const [reading, setReading] = useState<KnowledgeSource | null>(null)
+  const [filing, setFiling] = useState<KnowledgeSource | null>(null)
   if (knowledge.isPending) return <PageSkeleton />
   if (knowledge.error) return <QueryError error={knowledge.error} retry={() => knowledge.refetch()} />
   const k = knowledge.data
@@ -107,7 +109,7 @@ export function KnowledgePage() {
     <>
       <PageHeader
         title="Knowledge"
-        description="The company's documents the chat searches (Company knowledge, a tool in Admin → Tools), each person only what they may read: GitLab wikis and issues, Confluence, SharePoint and OneDrive, folders and websites."
+        description="The company's documents the chat searches (Company knowledge, a tool in Admin → Tools), each person only what they may read: GitLab wikis and issues, Confluence, SharePoint and OneDrive, folders, websites, and files uploaded here (scans and pictures read by OCR)."
         actions={
           <Button onClick={() => setAdding(true)}>
             <Plus /> Add a source
@@ -128,7 +130,7 @@ export function KnowledgePage() {
         ) : (
           <div className="stagger grid gap-4 xl:grid-cols-2">
             {k.sources.map((s) => (
-              <SourceCard key={s.id} source={s} onDocuments={() => setReading(s)} onEdit={() => setEditing(s)} />
+              <SourceCard key={s.id} source={s} onDocuments={() => setReading(s)} onEdit={() => setEditing(s)} onFiles={() => setFiling(s)} />
             ))}
           </div>
         )}
@@ -136,6 +138,7 @@ export function KnowledgePage() {
       <SourceDialog open={adding} folderRoot={k.folderRoot} onClose={() => setAdding(false)} />
       <SourceDialog key={editing?.id ?? 'none'} open={editing !== null} source={editing ?? undefined} folderRoot={k.folderRoot} onClose={() => setEditing(null)} />
       <DocumentsDialog source={reading} onClose={() => setReading(null)} />
+      <FilesDialog source={filing} onClose={() => setFiling(null)} />
     </>
   )
 }
@@ -161,7 +164,7 @@ function StateBadge({ source }: { source: KnowledgeSource }) {
   }
 }
 
-function SourceCard({ source, onDocuments, onEdit }: { source: KnowledgeSource; onDocuments: () => void; onEdit: () => void }) {
+function SourceCard({ source, onDocuments, onEdit, onFiles }: { source: KnowledgeSource; onDocuments: () => void; onEdit: () => void; onFiles: () => void }) {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['admin', 'knowledge'] })
@@ -262,6 +265,11 @@ function SourceCard({ source, onDocuments, onEdit }: { source: KnowledgeSource; 
           <Button variant="outline" size="sm" loading={sync.isPending} disabled={source.state === 'syncing'} onClick={() => sync.mutate()}>
             <RefreshCw /> Sync now
           </Button>
+          {source.kind === 'upload' && (
+            <Button variant="outline" size="sm" onClick={onFiles}>
+              <Upload /> Files
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={onDocuments} disabled={source.documents === 0}>
             <FileText /> Documents
           </Button>
@@ -395,6 +403,7 @@ function SourceDialog({ open, source, folderRoot, onClose }: { open: boolean; so
                   <SelectItem value="sharepoint">SharePoint or OneDrive</SelectItem>
                   <SelectItem value="folder">Folder</SelectItem>
                   <SelectItem value="website">Website</SelectItem>
+                  <SelectItem value="upload">Files uploaded here</SelectItem>
                 </SelectContent>
               </Select>
             </Field>
@@ -405,7 +414,7 @@ function SourceDialog({ open, source, folderRoot, onClose }: { open: boolean; so
               maxLength={100}
               value={draft.name}
               onChange={(e) => set({ name: e.target.value })}
-              placeholder={{ gitlab: 'Engineering wiki', folder: 'Handbook', website: 'Product docs', confluence: 'Company wiki', sharepoint: 'Engineering site' }[draft.kind]}
+              placeholder={{ gitlab: 'Engineering wiki', folder: 'Handbook', website: 'Product docs', confluence: 'Company wiki', sharepoint: 'Engineering site', upload: 'Company files' }[draft.kind]}
             />
           </Field>
           {draft.kind === 'gitlab' && (
@@ -471,6 +480,12 @@ function SourceDialog({ open, source, folderRoot, onClose }: { open: boolean; so
             <Field label="Folder" hint={`Mount it under ${folderRoot}, read-only, in docker-compose.override.yml. Text, Markdown, HTML, PDF and Office files are read.`}>
               <Input required className="font-mono" value={draft.location} onChange={(e) => set({ location: e.target.value })} placeholder={`${folderRoot}/handbook`} />
             </Field>
+          )}
+          {draft.kind === 'upload' && !source && (
+            <p className="text-sm text-muted-foreground">
+              Once it is added, drop files on it (Files): documents, spreadsheets and slides (Office, OpenDocument and older Office files), PDFs with their scanned
+              pages, pictures, e-mails, EPUB books and zip archives (each file inside on its own). Pictures and scans are read by OCR in the sandbox.
+            </p>
           )}
           {draft.kind === 'website' && (
             <>
@@ -554,3 +569,151 @@ function DocumentsDialog({ source, onClose }: { source: KnowledgeSource | null; 
     </Dialog>
   )
 }
+
+interface KnowledgeFile {
+  id: string
+  path: string
+  contentType: string | null
+  size: number
+  uploadedAt: string
+  uploadedBy: string | null
+  documents: number
+  passages: number
+}
+
+/** Files at a time in one upload, and bytes: a large folder goes up in parts. */
+const PartFiles = 50
+const PartBytes = 512 * 1024 * 1024
+
+/** An upload source's files: dropped or chosen (a whole folder keeps its folders' names), each with what it became; removed one by one. */
+function FilesDialog({ source, onClose }: { source: KnowledgeSource | null; onClose: () => void }) {
+  const queryClient = useQueryClient()
+  const confirm = useConfirm()
+  const pick = useRef<HTMLInputElement>(null)
+  const pickFolder = useRef<HTMLInputElement>(null)
+  const [over, setOver] = useState(false)
+  const [sending, setSending] = useState<string | null>(null)
+  const files = useQuery({
+    queryKey: ['admin', 'knowledge', source?.id, 'files'],
+    queryFn: ({ signal }) => api<KnowledgeFile[]>(`/api/admin/knowledge/${source!.id}/files`, { signal }),
+    enabled: source !== null,
+    // While it is being read, what each file became changes.
+    refetchInterval: source?.state === 'syncing' ? 3000 : false,
+  })
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: ['admin', 'knowledge'] })
+  }
+  const upload = async (chosen: File[]) => {
+    if (!source || chosen.length === 0) return
+    const parts: File[][] = [[]]
+    let bytes = 0
+    for (const f of chosen) {
+      const last = parts[parts.length - 1]!
+      if (last.length >= PartFiles || (last.length > 0 && bytes + f.size > PartBytes)) {
+        parts.push([])
+        bytes = 0
+      }
+      parts[parts.length - 1]!.push(f)
+      bytes += f.size
+    }
+    try {
+      let done = 0
+      for (const part of parts) {
+        setSending(`Uploading ${done + 1}–${done + part.length} of ${chosen.length}…`)
+        const form = new FormData()
+        for (const f of part) form.append('files', f, (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name)
+        await api(`/api/admin/knowledge/${source.id}/files`, { body: form })
+        done += part.length
+      }
+      toast.success(`${chosen.length} ${chosen.length === 1 ? 'file' : 'files'} added`, { description: 'They are being read now: the documents show as they are embedded.' })
+    } catch (e) {
+      toast.error('The upload stopped', { description: errorMessage(e) })
+    } finally {
+      setSending(null)
+      refresh()
+    }
+  }
+  const remove = useMutation({
+    mutationFn: (f: KnowledgeFile) => api(`/api/admin/knowledge/${source!.id}/files/${f.id}`, { method: 'DELETE' }),
+    onSuccess: refresh,
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  const drop = (e: DragEvent) => {
+    e.preventDefault()
+    setOver(false)
+    void upload([...e.dataTransfer.files])
+  }
+  return (
+    <Dialog open={source !== null} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-3xl">
+        <DialogHeader>
+          <DialogTitle>{source?.name}: files</DialogTitle>
+          <DialogDescription>
+            Documents, spreadsheets, slides, PDFs and scans, pictures, e-mails, EPUB books and zip archives, up to 200 MB each. A file uploaded again by the same name
+            replaces it.
+          </DialogDescription>
+        </DialogHeader>
+        {/* Dropping is the mouse's way; the buttons are everyone's. */}
+        <div
+          onDragOver={(e) => {
+            e.preventDefault()
+            setOver(true)
+          }}
+          onDragLeave={() => setOver(false)}
+          onDrop={drop}
+          className={`grid place-items-center gap-3 rounded-xl border-2 border-dashed px-4 py-8 text-center text-sm ${over ? 'border-primary bg-primary/5' : 'border-border'}`}
+        >
+          <Upload className="size-6 text-muted-foreground" aria-hidden="true" />
+          <p className="text-muted-foreground">{sending ?? 'Drop files or a folder here'}</p>
+          <div className="flex flex-wrap justify-center gap-2">
+            <Button variant="outline" size="sm" disabled={sending !== null} onClick={() => pick.current?.click()}>
+              <Upload /> Choose files
+            </Button>
+            <Button variant="outline" size="sm" disabled={sending !== null} onClick={() => pickFolder.current?.click()}>
+              <FolderUp /> Choose a folder
+            </Button>
+          </div>
+          <input ref={pick} type="file" multiple hidden aria-label="Files to upload" onChange={(e) => void upload([...(e.target.files ?? [])])} />
+          <input
+            ref={pickFolder}
+            type="file"
+            multiple
+            hidden
+            aria-label="A folder to upload"
+            {...({ webkitdirectory: '' } as Record<string, string>)}
+            onChange={(e) => void upload([...(e.target.files ?? [])])}
+          />
+        </div>
+        {files.error && <Alert variant="destructive">{errorMessage(files.error)}</Alert>}
+        {files.data && files.data.length === 0 && <p className="text-sm text-muted-foreground">No files yet.</p>}
+        <ul className="grid max-h-[45vh] gap-1 overflow-y-auto text-sm" aria-label="Files">
+          {(files.data ?? []).map((f) => (
+            <li key={f.id} className="flex min-w-0 items-center gap-3 rounded-md px-2 py-1.5 hover:bg-accent">
+              <div className="grid min-w-0 flex-1">
+                <span className="truncate font-mono text-xs" title={f.path}>
+                  {f.path}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {formatValue(f.size, 'bytes')} · {f.uploadedBy ?? 'someone removed'}, {ago(f.uploadedAt)} ·{' '}
+                  {f.documents === 0 ? 'not read yet' : `${f.documents} ${f.documents === 1 ? 'document' : 'documents'}, ${f.passages} passages`}
+                </span>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="text-destructive-ink"
+                aria-label={`Remove ${f.path}`}
+                onClick={async () => {
+                  if (await confirm({ title: `Remove ${f.path}?`, description: 'The file and what was read from it are deleted.', confirm: 'Remove', destructive: true })) remove.mutate(f)
+                }}
+              >
+                <Trash2 />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
