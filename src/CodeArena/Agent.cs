@@ -238,6 +238,7 @@ internal sealed class Agent
         Messages = [.. messages];
         _notes.Clear();
         _given.Clear();
+        Context.Shown?.Clear();
         _knownTokens = 0;
         _knownCount = 0;
         _compactedAt = 0;
@@ -1094,7 +1095,7 @@ internal sealed class Agent
     private int MaxToolChars => Math.Clamp(Model.Context * 3 / 2, 4_000, 40_000);
 
     /// <summary>A result past this many characters is kept aside (its start and end shown) rather than going whole.</summary>
-    private int KeepWhole => Math.Min(MaxToolChars, 16_000);
+    internal int KeepWhole => Math.Min(MaxToolChars, 16_000);
 
     /// <summary>An earlier result past this many characters is cleared (kept aside) before the session compacts.</summary>
     private const int ClearAbove = 1_000;
@@ -1129,6 +1130,8 @@ internal sealed class Agent
         {
             // Measured anew: what the gateway counted last included them.
             (_knownTokens, _knownCount) = (0, 0);
+            // Code answers show again what they had shown in the results cleared.
+            Context.Shown?.Clear();
         }
         return (count, freed);
     }
@@ -1418,18 +1421,21 @@ internal sealed class Agent
             // of this turn, when it has several; else the long results and arguments are cut.
             if (await CompactTurnAsync(budget, ct))
             {
+                Context.Shown?.Clear();
                 return true;
             }
             if (!Shrink(Messages))
             {
                 return false;
             }
+            Context.Shown?.Clear();
             Saved(null, "Long tool results and call arguments were cut to fit the model's window.");
             return true;
         }
         Events?.Notice("Compacting the conversation to fit the model's window…");
         var (summary, failure) = await TrySummaryAsync(keepFrom, SummaryInstruction + SessionNumbers(keepFrom), force, ct);
         var text = (summary ?? Digest(older, failure!)) + PlanNote();
+        Context.Shown?.Clear();
         Messages =
         [
             new JsonObject { ["role"] = "user", ["content"] = (summary is not null ? SummaryHead : OmittedHead) + "\n\n" + text + HistoryNote() },

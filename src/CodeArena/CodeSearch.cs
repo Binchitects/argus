@@ -344,7 +344,8 @@ internal sealed partial class CodeSearch
             {
                 if (_index.FileAt(e.Path) is { } file && file.Symbols.FirstOrDefault(s => s.Symbol.Qualified == e.From!.Qualified) is { } from)
                 {
-                    Boost(file, from.Symbol, 0.5f * seed.L, seed, false);
+                    // A reference (a type named in a declaration) is as near as a call, but not said to be one.
+                    Boost(file, from.Symbol, 0.5f * seed.L, seed, e.Call ? false : null);
                 }
             }
             foreach (var (s, _) in seed.File.Symbols.Where(s => s.Symbol.Parent == seed.Symbol.Qualified || s.Symbol.Qualified == seed.Symbol.Parent))

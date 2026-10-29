@@ -109,6 +109,16 @@ internal sealed class ToolContext
     public Action<string>? Progress { get; set; }
     /// <summary>Ticks an item of the checklist on in this session's chat (checklist_check); null where none can be (a sub-agent).</summary>
     public Func<JsonObject, CancellationToken, Task<ToolResult>>? Checklist { get; set; }
+    /// <summary>The folder's code index (code_search, code_symbol, code_outline); null when it is not on.</summary>
+    public CodeIndexHost? Code { get; init; }
+    /// <summary>How many characters a token is, as the agent has learnt it: a code answer's budget in characters.</summary>
+    public Func<double>? CharsPerToken { get; set; }
+    /// <summary>The longest result kept whole in the conversation: a code answer is never longer.</summary>
+    public Func<int>? ResultChars { get; set; }
+    /// <summary>The places code answers showed in this context (path:a-b): cited again in one line. Each agent its own; cleared when earlier results are.</summary>
+    public HashSet<string>? Shown { get; init; }
+    /// <summary>Whether the person's rules let read_file read a path: a code answer cites no other.</summary>
+    public Func<string, bool>? MayRead { get; set; }
 }
 
 /// <summary>The permission modes: how much runs without asking.</summary>

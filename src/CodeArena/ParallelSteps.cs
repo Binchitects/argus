@@ -137,7 +137,8 @@ internal sealed partial class Runtime
             var worker = new Agent
             {
                 Gateway = Gateway,
-                Tools = new ToolBox(Tools.All.Where(t => t.Kind != ToolKind.Agent && t.Name is not ("stop_command" or "command_output" or "ask_agent"))),
+                // The code index is of the folder, not of the step's worktree: grep there.
+                Tools = new ToolBox(Tools.All.Where(t => t.Kind != ToolKind.Agent && t.Name is not ("stop_command" or "command_output" or "ask_agent") && !CodeIndexTools.Names.Contains(t.Name))),
                 Permissions = permissions,
                 Context = context,
                 Ui = quiet,

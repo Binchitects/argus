@@ -41,6 +41,12 @@ internal sealed partial class Runtime : IAsyncDisposable
     public MemoryStore Memory { get; private set; } = null!;
     private string _memory = "";
 
+    /// <summary>The folder's code index, when Config.CodeIndex is on.</summary>
+    public CodeIndexHost? CodeIndex { get; private set; }
+
+    /// <summary>Whether the person's rules let read_file read a path (as the working directory sees it): what code answers may cite.</summary>
+    private bool MayRead(string path) => Tools.Find("read_file") is not { } read || Permissions.Rules.Denied(read, new JsonObject { ["path"] = path }, Workspace) is null;
+
     /// <summary>A newer Code Arena the Arena serves, as said at the start (the IDE's status bar shows it); null: none.</summary>
     public string? UpdateNotice { get; private set; }
 
@@ -380,6 +386,12 @@ internal sealed partial class Runtime : IAsyncDisposable
         tools.Add(MemoryStore.RecallTool());
         tools.AddRange(MemoryStore.HistoryTools());
         tools.Add(KeptResults.Tool());
+        if (Config.CodeIndex)
+        {
+            // Opened in the background: read from disk, then synced; a question waits for it at most a few seconds.
+            CodeIndex = new CodeIndexHost(Env.Paths.DataDir, Workspace);
+            tools.AddRange(CodeIndexTools.All(Config.CodeIndexTools));
+        }
         if (Config.ProjectMemory)
         {
             tools.Add(ProjectMemory.Tool());
@@ -492,10 +504,12 @@ internal sealed partial class Runtime : IAsyncDisposable
             Skills = () => [.. Extensions.Skills.Select(s => (s.Name, s.Description))],
             Agents = () => [.. Extensions.Agents.Select(a => (a.Name, a.Description))],
             Checklist = () => Checklist is { } on ? SessionChecklist.Text(on) : "",
+            CodeIndex = CodeIndex is not null,
         };
         Context = new ToolContext
         {
             Workspace = Workspace, Ui = Ui, Shell = Config.Shell, Jobs = Jobs, Memory = Memory, SessionsDir = Env.Paths.SessionsDir, Sandbox = Sandbox,
+            Code = CodeIndex, Shown = [], MayRead = MayRead,
             BeforeWrite = Checkpoints.BeforeWrite, Planning = () => Permissions.Mode == Mode.Plan,
             StepBegan = Checkpoints.BeginStep,
             // A step's check that is a command (its first word a program here) is run before the step is done; its run is
@@ -536,6 +550,8 @@ internal sealed partial class Runtime : IAsyncDisposable
             Nudge = "If it worked out a way of doing something worth doing again, keep it as a skill with skill_save" +
                 (Config.ProjectMemory ? "; a lasting fact about this project, with remember_project." : "."),
         };
+        Context.CharsPerToken = () => Agent.CharsPerToken;
+        Context.ResultChars = () => Agent.KeepWhole;
         Context.SubAgent = (description, prompt, agent, token) => RunSubAgentAsync(inputs, description, prompt, agent, token);
         Context.RunSteps = RunStepsAsync;
         Agent.Critique = Config.PlanCritique ? (plan, token) => CritiqueAsync(inputs, plan, token) : null;
@@ -1418,7 +1434,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             Gateway = Gateway,
             Tools = new ToolBox([.. Tools.ForSubAgent().All, report]),
             Permissions = Permissions,
-            Context = new ToolContext { Workspace = Workspace, Ui = Ui, Shell = Config.Shell, Sandbox = Sandbox },
+            Context = new ToolContext { Workspace = Workspace, Ui = Ui, Shell = Config.Shell, Sandbox = Sandbox, Code = CodeIndex, Shown = [], MayRead = MayRead },
             Ui = Ui,
             Model = Model,
             SystemPrompt = () => SystemPrompt.Build(inputs, subAgent: true),
@@ -1535,7 +1551,8 @@ internal sealed partial class Runtime : IAsyncDisposable
             Gateway = Gateway,
             Tools = tools,
             Permissions = Permissions,
-            Context = new ToolContext { Workspace = Workspace, Ui = Ui, Shell = Config.Shell, Sandbox = Sandbox },
+            // Its own record of what code answers showed it: it sees none of the agent's conversation.
+            Context = new ToolContext { Workspace = Workspace, Ui = Ui, Shell = Config.Shell, Sandbox = Sandbox, Code = CodeIndex, Shown = [], MayRead = MayRead },
             Ui = Ui,
             Model = model,
             SystemPrompt = () => own is null ? SystemPrompt.Build(inputs, subAgent: true) : own.Prompt + "\n\n" + SystemPrompt.Build(inputs, subAgent: true),
@@ -1600,6 +1617,7 @@ internal sealed partial class Runtime : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         Jobs.StopAll("code-arena stopped");
+        CodeIndex?.Dispose();
         Sandbox.Clean();
         // The earlier sessions not sent yet go at the next start.
         _sendingLater?.Cancel();

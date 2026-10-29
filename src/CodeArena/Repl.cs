@@ -47,12 +47,60 @@ internal sealed class Repl(Runtime rt)
         ("/remember", "the project's long memory (.remember/MEMORY.md, in the repository): what every session reads at its start"),
         ("/rewind [N] [code|chat]", "the turns kept; /rewind N goes back to before turn N (its files and the conversation)"),
         ("/search WORDS", "earlier sessions in this folder that said these words"),
+        ("/index [rebuild|off|on]", "the code index, when on: its files, symbols and the files skipped as secrets; rebuild; off or on for this session"),
         ("/permissions [allow|deny|remove RULE]", "kept rules, e.g. run_shell(npm test*), edit_file, read_file(.env*)"),
         ("/sandbox", "what commands in the sandbox may do"),
         ("/commands", "your own and the project's commands, sub-agents and skills"),
         ("/sync [all]", "where this session stands with its chat in Arena; all sends this folder's sessions Arena never had"),
         ("/exit", "leave (also Ctrl+D, or Ctrl+C twice)"),
     ];
+
+    /// <summary>/index: the code index's state; rebuild builds it again; off and on for this session.</summary>
+    private async Task IndexCommandAsync(string arg, CancellationToken ct)
+    {
+        if (rt.CodeIndex is not { } host)
+        {
+            Ui.Info("The code index is not on: \"codeIndex\": true in config.json turns it and its tools (code_search, code_symbol, code_outline) on.");
+            return;
+        }
+        switch (arg)
+        {
+            case "off":
+                host.Off = true;
+                Ui.Info("The code index is off for this session: its tools say so, and grep is used.");
+                return;
+            case "on":
+                host.Off = false;
+                Ui.Info("The code index is on again.");
+                return;
+            case "rebuild":
+                Ui.Info("Building the code index again…");
+                var built = await host.RebuildAsync();
+                foreach (var line in Cli.IndexStatus(built, host.LastSync, host.Built))
+                {
+                    Ui.Line(line);
+                }
+                return;
+            case "":
+                if (await host.GetAsync(TimeSpan.FromSeconds(2), ct) is not { } index)
+                {
+                    Ui.Info("The code index is still being built (the first time in this folder).");
+                    return;
+                }
+                foreach (var line in Cli.IndexStatus(index, host.LastSync, host.Built))
+                {
+                    Ui.Line(line);
+                }
+                if (host.Off)
+                {
+                    Ui.Info("It is off for this session (/index on turns it on again).");
+                }
+                return;
+            default:
+                Ui.Warn("/index, /index rebuild, /index off or /index on.");
+                return;
+        }
+    }
 
     public async Task<int> RunAsync(string? first, CancellationToken ct)
     {
@@ -786,6 +834,9 @@ internal sealed class Repl(Runtime rt)
                 break;
             case "/jobs":
                 await JobsAsync(arg);
+                break;
+            case "/index":
+                await IndexCommandAsync(arg, ct);
                 break;
             case "/clear":
                 var previous = rt.Session.Id;

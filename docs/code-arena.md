@@ -246,6 +246,7 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/remember` | the project's long memory, `.remember/MEMORY.md` in the repository: its sections and topic files (below) |
 | `/rewind [N] [code\|chat]` | the turns kept; `/rewind N` goes back to before turn N (below) |
 | `/search WORDS` | earlier sessions in this folder that said these words |
+| `/index [rebuild\|off\|on]` | the code index, when it is on ([below](#the-code-index)): its files, symbols and languages, its last sync, where it is kept, the files skipped as secrets; `rebuild` builds it again; `off` and `on` for this session |
 | `/permissions [allow\|deny\|remove RULE]` | kept rules (below) |
 | `/sandbox` | what commands in the sandbox may do |
 | `/commands` | your own and the project's commands, sub-agents and skills |
@@ -1563,6 +1564,38 @@ Code Arena's note, a line per tool, and the model loads what a task needs with
 `load_tools` (a function called straight from the list is loaded then). What a
 session loads stays loaded, kept with it, so the start of the requests stays
 what the engine has cached; loading one more reads the prompt again once.
+
+### The code index
+
+With `"codeIndex": true` in `config.json`, a session keeps an index of the
+folder's code and the model gets three more reading tools. The setting is off
+until the index is measured to help the model (docs/measurements/code-index.md
+has the numbers so far).
+
+| tool | what it does |
+|---|---|
+| `code_search` | finds code by what it does (BM25 over each symbol's words, its file's, and how near it is to the best by calls, containment and imports) or by name (its definitions and every use in code, grouped by the function each is in: complete for code, comments and strings aside). Each place is cited as `path:start-end` with its symbol and its lines as on disk, up to a budget (2,000 tokens by default); a place already shown in the conversation is cited in one line |
+| `code_symbol` | one symbol: its source, members and callers; its callers or callees; or its impact (what reaches it, up to three steps out, and the tests among them). Each use says how it was tied: `scope` (the code's own context: enclosing types and bases, usings, imports), `type` (a declared type), `name` (the one definition), `guess` (one of two or three); more than three stay unresolved, and are counted |
+| `code_outline` | a file's symbols, nested, with their lines; a folder's folders and the files most used from elsewhere |
+
+- **What it covers:** exactly the files grep reads (git's list, so
+  `.gitignore` holds), C#, TypeScript, JavaScript and Python read for symbols
+  by Code Arena's own scanners, Markdown by its headings, other text by its
+  words. A file that may hold a secret (`.env`, keys, `secrets/`, names ending
+  in token or password) is listed but never read, and values shaped like
+  tokens are hidden in what the tools show. Paths your rules deny to
+  `read_file` are left out of the answers, and counted.
+- **Where it is kept:** one file per folder in Code Arena's data folder
+  (`index/`, 0600 in a 0700 folder), never in the repository; this
+  repository's (2,460 files, 36,000 symbols) is 15 MB, built in 4 s and
+  brought up to date in 0.1 s. A question syncs it by size and time first (at
+  most once a second), so an edit is found by the next question.
+- **Without a model:** `code-arena index [--rebuild]` builds it and says what
+  it holds; `code-arena search "where are results cut"`, `code-arena search
+  --symbol KeptResults.Keep --show impact` and `code-arena search --outline
+  src` give the tools' answers in the terminal (`--json` for programs; exit
+  code 3 when a name is several symbols, which it lists).
+- `"codeIndexTools": ["code_search"]` offers only some of the three.
 
 ### Commands with no time limit, and in the background
 

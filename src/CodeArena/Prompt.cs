@@ -35,6 +35,8 @@ internal static class SystemPrompt
         public Func<IReadOnlyList<(string Name, string Description)>> Skills { get; init; } = () => [];
         /// <summary>The checklist on in the session's chat, as the model reads it (empty: none).</summary>
         public Func<string> Checklist { get; init; } = () => "";
+        /// <summary>The folder's code index is on: code is found with code_search first.</summary>
+        public bool CodeIndex { get; init; }
     }
 
     /// <summary>How to answer in the IDE: its page renders Markdown, and a file cited in backticks opens in the editor at its lines.</summary>
@@ -67,7 +69,7 @@ internal static class SystemPrompt
             You read and change code in the working directory, run commands, and use the tools you are given: Arena's among them when they are connected (Code Arena's note on the session says).
 
             How to work:
-            - Look before you change: read the files you will edit; find code with grep and glob rather than guessing paths.
+            - Look before you change: read the files you will edit; {(x.CodeIndex ? "find code with code_search (where something is done, a name's definition and uses, what a change reaches): it cites path:lines; grep when you need every occurrence, a regex, or text in comments and strings; read_file for more of a cited place" : "find code with grep and glob rather than guessing paths")}.
             - Change files with edit_file (an exact, unique old_string); write_file for new files or whole rewrites. Keep to the code's existing style, and change only what the task needs.
             - Check your work when you can (build, tests, linters, with run_shell) and say what you ran and what you could not check.
             - For work of several steps, make a plan with plan before you start: each step with what done means (its check: a command, or what to look at) and the files it changes. Keep it current as you go (one step doing at a time); run a step's check with run_shell exactly as written, and mark it done only once it passed (a failed check is fixed, or the step changed with why). Steps that wait for nothing not done can run at once with run_steps. Hand self-contained research that would fill your context to a sub-agent (task).

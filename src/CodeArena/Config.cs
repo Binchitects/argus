@@ -209,6 +209,10 @@ internal sealed class Config
     public bool BuiltInSkills { get; set; } = true;
     /// <summary>The project's long memory in .remember/ (read at a session's start, kept with remember_project): on unless false.</summary>
     public bool ProjectMemory { get; set; } = true;
+    /// <summary>The folder's code index and its tools (code_search, code_symbol, code_outline): off unless true, until it is measured to help.</summary>
+    public bool CodeIndex { get; set; }
+    /// <summary>Which of the code index's tools are offered (null: all three).</summary>
+    public List<string>? CodeIndexTools { get; set; }
     /// <summary>Whether a session's start looks for a newer Code Arena on the Arena (once a day): on unless false.</summary>
     public bool UpdateCheck { get; set; } = true;
     /// <summary>
@@ -316,6 +320,8 @@ internal sealed class Config
             : raw.Str("toolMode") is { } wrong ? throw new InvalidOperationException($"\"toolMode\" in {file} is direct, code or both, not {wrong}.") : null;
         config.BuiltInSkills = raw.Bool("builtInSkills") ?? true;
         config.ProjectMemory = raw.Bool("projectMemory") ?? true;
+        config.CodeIndex = raw.Bool("codeIndex") ?? false;
+        config.CodeIndexTools = raw["codeIndexTools"] is JsonArray codeTools ? [.. codeTools.Select(t => t?.ToString() ?? "").Where(t => CodeArena.CodeIndexTools.Names.Contains(t))] : null;
         config.UpdateCheck = raw.Bool("updateCheck") ?? true;
         config.Completion = raw.Bool("completion") ?? true;
         config.CompletionModel = raw.Str("completionModel");
@@ -457,6 +463,8 @@ internal sealed class Config
         Set("toolMode", ToolMode);
         Set("builtInSkills", BuiltInSkills ? null : false);
         Set("projectMemory", ProjectMemory ? null : false);
+        Set("codeIndex", CodeIndex ? true : null);
+        Set("codeIndexTools", CodeIndexTools is null ? null : new JsonArray([.. CodeIndexTools.Select(t => (JsonNode)t)]));
         Set("updateCheck", UpdateCheck ? null : false);
         Set("completion", Completion ? null : false);
         Set("completionModel", CompletionModel);

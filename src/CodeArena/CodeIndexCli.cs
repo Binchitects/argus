@@ -47,22 +47,33 @@ internal static partial class Cli
             return 1;
         }
         var (index, sync, rebuilt) = CodeIndex.Open(env.Paths.DataDir, workspace, ct, rebuild: args.Contains("--rebuild"));
+        foreach (var line in IndexStatus(index, sync, rebuilt))
+        {
+            env.Out.WriteLine(line);
+        }
+        return 0;
+    }
+
+    /// <summary>What an index holds: its files, symbols and languages, its last sync, where it is kept, and the files skipped as secrets.</summary>
+    internal static IEnumerable<string> IndexStatus(CodeIndex index, IndexSync? sync, bool built)
+    {
         var files = index.Files;
         var symbols = files.Sum(f => f.Symbols.Count);
         var languages = files.Where(f => f.Lang is not null).GroupBy(f => f.Lang!).OrderByDescending(g => g.Count())
             .Select(g => $"{LanguageName(g.Key)} {g.Count():N0}");
-        var o = env.Out;
-        o.WriteLine(string.Create(CultureInfo.InvariantCulture, $"Code index of {workspace.Root}: {files.Count:N0} files, {symbols:N0} symbols ({string.Join(", ", languages)} files)."));
-        o.WriteLine(string.Create(CultureInfo.InvariantCulture,
-            $"{(rebuilt ? "Built" : "Synced")} in {sync.Took.TotalSeconds:0.0} s: {sync.Read:N0} read, {sync.Kept:N0} kept, {sync.Removed:N0} removed."));
+        yield return string.Create(CultureInfo.InvariantCulture, $"Code index of {index.Root}: {files.Count:N0} files, {symbols:N0} symbols ({string.Join(", ", languages)} files).");
+        if (sync is not null)
+        {
+            yield return string.Create(CultureInfo.InvariantCulture,
+                $"{(built ? "Built" : "Synced")} in {sync.Took.TotalSeconds:0.0} s: {sync.Read:N0} read, {sync.Kept:N0} kept, {sync.Removed:N0} removed.");
+        }
         var size = File.Exists(index.File) ? new FileInfo(index.File).Length : 0;
-        o.WriteLine($"Kept in {index.File} ({Files.Size(size)}).");
+        yield return $"Kept in {index.File} ({Files.Size(size)}).";
         var secrets = files.Where(f => f.Tags.HasFlag(CodeFileTags.Sensitive)).Select(f => f.Path).Order(StringComparer.Ordinal).ToList();
         if (secrets.Count > 0)
         {
-            o.WriteLine($"Skipped as secrets (listed, never read): {string.Join(", ", secrets.Take(20))}{(secrets.Count > 20 ? $", … {secrets.Count - 20} more" : "")}.");
+            yield return $"Skipped as secrets (listed, never read): {string.Join(", ", secrets.Take(20))}{(secrets.Count > 20 ? $", … {secrets.Count - 20} more" : "")}.";
         }
-        return 0;
     }
 
     private static string LanguageName(string lang) => lang switch
