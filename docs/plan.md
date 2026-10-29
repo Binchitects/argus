@@ -2424,6 +2424,20 @@ from v7.5, which shipped the requests of 2026-10-28.
    change (a new model, a new prompt), scored by rules or a judge model,
    with what got worse shown first.
 
+### The app's own gateway, in place of LiteLLM
+
+Asked on 2026-10-29: model calls go through the app's own gateway, and
+LiteLLM goes. The design and its 22 commits are in
+[design/own-gateway.md](design/own-gateway.md): one hop less (the app already
+fronts every API key's request), routes built from the app's own tables,
+every protocol (chat completions, Anthropic messages, OpenAI responses,
+completions, media, embeddings) through the same admission, line, prompt log
+and safeguards, a request ledger of its own in place of LiteLLM's spend logs,
+rate limits shared by every replica without Valkey, and API keys kept by the
+app. LiteLLM stays the default until the new gateway meets measured gates
+against it on the live stack (overhead, throughput, fairness, usage and cost
+to the cent, client checks), then a day's soak, then it is removed.
+
 ### Groundwork, in between
 
 1. The vLLM and SGLang images on a real GPU server: bring-up, a smoke test per
