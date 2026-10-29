@@ -432,7 +432,13 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   file rewritten or reformatted) are one bar from the first to the last, so
   typing stays quick. **Ctrl+P** opens any file by a few
   letters of its path (`app:12` opens it at line 12; `:12` goes to line 12 of
-  the file shown, as the line in the status bar does). **Ctrl+Shift+P** (or
+  the file shown, as the line in the status bar does); `#` and a name goes to a
+  symbol anywhere in the folder (**Go to Symbol in Workspace…**, **Ctrl+T**, or
+  **Ctrl+Alt+Shift+O** where the browser keeps Ctrl+T), its parts' initials
+  matching too (`#rta` finds RunToolsAsync); `@` lists the file's own; `>` is
+  the palette; `?` lists them all. Symbols come from the folder's code index
+  ([below](#the-code-index), made on the first ask), so C#, TypeScript and
+  Python have them with no language server. **Ctrl+Shift+P** (or
   **F1**: Firefox keeps Ctrl+Shift+P for a private window) runs any command by
   name, as VS Code's palette: "Category: Title" with its key, the ones run
   lately first, a few words of the title (or of the command's id) narrowing
@@ -1282,6 +1288,7 @@ status (403 `outside` for a path outside the folder).
 | `DELETE /api/queue` | drops the queued messages; 204 |
 | `GET /api/files?path=DIR` | a folder's entries, folders first: `{path, entries: [{name, path, kind, size, link}]}` |
 | `GET /api/files/all` | every file, for quick open: `{files, truncated}` (50,000 at most) |
+| `GET /api/symbols?q=NAME[&path=FILE][&limit=N]` | Go to Symbol from the code index: `{symbols: [{name, kind, container, path, line, end}], building}`, by name across the folder (the name, then those it starts, its parts' initials, then those holding it), or one file's in order |
 | `GET /api/file?path=FILE` | `{path, size, version, text}`; `text` is null with `binary` or `tooLarge` (over 5 MB) |
 | `GET /api/media?path=FILE` | a picture, sound or video of the allowed folders as it is (PNG, JPEG, GIF, WebP, BMP, AVIF, MP3, WAV, Ogg, FLAC, M4A, AAC, MP4, WebM, MOV; up to 256 MB), for an `img`, `audio` or `video` element: the media type set, `nosniff` and a sandboxing CSP; 415 `not_media` for anything else (SVG and HTML included), 413 `too_large` |
 | `POST /api/file` `{path, text, version}` | saves; 409 `changed` when the file changed since `version`; `{path, version, size}` |

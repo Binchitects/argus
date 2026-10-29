@@ -311,3 +311,117 @@ internal sealed partial class CodeSearch
         return f.Symbols.Select(s => s.Symbol).Where(s => s.Kind is not ("namespace" or "heading") && (s.Parent is null || namespaces.Contains(s.Parent)));
     }
 }
+
+/// <summary>A symbol a name search found, for the IDE's Go to Symbol: what it is, what holds it, and where.</summary>
+internal sealed record SymbolMatch(string Name, string Kind, string? Container, string Path, int Line, int End);
+
+internal sealed partial class CodeSearch
+{
+    private static readonly string[] Unlisted = ["namespace", "heading", "main"];
+
+    /// <summary>
+    /// Symbols by name, best first: the name itself, then those it starts, then those whose parts it abbreviates (rta, RunTA:
+    /// RunToolsAsync), then those holding it; code before tests and generated code, then the shorter path. With a path, that
+    /// file's symbols as it is now, in order, those matching the query if one is given.
+    /// </summary>
+    public List<SymbolMatch> Symbols(string query, string? path = null, int limit = 100)
+    {
+        var q = query.Trim();
+        if (path is not null)
+        {
+            if (_index.FileAt(path) is not { } file || file.Tags.HasFlag(CodeFileTags.Sensitive))
+            {
+                return [];
+            }
+            _index.Refresh(path);
+            var symbols = _index.Graph().Now(file)?.Scanned.Symbols ?? [.. file.Symbols.Select(s => s.Symbol)];
+            return [.. symbols.Where(s => !Unlisted.Contains(s.Kind) && (q.Length == 0 || NameScore(s.Name, q) > 0)).Take(limit)
+                .Select(s => new SymbolMatch(s.Name, s.Kind, s.Parent is { } p ? Display(file, s with { Qualified = p }) : null, file.Path, s.Start, s.End))];
+        }
+        if (q.Length == 0)
+        {
+            return [];
+        }
+        var found = new List<(int Score, IndexedFile File, CodeSymbol Symbol)>();
+        foreach (var (file, s, _) in _symbols)
+        {
+            if (Unlisted.Contains(s.Symbol.Kind) || NameScore(s.Symbol.Name, q) is not (> 0 and var score))
+            {
+                continue;
+            }
+            found.Add((score, file, s.Symbol));
+        }
+        return [.. found.OrderByDescending(f => f.Score)
+            .ThenBy(f => f.File.Tags.HasFlag(CodeFileTags.Test) || f.File.Tags.HasFlag(CodeFileTags.Generated) || f.File.Tags.HasFlag(CodeFileTags.Vendored))
+            .ThenBy(f => f.File.Path.Length).ThenBy(f => f.File.Path, StringComparer.Ordinal).ThenBy(f => f.Symbol.Start)
+            .DistinctBy(f => (f.File.Path, f.Symbol.Qualified)).Take(limit)
+            .Select(f => new SymbolMatch(f.Symbol.Name, f.Symbol.Kind, f.Symbol.Parent is { } p ? Display(f.File, f.Symbol with { Qualified = p }) : null, f.File.Path, f.Symbol.Start, f.Symbol.End))];
+    }
+
+    /// <summary>How well a name matches what was typed: 100 the name, 80 its start, 60 its parts abbreviated, 40 inside it; 0 not at all.</summary>
+    internal static int NameScore(string name, string typed)
+    {
+        if (name.Equals(typed, StringComparison.OrdinalIgnoreCase))
+        {
+            return 100;
+        }
+        if (name.StartsWith(typed, StringComparison.OrdinalIgnoreCase))
+        {
+            return 80;
+        }
+        if (typed.Length <= 24 && Humps(Parts(name), 0, typed.ToLowerInvariant(), 0))
+        {
+            return 60;
+        }
+        return name.Contains(typed, StringComparison.OrdinalIgnoreCase) ? 40 : 0;
+    }
+
+    /// <summary>A name's parts, lower case, where its case changes, an underscore or a digit: RunToolsAsync is run, tools, async.</summary>
+    private static List<string> Parts(string name)
+    {
+        var parts = new List<string>();
+        var b = new System.Text.StringBuilder();
+        for (var i = 0; i < name.Length; i++)
+        {
+            var c = name[i];
+            var boundary = c is '_' or '-' or '$' || (i > 0 && char.IsUpper(c) && (char.IsLower(name[i - 1]) || (i + 1 < name.Length && char.IsLower(name[i + 1]) && char.IsUpper(name[i - 1]))))
+                || (i > 0 && char.IsDigit(c) != char.IsDigit(name[i - 1]));
+            if (boundary && b.Length > 0)
+            {
+                parts.Add(b.ToString());
+                b.Clear();
+            }
+            if (c is not ('_' or '-' or '$'))
+            {
+                b.Append(char.ToLowerInvariant(c));
+            }
+        }
+        if (b.Length > 0)
+        {
+            parts.Add(b.ToString());
+        }
+        return parts;
+    }
+
+    /// <summary>Whether the typed letters are the starts of the parts, in order, the first part's from the first letter: rta, runta, rtasync.</summary>
+    private static bool Humps(List<string> parts, int part, string typed, int at)
+    {
+        if (at == typed.Length)
+        {
+            return true;
+        }
+        if (part == parts.Count)
+        {
+            return false;
+        }
+        for (var n = Math.Min(parts[part].Length, typed.Length - at); n >= 1; n--)
+        {
+            if (string.CompareOrdinal(parts[part], 0, typed, at, n) == 0 && Humps(parts, part + 1, typed, at + n))
+            {
+                return true;
+            }
+        }
+        // A part left out (rasync: Run…Async), but never the first.
+        return part > 0 && Humps(parts, part + 1, typed, at);
+    }
+}

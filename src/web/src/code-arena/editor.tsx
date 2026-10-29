@@ -19,7 +19,7 @@ import { installCompletions } from './completion'
 import { compareId, renamed, revertChanges, sideLabel, sidePath, takeChanges, touched, type LineChange, type Side } from './compare'
 import { CompareToolbar } from './compare-toolbar'
 import { EditorContext, loadMonaco, mediaKind, rankFiles, useEditor, type DiffModels, type DiffSource, type EditorApi, type FileModel, type MonacoModule, type Reveal, type SaveReason, type Tab, type Unsaved } from './editor-state'
-import { acceptChange, allFilesQuery, changesQuery, changeTexts, gitShow, gitStageText, gitStatusQuery, nameOf, rawFileUrl, readFile, revertChange, userFileQuery, within, writeFile, writeUserFile, type Change, type CheckProblem, type OpenedFile, type Saved, type UserFileName } from './ide-api'
+import { acceptChange, allFilesQuery, changesQuery, changeTexts, gitShow, gitStageText, gitStatusQuery, nameOf, rawFileUrl, readFile, revertChange, symbolsQuery, userFileQuery, within, writeFile, writeUserFile, type Change, type CheckProblem, type OpenedFile, type Saved, type UserFileName } from './ide-api'
 import { addDebugActions, installDebugEditor } from './debug/editor-debug'
 import { installExtensions } from './extensions'
 import { bindEditorContext, keymap, useKeyFor } from './keyboard'
@@ -1328,9 +1328,44 @@ function UnsavedDialog({ paths, onAnswer }: { paths: string[] | null; onAnswer: 
 }
 
 /** Ctrl+P: any file of the working directory by a few letters of its path. */
+/** What quick open does by the first character typed, as VS Code's: files, > commands, @ this file's symbols, # the folder's, ? the list. */
+const quickModes = [
+  { prefix: '', label: 'Go to a file', hint: 'a few letters of its path; app.ts:12 for a line' },
+  { prefix: '>', label: 'Run a command', hint: 'the Command Palette' },
+  { prefix: '@', label: 'Go to a symbol in this file', hint: "its name, or its parts' initials" },
+  { prefix: '#', label: 'Go to a symbol in the folder', hint: "its name, or its parts' initials (rta: RunToolsAsync)" },
+  { prefix: ':', label: 'Go to a line in this file', hint: ':12, or :12:5 for a column' },
+  { prefix: '?', label: 'List what quick open does', hint: '' },
+] as const
+
 function QuickOpen() {
   const { quickOpen, setQuickOpen, open, tabs, active, quickText: typed, setQuickText: setTyped } = useEditor()
-  const all = useQuery({ ...allFilesQuery, enabled: quickOpen, staleTime: 10_000 })
+  const mode = typed.startsWith('#') ? 'folder' : typed.startsWith('@') ? 'file' : typed.startsWith('?') ? 'help' : 'files'
+  const all = useQuery({ ...allFilesQuery, enabled: quickOpen && mode === 'files', staleTime: 10_000 })
+  // The symbols asked for once typing pauses: one request as a name is typed, not one a letter.
+  const symbolText = mode === 'folder' || mode === 'file' ? typed.slice(1).trim() : ''
+  const [asked, setAsked] = useState(symbolText)
+  useEffect(() => {
+    const wait = setTimeout(() => setAsked(symbolText), 150)
+    return () => clearTimeout(wait)
+  }, [symbolText])
+  const filePath = active?.kind === 'file' ? active.path : null
+  const symbols = useQuery({
+    ...symbolsQuery(asked, mode === 'file' ? (filePath ?? undefined) : undefined),
+    enabled: quickOpen && (mode === 'file' ? !!filePath : mode === 'folder' && asked.length > 0),
+    staleTime: 2_000,
+  })
+  // > hands what follows to the Command Palette.
+  useEffect(() => {
+    if (!quickOpen || !typed.startsWith('>')) return
+    setQuickOpen(false)
+    setTyped('')
+    void runCommand('workbench.action.showCommands')
+  }, [quickOpen, typed, setQuickOpen, setTyped])
+  const close = () => {
+    setQuickOpen(false)
+    setTyped('')
+  }
   const recent = [...tabs].reverse().filter((t) => t.kind === 'file').map((t) => t.path)
   // :12 goes to line 12 of the file shown; app.ts:12 opens the file found at line 12.
   const at = /^(.*?):(\d+)(?::(\d+))?$/.exec(typed.trim())
@@ -1338,7 +1373,15 @@ function QuickOpen() {
   const line = at ? Number(at[2]) : undefined
   const column = at?.[3] ? Number(at[3]) : undefined
   const here = at && !name.trim() && active?.kind === 'file' ? active.path : null
-  const shown = here ? [here] : name.trim() ? rankFiles(all.data?.files ?? [], name) : [...new Set([...recent, ...(all.data?.files ?? [])])].slice(0, 50)
+  const shown = mode !== 'files' ? [] : here ? [here] : name.trim() ? rankFiles(all.data?.files ?? [], name) : [...new Set([...recent, ...(all.data?.files ?? [])])].slice(0, 50)
+  const titles = {
+    files: ['Go to file', "Type a few letters of a file's path, and :line to go to a line; ? lists what else it does", 'Go to file: a few letters of its path (:12 for a line)'],
+    file: ['Go to symbol in this file', "Type a few letters of a symbol's name", "Go to a symbol in this file: @ and a few letters of its name"],
+    folder: ['Go to symbol in the folder', "Type a symbol's name, or its parts' initials", 'Go to a symbol in the folder: # and its name, or its initials'],
+    help: ['What quick open does', 'Choose a mode', 'What quick open does'],
+  } as const
+  const [title, description, placeholder] = titles[mode]
+  const hits = symbols.data?.symbols ?? []
   return (
     <CommandDialog
       open={quickOpen}
@@ -1346,34 +1389,72 @@ function QuickOpen() {
         setQuickOpen(o)
         if (!o) setTyped('')
       }}
-      title="Go to file"
-      description="Type a few letters of a file's path, and :line to go to a line"
+      title={title}
+      description={description}
       shouldFilter={false}
     >
-      <CommandInput value={typed} onValueChange={setTyped} placeholder="Go to file: a few letters of its path (:12 for a line)" aria-label="File to open" />
+      <CommandInput value={typed} onValueChange={setTyped} placeholder={placeholder} aria-label="File to open" />
       <CommandList>
-        {all.isPending && <p className="py-6 text-center text-sm text-muted-foreground">Listing the files…</p>}
-        {all.error && <p className="py-6 text-center text-sm text-muted-foreground">{errorMessage(all.error)}</p>}
-        {all.data && <CommandEmpty>No file matches.</CommandEmpty>}
-        {shown.map((path) => (
-          <CommandItem
-            key={path}
-            value={path}
-            onSelect={() => {
-              setQuickOpen(false)
-              setTyped('')
-              void open(path, line ? { line, column } : undefined)
-            }}
-          >
-            <FileText aria-hidden="true" />
-            <span className="truncate font-medium">{here ? `Go to line ${line}` : nameOf(path)}</span>
-            <span className="min-w-0 truncate text-xs text-muted-foreground">
-              {path}
-              {line ? `:${line}` : ''}
-            </span>
-          </CommandItem>
-        ))}
-        {all.data?.truncated && <p className="px-2 py-1.5 text-xs text-muted-foreground">The folder has more files than are listed here.</p>}
+        {mode === 'files' && (
+          <>
+            {all.isPending && <p className="py-6 text-center text-sm text-muted-foreground">Listing the files…</p>}
+            {all.error && <p className="py-6 text-center text-sm text-muted-foreground">{errorMessage(all.error)}</p>}
+            {all.data && <CommandEmpty>No file matches.</CommandEmpty>}
+            {shown.map((path) => (
+              <CommandItem
+                key={path}
+                value={path}
+                onSelect={() => {
+                  close()
+                  void open(path, line ? { line, column } : undefined)
+                }}
+              >
+                <FileText aria-hidden="true" />
+                <span className="truncate font-medium">{here ? `Go to line ${line}` : nameOf(path)}</span>
+                <span className="min-w-0 truncate text-xs text-muted-foreground">
+                  {path}
+                  {line ? `:${line}` : ''}
+                </span>
+              </CommandItem>
+            ))}
+            {all.data?.truncated && <p className="px-2 py-1.5 text-xs text-muted-foreground">The folder has more files than are listed here.</p>}
+          </>
+        )}
+        {(mode === 'file' || mode === 'folder') && (
+          <>
+            {mode === 'file' && !filePath && <p className="py-6 text-center text-sm text-muted-foreground">Open a file to list its symbols.</p>}
+            {mode === 'folder' && !symbolText && <p className="py-6 text-center text-sm text-muted-foreground">Type a symbol&apos;s name: a few letters, or its parts&apos; initials (rta for RunToolsAsync).</p>}
+            {symbols.data?.building && <p className="py-6 text-center text-sm text-muted-foreground">The code index is being made for this folder: ask again in a moment.</p>}
+            {symbols.error && <p className="py-6 text-center text-sm text-muted-foreground">{errorMessage(symbols.error)}</p>}
+            {symbols.data && !symbols.data.building && hits.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">No symbol matches.</p>}
+            {hits.map((s) => (
+              <CommandItem
+                key={`${s.path}:${s.line}:${s.name}`}
+                value={`${s.path}:${s.line}:${s.name}`}
+                onSelect={() => {
+                  close()
+                  void open(s.path, { line: s.line })
+                }}
+              >
+                <FileCode2 aria-hidden="true" />
+                <span className="truncate font-medium">{s.name}</span>
+                <span className="text-xs text-muted-foreground">{s.kind}</span>
+                <span className="min-w-0 truncate text-xs text-muted-foreground">
+                  {s.container ? `${s.container} · ` : ''}
+                  {mode === 'folder' ? `${s.path}:${s.line}` : `:${s.line}`}
+                </span>
+              </CommandItem>
+            ))}
+          </>
+        )}
+        {mode === 'help' &&
+          quickModes.map((m) => (
+            <CommandItem key={m.prefix || 'files'} value={m.label} onSelect={() => setTyped(m.prefix)}>
+              <span className="w-4 font-mono text-muted-foreground">{m.prefix || '…'}</span>
+              <span className="truncate font-medium">{m.label}</span>
+              <span className="min-w-0 truncate text-xs text-muted-foreground">{m.hint}</span>
+            </CommandItem>
+          ))}
       </CommandList>
     </CommandDialog>
   )

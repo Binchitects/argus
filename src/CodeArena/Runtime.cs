@@ -41,8 +41,19 @@ internal sealed partial class Runtime : IAsyncDisposable
     public MemoryStore Memory { get; private set; } = null!;
     private string _memory = "";
 
-    /// <summary>The folder's code index, when Config.CodeIndex is on.</summary>
+    /// <summary>The folder's code index: made at the start when Config.CodeIndex is on (with the agent's tools), else when the IDE first asks for symbols.</summary>
     public CodeIndexHost? CodeIndex { get; private set; }
+
+    private readonly object _indexGate = new();
+
+    /// <summary>The code index for the IDE's Go to Symbol, made now if the session has none (the agent's tools stay as Config says).</summary>
+    public CodeIndexHost IndexForIde()
+    {
+        lock (_indexGate)
+        {
+            return CodeIndex ??= new CodeIndexHost(Env.Paths.DataDir, Workspace);
+        }
+    }
 
     /// <summary>Whether the person's rules let read_file read a path (as the working directory sees it): what code answers may cite.</summary>
     private bool MayRead(string path) => Tools.Find("read_file") is not { } read || Permissions.Rules.Denied(read, new JsonObject { ["path"] = path }, Workspace) is null;

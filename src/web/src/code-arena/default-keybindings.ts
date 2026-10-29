@@ -15,6 +15,8 @@ export const defaultKeybindings: RuleJson[] = [
   { key: 'ctrl+e', command: 'workbench.action.quickOpen', mac: 'cmd+e' },
   { key: 'ctrl+g', command: 'workbench.action.gotoLine', mac: 'ctrl+g' },
   { key: 'ctrl+shift+o', command: 'workbench.action.gotoSymbol', when: 'editorIsOpen' },
+  { key: 'ctrl+t', command: 'workbench.action.showAllSymbols' },
+  { key: 'ctrl+alt+shift+o', command: 'workbench.action.showAllSymbols' },
   { key: 'ctrl+,', command: 'workbench.action.openSettings' },
   { key: 'ctrl+k ctrl+s', command: 'workbench.action.openGlobalKeybindings' },
   { key: 'ctrl+k ctrl+t', command: 'workbench.action.selectTheme' },

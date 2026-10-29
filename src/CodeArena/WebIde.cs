@@ -222,6 +222,19 @@ internal sealed partial class WebApp
                 case ("POST", "/api/format"):
                     await FormatAsync(Body(req), res, ct);
                     return true;
+                case ("GET", "/api/symbols"):
+                {
+                    // Go to Symbol: by name across the folder, or one file's, from the code index (made on the first ask).
+                    var index = await _rt.IndexForIde().GetAsync(TimeSpan.FromSeconds(3), ct);
+                    var path = Query(req, "path") is { Length: > 0 } p ? _rt.Workspace.Show(_rt.Workspace.Resolve(p)).Replace('\\', '/') : null;
+                    var found = index is null ? [] : await Task.Run(() => index.Search().Symbols(Query(req, "q") ?? "", path, Math.Clamp(int.TryParse(Query(req, "limit"), out var n) ? n : 100, 1, 500)), ct);
+                    var list = new JsonArray([.. found.Select(s => (JsonNode)new JsonObject
+                    {
+                        ["name"] = s.Name, ["kind"] = s.Kind, ["container"] = s.Container, ["path"] = s.Path, ["line"] = s.Line, ["end"] = s.End,
+                    })]);
+                    await res.JsonAsync(200, new JsonObject { ["symbols"] = list, ["building"] = index is null }, ct);
+                    return true;
+                }
                 case ("GET", "/api/files/all"):
                     await res.JsonAsync(200, await Task.Run(() => _files.All(ct), ct), ct);
                     return true;

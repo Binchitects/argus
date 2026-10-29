@@ -855,6 +855,37 @@ describe('Code Arena, the IDE', () => {
     expect(screen.getByRole('textbox', { name: 'Search' })).toHaveFocus()
   })
 
+  it('quick open goes to symbols: # in the folder, @ in this file, ? lists what it does, > is the palette', async () => {
+    const asked: string[] = []
+    backend({
+      'GET /api/symbols': (_, __, url) => {
+        asked.push(url.search)
+        return url.searchParams.get('path')
+          ? { json: { symbols: [{ name: 'total', kind: 'const', container: null, path: 'src/app.ts', line: 1, end: 1 }], building: false } }
+          : { json: { symbols: url.searchParams.get('q') === 'cart' ? [{ name: 'cartTotal', kind: 'function', container: 'cart', path: 'src/lib/cart.ts', line: 1, end: 1 }] : [], building: false } }
+      },
+    })
+    renderIde()
+    await openApp()
+    await userEvent.keyboard('{Control>}p{/Control}')
+    const input = await screen.findByLabelText('File to open')
+    await userEvent.type(input, '?')
+    expect(await screen.findByRole('option', { name: /Go to a symbol in the folder/ })).toBeInTheDocument()
+    await userEvent.clear(input)
+    await userEvent.type(input, '@')
+    expect(await screen.findByRole('option', { name: /total/ })).toBeInTheDocument()
+    expect(asked.at(-1)).toContain('path=src%2Fapp.ts')
+    await userEvent.clear(input)
+    await userEvent.type(input, '#cart')
+    await userEvent.click(await screen.findByRole('option', { name: /cartTotal/ }))
+    expect(await screen.findByRole('tab', { name: 'cart.ts' })).toBeInTheDocument()
+    expect(asked.at(-1)).toContain('q=cart')
+
+    await userEvent.keyboard('{Control>}p{/Control}')
+    await userEvent.type(await screen.findByLabelText('File to open'), '>')
+    expect(await screen.findByRole('dialog', { name: 'Commands' })).toBeInTheDocument()
+  })
+
   it('shows a picture and a video in tabs of their own, from their address, never read as text', async () => {
     const { calls } = backend({
       'GET /api/files': (_, __, url) =>

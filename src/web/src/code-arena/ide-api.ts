@@ -92,6 +92,22 @@ export const folderQuery = (path: string) => ({
   queryFn: ({ signal }: { signal: AbortSignal }) => api<Listing>(path ? `/api/files?path=${at(path)}` : '/api/files', { signal }),
 })
 
+/** A symbol the code index found: what it is, what holds it, and where (its first and last lines). */
+export interface SymbolHit {
+  name: string
+  kind: string
+  container: string | null
+  path: string
+  line: number
+  end: number
+}
+
+/** Go to Symbol: symbols by name across the folder (best first), or one file's (in order); building while the index is first made. */
+export const symbolsQuery = (q: string, path?: string) => ({
+  queryKey: ['code', 'symbols', path ?? '', q] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ symbols: SymbolHit[]; building: boolean }>(`/api/symbols?q=${at(q)}${path ? `&path=${at(path)}` : ''}`, { signal }),
+})
+
 /** Every file of the working directory (as git sees them), for quick open. */
 export const allFilesQuery = {
   queryKey: ['code', 'files', 'all'] as const,

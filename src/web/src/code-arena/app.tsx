@@ -1057,6 +1057,7 @@ function Workbench({
     { id: 'workbench.action.quickOpen', category: 'File', title: 'Go to File…', run: () => setQuickOpen(true) },
     { id: 'workbench.action.gotoLine', category: 'Go', title: 'Go to Line/Column…', enabled: () => file, run: () => setQuickOpen(true, ':') },
     { id: 'workbench.action.gotoSymbol', category: 'Go', title: 'Go to Symbol in Editor…', enabled: () => file, run: () => runAction('editor.action.quickOutline') },
+    { id: 'workbench.action.showAllSymbols', category: 'Go', title: 'Go to Symbol in Workspace…', run: () => setQuickOpen(true, '#') },
     { id: 'workbench.action.files.openFolder', category: 'File', title: 'Open Folder…', run: () => void chooseAndOpenFolder(setOpening) },
     { id: 'workbench.action.openRecent', category: 'File', title: 'Open Recent…', run: () => void openRecentFolder(setOpening) },
     { id: 'workbench.action.addRootFolder', category: 'Workspaces', title: 'Add Folder to Workspace…', run: async () => {
