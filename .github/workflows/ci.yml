@@ -49,6 +49,8 @@ jobs:
         with: { global-json-file: global.json }
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm, cache-dependency-path: src/web/package-lock.json }
+      # The code index's scanners are measured against universal-ctags (CtagsFact).
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends universal-ctags
       - run: dotnet test tests/CodeArena.Tests -c Release
       - name: The package for Linux, and its program starts
         run: |
