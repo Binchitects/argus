@@ -17,7 +17,7 @@ namespace Llm.Api.Knowledge;
 /// the sandbox (the sandbox feature: Tesseract, in Knowledge:OcrLanguages, and LibreOffice there), with no network; without
 /// it those files are said to need it. An archive's files (.zip) are documents each of their own (<see cref="Members"/>).
 /// </summary>
-public sealed partial class DocumentReader(SandboxClient sandbox, IOptionsMonitor<KnowledgeOptions> options, Operations.Modules modules)
+public sealed partial class DocumentReader(SandboxClient sandbox, IOptionsMonitor<KnowledgeOptions> options, Operations.Features features)
 {
     public const int MaxChars = 2_000_000;
 
@@ -136,6 +136,11 @@ public sealed partial class DocumentReader(SandboxClient sandbox, IOptionsMonito
                 problem = $"Only the first {MaxOcrPages} scanned pages were read.";
             }
         }
+        // Nothing read at all (every page a scan, and no OCR): not a document yet.
+        if (pages.Sum(p => p.Count(char.IsLetterOrDigit)) < 20)
+        {
+            return new("", problem ?? $"{name} has no text in it.");
+        }
         var sb = new StringBuilder();
         for (var i = 0; i < pages.Count && sb.Length < MaxChars; i++)
         {
@@ -151,11 +156,12 @@ public sealed partial class DocumentReader(SandboxClient sandbox, IOptionsMonito
 
     private async Task<OcrRead> OcrAsync(string name, byte[] bytes, string kind, IReadOnlyList<int> pages, CancellationToken ct)
     {
-        if (!await modules.HasAsync("sandbox", ct))
+        // The sandbox has no network and no name on it: whether it runs is its heartbeat in the jobs' folder.
+        if (!features.Runs("sandbox") || sandbox.Unavailable() is not null)
         {
             return new("", kind == "convert"
-                ? $"{name}: opening this kind of file needs the sandbox feature (LibreOffice), which is off."
-                : $"{name}: reading text from pictures and scans needs the sandbox feature (OCR), which is off.");
+                ? $"{name}: opening this kind of file needs the sandbox feature (LibreOffice), which is off or not running."
+                : $"{name}: reading text from pictures and scans needs the sandbox feature (OCR), which is off or not running.");
         }
         var file = "in" + Path.GetExtension(name).ToLowerInvariant();
         var langs = options.CurrentValue.OcrLanguages;
