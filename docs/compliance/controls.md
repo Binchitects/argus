@@ -584,6 +584,8 @@ The safeguards find e-mail addresses, phone, card, IBAN and social security numb
 - `Llm.Tests/PromptLogTests.The_chats_and_the_API_requests_questions_and_answers_are_read_with_prompts_review_and_each_search_is_audited`
 - `Llm.Tests/PromptLogTests.An_answer_from_the_answer_cache_is_in_the_prompt_log_as_well`
 - `Llm.Tests/PromptLogTests.With_the_prompt_log_off_API_requests_are_not_kept`
+- `Llm.Tests/PromptLogTests.Every_API_request_is_in_the_log_from_its_arrival_while_it_runs_and_when_it_fails_is_refused_or_is_stopped`
+- `Llm.Tests/PromptLogTests.A_chat_question_is_in_the_log_with_its_answers_state_and_why_it_failed`
 
 **Watched by** `app:personal-data` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
 
@@ -593,7 +595,7 @@ The safeguards find e-mail addresses, phone, card, IBAN and social security numb
 
 ### NET-01: Encrypted in transit, one way in
 
-Only Traefik's ports 80 and 443 are published, 80 only to redirect; TLS 1.2 and 1.3 only, and for 1.2 only ciphers with forward secrecy and authenticated encryption; HSTS for a year with a trusted certificate (HSTS_SECONDS); the services talk on Docker's network; every page carries a strict content security policy and the security headers; a state change needs a header another site cannot send; hosts without a rule are refused.
+Only Traefik's ports 80 and 443 are published, 80 only to redirect; TLS 1.2 and 1.3 only, and for 1.2 only ciphers with forward secrecy and authenticated encryption; HSTS for a year with a trusted certificate (HSTS_SECONDS); the services talk on Docker's network; every page carries a strict content security policy and the security headers; a state change needs a header another site cannot send; hosts without a rule are refused; the API host goes by the app alone, which passes on only the model API's own paths, so the model gateway's management and pages are not reachable from outside.
 
 **Serves**
 
@@ -616,6 +618,8 @@ Only Traefik's ports 80 and 443 are published, 80 only to redirect; TLS 1.2 and 
 - `Llm.Tests/IdentityTests.State_changes_without_the_csrf_header_are_refused`
 - `Llm.Tests/ForwardAuthTests.Hosts_without_a_rule_are_denied_even_to_admins`
 - `Llm.Tests/FileSealingTests.With_HSTS_set_the_app_sends_it_as_Traefik_does_and_without_it_clears_any_kept_before`
+- `Llm.Tests/ApiPassageTests.The_model_list_and_embeddings_are_passed_on_with_the_callers_own_key`
+- `Llm.Tests/ApiPassageTests.The_gateways_own_management_is_not_found_from_outside`
 
 **Watched by** `live:tls`, `live:headers`, `live:csrf` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
 

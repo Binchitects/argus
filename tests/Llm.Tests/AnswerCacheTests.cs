@@ -234,13 +234,13 @@ public sealed class AnswerCacheTests(AppFixture app)
     }
 
     [Fact]
-    public void Traefik_sends_completions_by_the_app_whenever_it_is_up_cache_on_or_off()
+    public void Traefik_sends_the_whole_api_host_by_the_app_and_never_around_it()
     {
         var routes = File.ReadAllText(Path.Combine(AppFixture.PluginsPath, "..", "deploy", "config", "traefik", "routes.yml"));
-        Assert.Contains("Path(`/v1/chat/completions`) || Path(`/chat/completions`)", routes, StringComparison.Ordinal);
-        Assert.Contains("failover: { service: app-completions, fallback: litellm }", routes, StringComparison.Ordinal);
-        // The app's health, never the cache's mode: the key's line, the fair line and the prompt log are the app's.
-        Assert.Matches(@"app-completions:\n      loadBalancer:\n        servers: \[[^\]]*\]\n        healthCheck: \{ path: /healthz,", routes);
+        // The key's line, the fair line and the prompt log are the app's: the gateway's host is the app's alone, with no fallback.
+        Assert.Matches(@"gateway:\n\s+rule: Host\(`gateway\.\{\{ \$domain \}\}`\)\n\s+service: app\n", routes);
+        Assert.DoesNotContain("litellm", routes, StringComparison.Ordinal);
+        Assert.DoesNotContain("failover", routes, StringComparison.Ordinal);
     }
 
     [Fact]

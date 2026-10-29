@@ -37,6 +37,9 @@ public sealed class FakeModel : HttpMessageHandler
 {
     public ConcurrentQueue<(JsonObject Body, Dictionary<string, string> Headers)> Requests { get; } = new();
 
+    /// <summary>The model list and embeddings asked (path and query, and the key they came with).</summary>
+    public ConcurrentQueue<(string Path, string? Key)> Passed { get; } = new();
+
     /// <summary>Keys the gateway no longer knows: requests with them get 401.</summary>
     public ConcurrentDictionary<string, bool> RevokedKeys { get; } = new();
 
@@ -80,6 +83,17 @@ public sealed class FakeModel : HttpMessageHandler
         if (request.Headers.Authorization?.Parameter is { } key && RevokedKeys.ContainsKey(key))
         {
             return new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("""{"error":{"message":"Authentication Error, Invalid proxy server token passed."}}""") };
+        }
+        // The model list, and embeddings: what the app passes on as it came (ApiPassage).
+        if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath.EndsWith("/models", StringComparison.Ordinal))
+        {
+            Passed.Enqueue((request.RequestUri.PathAndQuery, request.Headers.Authorization?.Parameter));
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"object":"list","data":[{"id":"Qwen3.8-Flash-Next","object":"model"}]}""", Encoding.UTF8, "application/json") };
+        }
+        if (request.RequestUri!.AbsolutePath.EndsWith("/embeddings", StringComparison.Ordinal))
+        {
+            Passed.Enqueue((request.RequestUri.PathAndQuery, request.Headers.Authorization?.Parameter));
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("""{"object":"list","data":[{"object":"embedding","index":0,"embedding":[0.25,0.5]}]}""", Encoding.UTF8, "application/json") };
         }
         // Speech to text takes a form, and answers with what was said.
         if (request.RequestUri!.AbsolutePath.EndsWith("/audio/transcriptions", StringComparison.Ordinal))

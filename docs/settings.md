@@ -159,13 +159,10 @@ says whose it is, and holds no sound: the person's language goes first in the
 form and the sound streams on behind it (a language the request names comes
 later, and LiteLLM keeps it).
 
-- **Compose**: Traefik sends them (POST) by the app while its health check
-  passes, and straight to LiteLLM while the app is down. A browser's preflight
-  goes to LiteLLM, which answers it.
-- **Helm**: the ingress sends them (every method; the app passes a preflight on
-  to LiteLLM) to the app, with no fallback: while no app pod is ready, they
-  fail (502 or 503) and the rest of `gateway.DOMAIN` keeps working
-  ([deployment.md](deployment.md#helm)).
+Compose's Traefik and the Helm chart's ingress send all of `gateway.DOMAIN` to
+the app, with no way around it: while the app is down, these fail (502 or 503)
+with the rest of the API ([deployment.md](deployment.md#helm)). A browser's
+preflight is passed on to the gateway, which answers it.
 
 An installation upgraded from v5.2.0 starts with these defaults for everyone:
 the voices it used before.

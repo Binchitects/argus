@@ -673,6 +673,7 @@ public static class IdentityWiring
         Models.RemoteServerEndpoints.MapRemoteServers(app);
         app.MapGovernance();
         AnswerCacheEndpoints.MapAnswerCache(app);
+        Gateway.ApiPassage.MapApiPassage(app);
         Chat.VoiceEndpoints.MapVoices(app);
         Bots.BotEndpoints.MapBots(app);
         Notifications.PushEndpoints.MapPush(app);

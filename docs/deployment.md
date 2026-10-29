@@ -405,14 +405,13 @@ them or name an `existingSecret`. The model library and the app's files are
 shared by several pods: on more than one node they need ReadWriteMany storage
 (`persistence.sharedStorageClass`). The ingress turns on cookie affinity for
 NGINX and a sticky cookie for Traefik; another controller needs its own.
-`gateway.DOMAIN` goes straight to the gateway, but for API keys' speech:
-`/v1/audio/speech`, `/v1/audio/transcriptions`, and the same without `/v1`
-(every method) go to the app, which fills in the key's person's voice and
-language and passes them on to LiteLLM. An Ingress has no failover: while no
-app pod is ready (rolling, crashed, scaled to zero), those four paths fail
-(502 or 503), where compose's Traefik sends them straight to LiteLLM. The
-answer cache for API keys needs Traefik's health-checked route (compose), so it
-does not answer here.
+`gateway.DOMAIN` goes to the app alone, as in compose: the app answers the
+requests that ask a model (each key's line, the fair line, the answer cache,
+the prompt log, the person's voice and language) and passes on only the model
+API's own paths (models, model info, embeddings, moderations, rerank, token
+counts) with the caller's key; LiteLLM's management API and pages are not
+reachable from outside. While no app pod is ready, the API is down too (502 or
+503): nothing goes around the app.
 External Postgres: `postgresql.enabled=false` and `externalDatabase`. Logs reach
 Loki only with a log agent of the cluster's (promtail, or another). The host's
 figures come from the `host-exporters` DaemonSet (node-exporter and the CPU's
@@ -1220,5 +1219,5 @@ server from looking. Then `docker compose up -d --pull never`.
     -d '{"model":"MODEL","messages":[{"role":"user","content":"What are your opening hours?"}]}' | grep -i x-arena-cache; done
   ```
 
-  No header at all: Traefik still sends the key straight to LiteLLM. It asks
-  the app every 10 seconds; `docker compose logs traefik` shows a failing check.
+  No header at all: the answer cache is off (Settings → API keys), or the
+  request is not one it keeps (over 1 MB, the Anthropic protocol, no-store).

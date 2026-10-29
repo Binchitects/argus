@@ -41,12 +41,8 @@ spec:
     - host: {{ printf "gateway.%s" .Values.domain | quote }}
       http:
         paths:
-          {{- /* Speech with keys goes by the app: the key's person's voice, and the language they speak. Every method: the app passes the rest (a browser's preflight) on to LiteLLM. An Ingress has no failover: while no app pod is ready, these fail (Traefik in compose falls back to LiteLLM). */}}
-          {{- /* So do the requests that ask a model: each key's line (its requests beyond Chat:ApiRequestsPerKey wait their turn, not refused) and the answer cache. */}}
-          {{- range list "/v1/audio/speech" "/audio/speech" "/v1/audio/transcriptions" "/audio/transcriptions" "/v1/images/generations" "/images/generations" "/v1/chat/completions" "/chat/completions" "/v1/messages" "/messages" "/v1/responses" "/responses" "/v1/completions" "/completions" }}
-          - { path: {{ . }}, pathType: Exact, backend: { service: { name: app, port: { number: 8080 } } } }
-          {{- end }}
-          - { path: /, pathType: Prefix, backend: { service: { name: litellm, port: { number: 4000 } } } }
+          {{- /* The API for keys goes by the app alone, never straight to the model gateway: the app passes on only the model API's own paths (its management and pages are not found). */}}
+          - { path: /, pathType: Prefix, backend: { service: { name: app, port: { number: 8080 } } } }
     {{- if .Values.argus.enabled }}
     - host: {{ printf "argus.%s" .Values.domain | quote }}
       http:

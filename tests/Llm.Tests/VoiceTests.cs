@@ -854,21 +854,16 @@ public sealed class VoiceTests(AppFixture app)
     {
         var deploy = Path.Combine(AppFixture.PluginsPath, "..", "deploy");
         var routes = File.ReadAllText(Path.Combine(deploy, "config", "traefik", "routes.yml"));
-        Assert.Contains("Path(`/v1/audio/speech`) || Path(`/audio/speech`)", routes, StringComparison.Ordinal);
-        Assert.Contains("failover: { service: app-speech, fallback: litellm }", routes, StringComparison.Ordinal);
-        Assert.Contains("Path(`/v1/audio/transcriptions`) || Path(`/audio/transcriptions`)", routes, StringComparison.Ordinal);
-        // POST only: a browser's preflight goes straight to LiteLLM, which answers it.
-        Assert.Contains("Host(`gateway.{{ $domain }}`) && Method(`POST`) && (Path(`/v1/audio/speech`)", routes, StringComparison.Ordinal);
+        // The whole of gateway.DOMAIN goes to the app, speech and pictures with it, in both.
+        Assert.Matches(@"gateway:\n\s+rule: Host\(`gateway\.\{\{ \$domain \}\}`\)\n\s+service: app\n", routes);
         var ingress = File.ReadAllText(Path.Combine(deploy, "helm", "argus-arena", "templates", "ingress.yaml"));
-        Assert.Contains("\"/v1/audio/speech\" \"/audio/speech\" \"/v1/audio/transcriptions\" \"/audio/transcriptions\"", ingress, StringComparison.Ordinal);
+        var gateway = ingress[ingress.LastIndexOf("printf \"gateway.%s\"", StringComparison.Ordinal)..];
+        Assert.Contains("{ path: /, pathType: Prefix, backend: { service: { name: app, port: { number: 8080 } } } }", gateway[..gateway.IndexOf("- host:", 1, StringComparison.Ordinal)], StringComparison.Ordinal);
         Assert.Equal(["/v1/audio/speech", "/audio/speech", "/v1/audio/transcriptions", "/audio/transcriptions", "/v1/images/generations", "/images/generations"], KeySpeech.Paths);
-        // Pictures too: a picture model not loaded is loaded first.
-        Assert.Contains("Path(`/v1/images/generations`) || Path(`/images/generations`)", routes, StringComparison.Ordinal);
-        Assert.Contains("\"/v1/images/generations\" \"/images/generations\"", ingress, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void The_docs_say_the_chart_sends_keys_speech_to_the_app_with_no_fallback()
+    public void The_docs_say_the_api_host_goes_by_the_app_with_no_way_around_it()
     {
         var docs = Path.Combine(AppFixture.PluginsPath, "..", "docs");
         static string Section(string page, string heading)
@@ -878,15 +873,12 @@ public sealed class VoiceTests(AppFixture app)
             var end = page.IndexOf("\n## ", start + heading.Length + 1, StringComparison.Ordinal);
             return page[start..(end < 0 ? page.Length : end)];
         }
-        // The ingress has no failover: the operator must read that speech fails while no app pod is ready.
+        // The operator must read that the API is down while no app pod is ready, and that nothing goes around the app.
         var helm = Section(File.ReadAllText(Path.Combine(docs, "deployment.md")), "## Helm");
-        Assert.DoesNotContain("`gateway.DOMAIN` goes straight to the gateway:", helm, StringComparison.Ordinal);
-        Assert.Contains("`/v1/audio/speech`, `/v1/audio/transcriptions`, and the same without `/v1`", helm, StringComparison.Ordinal);
-        Assert.Contains("An Ingress has no failover", helm, StringComparison.Ordinal);
+        Assert.Contains("`gateway.DOMAIN` goes to the app alone", helm, StringComparison.Ordinal);
+        Assert.Contains("nothing goes around the app", helm, StringComparison.Ordinal);
         var speech = Section(File.ReadAllText(Path.Combine(docs, "settings.md")), "## Speech: everyone's until they choose");
-        Assert.Contains("- **Compose**: Traefik sends them (POST) by the app while its health check\n  passes, and straight to LiteLLM while the app is down.", speech, StringComparison.Ordinal);
-        Assert.Contains("- **Helm**: the ingress sends them", speech, StringComparison.Ordinal);
-        Assert.Contains("with no fallback", speech, StringComparison.Ordinal);
-        Assert.DoesNotContain("(straight to LiteLLM\nwhile the app is down)", speech, StringComparison.Ordinal);
+        Assert.Contains("send all of `gateway.DOMAIN` to\nthe app, with no way around it", speech, StringComparison.Ordinal);
+        Assert.DoesNotContain("straight to LiteLLM", speech, StringComparison.Ordinal);
     }
 }

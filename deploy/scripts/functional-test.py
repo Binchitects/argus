@@ -162,14 +162,33 @@ def app_chat(browser, text="Reply with the single word: pong"):
     return ("answered" if last["type"] == "done" else last["message"]), conv["id"]
 
 
+# LiteLLM's own management (spend logs, its users), asked inside its container: gateway.DOMAIN passes on only the
+# model API, never the gateway's management. The master key goes in on stdin, never on a command line.
+LITELLM_ASK = """
+import json, sys, urllib.error, urllib.request
+key, path, method, payload = json.loads(sys.stdin.read())
+req = urllib.request.Request("http://localhost:4000" + path, method=method, headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
+                             data=None if payload is None else json.dumps(payload).encode())
+try:
+    with urllib.request.urlopen(req, timeout=60) as r:
+        print(r.status); print(r.read().decode())
+except urllib.error.HTTPError as e:
+    print(e.code); print(e.read().decode())
+"""
+
+
 def litellm(path, payload=None, method=None):
-    b = Browser()
-    code, body, _, _ = b.req(u("gateway", path), payload, method=method,
-                             headers={"Authorization": "Bearer " + env("GATEWAY_KEY")})
+    container = subprocess.run(["docker", "ps", "--filter", "label=com.docker.compose.service=litellm", "--format", "{{.Names}}"],
+                               capture_output=True, text=True).stdout.split()
+    if not container:
+        return 0, "no litellm container"
+    out = subprocess.run(["docker", "exec", "-i", container[0], "python3", "-c", LITELLM_ASK], capture_output=True, text=True,
+                         input=json.dumps([env("GATEWAY_KEY"), path, method or ("POST" if payload is not None else "GET"), payload]))
+    code, _, body = out.stdout.partition("\n")
     try:
-        return code, json.loads(body)
-    except json.JSONDecodeError:
-        return code, body
+        return int(code), json.loads(body)
+    except ValueError:
+        return int(code) if code.isdigit() else 0, body
 
 
 def sso(browser, start_url, done_host):

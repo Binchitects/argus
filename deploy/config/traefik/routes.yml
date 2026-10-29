@@ -18,28 +18,13 @@ http:
       service: app
       middlewares: [secure]
       tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}
-    # The API for keys: OpenAI and Anthropic protocols.
+    # The API for keys (OpenAI and Anthropic protocols) goes by the app alone, never straight to the
+    # model gateway: each key's line, the fair line, the answer cache, the prompt log, the person's voice
+    # and language, and only the model API's own paths passed on (the gateway's management and pages
+    # are not found). While the app is down, it is down too.
     gateway:
       rule: Host(`gateway.{{ $domain }}`)
-      service: litellm
-      middlewares: [secure]
-      tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}
-    # The requests that ask a model with a key go by the app: each key's line (as many answered at
-    # once as Chat:ApiRequestsPerKey, the rest waiting their turn rather than refused) and the answer
-    # cache; straight to LiteLLM when the app is down.
-    gateway-completions:
-      rule: Host(`gateway.{{ $domain }}`) && (Path(`/v1/chat/completions`) || Path(`/chat/completions`) || Path(`/v1/messages`) || Path(`/messages`) || Path(`/v1/responses`) || Path(`/responses`) || Path(`/v1/completions`) || Path(`/completions`))
-      service: completions
-      middlewares: [secure]
-      tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}
-    # Speech with keys goes by the app, which reads a text that names no voice in the
-    # key's person's voice, and writes down speech that names no language in the
-    # language they speak (Your account → Voice); straight to LiteLLM when the app is down.
-    # POST only: a browser's preflight (OPTIONS) goes to LiteLLM, which answers it.
-    # Pictures with keys go by it too: a picture model that is not loaded is loaded first.
-    gateway-speech:
-      rule: Host(`gateway.{{ $domain }}`) && Method(`POST`) && (Path(`/v1/audio/speech`) || Path(`/audio/speech`) || Path(`/v1/audio/transcriptions`) || Path(`/audio/transcriptions`) || Path(`/v1/images/generations`) || Path(`/images/generations`))
-      service: speech
+      service: app
       middlewares: [secure]
       tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}
     # Argus's MCP, for coding agents with their own key.
@@ -65,24 +50,7 @@ http:
 {{ else }}
     app: { loadBalancer: { servers: [{ url: "http://app:8080" }] } }
 {{ end }}
-    litellm: { loadBalancer: { servers: [{ url: "http://litellm:4000" }] } }
     argus: { loadBalancer: { servers: [{ url: "http://argus:7700" }] } }
-    # The app answers its health check only while the answer cache is on: Traefik
-    # asks every 10 seconds, so turning the cache on or off takes effect within that.
-    # Whenever the app is up (its health, not the answer cache's mode: the key's line, the fair line
-    # and the prompt log are the app's whether the cache is on or off).
-    completions:
-      failover: { service: app-completions, fallback: litellm }
-    app-completions:
-      loadBalancer:
-        servers: [{ url: "http://app:8080" }]
-        healthCheck: { path: /healthz, interval: 10s, timeout: 3s }
-    speech:
-      failover: { service: app-speech, fallback: litellm }
-    app-speech:
-      loadBalancer:
-        servers: [{ url: "http://app:8080" }]
-        healthCheck: { path: /healthz, interval: 10s, timeout: 3s }
 
   middlewares:
     secure:

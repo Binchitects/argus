@@ -279,12 +279,9 @@ curl https://gateway.llm.localhost/v1/chat/completions \
   -d '{"model":"local","messages":[{"role":"user","content":"hi"}],"max_tokens":16}'
 ```
 
-Then confirm the call landed on **you** — the app's **Usage & cost** page (Everyone), or:
-
-```bash
-curl "https://gateway.llm.localhost/user/info?user_id=you@example.com" \
-  -H "Authorization: Bearer $GATEWAY_KEY"
-```
+Then confirm the call landed on **you**: the app's **Usage & cost** page
+(Everyone), or Admin → Prompt log with your user name. The gateway's own
+management (`/user/info` and the like) is not reachable from outside the stack.
 
 If spend did not move, the request was attributed to nobody — almost always
 the master key in `api_key`, or a repeated prompt served from cache.
