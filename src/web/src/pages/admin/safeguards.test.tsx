@@ -21,6 +21,7 @@ const rules: RulesResponse = {
   categories: [{ key: 'weapons', description: 'weapons of mass harm' }],
   secretKinds: ['private key', 'GitHub token'],
   piiKinds: ['email', 'phone'],
+  commandKinds: ['a fork bomb', 'a reverse shell'],
 }
 
 const asked: SafeguardEvent = {

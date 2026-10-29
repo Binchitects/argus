@@ -280,6 +280,12 @@ function RuleDialog({ data, id, start, onClose, onSaved }: { data: RulesResponse
           </Field>
           {r.detector === 'secrets' && <Choices label="Kinds (none ticked: all)" all={data.secretKinds} value={r.kinds} onChange={(v) => set('kinds', v)} />}
           {r.detector === 'pii' && <Choices label="Kinds (none ticked: all)" all={data.piiKinds} value={r.kinds} onChange={(v) => set('kinds', v)} />}
+          {r.detector === 'commands' && <Choices label="Kinds (none ticked: all)" all={data.commandKinds} value={r.kinds} onChange={(v) => set('kinds', v)} />}
+          {r.detector === 'exfiltration' && (
+            <Field label="The company's own domains" hint="One a line; images and links to them are left alone.">
+              <Textarea value={r.domains.join('\n')} onChange={(e) => set('domains', lines(e.target.value))} rows={3} />
+            </Field>
+          )}
           {r.detector === 'words' && (
             <Field label="Words, phrases and patterns" hint="One a line or separated by ;. A phrase matches as whole words, ignoring case; re: starts a regular expression (re:\bproject falcon\b). Empty for an Allow: all words.">
               <Textarea value={r.patterns ?? ''} onChange={(e) => set('patterns', e.target.value || null)} rows={3} />

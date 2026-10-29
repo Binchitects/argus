@@ -1,6 +1,6 @@
 import { api } from '@/lib/api'
 
-export type Detector = 'secrets' | 'pii' | 'words' | 'topic' | 'injection' | 'links' | 'files'
+export type Detector = 'secrets' | 'pii' | 'words' | 'topic' | 'injection' | 'links' | 'files' | 'commands' | 'exfiltration'
 export type Stage = 'question' | 'file' | 'answer' | 'tool_call' | 'tool_result' | 'api'
 export type RuleAction = 'block' | 'mask' | 'warn' | 'justify' | 'log' | 'reroute' | 'allow'
 
@@ -42,6 +42,7 @@ export interface RulesResponse {
   categories: { key: string; description: string }[]
   secretKinds: string[]
   piiKinds: string[]
+  commandKinds: string[]
 }
 
 export interface RuleHit {
@@ -114,12 +115,14 @@ export const statsQuery = {
 
 export const detectorText: Record<Detector, { title: string; about: string }> = {
   secrets: { title: 'Secrets', about: 'Private keys, cloud and service tokens, passwords.' },
-  pii: { title: 'Personal data', about: 'E-mail addresses, phone and card numbers, IBANs, IP addresses, social security numbers.' },
+  pii: { title: 'Personal data', about: 'E-mail addresses, phone and card numbers, IBANs, IP and MAC addresses, national, passport, social security and insurance numbers, wallet addresses.' },
   words: { title: 'Words and patterns', about: 'Words, phrases and re: patterns, matched as whole words.' },
   topic: { title: 'Topics', about: 'Subjects the model judges: built-in harms, or topics you describe.' },
-  injection: { title: 'Prompt injection', about: 'Attempts to get round the assistant’s rules, and text hidden from people.' },
+  injection: { title: 'Prompt injection', about: 'Attempts to get round the assistant’s rules in any language or disguise, encoded or hidden from people, and orders in what tools bring.' },
   links: { title: 'Links', about: 'Links to domains refused, or to any domain not on a list.' },
   files: { title: 'Files', about: 'Attached files by type and size.' },
+  commands: { title: 'Dangerous commands', about: 'Commands that wipe files or disks, open a reverse shell, run a script from the internet, drop a database or turn security off: for what agents send to tools.' },
+  exfiltration: { title: 'Data sent out', about: 'Images and links that would send data to another site, the way injected instructions leak what the model read.' },
 }
 
 export const stageText: Record<Stage, string> = {

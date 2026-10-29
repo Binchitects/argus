@@ -371,7 +371,7 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
             string? detail;
             if (rule.Detector is "topic" || (rule.Detector == "injection" && rule.ModelCheck))
             {
-                spans = rule.Detector == "injection" ? Injection.Find(text) : [];
+                spans = rule.Detector == "injection" ? Injection.Find(text, External(run.Stage)) : [];
                 var items = Items(rule);
                 if (spans.Count == 0 && run.ModelChecks && items.Count > 0)
                 {
@@ -398,7 +398,7 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
             }
             else
             {
-                spans = Spans(rule, text);
+                spans = Spans(rule, text, run.Stage);
                 detail = rule.Detector == "files" ? FileProblem(rule, run) : spans.Count > 0 ? Describe(rule, spans) : null;
             }
             if (detail is null)
@@ -471,27 +471,37 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
     {
         "words" => !Words.Patterns(r.Patterns).Any(),
         "topic" => r.Categories.Count == 0 && string.IsNullOrWhiteSpace(r.Topics),
-        "links" => r.Domains.Count == 0,
+        "links" or "exfiltration" => r.Domains.Count == 0,
         "files" => r.Extensions.Count == 0 && r.MaxFileMb is null,
         _ => r.Kinds.Count == 0,
     };
 
-    /// <summary>The spans a rule's detector finds in the text (secrets, personal data, words, links, injection's signs).</summary>
-    private static List<Finding> Spans(SafeguardRule rule, string text) => rule.Detector switch
+    /// <summary>
+    /// The spans a rule's detector finds in the text (secrets, personal data, words, links, injection's signs, commands, data
+    /// sent out). Injection reads what tools and files bring for orders to act as well: the person did not write it.
+    /// </summary>
+    private static List<Finding> Spans(SafeguardRule rule, string text, string stage = "question") => rule.Detector switch
     {
         "secrets" => [.. Secrets.Find(text).Where(h => rule.Kinds.Count == 0 || rule.Kinds.Contains(h.Kind)).Select(h => new Finding(h.Kind, h.Index, h.Length))],
         "pii" => Pii.Find(text, rule.Kinds),
         "words" => Words.Find(text, rule.Patterns),
         "links" => Links.Find(text, rule.Domains, rule.DomainsAllowed),
-        "injection" => Injection.Find(text),
+        "injection" => Injection.Find(text, External(stage)),
+        "commands" => Commands.Find(text, rule.Kinds),
+        "exfiltration" => Exfiltration.Find(text, rule.Domains),
         _ => [],
     };
+
+    /// <summary>Text the person did not write: what tools bring, and attached files.</summary>
+    private static bool External(string stage) => stage is "tool_result" or "file";
 
     private static string Marker(SafeguardRule rule, Finding f) => rule.Detector switch
     {
         "secrets" => $"[removed: {f.Kind}]",
         "pii" => f.Kind switch { "email" => "[email]", "phone" => "[phone]", "card" => "[card number]", "iban" => "[iban]", "ip" => "[ip address]", "ssn" => "[ssn]", _ => "[personal data]" },
         "links" => "[link removed]",
+        "commands" => $"[command removed: {f.Kind}]",
+        "exfiltration" => "[link removed: it would send data out]",
         _ => "[removed]",
     };
 
@@ -624,6 +634,8 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
             "secrets" or "pii" when run.Stage == "api" => $"The request was refused: it holds {detail}. Remove it and send it again.",
             "secrets" or "pii" => $"This {what} was not sent: it holds {detail}. Remove it (a placeholder will do) and send it again.",
             "links" => $"This {what} was not sent: it links to {detail}, which is not allowed here.",
+            "commands" => $"This {what} was not sent: it runs a command that does damage ({detail}).",
+            "exfiltration" => $"This {what} was not sent: it would send data out through a link ({detail}).",
             _ => O.RefusalMessage,
         };
     }
@@ -638,6 +650,8 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
             "topic" => $"It looks like it is about {detail}.",
             "links" => $"It links to {detail}.",
             "injection" => "It looks like an attempt to get round the assistant's rules.",
+            "commands" => $"It runs a command that does damage: {detail}.",
+            "exfiltration" => $"It would send data out through a link: {detail}.",
             _ => $"It has {detail}.",
         };
         return rule.Action == "justify" ? $"{found} Say why you need to send it: your reason is recorded." : $"{found} Send it anyway?";

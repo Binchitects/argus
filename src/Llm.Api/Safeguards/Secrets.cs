@@ -7,10 +7,11 @@ namespace Llm.Api.Safeguards;
 public sealed record SecretHit(string Kind, int Index, int Length);
 
 /// <summary>
-/// Secrets on the way in: private keys (PEM blocks), cloud and service tokens (AWS, GitHub,
-/// GitLab, Slack, sk- API keys), and passwords in obvious places (password=..., a connection
-/// string, a URL's user:password@). Each is found by its shape; a placeholder ($VAR, &lt;password&gt;,
-/// ***) or a name in code (config.password) is not a secret.
+/// Secrets on the way in: private keys (PEM blocks), cloud and service tokens (AWS, Google, Azure, Alibaba, DigitalOcean,
+/// GitHub, GitLab, Docker Hub, npm, PyPI, Hugging Face, Slack, Discord, Telegram, Twilio, SendGrid, Mailgun, Stripe, Square,
+/// Shopify, Databricks, Grafana, HashiCorp Vault, Linear, Postman, Atlassian, sk- API keys, JSON web tokens), and passwords
+/// in obvious places (password=..., a connection string, a URL's user:password@). Each is found by its shape; a placeholder
+/// ($VAR, &lt;password&gt;, ***) or a name in code (config.password) is not a secret.
 /// </summary>
 public static partial class Secrets
 {
@@ -30,6 +31,23 @@ public static partial class Secrets
         ("npm token", Npm, 0),
         ("JSON web token", Jwt, 0),
         ("Azure storage key", AzureKey, 1),
+        ("Alibaba Cloud key", Alibaba, 0),
+        ("DigitalOcean token", DigitalOcean, 0),
+        ("Docker Hub token", DockerHub, 0),
+        ("PyPI token", PyPi, 0),
+        ("Discord token", Discord, 0),
+        ("Telegram bot token", Telegram, 0),
+        ("Twilio key", Twilio, 0),
+        ("SendGrid key", SendGrid, 0),
+        ("Mailgun key", Mailgun, 0),
+        ("Square token", Square, 0),
+        ("Shopify token", Shopify, 0),
+        ("Databricks token", Databricks, 0),
+        ("Grafana token", Grafana, 0),
+        ("Vault token", Vault, 0),
+        ("Linear key", Linear, 0),
+        ("Postman key", Postman, 0),
+        ("Atlassian token", Atlassian, 0),
         ("password", UrlPassword, 1),
     ];
 
@@ -183,6 +201,57 @@ public static partial class Secrets
 
     [GeneratedRegex(@"\b[a-z][a-z0-9+.\-]*://[^\s/:@""']+:([^\s/@""']{3,})@", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase, 1000)]
     private static partial Regex UrlPassword();
+
+    [GeneratedRegex(@"\bLTAI[A-Za-z0-9]{12,20}\b", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex Alibaba();
+
+    [GeneratedRegex(@"\bdo[opr]_v1_[a-f0-9]{64}\b", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex DigitalOcean();
+
+    [GeneratedRegex(@"\bdckr_pat_[A-Za-z0-9_\-]{27,}", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex DockerHub();
+
+    [GeneratedRegex(@"\bpypi-AgEIcHlwaS5vcmc[A-Za-z0-9_\-]{50,}", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex PyPi();
+
+    [GeneratedRegex(@"\b[MNO][A-Za-z0-9_\-]{23,25}\.[A-Za-z0-9_\-]{6}\.[A-Za-z0-9_\-]{27,38}\b", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex Discord();
+
+    [GeneratedRegex(@"\b\d{8,10}:AA[A-Za-z0-9_\-]{33}\b", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex Telegram();
+
+    [GeneratedRegex(@"\b(?:SK|AC)[0-9a-f]{32}\b", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex Twilio();
+
+    [GeneratedRegex(@"\bSG\.[A-Za-z0-9_\-]{22}\.[A-Za-z0-9_\-]{43}\b", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex SendGrid();
+
+    [GeneratedRegex(@"\bkey-[0-9a-f]{32}\b", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex Mailgun();
+
+    [GeneratedRegex(@"\bsq0(?:atp|csp)-[0-9A-Za-z_\-]{22,43}\b|\bEAAA[A-Za-z0-9_\-]{60}\b", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex Square();
+
+    [GeneratedRegex(@"\bshp(?:at|ca|pa|ss)_[a-fA-F0-9]{32}\b", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex Shopify();
+
+    [GeneratedRegex(@"\bdapi[a-f0-9]{32}(?:-\d)?\b", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex Databricks();
+
+    [GeneratedRegex(@"\bglsa_[A-Za-z0-9]{32}_[a-fA-F0-9]{8}\b|\bglc_[A-Za-z0-9+/]{32,}={0,2}", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex Grafana();
+
+    [GeneratedRegex(@"\bhv[sbr]\.[A-Za-z0-9_\-]{24,}", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex Vault();
+
+    [GeneratedRegex(@"\blin_api_[A-Za-z0-9]{40}\b", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex Linear();
+
+    [GeneratedRegex(@"\bPMAK-[a-f0-9]{24}-[a-f0-9]{34}\b", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex Postman();
+
+    [GeneratedRegex(@"\bATATT3[A-Za-z0-9_\-=]{150,}", RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex Atlassian();
 
     [GeneratedRegex(@"(?<![A-Za-z0-9_])(?:password|passwd|pwd|pass|secret|client_secret|secret_key|api_?key|access_?token|auth_?token)[""']?\s*(?:=|:|=>)\s*(?:""(?<q1>[^""\r\n]{4,})""|'(?<q2>[^'\r\n]{4,})'|(?<bare>[^\s""';,&<>(){}\[\]]{4,})(?=[\s;,&]|$))",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase | RegexOptions.Multiline, 1000)]

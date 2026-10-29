@@ -452,7 +452,7 @@ People download everything of theirs from Your account; an admin exports a perso
 
 ### DAT-04: Personal data and secrets kept from the model
 
-Safeguards mask personal data before a question reaches the model while the chat keeps it as written; answers are masked or withheld by rule; what tools send and bring back is held by their rules; a pasted secret or private key is refused and audited by its kind only.
+Safeguards mask personal data before a question reaches the model while the chat keeps it as written; answers are masked or withheld by rule; what tools send and bring back is held by their rules; a pasted secret or private key is refused and audited by its kind only; words and prompt injection are read through their disguises and in eleven languages, commands that do damage are kept from agents' tools, and data sent out through images and links is stopped.
 
 **Serves**
 
@@ -473,6 +473,10 @@ Safeguards mask personal data before a question reaches the model while the chat
 
 - `Llm.Tests/SafeguardsTests.Personal_data_reaches_the_model_masked_and_the_chat_keeps_it_as_written`
 - `Llm.Tests/SafeguardRulesTests.Answers_are_masked_or_withheld_and_what_tools_send_and_bring_back_is_held_by_their_rules`
+- `Llm.Tests/SafeguardDetectorTests.A_word_is_found_through_its_disguises_and_masks_what_was_written`
+- `Llm.Tests/SafeguardDetectorTests.Injection_and_jailbreaks_are_found_in_any_language_and_disguise`
+- `Llm.Tests/SafeguardDetectorTests.Commands_that_do_damage_are_found`
+- `Llm.Tests/SafeguardDetectorTests.Data_sent_out_through_an_image_or_a_link_is_found_but_not_to_the_companys_own_site`
 - `Llm.Tests/SecretScanningTests.A_pasted_private_key_is_refused_in_the_chat_and_through_the_API_and_audited_by_its_kind_only`
 
 **The company's part** Decide which data may reach which model, and which models are outside the company.

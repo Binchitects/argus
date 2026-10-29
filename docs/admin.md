@@ -227,16 +227,27 @@ like the others: on or off, for whom, customized.
 **Admin → Safeguards** holds the rules that guard what goes to the models and
 what comes back. Each rule:
 
-- **looks for** one thing: secrets (private keys, cloud and service tokens,
-  passwords; some kinds or all), personal data (e-mail addresses, phone and
-  card numbers, IBANs, IP addresses, social security numbers, and health and
-  identity data: dates of birth, medical record, NHS, national and Medicare
-  numbers: [compliance](compliance/README.md#personal-and-health-data)), words and
-  patterns, topics the model judges (built-in harms, or topics you describe:
-  "legal advice: what someone should do in their own legal matter"), prompt
-  injection (its usual signs and hidden text, and the model's reading if you
-  tick it), links (domains refused, or only some allowed), or files (types
-  and size);
+- **looks for** one thing: secrets (private keys, and the tokens of over thirty
+  clouds and services: AWS, Google, Azure, GitHub, GitLab, Docker Hub, npm,
+  PyPI, Slack, Discord, Telegram, Twilio, SendGrid, Stripe, Shopify, Vault and
+  more; passwords; some kinds or all), personal data (e-mail addresses, phone
+  numbers with Iranian mobiles, card numbers, IBANs with their check digits,
+  IP and MAC addresses, crypto wallets, and health and identity data: dates of
+  birth, medical record, NHS, Iranian national, passport, US social security
+  and Medicare, UK National Insurance, Indian Aadhaar and PAN, Canadian social
+  insurance numbers, each with its check digit where it has one, in Persian
+  and Arabic digits too: [compliance](compliance/README.md#personal-and-health-data)),
+  words and patterns, topics the model judges (built-in harms, or topics you
+  describe: "legal advice: what someone should do in their own legal matter"),
+  prompt injection (below), links (domains refused, or only some allowed),
+  files (types and size), **dangerous commands** (wiping files or disks, a
+  fork bomb, a script piped from the internet, a reverse shell, dropping a
+  database, turning security off, reading keys off the machine, making
+  everything writable, force-pushing over main, crypto miners: for what
+  agents send to a terminal, Code Arena or the sandbox), or **data sent out**
+  (an image to another site, or a link whose address carries data: how
+  injected instructions leak what the model read; the company's own domains
+  are left alone);
 - **looks** at questions, attached files, answers, what goes to tools and
   what tools bring back, and API keys' requests (the gateway asks before
   each one);
@@ -254,14 +265,29 @@ what comes back. Each rule:
   project). **Monitor only** records what a rule would have done and does
   nothing: try a rule for a week before it bites.
 
+Words and injection are read as written and through their disguises: zero-width
+and direction characters dropped, full-width and look-alike Cyrillic and Greek
+letters as Latin ones, `p@ssw0rd` as `password`, `i g n o r e` as `ignore`, so
+a rule for a word or a jailbreak is not got round by spelling. Injection looks
+for the usual signs (ignore your instructions, reveal your system prompt, a
+persona without rules such as DAN, developer mode or a "late grandma") in
+English, Persian, Arabic, Chinese, Russian, Spanish, French, German, Turkish,
+Portuguese and Italian; the same in base64; text hidden from people (tag and
+zero-width characters, text that reads in another order than it shows, an
+instruction in an HTML comment or a hidden element); and, in what tools and
+files bring, an order to send data somewhere or words addressed to the
+assistant. Tick the model's reading for what no pattern catches.
+
 Rules run top to bottom (the arrows move them); the first Block ends it.
 The model reads a text once for every topic and injection rule together
 (Settings → Safeguards → **The model that judges**: a small model is best);
 when it cannot be loaded, a text a rule would block waits rather than going
 unread. Start from a **template**: secrets, secrets in answers, personal data
-to cloud models, classification labels, harmful requests, legal and medical
-advice, jailbreaks, prompt injection in tool results, file-sharing sites,
-programs, competitors.
+to cloud models, identity numbers to cloud models, classification labels,
+harmful requests, legal and medical advice, jailbreaks, prompt injection in
+tool results and in attached files, dangerous commands from agents and in
+answers, data sent out through links and from what tools bring, file-sharing
+sites, programs, competitors.
 
 The **Test bench** shows which rules fire for a text and what they would do,
 without sending or recording anything. **What they did** lists every time a

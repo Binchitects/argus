@@ -76,6 +76,16 @@ public static class SafeguardEndpoints
             domains: ["wetransfer.com", "dropbox.com", "mega.nz", "pastebin.com", "file.io", "transfer.sh"]),
         Template("Programs", "Programs and scripts are not attached.", "files", ["file"], "block", extensions: [".exe", ".dll", ".msi", ".bat", ".cmd", ".ps1", ".scr", ".jar", ".sh"]),
         Template("Competitors", "People are asked to confirm before naming a competitor.", "words", ["question"], "warn", patterns: "Competitor One; Competitor Two"),
+        Template("Identity numbers to cloud models", "National codes, passport, social security and insurance numbers (Iranian, US, UK, Indian, Canadian) never reach models on other providers.",
+            "pii", ["question", "file", "api"], "block", models: ["@external"], kinds: Pii.IdentityKinds),
+        Template("Prompt injection in attached files", "Instructions hidden in documents people attach (in comments, hidden text, base64, any language), removed before the model reads them.",
+            "injection", ["file"], "mask"),
+        Template("Dangerous commands from agents", "A terminal, Code Arena or the sandbox is never sent a command that wipes files or disks, opens a reverse shell, pipes a script from the internet, drops a database or turns security off.",
+            "commands", ["tool_call"], "block"),
+        Template("Dangerous commands in answers", "People are asked to confirm before an answer that holds such a command reaches them.", "commands", ["answer"], "warn"),
+        Template("Data sent out through links", "An answer or a tool call that would send data to another site through an image or a link's address (how injected instructions leak what the model read) is stopped. Add the company's own domains.",
+            "exfiltration", ["answer", "tool_call"], "block"),
+        Template("Data sent out from what tools bring", "Images and data-carrying links in what tools bring are removed before the model reads them.", "exfiltration", ["tool_result"], "mask"),
     ];
 
     private static object Template(string name, string description, string detector, string[] stages, string action, string[]? models = null, string? patterns = null,
@@ -99,7 +109,7 @@ public static class SafeguardEndpoints
             rules = rules.Select(r => new { rule = Shape(r), week = counts.GetValueOrDefault(r.Id) }),
             detectors = SafeguardRule.AllDetectors, stages = SafeguardRule.AllStages, actions = SafeguardRule.AllActions,
             categories = Safeguards.Categories.Select(c => new { key = c.Key, description = c.Value }),
-            secretKinds = Secrets.AllKinds, piiKinds = Pii.AllKinds,
+            secretKinds = Secrets.AllKinds, piiKinds = Pii.AllKinds, commandKinds = Commands.AllKinds,
         });
     }
 
@@ -161,6 +171,10 @@ public static class SafeguardEndpoints
         if (r.Detector == "pii" && (r.Kinds ?? []).FirstOrDefault(k => !Pii.AllKinds.Contains(k)) is { } kind)
         {
             return $"{kind} is not one of {string.Join(", ", Pii.AllKinds)}.";
+        }
+        if (r.Detector == "commands" && (r.Kinds ?? []).FirstOrDefault(k => !Commands.AllKinds.Contains(k)) is { } command)
+        {
+            return $"{command} is not one of {string.Join(", ", Commands.AllKinds)}.";
         }
         if (r.Detector == "secrets" && (r.Kinds ?? []).FirstOrDefault(k => !Secrets.AllKinds.Contains(k)) is { } secret)
         {

@@ -63,7 +63,7 @@ public sealed class SafeguardRule
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 
-    public static readonly string[] AllDetectors = ["secrets", "pii", "words", "topic", "injection", "links", "files"];
+    public static readonly string[] AllDetectors = ["secrets", "pii", "words", "topic", "injection", "links", "files", "commands", "exfiltration"];
     public static readonly string[] AllStages = ["question", "file", "answer", "tool_call", "tool_result", "api"];
     public static readonly string[] AllActions = ["block", "mask", "warn", "justify", "log", "reroute", "allow"];
 }
