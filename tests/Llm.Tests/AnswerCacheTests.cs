@@ -66,6 +66,23 @@ public sealed class AnswerCacheTests(AppFixture app)
     private static string Words(JsonObject completion) => completion["choices"]![0]!["message"]!["content"]!.GetValue<string>();
 
     [Fact]
+    public async Task A_browsers_preflight_of_chat_completions_is_answered()
+    {
+        var (f, _) = NewApp("off");
+        await using var _f = f;
+        var client = f.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://gateway.{AppFixture.Domain}"), HandleCookies = false });
+        foreach (var path in new[] { "/v1/chat/completions", "/chat/completions" })
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Options, new Uri(path, UriKind.Relative));
+            req.Headers.TryAddWithoutValidation("Origin", "https://tool.example.test");
+            req.Headers.TryAddWithoutValidation("Access-Control-Request-Method", "POST");
+            var res = await client.SendAsync(req);
+            await StatusAssert.Is(HttpStatusCode.NoContent, res);
+            Assert.Equal("*", res.Headers.GetValues("Access-Control-Allow-Origin").Single());
+        }
+    }
+
+    [Fact]
     public async Task A_repeated_identical_API_call_is_answered_from_the_cache_costs_nothing_and_says_so()
     {
         var (f, _) = NewApp("all");

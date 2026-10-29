@@ -427,8 +427,9 @@ public static class AnswerCacheEndpoints
 
     public static void MapAnswerCache(this IEndpointRouteBuilder app)
     {
-        app.MapPost("/v1/chat/completions", ProxyAsync).AllowAnonymous("The OpenAI-style API: the API key is checked.").DisableAntiforgery();
-        app.MapPost("/chat/completions", ProxyAsync).AllowAnonymous("The OpenAI-style API: the API key is checked.").DisableAntiforgery();
+        // A browser's preflight (OPTIONS) is answered too: a web page may call the API with its key.
+        app.MapMethods("/v1/chat/completions", ["POST", "OPTIONS"], ProxyAsync).AllowAnonymous("The OpenAI-style API: the API key is checked.").DisableAntiforgery();
+        app.MapMethods("/chat/completions", ["POST", "OPTIONS"], ProxyAsync).AllowAnonymous("The OpenAI-style API: the API key is checked.").DisableAntiforgery();
         // The other ways agents ask (Anthropic's messages, OpenAI's responses and completions): through the
         // key's line too, not cached.
         foreach (var path in new[] { "/v1/messages", "/messages", "/v1/responses", "/responses", "/v1/completions", "/completions" })
@@ -529,7 +530,7 @@ public static class AnswerCacheEndpoints
         var key = auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? auth[7..].Trim() : null;
         // Anthropic's clients send the key as x-api-key.
         key ??= request.Headers["x-api-key"].ToString() is { Length: > 0 } x ? x.Trim() : null;
-        var completions = request.Path.Value?.EndsWith("/chat/completions", StringComparison.Ordinal) == true;
+        var completions = request.Path.Value?.EndsWith("/chat/completions", StringComparison.Ordinal) == true && HttpMethods.IsPost(request.Method);
         var control = request.Headers.CacheControl.ToString();
         byte[]? body = null;
         JsonObject? json = null;
@@ -658,13 +659,32 @@ public static class AnswerCacheEndpoints
         using var _turn = turn;
         logged?.Running();
         // The agent's session goes back to the engine slot that holds its start (and its cache, from disk when it lost it),
-        // as a chat's conversation does: each turn reads only what is new.
-        using var sending = completions && key is { Length: > 0 } && json?["model"] is JsonValue pm && pm.TryGetValue<string>(out var pinned) && SessionOf(key, json) is { } session
-            ? await route.TakeAsync(pinned, session, ct)
-            : null;
-        if (sending?.Slot is { } slotId && json is not null)
+        // as a chat's conversation does: each turn reads only what is new. A model that cannot be made ready says so (503,
+        // try again), not a bare error; and the request goes to the copy, or the fallback, the slot was taken on.
+        Chat.EngineRoute.Sending? sending = null;
+        if (completions && key is { Length: > 0 } && json?["model"] is JsonValue pm && pm.TryGetValue<string>(out var pinned) && SessionOf(key, json) is { } session)
         {
-            json["id_slot"] = slotId;
+            try
+            {
+                sending = await route.TakeAsync(pinned, session, ct);
+            }
+            catch (Chat.ChatGatewayException ex) when (!ct.IsCancellationRequested)
+            {
+                await RefuseAsync(StatusCodes.Status503ServiceUnavailable, ex.Message, "model_not_ready");
+                return;
+            }
+        }
+        using var _sending = sending;
+        if (json is not null && (sending?.Slot is not null || sending?.Model is not null))
+        {
+            if (sending.Slot is { } slotId)
+            {
+                json["id_slot"] = slotId;
+            }
+            if (sending.Model is { } copy)
+            {
+                json["model"] = copy;
+            }
             body = Encoding.UTF8.GetBytes(json.ToJsonString());
         }
         using var forward = new HttpRequestMessage(new HttpMethod(request.Method), new Uri(request.Path + request.QueryString, UriKind.Relative))

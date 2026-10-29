@@ -1355,6 +1355,26 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         var verdict = await GuardAsync(f, "tiny-a");
         Assert.Equal("BLOCKED", verdict.GetProperty("action").GetString());
         Assert.StartsWith("tiny-a could not be loaded just now", verdict.GetProperty("blocked_reason").GetString(), StringComparison.Ordinal);
+        // An agent's session through the API (two messages, so it is pinned to a slot): the same reason, as JSON, with when to
+        // try again; not a bare error.
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var person = "k" + Guid.NewGuid().ToString("N")[..10];
+        var key = (await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = person, email = $"{person}@example.test" }))).GetProperty("apiKey").GetString()!;
+        var client = f.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://gateway.{AppFixture.Domain}"), HandleCookies = false });
+        using (var req = new HttpRequestMessage(HttpMethod.Post, new Uri("/v1/chat/completions", UriKind.Relative))
+        {
+            Content = new StringContent(JsonSerializer.Serialize(new { model = "tiny-a", messages = new[] { new { role = "system", content = "Be brief." }, new { role = "user", content = "Hi" } } }),
+                System.Text.Encoding.UTF8, "application/json"),
+        })
+        {
+            req.Headers.Authorization = new("Bearer", key);
+            var refused = await client.SendAsync(req);
+            await StatusAssert.Is(HttpStatusCode.ServiceUnavailable, refused);
+            var error = JsonDocument.Parse(await refused.Content.ReadAsStringAsync()).RootElement.GetProperty("error");
+            Assert.Equal("model_not_ready", error.GetProperty("type").GetString());
+            Assert.StartsWith("tiny-a could not be loaded just now", error.GetProperty("message").GetString(), StringComparison.Ordinal);
+            Assert.NotNull(refused.Headers.RetryAfter);
+        }
 
         // Its wait over: the request goes (the engine loads it for it), a try after which the next wait is longer.
         clock.Now += EngineState.Wait(1) + TimeSpan.FromSeconds(1);

@@ -84,6 +84,14 @@ public sealed class FakeModel : HttpMessageHandler
         {
             return new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent("""{"error":{"message":"Authentication Error, Invalid proxy server token passed."}}""") };
         }
+        // A browser's preflight: the gateway's CORS answers it.
+        if (request.Method == HttpMethod.Options)
+        {
+            Passed.Enqueue((request.RequestUri!.PathAndQuery, null));
+            var preflight = new HttpResponseMessage(HttpStatusCode.NoContent);
+            preflight.Headers.TryAddWithoutValidation("Access-Control-Allow-Origin", "*");
+            return preflight;
+        }
         // The model list, and embeddings: what the app passes on as it came (ApiPassage).
         if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath.EndsWith("/models", StringComparison.Ordinal))
         {
