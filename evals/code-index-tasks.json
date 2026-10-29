@@ -1,0 +1,3509 @@
+{
+ "corpus": "llm-service",
+ "head": "75326d44f46243b30d4f8609ce33b89831cd1824",
+ "seed": 20261030,
+ "tasks": [
+  {
+   "family": "locate",
+   "commit": "d7f237d2ca71481944c7cb6dbb5940accf463e5f",
+   "at": "d7f237d2ca71481944c7cb6dbb5940accf463e5f^",
+   "files": [
+    "src/CodeArena/Json.cs",
+    "src/CodeArena/UserFiles.cs",
+    "src/CodeArena/WebIde.cs",
+    "src/CodeArena/WorkspaceState.cs"
+   ],
+   "hunks": {
+    "src/CodeArena/Json.cs": [
+     [
+      116,
+      116
+     ]
+    ],
+    "src/CodeArena/WebIde.cs": [
+     [
+      26,
+      26
+     ],
+     [
+      35,
+      35
+     ],
+     [
+      183,
+      183
+     ]
+    ]
+   },
+   "prompt": "Code Arena keeps the person's settings and shortcuts, and each project's state and trust\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-000",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "e76a16c712c3a904ad162dffe86172d7122af11c",
+   "at": "e76a16c712c3a904ad162dffe86172d7122af11c^",
+   "files": [
+    "src/Argus/Indexing/Links.cs",
+    "src/Argus/Indexing/Parsers.cs",
+    "src/Argus/Store/GraphLinks.cs"
+   ],
+   "hunks": {
+    "src/Argus/Indexing/Links.cs": [
+     [
+      23,
+      23
+     ],
+     [
+      36,
+      36
+     ],
+     [
+      39,
+      39
+     ],
+     [
+      44,
+      45
+     ],
+     [
+      180,
+      180
+     ],
+     [
+      182,
+      182
+     ],
+     [
+      184,
+      184
+     ],
+     [
+      242,
+      242
+     ],
+     [
+      297,
+      297
+     ],
+     [
+      298,
+      298
+     ],
+     [
+      302,
+      302
+     ],
+     [
+      310,
+      310
+     ],
+     [
+      368,
+      368
+     ],
+     [
+      371,
+      372
+     ],
+     [
+      374,
+      374
+     ],
+     [
+      392,
+      393
+     ],
+     [
+      405,
+      405
+     ],
+     [
+      407,
+      407
+     ],
+     [
+      408,
+      408
+     ],
+     [
+      450,
+      450
+     ],
+     [
+      483,
+      483
+     ],
+     [
+      501,
+      501
+     ],
+     [
+      512,
+      512
+     ],
+     [
+      513,
+      513
+     ],
+     [
+      520,
+      520
+     ],
+     [
+      521,
+      521
+     ],
+     [
+      529,
+      529
+     ]
+    ],
+    "src/Argus/Indexing/Parsers.cs": [
+     [
+      28,
+      28
+     ]
+    ],
+    "src/Argus/Store/GraphLinks.cs": [
+     [
+      110,
+      110
+     ],
+     [
+      129,
+      129
+     ],
+     [
+      149,
+      149
+     ],
+     [
+      196,
+      196
+     ],
+     [
+      245,
+      245
+     ]
+    ]
+   },
+   "prompt": "Argus reads each ecosystem's own conventions for what links repositories\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-001",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "b69b807575a6b1e93ad7a89bf2f8a84bf2158bf5",
+   "at": "b69b807575a6b1e93ad7a89bf2f8a84bf2158bf5^",
+   "files": [
+    "src/CodeArena/Problems.cs",
+    "src/CodeArena/WebIde.cs"
+   ],
+   "hunks": {
+    "src/CodeArena/Problems.cs": [
+     [
+      14,
+      14
+     ],
+     [
+      16,
+      16
+     ],
+     [
+      48,
+      48
+     ],
+     [
+      52,
+      52
+     ],
+     [
+      64,
+      64
+     ]
+    ],
+    "src/CodeArena/WebIde.cs": [
+     [
+      36,
+      36
+     ],
+     [
+      40,
+      40
+     ]
+    ]
+   },
+   "prompt": "The Problems check builds the project's build configuration, Debug or Release\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-002",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "b9deda9d964f398dfd7337077da609ca12fb79e8",
+   "at": "b9deda9d964f398dfd7337077da609ca12fb79e8^",
+   "files": [
+    "src/CodeArena/IdeGit.cs"
+   ],
+   "hunks": {
+    "src/CodeArena/IdeGit.cs": [
+     [
+      42,
+      42
+     ],
+     [
+      46,
+      46
+     ]
+    ]
+   },
+   "prompt": "Code Arena's Source Control lists a folder's files when it is reached through a link\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-003",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "e553a5ad6446206da4ee03febeb3eff59c0d22f5",
+   "at": "e553a5ad6446206da4ee03febeb3eff59c0d22f5^",
+   "files": [
+    "argus/mcpsrv/tools.py",
+    "argus/store/packs.py",
+    "evals/run_code_review.py",
+    "evals/run_code_review_local.py"
+   ],
+   "hunks": {
+    "argus/mcpsrv/tools.py": [
+     [
+      434,
+      434
+     ],
+     [
+      534,
+      534
+     ],
+     [
+      746,
+      746
+     ]
+    ],
+    "argus/store/packs.py": [
+     [
+      672,
+      672
+     ]
+    ]
+   },
+   "prompt": "feat: docs_contracts -- the facts before the review, not after the mistake\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-004",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "da45680e89f7cb3c55930dc34017dcc2603df3b2",
+   "at": "da45680e89f7cb3c55930dc34017dcc2603df3b2^",
+   "files": [
+    "src/web/src/code-arena/format.ts",
+    "src/web/src/code-arena/monaco.ts"
+   ],
+   "hunks": {
+    "src/web/src/code-arena/format.ts": [
+     [
+      14,
+      15
+     ],
+     [
+      18,
+      18
+     ],
+     [
+      29,
+      29
+     ],
+     [
+      32,
+      32
+     ],
+     [
+      34,
+      34
+     ],
+     [
+      68,
+      68
+     ],
+     [
+      70,
+      70
+     ],
+     [
+      76,
+      76
+     ],
+     [
+      86,
+      88
+     ],
+     [
+      165,
+      166
+     ],
+     [
+      171,
+      171
+     ],
+     [
+      175,
+      175
+     ],
+     [
+      177,
+      177
+     ],
+     [
+      186,
+      188
+     ]
+    ],
+    "src/web/src/code-arena/monaco.ts": [
+     [
+      6,
+      6
+     ],
+     [
+      33,
+      33
+     ]
+    ]
+   },
+   "prompt": "Format Document formats with the editor's own formatter where no project formatter can run\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-005",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "8f9b1785b113946b0f1ea7b18d2fc69bae505a09",
+   "at": "8f9b1785b113946b0f1ea7b18d2fc69bae505a09^",
+   "files": [
+    "src/Llm.Api/Media/StoryEndpoints.cs"
+   ],
+   "hunks": {
+    "src/Llm.Api/Media/StoryEndpoints.cs": [
+     [
+      72,
+      72
+     ],
+     [
+      76,
+      76
+     ]
+    ]
+   },
+   "prompt": "A video not cut yet says so in the list of stories (it named a file of no id), and the storyboard's end-to-end check on the deployed stack\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-006",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "d7a3bca8407e16e98c8f5857f0a7d2635e671050",
+   "at": "d7a3bca8407e16e98c8f5857f0a7d2635e671050^",
+   "files": [
+    "argus/store/packs.py"
+   ],
+   "hunks": {
+    "argus/store/packs.py": [
+     [
+      219,
+      219
+     ],
+     [
+      256,
+      256
+     ],
+     [
+      285,
+      285
+     ]
+    ]
+   },
+   "prompt": "fix: one document could fill an entire search result set\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-007",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "fe5e91a15839efd6bf4dbf88ed0a75e2043aeaa9",
+   "at": "fe5e91a15839efd6bf4dbf88ed0a75e2043aeaa9^",
+   "files": [
+    "src/web/src/code-arena/dirty-diff.ts",
+    "src/web/src/code-arena/editor.tsx",
+    "src/web/src/code-arena/settings-schema.ts"
+   ],
+   "hunks": {
+    "src/web/src/code-arena/editor.tsx": [
+     [
+      26,
+      26
+     ],
+     [
+      1096,
+      1096
+     ],
+     [
+      1152,
+      1152
+     ]
+    ],
+    "src/web/src/code-arena/settings-schema.ts": [
+     [
+      141,
+      141
+     ]
+    ]
+   },
+   "prompt": "Code Arena's editor shows the lines changed since git's index beside the line numbers\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-008",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "ce6bc8d479c8c1c7cd76ab8a6897467c9d4688db",
+   "at": "ce6bc8d479c8c1c7cd76ab8a6897467c9d4688db^",
+   "files": [
+    "src/Llm.Api/Models/ModelCatalog.cs",
+    "src/Llm.Api/Models/ModelEndpoints.cs",
+    "src/web/src/pages/admin/models.tsx"
+   ],
+   "hunks": {
+    "src/Llm.Api/Models/ModelCatalog.cs": [
+     [
+      609,
+      609
+     ],
+     [
+      611,
+      613
+     ]
+    ],
+    "src/Llm.Api/Models/ModelEndpoints.cs": [
+     [
+      55,
+      55
+     ],
+     [
+      124,
+      125
+     ]
+    ],
+    "src/web/src/pages/admin/models.tsx": [
+     [
+      177,
+      178
+     ]
+    ]
+   },
+   "prompt": "Admin -> Models and the docs say which models never make room, and the prompt cache's RAM per loaded model\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-009",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "0c7421caa3321f017a2e940fab1a9031285ec75b",
+   "at": "0c7421caa3321f017a2e940fab1a9031285ec75b^",
+   "files": [
+    "src/Argus/Access/ArenaKeys.cs"
+   ],
+   "hunks": {
+    "src/Argus/Access/ArenaKeys.cs": [
+     [
+      73,
+      73
+     ],
+     [
+      75,
+      75
+     ]
+    ]
+   },
+   "prompt": "Argus: a key check answered at once no longer outlives the cache\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-010",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "321cc7cc18b2ff31dafa392892324b46d29b3fe4",
+   "at": "321cc7cc18b2ff31dafa392892324b46d29b3fe4^",
+   "files": [
+    "src/CodeArena/LayaGuard.cs",
+    "src/CodeArena/Mcp.cs",
+    "src/CodeArena/Runtime.cs"
+   ],
+   "hunks": {
+    "src/CodeArena/LayaGuard.cs": [
+     [
+      1,
+      1
+     ],
+     [
+      7,
+      7
+     ],
+     [
+      10,
+      11
+     ],
+     [
+      13,
+      14
+     ],
+     [
+      34,
+      34
+     ],
+     [
+      43,
+      44
+     ],
+     [
+      54,
+      54
+     ],
+     [
+      56,
+      56
+     ],
+     [
+      58,
+      58
+     ],
+     [
+      69,
+      69
+     ],
+     [
+      74,
+      75
+     ],
+     [
+      77,
+      77
+     ],
+     [
+      79,
+      79
+     ],
+     [
+      81,
+      81
+     ],
+     [
+      87,
+      87
+     ],
+     [
+      93,
+      94
+     ],
+     [
+      96,
+      96
+     ],
+     [
+      99,
+      99
+     ],
+     [
+      101,
+      108
+     ],
+     [
+      110,
+      110
+     ],
+     [
+      167,
+      167
+     ],
+     [
+      170,
+      173
+     ],
+     [
+      177,
+      177
+     ],
+     [
+      179,
+      180
+     ],
+     [
+      181,
+      181
+     ],
+     [
+      188,
+      188
+     ]
+    ],
+    "src/CodeArena/Mcp.cs": [
+     [
+      173,
+      174
+     ],
+     [
+      176,
+      176
+     ],
+     [
+      178,
+      178
+     ],
+     [
+      180,
+      181
+     ],
+     [
+      183,
+      194
+     ],
+     [
+      196,
+      196
+     ],
+     [
+      198,
+      205
+     ],
+     [
+      206,
+      206
+     ],
+     [
+      236,
+      236
+     ]
+    ],
+    "src/CodeArena/Runtime.cs": [
+     [
+      207,
+      207
+     ]
+    ]
+   },
+   "prompt": "Laya reads all of a long command, and a guard that stops checking says so on the page\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-011",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "5912aa967608ae4a5ff8ffc28eba2b785f1c35b6",
+   "at": "5912aa967608ae4a5ff8ffc28eba2b785f1c35b6^",
+   "files": [
+    "src/web/src/help/topics.ts",
+    "src/web/src/pages/chat/chat-page.tsx",
+    "src/web/src/pages/chat/screen-share.tsx",
+    "src/web/src/pages/chat/screen.ts"
+   ],
+   "hunks": {
+    "src/web/src/help/topics.ts": [
+     [
+      89,
+      89
+     ]
+    ],
+    "src/web/src/pages/chat/chat-page.tsx": [
+     [
+      15,
+      15
+     ],
+     [
+      175,
+      175
+     ],
+     [
+      559,
+      559
+     ],
+     [
+      585,
+      585
+     ],
+     [
+      704,
+      704
+     ],
+     [
+      781,
+      781
+     ],
+     [
+      989,
+      989
+     ],
+     [
+      1158,
+      1158
+     ]
+    ]
+   },
+   "prompt": "Show your screen: share a window, a tab or the screen, and each question (typed or in Talk) takes a picture of it for a model that sees\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-012",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "75067cec03d760ade3dbd17c92d28e0c0e2dce2e",
+   "at": "75067cec03d760ade3dbd17c92d28e0c0e2dce2e^",
+   "files": [
+    "src/Llm.Api/Chat/ChatService.cs",
+    "src/Llm.Api/Models/ModelCatalog.cs"
+   ],
+   "hunks": {
+    "src/Llm.Api/Chat/ChatService.cs": [
+     [
+      70,
+      70
+     ],
+     [
+      78,
+      78
+     ],
+     [
+      200,
+      200
+     ],
+     [
+      211,
+      211
+     ],
+     [
+      254,
+      254
+     ],
+     [
+      388,
+      388
+     ],
+     [
+      408,
+      408
+     ],
+     [
+      655,
+      655
+     ]
+    ],
+    "src/Llm.Api/Models/ModelCatalog.cs": [
+     [
+      444,
+      444
+     ],
+     [
+      483,
+      485
+     ],
+     [
+      493,
+      493
+     ]
+    ]
+   },
+   "prompt": "Deep research leaves the web to its parts, and new chats start on the admin's default\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-013",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "243731e106b4910ad39577dde83832a05c9db17e",
+   "at": "243731e106b4910ad39577dde83832a05c9db17e^",
+   "files": [
+    "src/Llm.Api/Chat/AnswerJobs.cs",
+    "src/Llm.Api/Chat/Tools/ChatTools.cs",
+    "src/Llm.Api/Code/Business/BusinessMap.cs",
+    "src/Llm.Api/Code/ReviewEngine.cs"
+   ],
+   "hunks": {
+    "src/Llm.Api/Chat/AnswerJobs.cs": [
+     [
+      25,
+      25
+     ],
+     [
+      35,
+      35
+     ],
+     [
+      41,
+      41
+     ],
+     [
+      43,
+      43
+     ],
+     [
+      45,
+      45
+     ],
+     [
+      356,
+      356
+     ],
+     [
+      407,
+      408
+     ],
+     [
+      425,
+      425
+     ],
+     [
+      431,
+      431
+     ],
+     [
+      448,
+      448
+     ]
+    ],
+    "src/Llm.Api/Chat/Tools/ChatTools.cs": [
+     [
+      145,
+      145
+     ],
+     [
+      172,
+      172
+     ],
+     [
+      199,
+      200
+     ]
+    ],
+    "src/Llm.Api/Code/Business/BusinessMap.cs": [
+     [
+      27,
+      27
+     ],
+     [
+      39,
+      41
+     ],
+     [
+      60,
+      66
+     ]
+    ],
+    "src/Llm.Api/Code/ReviewEngine.cs": [
+     [
+      22,
+      22
+     ],
+     [
+      32,
+      33
+     ],
+     [
+      35,
+      35
+     ],
+     [
+      54,
+      60
+     ]
+    ]
+   },
+   "prompt": "Two races the release suite met now and then, found under load and fixed at their cause\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-014",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "d73f3e981f3749ce309671c27e5a9f3bed2724c5",
+   "at": "d73f3e981f3749ce309671c27e5a9f3bed2724c5^",
+   "files": [
+    "src/argus/packs/sources/microsoft_docs.py"
+   ],
+   "hunks": {
+    "src/argus/packs/sources/microsoft_docs.py": [
+     [
+      237,
+      237
+     ],
+     [
+      239,
+      242
+     ],
+     [
+      337,
+      338
+     ]
+    ]
+   },
+   "prompt": "packs: keep the OS requirement Microsoft ships on every API page\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-015",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "7e555e873127e0c9954bd472d9d6bf86b3b8db0c",
+   "at": "7e555e873127e0c9954bd472d9d6bf86b3b8db0c^",
+   "files": [
+    "src/web/src/lib/zip.ts",
+    "src/web/src/pages/chat/chat-page.tsx",
+    "src/web/src/pages/chat/files-panel.tsx",
+    "src/web/src/pages/chat/files-zip.ts"
+   ],
+   "hunks": {
+    "src/web/src/pages/chat/chat-page.tsx": [
+     [
+      439,
+      439
+     ]
+    ],
+    "src/web/src/pages/chat/files-panel.tsx": [
+     [
+      2,
+      2
+     ],
+     [
+      7,
+      7
+     ],
+     [
+      8,
+      8
+     ],
+     [
+      9,
+      9
+     ],
+     [
+      16,
+      16
+     ],
+     [
+      33,
+      33
+     ],
+     [
+      35,
+      35
+     ],
+     [
+      46,
+      46
+     ],
+     [
+      69,
+      69
+     ]
+    ]
+   },
+   "prompt": "Files panel: download all of a chat's files as one zip\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-016",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "063f7b01b47221fd8d0044dd463fb3acdee26568",
+   "at": "063f7b01b47221fd8d0044dd463fb3acdee26568^",
+   "files": [
+    "argus/store/packs.py"
+   ],
+   "hunks": {
+    "argus/store/packs.py": [
+     [
+      989,
+      989
+     ],
+     [
+      1004,
+      1004
+     ],
+     [
+      1029,
+      1030
+     ],
+     [
+      1032,
+      1035
+     ],
+     [
+      1037,
+      1037
+     ],
+     [
+      1043,
+      1043
+     ],
+     [
+      1045,
+      1045
+     ]
+    ]
+   },
+   "prompt": "fix: let the chunk say which of a page's symbols it documents\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-017",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "3b73fe1f1020ffc12ba20860f313c324d5417054",
+   "at": "3b73fe1f1020ffc12ba20860f313c324d5417054^",
+   "files": [
+    "src/Llm.Api/Chat/ChatOptions.cs",
+    "src/Llm.Api/Chat/RoomTranslations.cs",
+    "src/Llm.Api/Settings/SettingsCatalog.cs"
+   ],
+   "hunks": {
+    "src/Llm.Api/Chat/ChatOptions.cs": [
+     [
+      60,
+      60
+     ]
+    ],
+    "src/Llm.Api/Chat/RoomTranslations.cs": [
+     [
+      18,
+      19
+     ],
+     [
+      47,
+      48
+     ],
+     [
+      53,
+      53
+     ],
+     [
+      73,
+      73
+     ],
+     [
+      123,
+      124
+     ],
+     [
+      128,
+      128
+     ]
+    ],
+    "src/Llm.Api/Settings/SettingsCatalog.cs": [
+     [
+      191,
+      191
+     ]
+    ]
+   },
+   "prompt": "Rooms' translations, tried live: faithful (days, dates and numbers as they were, names and code untranslated), asked once more when the model answers in words, and by the model an admin names (Model that translates rooms), else the one for small steps\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-018",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "6a118fc0b2be50d8965e54834e4b1c7703764736",
+   "at": "6a118fc0b2be50d8965e54834e4b1c7703764736^",
+   "files": [
+    "src/web/src/code-arena/jsonc.ts",
+    "src/web/src/code-arena/keybindings-editor.tsx",
+    "src/web/src/code-arena/keys.ts",
+    "src/web/src/code-arena/settings-editor.tsx"
+   ],
+   "hunks": {
+    "src/web/src/code-arena/jsonc.ts": [
+     [
+      259,
+      262
+     ],
+     [
+      268,
+      273
+     ],
+     [
+      292,
+      292
+     ],
+     [
+      304,
+      304
+     ],
+     [
+      306,
+      309
+     ],
+     [
+      329,
+      329
+     ]
+    ],
+    "src/web/src/code-arena/keybindings-editor.tsx": [
+     [
+      18,
+      18
+     ],
+     [
+      55,
+      55
+     ],
+     [
+      68,
+      68
+     ],
+     [
+      75,
+      75
+     ],
+     [
+      250,
+      250
+     ]
+    ],
+    "src/web/src/code-arena/keys.ts": [
+     [
+      3,
+      3
+     ],
+     [
+      14,
+      14
+     ],
+     [
+      291,
+      291
+     ],
+     [
+      293,
+      293
+     ],
+     [
+      307,
+      307
+     ],
+     [
+      325,
+      325
+     ],
+     [
+      336,
+      336
+     ],
+     [
+      341,
+      341
+     ],
+     [
+      343,
+      343
+     ],
+     [
+      349,
+      349
+     ],
+     [
+      363,
+      363
+     ],
+     [
+      393,
+      393
+     ],
+     [
+      394,
+      394
+     ]
+    ],
+    "src/web/src/code-arena/settings-editor.tsx": [
+     [
+      36,
+      36
+     ],
+     [
+      93,
+      93
+     ],
+     [
+      166,
+      166
+     ]
+    ]
+   },
+   "prompt": "Settings and Keyboard Shortcuts editors keep comments, show each tab's own values, and keybindings.json removals reach the editor\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-019",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "c3698d07b72b68e36975b3674a12e82afd4d3062",
+   "at": "c3698d07b72b68e36975b3674a12e82afd4d3062^",
+   "files": [
+    "argus/mcpsrv/tools.py"
+   ],
+   "hunks": {
+    "argus/mcpsrv/tools.py": [
+     [
+      384,
+      384
+     ],
+     [
+      388,
+      388
+     ],
+     [
+      394,
+      394
+     ],
+     [
+      402,
+      406
+     ],
+     [
+      551,
+      551
+     ],
+     [
+      558,
+      562
+     ],
+     [
+      896,
+      901
+     ],
+     [
+      1109,
+      1109
+     ],
+     [
+      1123,
+      1123
+     ],
+     [
+      1135,
+      1135
+     ],
+     [
+      1204,
+      1204
+     ]
+    ]
+   },
+   "prompt": "fix(argus): semantic search worked for nobody, and four tools refused in silence\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-020",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "e6fb9f3a68e455220aba3439765073334dcbf80a",
+   "at": "e6fb9f3a68e455220aba3439765073334dcbf80a^",
+   "files": [
+    "src/Argus/Indexing/Links.cs",
+    "src/Argus/Store/GraphLinks.cs"
+   ],
+   "hunks": {
+    "src/Argus/Indexing/Links.cs": [
+     [
+      26,
+      28
+     ],
+     [
+      316,
+      320
+     ]
+    ],
+    "src/Argus/Store/GraphLinks.cs": [
+     [
+      57,
+      57
+     ],
+     [
+      91,
+      91
+     ],
+     [
+      111,
+      111
+     ],
+     [
+      117,
+      117
+     ],
+     [
+      132,
+      132
+     ]
+    ]
+   },
+   "prompt": "Argus names a Python module from its import root, under any folder\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-021",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "e0debd026ce097c13ce85731cf54a7efba495153",
+   "at": "e0debd026ce097c13ce85731cf54a7efba495153^",
+   "files": [
+    "src/Llm.Api/Chat/ChatEndpoints.cs",
+    "src/Llm.Api/Chat/ChatService.cs",
+    "src/web/src/pages/chat/chat-page.tsx",
+    "src/web/src/pages/chat/composer.tsx"
+   ],
+   "hunks": {
+    "src/Llm.Api/Chat/ChatEndpoints.cs": [
+     [
+      38,
+      38
+     ],
+     [
+      473,
+      473
+     ]
+    ],
+    "src/Llm.Api/Chat/ChatService.cs": [
+     [
+      19,
+      19
+     ],
+     [
+      54,
+      54
+     ],
+     [
+      98,
+      98
+     ],
+     [
+      127,
+      127
+     ],
+     [
+      129,
+      129
+     ],
+     [
+      170,
+      170
+     ]
+    ],
+    "src/web/src/pages/chat/chat-page.tsx": [
+     [
+      35,
+      35
+     ],
+     [
+      402,
+      402
+     ],
+     [
+      415,
+      415
+     ],
+     [
+      418,
+      418
+     ],
+     [
+      461,
+      461
+     ],
+     [
+      485,
+      485
+     ],
+     [
+      616,
+      616
+     ],
+     [
+      726,
+      726
+     ]
+    ],
+    "src/web/src/pages/chat/composer.tsx": [
+     [
+      1,
+      1
+     ],
+     [
+      38,
+      38
+     ],
+     [
+      57,
+      57
+     ],
+     [
+      172,
+      172
+     ],
+     [
+      186,
+      186
+     ]
+    ]
+   },
+   "prompt": "Deep research: a plan, sub-agents on the web, a report with its sources\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-022",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "b22d91e5422c53a32f6b030ba29b5ecabd3b4185",
+   "at": "b22d91e5422c53a32f6b030ba29b5ecabd3b4185^",
+   "files": [
+    "argus/store/queries.py"
+   ],
+   "hunks": {
+    "argus/store/queries.py": [
+     [
+      91,
+      91
+     ]
+    ]
+   },
+   "prompt": "fix: report queued_retries as a path count, not a queue-row flag\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-023",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "631fa0ebdcbeafa00bd322bd5d57a01f422b5f5f",
+   "at": "631fa0ebdcbeafa00bd322bd5d57a01f422b5f5f^",
+   "files": [
+    "src/Llm.Api/Models/GpuShare.cs"
+   ],
+   "hunks": {
+    "src/Llm.Api/Models/GpuShare.cs": [
+     [
+      44,
+      44
+     ],
+     [
+      49,
+      49
+     ],
+     [
+      52,
+      53
+     ],
+     [
+      117,
+      118
+     ],
+     [
+      122,
+      122
+     ]
+    ]
+   },
+   "prompt": "Pictures from a gateway's model that is not this stack's no longer wait for each other\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-024",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "f48380a93011caa72f98c6fa1706ae3e73cbd579",
+   "at": "f48380a93011caa72f98c6fa1706ae3e73cbd579^",
+   "files": [
+    "src/Llm.Api/Chat/EngineRoute.cs",
+    "src/Llm.Api/Models/GpuShare.cs"
+   ],
+   "hunks": {
+    "src/Llm.Api/Chat/EngineRoute.cs": [
+     [
+      317,
+      317
+     ],
+     [
+      319,
+      319
+     ],
+     [
+      323,
+      323
+     ],
+     [
+      336,
+      336
+     ],
+     [
+      342,
+      342
+     ],
+     [
+      377,
+      377
+     ]
+    ],
+    "src/Llm.Api/Models/GpuShare.cs": [
+     [
+      158,
+      158
+     ],
+     [
+      273,
+      273
+     ],
+     [
+      275,
+      275
+     ]
+    ]
+   },
+   "prompt": "A video stopped while room is made for it gives back the chat models it had unloaded\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-025",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "a3be48d52a913c1a11b6b94f70206265dc77b512",
+   "at": "a3be48d52a913c1a11b6b94f70206265dc77b512^",
+   "files": [
+    "src/CodeArena/Ide.cs",
+    "src/CodeArena/LocalTools.cs",
+    "src/CodeArena/Mentions.cs",
+    "src/CodeArena/Workspace.cs"
+   ],
+   "hunks": {
+    "src/CodeArena/Ide.cs": [
+     [
+      192,
+      192
+     ],
+     [
+      239,
+      239
+     ],
+     [
+      242,
+      242
+     ],
+     [
+      244,
+      244
+     ]
+    ],
+    "src/CodeArena/LocalTools.cs": [
+     [
+      277,
+      277
+     ],
+     [
+      320,
+      320
+     ],
+     [
+      493,
+      493
+     ],
+     [
+      566,
+      567
+     ],
+     [
+      569,
+      577
+     ]
+    ],
+    "src/CodeArena/Mentions.cs": [
+     [
+      49,
+      49
+     ],
+     [
+      186,
+      187
+     ],
+     [
+      189,
+      189
+     ],
+     [
+      193,
+      193
+     ],
+     [
+      262,
+      262
+     ]
+    ],
+    "src/CodeArena/Workspace.cs": [
+     [
+      112,
+      113
+     ],
+     [
+      352,
+      352
+     ],
+     [
+      355,
+      355
+     ],
+     [
+      479,
+      479
+     ],
+     [
+      486,
+      486
+     ],
+     [
+      490,
+      490
+     ],
+     [
+      498,
+      498
+     ]
+    ]
+   },
+   "prompt": "Code Arena on Windows: files held open, UTF-16, CRLF, Git Bash\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-026",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "b5936fc9f8d05b8fa33d6ed857480ee0f3a938b7",
+   "at": "b5936fc9f8d05b8fa33d6ed857480ee0f3a938b7^",
+   "files": [
+    "src/Llm.Api/Code/SecurityReview.cs"
+   ],
+   "hunks": {
+    "src/Llm.Api/Code/SecurityReview.cs": [
+     [
+      502,
+      502
+     ],
+     [
+      538,
+      538
+     ],
+     [
+      581,
+      581
+     ],
+     [
+      585,
+      585
+     ]
+    ]
+   },
+   "prompt": "Security review: a finding's weakness is not the prompt's example\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-027",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "ec5b3bef40190c9d2b95cbffc06c15f7da0d05d9",
+   "at": "ec5b3bef40190c9d2b95cbffc06c15f7da0d05d9^",
+   "files": [
+    "src/Llm.Api/Models/ModelCatalog.cs"
+   ],
+   "hunks": {
+    "src/Llm.Api/Models/ModelCatalog.cs": [
+     [
+      153,
+      153
+     ]
+    ]
+   },
+   "prompt": "EngineState.Set says what it keeps\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-028",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "8d60e5692730cc06e280cc3a414388b582b9bb90",
+   "at": "8d60e5692730cc06e280cc3a414388b582b9bb90^",
+   "files": [
+    "src/argus/mcpsrv/server.py",
+    "src/argus/store/explore.py",
+    "stack/deploy/admin-panel/app.py"
+   ],
+   "hunks": {
+    "src/argus/mcpsrv/server.py": [
+     [
+      24,
+      24
+     ],
+     [
+      899,
+      899
+     ]
+    ],
+    "stack/deploy/admin-panel/app.py": [
+     [
+      568,
+      568
+     ],
+     [
+      570,
+      575
+     ],
+     [
+      577,
+      577
+     ],
+     [
+      608,
+      608
+     ],
+     [
+      610,
+      610
+     ],
+     [
+      1414,
+      1414
+     ],
+     [
+      1571,
+      1571
+     ],
+     [
+      1948,
+      1948
+     ],
+     [
+      1985,
+      1985
+     ]
+    ]
+   },
+   "prompt": "admin console: an index explorer, and a fence around its queries\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-029",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "e7c8f995b431c91eb8b806d2da035d5f6f968385",
+   "at": "e7c8f995b431c91eb8b806d2da035d5f6f968385^",
+   "files": [
+    "argus/packs/chunk.py"
+   ],
+   "hunks": {
+    "argus/packs/chunk.py": [
+     [
+      33,
+      33
+     ],
+     [
+      63,
+      63
+     ],
+     [
+      88,
+      88
+     ],
+     [
+      92,
+      92
+     ]
+    ]
+   },
+   "prompt": "fix: de-duplicate heading anchors within a document in packs/chunk.py\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-030",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "103b1742b72d3fee4d030e1b19cb2eb4895e170a",
+   "at": "103b1742b72d3fee4d030e1b19cb2eb4895e170a^",
+   "files": [
+    "argus/whichrepo.py",
+    "deploy/test-gitlab/seed_corpus.py"
+   ],
+   "hunks": {
+    "argus/whichrepo.py": [
+     [
+      49,
+      49
+     ],
+     [
+      51,
+      52
+     ],
+     [
+      66,
+      67
+     ]
+    ]
+   },
+   "prompt": "fix: a filename is now looked up as a file, and pin the measurement corpus\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-031",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "be74af350907c5fc14befad8f4cfe844f56e3317",
+   "at": "be74af350907c5fc14befad8f4cfe844f56e3317^",
+   "files": [
+    "src/Llm.Api/Gateway/GatewayRoutes.cs",
+    "src/Llm.Api/IdentityWiring.cs",
+    "src/Llm.Api/Models/ModelCatalog.cs"
+   ],
+   "hunks": {
+    "src/Llm.Api/IdentityWiring.cs": [
+     [
+      513,
+      513
+     ]
+    ],
+    "src/Llm.Api/Models/ModelCatalog.cs": [
+     [
+      443,
+      443
+     ],
+     [
+      1011,
+      1011
+     ],
+     [
+      1013,
+      1031
+     ],
+     [
+      1033,
+      1061
+     ],
+     [
+      1063,
+      1092
+     ],
+     [
+      1119,
+      1210
+     ],
+     [
+      1220,
+      1222
+     ]
+    ]
+   },
+   "prompt": "Routes built from the app's own tables\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-032",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "a0366edd5483812682eba71acbfd01f32a4e859c",
+   "at": "a0366edd5483812682eba71acbfd01f32a4e859c^",
+   "files": [
+    "argus/cli.py",
+    "argus/worker.py"
+   ],
+   "hunks": {
+    "argus/cli.py": [
+     [
+      41,
+      41
+     ],
+     [
+      47,
+      47
+     ],
+     [
+      130,
+      130
+     ],
+     [
+      145,
+      145
+     ]
+    ],
+    "argus/worker.py": [
+     [
+      167,
+      168
+     ],
+     [
+      173,
+      174
+     ],
+     [
+      176,
+      179
+     ]
+    ]
+   },
+   "prompt": "fix: clear retry counters on success and add --reset-retries\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-033",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "57ccd979dfa47ca0206efb0a756beb45ffe41de4",
+   "at": "57ccd979dfa47ca0206efb0a756beb45ffe41de4^",
+   "files": [
+    "src/web/src/pages/chat/chat-page.tsx",
+    "src/web/src/pages/chat/panel.tsx"
+   ],
+   "hunks": {
+    "src/web/src/pages/chat/chat-page.tsx": [
+     [
+      878,
+      878
+     ]
+    ],
+    "src/web/src/pages/chat/panel.tsx": [
+     [
+      33,
+      33
+     ],
+     [
+      41,
+      42
+     ],
+     [
+      116,
+      134
+     ],
+     [
+      142,
+      143
+     ],
+     [
+      145,
+      146
+     ],
+     [
+      162,
+      162
+     ]
+    ]
+   },
+   "prompt": "Ask a panel works in a new chat (the chat is made for it), and its verdict no longer pushes Done off the screen\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-034",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "6f0a2d5e9c0e4dda1a2b2afcf30a7ded41499333",
+   "at": "6f0a2d5e9c0e4dda1a2b2afcf30a7ded41499333^",
+   "files": [
+    "src/ArenaCode/Mcp.cs",
+    "src/ArenaCode/Runtime.cs",
+    "src/Llm.Api/ArenaMcp/McpEndpoints.cs"
+   ],
+   "hunks": {
+    "src/ArenaCode/Mcp.cs": [
+     [
+      46,
+      46
+     ],
+     [
+      81,
+      81
+     ]
+    ],
+    "src/ArenaCode/Runtime.cs": [
+     [
+      117,
+      117
+     ],
+     [
+      125,
+      125
+     ],
+     [
+      128,
+      128
+     ],
+     [
+      130,
+      130
+     ],
+     [
+      143,
+      143
+     ]
+    ],
+    "src/Llm.Api/ArenaMcp/McpEndpoints.cs": [
+     [
+      117,
+      117
+     ],
+     [
+      170,
+      170
+     ],
+     [
+      287,
+      287
+     ],
+     [
+      337,
+      337
+     ]
+    ]
+   },
+   "prompt": "Arena Code starts with Arena's default model, not the gateway's first\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-035",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "d3a19c77b52606806bc9ed41a96e9485e5bbaaa3",
+   "at": "d3a19c77b52606806bc9ed41a96e9485e5bbaaa3^",
+   "files": [
+    "src/argus/auditlog.py",
+    "src/argus/mcpsrv/server.py"
+   ],
+   "hunks": {
+    "src/argus/auditlog.py": [
+     [
+      89,
+      91
+     ]
+    ],
+    "src/argus/mcpsrv/server.py": [
+     [
+      256,
+      256
+     ],
+     [
+      270,
+      270
+     ],
+     [
+      303,
+      303
+     ]
+    ]
+   },
+   "prompt": "Log why a request was denied, not just that it was\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-036",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "f17f048ff08064bd1d97867e68d5ec826ed592e7",
+   "at": "f17f048ff08064bd1d97867e68d5ec826ed592e7^",
+   "files": [
+    "src/Llm.Api/Chat/ChatEndpoints.cs",
+    "src/Llm.Api/Chat/ChatService.cs",
+    "src/Llm.Api/Chat/GatewayChat.cs",
+    "src/Llm.Api/Chat/Talk.cs"
+   ],
+   "hunks": {
+    "src/Llm.Api/Chat/ChatEndpoints.cs": [
+     [
+      42,
+      42
+     ],
+     [
+      80,
+      80
+     ],
+     [
+      492,
+      492
+     ],
+     [
+      749,
+      750
+     ],
+     [
+      765,
+      765
+     ]
+    ],
+    "src/Llm.Api/Chat/ChatService.cs": [
+     [
+      20,
+      20
+     ]
+    ],
+    "src/Llm.Api/Chat/GatewayChat.cs": [
+     [
+      90,
+      90
+     ],
+     [
+      94,
+      94
+     ],
+     [
+      104,
+      105
+     ],
+     [
+      108,
+      108
+     ]
+    ]
+   },
+   "prompt": "Talk's server side: what is said is written down, and spoken questions get spoken answers\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-037",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "7c6e4383c6cad358610e456b2908f16132719c71",
+   "at": "7c6e4383c6cad358610e456b2908f16132719c71^",
+   "files": [
+    "src/web/src/pages/chat/chat-page.tsx",
+    "src/web/src/pages/chat/composer.tsx",
+    "src/web/src/pages/chat/use-research-gone.ts",
+    "src/web/src/pages/setup.tsx"
+   ],
+   "hunks": {
+    "src/web/src/pages/chat/chat-page.tsx": [
+     [
+      32,
+      32
+     ],
+     [
+      549,
+      549
+     ],
+     [
+      585,
+      585
+     ]
+    ],
+    "src/web/src/pages/chat/composer.tsx": [
+     [
+      4,
+      4
+     ],
+     [
+      318,
+      318
+     ],
+     [
+      322,
+      322
+     ]
+    ],
+    "src/web/src/pages/setup.tsx": [
+     [
+      26,
+      26
+     ],
+     [
+      30,
+      30
+     ],
+     [
+      328,
+      328
+     ]
+    ]
+   },
+   "prompt": "Deep research says why when it goes away or cannot be used, on a phone too\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-038",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "de209cea04b80be510b722d0138d519c9428bb3b",
+   "at": "de209cea04b80be510b722d0138d519c9428bb3b^",
+   "files": [
+    "src/Llm.Api/ArenaMcp/McpTools.cs",
+    "src/Llm.Api/Chat/PromptEndpoints.cs",
+    "src/Llm.Api/Chat/PromptLibrary.cs"
+   ],
+   "hunks": {
+    "src/Llm.Api/ArenaMcp/McpTools.cs": [
+     [
+      311,
+      313
+     ],
+     [
+      315,
+      315
+     ],
+     [
+      318,
+      318
+     ],
+     [
+      321,
+      321
+     ]
+    ],
+    "src/Llm.Api/Chat/PromptEndpoints.cs": [
+     [
+      57,
+      57
+     ]
+    ],
+    "src/Llm.Api/Chat/PromptLibrary.cs": [
+     [
+      26,
+      26
+     ]
+    ]
+   },
+   "prompt": "Arena MCP serves the prompt library\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-039",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "37475db889a0aa3bed5ad0e04c4d6acc6b6ff4d2",
+   "at": "37475db889a0aa3bed5ad0e04c4d6acc6b6ff4d2^",
+   "files": [
+    "src/web/src/code-arena/editor.tsx",
+    "src/web/src/code-arena/terminals.tsx"
+   ],
+   "hunks": {
+    "src/web/src/code-arena/editor.tsx": [
+     [
+      225,
+      226
+     ],
+     [
+      228,
+      228
+     ],
+     [
+      242,
+      242
+     ],
+     [
+      248,
+      248
+     ],
+     [
+      252,
+      252
+     ]
+    ],
+    "src/web/src/code-arena/terminals.tsx": [
+     [
+      114,
+      114
+     ],
+     [
+      120,
+      120
+     ],
+     [
+      130,
+      130
+     ]
+    ]
+   },
+   "prompt": "Code Arena's IDE keeps a save made while a file is read again, and opens one terminal however fast the panel is toggled\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-040",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "a3c8d7c9c3c6a3a383304971a332ada417ee60ad",
+   "at": "a3c8d7c9c3c6a3a383304971a332ada417ee60ad^",
+   "files": [
+    "deploy/agent_client_example.py"
+   ],
+   "hunks": {
+    "deploy/agent_client_example.py": [
+     [
+      33,
+      33
+     ],
+     [
+      40,
+      41
+     ]
+    ]
+   },
+   "prompt": "fix: the reference client hardcoded Ollama's endpoint\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-041",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "d69c5f0bc262b6016f43a84b1bdd28cd6d0f324b",
+   "at": "d69c5f0bc262b6016f43a84b1bdd28cd6d0f324b^",
+   "files": [
+    "deploy/scripts/multiuser-bench.py",
+    "deploy/scripts/scale-test.py"
+   ],
+   "hunks": {
+    "deploy/scripts/multiuser-bench.py": [
+     [
+      20,
+      20
+     ],
+     [
+      31,
+      31
+     ],
+     [
+      179,
+      179
+     ],
+     [
+      259,
+      259
+     ],
+     [
+      273,
+      273
+     ]
+    ],
+    "deploy/scripts/scale-test.py": [
+     [
+      7,
+      7
+     ],
+     [
+      140,
+      140
+     ],
+     [
+      144,
+      144
+     ],
+     [
+      146,
+      147
+     ],
+     [
+      184,
+      184
+     ],
+     [
+      201,
+      201
+     ],
+     [
+      205,
+      211
+     ]
+    ]
+   },
+   "prompt": "Load tests for the multi-GPU questions: ramps, shared prefixes, returns, restarts\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-042",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "44a5bfe77e9895e281ebf27eab1762cd5635c365",
+   "at": "44a5bfe77e9895e281ebf27eab1762cd5635c365^",
+   "files": [
+    "argus/mcpsrv/tools.py"
+   ],
+   "hunks": {
+    "argus/mcpsrv/tools.py": [
+     [
+      430,
+      433
+     ]
+    ]
+   },
+   "prompt": "fix: a guessed lang filter laundered into \"not documented\"\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-043",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "ec324d647799141ccec6b3b11ae623eea13c0fef",
+   "at": "ec324d647799141ccec6b3b11ae623eea13c0fef^",
+   "files": [
+    "src/Llm.Api/Models/MediaControl.cs"
+   ],
+   "hunks": {
+    "src/Llm.Api/Models/MediaControl.cs": [
+     [
+      117,
+      117
+     ],
+     [
+      120,
+      120
+     ]
+    ]
+   },
+   "prompt": "Tests for sound and video, read aloud, and the media models' controls\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-044",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "d0f6c85b79f063fa588293e2317fb0f3aa4822dc",
+   "at": "d0f6c85b79f063fa588293e2317fb0f3aa4822dc^",
+   "files": [
+    "src/web/src/code-arena/help-text.ts"
+   ],
+   "hunks": {
+    "src/web/src/code-arena/help-text.ts": [
+     [
+      73,
+      73
+     ],
+     [
+      90,
+      90
+     ]
+    ]
+   },
+   "prompt": "Docs and help: a failed turn keeps watching its commands, /jobs stop, stop_command asks every time\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-045",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "1c0701033c5cb9a03c786353105c1c53b716a436",
+   "at": "1c0701033c5cb9a03c786353105c1c53b716a436^",
+   "files": [
+    "dotnet/src/Argus/Indexing/Ctags.cs",
+    "src/argus/parse/ctags.py",
+    "stack/deploy/admin-panel/app.py"
+   ],
+   "hunks": {
+    "dotnet/src/Argus/Indexing/Ctags.cs": [
+     [
+      35,
+      35
+     ],
+     [
+      40,
+      40
+     ]
+    ],
+    "src/argus/parse/ctags.py": [
+     [
+      39,
+      39
+     ],
+     [
+      45,
+      45
+     ]
+    ],
+    "stack/deploy/admin-panel/app.py": [
+     [
+      448,
+      450
+     ]
+    ]
+   },
+   "prompt": "Index Python docstrings; one-paragraph console alerts\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-046",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "29196ea38260ec6a3095b55c87218504de8e0de5",
+   "at": "29196ea38260ec6a3095b55c87218504de8e0de5^",
+   "files": [
+    "argus/store/queries.py"
+   ],
+   "hunks": {
+    "argus/store/queries.py": [
+     [
+      5,
+      5
+     ],
+     [
+      25,
+      25
+     ],
+     [
+      29,
+      29
+     ],
+     [
+      32,
+      46
+     ],
+     [
+      51,
+      51
+     ],
+     [
+      54,
+      63
+     ],
+     [
+      67,
+      69
+     ],
+     [
+      71,
+      71
+     ],
+     [
+      74,
+      75
+     ],
+     [
+      76,
+      76
+     ],
+     [
+      81,
+      81
+     ],
+     [
+      84,
+      109
+     ]
+    ]
+   },
+   "prompt": "feat: chunk allowlists, wrap FTS errors, cap get_file output\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-047",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "123f360bcaf527d0eb2f30cf12db96745d250aa2",
+   "at": "123f360bcaf527d0eb2f30cf12db96745d250aa2^",
+   "files": [
+    "src/Llm.Api/Chat/MemoryReflection.cs"
+   ],
+   "hunks": {
+    "src/Llm.Api/Chat/MemoryReflection.cs": [
+     [
+      134,
+      134
+     ],
+     [
+      136,
+      136
+     ],
+     [
+      180,
+      180
+     ],
+     [
+      261,
+      261
+     ]
+    ]
+   },
+   "prompt": "Memory reflection: a chat with a tool call cut short is still read\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-048",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "9d4948b9c9099e38fcf92bf68f96ed04be742dcd",
+   "at": "9d4948b9c9099e38fcf92bf68f96ed04be742dcd^",
+   "files": [
+    "src/CodeArena/IdeGit.cs",
+    "src/CodeArena/WebIde.cs"
+   ],
+   "hunks": {
+    "src/CodeArena/IdeGit.cs": [
+     [
+      168,
+      171
+     ],
+     [
+      275,
+      275
+     ],
+     [
+      338,
+      338
+     ],
+     [
+      340,
+      340
+     ],
+     [
+      410,
+      410
+     ],
+     [
+      429,
+      433
+     ],
+     [
+      476,
+      476
+     ]
+    ],
+    "src/CodeArena/WebIde.cs": [
+     [
+      169,
+      169
+     ]
+    ]
+   },
+   "prompt": "Code Arena's git compare refuses a name git would misread and says when a read fails\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-049",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "34776f85b01bec1b3a48ded7fa72ab7dfb95530c",
+   "at": "34776f85b01bec1b3a48ded7fa72ab7dfb95530c^",
+   "files": [
+    "src/Llm.Api/Chat/Tools/ServerTls.cs",
+    "src/Llm.Api/Chat/Tools/ToolEndpoints.cs"
+   ],
+   "hunks": {
+    "src/Llm.Api/Chat/Tools/ServerTls.cs": [
+     [
+      197,
+      197
+     ],
+     [
+      215,
+      215
+     ],
+     [
+      217,
+      217
+     ],
+     [
+      223,
+      225
+     ],
+     [
+      227,
+      227
+     ],
+     [
+      230,
+      230
+     ],
+     [
+      232,
+      236
+     ],
+     [
+      238,
+      238
+     ],
+     [
+      240,
+      240
+     ],
+     [
+      242,
+      242
+     ],
+     [
+      245,
+      245
+     ],
+     [
+      248,
+      248
+     ],
+     [
+      250,
+      250
+     ],
+     [
+      254,
+      254
+     ],
+     [
+      262,
+      264
+     ],
+     [
+      266,
+      266
+     ],
+     [
+      268,
+      268
+     ],
+     [
+      272,
+      272
+     ]
+    ],
+    "src/Llm.Api/Chat/Tools/ToolEndpoints.cs": [
+     [
+      160,
+      161
+     ],
+     [
+      163,
+      167
+     ],
+     [
+      213,
+      214
+     ],
+     [
+      216,
+      216
+     ],
+     [
+      220,
+      220
+     ],
+     [
+      228,
+      228
+     ],
+     [
+      232,
+      232
+     ],
+     [
+      236,
+      236
+     ]
+    ]
+   },
+   "prompt": "An issuing CA trusted alone is held to its dates, Test names the real reason, and Read it says when no secure connection is possible\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-050",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "1c3bb471afd0502dd192daa701acb91a0ef664ab",
+   "at": "1c3bb471afd0502dd192daa701acb91a0ef664ab^",
+   "files": [
+    "tools/test-gitlab/seed.py"
+   ],
+   "hunks": {
+    "tools/test-gitlab/seed.py": [
+     [
+      11,
+      11
+     ],
+     [
+      209,
+      209
+     ],
+     [
+      361,
+      361
+     ],
+     [
+      420,
+      420
+     ]
+    ]
+   },
+   "prompt": "Review tests get a GitLab with merge requests, diffs, CI and real git refs\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-051",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "322ed6b11d6c962dff847f985ecabc12f6216f3f",
+   "at": "322ed6b11d6c962dff847f985ecabc12f6216f3f^",
+   "files": [
+    "argus/cli.py"
+   ],
+   "hunks": {
+    "argus/cli.py": [
+     [
+      11,
+      11
+     ],
+     [
+      16,
+      16
+     ],
+     [
+      189,
+      189
+     ],
+     [
+      202,
+      202
+     ],
+     [
+      213,
+      213
+     ]
+    ]
+   },
+   "prompt": "feat: add argus serve and flush-acl CLI commands\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-052",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "b5995f0a1b11141854a385900ceb31f6563dac3d",
+   "at": "b5995f0a1b11141854a385900ceb31f6563dac3d^",
+   "files": [
+    "argus/cli.py"
+   ],
+   "hunks": {
+    "argus/cli.py": [
+     [
+      4,
+      4
+     ],
+     [
+      269,
+      269
+     ],
+     [
+      578,
+      578
+     ],
+     [
+      686,
+      686
+     ]
+    ]
+   },
+   "prompt": "feat: add argus backup and document the restore procedure\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-053",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "ceff03fa4abbda21f360b5430977cadcd480c127",
+   "at": "ceff03fa4abbda21f360b5430977cadcd480c127^",
+   "files": [
+    "argus/packs/sources/python_docs.py"
+   ],
+   "hunks": {
+    "argus/packs/sources/python_docs.py": [
+     [
+      52,
+      52
+     ],
+     [
+      54,
+      54
+     ],
+     [
+      56,
+      56
+     ],
+     [
+      60,
+      60
+     ],
+     [
+      226,
+      226
+     ],
+     [
+      234,
+      234
+     ],
+     [
+      251,
+      251
+     ]
+    ]
+   },
+   "prompt": "fix: read the C API's own domain instead of its page titles\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-054",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "065871c02d7f6e136a5a5a15c297b13021dadcbd",
+   "at": "065871c02d7f6e136a5a5a15c297b13021dadcbd^",
+   "files": [
+    "src/CodeArena/Agent.cs",
+    "src/CodeArena/Gateway.cs",
+    "src/CodeArena/Runtime.cs"
+   ],
+   "hunks": {
+    "src/CodeArena/Agent.cs": [
+     [
+      147,
+      147
+     ],
+     [
+      348,
+      348
+     ],
+     [
+      384,
+      384
+     ]
+    ],
+    "src/CodeArena/Gateway.cs": [
+     [
+      47,
+      47
+     ],
+     [
+      49,
+      49
+     ],
+     [
+      135,
+      135
+     ],
+     [
+      137,
+      137
+     ],
+     [
+      168,
+      168
+     ],
+     [
+      193,
+      193
+     ],
+     [
+      195,
+      195
+     ],
+     [
+      197,
+      197
+     ],
+     [
+      199,
+      199
+     ],
+     [
+      201,
+      201
+     ],
+     [
+      204,
+      204
+     ],
+     [
+      217,
+      217
+     ],
+     [
+      222,
+      222
+     ],
+     [
+      226,
+      226
+     ],
+     [
+      243,
+      243
+     ]
+    ],
+    "src/CodeArena/Runtime.cs": [
+     [
+      101,
+      101
+     ],
+     [
+      589,
+      589
+     ]
+    ]
+   },
+   "prompt": "Code Arena carries on through a restarting gateway, a stalled stream and a dropped connection\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-055",
+   "split": "dev"
+  },
+  {
+   "family": "locate",
+   "commit": "ad28e1d638a4d0bd6e30021ae7dd87f1415dade8",
+   "at": "ad28e1d638a4d0bd6e30021ae7dd87f1415dade8^",
+   "files": [
+    "src/web/src/pages/admin/knowledge.tsx"
+   ],
+   "hunks": {
+    "src/web/src/pages/admin/knowledge.tsx": [
+     [
+      2,
+      2
+     ],
+     [
+      16,
+      16
+     ],
+     [
+      24,
+      24
+     ],
+     [
+      36,
+      36
+     ],
+     [
+      44,
+      44
+     ],
+     [
+      68,
+      68
+     ],
+     [
+      70,
+      70
+     ],
+     [
+      82,
+      82
+     ],
+     [
+      91,
+      91
+     ],
+     [
+      107,
+      107
+     ],
+     [
+      112,
+      112
+     ],
+     [
+      117,
+      117
+     ],
+     [
+      144,
+      144
+     ],
+     [
+      177,
+      177
+     ],
+     [
+      180,
+      180
+     ],
+     [
+      205,
+      205
+     ],
+     [
+      215,
+      215
+     ],
+     [
+      240,
+      240
+     ],
+     [
+      245,
+      245
+     ],
+     [
+      247,
+      247
+     ],
+     [
+      251,
+      251
+     ],
+     [
+      253,
+      253
+     ],
+     [
+      255,
+      255
+     ],
+     [
+      256,
+      256
+     ],
+     [
+      259,
+      269
+     ],
+     [
+      271,
+      271
+     ],
+     [
+      276,
+      276
+     ],
+     [
+      277,
+      277
+     ],
+     [
+      286,
+      286
+     ],
+     [
+      290,
+      291
+     ],
+     [
+      294,
+      305
+     ],
+     [
+      307,
+      307
+     ],
+     [
+      325,
+      325
+     ],
+     [
+      346,
+      346
+     ],
+     [
+      348,
+      348
+     ],
+     [
+      349,
+      349
+     ],
+     [
+      353,
+      354
+     ]
+    ]
+   },
+   "prompt": "Admin \u2192 Knowledge adds Confluence and SharePoint sources, with Test connection\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-056",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "36105dbaf8328139e40d31f361538fafb4c646b4",
+   "at": "36105dbaf8328139e40d31f361538fafb4c646b4^",
+   "files": [
+    "src/Llm.Api/Models/ModelAdvisor.cs",
+    "src/Llm.Api/Models/ModelEndpoints.cs",
+    "src/Llm.Api/Models/ModelLibrary.cs",
+    "src/Llm.Api/Models/VllmAdvisor.cs"
+   ],
+   "hunks": {
+    "src/Llm.Api/Models/ModelAdvisor.cs": [
+     [
+      106,
+      106
+     ]
+    ],
+    "src/Llm.Api/Models/ModelEndpoints.cs": [
+     [
+      215,
+      215
+     ],
+     [
+      220,
+      220
+     ],
+     [
+      248,
+      248
+     ],
+     [
+      267,
+      267
+     ],
+     [
+      495,
+      495
+     ],
+     [
+      507,
+      507
+     ],
+     [
+      567,
+      567
+     ],
+     [
+      583,
+      583
+     ],
+     [
+      623,
+      624
+     ],
+     [
+      643,
+      643
+     ],
+     [
+      646,
+      646
+     ]
+    ],
+    "src/Llm.Api/Models/ModelLibrary.cs": [
+     [
+      63,
+      63
+     ]
+    ]
+   },
+   "prompt": "vLLM models are sized and placed for whatever machine there is\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-057",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "037d74b2d6e80ad762b143508ebb2af565e4edd7",
+   "at": "037d74b2d6e80ad762b143508ebb2af565e4edd7^",
+   "files": [
+    "src/Llm.Api/Settings/SettingsCatalog.cs",
+    "src/web/src/pages/chat/types.ts"
+   ],
+   "hunks": {
+    "src/Llm.Api/Settings/SettingsCatalog.cs": [
+     [
+      162,
+      162
+     ]
+    ],
+    "src/web/src/pages/chat/types.ts": [
+     [
+      10,
+      10
+     ]
+    ]
+   },
+   "prompt": "New chats stay on the model they were getting when one the list puts first loads, and the setting says so\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-058",
+   "split": "test"
+  },
+  {
+   "family": "locate",
+   "commit": "9a7381d9897b802abb13ddb4fbd883e2ce8bb09c",
+   "at": "9a7381d9897b802abb13ddb4fbd883e2ce8bb09c^",
+   "files": [
+    "src/Argus/CodeHosts/CodeHost.cs",
+    "src/Argus/CodeHosts/GitLabHost.cs",
+    "src/Argus/Server/ToolCatalog.cs",
+    "src/Argus/Server/Tools.Review.cs"
+   ],
+   "hunks": {
+    "src/Argus/CodeHosts/CodeHost.cs": [
+     [
+      51,
+      51
+     ]
+    ],
+    "src/Argus/CodeHosts/GitLabHost.cs": [
+     [
+      158,
+      158
+     ]
+    ],
+    "src/Argus/Server/ToolCatalog.cs": [
+     [
+      1,
+      1
+     ],
+     [
+      112,
+      112
+     ]
+    ],
+    "src/Argus/Server/Tools.Review.cs": [
+     [
+      26,
+      26
+     ],
+     [
+      284,
+      284
+     ],
+     [
+      499,
+      499
+     ]
+    ]
+   },
+   "prompt": "Argus reads where the business speaks: issue_list, issue_get, wiki_list and wiki_get read a GitLab project's issues (by state, words, labels; one with its people's comments) and its wiki (its pages; one page's text), read-only with Argus's service token after the same per-person check as the merge request tools (34 tools). GitHub and Gitea say they are not read. Tests: the requirements test fakes ss (the host's own listeners on 18080/18443 failed it now and then) and checks a taken port is named with what listens\n\nName the files and the functions you would change for this, each with its path, and why. Change nothing.",
+   "id": "locate-059",
+   "split": "dev"
+  },
+  {
+   "family": "string",
+   "at": "HEAD",
+   "message": "No one asked for this one to be reviewed, or it was answered.",
+   "file": "src/Llm.Api/Safeguards/SafeguardEndpoints.cs",
+   "line": 359,
+   "prompt": "Where in the code is this message written: \"No one asked for this one to be reviewed, or it was answered.\"? Give its file and line. Change nothing.",
+   "id": "string-060",
+   "split": "dev"
+  },
+  {
+   "family": "string",
+   "at": "HEAD",
+   "message": "Who may open it: private, groups or company.",
+   "file": "src/Llm.Api/Apps/AppEndpoints.cs",
+   "line": 128,
+   "prompt": "Where in the code is this message written: \"Who may open it: private, groups or company.\"? Give its file and line. Change nothing.",
+   "id": "string-061",
+   "split": "test"
+  },
+  {
+   "family": "string",
+   "at": "HEAD",
+   "message": "Say it in one or two short sentences (at most 500 characters).",
+   "file": "src/CodeArena/Web.cs",
+   "line": 597,
+   "prompt": "Where in the code is this message written: \"Say it in one or two short sentences (at most 500 characters).\"? Give its file and line. Change nothing.",
+   "id": "string-062",
+   "split": "test"
+  },
+  {
+   "family": "string",
+   "at": "HEAD",
+   "message": "The index is unavailable; do not retry this query.",
+   "file": "src/Argus/Server/Tools.cs",
+   "line": 59,
+   "prompt": "Where in the code is this message written: \"The index is unavailable; do not retry this query.\"? Give its file and line. Change nothing.",
+   "id": "string-063",
+   "split": "test"
+  },
+  {
+   "family": "string",
+   "at": "HEAD",
+   "message": "Its certificate is trusted.",
+   "file": "src/Llm.Api/Ldap/LdapCheck.cs",
+   "line": 233,
+   "prompt": "Where in the code is this message written: \"Its certificate is trusted.\"? Give its file and line. Change nothing.",
+   "id": "string-064",
+   "split": "dev"
+  },
+  {
+   "family": "string",
+   "at": "HEAD",
+   "message": "Change retention, storage and company knowledge settings.",
+   "file": "src/Llm.Core/Access/Permissions.cs",
+   "line": 242,
+   "prompt": "Where in the code is this message written: \"Change retention, storage and company knowledge settings.\"? Give its file and line. Change nothing.",
+   "id": "string-065",
+   "split": "test"
+  },
+  {
+   "family": "string",
+   "at": "HEAD",
+   "message": "Say it in 4,000 characters or fewer.",
+   "file": "src/Llm.Api/Compliance/DataRequests.cs",
+   "line": 44,
+   "prompt": "Where in the code is this message written: \"Say it in 4,000 characters or fewer.\"? Give its file and line. Change nothing.",
+   "id": "string-066",
+   "split": "dev"
+  },
+  {
+   "family": "string",
+   "at": "HEAD",
+   "message": "Give the server a name, at most 100 characters.",
+   "file": "src/Llm.Api/Models/RemoteServerEndpoints.cs",
+   "line": 143,
+   "prompt": "Where in the code is this message written: \"Give the server a name, at most 100 characters.\"? Give its file and line. Change nothing.",
+   "id": "string-067",
+   "split": "test"
+  },
+  {
+   "family": "string",
+   "at": "HEAD",
+   "message": "The page to take (http://localhost:5173/...). Leave out for the whole screen.",
+   "file": "src/CodeArena/Screenshots.cs",
+   "line": 24,
+   "prompt": "Where in the code is this message written: \"The page to take (http://localhost:5173/...). Leave out for the whole screen.\"? Give its file and line. Change nothing.",
+   "id": "string-068",
+   "split": "dev"
+  },
+  {
+   "family": "string",
+   "at": "HEAD",
+   "message": "Give the words, phrases or patterns.",
+   "file": "src/Llm.Api/Safeguards/SafeguardEndpoints.cs",
+   "line": 153,
+   "prompt": "Where in the code is this message written: \"Give the words, phrases or patterns.\"? Give its file and line. Change nothing.",
+   "id": "string-069",
+   "split": "test"
+  },
+  {
+   "family": "string",
+   "at": "HEAD",
+   "message": "APP_DATA_KEY is not set, so a header value cannot be stored encrypted.",
+   "file": "src/Llm.Api/Chat/Tools/ToolEndpoints.cs",
+   "line": 370,
+   "prompt": "Where in the code is this message written: \"APP_DATA_KEY is not set, so a header value cannot be stored encrypted.\"? Give its file and line. Change nothing.",
+   "id": "string-070",
+   "split": "test"
+  },
+  {
+   "family": "string",
+   "at": "HEAD",
+   "message": "There were more: the database's limit stopped them.",
+   "file": "src/web/src/components/charts/data-chart.tsx",
+   "line": 123,
+   "prompt": "Where in the code is this message written: \"There were more: the database's limit stopped them.\"? Give its file and line. Change nothing.",
+   "id": "string-071",
+   "split": "dev"
+  },
+  {
+   "family": "string",
+   "at": "HEAD",
+   "message": "A run still going after this long is stopped, and the model told so.",
+   "file": "src/Llm.Api/Settings/SettingsCatalog.cs",
+   "line": 173,
+   "prompt": "Where in the code is this message written: \"A run still going after this long is stopped, and the model told so.\"? Give its file and line. Change nothing.",
+   "id": "string-072",
+   "split": "dev"
+  },
+  {
+   "family": "string",
+   "at": "HEAD",
+   "message": "That API key belongs to no one with an account here.",
+   "file": "src/Llm.Api/ArenaMcp/McpPeople.cs",
+   "line": 52,
+   "prompt": "Where in the code is this message written: \"That API key belongs to no one with an account here.\"? Give its file and line. Change nothing.",
+   "id": "string-073",
+   "split": "dev"
+  },
+  {
+   "family": "string",
+   "at": "HEAD",
+   "message": "Steps run at once only in the main conversation.",
+   "file": "src/CodeArena/LocalTools.cs",
+   "line": 211,
+   "prompt": "Where in the code is this message written: \"Steps run at once only in the main conversation.\"? Give its file and line. Change nothing.",
+   "id": "string-074",
+   "split": "test"
+  },
+  {
+   "family": "string",
+   "at": "HEAD",
+   "message": "Answer it: where the evidence is, or why there is none.",
+   "file": "src/Llm.Api/Compliance/Governance.cs",
+   "line": 202,
+   "prompt": "Where in the code is this message written: \"Answer it: where the evidence is, or why there is none.\"? Give its file and line. Change nothing.",
+   "id": "string-075",
+   "split": "dev"
+  },
+  {
+   "family": "string",
+   "at": "HEAD",
+   "message": "A LoRA adapter: not a model on its own.",
+   "file": "src/Llm.Api/Models/ModelProfile.cs",
+   "line": 157,
+   "prompt": "Where in the code is this message written: \"A LoRA adapter: not a model on its own.\"? Give its file and line. Change nothing.",
+   "id": "string-076",
+   "split": "test"
+  },
+  {
+   "family": "string",
+   "at": "HEAD",
+   "message": "There is no <svg> element in it.",
+   "file": "src/Llm.Api/Vector/SvgSafe.cs",
+   "line": 80,
+   "prompt": "Where in the code is this message written: \"There is no <svg> element in it.\"? Give its file and line. Change nothing.",
+   "id": "string-077",
+   "split": "test"
+  },
+  {
+   "family": "string",
+   "at": "HEAD",
+   "message": "Read the stack's logs and the answers' traces.",
+   "file": "src/Llm.Core/Access/Permissions.cs",
+   "line": 181,
+   "prompt": "Where in the code is this message written: \"Read the stack's logs and the answers' traces.\"? Give its file and line. Change nothing.",
+   "id": "string-078",
+   "split": "dev"
+  },
+  {
+   "family": "string",
+   "at": "HEAD",
+   "message": "The answer was withheld by a rule.",
+   "file": "src/Llm.Api/Chat/OneQuestion.cs",
+   "line": 77,
+   "prompt": "Where in the code is this message written: \"The answer was withheld by a rule.\"? Give its file and line. Change nothing.",
+   "id": "string-079",
+   "split": "dev"
+  }
+ ]
+}
