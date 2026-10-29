@@ -240,6 +240,28 @@ own hosts replace the chat's allowed sites for its crawl. A page that answers
 404 or 410 goes; one that fails otherwise stays as it was until it can be
 read.
 
+## The wiki
+
+**Wiki** (in everyone's menu) finds and reads what the company knows with no
+model in between, each person only what they may read:
+
+- **Search**: words, a name in the code, a table. **Documents** are the
+  passages of the knowledge sources that hold every word (a title holding them
+  first), then, when the embedder runs, those nearest in meaning; each with its
+  source, heading and the words around what matched. **Code** is Argus's, asked
+  as the person (the repositories they may read in GitLab): the symbol of that
+  name, the files that hold the words, and the code nearest in meaning.
+  **Data** is the tables and columns of the databases the person may ask
+  (Ask your data) whose names or comments hold the words.
+- **Sources**: the knowledge sources the person may read a document of, with
+  how many; open one to list its documents by title.
+- **A document**: read whole, from its passages in order, with **Open the
+  original** where it lives (a wiki page, an issue, a SharePoint file).
+- **Repositories** and a code file: what Argus indexed, the file's first 64 KB.
+
+Every list and search applies the same readers as the chat's search: a
+document someone may not read is not there for them, even by its address.
+
 ## In the chat
 
 **Company knowledge** is a tool (Admin → Tools: on, for everyone, in new

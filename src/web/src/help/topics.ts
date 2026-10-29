@@ -207,6 +207,17 @@ export const topics = {
     manual: { doc: 'chat', section: 'apps' },
   },
 
+  wiki: {
+    title: 'Wiki',
+    about: 'The company\'s documents, code and data, searched and read directly, with no model: only what you may read.',
+    parts: [
+      { name: 'Search', text: 'Words, a name in the code, a table: **Everything**, or only **Documents**, **Code** or **Data**. Documents are found by their words, then by meaning.' },
+      { name: 'Sources', text: 'The knowledge sources you may read, with how many of their documents you may read; open one to browse its documents by title.' },
+      { name: 'A document', text: 'Read whole, as it was last read from its source, with **Open the original** where it lives.' },
+      { name: 'Code', text: 'Files and symbols in the repositories you may read in GitLab, as Argus indexed them; **Repositories** lists them.' },
+    ],
+    tasks: [{ title: 'Find the leave policy', steps: ['Type "paid leave" and press **Search**.', 'Open the document under **Documents**.', 'Press **Open the original** to see it where it lives.'] }],
+  },
   data: {
     title: 'Data',
     about: 'The company\'s databases asked in words: each answer is the SQL it ran (read only), what it means, a chart and the rows.',

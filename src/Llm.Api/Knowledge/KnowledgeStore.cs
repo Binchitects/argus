@@ -124,5 +124,89 @@ public sealed class KnowledgeStore(AppDbContext db, VectorSupport vectors)
             new NpgsqlParameter("q", query), filterValue, new NpgsqlParameter("dims", query.Length), new NpgsqlParameter("limit", limit)).ToListAsync(ct);
     }
 
+    private const string Readable = "d.\"Readers\" && @readers AND d.\"Requires\" <@ @readers";
+
+    /// <summary>
+    /// The passages that hold these words (all of them, any case), among the documents these readers may read: for the wiki,
+    /// where people search without a model. A title that holds them counts most.
+    /// </summary>
+    public async Task<List<Passage>> KeywordAsync(string words, IReadOnlyCollection<string> readers, int limit, CancellationToken ct)
+    {
+        var terms = words.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Take(8)
+            .Select(t => "%" + t.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal) + "%").ToArray();
+        if (terms.Length == 0)
+        {
+            return [];
+        }
+        var sql = string.Concat(
+            "SELECT c.\"DocumentId\", d.\"Title\", d.\"Url\", s.\"Name\" AS \"Source\", d.\"AttachmentId\", c.\"Line\", c.\"EndLine\", c.\"Heading\", c.\"Text\", ",
+            "(CASE WHEN d.\"Title\" ILIKE ALL(@terms) THEN 1.0 ELSE 0.5 END)::double precision AS \"Score\" ",
+            "FROM knowledge_chunks c JOIN knowledge_documents d ON d.\"Id\" = c.\"DocumentId\" LEFT JOIN knowledge_sources s ON s.\"Id\" = d.\"SourceId\" ",
+            "WHERE ", Readable, " AND d.\"SourceId\" IS NOT NULL AND (c.\"Text\" ILIKE ALL(@terms) OR d.\"Title\" ILIKE ALL(@terms)) ",
+            "ORDER BY \"Score\" DESC, d.\"Title\", c.\"Ordinal\" LIMIT @limit");
+        return await db.Database.SqlQueryRaw<Passage>(sql, new NpgsqlParameter("readers", readers.ToArray()), new NpgsqlParameter("terms", terms),
+            new NpgsqlParameter("limit", limit)).ToListAsync(ct);
+    }
+
+    /// <summary>A source's documents these readers may read, by title (its words, when given), a page at a time.</summary>
+    public async Task<List<WikiDocument>> DocumentsAsync(Guid? source, IReadOnlyCollection<string> readers, string? words, int skip, int take, CancellationToken ct)
+    {
+        var sql = string.Concat(
+            "SELECT d.\"Id\", d.\"Title\", d.\"Url\", d.\"SourceId\", s.\"Name\" AS \"Source\", d.\"SyncedAt\", ",
+            "(SELECT count(*) FROM knowledge_chunks c WHERE c.\"DocumentId\" = d.\"Id\")::int AS \"Passages\" ",
+            "FROM knowledge_documents d JOIN knowledge_sources s ON s.\"Id\" = d.\"SourceId\" ",
+            "WHERE ", Readable, source is null ? "" : " AND d.\"SourceId\" = @source", words is null ? "" : " AND d.\"Title\" ILIKE @words",
+            " ORDER BY d.\"Title\" OFFSET @skip LIMIT @take");
+        List<NpgsqlParameter> args = [new("readers", readers.ToArray()), new("skip", skip), new("take", take)];
+        if (source is { } id)
+        {
+            args.Add(new("source", id));
+        }
+        if (words is not null)
+        {
+            args.Add(new("words", "%" + words.Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal) + "%"));
+        }
+        return await db.Database.SqlQueryRaw<WikiDocument>(sql, [.. args]).ToListAsync(ct);
+    }
+
+    /// <summary>How many documents of each source these readers may read.</summary>
+    public async Task<Dictionary<Guid, int>> CountsAsync(IReadOnlyCollection<string> readers, CancellationToken ct) =>
+        (await db.Database.SqlQueryRaw<SourceCount>(string.Concat("SELECT d.\"SourceId\" AS \"Source\", count(*)::int AS \"Count\" FROM knowledge_documents d WHERE ",
+            Readable, " AND d.\"SourceId\" IS NOT NULL GROUP BY d.\"SourceId\""), new NpgsqlParameter("readers", readers.ToArray())).ToListAsync(ct))
+        .ToDictionary(c => c.Source, c => c.Count);
+
+    /// <summary>A whole document's passages, in order, when these readers may read it; null when they may not (or it is not there).</summary>
+    public async Task<(WikiDocument Document, List<KnowledgeChunk> Passages)?> ReadAsync(Guid id, IReadOnlyCollection<string> readers, CancellationToken ct)
+    {
+        var doc = (await db.Database.SqlQueryRaw<WikiDocument>(string.Concat(
+            "SELECT d.\"Id\", d.\"Title\", d.\"Url\", d.\"SourceId\", s.\"Name\" AS \"Source\", d.\"SyncedAt\", 0 AS \"Passages\" ",
+            "FROM knowledge_documents d JOIN knowledge_sources s ON s.\"Id\" = d.\"SourceId\" WHERE d.\"Id\" = @id AND ", Readable),
+            new NpgsqlParameter("id", id), new NpgsqlParameter("readers", readers.ToArray())).ToListAsync(ct)).FirstOrDefault();
+        if (doc is null)
+        {
+            return null;
+        }
+        var passages = await db.KnowledgeChunks.AsNoTracking().Where(c => c.DocumentId == id).OrderBy(c => c.Ordinal).ToListAsync(ct);
+        return (doc, passages);
+    }
+
     private static string? Cut(string? text, int max) => text is null || text.Length <= max ? text : text[..max];
+}
+
+/// <summary>A document as the wiki lists it.</summary>
+public sealed class WikiDocument
+{
+    public Guid Id { get; init; }
+    public required string Title { get; init; }
+    public string? Url { get; init; }
+    public Guid? SourceId { get; init; }
+    public string? Source { get; init; }
+    public DateTimeOffset SyncedAt { get; init; }
+    public int Passages { get; init; }
+}
+
+internal sealed class SourceCount
+{
+    public Guid Source { get; init; }
+    public int Count { get; init; }
 }

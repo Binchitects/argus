@@ -666,6 +666,7 @@ public static class IdentityWiring
         Plugins.PluginEndpoints.MapPlugins(app);
         ArenaMcp.McpEndpoints.MapArenaMcp(app);
         Knowledge.KnowledgeEndpoints.MapKnowledge(app);
+        Wiki.WikiEndpoints.MapWiki(app);
         Models.ModelEndpoints.MapModels(app);
         Models.DefaultModelEndpoints.MapDefaultModels(app);
         Models.ModelHoursEndpoints.MapModelHours(app);

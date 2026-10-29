@@ -1,4 +1,4 @@
-import { Activity, AppWindow, ListOrdered, MessageSquareHeart, BadgeCheck, AudioLines, Brain, GitPullRequest, ListChecks, ListTodo, BarChart, BarChart3, Blocks, Bot, Boxes, CalendarClock, Database, FlaskConical, HardDrive, Home, KeyRound, LayoutDashboard, Library, LineChart, Logs, MessageSquare, Package, Palette, PieChart, Plug, Presentation, ScanSearch, ScrollText, Settings, ShieldAlert, ShieldCheck, Siren, SquareSlash, Telescope, ThumbsUp, Timer, Trophy, Users, UsersRound, Workflow, Wrench, type LucideIcon } from 'lucide-react'
+import { Activity, AppWindow, BookOpenText, ListOrdered, MessageSquareHeart, BadgeCheck, AudioLines, Brain, GitPullRequest, ListChecks, ListTodo, BarChart, BarChart3, Blocks, Bot, Boxes, CalendarClock, Database, FlaskConical, HardDrive, Home, KeyRound, LayoutDashboard, Library, LineChart, Logs, MessageSquare, Package, Palette, PieChart, Plug, Presentation, ScanSearch, ScrollText, Settings, ShieldAlert, ShieldCheck, Siren, SquareSlash, Telescope, ThumbsUp, Timer, Trophy, Users, UsersRound, Workflow, Wrench, type LucideIcon } from 'lucide-react'
 
 export interface NavItem {
   title: string
@@ -34,6 +34,7 @@ export const navigation: NavSection[] = [
       { title: 'Plans', path: '/plans', icon: ListChecks, keywords: ['plan', 'board', 'timeline', 'gantt', 'steps', 'project', 'kanban'] },
       { title: 'Science lab', path: '/lab', icon: FlaskConical, keywords: ['science', 'lab', 'mathematics', 'math', 'physics', 'chemistry', 'statistics', 'proof', 'sympy', 'units', 'notebook', 'wolfram'], feature: 'lab' },
       { title: 'Apps', path: '/apps', icon: AppWindow, keywords: ['app', 'apps', 'tool', 'publish', 'page', 'component', 'gallery', 'remix'], feature: 'apps' },
+      { title: 'Wiki', path: '/wiki', icon: BookOpenText, keywords: ['search', 'knowledge', 'documents', 'docs', 'handbook', 'code', 'files', 'tables', 'find', 'browse'] },
       { title: 'Data', path: '/data', icon: BarChart, keywords: ['ask your data', 'sql', 'database', 'query', 'chart', 'dashboard', 'board', 'report', 'analytics', 'bi'], feature: 'data' },
       { title: 'Decks', path: '/decks', icon: Presentation, keywords: ['slides', 'presentation', 'powerpoint', 'pptx', 'pdf', 'deck', 'keynote', 'template'], feature: 'decks' },
       { title: 'Media studio', path: '/media', icon: Palette, keywords: ['pictures', 'images', 'photo', 'edit', 'inpaint', 'paint', 'variations', 'upscale', 'enlarge', 'animate', 'video', 'clip', 'midjourney', 'photoshop'], feature: 'media' },
