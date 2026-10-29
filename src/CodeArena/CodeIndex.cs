@@ -165,6 +165,7 @@ internal sealed class CodeIndex
 
     private readonly object _gate = new();
     private Dictionary<string, IndexedFile> _files = new(StringComparer.Ordinal);
+    private CodeGraph? _graph;
 
     public CodeIndex(string root, string file)
     {
@@ -201,6 +202,21 @@ internal sealed class CodeIndex
             return _files.GetValueOrDefault(path);
         }
     }
+
+    /// <summary>A file's whole path, from its path as the index keeps it (relative to the root, or whole for an added folder outside it).</summary>
+    public string FullOf(string path) => System.IO.Path.GetFullPath(System.IO.Path.Combine(Root, path));
+
+    /// <summary>Who uses what over the files as the index has them now; made again after a sync changes them.</summary>
+    public CodeGraph Graph()
+    {
+        lock (_gate)
+        {
+            return _graph ??= new CodeGraph(this, _files.Values);
+        }
+    }
+
+    /// <summary>What a language's scanner finds in a text; null for a language none reads.</summary>
+    internal static ScannedFile? Scan(string? lang, string text) => lang is not null && Scanners.TryGetValue(lang, out var make) ? make().Scan(text) : null;
 
     /// <summary>
     /// Brings the index in step with the folder: files gone taken out, files new or changed (size or time, then bytes) read,
@@ -255,6 +271,10 @@ internal sealed class CodeIndex
         lock (_gate)
         {
             _files = new Dictionary<string, IndexedFile>(next, StringComparer.Ordinal);
+            if (read > 0 || before.Count != next.Count || before.Keys.Any(k => !next.ContainsKey(k)))
+            {
+                _graph = null;
+            }
         }
         LastScanned = read;
         var removed = before.Keys.Count(k => !next.ContainsKey(k));

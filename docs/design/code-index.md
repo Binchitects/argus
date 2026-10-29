@@ -216,7 +216,8 @@ The hats mean normalised by the maximum. These weights are only a starting point
 
 **Format**
 - A header: magic `CAIX`, format version, scanner versions per language, root, git HEAD, time of writing.
-- Then a string table, file records, symbol records, edges, and each file's term list (term id plus weighted term frequency, as varints).
+- Then a string table, file records (with each file's imports and the names its code uses), symbol records, and each file's term list (term id plus weighted term frequency).
+- **Edges are not stored.** `CodeGraph` works them out when asked, from the files as they are now: the file's names narrow where a symbol is used, and those files are scanned again (kept while their size and time stay). Measured on this repository: the lookup tables take 17 ms to build; resolving every use in src/CodeArena's 85 C# files takes 0.7 s (8 ms a file), src/web/src/code-arena's 106 TypeScript files 0.4 s; one symbol's uses across the folder take 0–100 ms (`KeptResults.Keep`: its 2 callers, `Agent.RunToolsAsync` and `Agent.ClearEarlier`, both `scope`, in 93 ms).
 - Global postings are not stored; they are rebuilt when the file loads. An incremental update therefore only replaces one file's record.
 
 **Writing**

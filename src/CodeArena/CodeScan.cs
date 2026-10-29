@@ -181,7 +181,7 @@ internal static class CodeTokens
 /// </summary>
 internal sealed class CSharpScanner : ICodeScanner
 {
-    public int Version => 1;
+    public int Version => 2;
 
     private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
     {
@@ -401,7 +401,8 @@ internal sealed class CSharpScanner : ICodeScanner
                     var from = eq > u ? eq + 1 : u + 1 < at.Count && at[u + 1].Is("static") ? u + 2 : u + 1;
                     if (Dotted(at, from) is { Length: > 0 } imported)
                     {
-                        imports.Add(imported);
+                        // A global using holds for every file of its project: marked so.
+                        imports.Add(at[0].Is("global") ? "global " + imported : imported);
                     }
                 }
                 return;
