@@ -26,9 +26,9 @@ public sealed class RateLimitTests(AppFixture app)
 
     private static async Task<TestBrowser> AdminAsync(WebApplicationFactory<Program> f) => await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
 
-    private static async Task<(Guid Id, string Name, string Email, string Password, string Key)> PersonAsync(TestBrowser admin)
+    private static async Task<(Guid Id, string Name, string Email, string Password, string Key)> PersonAsync(TestBrowser admin, string prefix = "rl")
     {
-        var name = "rl" + Guid.NewGuid().ToString("N")[..10];
+        var name = prefix + Guid.NewGuid().ToString("N")[..10];
         var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
         return (made.GetProperty("id").GetGuid(), name, $"{name}@example.test", made.GetProperty("password").GetString()!, made.GetProperty("apiKey").GetString()!);
     }
@@ -228,43 +228,28 @@ public sealed class RateLimitTests(AppFixture app)
         await KeyHasAsync(gateway, p.Email, new KeyRate(9, 1));
     }
 
-    /// <summary>Holds the first call a fake gateway's hook sees for one person or key until released, and says when it holds it.</summary>
-    private sealed class Hold
-    {
-        private readonly TaskCompletionSource _held = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private readonly TaskCompletionSource _go = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private int _once;
-
-        public Task Held => _held.Task.WaitAsync(TimeSpan.FromSeconds(15));
-
-        public Func<string, Task> For(string target) => async seen =>
-        {
-            if (seen == target && Interlocked.Exchange(ref _once, 1) == 0)
-            {
-                _held.SetResult();
-                await _go.Task;
-            }
-        };
-
-        public void Release() => _go.TrySetResult();
-    }
-
     [Fact]
     public async Task A_persons_own_limit_set_while_a_key_sync_runs_wins_over_what_the_sync_read()
     {
         var gateway = new FakeGateway();
         await using var f = NewApp(gateway);
         var admin = await AdminAsync(f);
-        var p = await PersonAsync(admin);
+        // A sync goes through people in their names' order, each in their turn: the first's, and the person's after.
+        var first = await PersonAsync(admin, "rl0");
+        var p = await PersonAsync(admin, "rlz");
+        await StatusAssert.Is(HttpStatusCode.OK, await LimitsAsync(admin, first.Id, 7, null));
+        var firstKey = gateway.KeysOf(first.Email).Single();
         var hold = new Hold();
-        gateway.BeforeKeys = hold.For(p.Email);
+        gateway.BeforeRate = hold.For(firstKey.Token);
+        firstKey.Rate = KeyRate.None;
         await using var scope = f.Services.CreateAsyncScope();
-        // A sync reads everyone (no limit of their own yet) and is held at the person's keys...
+        // A sync reads everyone (the person has no limit of their own yet) and is held as it puts the first's key right (the
+        // gateway lost its limits)...
         var sync = scope.ServiceProvider.GetRequiredService<RateLimits>().SyncAsync();
         try
         {
             await hold.Held;
-            // ...while an admin sets their own, which is on their key at once.
+            // ...while an admin sets the person's own, which is on their key at once (their turn is free).
             await StatusAssert.Is(HttpStatusCode.OK, await LimitsAsync(admin, p.Id, 5, 500));
             Assert.Equal(new KeyRate(5, 500), RateOf(gateway, p.Email));
         }
@@ -279,7 +264,7 @@ public sealed class RateLimitTests(AppFixture app)
     }
 
     [Fact]
-    public async Task A_sync_that_undoes_a_persons_own_limit_is_followed_by_one_that_puts_it_back()
+    public async Task A_persons_own_limit_set_while_a_sync_writes_their_key_waits_for_it_and_stays()
     {
         var gateway = new FakeGateway();
         await using var f = NewApp(gateway);
@@ -292,27 +277,27 @@ public sealed class RateLimitTests(AppFixture app)
         await Task.Delay(500);
         var hold = new Hold();
         gateway.BeforeRate = hold.For(token);
+        Task<HttpResponseMessage> limits;
         try
         {
             // A new limit for the group starts one sync, held just as it gives the key the group's 30...
             await StatusAssert.Is(HttpStatusCode.NoContent,
                 await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/groups/{group}/policies", UriKind.Relative), new { requestsPerMinute = 30 }));
             await hold.Held;
-            // ...while an admin sets the person's own, on their key at once.
-            await StatusAssert.Is(HttpStatusCode.OK, await LimitsAsync(admin, p.Id, 5, null));
-            Assert.Equal(new KeyRate(5, null), RateOf(gateway, p.Email));
+            // ...while an admin sets the person's own: saved, it waits for the sync's turn to go on their key (before, the
+            // sync went on to write the 30 over it, until the next sync).
+            limits = LimitsAsync(admin, p.Id, 5, null);
+            await Task.WhenAny(limits, Task.Delay(TimeSpan.FromSeconds(1)));
+            Assert.False(limits.IsCompleted);
         }
         finally
         {
             hold.Release();
         }
-        // The held sync gives the key the 30 it decided before; the sync the change woke puts their own back.
-        for (var i = 0; i < 150 && !gateway.RateChanges.Contains((token, new KeyRate(30, null))); i++)
-        {
-            await Task.Delay(100);
-        }
-        Assert.Contains((token, new KeyRate(30, null)), gateway.RateChanges);
-        await KeyHasAsync(gateway, p.Email, new KeyRate(5, null));
+        await StatusAssert.Is(HttpStatusCode.OK, await limits);
+        // The held sync gave the key the 30 it decided before; their own went on after it, and stays.
+        Assert.Equal([(token, new KeyRate(30, null)), (token, new KeyRate(5, null))], gateway.RateChanges.TakeLast(2));
+        Assert.Equal(new KeyRate(5, null), RateOf(gateway, p.Email));
     }
 
     [Fact]

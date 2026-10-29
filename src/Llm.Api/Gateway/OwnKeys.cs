@@ -32,7 +32,7 @@ public sealed class OwnKeyException(int status, string code, string message) : E
 /// keeps it so), each revoked on its own. Making them counts with Rotate's new keys an hour (<see cref="PeopleService.OwnKeysPerHour"/>).
 /// </summary>
 public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, RateLimits rateLimits, Models.KeyAccess keyAccess, Access.AccessService access, PeopleService people,
-    Audit audit, TimeProvider clock, OwnKeyPlaces places)
+    Audit audit, TimeProvider clock, OwnKeyPlaces places, KeyWriters writers)
 {
     /// <summary>The most keys a person may make for themselves.</summary>
     public const int MaxKeys = 20;
@@ -105,6 +105,8 @@ public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, RateLimits rateLi
             Token = "", Name = name, UserId = user.Id, RequestsPerMinute = request.RequestsPerMinute, TokensPerMinute = request.TokensPerMinute,
             Parallel = request.Parallel, MonthlyBudget = request.MonthlyBudget, CreatedAt = clock.GetUtcNow(),
         };
+        // Made and saved in the person's turn: a sync between the two would give the new key their limits, not its own.
+        using var turn = await writers.EnterAsync(user.Id, ct);
         await gateway.EnsureUserAsync(user.Email!, ct);
         var rate = Tighter((await rateLimits.ForAsync(user, ct)).Key, own);
         // A unique alias at the gateway: the person's name, the key's, and a few random letters.
@@ -117,6 +119,7 @@ public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, RateLimits rateLi
         }
         db.OwnKeys.Add(own);
         await db.SaveChangesAsync(ct);
+        turn.Dispose();
         places.Forget(own.Token);
         // Counted with Rotate's new keys an hour (PeopleService.OwnKeyWaitAsync).
         await audit.WriteAsync(Made, user.UserName, detail: $"{name}: {Describe(own)}", actor: user);
@@ -129,6 +132,8 @@ public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, RateLimits rateLi
     public async Task<KeyView> ChangeAsync(AppUser user, string token, KeyRequest request, CancellationToken ct = default)
     {
         Check(request);
+        // Changed, saved and written in the person's turn (KeyWriters).
+        using var turn = await writers.EnterAsync(user.Id, ct);
         var key = await KeyOfAsync(user, token, ct);
         var own = await db.OwnKeys.SingleOrDefaultAsync(k => k.Token == token && k.UserId == user.Id, ct);
         if (own is null)
@@ -165,6 +170,7 @@ public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, RateLimits rateLi
         {
             await gateway.SetKeyBudgetAsync(token, own.MonthlyBudget, ct);
         }
+        turn.Dispose();
         places.Forget(token);
         await audit.WriteAsync("person.key_changed", user.UserName, detail: $"{own.Name}: {Describe(own)}", actor: user);
         return View(user, (await gateway.KeysAsync(user.Email!, ct)).First(k => k.Token == token), own, (await rateLimits.ForAsync(user, ct)).Key);

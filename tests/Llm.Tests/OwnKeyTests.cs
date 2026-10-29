@@ -95,6 +95,66 @@ public sealed class OwnKeyTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_key_made_or_changed_while_a_sync_writes_the_persons_keys_waits_for_it_so_keeps_its_own_limits()
+    {
+        var gateway = new FakeGateway();
+        await using var f = NewApp(gateway);
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var (id, email, person) = await PersonAsync(f, admin);
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{id}/limits", UriKind.Relative), new { requestsPerMinute = 60, tokensPerMinute = (int?)null }));
+        async Task SyncAsync()
+        {
+            await using var scope = f.Services.CreateAsyncScope();
+            await scope.ServiceProvider.GetRequiredService<RateLimits>().SyncAsync();
+        }
+
+        // Only a sync in the person's turn writes their keys' limits. One is held as it puts their main key right (the gateway
+        // lost its limits): a key they make meanwhile waits for it (before, a sync that listed their keys after the new one was
+        // made, but read their own keys' limits before it was saved, gave it their limits alone, not its own).
+        var main = gateway.KeysOf(email).Single().Token;
+        var fixing = new Hold();
+        gateway.BeforeRate = fixing.For(main);
+        gateway.Keys[main].Rate = KeyRate.None;
+        var sync = SyncAsync();
+        Task<HttpResponseMessage> making;
+        try
+        {
+            await fixing.Held;
+            making = person.PostAsync("/api/account/keys/own", new { name = "CI", requestsPerMinute = 100, tokensPerMinute = 1000 });
+            await Task.WhenAny(making, Task.Delay(TimeSpan.FromSeconds(1)));
+            Assert.False(making.IsCompleted);
+        }
+        finally
+        {
+            fixing.Release();
+        }
+        await sync;
+        var token = AnswerCache.HashOf((await person.JsonAsync(await making)).GetProperty("apiKey").GetString()!);
+        Assert.Equal(new KeyRate(60, 1000), gateway.Keys[token].Rate);
+
+        // One is held as it puts the new key right (lost at the gateway too): a change meanwhile waits for it, then stays.
+        var writing = new Hold();
+        gateway.BeforeRate = writing.For(token);
+        gateway.Keys[token].Rate = KeyRate.None;
+        sync = SyncAsync();
+        Task<HttpResponseMessage> changing;
+        try
+        {
+            await writing.Held;
+            changing = person.Http.PutAsJsonAsync(new Uri($"/api/account/keys/own/{token}", UriKind.Relative), new { requestsPerMinute = 20, tokensPerMinute = 2000 });
+            await Task.WhenAny(changing, Task.Delay(TimeSpan.FromSeconds(1)));
+            Assert.False(changing.IsCompleted);
+        }
+        finally
+        {
+            writing.Release();
+        }
+        await sync;
+        await StatusAssert.Is(HttpStatusCode.OK, await changing);
+        Assert.Equal(new KeyRate(20, 2000), gateway.Keys[token].Rate);
+    }
+
+    [Fact]
     public async Task A_keys_own_requests_at_once_hold_in_the_apps_line()
     {
         var gateway = new FakeGateway();

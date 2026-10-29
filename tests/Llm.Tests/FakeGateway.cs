@@ -294,3 +294,24 @@ public sealed class FakeGateway : ILiteLlm
         }
     }
 }
+
+/// <summary>Holds the first call a fake gateway's hook sees for one person or key until released, and says when it holds it.</summary>
+public sealed class Hold
+{
+    private readonly TaskCompletionSource _held = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _go = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _once;
+
+    public Task Held => _held.Task.WaitAsync(TimeSpan.FromSeconds(15));
+
+    public Func<string, Task> For(string target) => async seen =>
+    {
+        if (seen == target && Interlocked.Exchange(ref _once, 1) == 0)
+        {
+            _held.SetResult();
+            await _go.Task;
+        }
+    };
+
+    public void Release() => _go.TrySetResult();
+}

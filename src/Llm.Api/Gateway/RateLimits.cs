@@ -52,7 +52,7 @@ public sealed record RateUse(long Requests, long Tokens, IReadOnlyList<Refusal> 
 /// an upgrade keeps a limit a key already carried (<see cref="KeepRow"/>).
 /// </summary>
 public sealed partial class RateLimits(AppDbContext db, AccessService access, ILiteLlm gateway, SqlDatasource sql, IOptionsMonitor<RateLimitOptions> options, TimeProvider clock,
-    ModelCalls running, Audit audit, ILogger<RateLimits> logger)
+    ModelCalls running, Audit audit, KeyWriters writers, ILogger<RateLimits> logger)
 {
     /// <summary>
     /// The chat's tools that reach a model: pictures, speech, video, and deep research ("research",
@@ -150,6 +150,8 @@ public sealed partial class RateLimits(AppDbContext db, AccessService access, IL
     /// <param name="upgrade">When the upgrade to rate limits ran, while limits keys carried before it are still to be kept (<see cref="KeepRow"/>).</param>
     private async Task<int> ApplyAsync(AppUser user, string email, KeyRate want, Func<Task<KeyRate>> recheck, DateTimeOffset? upgrade, CancellationToken ct)
     {
+        // Their keys as they are now, and their own keys' limits, read and written in the person's turn (KeyWriters).
+        using var turn = await writers.EnterAsync(user.Id, ct);
         var keys = await gateway.KeysAsync(email, ct);
         // A key the person made with limits of its own carries the tighter of theirs and its own (OwnKeys).
         var own = await db.OwnKeys.AsNoTracking().Where(k => k.UserId == user.Id).ToDictionaryAsync(k => k.Token, ct);
@@ -187,7 +189,8 @@ public sealed partial class RateLimits(AppDbContext db, AccessService access, IL
         var ids = groups.Select(g => g.Id).ToList();
         var added = (await db.GroupMembers.AsNoTracking().Where(m => ids.Contains(m.GroupId)).ToListAsync(ct)).ToLookup(m => m.UserId, m => m.GroupId);
         var changed = 0;
-        foreach (var user in await db.Users.AsNoTracking().Where(u => u.Email != null).ToListAsync(ct))
+        // One by one in their names' order, each in their turn (KeyWriters): a change of someone's limits waits only while theirs are written.
+        foreach (var user in await db.Users.AsNoTracking().Where(u => u.Email != null).OrderBy(u => u.UserName).ToListAsync(ct))
         {
             var mine = groups.Where(g => g.Directory is { } d ? AccessService.InDirectoryGroup(user.DirectoryGroups, d) : added[user.Id].Contains(g.Id))
                 .Select(g => (g.Name, g.RequestsPerMinute, g.TokensPerMinute)).ToList();

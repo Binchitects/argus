@@ -15,7 +15,7 @@ namespace Llm.Api.Models;
 /// too: each carries how many requests it may have at once.
 /// </summary>
 public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, ChatModels models, ILiteLlm gateway, IOptionsMonitor<ChatOptions> chat, Access.AccessService access,
-    Core.Data.AppDbContext db)
+    Core.Data.AppDbContext db, Gateway.KeyWriters writers)
 {
     /// <summary>
     /// LiteLLM's own limit of a key's requests at once; null: none. The app's line (KeyLine) holds a key to
@@ -77,6 +77,8 @@ public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, Ch
         foreach (var user in await users.Users.AsNoTracking().Where(u => u.Email != null).ToListAsync(ct))
         {
             var want = await ListForAsync(user, ct);
+            // Read and written in the person's turn (KeyWriters): a key of theirs made or changed meanwhile is not written over.
+            using var turn = await writers.EnterAsync(user.Id, ct);
             // A key the person made with fewer at once of its own carries that.
             var own = await db.OwnKeys.AsNoTracking().Where(k => k.UserId == user.Id).ToDictionaryAsync(k => k.Token, k => k.Parallel, ct);
             foreach (var key in await gateway.KeysAsync(user.Email!, ct))
