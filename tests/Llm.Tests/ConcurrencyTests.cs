@@ -993,13 +993,12 @@ public sealed class ConcurrencyTests(AppFixture app) : IDisposable
         await using var f = NewApp(new Dictionary<string, string?> { ["Chat:DefaultModel"] = "" }, parallel: 1, keep: [], others: [("tiny-a", 1)]);
         var state = f.Services.GetRequiredService<EngineState>();
         await EventuallyAsync(() => state.Default == Big, "the big model is the one new chats get");
-        // The gateway lists tiny-a first; then someone has it loaded.
-        var gateway = (FakeGateway)f.Services.GetRequiredService<Llm.Api.Gateway.ILiteLlm>();
-        lock (gateway.Models)
+        // The list puts tiny-a first (it was added before the big one); then someone has it loaded.
+        await using (var scope = f.Services.CreateAsyncScope())
         {
-            var first = gateway.Models.Single(m => m.Name == "tiny-a");
-            gateway.Models.Remove(first);
-            gateway.Models.Insert(0, first);
+            var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+            var bigAdded = await db.LocalModels.Where(m => m.Name == Big).Select(m => m.CreatedAt).SingleAsync();
+            await db.LocalModels.Where(m => m.Name == "tiny-a").ExecuteUpdateAsync(u => u.SetProperty(m => m.CreatedAt, bigAdded.AddDays(-1)));
         }
         f.Services.GetRequiredService<ChatModels>().Forget();
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);

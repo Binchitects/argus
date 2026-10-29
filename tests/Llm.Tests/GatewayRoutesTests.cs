@@ -42,7 +42,7 @@ public sealed class GatewayRoutesTests(AppFixture app)
         List<Deployment> routes;
         await using (var scope = f.Services.CreateAsyncScope())
         {
-            routes = await scope.ServiceProvider.GetRequiredService<GatewayRoutes>().BuildAsync(CancellationToken.None);
+            routes = await scope.ServiceProvider.GetRequiredService<GatewayRoutes>().BuildAsync(CancellationToken.None, others: false);
         }
 
         // llama.cpp's router, by the model's name, with the engines' key; a slot's share of the context as its window.
@@ -56,6 +56,13 @@ public sealed class GatewayRoutesTests(AppFixture app)
         // One name on two servers: a pool, each copy within its slots and weighed by them.
         var shared = routes.Where(r => r.Name == "shared").OrderBy(r => r.Kind, StringComparer.Ordinal).ToList();
         Assert.Equal([(Deployment.LlamaCpp, 2, 2, 2), (Deployment.Remote, 2, 6, 6)], shared.Select(r => (r.Kind, r.Copies, r.MaxParallel ?? 0, r.Weight)));
+        // As the chat lists them: each window and longest answer read back.
+        await using (var scope = f.Services.CreateAsyncScope())
+        {
+            var listed = await scope.ServiceProvider.GetRequiredService<GatewayRoutes>().ModelsAsync(CancellationToken.None);
+            var t = Assert.Single(listed, m => m.Name == "tiny");
+            Assert.Equal((8192, (int?)4096), (t.Context, t.MaxOutput));
+        }
         // LiteLLM was given exactly these, by these fingerprints: nothing is registered anew.
         Assert.Equal(routes.Select(r => r.Fingerprint).Order(StringComparer.Ordinal), gateway.Managed.Values.Select(m => m.Fingerprint).Order(StringComparer.Ordinal));
     }

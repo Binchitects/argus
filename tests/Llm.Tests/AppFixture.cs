@@ -197,6 +197,11 @@ public sealed class AppFixture : IAsyncLifetime
             b.ConfigureTestServices(s =>
             {
                 s.AddSingleton(gateway);
+                if (gateway is IRoutesSource routes)
+                {
+                    // The models a test asks for, as routes beside the app's own.
+                    s.AddSingleton(routes);
+                }
                 s.AddHttpClient<Llm.Api.Operations.ArgusAdmin>().ConfigurePrimaryHttpMessageHandler(() => Argus);
                 s.AddHttpClient<Llm.Api.Chat.ArgusMcp>().ConfigurePrimaryHttpMessageHandler(() => Argus);
                 s.AddHttpClient<Llm.Api.Chat.GatewayChat>().ConfigurePrimaryHttpMessageHandler(() => Model);

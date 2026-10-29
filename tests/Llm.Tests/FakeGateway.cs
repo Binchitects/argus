@@ -3,8 +3,11 @@ using Llm.Api.Gateway;
 
 namespace Llm.Tests;
 
-/// <summary>LiteLLM in memory: records what the app asked for, so tests can check it.</summary>
-public sealed class FakeGateway : ILiteLlm
+/// <summary>
+/// LiteLLM in memory: records what the app asked for, so tests can check it. The models a test lists here (not those the
+/// app registered) are routes beside the app's own, answered by the fake model at engine.test.
+/// </summary>
+public sealed class FakeGateway : ILiteLlm, IRoutesSource
 {
     public sealed class Key
     {
@@ -178,6 +181,48 @@ public sealed class FakeGateway : ILiteLlm
     /// <summary>What /model/info lists; tests change it to try a second model or one that can see.</summary>
     public List<GatewayModel> Models { get; } =
         [new("Qwen3.8-Flash-Next", 32768, 8192, Vision: false, Tools: true, Thinking: true, 0.20m, 0.02m, 0.80m)];
+
+    public IEnumerable<Deployment> Routes()
+    {
+        List<GatewayModel> given;
+        lock (Models)
+        {
+            given = [.. Models.Except(_listed.Values)];
+        }
+        foreach (var m in given)
+        {
+            var info = new System.Text.Json.Nodes.JsonObject
+            {
+                ["mode"] = m.Mode, ["supports_vision"] = m.Vision, ["supports_function_calling"] = m.Tools, ["supports_reasoning"] = m.Thinking, ["supports_audio_input"] = m.Audio,
+            };
+            if (m.Context is { } c)
+            {
+                info["max_input_tokens"] = c;
+            }
+            if (m.MaxOutput is { } o)
+            {
+                info["max_output_tokens"] = o;
+            }
+            var litellm = new System.Text.Json.Nodes.JsonObject { ["model"] = "openai/" + m.Name, ["api_base"] = "http://engine.test/v1", ["api_key"] = "none" };
+            if (m.InputPerMtok is { } i)
+            {
+                litellm["input_cost_per_token"] = i / 1_000_000m;
+            }
+            if (m.CachedInputPerMtok is { } ci)
+            {
+                litellm["cache_read_input_token_cost"] = ci / 1_000_000m;
+            }
+            if (m.OutputPerMtok is { } op)
+            {
+                litellm["output_cost_per_token"] = op / 1_000_000m;
+            }
+            yield return new Deployment
+            {
+                Name = m.Name, Kind = Deployment.Remote, BaseUrl = "http://engine.test/v1", Model = m.Name, Mode = m.Mode, Info = info, LiteLlm = litellm, Fingerprint = "test:" + m.Name,
+                Price = m.InputPerMtok is { } p ? new TokenPrice(p, m.CachedInputPerMtok ?? 0, m.OutputPerMtok ?? 0) : null,
+            };
+        }
+    }
 
     public Task<IReadOnlyList<GatewayModel>> ModelsAsync(CancellationToken ct = default)
     {

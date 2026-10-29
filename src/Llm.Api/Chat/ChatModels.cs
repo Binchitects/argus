@@ -4,7 +4,8 @@ using Microsoft.Extensions.Options;
 namespace Llm.Api.Chat;
 
 /// <summary>
-/// The models the chat offers (and the picture and speech models its tools use): the gateway's list, cached for a minute.
+/// The models the chat offers (and the picture and speech models its tools use): the routes', from the app's own tables,
+/// kept a minute (forgotten at once when the models change).
 /// </summary>
 public sealed class ChatModels(IServiceScopeFactory scopes, IOptionsMonitor<ChatOptions> chat, IOptions<Models.EngineOptions> engine, TimeProvider clock) : IDisposable
 {
@@ -62,21 +63,14 @@ public sealed class ChatModels(IServiceScopeFactory scopes, IOptionsMonitor<Chat
             {
                 return again;
             }
-            try
+            await using var scope = scopes.CreateAsyncScope();
+            var models = await scope.ServiceProvider.GetRequiredService<GatewayRoutes>().ModelsAsync(ct);
+            if (models.Count > 0)
             {
-                await using var scope = scopes.CreateAsyncScope();
-                var models = await scope.ServiceProvider.GetRequiredService<ILiteLlm>().ModelsAsync(ct);
-                if (models.Count > 0)
-                {
-                    // The deployment's model first: it is the default.
-                    _cached = [.. models.OrderBy(m => m.Name == DefaultName ? 0 : 1)];
-                    _at = clock.GetUtcNow();
-                    return _cached;
-                }
-            }
-            catch (GatewayException)
-            {
-                // Not cached: the next request asks again.
+                // The deployment's model first: it is the default.
+                _cached = [.. models.OrderBy(m => m.Name == DefaultName ? 0 : 1)];
+                _at = clock.GetUtcNow();
+                return _cached;
             }
             return Fallback();
         }
@@ -86,7 +80,7 @@ public sealed class ChatModels(IServiceScopeFactory scopes, IOptionsMonitor<Chat
         }
     }
 
-    /// <summary>When the gateway cannot say: the default model alone, so the chat still opens and says why answers fail.</summary>
+    /// <summary>No model yet: the default model alone, so the chat still opens and says why answers fail.</summary>
     private List<GatewayModel> Fallback() => DefaultName is { } d ? [new(d, null, null, false, true, true, null, null, null)] : [];
 
     /// <summary>The model to use: the one asked for if the gateway serves it, else the default.</summary>

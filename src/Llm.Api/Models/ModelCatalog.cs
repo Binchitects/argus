@@ -1009,7 +1009,8 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     private async Task SyncGatewayOnceAsync(CancellationToken ct)
     {
         var wanted = new Dictionary<string, (string Name, JsonObject Params, JsonObject Info)>(StringComparer.Ordinal);
-        foreach (var d in await routes.BuildAsync(ct))
+        // The app's own routes only: those given besides (a test's) are not the app's to register.
+        foreach (var d in await routes.BuildAsync(ct, others: false))
         {
             wanted[d.Fingerprint] = (d.Name, d.LiteLlm, d.Info);
         }

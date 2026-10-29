@@ -96,7 +96,7 @@ public sealed class VllmGatewayTests(AppFixture app) : IDisposable
             List<Llm.Api.Gateway.Deployment> routes;
             await using (var scope = f.Services.CreateAsyncScope())
             {
-                routes = await scope.ServiceProvider.GetRequiredService<Llm.Api.Gateway.GatewayRoutes>().BuildAsync(CancellationToken.None);
+                routes = await scope.ServiceProvider.GetRequiredService<Llm.Api.Gateway.GatewayRoutes>().BuildAsync(CancellationToken.None, others: false);
             }
             var flash = routes.Where(r => r.Name == "flash").OrderBy(r => r.BaseUrl, StringComparer.Ordinal).ToList();
             Assert.Equal([("http://vllm:8001/v1", "flash@0"), ("http://vllm:8002/v1", "flash@1")], flash.Select(r => (r.BaseUrl, r.Model)));

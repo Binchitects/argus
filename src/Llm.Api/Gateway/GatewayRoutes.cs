@@ -82,21 +82,52 @@ public sealed record Deployment
     public required string Fingerprint { get; init; }
 }
 
+/// <summary>Routes besides the app's own tables' (tests give the models they ask for this way).</summary>
+public interface IRoutesSource
+{
+    IEnumerable<Deployment> Routes();
+}
+
 /// <summary>
 /// The model names and where each is answered, from the app's own tables: the engine's models (llama.cpp's, each copy of a
 /// vLLM or SGLang model), the models chosen from other GPU servers, and the picture and speech models while their servers
 /// run. Every model carries its prices (its own, else Settings → Prices), so every request has a cost.
 /// </summary>
 public sealed class GatewayRoutes(AppDbContext db, ModelLibrary library, RemoteServerClient remote, Modules modules, MediaControl media,
-    IOptionsMonitor<PriceOptions> prices, VllmBackends vllm, IOptions<EngineOptions> engine)
+    IOptionsMonitor<PriceOptions> prices, VllmBackends vllm, IOptions<EngineOptions> engine, IEnumerable<IRoutesSource> sources)
 {
-    public async Task<List<Deployment>> BuildAsync(CancellationToken ct)
+    /// <summary>
+    /// The models people may choose (chat, pictures, speech, transcription), each name once, in the order they were added:
+    /// a copy under its own name (NAME@i) is in no list.
+    /// </summary>
+    public async Task<IReadOnlyList<GatewayModel>> ModelsAsync(CancellationToken ct)
+    {
+        var models = new List<GatewayModel>();
+        foreach (var d in await BuildAsync(ct))
+        {
+            if (d.CopyOf is not null || models.Any(m => m.Name == d.Name) || d.Mode is not ("chat" or "image_generation" or "audio_transcription" or "audio_speech"))
+            {
+                continue;
+            }
+            // Built here, a number is an int; read from JSON, any integer.
+            int? Int(string k) => d.Info[k] is JsonValue v ? v.TryGetValue<int>(out var i) ? i : v.TryGetValue<long>(out var n) ? (int)Math.Min(n, int.MaxValue) : null : null;
+            bool? Flag(string k) => d.Info[k] is JsonValue v && v.TryGetValue<bool>(out var b) ? b : null;
+            decimal? PerMtok(string k) => d.LiteLlm[k] is JsonValue v && v.TryGetValue<decimal>(out var x) ? x * 1_000_000m : null;
+            models.Add(new GatewayModel(d.Name, Int("max_input_tokens"), Int("max_output_tokens"), Flag("supports_vision") ?? false, Flag("supports_function_calling") ?? true,
+                Flag("supports_reasoning") ?? true, PerMtok("input_cost_per_token"), PerMtok("cache_read_input_token_cost"), PerMtok("output_cost_per_token"), d.Mode,
+                Flag("supports_audio_input") ?? false));
+        }
+        return models;
+    }
+
+    /// <summary>The routes: the app's own tables', and with <paramref name="others"/> those given besides (IRoutesSource).</summary>
+    public async Task<List<Deployment>> BuildAsync(CancellationToken ct, bool others = true)
     {
         var defaults = prices.CurrentValue;
         var built = new List<Deployment>();
         // Each chat model on each server first, with what makes it this one and the requests it serves at once.
         var deployments = new List<(Deployment D, object?[] Print, int? Slots)>();
-        foreach (var m in await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.LlamaCpp).ToListAsync(ct))
+        foreach (var m in await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.LlamaCpp).OrderBy(m => m.CreatedAt).ThenBy(m => m.Name).ToListAsync(ct))
         {
             // What its projector reads: pictures, sound (an omni model's), or both.
             var projector = m.Projector is { Length: > 0 } p ? library.Find(p)?.Profile.Projector ?? new ProjectorInfo(true, false, null, null) : null;
@@ -116,7 +147,8 @@ public sealed class GatewayRoutes(AppDbContext db, ModelLibrary library, RemoteS
         // vLLM's and SGLang's models: each copy at its own port, never sent more at once than its answers at once, a pool when
         // there are several; each copy also under its own name (NAME@i, kept out of every list) for the chat to keep a conversation
         // on one; and the fallback that answers while it cannot.
-        foreach (var m in await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.Vllm || m.EngineKind == EngineKinds.Sglang).ToListAsync(ct))
+        foreach (var m in await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.Vllm || m.EngineKind == EngineKinds.Sglang).OrderBy(m => m.CreatedAt).ThenBy(m => m.Name)
+            .ToListAsync(ct))
         {
             if (vllm.For(m.Engine, m.EngineKind) is not { } backend || backend.Presets().Where(e => e.Model == m.Name).ToList() is not { Count: > 0 } entries)
             {
@@ -153,7 +185,7 @@ public sealed class GatewayRoutes(AppDbContext db, ModelLibrary library, RemoteS
                 }
             }
         }
-        foreach (var server in await db.RemoteServers.AsNoTracking().ToListAsync(ct))
+        foreach (var server in await db.RemoteServers.AsNoTracking().OrderBy(s => s.CreatedAt).ToListAsync(ct))
         {
             var key = remote.Unprotect(server.ApiKeyProtected);
             foreach (var m in server.Models)
@@ -196,7 +228,8 @@ public sealed class GatewayRoutes(AppDbContext db, ModelLibrary library, RemoteS
             }
         }
         await MediaAsync(built, defaults, ct);
-        return built;
+        // Those given besides first, as they were listed before the app's own.
+        return others ? [.. sources.SelectMany(o => o.Routes()), .. built] : built;
     }
 
     /// <summary>The picture and speech models turned on, while their servers run: people's keys reach them too.</summary>
