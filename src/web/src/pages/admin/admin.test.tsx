@@ -214,6 +214,20 @@ describe('admin pages', () => {
     expect(screen.getByText('another one leads')).toBeInTheDocument()
   })
 
+  it('the overview lists who uses an old Code Arena', async () => {
+    fakeApi(admin, {
+      'GET /api/admin/overview': () => ({
+        json: {
+          people: 3, admins: 1, spend: 0, overCredit: [], warning: null, services: [], index: { configured: false, summary: null, error: null }, model: 'M',
+          oldCodeArena: { latest: '7.5.0', people: [{ id: 'p1', name: 'Ann', version: '5.8.0', lastSeen: '2026-10-29T10:00:00Z' }] },
+        },
+      }),
+    })
+    renderApp('/admin')
+    expect(await screen.findByText('1 person uses an old Code Arena')).toBeInTheDocument()
+    expect(screen.getByText(/Ann \(5\.8\.0\)/)).toHaveTextContent('This Arena serves 7.5.0')
+  })
+
   it('the audit export never writes a formula', () => {
     const csv = toCsv([{ id: 1, at: '2026-01-01', actor: '=cmd()', action: 'sign_in', target: 'a,b', success: false, ip: null, detail: 'say "hi"' }])
     expect(csv.split('\n')[1]).toBe(`2026-01-01,'=cmd(),sign_in,"a,b",false,,"say ""hi"""`)

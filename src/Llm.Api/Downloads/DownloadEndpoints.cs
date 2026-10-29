@@ -58,6 +58,9 @@ public static class DownloadEndpoints
     }
 
     /// <summary>Downloads:Directory, /downloads in the image.</summary>
+    /// <summary>Where the Code Arena builds this Arena serves are.</summary>
+    public static string CodeArenaRoot(IConfiguration config) => Root(config);
+
     private static string Root(IConfiguration config) => Path.Combine(config["Downloads:Directory"] is { Length: > 0 } d ? d : "/downloads", "code-arena");
 
     /// <summary>Downloads:SignatureDirectory: what scripts/sign-code-arena.sh wrote, mounted read only.</summary>

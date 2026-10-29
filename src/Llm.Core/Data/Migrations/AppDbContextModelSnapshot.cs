@@ -2969,6 +2969,36 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("business_systems", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Code.CodeArenaClient", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("FirstSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTimeOffset>("LastSeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Version")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LastSeenAt");
+
+                    b.HasIndex("UserId", "Version")
+                        .IsUnique();
+
+                    b.ToTable("code_arena_clients", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Code.CodeFix", b =>
                 {
                     b.Property<Guid>("Id")
@@ -7992,6 +8022,15 @@ namespace Llm.Core.Data.Migrations
                     b.HasOne("Llm.Core.Access.Group", null)
                         .WithMany()
                         .HasForeignKey("GroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Code.CodeArenaClient", b =>
+                {
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

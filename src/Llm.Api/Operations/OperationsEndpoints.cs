@@ -289,7 +289,7 @@ public static class OperationsEndpoints
     private static async Task<IResult> OverviewAsync(AppDbContext db, UserManager<AppUser> users, Ledger ledger, ArgusAdmin argus,
         IHttpClientFactory factory, IOptions<StackOptions> stack, IOptions<ArgusOptions> argusOptions, IOptions<Dashboards.DashboardOptions> dashboards, Chat.ChatModels models,
         Dashboards.PromDatasource prom, TimeProvider clock, Replicas replicas, Storage.StorageDisks disks, IOptionsMonitor<Storage.StorageOptions> storage,
-        Models.MediaControl media, Access.AccessService access, CancellationToken ct)
+        Models.MediaControl media, Access.AccessService access, Downloads.CodeArenaClients codeArena, CancellationToken ct)
     {
         var people = await db.Users.AsNoTracking().Where(u => !u.IsDisabled).ToListAsync(ct);
         var admins = (await access.OwnersAsync(ct: ct)).Count;
@@ -336,6 +336,10 @@ public static class OperationsEndpoints
             storage = await StorageAsync(space, storage.CurrentValue.AlertPercent),
             // The app's replicas on the database, and whether the one answering leads (runs the once-only background work).
             replicas = new { count = replicas.Count, leads = replicas.IsLeader, id = replicas.Id },
+            // Who used a Code Arena older than the one this Arena serves, in the last 30 days (each was told in their bell).
+            oldCodeArena = codeArena.Latest is { } latest
+                ? new { latest, people = (await codeArena.OldAsync(db, ct)).Select(o => new { id = o.Person, name = o.Name, version = o.Version, lastSeen = o.LastSeen }) }
+                : null,
         });
     }
 

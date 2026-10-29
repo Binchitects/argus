@@ -50,6 +50,13 @@ in this program's place (on Windows the running one moves aside as
 `code-arena.exe.old`); the next start runs it. `"updateCheck": false` in
 `config.json` stops the daily look.
 
+**Arena knows who runs an old one.** Every request Code Arena sends names its
+version (its User-Agent, `code-arena/X.Y.Z`): Arena puts down which version
+each person uses (at most once in ten minutes), and when it is older than the
+one Arena serves, it logs it and tells the person once in their bell to run
+`code-arena update`, whether or not their own daily look is on. **Admin →
+Overview** lists who used an old one in the last 30 days, with the version.
+
 **Signed by the server's CA.** When the stack has a CA of its own
 (`scripts/make-cert.sh`), the installer signs the builds it serves on each
 install, upgrade and repair (`scripts/sign-code-arena.sh`, on the host: no

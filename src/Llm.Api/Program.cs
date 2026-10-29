@@ -62,6 +62,12 @@ app.UseAuthentication();
 app.UseTwoFactorEnrolment();
 Llm.Api.Compliance.NoticeGate.UseNoticeGate(app);
 app.UseAuthorization();
+// Which Code Arena each person uses (its User-Agent): put down behind the request, and its person told when it is old.
+app.Use((http, next) =>
+{
+    http.RequestServices.GetRequiredService<Llm.Api.Downloads.CodeArenaClients>().Seen(http);
+    return next(http);
+});
 app.UseRateLimiter();
 // A feature that is off (deploy/features): its API answers 404.
 Llm.Api.FeatureEndpoints.UseFeatures(app);

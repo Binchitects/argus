@@ -56,6 +56,16 @@ export function OverviewPage() {
             {d.overCredit.length > 8 ? ` and ${d.overCredit.length - 8} more` : ''}. Their chats and API calls are refused until you raise it.
           </Alert>
         )}
+        {d.oldCodeArena && d.oldCodeArena.people.length > 0 && (
+          <Alert variant="warning" title={`${d.oldCodeArena.people.length} ${d.oldCodeArena.people.length === 1 ? 'person uses' : 'people use'} an old Code Arena`}>
+            {d.oldCodeArena.people
+              .slice(0, 8)
+              .map((p) => `${p.name} (${p.version})`)
+              .join(', ')}
+            {d.oldCodeArena.people.length > 8 ? ` and ${d.oldCodeArena.people.length - 8} more` : ''}. This Arena serves {d.oldCodeArena.latest}; each was told in their bell to run{' '}
+            <code className="font-mono">code-arena update</code>.
+          </Alert>
+        )}
         <IndexAlert configured={d.index.configured} idx={idx} error={d.index.error} />
         {d.certificate && <CertificateAlert cert={d.certificate} />}
         {d.storage?.disks

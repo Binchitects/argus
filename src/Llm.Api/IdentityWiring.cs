@@ -37,6 +37,7 @@ public static class IdentityWiring
         services.Configure<Operations.ReplicaOptions>(config.GetSection("Replicas"));
         services.Configure<Downloads.CertificateOptions>(config.GetSection("Certificates"));
         services.AddSingleton<Downloads.SiteCertificate>();
+        services.AddSingleton<Downloads.CodeArenaClients>();
         services.AddSingleton<Operations.Replicas>();
         services.AddHostedService(sp => sp.GetRequiredService<Operations.Replicas>());
 
