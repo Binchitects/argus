@@ -511,6 +511,7 @@ public static class IdentityWiring
 #pragma warning restore CA5359
         services.AddSingleton<Models.RemoteServerClient>();
         services.AddSingleton<Models.RemoteHealth>();
+        services.AddScoped<Gateway.GatewayRoutes>();
         services.AddScoped<Models.ModelCatalog>();
         services.AddScoped<Models.ModelPolicy>();
         services.AddScoped<Models.ToolModeBook>();

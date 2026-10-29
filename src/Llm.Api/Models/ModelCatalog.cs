@@ -440,7 +440,7 @@ public sealed class EngineState(TimeProvider clock)
 /// (config/engine/targets.json), and keeps the gateway's list in step.
 /// </summary>
 public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOptions<EngineOptions> options, ModelLibrary library, ChatModels chatModels,
-    RemoteServerClient remote, ModelHoursState hours, Modules modules, MediaControl media, IOptionsMonitor<PriceOptions> prices, VllmBackends vllm, ILogger<ModelCatalog> logger)
+    ModelHoursState hours, Modules modules, VllmBackends vllm, GatewayRoutes routes, ILogger<ModelCatalog> logger)
 {
     public const string PresetsFile = "models.ini";
     public const string KeepFile = "keep";
@@ -1008,88 +1008,11 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
 
     private async Task SyncGatewayOnceAsync(CancellationToken ct)
     {
-        var defaults = prices.CurrentValue;
         var wanted = new Dictionary<string, (string Name, JsonObject Params, JsonObject Info)>(StringComparer.Ordinal);
-        // Each chat model on each server first, with what makes it this one and the requests it serves at once.
-        var deployments = new List<(string Name, JsonObject Params, JsonObject Info, object?[] Print, int? Slots)>();
-        foreach (var m in await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.LlamaCpp).ToListAsync(ct))
+        foreach (var d in await routes.BuildAsync(ct))
         {
-            // What its projector reads: pictures, sound (an omni model's), or both.
-            var projector = m.Projector is { Length: > 0 } p ? library.Find(p)?.Profile.Projector ?? new ProjectorInfo(true, false, null, null) : null;
-            // The window one conversation really has: its slot's share of the context.
-            var window = SlotWindow(m);
-            var info = Info(window, Math.Min(m.MaxOutput ?? DefaultMaxOutput(window), window), projector?.Vision == true, m.Tools, m.Thinking, projector?.Audio == true);
-            var litellm = new JsonObject { ["model"] = "openai/" + m.Name, ["api_base"] = "os.environ/ENGINE_API_BASE", ["api_key"] = "os.environ/ENGINE_API_KEY" };
-            var price = TokenPrice.Of(m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok, defaults);
-            Prices(litellm, price);
-            deployments.Add((m.Name, litellm, info, ["local", m.Name, m.File, m.Context, m.Parallel, m.MaxOutput, m.Projector, projector?.Audio, m.Tools, m.Thinking,
-                price.Input, price.CachedInput, price.Output], m.Parallel));
+            wanted[d.Fingerprint] = (d.Name, d.LiteLlm, d.Info);
         }
-        // vLLM's and SGLang's models: each copy at its own port, never sent more at once than its answers at once, a pool when
-        // there are several; each copy also under its own name (NAME@i, kept out of every list) for the chat to keep a conversation
-        // on one; and the fallback that answers while it cannot.
-        foreach (var m in await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.Vllm || m.EngineKind == EngineKinds.Sglang).ToListAsync(ct))
-        {
-            if (vllm.For(m.Engine, m.EngineKind) is not { } backend || backend.Presets().Where(e => e.Model == m.Name).ToList() is not { Count: > 0 } entries)
-            {
-                continue;
-            }
-            var vision = VllmAdvisor.Read(library.FullPath(m.File))?.Vision == true;
-            var info = Info(m.Context, Math.Min(m.MaxOutput ?? DefaultMaxOutput(m.Context), m.Context), vision, m.Tools, m.Thinking);
-            if (m.Fallback is { Length: > 0 } fallback)
-            {
-                info["llm_app_fallbacks"] = new JsonArray(fallback);
-            }
-            var price = TokenPrice.Of(m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok, defaults);
-            foreach (var e in entries)
-            {
-                var litellm = new JsonObject
-                {
-                    ["model"] = "openai/" + e.Name, ["api_base"] = $"http://{backend.Host}:{e.Port}/v1", ["api_key"] = "os.environ/ENGINE_API_KEY",
-                    ["max_parallel_requests"] = Math.Max(1, m.Parallel),
-                };
-                Prices(litellm, price);
-                object?[] print = [m.EngineKind, m.Name, e.Name, backend.Host, e.Port, m.Context, m.Parallel, m.MaxOutput, vision, m.Tools, m.Thinking, m.Fallback,
-                    price.Input, price.CachedInput, price.Output];
-                deployments.Add((m.Name, litellm, (JsonObject)info.DeepClone(), print, Math.Max(1, m.Parallel)));
-                if (entries.Count > 1)
-                {
-                    var own = (JsonObject)info.DeepClone();
-                    own["llm_app_replica_of"] = m.Name;
-                    wanted[Fingerprint([.. print, "replica"])] = (e.Name, (JsonObject)litellm.DeepClone(), own);
-                }
-            }
-        }
-        foreach (var server in await db.RemoteServers.AsNoTracking().ToListAsync(ct))
-        {
-            var key = remote.Unprotect(server.ApiKeyProtected);
-            foreach (var m in server.Models)
-            {
-                var info = Info(m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking);
-                info["llm_app_server"] = server.Name;
-                var litellm = new JsonObject { ["model"] = "openai/" + m.Remote, ["api_base"] = server.BaseUrl, ["api_key"] = key ?? "none" };
-                if (server.BaseUrl.StartsWith("https:", StringComparison.OrdinalIgnoreCase))
-                {
-                    // The public roots, or no check at all.
-                    litellm["ssl_verify"] = server.VerifyTls;
-                }
-                var price = TokenPrice.Of(m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok, defaults);
-                Prices(litellm, price);
-                var keyPrint = key is null ? "" : Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key)))[..16];
-                deployments.Add((m.Name, litellm, info, ["remote", server.Id, server.BaseUrl, keyPrint, server.VerifyTls, m.Remote, m.Name, m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking,
-                    price.Input, price.CachedInput, price.Output], m.Parallel));
-            }
-        }
-        foreach (var pool in deployments.GroupBy(d => d.Name, StringComparer.Ordinal))
-        {
-            var size = pool.Count();
-            foreach (var d in pool)
-            {
-                // A model on one server is as it always was; on several, each copy carries its share of the pool.
-                wanted[Fingerprint(size == 1 ? d.Print : [.. d.Print, "pool", size, d.Slots])] = (d.Name, size == 1 ? d.Params : Pooled(d.Params, d.Info, size, d.Slots), d.Info);
-            }
-        }
-        await MediaAsync(wanted, defaults, ct);
         var managed = await gateway.ManagedModelsAsync(ct);
         // What is no longer wanted, and every copy but the first of one registered twice.
         var twice = managed.Where(g => g.Fingerprint is not null).GroupBy(g => g.Fingerprint!, StringComparer.Ordinal).SelectMany(g => g.Skip(1));
@@ -1116,98 +1039,6 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         chatModels.Forget();
     }
 
-    /// <summary>The picture and speech models turned on, while their servers run: people's keys reach them too.</summary>
-    private async Task MediaAsync(Dictionary<string, (string Name, JsonObject Params, JsonObject Info)> wanted, PriceOptions defaults, CancellationToken ct)
-    {
-        void Add(string name, string model, string url, JsonObject info, decimal? own)
-        {
-            var litellm = new JsonObject { ["model"] = model, ["api_base"] = url + "/v1", ["api_key"] = "none" };
-            MediaPrices(litellm, info["mode"]!.GetValue<string>(), defaults, own);
-            wanted[Fingerprint("media", name, model, url, info.ToJsonString(), litellm.ToJsonString())] = (name, litellm, info);
-        }
-        await media.RefreshAsync(ct);
-        foreach (var m in media.All)
-        {
-            // Each picture model under its own name (its server runs the one asked for); videos are made by the app, not the gateway.
-            if (m.Mode == MediaModes.Image && await modules.HasAsync("imagegen", ct))
-            {
-                Add(m.Name, "openai/sd-cpp-local", MediaModels.ImageUrl, new JsonObject { ["mode"] = m.Mode }, m.Row.UnitPrice);
-            }
-            else if (m.Id is not null && await modules.HasAsync("audio", ct))
-            {
-                Add(m.Name, "openai/" + m.Id, MediaModels.AudioUrl, new JsonObject { ["mode"] = m.Mode }, m.Row.UnitPrice);
-            }
-        }
-    }
-
-    /// <summary>
-    /// A picture or speech model's price as LiteLLM reads it: per picture, per second of sound
-    /// transcribed, per character read aloud. Pictures and speech also carry token prices of 0:
-    /// LiteLLM prices a request by its deployment's own entry only when that entry has a token
-    /// or per-second price (LiteLLM 1.100, cost_calculator._select_model_name_for_cost_calc).
-    /// </summary>
-    private static void MediaPrices(JsonObject litellm, string mode, PriceOptions p, decimal? own)
-    {
-        switch (mode)
-        {
-            case "image_generation":
-                litellm["input_cost_per_image"] = own ?? p.PerImage;
-                litellm["input_cost_per_token"] = 0m;
-                litellm["output_cost_per_token"] = 0m;
-                break;
-            case "audio_transcription":
-                litellm["input_cost_per_second"] = (own ?? p.PerAudioMinute) / 60m;
-                break;
-            case "audio_speech":
-                litellm["input_cost_per_character"] = (own ?? p.PerThousandCharacters) / 1000m;
-                litellm["input_cost_per_token"] = 0m;
-                litellm["output_cost_per_token"] = 0m;
-                break;
-        }
-    }
-
-    /// <summary>
-    /// One copy of a model served by several engines (this machine's and other GPU servers'): the gateway sends each
-    /// request to the least busy copy (router_settings in config/litellm.yaml), never more at once than a copy's
-    /// slots, and weighs the copies by their slots when it shuffles.
-    /// </summary>
-    public static JsonObject Pooled(JsonObject litellm, JsonObject info, int copies, int? slots)
-    {
-        if (slots is > 0 and var s)
-        {
-            litellm["max_parallel_requests"] = s;
-        }
-        litellm["weight"] = slots is > 0 ? slots : 1;
-        info["llm_app_pool"] = copies;
-        return litellm;
-    }
-
-    private static JsonObject Info(int? context, int? maxOutput, bool vision, bool tools, bool thinking, bool audio = false)
-    {
-        var info = new JsonObject
-        {
-            ["mode"] = "chat", ["supports_vision"] = vision, ["supports_function_calling"] = tools, ["supports_reasoning"] = thinking, ["supports_audio_input"] = audio,
-        };
-        if (context is { } c)
-        {
-            info["max_input_tokens"] = c;
-            info["max_tokens"] = c;
-        }
-        if (maxOutput is { } o)
-        {
-            info["max_output_tokens"] = o;
-        }
-        return info;
-    }
-
-    /// <summary>A chat model's prices, per token: LiteLLM prices a prompt's cached tokens at the cache read price, and at nothing without one.</summary>
-    private static void Prices(JsonObject litellm, TokenPrice price)
-    {
-        litellm["input_cost_per_token"] = price.Input / 1_000_000m;
-        litellm["cache_read_input_token_cost"] = price.CachedInput / 1_000_000m;
-        litellm["output_cost_per_token"] = price.Output / 1_000_000m;
-    }
-
     /// <summary>The longest answer when none is set: half the context, at most 32,768 tokens.</summary>
     public static int DefaultMaxOutput(int context) => Math.Max(ModelAdvisor.MinOutput, Math.Min(32768, context / 2 / 1024 * 1024));
 
@@ -1216,9 +1047,6 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
 
     /// <summary>The sync running against each gateway: the next waits for it.</summary>
     private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ILiteLlm, SemaphoreSlim> Syncing = [];
-
-    private static string Fingerprint(params object?[] parts) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('|', parts.Select(p => Convert.ToString(p, CultureInfo.InvariantCulture))))))[..16];
 
     private string? Read(string file)
     {

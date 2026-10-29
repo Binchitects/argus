@@ -92,6 +92,17 @@ public sealed class VllmGatewayTests(AppFixture app) : IDisposable
             Assert.Equal(["flash@0", "flash@1"], copies.Select(m => m.Name));
             Assert.All(copies, m => Assert.Equal("flash", m.Info["llm_app_replica_of"]!.GetValue<string>()));
             Assert.DoesNotContain(gateway.Models, m => m.Name.Contains('@', StringComparison.Ordinal));
+            // The same as routes: each copy at its port with the engines' key, its limit, its fallback; and under its own name.
+            List<Llm.Api.Gateway.Deployment> routes;
+            await using (var scope = f.Services.CreateAsyncScope())
+            {
+                routes = await scope.ServiceProvider.GetRequiredService<Llm.Api.Gateway.GatewayRoutes>().BuildAsync(CancellationToken.None);
+            }
+            var flash = routes.Where(r => r.Name == "flash").OrderBy(r => r.BaseUrl, StringComparer.Ordinal).ToList();
+            Assert.Equal([("http://vllm:8001/v1", "flash@0"), ("http://vllm:8002/v1", "flash@1")], flash.Select(r => (r.BaseUrl, r.Model)));
+            Assert.All(flash, r => Assert.Equal((EngineKinds.Vllm, true, 16, 16, 2, "Qwen3.8-Flash-Next"), (r.Kind, r.EngineKey, r.MaxParallel, r.Weight, r.Copies, r.Fallback)));
+            Assert.Equal([("flash@0", "flash"), ("flash@1", "flash")], routes.Where(r => r.CopyOf is not null).OrderBy(r => r.Name, StringComparer.Ordinal).Select(r => (r.Name, r.CopyOf)));
+            Assert.Equal(routes.Select(r => r.Fingerprint).Order(StringComparer.Ordinal), gateway.Managed.Values.Select(m => m.Fingerprint).Order(StringComparer.Ordinal));
             // In step: a second sync changes nothing.
             var before = gateway.Managed.Keys.ToHashSet();
             await using (var scope = f.Services.CreateAsyncScope())
