@@ -297,6 +297,10 @@ internal sealed class CodeIndex
         return true;
     }
 
+    /// <summary>A text's symbols as the index would read them (a Markdown file's headings too): the IDE's Outline of what the editor holds.</summary>
+    internal static List<CodeSymbol> Outline(string? lang, string text) =>
+        lang == "markdown" ? Markdown(text).Symbols : Scan(lang, text)?.Symbols ?? [];
+
     /// <summary>What a language's scanner finds in a text; null for a language none reads.</summary>
     internal static ScannedFile? Scan(string? lang, string text) => lang is not null && Scanners.TryGetValue(lang, out var make) ? make().Scan(text) : null;
 

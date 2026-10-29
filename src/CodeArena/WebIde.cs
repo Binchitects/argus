@@ -235,6 +235,25 @@ internal sealed partial class WebApp
                     await res.JsonAsync(200, new JsonObject { ["symbols"] = list, ["building"] = index is null }, ct);
                     return true;
                 }
+                case ("POST", "/api/outline"):
+                {
+                    // The Outline: the symbols of the text the editor holds (unsaved edits too), or of the file on disk.
+                    var body = Body(req);
+                    var path = body.Str("path") ?? throw new ToolError("Which file?");
+                    var text = body.Str("text") ?? _files.Read(path).Str("text") ?? "";
+                    if (text.Length > CodeFiles.MostSymbolBytes)
+                    {
+                        await res.JsonAsync(200, new JsonObject { ["symbols"] = new JsonArray(), ["language"] = null }, ct);
+                        return true;
+                    }
+                    var lang = CodeFiles.LanguageOf(path);
+                    var symbols = new JsonArray([.. CodeIndex.Outline(lang, text).Select(s => (JsonNode)new JsonObject
+                    {
+                        ["name"] = s.Name, ["kind"] = s.Kind, ["qualified"] = s.Qualified, ["parent"] = s.Parent, ["start"] = s.Start, ["end"] = s.End, ["signature"] = s.Signature,
+                    })]);
+                    await res.JsonAsync(200, new JsonObject { ["symbols"] = symbols, ["language"] = lang }, ct);
+                    return true;
+                }
                 case ("GET", "/api/files/all"):
                     await res.JsonAsync(200, await Task.Run(() => _files.All(ct), ct), ct);
                     return true;

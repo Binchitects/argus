@@ -19,6 +19,7 @@ import { runCommand, useCommands } from './commands'
 import { useKeyFor } from './keyboard'
 import { compareSelection } from './compare'
 import { foldersQuery, removeFolder } from './folders'
+import { Outline } from './outline'
 
 /** A row's place in the tree, for keys and the context menu. */
 interface Target {
@@ -290,6 +291,7 @@ export function Explorer({ project, onOpenChanges }: { project: string; onOpenCh
           </ContextMenu.Content>
         </ContextMenu.Portal>
       </ContextMenu.Root>
+      <Outline />
     </div>
   )
 }

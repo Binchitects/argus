@@ -95,6 +95,10 @@ public sealed class CodeScanTypeScriptTests
         Assert.Contains(("component", "Memoised", 59, 59), shapes);
         Assert.Contains(("component", "Page", 61, 63), shapes);
         Assert.Contains(("function", "lazy", 65, 65), shapes);
+        // A member names what holds it, as the Outline nests it.
+        Assert.Equal("Store", f.Symbols.Single(s => s.Qualified == "Store.load").Parent);
+        Assert.Equal("Source", f.Symbols.Single(s => s.Qualified == "Source.id").Parent);
+        Assert.Null(f.Symbols.Single(s => s.Qualified == "readSource").Parent);
         // Object literal members are not symbols of their own.
         Assert.DoesNotContain(shapes, s => s.Qualified.EndsWith("queryFn", StringComparison.Ordinal));
         Assert.Equal(("Reads a source, whole.", "The longest a request waits."),

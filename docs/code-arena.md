@@ -346,7 +346,12 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   keys move through the tree. F2 and Del are the keymap's (`renameFile`,
   `deleteFile`): keybindings.json changes them or takes them away. The files the agent changed are marked, and so
   are the folders they are in. A file deleted with unsaved changes keeps its
-  tab (the question says so): saving it makes the file again.
+  tab (the question says so): saving it makes the file again. **Outline**,
+  at the Explorer's foot, lists the symbols of the file shown, nested (C#,
+  TypeScript, JavaScript and Python by Code Arena's own scanners, a Markdown
+  file's headings), read from the text the editor holds, unsaved edits too;
+  the one the cursor is in is marked, a click goes to one, and **Collapse
+  all** folds them (`POST /api/outline`).
 - **editor**: tabs with Monaco, highlighting by the file's name (or
   `files.associations`; a name that says nothing, by its first line: a
   `#!` line's program, `<?php`), set up by the settings (below). The editor's

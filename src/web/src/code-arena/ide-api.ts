@@ -108,6 +108,20 @@ export const symbolsQuery = (q: string, path?: string) => ({
   queryFn: ({ signal }: { signal: AbortSignal }) => api<{ symbols: SymbolHit[]; building: boolean }>(`/api/symbols?q=${at(q)}${path ? `&path=${at(path)}` : ''}`, { signal }),
 })
 
+/** A symbol of the Outline: its name and kind, what holds it (qualified), its lines and its first line. */
+export interface OutlineSymbol {
+  name: string
+  kind: string
+  qualified: string
+  parent: string | null
+  start: number
+  end: number
+  signature: string
+}
+
+/** The Outline of a file: the symbols of the text the editor holds (unsaved edits too). */
+export const outlineOf = (path: string, text: string) => api<{ symbols: OutlineSymbol[]; language: string | null }>('/api/outline', { body: { path, text } })
+
 /** Every file of the working directory (as git sees them), for quick open. */
 export const allFilesQuery = {
   queryKey: ['code', 'files', 'all'] as const,

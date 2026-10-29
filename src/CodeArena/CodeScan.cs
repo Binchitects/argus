@@ -641,7 +641,7 @@ internal sealed class CSharpScanner : ICodeScanner
 /// </summary>
 internal sealed partial class TypeScriptScanner(string lang = "typescript") : ICodeScanner
 {
-    public int Version => 1;
+    public int Version => 2;
 
     private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
     {
@@ -684,6 +684,9 @@ internal sealed partial class TypeScriptScanner(string lang = "typescript") : IC
         var head = new List<CodeToken>();
 
         string Prefix() => string.Join('.', stack.Where(c => c.Kind is "type" or "namespace").Select(c => c.Name));
+
+        // A container's name as its symbol has it: what its members name as their parent.
+        string Qualify(string name) => Prefix() is { Length: > 0 } p ? $"{p}.{name}" : name;
 
         void Add(string kind, string name, CodeToken first, int endLine, int endOffset, int signatureEnd, Container? into = null)
         {
@@ -740,7 +743,7 @@ internal sealed partial class TypeScriptScanner(string lang = "typescript") : IC
                     if (stack.LastOrDefault() is not { Members: false } && FunctionValue(head) is { } bound && !Assigned(stack))
                     {
                         // const f = (…) => { … }: a function, its body to its brace.
-                        var c = new Container("member", bound.Name, null, (head.Count > 0 ? head[0] : t).Offset, false);
+                        var c = new Container("member", bound.Name, Qualify(bound.Name), (head.Count > 0 ? head[0] : t).Offset, false);
                         Add(bound.Kind, bound.Name, head.Count > 0 ? head[0] : t, t.Line, t.Offset, t.Offset, c);
                         stack.Add(c);
                         head.Clear();
@@ -805,13 +808,13 @@ internal sealed partial class TypeScriptScanner(string lang = "typescript") : IC
             var word = at[0].Text;
             if (inMembers && word is "class" or "interface" or "enum" && at.Count > 1 && at[1].Word)
             {
-                var c = new Container("type", at[1].Text, null, startTok.Offset, word != "enum");
+                var c = new Container("type", at[1].Text, Qualify(at[1].Text), startTok.Offset, word != "enum");
                 Add(word, at[1].Text, startTok, brace.Line, brace.Offset, brace.Offset, c);
                 return c;
             }
             if (inMembers && word is "namespace" or "module" && at.Count > 1 && at[1].Word)
             {
-                var c = new Container("namespace", at[1].Text, null, startTok.Offset, true);
+                var c = new Container("namespace", at[1].Text, Qualify(at[1].Text), startTok.Offset, true);
                 Add("namespace", at[1].Text, startTok, brace.Line, brace.Offset, brace.Offset, c);
                 return c;
             }
@@ -822,14 +825,14 @@ internal sealed partial class TypeScriptScanner(string lang = "typescript") : IC
                 if (nameAt < at.Count && at[nameAt].Word)
                 {
                     var name = at[nameAt].Text;
-                    var c = new Container("member", name, null, startTok.Offset, false);
+                    var c = new Container("member", name, Qualify(name), startTok.Offset, false);
                     Add(char.IsUpper(name[0]) && lang != "typescript-plain" ? "component" : "function", name, startTok, brace.Line, brace.Offset, brace.Offset, c);
                     return c;
                 }
             }
             if (inMembers && holder is { Kind: "type" } && Member(at) is { } m)
             {
-                var c = new Container("member", m, null, startTok.Offset, false);
+                var c = new Container("member", m, Qualify(m), startTok.Offset, false);
                 Add(m == "constructor" ? "constructor" : at.Any(x => x.Is("get") || x.Is("set")) && at.Count > 1 && at[1].Word ? "accessor" : "method", m, startTok, brace.Line, brace.Offset, brace.Offset, c);
                 return c;
             }

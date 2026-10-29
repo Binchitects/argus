@@ -55,7 +55,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   explorer: {
     name: 'Explorer',
-    text: 'The folder\'s files. Click opens one; a right-click has New file, New folder, Copy path, Rename (F2) and Delete. The files the agent changed are marked, and so are the folders they are in.',
+    text: 'The folder\'s files. Click opens one; a right-click has New file, New folder, Copy path, Rename (F2) and Delete. The files the agent changed are marked, and so are the folders they are in. **Outline**, at its foot, lists the symbols of the file shown (the one the cursor is in marked); a click goes to one.',
     manual: 'the-ide',
   },
   search: {
@@ -230,4 +230,5 @@ export const regions: Record<string, Part> = {
   Extensions: 'extensions',
   Output: 'output',
   'Keyboard Shortcuts': 'keybindings',
+  Outline: 'explorer',
 }

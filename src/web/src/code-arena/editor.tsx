@@ -1634,7 +1634,7 @@ function MarkdownPreview({ path }: { path: string }) {
       setText(model.getValue())
       listen = model.onDidChangeContent(() => {
         clearTimeout(wait)
-        wait = window.setTimeout(() => setText(model.getValue()), 150)
+        wait = window.setTimeout(() => !model.isDisposed() && setText(model.getValue()), 150)
       })
     })
     return () => {

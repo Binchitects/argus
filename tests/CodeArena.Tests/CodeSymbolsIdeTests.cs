@@ -48,5 +48,15 @@ public sealed class CodeSymbolsIdeTests : IDisposable
         var file = (await web.GetJsonAsync("/api/symbols?path=src/Agent.cs"))["symbols"]!.AsArray();
         Assert.Equal(["Agent", "RunToolsAsync", "Run"], file.Select(s => s!["name"]!.GetValue<string>()));
         Assert.False((await web.GetJsonAsync("/api/symbols?q=nothing_named_so"))["building"]!.GetValue<bool>());
+
+        // The Outline: the text the editor holds, saved or not; a Markdown file's headings.
+        var outline = JsonNode.Parse(await (await web.PostAsync("/api/outline", new JsonObject { ["path"] = "src/cart.ts", ["text"] = "export class Cart {\n  add() {}\n}\n" })).Content.ReadAsStringAsync())!;
+        Assert.Equal([("Cart", "class", (string?)null, 1), ("add", "method", "Cart", 2)],
+            outline["symbols"]!.AsArray().Select(s => (s!["name"]!.GetValue<string>(), s["kind"]!.GetValue<string>(), s["parent"]?.GetValue<string>(), s["start"]!.GetValue<int>())));
+        var headings = JsonNode.Parse(await (await web.PostAsync("/api/outline", new JsonObject { ["path"] = "README.md", ["text"] = "# Shop\n\n## Paying\n" })).Content.ReadAsStringAsync())!;
+        Assert.Equal(["Shop", "Paying"], headings["symbols"]!.AsArray().Select(s => s!["name"]!.GetValue<string>()));
+        // No text: the file as it is on disk.
+        var disk = JsonNode.Parse(await (await web.PostAsync("/api/outline", new JsonObject { ["path"] = "src/Agent.cs" })).Content.ReadAsStringAsync())!;
+        Assert.Contains(disk["symbols"]!.AsArray(), s => s!["name"]!.GetValue<string>() == "RunToolsAsync");
     }
 }

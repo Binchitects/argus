@@ -886,6 +886,29 @@ describe('Code Arena, the IDE', () => {
     expect(await screen.findByRole('dialog', { name: 'Commands' })).toBeInTheDocument()
   })
 
+  it('lists the file shown in the Outline from the text the editor holds, marks where the cursor is, and goes to a symbol', async () => {
+    const sent: { path: string; text: string }[] = []
+    backend({
+      'POST /api/outline': (body) => {
+        const b = body as { path: string; text: string }
+        sent.push(b)
+        const symbols = [{ name: 'total', kind: 'const', qualified: 'total', parent: null, start: 1, end: 1, signature: 'const total = 1' }]
+        if (b.text.includes('function pay')) symbols.push({ name: 'pay', kind: 'function', qualified: 'pay', parent: null, start: 3, end: 3, signature: 'function pay() {}' })
+        return { json: { symbols, language: 'typescript' } }
+      },
+    })
+    renderIde()
+    await openApp()
+    const outline = await screen.findByRole('region', { name: 'Outline' })
+    expect(await within(outline).findByRole('treeitem', { name: /total/ })).toBeInTheDocument()
+    expect(sent.at(-1)).toEqual({ path: 'src/app.ts', text: 'const total = 1\nconsole.log(total)\n' })
+
+    // Typed, not saved: the Outline reads what the editor holds.
+    act(() => editor().model!.setValue('const total = 1\nconsole.log(total)\nfunction pay() {}\n'))
+    await userEvent.click(await within(outline).findByRole('button', { name: /pay, function, line 3/ }, { timeout: 3000 }))
+    await waitFor(() => expect(editor().revealed).toBe(3))
+  })
+
   it("previews a Markdown file in a tab of its own that follows its text, its pictures from the folder", async () => {
     backend()
     renderIde()
