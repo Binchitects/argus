@@ -182,6 +182,24 @@ internal sealed class CodeIndex
     /// <summary>How many files were scanned by the last sync (a test counts what is read again).</summary>
     public int LastScanned { get; private set; }
 
+    /// <summary>
+    /// The folder's index as it was kept, brought in step with the folder (built whole when there is none, it cannot be read,
+    /// or a rebuild is asked for), and written back when anything changed.
+    /// </summary>
+    public static (CodeIndex Index, IndexSync Sync, bool Built) Open(string dataDir, Workspace workspace, CancellationToken ct, bool rebuild = false)
+    {
+        var file = FileFor(dataDir, workspace.Root);
+        var index = rebuild ? null : Load(workspace.Root, file);
+        var built = index is null;
+        index ??= new CodeIndex(workspace.Root, file);
+        var sync = index.Sync(workspace, workspace.Roots, ct);
+        if (built || sync.Read > 0 || sync.Removed > 0 || sync.Skipped > 0)
+        {
+            index.Save();
+        }
+        return (index, sync, built);
+    }
+
     public static string FileFor(string dataDir, string root) =>
         System.IO.Path.Combine(dataDir, "index", Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(root)))[..16] + ".bin");
 

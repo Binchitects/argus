@@ -162,6 +162,10 @@ internal sealed partial class CodeSearch
         public float G;
         public float Q;
         public float P = 1;
+        /// <summary>Its lines hold the question's text word for word.</summary>
+        public bool Phrase;
+        /// <summary>The lines that hold it: shown first.</summary>
+        public SortedSet<int> PhraseLines { get; } = [];
         public double Score;
         public List<string> Why { get; } = [];
         public HashSet<string> Calls { get; } = new(StringComparer.Ordinal);
@@ -239,9 +243,10 @@ internal sealed partial class CodeSearch
         var graph = _index.Graph();
         Near(graph, all, q);
         Coverage(graph, all.Values, terms);
+        Phrase(graph, all, q, fileScore);
         foreach (var c in all.Values)
         {
-            c.Score = (c.L + 0.5 * c.F + 0.6 * c.G + 0.3 * c.Q) * c.P;
+            c.Score = (c.L + 0.5 * c.F + 0.6 * c.G + 0.3 * c.Q + (c.Phrase ? 1.5 : 0)) * c.P;
         }
         var ranked = all.Values.Where(c => c.Score > 0).OrderByDescending(c => c.Score).ThenBy(c => c.File.Path, StringComparer.Ordinal).ThenBy(c => c.Symbol.Start).ToList();
         return Pack(q, raw, ranked, hidden, graph);
@@ -350,6 +355,48 @@ internal sealed partial class CodeSearch
             foreach (var c in all.Values.Where(c => imported.Contains(c.File) && c.L > 0))
             {
                 c.G = Math.Max(c.G, 0.2f * seed.L);
+            }
+        }
+    }
+
+    /// <summary>
+    /// A question of several words that a file holds word for word (a message, a line of code): the symbol holding that line
+    /// goes first, whatever its length. Looked for in the fifty files best by their words that hold every word.
+    /// </summary>
+    private void Phrase(CodeGraph graph, Dictionary<string, Candidate> all, CodeQuery q, Dictionary<IndexedFile, float> fileScore)
+    {
+        var phrase = Regex.Replace(q.Text.Trim(), @"\s+", " ").TrimEnd('.', '?', '!', ':', ';', ',');
+        if (phrase.Split(' ').Length < 3)
+        {
+            return;
+        }
+        var terms = Terms.Of(phrase).Distinct(StringComparer.Ordinal).ToList();
+        foreach (var file in fileScore.Where(f => terms.All(f.Key.Terms.ContainsKey)).OrderByDescending(f => f.Value).ThenBy(f => f.Key.Path, StringComparer.Ordinal).Take(50).Select(f => f.Key))
+        {
+            if ((q.MayRead is { } may && !may(file.Path)) || graph.Now(file) is not { } now)
+            {
+                continue;
+            }
+            string[]? code = null;
+            for (var at = now.Text.IndexOf(phrase, StringComparison.OrdinalIgnoreCase); at >= 0; at = now.Text.IndexOf(phrase, at + 1, StringComparison.OrdinalIgnoreCase))
+            {
+                var line = 1 + now.Text.AsSpan(0, at).Count('\n');
+                // In a comment just above a symbol (its doc): that symbol's.
+                code ??= now.Code.Split('\n');
+                var comment = line <= code.Length && code[line - 1].Trim().Length == 0;
+                var below = comment ? now.Scanned.Symbols.Where(s => s.Start > line && s.Start - line <= 3 && s.Kind != "namespace").MinBy(s => s.Start) : null;
+                if ((below ?? now.Enclosing(line)) is not { } symbol)
+                {
+                    continue;
+                }
+                var id = $"{file.Path}#{symbol.Qualified}";
+                if (!all.TryGetValue(id, out var c))
+                {
+                    all[id] = c = new Candidate(file, symbol) { P = Prior(file, q, q.Tests, false) };
+                    c.Why.AddRange(terms);
+                }
+                c.Phrase = true;
+                c.PhraseLines.Add(line);
             }
         }
     }
@@ -535,7 +582,8 @@ internal sealed partial class CodeSearch
             return new Place(c, a, head, a, b, shown, false, secrets);
         }
         var keep = new SortedSet<int>(Enumerable.Range(a, head - a + 1));
-        foreach (var hit in Enumerable.Range(head + 1, b - head).Where(n => Terms.Of(lines[n - 1]).Any(terms.Contains)))
+        // The lines holding the question word for word first, then those holding its words.
+        foreach (var hit in c.PhraseLines.Where(n => n > head && n <= b).Concat(Enumerable.Range(head + 1, b - head).Where(n => Terms.Of(lines[n - 1]).Any(terms.Contains))))
         {
             for (var n = Math.Max(a, hit - 3); n <= Math.Min(b, hit + 3) && keep.Count < WholeLines; n++)
             {

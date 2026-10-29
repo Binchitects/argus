@@ -120,6 +120,9 @@ internal static partial class Cli
           code-arena models                 the models you may use
           code-arena update                 install the newer Code Arena your Arena serves, if any
           code-arena sandbox [command]      what the agent's commands may do here; with a command, run it as they run
+          code-arena index [--rebuild]      build or refresh this folder's code index and say what it holds
+          code-arena search "question"      find code by what it does or by name, from the index, with no model
+                                            (--symbol NAME, --outline [PATH], --json: code-arena search --help)
 
         Options:
           -p, --print [prompt]       one-shot, for scripts; --output json for a JSON answer
@@ -156,6 +159,14 @@ internal static partial class Cli
         if (args is ["sandbox", .. var rest])
         {
             return await SandboxAsync(rest, env, ct);
+        }
+        if (args is ["index", .. var indexArgs])
+        {
+            return IndexCommand(indexArgs, env, ct);
+        }
+        if (args is ["search", .. var searchArgs])
+        {
+            return SearchCommand(searchArgs, env, ct);
         }
         Options o;
         try

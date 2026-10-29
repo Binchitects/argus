@@ -28,6 +28,7 @@ and docs/measurements/code-index.md.
     python3 evals/run_code_index.py tasks                 # make the tasks (evals/code-index-tasks.json)
     python3 evals/run_code_index.py tasks --check         # make them again: they must come out the same
     python3 evals/run_code_index.py run --program ./code-arena --arms grep --models Qwen3-4B-Q4_K_M
+    python3 evals/run_code_index.py retrieve --program ./code-arena   # the index alone, no model: hit@k against grep's ranking
 
 The corpus is a clone of this repository under ~/measure-sets/code-index/ (made
 from the local checkout, so nothing is downloaded and the working tree is never
@@ -235,8 +236,8 @@ def home_for(arm: str, model: str, base: pathlib.Path, url: str, key: str) -> pa
     return home
 
 
-def run_one(program: str, repo: pathlib.Path, task: dict, arm: str, model: str, base: pathlib.Path, url: str, key: str) -> dict:
-    subprocess.run(["git", "-C", str(repo), "checkout", "--quiet", "--force", task["at"]], check=True)
+def run_one(program: str, repo: pathlib.Path, task: dict, arm: str, model: str, base: pathlib.Path, url: str, key: str, head: str) -> dict:
+    subprocess.run(["git", "-C", str(repo), "checkout", "--quiet", "--force", head if task["at"] == "HEAD" else task["at"]], check=True)
     subprocess.run(["git", "-C", str(repo), "clean", "-fdq"], check=True)
     home = home_for(arm, model, base, url, key)
     started = time.monotonic()
@@ -259,11 +260,115 @@ def run_one(program: str, repo: pathlib.Path, task: dict, arm: str, model: str, 
             "requests": usage.get("requests"), "tool_calls": usage.get("tool_calls"), "tool_chars": usage.get("tool_chars")}
 
 
+WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")
+STOP = {"the", "and", "for", "with", "from", "that", "this", "are", "its", "not", "but", "into", "each", "when", "what", "where", "which",
+        "one", "own", "all", "any", "can", "has", "have", "was", "were", "will", "than", "then", "them", "they", "now", "too", "out"}
+
+
+def query_of(task: dict) -> str:
+    """What a person would ask: the commit's subject, or the message."""
+    return task["prompt"].split("\n\n")[0] if task["family"] == "locate" else task["message"]
+
+
+def grep_rank(repo: pathlib.Path, query: str) -> list[tuple[str, int, int]]:
+    """The baseline: the source files ranked by how many of the question's words they hold (git grep -i -w -c), then by how often."""
+    words = sorted({w.lower() for w in WORD.findall(query)} - STOP)
+    score: dict[str, list[int]] = {}
+    for w in words:
+        out = subprocess.run(["git", "-C", str(repo), "grep", "-I", "-i", "-w", "-c", "-e", w, "--", *[f"*{e}" for e in SOURCE]], capture_output=True, text=True).stdout
+        for line in out.splitlines():
+            path, _, count = line.rpartition(":")
+            row = score.setdefault(path, [0, 0])
+            row[0] += 1
+            row[1] += int(count)
+    ranked = sorted(score.items(), key=lambda x: (-x[1][0], -x[1][1], x[0]))
+    return [(path, 1, 1) for path, _ in ranked[:20]]
+
+
+def grep_fixed(repo: pathlib.Path, text: str) -> list[tuple[str, int, int]]:
+    """The baseline for a message: git grep -n -F, every line holding it, in path order."""
+    out = subprocess.run(["git", "-C", str(repo), "grep", "-I", "-n", "-F", "-e", text], capture_output=True, text=True).stdout
+    places = []
+    for line in out.splitlines():
+        path, number, _ = line.split(":", 2)
+        places.append((path, int(number), int(number)))
+    return places
+
+
+def hits(task: dict, places: list[tuple[str, int, int]], ks=(1, 3, 5, 10)) -> dict:
+    """hit@k: a right file among the first k files cited (and, for a message, its line within the place, give or take two)."""
+    files: list[str] = []
+    for p in places:
+        if p[0] not in files:
+            files.append(p[0])
+    out = {}
+    for k in ks:
+        if task["family"] == "locate":
+            top = set(files[:k])
+            out[f"hit@{k}"] = any(f in top for f in task["files"])
+            out[f"recall@{k}"] = sum(f in top for f in task["files"]) / len(task["files"])
+        else:
+            out[f"hit@{k}"] = any(p[0] == task["file"] and p[1] - 2 <= task["line"] <= p[2] + 2 for p in places if p[0] in files[:k])
+    return out
+
+
+def retrieve(program: str, repo: pathlib.Path, kept: dict, budget: int, split: str) -> list[dict]:
+    """The index's answers alone, no model: code-arena search --json for each task's question, against grep's ranking."""
+    home = pathlib.Path(tempfile.mkdtemp(prefix="ci-retrieve-"))
+    rows = []
+    try:
+        for task in kept["tasks"]:
+            if split and task["split"] != split:
+                continue
+            at = kept["head"] if task["at"] == "HEAD" else task["at"]
+            subprocess.run(["git", "-C", str(repo), "checkout", "--quiet", "--force", at], check=True)
+            subprocess.run(["git", "-C", str(repo), "clean", "-fdq"], check=True)
+            query = query_of(task)
+            started = time.monotonic()
+            done = subprocess.run([program, "search", query, "--json", "--budget", str(budget)], cwd=repo, env={**os.environ, "CODE_ARENA_HOME": str(home)},
+                                  capture_output=True, text=True, timeout=600)
+            seconds = time.monotonic() - started
+            try:
+                answer = json.loads(done.stdout)
+            except json.JSONDecodeError:
+                answer = {"items": [], "text": "", "route": "error"}
+            places = [(i["path"], i["start"], i["end"]) for i in answer["items"]]
+            # grep's way: the files ranked by the question's words; for a message, grep -F finds its line.
+            baseline = grep_rank(repo, query) if task["family"] == "locate" else grep_fixed(repo, task["message"])
+            for arm, cited in (("index", places), ("grep-rank", baseline)):
+                rows.append({"task": task["id"], "family": task["family"], "split": task["split"], "arm": arm, **hits(task, cited),
+                             "route": answer.get("route") if arm == "index" else None, "chars": len(answer.get("text", "")) if arm == "index" else None,
+                             "seconds": round(seconds, 2) if arm == "index" else None})
+            last = rows[-2]
+            print(f"{task['id']} {last['route']}: hit@1 {last['hit@1']} hit@5 {last['hit@5']} · grep hit@5 {rows[-1]['hit@5']} · {last['seconds']}s", flush=True)
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
+    return rows
+
+
+def summary(rows: list[dict]) -> str:
+    """A Markdown table: per family and arm, the share of tasks hit at 1, 3, 5 and 10."""
+    lines = ["| Family | Arm | Tasks | hit@1 | hit@3 | hit@5 | hit@10 | recall@5 |", "|---|---|---|---|---|---|---|---|"]
+    for family in ("locate", "string"):
+        for arm in ("index", "grep-rank"):
+            chosen = [r for r in rows if r["family"] == family and r["arm"] == arm]
+            if not chosen:
+                continue
+            share = lambda key: f"{100 * sum(bool(r.get(key)) if not key.startswith('recall') else r[key] for r in chosen) / len(chosen):.0f}%"
+            lines.append(f"| {family} | {arm} | {len(chosen)} | {share('hit@1')} | {share('hit@3')} | {share('hit@5')} | {share('hit@10')} | "
+                         f"{share('recall@5') if family == 'locate' else '–'} |")
+    return "\n".join(lines)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     sub = parser.add_subparsers(dest="command", required=True)
     tasks = sub.add_parser("tasks", help="make the tasks from the corpus's history")
     tasks.add_argument("--check", action="store_true", help="make them again and compare with the file")
+    ret = sub.add_parser("retrieve", help="the index's answers alone, no model: hit@k against grep's ranking")
+    ret.add_argument("--program", required=True, help="the code-arena program to run")
+    ret.add_argument("--budget", type=int, default=2000, help="the answer's budget in tokens")
+    ret.add_argument("--split", default="", help="only dev or test tasks")
     run = sub.add_parser("run", help="run the tasks")
     run.add_argument("--program", required=True, help="the code-arena program to run")
     run.add_argument("--arms", default="grep,index", help="grep, index, index-1")
@@ -292,6 +397,11 @@ def main() -> int:
         return 0
 
     kept = json.loads(TASKS.read_text())
+    if args.command == "retrieve":
+        rows = retrieve(str(pathlib.Path(args.program).resolve()), repo, kept, args.budget, args.split)
+        (ROOT / "evals" / "code-index-retrieval.json").write_text(json.dumps({"head": kept["head"], "budget": args.budget, "rows": rows}, indent=1) + "\n")
+        print(summary(rows))
+        return 0
     chosen = [t for t in kept["tasks"] if not args.family or t["family"] == args.family]
     if args.limit:
         chosen = chosen[:args.limit]
@@ -303,7 +413,7 @@ def main() -> int:
             for arm in args.arms.split(","):
                 for task in chosen:
                     for n in range(args.runs):
-                        row = run_one(args.program, repo, task, arm, model, base, args.url, person["apiKey"])
+                        row = run_one(args.program, repo, task, arm, model, base, args.url, person["apiKey"], kept["head"])
                         row["run"] = n
                         results["runs"].append(row)
                         print(f"{model} {arm} {task['id']} #{n}: {'pass' if row['pass'] else 'fail'} · {row['prompt_tokens']} in · "
