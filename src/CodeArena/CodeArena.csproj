@@ -24,6 +24,12 @@
     <Compile Include="../Llm.Core/Chat/HistoryWords.cs" Link="Shared/HistoryWords.cs" />
   </ItemGroup>
 
+  <!-- Code with its comments and strings blanked, lines and columns kept: Argus's own reading, which the code index
+       scans for what a file declares and uses (docs/design/code-index.md). Shared as a file, no project reference. -->
+  <ItemGroup>
+    <Compile Include="../Argus/Util/CodeText.cs" Link="Shared/CodeText.cs" />
+  </ItemGroup>
+
   <!-- The IDE (code-arena, code-arena web): the page src/web builds into web/
        (tools/publish-code-arena.sh does it first), embedded whole. Without it,
        code-arena web says the page is missing. -->
