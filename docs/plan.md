@@ -2429,7 +2429,8 @@ git sync; the code index's model gate with a stronger model.
 
 v7.6.1 (2026-10-30), a hotfix: vLLM's and NVIDIA's DCGM exporter's images from
 Docker Hub by default (nvcr.io refuses many networks), so both install and
-ride in the offline bundle.
+ride in the offline bundle. v7.6.2 the same day: what the app tells people
+to run names `arenactl`'s commands, not the scripts it replaced or removed.
 
 ### v7.7 — Argus's code graphs
 
