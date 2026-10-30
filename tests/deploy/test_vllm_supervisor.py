@@ -209,6 +209,20 @@ class SupervisorTests(SupervisorBase):
         self.until(lambda: not Path(f"/proc/{pid}").exists(), "its server stopped")
         self.assertFalse((self.dir / "status" / "m.json").exists())
 
+    def test_without_a_models_file_it_waits_quietly_and_runs_one_once_it_comes(self):
+        # A stack with the feature on and no model on this engine yet: the app writes no models.json.
+        self.run_supervisor()
+        heartbeat = self.dir / "status" / "supervisor.json"
+        self.until(heartbeat.exists, "its heartbeat")
+        first = json.loads(heartbeat.read_text())["at"]
+        self.until(lambda: json.loads(heartbeat.read_text())["at"] > first, "a few rounds")
+        port = free_port()
+        self.want(self.model("m", port))
+        self.until(lambda: self.status("m").get("phase") == "ready", "m ready")
+        self.proc.send_signal(signal.SIGTERM)
+        self.assertEqual(0, self.proc.wait(timeout=20))
+        self.assertNotIn("cannot open", self.proc.stdout.read())
+
     def test_no_key_no_start(self):
         e = {"PATH": "/usr/bin:/bin", "VLLM_PRESETS": str(self.dir / "presets"), "VLLM_STATUS": str(self.dir / "status")}
         out = subprocess.run(["/bin/sh", str(SUPERVISOR)], env=e, capture_output=True, text=True, timeout=10)
