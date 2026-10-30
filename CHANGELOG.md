@@ -15,6 +15,22 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v7.6.1 (2026-10-30)
+
+A hotfix: the vLLM engine and NVIDIA's DCGM exporter from images that can be
+pulled where NVIDIA's registry refuses, and so carried in the offline bundle.
+
+### :bug: Bugs fixed
+
+- The vllm and dcgm features could not be installed where nvcr.io refuses
+  (it answers 403 from many networks), nor carried in an offline bundle:
+  their images are now the projects' own on Docker Hub, vLLM's
+  `vllm/vllm-openai:v0.31.0` (the version the stack pins, run by the same
+  supervisor) and NVIDIA's `nvidia/dcgm-exporter:4.6.1-4.8.4`.
+  `VLLM_IMAGE` and `DCGM_EXPORTER_IMAGE` still choose another (NGC's, or
+  arena-vllm built by `vllm-build.yml`); the Helm chart's `images.vllm`
+  follows
+
 ## v7.6.0 (2026-10-30)
 
 The requests of 2026-10-29: company knowledge by upload and from many more

@@ -2427,6 +2427,10 @@ design/own-gateway.md). Left: the gateway's commits 7–21; the IDE plan's
 peek, editor groups, a Problems store, the Explorer's follow and edits, and
 git sync; the code index's model gate with a stronger model.
 
+v7.6.1 (2026-10-30), a hotfix: vLLM's and NVIDIA's DCGM exporter's images from
+Docker Hub by default (nvcr.io refuses many networks), so both install and
+ride in the offline bundle.
+
 ### v7.7 — A model of your own
 
 Moved from v7.3, which shipped the science lab and the Kubernetes install, and
