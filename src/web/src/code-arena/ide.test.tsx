@@ -784,10 +784,10 @@ const answerOnly = (at = 0) => ({
 const editor = () => fakes.editors[0]!
 const tabs = () => screen.getByRole('tablist', { name: 'Open files' })
 
-/** Opens src/app.ts from the explorer and waits for its model in the editor. */
+/** Opens src/app.ts from the explorer (kept: a double click) and waits for its model in the editor. */
 async function openApp() {
   await userEvent.click(await screen.findByRole('treeitem', { name: 'src, the agent changed files in it' }))
-  await userEvent.click(await screen.findByRole('treeitem', { name: 'app.ts, changed by the agent' }))
+  await userEvent.dblClick(await screen.findByRole('treeitem', { name: 'app.ts, changed by the agent' }))
   await waitFor(() => expect(editor().model?.value).toBe('const total = 1\nconsole.log(total)\n'))
 }
 
@@ -853,6 +853,39 @@ describe('Code Arena, the IDE', () => {
     expect(screen.queryByRole('tree', { name: 'Files' })).not.toBeInTheDocument()
     await userEvent.click(within(bar).getByRole('button', { name: 'Search' }))
     expect(screen.getByRole('textbox', { name: 'Search' })).toHaveFocus()
+  })
+
+  it('opens a file with one click as a preview the next one takes the place of, keeps it on a double click or an edit, pins and moves tabs', async () => {
+    backend()
+    renderIde()
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'src, the agent changed files in it' }))
+    await userEvent.click(await screen.findByRole('treeitem', { name: 'app.ts, changed by the agent' }))
+    const app = await within(tabs()).findByRole('tab', { name: 'app.ts' })
+    expect(app).toHaveAccessibleDescription(/preview/)
+    // Another look: in its place.
+    await userEvent.click(screen.getByRole('treeitem', { name: 'README.md' }))
+    expect(await within(tabs()).findByRole('tab', { name: 'README.md' })).toBeInTheDocument()
+    expect(within(tabs()).queryByRole('tab', { name: 'app.ts' })).not.toBeInTheDocument()
+    // Kept with a double click: the next look opens beside it.
+    await userEvent.dblClick(within(tabs()).getByRole('tab', { name: 'README.md' }))
+    expect(within(tabs()).getByRole('tab', { name: 'README.md' })).not.toHaveAccessibleDescription(/preview/)
+    await userEvent.click(screen.getByRole('treeitem', { name: 'app.ts, changed by the agent' }))
+    await waitFor(() => expect(editor().model?.value).toBe('const total = 1\nconsole.log(total)\n'))
+    const names = () => within(tabs()).getAllByRole('tab').map((t) => t.querySelector('.truncate')?.textContent)
+    expect(names()).toEqual(['README.md', 'app.ts'])
+    // An edit keeps it too.
+    act(() => editor().model!.setValue('const total = 2\n'))
+    await waitFor(() => expect(within(tabs()).getByRole('tab', { name: /app\.ts/ })).not.toHaveAccessibleDescription(/preview/))
+
+    // Pinned: first, and left by Close Others.
+    fireEvent.contextMenu(within(tabs()).getByRole('tab', { name: /app\.ts/ }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Pin' }))
+    expect(names()).toEqual(['app.ts', 'README.md'])
+    fireEvent.contextMenu(within(tabs()).getByRole('tab', { name: 'README.md' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Close Others' }))
+    expect(within(tabs()).getByRole('tab', { name: /app\.ts/ })).toBeInTheDocument()
+    // Unsaved, it shows the dot as any tab does; it says it is pinned.
+    expect(within(tabs()).getByRole('tab', { name: /app\.ts/ })).toHaveAccessibleDescription('pinned')
   })
 
   it('quick open goes to symbols: # in the folder, @ in this file, ? lists what it does, > is the palette', async () => {

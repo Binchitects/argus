@@ -59,6 +59,10 @@ export interface Tab {
   languageId?: string
   /** A picture's, sound's or video's: how many times it changed on disk while open (its address changes, so it is fetched again). */
   mediaVersion?: number
+  /** Opened with a single click to look at: the next such open takes its place, until it is edited, double-clicked or kept. */
+  preview?: boolean
+  /** Pinned: first in the strip, and Close Others, Close to the Right and Close Saved leave it. */
+  pinned?: boolean
 }
 
 /** The pictures, sound and video a tab shows as they are, by extension (the server's own list: no SVG, which may hold a script). */
@@ -100,7 +104,13 @@ export interface EditorApi {
   active: Tab | null
   /** The cursor in the file shown, 1-based. */
   cursor: { line: number; column: number } | null
-  open: (path: string, at?: Reveal) => Promise<void>
+  open: (path: string, at?: Reveal, how?: { preview?: boolean }) => Promise<void>
+  /** A preview tab kept as a tab of its own (the active one when none is named). */
+  keepTab: (id?: string) => void
+  /** Pins a tab (first in the strip, left by Close Others), or unpins it. */
+  pin: (id: string, on: boolean) => void
+  /** Moves a tab to a place in the strip (pinned ones stay first). */
+  moveTab: (id: string, to: number) => void
   /** Opens files in tabs behind the one shown, their text in the editor (a language server's edit changes them). */
   keep: (paths: string[]) => Promise<void>
   openDiff: (path: string, source?: DiffSource) => Promise<void>

@@ -355,7 +355,15 @@ The page is laid out as VS Code is, in Argus Arena's design system:
 - **editor**: tabs with Monaco, highlighting by the file's name (or
   `files.associations`; a name that says nothing, by its first line: a
   `#!` line's program, `<?php`), set up by the settings (below). The editor's
-  right-click **Command Palette** opens the workbench's. **Breadcrumbs** over
+  right-click **Command Palette** opens the workbench's. A file opened with a
+  single click (the Explorer, a search's result) is a **preview**, its name in
+  italics: the next one opened so takes its tab, until it is edited,
+  double-clicked or kept (**Ctrl+K Enter**); a double click in the Explorer
+  opens it for good (`workbench.editor.enablePreview`: false opens every file
+  so). **Pin** (the tab's menu, **Ctrl+K Shift+Enter**) keeps a tab first in
+  the strip, and Close Others, Close to the Right and Close Saved leave it;
+  tabs are dragged to reorder them, or moved with **Ctrl+Shift+PageUp** and
+  **PageDown** (**Alt+Shift+** where the browser keeps those). **Breadcrumbs** over
   it name the file's folders (each lists its files to open), the file, and the
   symbols the cursor is in (each lists the symbols beside it to go to);
   `breadcrumbs.enabled`, `breadcrumbs.filePath` and `breadcrumbs.symbolPath`

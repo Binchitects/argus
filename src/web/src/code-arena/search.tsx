@@ -229,7 +229,7 @@ export function SearchPanel({ focusKey, replaceKey = 0 }: { focusKey: number; re
                         <li key={`${m.line}:${m.column}`}>
                           <button
                             type="button"
-                            onClick={() => void editor.open(f.path, { line: m.line, column: m.column, length: m.length })}
+                            onClick={() => void editor.open(f.path, { line: m.line, column: m.column, length: m.length }, { preview: true })}
                             aria-label={`${f.path}, line ${m.line}, column ${m.column}: ${m.preview.trim()}`}
                             className="flex h-[1.375rem] w-full items-center gap-2 pr-2 pl-9 text-left outline-none hover:bg-accent/70 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
                           >

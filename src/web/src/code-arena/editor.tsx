@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Eye, FileCode2, FileDiff, FileImage, FileText, FolderOpen, GitCompareArrows, Keyboard, Settings2, X } from 'lucide-react'
+import { Eye, FileCode2, FileDiff, FileImage, FileText, FolderOpen, GitCompareArrows, Keyboard, Pin, Settings2, X } from 'lucide-react'
 import type * as Monaco from 'monaco-editor'
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ContextMenu } from 'radix-ui'
 import { Button } from '@/components/ui/button'
 import { CommandDialog, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
@@ -305,6 +305,21 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       if (!id) setCursor(null)
     }
     const update = (id: string, change: Partial<Tab>) => commit(tabsRef.current.map((t) => (t.id === id ? { ...t, ...change } : t)))
+    /** The pinned tabs first, each part in its own order. */
+    const pinnedFirst = (ts: Tab[]) => [...ts.filter((t) => t.pinned), ...ts.filter((t) => !t.pinned)]
+    const keepTab = (id = activeRef.current ?? '') => {
+      if (tabsRef.current.some((t) => t.id === id && t.preview)) update(id, { preview: false })
+    }
+    const pin = (id: string, on: boolean) => commit(pinnedFirst(tabsRef.current.map((t) => (t.id === id ? { ...t, pinned: on, preview: false } : t))))
+    const moveTab = (id: string, to: number) => {
+      const ts = tabsRef.current
+      const tab = ts.find((t) => t.id === id)
+      if (!tab) return
+      const rest = ts.filter((t) => t.id !== id)
+      const at = Math.max(0, Math.min(to, rest.length))
+      // Moved by hand: kept, not a preview.
+      commit(pinnedFirst([...rest.slice(0, at), { ...tab, preview: false }, ...rest.slice(at)]))
+    }
     const has = (id: string) => tabsRef.current.some((t) => t.id === id)
 
     /** Whether a file the editor holds has unsaved changes. */
@@ -314,12 +329,13 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     }
     const markDirty = (f: FileModel) => {
       const dirty = f.model.getAlternativeVersionId() !== f.savedAlt
-      // Every tab that holds the file: its own, and the compares it is a side of.
+      // Every tab that holds the file: its own, and the compares it is a side of. An edit keeps a preview tab.
       const next = tabsRef.current.map((t) => {
         const sides = fileSidesOf(t)
         if (!sides.includes(f.path)) return t
         const d = sides.some((p) => (p === f.path ? dirty : fileDirty(p)))
-        return t.dirty === d ? t : { ...t, dirty: d }
+        const kept = dirty && t.preview ? { preview: false } : {}
+        return t.dirty === d && !('preview' in kept) ? t : { ...t, dirty: d, ...kept }
       })
       if (next.some((t, i) => t !== tabsRef.current[i])) commit(next)
       // "files.autoSave": "afterDelay" saves a while after the last change.
@@ -342,7 +358,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       // Next to the tab shown, as an editor opens one.
       const ts = tabsRef.current
       const at = ts.findIndex((t) => t.id === activeRef.current)
-      commit(at < 0 ? [...ts, tab] : [...ts.slice(0, at + 1), tab, ...ts.slice(at + 1)])
+      commit(pinnedFirst(at < 0 ? [...ts, tab] : [...ts.slice(0, at + 1), tab, ...ts.slice(at + 1)]))
       if (show) activate(tab.id)
     }
 
@@ -405,7 +421,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     }
 
     /** Opens a file in its tab (at a place); behind the tab shown, not shown, with `behind`. */
-    const open = async (path: string, at?: Reveal, behind = false) => {
+    const open = async (path: string, at?: Reveal, behind = false, preview = false) => {
       const id = path
       if (at && !behind) {
         reveal.current = { id, at }
@@ -413,7 +429,22 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       }
       if (has(id)) {
         if (behind) await loadFile(path).catch(() => undefined)
-        else activate(id)
+        else {
+          // Opened for good (a double click, quick open): a preview tab of it is kept.
+          if (!preview) keepTab(id)
+          activate(id)
+        }
+        return
+      }
+      // A look (a single click): in the place of the last look, while that one is not edited.
+      const look = preview && !behind && settingsRef.current.get('workbench.editor.enablePreview') !== false
+      const before = look ? tabsRef.current.find((t) => t.preview && !t.dirty && !t.pinned) : undefined
+      if (before && !mediaKind(path)) {
+        const load = Symbol(path)
+        commit(tabsRef.current.map((t) => (t.id === before.id ? { id, kind: 'file', path, status: 'loading', dirty: false, load, preview: true } : t)))
+        activate(id)
+        collect()
+        await finishOpen(path, load)
         return
       }
       if (mediaKind(path)) {
@@ -422,7 +453,12 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         return
       }
       const load = Symbol(path)
-      add({ id, kind: 'file', path, status: 'loading', dirty: false, load }, !behind)
+      add({ id, kind: 'file', path, status: 'loading', dirty: false, load, ...(look ? { preview: true } : {}) }, !behind)
+      await finishOpen(path, load)
+    }
+
+    /** A file's tab, once its text is read: ready, with its language; or why it cannot open. */
+    const finishOpen = async (path: string, load: symbol) => {
       // This open's tab as it is now: none when it was closed meanwhile (one opened again has a load of its own), renamed perhaps.
       const mine = () => tabsRef.current.find((t) => t.load === load)
       try {
@@ -1141,7 +1177,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     }
 
     return {
-      open: (path: string, at?: Reveal) => open(path, at), keep, openDiff, activate: (id: string) => activate(id), close, save: (id?: string) => save(id), refresh, moved, removed, accept, revert, selection, pieceOf, editorCommands, runAction, showProblems, bindEditor, bindDiff,
+      open: (path: string, at?: Reveal, how?: { preview?: boolean }) => open(path, at, false, how?.preview === true), keepTab, pin, moveTab, keep, openDiff, activate: (id: string) => activate(id), close, save: (id?: string) => save(id), refresh, moved, removed, accept, revert, selection, pieceOf, editorCommands, runAction, showProblems, bindEditor, bindDiff,
       saveAll, closeMany, reopenClosed, cycle, activateIndex, navigate, focusEditor, toggleWordWrap, languages, setLanguage, activeModel, autoSaveOn,
       saveWith: save,
       compare,
@@ -1483,6 +1519,7 @@ function QuickOpen() {
 /** The tabs, the editor or the diff of the active one, and a few words when nothing is open. */
 export function EditorArea() {
   const ed = useEditor()
+  const tabStrip = useId()
   const crumbsOn = useSetting<boolean>('breadcrumbs.enabled') !== false
   const { tabs, active, bindEditor, bindDiff } = ed
   const changes = useQuery(changesQuery)
@@ -1493,7 +1530,7 @@ export function EditorArea() {
     <section aria-label="Editor" className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
       {tabs.length > 0 && (
         <div role="tablist" aria-label="Open files" className="flex h-9 shrink-0 overflow-x-auto overflow-y-hidden border-b bg-sidebar [scrollbar-width:thin]">
-          {tabs.map((t) => {
+          {tabs.map((t, i) => {
             const selected = t.id === active?.id
             const name = isUserFile(t.path) ? t.path.slice(5) : t.source === 'compare' && t.left && t.right ? `${sideLabel(t.left)} ↔ ${sideLabel(t.right)}` : nameOf(t.path)
             return (
@@ -1501,6 +1538,19 @@ export function EditorArea() {
                 <ContextMenu.Trigger asChild>
               <div
                 role="presentation"
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('application/x-code-arena-tab', t.id)
+                  e.dataTransfer.effectAllowed = 'move'
+                }}
+                onDragOver={(e) => e.dataTransfer.types.includes('application/x-code-arena-tab') && e.preventDefault()}
+                onDrop={(e) => {
+                  const id = e.dataTransfer.getData('application/x-code-arena-tab')
+                  if (!id || id === t.id) return
+                  e.preventDefault()
+                  const to = tabs.findIndex((x) => x.id === t.id)
+                  ed.moveTab(id, tabs.findIndex((x) => x.id === id) < to ? to : to)
+                }}
                 className={cn(
                   'group relative flex shrink-0 items-center border-r text-[0.8125rem] transition-colors',
                   selected ? 'bg-background text-foreground after:absolute after:inset-x-0 after:top-0 after:h-0.5 after:bg-primary' : 'text-muted-foreground hover:bg-accent/60',
@@ -1513,6 +1563,8 @@ export function EditorArea() {
                   aria-controls="editor-panel"
                   title={t.kind === 'diff' ? (t.source === 'compare' ? name : `${t.path}: ${t.source === 'git' ? 'its changes, not staged' : t.source === 'staged' ? 'its staged changes' : "the agent's changes"}`) : isUserFile(t.path) ? `Your ${t.path.slice(5)} (every project)` : t.path}
                   onClick={() => ed.activate(t.id)}
+                  onDoubleClick={() => ed.keepTab(t.id)}
+                  aria-describedby={t.preview || t.pinned ? `${tabStrip}-${i}` : undefined}
                   onAuxClick={(e) => e.button === 1 && void ed.close(t.id)}
                   className="flex h-full max-w-56 items-center gap-1.5 pr-1 pl-3 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                 >
@@ -1529,11 +1581,21 @@ export function EditorArea() {
                   ) : (
                     <FileCode2 className="size-3.5 shrink-0" aria-hidden="true" />
                   )}
-                  <span className="truncate">{name}</span>
+                  <span className={cn('truncate', t.preview && 'italic')}>{name}</span>
+                  {(t.preview || t.pinned) && (
+                    <span id={`${tabStrip}-${i}`} hidden>
+                      {t.preview ? 'preview: the next file opened with a single click takes its place' : 'pinned'}
+                    </span>
+                  )}
                   {isUserFile(t.path) && <span className="text-xs text-muted-foreground">User</span>}
                   {t.kind === 'diff' && t.source !== 'compare' && <span className="text-xs text-muted-foreground">{t.source === 'git' ? 'working tree' : t.source === 'staged' ? 'index' : 'changes'}</span>}
                   {t.dirty && <span className="sr-only">, not saved</span>}
                 </button>
+                {t.pinned && !t.dirty ? (
+                  <button type="button" aria-label={`Unpin ${name}`} title="Pinned: unpin" onClick={() => ed.pin(t.id, false)} className="mr-1 grid size-5 place-items-center rounded-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring">
+                    <Pin className="size-3.5" aria-hidden="true" />
+                  </button>
+                ) : (
                 <button
                   type="button"
                   aria-label={`Close ${name}${t.kind === 'diff' && t.source !== 'compare' ? ' changes' : ''}`}
@@ -1550,6 +1612,7 @@ export function EditorArea() {
                     <X className={cn('size-3.5', !selected && 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100')} aria-hidden="true" />
                   )}
                 </button>
+                )}
               </div>
                 </ContextMenu.Trigger>
                 <ContextMenu.Portal>
@@ -1778,10 +1841,13 @@ function TabMenu({ tab }: { tab: Tab }) {
   return (
     <ContextMenu.Content className={menuContent}>
       {item('Close', () => void ed.close(tab.id), keys.close)}
-      {item('Close Others', () => void ed.closeMany(ed.tabs.filter((t) => t.id !== tab.id).map((t) => t.id)))}
-      {item('Close to the Right', () => void ed.closeMany(ed.tabs.slice(at + 1).map((t) => t.id)))}
-      {item('Close Saved', () => void ed.closeMany(ed.tabs.filter((t) => !t.dirty).map((t) => t.id)), keys.saved)}
+      {item('Close Others', () => void ed.closeMany(ed.tabs.filter((t) => t.id !== tab.id && !t.pinned).map((t) => t.id)))}
+      {item('Close to the Right', () => void ed.closeMany(ed.tabs.slice(at + 1).filter((t) => !t.pinned).map((t) => t.id)))}
+      {item('Close Saved', () => void ed.closeMany(ed.tabs.filter((t) => !t.dirty && !t.pinned).map((t) => t.id)), keys.saved)}
       {item('Close All', () => void ed.closeMany(ed.tabs.map((t) => t.id)), keys.all)}
+      {separator}
+      {tab.pinned ? item('Unpin', () => ed.pin(tab.id, false)) : item('Pin', () => ed.pin(tab.id, true))}
+      {tab.preview && item('Keep Open', () => ed.keepTab(tab.id))}
       {!isUserFile(tab.path) && (
         <>
           {separator}

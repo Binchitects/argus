@@ -131,10 +131,11 @@ export function Explorer({ project, onOpenChanges }: { project: string; onOpenCh
     }
   }
 
-  const activate = (t: Target) => {
+  /** A folder opens or closes; a file opens as a preview (a single click), or for good (a double click). */
+  const activate = (t: Target, preview = true) => {
     setSelected(t)
     if (t.kind === 'dir') toggle(t.path)
-    else void editor.open(t.path)
+    else void editor.open(t.path, undefined, { preview })
   }
 
   /**
@@ -339,7 +340,7 @@ interface RowProps {
   selected: Target | null
   editing: Editing | null
   marks: Marks
-  onActivate: (t: Target) => void
+  onActivate: (t: Target, preview?: boolean) => void
   onSelect: (t: Target) => void
   onFinish: (name: string) => void
   onMenu: (t: Target) => void
@@ -373,6 +374,7 @@ function Row({ entry, level, first, ...props }: RowProps & { entry: Entry; level
         data-kind={entry.kind}
         title={change ? `${entry.path} · ${change.created ? 'made' : 'changed'} by the agent` : entry.path}
         onClick={() => onActivate(target)}
+        onDoubleClick={() => target.kind === 'file' && onActivate(target, false)}
         onKeyDown={onKey}
         onFocus={(e) => e.target === e.currentTarget && !isSelected && onSelect(target)}
         onContextMenu={() => {

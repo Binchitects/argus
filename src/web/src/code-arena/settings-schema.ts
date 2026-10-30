@@ -136,6 +136,7 @@ export const settingDefs: SettingDef[] = [
   { key: 'editor.cursorStyle', type: 'string', default: 'line', enum: ['line', 'block', 'underline', 'line-thin', 'block-outline', 'underline-thin'], description: 'The cursor\'s shape.', category: 'Text Editor', scope: lang },
   { key: 'editor.cursorBlinking', type: 'string', default: 'blink', enum: ['blink', 'smooth', 'phase', 'expand', 'solid'], description: 'How the cursor blinks.', category: 'Text Editor', scope: lang },
   { key: 'editor.cursorSmoothCaretAnimation', type: 'string', default: 'off', enum: ['off', 'explicit', 'on'], description: 'Whether the cursor glides to where it goes.', category: 'Text Editor', scope: lang },
+  { key: 'workbench.editor.enablePreview', type: 'boolean', default: true, description: "A file opened with a single click (the Explorer, a search's result) is a preview, in italics: the next one takes its tab, until it is edited, double-clicked or kept (Ctrl+K Enter).", category: 'Workbench' },
   { key: 'breadcrumbs.enabled', type: 'boolean', default: true, description: 'Shows the breadcrumbs over the editor: the folders, the file and the symbols the cursor is in.', category: 'Workbench' },
   { key: 'breadcrumbs.filePath', type: 'string', default: 'on', enum: ['on', 'off'], description: "Whether the breadcrumbs show the file's folders.", category: 'Workbench' },
   { key: 'breadcrumbs.symbolPath', type: 'string', default: 'on', enum: ['on', 'off'], description: 'Whether the breadcrumbs show the symbols the cursor is in.', category: 'Workbench' },
