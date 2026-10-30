@@ -185,7 +185,7 @@ public sealed partial class LedgerImport(IServiceScopeFactory scopes, IOptions<D
             FirstTokenAt = row.FirstToken is { } f ? DateTime.SpecifyKind(f, DateTimeKind.Utc) : null,
             DurationMs = row.DurationMs ?? (int)Math.Max(0, (end - start).TotalMilliseconds),
             Surface = surface, Call = call, Protocol = booked ? "internal" : protocol, CreditKind = credit, UserId = userId, Person = Person(row),
-            KeyHash = surface is "api" or "studio" && row.ApiKey.Length == 64 ? row.ApiKey : null, KeyAlias = Cut(row.Alias, 120), Tag = Cut(row.Tag, 64),
+            KeyHash = surface is "api" or "studio" && row.ApiKey.Length > 0 ? Cut(row.ApiKey, 64) : null, KeyAlias = Cut(row.Alias, 120), Tag = Cut(row.Tag, 64),
             Model = Cut(row.Model, 200) ?? "", Deployment = Uri.TryCreate(row.ApiBase, UriKind.Absolute, out var u) ? Cut(u.Authority, 200) : null,
             PromptTokens = row.Prompt, CachedTokens = (int)Math.Min(row.Cached, row.Prompt), CompletionTokens = row.Completion, Cost = (decimal)row.Spend,
             Seconds = Number(row.VideoSeconds) ?? Number(row.MusicSeconds), Pictures = (int?)Number(row.Pictures), Characters = (int?)Number(row.Characters),

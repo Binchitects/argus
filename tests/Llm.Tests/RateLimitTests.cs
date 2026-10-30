@@ -522,6 +522,13 @@ public sealed class RateLimitTests(AppFixture app)
     /// <summary>A request in the gateway's log for this key, as LiteLLM writes it: answered, or refused with this error.</summary>
     private async Task LogAsync(string id, string token, string email, DateTimeOffset at, int total = 0, int cached = 0, (string Class, string Message)? error = null)
     {
+        await LogOnlyAsync(id, token, email, at, total, cached, error);
+        await app.MirrorAsync();
+    }
+
+    /// <summary>A row of LiteLLM's log as LiteLLM writes it; <see cref="LogAsync"/> brings it into the apps' ledgers too.</summary>
+    private async Task LogOnlyAsync(string id, string token, string email, DateTimeOffset at, int total = 0, int cached = 0, (string Class, string Message)? error = null)
+    {
         await using var conn = new NpgsqlConnection(app.LitellmConnectionString);
         await conn.OpenAsync();
         await using var insert = new NpgsqlCommand("""

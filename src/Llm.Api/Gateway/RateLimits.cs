@@ -51,7 +51,7 @@ public sealed record RateUse(long Requests, long Tokens, IReadOnlyList<Refusal> 
 /// carries none: the chat has its fair line. Nothing is limited until an admin sets a limit, but
 /// an upgrade keeps a limit a key already carried (<see cref="KeepRow"/>).
 /// </summary>
-public sealed partial class RateLimits(AppDbContext db, AccessService access, ILiteLlm gateway, SqlDatasource sql, IOptionsMonitor<RateLimitOptions> options, TimeProvider clock,
+public sealed partial class RateLimits(AppDbContext db, AccessService access, ILiteLlm gateway, LedgerSql ledger, IOptionsMonitor<RateLimitOptions> options, TimeProvider clock,
     ModelCalls running, Audit audit, KeyWriters writers, ILogger<RateLimits> logger)
 {
     /// <summary>
@@ -79,18 +79,6 @@ public sealed partial class RateLimits(AppDbContext db, AccessService access, IL
 
     /// <summary>The most tokens a minute an admin may set (0 is no limit).</summary>
     public const int MaxTokens = 1_000_000_000;
-
-    /// <summary>A rate-limit refusal in the gateway's request log: LiteLLM's own limiter (its error class), never a refusal for credit.</summary>
-    public const string Refused = """(s.status = 'failure' and s.metadata->'error_information'->>'error_class' = 'ProxyRateLimitError')""";
-
-    /// <summary>Not a rate-limit refusal: such a request never reached a model, so usage does not count it (it is counted as refused).</summary>
-    public const string NotRefused = """coalesce(s.metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError'""";
-
-    /// <summary>Which limit refused it, from LiteLLM's message ("Limit type: requests"): requests, tokens, at once, or other.</summary>
-    public const string Kind = """
-        case substring(s.metadata->'error_information'->>'error_message' from 'Limit type: ([a-z_]+)')
-          when 'requests' then 'requests' when 'tokens' then 'tokens' when 'max_parallel_requests' then 'at once' else 'other' end
-        """;
 
     /// <summary>
     /// One limit: their own (0: no limit), else the most generous of their groups that set one
@@ -273,15 +261,16 @@ public sealed partial class RateLimits(AppDbContext db, AccessService access, IL
         {
             ["keys"] = tokens.ToArray(),
             ["me"] = email?.ToLowerInvariant() ?? "",
-            ["day"] = Logged(now.AddDays(-1)),
+            ["day"] = now.AddDays(-1),
         };
         var (requests, used) = await MinuteAsync(tokens, ct);
-        // A key's refusals are booked to its person (its user id is their email).
-        var refused = await sql.QueryAsync($"""
-            select {Kind} as "limit", count(*) as refusals, max(s."startTime") as last
-            from "LiteLLM_SpendLogs" s
-            where s."startTime" >= @day and {Refused}
-              and (s.api_key = any(@keys) or lower(coalesce(nullif(s."user",''), s.metadata->>'user_api_key_user_id', '')) = @me)
+        // A key's refusals are booked to its person: their own, by any key of theirs.
+        var refused = await ledger.QueryAsync("""
+            select case r.refusal when 'rpm' then 'requests' when 'tpm' then 'tokens' when 'parallel' then 'at once' else 'other' end as "limit",
+                   count(*) as refusals, max(r.started_at) as last
+            from gateway.requests r
+            where r.started_at >= @day and r.status = 'refused' and r.refusal in ('rpm', 'tpm', 'parallel')
+              and (r.key_hash = any(@keys) or r.person = @me)
             group by 1 order by 2 desc
             """, p, ct);
         return new RateUse(requests, used,
@@ -295,16 +284,13 @@ public sealed partial class RateLimits(AppDbContext db, AccessService access, IL
         {
             return (0, 0);
         }
-        var minute = await sql.QueryAsync($"""
-            select count(*) as requests, coalesce(sum(greatest(coalesce(s.total_tokens,0) - {UsageEndpoints.Cached}, 0)),0) as tokens
-            from "LiteLLM_SpendLogs" s
-            where s.api_key = any(@keys) and s."startTime" >= @minute and coalesce(s.metadata->'error_information'->>'error_code','') <> '429'
-            """, new Dictionary<string, object> { ["keys"] = tokens.ToArray(), ["minute"] = Logged(clock.GetUtcNow().AddMinutes(-1)) }, ct);
+        var minute = await ledger.QueryAsync("""
+            select count(*) as requests, coalesce(sum(greatest(r.total_tokens - r.cached_tokens, 0)),0) as tokens
+            from gateway.requests r
+            where r.key_hash = any(@keys) and r.started_at >= @minute and r.status <> 'refused'
+            """, new Dictionary<string, object> { ["keys"] = tokens.ToArray(), ["minute"] = clock.GetUtcNow().AddMinutes(-1) }, ct);
         return (Convert.ToInt64(minute.Rows[0][0] ?? 0L, CultureInfo.InvariantCulture), Convert.ToInt64(minute.Rows[0][1] ?? 0L, CultureInfo.InvariantCulture));
     }
-
-    /// <summary>The log's times are UTC without a zone: compared as they are, its index on startTime serves.</summary>
-    private static DateTime Logged(DateTimeOffset at) => DateTime.SpecifyKind(at.UtcDateTime, DateTimeKind.Unspecified);
 
     /// <summary>
     /// The person's Arena MCP calls of <see cref="ModelTools"/> that started since then and have ended
