@@ -21,7 +21,7 @@ import { installCompletions } from './completion'
 import { compareId, renamed, revertChanges, sideLabel, sidePath, takeChanges, touched, type LineChange, type Side } from './compare'
 import { CompareToolbar } from './compare-toolbar'
 import { EditorContext, loadMonaco, mediaKind, rankFiles, useEditor, type DiffModels, type DiffSource, type EditorApi, type FileModel, type MonacoModule, type Reveal, type SaveReason, type Tab, type Unsaved } from './editor-state'
-import { acceptChange, allFilesQuery, changesQuery, changeTexts, gitShow, gitStageText, gitStatusQuery, nameOf, rawFileUrl, readFile, revertChange, symbolsQuery, userFileQuery, within, writeFile, writeUserFile, type Change, type CheckProblem, type OpenedFile, type Saved, type UserFileName } from './ide-api'
+import { acceptChange, allFilesQuery, changesQuery, changeTexts, gitShow, gitStageText, gitStatusQuery, keepBackup, listBackups, nameOf, rawFileUrl, readFile, revertChange, saveWorkspaceState, symbolsQuery, userFileQuery, within, workspaceStateQuery, writeFile, writeUserFile, type Change, type CheckProblem, type OpenedFile, type Saved, type UserFileName } from './ide-api'
 import { addDebugActions, installDebugEditor } from './debug/editor-debug'
 import { installExtensions } from './extensions'
 import { bindEditorContext, keymap, useKeyFor } from './keyboard'
@@ -40,6 +40,13 @@ const actionId = (id: string) => id.replace(/^vs\.editor\.ICodeEditor:\d+:/, '')
 
 /** A diff's tab: the agent's changes to a file ("diff:"), or the file's since the last commit ("git:"). */
 const diffId = (path: string, source: DiffSource = 'agent') => `${source === 'git' ? 'git' : source === 'staged' ? 'staged' : 'diff'}:${path}`
+
+/** The tabs as workspace state keeps them for the next load: what each is, and the one shown with its cursor. */
+interface SavedEditors {
+  tabs: { kind: Tab['kind']; path: string; pinned?: boolean; preview?: boolean }[]
+  active: string | null
+  cursor?: { line: number; column: number } | null
+}
 
 /** The files a tab holds in the editor: a file tab's own, a compare's live sides. */
 const fileSidesOf = (t: Tab): string[] =>
@@ -254,6 +261,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     settingsRef.current = settings
   })
   const [tabs, setTabs] = useState<Tab[]>([])
+  const [hosts, setHosts] = useState(0)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [cursor, setCursor] = useState<{ line: number; column: number } | null>(null)
   const [quickOpen, showQuickOpen] = useState(false)
@@ -338,6 +346,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         return t.dirty === d && !('preview' in kept) ? t : { ...t, dirty: d, ...kept }
       })
       if (next.some((t, i) => t !== tabsRef.current[i])) commit(next)
+      backup(f, dirty)
       // "files.autoSave": "afterDelay" saves a while after the last change.
       const timer = autoSaves.current.get(f.path)
       if (timer) clearTimeout(timer)
@@ -398,9 +407,47 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         unshow(f.model)
         f.model.dispose()
         files.current.delete(path)
+        forgetBackup(path)
       }
       if (kept.length > 0) commit([...tabsRef.current, ...kept])
     }
+
+    // Hot exit: a file's unsaved text kept a second after typing pauses, forgotten when it is saved or thrown away.
+    const backedUp = new Set<string>()
+    const backupTimers = new Map<string, number>()
+    let backupsGoing = 0
+    const hotExit = () => settingsRef.current.get('files.hotExit') !== 'off'
+    const forgetBackup = (path: string) => {
+      const timer = backupTimers.get(path)
+      if (timer) clearTimeout(timer)
+      backupTimers.delete(path)
+      if (backedUp.delete(path)) void keepBackup(path, null, null).catch(() => undefined)
+    }
+    const backup = (f: FileModel, dirty: boolean) => {
+      if (!hotExit()) return
+      if (!dirty) {
+        forgetBackup(f.path)
+        return
+      }
+      const timer = backupTimers.get(f.path)
+      if (timer) clearTimeout(timer)
+      backupTimers.set(
+        f.path,
+        window.setTimeout(() => {
+          backupTimers.delete(f.path)
+          if (f.model.isDisposed()) return
+          backupsGoing++
+          void keepBackup(f.path, f.model.getValue(), f.version)
+            .then(
+              () => backedUp.add(f.path),
+              () => backedUp.delete(f.path),
+            )
+            .finally(() => backupsGoing--)
+        }, 1000),
+      )
+    }
+    /** Whether every unsaved file's text is kept: leaving then loses nothing, and is not asked about. */
+    const allBackedUp = () => hotExit() && backupTimers.size === 0 && backupsGoing === 0 && tabsRef.current.filter((t) => t.dirty).every((t) => fileSidesOf(t).every((p) => !fileDirty(p) || backedUp.has(p)))
 
     /** Takes tabs away, and shows the neighbour of the one shown when it went (the files' changes discarded are thrown away). */
     const drop = (ids: string[], discarded: string[] = []) => {
@@ -709,6 +756,45 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     const modelFor = async (path: string) => {
       const f = await loadFile(path).catch(() => null)
       return f && typeof f !== 'string' ? f.model : null
+    }
+
+    /**
+     * After a reload: the tabs as they were (pinned and previews too), the one shown at its cursor, and each file's unsaved
+     * text put back as one edit (Undo goes back to the file on disk), typed over the version it was (saving asks first when
+     * the file changed on disk since).
+     */
+    const restore = async () => {
+      const state = await queryClient.fetchQuery(workspaceStateQuery).catch(() => null)
+      const saved = (state as { editors?: SavedEditors } | null)?.editors
+      const backups = hotExit() ? ((await listBackups().catch(() => null))?.backups ?? []) : []
+      for (const t of saved?.tabs ?? []) {
+        if (t.kind === 'settings' || t.kind === 'keybindings') {
+          if (!has(t.kind)) add({ id: t.kind, kind: t.kind, path: t.kind === 'settings' ? 'Settings' : 'Keyboard Shortcuts', status: 'ready', dirty: false }, false)
+        } else if (t.kind === 'preview') {
+          if (!has(`preview:${t.path}`)) add({ id: `preview:${t.path}`, kind: 'preview', path: t.path, status: 'ready', dirty: false }, false)
+        } else if (t.kind === 'file' || t.kind === 'media') {
+          await open(t.path, undefined, true).catch(() => undefined)
+          if (t.pinned || t.preview) commit(pinnedFirst(tabsRef.current.map((x) => (x.id === t.path ? { ...x, pinned: t.pinned, preview: t.preview && !t.pinned } : x))))
+        }
+      }
+      for (const b of backups) {
+        if (!has(b.path)) await open(b.path, undefined, true).catch(() => undefined)
+        const f = files.current.get(b.path)
+        if (!f || f.model.isDisposed()) continue
+        backedUp.add(b.path)
+        if (f.model.getValue() === b.text) {
+          forgetBackup(b.path)
+          continue
+        }
+        f.model.pushEditOperations([], [{ range: f.model.getFullModelRange(), text: b.text }], () => null)
+        if (b.version) f.version = b.version
+      }
+      const shownBefore = saved?.active
+      if (shownBefore && has(shownBefore)) {
+        const tab = tabsRef.current.find((t) => t.id === shownBefore)!
+        if (tab.kind === 'file' && saved?.cursor) await open(tab.path, { line: saved.cursor.line, column: saved.cursor.column })
+        else activate(shownBefore)
+      } else if (!activeRef.current && tabsRef.current.length > 0) activate(tabsRef.current[0]!.id)
     }
 
     /** The Settings or the Keyboard Shortcuts editor: one tab each, shown again when open. */
@@ -1164,11 +1250,16 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       for (const t of tabsRef.current.filter((x) => x.dirty && x.kind === 'file' && !autoSavePaused.current.has(x.path))) await save(t.id, event)
     }
 
+    // A host bound (the editor's area drawn): the tab shown gets its editor then, if it was shown before there was one.
     const bindEditor = (el: HTMLDivElement | null) => {
+      if (el === codeHost.current) return
       codeHost.current = el
+      if (el) setHosts((n) => n + 1)
     }
     const bindDiff = (el: HTMLDivElement | null) => {
+      if (el === diffHost.current) return
       diffHost.current = el
+      if (el) setHosts((n) => n + 1)
     }
 
     /** The folder's files a language server's edit changes: opened behind the tab shown, so the edit can be made in them. */
@@ -1185,6 +1276,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       openPage,
       openPreview,
       modelFor,
+      restore,
+      allBackedUp,
       swapSides,
       diffEditor: () => diffEditor.current,
       modelsOf,
@@ -1319,16 +1412,39 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       actions.present(tab)
       setCursor(null)
     }
-  }, [shown, revealed, actions, queryClient])
+  }, [shown, revealed, actions, queryClient, hosts])
 
-  // Leaving with unsaved changes asks first.
+  // Leaving with unsaved changes asks first, unless hot exit kept every unsaved text (the next load puts it back).
   const anyDirty = tabs.some((t) => t.dirty)
   useEffect(() => {
     if (!anyDirty) return
-    const warn = (e: BeforeUnloadEvent) => e.preventDefault()
+    const warn = (e: BeforeUnloadEvent) => {
+      if (!actions.allBackedUp()) e.preventDefault()
+    }
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
-  }, [anyDirty])
+  }, [anyDirty, actions])
+
+  // The tabs as they were before a reload; then the tabs kept as they change (a second after), for the next load.
+  const restoring = useRef(false)
+  const [restored, setRestored] = useState(false)
+  useEffect(() => {
+    if (restoring.current) return
+    restoring.current = true
+    void actions.restore().finally(() => setRestored(true))
+  }, [actions])
+  useEffect(() => {
+    if (!restored) return
+    const wait = setTimeout(() => {
+      const editors: SavedEditors = {
+        tabs: tabs.filter((t) => t.kind !== 'diff').map((t) => ({ kind: t.kind, path: t.path, ...(t.pinned ? { pinned: true } : {}), ...(t.preview ? { preview: true } : {}) })),
+        active: activeId,
+        cursor,
+      }
+      void saveWorkspaceState({ editors }).catch(() => undefined)
+    }, 1000)
+    return () => clearTimeout(wait)
+  }, [restored, tabs, activeId, cursor])
 
   useEffect(() => {
     const models = files.current

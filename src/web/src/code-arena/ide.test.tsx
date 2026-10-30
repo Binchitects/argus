@@ -709,6 +709,8 @@ function backend(extra: Record<string, Handler> = {}, preferences: Preferences =
     },
     'GET /api/workspace/state': () => ({ json: {} }),
     'POST /api/workspace/state': (body) => ({ json: body }),
+    'GET /api/backups': () => ({ json: { backups: [] } }),
+    'POST /api/backups': () => ({ status: 204 }),
     'GET /api/debug/sessions': () => ({ json: [] }),
     'GET /api/user-files': (_, __, url) => {
       const name = url.searchParams.get('name')!
@@ -886,6 +888,28 @@ describe('Code Arena, the IDE', () => {
     expect(within(tabs()).getByRole('tab', { name: /app\.ts/ })).toBeInTheDocument()
     // Unsaved, it shows the dot as any tab does; it says it is pinned.
     expect(within(tabs()).getByRole('tab', { name: /app\.ts/ })).toHaveAccessibleDescription('pinned')
+  })
+
+  it('after a reload, the tabs are back as they were, unsaved text too, and typing keeps the unsaved text until it is saved', async () => {
+    const { calls } = backend({
+      'GET /api/workspace/state': () => ({
+        json: { editors: { tabs: [{ kind: 'file', path: 'README.md' }, { kind: 'file', path: 'src/app.ts', pinned: true }], active: 'src/app.ts', cursor: { line: 2, column: 1 } } },
+      }),
+      'GET /api/backups': () => ({ json: { backups: [{ path: 'README.md', text: '# Shop, not saved\n', version: 'r1' }] } }),
+    })
+    renderIde()
+    // Pinned first; the one shown at its cursor; the unsaved one unsaved.
+    await waitFor(() => expect(within(tabs()).getAllByRole('tab').map((t) => t.querySelector('.truncate')?.textContent)).toEqual(['app.ts', 'README.md']))
+    await waitFor(() => expect(editor().revealed).toBe(2))
+    expect(within(tabs()).getByRole('tab', { name: 'README.md, not saved' })).toBeInTheDocument()
+    // What the tabs are, kept for the next load.
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.path === '/api/workspace/state').at(-1)?.body).toMatchObject({ editors: { active: 'src/app.ts' } }), { timeout: 3000 })
+
+    // Typed: kept a second later; saved: forgotten.
+    act(() => editor().model!.setValue('const total = 2\n'))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/backups' && c.method === 'POST').at(-1)?.body).toEqual({ path: 'src/app.ts', text: 'const total = 2\n', version: 'v1' }), { timeout: 3000 })
+    await userEvent.keyboard('{Control>}s{/Control}')
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/backups' && c.method === 'POST').at(-1)?.body).toEqual({ path: 'src/app.ts', text: null, version: null }), { timeout: 3000 })
   })
 
   it('quick open goes to symbols: # in the folder, @ in this file, ? lists what it does, > is the palette', async () => {

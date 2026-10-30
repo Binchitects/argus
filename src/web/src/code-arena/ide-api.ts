@@ -122,6 +122,18 @@ export interface OutlineSymbol {
 /** The Outline of a file: the symbols of the text the editor holds (unsaved edits too). */
 export const outlineOf = (path: string, text: string) => api<{ symbols: OutlineSymbol[]; language: string | null }>('/api/outline', { body: { path, text } })
 
+/** A file's unsaved text kept for hot exit: the path, the text, the version of the file it was typed over. */
+export interface Backup {
+  path: string
+  text: string
+  version: string | null
+}
+
+/** The unsaved text kept of this folder's tabs: put back after a reload. */
+export const listBackups = () => api<{ backups: Backup[] }>('/api/backups')
+/** Keeps a file's unsaved text (null: forgets it, the file saved or its changes thrown away). */
+export const keepBackup = (path: string, text: string | null, version: string | null) => api('/api/backups', { body: { path, text, version } })
+
 /** Every file of the working directory (as git sees them), for quick open. */
 export const allFilesQuery = {
   queryKey: ['code', 'files', 'all'] as const,

@@ -23,6 +23,7 @@ internal sealed partial class WebApp
     private Problems _problems = null!;
     private IdeGit _git = null!;
     private UserFiles _userFiles = null!;
+    private Backups _backups = null!;
     private WorkspaceState _state = null!;
     private Formatters _formatters = null!;
     private Tasks _tasks = null!;
@@ -56,6 +57,7 @@ internal sealed partial class WebApp
         _git = new IdeGit(_rt.Workspace);
         _preferences = new PagePreferences(Path.Combine(_rt.Env.Paths.DataDir, PagePreferences.FileName));
         _userFiles = new UserFiles(_rt.Env.Paths.ConfigDir);
+        _backups = new Backups(_rt.Env.Paths.DataDir, _rt.Workspace.Root, _files.Resolve);
         _formatters = new Formatters(_files, _rt.Config, _state, () => _rt.Sandbox, _rt.Env.Env);
         _tasks = new Tasks(_rt.Workspace, _files, _terminals, _problems, _state, _rt.Env.Env);
         _runs = new RunConfigs(_rt.Workspace, _terminals, _tasks, _state, _rt.Env.Env);
@@ -391,6 +393,16 @@ internal sealed partial class WebApp
                 case ("GET", "/api/processes"):
                     await res.JsonAsync(200, await Task.Run(OwnProcesses.List, ct), ct);
                     return true;
+                case ("GET", "/api/backups"):
+                    await res.JsonAsync(200, new JsonObject { ["backups"] = _backups.List() }, ct);
+                    return true;
+                case ("POST", "/api/backups"):
+                {
+                    var body = Body(req);
+                    _backups.Keep(body.Str("path"), body.Str("text"), body.Str("version"));
+                    await res.NoContentAsync(ct);
+                    return true;
+                }
                 case ("GET", "/api/workspace/state"):
                     await res.JsonAsync(200, _state.Read(), ct);
                     return true;

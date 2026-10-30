@@ -346,7 +346,15 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   keys move through the tree. F2 and Del are the keymap's (`renameFile`,
   `deleteFile`): keybindings.json changes them or takes them away. The files the agent changed are marked, and so
   are the folders they are in. A file deleted with unsaved changes keeps its
-  tab (the question says so): saving it makes the file again. **Outline**,
+  tab (the question says so): saving it makes the file again. After a reload
+  (or the window closed and opened again) the tabs come back as they were,
+  pinned and previews too, the one shown at its cursor; and with **hot exit**
+  (`files.hotExit`, on) the unsaved text of each comes back unsaved, so
+  leaving loses nothing and does not ask. That text is kept a second after
+  typing pauses, in Code Arena's data folder (`backups/`, 0600, never in the
+  repository; 5 MB a file, 50 MB a folder at most), and forgotten when the
+  file is saved or its changes thrown away; a file changed on disk since asks
+  before it is saved over. **Outline**,
   at the Explorer's foot, lists the symbols of the file shown, nested (C#,
   TypeScript, JavaScript and Python by Code Arena's own scanners, a Markdown
   file's headings), read from the text the editor holds, unsaved edits too;
@@ -1310,6 +1318,7 @@ status (403 `outside` for a path outside the folder).
 | `DELETE /api/queue` | drops the queued messages; 204 |
 | `GET /api/files?path=DIR` | a folder's entries, folders first: `{path, entries: [{name, path, kind, size, link}]}` |
 | `GET /api/files/all` | every file, for quick open: `{files, truncated}` (50,000 at most) |
+| `GET /api/backups`, `POST /api/backups {path, text, version}` | hot exit: the unsaved text kept of this folder's tabs; `text: null` forgets one |
 | `GET /api/symbols?q=NAME[&path=FILE][&limit=N]` | Go to Symbol from the code index: `{symbols: [{name, kind, container, path, line, end}], building}`, by name across the folder (the name, then those it starts, its parts' initials, then those holding it), or one file's in order |
 | `GET /api/file?path=FILE` | `{path, size, version, text}`; `text` is null with `binary` or `tooLarge` (over 5 MB) |
 | `GET /api/media?path=FILE` | a picture, sound or video of the allowed folders as it is (PNG, JPEG, GIF, WebP, BMP, AVIF, MP3, WAV, Ogg, FLAC, M4A, AAC, MP4, WebM, MOV; up to 256 MB), for an `img`, `audio` or `video` element: the media type set, `nosniff` and a sandboxing CSP; 415 `not_media` for anything else (SVG and HTML included), 413 `too_large` |

@@ -182,6 +182,7 @@ export const settingDefs: SettingDef[] = [
   { key: 'editor.formatOnPaste', type: 'boolean', default: false, description: 'Formats what is pasted (with a formatter that formats a part of a file).', category: 'Formatting', scope: lang },
   { key: 'codeArena.formatOnSaveTimeout', type: 'integer', default: 1500, minimum: 100, maximum: 30000, description: 'Milliseconds format on save waits for the formatter; past it the file is saved as it is.', category: 'Formatting' },
   // Files
+  { key: 'files.hotExit', type: 'string', default: 'onExit', enum: ['onExit', 'off'], enumDescriptions: ['Unsaved text is kept as it is typed, and put back after a reload: leaving does not ask.', 'Not kept: leaving with unsaved changes asks first.'], description: 'Keeps the unsaved text of the tabs so a reload or a closed window loses nothing.', category: 'Files' },
   { key: 'files.autoSave', type: 'string', default: 'off', enum: ['off', 'afterDelay', 'onFocusChange', 'onWindowChange'], enumDescriptions: ['Never.', 'A while after the last change ("files.autoSaveDelay").', 'When the editor loses the focus.', 'When the browser window loses the focus.'], description: 'Saves files without being asked.', category: 'Files' },
   { key: 'files.autoSaveDelay', type: 'integer', default: 1000, minimum: 0, description: 'Milliseconds after the last change "afterDelay" saves.', category: 'Files' },
   { key: 'files.trimTrailingWhitespace', type: 'boolean', default: false, description: 'Removes the spaces at the end of lines as a file is saved.', category: 'Files', scope: lang },
