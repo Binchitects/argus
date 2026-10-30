@@ -10,17 +10,17 @@ What runs today, what it leaves out, and the tests that would close the gap.
 |---|---|---|---|
 | **Argus** | `./tools/dn test tests/Argus.Tests`; also the image's `test` stage and CI; `npm test` in `src/argus-web` | every route of its own app has its help; config and credentials, the parser, the index store (FTS, the allowlist on every scoped query, references, impact), indexing against a git fixture, packs, the server (MCP, the admin surface, the chat-client token) and the standalone app | nothing running |
 | **App** | `./tools/dn test tests/Llm.Tests` (xUnit, **345 tests**), `npm test` (Vitest, **186**) and `npm run e2e` (Playwright) in `src/web`, and CI on every push | sign-in, OIDC, LDAP against a real OpenLDAP, people and keys, the dashboards against LiteLLM's real schema and fakes of Prometheus and Loki, the admin pages, models kept loaded and loaded on request against a fake router, the picture, video and speech models' controls, sound and video attachments (what each kind of model gets, transcripts made once), read aloud, where the video server decodes (`sd-serve.sh` under `/bin/sh` with a fake `nvidia-smi`), messages queued while a chat answers, long documents' pages drawn twenty at a time, credit and alert news by email and webhook, other GPU servers, and every page in a real browser on desktop and phone | Docker (Testcontainers) |
-| **Deployment** | `scripts/upgrade-test.py --zero --stop-live` (and `--from TAG`) | this checkout from zero on fresh volumes: it comes up, provisions its first model, signs in, answers with a file; an upgrade keeps people, groups, chats and files, and survives `up` and `down`/`up` | a GPU host |
+| **Deployment** | `./arenactl check upgrade --zero --stop-live` (and `--from TAG`) | this checkout from zero on fresh volumes: it comes up, provisions its first model, signs in, answers with a file; an upgrade keeps people, groups, chats and files, and survives `up` and `down`/`up` | a GPU host |
 | **Code Arena** | `./tools/dn test tests/CodeArena.Tests`, `npx vitest run src/code-arena` in `src/web`, and CI | the agent against a fake gateway and MCP server (tools, modes, approvals, sessions, compaction); the prompt's line editor on a fake terminal (↑'s history per folder, the draft kept, editing keys, several lines, a paste taller than the screen drawn once, Ctrl+Z stopping it with the keys signals again and the prompt drawn as it was after); the IDE's server: files inside the folder only (absolute paths, `..` and links that lead out refused), search, the agent's changes accepted or reverted, this run's key and the Host and Origin checks on every call and on the terminal's WebSocket; terminals on a real pseudo-terminal with `/bin/sh` (echo, `stty size` after a resize, the exit code, close, a session and controlling terminal, no signal ignored or blocked, no API key), and the macOS helper's path run on Linux; the page (Explorer, tabs, saving, the diff view, search, the terminal panel, with Monaco, xterm.js and the socket faked); CI builds the Linux package with its page and starts it | Linux or macOS |
 | **arena CLI** | `python3 -m unittest discover clients/arena`, and CI | `arena ask`, `review` and `explain-failure` against a fake gateway and GitLab on a local socket: streaming, the model chosen, diffs and logs cut to the budget, the note posted, a private CA, every exit code; the GitLab CI template's jobs run by `sh` (with PyYAML) | nothing running |
 | **Recovery and offline, the scripts** | `python3 -m unittest discover -s tests/deploy`; also CI | the fake vLLM (`tools/fake-vllm`: health, models, streamed answers at a set pace, vLLM's metrics, sleep and wake, the key from the environment, a failed load, a crash, a drain); `airgap.sh`: every image once, `deploy/` without `.env`, backups, keys or models, the registered models listed or copied, checksums written and checked, a damaged bundle or an unlisted file loads nothing, Podman; the offline installer (`make-installer.sh`, `installer.sh`): the bundle's layout and checksums, a damaged bundle or `.run` refused, arguments, dry runs that change nothing, the version gate, install, an upgrade from a 5.2.0 installation (backup, files, `.env` merged), a failed upgrade rolled back, an interrupted one carried on, repair, remove with and without `--purge`, status, on Docker and Podman; `restore-test.sh` and `rollback-test.sh`: their plans, and the guards (never the live project, its volumes or its ports); `recovery-check.py`: a dump's people, chats and settings, and the API checks against a fake app; the Laya server (`services/laya/server.py`): what a request may hold, which checkpoint reads it, its HTTP, with the model stubbed | nothing running (fake `docker` and `podman` on PATH) |
-| **Restore and rollback** | `scripts/restore-test.sh [--from DIR]`, `scripts/rollback-test.sh FROM_TAG TO_TAG` | a backup restores into a throwaway project beside the live one, with its people, chats, settings and spend; a release rolls back by restoring the backup taken before the upgrade | a host with the stack's images |
-| **Clients** | `scripts/clients-check.py` | the API as developers use it: OpenAI and Anthropic protocols, streaming, tool calls, spend per key, Argus over MCP, Qwen Code and DeepSeek Harness through the API and MCP | a running stack |
-| **Scale** | `scripts/scale-test.py` | many people at once: the chat's queue (and no answer carrying another's secret), every key at once, a burst of sandbox jobs | a running stack |
-| **People** | `scripts/people-load.py` | 50, 100 or 300 people arriving over a ramp: sign in, lists, a new chat, a streamed answer, the chat read back; p50/p95/p99 and every failure by kind | a running stack |
-| **Functional** | `scripts/functional-test.py` | what a person does: sign-in, provisioning, key rotation, budget exhaustion and restoration, password reset, per-person billing, access per model, fair use, a key's rate limit (refused past it, seen by the person, the chat not held to it), dashboards and logs for admins only | a running stack |
-| **Sandbox** | `scripts/sandbox-check.py` | the running sandbox's isolation: no network, no reading others' runs, limits bind, nothing outlives a run | a running stack |
-| **Dashboard audit** | `scripts/audit-dashboards.py` | every panel's queries in the app: no errors, no values out of range | a running stack |
+| **Restore and rollback** | `./arenactl check restore [--from DIR]`, `./arenactl check rollback FROM_TAG TO_TAG` | a backup restores into a throwaway project beside the live one, with its people, chats, settings and spend; a release rolls back by restoring the backup taken before the upgrade | a host with the stack's images |
+| **Clients** | `./arenactl check clients` | the API as developers use it: OpenAI and Anthropic protocols, streaming, tool calls, spend per key, Argus over MCP, Qwen Code and DeepSeek Harness through the API and MCP | a running stack |
+| **Scale** | `./arenactl check scale` | many people at once: the chat's queue (and no answer carrying another's secret), every key at once, a burst of sandbox jobs | a running stack |
+| **People** | `./arenactl check load` | 50, 100 or 300 people arriving over a ramp: sign in, lists, a new chat, a streamed answer, the chat read back; p50/p95/p99 and every failure by kind | a running stack |
+| **Functional** | `./arenactl check functional` | what a person does: sign-in, provisioning, key rotation, budget exhaustion and restoration, password reset, per-person billing, access per model, fair use, a key's rate limit (refused past it, seen by the person, the chat not held to it), dashboards and logs for admins only | a running stack |
+| **Sandbox** | `./arenactl check sandbox` | the running sandbox's isolation: no network, no reading others' runs, limits bind, nothing outlives a run | a running stack |
+| **Dashboard audit** | `./arenactl check dashboards` | every panel's queries in the app: no errors, no values out of range | a running stack |
 | **Runtimes' parity** | `python3 -m unittest discover -s tests/deploy -p test_runtime_parity.py` (in the tests above, and CI) and `python3 deploy/helm/check-chart.py` | the same services, variables, mounted paths, files and scripts from `deploy/`, secrets and app routes in compose, `podman.yml`, `scale.yml` and the Helm chart, but the allowed differences ([deployment.md](deployment.md#runtimes)); the chart's copies byte for byte | `docker compose` or `podman compose` (`config` only reads); `helm` where installed, else the templates as text |
 
 **Podman** was checked by hand (2026-10-03, Podman 5.7, rootless): every service
@@ -81,12 +81,12 @@ emitted), `dcgm-exporter`, `promtail` (a log line reaches Loki), `langfuse-worke
 (a trace reaches ClickHouse), `minio` (a bucket exists), `vllm-secondary`
 (`api2.<domain>` serves its model).
 
-### S3 — Identity *(good: `audit-auth.sh`, `functional-test.py`)*
+### S3 — Identity *(good: `functional-test.py`, `OidcTests`, `ForwardAuthTests`)*
 
 | test | status |
 |---|---|
 | S3.1 | OIDC discovery + real code exchange per client, claims correct | exists |
-| S3.2 | forwardAuth allows/bypasses/denies per hostname per the access rules | exists — `ForwardAuthTests` (every host, member vs admin, machine token, unknown and look-alike hosts) and `audit-auth.sh` steps 3-5 |
+| S3.2 | forwardAuth allows/bypasses/denies per hostname per the access rules | exists — `ForwardAuthTests` (every host, member vs admin, machine token, unknown and look-alike hosts)|
 | S3.3 | the registered OIDC clients are exactly the configured ones | exists — `OidcTests.A_client_the_configuration_does_not_name_is_removed_at_start` |
 | S3.4 | `config/directory/users.yml` is hash-free and Argus can read it | exists — `IdentityTests.The_directory_for_argus_lists_people_without_passwords` |
 | S3.5 | a changed `APP_KEY` makes the app refuse to start instead of resetting its keys | exists — `KeyRingTests` |
@@ -132,7 +132,7 @@ removed OAuth password grant) were each read off a live GitLab
 | test | asserts | status |
 |---|---|---|
 | S6.1 | `backup.sh` produces a complete directory and `--verify` passes | **missing** |
-| S6.2 | **restore round trip**: back up, destroy the volumes, restore, and compare row counts and file counts | **scripted**: `scripts/restore-test.sh` restores into fresh volumes of a throwaway project and compares people, chats and settings with the backup's dump, through the API |
+| S6.2 | **restore round trip**: back up, destroy the volumes, restore, and compare row counts and file counts | **scripted**: `./arenactl check restore` restores into fresh volumes of a throwaway project and compares people, chats and settings with the backup's dump, through the API |
 | S6.3 | `--restore --with-config` restores `.env` and `config/` | **missing** |
 | S6.4 | `--install-timer` produces a working systemd unit | **missing** |
 | S6.5 | restore onto a **clean host** (no prior volumes) | **scripted** on the same host: `restore-test.sh` starts from no volumes |
@@ -141,9 +141,8 @@ removed OAuth password grant) were each read off a live GitLab
 
 Every scrape target `up == 1` **for the profiles that are on**; rule files load;
 one alert is driven from a synthetic metric to Alertmanager and observed. Today
-acceptance checks that the rules load and that Alertmanager and Loki answer, and
-the functional test reads a Prometheus panel, Loki's lines and every rule through
-the app; no alert is driven end to end yet.
+the functional test (`./arenactl check functional`) reads a Prometheus panel,
+Loki's lines and every rule through the app; no alert is driven end to end yet.
 
 Log *ingestion* is the newest gap to close, and the first live start showed why
 it needs a test. Promtail's `keep` filter was documented as "only ingest this
@@ -164,20 +163,21 @@ exactly the history an operator enables collection to get.
 
 ### S8 — Ingress and TLS
 
-Covered well by `domain-check.sh` and `acceptance.py` for routes. Missing:
-`api2`, `s3` and the `metrics` sub-routes per engine; and that a **denied**
-hostname really is denied.
+Traefik routes three names: the app, the gateway and Argus.
+`functional-test.py` and `clients-check.py` reach each through it, and
+`compliance-check.py` checks its TLS. Missing: that a **denied** hostname
+really is denied.
 
 ### S9 — Supply and offline
 
 | test | status |
 |---|---|
-| S9.1 | airgap bundle builds, its checksums verify, and a damaged one loads nothing | `scripts/airgap.sh pack` and `load`; the logic in CI (`tests/deploy`) |
+| S9.1 | airgap bundle builds, its checksums verify, and a damaged one loads nothing | `./arenactl airgap pack` and `load`; the logic in CI (`tests/deploy`) |
 | S9.2 | full round trip: build → extract → load → `up` → the stack serves | **missing**: needs a second host |
 | S9.3 | the stack starts with `--network none` on the compose network, i.e. genuinely offline | **missing** — this is what the offline commits claim |
 | S9.4 | images build from a clean cache (all three local ones) | **missing** |
 
-### S11 — Many people at once (`scripts/scale-test.py`), 2026-10-03
+### S11 — Many people at once (`./arenactl check scale`), 2026-10-03
 
 One RTX-class GPU serving Qwen3.8-Flash-Next (IQ4_XS), the sandbox on 2 slots:
 
@@ -192,7 +192,7 @@ Nothing failed or was refused: the fair-use queue serves everyone in turn
 instead. What grows with people is the wait, about linearly with the engine's
 slots; more slots (`LLAMACPP_PARALLEL`) or a second engine shorten it.
 
-### S12 — People in the app at once (`scripts/people-load.py`), 2026-10-21
+### S12 — People in the app at once (`./arenactl check load`), 2026-10-21
 
 Each person signs in, opens the chat list, starts a chat, asks and reads the
 streamed answer, reads the chat back; they arrive over a ramp. One RTX 3090,
@@ -388,13 +388,10 @@ cd deploy
   -e LDAP_TEST_USER_BASE_DN=DC=corp,DC=example,DC=com -e LDAP_TEST_USER=jsmith -e LDAP_TEST_USER_PASSWORD_FILE=/repo/data/jsmith-pw
 
 # with the stack up
-make health          # container state + in-network probes
-make smoke           # API surface
-./scripts/domain-check.sh
-./scripts/audit-auth.sh
-./scripts/acceptance.py        # note: SKIP is not PASS
-./scripts/functional-test.py   # the person-facing flows
-./scripts/audit-dashboards.py 6h  # every panel's queries, run in the app
+../arenactl status                 # each service's version and health, the features, disk and GPU
+../arenactl check functional       # the person-facing flows
+../arenactl check compliance       # the compliance controls: TLS, the security headers, the session cookie, the CSRF guard
+../arenactl check dashboards 6h    # every panel's queries, run in the app
 
 # the web in a real browser (in src/web): desktop and phone, both themes,
 # axe accessibility (WCAG 2.2 AA) on every page and what opens on it, focus
@@ -411,27 +408,23 @@ E2E_ARGUS_USER=dev_beta E2E_ARGUS_PASSWORD=<theirs> E2E_PASSWORD=... E2E_CHAT=1 
 # clients as developers point them: the API (OpenAI and Anthropic), streaming,
 # tool calls, spend attribution; Argus over MCP; Qwen Code and DeepSeek Harness
 # through the API and calling Argus (each with a throwaway home; the test GitLab up)
-./scripts/clients-check.py --dsh /path/to/node_modules/.bin/dsh
+../arenactl check clients --dsh /path/to/node_modules/.bin/dsh
 
 # many people at once: the chat's fair-use queue (and no answer carrying another
 # person's secret), every person's API key at once, a burst of sandbox jobs
-./scripts/scale-test.py --users 12 --sandbox-jobs 24
-./scripts/people-load.py --people 100 --ramp 60 --turns 2
+../arenactl check scale --users 12 --sandbox-jobs 24
+../arenactl check load --people 100 --ramp 60 --turns 2
 
 # upgrade: an old release from zero (fresh volumes), data in, this checkout over
 # it; and this checkout from zero. The live stack goes down meanwhile (volumes kept)
-./scripts/upgrade-test.py --from v3.0.0 --stop-live
-./scripts/upgrade-test.py --zero --stop-live
+../arenactl check upgrade --from v3.0.0 --stop-live
+../arenactl check upgrade --zero --stop-live
 
 # recovery, beside the live stack (never touching it): the newest backup restored
 # into a throwaway project and checked; a release rolled back by its backup
-./scripts/restore-test.sh
-./scripts/rollback-test.sh v4.1.0 v4.0.0
-./scripts/airgap.sh pack --dry-run /tmp/arena.tar   # what an offline bundle would hold
-
-# from inside the network
-docker run --rm --network llm-net -e MK=<master-key> \
-  -v "$PWD/scripts:/s:ro" python:3.13-slim python /s/e2e-check.py
+../arenactl check restore
+../arenactl check rollback v4.1.0 v4.0.0
+../arenactl airgap pack --dry-run /tmp/arena.tar   # what an offline bundle would hold
 ```
 
 For the Argus case the stack's Argus must index the test GitLab, and the
@@ -450,5 +443,5 @@ because all of this is temporary:
    - delete `dev_beta` from the app
    - run `./tools/test-gitlab/run.sh --down`
 
-**Read the SKIP lines.** A green `acceptance.py` on the default profiles has not
-exercised tracing, logging, cadvisor, dcgm or the second model.
+**Read the SKIP lines.** A check that cannot apply here says SKIP, and a green
+run has not exercised what it skipped.

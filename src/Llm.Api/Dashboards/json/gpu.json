@@ -305,7 +305,7 @@
     {
       "type": "row",
       "title": "Data-centre detail (DCGM)",
-      "emptyText": "NVIDIA's DCGM exporter is not running, so SM activity, tensor cores, XID errors, ECC, retired pages and NVLink are not measured. Turn it on with the dcgm profile (./install.sh --with dcgm, or dcgm in COMPOSE_PROFILES in deploy/.env); it runs on bare-metal Linux with the NVIDIA driver, and its image comes from nvcr.io.",
+      "emptyText": "NVIDIA's DCGM exporter is not running, so SM activity, tensor cores, XID errors, ECC, retired pages and NVLink are not measured. Turn it on with the dcgm profile (./arenactl repair --with dcgm, or sh argus-arena-VERSION-offline.run repair --with dcgm, or dcgm in COMPOSE_PROFILES in deploy/.env); it runs on bare-metal Linux with the NVIDIA driver, and its image comes from nvcr.io.",
       "gridPos": { "h": 1, "w": 24, "x": 0, "y": 48 },
       "collapsed": true,
       "panels": [

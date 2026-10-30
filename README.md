@@ -217,8 +217,8 @@ Open `https://llm.localhost` and sign in as `admin` with the password from
 `.env`. The app fetches its first model and the media models on its own. For an
 offline host, one `.run` file carries everything. The
 [deployment guide](docs/deployment.md) covers Podman, GPUs across servers and
-upgrades. For a large team or for availability, `installer.sh install
---kubernetes` checks a cluster first and installs the
+upgrades. For a large team or for availability, `./arenactl kube install`
+checks a cluster first and installs the
 [Helm chart](docs/deployment.md#helm). **Argus alone**, without the platform, is in
 [deploy/argus-standalone/](deploy/argus-standalone/README.md).
 

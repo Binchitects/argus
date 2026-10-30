@@ -137,7 +137,7 @@ public sealed partial class SecurityWatch(IServiceScopeFactory scopes, IOptionsM
             if (good is not null && now - good.At!.Value > ComplianceChecks.BackupDue)
             {
                 raised.Add(new SecurityAlert { Kind = "backup_late", Key = $"backup-late:{now:yyyyMMdd}", Title = "No good backup for over a day",
-                    Detail = $"The newest that ended well is {good.Name}. Is scripts/backup.sh's timer running (sudo scripts/backup.sh --install-timer)?" });
+                    Detail = $"The newest that ended well is {good.Name}. Is the daily backup's timer running (sudo ./arenactl backup --install-timer from the release's checkout; on an installed host without one, sudo DIR/deploy/scripts/backup.sh --install-timer)?" });
             }
         }
 

@@ -168,7 +168,7 @@ function NotInstalled({ item, admin }: { item: NavItem; admin: boolean }) {
     <EmptyState icon={item.icon} title={`${item.title} is not installed here`} className="mx-auto mt-16 max-w-lg">
       {admin ? (
         <>
-          Its feature, <code>{item.feature}</code>, is off. The installer turns it on: <code>installer.sh repair --with {item.feature}</code>
+          Its feature, <code>{item.feature}</code>, is off. The installer turns it on: <code>./arenactl repair --with {item.feature}</code> from the checkout, or <code>sh argus-arena-VERSION-offline.run repair --with {item.feature}</code> with the offline installer.
         </>
       ) : (
         'This feature is off on this server. Ask an admin if you need it.'

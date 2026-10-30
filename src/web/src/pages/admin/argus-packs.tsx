@@ -259,7 +259,7 @@ function AddPack({ packs, onClose }: { packs: Packs; onClose: () => void }) {
               label="Pack"
               hint={
                 library.length === 0
-                  ? `The library is empty: build packs into it with tools/build-packs.sh (${packs.library_dir}).`
+                  ? `The library is empty: build packs into it with tools/build-packs.sh in the checkout, or bring them in a bundle made with ./arenactl bundle --packs (${packs.library_dir}).`
                   : available.length === 0
                     ? 'Every pack in the library is installed.'
                     : 'Packs in the library that Argus does not search yet.'

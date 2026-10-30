@@ -19,9 +19,12 @@
    approves it. Settings changes are audited by Arena (Admin → Audit).
 2. Upgrades: read the release's changelog, including any **Weakened controls**;
    take a backup; try the upgrade first on [a test installation] with a copy of
-   the data (`installer upgrade --dry-run`); apply it in [the maintenance
-   window]; run `deploy/scripts/compliance-check.py` after.
-3. Rollback is a restore of the backup taken before (`backup.sh --restore`).
+   the data (`./arenactl upgrade --dry-run` in a checkout, or
+   `sh argus-arena-VERSION-offline.run upgrade --dry-run` with the offline
+   installer); apply it in [the maintenance window]; run
+   `./arenactl check compliance` after.
+3. Rollback is a restore of the backup taken before (`./arenactl restore
+   --from DIR`).
 4. Emergency changes (a security fix) may be made first and recorded within
    [one working day].
 5. Test data is not production data; where a copy of it must be used, it is

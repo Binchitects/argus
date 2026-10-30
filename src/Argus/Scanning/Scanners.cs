@@ -40,7 +40,7 @@ public static class Scanners
     public static JsonObject Scan(string mirror, string sha, bool history, IReadOnlyList<string>? tools, IReadOnlyList<string>? paths = null)
     {
         var url = BaseUrl ?? throw new ScannersUnavailable(
-            "No security scanners are installed here: an admin turns the scanners feature on (installer.sh repair --with scanners).");
+            "No security scanners are installed here: an admin turns the scanners feature on (./arenactl repair --with scanners, or sh argus-arena-VERSION-offline.run repair --with scanners).");
         var asked = tools is { Count: > 0 } ? tools : Known;
         if (asked.FirstOrDefault(t => !Known.Contains(t)) is { } unknown)
             throw new ToolError($"tools are some of {string.Join(", ", Known)}, not {PyStr.Repr(unknown)}.");
@@ -88,7 +88,7 @@ public static class Scanners
     public static JsonObject ScanFiles(IReadOnlyDictionary<string, string> files, IReadOnlyList<string>? tools)
     {
         var url = BaseUrl ?? throw new ScannersUnavailable(
-            "No security scanners are installed here: an admin turns the scanners feature on (installer.sh repair --with scanners).");
+            "No security scanners are installed here: an admin turns the scanners feature on (./arenactl repair --with scanners, or sh argus-arena-VERSION-offline.run repair --with scanners).");
         var asked = tools is { Count: > 0 } ? tools : Known;
         if (asked.FirstOrDefault(t => !Known.Contains(t)) is { } unknown)
             throw new ToolError($"tools are some of {string.Join(", ", Known)}, not {PyStr.Repr(unknown)}.");

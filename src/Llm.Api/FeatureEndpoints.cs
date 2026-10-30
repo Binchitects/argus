@@ -20,7 +20,7 @@ public static class FeatureEndpoints
             await http.Response.WriteAsJsonAsync(new
             {
                 status = "feature-off",
-                error = $"{Features.Of(f.Id).Title} is not installed here. An admin turns it on with: installer.sh repair --with {f.Id}",
+                error = $"{Features.Of(f.Id).Title} is not installed here. An admin turns it on with: ./arenactl repair --with {f.Id} (from the release's checkout), or sh argus-arena-{AppInfo.Current.Version}-offline.run repair --with {f.Id} (from its offline installer)",
             });
             return;
         }

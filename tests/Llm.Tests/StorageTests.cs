@@ -416,7 +416,7 @@ public sealed class StorageTests(AppFixture app)
         var plan = await admin.JsonAsync(await admin.GetAsync("/api/admin/storage/cleanups/old-backups?keep=1"));
         Assert.Equal(new[] { "2026-09-03_030000", "2026-09-01_030000" }, plan.GetProperty("items").EnumerateArray().Select(i => i.GetProperty("id").GetString()));
         Assert.Equal(2 * 1000 + "FAILED (1 problem(s))\n".Length + "ok\n".Length, plan.GetProperty("bytes").GetInt64());
-        Assert.Equal("scripts/backup.sh --prune --keep 1", plan.GetProperty("command").GetString());
+        Assert.Equal("./arenactl backup --prune --keep 1", plan.GetProperty("command").GetString());
         Assert.Equal(JsonValueKind.Null, plan.GetProperty("problem").ValueKind);
         Assert.DoesNotContain("legal hold", plan.GetProperty("warning").GetString(), StringComparison.Ordinal);
         var refused = await admin.PostAsync("/api/admin/storage/cleanups/old-backups", new { keep = 1 });
@@ -427,7 +427,7 @@ public sealed class StorageTests(AppFixture app)
             Directory.EnumerateFileSystemEntries(s.Backups).Select(Path.GetFileName).Order(StringComparer.Ordinal));
         // By default it keeps BACKUP_KEEP (14): nothing goes.
         var kept = await admin.JsonAsync(await admin.GetAsync("/api/admin/storage/cleanups/old-backups"));
-        Assert.Equal((0, 14, "scripts/backup.sh --prune --keep 14"), (kept.GetProperty("count").GetInt64(), kept.GetProperty("keep").GetInt32(), kept.GetProperty("command").GetString()));
+        Assert.Equal((0, 14, "./arenactl backup --prune --keep 14"), (kept.GetProperty("count").GetInt64(), kept.GetProperty("keep").GetInt32(), kept.GetProperty("command").GetString()));
         // Someone on legal hold: backups from before it hold their data, and those are named.
         var (_, heldId, _) = await PersonAsync(f, admin);
         await HoldAsync(admin, heldId, true);

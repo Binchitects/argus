@@ -139,7 +139,7 @@ function CertificateAlert({ cert }: { cert: CertificateStatus }) {
   if (cert.issuer === 'traefik')
     return (
       <Alert variant="warning" title="The site uses Traefik's own certificate">
-        Browsers warn, and tools must skip the check. Run scripts/make-cert.sh (from deploy/) for a certificate of your own, or set ACME_EMAIL for Let's Encrypt.
+        Browsers warn, and tools must skip the check. Run ./arenactl cert from the checkout (or, in an installation from the offline installer, deploy/scripts/make-cert.sh) for a certificate of your own, or set ACME_EMAIL for Let's Encrypt.
       </Alert>
     )
   if (cert.days > 30) return null
@@ -147,7 +147,7 @@ function CertificateAlert({ cert }: { cert: CertificateStatus }) {
     <Alert variant={cert.days <= 7 ? 'destructive' : 'warning'} title={`The certificate for ${cert.name} ${cert.days < 0 ? 'has expired' : `expires ${inDays(cert.days)}`}`}>
       {cert.issuer === 'letsencrypt'
         ? "Traefik renews Let's Encrypt's certificates by itself: the names must resolve to this machine and port 443 must reach it. Traefik's log says why it did not."
-        : "Run scripts/make-cert.sh again (from deploy/): it renews the certificate with the same CA, or installs your company's new one. Traefik serves it at once."}
+        : "Run ./arenactl cert again from the checkout (or, in an installation from the offline installer, DIR/deploy/scripts/make-cert.sh): it renews the certificate with the same CA, or installs your company's new one (--cert, --key, --chain). Traefik serves it at once."}
     </Alert>
   )
 }

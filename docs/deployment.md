@@ -101,7 +101,7 @@ The addresses, all on port 443:
 | `https://argus.DOMAIN/mcp` | Argus for coding agents, with a person's API key (not a GitLab token) |
 
 `*.localhost` resolves to this machine in browsers; for other tools,
-`deploy/scripts/setup-hosts.sh` adds the names to `/etc/hosts`.
+`./arenactl hosts` adds the names to `/etc/hosts`.
 
 People connect their tools from **Connect your tools** in the app. A team's
 GitLab pipeline uses the gateway too: a review of each merge request and an
@@ -116,7 +116,7 @@ Traefik does TLS and nothing else does.
 - **`ACME_EMAIL` in `.env`**: certificates from Let's Encrypt for the three
   names. They must resolve to this machine from the internet, with port 443 open.
 - **A certificate of your own** (what the installer makes by default):
-  `scripts/make-cert.sh` makes one with openssl,
+  `./arenactl cert` (`scripts/make-cert.sh`) makes one with openssl,
   signed by a CA of the deployment's own, for `DOMAIN`, `gateway.DOMAIN`,
   `argus.DOMAIN` and `*.DOMAIN`, or installs a company's (`--cert FILE --key FILE
   [--chain FILE]`). The files go to `certs/` (mounted into Traefik at `/certs`)
@@ -125,9 +125,9 @@ Traefik does TLS and nothing else does.
   tools that use the stack:
 
   ```bash
-  scripts/make-cert.sh
-  sudo cp certs/ca.crt /usr/local/share/ca-certificates/argus-arena.crt && sudo update-ca-certificates
-  curl --cacert certs/ca.crt https://DOMAIN/
+  ./arenactl cert
+  sudo cp deploy/certs/ca.crt /usr/local/share/ca-certificates/argus-arena.crt && sudo update-ca-certificates
+  curl --cacert deploy/certs/ca.crt https://DOMAIN/
   ```
 
   Run it again to renew: the same CA signs the new certificate, so nothing
@@ -138,8 +138,8 @@ Traefik does TLS and nothing else does.
   code-signing certificate from it (`signing/code-signing.crt` and `.key`, 3
   years, kept out of every container and of airgap bundles) and signs the
   builds' list into `DATA_DIR/code-arena-signature/`, which the app serves.
-  Run it by hand after changing the builds; `--check` says whether what is
-  served is signed ([code-arena.md](code-arena.md#getting-it)).
+  `./arenactl sign` does it by hand after changing the builds; `./arenactl sign
+--check` says whether what is served is signed ([code-arena.md](code-arena.md#getting-it)).
 
   People get the CA from **Connect your tools**: when no public CA vouches for
   the site, the page offers the certificate to download (with its SHA-256 to
@@ -202,7 +202,7 @@ to change, each with the disk its images take. A feature turned on brings those
 it requires; one that others on need is not turned off without them. `repair
 --with` loads a feature's images from the bundle and starts it; `repair
 --without` removes its containers and its images (`--keep-images` keeps them),
-and its data stays until `remove --purge`. `installer.sh features` lists them,
+and its data stays until `remove --purge`. `./arenactl features` (with a bundle, `sh argus-arena-VERSION-offline.run features`) lists them,
 on or off, with their sizes.
 
 By hand, in `deploy/`: change `COMPOSE_PROFILES` in `.env`, then `docker compose
@@ -220,7 +220,8 @@ Arena's look at commands ([code-arena.md](code-arena.md#laya-looks-at-commands))
 It is off by default. To turn it on, with the installer:
 
 ```bash
-installer.sh repair --with laya
+./arenactl repair --with laya                                            # from a checkout
+sh argus-arena-VERSION-offline.run repair --with laya --dir /srv/arena   # with the offline installer
 ```
 
 or by hand: add `laya` to `COMPOSE_PROFILES` in `.env`, then `docker compose up -d --build laya`.
@@ -250,8 +251,8 @@ or by hand: add `laya` to `COMPOSE_PROFILES` in `.env`, then `docker compose up 
   command in about 0.35 s. Each checkpoint loads in 2 to 3 seconds and answers
   once at start, so the first call is no slower. More threads (`LAYA_THREADS`
   and `cpus` in `docker-compose.override.yml`) make one call faster.
-- **Offline**: `scripts/airgap.sh pack --models` carries the two checkpoints
-  when they are in the library.
+- **Offline**: `./arenactl bundle --models` (or `./arenactl airgap pack
+  --models OUT.tar`) carries the two checkpoints when they are in the library.
 - **Helm**: `laya.enabled=true`, with the `arena-laya` image built and pushed
   like the app's; a NetworkPolicy lets only the app's pods in, and nothing out.
   The app is told whether it runs (`Modules__laya`), as for the media
@@ -275,7 +276,7 @@ the container's root, which under rootless Podman is you, so `MODELS_DIR` stays
 yours; it gives Promtail Podman's socket, and leaves the power caps out (they
 need the host's root). The offline installer takes `--podman`
 ([below](#the-offline-installer)), with `podman.yml` on top for you, and so does
-`scripts/backup.sh --podman` when `COMPOSE_FILE` names no files: a restore makes
+`./arenactl backup --podman` when `COMPOSE_FILE` names no files: a restore makes
 the volumes as Podman runs them, and the backup keeps `podman.yml`.
 [Runtimes](#runtimes) says what else differs.
 
@@ -359,9 +360,9 @@ per namespace: the services keep the names the app reaches them by.
 
 ### With the installer
 
-`installer.sh COMMAND --kubernetes` (the offline bundle's, or
-`deploy/scripts/kube-install.sh` from the repository) installs the chart for
-you. `requirements` checks the cluster before anything is changed and says
+`./arenactl kube COMMAND` from a checkout, or the offline installer's
+`COMMAND --kubernetes` (`sh argus-arena-VERSION-offline.run install
+--kubernetes`), installs the chart for you. `requirements` checks the cluster before anything is changed and says
 what each lack needs: kubectl 1.27 and helm 3.14 or newer, the cluster
 answering and your rights in the namespace, a default storage class (or
 `--storage-class`), one that shares volumes between nodes on more than one
@@ -405,7 +406,7 @@ the power limits run with compose only.
    them to a registry the cluster pulls from; name them under `images` (the tag
    defaults to the app's version).
 2. Make a TLS Secret for `DOMAIN`, `gateway.DOMAIN` and `argus.DOMAIN` (a
-   wildcard, or `scripts/make-cert.sh`'s files): `kubectl create secret tls
+   wildcard, or the files `./arenactl cert` makes): `kubectl create secret tls
    arena-tls --cert=... --key=...`.
 3. Install:
 
@@ -513,8 +514,8 @@ how). **no**: missing, with the reason.
 | `services/power-limits.sh` | mounted | no | no |
 | **Secrets** | `.env` | `.env` | the `arena-secrets` Secret, made at install and kept (or `existingSecret`): the same keys |
 | **Health checks** | the images' (app, web, Argus, Laya), Traefik's and Postgres's | the same (compose builds through Podman's Docker API keep them; a `podman build` by hand drops them) | probes: app, web, Postgres, LiteLLM, Laya, Argus |
-| **Backup and restore** | `scripts/backup.sh` | `scripts/backup.sh --podman` (with `podman.yml`) | no: the cluster's volume snapshots and a `pg_dumpall` |
-| **Install and upgrade** | `installer.sh`, `scripts/upgrade-test.py` | `installer.sh --podman` | `helm install` / `helm upgrade`; the app and Argus migrate as they start; no upgrade test |
+| **Backup and restore** | `./arenactl backup`, `./arenactl restore` | `./arenactl backup --podman`, `./arenactl restore --podman` (with `podman.yml`) | no: the cluster's volume snapshots and a `pg_dumpall` |
+| **Install and upgrade** | `./arenactl install` and `upgrade`, `./arenactl check upgrade` | `./arenactl install --podman` | `./arenactl kube install` / `upgrade`, or `helm install` / `helm upgrade`; the app and Argus migrate as they start; no upgrade test |
 | **Features** | | | |
 | media borrowing the GPU from idle chat models | yes: every server sees every GPU | yes | differs: each pod has its own GPUs, so a picture never needs to borrow; one GPU shared needs the device plugin's time-slicing (a vLLM model put to sleep frees its memory only for pods that share its GPU) |
 | AMD GPUs (ROCm) | `rocm.yml`: `/dev/kfd` and `/dev/dri`, ROCm images | `rocm.yml` after `podman.yml` | `gpuResource: amd.com/gpu`, ROCm images, `engines.backend: rocm` |
@@ -589,7 +590,7 @@ In this order, on the new server (each step's details in
    208–240 V. Pin the NVIDIA driver (R580 or newer) so the distribution does not
    upgrade it; install nvidia-container-toolkit with CDI
    (`nvidia-ctk cdi generate`; AMD: `amd-ctk`, or `rocm.yml`).
-2. **`scripts/gpu-check.sh`** (read only): driver, GPUs, ECC and MIG, peer to
+2. **`./arenactl check gpu`** (read only): driver, GPUs, ECC and MIG, peer to
    peer between every pair, no pair across sockets, power caps, locked memory and
    shared memory. With nccl-tests built: `--nccl /path/to/all_reduce_perf`
    (about 40–50 GB/s bus bandwidth over PCIe Gen5 with P2P). Fix every FAIL
@@ -604,7 +605,7 @@ In this order, on the new server (each step's details in
    you choose; FP8 checkpoints first, NVFP4 only once one passes its smoke test
    on the pinned vLLM. Load it, ask it a question in the chat, and read its log
    under Admin → Models if it fails.
-6. **Measure**: `scripts/multiuser-bench.py --scenarios ramp,prefixshare,returnafter
+6. **Measure**: `./arenactl check bench --scenarios ramp,prefixshare,returnafter
    --ramp 1..64 --json run.json`, then again with another setting (TP=2×2 against
    TP=4, a CPU or LMCache tier) and `--compare run.json`. Keep the JSON of each.
 7. **Durability**: the `ha` feature with `ha.yml` for gateway replicas,
@@ -756,13 +757,17 @@ became fixed, or went away:
 
 ## Backups and restore
 
-`scripts/backup.sh` backs up the database (a consistent dump), every named
-volume and the configuration into `backups/`; `--install-timer` runs it daily.
+`./arenactl backup` backs up the database (a consistent dump), every named
+volume and the configuration into `backups/`; `sudo ./arenactl backup
+--install-timer` runs it daily. It runs the installation's own
+`scripts/backup.sh` (`--dir DIR` picks the installation); on a host with the
+installation and no checkout, run `scripts/backup.sh` in its `deploy/` with the
+same options.
 Models are not backed up: they are in `MODELS_DIR` and can be fetched again.
 `BACKUP_DIR`, `BACKUP_COPY_DIR` (a verified second copy on another disk),
 `BACKUP_KEEP`, `BACKUP_INCLUDE_LOGS` and `BACKUP_TIME` in `.env` change where,
 how many and when ([configuration.md](configuration.md#env)). After each good
-backup it keeps the newest `BACKUP_KEEP`; `scripts/backup.sh --prune [--keep N]`
+backup it keeps the newest `BACKUP_KEEP`; `./arenactl backup --prune [--keep N]`
 removes older ones now, never the latest nor the newest that ended well.
 
 The app mounts `BACKUP_DIR` at `/backups` **read only**, to show the backups
@@ -792,9 +797,9 @@ sudo sh -c 'openssl rand -base64 48 > /root/arena-backup.key && chmod 600 /root/
 A key inside `deploy/` or the backups' folders is refused (it would travel with
 the backups it opens). `--verify` opens each file with the key, or checks the
 checksums alone where the key is not; `--restore` opens the backup into a
-private folder beside it and removes it after; `scripts/backup.sh --open DIR
+private folder beside it and removes it after; `./arenactl backup --open DIR
 --to OUT` makes a plain copy to look into (remove it when done: it holds every
-secret of the stack); `scripts/restore-test.sh` opens an encrypted backup by
+secret of the stack); `./arenactl check restore` opens an encrypted backup by
 itself. Admin → Compliance shows whether the newest backup is encrypted.
 pgBackRest (below) encrypts its repository with its own `repo1-cipher-type` and
 `repo1-cipher-pass` (`PGBACKREST_REPO1_CIPHER_TYPE` and
@@ -803,9 +808,9 @@ before its first backup.
 
 Docker makes a folder it mounts root's when the folder is not there yet, as
 when the stack starts (an upgrade, say) before the first backup into a new
-`BACKUP_DIR`. `scripts/backup.sh`, run as you, takes such a folder back while
+`BACKUP_DIR`. `./arenactl backup`, run as you, takes such a folder back while
 it is empty, through Docker as its other containers run; a folder of root's
-with something in it, it names with the fix. `sudo scripts/backup.sh
+with something in it, it names with the fix. `sudo ./arenactl backup
 --install-timer` makes the folder (or takes it back from root) for the user the
 timer runs as. The default `./backups` is in the repository, so it is always
 yours.
@@ -814,13 +819,13 @@ To put a backup back, stop the stack and restore it: the volumes and the
 database, and with `--with-config` also `.env` and the files under `config/`.
 
 ```bash
-docker compose down                                   # volumes are kept
-scripts/backup.sh --verify backups/2026-10-04_033000
-scripts/backup.sh --restore --from backups/2026-10-04_033000
-docker compose up -d
+docker compose down                                   # in deploy/: volumes are kept
+./arenactl backup --verify backups/2026-10-04_033000
+./arenactl restore --from backups/2026-10-04_033000
+docker compose up -d                                  # in deploy/
 ```
 
-`scripts/restore-test.sh` proves a backup restores, without touching the live
+`./arenactl check restore` proves a backup restores, without touching the live
 stack. It restores the newest backup (or `--from DIR`) into a throwaway project
 beside it, with its own name, volumes, network and port (127.0.0.1:18443), and
 only `postgres`, `app`, `web`, `traefik` and `litellm`. Its network has no way
@@ -843,9 +848,9 @@ volumes.
 once from the pgvector image already on the host with Debian's pgbackrest
 package: approve the build first): every WAL segment is archived to
 `BACKUP_DIR/pgbackrest` as it is written, so the database can be put back to
-any second. `scripts/backup.sh --pitr full` (weekly) and `--pitr diff`
+any second. `./arenactl backup --pitr full` (weekly) and `--pitr diff`
 (daily) take the backups (four full ones are kept, with their WAL);
-`scripts/restore-drill.sh [--to "YYYY-MM-DD HH:MM:SS+00"]` restores the
+`./arenactl check restore-drill [--to "YYYY-MM-DD HH:MM:SS+00"]` restores the
 repository to a moment into a scratch container and volume of its own,
 starts it and checks the databases and their people, and never touches the
 stack's Postgres (`--dry-run` says what it would do). The logical dump above
@@ -858,19 +863,19 @@ EF migrations only go forward. An older app on a database a newer one migrated
 may start, but nothing undoes the newer schema. A rollback is the backup taken
 before the upgrade:
 
-1. Before upgrading, take a backup: `scripts/backup.sh`.
+1. Before upgrading, take a backup: `./arenactl backup`.
 2. Upgrade: the new release's images, then `docker compose up -d`. The app
    migrates the database at its first start.
 3. To roll back: `docker compose down`, the release you came from checked out
-   and its images built, `scripts/backup.sh --restore --from <the backup from
-   step 1>`, then `docker compose up -d`.
+   and its images built (`./arenactl build`), `./arenactl restore --from <the
+   backup from step 1>`, then `docker compose up -d`.
 
 What was written after the upgrade is lost: the backup is from before it. The
 offline installer's upgrade takes the backup and rolls back by itself
 ([Upgrade from 5.2.0](#upgrade-from-520)).
 
-`scripts/rollback-test.sh FROM_TAG TO_TAG` (for example `v4.1.0 v4.0.0`) proves
-it in a throwaway project, as `restore-test.sh` does, on port 18444:
+`./arenactl check rollback FROM_TAG TO_TAG` (for example `v4.1.0 v4.0.0`) proves
+it in a throwaway project, as `./arenactl check restore` does, on port 18444:
 
 1. It builds both releases' app and web images from their tags.
 2. `TO_TAG` from zero; a person, a group, a chat and a setting go in; the
@@ -889,7 +894,7 @@ Two ways to a host with no network:
 
 - **The offline installer**: one file per release that installs, upgrades from
   5.2.0, repairs and removes the stack ([below](#the-offline-installer)).
-- **`scripts/airgap.sh`**: a running stack's images, files and models in one
+- **`./arenactl airgap`**: a running stack's images, files and models in one
   tar, loaded by hand on the other host
   ([below](#carrying-a-running-stack-airgapsh)).
 
@@ -908,13 +913,13 @@ Traefik.
 
 #### Making it
 
-On the release's host, with its images built (`docker compose build`, and
-`docker compose --profile laya build laya` in `deploy/`):
+On a Linux machine with this checkout. It builds every feature's images first
+(`--no-build` takes them as this host has them):
 
 ```bash
-deploy/scripts/make-installer.sh                    # dist/argus-arena-VERSION-offline.run and .sha256
-deploy/scripts/make-installer.sh --models --packs   # with the models and the knowledge packs
-deploy/scripts/make-installer.sh --dry-run          # what it would hold
+./arenactl bundle --with-deps        # dist/argus-arena-VERSION-offline.run and .sha256
+./arenactl bundle --models --packs   # with the models and the knowledge packs
+./arenactl bundle --dry-run          # what it would hold
 ```
 
 | option | what |
@@ -923,8 +928,10 @@ deploy/scripts/make-installer.sh --dry-run          # what it would hold
 | `--packs` | the knowledge packs in `packs/` |
 | `--code-arena DIR` | Code Arena's packages (default `dist/`, which `./arenactl code-arena` fills, and this when it is empty) |
 | `--without A,B` | features whose images stay out: a smaller file for hosts without them (`chat-models,pictures,video,gpu-monitoring,power-limits` for hosts with no GPU); the installer then cannot turn them on |
-| `--podman`, `--project NAME` | the images in Podman's store; the compose project they were built under (default `arena`) |
-| `--version V`, `--out DIR` | the release (default `VERSION`); where the file goes (default `dist/`) |
+| `--with-deps` | Docker's static binaries, its compose plugin and NVIDIA's container toolkit inside: the installer installs them from the bundle where the host lacks them. NVIDIA's driver is not inside |
+| `--podman` | the images in Podman's store |
+| `--out DIR` | where the file goes (default `dist/`) |
+| `--no-build` | the images as this host has them |
 
 The release's own images go in as `arena-SERVICE:VERSION`, the others as the
 compose file names them. `MANIFEST` says the version, the commit and the oldest
@@ -961,8 +968,8 @@ toolkit wired into Docker (its runtime) or Podman (a CDI spec, kept current
 as the driver changes), the ports opened and the limits raised, each step
 checked again after. A missing NVIDIA driver is installed too, and the
 installer stops for the reboot it needs (exit 7: run it again after).
-`installer.sh requirements` checks a host before anything else (`--fix` puts it
-right; `./arenactl requirements` is the same from a checkout). After the images load, a
+`sh argus-arena-VERSION-offline.run requirements` checks a host before anything
+else (`--fix` puts it right; `./arenactl requirements` is the same from a checkout). After the images load, a
 container runs `nvidia-smi` to prove the GPU reaches it. Then it asks the domain, the admin's e-mail, where models live, the
 **default models** (download them from Hugging Face once, at the first start;
 copy them from a folder, the model library's layout, with `audio.tar.gz` for the
@@ -1149,11 +1156,12 @@ Podman ([above](#podman)) the ports default to 8080 and 8443.
 
 ### Carrying a running stack (airgap.sh)
 
-`scripts/airgap.sh` carries a running stack, as it is, to a host with no network, in
-one file. On a host where the stack runs:
+`./arenactl airgap` carries a running stack, as it is, to a host with no network, in
+one file. On a host where the stack runs, from its checkout (without one,
+`scripts/airgap.sh` in the installation's `deploy/`):
 
 ```bash
-scripts/airgap.sh pack --models /media/usb/arena.tar
+./arenactl airgap pack --models /media/usb/arena.tar
 ```
 
 The bundle holds:
@@ -1197,19 +1205,19 @@ server from looking. Then `docker compose up -d --pull never`.
 
 ## Testing a deployment
 
-| script | what it proves |
+| command | what it proves |
 |---|---|
-| `scripts/upgrade-test.py --zero --stop-live` | this checkout from zero on fresh volumes: it comes up, provisions its first model, signs in, answers with a file |
-| `scripts/upgrade-test.py --from TAG --stop-live` | a release from zero with data in, then this checkout over it: everything kept, the old chat goes on |
-| `scripts/restore-test.sh [--from DIR]` | a backup restores: in a throwaway project beside the live one, its people, chats, settings and spend are there |
-| `scripts/rollback-test.sh FROM_TAG TO_TAG` | a release rolls back by restoring the backup taken before the upgrade, in a throwaway project |
-| `scripts/airgap.sh pack --dry-run X.tar` | what an offline bundle would hold, and that every image is on this host |
-| `scripts/make-installer.sh --dry-run` | what the release's offline installer would hold, and that its images are built |
+| `./arenactl check upgrade --zero --stop-live` | this checkout from zero on fresh volumes: it comes up, provisions its first model, signs in, answers with a file |
+| `./arenactl check upgrade --from TAG --stop-live` | a release from zero with data in, then this checkout over it: everything kept, the old chat goes on |
+| `./arenactl check restore [--from DIR]` | a backup restores: in a throwaway project beside the live one, its people, chats, settings and spend are there |
+| `./arenactl check rollback FROM_TAG TO_TAG` | a release rolls back by restoring the backup taken before the upgrade, in a throwaway project |
+| `./arenactl airgap pack --dry-run X.tar` | what an offline bundle would hold, and that every image is on this host |
+| `./arenactl bundle --dry-run` | what the release's offline installer would hold, and that its images are built |
 | `sh argus-arena-VERSION-offline.run upgrade --dir DIR --dry-run` | what an upgrade would change on that host: the files, the `.env` keys, the images |
-| `scripts/clients-check.py` | the API (OpenAI and Anthropic, streaming, tools), Argus over MCP, Qwen Code and DeepSeek Harness |
-| `scripts/scale-test.py` | many people at once: the chat's queue, every key, a burst of sandbox jobs |
-| `scripts/sandbox-check.py` | the Python sandbox's limits and escapes |
-| `scripts/functional-test.py` | everything a person does, done for real, as two people |
+| `./arenactl check clients` | the API (OpenAI and Anthropic, streaming, tools), Argus over MCP, Qwen Code and DeepSeek Harness |
+| `./arenactl check scale` | many people at once: the chat's queue, every key, a burst of sandbox jobs |
+| `./arenactl check sandbox` | the Python sandbox's limits and escapes |
+| `./arenactl check functional` | everything a person does, done for real, as two people |
 
 ## When something is wrong
 

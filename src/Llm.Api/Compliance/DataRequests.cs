@@ -264,7 +264,7 @@ public sealed partial class DataRequests(AppDbContext db, PeopleService people, 
         var newest = backups.Backups.Where(b => b.At is not null).MaxBy(b => b.At)?.At;
         var backupWords = newest is null
             ? "No backup was found that holds their data."
-            : $"Backups taken before {now:yyyy-MM-dd} still hold their data, untouched and unread; scripts/backup.sh keeps the newest {keep}, so the last of them is gone by about {now.AddDays(keep):yyyy-MM-dd}. Restoring one of them would bring them back: erase them again after a restore.";
+            : $"Backups taken before {now:yyyy-MM-dd} still hold their data, untouched and unread; ./arenactl backup (its backup.sh) keeps the newest {keep}, so the last of them is gone by about {now.AddDays(keep):yyyy-MM-dd}. Restoring one of them would bring them back: erase them again after a restore.";
         var certificate = new ErasureCertificate(request.Id, request.Person, request.Email, now, actor.UserName!, erased, cleared, kept, backupWords);
         request.Certificate = JsonSerializer.Serialize(certificate, Json);
         await audit.WriteAsync("privacy.erase", request.Person, detail: string.Join("; ", erased.Select(e => $"{e.Count} {e.What}")));

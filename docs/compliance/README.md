@@ -74,7 +74,7 @@ Nothing in it may go stale:
   control's tests with `tools/dn test --filter Control=IAM-01`.
 - **Live checks** run inside the app (`app:` checks, shown in Admin →
   Compliance and by `GET /api/admin/compliance`) and from outside
-  (`live:` checks, by [`deploy/scripts/compliance-check.py`](#checking-a-live-stack)).
+  (`live:` checks, by [`./arenactl check compliance`](#checking-a-live-stack)).
 
 ## The documents
 
@@ -581,7 +581,7 @@ scanned here; scan them with Trivy where it is installed.
 ## Checking a live stack
 
 ```bash
-python3 deploy/scripts/compliance-check.py
+./arenactl check compliance
 ```
 
 It reads the admin's password from `deploy/.env` (never printing it), then

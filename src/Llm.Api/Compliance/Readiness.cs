@@ -48,7 +48,7 @@ public sealed class Readiness(AppDbContext db, ComplianceChecks checks, IService
         ["risks"] = "Admin → Compliance → Risks", ["soa"] = "Admin → Compliance → Statement of Applicability", ["policies"] = "Admin → Compliance → Policies",
         ["audits"] = "Admin → Compliance → Audits", ["suppliers"] = "Admin → Compliance → Suppliers", ["ai-systems"] = "Admin → Compliance → AI systems",
         ["access-review"] = "Admin → Compliance → Access reviews", ["incidents"] = "Admin → Compliance → Incidents", ["data-requests"] = "Admin → Compliance → Data requests",
-        ["backups"] = "scripts/backup.sh and its restore drill", ["management"] = "Admin → Compliance → Management",
+        ["backups"] = "./arenactl backup, and its restore drill: ./arenactl check restore", ["management"] = "Admin → Compliance → Management",
     };
 
     public async Task<IReadOnlyList<FrameworkReadiness>> AllAsync(CancellationToken ct)

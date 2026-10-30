@@ -229,7 +229,8 @@ argus pack renew --packs-dir packs
 argus pack index --packs-dir packs --out packs/index.json --base-url https://packs.example.com/ advisories
 ```
 
-An offline host then takes it with `argus pack update` (or `airgap.sh`). The
+An offline host then takes it with `argus pack update` (or in a bundle made
+with `./arenactl bundle --packs`). The
 first fetch is a shallow, sparse clone of the reviewed advisories (about
 340 MB unpacked, two minutes) and the KEV catalog (2 MB); after that only
 what changed comes down. The first build embeds every advisory (some

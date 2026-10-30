@@ -70,7 +70,7 @@ public sealed partial class StorageCleanups(AppDbContext db, StorageFiles files,
             "deleted-chats" => await EraseHiddenAsync(ct),
             "unused-files" or "old-media" => await DeleteFilesAsync(kind, plan, ct),
             "disk-orphans" => await RemoveOrphansAsync(plan, ct),
-            "old-backups" => throw new CleanupException($"The app sees the backups read only and never deletes one. On the host, in deploy/: {plan.Command}"),
+            "old-backups" => throw new CleanupException($"The app sees the backups read only and never deletes one. On the host, in the release's checkout: {plan.Command} (without one, in the installation's deploy/: scripts/backup.sh --prune --keep {plan.Keep})"),
             _ => await RemoveModelsAsync(only ?? [], ct),
         };
         cache.Forget();
@@ -217,7 +217,7 @@ public sealed partial class StorageCleanups(AppDbContext db, StorageFiles files,
         var problem = report.State switch
         {
             "missing" => $"The app does not see the backups: {report.Dir} is not mounted (BACKUP_DIR, in the app's volumes).",
-            "unreadable" => $"The app may not read the backups: {report.Dir} belongs to another user (scripts/backup.sh ran as root?).",
+            "unreadable" => $"The app may not read the backups: {report.Dir} belongs to another user (a backup taken as root, with sudo ./arenactl backup or the daily timer?).",
             _ => null,
         };
         var holds = await db.Users.AsNoTracking().Where(u => u.LegalHoldSince != null).Select(u => u.LegalHoldSince!.Value).ToListAsync(ct);
@@ -243,7 +243,7 @@ public sealed partial class StorageCleanups(AppDbContext db, StorageFiles files,
         return new CleanupPlan("old-backups", beyond.Count, beyond.Sum(b => b.Bytes), Amount.None,
             [.. beyond.Select(b => new CleanupItem(b.Name, b.Name, null, b.Bytes, b.At,
                 string.Join(" · ", new[] { b.Result, Before(b) ? "taken before a legal hold began" : null }.OfType<string>()) is { Length: > 0 } note ? note : null))],
-            problem, warnings.Count > 0 ? string.Join(" ", warnings) : null, null, keep, $"scripts/backup.sh --prune --keep {keep}");
+            problem, warnings.Count > 0 ? string.Join(" ", warnings) : null, null, keep, $"./arenactl backup --prune --keep {keep}");
     }
 
     private async Task<CleanupPlan> ModelsAsync(CancellationToken ct)

@@ -62,8 +62,8 @@ speaking the OpenAI protocol, so the engine keeps the whole GPU. Measured warm o
 the reference host, a query embeds in **15 ms median** on 4 cores
 (`EMBED_CPUS`, `EMBED_THREADS`), a fraction of what the Python Argus's CPU
 embedder took (94 ms warm, 2,254 ms cold). `embed-init` fetches the model once
-into `EMBED_MODEL_DIR` and checks it against Hugging Face's SHA-256; the
-acceptance run checks that the embedder answers with `ARGUS_EMBED_DIM` (768)
+into `EMBED_MODEL_DIR` and checks it against Hugging Face's SHA-256; Argus
+refuses an embedding that does not have `ARGUS_EMBED_DIM` (768)
 dimensions, the width the index and every pack were built with.
 
 ---
@@ -242,8 +242,8 @@ Two consequences follow, and both are deliberate:
 everywhere that account signs in, so it is a bigger secret than a read-only
 PAT. Anything that can read this container's environment — `docker inspect`, a
 crash dump, a support bundle — reads it. Prefer a token whenever one is
-possible; also run `./scripts/airgap-bundle.sh` rather than `--with-env` when
-shipping a bundle, since the former empties every `*PASSWORD` by name.
+possible. A bundle for another host (`./arenactl bundle`, or `./arenactl
+airgap pack OUT.tar`) never carries `.env`, so the password stays behind.
 
 **A minted token expires.** With no `expires_at` GitLab applies its own default
 (measured: one year), and an administrator can revoke the token at any moment.
@@ -858,8 +858,9 @@ NO_PROXY=localhost,127.0.0.1,::1,.local,llm.localhost,.llm.localhost
 ```
 
 `*.localhost` also resolves automatically in browsers but **not** in curl or
-SDK clients — run `scripts/setup-hosts` once so `argus.llm.localhost` resolves
-from the command line.
+SDK clients — run `./arenactl hosts` once on the stack's host (on an installed host
+without a checkout, `DIR/deploy/scripts/installer.sh install --hosts`) so
+`argus.llm.localhost` resolves from the command line.
 
 ---
 

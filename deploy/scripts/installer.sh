@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Argus Arena's offline installer: install, upgrade (from 5.2.0 or newer), repair,
-# remove, status and verify, from one bundle that scripts/make-installer.sh makes,
+# remove, status and verify, from one bundle that ./arenactl bundle makes,
 # with Docker or rootless Podman, and nothing from the network.
 #
 #   sh argus-arena-VERSION-offline.run COMMAND [options]   the bundle unpacks itself and runs this
@@ -294,7 +294,7 @@ if [[ -n "$BUNDLE" ]]; then
   valid_version "$BVERSION" || die "the bundle's MANIFEST names no version it can use: \"$BVERSION\""
   valid_version "$UPGRADES_FROM" || die "the bundle's MANIFEST says no version it upgrades from"
 fi
-need_bundle() { [[ -n "$BUNDLE" ]] || die "$CMD needs the bundle: run it from argus-arena-VERSION-offline.run (or --bundle DIR)"; }
+need_bundle() { [[ -n "$BUNDLE" ]] || die "$CMD needs the bundle: run it from argus-arena-VERSION-offline.run (sh argus-arena-VERSION-offline.run $CMD ...), from the release's checkout (./arenactl $CMD ...), or with --bundle DIR"; }
 
 # Every file of the bundle matches SHA256SUMS and none is unlisted (partly unpacked: those there).
 verify_bundle() {
@@ -400,7 +400,7 @@ ensure_cert() {   # ensure_cert plan|do
   if (cd "$DEPLOY" && sh scripts/make-cert.sh --domain "$domain" >/dev/null); then
     ok "certs/tls.crt for $domain and *.$domain, from certs/ca.crt: trust that CA on the machines and tools that use the stack"
   else
-    bad "scripts/make-cert.sh failed: Traefik serves its own certificate until it is run again (installer.sh repair)"
+    bad "scripts/make-cert.sh failed: Traefik serves its own certificate until it is run again (./arenactl repair in a checkout, or $DIR/deploy/scripts/installer.sh repair --dir $DIR here)"
   fi
 }
 # Code Arena's builds, as the app serves them, signed with a code-signing certificate of the stack's
@@ -1050,7 +1050,7 @@ check_gpu_passthrough() {
     ok "$(grep -c '^GPU' <<< "$out") GPU(s) reach containers: $(grep -m1 '^GPU' <<< "$out" | cut -d'(' -f1)"
   else
     bad "a container does not see the GPU: $(tail -n1 <<< "$out")"
-    note "installer.sh requirements --fix wires NVIDIA's container toolkit into $ENGINE; or install again with --cpu-only"
+        note "$SELF requirements --fix (./arenactl requirements --fix from a checkout) wires NVIDIA's container toolkit into $ENGINE; or install again with --cpu-only"
     [[ $SKIP_REQ -eq 1 ]] && return 0
     refuse "the GPU does not reach containers"
   fi
@@ -1722,7 +1722,7 @@ cmd_features() {
   fi
   feat_list ${on[@]+"${on[@]}"}
   say ""
-  say "installer.sh install, upgrade or repair with --with A,B and --without A,B changes them (a feature brings those it needs)."
+  say "install, upgrade or repair with --with A,B and --without A,B changes them (a feature brings those it needs): ./arenactl repair --with A in a checkout, sh argus-arena-VERSION-offline.run repair --with A with the bundle, or $DIR/deploy/scripts/installer.sh repair --with A on this host."
 }
 
 # ========================================================================= models
@@ -2073,7 +2073,7 @@ cmd_install() {
 
   say "Install Argus Arena $BVERSION in $DIR ($ENGINE, project $PROJECT)$([[ $DRY -eq 1 ]] && echo " -- dry run: nothing is done")"
   say "  https://$NEW_DOMAIN$([[ "$NEW_HTTPS" != 443 ]] && echo ":$NEW_HTTPS"), models in $MODELS_DIR$([[ ${MODELS_HAD:-0} -gt 0 ]] && echo " ($MODELS_HAD model file(s) there already, used as they are)"), data in $DATA_DIR; features: $(feat_count)"
-  [[ $NO_GITLAB -eq 1 ]] && note "no GitLab given (--gitlab-url, --gitlab-token-file): Argus is off; to turn it on later, GITLAB_URL and GITLAB_TOKEN in .env, then installer.sh repair --with argus"
+  [[ $NO_GITLAB -eq 1 ]] && note "no GitLab given (--gitlab-url, --gitlab-token-file): Argus is off; to turn it on later, GITLAB_URL and GITLAB_TOKEN in .env, then $DIR/deploy/scripts/installer.sh repair --with argus"
   if [[ $DRY -eq 1 ]]; then
     [[ -n "$BUNDLE" ]] && check_bundle
     check_requirements fresh
@@ -2550,7 +2550,7 @@ cmd_upgrade() {
   for id in ${new[@]+"${new[@]}"}; do
     [[ ",$WITH_ARG,$WITHOUT_ARG," == *",$id,"* ]] && continue
     if [[ $YES -eq 0 && $DRY -eq 0 && $TTY -eq 1 ]] && choose "New in $BVERSION: $id, ${FEAT_TITLE[$id]}. Turn it on?" "$([[ ${FEAT_DEF[$id]} == on ]] && echo y || echo n)"; then base+=("$id")
-    else note "new in $BVERSION, off: $id (${FEAT_TITLE[$id]}); installer.sh repair --with $id turns it on"; fi
+    else note "new in $BVERSION, off: $id (${FEAT_TITLE[$id]}); sh argus-arena-$BVERSION-offline.run repair --with $id --dir $DIR (or ./arenactl repair --with $id in a checkout) turns it on"; fi
   done
   choose_features upgrade ${base[@]+"${base[@]}"}
   if [[ $DRY -eq 1 ]]; then
@@ -3118,7 +3118,7 @@ cmd_status() {
   fi
   step "backups"
   v="$(ls -1d "$BACKUP_DIR"/20[0-9][0-9]-*_* 2>/dev/null | grep -v '\.part$' | sort | tail -n1)"
-  if [[ -n "$v" ]]; then say "  latest: $(basename "$v") $(cat "$v/RESULT" 2>/dev/null) ($(ls -1d "$BACKUP_DIR"/20[0-9][0-9]-*_* | wc -l) in $BACKUP_DIR)"; else say "  none in $BACKUP_DIR (scripts/backup.sh)"; fi
+  if [[ -n "$v" ]]; then say "  latest: $(basename "$v") $(cat "$v/RESULT" 2>/dev/null) ($(ls -1d "$BACKUP_DIR"/20[0-9][0-9]-*_* | wc -l) in $BACKUP_DIR)"; else say "  none in $BACKUP_DIR ($DEPLOY/scripts/backup.sh takes one)"; fi
   [[ -n "$(state_get previous)" ]] && say "  rollback: to $(state_get previous) (upgrade --rollback), its images kept as $PROJECT-rollback:$(state_get previous)-..."
   say ""
   [[ -n "${models// /}" ]] && say "The embedding server waits for its model: bring $EMBED_FILE into $MODELS_DIR (search by meaning needs it)."
@@ -3165,7 +3165,7 @@ cmd_requirements() {
     fix_requirements fresh || :
     [[ $DRY -eq 1 ]] && return 0
   elif [[ ${#FIXES[@]} -gt 0 ]]; then
-    say "installer.sh requirements --fix puts right what it can (as root, asking first)."
+    say "./arenactl requirements --fix (on an installed host: DIR/deploy/scripts/installer.sh requirements --fix) puts right what it can (as root, asking first)."
   fi
   if [[ $REQ_FAIL -eq 0 ]]; then say "Every requirement is met."; return 0; fi
   say "$REQ_FAIL requirement(s) not met (above)."

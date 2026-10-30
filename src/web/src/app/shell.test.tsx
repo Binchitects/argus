@@ -52,7 +52,7 @@ describe('shell', () => {
     fakeApi({ ...admin, featuresOff: ['lab'] })
     renderApp('/lab')
     expect(await screen.findByText('Science lab is not installed here')).toBeInTheDocument()
-    expect(screen.getByText('installer.sh repair --with lab')).toBeInTheDocument()
+    expect(screen.getByText('./arenactl repair --with lab')).toBeInTheDocument()
     const nav = screen.getByRole('navigation', { name: 'Main' })
     expect(within(nav).queryByRole('link', { name: 'Science lab' })).not.toBeInTheDocument()
   })

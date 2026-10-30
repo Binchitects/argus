@@ -662,7 +662,7 @@ public sealed partial class WebTests : IDisposable
         };
         Assert.Equal(1, await Cli.RunAsync(["web", "--no-open"], env));
         Assert.Contains("This code-arena has no IDE: its page was not built into it", output.ToString());
-        Assert.Contains("tools/publish-code-arena.sh", output.ToString());
+        Assert.Contains("./arenactl code-arena", output.ToString());
         Assert.Equal(2, await Cli.RunAsync(["web", "do", "something"], env));
         Assert.Contains("web takes no prompt", output.ToString());
 

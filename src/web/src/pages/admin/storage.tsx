@@ -313,7 +313,7 @@ function WhatTakesRoom({ r }: { r: StorageReport }) {
 
 function backupNote(r: StorageReport): string | undefined {
   if (r.backups.state === 'missing') return `Not mounted in the app: ${r.backups.dir} is not there.`
-  if (r.backups.state === 'unreadable') return 'The app may not read them: they belong to another user (scripts/backup.sh ran as root?).'
+  if (r.backups.state === 'unreadable') return 'The app may not read them: they belong to another user (a backup taken as root, with sudo ./arenactl backup or the daily timer?).'
   return r.backups.otherBytes > 0 ? `Besides the backups, ${size(r.backups.otherBytes)} of other files there.` : undefined
 }
 
@@ -490,7 +490,7 @@ function Backups({ r }: { r: StorageReport }) {
       <CardHeader>
         <CardTitle>Backups</CardTitle>
         <CardDescription>
-          What <code className="font-mono text-xs">scripts/backup.sh</code> keeps in {b.dir}: one folder a backup.
+          What <code className="font-mono text-xs">./arenactl backup</code> keeps in {b.dir}: one folder a backup.
         </CardDescription>
       </CardHeader>
       <CardContent className="text-sm">

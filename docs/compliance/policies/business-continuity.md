@@ -30,7 +30,7 @@ recovery point objective: e.g. 1 day] of chats and files may be lost.
 
 ## Restores, proven
 
-1. `deploy/scripts/restore-test.sh` restores the newest backup into a stack of
+1. `./arenactl check restore` restores the newest backup into a stack of
    its own and checks it [every month], and after every upgrade.
 2. A full drill, a new host from the backup and the installer, [every year]:
    timed against the recovery time objective, written up, and what it taught
@@ -46,7 +46,8 @@ Alerts warn before a disk fills.
 1. [Who] decides it is a disaster and tells [whom].
 2. A spare host (or [a new one, ordered within N days]) is installed with the
    offline installer of the release that ran, and the newest backup restored
-   (`backup.sh --restore`).
+   (the new installation's `deploy/scripts/backup.sh --restore --from DIR`, or
+   `./arenactl restore --from DIR` from a checkout).
 3. While it is down: [what people do instead; who tells them].
 4. Emergency mode: [who may reach health information, and how, while Arena is
    down].

@@ -441,11 +441,11 @@ public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, S
                 (groups.Count > 0 ? $"; {groups.Count} group{(groups.Count == 1 ? "" : "s")} keep their own ({string.Join(", ", groups.Take(4).Select(g => $"{g.Name}: {g.RetentionDays} days"))}{(groups.Count > 4 ? "…" : "")})" : "") +
                 ". Files in no chat go when they are as old. Settings → Data retention, and Groups."),
             new("Legal hold", held == 0 ? "Nobody is on legal hold." : $"{held} {(held == 1 ? "person is" : "people are")} on legal hold: nothing of theirs is deleted, by retention, by them or here. " +
-                "Backups taken before a hold began hold their data from then, and scripts/backup.sh removes old backups by count, hold or not: the old backups' preview says which."),
+                "Backups taken before a hold began hold their data from then, and ./arenactl backup (its backup.sh) removes old backups by count, hold or not: the old backups' preview says which."),
             new("Pictures, videos and speech the tools made", $"Kept as long as their chat. The clean-up of old ones takes {o.MediaDays} days as old (Settings → Storage)."),
             new("Rooms for files", o.PersonMegabytes is > 0 ? $"{StorageDisks.Size(o.PersonMegabytes.Value * 1024L * 1024)} each, unless an admin gave someone their own" : "No limit, unless an admin gave someone their own"),
             new("The answer cache", answerCache.CurrentValue.On ? $"Answers are kept {answerCache.CurrentValue.AnswerCacheTtl.TotalHours:0.#} hours (Settings → API keys)." : "Off: nothing is kept."),
-            new("Backups", $"scripts/backup.sh keeps the newest {o.BackupsKept} (BACKUP_KEEP in .env) after each good backup, and removes older ones on request (--prune). The app sees them read only: it never changes or deletes one."),
+            new("Backups", $"./arenactl backup (on a host without a checkout, DIR/deploy/scripts/backup.sh) keeps the newest {o.BackupsKept} (BACKUP_KEEP in .env) after each good backup, and removes older ones on request (./arenactl backup --prune). The app sees them read only: it never changes or deletes one."),
             new("Partial downloads", "Kept while their download can go on from where it got to; a part no download owns is a leftover."),
             new("Container logs", "Docker keeps 5 files of 20 MB for each container."),
         };
