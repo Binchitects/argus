@@ -11,7 +11,7 @@
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
   <a href="#code-arena">Code Arena</a> ·
-  <a href="#argus">Argus</a> ·
+  <a href="docs/argus/README.md">Argus</a> ·
   <a href="docs/README.md">Documentation</a> ·
   <a href="CHANGELOG.md">What's new</a>
 </p>
@@ -154,24 +154,6 @@ and grows with its load.
 </tr>
 </table>
 
-## Argus
-
-A local model can't know a driver's IRQL or which header really declares
-`CreateFileW`. Those facts are too specialised to live in any model's weights.
-Argus hands the model the source and the real documentation, and the answers
-change:
-
-| model | alone | with Argus |
-|---|:---:|:---:|
-| `qwen3.6:27b` (dense, 27.8B) | 5 / 10 | **10 / 10** |
-| `qwen3.6:35b` (MoE, 36.0B) | 5 / 10 | **9 / 10** |
-| `qwen3.8:27b` (dense, 27.3B) | 5 / 9 | **9 / 10** |
-
-Ten task families were graded against facts checked before any model ran. All
-three models failed the same five tasks alone. Scale didn't fix that; retrieval
-did, and the median answer got faster too (5.5 s to 2.4 s).
-[The full comparison →](docs/measurements/model-comparison.md)
-
 ## Code Arena
 
 ```bash
@@ -226,15 +208,20 @@ checks a cluster first and installs the
 
 ```mermaid
 flowchart LR
-  people([People and their tools]) --> traefik[Traefik]
-  traefik --> web[Web app] & api[.NET API] & gateway[LiteLLM gateway]
-  api --> gateway --> engine[Engines on your GPUs]
-  api --> argus[Argus] --> gitlab[(Your GitLab)]
-  api --> sandbox[Sandboxes] & studio[Studio servers] & pg[(Postgres)]
+  people([People, their tools and Code Arena]) --> traefik[Traefik]
+  traefik --> web[Web app] & app[.NET app and API] & argus[Argus]
+  app --> gateway[Model gateway] --> engines[llama.cpp, vLLM or SGLang on your GPUs]
+  app --> argus --> gitlab[(Your GitLab, read only)]
+  app --> tools[Sandboxes, browser, studio servers] & pg[(Postgres)]
 ```
 
-A .NET 10 API and a React app. llama.cpp and vLLM serve the models behind a
-LiteLLM gateway, and Prometheus, Loki and Alertmanager watch it all.
+A .NET 10 app and API with a React web app. Traefik is the only way in: the
+pages go to the web app, coding agents' Argus to Argus, and the API to the
+app, an API key's model requests too. The app checks the key, keeps its own
+ledger of every model request, and sends the call on to llama.cpp, vLLM or
+SGLang on your GPUs, or to another server, through a LiteLLM gateway that its
+own gateway is replacing step by step. Argus mirrors your GitLab with a
+read-only token. Prometheus, Loki and Alertmanager watch it all.
 [The architecture →](docs/architecture.md)
 
 ## Learn more

@@ -31,7 +31,8 @@ spec:
           env:
             {{- include "arena.secretEnv" (list $ "ENGINE_KEY" "ENGINE_KEY") | nindent 12 }}
             - { name: CUDA_DEVICE_ORDER, value: PCI_BUS_ID }
-            # What llama.cpp fetches itself (a preset's hf-repo) lands in the library and stays.
+            # llama.cpp's own cache, in the library. It fetches nothing: the app writes only the library's files into its
+            # presets, and refuses a preset's hf-repo, hf-file or model-url (ModelCatalog's reserved keys).
             - { name: LLAMA_CACHE, value: /library/.llama.cpp }
           resources:
             {{- with .Values.llamacpp.resources.requests }}

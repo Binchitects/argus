@@ -191,7 +191,8 @@ services:
     environment:
       ENGINE_KEY: ${ENGINE_KEY}
       CUDA_DEVICE_ORDER: PCI_BUS_ID
-      # What llama.cpp fetches itself (a preset's hf-repo) lands in the library and stays.
+      # llama.cpp's own cache, in the library. It fetches nothing: the app writes only the library's files into its
+      # presets, and refuses a preset's hf-repo, hf-file or model-url (ModelCatalog's reserved keys).
       LLAMA_CACHE: /library/.llama.cpp
     volumes:
       - ./services/llamacpp/router.sh:/router.sh:ro
