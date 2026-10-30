@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-7.6.0-5b8cff">
+  <img alt="version" src="https://img.shields.io/badge/version-7.6.1-5b8cff">
   <img alt="self-hosted" src="https://img.shields.io/badge/self--hosted-on%20your%20GPUs-7c4dff">
   <img alt="offline" src="https://img.shields.io/badge/installs-air--gapped-2ea043">
   <img alt="licence" src="https://img.shields.io/badge/licence-AGPL--3.0%20%7C%20commercial-555">
