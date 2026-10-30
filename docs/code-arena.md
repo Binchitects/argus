@@ -1109,10 +1109,24 @@ errors and warnings it printed, by file: **Run check** runs it (in the folder,
 as your terminals run, with no sandbox; five minutes at most). Each problem
 opens its file at its line, where the editor marks it too (as the editor's
 own problems, with **Fix with Code Arena** in the light bulb), and **Fix**
-beside it asks the agent to fix it. The status bar counts the errors and
-warnings; the activity bar the errors. Below the check's, **Language
-servers** lists what the language servers running found (in the files open,
-and in others some servers check too), each with the server's name.
+beside it asks the agent to fix it. Below the check's, **Language servers**
+lists what the language servers running found (in the files open, and in
+others some servers check too), each with the server's name, and **The
+editor** what the editor's own services found in the files open
+(TypeScript's and JavaScript's, JSON's, CSS's and HTML's, while no server
+answers for their language). The status bar counts the errors and warnings
+of all three, and the activity bar their errors.
+
+As in VS Code, **Filter problems** keeps what matches its terms, split by
+commas: a word matches the message, the code, the file or the source (in any
+case), a term with `*`, `?` or `/` is a glob of the file's path (`**/*.ts`;
+of its name when it has no `/`: `*.md`), and one starting with `!` leaves out
+what it matches (`!**/node_modules/**`). **Show errors**, **Show warnings**
+and **Show infos** turn a severity off and on, **Show active file only** keeps
+the file shown, and each file folds (**Collapse All** folds them all). A
+problem's **⋯** menu has **Copy** (`src/app.ts:2:9 error TS2304 Cannot find
+name 'totl'.`), **Copy Message** and **Quick Fix…**, which opens the file at
+the problem and offers the fixes for it.
 
 The check is `"checkCommand"` in `config.json`, else the first found by the
 project's files: `dotnet build` (a solution or project), `tsc --noEmit`

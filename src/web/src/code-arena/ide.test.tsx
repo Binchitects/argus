@@ -406,6 +406,9 @@ const fakes = vi.hoisted(() => {
     commands: new Map<string, (...args: unknown[]) => void>(),
     /** The markers the page set, by owner and the file's address. */
     marked: new Map<string, { startLineNumber: number; message: string }[]>(),
+    /** Who set each list of markers, on which model: what getModelMarkers({}) reads. */
+    markerSets: new Map<string, { owner: string; resource: unknown; markers: Record<string, unknown>[] }>(),
+    markerListeners: [] as ((uris: unknown[]) => void)[],
     codeActions: [] as { provideCodeActions: (...args: unknown[]) => unknown }[],
     inline: [] as { provideInlineCompletions: (...args: unknown[]) => Promise<{ items: { insertText: string }[] }> }[],
     /** The themes the page gave Monaco, by name. */
@@ -466,9 +469,19 @@ vi.mock('monaco-editor', () => ({
       for (const f of fakes.relanguaged) f({ model: m, oldLanguage })
     },
     setTheme: (t: string) => fakes.themes.push(t),
-    getModelMarkers: ({ resource }: { resource: InstanceType<typeof fakes.Uri> }) => fakes.markers.get(resource.toString()) ?? [],
-    setModelMarkers: (model: InstanceType<typeof fakes.Model>, owner: string, markers: { startLineNumber: number; message: string }[]) =>
-      fakes.marked.set(`${owner}:${model.uri?.toString()}`, markers),
+    getModelMarkers: ({ resource }: { resource?: InstanceType<typeof fakes.Uri> }) =>
+      resource
+        ? (fakes.markers.get(resource.toString()) ?? [])
+        : [...fakes.markerSets.values()].flatMap((set) => set.markers.map((k) => ({ ...k, owner: set.owner, resource: set.resource }))),
+    setModelMarkers: (model: InstanceType<typeof fakes.Model>, owner: string, markers: { startLineNumber: number; message: string }[]) => {
+      fakes.marked.set(`${owner}:${model.uri?.toString()}`, markers)
+      fakes.markerSets.set(`${owner}:${model.uri?.toString()}`, { owner, resource: model.uri, markers })
+      for (const l of fakes.markerListeners) l([model.uri])
+    },
+    onDidChangeMarkers: (l: (uris: unknown[]) => void) => {
+      fakes.markerListeners.push(l)
+      return { dispose() {} }
+    },
     registerCommand: (id: string, run: (...args: unknown[]) => void) => {
       fakes.commands.set(id, run)
       return { dispose() {} }
@@ -591,6 +604,10 @@ beforeEach(() => {
   debug.replHistory = []
   for (const list of [fakes.models, fakes.editors, fakes.diffEditors, fakes.terminals, fakes.sockets, fakes.themes, fakes.keybindingRules]) list.length = 0
   fakes.definedThemes.clear()
+  // Each test's own markers: the editor's problems are counted from them.
+  fakes.marked.clear()
+  fakes.markerSets.clear()
+  for (const l of fakes.markerListeners) l([])
   // The language servers' store is the page's too: none running, the list read again.
   languageServers.reset()
   fakes.providers.clear()
@@ -2063,6 +2080,81 @@ describe('Code Arena, the IDE', () => {
     expect(calls.filter((c) => c.path === '/api/complete')).toHaveLength(asked)
   })
 
+  it("lists every problem as VS Code's Problems does: the editor's own too, filtered, by severity, the active file only, folded, copied and quick-fixed", async () => {
+    const problems = [
+      { path: 'src/app.ts', line: 2, column: 9, severity: 'error', code: 'TS2304', message: "Cannot find name 'totl'." },
+      { path: 'src/lib/cart.ts', line: 1, column: 1, severity: 'warning', code: null, message: 'Unused import.' },
+      { path: 'src/lib/cart.ts', line: 3, column: 2, severity: 'info', code: null, message: 'Could be shorter.' },
+    ]
+    backend({ 'GET /api/problems': () => ({ json: { command: 'tsc', running: false, ran: '2026-10-11T10:00:00Z', exitCode: 2, said: null, problems } }) })
+    renderIde()
+    await openApp()
+    // The editor's own TypeScript service marks the file too: counted, and listed apart.
+    act(() => monaco.editor.setModelMarkers(editor().model as unknown as Monaco.editor.ITextModel, 'typescript', [
+      { severity: 8, startLineNumber: 1, startColumn: 5, endLineNumber: 1, endColumn: 6, message: "';' expected.", code: '1005' },
+    ] as Monaco.editor.IMarkerData[]))
+    const status = screen.getByRole('contentinfo', { name: 'Status bar' })
+    await userEvent.click(await within(status).findByRole('button', { name: 'Problems: 2 errors, 1 warning' }))
+    const panel = await screen.findByRole('complementary', { name: 'Problems' })
+    const sections = () => within(panel).queryAllByRole('region').map((r) => r.getAttribute('aria-label'))
+    await waitFor(() => expect(sections()).toEqual(['src/app.ts', 'src/lib/cart.ts', 'src/app.ts, from the editor']))
+    expect(within(within(panel).getByRole('region', { name: 'src/app.ts, from the editor' })).getByText(/';' expected\./)).toBeInTheDocument()
+
+    // The filter: text, a glob of files, and what to leave out.
+    const filter = within(panel).getByRole('searchbox', { name: 'Filter problems' })
+    await userEvent.type(filter, 'totl')
+    expect(sections()).toEqual(['src/app.ts'])
+    expect(within(panel).getByText('3 problems hidden by the filter')).toBeInTheDocument()
+    await userEvent.clear(filter)
+    await userEvent.type(filter, '!**/lib/**')
+    expect(sections()).toEqual(['src/app.ts', 'src/app.ts, from the editor'])
+    await userEvent.clear(filter)
+    await userEvent.type(filter, '*.ts, !TS2304')
+    expect(sections()).toEqual(['src/lib/cart.ts', 'src/app.ts, from the editor'])
+    await userEvent.clear(filter)
+
+    // Each severity shown or not; the active file only.
+    await userEvent.click(within(panel).getByRole('button', { name: 'Show warnings' }))
+    expect(within(panel).getByRole('button', { name: 'Show warnings' })).toHaveAttribute('aria-pressed', 'false')
+    expect(within(within(panel).getByRole('list', { name: 'Problems in src/lib/cart.ts' })).getAllByRole('listitem').map((li) => li.textContent)).toEqual([expect.stringContaining('Could be shorter.')])
+    await userEvent.click(within(panel).getByRole('button', { name: 'Show infos' }))
+    expect(sections()).toEqual(['src/app.ts', 'src/app.ts, from the editor'])
+    await userEvent.click(within(panel).getByRole('button', { name: 'Show warnings' }))
+    await userEvent.click(within(panel).getByRole('button', { name: 'Show infos' }))
+    await userEvent.click(within(panel).getByRole('button', { name: 'Show active file only' }))
+    expect(sections()).toEqual(['src/app.ts', 'src/app.ts, from the editor'])
+    await userEvent.click(within(panel).getByRole('button', { name: 'Show active file only' }))
+
+    // Folded, every file at once, and one open again.
+    await userEvent.click(within(panel).getByRole('button', { name: 'Collapse All' }))
+    expect(within(panel).queryByRole('list', { name: 'Problems in src/app.ts' })).not.toBeInTheDocument()
+    const header = within(within(panel).getByRole('region', { name: 'src/app.ts' })).getByRole('button', { name: /app\.ts/ })
+    expect(header).toHaveAttribute('aria-expanded', 'false')
+    await userEvent.click(header)
+    expect(within(panel).getByRole('list', { name: 'Problems in src/app.ts' })).toBeInTheDocument()
+
+    // Copy, Copy Message, and Quick Fix at its place.
+    const writeText = vi.fn(() => Promise.resolve())
+    const had = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    onTestFinished(() => {
+      if (had) Object.defineProperty(navigator, 'clipboard', had)
+      else Reflect.deleteProperty(navigator, 'clipboard')
+    })
+    await userEvent.click(within(panel).getByRole('button', { name: 'More actions for src/app.ts:2' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Copy' }))
+    expect(writeText).toHaveBeenLastCalledWith("src/app.ts:2:9 error TS2304 Cannot find name 'totl'.")
+    await userEvent.click(within(panel).getByRole('button', { name: 'More actions for src/app.ts:2' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Copy Message' }))
+    expect(writeText).toHaveBeenLastCalledWith("Cannot find name 'totl'.")
+    const quickFix = vi.fn()
+    editor().addAction({ id: 'editor.action.quickFix', label: 'Quick Fix', run: quickFix })
+    await userEvent.click(within(panel).getByRole('button', { name: 'More actions for src/app.ts:2' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Quick Fix…' }))
+    await waitFor(() => expect(quickFix).toHaveBeenCalled())
+    expect(editor().selection).toEqual({ startLineNumber: 2, startColumn: 9, endLineNumber: 2, endColumn: 9 })
+  })
+
   it("runs the project's check, lists its problems by file, marks them in the editor and asks the agent to fix one", async () => {
     let ran = false
     const problem = { path: 'src/app.ts', line: 2, column: 9, severity: 'error', code: 'TS2304', message: "Cannot find name 'totl'." }
@@ -3066,7 +3158,9 @@ describe('Code Arena, the language servers', () => {
     // Its diagnostics are marked in the file, and listed in Problems with its name.
     receive({ method: 'textDocument/publishDiagnostics', params: { uri: 'file:///src/app.ts', diagnostics: [{ range: { start: { line: 1, character: 0 }, end: { line: 1, character: 7 } }, severity: 1, code: 2304, source: 'ts', message: "Cannot find name 'consol'." }] } })
     await waitFor(() => expect(fakes.marked.get('lsp:typescript:file:///src/app.ts')).toEqual([expect.objectContaining({ startLineNumber: 2, startColumn: 1, endColumn: 8, message: "Cannot find name 'consol'.", severity: 8 })]))
-    await userEvent.click(screen.getByRole('button', { name: 'Problems' }))
+    // Counted as the check's are: on the status bar and the activity bar.
+    expect(within(status).getByRole('button', { name: 'Problems: 1 error, 0 warnings' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Problems (1)' }))
     const fromServers = await screen.findByRole('region', { name: 'src/app.ts, from the language servers' })
     expect(fromServers).toHaveTextContent("Cannot find name 'consol'.typescript-language-server 2304 [2, 1]")
 

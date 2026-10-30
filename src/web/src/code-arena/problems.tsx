@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CircleAlert, CircleCheck, ExternalLink, Info, Play, ShieldAlert, TriangleAlert, Wand2 } from 'lucide-react'
-import { useEffect } from 'react'
+import { ChevronDown, ChevronRight, ChevronsDownUp, CircleAlert, CircleCheck, Ellipsis, ExternalLink, FileCode, Info, Play, ShieldAlert, TriangleAlert, Wand2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -10,8 +11,8 @@ import { asks, chatBridge, problemText } from './bridge'
 import { useEditor } from './editor-state'
 import { FileIcon } from './file-icon'
 import { PartHelp } from './help'
-import { nameOf, parentOf, problemsQuery, readSecurity, runCheck, securityProblemsQuery, type CheckProblem } from './ide-api'
-import { languageServers, useLanguageServers } from './lsp/servers'
+import { nameOf, parentOf, problemsQuery, readSecurity, runCheck, securityProblemsQuery } from './ide-api'
+import { problemFilter, problemLine, useProblems, type Problem } from './problems-store'
 
 const action =
   'grid size-6 place-items-center rounded-sm text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 [&_svg]:size-3.5'
@@ -19,13 +20,13 @@ const action =
 const icons = { error: CircleAlert, warning: TriangleAlert, info: Info }
 const colors = { error: 'text-destructive-ink', warning: 'text-warning-ink', info: 'text-muted-foreground' }
 
-/** A problem as Problems lists it: the check's, or a language server's (which says its name). */
-type Listed = CheckProblem & { server?: string }
+type Severity = Problem['severity']
 
 /**
  * The project's check (its build, type check or linter) and what it found, by file, then what the language servers
- * running found: each problem opens the file at its line, and Fix asks the agent about it. The editor marks them in the
- * files too.
+ * running found, then the editor's own services (TypeScript's, JSON's, CSS's, HTML's): each problem opens the file at its
+ * line, and Fix asks the agent about it. As VS Code's: a filter (text, a glob of files, `!` to leave out), each severity
+ * shown or not, the active file only, files folded, and each problem copied or quick-fixed.
  */
 export function ProblemsPanel() {
   const queryClient = useQueryClient()
@@ -49,17 +50,47 @@ export function ProblemsPanel() {
   useEffect(() => {
     if (securityRead) void queryClient.invalidateQueries({ queryKey: problemsQuery.queryKey, exact: true })
   }, [securityRead, queryClient])
-  useLanguageServers()
-  const fromServers: Listed[] = languageServers.problems()
+  const all = useProblems()
+  const { active } = useEditor()
+  const [filter, setFilter] = useState('')
+  const [shown, setShown] = useState<Record<Severity, boolean>>({ error: true, warning: true, info: true })
+  const [activeOnly, setActiveOnly] = useState(false)
+  const [folded, setFolded] = useState<ReadonlySet<string>>(new Set())
+  const activePath = active?.kind === 'file' || active?.kind === 'preview' ? active.path : null
+  const matches = problemFilter(filter)
+  const keep = (p: Problem) => shown[p.severity] && (!activeOnly || p.path === activePath) && matches(p)
   const data = last.data
-  const problems = data?.problems ?? []
-  const files = [...new Set(problems.map((p) => p.path))]
-  const serverFiles = [...new Set(fromServers.map((p) => p.path))]
+  const problems = all.filter((p) => p.source === 'check' && keep(p))
+  const fromServers = all.filter((p) => p.source === 'server' && keep(p))
+  const fromEditor = all.filter((p) => p.source === 'editor' && keep(p))
+  const hidden = all.length - problems.length - fromServers.length - fromEditor.length
+  const filesOf = (list: Problem[]) => [...new Set(list.map((p) => p.path))]
+  const files = filesOf(problems)
+  const serverFiles = filesOf(fromServers)
+  const editorFiles = filesOf(fromEditor)
+  const fold = (key: string) => setFolded((f) => new Set(f.has(key) ? [...f].filter((k) => k !== key) : [...f, key]))
   const running = run.isPending || !!data?.running
+  const toggle = (severity: Severity, label: string, Icon: typeof CircleAlert) => (
+    <Tooltip content={label}>
+      <button type="button" aria-label={label} aria-pressed={shown[severity]} onClick={() => setShown((s) => ({ ...s, [severity]: !s[severity] }))} className={cn(action, shown[severity] && 'bg-accent text-foreground')}>
+        <Icon />
+      </button>
+    </Tooltip>
+  )
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-9 shrink-0 items-center gap-1 pr-1.5 pl-3">
         <h2 className="min-w-0 flex-1 truncate text-[0.6875rem] font-semibold tracking-wider text-muted-foreground uppercase">Problems</h2>
+        <Tooltip content="Collapse All">
+          <button
+            type="button"
+            aria-label="Collapse All"
+            onClick={() => setFolded(new Set([...files.map((f) => `check:${f}`), ...serverFiles.map((f) => `server:${f}`), ...editorFiles.map((f) => `editor:${f}`)]))}
+            className={action}
+          >
+            <ChevronsDownUp />
+          </button>
+        </Tooltip>
         <Tooltip content={data?.command ? `Run check: ${data.command}` : 'Run check'}>
           <button type="button" aria-label="Run check" onClick={() => run.mutate()} disabled={running || !data?.command} className={action}>
             <Play className={cn(running && 'animate-pulse')} />
@@ -72,7 +103,26 @@ export function ProblemsPanel() {
         </Tooltip>
         <PartHelp part="problems" />
       </div>
+      <div className="flex shrink-0 items-center gap-1 pr-1.5 pb-1.5 pl-3">
+        <input
+          type="search"
+          aria-label="Filter problems"
+          placeholder="Filter (text, **/*.ts, !exclude)"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          className="h-6 min-w-0 flex-1 rounded-sm border border-input bg-background px-1.5 text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        />
+        {toggle('error', 'Show errors', CircleAlert)}
+        {toggle('warning', 'Show warnings', TriangleAlert)}
+        {toggle('info', 'Show infos', Info)}
+        <Tooltip content="Show active file only">
+          <button type="button" aria-label="Show active file only" aria-pressed={activeOnly} onClick={() => setActiveOnly((on) => !on)} className={cn(action, activeOnly && 'bg-accent text-foreground')}>
+            <FileCode />
+          </button>
+        </Tooltip>
+      </div>
       <div className="min-h-0 flex-1 overflow-auto pb-4 text-[0.8125rem]">
+        {hidden > 0 && <p className="px-3 pb-2 text-xs text-muted-foreground">{`${hidden} ${hidden === 1 ? 'problem' : 'problems'} hidden by the filter`}</p>}
         {last.isPending && Array.from({ length: 3 }, (_, i) => <Skeleton key={i} className="mx-3 my-1.5 h-4" />)}
         {last.error && <p className="px-3 py-2 text-muted-foreground">{errorMessage(last.error)}</p>}
         {data && (
@@ -83,11 +133,11 @@ export function ProblemsPanel() {
                 ? 'No check found for this folder: set "checkCommand" in config.json (a build, a type check or a linter).'
                 : !data.ran
                   ? <>Run the check (<code className="font-mono">{data.command}</code>) to see its problems.</>
-                  : problems.length === 0
+                  : data.problems.length === 0
                     ? data.exitCode === 0
                       ? 'No problems.'
                       : `The check failed (exit code ${data.exitCode ?? '—'}): ${data.said ?? 'nothing it printed reads as a problem'}`
-                    : `${count(problems, 'error')} · ${count(problems, 'warning')} · ran ${new Date(data.ran).toLocaleTimeString()}`}
+                    : `${count(data.problems, 'error')} · ${count(data.problems, 'warning')} · ran ${new Date(data.ran).toLocaleTimeString()}`}
           </p>
         )}
         {security.data && (
@@ -107,20 +157,43 @@ export function ProblemsPanel() {
             )}
           </p>
         )}
-        {data?.ran && problems.length === 0 && data.exitCode === 0 && !running && (
+        {data?.ran && data.problems.length === 0 && data.exitCode === 0 && !running && (
           <div className="grid justify-items-center gap-2 px-6 py-6 text-center text-muted-foreground">
             <CircleCheck className="size-6 opacity-60" aria-hidden="true" />
           </div>
         )}
         {files.map((file) => (
-          <FileProblems key={file} file={file} problems={problems.filter((p) => p.path === file)} />
+          <FileProblems key={file} file={file} problems={problems.filter((p) => p.path === file)} folded={folded.has(`check:${file}`)} onFold={() => fold(`check:${file}`)} />
         ))}
         {serverFiles.length > 0 && (
           <>
             <h3 className="px-3 pt-3 pb-1 text-[0.6875rem] font-semibold tracking-wider text-muted-foreground uppercase">Language servers</h3>
             <p className="px-3 pb-2 text-xs text-muted-foreground">{`${count(fromServers, 'error')} · ${count(fromServers, 'warning')}, as the servers running see the files`}</p>
             {serverFiles.map((file) => (
-              <FileProblems key={`lsp:${file}`} file={file} label={`${file}, from the language servers`} problems={fromServers.filter((p) => p.path === file)} />
+              <FileProblems
+                key={`lsp:${file}`}
+                file={file}
+                label={`${file}, from the language servers`}
+                problems={fromServers.filter((p) => p.path === file)}
+                folded={folded.has(`server:${file}`)}
+                onFold={() => fold(`server:${file}`)}
+              />
+            ))}
+          </>
+        )}
+        {editorFiles.length > 0 && (
+          <>
+            <h3 className="px-3 pt-3 pb-1 text-[0.6875rem] font-semibold tracking-wider text-muted-foreground uppercase">The editor</h3>
+            <p className="px-3 pb-2 text-xs text-muted-foreground">{`${count(fromEditor, 'error')} · ${count(fromEditor, 'warning')}, from the editor's own services for the files open`}</p>
+            {editorFiles.map((file) => (
+              <FileProblems
+                key={`editor:${file}`}
+                file={file}
+                label={`${file}, from the editor`}
+                problems={fromEditor.filter((p) => p.path === file)}
+                folded={folded.has(`editor:${file}`)}
+                onFold={() => fold(`editor:${file}`)}
+              />
             ))}
           </>
         )}
@@ -129,22 +202,41 @@ export function ProblemsPanel() {
   )
 }
 
-const count = (problems: Listed[], severity: 'error' | 'warning') => {
+const count = (problems: { severity: Severity }[], severity: 'error' | 'warning') => {
   const n = problems.filter((p) => p.severity === severity).length
   return `${n} ${severity}${n === 1 ? '' : 's'}`
 }
 
-/** One file's problems: each opens the file at its line; Fix asks the agent about it. */
-function FileProblems({ file, problems, label }: { file: string; problems: Listed[]; label?: string }) {
+/** One file's problems, folded or not: each opens the file at its line; Fix asks the agent about it; its menu copies or quick-fixes it. */
+function FileProblems({ file, problems, label, folded, onFold }: { file: string; problems: Problem[]; label?: string; folded: boolean; onFold: () => void }) {
   const editor = useEditor()
+  const Chevron = folded ? ChevronRight : ChevronDown
+  const copy = (text: string) =>
+    void navigator.clipboard?.writeText(text).then(
+      () => toast.success('Copied.'),
+      () => toast.error('The browser did not let the page copy it.'),
+    )
+  const quickFix = async (p: Problem) => {
+    await editor.open(p.path, { line: p.line, column: p.column })
+    editor.runAction('editor.action.quickFix')
+  }
   return (
     <section aria-label={label ?? file}>
-      <h3 className="flex h-[1.375rem] items-center gap-1.5 pl-3 font-medium">
-        <FileIcon path={file} />
-        <span className="truncate">{nameOf(file)}</span>
-        <span className="min-w-0 truncate text-xs font-normal text-muted-foreground">{parentOf(file)}</span>
+      <h3 className="flex h-[1.375rem] items-center font-medium">
+        <button
+          type="button"
+          aria-expanded={!folded}
+          onClick={onFold}
+          className="flex min-w-0 flex-1 items-center gap-1.5 pl-1 text-left outline-none hover:bg-accent/70 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
+        >
+          <Chevron className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <FileIcon path={file} />
+          <span className="truncate">{nameOf(file)}</span>
+          <span className="min-w-0 truncate text-xs font-normal text-muted-foreground">{parentOf(file)}</span>
+          <span className="ml-auto pr-2 text-xs font-normal text-muted-foreground">{problems.length}</span>
+        </button>
       </h3>
-      <ul aria-label={`Problems in ${file}`}>
+      {!folded && <ul aria-label={`Problems in ${file}`}>
         {problems.map((p, i) => {
           const Icon = icons[p.severity]
           return (
@@ -173,10 +265,22 @@ function FileProblems({ file, problems, label }: { file: string; problems: Liste
                   <Wand2 />
                 </button>
               </Tooltip>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button type="button" aria-label={`More actions for ${p.path}:${p.line}`} className={cn(action, 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 data-[state=open]:opacity-100')}>
+                    <Ellipsis />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => copy(problemLine(p))}>Copy</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => copy(p.message)}>Copy Message</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => void quickFix(p)}>Quick Fix…</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </li>
           )
         })}
-      </ul>
+      </ul>}
     </section>
   )
 }

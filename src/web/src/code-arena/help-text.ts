@@ -70,7 +70,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   problems: {
     name: 'Problems',
-    text: "The errors and warnings of the project's own check (its build, type check or linter): **Run check** runs it. Each opens the file at its line, where the editor marks it too; **Fix** asks the agent to fix it.",
+    text: "The errors and warnings of the project's own check (its build, type check or linter), the language servers' and the editor's own: **Run check** runs the check. Each opens the file at its line, where the editor marks it too; **Fix** asks the agent to fix it, and its **⋯** menu copies it or offers **Quick Fix…**. **Filter problems** takes words, globs of files (`**/*.ts`) and `!` to leave out; the buttons beside it show each severity, or the active file only.",
     manual: 'problems',
   },
   review: {

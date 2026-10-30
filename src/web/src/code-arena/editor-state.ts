@@ -9,12 +9,28 @@ import type { CheckProblem } from './ide-api'
 export type MonacoModule = typeof import('./monaco')
 
 let loading: Promise<MonacoModule> | null = null
+let loaded: MonacoModule | null = null
+const onLoaded = new Set<(m: MonacoModule) => void>()
 /** Monaco and its setup, loaded with the first file opened (it is most of the page's weight). */
 export const loadMonaco = () =>
-  (loading ??= import('./monaco').catch((e: unknown) => {
-    loading = null
-    throw e
-  }))
+  (loading ??= import('./monaco').then(
+    (m) => {
+      loaded = m
+      for (const f of onLoaded) f(m)
+      onLoaded.clear()
+      return m
+    },
+    (e: unknown) => {
+      loading = null
+      throw e
+    },
+  ))
+
+/** Runs once Monaco is loaded (at once when it is): what only matters once a file is open waits for it, and never loads it. */
+export function whenMonaco(f: (m: MonacoModule) => void) {
+  if (loaded) f(loaded)
+  else onLoaded.add(f)
+}
 
 /** macOS (and iPadOS): the editor's keys are ⌘ there, and Ctrl stays the terminal's and the editor's own. */
 export const onMac = () => typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)

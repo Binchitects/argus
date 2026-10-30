@@ -13,7 +13,8 @@ import { cn } from '@/lib/utils'
 import { changeSettings, compaction, compactWho, modeLabels, retryServers, stateQuery, windowQuery, type CodeState, type ServerStatus } from './api'
 import { useEditor } from './editor-state'
 import { api } from './http'
-import { changesQuery, problemsQuery } from './ide-api'
+import { changesQuery } from './ide-api'
+import { countProblems, useProblems } from './problems-store'
 import { useKeyFor, useKeymap } from './keyboard'
 import { LanguageStatus } from './language-status'
 
@@ -66,10 +67,8 @@ export function StatusBar({
   const keyStatus = useKeymap().status
   const terminalKey = useKeyFor('workbench.action.terminal.toggleTerminal')
   const changes = useQuery(changesQuery)
-  const check = useQuery(problemsQuery).data
-  const problems = check?.ran ? check.problems : null
-  const errors = problems?.filter((p) => p.severity === 'error').length ?? 0
-  const warnings = problems?.filter((p) => p.severity === 'warning').length ?? 0
+  // Every problem: the check's, the language servers' and the editor's own services' (0 and 0 when there are none).
+  const { error: errors, warning: warnings } = countProblems(useProblems())
   const count = changes.data?.length ?? 0
   const [dialog, setDialog] = useState<'context' | 'servers' | null>(null)
   const running = state.jobs.filter((j) => j.running).length
@@ -98,12 +97,14 @@ export function StatusBar({
       <Item onClick={onChanges} aria-label={`Agent changes: ${count} ${count === 1 ? 'file' : 'files'}`} title="The files the agent changed">
         <GitCompareArrows aria-hidden="true" /> {count}
       </Item>
-      {problems && (
-        <Item onClick={onProblems} aria-label={`Problems: ${errors} ${errors === 1 ? 'error' : 'errors'}, ${warnings} ${warnings === 1 ? 'warning' : 'warnings'}`} title="The check's problems">
-          <CircleAlert aria-hidden="true" /> {errors}
-          <TriangleAlert aria-hidden="true" /> {warnings}
-        </Item>
-      )}
+      <Item
+        onClick={onProblems}
+        aria-label={`Problems: ${errors} ${errors === 1 ? 'error' : 'errors'}, ${warnings} ${warnings === 1 ? 'warning' : 'warnings'}`}
+        title="Problems: the check's, the language servers' and the editor's"
+      >
+        <CircleAlert aria-hidden="true" /> {errors}
+        <TriangleAlert aria-hidden="true" /> {warnings}
+      </Item>
       <Item onClick={onTerminal} aria-label="Show or hide the terminal" title={terminalKey ? `Terminal (${terminalKey})` : 'Terminal'}>
         <SquareTerminal aria-hidden="true" />
       </Item>

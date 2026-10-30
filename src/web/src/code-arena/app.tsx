@@ -24,6 +24,7 @@ import { ManageMenu } from './manage-menu'
 import { AccountsMenu } from './accounts-menu'
 import { PlanPanel } from './plan-panel'
 import { ProblemsPanel } from './problems'
+import { countProblems, useProblems } from './problems-store'
 import { ReviewPanel } from './review'
 import { SourceControlPanel } from './scm'
 import { EditorArea, EditorProvider } from './editor'
@@ -570,9 +571,9 @@ function Workbench({
   useDiskChanges(onDisk)
 
   const count = changes.data?.length ?? 0
-  // The check's problems: marked in the editor's files, counted on the activity bar and the status bar.
+  // The check's problems: marked in the editor's files. Every problem's errors (the servers' and the editor's too) on the activity bar.
   const problems = useQuery(problemsQuery).data?.problems
-  const errors = problems?.filter((p) => p.severity === 'error').length ?? 0
+  const errors = countProblems(useProblems()).error
   const gitCount = useQuery(gitStatusQuery).data?.files?.length ?? 0
   useEffect(() => {
     if (problems) showProblems(problems)
