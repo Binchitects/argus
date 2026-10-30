@@ -99,20 +99,21 @@ const argusChat = {
 
 /**
  * A saved chat served by the browser itself, with what the page asks of it beside: where it stands (every few seconds,
- * to read it again when it changed elsewhere) and its canvases (none).
+ * to read it again when it changed elsewhere), its canvases (none) and its checklist (none).
  */
 async function serveChat(page: Page, chat: { id: string }) {
   // Read with how many of its last messages (?last=): matched by its path alone.
   await page.route((url) => url.pathname === `/api/chat/conversations/${chat.id}`, (route) => route.fulfill({ json: chat }))
   await page.route(`**/api/chat/conversations/${chat.id}/stamp`, (route) => route.fulfill({ json: { stamp: 'e2e', answering: false } }))
   await page.route(`**/api/chat/conversations/${chat.id}/canvases`, (route) => route.fulfill({ json: [] }))
+  // No checklist on (204), as the app says it.
+  await page.route(`**/api/chat/conversations/${chat.id}/checklist`, (route) => route.fulfill({ status: 204 }))
 }
 
 async function serveArgusChat(page: Page) {
-  await page.route('**/api/chat/config', async (route) => {
-    const res = await route.fetch()
-    await route.fulfill({ response: res, json: { ...(await res.json()), argus: true, gitlabUrl: 'https://gitlab.example.com' } })
-  })
+  // Read once, before the page, as the context gauge's.
+  const config = await (await page.request.get('/api/chat/config')).json()
+  await page.route('**/api/chat/config', (route) => route.fulfill({ json: { ...config, argus: true, gitlabUrl: 'https://gitlab.example.com' } }))
   await serveChat(page, argusChat)
   await page.route('**/api/chat/attachments/*/content*', (route) => route.fulfill({ body: png, contentType: 'image/png' }))
 }
@@ -232,12 +233,11 @@ const contextChat = {
 test.describe('context gauge', () => {
   test('shows how full the context is and what fills it, and compacts from there', async ({ page }, info) => {
     // The gauge needs the chat's model and its window: a stack without models (CI's) is given one.
-    await page.route('**/api/chat/config', async (route) => {
-      const res = await route.fetch()
-      const config = await res.json()
-      const model = { name: 'Test-Model', context: 32768, maxOutput: 4096, vision: false, tools: true, thinking: false, loaded: true }
-      await route.fulfill({ response: res, json: { ...config, model: config.model ?? model.name, models: config.models?.some((m: { name: string }) => m.name === model.name) ? config.models : [...(config.models ?? []), model] } })
-    })
+    // Read once, before the page: a handler still fetching when the test ends would fail it (compacting reads it again).
+    const config = await (await page.request.get('/api/chat/config')).json()
+    const model = { name: 'Test-Model', context: 32768, maxOutput: 4096, vision: false, tools: true, thinking: false, loaded: true }
+    const given = { ...config, model: config.model ?? model.name, models: config.models?.some((m: { name: string }) => m.name === model.name) ? config.models : [...(config.models ?? []), model] }
+    await page.route('**/api/chat/config', (route) => route.fulfill({ json: given }))
     await serveChat(page, contextChat)
     let compacted = false
     await page.route(`**/api/chat/conversations/${contextChat.id}/compact`, (route) => {
