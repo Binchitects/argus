@@ -15,6 +15,27 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v7.6.2 (2026-10-30)
+
+A hotfix: what the app tells people to run names the commands of today.
+
+### :bug: Bugs fixed
+
+- The scripts were unified behind `./arenactl` in v7.6.0, and some were
+  deleted, but the app, Argus, Code Arena, the installer and the manual
+  still named them: Code Arena's builds (`tools/publish-code-arena.sh`),
+  backups (`scripts/backup.sh`), the certificate (`scripts/make-cert.sh`),
+  the outside compliance check (`deploy/scripts/compliance-check.py`), a
+  feature that is off (a bare `installer.sh repair --with`), and in the
+  manual scripts that are gone (`audit-auth.sh`, `get-token.sh`,
+  `domain-check.sh`, `acceptance.py`, `airgap-bundle.sh`,
+  `install-requirements.sh`). Each now says what to type: the `arenactl`
+  command from the release's checkout and, where a host has only the
+  offline installer, the `.run`'s command or the installation's own
+  `deploy/scripts/` (131 places, in the pages and their help, the API's,
+  Argus's and Code Arena's messages, the GPU dashboard, the installer's
+  advice and the manual)
+
 ## v7.6.1 (2026-10-30)
 
 A hotfix: the vLLM engine and NVIDIA's DCGM exporter from images that can be
