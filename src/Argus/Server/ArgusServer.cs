@@ -700,6 +700,8 @@ public static partial class ArgusServer
                     ["error"] = Short(exc), ["repos"] = new JsonArray(),
                     ["symbols"] = new JsonObject { ["rows"] = new JsonArray(), ["capped"] = false },
                     ["files"] = new JsonObject { ["rows"] = new JsonArray(), ["capped"] = false },
+                    ["query"] = q,
+                    ["repo"] = repo,
                 });
             }
         });

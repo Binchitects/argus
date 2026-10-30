@@ -265,6 +265,9 @@ export interface ExploreResult {
   repos: { path_with_namespace: string; symbols: number; files: number; [k: string]: unknown }[];
   symbols: { rows: { name: string; kind: string; scope: string | null; signature: string | null; is_public: number; path: string; line: number; path_with_namespace: string }[]; capped: boolean };
   files: { rows: { path: string; lang: string | null; symbols: number; path_with_namespace: string }[]; capped: boolean };
+  /** What it answers: the search and the repository asked. */
+  query?: string;
+  repo?: string;
   error?: string;
 }
 
