@@ -24,7 +24,7 @@ and no setup scripts.
 | `laya` | typed decisions on the CPU (the chat's Decide tool, Code Arena's look at commands); **off** until its feature is on ([below](#laya)) |
 | `searxng` | the chat's web search |
 | `prometheus`, `alertmanager`, `loki`, `promtail`, `node-exporter`, `gpu-exporter`, `cpu-temp-exporter` | what the app's dashboards, logs and alerts read |
-| `dcgm-exporter` (profile `dcgm`, off by default) | NVIDIA DCGM's data-centre GPU detail for the GPU Hardware dashboard: PCIe and NVLink throughput, SM and tensor activity, XID errors, ECC and retired pages. Bare-metal Linux only, from NVIDIA's registry (`nvcr.io`); the `dcgm` feature turns it on. Without it the dashboard's GPU detail section (clocks, throttling, PCIe link, fans, ECC) still comes from `gpu-exporter` |
+| `dcgm-exporter` (profile `dcgm`, off by default) | NVIDIA DCGM's data-centre GPU detail for the GPU Hardware dashboard: PCIe and NVLink throughput, SM and tensor activity, XID errors, ECC and retired pages. Bare-metal Linux only, NVIDIA's own image on Docker Hub (`nvidia/dcgm-exporter`; nvcr.io has the same); the `dcgm` feature turns it on. Without it the dashboard's GPU detail section (clocks, throttling, PCIe link, fans, ECC) still comes from `gpu-exporter` |
 | `power-limits` | GPU and CPU power caps from `.env`, kept applied (privileged) |
 
 ## Deploy

@@ -356,7 +356,9 @@ vLLM serves **one model per process** and has no router mode. Keep the pattern t
 
 ## 6. What must be downloaded (for your approval)
 
-Docker Hub is blocked here. The registry probe (`/v2/`, headers only) gave:
+Docker Hub was blocked here when this was written; since 2026-10-30 it answers, and the stack's defaults are vLLM's
+own `vllm/vllm-openai:v0.31.0` and NVIDIA's own `nvidia/dcgm-exporter:4.6.1-4.8.4` from it (nvcr.io still answers 403).
+The registry probe (`/v2/`, headers only) gave at first:
 
 - ghcr.io answers.
 - public.ecr.aws and quay.io answer with an auth challenge, which is normal.

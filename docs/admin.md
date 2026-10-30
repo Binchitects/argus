@@ -1477,7 +1477,7 @@ from the app itself (Prometheus job `app`: `arena_line_running`,
 the stack's network only: Traefik routes no `/metrics` to the app, and the app
 refuses one that came through it. NVIDIA's DCGM detail (SM activity, tensor
 cores, XID errors, ECC, NVLink) needs the **dcgm** profile
-(`COMPOSE_PROFILES=dcgm`, where nvcr.io is reachable): the Hardware dashboard
+(`COMPOSE_PROFILES=dcgm`; the offline bundle carries its image): the Hardware dashboard
 says so, and GPU Hardware's DCGM panels are empty without it.
 
 The dashboards are files in Grafana's JSON format, in `src/Llm.Api/Dashboards/json/`
