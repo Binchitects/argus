@@ -35,6 +35,8 @@ export interface ClientHost {
   folderName: () => string
   /** Opens the folder's files in tabs behind the one shown, so an edit can be applied to them. */
   keep: (paths: string[]) => Promise<void>
+  /** Reads the folder's files with no tab, so a peek can show them. */
+  preload: (paths: string[]) => Promise<void>
   /** Opens a file of the folder at a place (window/showDocument). */
   open: (path: string, at?: Monaco.IRange) => void
   /** A line for the server's output. */
@@ -370,6 +372,19 @@ export class LanguageClient {
     return [...c.editsByUri(edit).files.keys()].every((uri) => m.editor.getModel(m.Uri.parse(uri)))
   }
 
+  /**
+   * The folder's files these places are in that the editor holds no model of, read for the peek (at most 30), before the
+   * answer goes to Monaco: a peek shows only what a model holds. Monaco giving up stops the wait.
+   */
+  private async preload(uris: Monaco.Uri[], token: Monaco.CancellationToken) {
+    const m = this.host.monaco
+    const paths = [...new Set(uris.filter((u) => u.scheme === 'file' && !m.editor.getModel(u)).map((u) => this.host.pathOf(u)))]
+      .filter((p): p is string => p !== null)
+      .slice(0, 30)
+    if (paths.length === 0 || token.isCancellationRequested) return
+    await Promise.race([this.host.preload(paths), new Promise<void>((done) => token.onCancellationRequested(() => done()))])
+  }
+
   /** The folder's files an edit changes, opened (behind the tab shown) when the editor does not hold them yet. */
   private async load(edit: c.WorkspaceEdit) {
     const m = this.host.monaco
@@ -534,7 +549,9 @@ export class LanguageClient {
       // The folder's own first: a place outside it (a library's declaration beside the folder's) cannot be shown in the
       // editor, so it is offered only when there is no other (and opening it says why it does not open).
       const inside = found.filter((l) => l.uri.scheme !== 'outside')
-      return inside.length ? inside : found.slice(0, 1)
+      const places = inside.length ? inside : found.slice(0, 1)
+      await this.preload(places.map((l) => l.uri), token)
+      return places
     }
     if (cap.definitionProvider) add(m.languages.registerDefinitionProvider(languages, { provideDefinition: locations('textDocument/definition') }))
     if (cap.declarationProvider) add(m.languages.registerDeclarationProvider?.(languages, { provideDeclaration: locations('textDocument/declaration') }))
@@ -547,7 +564,9 @@ export class LanguageClient {
             if (!this.uriOf(model)) return undefined
             const found = await this.ask<c.Location[]>('textDocument/references', { ...doc(model, position), context: { includeDeclaration: context.includeDeclaration } }, token)
             // The folder's files only: the editor cannot show one outside it.
-            return (found ?? []).map((l) => ({ uri: m.Uri.parse(l.uri), range: c.toRange(l.range) })).filter((l) => l.uri.scheme !== 'outside')
+            const places = (found ?? []).map((l) => ({ uri: m.Uri.parse(l.uri), range: c.toRange(l.range) })).filter((l) => l.uri.scheme !== 'outside')
+            await this.preload(places.map((l) => l.uri), token)
+            return places
           },
         }),
       )

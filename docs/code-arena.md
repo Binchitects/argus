@@ -954,7 +954,9 @@ and the language server for its language starts, and the editor gets its
 completions (with their documentation and auto-imports), hovers, signature
 help, **Go to Definition** (**F12**; into another file of the folder, it opens
 there), declaration, type definition and implementation, **Go to
-References** (**Shift+F12**), the other uses of a name highlighted, the
+References** (**Shift+F12**), **Peek Definition** (**Alt+F12**) and **Peek
+References** into files that are not open (read with no tab; the 30 used last
+are kept), the other uses of a name highlighted, the
 symbols (**Ctrl+Shift+O**, the outline), **Rename Symbol** (**F2**, in every
 file it changes: the files not open yet open behind the one shown, unsaved),
 code actions (the light bulb: quick fixes, organize imports, refactorings) and

@@ -57,6 +57,8 @@ export interface ServersHost {
   open: (path: string, at?: Reveal) => void
   /** Opens files in tabs behind the one shown (an edit changes them). */
   keep: (paths: string[]) => Promise<void>
+  /** Reads files a peek shows, with no tab. */
+  preload: (paths: string[]) => Promise<void>
 }
 
 /** The lines of a server's output the page keeps. */
@@ -295,6 +297,7 @@ class LanguageServers {
       settings: () => this.host?.settings() ?? {},
       folderName: () => this.host?.project ?? '',
       keep: (paths) => this.host?.keep(paths) ?? Promise.resolve(),
+      preload: (paths) => this.host?.preload(paths) ?? Promise.resolve(),
       open: (path, at) => this.host?.open(path, at && { line: at.startLineNumber, column: at.startColumn }),
       log: (line) => this.log(info.id, line),
       changed: () => {

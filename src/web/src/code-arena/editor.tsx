@@ -49,6 +49,9 @@ interface SavedEditors {
 }
 
 /** The files a tab holds in the editor: a file tab's own, a compare's live sides. */
+/** How many files with no tab a peek keeps loaded. */
+const peekKept = 30
+
 const fileSidesOf = (t: Tab): string[] =>
   t.kind === 'file' || t.kind === 'preview' ? [t.path] : [t.left, t.right].flatMap((x) => (x?.kind === 'file' ? [x.path] : []))
 
@@ -289,6 +292,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   const mon = useRef<MonacoModule | null>(null)
   const problemsOf = useRef<CheckProblem[]>([])
   const files = useRef(new Map<string, FileModel>())
+  /** Files a language server's answer named (a peek, references) that no tab holds, the one used last at the end. */
+  const peeked = useRef(new Map<string, true>())
   const diffs = useRef(new Map<string, DiffModels>())
   const codeHost = useRef<HTMLDivElement | null>(null)
   const diffHost = useRef<HTMLDivElement | null>(null)
@@ -399,17 +404,47 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       const held = new Set(tabsRef.current.flatMap(fileSidesOf))
       const kept: Tab[] = []
       for (const [path, f] of [...files.current]) {
-        if (held.has(path)) continue
+        if (held.has(path) || peeked.current.has(path)) continue
         if (fileDirty(path) && !discarded.includes(path)) {
           kept.push({ id: path, kind: 'file', path, status: 'ready', dirty: true, language: languageName(f.model), languageId: f.model.getLanguageId?.() })
           continue
         }
-        unshow(f.model)
-        f.model.dispose()
-        files.current.delete(path)
-        forgetBackup(path)
+        letGo(path, f)
       }
       if (kept.length > 0) commit([...tabsRef.current, ...kept])
+    }
+
+    const letGo = (path: string, f: FileModel) => {
+      unshow(f.model)
+      f.model.dispose()
+      files.current.delete(path)
+      forgetBackup(path)
+    }
+
+    /**
+     * The folder's files a language server's answer names (Peek Definition, Peek References), read with no tab so the
+     * peek can show them. The 30 used last are kept; beyond that the oldest goes (one changed in the peek gets a tab, as
+     * a file closed unsaved does).
+     */
+    const preload = async (paths: string[]) => {
+      const held = new Set(tabsRef.current.flatMap(fileSidesOf))
+      await Promise.all(
+        paths
+          .filter((p) => !held.has(p))
+          .slice(0, peekKept)
+          .map(async (p) => {
+            const f = await loadFile(p).catch(() => undefined)
+            if (typeof f !== 'object') return
+            peeked.current.delete(p)
+            peeked.current.set(p, true)
+          }),
+      )
+      for (const oldest of [...peeked.current.keys()].slice(0, Math.max(0, peeked.current.size - peekKept))) {
+        peeked.current.delete(oldest)
+        const f = files.current.get(oldest)
+        if (f && !tabsRef.current.some((t) => fileSidesOf(t).includes(oldest)) && !fileDirty(oldest)) letGo(oldest, f)
+      }
+      collect()
     }
 
     // Hot exit: a file's unsaved text kept a second after typing pauses, forgotten when it is saved or thrown away.
@@ -470,6 +505,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     /** Opens a file in its tab (at a place); behind the tab shown, not shown, with `behind`. */
     const open = async (path: string, at?: Reveal, behind = false, preview = false) => {
       const id = path
+      // In a tab now: no longer only a peek's.
+      peeked.current.delete(path)
       if (at && !behind) {
         reveal.current = { id, at }
         setRevealed((n) => n + 1)
@@ -1268,7 +1305,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     }
 
     return {
-      open: (path: string, at?: Reveal, how?: { preview?: boolean }) => open(path, at, false, how?.preview === true), keepTab, pin, moveTab, keep, openDiff, activate: (id: string) => activate(id), close, save: (id?: string) => save(id), refresh, moved, removed, accept, revert, selection, pieceOf, editorCommands, runAction, showProblems, bindEditor, bindDiff,
+      open: (path: string, at?: Reveal, how?: { preview?: boolean }) => open(path, at, false, how?.preview === true), keepTab, pin, moveTab, keep, preload, openDiff, activate: (id: string) => activate(id), close, save: (id?: string) => save(id), refresh, moved, removed, accept, revert, selection, pieceOf, editorCommands, runAction, showProblems, bindEditor, bindDiff,
       saveAll, closeMany, reopenClosed, cycle, activateIndex, navigate, focusEditor, toggleWordWrap, languages, setLanguage, activeModel, autoSaveOn,
       saveWith: save,
       compare,

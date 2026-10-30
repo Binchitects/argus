@@ -825,10 +825,10 @@ function Workbench({
   }, [ed, settings, show, change, showTerminal])
   // The language servers: the folder's trust, the settings and the editor, as they are now.
   const trusted = workspace.data?.trust === 'trusted'
-  const { open: openFile, keep } = ed
+  const { open: openFile, keep, preload } = ed
   useEffect(() => {
-    languageServers.configure({ trusted, settings: settings.all, folder: state.folder, project: state.project, open: (path, at) => void openFile(path, at), keep })
-  }, [trusted, settings.all, state.folder, state.project, openFile, keep])
+    languageServers.configure({ trusted, settings: settings.all, folder: state.folder, project: state.project, open: (path, at) => void openFile(path, at), keep, preload })
+  }, [trusted, settings.all, state.folder, state.project, openFile, keep, preload])
   /** The language server of the file shown, or one of those running (chosen when there are several). */
   const pickServer = async (args: unknown): Promise<{ id?: string; language?: string } | null> => {
     const id = (args as { id?: unknown } | undefined)?.id

@@ -113,6 +113,8 @@ export interface EditorApi {
   moveTab: (id: string, to: number) => void
   /** Opens files in tabs behind the one shown, their text in the editor (a language server's edit changes them). */
   keep: (paths: string[]) => Promise<void>
+  /** Reads the folder's files a peek shows, with no tab (the 30 used last are kept). */
+  preload: (paths: string[]) => Promise<void>
   openDiff: (path: string, source?: DiffSource) => Promise<void>
   /** Opens the Settings editor or the Keyboard Shortcuts editor (one tab each). */
   openPage: (kind: 'settings' | 'keybindings', query?: string) => void

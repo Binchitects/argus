@@ -3110,6 +3110,50 @@ describe('Code Arena, the language servers', () => {
     expect(fakes.sockets.length).toBe(sockets)
   })
 
+  it('reads the files a peek names with no tab, keeps them when a tab closes, and lets the oldest go beyond thirty', async () => {
+    const peekFile = (n: number) => `src/peek/f${n}.ts`
+    backend({
+      'GET /api/lsp': () => ({ json: servers }),
+      'GET /api/workspace/state': () => ({ json: { trust: 'trusted' } }),
+      'GET /api/file': (_, __, url) => {
+        const path = url.searchParams.get('path')!
+        if (path.startsWith('src/peek/')) return { json: { path, size: 10, version: 'p1', text: 'export {}\n' } }
+        return path === 'src/app.ts' ? { json: { path, size: 34, version: 'a1', text: 'const total = 1\nconsole.log(total)\n' } } : { status: 404, json: { status: 'not_found', error: 'There is no such file.' } }
+      },
+    })
+    renderIde()
+    await openApp()
+    await waitFor(() => expect(lsp()).toBeTruthy())
+    act(() => lsp()!.open())
+    const init = await request('initialize')
+    receive({ id: init.id, result: { capabilities: { textDocumentSync: 2, referencesProvider: true, definitionProvider: true } } })
+    await waitFor(() => expect(provider('reference')).toBeTruthy())
+    const held = (path: string) => fakes.models.some((m) => !m.disposed && m.uri?.toString() === `file:///${path}`)
+    const at = (path: string) => ({ uri: `file:///${path}`, range: { start: { line: 0, character: 7 }, end: { line: 0, character: 9 } } })
+
+    // Thirty files of references: each read before the answer goes to Monaco, with no tab.
+    const refs = provider('reference')!.provideReferences(editor().model, { lineNumber: 1, column: 7 }, { includeDeclaration: true }, token) as Promise<unknown[]>
+    const req = await request('textDocument/references')
+    receive({ id: req.id, result: Array.from({ length: 30 }, (_, n) => at(peekFile(n))) })
+    expect(await refs).toHaveLength(30)
+    expect(Array.from({ length: 30 }, (_, n) => held(peekFile(n)))).toEqual(Array(30).fill(true))
+    expect(within(tabs()).getAllByRole('tab').map((t) => t.getAttribute('aria-label') ?? t.textContent)).not.toContainEqual(expect.stringContaining('f0.ts'))
+
+    // A tab closed: what the peek holds stays.
+    await userEvent.dblClick(await screen.findByRole('treeitem', { name: 'README.md' }))
+    await userEvent.click(within(tabs()).getByRole('button', { name: 'Close README.md' }))
+    expect(held(peekFile(0))).toBe(true)
+
+    // A thirty-first, by Peek Definition: the oldest goes.
+    const def = provider('definition')!.provideDefinition(editor().model, { lineNumber: 1, column: 7 }, token) as Promise<unknown[]>
+    const asked = await request('textDocument/definition')
+    receive({ id: asked.id, result: [at(peekFile(30))] })
+    expect(await def).toHaveLength(1)
+    expect(held(peekFile(30))).toBe(true)
+    expect(held(peekFile(0))).toBe(false)
+    expect(held(peekFile(1))).toBe(true)
+  })
+
   it('starts no server the settings turn off', async () => {
     backend({ 'GET /api/lsp': () => ({ json: servers }), 'GET /api/workspace/state': () => ({ json: { trust: 'trusted' } }) }, {}, { 'settings.json': '{ "codeArena.languageServers.typescript.enabled": false }' })
     renderIde()
