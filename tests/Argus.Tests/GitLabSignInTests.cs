@@ -1,8 +1,9 @@
-using System.Net;
-using System.Net.Sockets;
-using System.Text;
 using Argus.Configuration;
 using Argus.Indexing;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 
 namespace Argus.Tests;
 
@@ -17,7 +18,7 @@ public class GitLabSignInTests
     /// </summary>
     sealed class FakeGitLab : IDisposable
     {
-        readonly HttpListener _listener = new();
+        readonly WebApplication _app;
         readonly Dictionary<string, string> _tokens = [];
         int _loads;
         public string Url { get; }
@@ -26,55 +27,47 @@ public class GitLabSignInTests
         /// <summary>Posts refused for their token (a real GitLab answers 422).</summary>
         public int Forged { get; private set; }
 
+        /// <summary>On a port of its own: bound when it starts (a port looked up first may be taken by then).</summary>
         public FakeGitLab()
         {
-            var probe = new TcpListener(IPAddress.Loopback, 0);
-            probe.Start();
-            var port = ((IPEndPoint)probe.LocalEndpoint).Port;
-            probe.Stop();
-            Url = $"http://127.0.0.1:{port}";
-            _listener.Prefixes.Add(Url + "/");
-            _listener.Start();
-            _ = Task.Run(ServeAsync);
+            var b = WebApplication.CreateSlimBuilder();
+            b.Logging.ClearProviders();
+            b.WebHost.UseUrls("http://127.0.0.1:0");
+            _app = b.Build();
+            _app.Run(ServeAsync);
+            _app.StartAsync().GetAwaiter().GetResult();
+            Url = _app.Urls.First();
         }
 
-        async Task ServeAsync()
+        async Task ServeAsync(HttpContext ctx)
         {
-            while (_listener.IsListening)
+            var path = ctx.Request.Path.Value ?? "/";
+            var signedIn = ctx.Request.Cookies["_gitlab_session"] == "ok";
+            var form = Form(await new StreamReader(ctx.Request.Body).ReadToEndAsync());
+            if (ctx.Request.Method == "POST")
             {
-                HttpListenerContext ctx;
-                try { ctx = await _listener.GetContextAsync(); }
-                catch (Exception e) when (e is HttpListenerException or ObjectDisposedException) { return; }
-                var path = ctx.Request.Url!.AbsolutePath;
-                var signedIn = ctx.Request.Cookies["_gitlab_session"]?.Value == "ok";
-                var form = Form(ctx.Request.HasEntityBody ? new StreamReader(ctx.Request.InputStream).ReadToEnd() : "");
-                if (ctx.Request.HttpMethod == "POST")
-                {
-                    lock (Posts) Posts.Add(path);
-                }
-                var (status, body) = (ctx.Request.HttpMethod, path) switch
-                {
-                    ("GET", "/users/sign_in") => (200, SignInPage()),
-                    ("POST", "/users/sign_in" or "/users/auth/ldapmain/callback") when !Fresh(path, form) => (422, "Can't verify CSRF token authenticity."),
-                    // Only the local account has a password GitLab keeps.
-                    ("POST", "/users/sign_in") when form.GetValueOrDefault("user[login]") == "local" && form.GetValueOrDefault("user[password]") == "secret"
-                        => Session(ctx),
-                    ("POST", "/users/sign_in") => Refused("Invalid login or password."),
-                    // The LDAP server knows the LDAP account.
-                    ("POST", "/users/auth/ldapmain/callback") when form.GetValueOrDefault("username") == "ldapuser" && form.GetValueOrDefault("password") == "secret"
-                        => Session(ctx),
-                    ("POST", "/users/auth/ldapmain/callback") => Refused("Could not authenticate you from Ldapmain because \"Invalid credentials\"."),
-                    ("GET", "/api/v4/user") => signedIn ? (200, "{\"id\":7}") : (401, "{\"message\":\"401 Unauthorized\"}"),
-                    ("GET", "/-/user_settings/profile") => (200, "<meta name=\"csrf-token\" content=\"c1\">"),
-                    ("GET", "/api/v4/personal_access_tokens") => (200, "[]"),
-                    ("POST", "/-/user_settings/personal_access_tokens") => signedIn ? (200, "{\"token\":\"glpat-made\"}") : (401, "{}"),
-                    _ => (404, "{}"),
-                };
-                ctx.Response.StatusCode = status;
-                var bytes = Encoding.UTF8.GetBytes(body);
-                await ctx.Response.OutputStream.WriteAsync(bytes);
-                ctx.Response.Close();
+                lock (Posts) Posts.Add(path);
             }
+            var (status, body) = (ctx.Request.Method, path) switch
+            {
+                ("GET", "/users/sign_in") => (200, SignInPage()),
+                ("POST", "/users/sign_in" or "/users/auth/ldapmain/callback") when !Fresh(path, form) => (422, "Can't verify CSRF token authenticity."),
+                // Only the local account has a password GitLab keeps.
+                ("POST", "/users/sign_in") when form.GetValueOrDefault("user[login]") == "local" && form.GetValueOrDefault("user[password]") == "secret"
+                    => Session(ctx),
+                ("POST", "/users/sign_in") => Refused("Invalid login or password."),
+                // The LDAP server knows the LDAP account.
+                ("POST", "/users/auth/ldapmain/callback") when form.GetValueOrDefault("username") == "ldapuser" && form.GetValueOrDefault("password") == "secret"
+                    => Session(ctx),
+                ("POST", "/users/auth/ldapmain/callback") => Refused("Could not authenticate you from Ldapmain because \"Invalid credentials\"."),
+                ("GET", "/api/v4/user") => signedIn ? (200, "{\"id\":7}") : (401, "{\"message\":\"401 Unauthorized\"}"),
+                ("GET", "/-/user_settings/profile") => (200, "<meta name=\"csrf-token\" content=\"c1\">"),
+                ("GET", "/api/v4/personal_access_tokens") => (200, "[]"),
+                ("POST", "/-/user_settings/personal_access_tokens") => signedIn ? (200, "{\"token\":\"glpat-made\"}") : (401, "{}"),
+                _ => (404, "{}"),
+            };
+            ctx.Response.StatusCode = status;
+            await ctx.Response.WriteAsync(body);
         }
 
         string SignInPage()
@@ -118,13 +111,13 @@ public class GitLabSignInTests
             return fields;
         }
 
-        static (int, string) Session(HttpListenerContext ctx)
+        static (int, string) Session(HttpContext ctx)
         {
-            ctx.Response.AppendCookie(new Cookie("_gitlab_session", "ok", "/"));
+            ctx.Response.Cookies.Append("_gitlab_session", "ok", new CookieOptions { Path = "/" });
             return (200, "Welcome");
         }
 
-        public void Dispose() => _listener.Close();
+        public void Dispose() => _app.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 
     static GitLabConfig Config(FakeGitLab gitlab, string user, string ldap = "") =>

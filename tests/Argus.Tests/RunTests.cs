@@ -8,6 +8,10 @@ using Argus.Indexing;
 using Argus.Server;
 using Argus.Store;
 using Argus.Util;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 
 namespace Argus.Tests;
 
@@ -17,71 +21,58 @@ namespace Argus.Tests;
 /// </summary>
 sealed class SocketGitLab : IDisposable
 {
-    readonly HttpListener _listener = new();
+    readonly WebApplication _app;
     readonly string _repos;
     public string Url { get; }
     /// <summary>Per token, the projects it lists: id, path, created_at.</summary>
     public Dictionary<string, List<(long Id, string Path, string Created)>> Listings { get; } = new(StringComparer.Ordinal);
 
+    /// <summary>On a port of its own: bound when it starts (a port looked up first may be taken by then).</summary>
     public SocketGitLab(string repos)
     {
         _repos = repos;
-        var probe = new TcpListener(IPAddress.Loopback, 0);
-        probe.Start();
-        var port = ((IPEndPoint)probe.LocalEndpoint).Port;
-        probe.Stop();
-        Url = $"http://127.0.0.1:{port}";
-        _listener.Prefixes.Add(Url + "/");
-        _listener.Start();
-        _ = Task.Run(Serve);
+        var b = WebApplication.CreateSlimBuilder();
+        b.Logging.ClearProviders();
+        b.WebHost.UseUrls("http://127.0.0.1:0");
+        _app = b.Build();
+        _app.Run(Answer);
+        _app.StartAsync().GetAwaiter().GetResult();
+        Url = _app.Urls.First();
     }
 
-    async Task Serve()
-    {
-        while (_listener.IsListening)
-        {
-            HttpListenerContext ctx;
-            try { ctx = await _listener.GetContextAsync(); }
-            catch (Exception) { return; }
-            try { Answer(ctx); }
-            catch (Exception) { ctx.Response.StatusCode = 500; }
-            finally { ctx.Response.Close(); }
-        }
-    }
-
-    void Write(HttpListenerContext ctx, int status, byte[] body)
+    static async Task Write(HttpContext ctx, int status, byte[] body)
     {
         ctx.Response.StatusCode = status;
-        ctx.Response.ContentLength64 = body.Length;
-        ctx.Response.OutputStream.Write(body);
+        ctx.Response.ContentLength = body.Length;
+        await ctx.Response.Body.WriteAsync(body);
     }
 
-    void Answer(HttpListenerContext ctx)
+    async Task Answer(HttpContext ctx)
     {
-        var path = ctx.Request.Url!.AbsolutePath;
+        var path = ctx.Request.Path.Value ?? "/";
         if (path.StartsWith("/repos/", StringComparison.Ordinal))
         {
-            var file = Path.GetFullPath(Path.Combine(_repos, Uri.UnescapeDataString(path["/repos/".Length..])));
-            if (!file.StartsWith(_repos, StringComparison.Ordinal) || !File.Exists(file)) { Write(ctx, 404, "not found"u8.ToArray()); return; }
-            Write(ctx, 200, File.ReadAllBytes(file));
+            var file = Path.GetFullPath(Path.Combine(_repos, path["/repos/".Length..]));
+            if (!file.StartsWith(_repos, StringComparison.Ordinal) || !File.Exists(file)) { await Write(ctx, 404, "not found"u8.ToArray()); return; }
+            await Write(ctx, 200, await File.ReadAllBytesAsync(file));
             return;
         }
-        var token = ctx.Request.Headers["PRIVATE-TOKEN"] ?? "";
-        if (!Listings.TryGetValue(token, out var projects)) { Write(ctx, 401, """{"message":"401 Unauthorized"}"""u8.ToArray()); return; }
+        var token = ctx.Request.Headers["PRIVATE-TOKEN"].ToString();
+        if (!Listings.TryGetValue(token, out var projects)) { await Write(ctx, 401, """{"message":"401 Unauthorized"}"""u8.ToArray()); return; }
         JsonNode body = path switch
         {
             "/api/v4/user" => new JsonObject { ["id"] = 1, ["username"] = "svc", ["is_admin"] = true },
-            "/api/v4/projects" when ctx.Request.QueryString["page"] is "1" => new JsonArray([.. projects.Select(p => (JsonNode)new JsonObject
+            "/api/v4/projects" when ctx.Request.Query["page"] == "1" => new JsonArray([.. projects.Select(p => (JsonNode)new JsonObject
             {
                 ["id"] = p.Id, ["path_with_namespace"] = p.Path, ["default_branch"] = "main", ["created_at"] = p.Created,
                 ["http_url_to_repo"] = $"https://gitlab.advertised.invalid/repos/{p.Path}.git",
             })]),
             _ => new JsonArray(),
         };
-        Write(ctx, 200, Encoding.UTF8.GetBytes(body.ToJsonString()));
+        await Write(ctx, 200, Encoding.UTF8.GetBytes(body.ToJsonString()));
     }
 
-    public void Dispose() => _listener.Close();
+    public void Dispose() => _app.DisposeAsync().AsTask().GetAwaiter().GetResult();
 }
 
 /// <summary>Index runs as they happen: the queue, each repository's progress, its log, and a whole run through a GitLab twice.</summary>
