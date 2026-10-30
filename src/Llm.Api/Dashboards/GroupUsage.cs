@@ -25,7 +25,7 @@ public static class GroupUsage
         public Used Add(Used o) => new(Requests + o.Requests, InputMiss + o.InputMiss, InputHit + o.InputHit, Output + o.Output, Cost + o.Cost);
     }
 
-    private static async Task<IResult> UsageAsync(DateTimeOffset from, DateTimeOffset to, SqlDatasource sql, AppDbContext db, Credit credit, CancellationToken ct)
+    private static async Task<IResult> UsageAsync(DateTimeOffset from, DateTimeOffset to, LedgerSql sql, AppDbContext db, Credit credit, CancellationToken ct)
     {
         if (to <= from || to - from > DashboardEndpoints.MaxRange)
         {
@@ -34,15 +34,17 @@ public static class GroupUsage
         Dictionary<string, Used> byPerson;
         try
         {
-            var rows = await sql.QueryAsync($"""
-                select lower({UsageEndpoints.Person}) as person, count(*) as requests,
-                       coalesce(sum(greatest(coalesce(s.prompt_tokens,0) - {UsageEndpoints.Cached}, 0)),0) as input_miss,
-                       coalesce(sum({UsageEndpoints.Cached}),0) as input_hit,
-                       coalesce(sum(s.completion_tokens),0) as output,
-                       coalesce(sum(s.spend),0) as cost
-                {UsageEndpoints.From} where s."startTime" >= @from and s."startTime" < @to and {RateLimits.NotRefused}
+            // Each person's from the app's own ledger (a rate limit's refusal left out, as the dashboards leave it).
+            var rows = await sql.QueryAsync("""
+                select r.person, count(*) as requests,
+                       coalesce(sum(greatest(r.prompt_tokens - r.cached_tokens, 0)),0) as input_miss,
+                       coalesce(sum(r.cached_tokens),0) as input_hit,
+                       coalesce(sum(r.completion_tokens),0) as output,
+                       coalesce(sum(r.cost),0) as cost
+                from gateway.requests r
+                where r.started_at >= @from and r.started_at < @to and r.person is not null and not (r.status = 'refused' and r.refusal in ('rpm', 'tpm', 'parallel'))
                 group by 1
-                """, new Dictionary<string, object> { ["from"] = from.UtcDateTime, ["to"] = to.UtcDateTime }, ct);
+                """, new Dictionary<string, object> { ["from"] = from.ToUniversalTime(), ["to"] = to.ToUniversalTime() }, ct);
             byPerson = rows.Rows.ToDictionary(r => (string)r[0]!, r => new Used(Num(r[1]), Num(r[2]), Num(r[3]), Num(r[4]), Convert.ToDecimal(r[5] ?? 0m, CultureInfo.InvariantCulture)),
                 StringComparer.OrdinalIgnoreCase);
         }
