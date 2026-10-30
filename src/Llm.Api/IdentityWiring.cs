@@ -388,6 +388,14 @@ public static class IdentityWiring
         services.AddScoped<Plans.PlansTool>();
         services.AddScoped<Code.ReviewTool>();
         services.Configure<Chat.Tools.WebOptions>(config.GetSection("Web"));
+        services.PostConfigure<Chat.Tools.WebOptions>(o =>
+        {
+            // The web-search feature's own SearXNG, unless an admin set another (Settings -> Tools -> Search engine).
+            if (string.IsNullOrWhiteSpace(o.SearchUrl) && Operations.Features.On(config, "web-search"))
+            {
+                o.SearchUrl = Chat.Tools.WebOptions.OwnSearch;
+            }
+        });
         services.Configure<Plugins.PluginOptions>(config.GetSection("Plugins"));
         services.Configure<Schedules.GitLabOptions>(config.GetSection("GitLab"));
         services.AddSingleton<Schedules.GitLabBot>();

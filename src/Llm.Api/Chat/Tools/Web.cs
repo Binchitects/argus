@@ -21,8 +21,11 @@ public sealed class WebOptions
     /// </summary>
     public string? AllowedSites { get; set; }
 
-    /// <summary>A SearXNG instance; empty: no search (the websearch profile sets it to its own).</summary>
+    /// <summary>A SearXNG instance; empty: the web-search feature's own (<see cref="OwnSearch"/>) when it is on, else no search.</summary>
     public string? SearchUrl { get; set; }
+
+    /// <summary>The web-search feature's SearXNG, on the stack's network.</summary>
+    public const string OwnSearch = "http://searxng:8080";
 
     /// <summary>Of a page, what one read returns.</summary>
     public int MaxPageChars { get; set; } = 20_000;
