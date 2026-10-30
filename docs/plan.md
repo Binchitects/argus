@@ -2411,10 +2411,26 @@ llama.cpp "leak" was its prompt cache, sized in Settings. Left: SGLang and
 vLLM on a real GPU server (bring-up, a smoke test per model, numbers), with
 the groundwork below.
 
-### v7.6 — A model of your own
+### v7.6.0 — Knowledge from anywhere, a wiki, and Code Arena's code index (2026-10-30)
+
+Shipped the requests of 2026-10-29 instead of the model lab: knowledge by
+upload (OCR) and from GitHub, Gitea, Jira, Notion, WebDAV, S3 and feeds; Ask
+your data on MySQL, MariaDB, SQL Server and uploaded files; a wiki searched
+with no model; Agent Studio on fifteen GitLab events with steps that act;
+stronger safeguards; hardware dashboards for any number of GPUs; the prompt
+log in every state; one command (`arenactl`) to build and install with an
+offline bundle; Code Arena's code index (off by default: with Qwen3-4B
+neither it nor grep alone passes the locate tasks, docs/measurements/
+code-index.md) and ten VS Code features in its IDE; and the app's own
+gateway up to its ledger and LiteLLM's log mirrored into it (commits 0–6 of
+design/own-gateway.md). Left: the gateway's commits 7–21; the IDE plan's
+peek, editor groups, a Problems store, the Explorer's follow and edits, and
+git sync; the code index's model gate with a stronger model.
+
+### v7.7 — A model of your own
 
 Moved from v7.3, which shipped the science lab and the Kubernetes install, and
-from v7.5, which shipped the requests of 2026-10-28.
+from v7.5 and v7.6, which shipped the requests of 2026-10-28 and 2026-10-29.
 
 1. **Model lab.** Teach a small model the company's words on the local GPU
    (a LoRA from chosen knowledge sources, prompts and good answers), then

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ArrowRight, BadgeCheck, Cpu, ExternalLink, KeyRound, LineChart, ListOrdered, ListTodo, MessageSquareHeart, ScrollText, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, ArrowRight, BarChart, BookOpenText, ExternalLink, Library, ShieldAlert, SquareCode, Workflow, type LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
@@ -29,68 +29,52 @@ interface Tour {
 }
 
 const latestTour: Tour = {
-  release: '7.5',
-  title: "What's new in Argus Arena 7.5",
+  release: '7.6',
+  title: "What's new in Argus Arena 7.6",
   slides: [
     {
-      icon: ListTodo,
-      title: 'Checklists',
-      text: 'Write a checklist once (your definition of done, a release\'s steps) and turn it on in a chat or in Code Arena: the model works through it and ticks each item with what it did, and the list is the same in both.',
-      to: '/checklists',
-      action: 'Open Checklists',
+      icon: BookOpenText,
+      title: 'A wiki of everything',
+      text: "The company's documents, code and data in one place, searched and read with no model: what knowledge holds, the repositories Argus reads, and the data's tables.",
+      to: '/wiki',
+      action: 'Open the wiki',
     },
     {
-      icon: KeyRound,
-      title: 'API keys of your own',
-      text: 'Account → API keys: a key for each tool or script, named, each with its own limits under yours, its own requests at once and a monthly budget, and each revoked on its own.',
-      to: '/account',
-      action: 'Make a key',
-    },
-    {
-      icon: BadgeCheck,
-      title: 'Code Arena, signed',
-      text: "Sign in to Code Arena with your user name and password, open and add folders, and reference files outside the folder with @. Its downloads are signed by your server's own CA, and its installers and code-arena update check that before they install.",
+      icon: SquareCode,
+      title: 'Code Arena, more like VS Code',
+      text: 'Preview and pinned tabs, tabs and unsaved text back after a reload, breadcrumbs and an Outline, Go to Symbol in the whole folder (Ctrl+T), Markdown preview, and pictures, sound and video in tabs.',
       to: '/help/code-arena',
       action: 'Read about Code Arena',
     },
     {
-      icon: MessageSquareHeart,
-      title: 'Say what you think',
-      text: 'Rate any answer and say why, or Send feedback from the account menu about Arena itself: both reach the people who run it.',
-      to: '/',
-      action: 'Open the chat',
+      icon: BarChart,
+      title: 'Ask your data, on more',
+      text: 'Ask questions of MySQL, MariaDB and SQL Server databases as of PostgreSQL ones, and of CSV, Excel and JSON files uploaded as a source.',
+      to: '/data',
+      action: 'Open Data',
     },
     {
-      icon: LineChart,
-      title: 'A dashboard for each role',
-      text: 'LLM and users, System and Hardware, each with its own permission. Usage by group shows each group\'s requests, tokens and spend with its members.',
-      to: '/admin/dashboards',
-      action: 'Open Dashboards',
-      permission: 'usage.read',
+      icon: Workflow,
+      title: 'Agent Studio reacts to GitLab',
+      text: 'A workflow can start on fifteen GitLab events (a merge request opened, a pipeline failed, an issue labelled…), filtered by branch, label or words, and act: comment, label, open an issue, run code, query data, call a service, wait or notify.',
+      to: '/studio',
+      action: 'Open Agent Studio',
     },
     {
-      icon: ListOrdered,
-      title: 'Fair when it is busy',
-      text: "Requests at once for each person and group, API keys' requests in the same fair line as the chat's, and a longest line past which a request is told to try again. Admin → Line shows who runs and who waits, in order.",
-      to: '/admin/line',
-      action: 'Open the line',
-      permission: 'usage.read',
+      icon: Library,
+      title: 'Knowledge from anywhere',
+      text: 'Upload documents and pictures (read with OCR when they are scans), or add GitHub, Gitea, Jira, Notion, WebDAV, S3 or a feed as a source.',
+      to: '/admin/knowledge',
+      action: 'Open Knowledge',
+      permission: 'knowledge.read',
     },
     {
-      icon: ScrollText,
-      title: 'The prompt log',
-      text: 'Every prompt and answer, the chat\'s and the API\'s, searchable by those with its own permission, and each search audited. Kept as long as the retention settings say.',
-      to: '/admin/prompts',
-      action: 'Open the prompt log',
-      permission: 'prompts.review',
-    },
-    {
-      icon: Cpu,
-      title: 'SGLang beside vLLM',
-      text: 'A third engine, chosen at install, upgrade or repair: SGLang runs one server a model on its GPUs, as vLLM does. Models on disk are listed with what uses them, and removed with their files.',
-      to: '/help/deployment',
-      action: 'Read how',
-      permission: 'settings.read',
+      icon: ShieldAlert,
+      title: 'Safeguards that are harder to get round',
+      text: 'Disguised words, injections hidden in other languages, base64 or HTML, more kinds of personal data and secrets, and commands that would send data away are caught; six new templates to start from.',
+      to: '/admin/safeguards',
+      action: 'Open Safeguards',
+      permission: 'safeguards.read',
     },
   ],
 }

@@ -5,7 +5,7 @@ import { fakeApi, member, renderApp } from '@/test/utils'
 
 describe("what's new", () => {
   it('opens once after a release, goes through its pages, and is kept as seen', async () => {
-    let seen: string | null = '7.3'
+    let seen: string | null = '7.4'
     const calls = fakeApi(member, {
       'GET /api/account/whats-new': () => ({ json: { seen } }),
       'PUT /api/account/whats-new': (body) => {
@@ -14,30 +14,30 @@ describe("what's new", () => {
       },
     })
     renderApp('/')
-    const tour = await screen.findByRole('dialog', { name: 'Checklists' })
-    expect(within(tour).getByText("What's new in Argus Arena 7.5")).toBeInTheDocument()
+    const tour = await screen.findByRole('dialog', { name: 'A wiki of everything' })
+    expect(within(tour).getByText("What's new in Argus Arena 7.6")).toBeInTheDocument()
     await userEvent.click(within(tour).getByRole('button', { name: /Next/ }))
-    expect(await screen.findByRole('dialog', { name: 'API keys of your own' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: 'Code Arena, more like VS Code' })).toBeInTheDocument()
     // A page by its dot, then to the last one: a member has no admin pages to see.
-    await userEvent.click(screen.getByRole('button', { name: 'Say what you think (4 of 4)' }))
-    const last = await screen.findByRole('dialog', { name: 'Say what you think' })
+    await userEvent.click(screen.getByRole('button', { name: 'Agent Studio reacts to GitLab (4 of 4)' }))
+    const last = await screen.findByRole('dialog', { name: 'Agent Studio reacts to GitLab' })
     await userEvent.click(within(last).getByRole('button', { name: 'Done' }))
-    await waitFor(() => expect(calls.find((c) => c.method === 'PUT' && c.path === '/api/account/whats-new')?.body).toEqual({ release: '7.5' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT' && c.path === '/api/account/whats-new')?.body).toEqual({ release: '7.6' }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
 
     // Again from the account menu, as often as they like.
     await userEvent.click(screen.getByRole('button', { name: /Account menu/ }))
     await userEvent.click(await screen.findByRole('menuitem', { name: "What's new" }))
-    expect(await screen.findByRole('dialog', { name: 'Checklists' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: 'A wiki of everything' })).toBeInTheDocument()
   })
 
-  it('shows the features chosen at install to those who may read the settings', async () => {
-    fakeApi({ ...member, permissions: ['settings.read'] }, { 'GET /api/account/whats-new': () => ({ json: { seen: '7.4' } }), 'PUT /api/account/whats-new': () => ({ json: { seen: '7.5' } }) })
+  it('shows the knowledge sources to those who may read knowledge', async () => {
+    fakeApi({ ...member, permissions: ['knowledge.read'] }, { 'GET /api/account/whats-new': () => ({ json: { seen: '7.5' } }), 'PUT /api/account/whats-new': () => ({ json: { seen: '7.6' } }) })
     renderApp('/')
-    await screen.findByRole('dialog', { name: 'Checklists' })
-    await userEvent.click(screen.getByRole('button', { name: 'SGLang beside vLLM (5 of 5)' }))
-    const page = await screen.findByRole('dialog', { name: 'SGLang beside vLLM' })
-    expect(within(page).getByRole('button', { name: 'Read how' })).toBeInTheDocument()
+    await screen.findByRole('dialog', { name: 'A wiki of everything' })
+    await userEvent.click(screen.getByRole('button', { name: 'Knowledge from anywhere (5 of 5)' }))
+    const page = await screen.findByRole('dialog', { name: 'Knowledge from anywhere' })
+    expect(within(page).getByRole('button', { name: 'Open Knowledge' })).toBeInTheDocument()
   })
 
   it('does not open for someone who has seen it, or a later one', async () => {
@@ -51,14 +51,15 @@ describe("what's new", () => {
   it('takes them where to try it', async () => {
     const calls = fakeApi(member, {
       'GET /api/account/whats-new': () => ({ json: { seen: null } }),
-      'PUT /api/account/whats-new': () => ({ json: { seen: '7.5' } }),
-      'GET /api/checklists': () => ({ json: [] }),
+      'PUT /api/account/whats-new': () => ({ json: { seen: '7.6' } }),
+      'GET /api/wiki': () => ({ json: { sources: [], meaning: false, code: false, data: false } }),
     })
     renderApp('/')
-    const tour = await screen.findByRole('dialog', { name: 'Checklists' })
-    await userEvent.click(within(tour).getByRole('button', { name: 'Open Checklists' }))
-    // The checklists' page.
-    expect(await screen.findByRole('heading', { level: 1, name: 'Checklists' })).toBeInTheDocument()
+    const tour = await screen.findByRole('dialog', { name: 'A wiki of everything' })
+    await userEvent.click(within(tour).getByRole('button', { name: 'Open the wiki' }))
+    // The wiki's page.
+    expect(await screen.findByRole('heading', { level: 1, name: 'Wiki' })).toBeInTheDocument()
     expect(calls.some((c) => c.method === 'PUT' && c.path === '/api/account/whats-new')).toBe(true)
   })
+
 })

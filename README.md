@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img alt="version" src="https://img.shields.io/badge/version-7.5.0-5b8cff">
+  <img alt="version" src="https://img.shields.io/badge/version-7.6.0-5b8cff">
   <img alt="self-hosted" src="https://img.shields.io/badge/self--hosted-on%20your%20GPUs-7c4dff">
   <img alt="offline" src="https://img.shields.io/badge/installs-air--gapped-2ea043">
   <img alt="licence" src="https://img.shields.io/badge/licence-AGPL--3.0%20%7C%20commercial-555">
@@ -51,9 +51,10 @@ people in, with calls captioned live in each reader's language.
 
 ### 🧑‍💻 Code Arena
 Our own coding agent, with a full IDE in your browser: editor, search, git,
-terminals, a debugger and language servers. It's one file, installed in one line
-from your Arena and kept current by it. Every Arena tool works as you, and every
-session is synced with the web chat.
+terminals, a debugger and language servers, tabs, breadcrumbs and an Outline
+as in VS Code, and a code index that finds code by what it does or by name.
+It's one file, installed in one line from your Arena and kept current by it.
+Every Arena tool works as you, and every session is synced with the web chat.
 
 </td>
 </tr>
@@ -88,9 +89,10 @@ same GPUs, with the same rights and budgets as the chat.
 <td valign="top">
 
 ### 🤖 Agents and apps
-Build agents in Agent Studio, turn a chat into an app, ask questions of your
-data, make a deck, let a browser agent do a task while you watch, and sketch a
-screen that becomes working code. For long work the chat proposes a plan you
+Build agents in Agent Studio that react to GitLab and act on it, turn a chat
+into an app, ask questions of your databases and files, search a wiki of
+everything the company knows, make a deck, let a browser agent do a task while
+you watch, and sketch a screen that becomes working code. For long work the chat proposes a plan you
 approve, and calls its tools from a short program when one call is not enough.
 
 </td>

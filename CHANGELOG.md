@@ -15,6 +15,74 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v7.6.0 (2026-10-30)
+
+The requests of 2026-10-29: company knowledge by upload and from many more
+places, Ask your data on more databases and files, a wiki searched with no
+model, Agent Studio that reacts to GitLab and acts on it, stronger
+safeguards, one command to build and install that works on a fresh machine,
+and Code Arena with a code index of its own (find code by what it does or by
+name, with fewer tokens than grep) and more of VS Code.
+
+### :rocket: Epics and highlights
+
+- **Code Arena's code index**: an index of the folder's code, made by Code
+  Arena's own scanners (C#, TypeScript, JavaScript, Python, Markdown), kept
+  in its data folder (never in the repository) and synced before every
+  question. `code_search` finds code by what it does or by name and cites
+  each place as `path:start-end` with its lines, within a token budget;
+  `code_symbol` gives a symbol's source, callers, callees or impact, each use
+  tied to what it names and how sure that is; `code_outline` maps a file or a
+  folder. Off by default (`"codeIndex": true` turns it on) until it is shown
+  to help a model: with no model, the index puts a changed file first for 53%
+  of 60 real commits' subjects against 13% for grep's ranking.
+  `code-arena index` and `code-arena search` give the same answers in the
+  terminal; the IDE's Go to Symbol in Workspace (Ctrl+T, `#` in quick open)
+  and its Outline read it too
+- **More of VS Code in Code Arena's IDE**: preview, pinned and reordered tabs;
+  tabs and unsaved text back after a reload (hot exit); breadcrumbs; the
+  Outline; quick open's `#`, `@`, `?` and `>`; Markdown preview; pictures,
+  sound and video in tabs; a script's language from its first line; tsc's
+  pretty output in Problems
+- **Company knowledge from anywhere**: uploads of many document types and
+  pictures, read with OCR; GitHub and Gitea, Jira, Notion, WebDAV, S3 and
+  feeds as sources
+- **Ask your data on more**: MySQL and MariaDB, SQL Server, and uploaded
+  CSV, Excel and JSON files
+- **A wiki**: the company's documents, code and data, searched and read with
+  no model
+- **Agent Studio acts**: fifteen GitLab events with filters, and steps that
+  run code, query data and knowledge, call HTTP, wait, notify and comment,
+  label or open issues in GitLab
+- **One command for everything**: `arenactl` builds, packages and installs,
+  with every dependency in an offline bundle, and works on a fresh machine
+
+### :sparkles: New features & Enhancements
+
+- Hardware dashboards for one GPU, many or none
+- The prompt log shows every request in any state
+- Arena tells people who run an old Code Arena
+- Safeguards that are harder to get round, and more of them
+- The app's own gateway, step by step: the API goes through the app alone,
+  Code Studio's workspaces ask models through the app, routes and the chat's
+  models come from the app's own tables, and the app's own ledger of model
+  requests (LiteLLM stays the default until measured against it)
+
+### :bug: Bugs fixed
+
+- A real GitLab webhook to an Agent Studio workflow was refused (it sent no
+  X-Requested-With)
+- API completions: a model not ready says so (503 with Retry-After), a copy
+  keeps its name, preflights pass
+- A tab shown before the IDE's editor area was drawn never got its editor
+- The TypeScript scanner said nothing of what holds a symbol, and the C#
+  scanner named a field typed with generic arguments after the first of them
+
+### :arrow_up: Deps updates
+
+- MySqlConnector 2.6.2 and Microsoft.Data.SqlClient 7.1.1 (Ask your data on
+  MySQL, MariaDB and SQL Server)
+
 ## v7.5.0 (2026-10-29)
 
 Arena for many people at once: a fair line when it is busy, a dashboard for
