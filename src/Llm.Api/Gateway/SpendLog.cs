@@ -157,7 +157,7 @@ public sealed partial class SpendLog(IOptions<DashboardOptions> options, IConfig
                 case
                   when s.call_type in ('aimage_generation', 'image_generation') then case when coalesce(s.spend, 0) = 0 then @image else s.spend::numeric end
                   when s.call_type = '{VideoCall}' and jsonb_typeof(s.metadata->'video_seconds') = 'number' then (s.metadata->>'video_seconds')::numeric * @video
-                  when s.call_type in ('aspeech', 'speech', 'atranscription', 'transcription', '{VideoCall}') then null
+                  when s.call_type in ('aspeech', 'speech', 'atranscription', 'transcription', '{VideoCall}', '{MusicCall}') then null
                   else (greatest(coalesce(s.prompt_tokens, 0) - least({UsageEndpoints.Cached}, coalesce(s.prompt_tokens, 0)), 0) * coalesce(p.i, @di)
                         + least({UsageEndpoints.Cached}, coalesce(s.prompt_tokens, 0)) * coalesce(p.c, @dc)
                         + coalesce(s.completion_tokens, 0) * coalesce(p.o, @do)) / 1000000
@@ -211,7 +211,55 @@ public sealed partial class SpendLog(IOptions<DashboardOptions> options, IConfig
             await update.ExecuteNonQueryAsync(ct);
         }
         await tx.CommitAsync(ct);
+        if (apply && change.Rows > 0)
+        {
+            await RepriceLedgerAsync(from, to, onlyFree, models, standard, defaults, ct);
+        }
         return change;
+    }
+
+    /// <summary>
+    /// The same prices in the app's own ledger, which credit reads: its tokens, its cached tokens, a clip's seconds; a
+    /// sound (speech, music, a transcription) and a clip of no known length keep what they cost.
+    /// </summary>
+    private async Task RepriceLedgerAsync(DateTimeOffset from, DateTimeOffset to, bool onlyFree, IReadOnlyDictionary<string, TokenPrice> models, TokenPrice standard,
+        PriceOptions defaults, CancellationToken ct)
+    {
+        await using var conn = new NpgsqlConnection(DatabaseSettings.ConnectionString(config));
+        await conn.OpenAsync(ct);
+        await using var cmd = new NpgsqlCommand("""
+            with p as (
+              select * from unnest(@names::text[], @input::numeric[], @cached::numeric[], @output::numeric[]) as t(name, i, c, o)
+            ), r as (
+              select g.id, g.cost as old,
+                case
+                  when g.call = 'image' then case when g.cost = 0 then @image else g.cost end
+                  when g.call = 'video' and g.seconds is not null then g.seconds::numeric * @video
+                  when g.call in ('speech', 'transcription', 'video', 'music') then null
+                  else (greatest(g.prompt_tokens - least(g.cached_tokens, g.prompt_tokens), 0) * coalesce(p.i, @di)
+                        + least(g.cached_tokens, g.prompt_tokens) * coalesce(p.c, @dc)
+                        + g.completion_tokens * coalesce(p.o, @do)) / 1000000
+                end as new
+              from gateway.requests g left join p on p.name = g.model
+              where g.started_at >= @from and g.started_at < @to and g.status in ('done', 'cached') and (not @onlyFree or g.cost = 0)
+            )
+            update gateway.requests g set cost = r.new
+            from r where g.id = r.id and r.new is not null and abs(r.new - r.old) > 1e-12
+            """, conn);
+        var names = models.Keys.ToArray();
+        cmd.Parameters.AddWithValue("names", names);
+        cmd.Parameters.AddWithValue("input", names.Select(n => models[n].Input).ToArray());
+        cmd.Parameters.AddWithValue("cached", names.Select(n => models[n].CachedInput).ToArray());
+        cmd.Parameters.AddWithValue("output", names.Select(n => models[n].Output).ToArray());
+        cmd.Parameters.AddWithValue("di", standard.Input);
+        cmd.Parameters.AddWithValue("dc", standard.CachedInput);
+        cmd.Parameters.AddWithValue("do", standard.Output);
+        cmd.Parameters.AddWithValue("image", defaults.PerImage);
+        cmd.Parameters.AddWithValue("video", defaults.PerVideoSecond);
+        cmd.Parameters.AddWithValue("from", from.ToUniversalTime());
+        cmd.Parameters.AddWithValue("to", to.ToUniversalTime());
+        cmd.Parameters.AddWithValue("onlyFree", onlyFree);
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     public static string Money(decimal value) => value.ToString(value is > 0 and < 0.01m ? "$0.0000" : "$0.00", CultureInfo.InvariantCulture);

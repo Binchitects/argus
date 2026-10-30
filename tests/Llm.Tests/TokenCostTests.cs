@@ -398,6 +398,7 @@ public sealed class TokenCostTests(AppFixture app)
             await seed.ExecuteNonQueryAsync();
         }
         await using var f = app.Create(app.ConnectionStringFor("recalc_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway());
+        await app.MirrorAsync();
         var (_, personId, _) = await PersonAsync(f);
         // An answer from before costs were kept, in the same window.
         Guid round;
@@ -455,6 +456,13 @@ public sealed class TokenCostTests(AppFixture app)
         Assert.Equal(completion, await SpendAsync(model + "-1"));
         Assert.Equal(0.01m, await SpendAsync(model + "-2"));
         Assert.Equal(0m, await SpendAsync(model + "-3"));
+        // The app's own ledger, which credit reads, has the same prices.
+        using (var scope = f.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var ledger = await db.GatewayRequests.AsNoTracking().Where(r => r.SourceId!.StartsWith(model)).ToDictionaryAsync(r => r.SourceId!, r => Math.Round(r.Cost, 12));
+            Assert.Equal((completion, 0.01m, 0m, 0.5m), (ledger[model + "-1"], ledger[model + "-2"], ledger[model + "-3"], ledger[model + "-4"]));
+        }
         // Already priced, and so left alone.
         Assert.Equal(0.5m, await SpendAsync(model + "-4"));
         using (var scope = f.Services.CreateScope())
