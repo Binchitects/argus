@@ -60,8 +60,14 @@ public static partial class GuardrailEndpoints
         {
             return Answer(ApiVerdict.None);
         }
+        // The key's person as the app keeps its keys (by its hash: an email changed since the key was made is theirs), else
+        // as LiteLLM names them.
         var owner = key is null ? null : Str(key, "user_api_key_user_id") ?? Str(key, "user_api_key_user_email");
-        var user = owner is { } email && email.Contains('@') ? await users.FindByEmailAsync(email) : null;
+        var holder = key is not null && Str(key, "user_api_key_hash") is { Length: 64 } hash
+            ? await http.RequestServices.GetRequiredService<Gateway.KeyBook>().ForHashAsync(hash, http.RequestAborted)
+            : null;
+        var user = holder is not null ? await users.FindByIdAsync(holder.UserId.ToString())
+            : owner is { } email && email.Contains('@') ? await users.FindByEmailAsync(email) : null;
         if (user is { IsDisabled: true })
         {
             return Answer(new ApiVerdict("BLOCKED", "This account is disabled."));

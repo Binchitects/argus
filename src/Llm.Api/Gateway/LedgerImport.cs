@@ -138,7 +138,15 @@ public sealed partial class LedgerImport(IServiceScopeFactory scopes, IOptions<D
         var ids = await db.Users.AsNoTracking().Where(u => u.NormalizedEmail != null && emails.Select(e => e.ToUpperInvariant()).Contains(u.NormalizedEmail))
             .Select(u => new { u.NormalizedEmail, u.Id }).ToListAsync(ct);
         var idOf = ids.ToDictionary(u => u.NormalizedEmail!, u => u.Id, StringComparer.Ordinal);
-        var ledger = rows.Select(row => ToRequest(row, Person(row) is { } p && idOf.TryGetValue(p.ToUpperInvariant(), out var id) ? id : null)).ToList();
+        // A person's own key names them as they are now (LiteLLM keeps the email the key was made with: one changed since is theirs).
+        var hashes = rows.Select(r => r.ApiKey).Where(k => k.Length == 64).Distinct().ToList();
+        var owners = await (from k in db.ApiKeys.AsNoTracking()
+                            join u in db.Users.AsNoTracking() on k.UserId equals u.Id
+                            where hashes.Contains(k.Hash)
+                            select new { k.Hash, u.Id, u.Email }).ToDictionaryAsync(o => o.Hash.TrimEnd(), StringComparer.Ordinal, ct);
+        var ledger = rows.Select(row => owners.TryGetValue(row.ApiKey, out var owner) && row.Alias != Chat.ChatKey.Alias
+            ? ToRequest(row, owner.Id, owner.Email?.Trim().ToLowerInvariant())
+            : ToRequest(row, Person(row) is { } p && idOf.TryGetValue(p.ToUpperInvariant(), out var id) ? id : null)).ToList();
         await WriteAsync(db, ledger, ct);
         // A full batch: the next reads on from its last row. Else the next look reads the last minute again (rows written late).
         if (rows.Count == Batch)
@@ -260,8 +268,8 @@ public sealed partial class LedgerImport(IServiceScopeFactory scopes, IOptions<D
     private static string? Person(Row row) =>
         new[] { row.User, row.MetaUser, row.KeyUser, row.EndUser }.FirstOrDefault(p => p is { Length: > 0 } && p != "default_user_id")?.Trim().ToLowerInvariant();
 
-    /// <summary>A row of LiteLLM's log as the ledger keeps it.</summary>
-    private static GatewayRequest ToRequest(Row row, Guid? userId)
+    /// <summary>A row of LiteLLM's log as the ledger keeps it: for this person (by default, the one LiteLLM names).</summary>
+    private static GatewayRequest ToRequest(Row row, Guid? userId, string? person = null)
     {
         var (call, protocol) = row.CallType switch
         {
@@ -301,7 +309,7 @@ public sealed partial class LedgerImport(IServiceScopeFactory scopes, IOptions<D
             Id = Guid.CreateVersion7(new DateTimeOffset(start)), StartedAt = start, EndedAt = end,
             FirstTokenAt = row.FirstToken is { } f ? DateTime.SpecifyKind(f, DateTimeKind.Utc) : null,
             DurationMs = row.DurationMs ?? (int)Math.Max(0, (end - start).TotalMilliseconds),
-            Surface = surface, Call = call, Protocol = booked ? "internal" : protocol, CreditKind = credit, UserId = userId, Person = Person(row),
+            Surface = surface, Call = call, Protocol = booked ? "internal" : protocol, CreditKind = credit, UserId = userId, Person = person ?? Person(row),
             KeyHash = surface is "api" or "studio" && row.ApiKey.Length > 0 ? Cut(row.ApiKey, 64) : null, KeyAlias = Cut(row.Alias, 120), Tag = Cut(row.Tag, 64),
             Model = Cut(row.Model, 200) ?? "", Deployment = Uri.TryCreate(row.ApiBase, UriKind.Absolute, out var u) ? Cut(u.Authority, 200) : null,
             PromptTokens = row.Prompt, CachedTokens = (int)Math.Min(row.Cached, row.Prompt), CompletionTokens = row.Completion, Cost = (decimal)row.Spend,

@@ -82,7 +82,7 @@ public sealed class PromptLogTests(AppFixture app)
         await using var f = app.Create(app.ConnectionStringFor("promptscache_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), new Dictionary<string, string?>
         {
             ["Gateway:AnswerCache"] = "all",
-            ["Gateway:AnswerCacheKeyCheck"] = "00:00:00",
+            ["Gateway:KeyCacheSeconds"] = "0",
         });
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
         var name = "pc" + Guid.NewGuid().ToString("N")[..8];

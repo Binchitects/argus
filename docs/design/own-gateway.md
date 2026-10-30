@@ -583,7 +583,7 @@ Every class LiteLLM touches today:
 | `Workspaces:GatewayUrl` | StudioWorkspaces.cs:27 |
 | `Dashboards:SqlDatabase` | DashboardStore.cs:12 |
 | `Keys:Watch` | KeyAccess.cs |
-| `Gateway:AnswerCacheKeyCheck` (folded into `Gateway:KeyCacheSeconds`) | AnswerCache.cs:32 |
+| `Gateway:AnswerCacheKeyCheck` (folded into `Gateway:KeyCacheSeconds`, done in 9c) | AnswerCache.cs:32 |
 | Helm `images.litellm`, `litellm.*`, `availability.autoscale.maxReplicas.litellm`, `secrets.gatewayKey` | values.yaml |
 | Database name `litellm`, datasource uid `litellm-db`, header `X-LLM-User-Email` | — |
 
@@ -747,11 +747,15 @@ models a key may not use): the importer tells each apart, and migration LedgerRe
 mirrored (live: 649 of 673 "failures" were refusals). The usage dashboard's "Refused by rate limits" became "Refused",
 with every reason.
 
-Commit 9 goes in three parts: 9a mirrors people's keys into `gateway.api_keys` (every half minute, with the names and
+Commit 9 went in three parts (all live 2026-10-30; a key the app made answered through LiteLLM live): 9a mirrors people's keys into `gateway.api_keys` (every half minute, with the names and
 limits of `own_keys`, a key LiteLLM no longer holds taken out); 9b has the app make the keys (`ApiKeys`: the secret made
 here, registered at LiteLLM with `key`, the row first, `own_keys` merged and dropped; the mirror then leaves a row's kind,
 name and limits alone and takes out only rows older than two minutes); 9c reads them (`KeyBook` replaces the five caches,
-`MoveGatewayAsync` goes, and the importer names the person by the key's owner).
+`MoveGatewayAsync` goes, and the importer names the person by the key's owner). Also in 9c: the guardrail finds the
+person by `user_api_key_hash` (an email changed since the key was made is theirs, so credit and API-off still hold), the
+app never asks LiteLLM of a key (`KeyInfoAsync` is gone), and `Gateway:KeyCacheSeconds` (10) replaced
+`Gateway:AnswerCacheKeyCheck`. The key lists on Account and Admin → People still read LiteLLM's (its spend and block
+state) until commit 11 moves the blocks to the app.
 
 ---
 

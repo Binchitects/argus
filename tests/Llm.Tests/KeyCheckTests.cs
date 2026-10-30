@@ -1,7 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Llm.Api.Gateway;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Llm.Tests;
 
@@ -39,10 +42,12 @@ public sealed class KeyCheckTests(AppFixture app)
     }
 
     [Fact]
-    public async Task Argus_learns_whose_an_api_key_is_and_the_gateway_is_asked_once_a_minute()
+    public async Task Argus_learns_whose_an_api_key_is_and_the_apps_keys_are_read_once_while_believed()
     {
         var (_, name, key) = await PersonAsync();
         var http = Inside();
+        var book = app.Factory.Services.GetRequiredService<KeyBook>();
+        var reads = book.Reads;
 
         var (status, body) = await AskAsync(http, new { key });
         Assert.Equal(HttpStatusCode.OK, status);
@@ -53,7 +58,7 @@ public sealed class KeyCheckTests(AppFixture app)
         (status, body) = await AskAsync(http, new { key }, FakeArgus.Token);
         Assert.Equal(HttpStatusCode.OK, status);
         Assert.Equal(name, body.GetProperty("username").GetString());
-        Assert.Equal(1, app.Gateway.KeyLookups.Count(k => k == key));
+        Assert.Equal(reads + 1, book.Reads);
     }
 
     [Fact]
@@ -94,12 +99,24 @@ public sealed class KeyCheckTests(AppFixture app)
         Assert.Equal("invalid_key", body.GetProperty("status").GetString());
         Assert.Contains("not valid", body.GetProperty("error").GetString(), StringComparison.Ordinal);
 
-        var (_, _, blocked) = await PersonAsync();
-        app.Gateway.Keys.Values.Single(k => k.Secret == blocked).Blocked = true;
-        Assert.Equal(HttpStatusCode.Unauthorized, (await AskAsync(http, new { key = blocked })).Status);
+        // Revoked: refused at once (the app forgets what it believed of the key).
+        var (_, _, revoked) = await PersonAsync();
+        Assert.Equal(HttpStatusCode.OK, (await AskAsync(http, new { key = revoked })).Status);
+        await using (var scope = app.Factory.Services.CreateAsyncScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<ApiKeys>().RevokeAsync([AnswerCache.HashOf(revoked)]);
+        }
+        Assert.Equal(HttpStatusCode.Unauthorized, (await AskAsync(http, new { key = revoked })).Status);
 
         var (_, _, expired) = await PersonAsync();
-        app.Gateway.Keys.Values.Single(k => k.Secret == expired).Expires = DateTimeOffset.UtcNow.AddMinutes(-1);
+        await using (var scope = app.Factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+            var hash = AnswerCache.HashOf(expired);
+            (await db.ApiKeys.SingleAsync(k => k.Hash == hash)).ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+            await db.SaveChangesAsync();
+            scope.ServiceProvider.GetRequiredService<KeyBook>().Changed(hash);
+        }
         Assert.Equal(HttpStatusCode.Unauthorized, (await AskAsync(http, new { key = expired })).Status);
     }
 

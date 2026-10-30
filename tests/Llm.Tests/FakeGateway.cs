@@ -139,17 +139,6 @@ public sealed class FakeGateway : ILiteLlm, IRoutesSource
         return [.. KeysOf(email).Select(k => new GatewayKey(k.Token, k.Alias, "sk-...", 0, k.Blocked, k.CreatedAt, k.Models, k.MaxParallel, k.TeamId, k.Rate, k.MaxBudget))];
     }
 
-    /// <summary>The keys looked up by the key itself (each one asked about), so tests can see what was cached.</summary>
-    public ConcurrentQueue<string> KeyLookups { get; } = new();
-
-    public Task<GatewayKeyInfo?> KeyInfoAsync(string key, CancellationToken ct = default)
-    {
-        Check();
-        KeyLookups.Enqueue(key);
-        var found = Keys.Values.FirstOrDefault(k => k.Secret == key);
-        return Task.FromResult(found is null ? null : new GatewayKeyInfo(found.Email, found.Blocked, found.Expires, found.Models));
-    }
-
     public Task DeleteKeysAsync(IEnumerable<string> tokens, CancellationToken ct = default)
     {
         Check();

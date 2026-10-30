@@ -22,6 +22,7 @@ public sealed partial class PeopleService(
     AppDbContext db,
     ILiteLlm gateway,
     ApiKeys keys,
+    KeyBook keyBook,
     Models.KeyAccess keyAccess,
     RateLimits rateLimits,
     Audit audit,
@@ -169,6 +170,7 @@ public sealed partial class PeopleService(
             await EndSessionsAsync(user);
         }
         await SetKeysBlockedAsync(user, disabled || await access.ApiOffAsync(user));
+        keyBook.Changed();
         await audit.WriteAsync(disabled ? "person.disable" : "person.enable", user.UserName, detail: reason);
         await directory.WriteAsync();
     }
@@ -269,6 +271,8 @@ public sealed partial class PeopleService(
         }
         await access.SetFeatureAsync(null, user, Llm.Core.Access.Permissions.ApiKeys, on, "API access off (Admin → People)");
         await audit.WriteAsync(on ? "person.api_on" : "person.api_off", user.UserName);
+        // Their keys are read again, on every replica: refused (or taken again) at once.
+        keyBook.Changed();
         var stillOff = on && await access.ApiOffAsync(user);
         try
         {

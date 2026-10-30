@@ -163,7 +163,7 @@ public sealed class ArenaMcpTests(AppFixture app)
     }
 
     [Fact]
-    public async Task No_key_a_wrong_key_a_blocked_key_and_a_disabled_person_are_all_refused()
+    public async Task No_key_a_wrong_key_a_revoked_key_and_a_disabled_person_are_all_refused()
     {
         var gateway = new FakeGateway();
         await using var f = NewApp(gateway);
@@ -173,24 +173,29 @@ public sealed class ArenaMcpTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.Unauthorized, nobody);
         Assert.Equal("Bearer", nobody.Headers.WwwAuthenticate.Single().Scheme);
         Assert.Contains("API key", JsonDocument.Parse(await nobody.Content.ReadAsStringAsync()).RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
-        var lookups = gateway.KeyLookups.Count;
+        var book = f.Services.GetRequiredService<KeyBook>();
+        var lookups = book.Reads;
         await StatusAssert.Is(HttpStatusCode.Unauthorized, await Agent(f, "not-a-key").PostAsync(Endpoint, JsonContent.Create(new { jsonrpc = "2.0", id = 1, method = "ping" })));
-        Assert.Equal(lookups, gateway.KeyLookups.Count);
+        Assert.Equal(lookups, book.Reads);
         await StatusAssert.Is(HttpStatusCode.Unauthorized, await Agent(f, "sk-not-anyones").PostAsync(Endpoint, JsonContent.Create(new { jsonrpc = "2.0", id = 1, method = "ping" })));
         // The app's own client says why.
         var refused = await Assert.ThrowsAsync<McpException>(() => ConnectAsync(f, "sk-not-anyones"));
         Assert.Contains("not known here", refused.Message, StringComparison.Ordinal);
 
-        // The key works, and the gateway is asked once for a while, not on every call.
-        lookups = gateway.KeyLookups.Count;
+        // The key works, and the app's keys are read once for a while, not on every call.
+        lookups = book.Reads;
         var agent = Agent(f, key);
         await RpcAsync(agent, "ping");
         await RpcAsync(agent, "ping");
-        Assert.Equal(lookups + 1, gateway.KeyLookups.Count);
+        Assert.Equal(lookups + 1, book.Reads);
 
-        // A blocked key (another person's, not asked about yet) is refused.
-        var (_, _, otherEmail, otherKey) = await PersonAsync(f);
-        gateway.KeysOf(otherEmail).Single().Blocked = true;
+        // A revoked key (another person's, asked about before) is refused at once.
+        var (_, _, _, otherKey) = await PersonAsync(f);
+        await RpcAsync(Agent(f, otherKey), "ping");
+        await using (var scope = f.Services.CreateAsyncScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<ApiKeys>().RevokeAsync([AnswerCache.HashOf(otherKey)]);
+        }
         await StatusAssert.Is(HttpStatusCode.Unauthorized, await Agent(f, otherKey).PostAsync(Endpoint, JsonContent.Create(new { jsonrpc = "2.0", id = 1, method = "ping" })));
 
         // A disabled person, at once, even with their key remembered.
@@ -200,10 +205,10 @@ public sealed class ArenaMcpTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.Unauthorized, disabled);
         Assert.Contains("disabled", await disabled.Content.ReadAsStringAsync(), StringComparison.Ordinal);
 
-        // The gateway down: nobody can be checked, and the agent hears it is for now.
+        // The gateway down: the app knows its keys itself, so a key still signs in.
         var (_, _, _, freshKey) = await PersonAsync(f);
         gateway.Down = true;
-        await StatusAssert.Is(HttpStatusCode.ServiceUnavailable, await Agent(f, freshKey).PostAsync(Endpoint, JsonContent.Create(new { jsonrpc = "2.0", id = 1, method = "ping" })));
+        await StatusAssert.Is(HttpStatusCode.OK, await Agent(f, freshKey).PostAsync(Endpoint, JsonContent.Create(new { jsonrpc = "2.0", id = 1, method = "ping" })));
         gateway.Down = false;
     }
 

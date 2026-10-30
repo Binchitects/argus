@@ -183,12 +183,13 @@ public sealed class ScimTests(AppFixture app, CompanyIdpFixture company) : IClas
         });
         Assert.Equal("Ivo P.", put.GetProperty("displayName").GetString());
 
-        // A new email: a new key under it, and the old one gone.
-        Assert.NotEmpty(company.Gateway.KeysOf("ivo.petrov@example.test"));
+        // A new email: their key is theirs by who they are, so it stays (none is made for the new email).
+        var before = company.Gateway.KeysOf("ivo.petrov@example.test").Select(k => k.Token).ToList();
+        Assert.NotEmpty(before);
         var moved = await scim.JsonAsync(HttpMethod.Patch, $"/Users/{id}", ScimClient.Patch(new { op = "Replace", path = "emails[type eq \"work\"].value", value = "ivo@example.test" }));
         Assert.Equal("ivo@example.test", moved.GetProperty("emails")[0].GetProperty("value").GetString());
-        Assert.Empty(company.Gateway.KeysOf("ivo.petrov@example.test"));
-        Assert.NotEmpty(company.Gateway.KeysOf("ivo@example.test"));
+        Assert.Equal(before, company.Gateway.KeysOf("ivo.petrov@example.test").Select(k => k.Token));
+        Assert.Empty(company.Gateway.KeysOf("ivo@example.test"));
 
         // One part of the name keeps the other.
         var renamed = await scim.JsonAsync(HttpMethod.Patch, $"/Users/{id}", ScimClient.Patch(new { op = "replace", path = "name.givenName", value = "Ivan" }));

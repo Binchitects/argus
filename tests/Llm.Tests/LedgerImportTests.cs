@@ -206,6 +206,32 @@ public sealed class LedgerImportTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_request_by_a_persons_key_is_theirs_as_they_are_now_whatever_email_LiteLLM_names()
+    {
+        var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
+        var name = "km" + Guid.NewGuid().ToString("N")[..8];
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
+        var hash = AnswerCache.HashOf(made.GetProperty("apiKey").GetString()!);
+        var id = "rk-" + Guid.NewGuid().ToString("N")[..8];
+        await using (var conn = new NpgsqlConnection(app.LitellmConnectionString))
+        {
+            await conn.OpenAsync();
+            // LiteLLM still names the email the key was made with (they changed it since).
+            await using var insert = new NpgsqlCommand("""
+                insert into "LiteLLM_SpendLogs" (request_id, call_type, api_key, spend, prompt_tokens, completion_tokens, "startTime", "endTime", model, "user", metadata, status) values
+                  (@id, 'acompletion', @hash, 0.5, 10, 2, '2025-03-01', '2025-03-01', 'qwen', 'before@example.test',
+                   '{"user_api_key_user_id":"before@example.test","user_api_key_alias":"app-x"}', 'success')
+                """, conn);
+            insert.Parameters.AddWithValue("id", id);
+            insert.Parameters.AddWithValue("hash", hash);
+            await insert.ExecuteNonQueryAsync();
+        }
+        await app.MirrorAsync();
+        var row = Assert.Single(await LedgerAsync(id));
+        Assert.Equal(($"{name}@example.test", made.GetProperty("id").GetGuid()), (row.Person, row.UserId));
+    }
+
+    [Fact]
     public async Task Each_persons_totals_are_LiteLLMs_to_the_billionth()
     {
         await ImportAllAsync();

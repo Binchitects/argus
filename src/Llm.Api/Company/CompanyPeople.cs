@@ -17,7 +17,7 @@ public sealed class CompanyRefusedException(string message, bool conflict = fals
 /// SCIM: made, matched and kept current here. The provider is in charge of their
 /// name, email and (at sign-in) role; their password is never checked here.
 /// </summary>
-public sealed partial class CompanyPeople(UserManager<AppUser> users, PeopleService people, ILiteLlm gateway, ApiKeys keys, Audit audit, DirectoryFile directory, Access.AccessService access)
+public sealed partial class CompanyPeople(UserManager<AppUser> users, PeopleService people, Audit audit, DirectoryFile directory, Access.AccessService access)
 {
     [System.Text.RegularExpressions.GeneratedRegex("^[a-z0-9][a-z0-9._-]{1,63}$")]
     private static partial System.Text.RegularExpressions.Regex UserNamePattern();
@@ -152,31 +152,10 @@ public sealed partial class CompanyPeople(UserManager<AppUser> users, PeopleServ
         }
         if (oldEmail is not null)
         {
-            await MoveGatewayAsync(user, oldEmail);
+            // Their keys are theirs by who they are, not by their email: they keep working.
+            await audit.WriteAsync("person.change_email", user.UserName, detail: $"{oldEmail} to {user.Email}");
         }
         await directory.WriteAsync();
-    }
-
-    /// <summary>The gateway knows people by email: a new email gets a new key, and the old one stops.</summary>
-    private async Task MoveGatewayAsync(AppUser user, string? oldEmail)
-    {
-        try
-        {
-            if (!string.IsNullOrEmpty(oldEmail))
-            {
-                await keys.RevokeAsync([.. (await gateway.KeysAsync(oldEmail)).Select(k => k.Token)]);
-            }
-            // A disabled person gets no key now; they make one under Your account when they are back.
-            if (!user.IsDisabled)
-            {
-                await people.ProvisionGatewayAsync(user);
-            }
-            await audit.WriteAsync("person.change_email", user.UserName, detail: $"{oldEmail} to {user.Email}, a new API key");
-        }
-        catch (GatewayException ex)
-        {
-            await audit.WriteAsync("person.change_email", user.UserName, success: false, detail: ex.Message);
-        }
     }
 
     /// <summary>The provider's groups, kept for access rules (tools, models) that name them.</summary>

@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using Llm.Api.Identity;
 using Llm.Core.Data;
 using Llm.Core.Gateway;
@@ -215,28 +214,11 @@ public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, ApiKeys keys, Rat
         }.OfType<string>()) is { Length: > 0 } said ? said : "no limits of its own";
 }
 
-/// <summary>
-/// Each key's own requests at once (api_keys.parallel) for the app's line (<see cref="KeyLine"/>), read once a minute at
-/// most per key, and at once after the key changes here. Null: none of its own.
-/// </summary>
-public sealed class OwnKeyPlaces(IServiceScopeFactory scopes, TimeProvider clock)
+/// <summary>Each key's own requests at once (api_keys.parallel) for the app's line (<see cref="KeyLine"/>), from <see cref="KeyBook"/>. Null: none of its own.</summary>
+public sealed class OwnKeyPlaces(KeyBook book)
 {
-    private readonly ConcurrentDictionary<string, (int? Parallel, DateTimeOffset At)> _known = new(StringComparer.Ordinal);
+    public async Task<int?> ForAsync(string token, CancellationToken ct) => (await book.ForHashAsync(token, ct))?.Parallel;
 
-    public async Task<int?> ForAsync(string token, CancellationToken ct)
-    {
-        var now = clock.GetUtcNow();
-        if (_known.TryGetValue(token, out var known) && now - known.At < TimeSpan.FromMinutes(1))
-        {
-            return known.Parallel;
-        }
-        await using var scope = scopes.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var parallel = await db.ApiKeys.AsNoTracking().Where(k => k.Hash == token).Select(k => k.Parallel).FirstOrDefaultAsync(ct);
-        _known[token] = (parallel, now);
-        return parallel;
-    }
-
-    /// <summary>The key changed or went: read again at its next request.</summary>
-    public void Forget(string token) => _known.TryRemove(token, out _);
+    /// <summary>The key changed or went: read again at its next request, on every replica.</summary>
+    public void Forget(string token) => book.Changed(token);
 }

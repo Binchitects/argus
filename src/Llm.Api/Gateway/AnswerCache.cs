@@ -28,8 +28,6 @@ public sealed class AnswerCacheOptions
     public string AnswerCache { get; set; } = AnswerCacheModes.Off;
     /// <summary>How long an answer is kept.</summary>
     public TimeSpan AnswerCacheTtl { get; set; } = TimeSpan.FromDays(1);
-    /// <summary>How long what the gateway said of a key (blocked, its models, its person) is believed. Not on the Settings page; tests set 0.</summary>
-    public TimeSpan AnswerCacheKeyCheck { get; set; } = TimeSpan.FromSeconds(30);
 
     public bool On => AnswerCache is AnswerCacheModes.OptIn or AnswerCacheModes.All;
 }
@@ -44,10 +42,9 @@ public static class AnswerCacheModes
 /// <summary>A request the cache takes part in: its exact-match hash, the key's hash, and the answer kept for it (null: none yet).</summary>
 public sealed record CacheLookup(string Hash, string KeyHash, string Model, JsonObject? Answer);
 
-/// <summary>What the cache remembers between requests: what the gateway said of each key lately, and when old answers were last cleared.</summary>
+/// <summary>What the cache remembers between requests: when old answers were last cleared.</summary>
 public sealed class AnswerCacheState
 {
-    public ConcurrentDictionary<string, (GatewayKeyInfo? Key, bool OptedIn, DateTimeOffset At)> Keys { get; } = new();
     public DateTimeOffset LastCleared { get; set; }
 }
 
@@ -58,7 +55,7 @@ public sealed class AnswerCacheState
 /// gateway would refuse (unknown, blocked, expired, not allowed the model) gets nothing from
 /// it: its request goes to the gateway, which refuses it.
 /// </summary>
-public sealed class AnswerCache(AppDbContext db, ILiteLlm gateway, AnswerCacheState state, IOptionsMonitor<AnswerCacheOptions> options, TimeProvider clock)
+public sealed class AnswerCache(AppDbContext db, KeyBook book, AnswerCacheState state, IOptionsMonitor<AnswerCacheOptions> options, TimeProvider clock)
 {
     /// <summary>Says on each answer it applies to whether it came from the cache: hit or miss.</summary>
     public const string Header = "x-arena-cache";
@@ -81,9 +78,10 @@ public sealed class AnswerCache(AppDbContext db, ILiteLlm gateway, AnswerCacheSt
             return null;
         }
         var keyHash = HashOf(key);
-        var (info, optedIn) = await KeyAsync(key, keyHash, o, ct);
+        var info = await book.ForHashAsync(keyHash, ct);
         // A key the gateway would refuse: it refuses it, the cache does not answer for it.
-        if (info is null || info.Blocked || info.Expires < clock.GetUtcNow() || !(info.Models.Count == 0 || info.Models.Contains(model) || info.Models.Contains("all-proxy-models")))
+        var optedIn = info?.CacheApiAnswers == true;
+        if (info is null || info.Disabled || info.ApiOff || info.ExpiredAt(clock.GetUtcNow()) || !(info.Models.Count == 0 || info.Models.Contains(model)))
         {
             return null;
         }
@@ -134,7 +132,7 @@ public sealed class AnswerCache(AppDbContext db, ILiteLlm gateway, AnswerCacheSt
     }
 
     /// <summary>Forgets what the gateway said of a key: the next request asks again (a person turned the cache on).</summary>
-    public void Forget(string keyHash) => state.Keys.TryRemove(keyHash, out _);
+    public void Forget(string keyHash) => book.Changed(keyHash);
 
     /// <summary>Forgets what the gateway said of these keys and the answers kept for them (a person turned the cache off).</summary>
     public async Task ForgetAsync(IReadOnlyCollection<string> keyHashes, CancellationToken ct)
@@ -144,38 +142,6 @@ public sealed class AnswerCache(AppDbContext db, ILiteLlm gateway, AnswerCacheSt
             Forget(k);
         }
         await db.CachedAnswers.Where(a => keyHashes.Contains(a.KeyHash)).ExecuteDeleteAsync(ct);
-    }
-
-    /// <summary>What the gateway says of a key, and whether its person turned the cache on; believed for a few seconds.</summary>
-    private async Task<(GatewayKeyInfo? Key, bool OptedIn)> KeyAsync(string key, string keyHash, AnswerCacheOptions o, CancellationToken ct)
-    {
-        var now = clock.GetUtcNow();
-        if (state.Keys.TryGetValue(keyHash, out var known) && now - known.At < o.AnswerCacheKeyCheck)
-        {
-            return (known.Key, known.OptedIn);
-        }
-        GatewayKeyInfo? info;
-        try
-        {
-            info = await gateway.KeyInfoAsync(key, ct);
-        }
-        catch (GatewayException)
-        {
-            // The gateway cannot say: the request goes to it, as without the cache.
-            return (null, false);
-        }
-        var optedIn = false;
-        if (info?.UserId is { Length: > 0 } email)
-        {
-            var normalized = email.ToUpperInvariant();
-            optedIn = await db.Users.AsNoTracking().Where(u => u.NormalizedEmail == normalized).Select(u => u.CacheApiAnswers).FirstOrDefaultAsync(ct);
-        }
-        if (state.Keys.Count > 10_000)
-        {
-            state.Keys.Clear();
-        }
-        state.Keys[keyHash] = (info, optedIn, now);
-        return (info, optedIn);
     }
 
     /// <summary>The request as the exact match sees it: properties in order, without stream, stream_options and user (who asks, and how it is delivered, do not change the answer).</summary>
@@ -413,6 +379,7 @@ public static class AnswerCacheEndpoints
         services.AddScoped<AnswerCache>();
         services.AddSingleton<KeyLine>();
         services.AddSingleton<OwnKeyPlaces>();
+        services.AddSingleton<KeyBook>();
         services.AddSingleton<KeyPeople>();
         services.AddSingleton<PromptLogWriter>();
         services.AddScoped<OwnKeys>();
@@ -461,7 +428,7 @@ public static class AnswerCacheEndpoints
         ttlHours = Math.Round(o.AnswerCacheTtl.TotalHours, 2),
     };
 
-    private static async Task<IResult> ChooseAsync(CacheChoice body, ClaimsPrincipal p, UserManager<AppUser> users, ILiteLlm gateway, AnswerCache cache, Audit audit,
+    private static async Task<IResult> ChooseAsync(CacheChoice body, ClaimsPrincipal p, UserManager<AppUser> users, ApiKeys apiKeys, AnswerCache cache, Audit audit,
         IOptionsMonitor<AnswerCacheOptions> options, CancellationToken ct)
     {
         var me = (await users.GetUserAsync(p))!;
@@ -472,24 +439,17 @@ public static class AnswerCacheEndpoints
             await audit.WriteAsync("account.answer_cache", me.UserName, detail: body.On ? "on" : "off");
         }
         // Off: what was kept for their key goes now, and the next request asks the model.
-        try
+        var keys = (await apiKeys.OfAsync(me.Id, ct)).Select(k => k.Hash.TrimEnd()).ToList();
+        if (body.On)
         {
-            var keys = (await gateway.KeysAsync(me.Email!, ct)).Select(k => k.Token).ToList();
-            if (body.On)
+            foreach (var k in keys)
             {
-                foreach (var k in keys)
-                {
-                    cache.Forget(k);
-                }
-            }
-            else
-            {
-                await cache.ForgetAsync(keys, ct);
+                cache.Forget(k);
             }
         }
-        catch (GatewayException)
+        else
         {
-            // The answers expire on their own; the choice is saved.
+            await cache.ForgetAsync(keys, ct);
         }
         return Results.Ok(Mine(me, options.CurrentValue));
     }

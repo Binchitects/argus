@@ -34,7 +34,7 @@ public static class KeySpeech
     /// <summary>Text to speech requests larger than this go on as they came.</summary>
     private const int MostRead = 1024 * 1024;
 
-    public static async Task ProxyAsync(HttpContext http, ILiteLlm gateway, AppDbContext db, VoiceCatalog voices, IHttpClientFactory factory, Models.MediaControl media)
+    public static async Task ProxyAsync(HttpContext http, AppDbContext db, VoiceCatalog voices, IHttpClientFactory factory, Models.MediaControl media)
     {
         var ct = http.RequestAborted;
         var request = http.Request;
@@ -58,7 +58,7 @@ public static class KeySpeech
             if (SpokenBy(body) is { } model && media.Find(model) is { Mode: Llm.Core.Models.MediaModes.Image } local)
             {
                 // The key's person's picture credit first: a request the gateway refuses anyway does not load the model for nothing.
-                if (await PersonAsync(request.Headers.Authorization.ToString(), gateway, db, http.RequestServices.GetRequiredService<Access.AccessService>(), ct) is { } owner
+                if (await PersonAsync(request.Headers.Authorization.ToString(), http.RequestServices.GetRequiredService<KeyBook>(), db, http.RequestServices.GetRequiredService<Access.AccessService>(), ct) is { } owner
                     && await http.RequestServices.GetRequiredService<Credit>().RefusalAsync(owner, Llm.Core.Access.CreditKind.Pictures, ct) is { } refusal)
                 {
                     http.Response.StatusCode = StatusCodes.Status400BadRequest;
@@ -78,7 +78,7 @@ public static class KeySpeech
             length = body.Length;
         }
         // Only a person's speech is changed: who it is comes first, from the key alone, and anyone else's goes on as it came.
-        else if (HttpMethods.IsPost(request.Method) && !picture && await PersonAsync(request.Headers.Authorization.ToString(), gateway, db, http.RequestServices.GetRequiredService<Access.AccessService>(), ct) is { } person)
+        else if (HttpMethods.IsPost(request.Method) && !picture && await PersonAsync(request.Headers.Authorization.ToString(), http.RequestServices.GetRequiredService<KeyBook>(), db, http.RequestServices.GetRequiredService<Access.AccessService>(), ct) is { } person)
         {
             if (request.Path.Value?.EndsWith("/transcriptions", StringComparison.Ordinal) == true)
             {
@@ -262,30 +262,16 @@ public static class KeySpeech
         return (new Spliced([.. part, .. start], body), part.Length);
     }
 
-    /// <summary>The person a key belongs to: null for no key, a key the gateway does not know or blocked, or one of nobody here.</summary>
-    private static async Task<AppUser?> PersonAsync(string authorization, ILiteLlm gateway, AppDbContext db, Access.AccessService access, CancellationToken ct)
+    /// <summary>The person a key belongs to: null for no key, a key the app does not know or expired, or one of nobody here.</summary>
+    private static async Task<AppUser?> PersonAsync(string authorization, KeyBook book, AppDbContext db, Access.AccessService access, CancellationToken ct)
     {
         var key = authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? authorization[7..].Trim() : "";
-        if (key.Length == 0)
+        if (key.Length == 0 || await book.ForAsync(key, ct) is not { } holder || holder.ExpiredAt(DateTimeOffset.UtcNow))
         {
             return null;
         }
-        GatewayKeyInfo? info;
-        try
-        {
-            info = await gateway.KeyInfoAsync(key, ct);
-        }
-        catch (GatewayException)
-        {
-            return null;
-        }
-        if (info is not { Blocked: false, UserId: { Length: > 0 } email })
-        {
-            return null;
-        }
-        var normalized = email.ToUpperInvariant();
-        // A person whose API access was taken is not one here, whatever the gateway said of the key.
-        var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.NormalizedEmail == normalized && !u.IsDisabled, ct);
+        // A person whose API access was taken is not one here, whatever the key.
+        var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == holder.UserId && !u.IsDisabled, ct);
         return user is null || await access.ApiOffAsync(user, ct) ? null : user;
     }
 

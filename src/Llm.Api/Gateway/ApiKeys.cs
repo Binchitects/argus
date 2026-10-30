@@ -15,7 +15,7 @@ public sealed record OwnLimits(int? RequestsPerMinute, int? TokensPerMinute, int
 /// models, the limits and the budget it holds the key to. The row first, so the mirror of LiteLLM's keys never finds a key
 /// the app does not know; a key LiteLLM refused is taken out again.
 /// </summary>
-public sealed class ApiKeys(AppDbContext db, ILiteLlm gateway, TimeProvider clock)
+public sealed class ApiKeys(AppDbContext db, ILiteLlm gateway, KeyBook book, TimeProvider clock)
 {
     /// <summary>A new key: the secret (shown once), and its row.</summary>
     public async Task<(string Secret, ApiKey Key)> MakeAsync(AppUser user, string kind, string alias, IReadOnlyList<string> models, int? maxParallel, KeyRate? rate,
@@ -44,6 +44,7 @@ public sealed class ApiKeys(AppDbContext db, ILiteLlm gateway, TimeProvider cloc
             await db.SaveChangesAsync(CancellationToken.None);
             throw;
         }
+        book.Changed(key.Hash);
         return (secret, key);
     }
 
@@ -56,6 +57,10 @@ public sealed class ApiKeys(AppDbContext db, ILiteLlm gateway, TimeProvider cloc
         }
         await gateway.DeleteKeysAsync(hashes, ct);
         await db.ApiKeys.Where(k => hashes.Contains(k.Hash)).ExecuteDeleteAsync(ct);
+        foreach (var hash in hashes)
+        {
+            book.Changed(hash);
+        }
     }
 
     /// <summary>A person's keys, the oldest first.</summary>

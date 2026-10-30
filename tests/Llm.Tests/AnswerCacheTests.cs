@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Llm.Api.Gateway;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Llm.Tests;
 
@@ -21,7 +22,7 @@ public sealed class AnswerCacheTests(AppFixture app)
         {
             ["Gateway:AnswerCache"] = mode,
             // What the gateway says of a key is asked every time here (blocking a key shows at once).
-            ["Gateway:AnswerCacheKeyCheck"] = "00:00:00",
+            ["Gateway:KeyCacheSeconds"] = "0",
         });
         return (f, gateway);
     }
@@ -196,8 +197,10 @@ public sealed class AnswerCacheTests(AppFixture app)
         var marker = "blocked-" + Guid.NewGuid().ToString("N")[..8];
         Assert.Equal("miss", Cache(await CallAsync(f, key, Question(marker))));
 
-        // Blocked by an admin: the request goes to the gateway, which refuses it.
-        await gateway.SetBlockedAsync([AnswerCache.HashOf(key)], true);
+        // API access taken by an admin: the request goes to the gateway, which refuses it.
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var person = (await f.Services.GetRequiredService<KeyBook>().ForAsync(key, CancellationToken.None))!.UserId;
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{person}/api", UriKind.Relative), new { on = false }));
         app.Model.RevokedKeys[key] = true;
         var refused = await CallAsync(f, key, Question(marker));
         Assert.Equal(HttpStatusCode.Unauthorized, refused.StatusCode);

@@ -180,26 +180,6 @@ public sealed class LiteLlmClientTests
         Assert.False(body.TryGetProperty("user_id", out _));
     }
 
-    [Fact]
-    public async Task A_key_is_looked_up_by_its_hash_and_never_sent_itself()
-    {
-        var (client, recorder) = Create();
-        recorder.KeyInfo = """{"key":"x","info":{"user_id":"p@example.test","blocked":true,"expires":"2026-11-04T10:00:00"}}""";
-        var info = await client.KeyInfoAsync("sk-secret-key");
-        Assert.NotNull(info);
-        Assert.Equal(("p@example.test", true, new DateTimeOffset(2026, 11, 4, 10, 0, 0, TimeSpan.Zero)), (info.UserId, info.Blocked, info.Expires));
-        Assert.Empty(info.Models);
-        var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData("sk-secret-key"u8.ToArray()));
-        Assert.Equal($"/key/info?key={hash}", recorder.Calls.Single().Path);
-        Assert.DoesNotContain("sk-secret-key", recorder.Calls.Single().Path, StringComparison.Ordinal);
-
-        recorder.KeyInfo = """{"key":"x","info":{"user_id":"p@example.test","blocked":false,"models":["qwen"]}}""";
-        Assert.Equal(["qwen"], (await client.KeyInfoAsync("sk-secret-key"))!.Models);
-
-        recorder.KeyInfo = null;
-        Assert.Null(await client.KeyInfoAsync("sk-unknown"));
-    }
-
     private sealed class Hangs : HttpMessageHandler
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)

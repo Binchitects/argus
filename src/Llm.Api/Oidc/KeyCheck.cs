@@ -1,5 +1,4 @@
 using Llm.Api.Access;
-using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using Llm.Api.Chat;
@@ -13,17 +12,14 @@ namespace Llm.Api.Oidc;
 
 /// <summary>
 /// Whose an API key is, for Argus. A coding agent connects to Argus with the
-/// person's gateway key (sk-...); Argus asks here, from inside the stack's
+/// person's API key (sk-...); Argus asks here, from inside the stack's
 /// network with ARGUS_KEY, and gets the person's email and username (their
 /// GitLab username). Refused through the proxy. The key is never logged or
-/// kept: only its hash, for a minute, beside the email the gateway gave.
+/// kept: the app's keys are read by its hash (<see cref="KeyBook"/>).
 /// </summary>
 public static class KeyCheck
 {
     public const string Path = "/api/authz/key";
-
-    /// <summary>How long the gateway's answer for a key is believed. The person is looked up on every check.</summary>
-    public static readonly TimeSpan Remember = TimeSpan.FromSeconds(60);
 
     /// <summary>Headers Traefik adds (and what the forwarded-headers step leaves of them): their presence means the proxy.</summary>
     private static bool ThroughProxy(IHeaderDictionary headers) =>
@@ -34,10 +30,8 @@ public static class KeyCheck
 
     public static void MapKeyCheck(this IEndpointRouteBuilder app)
     {
-        // The gateway's answers by key hash, for this app only (tests run several).
-        var known = new ConcurrentDictionary<string, (DateTimeOffset Until, string Email)>(StringComparer.Ordinal);
-        app.MapPost(Path, (HttpContext ctx, ILiteLlm gateway, UserManager<AppUser> users, IOptions<ArgusOptions> argus, IOptionsMonitor<ChatOptions> chat,
-            TimeProvider clock, Access.AccessService access) => CheckAsync(ctx, gateway, users, access, argus.Value, chat.CurrentValue, clock, known))
+        app.MapPost(Path, (HttpContext ctx, KeyBook book, UserManager<AppUser> users, IOptions<ArgusOptions> argus, IOptionsMonitor<ChatOptions> chat,
+            TimeProvider clock, Access.AccessService access) => CheckAsync(ctx, book, users, access, argus.Value, chat.CurrentValue, clock))
             .AllowAnonymous("Argus and Laya ask whose an API key is: the key itself is checked.");
         app.MapPost(CodePath, (HttpContext ctx, UserManager<AppUser> users, IOptions<ArgusOptions> argus, IOptionsMonitor<ChatOptions> chat, Access.AccessService access) =>
                 CodeAsync(ctx, users, access, argus.Value, chat.CurrentValue))
@@ -104,8 +98,8 @@ public static class KeyCheck
             : null;
     }
 
-    private static async Task<IResult> CheckAsync(HttpContext ctx, ILiteLlm gateway, UserManager<AppUser> users, Access.AccessService access, ArgusOptions argus, ChatOptions chat,
-        TimeProvider clock, ConcurrentDictionary<string, (DateTimeOffset Until, string Email)> known)
+    private static async Task<IResult> CheckAsync(HttpContext ctx, KeyBook book, UserManager<AppUser> users, Access.AccessService access, ArgusOptions argus, ChatOptions chat,
+        TimeProvider clock)
     {
         // Argus's credentials: the chat's own when set, and ARGUS_KEY (Argus takes it as both).
         if (Caller(ctx, argus, chat) is { } refused)
@@ -128,45 +122,15 @@ public static class KeyCheck
             return Results.Json(new { error = "Send the key as {\"key\": \"sk-...\"}." }, statusCode: StatusCodes.Status400BadRequest);
         }
 
-        var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(key)));
-        var now = clock.GetUtcNow();
-        string email;
-        if (known.TryGetValue(hash, out var hit) && hit.Until > now)
+        var holder = await book.ForAsync(key, ctx.RequestAborted);
+        if (holder is null || holder.ExpiredAt(clock.GetUtcNow()))
         {
-            email = hit.Email;
-        }
-        else
-        {
-            GatewayKeyInfo? info;
-            try
-            {
-                info = await gateway.KeyInfoAsync(key, ctx.RequestAborted);
-            }
-            catch (GatewayException)
-            {
-                return Results.Json(new { status = "gateway", error = "The gateway could not be asked about the key right now." }, statusCode: StatusCodes.Status503ServiceUnavailable);
-            }
-            if (info is null || info.Blocked || info.Expires <= now || string.IsNullOrWhiteSpace(info.UserId))
-            {
-                return Refused();
-            }
-            email = info.UserId;
-            if (known.Count > 1000)
-            {
-                foreach (var (k, v) in known)
-                {
-                    if (v.Until <= now)
-                    {
-                        known.TryRemove(k, out _);
-                    }
-                }
-            }
-            var until = now + Remember;
-            known[hash] = (info.Expires is { } expires && expires < until ? expires : until, email);
+            return Refused();
         }
 
-        // The person now: someone disabled, or whose API access was taken, since is refused at once, whatever the gateway said.
-        var user = await users.FindByEmailAsync(email);
+        // The person now (by the key's owner: an email changed since is theirs): someone disabled, or whose API access was
+        // taken, since is refused at once.
+        var user = await users.FindByIdAsync(holder.UserId.ToString());
         if (user is null || user.IsDisabled || await access.ApiOffAsync(user, ctx.RequestAborted))
         {
             return Refused();
