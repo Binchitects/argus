@@ -27,7 +27,8 @@ export default function Explore() {
     () => api.get<ExploreResult>(`/admin/explore?q=${encodeURIComponent(q)}&repo=${encodeURIComponent(repo)}&limit=50`),
     [q, repo],
   );
-  const d = data.value;
+  // The answer to this search: one to the search before (still coming in, or this one failed) is never shown as its.
+  const d = data.value && (data.value.query ?? "") === q && (data.value.repo ?? "") === repo ? data.value : null;
   const repos = useTable<RepoRow>(d?.repos ?? NONE, REPOS, { by: "repo", desc: false });
   const symbols = useTable<SymbolRow>(d?.symbols.rows ?? NONE, SYMBOLS);
   const files = useTable<FileRow>(d?.files.rows ?? NONE, FILES);
@@ -48,13 +49,14 @@ export default function Explore() {
         <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="symbol or path fragment" aria-label="Search the index" style={{ minWidth: 280 }} />
         <select value={draftRepo} onChange={(e) => setDraftRepo(e.target.value)} aria-label="Repository">
           <option value="">every repository</option>
-          {(d?.repos ?? []).map((r) => (
+          {(data.value?.repos ?? []).map((r) => (
             <option key={r.path_with_namespace} value={r.path_with_namespace}>{r.path_with_namespace} ({r.symbols} symbols)</option>
           ))}
         </select>
         <button className="btn primary" type="submit">Search</button>
       </form>
       {data.error && <div className="msg bad">Argus did not answer: {data.error}</div>}
+      {!d && !data.error && (q || repo) && <p className="dim" data-testid="searching">Searching…</p>}
       {d?.error && <div className="msg bad"><strong>The index could not be read.</strong> {d.error}</div>}
       {!q && !repo && d && (
         <div className="card">

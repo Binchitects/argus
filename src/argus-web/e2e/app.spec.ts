@@ -85,10 +85,12 @@ test.describe.serial("Argus", () => {
     await expect(symbols).toContainText("include/decoder.h");
     await page.getByLabel("Search the index").fill("checksum");
     await page.getByRole("button", { name: "Search" }).click();
+    await expect(page).toHaveURL(/[?&]q=checksum/);
     await expect(symbols).toContainText("private");
     await page.screenshot({ path: join(shots(), "05-explore.png"), fullPage: true });
     await page.getByLabel("Search the index").fill("vault_unlock");
     await page.getByRole("button", { name: "Search" }).click();
+    await expect(page).toHaveURL(/[?&]q=vault_unlock/);
     await expect(symbols).toContainText("acme/secret");
   });
 
