@@ -512,6 +512,12 @@ public static class IdentityWiring
         services.AddSingleton<Models.RemoteServerClient>();
         services.AddSingleton<Models.RemoteHealth>();
         services.AddScoped<Gateway.GatewayRoutes>();
+        // LiteLLM's request log brought into the app's own ledger while LiteLLM still answers (off: a test calls it itself).
+        services.AddSingleton<Gateway.LedgerImport>();
+        if (config.GetValue("Gateway:LedgerImport", true))
+        {
+            services.AddHostedService(sp => sp.GetRequiredService<Gateway.LedgerImport>());
+        }
         services.AddScoped<Models.ModelCatalog>();
         services.AddScoped<Models.ModelPolicy>();
         services.AddScoped<Models.ToolModeBook>();

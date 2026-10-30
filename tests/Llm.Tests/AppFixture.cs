@@ -151,6 +151,8 @@ public sealed class AppFixture : IAsyncLifetime
             b.UseSetting("Dashboards:Path", DashboardsPath);
             b.UseSetting("Plugins:Directory", PluginsPath);
             b.UseSetting("Dashboards:SqlDatabase", "litellm_test" + _run);
+            // The ledger's mirror of LiteLLM's log runs when a test asks it to (LedgerImportTests), not on its own between tests.
+            b.UseSetting("Gateway:LedgerImport", "false");
             b.UseSetting("Dashboards:StatementTimeout", "00:00:03");
             // Many apps at once here: the bell's watcher would hold their connections (its checks are called directly).
             b.UseSetting("Notifications:Watch", "false");
