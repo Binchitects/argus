@@ -8,6 +8,7 @@ using Llm.Core.Models;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 
 namespace Llm.Tests;
 
@@ -357,6 +358,73 @@ public sealed class GpuShareTests(AppFixture app) : IDisposable
         await s.Media.SetKeptAsync(Picture, false);
         await catalog.WritePresetsAsync();
         Assert.DoesNotContain("fit-target", await File.ReadAllTextAsync(presets), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Presets_are_written_one_at_a_time_so_one_that_read_the_models_before_an_admins_save_never_writes_over_that_saves()
+    {
+        await using var s = await NewAsync();
+        var presets = Path.Combine(_dir, "config", "models.ini");
+        string connection;
+        await using (var scope = s.App.Services.CreateAsyncScope())
+        {
+            connection = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>().Database.GetConnectionString()!;
+        }
+        Task WriteAsync() => Task.Run(async () =>
+        {
+            await using var scope = s.App.Services.CreateAsyncScope();
+            await scope.ServiceProvider.GetRequiredService<ModelCatalog>().WritePresetsAsync();
+        });
+        // The picture models held: a write that has read the chat models waits there, before it writes (its presets leave
+        // the kept picture model room).
+        await using var held = new NpgsqlConnection(connection);
+        await held.OpenAsync();
+        await using var hold = await held.BeginTransactionAsync();
+        await using (var take = new NpgsqlCommand("LOCK TABLE media_models IN ACCESS EXCLUSIVE MODE", held, hold))
+        {
+            await take.ExecuteNonQueryAsync();
+        }
+        // How many writes wait there (asked outside the lock's transaction: inside it, the view is read once).
+        await using var watch = new NpgsqlConnection(connection);
+        await watch.OpenAsync();
+        async Task<long> WaitingAsync()
+        {
+            await using var count = new NpgsqlCommand("""
+                SELECT count(*) FROM pg_stat_activity
+                WHERE datname = current_database() AND wait_event_type = 'Lock'
+                  AND query LIKE '%FROM media_models%' AND query LIKE '%"Kept"%' AND query LIKE '%LIMIT 1%'
+                """, watch);
+            return (long)(await count.ExecuteScalarAsync())!;
+        }
+        async Task UntilWaitingAsync(long writes, TimeSpan most)
+        {
+            var watched = System.Diagnostics.Stopwatch.StartNew();
+            while (await WaitingAsync() < writes && watched.Elapsed < most)
+            {
+                await Task.Delay(20);
+            }
+        }
+
+        // Writes going on (the watcher's passes, other admins' saves): one has read the models and waits to write; the
+        // others have not read them yet, and do once it has written (eight read at once would wait here within a second).
+        var before = Enumerable.Range(0, 8).Select(_ => WriteAsync()).ToList();
+        await UntilWaitingAsync(1, TimeSpan.FromSeconds(30));
+        Assert.Equal(1, await WaitingAsync());
+        await UntilWaitingAsync(2, TimeSpan.FromSeconds(1));
+        Assert.Equal(1, await WaitingAsync());
+
+        // An admin saves a model and writes the presets; then the picture models are let go and every write ends: the
+        // last presets written have the model.
+        await using (var scope = s.App.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+            db.LocalModels.Add(new LocalModel { Name = "added", File = "added/Added.gguf", Context = 8192 });
+            await db.SaveChangesAsync();
+        }
+        var after = WriteAsync();
+        await hold.CommitAsync();
+        await Task.WhenAll([.. before, after]);
+        Assert.Contains("[added]\n", await File.ReadAllTextAsync(presets), StringComparison.Ordinal);
     }
 
     [Fact]

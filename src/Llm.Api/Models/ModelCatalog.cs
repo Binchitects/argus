@@ -700,8 +700,14 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         (extra ?? "").Split('\n').Select(l => PresetLine().Match(l.Trim())).Where(k => k.Success)
             .GroupBy(k => k.Groups[1].Value, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.Last().Groups[2].Value.Trim(), StringComparer.Ordinal);
 
-    /// <summary>Writes the presets for the engine; it restarts when they change.</summary>
-    public async Task WritePresetsAsync(CancellationToken ct = default)
+    /// <summary>
+    /// Writes the presets for the engine; it restarts when they change. One writer at a time on every replica, each reading
+    /// the models after the one before it wrote: a watcher's pass that read them before an admin's save never writes over the
+    /// presets that save wrote (the model added would be gone from the engine until the next pass, a minute on).
+    /// </summary>
+    public Task WritePresetsAsync(CancellationToken ct = default) => OneWriterAsync(WritePresetsOnceAsync, ct);
+
+    private async Task WritePresetsOnceAsync(CancellationToken ct)
     {
         // llama.cpp's models only: the other kinds have their own engines' desired state.
         var models = await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.LlamaCpp).OrderBy(m => m.Name).ToListAsync(ct);
@@ -943,9 +949,12 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
 
     /// <summary>
     /// Each vLLM and SGLang engine's presets (its models, as processes), and its desired state brought in step: a model's new
-    /// settings reach its running processes (the supervisor restarts them), a model gone is no longer run. Whether each sleeps is kept.
+    /// settings reach its running processes (the supervisor restarts them), a model gone is no longer run. Whether each sleeps is
+    /// kept. One writer at a time, as the engine's presets.
     /// </summary>
-    public async Task WriteVllmPresetsAsync(CancellationToken ct = default)
+    public Task WriteVllmPresetsAsync(CancellationToken ct = default) => OneWriterAsync(WriteVllmPresetsOnceAsync, ct);
+
+    private async Task WriteVllmPresetsOnceAsync(CancellationToken ct)
     {
         var models = await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.Vllm || m.EngineKind == EngineKinds.Sglang)
             .OrderBy(m => m.CreatedAt).ThenBy(m => m.Name).ToListAsync(ct);
@@ -1048,6 +1057,24 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
 
     /// <summary>The sync running against each gateway: the next waits for it.</summary>
     private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ILiteLlm, SemaphoreSlim> Syncing = [];
+
+    /// <summary>The engines' presets being written: one writer at a time on every replica (they share the engines' files).</summary>
+    private const long Writing = 0x50524553455453;
+
+    /// <summary>
+    /// <paramref name="write"/> inside a transaction holding <see cref="Writing"/> (taken in the caller's, when one is open):
+    /// the next writer waits, then reads the models itself.
+    /// </summary>
+    private async Task OneWriterAsync(Func<CancellationToken, Task> write, CancellationToken ct)
+    {
+        await using var own = db.Database.CurrentTransaction is null ? await db.Database.BeginTransactionAsync(ct) : null;
+        await db.Database.ExecuteSqlRawAsync($"SELECT pg_advisory_xact_lock({Writing})", ct);
+        await write(ct);
+        if (own is not null)
+        {
+            await own.CommitAsync(ct);
+        }
+    }
 
     private string? Read(string file)
     {
