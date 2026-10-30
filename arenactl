@@ -723,7 +723,7 @@ OPS = {
     "cert": ("make-cert.sh", "the stack's certificate: a CA of its own, or the company's (--cert, --key)"),
     "sign": ("sign-code-arena.sh", "sign the Code Arena builds the app serves with the stack's CA (--check)"),
     "backup": ("backup.sh", "back up the databases, settings and files (--install-timer: daily)"),
-    "restore": ("backup.sh", "restore a backup: arenactl restore BACKUP_DIR"),
+    "restore": ("backup.sh", "restore a backup: arenactl restore --from BACKUP_DIR"),
     "hosts": ("setup-hosts.sh", "the stack's names in /etc/hosts (root)"),
     "kube": ("kube-install.sh", "install, upgrade, status and remove on Kubernetes with Helm"),
     "airgap": ("airgap.sh", "carry a running stack to a host with no network (pack, load)"),

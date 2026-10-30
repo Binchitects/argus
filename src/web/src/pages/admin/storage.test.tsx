@@ -292,7 +292,7 @@ describe('Admin → Storage', () => {
       ...routes,
       'GET /api/admin/storage/cleanups/old-backups': () => ({
         json: plan({
-          kind: 'old-backups', days: null, keep: 3, count: 1, bytes: 2 * GB, command: 'scripts/backup.sh --prune --keep 3',
+          kind: 'old-backups', days: null, keep: 3, count: 1, bytes: 2 * GB, command: './arenactl backup --prune --keep 3',
           warning: '1 person is on legal hold, the first since 2026-10-01: a backup taken before then holds their data.',
           items: [{ id: '2026-09-01_030000', name: '2026-09-01_030000', person: null, bytes: 2 * GB, at: '2026-09-01T03:00:00Z', note: 'ok · taken before a legal hold began' }],
         }),
@@ -305,7 +305,7 @@ describe('Admin → Storage', () => {
     await userEvent.clear(keep)
     await userEvent.type(keep, '3')
     await userEvent.click(within(backups).getByRole('button', { name: 'Preview' }))
-    expect(await within(backups).findByText('scripts/backup.sh --prune --keep 3')).toBeInTheDocument()
+    expect(await within(backups).findByText('./arenactl backup --prune --keep 3')).toBeInTheDocument()
     expect(within(backups).getByText(/taken before a legal hold began/)).toBeInTheDocument()
     expect(within(backups).getByText(/1 person is on legal hold/)).toBeInTheDocument()
     expect(within(backups).getByText('BACKUP_KEEP=3')).toBeInTheDocument()

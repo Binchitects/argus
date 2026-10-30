@@ -206,12 +206,8 @@ client glued their arguments together. `parallel_tool_calls: false` and
 
 **The fix is the route.** `config/litellm/config.yaml` speaks plain
 `openai/...` to the engine's own OpenAI-compatible endpoint, bypassing any
-native-protocol transform. `e2e-check.py` asserts streaming tool-call
-arguments still parse, on whichever engine is running.
-
-Because the window is fixed at engine start rather than negotiated per call,
-the e2e check also compares the served window against the advertised one, so a
-mismatch is loud rather than silent.
+native-protocol transform. `./arenactl check clients` asserts a tool call's
+arguments still parse, through the gateway, on whichever engine is running.
 
 **A second, unrelated time sink worth knowing.** Feeding a preprocessed C file
 to the model will not work: a `.i` from the Windows SDK runs to ~1.8 MB, about
@@ -230,8 +226,9 @@ NO_PROXY=localhost,127.0.0.1,::1,.local,llm.localhost,.llm.localhost
 ```
 
 **Name resolution.** `*.localhost` resolves in browsers but **not** in curl,
-SDK clients, or Hermes. Run `./scripts/setup-hosts.sh` once on the client
-machine.
+SDK clients, or Hermes. Run `./arenactl hosts` once on the stack's host (it
+points the names at 127.0.0.1); elsewhere, put them in the hosts file at the
+host's address.
 
 **A half-dead engine looks like a hardware limit.** This was learned the hard
 way with a host-process engine: force-killing it left orphaned worker

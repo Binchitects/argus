@@ -1102,7 +1102,7 @@ preview gives the command that removes them on the host instead.
 | Old pictures, videos and speech | what those tools made, past the age chosen (**Settings → Storage → Old generated media**, 90 days by default); the chats keep their words |
 | Files of deleted chats | chats deleted while their owner was on legal hold, once the hold is over, with their files (the hourly retention job takes them too); it shows what the holds still keep |
 | Leftovers on disk | what no database row owns: a download's `.part` file no download will finish, and Python sandbox jobs left behind (older than an hour) |
-| Old backups | shown only: backups beyond the newest ones kept (`BACKUP_KEEP` in `.env`, 14 by default, or the number typed), never the latest nor the newest that ended well, and `scripts/backup.sh --prune --keep N` to run in `deploy/` on the host. With anyone on legal hold it warns that backups from before the hold hold their data (what they deleted since, too) and marks those taken before it: ask whoever placed the hold before removing them. A backup's start is the one its `MANIFEST` gives in UTC; a backup's name is the host's local time, so for a backup from before v5.3, which has only its name, one named up to 14 hours after the hold began counts as before it |
+| Old backups | shown only: backups beyond the newest ones kept (`BACKUP_KEEP` in `.env`, 14 by default, or the number typed), never the latest nor the newest that ended well, and `./arenactl backup --prune --keep N` to run on the host (`scripts/backup.sh --prune --keep N` in `deploy/` on a host without a checkout). With anyone on legal hold it warns that backups from before the hold hold their data (what they deleted since, too) and marks those taken before it: ask whoever placed the hold before removing them. A backup's start is the one its `MANIFEST` gives in UTC; a backup's name is the host's local time, so for a backup from before v5.3, which has only its name, one named up to 14 hours after the hold began counts as before it |
 | Models nothing uses | model files (GGUF, vLLM snapshots, picture and video models' files) no model of Admin → Models uses, no server reads and no download writes into, each chosen by hand (as [On disk](#on-disk) does, one at a time): one deleted is gone from the library, and using it again means downloading it again |
 
 A clean-up that cannot run says why (the backups not mounted, or another
@@ -1526,12 +1526,12 @@ Live dashboards (those with a refresh in their file) refresh themselves, and
 can pause. Edit a dashboard file and the next request uses it: the app reads
 the files on every request.
 
-`scripts/audit-dashboards.py` runs every panel's queries in the app (over the
+`./arenactl check dashboards` runs every panel's queries in the app (over the
 last hour, as the pages open, or the window given) and reports errors, empty
 panels, null values and percentages out of range:
 
 ```bash
-python3 scripts/audit-dashboards.py 6h
+./arenactl check dashboards 6h
 ```
 
 ### Charts

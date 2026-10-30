@@ -253,7 +253,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         var good = report.Backups.Where(b => b.Result == "ok" && b.At is not null).MaxBy(b => b.At);
         if (good is null)
         {
-            return (Fail, report.Backups.Count == 0 ? "No backup yet: run scripts/backup.sh on a schedule." : "No backup ended well: see the newest one's log.");
+            return (Fail, report.Backups.Count == 0 ? "No backup yet: run ./arenactl backup on a schedule (daily: sudo ./arenactl backup --install-timer; without the release's checkout, sudo scripts/backup.sh --install-timer in deploy/)." : "No backup ended well: see the newest one's log.");
         }
         var age = clock.GetUtcNow() - good.At!.Value;
         var said = $"The newest that ended well is {good.Name}, {Span(age)} old{(good.Encrypted ? ", encrypted" : "")}; {report.Backups.Count} kept.";
@@ -261,7 +261,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         {
             return (age <= BackupStale ? Warn : Fail, $"{said} Backups are expected every day.");
         }
-        return good.Encrypted ? (Ok, said) : (Warn, $"{said} It is not encrypted, and it holds every secret of the stack: set BACKUP_KEY_FILE (scripts/backup.sh --help).");
+        return good.Encrypted ? (Ok, said) : (Warn, $"{said} It is not encrypted, and it holds every secret of the stack: set BACKUP_KEY_FILE (./arenactl backup --help).");
     }
 
     private async Task<(string, string)> CertificateAsync(CancellationToken ct)

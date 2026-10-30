@@ -2348,10 +2348,10 @@ stage), from .NET's runtime packs, which are not part of the SDK:
   `--prune` drops older ones), then `docker compose build app`. When the
   packs there are not at the SDK's version, the image publishes with
   nuget.org's instead, and skips Code Arena only when neither is to be had.
-  `deploy/scripts/make-installer.sh` packs Code Arena's packages of the
-  release, making them first when `dist/` has none.
+  `./arenactl bundle` packs Code Arena's packages of the release, making
+  them first when `dist/` has none.
 - **A host with internet**: `docker compose build app --build-arg CODE_ARENA=online`
-  (or `tools/publish-code-arena.sh`) fetches them from nuget.org.
+  (or `./arenactl code-arena`, outside the image) fetches them from nuget.org.
 - **A host without**: fill `tools/offline-nuget/` once from a machine with
   internet (its [README](../tools/offline-nuget/README.md) has the commands,
   about 220 MB), carry it over with the repository, and build as usual: the
@@ -2363,11 +2363,10 @@ stage), from .NET's runtime packs, which are not part of the SDK:
   Without them, the image tries nuget.org's; with neither, it skips Code
   Arena, the build log lists the files to fetch at that version, and the page
   says how to add it.
-- **By hand**: `tools/publish-code-arena.sh --offline [rid ...]` writes
-  `dist/code-arena/<rid>/code-arena` and `SHA256SUMS`, with `dotnet` or
-  `tools/dn`. It checks the packs first: when one is missing for a system
-  asked for, it lists them at the version to fetch, builds nothing and exits
-  with 3. Copy the files to people any way you like.
+- **By hand**: `./arenactl code-arena --offline [rid ...]` (below) checks the
+  packs first: when one is missing for a system asked for, it lists them at
+  the version to fetch, publishes nothing and exits with 3. Copy the packages
+  to people any way you like.
 - **Packages for a release**: `./arenactl code-arena [rid ...]`, on Linux,
   macOS or Windows, builds the IDE's page (with Node.js 20+, else in Node's
   container), publishes each system (with the .NET SDK 10, else in its

@@ -613,7 +613,7 @@ internal static partial class Cli
                 ui.Warn("This code-arena has no IDE built into it: the conversation runs in this terminal.");
                 return await AgentAsync(o, env, ct);
             }
-            ui.Error("This code-arena has no IDE: its page was not built into it. tools/publish-code-arena.sh builds the page (from src/web) and then the program.");
+            ui.Error("This code-arena has no IDE: its page was not built into it. ./arenactl code-arena, in Argus Arena's repository, builds the page (from src/web) and then the program.");
             return 1;
         }
         // The whole run is one "turn" of Ctrl+C: the first press stops the server.

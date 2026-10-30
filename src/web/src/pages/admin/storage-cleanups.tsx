@@ -155,7 +155,7 @@ function CleanupCard({ k, start }: { k: CleanupType; start: number | undefined }
             {p.command && !p.problem && p.count > 0 && (
               <div className="grid gap-1.5">
                 <p className="text-muted-foreground">
-                  The app never deletes a backup. On the host, in <code className="font-mono text-xs">deploy/</code>, run:
+                  The app never deletes a backup. On the host, from the checkout, run (in an installation from the offline installer, <code className="font-mono text-xs">deploy/scripts/backup.sh</code> with the same options):
                 </p>
                 <CodeBlock code={p.command} label={`${k.title}: the command`} />
                 <p className="text-xs text-muted-foreground">

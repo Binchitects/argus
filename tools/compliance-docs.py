@@ -106,7 +106,7 @@ def controls_md(controls: dict, catalog: dict) -> str:
         out += ["**Documented in** " + ", ".join(f"[{d}]({link(d, at)})" for d in c.get("docs", [])), ""]
         out += ["**Proved by**", "", *[f"- `{t}`" for t in c.get("tests", [])], ""]
         if c.get("checks"):
-            out += ["**Watched by** " + ", ".join(f"`{x}`" for x in c["checks"]) + " (Admin → Compliance, and `deploy/scripts/compliance-check.py`)", ""]
+            out += ["**Watched by** " + ", ".join(f"`{x}`" for x in c["checks"]) + " (Admin → Compliance, and `./arenactl check compliance`)", ""]
         out += ["**The company's part** " + " ".join(c.get("operator", "").split()), ""]
     return "\n".join(out).rstrip() + "\n"
 

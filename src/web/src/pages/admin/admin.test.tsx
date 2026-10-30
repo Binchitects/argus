@@ -251,7 +251,7 @@ describe('the certificate on the overview', () => {
     renderApp('/admin')
     expect(await screen.findByLabelText('Certificate')).toHaveTextContent('12 days')
     expect(screen.getByText('The certificate for llm.example.com expires in 12 days')).toBeInTheDocument()
-    expect(screen.getByText(/Run scripts\/make-cert.sh again/)).toBeInTheDocument()
+    expect(screen.getByText(/Run \.\/arenactl cert again/)).toBeInTheDocument()
   })
 
   it("says when it is Traefik's own, and nothing to do for a far one from Let's Encrypt", async () => {

@@ -45,13 +45,12 @@ tools/dn test tests/CodeArena.Tests -c Release
 ```
 
 Code Arena uses the base class library only (no packages). Its standalone
-files, one per system, need .NET's runtime packs: `tools/publish-code-arena.sh
---offline` builds them from `tools/offline-nuget/` into `dist/code-arena/`
+files, one per system, need .NET's runtime packs: `./arenactl code-arena`
+builds them into `dist/code-arena/` and packs them for a release
 ([code-arena.md](code-arena.md#building-it-admins)), after building the page of
 its IDE from `src/web` (`vite.code-arena.config.ts`, into
-`src/CodeArena/web`, which the program embeds); `./arenactl code-arena`
-builds and packs them for a release (online by default; `--offline` from
-`tools/offline-nuget/`). The page's code is `src/web/src/code-arena/`:
+`src/CodeArena/web`, which the program embeds): the packs from nuget.org, or
+`--offline` from `tools/offline-nuget/`. The page's code is `src/web/src/code-arena/`:
 the chat's components, Monaco and xterm.js around Code Arena's API
 ([its calls](code-arena.md#the-pages-calls)); its tests run with the web's
 (`npx vitest run src/code-arena`). The terminals' tests start a real `/bin/sh`
@@ -142,16 +141,16 @@ python3 -m unittest discover clients/arena
 
 ## The deployment's own tests
 
-Against the running platform, from `deploy/` (each described in
+Against the running platform, from the repository's root (each described in
 [testing.md](testing.md)):
 
 ```bash
-python3 scripts/upgrade-test.py --zero --stop-live   # this checkout from zero
-python3 scripts/functional-test.py      # what a person does, as two people
-python3 scripts/clients-check.py        # the API, Argus over MCP, Qwen Code, DeepSeek Harness
-python3 scripts/scale-test.py           # many people at once
-python3 scripts/sandbox-check.py        # the sandbox's isolation
-python3 scripts/audit-dashboards.py 6h  # every dashboard panel's queries
+./arenactl check upgrade --zero --stop-live   # this checkout from zero
+./arenactl check functional      # what a person does, as two people
+./arenactl check clients         # the API, Argus over MCP, Qwen Code, DeepSeek Harness
+./arenactl check scale           # many people at once
+./arenactl check sandbox         # the sandbox's isolation
+./arenactl check dashboards 6h   # every dashboard panel's queries
 ```
 
 ## Images
@@ -180,21 +179,22 @@ A release is a tag, `vX.Y.Z`, on a commit of `main` whose suites all pass.
    tests/deploy`), and the outside-in suites against the stack running this
    commit ([testing.md](testing.md)).
 3. The compliance checks pass against the stack running this commit:
-   `python3 deploy/scripts/compliance-check.py` exits 0
+   `./arenactl check compliance` exits 0
    ([compliance](compliance/README.md#checking-a-live-stack)). A change that
    makes a control weaker is under **Weakened controls** in the changelog.
    The release scan passes: `python3 tools/release-scan.py` writes the SBOM
    and exits 0 ([supply chain](compliance/README.md#supply-chain)).
 4. An upgrade from the oldest release the bundle takes (5.2.0) keeps every
-   person, chat and setting: `scripts/upgrade-test.py --from v5.2.0
+   person, chat and setting: `./arenactl check upgrade --from v5.2.0
    --stop-live`. Each migration applies on that release's schema.
 5. The images: `./arenactl build --all` (every feature's, built and pulled).
 6. Code Arena: `tools/fetch-code-arena-packs.sh` before the images (the app
    image carries its builds); its packages for the release
    (`./arenactl code-arena`, into `dist/`) are made by the installer's
    step below when `dist/` has none.
-7. The offline installer: `deploy/scripts/make-installer.sh` (with `--models`
-   and `--packs` for a bundle that carries them) writes
+7. The offline installer: `./arenactl bundle --no-build` (the images of step 5;
+   `--with-deps` for the host's dependencies, `--models` and `--packs` for a
+   bundle that carries them) writes
    `dist/argus-arena-VERSION-offline.run` and its `.sha256`. It needs the tags
    of the releases since 5.2.0 (`git fetch --tags`) and the embedding model in
    `MODELS_DIR` (it says so when either is missing). Check it:

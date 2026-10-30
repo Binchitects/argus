@@ -150,7 +150,7 @@ public static class DownloadEndpoints
             case "$(uname -m)" in x86_64|amd64) arch=x64 ;; arm64|aarch64) arch=arm64 ;; *) echo "Code Arena: no build for $(uname -m)" >&2; exit 1 ;; esac
             rid="$os-$arch"
             case "$rid" in
-            {{sums}}  *) echo "Code Arena: this Arena has no build for $rid yet (an admin adds them: tools/fetch-code-arena-packs.sh)" >&2; exit 1 ;;
+            {{sums}}  *) echo "Code Arena: this Arena has no build for $rid yet (an admin adds them: ./arenactl repair, in a checkout of the release, builds them into the app)" >&2; exit 1 ;;
             esac
             dir="${CODE_ARENA_DIR:-$HOME/.local/bin}"
             mkdir -p "$dir"
@@ -227,7 +227,7 @@ public static class DownloadEndpoints
         var sum = builds.FirstOrDefault(b => b.Rid == "win-x64")?.Sha256;
         if (sum is null)
         {
-            return "Write-Error 'Code Arena: this Arena has no build for Windows yet (an admin adds them: tools/fetch-code-arena-packs.sh)'\n";
+            return "Write-Error 'Code Arena: this Arena has no build for Windows yet (an admin adds them: ./arenactl repair, in a checkout of the release, builds them into the app)'\n";
         }
         return $$"""
             # Code Arena from {{arena}}: the build for Windows, checked, on your PATH.

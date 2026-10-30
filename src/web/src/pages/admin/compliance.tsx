@@ -97,7 +97,7 @@ const STATES: Record<State, { label: string; icon: LucideIcon; tone: string; bad
 function StateBadge({ state }: { state: State | null }) {
   if (!state) {
     return (
-      <Badge variant="outline" title="Watched from outside, by deploy/scripts/compliance-check.py, or proved by tests alone">
+      <Badge variant="outline" title="Watched from outside, by ./arenactl check compliance, or proved by tests alone">
         <CircleDashed className="size-3" aria-hidden="true" /> No live check here
       </Badge>
     )
@@ -239,7 +239,7 @@ function ControlCard({ c, framework, checks, mayAttest, onAttest, now }: { c: Co
                   const r = checks.get(k.replace(/^app:/, ''))
                   const s = r && k.startsWith('app:') ? STATES[r.state] : null
                   return (
-                    <span key={k} className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs" title={r?.detail ?? 'From outside: deploy/scripts/compliance-check.py'}>
+                    <span key={k} className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs" title={r?.detail ?? 'From outside: ./arenactl check compliance'}>
                       {s ? <s.icon className={cn('size-3', s.tone)} aria-label={s.label} /> : <CircleDashed className="size-3 text-muted-foreground" aria-label="From outside" />}
                       {r?.title ?? k.replace(/^live:/, 'outside: ')}
                     </span>
@@ -418,7 +418,7 @@ export function CompliancePage() {
                 Checks now
               </h2>
               <span className="text-xs text-muted-foreground">
-                Checked {ago(data.checkedAt)}. From outside, <code className="font-mono">deploy/scripts/compliance-check.py</code> checks TLS, the headers, the session cookie and the cross-site guard.
+                Checked {ago(data.checkedAt)}. From outside, <code className="font-mono">./arenactl check compliance</code> (in an installation, <code className="font-mono">deploy/scripts/compliance-check.py</code>) checks TLS, the headers, the session cookie and the cross-site guard.
               </span>
             </div>
             <ul className="grid gap-2 md:grid-cols-2">

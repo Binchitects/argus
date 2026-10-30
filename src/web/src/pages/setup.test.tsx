@@ -204,7 +204,7 @@ describe('connect your tools', () => {
     await userEvent.click(await screen.findByRole('combobox', { name: 'Your tool' }))
     await userEvent.click(await screen.findByRole('option', { name: 'Code Arena (our own agent)' }))
     const steps = screen.getByRole('region', { name: 'Setting up Code Arena (our own agent)' })
-    expect(within(steps).getByText(/no builds of it yet/)).toHaveTextContent('tools/fetch-code-arena-packs.sh, then rebuild the app')
+    expect(within(steps).getByText(/no builds of it yet/)).toHaveTextContent('./arenactl build --services app builds them into the app')
     expect(within(steps).queryByRole('link')).not.toBeInTheDocument()
   })
 

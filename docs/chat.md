@@ -1276,7 +1276,7 @@ my details", "check our status page and the vendor's for an outage".
   **Close** (the X) on the bar.
 - **Who has it**: the `feature.browser` permission and the tool's own
   settings (Admin → Tools). It is off in rooms, as it acts as you. It needs
-  the `browser` feature (`installer.sh repair --with browser`, or `browser` in `COMPOSE_PROFILES`).
+  the `browser` feature (`./arenactl repair --with browser` from a checkout, `sh argus-arena-VERSION-offline.run repair --with browser` with the offline bundle, or `browser` in `COMPOSE_PROFILES`).
 
 ## Apps
 
@@ -2021,7 +2021,7 @@ their turn:
 - **Python runs are sealed off.** No network at all; each run is its own
   unprivileged user in its own directory, with CPU, memory, file size and
   process limits; nothing it starts outlives it; its directory is wiped. It
-  sees only the files of the chat it runs for. `scripts/sandbox-check.py`
+  sees only the files of the chat it runs for. `./arenactl check sandbox`
   tests all of it against the running sandbox.
 - **The web is only what an admin allows**: named sites (or `*` for any public
   one), and never an address inside the network, whatever a name or a
@@ -2202,8 +2202,8 @@ use and edit one); a new chat takes `assistantId`.
 | "Argus is not available for this answer: …" | Argus's reason follows | usually no GitLab account matches the person's email; see [ARGUS.md](argus/README.md) |
 | "… is not available for this answer: … did not answer" | an MCP server is down or refused the key | Admin → Tools → the server's **Edit** → **Test** |
 | No **Image generation** or **Video generation** in the Tools menu | the model is off, or its server does not run | Admin → Models: turn it on; a module left out in `docker-compose.override.yml` stays out |
-| No **Python** in the Tools menu | the sandbox is not running | `docker compose ps sandbox`; `scripts/sandbox-check.py` says whether it is sound |
-| No **Decide (Laya)** in the Tools menu | the laya module is off (the default), or still fetching or loading its checkpoints | `installer.sh repair --with laya` (or `laya` added to `COMPOSE_PROFILES` in `.env`, then `docker compose up -d laya`); Admin → Models shows the downloads |
+| No **Python** in the Tools menu | the sandbox is not running | `docker compose ps sandbox`; `./arenactl check sandbox` says whether it is sound |
+| No **Decide (Laya)** in the Tools menu | the laya module is off (the default), or still fetching or loading its checkpoints | `./arenactl repair --with laya` from a checkout, or `sh argus-arena-VERSION-offline.run repair --with laya` on an installed host (or `laya` added to `COMPOSE_PROFILES` in `.env`, then `docker compose up -d laya`); Admin → Models shows the downloads |
 | No **Web** in the Tools menu | it is off (the default), or no site is allowed | Admin → Tools → Web on, and Settings → Python and web → Sites the chat may open |
 | No **Deep research** in the chat's **Tools** | an admin has not given deep research to you | Admin → Tools → Deep research: who may use it |
 | **Deep research** is greyed out | the chat's model calls no tools, or **Compare** is on (its tooltip, or a tap, says which) | choose a model that calls tools, or turn Compare off |

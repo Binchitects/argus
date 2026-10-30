@@ -505,7 +505,7 @@ Two checks need a live server, and both are worth more than the unit suite for
 the failures they catch:
 
 ```bash
-python tools/smoke_test.py --url https://argus.llm.localhost/mcp --token <PAT>
+./arenactl check argus --url https://argus.llm.localhost/mcp --token <PAT>
 ```
 
 ```bash

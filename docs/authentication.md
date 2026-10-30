@@ -92,17 +92,11 @@ one stays signed in. Opening two-factor setup and cancelling changes nothing.
 
 ### As a machine client of the engine API
 
-```bash
-export TOKEN=$(./scripts/get-token.sh)
-```
+A tool, a script or a pipeline sends an API key to the gateway, the same way a person's tools do, so what it uses is counted against the person who owns that key:
 
 ```bash
-curl https://api.llm.localhost/v1/chat/completions -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"model":"default","messages":[{"role":"user","content":"hi"}]}'
+curl https://gateway.llm.localhost/v1/chat/completions -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' -d '{"model":"MODEL","messages":[{"role":"user","content":"hi"}]}'
 ```
-
-Tokens expire after an hour. Fetch a new one rather than caching it; that is the
-point of replacing a static key. Tools that belong to a person should use that
-person's API key at the gateway instead, so their usage is attributed to them.
 
 ---
 
@@ -550,7 +544,6 @@ to bypass authentication from outside the Docker network.
 | Who is who for Argus (username → email, no passwords) | `config/directory/users.yml`, written by the app |
 | Company sign-in settings (the client secret encrypted), the SCIM token's SHA-256 | the `settings` table of `llmapp` |
 | SAML assertions already used, until they expire | the `saml_assertions` table of `llmapp` |
-| Machine-client token helper | `scripts/get-token.sh` |
 
 The app runs as `LLM_UID:LLM_GID` (the owner of `deploy/config`), so the files it
 writes stay yours.
@@ -560,16 +553,18 @@ writes stay yours.
 ## Auditing it
 
 ```bash
-./scripts/audit-auth.sh
+./arenactl check functional
+./arenactl check compliance
 ```
 
-It signs in for real and runs the full authorization-code exchange for every
-client, printing the claims that arrive; checks that a used code and a wrong
-client secret are refused and an unknown redirect is never followed; gets a
-machine token and uses it (and a forged one); checks forwardAuth anonymous and
-signed in; and checks the CSRF guard, the security headers and the session
-cookie flags. It exits non-zero when anything fails. Run it after changing
-`.env` secrets or an app's OAuth settings.
+The first signs in for real, as the admin and as a person it makes: the person
+is no admin and is refused the admin's pages, their key reaches the model, and
+a rotated key and a reset password stop working. The second checks from outside
+the CSRF guard, the security headers, the session cookie's flags and TLS, then
+the app's own checks. Each exits non-zero when anything fails. Run them after
+changing `.env` secrets or an app's OAuth settings. The code exchange itself (a
+used code and a wrong client secret refused, an unknown redirect never
+followed) is proved by the app's tests (`OidcTests`).
 
 ---
 
@@ -577,8 +572,8 @@ cookie flags. It exits non-zero when anything fails. Run it after changing
 
 **Every app fails at once with `invalid_client`.** Almost always **secret
 drift**: a secret changed in `.env` but an app container still holds the old
-value. `audit-auth.sh` step 0 compares each container with `.env`; if it reports
-STALE, `docker compose up -d` recreates it.
+value. `docker compose up -d` in `deploy/` recreates each container whose
+settings changed, with the new value.
 
 **The app will not start: "The stored sign-in keys cannot be decrypted".**
 `APP_KEY` differs from the value of the first start. Put the old value

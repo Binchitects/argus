@@ -34,7 +34,7 @@ Every person has their own account. Passwords must score 3 or more on zxcvbn, wi
 - `Llm.Tests/IdentityTests.Ten_failures_lock_the_account_from_any_address`
 - `Llm.Tests/ConcurrentSignInTests.Parallel_wrong_passwords_still_reach_the_lockout`
 
-**Watched by** `app:passwords` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:passwords` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** A password policy people are told about; no shared accounts; the first admin's password (ADMIN_PASSWORD) kept as a break-glass secret.
 
@@ -63,7 +63,7 @@ A session ends after an hour without activity and after 12 hours in any case (30
 - `Llm.Tests/IdentityTests.A_password_reset_ends_the_persons_sessions_and_only_the_new_password_works`
 - `Llm.Tests/IdentityTests.Disabling_signs_out_and_blocks_keys_and_enabling_undoes_it`
 
-**Watched by** `app:sessions`, `live:cookies` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:sessions`, `live:cookies` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Decide whether "keep me signed in" fits (for health data, set Auth:RememberMe no longer than Auth:SessionMax); screens locked when people step away.
 
@@ -94,7 +94,7 @@ People enrol an authenticator app and get recovery codes; an admin can reset a l
 - `Llm.Tests/CompanySignInTests.A_second_factor_required_of_someone_must_come_from_the_provider`
 - `Llm.Tests/SamlSignInTests.A_second_factor_required_of_someone_must_be_the_assertions_authentication_context`
 
-**Watched by** `app:two-factor` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:two-factor` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Choose who must use it (Settings → Sign-in: admins at least; everyone for health data); require a second factor at the identity provider for company sign-in.
 
@@ -203,7 +203,7 @@ An access review lists every privileged role given to a person, a group or every
 - `Llm.Tests/AccessReviewTests.A_review_lists_privileged_roles_their_groups_members_and_unused_accounts_and_revoking_takes_effect_at_once`
 - `Llm.Tests/AccessReviewTests.The_schedule_starts_a_review_when_one_is_due_tells_the_admins_and_disables_unused_accounts_when_asked`
 
-**Watched by** `app:access-review` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:access-review` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Name the reviewers (the Compliance officer role), finish each review by its due date, and review the directory's and SCIM's groups at their source as the review says.
 
@@ -237,7 +237,7 @@ The audit log keeps every sign-in, every change to people, groups, roles, settin
 - `Llm.Tests/ArenaMcpTests.At_its_code_address_an_agent_gets_search_tools_and_run_code_whose_program_calls_the_tools_as_the_person`
 - `Llm.Tests/ShareTests.A_shared_chat_opens_for_a_colleague_and_not_for_someone_outside_the_group_and_revoking_stops_it`
 
-**Watched by** `app:audit-log` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:audit-log` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Someone reviews the audit log on a schedule.
 
@@ -265,7 +265,7 @@ Every service's logs go to Loki, searchable by container, level and text; how lo
 - `Llm.Tests/StorageTests.Lokis_retention_is_read_from_its_configuration`
 - `Llm.Tests/RecordRetentionTests.Loki_is_set_to_keep_logs_for_ninety_days_in_compose_and_in_the_chart`
 
-**Watched by** `app:log-retention` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:log-retention` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Decide how long logs are kept.
 
@@ -294,7 +294,7 @@ Each entry is sealed onto the one before it with SHA-256, under one lock for eve
 - `Llm.Tests/AuditChainTests.An_anchor_kept_apart_shows_the_end_of_the_chain_rewritten_and_entries_from_before_the_chain_are_sealed`
 - `Llm.Tests/AuditChainTests.Many_writers_at_once_still_make_one_chain`
 
-**Watched by** `app:audit-chain` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:audit-chain` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Keep the audit volume's folder (DATA_DIR/audit) where the database's administrators cannot write, and back it up apart; restrict direct database access and keep its own logs.
 
@@ -322,7 +322,7 @@ Every entry, as it is written, in order and each once, by syslog (RFC 5424 over 
 - `Llm.Tests/AuditForwardTests.Each_entry_is_posted_once_in_order_signed_and_a_webhook_that_fails_gets_them_all_later`
 - `Llm.Tests/AuditForwardTests.Syslog_gets_each_entry_octet_counted_as_RFC_5424_with_failures_as_warnings`
 
-**Watched by** `app:audit-forwarding` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:audit-forwarding` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Run the SIEM, keep what it receives for as long as the frameworks ask (six years under HIPAA), and watch its alerts.
 
@@ -352,7 +352,7 @@ Prometheus and Alertmanager watch the stack; an alert that starts firing reaches
 - `Llm.Tests/NotificationsTests.A_system_alert_that_starts_firing_reaches_every_admin_once`
 - `Llm.Tests/OperationsTests.The_certificate_alerts_warn_thirty_days_before_and_are_critical_seven_days_before`
 
-**Watched by** `app:certificate` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:certificate` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Someone takes the alerts, around the clock where the company needs it.
 
@@ -383,7 +383,7 @@ Many failed sign-ins, an administrative role given, many exports by one person, 
 - `Llm.Tests/IncidentTests.Failed_sign_ins_an_admin_made_many_exports_and_a_failed_backup_each_raise_one_alert_to_every_admin`
 - `Llm.Tests/IncidentTests.An_incident_runs_from_its_alert_to_closure_with_the_GDPRs_72_hours_and_HIPAAs_60_days`
 
-**Watched by** `app:incidents` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:incidents` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Name who answers the alerts and runs incidents, know which supervisory authority to tell and how, and keep the incident-response runbook.
 
@@ -408,7 +408,7 @@ The company sets how long chats are kept, a group can set a shorter time, and ev
 
 - `Llm.Tests/RetentionTests.A_chat_past_its_groups_retention_is_deleted_with_its_files_and_one_under_legal_hold_is_not`
 
-**Watched by** `app:chat-retention` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:chat-retention` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Decide the periods, and write them in the retention policy.
 
@@ -510,7 +510,7 @@ The signing keys, settings' secrets (directory, SSO, connectors) and tokens are 
 - `Llm.Tests/FileSealingTests.A_file_is_stored_encrypted_read_as_it_was_and_those_stored_before_are_sealed_by_the_job`
 - `Llm.Tests/FileSealingTests.Without_APP_KEY_files_are_stored_as_they_are_and_the_check_says_so`
 
-**Watched by** `app:data-key`, `app:files-sealed`, `live:disk` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:data-key`, `app:files-sealed`, `live:disk` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Keep APP_KEY with the company's secrets, apart from the backups; encrypt the hosts' disks.
 
@@ -534,7 +534,7 @@ A person asks from Your account (or an admin takes the request in for them) for 
 - `Llm.Tests/DataRequestTests.Restriction_stops_everything_that_learns_from_their_data_until_it_is_lifted`
 - `Llm.Tests/DataRequestTests.Erasure_removes_everything_of_theirs_takes_them_out_of_what_others_keep_and_certifies_what_is_kept`
 
-**Watched by** `app:data-requests` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:data-requests` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Name who answers them (a data protection officer, with the privacy.manage permission), verify who is asking, and tell people where to complain.
 
@@ -558,7 +558,7 @@ The audit log six years unless set (only ever from the start of its chain), the 
 
 - `Llm.Tests/RecordRetentionTests.Records_past_their_time_go_the_audit_log_only_from_the_start_of_its_chain_and_the_check_says_how_long_each_is_kept`
 
-**Watched by** `app:records-retention`, `app:log-retention` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:records-retention`, `app:log-retention` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Decide the periods, write them in the retention policy, and keep backups as long as it says.
 
@@ -592,7 +592,7 @@ The safeguards find e-mail addresses, phone, card, IBAN and social security numb
 - `Llm.Tests/PromptLogTests.Every_API_request_is_in_the_log_from_its_arrival_while_it_runs_and_when_it_fails_is_refused_or_is_stopped`
 - `Llm.Tests/PromptLogTests.A_chat_question_is_in_the_log_with_its_answers_state_and_why_it_failed`
 
-**Watched by** `app:personal-data` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:personal-data` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Decide which models may see which data (a HIPAA BAA, a GDPR processing agreement with any provider outside the company), add the templates, and add the company's own identifiers as words or patterns.
 
@@ -626,7 +626,7 @@ Only Traefik's ports 80 and 443 are published, 80 only to redirect; TLS 1.2 and 
 - `Llm.Tests/ApiPassageTests.The_model_list_and_embeddings_are_passed_on_with_the_callers_own_key`
 - `Llm.Tests/ApiPassageTests.The_gateways_own_management_is_not_found_from_outside`
 
-**Watched by** `live:tls`, `live:headers`, `live:csrf` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `live:tls`, `live:headers`, `live:csrf` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** A certificate from the company's CA or Let's Encrypt; the network around the hosts.
 
@@ -661,7 +661,7 @@ scripts/backup.sh backs up the databases, the settings and the files, with a sec
 - `deploy/test_recovery.py::test_The_live_project_is_refused_before_anything_runs`
 - `deploy/test_recovery_check.py::test_A_person_lost_in_the_restore_fails_it`
 
-**Watched by** `app:backups` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:backups` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Schedule the backups, keep the second copy off the host, keep the backups' key (BACKUP_KEY_FILE) apart from them with a copy in the company's vault, run the drill on a schedule, and encrypt pgBackRest's repository (its repo1-cipher-type and repo1-cipher-pass) when using it.
 
@@ -752,7 +752,7 @@ The notice the company sets (acceptable use, the privacy notice) is on the sign-
 - `Llm.Tests/NoticeTests.Everyone_accepts_the_current_version_before_anything_else_and_a_new_version_again`
 - `Llm.Tests/NoticeTests.Without_a_notice_nothing_waits_and_the_check_asks_for_one`
 
-**Watched by** `app:notice` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:notice` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Write the notice and the policies it points to, keep them current, and set a new version when they change in substance.
 
@@ -812,7 +812,7 @@ A register of the risks to the company's information and its AI (Admin → Compl
 - `Llm.Tests/RiskRegisterTests.An_acceptance_names_who_why_and_until_when_and_a_treatment_has_its_actions_and_history`
 - `Llm.Tests/RiskRegisterTests.Only_those_who_manage_compliance_change_the_register_and_an_auditor_reads_it`
 
-**Watched by** `app:risks` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:risks` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Assess the risks at least once a year and after significant changes, with the owners who know them; management accepts the risks left, and the treatment's actions are done by their dates.
 
@@ -835,7 +835,7 @@ For each of ISO 27001's and ISO 42001's Annex A controls (Admin → Compliance �
 - `Llm.Tests/SoaTests.Each_Annex_A_control_says_whether_it_applies_and_why_how_far_and_what_serves_it`
 - `Llm.Tests/SoaTests.It_is_approved_once_every_control_is_decided_each_approval_a_version_kept_as_it_stood`
 
-**Watched by** `app:soa` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:soa` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Decide each control with the risk owners, approve the statement (the information security officer, or management), and approve it again after the risk assessment each year and when the scope changes.
 
@@ -864,7 +864,7 @@ The company's policies (Admin → Compliance → Policies), adopted from the tem
 - `Llm.Tests/PolicyTests.A_policy_from_a_template_is_in_force_once_approved_and_each_reader_acknowledges_its_version`
 - `Llm.Tests/PolicyTests.A_new_version_says_what_changed_is_read_again_and_a_review_keeps_it_in_force`
 
-**Watched by** `app:policies` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:policies` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Adopt the policies that apply, fill in their brackets, have them approved by management, review each on time, and follow up with those who have not read them.
 
@@ -892,7 +892,7 @@ The audit programme (Admin → Compliance → Audits): each audit, internal or a
 - `Llm.Tests/AuditTests.A_finding_is_acted_on_with_its_root_cause_and_closed_only_when_its_action_is_checked`
 - `Llm.Tests/AuditTests.The_check_wants_an_internal_audit_each_year_findings_in_time_certificates_current_and_waivers_decided`
 
-**Watched by** `app:audits` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:audits` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Plan internal audits that cover every clause and control over the certification cycle, by people who do not audit their own work; act on the findings by their dates; renew the certificates before they end.
 
@@ -920,7 +920,7 @@ The supplier register (Admin → Compliance → Suppliers): each model provider,
 
 - `Llm.Tests/SupplierTests.What_Arena_connects_to_is_offered_until_registered_with_its_data_agreements_and_review`
 
-**Watched by** `app:suppliers` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:suppliers` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Register each supplier with what it gets, sign a DPA (and a BAA for health data) where it processes personal data, keep its certificates' dates current, and review it on time.
 
@@ -941,7 +941,7 @@ The register of the company's AI systems (Admin → Compliance → AI systems): 
 
 - `Llm.Tests/AiGovernanceTests.An_AI_system_is_put_into_use_only_once_its_class_impact_oversight_and_evaluation_are_said`
 
-**Watched by** `app:ai-systems` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:ai-systems` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Register each AI system before it goes into use, with its owner; classify it under the AI Act with your counsel; assess its impact with the people it affects in mind; give each high-risk system its human oversight and evaluation, and its fundamental rights assessment where Article 27 asks for one.
 
@@ -1013,7 +1013,7 @@ Admin → Compliance → Management: each of Arena's controls has its owner in t
 - `Llm.Tests/ManagementTests.A_review_keeps_its_inputs_as_the_system_stood_and_objectives_are_measured_by_their_checks`
 - `Llm.Tests/ManagementTests.An_auditor_reads_and_asks_for_evidence_and_changes_nothing_else`
 
-**Watched by** `app:management` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:management` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Name each control's owner, hold the management review at least once a year with the leadership, set objectives that matter, and answer the auditors' requests in time.
 
@@ -1051,6 +1051,6 @@ Code Studio → Security reviews a repository at a commit, read with the person'
 - `Llm.Tests/FixTests.A_security_fixs_change_is_checked_by_the_scanners_and_the_review_before_its_merge_request`
 - `Llm.Tests/CodeArenaSyncTests.Code_Arena_reads_the_latest_security_review_of_its_branch_with_what_Fix_it_would_ask`
 
-**Watched by** `app:vulnerabilities` (Admin → Compliance, and `deploy/scripts/compliance-check.py`)
+**Watched by** `app:vulnerabilities` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Load the advisories pack and renew it each day, review each repository at least monthly and before each release, and fix or accept what it finds within its time.

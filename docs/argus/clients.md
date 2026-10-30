@@ -133,7 +133,7 @@ argus serve --config /etc/argus/config.yaml --host 0.0.0.0 --allowed-host argus.
 ## Verifying, whichever client
 
 ```bash
-python tools/smoke_test.py --url https://argus.internal/mcp --token <key>
+./arenactl check argus --url https://argus.internal/mcp --token <key>
 ```
 
 Seven checks: health, that a bad token is refused, the MCP handshake, the

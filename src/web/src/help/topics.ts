@@ -963,7 +963,7 @@ export const topics = {
       { name: 'Download evidence', text: 'One zip: the controls, every check\'s result, the attestations, the settings (no secret), who holds an administrative permission, the access reviews, the audit log\'s chain and its last 90 days by action. Each download is audited.' },
     ],
     tasks: [
-      { title: 'Prepare for an audit', steps: ['Fix what is red or amber under **Checks now**: each says what to change.', 'For each control, do the company\'s part and **Attest** it with where its proof is.', 'Run `python3 deploy/scripts/compliance-check.py` on the host for the checks from outside.', '**Download evidence** and give it to the auditor with your policies.'] },
+      { title: 'Prepare for an audit', steps: ['Fix what is red or amber under **Checks now**: each says what to change.', 'For each control, do the company\'s part and **Attest** it with where its proof is.', 'Run `./arenactl check compliance` on the host, from the checkout (or, in an installation from the offline installer, `python3 deploy/scripts/compliance-check.py`), for the checks from outside.', '**Download evidence** and give it to the auditor with your policies.'] },
     ],
     manual: { doc: 'compliance', section: 'controls-and-how-they-are-kept' },
   },

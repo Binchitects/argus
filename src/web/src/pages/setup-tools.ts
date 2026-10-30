@@ -154,7 +154,7 @@ export const tools: Tool[] = [
       if (builds.length === 0)
         return [
           {
-            text: "This Arena has no builds of it yet. An admin adds them: tools/fetch-code-arena-packs.sh, then rebuild the app (the deploy does both); or run tools/publish-code-arena.sh and hand out the files in dist/code-arena.",
+            text: "This Arena has no builds of it yet. An admin adds them from the checkout: ./arenactl build --services app builds them into the app's image (the .NET packs from nuget.org, or, on a host with no network, from tools/offline-nuget, which tools/fetch-code-arena-packs.sh fills), and the app is started again on it; or ./arenactl code-arena makes the packages to hand out, in dist/.",
           },
         ]
       return [

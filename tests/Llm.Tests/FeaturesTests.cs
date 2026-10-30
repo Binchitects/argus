@@ -80,7 +80,7 @@ public sealed partial class FeaturesTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.NotFound, lab);
         var body = await admin.JsonAsync(lab);
         Assert.Equal("feature-off", body.GetProperty("status").GetString());
-        Assert.Contains("installer.sh repair --with lab", body.GetProperty("error").GetString(), StringComparison.Ordinal);
+        Assert.Contains("./arenactl repair --with lab", body.GetProperty("error").GetString(), StringComparison.Ordinal);
         await StatusAssert.Is(HttpStatusCode.NotFound, await admin.GetAsync("/api/decks"));
         // The media studio needs pictures: off with it.
         await StatusAssert.Is(HttpStatusCode.NotFound, await admin.GetAsync("/api/media/items"));
