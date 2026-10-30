@@ -732,6 +732,11 @@ Each commit builds, passes the full Llm.Tests and CodeArena.Tests suites and the
 | 20 | Deploy without LiteLLM | All of §4: compose, ha.yml, config files, features, .env.example, installer (and the drop of the litellm database after import), kube-install, bundles, arenactl, Helm, backups and drills, CI, tests/deploy, functional-test.py rewrite | tests/deploy; the kind CI job; live: installer upgrade on the live stack (the container and image go), restore-drill, clients-check, functional-test |
 | 21 | Docs, compliance and help for our gateway | All of the docs and compliance list in §4; `Risks.cs:215`; CHANGELOG ("Weakened controls" rule: none weakened), whats-new; then the release tag and `gh release create` | compliance-docs.py, release-scan.py, VoiceTests:866 doc checks, the help build |
 
+**Done so far** (live stack, 2026-10-30): commits 0 to 6. The mirror brought all 9,505 rows of LiteLLM's log into
+`gateway.requests` at its first look. This month's totals: 635 people, each equal to LiteLLM's to the billionth, and the
+whole equal ($5.5268583). The one difference is LiteLLM's placeholder `default_user_id` (17 requests of its master key),
+which today's usage pages show as if it were a person and the ledger counts as no one.
+
 ---
 
 ## 7. Risks, and how the new gateway is measured against LiteLLM before LiteLLM is removed
