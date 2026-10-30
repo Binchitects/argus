@@ -49,7 +49,7 @@ public sealed record PromptFilter(DateTimeOffset From, DateTimeOffset To, string
 /// API keys from the gateway's request log (the chat's own requests there are its answers, and
 /// the small steps around them: titles, summaries, checks, which are in the usage totals only).
 /// </summary>
-public sealed class PromptUsage(AppDbContext db, SqlDatasource sql)
+public sealed class PromptUsage(AppDbContext db, Gateway.LedgerSql sql)
 {
     public const int DefaultLimit = 1000;
     public const int MaxLimit = 5000;
@@ -154,55 +154,56 @@ public sealed class PromptUsage(AppDbContext db, SqlDatasource sql)
         return (rows, totals, models);
     }
 
-    /// <summary>The requests made with API keys in the range: every key but the chat's, the master key's too (attributed to nobody).</summary>
+    /// <summary>The requests made with API keys in the range (people's and Code Studio's), the master key's too (attributed to nobody), from the app's ledger.</summary>
     private async Task<(List<PromptRow>, PromptTotals, List<string>)> ApiAsync(PromptFilter f, int limit, CancellationToken ct)
     {
-        var p = new Dictionary<string, object>
-        {
-            ["from"] = f.From.UtcDateTime, ["to"] = f.To.UtcDateTime, ["chat"] = Chat.ChatKey.Alias, ["limit"] = limit + 1,
-        };
-        var key = """coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)')""";
-        var where = $"""
-             where s."startTime" >= @from and s."startTime" < @to and s.call_type <> '' and coalesce(s.status, 'success') <> 'failure'
-               and {key} <> @chat
-            """;
+        var p = new Dictionary<string, object> { ["from"] = f.From.ToUniversalTime(), ["to"] = f.To.ToUniversalTime(), ["limit"] = limit + 1 };
+        // Answered (or from the cache): a failure or a refusal made nothing to read.
+        var where = " where r.started_at >= @from and r.started_at < @to and r.surface in ('api', 'studio') and r.status in ('done', 'cached') ";
         if (f.Emails is { } emails)
         {
-            where += $" and lower({UsageEndpoints.Person}) = any(@people)";
-            p["people"] = emails.ToArray();
+            where += " and r.person = any(@people)";
+            p["people"] = emails.Select(e => e.ToLowerInvariant()).ToArray();
         }
         var inRange = where;
         if (f.Model is { Length: > 0 } model)
         {
-            where += $" and {UsageEndpoints.Model} = @model";
+            where += " and r.model = @model";
             p["model"] = model;
         }
         var found = await sql.QueryAsync($"""
-            select s.request_id, s."startTime", {UsageEndpoints.Model}, s.call_type, {key}, lower({UsageEndpoints.Person}),
-                   coalesce(s.prompt_tokens, 0), {UsageEndpoints.Cached}, coalesce(s.completion_tokens, 0), coalesce(s.spend, 0)
-            {UsageEndpoints.From}{where}
-            order by s."startTime" desc limit @limit
+            select coalesce(r.source_id, r.id::text), r.started_at, r.model, r.call, coalesce(r.key_alias, '(master key)'), coalesce(r.person, '(unattributed)'),
+                   r.prompt_tokens, r.cached_tokens, r.completion_tokens, r.cost
+            from gateway.requests r{where}
+            order by r.started_at desc limit @limit
             """, p, ct);
         var sums = (await sql.QueryAsync($"""
-            select count(*), coalesce(sum(s.prompt_tokens), 0), coalesce(sum({UsageEndpoints.Cached}), 0), coalesce(sum(s.completion_tokens), 0), coalesce(sum(s.spend), 0)
-            {UsageEndpoints.From}{where}
+            select count(*), coalesce(sum(r.prompt_tokens), 0), coalesce(sum(r.cached_tokens), 0), coalesce(sum(r.completion_tokens), 0), coalesce(sum(r.cost), 0)
+            from gateway.requests r{where}
             """, p, ct)).Rows[0];
-        var models = (await sql.QueryAsync($"select distinct {UsageEndpoints.Model} {UsageEndpoints.From}{inRange}", p, ct)).Rows
+        var models = (await sql.QueryAsync($"select distinct r.model from gateway.requests r{inRange}", p, ct)).Rows
             .Select(r => r[0] as string).OfType<string>().Where(m => m.Length > 0).ToList();
         var byEmail = f.Titles ? [] : await PeopleByEmailAsync(found.Rows.Select(r => (string)r[5]!).Distinct().ToList(), ct);
-        var rows = found.Rows.Select(r => new PromptRow((string)r[0]!, new DateTimeOffset((DateTime)r[1]!, TimeSpan.Zero), "api", Kind((string)r[3]!), r[2] as string,
+        var rows = found.Rows.Select(r => new PromptRow((string)r[0]!, Time(r[1]!), "api", Kind((string)r[3]!), r[2] as string,
             Long(r[6]), Long(r[7]), Long(r[8]), Dec(r[9]), false, Key: (string)r[4]!,
             Person: f.Titles ? null : byEmail.GetValueOrDefault((string)r[5]!) ?? new PromptPerson(null, (string)r[5]!, null))).ToList();
         return (rows, new PromptTotals(Long(sums[0]), Long(sums[1]), Long(sums[2]), Long(sums[3]), Dec(sums[4]), 0), models);
     }
 
-    /// <summary>What a request of the gateway's log made, by its call.</summary>
-    public static string Kind(string callType) => callType switch
+    private static DateTimeOffset Time(object v) => v switch
     {
-        "aimage_generation" or "image_generation" => "picture",
-        "aspeech" or "speech" => "speech",
-        "atranscription" or "transcription" => "transcription",
-        SpendLog.VideoCall => "video",
+        DateTimeOffset o => o,
+        DateTime d => new DateTimeOffset(DateTime.SpecifyKind(d, DateTimeKind.Utc)),
+        _ => DateTimeOffset.Parse(v.ToString()!, System.Globalization.CultureInfo.InvariantCulture),
+    };
+
+    /// <summary>What a request made, by its call in the ledger.</summary>
+    public static string Kind(string call) => call switch
+    {
+        "image" or "image_edit" => "picture",
+        "speech" => "speech",
+        "transcription" => "transcription",
+        "video" => "video",
         _ => "chat",
     };
 
