@@ -57,15 +57,14 @@ public sealed class FakeGateway : ILiteLlm, IRoutesSource
         return Task.CompletedTask;
     }
 
-    public Task<string> GenerateKeyAsync(string email, string keyAlias, IReadOnlyList<string>? models = null, int? maxParallel = null, KeyRate? rate = null,
+    public Task GenerateKeyAsync(string email, string keyAlias, string key, IReadOnlyList<string>? models = null, int? maxParallel = null, KeyRate? rate = null,
         CancellationToken ct = default)
     {
         Check();
-        var secret = "sk-" + Guid.NewGuid().ToString("N");
         // As LiteLLM keeps it: the key's SHA-256, in hex.
-        var token = AnswerCache.HashOf(secret);
-        Keys[token] = new Key { Secret = secret, Token = token, Email = email, Alias = keyAlias, Models = models ?? [], MaxParallel = maxParallel, Rate = rate ?? KeyRate.None };
-        return Task.FromResult(secret);
+        var token = AnswerCache.HashOf(key);
+        Keys[token] = new Key { Secret = key, Token = token, Email = email, Alias = keyAlias, Models = models ?? [], MaxParallel = maxParallel, Rate = rate ?? KeyRate.None };
+        return Task.CompletedTask;
     }
 
     /// <summary>Runs before a key's rate is set (its hashed token): a test holds a sync there.</summary>

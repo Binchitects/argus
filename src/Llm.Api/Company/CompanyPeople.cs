@@ -17,7 +17,7 @@ public sealed class CompanyRefusedException(string message, bool conflict = fals
 /// SCIM: made, matched and kept current here. The provider is in charge of their
 /// name, email and (at sign-in) role; their password is never checked here.
 /// </summary>
-public sealed partial class CompanyPeople(UserManager<AppUser> users, PeopleService people, ILiteLlm gateway, Audit audit, DirectoryFile directory, Access.AccessService access)
+public sealed partial class CompanyPeople(UserManager<AppUser> users, PeopleService people, ILiteLlm gateway, ApiKeys keys, Audit audit, DirectoryFile directory, Access.AccessService access)
 {
     [System.Text.RegularExpressions.GeneratedRegex("^[a-z0-9][a-z0-9._-]{1,63}$")]
     private static partial System.Text.RegularExpressions.Regex UserNamePattern();
@@ -164,7 +164,7 @@ public sealed partial class CompanyPeople(UserManager<AppUser> users, PeopleServ
         {
             if (!string.IsNullOrEmpty(oldEmail))
             {
-                await gateway.DeleteKeysAsync((await gateway.KeysAsync(oldEmail)).Select(k => k.Token));
+                await keys.RevokeAsync([.. (await gateway.KeysAsync(oldEmail)).Select(k => k.Token)]);
             }
             // A disabled person gets no key now; they make one under Your account when they are back.
             if (!user.IsDisabled)

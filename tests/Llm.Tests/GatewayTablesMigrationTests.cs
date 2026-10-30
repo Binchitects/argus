@@ -117,4 +117,54 @@ public sealed class GatewayTablesMigrationTests(AppFixture app)
             ["a|refused|credit", "b|refused|api_off", "c|refused|safeguards", "d|refused|key", "e|refused|model", "f|refused|blocked", "g|failed|", "|failed|"],
             after.Select(r => $"{r.SourceId}|{r.Status}|{r.Refusal}"));
     }
+
+    [Fact]
+    public async Task Own_keys_join_the_apps_keys_with_their_names_and_limits_and_their_table_goes()
+    {
+        var cs = app.ConnectionStringFor("gwownkeys_" + Guid.NewGuid().ToString("N")[..8]);
+        var options = new DbContextOptionsBuilder<AppDbContext>();
+        options.UseNpgsql(cs);
+        options.UseOpenIddict<Guid>();
+        await using var db = new AppDbContext(options.Options);
+        var all = db.Database.GetMigrations().ToList();
+        var before = all[all.FindIndex(m => m.EndsWith("_ApiKeysOwn", StringComparison.Ordinal)) - 1];
+        await db.GetService<IMigrator>().MigrateAsync(before);
+
+        var user = Guid.NewGuid();
+        var (mirrored, notYet) = (new string('b', 64), new string('c', 64));
+        await using (var conn = new NpgsqlConnection(cs))
+        {
+            await conn.OpenAsync();
+            await V61MigrationTests.InsertAsync(conn, "AspNetUsers", new() { ["Id"] = user, ["UserName"] = "ana", ["Email"] = "ana@corp.test" });
+            // One the mirror of LiteLLM's keys brought over already (as the main key, its alias), one it has not yet.
+            await using var seed = new NpgsqlCommand($"""
+                insert into gateway.api_keys (hash, user_id, kind, alias, preview, created_at, spend) values ('{mirrored}', '{user}', 'main', 'app-ana-own-1a2b3c4d', 'sk-...mirr', now(), 1.5);
+                insert into own_keys ("Token", "UserId", "Name", "RequestsPerMinute", "TokensPerMinute", "Parallel", "MonthlyBudget", "CreatedAt") values
+                  ('{mirrored}', '{user}', 'CI', 5, null, 2, 3.5, '2026-10-01T00:00:00Z'),
+                  ('{notYet}', '{user}', 'laptop', null, 1000, null, null, '2026-10-02T00:00:00Z');
+                """, conn);
+            await seed.ExecuteNonQueryAsync();
+        }
+        await db.Database.MigrateAsync();
+
+        var keys = await db.ApiKeys.AsNoTracking().OrderBy(k => k.Hash).ToListAsync();
+        Assert.Equal(
+            [$"{mirrored}|own|app-ana-own-1a2b3c4d|CI|5||2|3.5000|1.5", $"{notYet}|own|own-cccccccccccccccc|laptop||1000|||0"],
+            keys.Select(k => $"{k.Hash}|{k.Kind}|{k.Alias}|{k.Name}|{k.RequestsPerMinute}|{k.TokensPerMinute}|{k.Parallel}|{k.MonthlyBudget}|{k.Spend:0.#########}"));
+        await using (var conn = new NpgsqlConnection(cs))
+        {
+            await conn.OpenAsync();
+            await using var gone = new NpgsqlCommand("select count(*) from pg_class where relname = 'own_keys'", conn);
+            Assert.Equal(0L, await gone.ExecuteScalarAsync());
+        }
+
+        // Back down: the own keys' table again, from the app's own keys.
+        await db.GetService<IMigrator>().MigrateAsync(before);
+        await using (var conn = new NpgsqlConnection(cs))
+        {
+            await conn.OpenAsync();
+            await using var back = new NpgsqlCommand("""select string_agg("Name", ',' order by "Name") from own_keys""", conn);
+            Assert.Equal("CI,laptop", await back.ExecuteScalarAsync());
+        }
+    }
 }

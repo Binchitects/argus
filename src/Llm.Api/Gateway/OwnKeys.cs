@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Llm.Api.Identity;
 using Llm.Core.Data;
+using Llm.Core.Gateway;
 using Llm.Core.Identity;
 using Microsoft.EntityFrameworkCore;
 
@@ -31,7 +32,7 @@ public sealed class OwnKeyException(int status, string code, string message) : E
 /// limits of its own under those an admin set on them (the tighter of the two is what the gateway holds it to: the sync
 /// keeps it so), each revoked on its own. Making them counts with Rotate's new keys an hour (<see cref="PeopleService.OwnKeysPerHour"/>).
 /// </summary>
-public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, RateLimits rateLimits, Models.KeyAccess keyAccess, Access.AccessService access, PeopleService people,
+public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, ApiKeys keys, RateLimits rateLimits, Models.KeyAccess keyAccess, Access.AccessService access, PeopleService people,
     Audit audit, TimeProvider clock, OwnKeyPlaces places, KeyWriters writers)
 {
     /// <summary>The most keys a person may make for themselves.</summary>
@@ -44,7 +45,7 @@ public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, RateLimits rateLi
     private static int? Tighter(int? a, int? b) => a is null ? b : b is null ? a : Math.Min(a.Value, b.Value);
 
     /// <summary>What a key carries: the person's limits, tightened by the key's own where it set any.</summary>
-    public static KeyRate Tighter(KeyRate person, OwnKey? own) =>
+    public static KeyRate Tighter(KeyRate person, ApiKey? own) =>
         own is null ? person : new KeyRate(Tighter(person.RequestsPerMinute, own.RequestsPerMinute), Tighter(person.TokensPerMinute, own.TokensPerMinute));
 
     /// <summary>How many requests at once a key may have at the gateway: anyone's key's, tightened by its own.</summary>
@@ -57,15 +58,18 @@ public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, RateLimits rateLi
         {
             return [];
         }
-        var keys = await gateway.KeysAsync(user.Email!, ct);
-        var own = await db.OwnKeys.AsNoTracking().Where(k => k.UserId == user.Id).ToDictionaryAsync(k => k.Token, ct);
+        var held = await gateway.KeysAsync(user.Email!, ct);
+        var rows = await db.ApiKeys.AsNoTracking().Where(k => k.UserId == user.Id).ToDictionaryAsync(k => k.Hash, ct);
         var rate = (await rateLimits.ForAsync(user, ct)).Key;
-        return [.. keys.OrderBy(k => k.CreatedAt).Select(k => View(user, k, own.GetValueOrDefault(k.Token), rate))];
+        return [.. held.OrderBy(k => k.CreatedAt).Select(k => View(user, k, rows.GetValueOrDefault(k.Token), rate))];
     }
 
-    private KeyView View(AppUser user, GatewayKey k, OwnKey? own, KeyRate rate)
+    private KeyView View(AppUser user, GatewayKey k, ApiKey? row, KeyRate rate)
     {
-        var kind = own is not null ? "own" : k.Alias == PeopleService.KeyAlias(user) ? "main" : k.Alias.StartsWith("studio:", StringComparison.Ordinal) ? "studio" : "other";
+        var own = row?.Kind == ApiKey.Own ? row : null;
+        var kind = own is not null ? "own"
+            : row?.Kind == ApiKey.Studio || k.Alias.StartsWith("studio:", StringComparison.Ordinal) ? "studio"
+            : k.Alias == PeopleService.KeyAlias(user) ? "main" : "other";
         var name = own?.Name ?? kind switch { "main" => "Your key", "studio" => "Code Studio workspace", _ => k.Alias };
         var effective = Tighter(rate, own);
         return new KeyView(k.Token, name, kind, k.Preview, k.Spend, k.Blocked, k.CreatedAt,
@@ -86,11 +90,11 @@ public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, RateLimits rateLi
         {
             throw new OwnKeyException(403, "disabled", "Your account is disabled.");
         }
-        if (await db.OwnKeys.CountAsync(k => k.UserId == user.Id, ct) >= MaxKeys)
+        if (await db.ApiKeys.CountAsync(k => k.UserId == user.Id && k.Kind == ApiKey.Own, ct) >= MaxKeys)
         {
             throw new OwnKeyException(409, "too_many", $"You have {MaxKeys} keys of your own, the most there may be: revoke one you no longer use first.");
         }
-        if (await db.OwnKeys.AnyAsync(k => k.UserId == user.Id && k.Name == name, ct))
+        if (await db.ApiKeys.AnyAsync(k => k.UserId == user.Id && k.Kind == ApiKey.Own && k.Name == name, ct))
         {
             throw new OwnKeyException(409, "name_taken", $"You have a key named {name} already: choose another name.");
         }
@@ -100,31 +104,21 @@ public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, RateLimits rateLi
             throw new OwnKeyException(429, "too_many_keys",
                 $"You made {PeopleService.OwnKeysPerHour} new keys in the last hour, the most there may be. Make the next in {minutes} minute{(minutes == 1 ? "" : "s")}.");
         }
-        var own = new OwnKey
-        {
-            Token = "", Name = name, UserId = user.Id, RequestsPerMinute = request.RequestsPerMinute, TokensPerMinute = request.TokensPerMinute,
-            Parallel = request.Parallel, MonthlyBudget = request.MonthlyBudget, CreatedAt = clock.GetUtcNow(),
-        };
+        var limits = new OwnLimits(request.RequestsPerMinute, request.TokensPerMinute, request.Parallel, request.MonthlyBudget);
         // Made and saved in the person's turn: a sync between the two would give the new key their limits, not its own.
         using var turn = await writers.EnterAsync(user.Id, ct);
         await gateway.EnsureUserAsync(user.Email!, ct);
-        var rate = Tighter((await rateLimits.ForAsync(user, ct)).Key, own);
+        var person = (await rateLimits.ForAsync(user, ct)).Key;
+        var rate = new KeyRate(Tighter(person.RequestsPerMinute, limits.RequestsPerMinute), Tighter(person.TokensPerMinute, limits.TokensPerMinute));
         // A unique alias at the gateway: the person's name, the key's, and a few random letters.
         var alias = $"{PeopleService.KeyAlias(user)}-own-{Guid.NewGuid().ToString("N")[..8]}";
-        var key = await gateway.GenerateKeyAsync(user.Email!, alias, await keyAccess.ListForAsync(user, ct), TighterParallel(keyAccess.MaxParallel, own.Parallel), rate, ct);
-        own.Token = AnswerCache.HashOf(key);
-        if (own.MonthlyBudget is { } budget)
-        {
-            await gateway.SetKeyBudgetAsync(own.Token, budget, ct);
-        }
-        db.OwnKeys.Add(own);
-        await db.SaveChangesAsync(ct);
+        var (key, own) = await keys.MakeAsync(user, ApiKey.Own, alias, await keyAccess.ListForAsync(user, ct), TighterParallel(keyAccess.MaxParallel, limits.Parallel), rate, name, own: limits, ct: ct);
         turn.Dispose();
-        places.Forget(own.Token);
+        places.Forget(own.Hash);
         // Counted with Rotate's new keys an hour (PeopleService.OwnKeyWaitAsync).
         await audit.WriteAsync(Made, user.UserName, detail: $"{name}: {Describe(own)}", actor: user);
-        var made = (await gateway.KeysAsync(user.Email!, ct)).FirstOrDefault(k => k.Token == own.Token)
-            ?? new GatewayKey(own.Token, alias, null, 0, false, own.CreatedAt, Rate: rate);
+        var made = (await gateway.KeysAsync(user.Email!, ct)).FirstOrDefault(k => k.Token == own.Hash)
+            ?? new GatewayKey(own.Hash, alias, own.Preview, 0, false, own.CreatedAt, Rate: rate);
         return (key, View(user, made, own, (await rateLimits.ForAsync(user, ct)).Key));
     }
 
@@ -135,20 +129,28 @@ public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, RateLimits rateLi
         // Changed, saved and written in the person's turn (KeyWriters).
         using var turn = await writers.EnterAsync(user.Id, ct);
         var key = await KeyOfAsync(user, token, ct);
-        var own = await db.OwnKeys.SingleOrDefaultAsync(k => k.Token == token && k.UserId == user.Id, ct);
+        var own = await db.ApiKeys.SingleOrDefaultAsync(k => k.Hash == token && k.UserId == user.Id, ct);
+        if (own?.Kind == ApiKey.Studio || key.Alias.StartsWith("studio:", StringComparison.Ordinal))
+        {
+            throw new OwnKeyException(409, "studio", "A Code Studio workspace's key is the workspace's: it goes when the workspace does.");
+        }
         if (own is null)
         {
-            if (key.Alias.StartsWith("studio:", StringComparison.Ordinal))
-            {
-                throw new OwnKeyException(409, "studio", "A Code Studio workspace's key is the workspace's: it goes when the workspace does.");
-            }
-            own = new OwnKey { Token = token, UserId = user.Id, Name = key.Alias == PeopleService.KeyAlias(user) ? "Your key" : key.Alias, CreatedAt = key.CreatedAt ?? clock.GetUtcNow() };
-            db.OwnKeys.Add(own);
+            // A key the mirror has not brought over yet (it looks every half minute): kept here now.
+            var alias = await db.ApiKeys.AnyAsync(k => k.Alias == key.Alias, ct) ? $"{key.Alias}-{token[..8]}" : key.Alias;
+            own = new ApiKey { Hash = token, UserId = user.Id, Kind = ApiKey.Own, Alias = alias, Preview = key.Preview ?? "sk-...", CreatedAt = key.CreatedAt ?? clock.GetUtcNow() };
+            db.ApiKeys.Add(own);
         }
+        if (own.Kind != ApiKey.Own)
+        {
+            // A key not made here (the main key) takes a name and limits too: it is one of the person's own from now on.
+            own.Kind = ApiKey.Own;
+        }
+        own.Name ??= key.Alias == PeopleService.KeyAlias(user) ? "Your key" : key.Alias;
         if (request.Name is not null)
         {
             var name = Name(request.Name);
-            if (name != own.Name && await db.OwnKeys.AnyAsync(k => k.UserId == user.Id && k.Name == name && k.Token != token, ct))
+            if (name != own.Name && await db.ApiKeys.AnyAsync(k => k.UserId == user.Id && k.Kind == ApiKey.Own && k.Name == name && k.Hash != token, ct))
             {
                 throw new OwnKeyException(409, "name_taken", $"You have a key named {name} already: choose another name.");
             }
@@ -180,17 +182,12 @@ public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, RateLimits rateLi
     public async Task RevokeAsync(AppUser user, string token, CancellationToken ct = default)
     {
         var key = await KeyOfAsync(user, token, ct);
-        if (key.Alias.StartsWith("studio:", StringComparison.Ordinal))
+        var own = await db.ApiKeys.AsNoTracking().SingleOrDefaultAsync(k => k.Hash == token && k.UserId == user.Id, ct);
+        if (own?.Kind == ApiKey.Studio || key.Alias.StartsWith("studio:", StringComparison.Ordinal))
         {
             throw new OwnKeyException(409, "studio", "A Code Studio workspace's key is the workspace's: it goes when the workspace does.");
         }
-        await gateway.DeleteKeysAsync([token], ct);
-        var own = await db.OwnKeys.SingleOrDefaultAsync(k => k.Token == token && k.UserId == user.Id, ct);
-        if (own is not null)
-        {
-            db.OwnKeys.Remove(own);
-            await db.SaveChangesAsync(ct);
-        }
+        await keys.RevokeAsync([token], ct);
         places.Forget(token);
         await audit.WriteAsync("person.key_revoked", user.UserName, detail: own?.Name ?? key.Alias, actor: user);
     }
@@ -210,7 +207,7 @@ public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, RateLimits rateLi
         }
     }
 
-    private static string Describe(OwnKey k) =>
+    private static string Describe(ApiKey k) =>
         string.Join(", ", new[]
         {
             k.RequestsPerMinute is { } r ? $"{r} requests a minute" : null, k.TokensPerMinute is { } t ? $"{t} tokens a minute" : null,
@@ -219,7 +216,7 @@ public sealed class OwnKeys(AppDbContext db, ILiteLlm gateway, RateLimits rateLi
 }
 
 /// <summary>
-/// Each key's own requests at once (OwnKey.Parallel) for the app's line (<see cref="KeyLine"/>), read once a minute at
+/// Each key's own requests at once (api_keys.parallel) for the app's line (<see cref="KeyLine"/>), read once a minute at
 /// most per key, and at once after the key changes here. Null: none of its own.
 /// </summary>
 public sealed class OwnKeyPlaces(IServiceScopeFactory scopes, TimeProvider clock)
@@ -235,7 +232,7 @@ public sealed class OwnKeyPlaces(IServiceScopeFactory scopes, TimeProvider clock
         }
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        var parallel = await db.OwnKeys.AsNoTracking().Where(k => k.Token == token).Select(k => k.Parallel).FirstOrDefaultAsync(ct);
+        var parallel = await db.ApiKeys.AsNoTracking().Where(k => k.Hash == token).Select(k => k.Parallel).FirstOrDefaultAsync(ct);
         _known[token] = (parallel, now);
         return parallel;
     }

@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using Llm.Api.Gateway;
 using Llm.Core.Data;
+using Llm.Core.Gateway;
 using Llm.Core.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -20,6 +21,7 @@ public sealed partial class PeopleService(
     UserManager<AppUser> users,
     AppDbContext db,
     ILiteLlm gateway,
+    ApiKeys keys,
     Models.KeyAccess keyAccess,
     RateLimits rateLimits,
     Audit audit,
@@ -92,7 +94,7 @@ public sealed partial class PeopleService(
             await gateway.EnsureUserAsync(email);
             // No budget at the gateway (an edited litellm.yaml may still give new people one): the credits are the app's.
             await gateway.SetBudgetAsync(email, null);
-            var key = await gateway.GenerateKeyAsync(email, KeyAlias(user), await keyAccess.ListForAsync(user), keyAccess.MaxParallel, (await rateLimits.ForAsync(user)).Key);
+            var (key, _) = await keys.MakeAsync(user, ApiKey.Main, KeyAlias(user), await keyAccess.ListForAsync(user), keyAccess.MaxParallel, (await rateLimits.ForAsync(user)).Key);
             return (user, new Secrets(password, key));
         }
         catch (GatewayException ex)
@@ -106,9 +108,9 @@ public sealed partial class PeopleService(
     {
         await gateway.EnsureUserAsync(user.Email!);
         // Without API access, no key is made.
-        if (!await access.ApiOffAsync(user) && (await gateway.KeysAsync(user.Email!)).Count == 0)
+        if (!await access.ApiOffAsync(user) && (await keys.OfAsync(user.Id)).Count == 0)
         {
-            await gateway.GenerateKeyAsync(user.Email!, KeyAlias(user), await keyAccess.ListForAsync(user), keyAccess.MaxParallel, (await rateLimits.ForAsync(user)).Key);
+            await keys.MakeAsync(user, ApiKey.Main, KeyAlias(user), await keyAccess.ListForAsync(user), keyAccess.MaxParallel, (await rateLimits.ForAsync(user)).Key);
         }
     }
 
@@ -224,15 +226,19 @@ public sealed partial class PeopleService(
         {
             throw new PeopleException($"{user.UserName} is disabled: enable them first.");
         }
-        // The main key (and any other not made on Account → API keys, nor a Code Studio workspace's): those keep working.
-        var own = await db.OwnKeys.AsNoTracking().Where(k => k.UserId == user.Id).Select(k => k.Token).ToListAsync();
-        var old = (await gateway.KeysAsync(user.Email!)).Where(k => !own.Contains(k.Token) && !k.Alias.StartsWith("studio:", StringComparison.Ordinal)).ToList();
+        // The main key goes (the person's own keys and a Code Studio workspace's keep working), and one LiteLLM holds that the
+        // app has not taken over yet (its mirror looks every half minute) unless it is one of theirs or a workspace's.
+        var rows = (await keys.OfAsync(user.Id)).ToDictionary(k => k.Hash, StringComparer.Ordinal);
+        var old = (await gateway.KeysAsync(user.Email!)).Where(k => rows.TryGetValue(k.Token, out var row)
+            ? row.Kind == ApiKey.Main
+            : !k.Alias.StartsWith("studio:", StringComparison.Ordinal) && !k.Alias.Contains("-own-", StringComparison.Ordinal)).ToList();
+        var mains = rows.Values.Where(k => k.Kind == ApiKey.Main).Select(k => k.Hash).Concat(old.Select(k => k.Token)).ToHashSet(StringComparer.Ordinal);
         // Before the old keys go: a limit they carried from before the upgrade to rate limits is kept.
         var rate = await rateLimits.ForNewKeyAsync(user, old);
-        await gateway.DeleteKeysAsync(old.Select(k => k.Token));
+        await keys.RevokeAsync(mains);
         await gateway.EnsureUserAsync(user.Email!);
-        var key = await gateway.GenerateKeyAsync(user.Email!, KeyAlias(user), await keyAccess.ListForAsync(user), keyAccess.MaxParallel, rate);
-        await audit.WriteAsync("person.rotate_key", user.UserName, detail: $"revoked {old.Count}");
+        var (key, _) = await keys.MakeAsync(user, ApiKey.Main, KeyAlias(user), await keyAccess.ListForAsync(user), keyAccess.MaxParallel, rate);
+        await audit.WriteAsync("person.rotate_key", user.UserName, detail: $"revoked {mains.Count}");
         return new Secrets(null, key);
     }
 
@@ -266,14 +272,14 @@ public sealed partial class PeopleService(
         var stillOff = on && await access.ApiOffAsync(user);
         try
         {
-            var keys = await gateway.KeysAsync(user.Email!);
+            var held = await gateway.KeysAsync(user.Email!);
             var blocked = user.IsDisabled || await access.ApiOffAsync(user);
-            await gateway.SetBlockedAsync(keys.Where(k => k.Blocked != blocked).Select(k => k.Token), blocked);
-            if (!blocked && keys.Count == 0)
+            await gateway.SetBlockedAsync(held.Where(k => k.Blocked != blocked).Select(k => k.Token), blocked);
+            if (!blocked && (await keys.OfAsync(user.Id)).Count == 0)
             {
                 // Given back with no key left: one is made, as for a new person (they see it under Your account).
                 await gateway.EnsureUserAsync(user.Email!);
-                await gateway.GenerateKeyAsync(user.Email!, KeyAlias(user), await keyAccess.ListForAsync(user), keyAccess.MaxParallel, (await rateLimits.ForAsync(user)).Key);
+                await keys.MakeAsync(user, ApiKey.Main, KeyAlias(user), await keyAccess.ListForAsync(user), keyAccess.MaxParallel, (await rateLimits.ForAsync(user)).Key);
             }
             return stillOff ? $"Saved, but {user.UserName} still has no API access: a rule for a group or a role of theirs denies it (Admin → Access)." : null;
         }

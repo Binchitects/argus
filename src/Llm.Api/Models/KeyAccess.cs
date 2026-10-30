@@ -80,7 +80,7 @@ public sealed class KeyAccess(UserManager<AppUser> users, ModelPolicy policy, Ch
             // Read and written in the person's turn (KeyWriters): a key of theirs made or changed meanwhile is not written over.
             using var turn = await writers.EnterAsync(user.Id, ct);
             // A key the person made with fewer at once of its own carries that.
-            var own = await db.OwnKeys.AsNoTracking().Where(k => k.UserId == user.Id).ToDictionaryAsync(k => k.Token, k => k.Parallel, ct);
+            var own = await db.ApiKeys.AsNoTracking().Where(k => k.UserId == user.Id).ToDictionaryAsync(k => k.Hash, k => k.Parallel, ct);
             foreach (var key in await gateway.KeysAsync(user.Email!, ct))
             {
                 var parallel = Gateway.OwnKeys.TighterParallel(MaxParallel, own.GetValueOrDefault(key.Token));

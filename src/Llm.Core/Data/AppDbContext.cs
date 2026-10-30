@@ -82,7 +82,6 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Studio.WorkflowRun> WorkflowRuns => Set<Studio.WorkflowRun>();
     public DbSet<Studio.WorkflowRunStep> WorkflowRunSteps => Set<Studio.WorkflowRunStep>();
     public DbSet<Code.CodeFix> CodeFixes => Set<Code.CodeFix>();
-    public DbSet<Identity.OwnKey> OwnKeys => Set<Identity.OwnKey>();
     public DbSet<Gateway.GatewayRequest> GatewayRequests => Set<Gateway.GatewayRequest>();
     public DbSet<Gateway.ApiKey> ApiKeys => Set<Gateway.ApiKey>();
     public DbSet<ProductFeedback> ProductFeedback => Set<ProductFeedback>();
@@ -832,16 +831,6 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Answer).HasMaxLength(4000);
             e.HasIndex(x => new { x.Status, x.CreatedAt });
             e.HasIndex(x => new { x.UserId, x.CreatedAt });
-            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
-        });
-        builder.Entity<Identity.OwnKey>(e =>
-        {
-            e.ToTable("own_keys");
-            e.HasKey(x => x.Token);
-            e.Property(x => x.Token).HasMaxLength(64);
-            e.Property(x => x.Name).HasMaxLength(80);
-            e.Property(x => x.MonthlyBudget).HasPrecision(12, 4);
-            e.HasIndex(x => x.UserId);
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<Code.CodeFix>(e =>

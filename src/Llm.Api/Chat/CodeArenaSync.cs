@@ -150,7 +150,7 @@ public static class CodeArenaSync
         }
         var header = http.Request.Headers.Authorization.ToString();
         var token = Gateway.AnswerCache.HashOf(header.StartsWith("Bearer ", StringComparison.Ordinal) ? header[7..].Trim() : header.Trim());
-        if (!await db.OwnKeys.AnyAsync(k => k.Token == token && k.UserId == me.Id, http.RequestAborted))
+        if (!await db.ApiKeys.AnyAsync(k => k.Hash == token && k.UserId == me.Id && k.Kind == Core.Gateway.ApiKey.Own, http.RequestAborted))
         {
             return AuthEndpoints.Problem(409, "not_own", "This key is not one Code Arena made: it stays (Account → API keys revokes it).");
         }

@@ -33,7 +33,8 @@ public sealed class LiteLlmClientTests
             }
             var answer = request.RequestUri.AbsolutePath switch
             {
-                "/key/generate" => """{"key":"sk-new"}""",
+                // LiteLLM answers with the key it was given (the app's, ApiKeys), as its /key/generate does.
+                "/key/generate" => JsonSerializer.Serialize(new { key = body.TryGetProperty("key", out var given) ? given.GetString() : "sk-new" }),
                 "/end_user/info" => EndUser!,
                 "/key/info" => KeyInfo!,
                 "/key/list" => KeyList,
@@ -133,24 +134,25 @@ public sealed class LiteLlmClientTests
     }
 
     [Fact]
-    public async Task A_generated_key_carries_the_persons_alias()
+    public async Task A_key_is_registered_with_the_apps_own_secret_and_the_persons_alias()
     {
         var (client, recorder) = Create();
-        Assert.Equal("sk-new", await client.GenerateKeyAsync("p@example.test", "app-p"));
-        Assert.Equal("app-p", recorder.Calls.Single().Body.GetProperty("key_alias").GetString());
+        await client.GenerateKeyAsync("p@example.test", "app-p", "sk-made-by-the-app");
+        var sent = recorder.Calls.Single().Body;
+        Assert.Equal(("app-p", "sk-made-by-the-app"), (sent.GetProperty("key_alias").GetString(), sent.GetProperty("key").GetString()));
     }
 
     [Fact]
     public async Task A_keys_rate_limits_are_given_with_it_changed_lifted_and_read_back()
     {
         var (client, recorder) = Create();
-        await client.GenerateKeyAsync("p@example.test", "app-p", rate: new KeyRate(60, 100_000));
+        await client.GenerateKeyAsync("p@example.test", "app-p", "sk-one", rate: new KeyRate(60, 100_000));
         var made = recorder.Calls.Single().Body;
         Assert.Equal((60, 100_000), (made.GetProperty("rpm_limit").GetInt32(), made.GetProperty("tpm_limit").GetInt32()));
 
         // No limit: nothing sent, so LiteLLM keeps none.
         recorder.Calls.Clear();
-        await client.GenerateKeyAsync("p@example.test", "app-p", rate: KeyRate.None);
+        await client.GenerateKeyAsync("p@example.test", "app-p", "sk-two", rate: KeyRate.None);
         Assert.False(recorder.Calls.Single().Body.TryGetProperty("rpm_limit", out _));
         Assert.False(recorder.Calls.Single().Body.TryGetProperty("tpm_limit", out _));
 

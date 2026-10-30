@@ -416,6 +416,7 @@ public static class AnswerCacheEndpoints
         services.AddSingleton<KeyPeople>();
         services.AddSingleton<PromptLogWriter>();
         services.AddScoped<OwnKeys>();
+        services.AddScoped<ApiKeys>();
         services.AddHttpClient(AnswerCache.Client, (sp, c) =>
         {
             c.BaseAddress = new Uri(sp.GetRequiredService<IOptions<LiteLlmOptions>>().Value.Url);

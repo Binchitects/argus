@@ -142,7 +142,7 @@ public sealed partial class RateLimits(AppDbContext db, AccessService access, IL
         using var turn = await writers.EnterAsync(user.Id, ct);
         var keys = await gateway.KeysAsync(email, ct);
         // A key the person made with limits of its own carries the tighter of theirs and its own (OwnKeys).
-        var own = await db.OwnKeys.AsNoTracking().Where(k => k.UserId == user.Id).ToDictionaryAsync(k => k.Token, ct);
+        var own = await db.ApiKeys.AsNoTracking().Where(k => k.UserId == user.Id && k.Kind == Llm.Core.Gateway.ApiKey.Own).ToDictionaryAsync(k => k.Hash, ct);
         KeyRate Target(GatewayKey k, KeyRate w) => OwnKeys.Tighter(w, own.GetValueOrDefault(k.Token));
         if (keys.Any(k => (k.Rate ?? KeyRate.None) != Target(k, want)))
         {

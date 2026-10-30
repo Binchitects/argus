@@ -42,9 +42,11 @@ public interface ILiteLlm
     /// <summary>Sets the ceiling on both the user (API keys) and the end-user record (the shared chat key).</summary>
     Task SetBudgetAsync(string email, decimal? budget, CancellationToken ct = default);
 
+    /// <summary>Registers a person's key, made by the app (<see cref="ApiKeys"/>), under its secret.</summary>
+    /// <param name="key">The secret: LiteLLM keeps its SHA-256, as the app does.</param>
     /// <param name="models">The models the key may call; empty or null: every model.</param>
     /// <param name="rate">Its requests and tokens a minute; null: no limit.</param>
-    Task<string> GenerateKeyAsync(string email, string keyAlias, IReadOnlyList<string>? models = null, int? maxParallel = null, KeyRate? rate = null, CancellationToken ct = default);
+    Task GenerateKeyAsync(string email, string keyAlias, string key, IReadOnlyList<string>? models = null, int? maxParallel = null, KeyRate? rate = null, CancellationToken ct = default);
 
     /// <summary>Which models a key may call (by its hashed token); empty: every model.</summary>
     /// <summary>The models a key may call, and how many requests it may have at once (null: no limit).</summary>

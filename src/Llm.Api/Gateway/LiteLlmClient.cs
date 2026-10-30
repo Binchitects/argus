@@ -68,10 +68,11 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
         }
     }
 
-    public async Task<string> GenerateKeyAsync(string email, string keyAlias, IReadOnlyList<string>? models = null, int? maxParallel = null, KeyRate? rate = null,
+    public async Task GenerateKeyAsync(string email, string keyAlias, string key, IReadOnlyList<string>? models = null, int? maxParallel = null, KeyRate? rate = null,
         CancellationToken ct = default)
     {
-        var body = new JsonObject { ["user_id"] = email, ["key_alias"] = keyAlias };
+        // The secret is the app's (ApiKeys): LiteLLM keeps it as the app does, by its SHA-256.
+        var body = new JsonObject { ["user_id"] = email, ["key_alias"] = keyAlias, ["key"] = key };
         if (models is { Count: > 0 })
         {
             body["models"] = new JsonArray([.. models.Select(m => (JsonNode)m)]);
@@ -89,9 +90,10 @@ public sealed class LiteLlmClient(HttpClient http) : ILiteLlm
             body["tpm_limit"] = rate.TokensPerMinute;
         }
         var res = await SendAsync(HttpMethod.Post, "/key/generate", body, ct);
-        return res?["key"]?.GetValue<string>() is { Length: > 0 } key
-            ? key
-            : throw new GatewayException("The gateway created no key.");
+        if (res?["key"]?.GetValue<string>() != key)
+        {
+            throw new GatewayException("The gateway did not take the key it was given.");
+        }
     }
 
     public async Task<string> GenerateServiceKeyAsync(string keyAlias, CancellationToken ct = default)
