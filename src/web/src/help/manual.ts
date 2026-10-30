@@ -198,6 +198,8 @@ export const notInTheManual = [
   'plan.md',
   // Designs for the work under way, as plan.md is: not how the app works yet.
   'design/code-arena-parity.md',
+  'design/code-index.md',
+  'design/own-gateway.md',
   'design/v5.9-code-review-access.md',
   'design/v5.9-rooms.md',
   'argus/roadmap.md',
