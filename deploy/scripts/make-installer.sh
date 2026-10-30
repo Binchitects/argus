@@ -162,11 +162,13 @@ left() { [[ ",$LEAVE," == *",$1,"* ]]; }
 # The release's own images are saved as arena-SERVICE:VERSION (tagged so once the plan is
 # done: a dry run looks for them as they are); the rest as compose names them. A service left
 # out loses its own profiles too (!override): Laya's would keep it in.
+RELEASE_SERVICES=()
+if [[ $DRY -eq 0 ]]; then for s in "${BUILT[@]}"; do left "$s" || RELEASE_SERVICES+=("  $s: { image: \"arena-$s:$VERSION\" }"); done; fi
+for s in ${LEAVE//,/ }; do RELEASE_SERVICES+=("  $s: { profiles: !override [off] }"); done
 {
   echo "# make-installer.sh: the release's own images by version, and the services left out."
-  echo "services:"
-  if [[ $DRY -eq 0 ]]; then for s in "${BUILT[@]}"; do left "$s" || echo "  $s: { image: \"arena-$s:$VERSION\" }"; done; fi
-  for s in ${LEAVE//,/ }; do echo "  $s: { profiles: !override [off] }"; done
+  # None (a dry run that leaves nothing out): an empty mapping, which compose takes (an empty services: it refuses).
+  if [[ ${#RELEASE_SERVICES[@]} -eq 0 ]]; then echo "services: {}"; else echo "services:"; printf '%s\n' "${RELEASE_SERVICES[@]}"; fi
 } > "$WORK/release.yml"
 AIRGAP_ENV=(env COMPOSE_PROJECT_NAME="$PROJECT" COMPOSE_FILE="$ROOT/docker-compose.yml:$WORK/release.yml" COMPOSE_PROFILES="$PROFILES")
 AIRGAP=(bash "$ROOT/scripts/airgap.sh" pack)
