@@ -213,7 +213,8 @@ shutdown() {
 
 seen= ticks=0
 while true; do
-  stamp=$(cksum < "$models" 2>/dev/null || echo none)
+  # No models.json yet (no model on this engine): nothing to run, and nothing to say.
+  if [ -f "$models" ]; then stamp=$(cksum < "$models"); else stamp=none; fi
   if [ "$stamp" != "$seen" ]; then
     if [ -f "$models" ]; then
       python3 "$helper" plan "$models" "$run" > /dev/null
