@@ -737,11 +737,21 @@ Each commit builds, passes the full Llm.Tests and CodeArena.Tests suites and the
 whole equal ($5.5268583). The one difference is LiteLLM's placeholder `default_user_id` (17 requests of its master key),
 which today's usage pages show as if it were a person and the ledger counts as no one.
 
-Commits 7 and 8 then moved every reader of LiteLLM's log onto the ledger: credit, usage, the prompt list, rate limits,
+Commits 7 and 8 (live 2026-10-30) then moved every reader of LiteLLM's log onto the ledger: credit, usage, the prompt list, rate limits,
 repricing, the storage page and the dashboards (53 of their 54 SQL panels; "Which key belongs to whom" reads LiteLLM's
 keys until commit 9). For the next release's CHANGELOG: a request refused for any reason (a budget or credit as much as
 a rate limit) is no longer counted as a request or a failure; "Budget headroom" became "Spend this month, by person and
-kind", and "Master-key requests" became "Requests with no person".
+kind", and "Master-key requests" became "Requests with no person". A review of them found refusals the first mirror
+kept as failures (the guardrail's credit, safeguards and API-off answers, LiteLLM's unknown, blocked and expired keys,
+models a key may not use): the importer tells each apart, and migration LedgerRefusals did the same for the rows already
+mirrored (live: 649 of 673 "failures" were refusals). The usage dashboard's "Refused by rate limits" became "Refused",
+with every reason.
+
+Commit 9 goes in three parts: 9a mirrors people's keys into `gateway.api_keys` (every half minute, with the names and
+limits of `own_keys`, a key LiteLLM no longer holds taken out); 9b has the app make the keys (`ApiKeys`: the secret made
+here, registered at LiteLLM with `key`, the row first, `own_keys` merged and dropped; the mirror then leaves a row's kind,
+name and limits alone and takes out only rows older than two minutes); 9c reads them (`KeyBook` replaces the five caches,
+`MoveGatewayAsync` goes, and the importer names the person by the key's owner).
 
 ---
 

@@ -9,7 +9,7 @@ namespace Llm.Tests;
 
 /// <summary>
 /// LiteLLM's request log mirrored into the app's own ledger: each row once, attributed as the usage pages attribute it, a
-/// refusal told from a failure, and the same totals per person as LiteLLM's log gives.
+/// refusal told from a failure, and the same totals per person as LiteLLM's log gives. People's keys come over too.
 /// </summary>
 [Collection(nameof(AppCollection))]
 public sealed class LedgerImportTests(AppFixture app)
@@ -122,6 +122,83 @@ public sealed class LedgerImportTests(AppFixture app)
         }
         var row = Assert.Single(await LedgerAsync(id));
         Assert.Equal((refusal is null ? GatewayRequest.Failed : GatewayRequest.Refused, refusal), (row.Status, row.Refusal));
+    }
+
+    [Fact]
+    public async Task Peoples_keys_come_over_with_the_names_and_limits_given_here_and_go_when_LiteLLM_drops_them()
+    {
+        // An app of its own: its people are this test's alone (LiteLLM's database is every app's).
+        await using var f = app.Create(app.ConnectionStringFor("keys_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway());
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var name = "ki" + Guid.NewGuid().ToString("N")[..8];
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
+        var id = made.GetProperty("id").GetGuid();
+        static string Hash(string s) => AnswerCache.HashOf(s);
+        var (main, own, studio, chat, nobody) = (Hash(name + "main"), Hash(name + "own"), Hash(name + "studio"), Hash(name + "chat"), Hash(name + "nobody"));
+        var workspace = Guid.NewGuid();
+        await using (var scope = f.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.OwnKeys.Add(new Llm.Core.Identity.OwnKey { Token = own, UserId = id, Name = "CI", RequestsPerMinute = 5, MonthlyBudget = 2m, CreatedAt = new DateTimeOffset(2026, 1, 2, 0, 0, 0, TimeSpan.Zero) });
+            await db.SaveChangesAsync();
+        }
+        await using var conn = new NpgsqlConnection(app.LitellmConnectionString);
+        await conn.OpenAsync();
+        try
+        {
+            await using (var insert = new NpgsqlCommand("""
+                insert into "LiteLLM_VerificationToken" (token, key_alias, key_name, user_id, spend, expires, created_at) values
+                  (@main, 'app-' || @name, 'sk-...main', @email, 0.25, '2027-01-01 00:00', '2026-01-01 00:00'),
+                  (@own, 'app-' || @name || '-own-abcd1234', 'sk-...ownk', upper(@email), 0, null, '2026-01-02 00:00'),
+                  (@studio, @workspace, 'sk-...stud', @email, 0.5, null, '2026-01-03 00:00'),
+                  (@chat, 'chat', 'sk-...chat', @email, 9, null, '2026-01-04 00:00'),
+                  (@nobody, 'app-nobody', 'sk-...nobo', 'nobody-' || @email, 1, null, '2026-01-05 00:00')
+                """, conn))
+            {
+                foreach (var (k, v) in new[] { ("main", main), ("own", own), ("studio", studio), ("chat", chat), ("nobody", nobody), ("name", name), ("email", $"{name}@example.test"), ("workspace", $"studio:{workspace:N}") })
+                {
+                    insert.Parameters.AddWithValue(k, v);
+                }
+                await insert.ExecuteNonQueryAsync();
+            }
+            var import = f.Services.GetRequiredService<LedgerImport>();
+            async Task<Dictionary<string, ApiKey>> KeysAsync()
+            {
+                await import.ImportKeysAsync(CancellationToken.None);
+                await using var scope = f.Services.CreateAsyncScope();
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                return await db.ApiKeys.AsNoTracking().Where(k => k.UserId == id).ToDictionaryAsync(k => k.Hash.Trim());
+            }
+            var keys = await KeysAsync();
+            // The chat's own key is the app's, not the person's; a key of no one with an account here stays out.
+            Assert.Equal(new[] { main, own, studio }.Order(), keys.Keys.Order());
+            Assert.Equal((ApiKey.Main, "app-" + name, (string?)null, "sk-...main", 0.25m, new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero)),
+                (keys[main].Kind, keys[main].Alias, keys[main].Name, keys[main].Preview, keys[main].Spend, keys[main].ExpiresAt));
+            Assert.Equal((ApiKey.Own, "CI", (int?)5, (int?)null, (decimal?)2m, new DateTimeOffset(2026, 1, 2, 0, 0, 0, TimeSpan.Zero)),
+                (keys[own].Kind, keys[own].Name, keys[own].RequestsPerMinute, keys[own].TokensPerMinute, keys[own].MonthlyBudget, keys[own].CreatedAt));
+            // A workspace the app no longer has: the key is still its kind, tied to none.
+            Assert.Equal((ApiKey.Studio, (Guid?)null), (keys[studio].Kind, keys[studio].WorkspaceId));
+
+            // What it spent since, and a key revoked at LiteLLM.
+            await using (var change = new NpgsqlCommand("""
+                update "LiteLLM_VerificationToken" set spend = 0.75 where token = @main;
+                delete from "LiteLLM_VerificationToken" where token = @own;
+                """, conn))
+            {
+                change.Parameters.AddWithValue("main", main);
+                change.Parameters.AddWithValue("own", own);
+                await change.ExecuteNonQueryAsync();
+            }
+            keys = await KeysAsync();
+            Assert.Equal(new[] { main, studio }.Order(), keys.Keys.Order());
+            Assert.Equal(0.75m, keys[main].Spend);
+        }
+        finally
+        {
+            await using var delete = new NpgsqlCommand("""delete from "LiteLLM_VerificationToken" where token = any(@tokens)""", conn);
+            delete.Parameters.AddWithValue("tokens", new[] { main, own, studio, chat, nobody });
+            await delete.ExecuteNonQueryAsync();
+        }
     }
 
     [Fact]

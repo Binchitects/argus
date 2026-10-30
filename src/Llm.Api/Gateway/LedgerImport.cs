@@ -14,7 +14,8 @@ namespace Llm.Api.Gateway;
 /// LiteLLM's request log brought into the app's own ledger (gateway.requests) while LiteLLM still answers: on the leader,
 /// every few seconds, the rows written since the last look (each once, by LiteLLM's request id), and at first all it keeps
 /// (Retention:GatewayLogDays). Each row is attributed as the usage pages attribute it today (the person, the key, the kind
-/// of credit), so the pages can read the ledger and show the same numbers; refusals and failures are told apart.
+/// of credit), so the pages can read the ledger and show the same numbers; refusals and failures are told apart. People's
+/// keys come over too (gateway.api_keys), every half minute, with the names and limits people gave them here.
 /// </summary>
 public sealed partial class LedgerImport(IServiceScopeFactory scopes, IOptions<DashboardOptions> dashboards, IConfiguration config, Replicas replicas,
     TimeProvider clock, ILogger<LedgerImport> logger) : BackgroundService
@@ -29,6 +30,11 @@ public sealed partial class LedgerImport(IServiceScopeFactory scopes, IOptions<D
 
     /// <summary>The most rows one look reads: a look that read as many reads on.</summary>
     public const int Batch = 5000;
+
+    /// <summary>How often people's keys are read again.</summary>
+    private static readonly TimeSpan KeysEvery = TimeSpan.FromSeconds(30);
+
+    private DateTimeOffset _keysRead = DateTimeOffset.MinValue;
 
     private readonly string _litellm = new NpgsqlConnectionStringBuilder(DatabaseSettings.ConnectionString(config))
     {
@@ -50,6 +56,11 @@ public sealed partial class LedgerImport(IServiceScopeFactory scopes, IOptions<D
             }
             try
             {
+                if (clock.GetUtcNow() - _keysRead >= KeysEvery)
+                {
+                    await ImportKeysAsync(stoppingToken);
+                    _keysRead = clock.GetUtcNow();
+                }
                 while (await ImportAsync(stoppingToken) == Batch)
                 {
                     // A full batch: there is more (the first look brings the whole log over).
@@ -138,6 +149,106 @@ public sealed partial class LedgerImport(IServiceScopeFactory scopes, IOptions<D
             (_since, _after) = (rows[^1].CreatedAt - Overlap, "");
         }
         return rows.Count;
+    }
+
+    private sealed record KeyRow(string Token, string? Alias, string? Preview, string Email, DateTime? CreatedAt, double Spend, DateTime? Expires);
+
+    /// <summary>
+    /// People's keys as LiteLLM holds them, into gateway.api_keys: each person's key by its hash, of its kind (their main key,
+    /// one of their own with the name and limits they gave it here, a Code Studio workspace's), and what it spent; a key
+    /// LiteLLM no longer holds goes. The chat's own key, and keys of no one with an account, stay out. How many are kept.
+    /// </summary>
+    public async Task<int> ImportKeysAsync(CancellationToken ct)
+    {
+        var rows = new List<KeyRow>();
+        await using (var conn = new NpgsqlConnection(_litellm))
+        {
+            try
+            {
+                await conn.OpenAsync(ct);
+            }
+            catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.InvalidCatalogName)
+            {
+                return 0;
+            }
+            await using var cmd = new NpgsqlCommand("""
+                select token, key_alias, key_name, user_id, created_at, spend, expires from "LiteLLM_VerificationToken"
+                where coalesce(user_id, '') <> '' and coalesce(key_alias, '') <> @chat
+                order by created_at, token
+                """, conn);
+            cmd.Parameters.AddWithValue("chat", Chat.ChatKey.Alias);
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                rows.Add(new KeyRow(r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1), r.IsDBNull(2) ? null : r.GetString(2), r.GetString(3).Trim(),
+                    r.IsDBNull(4) ? null : r.GetDateTime(4), r.GetDouble(5), r.IsDBNull(6) ? null : r.GetDateTime(6)));
+            }
+        }
+        if (rows.Count == 0)
+        {
+            // LiteLLM holds no one's key (a new stack, or its tables not there yet): nothing is taken away for that.
+            return 0;
+        }
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var emails = rows.Select(k => k.Email.ToUpperInvariant()).Distinct().ToList();
+        var people = await db.Users.AsNoTracking().Where(u => u.NormalizedEmail != null && emails.Contains(u.NormalizedEmail))
+            .Select(u => new { u.NormalizedEmail, u.Id, u.UserName }).ToDictionaryAsync(u => u.NormalizedEmail!, StringComparer.Ordinal, ct);
+        var own = await db.OwnKeys.AsNoTracking().ToDictionaryAsync(k => k.Token, StringComparer.Ordinal, ct);
+        var workspaces = (await db.StudioWorkspaces.AsNoTracking().Select(w => w.Id).ToListAsync(ct)).ToHashSet();
+        var wanted = new Dictionary<string, ApiKey>(StringComparer.Ordinal);
+        var aliases = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var k in rows)
+        {
+            if (!people.TryGetValue(k.Email.ToUpperInvariant(), out var person) || k.Token.Length > 64 || wanted.ContainsKey(k.Token))
+            {
+                continue;
+            }
+            var alias = Cut(k.Alias, 120) is { Length: > 0 } a ? a : "key-" + k.Token[..Math.Min(8, k.Token.Length)];
+            if (!aliases.Add(alias))
+            {
+                // Aliases are one key's each here: a second key under one gets its hash's start after it.
+                alias = Cut(alias, 111) + "-" + k.Token[..Math.Min(8, k.Token.Length)];
+                aliases.Add(alias);
+            }
+            var mine = own.GetValueOrDefault(k.Token);
+            Guid? workspace = alias.StartsWith("studio:", StringComparison.Ordinal) && Guid.TryParseExact(alias[7..], "N", out var w) && workspaces.Contains(w) ? w : null;
+            var kind = alias.StartsWith("studio:", StringComparison.Ordinal) ? ApiKey.Studio
+                : alias == $"app-{person.UserName}" && mine is null ? ApiKey.Main
+                : ApiKey.Own;
+            wanted[k.Token] = new ApiKey
+            {
+                Hash = k.Token, UserId = person.Id, Kind = kind, Alias = alias,
+                Name = mine?.Name ?? (kind == ApiKey.Own ? Cut(k.Alias, 80) ?? "A key" : null),
+                Preview = Cut(k.Preview, 20) ?? "sk-...", WorkspaceId = workspace,
+                RequestsPerMinute = mine?.RequestsPerMinute, TokensPerMinute = mine?.TokensPerMinute, Parallel = mine?.Parallel, MonthlyBudget = mine?.MonthlyBudget,
+                ExpiresAt = k.Expires is { } e ? new DateTimeOffset(DateTime.SpecifyKind(e, DateTimeKind.Utc)) : null,
+                CreatedAt = mine?.CreatedAt ?? (k.CreatedAt is { } c ? new DateTimeOffset(DateTime.SpecifyKind(c, DateTimeKind.Utc)) : clock.GetUtcNow()),
+                Spend = (decimal)k.Spend,
+            };
+        }
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        var have = await db.ApiKeys.ToListAsync(ct);
+        // What went first, then what is new or changed: an alias freed by a key that went may be taken by a new one.
+        db.ApiKeys.RemoveRange(have.Where(k => !wanted.ContainsKey(k.Hash.TrimEnd())));
+        await db.SaveChangesAsync(ct);
+        var kept = have.Where(k => wanted.ContainsKey(k.Hash.TrimEnd())).ToDictionary(k => k.Hash.TrimEnd(), StringComparer.Ordinal);
+        foreach (var (hash, k) in wanted)
+        {
+            if (kept.TryGetValue(hash, out var row))
+            {
+                (row.UserId, row.Kind, row.Alias, row.Name, row.Preview, row.WorkspaceId) = (k.UserId, k.Kind, k.Alias, k.Name, k.Preview, k.WorkspaceId);
+                (row.RequestsPerMinute, row.TokensPerMinute, row.Parallel, row.MonthlyBudget) = (k.RequestsPerMinute, k.TokensPerMinute, k.Parallel, k.MonthlyBudget);
+                (row.ExpiresAt, row.CreatedAt, row.Spend) = (k.ExpiresAt, k.CreatedAt, k.Spend);
+            }
+            else
+            {
+                db.ApiKeys.Add(k);
+            }
+        }
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return wanted.Count;
     }
 
     /// <summary>Who a request was for, as the usage pages say it: the user LiteLLM was told, else the key's, else the end user; null when no one.</summary>
