@@ -44,8 +44,11 @@ internal sealed partial class WebApp
     /// <summary>The folders added to this workspace (Add Folder), as the page shows them: whole paths, / between parts.</summary>
     private JsonArray AddedJson() => new([.. Folders.Added(_state).Select(f => (JsonNode)_rt.Workspace.Show(f))]);
 
-    /// <summary>The one call whose body is not JSON: a VS Code extension's .vsix, sent whole.</summary>
+    /// <summary>A call whose body is not JSON: a VS Code extension's .vsix, sent whole.</summary>
     private const string InstallPath = "/api/extensions/install";
+
+    /// <summary>The other: a file dropped from the computer onto the Explorer, its bytes as they are.</summary>
+    private const string UploadPath = "/api/files/upload";
 
     private void StartIde()
     {
@@ -297,6 +300,17 @@ internal sealed partial class WebApp
                     await res.JsonAsync(200, new JsonObject { ["from"] = _files.Show(from), ["to"] = _files.Show(to) }, ct);
                     return true;
                 }
+                case ("POST", "/api/files/copy"):
+                {
+                    var body = Body(req);
+                    var (from, to) = await Task.Run(() => _files.Copy(body.Str("from"), body.Str("to")), ct);
+                    await res.JsonAsync(200, new JsonObject { ["from"] = _files.Show(from), ["to"] = _files.Show(to) }, ct);
+                    return true;
+                }
+                case ("POST", UploadPath):
+                    // The file's bytes as they are (Content-Type: application/octet-stream, which no form sends).
+                    await res.JsonAsync(200, await Task.Run(() => _files.Upload(Query(req, "path"), req.Body, Flag(req, "overwrite")), ct), ct);
+                    return true;
                 case ("POST", "/api/files/delete"):
                     _files.Delete(Body(req).Str("path"));
                     await res.NoContentAsync(ct);

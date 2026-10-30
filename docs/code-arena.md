@@ -347,7 +347,18 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   **Open in Integrated Terminal** (a shell in the folder), Rename (F2) and
   Delete (Del, asks first); the arrow keys move through the tree. F2 and Del
   are the keymap's (`renameFile`, `deleteFile`): keybindings.json changes them
-  or takes them away. It follows the file the editor shows, as VS Code's
+  or takes them away. As in VS Code, Ctrl+click (Cmd+click) adds a row to the
+  selection, Shift+click takes the rows between, and Ctrl+A all of them;
+  Delete deletes them all after one question, and two files selected have
+  **Compare Selected**. **Cut**, **Copy** and **Paste** (Ctrl+X, Ctrl+C,
+  Ctrl+V while the tree has the focus: `filesExplorer.cut`, `.copy`,
+  `.paste`) copy files and folders into the folder pasted on (a copy beside
+  its original is `name copy.ext`, then `name copy 2.ext`; links are copied
+  as links; 10,000 entries at most), or move them, with their tabs. A row
+  dragged onto a folder moves there, after a question
+  (`explorer.confirmDragAndDrop`), or is copied with Ctrl (Alt on macOS);
+  files dragged from the computer onto a folder are written into it (256 MB
+  each at most; one there already is replaced only when you say so). It follows the file the editor shows, as VS Code's
   does: its folders open, it is selected and scrolled to
   (`explorer.autoReveal`: `true`, `false`, or `"focusNoScroll"` to select it
   without scrolling); **Reveal in Explorer View**, in a tab's menu and the

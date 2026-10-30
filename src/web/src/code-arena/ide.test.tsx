@@ -3392,6 +3392,94 @@ describe('Code Arena, the IDE, as its review asked', () => {
     await waitFor(() => expect(screen.getByRole('treeitem', { name: 'cart.ts' })).toHaveAttribute('aria-selected', 'true'))
   })
 
+  it('selects several rows, copies, cuts and pastes them, moves them by a drag and writes a file dropped from the computer', async () => {
+    const folders: Record<string, Entry[]> = {
+      '': [
+        { name: 'src', path: 'src', kind: 'dir' },
+        { name: 'README.md', path: 'README.md', kind: 'file', size: 7 },
+      ],
+      src: [
+        { name: 'lib', path: 'src/lib', kind: 'dir' },
+        { name: 'app.ts', path: 'src/app.ts', kind: 'file', size: 34 },
+      ],
+      'src/lib': [],
+    }
+    const add = (path: string, kind: 'file' | 'dir') => {
+      const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''
+      folders[parent] = [...(folders[parent] ?? []), { name: path.slice(path.lastIndexOf('/') + 1), path, kind }]
+      if (kind === 'dir') folders[path] ??= []
+    }
+    const { calls } = backend({
+      'GET /api/files': (_, __, url) => {
+        const path = url.searchParams.get('path') ?? ''
+        return folders[path] ? { json: { path: path || '.', entries: folders[path] } } : { status: 404, json: { status: 'not_found', error: `There is no folder ${path}.` } }
+      },
+      'POST /api/files/copy': (body) => {
+        const b = body as { from: string; to: string }
+        add(b.to, Object.values(folders).flat().find((e) => e.path === b.from)?.kind ?? 'file')
+        return { json: b }
+      },
+      'POST /api/files/rename': (body) => {
+        const b = body as { from: string; to: string }
+        for (const k of Object.keys(folders)) folders[k] = folders[k]!.filter((e) => e.path !== b.from)
+        add(b.to, 'file')
+        return { json: b }
+      },
+      'POST /api/files/upload': (_, __, url) => ({ json: { path: url.searchParams.get('path'), kind: 'file', size: 4 } }),
+    })
+    renderIde()
+    await openApp()
+    const row = (name: string) => screen.getByRole('treeitem', { name: new RegExp(`^${name.replace('.', '\\.')}(,|$)`) })
+    const posts = (path: string) => calls.filter((c) => c.method === 'POST' && c.path.startsWith(path)).map((c) => c.body)
+
+    // Ctrl+click adds a row to the selection; Shift+click takes the rows between.
+    await userEvent.click(row('src'))
+    await userEvent.click(row('src'))
+    fireEvent.click(row('README.md'), { ctrlKey: true })
+    expect([row('src'), row('README.md')].map((r) => r.getAttribute('aria-selected'))).toEqual(['true', 'true'])
+    expect(screen.getByRole('tree', { name: 'Files' })).toHaveAttribute('aria-multiselectable', 'true')
+
+    // Copied, and pasted where they are: each a copy beside its original.
+    act(() => row('README.md').focus())
+    await userEvent.keyboard('{Control>}c{/Control}')
+    await userEvent.keyboard('{Control>}v{/Control}')
+    await waitFor(() => expect(posts('/api/files/copy')).toEqual([{ from: 'src', to: 'src copy' }, { from: 'README.md', to: 'README copy.md' }]))
+    // Again: the next free name.
+    await userEvent.keyboard('{Control>}v{/Control}')
+    await waitFor(() => expect(posts('/api/files/copy').slice(2)).toEqual([{ from: 'src', to: 'src copy 2' }, { from: 'README.md', to: 'README copy 2.md' }]))
+
+    // Cut and pasted into a folder: a move, and the file's tab follows it.
+    act(() => row('app.ts').focus())
+    await userEvent.keyboard('{Control>}x{/Control}')
+    act(() => row('lib').focus())
+    await userEvent.keyboard('{Control>}v{/Control}')
+    await waitFor(() => expect(posts('/api/files/rename')).toEqual([{ from: 'src/app.ts', to: 'src/lib/app.ts' }]))
+    await waitFor(() => expect(editor().model?.uri?.toString()).toBe('file:///src/lib/app.ts'))
+
+    // A drag onto a folder moves, after asking (with Ctrl, it would copy).
+    const carried = new Map<string, string>()
+    const dataTransfer = {
+      types: [] as string[], files: [] as File[], effectAllowed: 'all', dropEffect: 'none',
+      setData(type: string, value: string) {
+        carried.set(type, value)
+        this.types = [...carried.keys()]
+      },
+      getData: (type: string) => carried.get(type) ?? '',
+    }
+    fireEvent.dragStart(row('README.md'), { dataTransfer })
+    fireEvent.dragOver(row('lib'), { dataTransfer })
+    fireEvent.drop(row('lib'), { dataTransfer })
+    await userEvent.click(within(await screen.findByRole('alertdialog', { name: 'Move README.md into src/lib?' })).getByRole('button', { name: 'Move' }))
+    await waitFor(() => expect(posts('/api/files/rename').at(-1)).toEqual({ from: 'README.md', to: 'src/lib/README.md' }))
+
+    // A file dropped from the computer is written into the folder, as its bytes.
+    const logo = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'logo.png', { type: 'image/png' })
+    const fromComputer = { types: ['Files'], files: [logo], dropEffect: 'none', getData: () => '' }
+    fireEvent.dragOver(row('lib'), { dataTransfer: fromComputer })
+    fireEvent.drop(row('lib'), { dataTransfer: fromComputer })
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/files/upload?path=src%2Flib%2Flogo.png')?.body).toBe(logo))
+  })
+
   it("renames and deletes in the explorer with the keymap's keys, which keybindings.json changes", async () => {
     backend({}, {}, { 'keybindings.json': '[{ "key": "f2", "command": "-renameFile" }, { "key": "ctrl+alt+r", "command": "renameFile", "when": "filesExplorerFocus" }]' })
     renderIde()

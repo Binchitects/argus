@@ -175,6 +175,11 @@ export const writeFile = (path: string, text: string, version: string | null) =>
 export const createEntry = (path: string, kind: 'file' | 'dir') => api<{ path: string; kind: 'file' | 'dir' }>('/api/files/new', { body: { path, kind } })
 export const renameEntry = (from: string, to: string) => api<{ from: string; to: string }>('/api/files/rename', { body: { from, to } })
 export const deleteEntry = (path: string) => api('/api/files/delete', { body: { path } })
+/** A copy of a file, or of a folder and all in it (links copied as links). */
+export const copyEntry = (from: string, to: string) => api<{ from: string; to: string }>('/api/files/copy', { body: { from, to } })
+/** A file dropped from the computer, written into the folder (onto one there only when told to overwrite it). */
+export const uploadFile = (path: string, file: Blob, overwrite = false) =>
+  api<{ path: string; kind: 'file'; size: number }>(`/api/files/upload?path=${at(path)}${overwrite ? '&overwrite=1' : ''}`, { body: file })
 
 export const changeTexts = (path: string) => api<ChangeTexts>(`/api/changes/diff?path=${at(path)}`)
 /** Keeps the agent's change to a file (all of them without one). */

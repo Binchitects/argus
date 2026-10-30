@@ -355,6 +355,113 @@ internal sealed class IdeFiles(Workspace workspace)
         return (source, target);
     }
 
+    /// <summary>The most a file dropped from the computer (uploaded into the folder) may hold.</summary>
+    public const int MaxUpload = 256 * 1024 * 1024;
+
+    /// <summary>The most files and folders one copy makes.</summary>
+    public const int MaxCopied = 10_000;
+
+    /// <summary>
+    /// A copy of a file, or of a folder and all in it, at a new place: a link is copied as a link (to where it points), not
+    /// followed. Refused onto something that exists, a folder into itself, and past <see cref="MaxCopied"/> entries.
+    /// </summary>
+    public (string From, string To) Copy(string? from, string? to)
+    {
+        var source = ResolveEntry(from);
+        var target = ResolveEntry(to);
+        if (!File.Exists(source) && !Directory.Exists(source))
+        {
+            throw new IdeError(404, "not_found", $"There is no {Show(source)}.");
+        }
+        if (File.Exists(target) || Directory.Exists(target))
+        {
+            throw new IdeError(409, "exists", $"{Show(target)} exists already.");
+        }
+        var folder = Directory.Exists(source) && new DirectoryInfo(source).LinkTarget is null;
+        if (folder && (target.StartsWith(source + Path.DirectorySeparatorChar, PathCompare) || string.Equals(source, target, PathCompare)))
+        {
+            throw new IdeError(400, "invalid", "A folder cannot be copied into itself.");
+        }
+        if (folder && Count(source, MaxCopied + 1) > MaxCopied)
+        {
+            throw new IdeError(413, "too_many", $"{Show(source)} holds more than {MaxCopied:N0} files and folders: copy it in a terminal.");
+        }
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        CopyEntry(source, target);
+        return (source, target);
+    }
+
+    /// <summary>The entries under a folder, links not followed, counted up to <paramref name="most"/>.</summary>
+    private static int Count(string dir, int most)
+    {
+        var n = 0;
+        var left = new Stack<string>([dir]);
+        while (left.Count > 0 && n < most)
+        {
+            foreach (var entry in Directory.EnumerateFileSystemEntries(left.Pop()))
+            {
+                if (++n >= most)
+                {
+                    break;
+                }
+                if (Directory.Exists(entry) && new DirectoryInfo(entry).LinkTarget is null)
+                {
+                    left.Push(entry);
+                }
+            }
+        }
+        return n;
+    }
+
+    private static void CopyEntry(string source, string target)
+    {
+        var info = new FileInfo(source);
+        if (info.LinkTarget is { } points)
+        {
+            if (Directory.Exists(source))
+            {
+                Directory.CreateSymbolicLink(target, points);
+            }
+            else
+            {
+                File.CreateSymbolicLink(target, points);
+            }
+        }
+        else if (Directory.Exists(source))
+        {
+            Directory.CreateDirectory(target);
+            foreach (var entry in Directory.EnumerateFileSystemEntries(source))
+            {
+                CopyEntry(entry, Path.Combine(target, Path.GetFileName(entry)));
+            }
+        }
+        else
+        {
+            File.Copy(source, target);
+        }
+    }
+
+    /// <summary>A file dropped from the computer, written into the folder: refused onto one that exists unless asked to overwrite it.</summary>
+    public JsonObject Upload(string? path, byte[] bytes, bool overwrite)
+    {
+        var full = ResolveEntry(path);
+        if (Directory.Exists(full))
+        {
+            throw new IdeError(409, "folder", $"{Show(full)} is a folder.");
+        }
+        if (File.Exists(full) && !overwrite)
+        {
+            throw new IdeError(409, "exists", $"{Show(full)} exists already.");
+        }
+        if (bytes.Length > MaxUpload)
+        {
+            throw new IdeError(413, "too_large", $"A file dropped here holds at most {MaxUpload / (1024 * 1024)} MB.");
+        }
+        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+        File.WriteAllBytes(full, bytes);
+        return new JsonObject { ["path"] = Show(full), ["kind"] = "file", ["size"] = bytes.Length };
+    }
+
     /// <summary>Deletes a file, or a folder with everything in it.</summary>
     public string Delete(string? path)
     {

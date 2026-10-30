@@ -153,6 +153,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         app._server.OnError = e => rt.Ui.Error($"The web interface: {e.Message}");
         app._server.BodyLimit = (method, path) => method != "POST" ? HttpServer.MaxBody
             : path == InstallPath ? EditorExtensions.MaxVsix
+            : path == UploadPath ? IdeFiles.MaxUpload
             // A file relayed to Arena: as large as Arena takes (its config says), with room for the form around it.
             : path == ArenaRelay.Upload ? (int)Math.Min(int.MaxValue, (rt.ArenaChat.Long("maxUploadBytes") ?? ArenaRelay.DefaultUpload) + 1024 * 1024)
             : HttpServer.MaxBody;
@@ -246,14 +247,17 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 await ArenaRelay.RelayAsync(_rt.Config, _rt.Http, req, res, ct);
                 return;
             }
-            // JSON only: a form or a plain-text post from another page cannot pass for the page's own. A .vsix comes as its
-            // bytes, of a type no form sends either (another site's script would need a CORS preflight, which is refused).
+            // JSON only: a form or a plain-text post from another page cannot pass for the page's own. A .vsix and a file
+            // dropped from the computer come as their bytes, of a type no form sends either (another site's script would
+            // need a CORS preflight, which is refused).
             var type = req.Header("Content-Type") ?? "";
-            if (req.Method is not ("GET" or "HEAD") && !(req.Path == InstallPath
-                ? type.StartsWith("application/octet-stream", StringComparison.OrdinalIgnoreCase) || type.StartsWith("application/zip", StringComparison.OrdinalIgnoreCase) || type.StartsWith("application/vsix", StringComparison.OrdinalIgnoreCase)
+            var bytes = req.Path is InstallPath or UploadPath;
+            if (req.Method is not ("GET" or "HEAD") && !(bytes
+                ? type.StartsWith("application/octet-stream", StringComparison.OrdinalIgnoreCase)
+                  || (req.Path == InstallPath && (type.StartsWith("application/zip", StringComparison.OrdinalIgnoreCase) || type.StartsWith("application/vsix", StringComparison.OrdinalIgnoreCase)))
                 : type.StartsWith("application/json", StringComparison.OrdinalIgnoreCase)))
             {
-                await res.ErrorAsync(415, "unsupported", req.Path == InstallPath ? "Send the .vsix's bytes (Content-Type: application/octet-stream)." : "Send JSON (Content-Type: application/json).", ct);
+                await res.ErrorAsync(415, "unsupported", bytes ? "Send the file's bytes (Content-Type: application/octet-stream)." : "Send JSON (Content-Type: application/json).", ct);
                 return;
             }
             await ApiAsync(req, res, ct);

@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronRight, ChevronsDownUp, Columns2, Copy, FilePlus, FileSearch, FolderInput, FolderOpen, FolderPlus, GitCompareArrows, Link, MessageSquarePlus, Pencil, RefreshCw, SquareDashedMousePointer, SquareTerminal, Trash2, X } from 'lucide-react'
+import { ChevronRight, ChevronsDownUp, ClipboardPaste, Columns2, Copy, FilePlus, FileSearch, FolderInput, FolderOpen, FolderPlus, GitCompareArrows, Link, MessageSquarePlus, Pencil, RefreshCw, Scissors, SquareDashedMousePointer, SquareTerminal, Trash2, X } from 'lucide-react'
 import { ContextMenu } from 'radix-ui'
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import { useConfirm } from '@/components/ui/confirm'
 import { menuContent, menuItem } from '@/components/ui/dropdown-menu'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -9,12 +9,14 @@ import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
 import { errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import { useEditor } from './editor-state'
+import { onMac, useEditor } from './editor-state'
 import { useIconTheme } from './extensions'
 import { FileIcon, FolderIcon } from './file-icon'
 import { PartHelp } from './help'
-import { changesQuery, createEntry, deleteEntry, folderQuery, gitStatusQuery, join, nameOf, parentOf, renameEntry, within, type Change, type Entry, type GitFile } from './ide-api'
+import { changesQuery, copyEntry, createEntry, deleteEntry, folderQuery, gitStatusQuery, join, nameOf, parentOf, renameEntry, uploadFile, within, type Change, type Entry, type GitFile } from './ide-api'
+import { ApiError } from '@/lib/api'
 import { takeReveal, useReveal } from './explorer-reveal'
+import { copyName } from './copy-name'
 import { useProblems } from './problems-store'
 import { useSettings } from './settings'
 import { wholePath } from './whole-path'
@@ -110,6 +112,14 @@ const gitWords: Record<GitMark, string> = { M: 'modified', U: 'untracked', A: 'a
 /** A row being made (a new file or folder) or renamed: its name typed in place. */
 type Editing = { kind: 'new'; parent: string; type: 'file' | 'dir' } | { kind: 'rename'; path: string }
 
+/** The Explorer's own clipboard (Copy, Cut): the page's, as VS Code's is the window's. */
+const clipboard: { items: Target[]; cut: boolean } = { items: [], cut: false }
+const hold = (items: Target[], cut: boolean) => Object.assign(clipboard, { items, cut })
+
+/** What a drag between rows carries: the rows dragged. */
+const dragType = 'application/x-code-arena-entries'
+
+
 /**
  * The working directory's files: folders open on demand, a file opens in the
  * editor. New file, new folder, rename (F2) and delete (Delete) from the
@@ -138,6 +148,11 @@ export function Explorer({
   const settings = useSettings()
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [selected, setSelected] = useState<Target | null>(null)
+  // Several rows selected at once (Ctrl+click, Shift+click, Ctrl+A); empty: the one selected alone.
+  const [marked, setMarked] = useState<ReadonlyMap<string, 'file' | 'dir'>>(new Map())
+  const anchor = useRef<string | null>(null)
+  const treeRef = useRef<HTMLDivElement>(null)
+  const [dropAt, setDropAt] = useState<string | null>(null)
   const [editing, setEditing] = useState<Editing | null>(null)
   const [menuFor, setMenuFor] = useState<Target | null>(null)
   const root = useQuery({ ...folderQuery(''), refetchOnWindowFocus: true })
@@ -213,27 +228,168 @@ export function Explorer({
     }
   }
 
-  const remove = async (t: Target) => {
-    const name = nameOf(t.path)
+  /** Deletes these (the rows selected), after one question. */
+  const remove = async (targets: Target[]) => {
+    if (targets.length === 0) return
+    const t = targets[0]!
     // Their tabs stay open (the editor keeps what is typed): said here, so the delete is not taken to lose it.
-    const unsaved = editor.tabs.filter((tab) => tab.kind === 'file' && tab.dirty && within(tab.path, t.path)).map((tab) => nameOf(tab.path))
+    const unsaved = editor.tabs.filter((tab) => tab.kind === 'file' && tab.dirty && targets.some((x) => within(tab.path, x.path))).map((tab) => nameOf(tab.path))
     const kept =
       unsaved.length === 0 ? '' : unsaved.length === 1 ? ` ${unsaved[0]} has unsaved changes: its tab stays open, and saving it makes the file again.` : ` ${unsaved.join(', ')} have unsaved changes: their tabs stay open, and saving one makes the file again.`
     const ok = await confirm({
-      title: `Delete ${name}?`,
-      description: (t.kind === 'dir' ? `The folder ${t.path} and everything in it are deleted from the disk. This cannot be undone.` : `${t.path} is deleted from the disk. This cannot be undone.`) + kept,
+      title: targets.length === 1 ? `Delete ${nameOf(t.path)}?` : `Delete ${targets.length} items?`,
+      description:
+        (targets.length > 1
+          ? `${targets.map((x) => x.path).join(', ')} are deleted from the disk, the folders with everything in them. This cannot be undone.`
+          : t.kind === 'dir'
+            ? `The folder ${t.path} and everything in it are deleted from the disk. This cannot be undone.`
+            : `${t.path} is deleted from the disk. This cannot be undone.`) + kept,
       confirm: 'Delete',
       destructive: true,
     })
     if (!ok) return
     try {
-      await deleteEntry(t.path)
-      editor.removed(t.path)
+      for (const x of targets) {
+        await deleteEntry(x.path)
+        editor.removed(x.path)
+      }
       setSelected(null)
+      setMarked(new Map())
       await Promise.all([reload(), queryClient.invalidateQueries({ queryKey: changesQuery.queryKey })])
     } catch (e) {
       toast.error(errorMessage(e))
+      await reload()
     }
+  }
+
+  /** The rows of the folder's own tree, as drawn (open folders' entries in place). */
+  const drawnRows = () => [...(treeRef.current?.querySelectorAll<HTMLElement>('[role=tree][aria-label="Files"] [role=treeitem]') ?? [])]
+  const targetOf = (row: HTMLElement): Target => ({ path: row.dataset.path!, kind: row.dataset.kind as 'file' | 'dir' })
+  /** The rows the menu, Delete, Copy and Cut act on: the ones selected when this one is among them, else this one alone. */
+  const actOn = (t: Target | null): Target[] =>
+    !t ? [] : marked.size > 1 && marked.has(t.path) ? [...marked].map(([path, kind]) => ({ path, kind })) : [t]
+
+  /** A row clicked: alone (it opens), with Ctrl (Cmd) added to the selection or taken out, with Shift the rows from the last one clicked. */
+  const click = (t: Target, e: MouseEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      const next = new Map(marked.size > 0 ? marked : selected ? [[selected.path, selected.kind] as const] : [])
+      if (next.has(t.path)) next.delete(t.path)
+      else next.set(t.path, t.kind)
+      setMarked(next)
+      setSelected(t)
+      anchor.current = t.path
+      return
+    }
+    if (e.shiftKey && anchor.current) {
+      const rows = drawnRows()
+      const from = rows.findIndex((r) => r.dataset.path === anchor.current)
+      const to = rows.findIndex((r) => r.dataset.path === t.path)
+      if (from >= 0 && to >= 0) {
+        const [a, b] = from < to ? [from, to] : [to, from]
+        setMarked(new Map(rows.slice(a, b + 1).map((r) => [r.dataset.path!, r.dataset.kind as 'file' | 'dir'])))
+        setSelected(t)
+        return
+      }
+    }
+    setMarked(new Map())
+    anchor.current = t.path
+    activate(t)
+  }
+  /** The focus on a row by the keys: it alone is selected. */
+  const focusOn = (t: Target) => {
+    setSelected(t)
+    setMarked(new Map())
+    anchor.current = t.path
+  }
+
+  /** Copied or cut rows put in a folder: a copy beside its original gets a name of its own; a cut moves (its tabs follow). */
+  const paste = async (into: string, items = clipboard.items, cut = clipboard.cut) => {
+    if (items.length === 0) return
+    try {
+      const listing = await queryClient.fetchQuery(folderQuery(into))
+      const taken = new Set(listing.entries.map((e) => e.name))
+      for (const item of items) {
+        const name = nameOf(item.path)
+        if (cut) {
+          const to = join(into, name)
+          if (to === item.path) continue
+          if (item.kind === 'dir' && within(into, item.path)) throw new Error(`${item.path} cannot move into itself.`)
+          await move(item.path, to)
+        } else {
+          const copy = taken.has(name) ? copyName(name, taken, item.kind === 'dir') : name
+          taken.add(copy)
+          await copyEntry(item.path, join(into, copy))
+        }
+      }
+      if (cut && items === clipboard.items) hold([], false)
+      if (into) toggle(into, true)
+    } catch (e) {
+      toast.error(errorMessage(e))
+    }
+    await Promise.all([reload(), queryClient.invalidateQueries({ queryKey: changesQuery.queryKey })])
+  }
+
+  /** A file or folder moved (a cut pasted, a drag): its tabs, open folders and selection follow it. */
+  const move = async (from: string, to: string) => {
+    const moved = await renameEntry(from, to)
+    editor.moved(moved.from, moved.to)
+    setExpanded((s) => new Set([...s].map((p) => (within(p, moved.from) ? moved.to + p.slice(moved.from.length) : p))))
+    setSelected((t) => (t && within(t.path, moved.from) ? { ...t, path: moved.to + t.path.slice(moved.from.length) } : t))
+  }
+
+  /** Where a drop goes: a folder dropped on, a file's folder, or the folder's root. */
+  const dropFolder = (t: Target | null) => (t ? folderFor(t) : '')
+  const copying = (e: DragEvent) => (onMac() ? e.altKey : e.ctrlKey)
+  const dragStart = (t: Target, e: DragEvent) => {
+    e.dataTransfer.setData(dragType, JSON.stringify(actOn(t)))
+    e.dataTransfer.effectAllowed = 'copyMove'
+  }
+  const dragOver = (t: Target | null, e: DragEvent) => {
+    const types = [...e.dataTransfer.types]
+    if (!types.includes(dragType) && !types.includes('Files')) return
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = types.includes('Files') || copying(e) ? 'copy' : 'move'
+    setDropAt(dropFolder(t))
+  }
+  const drop = async (t: Target | null, e: DragEvent) => {
+    const types = [...e.dataTransfer.types]
+    if (!types.includes(dragType) && !types.includes('Files')) return
+    e.preventDefault()
+    e.stopPropagation()
+    setDropAt(null)
+    const into = dropFolder(t)
+    if (types.includes(dragType)) {
+      const items = (JSON.parse(e.dataTransfer.getData(dragType) || '[]') as Target[]).filter((x) => parentOf(x.path) !== into || copying(e))
+      if (items.length === 0) return
+      if (!copying(e) && settings.get('explorer.confirmDragAndDrop') !== false) {
+        const ok = await confirm({
+          title: items.length === 1 ? `Move ${nameOf(items[0]!.path)} into ${into || project}?` : `Move ${items.length} items into ${into || project}?`,
+          description: 'Their open tabs follow them. Turn this question off with "explorer.confirmDragAndDrop".',
+          confirm: 'Move',
+        })
+        if (!ok) return
+      }
+      await paste(into, items, !copying(e))
+      return
+    }
+    // Files from the computer: written into the folder (one there already: asked first).
+    for (const file of [...e.dataTransfer.files]) {
+      const path = join(into, file.name)
+      try {
+        await uploadFile(path, file)
+      } catch (err) {
+        if (!(err instanceof ApiError) || err.http !== 409) {
+          toast.error(errorMessage(err))
+          continue
+        }
+        if (await confirm({ title: `Replace ${path}?`, description: 'A file of that name is there already: the one dropped takes its place.', confirm: 'Replace', destructive: true })) {
+          await uploadFile(path, file, true).catch((x: unknown) => toast.error(errorMessage(x)))
+        }
+      }
+    }
+    if (into) toggle(into, true)
+    await reload()
   }
 
   /** A folder opens or closes; a file opens as a preview (a single click), or for good (a double click). */
@@ -256,9 +412,12 @@ export function Explorer({
       const t = focusedTarget()
       if (t) setEditing({ kind: 'rename', path: t.path })
     } },
-    { id: 'deleteFile', category: 'Explorer', title: 'Delete', hidden: true, enabled: () => !!focusedTarget(), run: () => {
-      const t = focusedTarget()
-      if (t) void remove(t)
+    { id: 'deleteFile', category: 'Explorer', title: 'Delete', hidden: true, enabled: () => !!focusedTarget(), run: () => void remove(actOn(focusedTarget())) },
+    { id: 'filesExplorer.copy', category: 'Explorer', title: 'Copy', hidden: true, enabled: () => !!focusedTarget(), run: () => hold(actOn(focusedTarget()), false) },
+    { id: 'filesExplorer.cut', category: 'Explorer', title: 'Cut', hidden: true, enabled: () => !!focusedTarget(), run: () => hold(actOn(focusedTarget()), true) },
+    { id: 'filesExplorer.paste', category: 'Explorer', title: 'Paste', hidden: true, enabled: () => clipboard.items.length > 0, run: () => void paste(folderFor(focusedTarget())) },
+    { id: 'list.selectAll', category: 'Explorer', title: 'Select All', hidden: true, enabled: () => drawnRows().length > 0, run: () => {
+      setMarked(new Map(drawnRows().map((r) => [r.dataset.path!, r.dataset.kind as 'file' | 'dir'])))
     } },
   ])
   const renameKey = useKeyFor('renameFile')
@@ -274,7 +433,7 @@ export function Explorer({
     const focus = (el: HTMLElement | undefined) => {
       if (!el) return
       el.focus()
-      setSelected({ path: el.dataset.path!, kind: el.dataset.kind as 'file' | 'dir' })
+      focusOn(targetOf(el))
     }
     const open = row.getAttribute('aria-expanded') === 'true'
     const keys: Record<string, () => void> = {
@@ -294,9 +453,9 @@ export function Explorer({
     }
   }
 
-  const rows = {
-    expanded, selected, editing, marks, onActivate: activate, onSelect: setSelected, onFinish: (name: string) => void finish(name), onMenu: setMenuFor, onKey,
-    scrollTo, onScrolled: () => setScrollTo(null),
+  const rows: RowProps = {
+    expanded, selected, marked, editing, marks, onActivate: activate, onClick: click, onSelect: focusOn, onFinish: (name: string) => void finish(name), onMenu: setMenuFor, onKey,
+    scrollTo, onScrolled: () => setScrollTo(null), dropAt, onDragStart: dragStart, onDragOver: dragOver, onDrop: (t, e) => void drop(t, e), onDragEnd: () => setDropAt(null),
   }
   // The folders added to the workspace (Add Folder), each a root below this folder's files.
   const folders = useQuery(foldersQuery)
@@ -337,11 +496,17 @@ export function Explorer({
       </div>
       <ContextMenu.Root onOpenChange={(open) => !open && setMenuFor(null)}>
         <ContextMenu.Trigger asChild>
-          <div className="min-h-0 flex-1 overflow-auto pb-4">
+          <div
+            ref={treeRef}
+            onDragOver={(e) => dragOver(null, e)}
+            onDragLeave={(e) => e.currentTarget === e.target && setDropAt(null)}
+            onDrop={(e) => void drop(null, e)}
+            className={cn('min-h-0 flex-1 overflow-auto pb-4', dropAt === '' && 'bg-accent/40')}
+          >
             {root.isPending && Array.from({ length: 6 }, (_, i) => <Skeleton key={i} className="mx-3 my-1.5 h-4" />)}
             {root.error && <p className="px-3 py-2 text-sm text-muted-foreground">{errorMessage(root.error)}</p>}
             {root.data && (
-              <ul role="tree" aria-label="Files" data-context="explorer" className="text-[0.8125rem]">
+              <ul role="tree" aria-label="Files" aria-multiselectable="true" data-context="explorer" className="text-[0.8125rem]">
                 {editing?.kind === 'new' && editing.parent === '' && <NameInput level={0} type={editing.type} onFinish={rows.onFinish} />}
                 {root.data.entries.map((e) => (
                   <Row key={e.path} entry={e} level={0} first={e === first} {...rows} />
@@ -362,6 +527,11 @@ export function Explorer({
             <ContextMenu.Item className={menuItem} onSelect={() => startNew('dir', at)}>
               <FolderPlus /> New folder
             </ContextMenu.Item>
+            {clipboard.items.length > 0 && (
+              <ContextMenu.Item className={menuItem} onSelect={() => void paste(folderFor(at.path ? at : null))}>
+                <ClipboardPaste /> Paste
+              </ContextMenu.Item>
+            )}
             {at.path && (
               <>
                 <ContextMenu.Separator className="-mx-1 my-1 h-px bg-border" />
@@ -373,7 +543,12 @@ export function Explorer({
                 <ContextMenu.Item className={menuItem} onSelect={() => chatBridge.current?.mention(at.path)}>
                   <MessageSquarePlus /> Add to chat
                 </ContextMenu.Item>
-                {at.kind === 'file' && (
+                {at.kind === 'file' && actOn(at).length === 2 && actOn(at).every((x) => x.kind === 'file') && (
+                  <ContextMenu.Item className={menuItem} onSelect={() => void editor.compare({ kind: 'file', path: actOn(at)[0]!.path }, { kind: 'file', path: actOn(at)[1]!.path })}>
+                    <Columns2 /> Compare Selected
+                  </ContextMenu.Item>
+                )}
+                {at.kind === 'file' && actOn(at).length === 1 && (
                   <>
                     <ContextMenu.Separator className="-mx-1 my-1 h-px bg-border" />
                     <ContextMenu.Item className={menuItem} onSelect={() => (compareSelection.path = at.path)}>
@@ -386,6 +561,13 @@ export function Explorer({
                     )}
                   </>
                 )}
+                <ContextMenu.Separator className="-mx-1 my-1 h-px bg-border" />
+                <ContextMenu.Item className={menuItem} onSelect={() => hold(actOn(at), true)}>
+                  <Scissors /> Cut
+                </ContextMenu.Item>
+                <ContextMenu.Item className={menuItem} onSelect={() => hold(actOn(at), false)}>
+                  <Copy /> Copy
+                </ContextMenu.Item>
                 <ContextMenu.Separator className="-mx-1 my-1 h-px bg-border" />
                 <ContextMenu.Item className={menuItem} onSelect={() => void navigator.clipboard?.writeText(wholePath(folder, at.path)).catch(() => undefined)}>
                   <Copy /> Copy Path
@@ -404,7 +586,7 @@ export function Explorer({
                 <ContextMenu.Item className={menuItem} onSelect={() => setEditing({ kind: 'rename', path: at.path })}>
                   <Pencil /> Rename {renameKey && <span className="ml-auto text-xs text-muted-foreground">{renameKey}</span>}
                 </ContextMenu.Item>
-                <ContextMenu.Item className={cn(menuItem, 'text-destructive-ink focus:bg-destructive/10 focus:text-destructive-ink [&_svg]:text-destructive-ink')} onSelect={() => void remove(at)}>
+                <ContextMenu.Item className={cn(menuItem, 'text-destructive-ink focus:bg-destructive/10 focus:text-destructive-ink [&_svg]:text-destructive-ink')} onSelect={() => void remove(actOn(at))}>
                   <Trash2 /> Delete {deleteKey && <span className="ml-auto text-xs">{deleteKey}</span>}
                 </ContextMenu.Item>
               </>
@@ -458,9 +640,12 @@ function AddedFolder({ folder, rows, onRemove }: { folder: string; rows: RowProp
 interface RowProps {
   expanded: Set<string>
   selected: Target | null
+  /** The rows selected together; empty: the one selected alone. */
+  marked: ReadonlyMap<string, 'file' | 'dir'>
   editing: Editing | null
   marks: Marks
   onActivate: (t: Target, preview?: boolean) => void
+  onClick: (t: Target, e: MouseEvent) => void
   onSelect: (t: Target) => void
   onFinish: (name: string) => void
   onMenu: (t: Target) => void
@@ -468,16 +653,24 @@ interface RowProps {
   /** The row to scroll to as it is drawn (a file revealed), and that it was. */
   scrollTo: string | null
   onScrolled: () => void
+  /** The folder a drag is over ('' the root), and the drag's steps. */
+  dropAt: string | null
+  onDragStart: (t: Target, e: DragEvent) => void
+  onDragOver: (t: Target, e: DragEvent) => void
+  onDrop: (t: Target, e: DragEvent) => void
+  onDragEnd: () => void
 }
 
 const indent = (level: number) => ({ paddingLeft: `${0.5 + level * 0.75}rem` })
 
 function Row({ entry, level, first, ...props }: RowProps & { entry: Entry; level: number; first?: boolean }) {
-  const { expanded, selected, editing, marks, onActivate, onSelect, onFinish, onMenu, onKey, scrollTo, onScrolled } = props
+  const { expanded, selected, marked, editing, marks, onActivate, onClick, onSelect, onFinish, onMenu, onKey, scrollTo, onScrolled, dropAt, onDragStart, onDragOver, onDrop, onDragEnd } = props
   const dir = entry.kind === 'dir'
   const open = dir && expanded.has(entry.path)
   const target: Target = { path: entry.path, kind: entry.kind }
-  const isSelected = selected?.path === entry.path
+  const isSelected = marked.size > 0 ? marked.has(entry.path) : selected?.path === entry.path
+  // The focus a click gives is the click's to select by (with Ctrl or Shift, among others): not the focus's.
+  const pointed = useRef(false)
   const change = marks.files.get(entry.path)
   const changedUnder = dir && marks.folders.has(entry.path)
   const icons = useIconTheme()
@@ -529,24 +722,38 @@ function Row({ entry, level, first, ...props }: RowProps & { entry: Entry; level
         aria-level={level + 1}
         aria-expanded={dir ? open : undefined}
         aria-selected={isSelected}
-        tabIndex={isSelected || (!selected && first) ? 0 : -1}
+        tabIndex={selected?.path === entry.path || (!selected && first) ? 0 : -1}
         aria-label={entry.name + (change ? (change.created ? ', made by the agent' : ', changed by the agent') : '') + (changedUnder && !open ? ', the agent changed files in it' : '')}
         data-path={entry.path}
         data-kind={entry.kind}
         aria-describedby={says.length > 0 ? described : undefined}
         title={[entry.path, change && `${change.created ? 'made' : 'changed'} by the agent`, ...says].filter(Boolean).join(' · ')}
-        onClick={() => onActivate(target)}
+        draggable={editing === null}
+        onPointerDown={() => (pointed.current = true)}
+        onClick={(e) => {
+          pointed.current = false
+          onClick(target, e)
+        }}
         onDoubleClick={() => target.kind === 'file' && onActivate(target, false)}
         onKeyDown={onKey}
-        onFocus={(e) => e.target === e.currentTarget && !isSelected && onSelect(target)}
-        onContextMenu={() => {
+        onFocus={(e) => {
+          if (pointed.current || e.target !== e.currentTarget || selected?.path === entry.path) return
           onSelect(target)
+        }}
+        onContextMenu={() => {
+          pointed.current = false
+          if (!isSelected) onSelect(target)
           onMenu(target)
         }}
+        onDragStart={(e) => onDragStart(target, e)}
+        onDragOver={(e) => onDragOver(target, e)}
+        onDrop={(e) => onDrop(target, e)}
+        onDragEnd={onDragEnd}
         style={indent(level)}
         className={cn(
           'flex h-[1.375rem] cursor-pointer items-center gap-1 pr-2 outline-none select-none hover:bg-accent/70 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset',
           isSelected && 'bg-accent text-accent-foreground',
+          dir && dropAt === entry.path && 'bg-accent/60 ring-1 ring-ring ring-inset',
           color,
           ignored && 'opacity-60',
         )}

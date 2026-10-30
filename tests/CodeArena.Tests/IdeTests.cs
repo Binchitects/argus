@@ -18,6 +18,66 @@ public sealed class IdeTests : IDisposable
     private readonly FakeMcp _mcp = new();
 
     [Fact]
+    public async Task Files_and_folders_are_copied_links_as_links_and_a_dropped_file_is_written_once()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        h.Write("src/app.ts", "one\n");
+        h.Write("src/lib/cart.ts", "two\n");
+        if (!OperatingSystem.IsWindows())
+        {
+            File.CreateSymbolicLink(Path.Combine(h.Work, "src", "readme.md"), "../README.md");
+        }
+        h.Write("README.md", "# Shop\n");
+        await using var web = await WebRun.StartAsync(h);
+
+        var file = await Json(await web.PostAsync("/api/files/copy", new JsonObject { ["from"] = "src/app.ts", ["to"] = "src/app copy.ts" }));
+        Assert.Equal("src/app copy.ts", file["to"]!.GetValue<string>());
+        Assert.Equal("one\n", File.ReadAllText(Path.Combine(h.Work, "src", "app copy.ts")));
+        await Json(await web.PostAsync("/api/files/copy", new JsonObject { ["from"] = "src", ["to"] = "src2" }));
+        Assert.Equal("two\n", File.ReadAllText(Path.Combine(h.Work, "src2", "lib", "cart.ts")));
+        if (!OperatingSystem.IsWindows())
+        {
+            // The link copied as a link, to where it pointed: not the file it points at.
+            Assert.Equal("../README.md", new FileInfo(Path.Combine(h.Work, "src2", "readme.md")).LinkTarget);
+        }
+        // Onto something there, a folder into itself, from outside the folder: refused.
+        Assert.Equal(HttpStatusCode.Conflict, (await web.PostAsync("/api/files/copy", new JsonObject { ["from"] = "src/app.ts", ["to"] = "README.md" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/files/copy", new JsonObject { ["from"] = "src", ["to"] = "src/inner" })).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await web.PostAsync("/api/files/copy", new JsonObject { ["from"] = "../x", ["to"] = "x" })).StatusCode);
+
+        // A file dropped from the computer: its bytes, once; again only to overwrite it; never as a form.
+        async Task<HttpResponseMessage> Upload(string path, byte[] bytes, string query = "", string type = "application/octet-stream")
+        {
+            using var content = new ByteArrayContent(bytes);
+            content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(type);
+            var response = await web.Http.PostAsync($"/api/files/upload?path={Uri.EscapeDataString(path)}{query}", content);
+            await response.Content.LoadIntoBufferAsync();
+            return response;
+        }
+        Assert.Equal(HttpStatusCode.OK, (await Upload("assets/logo.png", [0x89, 0x50, 0x4E, 0x47])).StatusCode);
+        Assert.Equal([0x89, 0x50, 0x4E, 0x47], File.ReadAllBytes(Path.Combine(h.Work, "assets", "logo.png")));
+        Assert.Equal(HttpStatusCode.Conflict, (await Upload("assets/logo.png", [1])).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await Upload("assets/logo.png", [1], "&overwrite=1")).StatusCode);
+        Assert.Equal([1], File.ReadAllBytes(Path.Combine(h.Work, "assets", "logo.png")));
+        Assert.Equal(HttpStatusCode.UnsupportedMediaType, (await Upload("assets/form.txt", [1], type: "multipart/form-data")).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await Upload("../outside.txt", [1])).StatusCode);
+    }
+
+    [Fact]
+    public async Task A_folder_of_more_than_ten_thousand_entries_is_not_copied()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        var many = Directory.CreateDirectory(Path.Combine(h.Work, "many")).FullName;
+        for (var i = 0; i <= IdeFiles.MaxCopied; i++)
+        {
+            File.WriteAllText(Path.Combine(many, $"{i}.txt"), "");
+        }
+        await using var web = await WebRun.StartAsync(h);
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, (await web.PostAsync("/api/files/copy", new JsonObject { ["from"] = "many", ["to"] = "more" })).StatusCode);
+        Assert.False(Directory.Exists(Path.Combine(h.Work, "more")));
+    }
+
+    [Fact]
     public async Task A_terminal_opens_in_a_folder_of_the_folders_and_no_other()
     {
         using var h = new Harness(_gateway, _mcp);
