@@ -91,15 +91,20 @@ public sealed partial class SqlDatasource(IOptions<DashboardOptions> options, IC
             GRANT SELECT ON ALL TABLES IN SCHEMA public TO {ReadOnlyRole};
             ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO {ReadOnlyRole};
             """, conn);
-        try
+        for (var attempt = 1; ; attempt++)
         {
-            await cmd.ExecuteNonQueryAsync(ct);
-            Volatile.Write(ref _rolePrepared, 1);
-        }
-        catch (PostgresException ex) when (ex.SqlState is "23505" or "XX000" or "42710")
-        {
-            // Two first queries at once both creating the role: the other one won.
-            LogRoleRace(logger, ex.MessageText);
+            try
+            {
+                await cmd.ExecuteNonQueryAsync(ct);
+                Volatile.Write(ref _rolePrepared, 1);
+                return;
+            }
+            catch (PostgresException ex) when (ex.SqlState is "23505" or "XX000" or "42710" && attempt < 3)
+            {
+                // Another first query, here or for the other datasource (the role is the server's), set it up at the same
+                // moment: this script's grants were rolled back with it, so it runs again (the role is there now).
+                LogRoleRace(logger, ex.MessageText);
+            }
         }
     }
 

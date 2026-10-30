@@ -523,7 +523,7 @@ public sealed class RateLimitTests(AppFixture app)
     private async Task LogAsync(string id, string token, string email, DateTimeOffset at, int total = 0, int cached = 0, (string Class, string Message)? error = null)
     {
         await LogOnlyAsync(id, token, email, at, total, cached, error);
-        await app.MirrorAsync();
+        await app.MirrorForAsync(email);
     }
 
     /// <summary>A row of LiteLLM's log as LiteLLM writes it; <see cref="LogAsync"/> brings it into the apps' ledgers too.</summary>
@@ -588,7 +588,8 @@ public sealed class RateLimitTests(AppFixture app)
             Assert.Equal(2, Stat(await PanelAsync(admin, "Requests", from, to, "llm-overview")));
             Assert.Equal(0, Stat(await PanelAsync(admin, "Failures", from, to, "llm-overview")));
             Assert.Equal(2, (await PanelAsync(admin, "By model", from, to, "llm-overview")).GetProperty("rows")[0][1].GetDouble());
-            Assert.Equal(2, (await PanelAsync(admin, "Refused by rate limits", from, to)).GetProperty("rows").EnumerateArray().Sum(r => r[3].GetDouble()));
+            // Each refusal is on Refused, with why: the budget's as much as the limits'.
+            Assert.Equal(3, (await PanelAsync(admin, "Refused", from, to)).GetProperty("rows").EnumerateArray().Sum(r => r[3].GetDouble()));
         }
         finally
         {
@@ -641,15 +642,16 @@ public sealed class RateLimitTests(AppFixture app)
             Assert.Equal(2, seen.GetProperty("used").GetProperty("requests").GetInt64());
             Assert.Equal(3, seen.GetProperty("refused").GetArrayLength());
 
-            // The Usage by person dashboard: who was refused, with which key, for which limit.
-            var table = await PanelAsync(admin, "Refused by rate limits", now.AddDays(-1), now.AddMinutes(1));
+            // The Usage by person dashboard: who was refused, with which key, and why (a limit, or the budget).
+            var table = await PanelAsync(admin, "Refused", now.AddDays(-1), now.AddMinutes(1));
             var cols = table.GetProperty("columns").EnumerateArray().Select(c => c.GetProperty("name").GetString()).ToList();
-            Assert.Equal(["Person", "Key", "Limit", "Refused", "Last"], cols);
+            Assert.Equal(["Person", "Key", "Why", "Refused", "Last"], cols);
             var rows = table.GetProperty("rows").EnumerateArray().Where(r => r[0].GetString() == p.Email)
                 .ToDictionary(r => r[2].GetString()!, r => (Key: r[1].GetString(), Count: r[3].GetDouble()));
             Assert.Equal(new Dictionary<string, (string?, double)>
             {
                 ["requests a minute"] = ("app-" + p.Name, 2), ["tokens a minute"] = ("app-" + p.Name, 1), ["requests at once"] = ("app-" + p.Name, 1),
+                ["a budget"] = ("app-" + p.Name, 1),
             }, rows);
             Assert.Contains(table.GetProperty("rows").EnumerateArray(), r => r[0].GetString() == other.Email);
 

@@ -106,7 +106,7 @@ public sealed class AppFixture : IAsyncLifetime
         insert.Parameters.AddWithValue("spend", (double)spend);
         insert.Parameters.AddWithValue("email", email);
         await insert.ExecuteNonQueryAsync();
-        await MirrorAsync();
+        await MirrorForAsync(email);
     }
 
     /// <summary>
@@ -131,7 +131,7 @@ public sealed class AppFixture : IAsyncLifetime
         insert.Parameters.AddWithValue("metadata", apiKey ? $$"""{"user_api_key_user_id":"{{email}}","user_api_key_alias":"app-key"}""" : """{"user_api_key_alias":"chat"}""");
         insert.Parameters.AddWithValue("endUser", apiKey ? "" : email);
         await insert.ExecuteNonQueryAsync();
-        await MirrorAsync();
+        await MirrorForAsync(email);
     }
 
     /// <summary>The gateway's database (its request log), for tests that seed rows of their own.</summary>
@@ -142,47 +142,64 @@ public sealed class AppFixture : IAsyncLifetime
 
     /// <summary>A separate app on its own database, for tests that need a fresh start (imports, LDAP).</summary>
     /// <param name="services">Test services of its own (a clock), after the fakes.</param>
-    public WebApplicationFactory<Program> Create(string connectionString, ILiteLlm gateway, IDictionary<string, string?>? settings = null, Action<IServiceCollection>? services = null)
+    public WebApplicationFactory<Program> Create(string connectionString, ILiteLlm gateway, IDictionary<string, string?>? settings = null, Action<IServiceCollection>? services = null) =>
+        Build(connectionString, gateway, settings, services);
+
+    /// <summary>The services of each app whose host is running: listed as it starts, gone as it stops.</summary>
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<IServiceProvider, byte> _apps = new();
+
+    /// <summary>Lists its app's services with the fixture once the app's other hosted services have started.</summary>
+    private sealed class Started(IServiceProvider services, AppFixture fixture) : Microsoft.Extensions.Hosting.IHostedService
     {
-        WebApplicationFactory<Program>? made = null;
-        // Known to MirrorAsync once it has started (its services built): one never started is left so.
-        made = Build(connectionString, gateway, settings, s =>
+        public Task StartAsync(CancellationToken cancellationToken)
         {
-            services?.Invoke(s);
-            if (made is not null)
-            {
-                _apps.Add(new WeakReference<WebApplicationFactory<Program>>(made));
-            }
-        });
-        return made;
+            fixture._apps[services] = 0;
+            return Task.CompletedTask;
+        }
+
+        public Task StopAsync(CancellationToken cancellationToken)
+        {
+            fixture._apps.TryRemove(services, out _);
+            return Task.CompletedTask;
+        }
     }
 
-    private readonly System.Collections.Concurrent.ConcurrentBag<WeakReference<WebApplicationFactory<Program>>> _apps = [];
-
     /// <summary>
-    /// What a test wrote into LiteLLM's request log, brought into the ledger (gateway.requests) of each app that has
-    /// started, as the leader's mirror does every few seconds: the apps read the ledger, and each read the shared log before.
+    /// What a test wrote into LiteLLM's request log, brought into an app's ledger (gateway.requests) as the leader's mirror
+    /// does every few seconds: the apps read the ledger, and each read the shared log before. This app's (the shared one's when
+    /// none is named): each other app reads the whole shared log at its first import.
     /// </summary>
-    public async Task MirrorAsync()
+    public Task MirrorAsync(WebApplicationFactory<Program>? into = null) => MirrorIntoAsync((into ?? Factory).Services);
+
+    /// <summary>The same, into each running app that has this person: the app a test made them in.</summary>
+    public async Task MirrorForAsync(string email)
     {
-        foreach (var weak in _apps)
+        var normalized = email.ToUpperInvariant();
+        foreach (var services in _apps.Keys)
         {
-            if (!weak.TryGetTarget(out var f))
-            {
-                continue;
-            }
+            bool theirs;
             try
             {
-                var import = f.Services.GetRequiredService<LedgerImport>();
-                while (await import.ImportAsync(CancellationToken.None) == LedgerImport.Batch)
-                {
-                    // A full batch: there is more.
-                }
+                await using var scope = services.CreateAsyncScope();
+                theirs = await scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>().Users.AnyAsync(u => u.NormalizedEmail == normalized);
             }
-            catch (Exception e) when (e is ObjectDisposedException or Npgsql.NpgsqlException or InvalidOperationException)
+            catch (ObjectDisposedException)
             {
-                // An app its test is done with (disposed, or its database gone).
+                continue; // stopping as it was asked
             }
+            if (theirs)
+            {
+                await MirrorIntoAsync(services);
+            }
+        }
+    }
+
+    private static async Task MirrorIntoAsync(IServiceProvider services)
+    {
+        var import = services.GetRequiredService<LedgerImport>();
+        while (await import.ImportAsync(CancellationToken.None) == LedgerImport.Batch)
+        {
+            // A full batch: there is more.
         }
     }
 
@@ -274,6 +291,8 @@ public sealed class AppFixture : IAsyncLifetime
                 s.AddHttpClient<Llm.Api.Models.HuggingFace>().ConfigurePrimaryHttpMessageHandler(() => HuggingFace);
                 s.AddHttpClient(Llm.Api.Knowledge.Embedder.Client).ConfigurePrimaryHttpMessageHandler(() => Embedder);
                 services?.Invoke(s);
+                // Last, so it runs once the app's own hosted services have started.
+                s.AddHostedService(sp => new Started(sp, this));
             });
         });
 

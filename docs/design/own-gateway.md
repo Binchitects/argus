@@ -323,7 +323,7 @@ All three tables live in the app database `llmapp`, in a schema `gateway`. Colum
 | `pictures`, `characters` | int null | |
 | `status` | varchar(10) not null | `done`, `failed`, `stopped`, `refused`, `cached` |
 | `http_status` | smallint not null | |
-| `refusal` | varchar(16) null | `rpm`, `tpm`, `parallel`, `budget`, `credit`, `blocked`, `expired`, `disabled`, `api_off`, `model`, `safeguards`, `busy`, `too_long`, `room`; replaces `error_class='ProxyRateLimitError'` and "Limit type" |
+| `refusal` | varchar(16) null | `rpm`, `tpm`, `parallel`, `budget`, `credit`, `key` (unknown or missing), `blocked`, `expired`, `disabled`, `api_off`, `model`, `safeguards`, `busy`, `too_long`, `room`; replaces `error_class='ProxyRateLimitError'` and "Limit type" |
 | `error` | varchar(500) null | |
 | `source_id` | varchar(100) null | LiteLLM's `request_id` for imported or mirrored rows; unique where not null |
 
@@ -428,7 +428,7 @@ Panels whose meaning changes:
 - **usage-by-user :459 "Which key belongs to whom"** reads `gateway.key_owners`.
 - **usage-by-user :605 "Budget headroom"** reads `LiteLLM_UserTable`, whose budgets `CreditMove` already clears (CreditMove.cs:41-48), so it is stale. It becomes "Spend this month by person and kind" from `gateway.month_spend`.
 - **usage-by-user :643 "Unattributed usage"** lists `surface`, `tag` and `key_alias` where `person is null`.
-- **llm-users :1437 and usage-by-user :681 "Refused by rate limits"** use `refusal`.
+- **llm-users :1437 and usage-by-user :681 "Refused by rate limits"** use `refusal`, and became "Refused": every refusal, with why.
 - **Requests panels** exclude every refusal (`status <> 'refused'`). Today they exclude only rate-limit refusals; this goes in the CHANGELOG.
 
 **Datasource** (SqlDatasource.cs:13-93, DashboardStore.cs:12, DashboardEndpoints.cs:20):

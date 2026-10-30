@@ -93,7 +93,7 @@
         "graphMode": "none",
         "colorMode": "value"
       },
-      "description": "Requests the gateway took. A request refused for its key's rate limit never reached a model: it is not counted here, nor in any panel of this dashboard (Usage by person lists them)."
+      "description": "A refused request (a rate limit, credit or a budget, the safeguards) never reached a model: it is not counted here, nor in any panel of this dashboard (Usage by person lists them under Refused)."
     },
     {
       "type": "stat",
@@ -173,7 +173,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms),0) AS \"p50\" from requests WHERE $__timeFilter(started_at) AND status <> 'refused' AND duration_ms IS NOT NULL"
+          "rawSql": "SELECT COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms),0) AS \"p50\" from requests WHERE $__timeFilter(started_at) AND status <> 'refused' AND surface <> 'media'"
         }
       ],
       "fieldConfig": {
@@ -230,7 +230,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms),0) AS \"p95\" from requests WHERE $__timeFilter(started_at) AND status <> 'refused' AND duration_ms IS NOT NULL"
+          "rawSql": "SELECT COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms),0) AS \"p95\" from requests WHERE $__timeFilter(started_at) AND status <> 'refused' AND surface <> 'media'"
         }
       ],
       "fieldConfig": {
@@ -382,7 +382,7 @@
         "graphMode": "none",
         "colorMode": "value"
       },
-      "description": "Requests that failed: refused for credit, a model's error, a timeout. Refusals for a key's rate limit are the client's limit, not a failure: Usage by person lists them."
+      "description": "Requests that reached a model and failed: a model's error, a timeout, one stopped half way. A refusal (a rate limit, credit or a budget, the safeguards) never reached a model and is not a failure: Usage by person lists them."
     },
     {
       "type": "timeseries",
@@ -517,7 +517,7 @@
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(started_at, $__interval), percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms) AS \"p50\", percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS \"p95\" from requests WHERE $__timeFilter(started_at) AND status <> 'refused' AND duration_ms IS NOT NULL GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT $__timeGroupAlias(started_at, $__interval), percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms) AS \"p50\", percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS \"p95\" from requests WHERE $__timeFilter(started_at) AND status <> 'refused' AND surface <> 'media' GROUP BY 1 ORDER BY 1"
         }
       ],
       "fieldConfig": {

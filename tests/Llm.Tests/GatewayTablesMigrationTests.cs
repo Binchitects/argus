@@ -79,4 +79,42 @@ public sealed class GatewayTablesMigrationTests(AppFixture app)
             Assert.Equal(1L, await people.ExecuteScalarAsync());
         }
     }
+
+    [Fact]
+    public async Task Refusals_the_first_mirror_kept_as_failures_become_refusals_with_why_and_failures_stay()
+    {
+        var cs = app.ConnectionStringFor("gwrefusals_" + Guid.NewGuid().ToString("N")[..8]);
+        var options = new DbContextOptionsBuilder<AppDbContext>();
+        options.UseNpgsql(cs);
+        options.UseOpenIddict<Guid>();
+        await using var db = new AppDbContext(options.Options);
+        var all = db.Database.GetMigrations().ToList();
+        var before = all[all.FindIndex(m => m.EndsWith("_LedgerRefusals", StringComparison.Ordinal)) - 1];
+        await db.GetService<IMigrator>().MigrateAsync(before);
+
+        var now = DateTimeOffset.UtcNow;
+        (string Error, string? Source)[] rows =
+        [
+            ("You have used all your API credit for this month ($0.00). Ask an admin to raise it.", "a"),
+            ("Your API access is off. Ask an admin to turn it on (Admin → People).", "b"),
+            ("The request was refused: it holds a credit card number. Remove it and send it again.", "c"),
+            ("Authentication Error, Invalid proxy server token passed. Received API Key = sk-...", "d"),
+            ("key not allowed to access model. This key can only access models=['a']", "e"),
+            ("Key is blocked. Update via `/key/unblock` if you're an admin.", "f"),
+            ("litellm.BadRequestError: OpenAIException - model is not loaded.", "g"),
+            // The app's own row (no source in LiteLLM's log) is the app's to say.
+            ("You have used all your API credit for this month ($0.00).", null),
+        ];
+        db.GatewayRequests.AddRange(rows.Select(r => new GatewayRequest
+        {
+            StartedAt = now, EndedAt = now, Surface = "api", Call = "chat", CreditKind = "api", Model = "qwen", Status = GatewayRequest.Failed, Error = r.Error, SourceId = r.Source,
+        }));
+        await db.SaveChangesAsync();
+        await db.Database.MigrateAsync();
+
+        var after = await db.GatewayRequests.AsNoTracking().OrderBy(r => r.SourceId).Select(r => new { r.SourceId, r.Status, r.Refusal }).ToListAsync();
+        Assert.Equal(
+            ["a|refused|credit", "b|refused|api_off", "c|refused|safeguards", "d|refused|key", "e|refused|model", "f|refused|blocked", "g|failed|", "|failed|"],
+            after.Select(r => $"{r.SourceId}|{r.Status}|{r.Refusal}"));
+    }
 }

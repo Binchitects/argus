@@ -216,9 +216,35 @@ public sealed partial class LedgerImport(IServiceScopeFactory scopes, IOptions<D
             var kind = LimitType().Match(message) is { Success: true } m ? m.Groups[1].Value : "";
             return (GatewayRequest.Refused, kind switch { "tokens" => "tpm", "max_parallel_requests" => "parallel", _ => "rpm" });
         }
-        if (row.ErrorClass == "BudgetExceededError" || (message.Contains("budget", StringComparison.OrdinalIgnoreCase) && message.Contains("exceed", StringComparison.OrdinalIgnoreCase)))
+        bool Has(string text) => message.Contains(text, StringComparison.OrdinalIgnoreCase);
+        if (row.ErrorClass == "BudgetExceededError" || (Has("budget") && Has("exceed")))
         {
             return (GatewayRequest.Refused, "budget");
+        }
+        if (row.ErrorClass == "GuardrailRaisedException")
+        {
+            // The app's guardrail, before the model (GuardrailEndpoints): the person, their credit, the safeguards, the model's room.
+            return (GatewayRequest.Refused, Has("account is disabled") ? "disabled" : Has("API access is off") ? "api_off"
+                : message.StartsWith("You have ", StringComparison.Ordinal) && Has(" credit") ? "credit"
+                : Has(" is starting.") || Has("could not be started") || Has("waits while its GPU") || Has("answers in its place") ? "room"
+                : "safeguards");
+        }
+        // LiteLLM's own refusals of the key, before any model: blocked, expired, unknown or missing, or not for that model.
+        if (Has("Key is blocked"))
+        {
+            return (GatewayRequest.Refused, "blocked");
+        }
+        if (Has("Expired Key") || Has("key expired"))
+        {
+            return (GatewayRequest.Refused, "expired");
+        }
+        if (row.ErrorClass == "KeyNotFoundError" || Has("No api key passed in") || Has("Invalid proxy server token"))
+        {
+            return (GatewayRequest.Refused, "key");
+        }
+        if (row.ErrorClass == "ProxyModelNotFoundError" || Has("not allowed to access model") || Has("Invalid model name"))
+        {
+            return (GatewayRequest.Refused, "model");
         }
         return (GatewayRequest.Failed, null);
     }

@@ -88,6 +88,42 @@ public sealed class LedgerImportTests(AppFixture app)
         Assert.Equal(GatewayRequest.Cached, rows[cached].Status);
     }
 
+    [Theory]
+    [InlineData("GuardrailRaisedException", "You have used all your API credit for this month ($0.00). Ask an admin to raise it.", "credit")]
+    [InlineData("GuardrailRaisedException", "Your API access is off. Ask an admin to turn it on (Admin → People).", "api_off")]
+    [InlineData("GuardrailRaisedException", "This account is disabled.", "disabled")]
+    [InlineData("GuardrailRaisedException", "The request was refused: it holds a credit card number. Remove it and send it again.", "safeguards")]
+    [InlineData("GuardrailRaisedException", "Qwen3-4B is starting.", "room")]
+    [InlineData("Exception", "Key is blocked. Update via `/key/unblock` if you're an admin.", "blocked")]
+    [InlineData("KeyNotFoundError", "Authentication Error, Invalid proxy server token passed.", "key")]
+    [InlineData("Exception", "No api key passed in.", "key")]
+    [InlineData("ProxyException", "key not allowed to access model. This key can only access models=['a']", "model")]
+    [InlineData("BadRequestError", "litellm.BadRequestError: OpenAIException - model is not loaded.", null)]
+    public async Task Each_refusal_before_a_model_says_why_and_an_engines_error_is_a_failure(string errorClass, string message, string? refusal)
+    {
+        var id = "rr-" + Guid.NewGuid().ToString("N")[..8];
+        await using (var conn = new NpgsqlConnection(app.LitellmConnectionString))
+        {
+            await conn.OpenAsync();
+            await using var insert = new NpgsqlCommand("""
+                insert into "LiteLLM_SpendLogs" (request_id, call_type, api_key, spend, prompt_tokens, completion_tokens, "startTime", "endTime", model, metadata, status) values
+                  (@id, 'acompletion', 'hash-alice', 0, 0, 0, '2025-02-02', '2025-02-02', 'qwen',
+                   jsonb_build_object('user_api_key_user_id', 'alice@example.test', 'error_information', jsonb_build_object('error_class', @class, 'error_code', '400', 'error_message', @message)), 'failure')
+                """, conn);
+            insert.Parameters.AddWithValue("id", id);
+            insert.Parameters.AddWithValue("class", errorClass);
+            insert.Parameters.AddWithValue("message", message);
+            await insert.ExecuteNonQueryAsync();
+        }
+        var import = app.Factory.Services.GetRequiredService<LedgerImport>();
+        for (var i = 0; i < 20 && (await LedgerAsync(id)).Count < 1; i++)
+        {
+            await import.ImportAsync(CancellationToken.None);
+        }
+        var row = Assert.Single(await LedgerAsync(id));
+        Assert.Equal((refusal is null ? GatewayRequest.Failed : GatewayRequest.Refused, refusal), (row.Status, row.Refusal));
+    }
+
     [Fact]
     public async Task Each_persons_totals_are_LiteLLMs_to_the_billionth()
     {

@@ -1309,7 +1309,7 @@ them.
   counts a request, however long it runs: a five-minute video holds back one
   request, for one minute. Past the limit, the tool call is an error saying
   which limit, audited as `mcp.rate_limited`; their key's card counts these
-  calls and refusals too, the Refused by rate limits panel does not (it reads
+  calls and refusals too, the dashboards' Refused panel does not (it reads
   the gateway's log). Tokens a minute and requests at once do not apply to
   these tools: pictures, speech and video have no tokens, and the chat's own
   limits for pictures and videos hold. A deep research run started there

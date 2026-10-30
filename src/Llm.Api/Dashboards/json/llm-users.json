@@ -89,7 +89,7 @@
         "graphMode": "none",
         "colorMode": "value"
       },
-      "description": "Requests the gateway took. A request refused for its key's rate limit never reached a model: it is not counted here, nor in any panel of this dashboard (Usage by person lists them)."
+      "description": "A refused request (a rate limit, credit or a budget, the safeguards) never reached a model: it is not counted here, nor in any panel of this dashboard (Usage by person lists them under Refused)."
     },
     {
       "type": "stat",
@@ -169,7 +169,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms),0) AS \"p50\" from requests WHERE $__timeFilter(started_at) AND status <> 'refused' AND duration_ms IS NOT NULL"
+          "rawSql": "SELECT COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms),0) AS \"p50\" from requests WHERE $__timeFilter(started_at) AND status <> 'refused' AND surface <> 'media'"
         }
       ],
       "fieldConfig": {
@@ -226,7 +226,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms),0) AS \"p95\" from requests WHERE $__timeFilter(started_at) AND status <> 'refused' AND duration_ms IS NOT NULL"
+          "rawSql": "SELECT COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms),0) AS \"p95\" from requests WHERE $__timeFilter(started_at) AND status <> 'refused' AND surface <> 'media'"
         }
       ],
       "fieldConfig": {
@@ -378,7 +378,7 @@
         "graphMode": "none",
         "colorMode": "value"
       },
-      "description": "Requests that failed: refused for credit, a model's error, a timeout. Refusals for a key's rate limit are the client's limit, not a failure: Usage by person lists them."
+      "description": "Requests that reached a model and failed: a model's error, a timeout, one stopped half way. A refusal (a rate limit, credit or a budget, the safeguards) never reached a model and is not a failure: Usage by person lists them."
     },
     {
       "type": "timeseries",
@@ -513,7 +513,7 @@
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(started_at, $__interval), percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms) AS \"p50\", percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS \"p95\" from requests WHERE $__timeFilter(started_at) AND status <> 'refused' AND duration_ms IS NOT NULL GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT $__timeGroupAlias(started_at, $__interval), percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms) AS \"p50\", percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS \"p95\" from requests WHERE $__timeFilter(started_at) AND status <> 'refused' AND surface <> 'media' GROUP BY 1 ORDER BY 1"
         }
       ],
       "fieldConfig": {
@@ -1027,7 +1027,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "select count(distinct coalesce(s.person, '(unattributed)')) as v from requests s where $__timeFilter(s.started_at)"
+          "rawSql": "select count(distinct coalesce(s.person, '(unattributed)')) as v from requests s where $__timeFilter(s.started_at) and s.status <> 'refused'"
         }
       ],
       "fieldConfig": {
@@ -1413,12 +1413,12 @@
     },
     {
       "type": "table",
-      "title": "Refused by rate limits",
+      "title": "Refused",
       "datasource": {
         "type": "postgres",
         "uid": "gateway-db"
       },
-      "description": "API requests the gateway refused (HTTP 429) for a key's rate limits: requests a minute, tokens a minute, or requests at once. Who, with which key, which limit, how often and when last. They are not counted as requests in the other panels. Refusals for credit are not here. The gateway keeps no prompt or answer with a refusal.",
+      "description": "Requests the gateway refused before any model: a key's rate limits (requests or tokens a minute, requests at once), credit or a budget, the safeguards, a key unknown, blocked or expired, a model the key may not use, no room on the model. Who, with which key, why, how often and when last. They are not counted as requests or failures in the other panels. The gateway keeps no prompt or answer with a refusal.",
       "gridPos": {
         "h": 9,
         "w": 12,
@@ -1434,7 +1434,7 @@
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "select coalesce(s.person, '(unattributed)') as \"Person\", coalesce(s.key_alias, s.surface) as \"Key\", case s.refusal when 'rpm' then 'requests a minute' when 'tpm' then 'tokens a minute' when 'parallel' then 'requests at once' else 'other' end as \"Limit\", count(*) as \"Refused\", max(s.started_at) as \"Last\" from requests s where $__timeFilter(s.started_at) and s.status = 'refused' and s.refusal in ('rpm', 'tpm', 'parallel') group by 1,2,3 order by 4 desc, 5 desc"
+          "rawSql": "select coalesce(s.person, '(unattributed)') as \"Person\", coalesce(s.key_alias, s.surface) as \"Key\", case s.refusal when 'rpm' then 'requests a minute' when 'tpm' then 'tokens a minute' when 'parallel' then 'requests at once' when 'budget' then 'a budget' when 'credit' then 'credit' when 'key' then 'unknown key' when 'blocked' then 'key blocked' when 'expired' then 'key expired' when 'disabled' then 'account disabled' when 'api_off' then 'API access off' when 'model' then 'model not allowed' when 'safeguards' then 'safeguards' when 'room' then 'no room on the model' when 'busy' then 'busy' when 'too_long' then 'too long' else 'other' end as \"Why\", count(*) as \"Refused\", max(s.started_at) as \"Last\" from requests s where $__timeFilter(s.started_at) and s.status = 'refused' group by 1,2,3 order by 4 desc, 5 desc"
         }
       ],
       "fieldConfig": {
