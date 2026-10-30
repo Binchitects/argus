@@ -3,9 +3,10 @@ import { noGateway } from './helpers.ts'
 
 test('the account shows the key and credit, and two-factor setup can be started and cancelled', async ({ page }) => {
   await page.goto('/account')
-  await expect(page.getByRole('heading', { name: 'API key', exact: true })).toBeVisible()
-  // Without a gateway the card says why there is no credit to show.
-  await expect(noGateway ? page.getByRole('alert').filter({ hasText: /gateway|reach/i }) : page.getByText('Credit used')).toBeVisible()
+  const key = page.locator('section').filter({ has: page.getByRole('heading', { name: 'API key', exact: true }) })
+  await expect(key).toBeVisible()
+  // Without a gateway the key's card says why there is no credit to show (the card of the other keys says so too).
+  await expect(noGateway ? key.getByRole('alert').filter({ hasText: /gateway|reach/i }) : page.getByText('Credit used')).toBeVisible()
   const setup = page.getByRole('button', { name: 'Set up' })
   if (await setup.isVisible()) {
     await setup.click()
