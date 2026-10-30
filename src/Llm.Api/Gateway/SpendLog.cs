@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json.Nodes;
 using Llm.Api.Dashboards;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Npgsql;
 
@@ -16,7 +17,7 @@ public sealed record SpendChange(int Rows, decimal Before, decimal After, int Un
 /// make itself, both made without the gateway, booked as the gateway books a picture; and past requests' cost worked out again at today's prices
 /// (CostRecalculation). Only these rows: the gateway's own running totals are left as they are.
 /// </summary>
-public sealed partial class SpendLog(IOptions<DashboardOptions> options, IConfiguration config, ILogger<SpendLog> logger)
+public sealed partial class SpendLog(IOptions<DashboardOptions> options, IConfiguration config, IServiceScopeFactory scopes, ILogger<SpendLog> logger)
 {
     /// <summary>The call type of a clip the app booked (LiteLLM's own name for video generation).</summary>
     public const string VideoCall = "avideo_generation";
@@ -90,7 +91,8 @@ public sealed partial class SpendLog(IOptions<DashboardOptions> options, IConfig
                   "startTime", "endTime", model, model_group, custom_llm_provider, api_base, "user", metadata, end_user, status)
                 values (@id, @call, @key, @spend, 0, 0, 0, @start, @end, @model, @model, 'arena', @base, '', @metadata::jsonb, @email, 'success')
                 """, conn);
-            insert.Parameters.AddWithValue("id", $"arena-{call switch { VideoCall => "video", PictureCall => "picture", SpeechCall => "speech", _ => "music" }}-{Guid.NewGuid():N}");
+            var id = $"arena-{call switch { VideoCall => "video", PictureCall => "picture", SpeechCall => "speech", _ => "music" }}-{Guid.NewGuid():N}";
+            insert.Parameters.AddWithValue("id", id);
             insert.Parameters.AddWithValue("call", call);
             insert.Parameters.AddWithValue("key", chatKeyHash);
             insert.Parameters.AddWithValue("spend", (double)cost);
@@ -103,11 +105,37 @@ public sealed partial class SpendLog(IOptions<DashboardOptions> options, IConfig
             insert.Parameters.AddWithValue("metadata", metadata.ToJsonString());
             insert.Parameters.AddWithValue("email", email);
             await insert.ExecuteNonQueryAsync(ct);
+            await LedgerAsync(id, call, apiBase, email, model, cost, start, end, metadata, ct);
         }
         catch (NpgsqlException ex)
         {
             LogNotBooked(logger, ex.Message);
         }
+    }
+
+    /// <summary>
+    /// The same booking in the app's own ledger, at once (its credit counts it now), under LiteLLM's id: the mirror of
+    /// LiteLLM's log finds it there and leaves it.
+    /// </summary>
+    private async Task LedgerAsync(string id, string call, string apiBase, string email, string model, decimal cost, DateTimeOffset start, DateTimeOffset end,
+        JsonObject metadata, CancellationToken ct)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+        var person = email.Trim().ToLowerInvariant();
+        var normalized = person.ToUpperInvariant();
+        var userId = await db.Users.Where(u => u.NormalizedEmail == normalized).Select(u => (Guid?)u.Id).FirstOrDefaultAsync(ct);
+        db.GatewayRequests.Add(new Llm.Core.Gateway.GatewayRequest
+        {
+            StartedAt = start, EndedAt = end, DurationMs = (int)Math.Max(0, (end - start).TotalMilliseconds), Surface = "media",
+            Call = call switch { VideoCall => "video", PictureCall => "image", SpeechCall => "speech", _ => "music" }, Protocol = "internal",
+            CreditKind = call switch { VideoCall => "video", PictureCall => "pictures", _ => "speech" }, UserId = userId, Person = person, KeyAlias = Chat.ChatKey.Alias,
+            Model = model, Deployment = Uri.TryCreate(apiBase, UriKind.Absolute, out var u) ? u.Authority : null, Cost = cost,
+            Seconds = metadata["video_seconds"]?.GetValue<double>() ?? metadata["music_seconds"]?.GetValue<double>(),
+            Pictures = metadata["pictures"]?.GetValue<int>(), Characters = metadata["characters"] is { } c ? (int)c.GetValue<double>() : null,
+            Status = Llm.Core.Gateway.GatewayRequest.Done, HttpStatus = 200, SourceId = id,
+        });
+        await db.SaveChangesAsync(ct);
     }
 
     /// <summary>

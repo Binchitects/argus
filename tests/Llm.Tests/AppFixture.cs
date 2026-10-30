@@ -1,4 +1,5 @@
 using Llm.Api.Gateway;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -103,6 +104,7 @@ public sealed class AppFixture : IAsyncLifetime
         insert.Parameters.AddWithValue("spend", (double)spend);
         insert.Parameters.AddWithValue("email", email);
         await insert.ExecuteNonQueryAsync();
+        await MirrorAsync();
     }
 
     /// <summary>
@@ -127,6 +129,7 @@ public sealed class AppFixture : IAsyncLifetime
         insert.Parameters.AddWithValue("metadata", apiKey ? $$"""{"user_api_key_user_id":"{{email}}","user_api_key_alias":"app-key"}""" : """{"user_api_key_alias":"chat"}""");
         insert.Parameters.AddWithValue("endUser", apiKey ? "" : email);
         await insert.ExecuteNonQueryAsync();
+        await MirrorAsync();
     }
 
     /// <summary>The gateway's database (its request log), for tests that seed rows of their own.</summary>
@@ -137,7 +140,55 @@ public sealed class AppFixture : IAsyncLifetime
 
     /// <summary>A separate app on its own database, for tests that need a fresh start (imports, LDAP).</summary>
     /// <param name="services">Test services of its own (a clock), after the fakes.</param>
-    public WebApplicationFactory<Program> Create(string connectionString, ILiteLlm gateway, IDictionary<string, string?>? settings = null, Action<IServiceCollection>? services = null) =>
+    public WebApplicationFactory<Program> Create(string connectionString, ILiteLlm gateway, IDictionary<string, string?>? settings = null, Action<IServiceCollection>? services = null)
+    {
+        var factory = Build(connectionString, gateway, settings, services);
+        _apps.Add(new WeakReference<WebApplicationFactory<Program>>(factory));
+        return factory;
+    }
+
+    private readonly System.Collections.Concurrent.ConcurrentBag<WeakReference<WebApplicationFactory<Program>>> _apps = [];
+
+    /// <summary>
+    /// What a test wrote into LiteLLM's request log, brought into each app's own ledger (gateway.requests), as the
+    /// leader's mirror does every few seconds: the apps read the ledger, and each read the shared log before.
+    /// </summary>
+    public async Task MirrorAsync()
+    {
+        foreach (var weak in _apps)
+        {
+            if (!weak.TryGetTarget(out var f))
+            {
+                continue;
+            }
+            try
+            {
+                var import = f.Services.GetRequiredService<Llm.Api.Gateway.LedgerImport>();
+                while (await import.ImportAsync(CancellationToken.None) > 0 && await MoreAsync(f))
+                {
+                    // Batches until it has caught up.
+                }
+            }
+            catch (ObjectDisposedException)
+            {
+                // An app its test is done with.
+            }
+        }
+    }
+
+    /// <summary>Whether LiteLLM's log has rows this app's ledger has not: a mirror that read a full batch reads on.</summary>
+    private async Task<bool> MoreAsync(WebApplicationFactory<Program> f)
+    {
+        await using var scope = f.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+        var have = await db.GatewayRequests.CountAsync(r => r.SourceId != null);
+        await using var conn = new Npgsql.NpgsqlConnection(LitellmConnectionString);
+        await conn.OpenAsync();
+        await using var count = new Npgsql.NpgsqlCommand("select count(*) from \"LiteLLM_SpendLogs\"", conn);
+        return (long)(await count.ExecuteScalarAsync())! > have;
+    }
+
+    private WebApplicationFactory<Program> Build(string connectionString, ILiteLlm gateway, IDictionary<string, string?>? settings, Action<IServiceCollection>? services) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(b =>
         {
             b.UseSetting("ConnectionStrings:App", connectionString);

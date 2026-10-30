@@ -1,6 +1,5 @@
 using System.Globalization;
 using Llm.Api.Access;
-using Llm.Api.Dashboards;
 using Llm.Core.Access;
 using Llm.Core.Data;
 using Llm.Core.Identity;
@@ -30,8 +29,11 @@ public sealed record MonthBook(DateTimeOffset Month, IReadOnlyDictionary<string,
 /// <summary>A group's spend in a month, or a cost centre's (each person once).</summary>
 public sealed record ChargeRow(string Month, string Kind, string Name, string? CostCentre, int Members, decimal Spend, decimal? Credit);
 
-/// <summary>The month's spend, read at most every <see cref="CreditOptions.Refresh"/> (one reader at a time).</summary>
-public sealed partial class CreditBook(SqlDatasource sql, IOptionsMonitor<CreditOptions> options, TimeProvider clock, ILogger<CreditBook> logger) : IDisposable
+/// <summary>
+/// The month's spend, read at most every <see cref="CreditOptions.Refresh"/> (one reader at a time), from the app's own
+/// ledger of model requests (gateway.requests), each request already put to its person and its kind of credit.
+/// </summary>
+public sealed partial class CreditBook(IServiceScopeFactory scopes, IOptionsMonitor<CreditOptions> options, TimeProvider clock, ILogger<CreditBook> logger) : IDisposable
 {
     private readonly SemaphoreSlim _lock = new(1, 1);
     private MonthBook? _book;
@@ -73,23 +75,25 @@ public sealed partial class CreditBook(SqlDatasource sql, IOptionsMonitor<Credit
     /// <summary>The next read asks the request log again (a credit was just changed, a test moved on).</summary>
     public void Forget() => _book = null;
 
-    /// <summary>Spend per person (lower-case email) and kind between two times, over every path, by the dashboards' rule.</summary>
+    /// <summary>Spend per person (lower-case email) and kind between two times, over every path.</summary>
     public async Task<Dictionary<string, IReadOnlyDictionary<CreditKind, decimal>>> SpendAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
     {
-        var rows = await sql.QueryAsync($"""
-            select lower({UsageEndpoints.Person}) as person, {UsageEndpoints.CreditKind} as kind, coalesce(sum(s.spend),0) as spend
-            {UsageEndpoints.From} where s."startTime" >= @from and s."startTime" < @to
-            group by 1, 2
-            """, new Dictionary<string, object> { ["from"] = from.UtcDateTime, ["to"] = to.UtcDateTime }, ct);
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var rows = await db.GatewayRequests.AsNoTracking()
+            .Where(r => r.StartedAt >= from && r.StartedAt < to && r.Person != null)
+            .GroupBy(r => new { r.Person, r.CreditKind })
+            .Select(g => new { g.Key.Person, g.Key.CreditKind, Spend = g.Sum(r => r.Cost) })
+            .ToListAsync(ct);
         var spend = new Dictionary<string, Dictionary<CreditKind, decimal>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var r in rows.Rows)
+        foreach (var r in rows)
         {
-            if (Credits.Parse((string?)r[1]) is not { } kind)
+            if (Credits.Parse(r.CreditKind) is not { } kind)
             {
                 continue;
             }
-            var person = spend.TryGetValue((string)r[0]!, out var p) ? p : spend[(string)r[0]!] = [];
-            person[kind] = person.GetValueOrDefault(kind) + Convert.ToDecimal(r[2] ?? 0m, CultureInfo.InvariantCulture);
+            var person = spend.TryGetValue(r.Person!, out var p) ? p : spend[r.Person!] = [];
+            person[kind] = person.GetValueOrDefault(kind) + r.Spend;
         }
         return spend.ToDictionary(p => p.Key, p => (IReadOnlyDictionary<CreditKind, decimal>)p.Value, StringComparer.OrdinalIgnoreCase);
     }
@@ -97,12 +101,14 @@ public sealed partial class CreditBook(SqlDatasource sql, IOptionsMonitor<Credit
     /// <summary>Spend per month (yyyy-MM) and person, for the chargeback report.</summary>
     public async Task<List<(string Month, string Person, decimal Spend)>> MonthlyAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
     {
-        var rows = await sql.QueryAsync($"""
-            select to_char(date_trunc('month', s."startTime"), 'YYYY-MM') as month, lower({UsageEndpoints.Person}) as person, coalesce(sum(s.spend),0) as spend
-            {UsageEndpoints.From} where s."startTime" >= @from and s."startTime" < @to
-            group by 1, 2
-            """, new Dictionary<string, object> { ["from"] = from.UtcDateTime, ["to"] = to.UtcDateTime }, ct);
-        return [.. rows.Rows.Select(r => ((string)r[0]!, (string)r[1]!, Convert.ToDecimal(r[2] ?? 0m, CultureInfo.InvariantCulture)))];
+        await using var scope = scopes.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var rows = await db.GatewayRequests.AsNoTracking()
+            .Where(r => r.StartedAt >= from && r.StartedAt < to && r.Person != null)
+            .GroupBy(r => new { r.StartedAt.Year, r.StartedAt.Month, r.Person })
+            .Select(g => new { g.Key.Year, g.Key.Month, g.Key.Person, Spend = g.Sum(r => r.Cost) })
+            .ToListAsync(ct);
+        return [.. rows.Select(r => ($"{r.Year:D4}-{r.Month:D2}", r.Person!, r.Spend))];
     }
 
     public void Dispose() => _lock.Dispose();
