@@ -80,7 +80,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   git: {
     name: 'Source control',
-    text: "The folder's git: what changed since the last commit, **staged** for the next commit or not. A file opens as the last commit has it and as it is now; **+** stages it, **−** unstages it, **↺** puts it back. Write the message and **Commit** (all of it when nothing is staged); switch the branch below, and see the last commits.",
+    text: "The folder's git: what changed since the last commit, **staged** for the next commit or not. A file opens as the last commit has it and as it is now; **+** stages it, **−** unstages it, **↺** puts it back. Write the message and **Commit** (all of it when nothing is staged; its arrow has Amend, Commit & Push and Commit & Sync); **Sync Changes** pulls and pushes, **Publish Branch** gives a branch its upstream, and **⋯** has Pull, Push, Fetch, Checkout to…, the branches and Undo Last Commit. Switch the branch below, and see the last commits.",
     manual: 'source-control',
   },
   sessions: {

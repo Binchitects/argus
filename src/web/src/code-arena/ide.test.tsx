@@ -17,7 +17,8 @@ import { asks } from './bridge'
 import { allViews } from './workbench-layout'
 import { rankFiles } from './editor-state'
 import { parts, regions, tasks } from './help-text'
-import type { Change, Entry, Preferences, TerminalInfo } from './ide-api'
+import type { Change, Entry, GitFile, Preferences, TerminalInfo } from './ide-api'
+import { runCommand } from './commands'
 
 // Monaco, xterm.js and the terminal's socket, as fakes that remember what the page did with them.
 const fakes = vi.hoisted(() => {
@@ -3478,6 +3479,57 @@ describe('Code Arena, the IDE, as its review asked', () => {
     fireEvent.dragOver(row('lib'), { dataTransfer: fromComputer })
     fireEvent.drop(row('lib'), { dataTransfer: fromComputer })
     await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/files/upload?path=src%2Flib%2Flogo.png')?.body).toBe(logo))
+  })
+
+  it("syncs from the status bar once asked, publishes a branch with no upstream, and checks out or makes a branch from the branch's picker", async () => {
+    let status = { repository: true, branch: 'main', ahead: 2, behind: 1, files: [] as GitFile[] }
+    const { calls } = backend({
+      'GET /api/git/status': () => ({ json: status }),
+      'GET /api/git/branches': () => ({
+        json: [
+          { name: 'main', current: true, kind: 'local' },
+          { name: 'feature/cart', current: false, kind: 'local' },
+          { name: 'origin/review', current: false, kind: 'remote' },
+          { name: 'v1.0', current: false, kind: 'tag' },
+        ],
+      }),
+      'POST /api/git/sync': () => {
+        status = { ...status, ahead: 0, behind: 0 }
+        return { json: status }
+      },
+      'POST /api/git/push': () => ({ json: status }),
+      'POST /api/git/fetch': () => ({ json: status }),
+      'POST /api/git/switch': () => ({ json: status }),
+      'POST /api/git/branch/create': () => ({ json: status }),
+    })
+    renderIde()
+    const bar = await screen.findByRole('contentinfo', { name: 'Status bar' })
+    const posts = (path: string) => calls.filter((c) => c.method === 'POST' && c.path === path).map((c) => c.body)
+
+    // One behind, two ahead: synced once the question is answered (git.confirmSync).
+    await userEvent.click(await within(bar).findByRole('button', { name: 'Sync changes: 1 to pull, 2 to push' }))
+    await userEvent.click(within(await screen.findByRole('alertdialog', { name: 'Sync the branch?' })).getByRole('button', { name: 'Sync' }))
+    await waitFor(() => expect(posts('/api/git/sync')).toEqual([{ rebase: false }]))
+    expect(await within(bar).findByRole('button', { name: 'Sync changes: 0 to pull, 0 to push' })).toBeInTheDocument()
+
+    // No upstream (a fetch reads git's state again): the item publishes it.
+    status = { repository: true, branch: 'main', ahead: null as unknown as number, behind: null as unknown as number, files: [] }
+    act(() => void runCommand('git.fetch'))
+    await userEvent.click(await within(bar).findByRole('button', { name: 'Publish the branch' }))
+    await waitFor(() => expect(posts('/api/git/push')).toEqual([{ force: false }]))
+
+    // The branch's item: Checkout to…, a remote's branch tracked; and a new branch made from the picker.
+    await userEvent.click(within(bar).getByRole('button', { name: 'Branch feature/cart: checkout to another' }))
+    let picker = await screen.findByRole('dialog', { name: 'Checkout to…' })
+    expect(within(picker).getAllByRole('option').map((o) => o.textContent)).toEqual(['+ Create new branch…', '+ Create new branch from…', 'feature/cart', 'origin/review', 'v1.0'])
+    await userEvent.click(within(picker).getByRole('option', { name: 'origin/review' }))
+    await waitFor(() => expect(posts('/api/git/switch')).toEqual([{ branch: 'origin/review', kind: 'remote' }]))
+    await userEvent.click(within(bar).getByRole('button', { name: 'Branch feature/cart: checkout to another' }))
+    picker = await screen.findByRole('dialog', { name: 'Checkout to…' })
+    await userEvent.click(within(picker).getByRole('option', { name: '+ Create new branch…' }))
+    const named = await screen.findByRole('dialog', { name: 'Create a branch' })
+    await userEvent.type(within(named).getByRole('combobox'), 'fix/total{Enter}')
+    await waitFor(() => expect(posts('/api/git/branch/create')).toEqual([{ name: 'fix/total' }]))
   })
 
   it("renames and deletes in the explorer with the keymap's keys, which keybindings.json changes", async () => {

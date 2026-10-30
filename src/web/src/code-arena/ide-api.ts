@@ -438,8 +438,16 @@ export const gitLogQuery = {
 }
 export const gitBranchesQuery = {
   queryKey: ['code', 'git', 'branches'] as const,
-  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ name: string; current: boolean }[]>('/api/git/branches', { signal }),
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<GitBranch[]>('/api/git/branches', { signal }),
 }
+/** A branch: the folder's own (local), a remote's, or a tag. */
+export interface GitBranch {
+  name: string
+  current: boolean
+  kind: 'local' | 'remote' | 'tag'
+}
+/** The local branches, then the remotes' and the tags (Checkout to…). */
+export const gitAllBranches = () => api<GitBranch[]>('/api/git/branches?all=1')
 /** A file as a revision has it: HEAD, ":" (the index) or a commit. */
 export interface GitShown {
   path: string
@@ -478,8 +486,18 @@ export const gitStageText = (path: string, text: string) => api<GitStatus>('/api
 export const gitStage = (paths: string[]) => api<GitStatus>('/api/git/stage', { body: { paths } })
 export const gitUnstage = (paths: string[]) => api<GitStatus>('/api/git/unstage', { body: { paths } })
 export const gitDiscard = (paths: string[]) => api<GitStatus>('/api/git/discard', { body: { paths } })
-export const gitCommit = (message: string, all: boolean) => api<{ hash: string; status: GitStatus }>('/api/git/commit', { body: { message, all } })
-export const gitSwitch = (branch: string) => api<GitStatus>('/api/git/switch', { body: { branch } })
+export const gitCommit = (message: string, all: boolean, amend = false) =>
+  api<{ hash: string; status: GitStatus }>('/api/git/commit', { body: amend ? { message, all, amend } : { message, all } })
+export const gitSwitch = (branch: string, kind: GitBranch['kind'] = 'local') => api<GitStatus>('/api/git/switch', { body: { branch, kind } })
+export const gitFetch = () => api<GitStatus>('/api/git/fetch', { body: {} })
+export const gitPull = (rebase: boolean) => api<GitStatus>('/api/git/pull', { body: { rebase } })
+/** Pushes the branch; one with no upstream is published (to origin, or the only remote). */
+export const gitPush = (force = false) => api<GitStatus>('/api/git/push', { body: { force } })
+export const gitSync = (rebase: boolean) => api<GitStatus>('/api/git/sync', { body: { rebase } })
+export const gitCreateBranch = (name: string, from?: string) => api<GitStatus>('/api/git/branch/create', { body: from ? { name, from } : { name } })
+export const gitRenameBranch = (to: string) => api<GitStatus>('/api/git/branch/rename', { body: { to } })
+export const gitDeleteBranch = (name: string, force = false) => api<GitStatus>('/api/git/branch/delete', { body: { name, force } })
+export const gitUndoCommit = () => api<GitStatus>('/api/git/undo-commit', { body: {} })
 
 /** Code completion at the editor's cursor: what goes there (empty: nothing). */
 export const completeCode = (body: { path: string; prefix: string; suffix: string }, signal: AbortSignal) => api<{ text: string }>('/api/complete', { body, signal })

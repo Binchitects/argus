@@ -135,6 +135,100 @@ public sealed class SourceControlTests : IDisposable
     }
 
     [Fact]
+    public async Task A_branch_is_published_fetched_pulled_synced_and_made_renamed_deleted_amended_and_undone()
+    {
+        using var h = new Harness(_gateway, _mcp, c => c["autoCommit"] = false);
+        // The remote: a bare repository beside the folder; a second clone of it stands for a colleague.
+        var remote = Directory.CreateTempSubdirectory("code-arena-remote-").FullName;
+        var other = Directory.CreateTempSubdirectory("code-arena-other-").FullName;
+        try
+        {
+            Git(remote, "init", "-q", "--bare", "-b", "main");
+            Git(h.Work, "init", "-q", "-b", "main");
+            Git(h.Work, "config", "user.name", "Pat Person");
+            Git(h.Work, "config", "user.email", "pat@example.test");
+            h.Write("app.ts", "one\n");
+            Git(h.Work, "add", "-A");
+            Git(h.Work, "commit", "-q", "-m", "First");
+            Git(h.Work, "remote", "add", "origin", remote);
+            await using var web = await WebRun.StartAsync(h);
+            async Task<JsonNode> Post(string path, JsonObject? body = null) => await Json(await web.PostAsync(path, body ?? new JsonObject()));
+
+            // Pushed with no upstream: published, with origin's branch as its upstream.
+            var published = await Post("/api/git/push");
+            Assert.Equal((0, 0), (published["behind"]!.GetValue<int>(), published["ahead"]!.GetValue<int>()));
+            Assert.Equal("origin/main", GitOut(h.Work, "rev-parse", "--abbrev-ref", "@{upstream}"));
+
+            // A colleague pushes: fetched, the branch is one behind; pulled, it is level.
+            Git(other, "clone", "-q", remote, ".");
+            Git(other, "config", "user.name", "Kim");
+            Git(other, "config", "user.email", "kim@example.test");
+            File.WriteAllText(Path.Combine(other, "app.ts"), "two\n");
+            Git(other, "commit", "-q", "-am", "Second");
+            Git(other, "push", "-q");
+            await Post("/api/git/fetch");
+            Assert.Equal(1, (await web.GetJsonAsync("/api/git/status"))["behind"]!.GetValue<int>());
+            var pulled = await Post("/api/git/pull");
+            Assert.Equal(0, pulled["behind"]!.GetValue<int>());
+            Assert.Equal("two\n", File.ReadAllText(Path.Combine(h.Work, "app.ts")));
+
+            // A commit here, synced: pulled (nothing new) and pushed.
+            h.Write("app.ts", "three\n");
+            await Post("/api/git/commit", new JsonObject { ["message"] = "Third", ["all"] = true });
+            var synced = await Post("/api/git/sync");
+            Assert.Equal(0, synced["ahead"]!.GetValue<int>());
+            Assert.Equal("Third", GitOut(remote, "log", "-1", "--format=%s", "main"));
+
+            // Amended (a new message), then undone: the commit's changes staged again.
+            await Post("/api/git/commit", new JsonObject { ["message"] = "Third, said better", ["amend"] = true });
+            Assert.Equal("Third, said better", GitOut(h.Work, "log", "-1", "--format=%s"));
+            await Post("/api/git/undo-commit");
+            Assert.Equal("Second", GitOut(h.Work, "log", "-1", "--format=%s"));
+            Assert.Equal("M  app.ts", GitOut(h.Work, "status", "--porcelain"));
+
+            // Branches: made (from a commit too), renamed, deleted (refused while not merged, then forced); a remote's checked out tracking it.
+            await Post("/api/git/branch/create", new JsonObject { ["name"] = "feature/cart" });
+            Assert.Equal("feature/cart", GitOut(h.Work, "rev-parse", "--abbrev-ref", "HEAD"));
+            await Post("/api/git/branch/rename", new JsonObject { ["to"] = "feature/basket" });
+            Assert.Equal("feature/basket", GitOut(h.Work, "rev-parse", "--abbrev-ref", "HEAD"));
+            await Post("/api/git/commit", new JsonObject { ["message"] = "Basket" });
+            await Post("/api/git/switch", new JsonObject { ["branch"] = "main" });
+            Assert.Equal(HttpStatusCode.Conflict, (await web.PostAsync("/api/git/branch/delete", new JsonObject { ["name"] = "feature/basket" })).StatusCode);
+            await Post("/api/git/branch/delete", new JsonObject { ["name"] = "feature/basket", ["force"] = true });
+            await Post("/api/git/branch/create", new JsonObject { ["name"] = "old", ["from"] = "HEAD~1" });
+            Assert.Equal(GitOut(h.Work, "rev-parse", "main~1"), GitOut(h.Work, "rev-parse", "HEAD"));
+            Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/git/branch/create", new JsonObject { ["name"] = "-x" })).StatusCode);
+            Git(other, "push", "-q", "origin", "main:review");
+            await Post("/api/git/fetch");
+            var all = (await web.GetJsonAsync("/api/git/branches?all=1")).AsArray().Select(b => $"{b!["kind"]}:{b["name"]}").ToList();
+            Assert.Contains("remote:origin/review", all);
+            Assert.DoesNotContain("remote:origin/HEAD", all);
+            await Post("/api/git/switch", new JsonObject { ["branch"] = "origin/review", ["kind"] = "remote" });
+            Assert.Equal("origin/review", GitOut(h.Work, "rev-parse", "--abbrev-ref", "@{upstream}"));
+        }
+        finally
+        {
+            Directory.Delete(remote, recursive: true);
+            Directory.Delete(other, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task A_remotes_password_is_not_said_back()
+    {
+        using var h = new Harness(_gateway, _mcp, c => c["autoCommit"] = false);
+        Git(h.Work, "init", "-q", "-b", "main");
+        // An address that cannot be reached, with a token in it, as people paste them.
+        Git(h.Work, "remote", "add", "origin", "https://pat:" + "ghp_" + "notarealtoken0123456789@127.0.0.1:9/shop.git");
+        await using var web = await WebRun.StartAsync(h);
+        var refused = await web.PostAsync("/api/git/fetch", new JsonObject());
+        var said = await refused.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        Assert.DoesNotContain("notarealtoken", said);
+        Assert.Equal("git: https://***@x/y", IdeGit.Clean("git: https://pat:secret@x/y"));
+    }
+
+    [Fact]
     public async Task What_the_repository_ignores_is_listed_a_folder_once()
     {
         using var h = new Harness(_gateway, _mcp, c => c["autoCommit"] = false);

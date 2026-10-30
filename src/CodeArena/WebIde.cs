@@ -158,7 +158,7 @@ internal sealed partial class WebApp
                     await res.JsonAsync(200, await _git.CommitFilesAsync(Query(req, "hash"), ct), ct);
                     return true;
                 case ("GET", "/api/git/branches"):
-                    await res.JsonAsync(200, await _git.BranchesAsync(ct), ct);
+                    await res.JsonAsync(200, await _git.BranchesAsync(ct, Flag(req, "all")), ct);
                     return true;
                 case ("POST", "/api/git/stage"):
                     await _git.StageAsync(Body(req), ct);
@@ -191,6 +191,30 @@ internal sealed partial class WebApp
                     await _git.SwitchAsync(Body(req), ct);
                     await res.JsonAsync(200, await _git.StatusAsync(ct), ct);
                     return true;
+                case ("POST", "/api/git/fetch"):
+                case ("POST", "/api/git/pull"):
+                case ("POST", "/api/git/push"):
+                case ("POST", "/api/git/sync"):
+                case ("POST", "/api/git/branch/create"):
+                case ("POST", "/api/git/branch/rename"):
+                case ("POST", "/api/git/branch/delete"):
+                case ("POST", "/api/git/undo-commit"):
+                {
+                    var body = Body(req);
+                    await (req.Path switch
+                    {
+                        "/api/git/fetch" => _git.FetchAsync(ct),
+                        "/api/git/pull" => _git.PullAsync(body, ct),
+                        "/api/git/push" => _git.PushAsync(body, ct),
+                        "/api/git/sync" => _git.SyncAsync(body, ct),
+                        "/api/git/branch/create" => _git.CreateBranchAsync(body, ct),
+                        "/api/git/branch/rename" => _git.RenameBranchAsync(body, ct),
+                        "/api/git/branch/delete" => _git.DeleteBranchAsync(body, ct),
+                        _ => _git.UndoCommitAsync(ct),
+                    });
+                    await res.JsonAsync(200, await _git.StatusAsync(ct), ct);
+                    return true;
+                }
                 case ("GET", "/api/problems"):
                     await res.JsonAsync(200, ProblemsJson(_problems.Last), ct);
                     return true;

@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, GitBranch, GitCommitHorizontal, Minus, Plus, RefreshCw, Undo2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, ChevronDown, CloudUpload, Ellipsis, GitBranch, GitCommitHorizontal, Minus, Plus, RefreshCw, Undo2 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { useConfirm } from '@/components/ui/confirm'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Textarea } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -12,6 +13,7 @@ import { errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { useEditor } from './editor-state'
 import { FileIcon } from './file-icon'
+import { useGit } from './git-actions'
 import { PartHelp } from './help'
 import {
   gitBranchesQuery,
@@ -19,8 +21,10 @@ import {
   gitDiscard,
   gitLogQuery,
   gitStage,
+  gitPush,
   gitStatusQuery,
   gitSwitch,
+  gitSync,
   gitUnstage,
   nameOf,
   parentOf,
@@ -110,18 +114,28 @@ export function SourceControlPanel() {
   const files = status.data?.files ?? []
   const staged = files.filter((f) => f.staged)
   const changed = files.filter((f) => f.changed)
+  const git = useGit()
+  /** Commit (Amend: into the last commit), then, as asked, push or sync. */
   const commit = useMutation({
-    mutationFn: () => gitCommit(message, staged.length === 0),
+    mutationFn: async ({ amend = false, then }: { amend?: boolean; then?: 'push' | 'sync' } = {}) => {
+      const done = await gitCommit(message, staged.length === 0, amend)
+      if (then === 'push') await gitPush()
+      if (then === 'sync') await gitSync(git.rebase())
+      return { ...done, amend, then }
+    },
     onSuccess: (r) => {
       settle(r.status)
       setMessage('')
-      toast.success(`Committed ${r.hash}.`)
+      toast.success(`${r.amend ? 'Amended' : 'Committed'} ${r.hash}${r.then === 'push' ? ', and pushed' : r.then === 'sync' ? ', and synced' : ''}.`)
       void queryClient.invalidateQueries({ queryKey: ['code', 'git'] })
     },
-    onError: (e) => toast.error(errorMessage(e)),
+    onError: (e) => {
+      toast.error(errorMessage(e))
+      void queryClient.invalidateQueries({ queryKey: ['code', 'git'] })
+    },
   })
   const switchTo = useMutation({
-    mutationFn: gitSwitch,
+    mutationFn: (branch: string) => gitSwitch(branch),
     onSuccess: (s) => {
       settle(s)
       void queryClient.invalidateQueries({ queryKey: ['code', 'git'] })
@@ -138,7 +152,11 @@ export function SourceControlPanel() {
     })
     if (ok) act.mutate({ op: 'discard', paths })
   }
-  const busy = act.isPending || commit.isPending || switchTo.isPending
+  const busy = act.isPending || commit.isPending || switchTo.isPending || git.busy !== null
+  const ahead = status.data?.ahead ?? 0
+  const behind = status.data?.behind ?? 0
+  // No upstream (ahead and behind unknown): the branch is to be published.
+  const unpublished = !!status.data?.branch && status.data.ahead == null
 
   const row = (f: GitFile, list: 'staged' | 'changed') => {
     const letter = (list === 'staged' ? f.staged : f.changed) ?? ''
@@ -185,6 +203,28 @@ export function SourceControlPanel() {
             <RefreshCw />
           </button>
         </Tooltip>
+        {status.data?.repository && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button type="button" aria-label="More git actions" className={action} disabled={busy}>
+                <Ellipsis />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => void git.pull()}>Pull</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void git.push()}>{unpublished ? 'Publish Branch' : 'Push'}</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void git.fetch()}>Fetch</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void git.sync()}>Sync</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => void git.checkout()}>Checkout to…</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void git.createBranch()}>Create Branch…</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void git.renameBranch()}>Rename Branch…</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void git.deleteBranch()}>Delete Branch…</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => void git.undoCommit()}>Undo Last Commit</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         <PartHelp part="git" />
       </div>
       <div className="min-h-0 flex-1 overflow-auto pb-4 text-[0.8125rem]">
@@ -197,7 +237,7 @@ export function SourceControlPanel() {
               className="grid gap-1.5 px-3 pb-2"
               onSubmit={(e) => {
                 e.preventDefault()
-                if (message.trim()) commit.mutate()
+                if (message.trim()) commit.mutate({})
               }}
             >
               <Textarea
@@ -206,7 +246,7 @@ export function SourceControlPanel() {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && message.trim()) {
                     e.preventDefault()
-                    commit.mutate()
+                    commit.mutate({})
                   }
                 }}
                 rows={2}
@@ -214,9 +254,37 @@ export function SourceControlPanel() {
                 aria-label="Commit message"
                 className="min-h-14 text-sm"
               />
-              <Button type="submit" size="sm" disabled={busy || !message.trim() || files.length === 0}>
-                <Check /> {staged.length > 0 ? `Commit ${staged.length} staged` : 'Commit all'}
-              </Button>
+              <div className="flex">
+                <Button type="submit" size="sm" disabled={busy || !message.trim() || files.length === 0} className="min-w-0 flex-1 rounded-r-none">
+                  <Check /> {staged.length > 0 ? `Commit ${staged.length} staged` : 'Commit all'}
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button type="button" size="sm" aria-label="Commit, and more" disabled={busy} className="rounded-l-none border-l border-primary-foreground/30 px-1.5">
+                      <ChevronDown />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem disabled={!message.trim() || files.length === 0} onSelect={() => commit.mutate({})}>Commit</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => commit.mutate({ amend: true })}>Commit (Amend)</DropdownMenuItem>
+                    <DropdownMenuItem disabled={!message.trim() || files.length === 0} onSelect={() => commit.mutate({ then: 'push' })}>Commit &amp; Push</DropdownMenuItem>
+                    <DropdownMenuItem disabled={!message.trim() || files.length === 0} onSelect={() => commit.mutate({ then: 'sync' })}>Commit &amp; Sync</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+              {(unpublished || ahead + behind > 0) && (
+                <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void (unpublished ? git.publish() : git.sync())}>
+                  {unpublished ? (
+                    <>
+                      <CloudUpload /> Publish Branch
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw /> Sync Changes {behind > 0 && <><ArrowDown aria-hidden="true" />{behind}</>} {ahead > 0 && <><ArrowUp aria-hidden="true" />{ahead}</>}
+                    </>
+                  )}
+                </Button>
+              )}
             </form>
             <section aria-label="Staged changes">
               <h3 className="flex h-[1.375rem] items-center px-3 text-xs font-semibold text-muted-foreground">

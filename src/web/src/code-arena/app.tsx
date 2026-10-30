@@ -15,7 +15,7 @@ import type { ChatConfig } from '@/pages/chat/types'
 import { stateQuery, type CodeEvent, type CodeState } from './api'
 import { ChangesPanel } from './changes'
 import { Sessions, ThemeMenu, Thread } from './chat'
-import { useCommands, type Command } from './commands'
+import { runCommand, useCommands, type Command } from './commands'
 import { chooseAndAddFolder, chooseAndOpenFolder, foldersQuery, openRecentFolder } from './folders'
 import { completion } from './completion'
 import { CommandPalette, recentLimit, type PaletteCommand } from './palette'
@@ -24,6 +24,7 @@ import { ManageMenu } from './manage-menu'
 import { AccountsMenu } from './accounts-menu'
 import { PlanPanel } from './plan-panel'
 import { revealInExplorer } from './explorer-reveal'
+import { GitCommands } from './git-commands'
 import { ProblemsPanel } from './problems'
 import { countProblems, useProblems } from './problems-store'
 import { ReviewPanel } from './review'
@@ -1422,11 +1423,12 @@ function Workbench({
       )}
       {/* By key, in the order the side bar's place gives: React moves the parts, never draws the editor or the chat again. */}
       <div className="flex min-h-0 flex-1">{left ? workbenchParts : [...workbenchParts].reverse()}</div>
+      <GitCommands />
       <StatusBar
         state={state}
         onChanges={() => show('changes')}
         onProblems={() => show('problems')}
-        onBranch={() => show('git')}
+        onBranch={() => runCommand('git.checkout')}
         onTerminal={toggleTerminal}
         onChat={() => change({ chatOpen: true })}
         onAbout={() => setAbout(true)}

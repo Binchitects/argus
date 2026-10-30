@@ -265,7 +265,8 @@ internal static class TurnCommits
         }
     }
 
-    internal static async Task<(int Code, string Output)> GitAsync(string dir, IReadOnlyList<string> args, CancellationToken ct, string? input = null, CommitIdentity? author = null)
+    internal static async Task<(int Code, string Output)> GitAsync(string dir, IReadOnlyList<string> args, CancellationToken ct, string? input = null, CommitIdentity? author = null,
+        TimeSpan? timeout = null)
     {
         var psi = new ProcessStartInfo("git")
         {
@@ -283,6 +284,11 @@ internal static class TurnCommits
         }
         psi.Environment["GIT_TERMINAL_PROMPT"] = "0";
         psi.Environment["GIT_PAGER"] = "cat";
+        // ssh asks nobody either (a passphrase, a host key): it fails and says why. One the person set is theirs.
+        if (!psi.Environment.ContainsKey("GIT_SSH_COMMAND"))
+        {
+            psi.Environment["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes";
+        }
         psi.Environment.Remove("ARENA_API_KEY");
         author?.Apply(psi.Environment);
         Process process;
@@ -312,10 +318,11 @@ internal static class TurnCommits
             // Read to the end without a token: a read cut short would lose what git said.
             var output = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
             var error = process.StandardError.ReadToEndAsync(CancellationToken.None);
-            // A hook or a signing program that waits for someone: given up after two minutes, never left hanging;
-            // the turn's Ctrl+C or Stop gives it up at once.
+            // A hook or a signing program that waits for someone: given up after two minutes (a fetch or a push, which
+            // waits on the network, after what it is given), never left hanging; the turn's Ctrl+C or Stop gives it up at once.
+            var most = timeout ?? TimeSpan.FromMinutes(2);
             using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            limit.CancelAfter(TimeSpan.FromMinutes(2));
+            limit.CancelAfter(most);
             try
             {
                 await process.WaitForExitAsync(limit.Token);
@@ -324,7 +331,7 @@ internal static class TurnCommits
             {
                 await StopAsync(process, dir, started);
                 ct.ThrowIfCancellationRequested();
-                return (-1, $"git {args.First(a => !a.StartsWith('-'))} did not end within two minutes (a hook, or a signing program waiting for a passphrase?)");
+                return (-1, $"git {args.First(a => !a.StartsWith('-'))} did not end within {(int)most.TotalMinutes} minutes (a hook, the network, or a program waiting for a passphrase?)");
             }
             // Something a hook left running in the background can hold git's output open: what came in two seconds is enough.
             var both = Task.WhenAll(output, error);

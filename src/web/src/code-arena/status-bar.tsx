@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowUpCircle, Bot, CircleAlert, ExternalLink, Gauge, GitBranch, GitCompareArrows, Info, LoaderCircle, Plug, RotateCw, ShieldCheck, Sparkles, SquareTerminal, TriangleAlert, Unplug } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpCircle, Bot, CircleAlert, CloudUpload, ExternalLink, Gauge, GitBranch, GitCompareArrows, Info, LoaderCircle, Plug, RefreshCw, RotateCw, ShieldCheck, Sparkles, SquareTerminal, TriangleAlert, Unplug } from 'lucide-react'
 import { RadioGroup } from 'radix-ui'
 import { useState, type ComponentProps, type FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
@@ -13,7 +13,9 @@ import { cn } from '@/lib/utils'
 import { changeSettings, compaction, compactWho, modeLabels, retryServers, stateQuery, windowQuery, type CodeState, type ServerStatus } from './api'
 import { useEditor } from './editor-state'
 import { api } from './http'
-import { changesQuery } from './ide-api'
+import { useGit } from './git-actions'
+import { changesQuery, gitStatusQuery } from './ide-api'
+import { useSettings } from './settings'
 import { countProblems, useProblems } from './problems-store'
 import { useKeyFor, useKeymap } from './keyboard'
 import { LanguageStatus } from './language-status'
@@ -70,6 +72,11 @@ export function StatusBar({
   // Every problem: the check's, the language servers' and the editor's own services' (0 and 0 when there are none).
   const { error: errors, warning: warnings } = countProblems(useProblems())
   const count = changes.data?.length ?? 0
+  // The branch's commits to pull and push, synced on a click (git.enableStatusBarSync); one with no upstream, published.
+  const git = useGit()
+  const repo = useQuery(gitStatusQuery).data
+  const syncShown = useSettings().get('git.enableStatusBarSync') !== false && !!repo?.repository && !!repo.branch
+  const unpublished = repo?.ahead == null
   const [dialog, setDialog] = useState<'context' | 'servers' | null>(null)
   const running = state.jobs.filter((j) => j.running).length
   const connected = state.servers.filter((s) => s.state === 'connected').length
@@ -89,9 +96,28 @@ export function StatusBar({
   return (
     <footer aria-label="Status bar" className="flex h-6 shrink-0 items-stretch overflow-hidden bg-primary text-[0.75rem] text-primary-foreground">
       {state.branch && (
-        <Item onClick={onBranch} className="min-w-0" title={`Git branch ${state.branch}: source control`} aria-label={`Branch ${state.branch}: source control`}>
+        <Item onClick={onBranch} className="min-w-0" title={`Git branch ${state.branch}: checkout to another`} aria-label={`Branch ${state.branch}: checkout to another`}>
           <GitBranch className="size-3.5 shrink-0" aria-hidden="true" />
           <span className="truncate">{state.branch}</span>
+        </Item>
+      )}
+      {syncShown && (
+        <Item
+          onClick={() => void (unpublished ? git.publish() : git.sync())}
+          aria-label={unpublished ? 'Publish the branch' : `Sync changes: ${repo.behind} to pull, ${repo.ahead} to push`}
+          title={unpublished ? 'Publish the branch' : 'Sync changes: pull, then push'}
+        >
+          {git.busy ? (
+            <LoaderCircle className="animate-spin" aria-hidden="true" />
+          ) : unpublished ? (
+            <CloudUpload aria-hidden="true" />
+          ) : (
+            <>
+              <RefreshCw aria-hidden="true" /> {repo.behind}
+              <ArrowDown aria-hidden="true" /> {repo.ahead}
+              <ArrowUp aria-hidden="true" />
+            </>
+          )}
         </Item>
       )}
       <Item onClick={onChanges} aria-label={`Agent changes: ${count} ${count === 1 ? 'file' : 'files'}`} title="The files the agent changed">

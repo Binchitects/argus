@@ -1116,8 +1116,7 @@ reads the quote before the message, and the editor's lines after it.
 
 ### Source control
 
-**Source control** in the activity bar (Ctrl+Shift+G, or the branch in the
-status bar) is the folder's git as you work it, beside the agent's own turn
+**Source control** in the activity bar (Ctrl+Shift+G) is the folder's git as you work it, beside the agent's own turn
 commits: what changed since the last commit, **Staged** (in the next commit)
 and **Changes** (not yet). A file opens as a diff tab, as the last commit has
 it and as it is now; **+** stages it, **−** unstages it, **↺** puts it back as
@@ -1126,6 +1125,25 @@ the message and **Commit** (Ctrl+Enter): what is staged, or all of it when
 nothing is. Your own git name and email commit. Below: the branch, to switch
 to another, how far it is ahead of and behind its upstream, and the last
 commits. A repository bigger than the folder shows the folder's files only.
+
+As in VS Code, the commit button's arrow has **Commit (Amend)** (into the
+last commit, its message kept when you write none), **Commit & Push** and
+**Commit & Sync**; **Sync Changes ↓1 ↑2** pulls, then pushes (it asks first:
+`git.confirmSync`; `git.rebaseWhenSync` rebases instead of merging), and a
+branch with no upstream has **Publish Branch** (pushed to origin, or the only
+remote, as its upstream). The **⋯** menu has Pull, Push, Fetch, Sync,
+**Checkout to…** (a new branch, one from another branch or a tag, a local
+branch, a remote's, which is then tracked, or a tag), Create, Rename and
+Delete Branch (a branch with commits merged nowhere asks again), and **Undo
+Last Commit** (its changes staged again). The status bar has the same sync
+(`git.enableStatusBarSync`), and the branch there opens Checkout to…. The
+palette has them as `git.pull`, `git.push`, `git.fetch`, `git.sync`,
+`git.publish`, `git.checkout`, `git.branch`, `git.renameBranch`,
+`git.deleteBranch` and `git.undoCommit`; `git.autofetch` fetches every three
+minutes. A fetch, pull or push waits ten minutes at most, asks for nothing
+(ssh's `BatchMode`, unless `GIT_SSH_COMMAND` says otherwise: your own keys and
+credential helper hold), and a password or token in a remote's address is
+never shown in what git said.
 
 ### Problems
 

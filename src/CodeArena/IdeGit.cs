@@ -26,6 +26,18 @@ internal sealed partial class IdeGit(Workspace workspace)
     private static Task<(int Code, string Output)> Git(string dir, IReadOnlyList<string> args, CancellationToken ct, string? input = null) =>
         TurnCommits.GitAsync(dir, args, ct, input);
 
+    /// <summary>How long a fetch, a pull or a push may wait on the network.</summary>
+    private static readonly TimeSpan Network = TimeSpan.FromMinutes(10);
+
+    private Task<(int Code, string Output)> Remote(IReadOnlyList<string> args, CancellationToken ct) => TurnCommits.GitAsync(workspace.Root, args, ct, timeout: Network);
+
+    /// <summary>A user and password (or token) in a remote's address, as git may say it back: never shown.</summary>
+    [GeneratedRegex(@"(https?://)[^/@\s]+@")]
+    private static partial Regex Credentials();
+
+    /// <summary>What git said, with no credential in it.</summary>
+    public static string Clean(string said) => Credentials().Replace(said, "$1***@");
+
     /// <summary>
     /// A revision the page may name: a hash, a branch, a tag, main~2 or HEAD^; never an option (no "-" first), no space,
     /// no ":" (\z, not $, which would let a line break through at the end).
@@ -222,11 +234,15 @@ internal sealed partial class IdeGit(Workspace workspace)
         }
     }
 
-    /// <summary>Commits what is staged (all of what changed, staged first, with <c>all</c>), with the message: its short hash.</summary>
+    /// <summary>
+    /// Commits what is staged (all of what changed, staged first, with <c>all</c>), with the message: its short hash. With
+    /// <c>amend</c>: into the last commit instead (its message kept when none is given).
+    /// </summary>
     public async Task<string> CommitAsync(JsonObject body, CancellationToken ct)
     {
         var message = body.Str("message")?.Trim();
-        if (string.IsNullOrEmpty(message))
+        var amend = body.Bool("amend") == true;
+        if (string.IsNullOrEmpty(message) && !amend)
         {
             throw new IdeError(400, "invalid", "Write the commit's message first.");
         }
@@ -235,14 +251,147 @@ internal sealed partial class IdeGit(Workspace workspace)
         {
             Check(await Git(workspace.Root, ["add", "-A", "--", "."], ct), "staged");
         }
-        var (staged, _) = await Git(workspace.Root, ["diff", "--cached", "--quiet"], ct);
-        if (staged == 0)
+        if (amend)
         {
-            throw new IdeError(409, "nothing", "Nothing is staged to commit: stage the files first, or commit all.");
+            if ((await Git(workspace.Root, ["rev-parse", "--verify", "-q", "HEAD"], ct)).Code != 0)
+            {
+                throw new IdeError(409, "nothing", "There is no commit yet to amend.");
+            }
+            Check(string.IsNullOrEmpty(message)
+                ? await Git(workspace.Root, ["commit", "-q", "--amend", "--no-edit"], ct)
+                : await Git(workspace.Root, ["commit", "-q", "--amend", "-F", "-"], ct, message), "committed");
         }
-        Check(await Git(workspace.Root, ["commit", "-q", "-F", "-"], ct, message), "committed");
+        else
+        {
+            var (staged, _) = await Git(workspace.Root, ["diff", "--cached", "--quiet"], ct);
+            if (staged == 0)
+            {
+                throw new IdeError(409, "nothing", "Nothing is staged to commit: stage the files first, or commit all.");
+            }
+            Check(await Git(workspace.Root, ["commit", "-q", "-F", "-"], ct, message), "committed");
+        }
         var (_, hash) = await Git(workspace.Root, ["rev-parse", "--short", "HEAD"], ct);
         return hash.Trim();
+    }
+
+    /// <summary>Undo Last Commit: the last commit taken back, what it changed staged again (reset --soft HEAD~1).</summary>
+    public async Task UndoCommitAsync(CancellationToken ct)
+    {
+        await RequireRootAsync(ct);
+        if ((await Git(workspace.Root, ["rev-parse", "--verify", "-q", "HEAD~1"], ct)).Code != 0)
+        {
+            throw new IdeError(409, "first", "The last commit is the first: there is nothing before it to go back to.");
+        }
+        Check(await Git(workspace.Root, ["reset", "--soft", "HEAD~1"], ct), "undone");
+    }
+
+    /// <summary>Fetch: what the remotes have now, branches gone there pruned.</summary>
+    public async Task FetchAsync(CancellationToken ct)
+    {
+        await RequireRootAsync(ct);
+        CheckRemote(await Remote(["fetch", "--all", "--prune"], ct), "fetched");
+    }
+
+    /// <summary>Pull: the branch's upstream merged in (or rebased onto, with <c>rebase</c>: git.rebaseWhenSync).</summary>
+    public async Task PullAsync(JsonObject body, CancellationToken ct)
+    {
+        await RequireRootAsync(ct);
+        await UpstreamAsync(ct);
+        CheckRemote(await Remote(["pull", "--no-edit", body.Bool("rebase") == true ? "--rebase" : "--no-rebase"], ct), "pulled");
+    }
+
+    /// <summary>
+    /// Push: to the branch's upstream; a branch with none is published (to <c>remote</c>, else the only or first remote,
+    /// as its upstream from now on). <c>force</c> pushes over what the remote has, only if it is what was last fetched.
+    /// </summary>
+    public async Task PushAsync(JsonObject body, CancellationToken ct)
+    {
+        await RequireRootAsync(ct);
+        var branch = await BranchAsync(ct);
+        var publish = (await Git(workspace.Root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], ct)).Code != 0;
+        List<string> args = ["push"];
+        if (body.Bool("force") == true)
+        {
+            args.Add("--force-with-lease");
+        }
+        if (publish)
+        {
+            var (_, remotes) = await Git(workspace.Root, ["remote"], ct);
+            var names = remotes.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var remote = body.Str("remote") is { Length: > 0 } asked ? (names.Contains(asked) ? asked : throw new IdeError(404, "no_remote", $"There is no remote {asked}."))
+                : names.Contains("origin") ? "origin" : names.FirstOrDefault() ?? throw new IdeError(409, "no_remote", "The repository has no remote to publish to (git remote add makes one).");
+            args.AddRange(["-u", remote, branch]);
+        }
+        CheckRemote(await Remote(args, ct), "pushed");
+    }
+
+    /// <summary>Sync: pull, then push.</summary>
+    public async Task SyncAsync(JsonObject body, CancellationToken ct)
+    {
+        await PullAsync(body, ct);
+        await PushAsync(new JsonObject(), ct);
+    }
+
+    /// <summary>The branch checked out; refused when none is (a commit checked out alone).</summary>
+    private async Task<string> BranchAsync(CancellationToken ct)
+    {
+        var (_, branch) = await Git(workspace.Root, ["rev-parse", "--abbrev-ref", "HEAD"], ct);
+        return branch.Trim() is { Length: > 0 } b && b != "HEAD" ? b : throw new IdeError(409, "detached", "No branch is checked out (a commit is): check out a branch first.");
+    }
+
+    private async Task UpstreamAsync(CancellationToken ct)
+    {
+        await BranchAsync(ct);
+        if ((await Git(workspace.Root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], ct)).Code != 0)
+        {
+            throw new IdeError(409, "no_upstream", "The branch has no upstream yet: publish it (Push) first.");
+        }
+    }
+
+    /// <summary>A branch name git takes (check-ref-format), never an option.</summary>
+    private async Task<string> BranchNameAsync(string? name, CancellationToken ct)
+    {
+        var n = name?.Trim();
+        if (string.IsNullOrEmpty(n) || n.StartsWith('-') || (await Git(workspace.Root, ["check-ref-format", "--branch", n], ct)).Code != 0)
+        {
+            throw new IdeError(400, "invalid", $"\"{n}\" is not a branch name git takes.");
+        }
+        return n;
+    }
+
+    /// <summary>A new branch, checked out: from what is checked out now, or from <c>from</c> (a branch, a tag, a commit).</summary>
+    public async Task CreateBranchAsync(JsonObject body, CancellationToken ct)
+    {
+        await RequireRootAsync(ct);
+        var name = await BranchNameAsync(body.Str("name"), ct);
+        List<string> args = ["switch", "-c", name];
+        if (body.Str("from") is { Length: > 0 } from)
+        {
+            args.Add(Revision().IsMatch(from) ? from : throw NoRevision(from));
+        }
+        Check(await Git(workspace.Root, args, ct), "made");
+    }
+
+    /// <summary>A branch renamed (the one checked out when none is named).</summary>
+    public async Task RenameBranchAsync(JsonObject body, CancellationToken ct)
+    {
+        await RequireRootAsync(ct);
+        var from = body.Str("from") is { Length: > 0 } f ? await BranchNameAsync(f, ct) : await BranchAsync(ct);
+        var to = await BranchNameAsync(body.Str("to"), ct);
+        Check(await Git(workspace.Root, ["branch", "-m", from, to], ct), "renamed");
+    }
+
+    /// <summary>A branch deleted: refused while it has commits merged nowhere, unless <c>force</c> (said after asking).</summary>
+    public async Task DeleteBranchAsync(JsonObject body, CancellationToken ct)
+    {
+        await RequireRootAsync(ct);
+        var name = await BranchNameAsync(body.Str("name"), ct);
+        var (code, said) = await Git(workspace.Root, ["branch", body.Bool("force") == true ? "-D" : "-d", name], ct);
+        if (code != 0 && said.Contains("not fully merged", StringComparison.Ordinal))
+        {
+            throw new IdeError(409, "not_merged", $"{name} has commits merged into no other branch: deleting it loses them.");
+        }
+        Check((code, said), "deleted");
     }
 
     /// <summary>
@@ -533,27 +682,55 @@ internal sealed partial class IdeGit(Workspace workspace)
         }
     }
 
-    /// <summary>The local branches, the one checked out first.</summary>
-    public async Task<JsonArray> BranchesAsync(CancellationToken ct)
+    /// <summary>
+    /// The local branches, the one checked out first; with <paramref name="all"/>, the remotes' branches (each
+    /// <c>kind</c> "remote") and the tags ("tag") after them, as Checkout to… lists them.
+    /// </summary>
+    public async Task<JsonArray> BranchesAsync(CancellationToken ct, bool all = false)
     {
         if (await RootAsync(ct) is null)
         {
             return [];
         }
         var (_, output) = await Git(workspace.Root, ["branch", "--format=%(HEAD)%(refname:short)"], ct);
-        return new JsonArray([.. output.Split('\n', StringSplitOptions.RemoveEmptyEntries).OrderByDescending(b => b.StartsWith('*'))
-            .Select(b => (JsonNode)new JsonObject { ["name"] = b.TrimStart('*', ' '), ["current"] = b.StartsWith('*') })]);
+        var list = new JsonArray([.. output.Split('\n', StringSplitOptions.RemoveEmptyEntries).OrderByDescending(b => b.StartsWith('*'))
+            .Select(b => (JsonNode)new JsonObject { ["name"] = b.TrimStart('*', ' '), ["current"] = b.StartsWith('*'), ["kind"] = "local" })]);
+        if (all)
+        {
+            var (_, refs) = await Git(workspace.Root, ["for-each-ref", "--format=%(refname)", "refs/remotes", "refs/tags"], ct);
+            foreach (var r in refs.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                // A remote's HEAD names its default branch: not one to check out.
+                if (r.StartsWith("refs/remotes/", StringComparison.Ordinal) && !r.EndsWith("/HEAD", StringComparison.Ordinal))
+                {
+                    list.Add(new JsonObject { ["name"] = r["refs/remotes/".Length..], ["current"] = false, ["kind"] = "remote" });
+                }
+                else if (r.StartsWith("refs/tags/", StringComparison.Ordinal))
+                {
+                    list.Add(new JsonObject { ["name"] = r["refs/tags/".Length..], ["current"] = false, ["kind"] = "tag" });
+                }
+            }
+        }
+        return list;
     }
 
-    /// <summary>Checks out another branch (git refuses when it would lose what is not committed, and says why).</summary>
+    /// <summary>
+    /// Checks out another branch (git refuses when it would lose what is not committed, and says why): a remote's branch
+    /// as a local one that tracks it, a tag as its commit alone.
+    /// </summary>
     public async Task SwitchAsync(JsonObject body, CancellationToken ct)
     {
         var name = body.Str("branch")?.Trim();
-        if (string.IsNullOrEmpty(name) || name.StartsWith('-'))
+        if (string.IsNullOrEmpty(name) || name.StartsWith('-') || !Revision().IsMatch(name))
         {
             throw new IdeError(400, "invalid", "Say which branch.");
         }
-        Check(await Git(workspace.Root, ["switch", name], ct), "switched");
+        Check(await Git(workspace.Root, body.Str("kind") switch
+        {
+            "remote" => ["switch", "--track", name],
+            "tag" => ["switch", "--detach", name],
+            _ => ["switch", name],
+        }, ct), "switched");
     }
 
     private static void Check((int Code, string Output) result, string what)
@@ -563,4 +740,7 @@ internal sealed partial class IdeGit(Workspace workspace)
             throw new IdeError(409, "git", $"git refused, nothing {what}: {Fmt.OneLine(result.Output.Trim(), 400)}");
         }
     }
+
+    /// <summary>As <see cref="Check"/>, for a call to a remote: what git said has no credential in it.</summary>
+    private static void CheckRemote((int Code, string Output) result, string what) => Check((result.Code, Clean(result.Output)), what);
 }
