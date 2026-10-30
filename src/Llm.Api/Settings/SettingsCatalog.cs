@@ -169,7 +169,7 @@ public static class SettingsCatalog
             { Default = "true" },
         new("Mcp:ListWaitSeconds", ArenaMcp, "Wait for a slow tool server", "Connecting an agent starts Argus and the MCP servers here together and waits this long at most: one slower is listed as not available now, with the reason, and asked again on the next list, so a slow or dead server never holds an agent.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "10", Min = 1, Max = 120, Unit = "seconds", Optional = false },
-        new("Web:SearchUrl", Tools, "Search engine", "A SearXNG instance for the Web tool's search. Empty: the websearch profile's own when it is on; otherwise no search, only opening pages.", SettingType.Url, SettingScope.Live),
+        new("Web:SearchUrl", Tools, "Search engine", "A SearXNG instance for the Web tool's search. Empty: the web-search feature's own when it is on; otherwise no search, only opening pages.", SettingType.Url, SettingScope.Live),
         new("Sandbox:TimeoutSeconds", Tools, "Longest Python run", "A run still going after this long is stopped, and the model told so.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "60", Min = 5, Max = 300, Unit = "seconds", Optional = false },
         new("Chat:AnswersPerPerson", Chat, "Answers at once, per person", "Answers one person may have running at once, across their chats. More wait their turn, so nobody takes the model from the others. A person's own (Admin → People) or their group's (Admin → Groups) wins, and holds their API requests too.", SettingType.WholeNumber, SettingScope.Live)

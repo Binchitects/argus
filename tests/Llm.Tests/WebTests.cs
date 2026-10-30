@@ -6,6 +6,8 @@ using System.Text.Json.Nodes;
 using Llm.Api.Chat;
 using Llm.Api.Chat.Tools;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 namespace Llm.Tests;
 
@@ -220,6 +222,27 @@ public sealed class WebTests(AppFixture app)
 
     private static async Task<List<string>> ToolsAsync(TestBrowser b) =>
         [.. (await b.JsonAsync(await b.GetAsync("/api/chat/config"))).GetProperty("tools").EnumerateArray().Select(t => t.GetProperty("id").GetString()!)];
+
+    [Fact]
+    public async Task Without_an_address_the_web_search_features_own_SearXNG_is_searched_and_none_while_it_is_off()
+    {
+        static string? SearchOf(WebApplicationFactory<Program> f) =>
+            f.Services.GetRequiredService<IOptionsMonitor<WebOptions>>().CurrentValue.SearchUrl;
+        await using (var own = NewApp("docs.example.test"))
+        {
+            Assert.Equal(WebOptions.OwnSearch, SearchOf(own));
+        }
+        await using (var set = NewApp("docs.example.test", searchUrl: "http://searxng.test:8080"))
+        {
+            Assert.Equal("http://searxng.test:8080", SearchOf(set));
+        }
+        var allBut = string.Join(',', Llm.Api.Operations.Features.All.Select(x => x.Id).Where(id => id != "web-search"));
+        await using var off = app.Create(app.ConnectionStringFor("web_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), new Dictionary<string, string?>
+        {
+            ["Web:AllowedSites"] = "docs.example.test", ["Features:On"] = allBut,
+        });
+        Assert.True(string.IsNullOrEmpty(SearchOf(off)));
+    }
 
     [Fact]
     public async Task The_web_is_off_until_an_admin_turns_it_on_and_allows_sites()
