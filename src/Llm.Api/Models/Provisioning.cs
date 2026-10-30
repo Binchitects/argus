@@ -12,10 +12,10 @@ namespace Llm.Api.Models;
 /// <summary>
 /// The default models a deployment starts with: the first chat model (MODEL in .env), the picture and
 /// video servers' files (they wait for them in the library) and the speech server's models. Never
-/// fetched by the app on its own (a site may be offline, metered, or want to choose): the installer's
-/// "download the default models" option asks for them (through /internal/models/defaults), or an admin
-/// (Admin → Models → Default models), and only then are they downloaded (<see cref="RunAsync"/> with
-/// download). On its own, at start and every ten minutes, it only adds the first chat model, and keeps
+/// fetched unless asked (a site may be offline, metered, or want to choose): by an admin (Admin → Models →
+/// Default models), or by the installer's "download the default models" option (DEFAULT_MODELS=download:
+/// once, at the first start), and only then are they downloaded (<see cref="RunAsync"/> with download).
+/// Otherwise, at start and every ten minutes, it only adds the first chat model, and keeps
 /// it loaded, once its files are in the library (copied there, or downloaded when asked). With several
 /// replicas, the one that leads does it.
 /// </summary>
@@ -30,7 +30,7 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
     private bool _speechAsked;
     /// <summary>MODEL's files were said to be missing (once, until they come).</summary>
     private bool _toldMissing;
-    /// <summary>One run at a time: the background round and an admin's (or the installer's) would add the model twice.</summary>
+    /// <summary>One run at a time: the background round and an admin's would add the model twice.</summary>
     private readonly SemaphoreSlim _running = new(1, 1);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -142,7 +142,7 @@ public sealed partial class Provisioning(IServiceScopeFactory scopes, Modules mo
         return true;
     }
 
-    /// <summary>The default models' files and whether each is in the library (or, for speech, at the speech server), for the page and the installer.</summary>
+    /// <summary>The default models' files and whether each is in the library (or, for speech, at the speech server), for the page.</summary>
     public async Task<IReadOnlyList<DefaultModel>> ListAsync(CancellationToken ct)
     {
         await using var scope = scopes.CreateAsyncScope();

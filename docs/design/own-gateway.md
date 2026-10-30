@@ -281,7 +281,7 @@ They come from the existing `app` scrape job (prometheus.yml:70-73). LiteLLM's m
 - **The runtime model registry:** `/model/new`, `/model/delete`, `/config/update`, `store_model_in_db`, the `openai/` prefix.
 - **`LITELLM_LOCAL_MODEL_COST_MAP`.**
 - **The guardrail callback** (`/internal/guardrail/...`, GuardrailEndpoints.cs:27).
-- **`/internal/models/defaults`**, keyed by the master key (DefaultModelEndpoints.cs:19, 63). No installer script calls it; the installer uses `DEFAULT_MODELS` (installer.sh:1402) instead.
+- **`/internal/models/defaults`**, keyed by the master key: removed on 2026-10-30. No installer script called it; the installer uses `DEFAULT_MODELS` (installer.sh:1402), which the app downloads once at the first start.
 
 ---
 
@@ -824,7 +824,7 @@ defaults, each easy to change before the commit that acts on it.
    the month's credit does not reset.
 2. **`deploy/argus-standalone` stays on LiteLLM** for now: it is a separate
    product with no Llm.Api. It is the only place LiteLLM remains.
-3. **`/internal/models/defaults` is removed**: it has no caller.
+3. **`/internal/models/defaults` is removed**: it had no caller (done 2026-10-30).
 4. **The temporary `Gateway:Mode` switch is accepted** for commits 10 to 18,
    so each step ships with the old path as a quick way back; it is deleted in
    commit 19.

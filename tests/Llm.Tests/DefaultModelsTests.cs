@@ -10,8 +10,8 @@ namespace Llm.Tests;
 
 /// <summary>
 /// "Make the default models download an option in the installer, not in the service": the app fetches nothing on its own;
-/// the installer (through the internal path, with the gateway's master key) or an admin asks for the default models, and the
-/// first chat model is added once its files are in the library, however they came.
+/// the installer (DEFAULT_MODELS=download: once, at the first start) or an admin asks for the default models, and the first
+/// chat model is added once its files are in the library, however they came.
 /// </summary>
 [Collection(nameof(AppCollection))]
 public sealed class DefaultModelsTests(AppFixture app) : IDisposable
@@ -21,14 +21,20 @@ public sealed class DefaultModelsTests(AppFixture app) : IDisposable
 
     public void Dispose() => Directory.Delete(_dir, recursive: true);
 
-    private WebApplicationFactory<Program> NewApp()
+    /// <summary>Its own app and database; with <paramref name="installerDownloads"/>, the installer chose DEFAULT_MODELS=download (one replica, leading at once).</summary>
+    private WebApplicationFactory<Program> NewApp(bool installerDownloads = false)
     {
         app.Engine.Reset(Path.Combine(_dir, "config", "models.ini"));
-        return app.Create(app.ConnectionStringFor("defaults_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), new Dictionary<string, string?>
+        var settings = new Dictionary<string, string?>
         {
             ["Engine:Enabled"] = "true", ["Engine:ApiKey"] = FakeEngine.Key, ["Engine:ConfigDir"] = Path.Combine(_dir, "config"),
             ["Engine:LibraryDir"] = Path.Combine(_dir, "library"), ["Engine:FirstModel"] = First,
-        });
+        };
+        if (installerDownloads)
+        {
+            (settings["Engine:DefaultModels"], settings["Replicas:Enabled"]) = ("download", "false");
+        }
+        return app.Create(app.ConnectionStringFor("defaults_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), settings);
     }
 
     private static async Task<int> DownloadsAsync(WebApplicationFactory<Program> f)
@@ -51,12 +57,15 @@ public sealed class DefaultModelsTests(AppFixture app) : IDisposable
         var chat = list.EnumerateArray().Single(m => m.GetProperty("server").GetString() == "chat");
         Assert.Equal("missing", chat.GetProperty("state").GetString());
 
-        // The installer's option: the internal path, only with the gateway's master key.
+        // There is no other way in: the internal path the installer once called is gone, the master key notwithstanding.
         var b = new TestBrowser(f);
-        await StatusAssert.Is(HttpStatusCode.Unauthorized, await b.Http.PostAsync(new Uri(DefaultModelEndpoints.InternalPath, UriKind.Relative), null));
-        using var ask = new HttpRequestMessage(HttpMethod.Post, new Uri(DefaultModelEndpoints.InternalPath, UriKind.Relative));
-        ask.Headers.Add("x-api-key", "sk-master-for-tests");
-        var res = await b.Http.SendAsync(ask);
+        using var internalAsk = new HttpRequestMessage(HttpMethod.Post, new Uri("/internal/models/defaults", UriKind.Relative));
+        internalAsk.Headers.Add("x-api-key", "sk-master-for-tests");
+        await StatusAssert.Is(HttpStatusCode.NotFound, await b.Http.SendAsync(internalAsk));
+        Assert.Equal(0, await DownloadsAsync(f));
+
+        // An admin asks.
+        var res = await admin.PostAsync("/api/admin/models/defaults");
         await StatusAssert.Is(HttpStatusCode.OK, res);
         var started = await res.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
         Assert.Equal(["chat: Tiny-Q4_K_M.gguf"], started.GetProperty("started").EnumerateArray().Select(s => s.GetString()));
@@ -64,6 +73,23 @@ public sealed class DefaultModelsTests(AppFixture app) : IDisposable
         Assert.Contains("model.defaults", await (await admin.GetAsync("/api/admin/audit?take=1000")).Content.ReadAsStringAsync(), StringComparison.Ordinal);
         // Asked again while it goes: not twice.
         Assert.Empty((await (await admin.PostAsync("/api/admin/models/defaults")).Content.ReadFromJsonAsync<System.Text.Json.JsonElement>()).GetProperty("started").EnumerateArray());
+        Assert.Equal(1, await DownloadsAsync(f));
+    }
+
+    [Fact]
+    public async Task The_installers_option_has_the_default_models_downloaded_once_at_the_first_start()
+    {
+        await using var f = NewApp(installerDownloads: true);
+        _ = f.Server;
+        for (var i = 0; i < 300 && await DownloadsAsync(f) == 0; i++)
+        {
+            await Task.Delay(100);
+        }
+        Assert.Equal(1, await DownloadsAsync(f));
+        await using var scope = f.Services.CreateAsyncScope();
+        // Marked done at once: the next start (or the next round) does not download them again.
+        Assert.True(await scope.ServiceProvider.GetRequiredService<AppDbContext>().Settings.AnyAsync(x => x.Key == Provisioning.Downloaded));
+        Assert.Empty(await f.Services.GetRequiredService<Provisioning>().RunAsync(download: false, CancellationToken.None));
         Assert.Equal(1, await DownloadsAsync(f));
     }
 
