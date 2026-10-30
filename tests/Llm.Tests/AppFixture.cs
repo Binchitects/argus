@@ -85,6 +85,8 @@ public sealed class AppFixture : IAsyncLifetime
         await LitellmSeed.CreateAsync(Server, "litellm_test" + _run);
         Factory = Create(AppConnectionString, Gateway);
         _ = Factory.Server; // start the app now, so migration failures surface here
+        // The seed in the app's own ledger too, as the mirror would bring it.
+        await MirrorAsync();
     }
 
     /// <summary>

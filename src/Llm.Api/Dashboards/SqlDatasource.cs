@@ -135,14 +135,14 @@ public sealed partial class SqlDatasource(IOptions<DashboardOptions> options, IC
         return false;
     }
 
-    private static string TypeOf(Type t) =>
+    internal static string TypeOf(Type t) =>
         t == typeof(string) ? "string"
         : t == typeof(bool) ? "boolean"
         : t == typeof(DateTime) || t == typeof(DateTimeOffset) ? "time"
         : t.IsPrimitive || t == typeof(decimal) ? "number"
         : "string";
 
-    private static object? Normalise(object v) => v switch
+    internal static object? Normalise(object v) => v switch
     {
         decimal m => (double)m,
         long or int or short or float or double => Convert.ToDouble(v, System.Globalization.CultureInfo.InvariantCulture),

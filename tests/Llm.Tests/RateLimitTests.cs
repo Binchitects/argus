@@ -620,6 +620,7 @@ public sealed class RateLimitTests(AppFixture app)
             await LogAsync(run + "7", token, p.Email, now.AddSeconds(-20), error: ("BudgetExceededError", "Budget has been exceeded!"));
             await LogAsync(run + "8", token, p.Email, now.AddDays(-2), error: Over(token, "requests"));
             await LogAsync(run + "9", app.Gateway.KeysOf(other.Email).Single().Token, other.Email, now.AddSeconds(-10), error: Over("x", "requests"));
+            await app.MirrorAsync();
 
             var me = await new TestBrowser(app.Factory).SignedInAsync(p.Name, p.Password);
             var limits = await me.JsonAsync(await me.GetAsync("/api/account/keys/limits"));

@@ -45,7 +45,7 @@ public static class UsageEndpoints
         app.MapGet("/api/usage/me", MeAsync).PersonOnly();
 
     private static async Task<IResult> MeAsync(DateTimeOffset from, DateTimeOffset to, long? intervalMs, ClaimsPrincipal principal,
-        UserManager<AppUser> users, SqlDatasource sql, CancellationToken ct)
+        UserManager<AppUser> users, Gateway.LedgerSql ledger, CancellationToken ct)
     {
         if (to <= from || to - from > DashboardEndpoints.MaxRange)
         {
@@ -56,33 +56,35 @@ public static class UsageEndpoints
         var p = new Dictionary<string, object>
         {
             ["me"] = me.Email!.ToLowerInvariant(),
-            ["from"] = from.UtcDateTime,
-            ["to"] = to.UtcDateTime,
+            ["from"] = from.ToUniversalTime(),
+            ["to"] = to.ToUniversalTime(),
             ["secs"] = interval.TotalSeconds,
         };
-        var where = $""" where lower({Person}) = @me and s."startTime" between @from and @to and {Gateway.RateLimits.NotRefused} """;
+        // The app's own ledger: each request already put to its person. A rate limit's refusal is not counted, as the
+        // dashboards count today (one refused for credit is, until they read the ledger too).
+        const string Where = " from gateway.requests r where r.person = @me and r.started_at between @from and @to and not (r.status = 'refused' and r.refusal in ('rpm', 'tpm', 'parallel')) ";
         try
         {
-            var totals = await sql.QueryAsync($"""
+            var totals = await ledger.QueryAsync($"""
                 select count(*) as requests,
-                       coalesce(sum(greatest(coalesce(s.prompt_tokens,0) - {Cached}, 0)),0) as input_miss,
-                       coalesce(sum({Cached}),0) as input_hit,
-                       coalesce(sum(s.completion_tokens),0) as output,
-                       coalesce(sum(s.spend),0) as cost
-                {From}{where}
+                       coalesce(sum(greatest(r.prompt_tokens - r.cached_tokens, 0)),0) as input_miss,
+                       coalesce(sum(r.cached_tokens),0) as input_hit,
+                       coalesce(sum(r.completion_tokens),0) as output,
+                       coalesce(sum(r.cost),0) as cost
+                {Where}
                 """, p, ct);
-            var byTime = await sql.QueryAsync($"""
-                select floor(extract(epoch from s."startTime")/@secs)*@secs as "time",
-                       sum(greatest(coalesce(s.prompt_tokens,0) - {Cached}, 0)) as "Input, cache miss",
-                       sum({Cached}) as "Input, cache hit",
-                       sum(coalesce(s.completion_tokens,0)) as "Output",
-                       sum(coalesce(s.spend,0)) as cost
-                {From}{where}
+            var byTime = await ledger.QueryAsync($"""
+                select floor(extract(epoch from r.started_at)/@secs)*@secs as "time",
+                       sum(greatest(r.prompt_tokens - r.cached_tokens, 0)) as "Input, cache miss",
+                       sum(r.cached_tokens) as "Input, cache hit",
+                       sum(r.completion_tokens) as "Output",
+                       sum(r.cost) as cost
+                {Where}
                 group by 1 order by 1
                 """, p, ct);
-            var byModel = await sql.QueryAsync($"""
-                select {Model} as model, count(*) as requests, coalesce(sum(s.total_tokens),0) as tokens, coalesce(sum(s.spend),0) as cost
-                {From}{where}
+            var byModel = await ledger.QueryAsync($"""
+                select r.model as model, count(*) as requests, coalesce(sum(r.total_tokens),0) as tokens, coalesce(sum(r.cost),0) as cost
+                {Where}
                 group by 1 order by cost desc
                 """, p, ct);
             var t = totals.Rows[0];

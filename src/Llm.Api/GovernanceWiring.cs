@@ -21,6 +21,7 @@ public static class GovernanceWiring
         services.Configure<Gateway.PriceOptions>(config.GetSection("Prices"));
         services.AddScoped<Gateway.PriceBook>();
         services.AddSingleton<Gateway.SpendLog>();
+        services.AddSingleton<Gateway.LedgerSql>();
         services.AddScoped<Gateway.CostRecalculation>();
         services.AddScoped<Dashboards.PromptUsage>();
         Storage.StorageEndpoints.AddStorage(services, config);
