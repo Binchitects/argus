@@ -181,7 +181,7 @@ internal static class CodeTokens
 /// </summary>
 internal sealed class CSharpScanner : ICodeScanner
 {
-    public int Version => 2;
+    public int Version => 3;
 
     private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
     {
@@ -297,6 +297,10 @@ internal sealed class CSharpScanner : ICodeScanner
             }
             if (t.Is("}"))
             {
+                if (stack.Count > 0 && stack[^1] is { Kind: "type", Index: >= 0 } e && symbols[e.Index].Kind == "enum")
+                {
+                    EnumMembers(head);
+                }
                 if (stack.Count > 0)
                 {
                     var c = stack[^1];
@@ -357,7 +361,7 @@ internal sealed class CSharpScanner : ICodeScanner
             if (inMembers && holder is { Kind: "type" })
             {
                 // A member with a body: a method or constructor (a parameter list after its name), an indexer, an operator, a property, an event.
-                if (Callable(at) is { } member)
+                if (Callable(at, members: true) is { } member)
                 {
                     var c = new Container("member", member.Name, Join(Prefix(), member.Name), depth, startTok.Line, startTok.Offset, false);
                     Add(member.Kind, member.Name, startTok, brace.Line, brace.Offset, brace.Offset, c);
@@ -448,7 +452,7 @@ internal sealed class CSharpScanner : ICodeScanner
             var assign = at.FindIndex(x => x.Is("="));
             var before = arrow >= 0 && (assign < 0 || arrow < assign) ? at[..arrow] : assign >= 0 ? at[..assign] : at;
             var sigEnd = arrow >= 0 && (assign < 0 || arrow < assign) ? at[arrow].Offset : assign >= 0 ? at[assign].Offset : semi.Offset;
-            if (Callable(before) is { } m)
+            if (Callable(before, members: true) is { } m)
             {
                 Add(m.Kind, m.Name, startTok, semi.Line, semi.Offset + 1, sigEnd);
                 return;
@@ -458,10 +462,37 @@ internal sealed class CSharpScanner : ICodeScanner
             {
                 return;
             }
-            var kind = at.Any(x => x.Is("event")) ? "event" : at.Any(x => x.Is("const")) ? "const" : arrow >= 0 && (assign < 0 || arrow < assign) ? "property" : "field";
-            // int a, b; declares both: the first is enough to find them.
-            var name = before.Any(x => x.Is(",")) ? before.TakeWhile(x => !x.Is(",")).Last(x => x.Word).Text : last.Text;
-            Add(kind, name, startTok, semi.Line, semi.Offset + 1, sigEnd);
+            var property = arrow >= 0 && (assign < 0 || arrow < assign);
+            var kind = at.Any(x => x.Is("event")) ? "event" : at.Any(x => x.Is("const")) ? "const" : property ? "property" : "field";
+            // int a = 1, b = 2; declares both. A comma inside a type's generic arguments (Dictionary<string, int> x) is not one.
+            var names = property ? [before.Last(x => x.Word && !Keywords.Contains(x.Text))] : Declarators(at);
+            foreach (var name in names.Count > 0 ? names : [last])
+            {
+                Add(kind, name.Text, startTok, semi.Line, semi.Offset + 1, sigEnd);
+            }
+        }
+
+        // An enum's members, from its body as it closes: each name, whatever its value or attributes.
+        void EnumMembers(List<CodeToken> body)
+        {
+            var depth = 0;
+            var segment = new List<CodeToken>();
+            foreach (var t in body.Append(new CodeToken(",", body.Count > 0 ? body[^1].Line : 0, body.Count > 0 ? body[^1].Offset : 0, false)))
+            {
+                depth += t.Is("(") || t.Is("[") ? 1 : t.Is(")") || t.Is("]") ? -1 : 0;
+                if (depth > 0 || !t.Is(","))
+                {
+                    segment.Add(t);
+                    continue;
+                }
+                var named = Strip(segment);
+                if (named.Count > 0 && named[0].Word)
+                {
+                    var end = segment[^1];
+                    Add("enummember", named[0].Text, named[0], end.Line, end.Offset + end.Text.Length, end.Offset + end.Text.Length);
+                }
+                segment.Clear();
+            }
         }
     }
 
@@ -471,6 +502,49 @@ internal sealed class CSharpScanner : ICodeScanner
     };
 
     private static string Join(string prefix, string name) => prefix.Length > 0 ? $"{prefix}.{name}" : name;
+
+    /// <summary>
+    /// The names a field's declaration declares (int a = 1, b;): each name outside parentheses, brackets, braces and the
+    /// type's angle brackets, followed by =, a comma or the end; what comes after an = is its value, until the next comma.
+    /// </summary>
+    private static List<CodeToken> Declarators(List<CodeToken> at)
+    {
+        var names = new List<CodeToken>();
+        var (depth, angle, value) = (0, 0, false);
+        for (var i = 0; i < at.Count; i++)
+        {
+            var t = at[i];
+            if (t.Is("(") || t.Is("[") || t.Is("{"))
+            {
+                depth++;
+            }
+            else if (t.Is(")") || t.Is("]") || t.Is("}"))
+            {
+                depth--;
+            }
+            else if (!value && depth == 0 && t.Is("<"))
+            {
+                angle++;
+            }
+            else if (!value && depth == 0 && (t.Is(">") || t.Is(">>")))
+            {
+                angle = Math.Max(0, angle - t.Text.Length);
+            }
+            else if (depth == 0 && angle == 0 && t.Is("="))
+            {
+                value = true;
+            }
+            else if (depth == 0 && angle == 0 && t.Is(","))
+            {
+                value = false;
+            }
+            else if (!value && depth == 0 && angle == 0 && t.Word && !Keywords.Contains(t.Text) && (i + 1 == at.Count || at[i + 1].Is("=") || at[i + 1].Is(",")))
+            {
+                names.Add(t);
+            }
+        }
+        return names;
+    }
 
     /// <summary>Whether a head assigns (=, or =>) outside its parentheses: an expression follows, not a declaration's body.</summary>
     private static bool Assigns(List<CodeToken> head)
@@ -550,7 +624,11 @@ internal sealed class CSharpScanner : ICodeScanner
     /// A method's, constructor's, operator's or indexer's head: the first parameter list after a name that is not a keyword
     /// (generic arguments skipped), so a tuple return type and a base constructor call are not taken for it.
     /// </summary>
-    private static (string Kind, string Name)? Callable(List<CodeToken> at)
+    /// <summary>
+    /// The method (or operator, or indexer) a head declares, by the name before its parameters. Among a type's members, a
+    /// dotted name after a type (void IAgentEvents.Step()) is an interface's member implemented by name: its own name.
+    /// </summary>
+    private static (string Kind, string Name)? Callable(List<CodeToken> at, bool members = false)
     {
         for (var i = 0; i < at.Count; i++)
         {
@@ -583,6 +661,10 @@ internal sealed class CSharpScanner : ICodeScanner
                 j--;
             }
             if (j >= 0 && at[j].Word && !Keywords.Contains(at[j].Text) && !(j > 0 && (at[j - 1].Is("new") || at[j - 1].Is(".") || at[j - 1].Is("?."))))
+            {
+                return ("method", at[j].Text);
+            }
+            if (members && j >= 3 && at[j].Word && at[j - 1].Is(".") && at[j - 2].Word && (at[j - 3].Word || at[j - 3].Is(">") || at[j - 3].Is("?") || at[j - 3].Is("]")))
             {
                 return ("method", at[j].Text);
             }

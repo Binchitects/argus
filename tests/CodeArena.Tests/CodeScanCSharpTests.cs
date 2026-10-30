@@ -128,6 +128,37 @@ public sealed class CodeScanCSharpTests
     }
 
     [Fact]
+    public void Fields_name_every_declarator_and_never_a_generic_argument_enums_their_members_and_explicit_members_their_name()
+    {
+        var scanned = new CSharpScanner().Scan("""
+            namespace Shop;
+
+            enum State { Idle, Busy = 2, [Obsolete] Gone }
+
+            sealed class Cart : IDisposable
+            {
+                private const int First = 1, Second = 2;
+                private static readonly Dictionary<string, List<int>> Totals = new(StringComparer.Ordinal);
+                private readonly Dictionary<string, WeakReference<Cart>> _carts = [];
+                public static IReadOnlyDictionary<string, string> All => Read();
+                void IDisposable.Dispose() { }
+            }
+            """);
+        var named = scanned.Symbols.Select(x => (x.Kind, x.Qualified)).ToList();
+        Assert.Contains(("enummember", "Shop.State.Idle"), named);
+        Assert.Contains(("enummember", "Shop.State.Busy"), named);
+        Assert.Contains(("enummember", "Shop.State.Gone"), named);
+        Assert.Contains(("const", "Shop.Cart.First"), named);
+        Assert.Contains(("const", "Shop.Cart.Second"), named);
+        Assert.Contains(("field", "Shop.Cart.Totals"), named);
+        Assert.Contains(("field", "Shop.Cart._carts"), named);
+        Assert.Contains(("property", "Shop.Cart.All"), named);
+        Assert.Contains(("method", "Shop.Cart.Dispose"), named);
+        Assert.DoesNotContain(named, x => x.Qualified.EndsWith(".string", StringComparison.Ordinal) || x.Qualified.EndsWith(".int", StringComparison.Ordinal));
+        Assert.Equal("Shop.State", scanned.Symbols.Single(x => x.Name == "Busy").Parent);
+    }
+
+    [Fact]
     public void A_symbols_hash_changes_with_its_code_not_its_comments_or_spacing()
     {
         static string HashOf(string text) => new CSharpScanner().Scan(text).Symbols.Single(s => s.Kind == "method").Hash;
@@ -141,15 +172,16 @@ public sealed class CodeScanCSharpTests
     public void The_scanner_finds_what_ctags_finds_declared()
     {
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "CodeArena"));
-        var tags = GdbFactAttribute.Run("ctags", "-R", "--languages=C#", "--kinds-C#=cmpfeEigs", "--fields=+n", "-f", "-", root) ?? "";
+        var tags = GdbFactAttribute.Run("ctags", "-R", "--languages=C#", "--kinds-C#=cmpfeEigs", "--fields=+nK", "-f", "-", root) ?? "";
         var expected = new HashSet<(string File, string Name, int Line)>();
         foreach (var line in tags.Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
             var parts = line.Split('\t');
             var at = parts.FirstOrDefault(p => p.StartsWith("line:", StringComparison.Ordinal));
-            if (parts.Length > 2 && at is not null && !parts[1].Contains("/obj/", StringComparison.Ordinal))
+            if (parts.Length > 3 && at is not null && !parts[1].Contains("/obj/", StringComparison.Ordinal) && LooksDeclared(parts[2], parts[0][(parts[0].LastIndexOf('.') + 1)..], parts[3]))
             {
-                expected.Add((Path.GetFileName(parts[1]), parts[0], int.Parse(at[5..], System.Globalization.CultureInfo.InvariantCulture)));
+                // An explicit interface member (IAgentEvents.Step) is named by its own name, as code calls it.
+                expected.Add((Path.GetFileName(parts[1]), parts[0][(parts[0].LastIndexOf('.') + 1)..], int.Parse(at[5..], System.Globalization.CultureInfo.InvariantCulture)));
             }
         }
         var scanner = new CSharpScanner();
@@ -167,6 +199,34 @@ public sealed class CodeScanCSharpTests
         var hit = expected.Count(e => lines.TryGetValue((e.File, e.Name), out var ranges) && ranges.Any(r => r.Item1 <= e.Line && e.Line <= r.Item2));
         Assert.True(expected.Count > 1000, $"ctags found {expected.Count}");
         Assert.True(hit >= expected.Count * 0.98, $"the scanner found {hit} of the {expected.Count} declarations ctags found");
+    }
+
+    /// <summary>
+    /// Whether what ctags reports looks like a declaration on its line. ctags 5.9's C# parser also takes a parameter of a
+    /// method with an expression body, a local (var body = …) or a word in a string for one; those are not counted.
+    /// </summary>
+    internal static bool LooksDeclared(string pattern, string name, string kind)
+    {
+        var line = pattern.StartsWith("/^", StringComparison.Ordinal) ? pattern[2..] : pattern;
+        line = line.EndsWith("$/;\"", StringComparison.Ordinal) ? line[..^4] : line.TrimEnd('/', ';', '"', '$');
+        line = line.Trim();
+        if (new[] { "var ", "await ", "return ", "foreach ", "foreach(", "if ", "for ", "while " }.Any(s => line.StartsWith(s, StringComparison.Ordinal)))
+        {
+            return false;
+        }
+        var at = System.Text.RegularExpressions.Regex.Match(line, $@"(?<![\w.]){System.Text.RegularExpressions.Regex.Escape(name)}\b");
+        if (!at.Success)
+        {
+            return true;
+        }
+        var before = line[..at.Index];
+        if (before.Contains('(') || before.Contains("=>", StringComparison.Ordinal) || before.Contains('"'))
+        {
+            return false;
+        }
+        // A method's name comes before its parameters (or its generic arguments).
+        var after = line[(at.Index + at.Length)..].TrimStart();
+        return kind != "method" || after.StartsWith('(') || after.StartsWith('<');
     }
 
     [Fact]
