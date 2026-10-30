@@ -671,6 +671,8 @@ internal sealed class SessionStore
         public SessionData State { get; init; } = new();
         /// <summary>Message lines, all of them.</summary>
         public int Messages { get; init; }
+        /// <summary>When the last message was written: the session's last activity (what the sync writes later of it is not).</summary>
+        public DateTimeOffset? LastMessage { get; init; }
         public string Preview { get; init; } = "";
         public long Prompt { get; init; }
         public long Cached { get; init; }
@@ -736,6 +738,7 @@ internal sealed class SessionStore
     {
         var (cwd, model, atCompact) = (s.Cwd, s.Model, s.ModelAtCompact);
         var (messages, preview, prompt, cached, completion, compact, length) = (s.Messages, s.Preview, s.Prompt, s.Cached, s.Completion, s.LastCompact, s.Length);
+        var lastMessage = s.LastMessage;
         var state = s.State.Copy();
         var at0 = new DateTimeOffset(written, TimeSpan.Zero);
         // A message's line is read whole only while the preview (the first question) is not found.
@@ -765,6 +768,10 @@ internal sealed class SessionStore
                 if ((whole is not null ? Without(whole) : Head(bytes)) is { } head)
                 {
                     state.Apply(head, at0, light: true);
+                    if (DateTimeOffset.TryParse(head.Str("at"), out var when) && (lastMessage is null || when > lastMessage))
+                    {
+                        lastMessage = when;
+                    }
                 }
                 continue;
             }
@@ -793,7 +800,7 @@ internal sealed class SessionStore
         return new SessionScan
         {
             Size = size, Written = written, Length = length, Cwd = cwd, Model = model, ModelAtCompact = atCompact, State = state,
-            Messages = messages, Preview = preview, Prompt = prompt, Cached = cached, Completion = completion, LastCompact = compact,
+            Messages = messages, LastMessage = lastMessage, Preview = preview, Prompt = prompt, Cached = cached, Completion = completion, LastCompact = compact,
         };
 
         // A message line read whole, as the scan keeps it: without its words.
@@ -859,16 +866,25 @@ internal sealed class SessionStore
         }
     }
 
-    /// <summary>Saved sessions, newest first; those of this folder only when cwd is given. Each file is scanned once (<see cref="Scan"/>).</summary>
+    /// <summary>
+    /// Saved sessions, newest first by their last message (what the sync writes of a session later, as what Arena has of it,
+    /// does not make it newer); those of this folder only when cwd is given. Each file is scanned once (<see cref="Scan"/>).
+    /// </summary>
     public static List<SessionSummary> List(string dir, string? cwd = null, int max = 20)
     {
         if (!Directory.Exists(dir))
         {
             return [];
         }
-        var found = new List<SessionSummary>();
+        // The newest found so far, newest first, at most max. A file is never written before its last message: once the
+        // last of them is newer than the next file was written, no file further on comes before it.
+        var found = new List<(DateTime At, SessionSummary Session)>();
         foreach (var file in new DirectoryInfo(dir).EnumerateFiles("*.jsonl").OrderByDescending(f => f.LastWriteTimeUtc))
         {
+            if (found.Count >= max && found[^1].At >= file.LastWriteTimeUtc)
+            {
+                break;
+            }
             SessionScan scan;
             try
             {
@@ -886,14 +902,17 @@ internal sealed class SessionStore
             {
                 continue;
             }
-            found.Add(new SessionSummary(Path.GetFileNameWithoutExtension(file.Name), file.FullName, scan.Cwd, file.LastWriteTime, scan.Preview, scan.Messages,
-                scan.State.Conversation, scan.State.Unlinked, scan.State.Waiting) { Plan = scan.State.Plan });
-            if (found.Count >= max)
+            // A message from the web chat says Arena's time: never later than the file says.
+            var at = scan.LastMessage is { } last && last.UtcDateTime < file.LastWriteTimeUtc ? last.UtcDateTime : file.LastWriteTimeUtc;
+            found.Add((at, new SessionSummary(Path.GetFileNameWithoutExtension(file.Name), file.FullName, scan.Cwd, at.ToLocalTime(), scan.Preview, scan.Messages,
+                scan.State.Conversation, scan.State.Unlinked, scan.State.Waiting) { Plan = scan.State.Plan }));
+            found.Sort((a, b) => b.At.CompareTo(a.At));
+            if (found.Count > max)
             {
-                break;
+                found.RemoveAt(found.Count - 1);
             }
         }
-        return found;
+        return [.. found.Select(f => f.Session)];
     }
 
     /// <summary>

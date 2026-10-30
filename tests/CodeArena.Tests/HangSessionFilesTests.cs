@@ -106,6 +106,24 @@ public sealed class HangSessionFilesTests(ITestOutputHelper log) : IDisposable
     }
 
     [Fact]
+    public void Sessions_are_listed_by_their_last_message_not_by_what_the_sync_wrote_of_them_since()
+    {
+        var older = SessionStore.Create(_dir, "/work/project", "model-a");
+        older.Message(Message("user", "the older question"));
+        var newer = SessionStore.Create(_dir, "/work/project", "model-a");
+        newer.Message(Message("user", "the newer question"));
+        // Arena has the older one's message only now (the sync caught up later): its file is written after the newer one's.
+        older.Link("chat-1");
+        older.Sent([(1, "m-1")]);
+        File.SetLastWriteTimeUtc(older.File, DateTime.UtcNow.AddMinutes(1));
+
+        Assert.Equal(["the newer question", "the older question"], SessionStore.List(_dir, "/work/project").Select(s => s.Preview));
+        Assert.Equal(newer.File, Assert.Single(SessionStore.List(_dir, "/work/project", 1)).File);
+        // Its time is its last message's, not the sync's.
+        Assert.True(SessionStore.List(_dir, "/work/project").Single(s => s.File == older.File).Updated < DateTime.Now.AddSeconds(30));
+    }
+
+    [Fact]
     public void Listing_scans_each_file_once_and_then_only_what_was_added()
     {
         var stores = Enumerable.Range(0, 6).Select(_ => Write(_dir, compactions: 8, perPart: 30, size: 4000)).ToList();
