@@ -259,7 +259,9 @@ def run_one(program: str, repo: pathlib.Path, task: dict, arm: str, model: str, 
     return {"task": task["id"], "family": task["family"], "split": task["split"], "arm": arm, "model": model, "mode": mode, "seconds": round(seconds, 1),
             "error": result.get("error") if result.get("is_error") else None, **grade(task, result.get("result") or ""),
             "prompt_tokens": usage.get("prompt_tokens"), "cached_tokens": usage.get("cached_tokens"), "completion_tokens": usage.get("completion_tokens"),
-            "requests": usage.get("requests"), "tool_calls": usage.get("tool_calls"), "tool_chars": usage.get("tool_chars")}
+            "requests": usage.get("requests"), "tool_calls": usage.get("tool_calls"), "tool_chars": usage.get("tool_chars"),
+            # Its start, to read why a run failed (a model's answer, never a secret: the corpus is the repository).
+            "answer": (result.get("result") or "")[:600]}
 
 
 WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_]{2,}")

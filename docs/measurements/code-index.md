@@ -31,7 +31,27 @@ place, give or take two). **recall@5** is the share of a commit's changed files 
 - **Cost:** a median answer of 6,751 characters (≈1,930 tokens at 3.5 characters a token) for a budget of 2,000; a median of
   1.4 s a search, the process's start, loading the 15 MB index and syncing it after each checkout included.
 
-## With a model
+## With a model (2026-10-30)
 
-Not run yet: the grep and index arms with Qwen3-4B-Q4_K_M (pass rate, tokens, rounds, tool calls) come with the tools
-(design commit 14), and decide whether `codeIndex` is on by default (commit 15, after the person sees the numbers).
+`python3 evals/run_code_index.py run --arms grep,index --models Qwen3-4B-Q4_K_M --runs 1 --split test`: the judging half
+(25 locate and 10 string tasks), one run each, Code Arena in ask mode (`-p` asks no one, so nothing is changed), on the
+live stack's model. Results: evals/code-index-results.json.
+
+| Arm | Family | Runs | Pass | Files named (recall) | Prompt tokens (median) | Rounds (median) | Runs with no tool | Seconds (median) |
+|---|---|---|---|---|---|---|---|---|
+| grep | locate | 25 | 0 | 0% | 10,879 | 1 | 15 | 42 |
+| index | locate | 25 | 0 | 1% | 23,655 | 2 | 11 | 72 |
+| grep | string | 10 | 1 | 90% | 22,192 | 2 | 0 | 59 |
+| index | string | 10 | 0 | 90% | 25,778 | 2 | 4 | 46 |
+
+- **Qwen3-4B cannot do these tasks in either arm.** For a commit's subject it mostly answers at once from nothing (15 of
+  25 runs with no tool in the grep arm, 11 in the index arm), or plans and runs steps it does not need (`plan` 8 times,
+  `run_steps` 5, a `screenshot`, a `search_sessions` in the grep arm). For a message, both arms name the right file nine
+  times in ten but give no line within two of it (one run did, with grep).
+- **The index's tools are taken up more readily**: 13 `code_search` and 2 `code_symbol` calls over the 25 locate runs,
+  against 3 `grep` calls in the grep arm. The prompt tokens are higher in the index arm because more of its runs go a
+  second round, not because its answers are bigger.
+- **The gate is not met**, so `codeIndex` stays off by default. A fair verdict needs a model that can work with tools
+  over several rounds (14B and up, or a remote one): the live stack runs only Qwen3-4B, and loading another model there
+  is the person's call. The retrieval numbers above are what the index itself does.
+- Runs since keep the start of each answer in the results (`answer`), to read why a run failed.
