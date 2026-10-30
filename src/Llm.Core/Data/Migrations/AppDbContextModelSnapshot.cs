@@ -5167,6 +5167,277 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("deck_versions", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Gateway.ApiKey", b =>
+                {
+                    b.Property<string>("Hash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character(64)")
+                        .HasColumnName("hash")
+                        .IsFixedLength();
+
+                    b.Property<string>("Alias")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("alias");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(8)
+                        .HasColumnType("character varying(8)")
+                        .HasColumnName("kind");
+
+                    b.Property<DateTimeOffset?>("LastUsedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_used_at");
+
+                    b.Property<decimal?>("MonthlyBudget")
+                        .HasPrecision(12, 4)
+                        .HasColumnType("numeric(12,4)")
+                        .HasColumnName("monthly_budget");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("name");
+
+                    b.Property<int?>("Parallel")
+                        .HasColumnType("integer")
+                        .HasColumnName("parallel");
+
+                    b.Property<string>("Preview")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("preview");
+
+                    b.Property<int?>("RequestsPerMinute")
+                        .HasColumnType("integer")
+                        .HasColumnName("requests_per_minute");
+
+                    b.Property<decimal>("Spend")
+                        .HasPrecision(18, 9)
+                        .HasColumnType("numeric(18,9)")
+                        .HasColumnName("spend");
+
+                    b.Property<int?>("TokensPerMinute")
+                        .HasColumnType("integer")
+                        .HasColumnName("tokens_per_minute");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<Guid?>("WorkspaceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("workspace_id");
+
+                    b.HasKey("Hash");
+
+                    b.HasIndex("Alias")
+                        .IsUnique();
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("WorkspaceId");
+
+                    b.ToTable("api_keys", "gateway");
+                });
+
+            modelBuilder.Entity("Llm.Core.Gateway.GatewayRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<short>("Attempts")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("smallint")
+                        .HasDefaultValue((short)1)
+                        .HasColumnName("attempts");
+
+                    b.Property<int>("CachedTokens")
+                        .HasColumnType("integer")
+                        .HasColumnName("cached_tokens");
+
+                    b.Property<string>("Call")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)")
+                        .HasColumnName("call");
+
+                    b.Property<int?>("Characters")
+                        .HasColumnType("integer")
+                        .HasColumnName("characters");
+
+                    b.Property<int>("CompletionTokens")
+                        .HasColumnType("integer")
+                        .HasColumnName("completion_tokens");
+
+                    b.Property<Guid?>("ConversationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("conversation_id");
+
+                    b.Property<decimal>("Cost")
+                        .HasPrecision(18, 9)
+                        .HasColumnType("numeric(18,9)")
+                        .HasColumnName("cost");
+
+                    b.Property<string>("CreditKind")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)")
+                        .HasColumnName("credit_kind");
+
+                    b.Property<string>("Deployment")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("deployment");
+
+                    b.Property<int>("DurationMs")
+                        .HasColumnType("integer")
+                        .HasColumnName("duration_ms");
+
+                    b.Property<DateTimeOffset>("EndedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("ended_at");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("error");
+
+                    b.Property<string>("FallbackFrom")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("fallback_from");
+
+                    b.Property<DateTimeOffset?>("FirstTokenAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("first_token_at");
+
+                    b.Property<short>("HttpStatus")
+                        .HasColumnType("smallint")
+                        .HasColumnName("http_status");
+
+                    b.Property<string>("KeyAlias")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("key_alias");
+
+                    b.Property<string>("KeyHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character(64)")
+                        .HasColumnName("key_hash")
+                        .IsFixedLength();
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("model");
+
+                    b.Property<string>("Person")
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)")
+                        .HasColumnName("person");
+
+                    b.Property<int?>("Pictures")
+                        .HasColumnType("integer")
+                        .HasColumnName("pictures");
+
+                    b.Property<int>("PromptTokens")
+                        .HasColumnType("integer")
+                        .HasColumnName("prompt_tokens");
+
+                    b.Property<string>("Protocol")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("protocol");
+
+                    b.Property<int?>("ReasoningTokens")
+                        .HasColumnType("integer")
+                        .HasColumnName("reasoning_tokens");
+
+                    b.Property<string>("Refusal")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("refusal");
+
+                    b.Property<double?>("Seconds")
+                        .HasColumnType("double precision")
+                        .HasColumnName("seconds");
+
+                    b.Property<string>("SourceId")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("source_id");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("started_at");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)")
+                        .HasColumnName("status");
+
+                    b.Property<string>("Surface")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)")
+                        .HasColumnName("surface");
+
+                    b.Property<string>("Tag")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("tag");
+
+                    b.Property<int>("TotalTokens")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("integer")
+                        .HasColumnName("total_tokens")
+                        .HasComputedColumnSql("prompt_tokens + completion_tokens", true);
+
+                    b.Property<bool>("UsageEstimated")
+                        .HasColumnType("boolean")
+                        .HasColumnName("usage_estimated");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceId")
+                        .IsUnique()
+                        .HasFilter("source_id IS NOT NULL");
+
+                    b.HasIndex("StartedAt");
+
+                    NpgsqlIndexBuilderExtensions.IncludeProperties(b.HasIndex("StartedAt"), new[] { "Person", "CreditKind", "Cost" });
+
+                    b.HasIndex("KeyHash", "StartedAt")
+                        .HasFilter("key_hash IS NOT NULL");
+
+                    b.HasIndex("Person", "StartedAt");
+
+                    b.HasIndex("UserId", "StartedAt");
+
+                    b.ToTable("requests", "gateway");
+                });
+
             modelBuilder.Entity("Llm.Core.Identity.AppRole", b =>
                 {
                     b.Property<Guid>("Id")
@@ -8284,6 +8555,28 @@ namespace Llm.Core.Data.Migrations
                         .HasForeignKey("DeckId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Gateway.ApiKey", b =>
+                {
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Llm.Core.Code.StudioWorkspace", null)
+                        .WithMany()
+                        .HasForeignKey("WorkspaceId")
+                        .OnDelete(DeleteBehavior.Cascade);
+                });
+
+            modelBuilder.Entity("Llm.Core.Gateway.GatewayRequest", b =>
+                {
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.SetNull);
                 });
 
             modelBuilder.Entity("Llm.Core.Identity.OwnKey", b =>

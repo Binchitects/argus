@@ -126,6 +126,13 @@ public sealed class DataRequestTests(AppFixture app)
             db.Conversations.Add(room);
             var said = new ChatMessage { ConversationId = room.Id, Sequence = 1, Role = "user", Content = "Call me on 0555 123 456.", AuthorId = id };
             db.ChatMessages.Add(said);
+            // A request of theirs in the app's own ledger of model requests.
+            var email = (await db.Users.SingleAsync(u => u.Id == id)).Email!.ToLowerInvariant();
+            var at = DateTimeOffset.UtcNow;
+            db.GatewayRequests.Add(new Llm.Core.Gateway.GatewayRequest
+            {
+                StartedAt = at, EndedAt = at, Surface = "api", Call = "chat", CreditKind = "api", UserId = id, Person = email, KeyAlias = "app-" + name, Model = "m", Status = "done", Cost = 0.5m, ConversationId = chat,
+            });
             await db.SaveChangesAsync();
             theirs = said.Id;
         }
@@ -157,6 +164,9 @@ public sealed class DataRequestTests(AppFixture app)
             var kept = await db.ChatMessages.AsNoTracking().SingleAsync(m => m.Id == theirs);
             Assert.Equal("(erased at their request)", kept.Content);
             Assert.Null(kept.AuthorId);
+            // The ledger keeps the request for the company's totals, no longer theirs.
+            var ledger = await db.GatewayRequests.AsNoTracking().SingleAsync(r => r.Cost == 0.5m && r.Model == "m");
+            Assert.Equal(("erased", (Guid?)null, (string?)null, (Guid?)null), (ledger.Person, ledger.UserId, ledger.KeyAlias, ledger.ConversationId));
         }
         var certificate = await (await admin.GetAsync($"/api/admin/compliance/data-requests/{rid}/certificate")).Content.ReadAsStringAsync();
         Assert.StartsWith("# Certificate of erasure", certificate, StringComparison.Ordinal);
@@ -164,6 +174,7 @@ public sealed class DataRequestTests(AppFixture app)
         Assert.Contains("1 memories", certificate, StringComparison.Ordinal);
         Assert.Contains("1 their messages in other people's rooms", certificate, StringComparison.Ordinal);
         Assert.Contains("entries of the audit log that name them", certificate, StringComparison.Ordinal);
+        Assert.Contains("their requests in the app's ledger of model requests", certificate, StringComparison.Ordinal);
         Assert.Contains("## Backups", certificate, StringComparison.Ordinal);
         var audit = (await admin.JsonAsync(await admin.GetAsync("/api/admin/audit?take=50"))).EnumerateArray().Select(e => e.GetProperty("action").GetString()).ToList();
         Assert.Contains("privacy.erase", audit);

@@ -31,9 +31,12 @@ public sealed partial class RecordRetention(AppDbContext db, Gateway.SpendLog sp
         var gatewayGone = 0;
         if (o.GatewayLogDays > 0)
         {
+            // The app's own ledger keeps them as long as LiteLLM's log did.
+            var before = now.AddDays(-o.GatewayLogDays);
+            await db.GatewayRequests.Where(r => r.StartedAt < before).ExecuteDeleteAsync(ct);
             try
             {
-                gatewayGone = await spend.DeleteBeforeAsync(now.AddDays(-o.GatewayLogDays), ct);
+                gatewayGone = await spend.DeleteBeforeAsync(before, ct);
             }
             catch (NpgsqlException ex)
             {

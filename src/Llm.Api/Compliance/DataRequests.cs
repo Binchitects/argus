@@ -231,6 +231,15 @@ public sealed partial class DataRequests(AppDbContext db, PeopleService people, 
             cleared.Add(new ErasedPart("action items given to them in other people's meetings: no longer theirs", actions));
         }
         var kept = new List<string>();
+        // The app's own ledger of model requests: kept for the company's totals, no longer theirs.
+        var email0 = person.Email?.Trim().ToLowerInvariant();
+        var ledger = await db.GatewayRequests.Where(r => r.UserId == userId || (email0 != null && r.Person == email0))
+            .ExecuteUpdateAsync(u => u.SetProperty(r => r.Person, "erased").SetProperty(r => r.UserId, (Guid?)null).SetProperty(r => r.KeyAlias, (string?)null)
+                .SetProperty(r => r.ConversationId, (Guid?)null), ct);
+        if (ledger > 0)
+        {
+            cleared.Add(new ErasedPart("their requests in the app's ledger of model requests: kept for the company's totals, no longer theirs", ledger));
+        }
         try
         {
             if (person.Email is { } email && await spend.ForgetAsync(email, ct) is > 0 and var rows)

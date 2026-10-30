@@ -11,6 +11,15 @@ namespace Llm.Core.Data;
 public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     : IdentityDbContext<AppUser, AppRole, Guid>(options), IDataProtectionKeyContext
 {
+    /// <summary>Every column of an entity named in snake case (prompt_tokens), as SQL written by hand reads best.</summary>
+    private static void Snake(Microsoft.EntityFrameworkCore.Metadata.IMutableEntityType entity)
+    {
+        foreach (var p in entity.GetProperties())
+        {
+            p.SetColumnName(string.Concat(p.Name.Select((c, i) => i > 0 && char.IsUpper(c) ? "_" + char.ToLowerInvariant(c) : char.ToLowerInvariant(c).ToString())));
+        }
+    }
+
     public DbSet<Setting> Settings => Set<Setting>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
     /// <summary>Cookie, 2FA and OIDC key material survives restarts and is shared by every replica.</summary>
@@ -74,6 +83,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Studio.WorkflowRunStep> WorkflowRunSteps => Set<Studio.WorkflowRunStep>();
     public DbSet<Code.CodeFix> CodeFixes => Set<Code.CodeFix>();
     public DbSet<Identity.OwnKey> OwnKeys => Set<Identity.OwnKey>();
+    public DbSet<Gateway.GatewayRequest> GatewayRequests => Set<Gateway.GatewayRequest>();
+    public DbSet<Gateway.ApiKey> ApiKeys => Set<Gateway.ApiKey>();
     public DbSet<ProductFeedback> ProductFeedback => Set<ProductFeedback>();
     public DbSet<PromptLogEntry> PromptLog => Set<PromptLogEntry>();
     public DbSet<Checklist> Checklists => Set<Checklist>();
@@ -890,6 +901,55 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(b => b.Step).HasMaxLength(300);
             e.Property(b => b.Error).HasMaxLength(2000);
             e.Property(b => b.Model).HasMaxLength(200);
+        });
+        // The model gateway's own tables, in a schema of their own (the dashboards' role reads it and nothing else), named in
+        // snake case so the dashboards' SQL reads plainly.
+        builder.Entity<Gateway.GatewayRequest>(e =>
+        {
+            e.ToTable("requests", "gateway");
+            e.Property(x => x.Surface).HasMaxLength(12);
+            e.Property(x => x.Call).HasMaxLength(24);
+            e.Property(x => x.Protocol).HasMaxLength(16);
+            e.Property(x => x.CreditKind).HasMaxLength(12);
+            e.Property(x => x.Person).HasMaxLength(256);
+            e.Property(x => x.KeyHash).HasMaxLength(64).IsFixedLength();
+            e.Property(x => x.KeyAlias).HasMaxLength(120);
+            e.Property(x => x.Tag).HasMaxLength(64);
+            e.Property(x => x.Model).HasMaxLength(200);
+            e.Property(x => x.Deployment).HasMaxLength(200);
+            e.Property(x => x.FallbackFrom).HasMaxLength(200);
+            e.Property(x => x.Attempts).HasDefaultValue((short)1);
+            e.Property(x => x.TotalTokens).HasComputedColumnSql("prompt_tokens + completion_tokens", stored: true);
+            e.Property(x => x.Cost).HasPrecision(18, 9);
+            e.Property(x => x.Status).HasMaxLength(10);
+            e.Property(x => x.Refusal).HasMaxLength(16);
+            e.Property(x => x.Error).HasMaxLength(500);
+            e.Property(x => x.SourceId).HasMaxLength(100);
+            // The month's spend by person and credit (the credit page, the ledger) reads this index alone.
+            e.HasIndex(x => x.StartedAt).IncludeProperties(x => new { x.Person, x.CreditKind, x.Cost });
+            e.HasIndex(x => new { x.Person, x.StartedAt });
+            e.HasIndex(x => new { x.UserId, x.StartedAt });
+            e.HasIndex(x => new { x.KeyHash, x.StartedAt }).HasFilter("key_hash IS NOT NULL");
+            e.HasIndex(x => x.SourceId).IsUnique().HasFilter("source_id IS NOT NULL");
+            e.HasOne<Identity.AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.SetNull);
+            Snake(e.Metadata);
+        });
+        builder.Entity<Gateway.ApiKey>(e =>
+        {
+            e.ToTable("api_keys", "gateway");
+            e.HasKey(x => x.Hash);
+            e.Property(x => x.Hash).HasMaxLength(64).IsFixedLength();
+            e.Property(x => x.Kind).HasMaxLength(8);
+            e.Property(x => x.Alias).HasMaxLength(120);
+            e.Property(x => x.Name).HasMaxLength(80);
+            e.Property(x => x.Preview).HasMaxLength(20);
+            e.Property(x => x.MonthlyBudget).HasPrecision(12, 4);
+            e.Property(x => x.Spend).HasPrecision(18, 9);
+            e.HasIndex(x => x.Alias).IsUnique();
+            e.HasIndex(x => x.UserId);
+            e.HasOne<Identity.AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Code.StudioWorkspace>().WithMany().HasForeignKey(x => x.WorkspaceId).OnDelete(DeleteBehavior.Cascade);
+            Snake(e.Metadata);
         });
         builder.Entity<Code.StudioWorkspace>(e =>
         {
