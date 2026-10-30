@@ -2431,10 +2431,32 @@ v7.6.1 (2026-10-30), a hotfix: vLLM's and NVIDIA's DCGM exporter's images from
 Docker Hub by default (nvcr.io refuses many networks), so both install and
 ride in the offline bundle.
 
-### v7.7 — A model of your own
+### v7.7 — Argus's code graphs
 
-Moved from v7.3, which shipped the science lab and the Kubernetes install, and
-from v7.5 and v7.6, which shipped the requests of 2026-10-28 and 2026-10-29.
+Asked 2026-10-30: "I want to make argus (code indexer) stronger … more complex
+graphs … consider huge improvement on argus for next version". The design is
+[design/argus-graph.md](design/argus-graph.md): a graph of symbols in Argus's
+own index, built from what it already mirrors with no build and no download
+(Code Arena's scanners shared, ctags for the rest), in the same SQLite file,
+filtered by each person's GitLab rights in SQL. Ask who calls a method, what
+implements an interface, or what a merge request will break in every
+repository you can read, and get the exact lines, how sure each is, the tests
+to run, the owners to ask, and the endpoints, topics and tables at the other
+end. People get a Code map page, cross-repository call and type hierarchy in
+Code Arena's IDE, and an Impact card on automatic merge request reviews;
+agents get `symbol_graph`, `mr_impact` and `service_contracts`, off until the
+gates in its §7 are met with a model and without (a baseline harness first).
+31 commits in its §9; the headline is reachable at its commit 27.
+
+Also in v7.7: the app's own gateway, commits 10 to 21 of
+[design/own-gateway.md](design/own-gateway.md) (9 shipped after v7.6.1), and
+the IDE plan's editor groups.
+
+### v7.8 — A model of your own
+
+Moved from v7.3, which shipped the science lab and the Kubernetes install, from
+v7.5 and v7.6, which shipped the requests of 2026-10-28 and 2026-10-29, and
+from v7.7, which is Argus's code graphs.
 
 1. **Model lab.** Teach a small model the company's words on the local GPU
    (a LoRA from chosen knowledge sources, prompts and good answers), then
