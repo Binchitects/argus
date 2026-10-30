@@ -60,6 +60,9 @@ public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, S
         ["memories"] = "what people asked the chat to remember",
         ["storage_samples"] = "the storage page's trends",
         ["scheduled_runs"] = "scheduled tasks' runs",
+        ["gateway.requests"] = "the app's own ledger of model requests: usage, cost, credit",
+        ["gateway.api_keys"] = "API keys, as the app keeps them",
+        ["gateway.rate_windows"] = "each API key's requests and tokens this minute",
         ["LiteLLM_SpendLogs"] = "the gateway's request log: usage, cost, the dashboards",
         ["LiteLLM_ErrorLogs"] = "the gateway's errors",
         ["LiteLLM_AuditLog"] = "the gateway's audit log",
@@ -220,7 +223,7 @@ public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, S
     {
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT c.relname, pg_total_relation_size(c.oid), greatest(c.reltuples, 0)::bigint
+            SELECT CASE WHEN n.nspname = 'public' THEN c.relname ELSE n.nspname || '.' || c.relname END, pg_total_relation_size(c.oid), greatest(c.reltuples, 0)::bigint
             FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
             WHERE c.relkind IN ('r', 'p', 'm') AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg_toast%'
             ORDER BY 2 DESC LIMIT 10
@@ -236,7 +239,7 @@ public sealed partial class StorageReport(AppDbContext db, StorageDisks disks, S
     }
 
     private static string? DatabaseWhat(string name, string app, string gateway) =>
-        name == app ? "The app: chats and their files, settings, company knowledge, the audit log"
+        name == app ? "The app: chats and their files, settings, company knowledge, the audit log, its ledger of model requests"
         : name == gateway ? "The gateway: API keys, credit, and its log of every request"
         : name switch
         {
