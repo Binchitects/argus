@@ -301,7 +301,16 @@ public sealed class AppFixture : IAsyncLifetime
         await Factory.DisposeAsync();
         if (_postgres is not null)
         {
-            await _postgres.DisposeAsync();
+            try
+            {
+                await _postgres.DisposeAsync();
+            }
+            catch (Exception ex) when (ex is OperationCanceledException or TimeoutException or HttpRequestException)
+            {
+                // Every test has run. A Docker slow to delete the container (an hour of the suite's databases on a CI
+                // runner's disk took more than its client's 100 s) leaves it to Ryuk, which removes it once the run ends.
+                Console.Error.WriteLine($"The test database's container is left to Ryuk to remove: {ex.GetType().Name}: {ex.Message}");
+            }
         }
         Directory.Delete(_webRoot, recursive: true);
     }
