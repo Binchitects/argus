@@ -250,6 +250,7 @@ public static class IdentityWiring
         services.Configure<Dashboards.DashboardOptions>(config.GetSection("Dashboards"));
         services.AddSingleton<Dashboards.DashboardStore>();
         services.AddSingleton<Dashboards.SqlDatasource>();
+        services.AddSingleton<Dashboards.GatewayDatasource>();
         services.AddScoped<Gateway.Ledger>();
         services.AddScoped<Notifications.Notifier>();
         services.Configure<Notifications.NotificationOptions>(config.GetSection("Notifications"));

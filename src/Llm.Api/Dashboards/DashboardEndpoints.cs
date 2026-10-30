@@ -17,7 +17,7 @@ public static partial class DashboardEndpoints
     public static readonly TimeSpan MaxRange = TimeSpan.FromDays(400);
 
     /// <summary>The datasources the app runs: LiteLLM's database (SQL), Prometheus and Loki.</summary>
-    private static readonly HashSet<string> Served = [SqlDatasource.Uid, PromDatasource.Uid, LokiDatasource.Uid];
+    private static readonly HashSet<string> Served = [SqlDatasource.Uid, GatewayDatasource.Uid, PromDatasource.Uid, LokiDatasource.Uid];
 
     public static void MapDashboards(this IEndpointRouteBuilder app)
     {
@@ -48,9 +48,9 @@ public static partial class DashboardEndpoints
         g.MapGet("/{uid}/variables", async (string uid, DateTimeOffset? from, DateTimeOffset? to, DashboardStore store, PromDatasource prom, LokiDatasource loki,
             ClaimsPrincipal user, UserManager<Core.Identity.AppUser> users, AccessService access, CancellationToken ct) =>
             store.Find(uid) is { } d && !await MayAsync(d, user, users, access) ? Results.Forbid() : await VariablesAsync(uid, from, to, store, prom, loki, ct));
-        g.MapPost("/{uid}/panels/{key:int}/query", async (string uid, int key, PanelQuery q, DashboardStore store, SqlDatasource sql, PromDatasource prom, LokiDatasource loki,
+        g.MapPost("/{uid}/panels/{key:int}/query", async (string uid, int key, PanelQuery q, DashboardStore store, SqlDatasource sql, GatewayDatasource ledger, PromDatasource prom, LokiDatasource loki,
             IOptions<DashboardOptions> options, ClaimsPrincipal user, UserManager<Core.Identity.AppUser> users, AccessService access, CancellationToken ct) =>
-            store.Find(uid) is { } d && !await MayAsync(d, user, users, access) ? Results.Forbid() : await QueryAsync(uid, key, q, store, sql, prom, loki, options, ct));
+            store.Find(uid) is { } d && !await MayAsync(d, user, users, access) ? Results.Forbid() : await QueryAsync(uid, key, q, store, sql, ledger, prom, loki, options, ct));
     }
 
     /// <summary>Whether the person may see this dashboard: its permission (an Owner has every one).</summary>
@@ -168,7 +168,7 @@ public static partial class DashboardEndpoints
     [GeneratedRegex(@"^\s*label_values\(\s*(?:(?<match>.+?)\s*,\s*)?(?<label>[a-zA-Z_]\w*)\s*\)\s*$")]
     private static partial Regex LabelValues();
 
-    private static async Task<IResult> QueryAsync(string uid, int key, PanelQuery q, DashboardStore store, SqlDatasource sql, PromDatasource prom, LokiDatasource loki,
+    private static async Task<IResult> QueryAsync(string uid, int key, PanelQuery q, DashboardStore store, SqlDatasource sql, GatewayDatasource ledger, PromDatasource prom, LokiDatasource loki,
         IOptions<DashboardOptions> options, CancellationToken ct)
     {
         if (store.Find(uid) is not { } d || key < 0 || key >= d.Panels.Count)
@@ -224,7 +224,8 @@ public static partial class DashboardEndpoints
                 {
                     PromDatasource.Uid => await PromTargetAsync(t, panel, q, interval, vars, prom, o, ct),
                     LokiDatasource.Uid => await LokiTargetAsync(t, panel, q, interval, vars, loki, o, ct),
-                    _ => await SqlTargetAsync(t, q, interval, sql, ct),
+                    GatewayDatasource.Uid => SqlTarget(t, await ledger.QueryAsync(SqlMacros.Expand(t.RawSql!, q.From, q.To, interval), ct)),
+                    _ => SqlTarget(t, await sql.QueryAsync(SqlMacros.Expand(t.RawSql!, q.From, q.To, interval), ct)),
                 });
             }
             catch (Exception ex) when (ex is Npgsql.NpgsqlException or FormatException or InvalidOperationException or DatasourceException or HttpRequestException)
@@ -240,9 +241,8 @@ public static partial class DashboardEndpoints
         return Results.Ok(new { intervalMs = (long)interval.TotalMilliseconds, results });
     }
 
-    private static async Task<TargetResult> SqlTargetAsync(PanelTarget t, PanelQuery q, TimeSpan interval, SqlDatasource sql, CancellationToken ct)
+    private static TargetResult SqlTarget(PanelTarget t, TableResult table)
     {
-        var table = await sql.QueryAsync(SqlMacros.Expand(t.RawSql!, q.From, q.To, interval), ct);
         return t.Format == "time_series"
             ? new TargetResult(t.RefId, t.Format, null, SeriesShaping.ToSeries(table), null)
             : new TargetResult(t.RefId, t.Format, table, null, null);

@@ -398,8 +398,8 @@ public sealed class TokenCostTests(AppFixture app)
             await seed.ExecuteNonQueryAsync();
         }
         await using var f = app.Create(app.ConnectionStringFor("recalc_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway());
-        await app.MirrorAsync();
         var (_, personId, _) = await PersonAsync(f);
+        await app.MirrorAsync();
         // An answer from before costs were kept, in the same window.
         Guid round;
         using (var scope = f.Services.CreateScope())

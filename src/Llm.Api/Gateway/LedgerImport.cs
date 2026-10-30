@@ -27,7 +27,8 @@ public sealed partial class LedgerImport(IServiceScopeFactory scopes, IOptions<D
     /// </summary>
     private static readonly TimeSpan Overlap = TimeSpan.FromMinutes(1);
 
-    private const int Batch = 5000;
+    /// <summary>The most rows one look reads: a look that read as many reads on.</summary>
+    public const int Batch = 5000;
 
     private readonly string _litellm = new NpgsqlConnectionStringBuilder(DatabaseSettings.ConnectionString(config))
     {

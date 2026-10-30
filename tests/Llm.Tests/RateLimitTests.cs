@@ -583,11 +583,11 @@ public sealed class RateLimitTests(AppFixture app)
             await LogAsync(run + "5", token, p.Email, at, error: Over(token, "tokens"));
             var (from, to) = (at.AddSeconds(-1), at.AddSeconds(1));
             double Stat(JsonElement table) => table.GetProperty("rows")[0][0].GetDouble();
-            Assert.Equal(3, Stat(await PanelAsync(admin, "Requests", from, to)));
-            Assert.Equal(3, Stat(await PanelAsync(admin, "Requests", from, to, "llm-overview")));
-            // Refused for credit is a failure; refused for a key's rate limit is the client's limit.
-            Assert.Equal(1, Stat(await PanelAsync(admin, "Failures", from, to, "llm-overview")));
-            Assert.Equal(3, (await PanelAsync(admin, "By model", from, to, "llm-overview")).GetProperty("rows")[0][1].GetDouble());
+            // Every refusal (a budget's as much as a rate limit's) never reached a model: not a request, nor a failure.
+            Assert.Equal(2, Stat(await PanelAsync(admin, "Requests", from, to)));
+            Assert.Equal(2, Stat(await PanelAsync(admin, "Requests", from, to, "llm-overview")));
+            Assert.Equal(0, Stat(await PanelAsync(admin, "Failures", from, to, "llm-overview")));
+            Assert.Equal(2, (await PanelAsync(admin, "By model", from, to, "llm-overview")).GetProperty("rows")[0][1].GetDouble());
             Assert.Equal(2, (await PanelAsync(admin, "Refused by rate limits", from, to)).GetProperty("rows").EnumerateArray().Sum(r => r[3].GetDouble()));
         }
         finally
@@ -653,16 +653,16 @@ public sealed class RateLimitTests(AppFixture app)
             }, rows);
             Assert.Contains(table.GetProperty("rows").EnumerateArray(), r => r[0].GetString() == other.Email);
 
-            // A refusal never reached a model: their usage and the dashboard's requests count the four that did (one refused for credit), not the four refused.
+            // A refusal never reached a model, a limit's or credit's: their usage and the dashboard's requests count the three that did.
             var q = $"from={Uri.EscapeDataString(now.AddDays(-1).ToString("o"))}&to={Uri.EscapeDataString(now.AddMinutes(1).ToString("o"))}";
-            Assert.Equal(4, (await me.JsonAsync(await me.GetAsync("/api/usage/me?" + q))).GetProperty("totals").GetProperty("requests").GetDouble());
+            Assert.Equal(3, (await me.JsonAsync(await me.GetAsync("/api/usage/me?" + q))).GetProperty("totals").GetProperty("requests").GetDouble());
             foreach (var panel in new[] { "Per person — every surface combined", "Tokens and cost per person" })
             {
                 var people = (await PanelAsync(admin, panel, now.AddDays(-1), now.AddMinutes(1))).GetProperty("rows").EnumerateArray();
-                Assert.Equal(4, people.Single(r => r[0].GetString() == p.Email)[1].GetDouble());
+                Assert.Equal(3, people.Single(r => r[0].GetString() == p.Email)[1].GetDouble());
             }
             var recent = (await PanelAsync(admin, "Recent requests, resolved", now.AddDays(-1), now.AddMinutes(1))).GetProperty("rows").EnumerateArray();
-            Assert.Equal(4, recent.Count(r => r[1].GetString() == p.Email));
+            Assert.Equal(3, recent.Count(r => r[1].GetString() == p.Email));
         }
         finally
         {

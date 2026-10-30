@@ -92,7 +92,7 @@ public sealed class DashboardTests(AppFixture app)
         Assert.Equal(40, Stat(await Query(b, "usage-by-user", k["Input tokens, cache hit"])));
         Assert.Equal(22, Stat(await Query(b, "usage-by-user", k["Output tokens"])));
         Assert.Equal(0.0022, Stat(await Query(b, "usage-by-user", k["Cost"])), 9);
-        Assert.Equal(1, Stat(await Query(b, "usage-by-user", k["Master-key requests"])));
+        Assert.Equal(1, Stat(await Query(b, "usage-by-user", k["Requests with no person"])));
     }
 
     [Fact]
@@ -234,6 +234,18 @@ public sealed class ReadOnlyTests(AppFixture app)
         Assert.True(ex.SqlState is "25006" or "42501", ex.SqlState); // read-only transaction / permission denied
         var rows = await sql!.QueryAsync("""select count(*) from "LiteLLM_SpendLogs" where request_id in ('r1','r2','r3','r4','r5')""", CancellationToken.None);
         Assert.Equal(5.0, rows.Rows[0][0]);
+    }
+
+    [Fact]
+    public async Task Ledger_panels_read_the_schema_gateway_alone_and_cannot_write()
+    {
+        var ledger = app.Factory.Services.GetService(typeof(GatewayDatasource)) as GatewayDatasource;
+        var rows = await ledger!.QueryAsync("select count(*) from requests where source_id in ('r1','r2','r3','r4','r5')", CancellationToken.None);
+        Assert.Equal(5.0, rows.Rows[0][0]);
+        var ex = await Assert.ThrowsAnyAsync<Npgsql.PostgresException>(() => ledger.QueryAsync("select count(*) from public.\"AspNetUsers\"", CancellationToken.None));
+        Assert.Equal("42501", ex.SqlState); // permission denied: the app's own tables stay out of panel SQL
+        ex = await Assert.ThrowsAnyAsync<Npgsql.PostgresException>(() => ledger.QueryAsync("delete from requests returning 1", CancellationToken.None));
+        Assert.True(ex.SqlState is "25006" or "42501", ex.SqlState);
     }
 
     [Fact]

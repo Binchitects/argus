@@ -39,7 +39,7 @@
       "title": "Requests",
       "datasource": {
         "type": "postgres",
-        "uid": "litellm-db"
+        "uid": "gateway-db"
       },
       "gridPos": {
         "h": 4,
@@ -52,11 +52,11 @@
           "refId": "A",
           "datasource": {
             "type": "postgres",
-            "uid": "litellm-db"
+            "uid": "gateway-db"
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) AS \"Requests\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND coalesce(metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError'"
+          "rawSql": "SELECT count(*) AS \"Requests\" from requests WHERE $__timeFilter(started_at) AND status <> 'refused'"
         }
       ],
       "fieldConfig": {
@@ -96,7 +96,7 @@
       "title": "Total tokens",
       "datasource": {
         "type": "postgres",
-        "uid": "litellm-db"
+        "uid": "gateway-db"
       },
       "gridPos": {
         "h": 4,
@@ -109,11 +109,11 @@
           "refId": "A",
           "datasource": {
             "type": "postgres",
-            "uid": "litellm-db"
+            "uid": "gateway-db"
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(sum(total_tokens),0) AS \"Tokens\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")"
+          "rawSql": "SELECT COALESCE(sum(total_tokens),0) AS \"Tokens\" from requests WHERE $__timeFilter(started_at)"
         }
       ],
       "fieldConfig": {
@@ -152,7 +152,7 @@
       "title": "Median latency",
       "datasource": {
         "type": "postgres",
-        "uid": "litellm-db"
+        "uid": "gateway-db"
       },
       "gridPos": {
         "h": 4,
@@ -165,11 +165,11 @@
           "refId": "A",
           "datasource": {
             "type": "postgres",
-            "uid": "litellm-db"
+            "uid": "gateway-db"
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY request_duration_ms),0) AS \"p50\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND coalesce(metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError' AND request_duration_ms IS NOT NULL"
+          "rawSql": "SELECT COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms),0) AS \"p50\" from requests WHERE $__timeFilter(started_at) AND status <> 'refused' AND duration_ms IS NOT NULL"
         }
       ],
       "fieldConfig": {
@@ -209,7 +209,7 @@
       "title": "p95 latency",
       "datasource": {
         "type": "postgres",
-        "uid": "litellm-db"
+        "uid": "gateway-db"
       },
       "gridPos": {
         "h": 4,
@@ -222,11 +222,11 @@
           "refId": "A",
           "datasource": {
             "type": "postgres",
-            "uid": "litellm-db"
+            "uid": "gateway-db"
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY request_duration_ms),0) AS \"p95\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND coalesce(metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError' AND request_duration_ms IS NOT NULL"
+          "rawSql": "SELECT COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms),0) AS \"p95\" from requests WHERE $__timeFilter(started_at) AND status <> 'refused' AND duration_ms IS NOT NULL"
         }
       ],
       "fieldConfig": {
@@ -266,7 +266,7 @@
       "title": "Prompt cache hit",
       "datasource": {
         "type": "postgres",
-        "uid": "litellm-db"
+        "uid": "gateway-db"
       },
       "gridPos": {
         "h": 4,
@@ -279,11 +279,11 @@
           "refId": "A",
           "datasource": {
             "type": "postgres",
-            "uid": "litellm-db"
+            "uid": "gateway-db"
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COALESCE(round(100.0*sum(coalesce((metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0))/NULLIF(sum(coalesce(prompt_tokens,0)),0),1),0) AS \"Cache\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\")"
+          "rawSql": "SELECT COALESCE(round(100.0*sum(cached_tokens)/NULLIF(sum(coalesce(prompt_tokens,0)),0),1),0) AS \"Cache\" from requests WHERE $__timeFilter(started_at)"
         }
       ],
       "fieldConfig": {
@@ -324,7 +324,7 @@
       "title": "Failures",
       "datasource": {
         "type": "postgres",
-        "uid": "litellm-db"
+        "uid": "gateway-db"
       },
       "gridPos": {
         "h": 4,
@@ -337,11 +337,11 @@
           "refId": "A",
           "datasource": {
             "type": "postgres",
-            "uid": "litellm-db"
+            "uid": "gateway-db"
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT count(*) FILTER (WHERE status IS NOT NULL AND status <> 'success') AS \"Failures\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND coalesce(metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError'"
+          "rawSql": "SELECT count(*) FILTER (WHERE status IN ('failed', 'stopped')) AS \"Failures\" from requests WHERE $__timeFilter(started_at) AND status <> 'refused'"
         }
       ],
       "fieldConfig": {
@@ -385,7 +385,7 @@
       "title": "Requests over time, by model",
       "datasource": {
         "type": "postgres",
-        "uid": "litellm-db"
+        "uid": "gateway-db"
       },
       "description": "Every request the gateway served, whichever engine answered it.",
       "gridPos": {
@@ -399,11 +399,11 @@
           "refId": "A",
           "datasource": {
             "type": "postgres",
-            "uid": "litellm-db"
+            "uid": "gateway-db"
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(\"startTime\", $__interval), model AS metric, count(*) AS \"requests\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND coalesce(metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError' GROUP BY 1, 2 ORDER BY 1"
+          "rawSql": "SELECT $__timeGroupAlias(started_at, $__interval), model AS metric, count(*) AS \"requests\" from requests WHERE $__timeFilter(started_at) AND status <> 'refused' GROUP BY 1, 2 ORDER BY 1"
         }
       ],
       "fieldConfig": {
@@ -440,7 +440,7 @@
       "title": "Token throughput: cached input, uncached input, output",
       "datasource": {
         "type": "postgres",
-        "uid": "litellm-db"
+        "uid": "gateway-db"
       },
       "description": "Prompt tokens dominate long-context work; completion tokens are what the GPU actually generates.",
       "gridPos": {
@@ -454,11 +454,11 @@
           "refId": "A",
           "datasource": {
             "type": "postgres",
-            "uid": "litellm-db"
+            "uid": "gateway-db"
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(\"startTime\", $__interval), COALESCE(sum(greatest(coalesce(prompt_tokens,0) - coalesce((metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0),0)),0) AS \"input, cache miss\", COALESCE(sum(coalesce((metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0)),0) AS \"input, cache hit\", COALESCE(sum(completion_tokens),0) AS \"output\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT $__timeGroupAlias(started_at, $__interval), COALESCE(sum(greatest(coalesce(prompt_tokens,0) - cached_tokens,0)),0) AS \"input, cache miss\", COALESCE(sum(cached_tokens),0) AS \"input, cache hit\", COALESCE(sum(completion_tokens),0) AS \"output\" from requests WHERE $__timeFilter(started_at) GROUP BY 1 ORDER BY 1"
         }
       ],
       "fieldConfig": {
@@ -495,7 +495,7 @@
       "title": "Latency percentiles",
       "datasource": {
         "type": "postgres",
-        "uid": "litellm-db"
+        "uid": "gateway-db"
       },
       "description": "End-to-end, as the CLIENT experienced it -- queueing and gateway overhead included.",
       "gridPos": {
@@ -509,11 +509,11 @@
           "refId": "A",
           "datasource": {
             "type": "postgres",
-            "uid": "litellm-db"
+            "uid": "gateway-db"
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(\"startTime\", $__interval), percentile_cont(0.5) WITHIN GROUP (ORDER BY request_duration_ms) AS \"p50\", percentile_cont(0.95) WITHIN GROUP (ORDER BY request_duration_ms) AS \"p95\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND coalesce(metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError' AND request_duration_ms IS NOT NULL GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT $__timeGroupAlias(started_at, $__interval), percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms) AS \"p50\", percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS \"p95\" from requests WHERE $__timeFilter(started_at) AND status <> 'refused' AND duration_ms IS NOT NULL GROUP BY 1 ORDER BY 1"
         }
       ],
       "fieldConfig": {
@@ -550,7 +550,7 @@
       "title": "Time to first token",
       "datasource": {
         "type": "postgres",
-        "uid": "litellm-db"
+        "uid": "gateway-db"
       },
       "description": "Prefill. On a 128K window this dominates: ~164s measured for a 114K-token prompt.",
       "gridPos": {
@@ -564,11 +564,11 @@
           "refId": "A",
           "datasource": {
             "type": "postgres",
-            "uid": "litellm-db"
+            "uid": "gateway-db"
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(\"startTime\", $__interval), percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (\"completionStartTime\" - \"startTime\"))*1000) AS \"p50 TTFT\", percentile_cont(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (\"completionStartTime\" - \"startTime\"))*1000) AS \"p95 TTFT\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND \"completionStartTime\" IS NOT NULL GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT $__timeGroupAlias(started_at, $__interval), percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (first_token_at - started_at))*1000) AS \"p50 TTFT\", percentile_cont(0.95) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (first_token_at - started_at))*1000) AS \"p95 TTFT\" from requests WHERE $__timeFilter(started_at) AND first_token_at IS NOT NULL GROUP BY 1 ORDER BY 1"
         }
       ],
       "fieldConfig": {
@@ -1009,7 +1009,7 @@
       "title": "People active",
       "datasource": {
         "type": "postgres",
-        "uid": "litellm-db"
+        "uid": "gateway-db"
       },
       "description": "",
       "gridPos": {
@@ -1023,11 +1023,11 @@
           "refId": "A",
           "datasource": {
             "type": "postgres",
-            "uid": "litellm-db"
+            "uid": "gateway-db"
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "select count(distinct coalesce(nullif(s.\"user\",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)')) as v from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\")"
+          "rawSql": "select count(distinct coalesce(s.person, '(unattributed)')) as v from requests s where $__timeFilter(s.started_at)"
         }
       ],
       "fieldConfig": {
@@ -1066,7 +1066,7 @@
       "title": "Requests (attributed)",
       "datasource": {
         "type": "postgres",
-        "uid": "litellm-db"
+        "uid": "gateway-db"
       },
       "description": "Requests the gateway took, every surface. Refusals for a key's rate limit are not counted: they are under Refused by rate limits.",
       "gridPos": {
@@ -1080,11 +1080,11 @@
           "refId": "A",
           "datasource": {
             "type": "postgres",
-            "uid": "litellm-db"
+            "uid": "gateway-db"
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "select count(*) as v from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\") and coalesce(s.metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError'"
+          "rawSql": "select count(*) as v from requests s where $__timeFilter(s.started_at) and s.status <> 'refused'"
         }
       ],
       "fieldConfig": {
@@ -1123,7 +1123,7 @@
       "title": "Tokens (attributed)",
       "datasource": {
         "type": "postgres",
-        "uid": "litellm-db"
+        "uid": "gateway-db"
       },
       "description": "",
       "gridPos": {
@@ -1137,11 +1137,11 @@
           "refId": "A",
           "datasource": {
             "type": "postgres",
-            "uid": "litellm-db"
+            "uid": "gateway-db"
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "select coalesce(sum(s.total_tokens),0) as v from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\")"
+          "rawSql": "select coalesce(sum(s.total_tokens),0) as v from requests s where $__timeFilter(s.started_at)"
         }
       ],
       "fieldConfig": {
@@ -1180,7 +1180,7 @@
       "title": "Spend",
       "datasource": {
         "type": "postgres",
-        "uid": "litellm-db"
+        "uid": "gateway-db"
       },
       "description": "",
       "gridPos": {
@@ -1194,11 +1194,11 @@
           "refId": "A",
           "datasource": {
             "type": "postgres",
-            "uid": "litellm-db"
+            "uid": "gateway-db"
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "select round(coalesce(sum(s.spend),0)::numeric,4) as v from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\")"
+          "rawSql": "select round(coalesce(sum(s.cost),0)::numeric,4) as v from requests s where $__timeFilter(s.started_at)"
         }
       ],
       "fieldConfig": {
@@ -1238,7 +1238,7 @@
       "title": "Per person — every surface combined",
       "datasource": {
         "type": "postgres",
-        "uid": "litellm-db"
+        "uid": "gateway-db"
       },
       "description": "One row per person, API and web UI summed. This is the number to bill, quota or argue about.",
       "gridPos": {
@@ -1252,11 +1252,11 @@
           "refId": "A",
           "datasource": {
             "type": "postgres",
-            "uid": "litellm-db"
+            "uid": "gateway-db"
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "select coalesce(nullif(s.\"user\",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)') as \"Person\", count(*) as \"Requests\", coalesce(sum(s.prompt_tokens),0) as \"Prompt\", coalesce(sum(s.completion_tokens),0) as \"Completion\", coalesce(sum(s.total_tokens),0) as \"Tokens\", round(coalesce(sum(s.spend),0)::numeric,4) as \"Spend\", count(distinct coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)')) as \"Keys used\", string_agg(distinct case when coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') = 'chat' then 'Chat' when coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') = '(master key)' then 'Master key (unattributed)' else 'API / agent' end, ', ') as \"Surfaces\" from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\") and coalesce(s.metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError' group by 1 order by 5 desc nulls last"
+          "rawSql": "select coalesce(s.person, '(unattributed)') as \"Person\", count(*) as \"Requests\", coalesce(sum(s.prompt_tokens),0) as \"Prompt\", coalesce(sum(s.completion_tokens),0) as \"Completion\", coalesce(sum(s.total_tokens),0) as \"Tokens\", round(coalesce(sum(s.cost),0)::numeric,4) as \"Spend\", count(distinct coalesce(s.key_alias, s.surface)) as \"Keys used\", string_agg(distinct case s.surface when 'chat' then 'Chat' when 'app' then 'Arena itself' when 'studio' then 'Code Studio' when 'media' then 'Pictures, video, sound' else 'API / agent' end, ', ') as \"Surfaces\" from requests s where $__timeFilter(s.started_at) and s.status <> 'refused' group by 1 order by 5 desc nulls last"
         }
       ],
       "fieldConfig": {
@@ -1276,7 +1276,7 @@
       "title": "Tokens per day, by person",
       "datasource": {
         "type": "postgres",
-        "uid": "litellm-db"
+        "uid": "gateway-db"
       },
       "description": "",
       "gridPos": {
@@ -1290,11 +1290,11 @@
           "refId": "A",
           "datasource": {
             "type": "postgres",
-            "uid": "litellm-db"
+            "uid": "gateway-db"
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "select $__timeGroupAlias(s.\"startTime\", 1d), coalesce(nullif(s.\"user\",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)') as metric, coalesce(sum(s.total_tokens),0) as tokens from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\") group by 1,2 order by 1"
+          "rawSql": "select $__timeGroupAlias(s.started_at, 1d), coalesce(s.person, '(unattributed)') as metric, coalesce(sum(s.total_tokens),0) as tokens from requests s where $__timeFilter(s.started_at) group by 1,2 order by 1"
         }
       ],
       "fieldConfig": {
@@ -1330,7 +1330,7 @@
       "title": "Tokens and cost per person",
       "datasource": {
         "type": "postgres",
-        "uid": "litellm-db"
+        "uid": "gateway-db"
       },
       "gridPos": {
         "h": 9,
@@ -1343,12 +1343,12 @@
         {
           "datasource": {
             "type": "postgres",
-            "uid": "litellm-db"
+            "uid": "gateway-db"
           },
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "select coalesce(nullif(s.\"user\",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)') as \"Person\", count(*) as \"Requests\", sum(greatest(coalesce(s.prompt_tokens,0) - coalesce((s.metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0), 0)) as \"Input, cache miss\", sum(coalesce((s.metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0)) as \"Input, cache hit\", round(100.0*sum(coalesce((s.metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0))/nullif(sum(coalesce(s.prompt_tokens,0)),0),1) as \"Cache hit %\", sum(coalesce(s.completion_tokens,0)) as \"Output\", round(sum(s.spend)::numeric,4) as \"Cost\" from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\") and coalesce(s.metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError' group by 1 order by \"Cost\" desc nulls last",
+          "rawSql": "select coalesce(s.person, '(unattributed)') as \"Person\", count(*) as \"Requests\", sum(greatest(coalesce(s.prompt_tokens,0) - s.cached_tokens, 0)) as \"Input, cache miss\", sum(s.cached_tokens) as \"Input, cache hit\", round(100.0*sum(s.cached_tokens)/nullif(sum(coalesce(s.prompt_tokens,0)),0),1) as \"Cache hit %\", sum(coalesce(s.completion_tokens,0)) as \"Output\", round(sum(s.cost)::numeric,4) as \"Cost\" from requests s where $__timeFilter(s.started_at) and s.status <> 'refused' group by 1 order by \"Cost\" desc nulls last",
           "refId": "A"
         }
       ],
@@ -1378,7 +1378,7 @@
       "title": "By model",
       "datasource": {
         "type": "postgres",
-        "uid": "litellm-db"
+        "uid": "gateway-db"
       },
       "description": "Per model: requests, tokens, the share of prompt tokens read from the engine's cache, the median time and the spend.",
       "gridPos": {
@@ -1392,11 +1392,11 @@
           "refId": "A",
           "datasource": {
             "type": "postgres",
-            "uid": "litellm-db"
+            "uid": "gateway-db"
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT model AS \"Model\", count(*) AS \"Requests\", COALESCE(sum(prompt_tokens),0) AS \"Prompt tokens\", COALESCE(sum(completion_tokens),0) AS \"Completion tokens\", COALESCE(round(100.0*sum(coalesce((metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0))/NULLIF(sum(coalesce(prompt_tokens,0)),0),1),0) AS \"Cache hit %\", round(COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY request_duration_ms),0)::numeric,0) AS \"p50 ms\", round(COALESCE(sum(spend),0)::numeric,4) AS \"Spend\" FROM \"LiteLLM_SpendLogs\" WHERE $__timeFilter(\"startTime\") AND coalesce(metadata->'error_information'->>'error_class','') <> 'ProxyRateLimitError' GROUP BY 1 ORDER BY 2 DESC"
+          "rawSql": "SELECT model AS \"Model\", count(*) AS \"Requests\", COALESCE(sum(prompt_tokens),0) AS \"Prompt tokens\", COALESCE(sum(completion_tokens),0) AS \"Completion tokens\", COALESCE(round(100.0*sum(cached_tokens)/NULLIF(sum(coalesce(prompt_tokens,0)),0),1),0) AS \"Cache hit %\", round(COALESCE(percentile_cont(0.5) WITHIN GROUP (ORDER BY duration_ms),0)::numeric,0) AS \"p50 ms\", round(COALESCE(sum(cost),0)::numeric,4) AS \"Spend\" from requests WHERE $__timeFilter(started_at) AND status <> 'refused' GROUP BY 1 ORDER BY 2 DESC"
         }
       ],
       "fieldConfig": {
@@ -1416,7 +1416,7 @@
       "title": "Refused by rate limits",
       "datasource": {
         "type": "postgres",
-        "uid": "litellm-db"
+        "uid": "gateway-db"
       },
       "description": "API requests the gateway refused (HTTP 429) for a key's rate limits: requests a minute, tokens a minute, or requests at once. Who, with which key, which limit, how often and when last. They are not counted as requests in the other panels. Refusals for credit are not here. The gateway keeps no prompt or answer with a refusal.",
       "gridPos": {
@@ -1430,11 +1430,11 @@
           "refId": "A",
           "datasource": {
             "type": "postgres",
-            "uid": "litellm-db"
+            "uid": "gateway-db"
           },
           "format": "table",
           "rawQuery": true,
-          "rawSql": "select coalesce(nullif(s.\"user\",''), s.metadata->>'user_api_key_user_id', v.user_id, nullif(s.end_user,''), '(unattributed)') as \"Person\", coalesce(s.metadata->>'user_api_key_alias', v.key_alias, '(master key)') as \"Key\", case substring(s.metadata->'error_information'->>'error_message' from 'Limit type: ([a-z_]+)') when 'requests' then 'requests a minute' when 'tokens' then 'tokens a minute' when 'max_parallel_requests' then 'requests at once' else 'other' end as \"Limit\", count(*) as \"Refused\", max(s.\"startTime\") as \"Last\" from \"LiteLLM_SpendLogs\" s left join \"LiteLLM_VerificationToken\" v on v.token = s.api_key where $__timeFilter(s.\"startTime\") and s.status = 'failure' and s.metadata->'error_information'->>'error_class' = 'ProxyRateLimitError' group by 1,2,3 order by 4 desc, 5 desc"
+          "rawSql": "select coalesce(s.person, '(unattributed)') as \"Person\", coalesce(s.key_alias, s.surface) as \"Key\", case s.refusal when 'rpm' then 'requests a minute' when 'tpm' then 'tokens a minute' when 'parallel' then 'requests at once' else 'other' end as \"Limit\", count(*) as \"Refused\", max(s.started_at) as \"Last\" from requests s where $__timeFilter(s.started_at) and s.status = 'refused' and s.refusal in ('rpm', 'tpm', 'parallel') group by 1,2,3 order by 4 desc, 5 desc"
         }
       ],
       "fieldConfig": {

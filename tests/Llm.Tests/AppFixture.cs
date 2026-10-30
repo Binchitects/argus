@@ -144,16 +144,24 @@ public sealed class AppFixture : IAsyncLifetime
     /// <param name="services">Test services of its own (a clock), after the fakes.</param>
     public WebApplicationFactory<Program> Create(string connectionString, ILiteLlm gateway, IDictionary<string, string?>? settings = null, Action<IServiceCollection>? services = null)
     {
-        var factory = Build(connectionString, gateway, settings, services);
-        _apps.Add(new WeakReference<WebApplicationFactory<Program>>(factory));
-        return factory;
+        WebApplicationFactory<Program>? made = null;
+        // Known to MirrorAsync once it has started (its services built): one never started is left so.
+        made = Build(connectionString, gateway, settings, s =>
+        {
+            services?.Invoke(s);
+            if (made is not null)
+            {
+                _apps.Add(new WeakReference<WebApplicationFactory<Program>>(made));
+            }
+        });
+        return made;
     }
 
     private readonly System.Collections.Concurrent.ConcurrentBag<WeakReference<WebApplicationFactory<Program>>> _apps = [];
 
     /// <summary>
-    /// What a test wrote into LiteLLM's request log, brought into each app's own ledger (gateway.requests), as the
-    /// leader's mirror does every few seconds: the apps read the ledger, and each read the shared log before.
+    /// What a test wrote into LiteLLM's request log, brought into the ledger (gateway.requests) of each app that has
+    /// started, as the leader's mirror does every few seconds: the apps read the ledger, and each read the shared log before.
     /// </summary>
     public async Task MirrorAsync()
     {
@@ -165,29 +173,17 @@ public sealed class AppFixture : IAsyncLifetime
             }
             try
             {
-                var import = f.Services.GetRequiredService<Llm.Api.Gateway.LedgerImport>();
-                while (await import.ImportAsync(CancellationToken.None) > 0 && await MoreAsync(f))
+                var import = f.Services.GetRequiredService<LedgerImport>();
+                while (await import.ImportAsync(CancellationToken.None) == LedgerImport.Batch)
                 {
-                    // Batches until it has caught up.
+                    // A full batch: there is more.
                 }
             }
-            catch (ObjectDisposedException)
+            catch (Exception e) when (e is ObjectDisposedException or Npgsql.NpgsqlException or InvalidOperationException)
             {
-                // An app its test is done with.
+                // An app its test is done with (disposed, or its database gone).
             }
         }
-    }
-
-    /// <summary>Whether LiteLLM's log has rows this app's ledger has not: a mirror that read a full batch reads on.</summary>
-    private async Task<bool> MoreAsync(WebApplicationFactory<Program> f)
-    {
-        await using var scope = f.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
-        var have = await db.GatewayRequests.CountAsync(r => r.SourceId != null);
-        await using var conn = new Npgsql.NpgsqlConnection(LitellmConnectionString);
-        await conn.OpenAsync();
-        await using var count = new Npgsql.NpgsqlCommand("select count(*) from \"LiteLLM_SpendLogs\"", conn);
-        return (long)(await count.ExecuteScalarAsync())! > have;
     }
 
     private WebApplicationFactory<Program> Build(string connectionString, ILiteLlm gateway, IDictionary<string, string?>? settings, Action<IServiceCollection>? services) =>

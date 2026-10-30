@@ -60,9 +60,9 @@ public static class UsageEndpoints
             ["to"] = to.ToUniversalTime(),
             ["secs"] = interval.TotalSeconds,
         };
-        // The app's own ledger: each request already put to its person. A rate limit's refusal is not counted, as the
-        // dashboards count today (one refused for credit is, until they read the ledger too).
-        const string Where = " from gateway.requests r where r.person = @me and r.started_at between @from and @to and not (r.status = 'refused' and r.refusal in ('rpm', 'tpm', 'parallel')) ";
+        // The app's own ledger: each request already put to its person. A refusal (a limit, a budget) never reached a model,
+        // and is not counted, as the dashboards do not count it.
+        const string Where = " from gateway.requests r where r.person = @me and r.started_at between @from and @to and r.status <> 'refused' ";
         try
         {
             var totals = await ledger.QueryAsync($"""

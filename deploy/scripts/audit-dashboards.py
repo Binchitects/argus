@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SQL_UID = "litellm-db"
+SQL_UIDS = {"litellm-db", "gateway-db"}
 
 
 def env(key, default=""):
@@ -110,8 +110,8 @@ def main():
         for p in d["panels"]:
             if p["type"] in ("row", "text") or not p.get("supported"):
                 continue
-            # Usage panels read the gateway's database: a month, as their page opens.
-            span = 30 * 86400 if SQL_UID in p.get("datasources", []) else seconds(window)
+            # Usage panels read the requests' tables: a month, as their page opens.
+            span = 30 * 86400 if SQL_UIDS & set(p.get("datasources", [])) else seconds(window)
             code, r = call(f"/api/dashboards/{d['uid']}/panels/{p['key']}/query",
                            {"from": iso(now - span), "to": iso(now), "maxDataPoints": 400})
             unit = ((p.get("fieldConfig") or {}).get("defaults") or {}).get("unit", "")

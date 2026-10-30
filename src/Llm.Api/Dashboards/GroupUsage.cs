@@ -34,7 +34,7 @@ public static class GroupUsage
         Dictionary<string, Used> byPerson;
         try
         {
-            // Each person's from the app's own ledger (a rate limit's refusal left out, as the dashboards leave it).
+            // Each person's from the app's own ledger (a refusal left out, as the dashboards leave it).
             var rows = await sql.QueryAsync("""
                 select r.person, count(*) as requests,
                        coalesce(sum(greatest(r.prompt_tokens - r.cached_tokens, 0)),0) as input_miss,
@@ -42,7 +42,7 @@ public static class GroupUsage
                        coalesce(sum(r.completion_tokens),0) as output,
                        coalesce(sum(r.cost),0) as cost
                 from gateway.requests r
-                where r.started_at >= @from and r.started_at < @to and r.person is not null and not (r.status = 'refused' and r.refusal in ('rpm', 'tpm', 'parallel'))
+                where r.started_at >= @from and r.started_at < @to and r.person is not null and r.status <> 'refused'
                 group by 1
                 """, new Dictionary<string, object> { ["from"] = from.ToUniversalTime(), ["to"] = to.ToUniversalTime() }, ct);
             byPerson = rows.Rows.ToDictionary(r => (string)r[0]!, r => new Used(Num(r[1]), Num(r[2]), Num(r[3]), Num(r[4]), Convert.ToDecimal(r[5] ?? 0m, CultureInfo.InvariantCulture)),
