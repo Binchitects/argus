@@ -216,7 +216,7 @@ services:
   # nothing is pulled while the profile is off). fake-gpu.yml runs it with the fake vLLM instead.
   vllm:
     <<: [*service, *gpu]
-    image: ${VLLM_IMAGE:-nvcr.io/nvidia/vllm:26.09-py3}
+    image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.31.0}
     container_name: vllm
     profiles: [vllm]
     entrypoint: [/bin/sh, /vllm/supervisor.sh]
@@ -620,11 +620,11 @@ services:
     container_name: gpu-exporter
 
   # Data-centre GPU detail (PCIe and NVLink throughput, SM and tensor activity, XID, ECC and retired pages)
-  # for the GPU Hardware dashboard's DCGM section. Bare-metal Linux only (not WSL2), and its image is on
-  # NVIDIA's registry (nvcr.io): COMPOSE_PROFILES=dcgm turns it on; the installer offers it where it can.
+  # for the GPU Hardware dashboard's DCGM section. Bare-metal Linux only (not WSL2); NVIDIA's own image on Docker Hub
+  # (nvcr.io has the same, where it is reachable): COMPOSE_PROFILES=dcgm turns it on; the installer offers it where it can.
   dcgm-exporter:
     <<: [*service, *gpu]
-    image: ${DCGM_EXPORTER_IMAGE:-nvcr.io/nvidia/k8s/dcgm-exporter:4.6.0-4.8.3-ubuntu22.04}
+    image: ${DCGM_EXPORTER_IMAGE:-nvidia/dcgm-exporter:4.6.1-4.8.4}
     container_name: dcgm-exporter
     profiles: [dcgm]
     cap_add: [SYS_ADMIN]
