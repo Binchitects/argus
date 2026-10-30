@@ -63,7 +63,7 @@ function Preview({ m }: { m: SearchMatch }) {
  * include and leave out. A result opens its file at the match. With Replace
  * shown, what it finds is replaced in one file or in all of them.
  */
-export function SearchPanel({ focusKey, replaceKey = 0 }: { focusKey: number; replaceKey?: number }) {
+export function SearchPanel({ focusKey, replaceKey = 0, searchIn }: { focusKey: number; replaceKey?: number; searchIn?: { include: string; at: number } }) {
   const editor = useEditor()
   const [text, setText] = useState('')
   const [options, setOptions] = useState({ case: false, word: false, regex: false })
@@ -102,6 +102,15 @@ export function SearchPanel({ focusKey, replaceKey = 0 }: { focusKey: number; re
   useEffect(() => {
     if (focusKey > 0) box.current?.focus()
   }, [focusKey])
+  // Find in Folder (the Explorer's menu): the folder as the files to include, and the focus in the search box.
+  const [searchInAt, setSearchInAt] = useState(searchIn?.at)
+  if (searchIn && searchIn.at !== searchInAt) {
+    setSearchInAt(searchIn.at)
+    setInclude(searchIn.include ? `./${searchIn.include}` : '')
+  }
+  useEffect(() => {
+    if (searchIn) box.current?.focus()
+  }, [searchIn])
   // "Replace in Files" (Ctrl+Shift+H): the replace box shows.
   const [replaceAsked, setReplaceAsked] = useState(replaceKey)
   if (replaceKey !== replaceAsked) {

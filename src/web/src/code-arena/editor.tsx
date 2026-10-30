@@ -1548,7 +1548,13 @@ const quickModes = [
 ] as const
 
 function QuickOpen() {
-  const { quickOpen, setQuickOpen, open, tabs, active, quickText: typed, setQuickText: setTyped } = useEditor()
+  const { quickOpen, setQuickOpen, open: openFile, tabs, active, quickText: typed, setQuickText: setTyped, focusEditor } = useEditor()
+  // A file opened from here has the focus, as in VS Code: not what had it before (a row of the Explorer, say).
+  const opened = useRef(false)
+  const open: typeof openFile = (...args) => {
+    opened.current = true
+    return openFile(...args)
+  }
   const mode = typed.startsWith('#') ? 'folder' : typed.startsWith('@') ? 'file' : typed.startsWith('?') ? 'help' : 'files'
   const all = useQuery({ ...allFilesQuery, enabled: quickOpen && mode === 'files', staleTime: 10_000 })
   // The symbols asked for once typing pauses: one request as a name is typed, not one a letter.
@@ -1597,6 +1603,12 @@ function QuickOpen() {
       onOpenChange={(o) => {
         setQuickOpen(o)
         if (!o) setTyped('')
+      }}
+      onCloseAutoFocus={(e) => {
+        if (!opened.current) return
+        opened.current = false
+        e.preventDefault()
+        focusEditor()
       }}
       title={title}
       description={description}
@@ -2006,6 +2018,7 @@ function TabMenu({ tab }: { tab: Tab }) {
           {separator}
           {item('Copy Path', () => run('workbench.action.files.copyPathOfActiveFile'))}
           {item('Copy Relative Path', () => run('copyRelativeFilePath'))}
+          {(tab.kind === 'file' || tab.kind === 'preview') && item('Reveal in Explorer View', () => run('workbench.files.action.showActiveFileInExplorer'))}
         </>
       )}
       {tab.kind === 'file' && (

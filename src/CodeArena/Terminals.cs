@@ -250,12 +250,13 @@ internal sealed class Terminals(Workspace workspace, Config config, Func<string,
     }
 
     /// <summary>
-    /// A new terminal at this size: the person's shell, or the program <paramref name="start"/> names. A terminal whose
+    /// A new terminal at this size: the person's shell (in <paramref name="shellIn"/>, the folder's root when none), or the
+    /// program <paramref name="start"/> names. A terminal whose
     /// program ended, with the same reuse key, gives way to the new one, which keeps its id (a page attached to it
     /// attaches again). Throws IdeError when there are too many or the program is not there, IOException when it does
     /// not start.
     /// </summary>
-    public Terminal Open(int cols, int rows, TerminalStart? start = null)
+    public Terminal Open(int cols, int rows, TerminalStart? start = null, string? shellIn = null)
     {
         lock (_gate)
         {
@@ -282,7 +283,7 @@ internal sealed class Terminals(Workspace workspace, Config config, Func<string,
         }
         // Whatever a task or a run configuration sets.
         vars.Remove("ARENA_API_KEY");
-        var cwd = start?.Cwd ?? workspace.Root;
+        var cwd = start?.Cwd ?? shellIn ?? workspace.Root;
         if (!Directory.Exists(cwd))
         {
             throw new IdeError(400, "bad_config", $"The folder {cwd} is not there.");

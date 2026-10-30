@@ -98,6 +98,7 @@ public sealed class SourceControlTests : IDisposable
         var status = await web.GetJsonAsync("/api/git/status");
         Assert.Equal("main", status["branch"]!.GetValue<string>());
         Assert.Equal(new Dictionary<string, (string?, string?)> { ["src/app.ts"] = (null, "M"), ["notes.txt"] = (null, "?") }, Files(status));
+        Assert.Empty(status["ignored"]!.AsArray());
 
         // The last commit's, for the compare (now is the file's own).
         Assert.Equal("const total = 1\n", (await web.GetJsonAsync("/api/git/show?path=src%2Fapp.ts&rev=HEAD"))["text"]!.GetValue<string>());
@@ -131,6 +132,24 @@ public sealed class SourceControlTests : IDisposable
 
         // Outside the folder: refused.
         Assert.Equal(HttpStatusCode.Forbidden, (await web.PostAsync("/api/git/stage", new JsonObject { ["paths"] = new JsonArray("../x") })).StatusCode);
+    }
+
+    [Fact]
+    public async Task What_the_repository_ignores_is_listed_a_folder_once()
+    {
+        using var h = new Harness(_gateway, _mcp, c => c["autoCommit"] = false);
+        Git(h.Work, "init", "-q", "-b", "main");
+        h.Write(".gitignore", "build/\n*.log\n");
+        h.Write("src/app.ts", "const total = 1\n");
+        h.Write("build/out.js", "x\n");
+        h.Write("build/deep/more.js", "x\n");
+        h.Write("src/debug.log", "x\n");
+        await using var web = await WebRun.StartAsync(h);
+
+        var status = await web.GetJsonAsync("/api/git/status");
+        Assert.Equal(["build", "src/debug.log"], status["ignored"]!.AsArray().Select(p => p!.GetValue<string>()).Order(StringComparer.Ordinal));
+        // Not listed as changed.
+        Assert.DoesNotContain("build/out.js", Files(status).Keys);
     }
 
     [Fact]

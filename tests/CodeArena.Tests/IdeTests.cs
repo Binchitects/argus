@@ -18,6 +18,21 @@ public sealed class IdeTests : IDisposable
     private readonly FakeMcp _mcp = new();
 
     [Fact]
+    public async Task A_terminal_opens_in_a_folder_of_the_folders_and_no_other()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        h.Write("src/app.txt", "one\n");
+        await using var web = await WebRun.StartAsync(h);
+        var opened = await web.PostAsync("/api/terminals", new JsonObject { ["cols"] = 80, ["rows"] = 24, ["cwd"] = "src" });
+        Assert.Equal(HttpStatusCode.OK, opened.StatusCode);
+        foreach (var outside in new[] { "..", "/", "missing" })
+        {
+            var refused = await web.PostAsync("/api/terminals", new JsonObject { ["cols"] = 80, ["rows"] = 24, ["cwd"] = outside });
+            Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+        }
+    }
+
+    [Fact]
     public async Task Files_are_listed_read_saved_made_renamed_and_deleted_inside_the_working_directory()
     {
         using var h = new Harness(_gateway, _mcp);
@@ -314,6 +329,21 @@ public sealed class IdeTests : IDisposable
         await terminal.TypeAsync("exit\r");
         Assert.Equal(0, await terminal.ExitAsync());
         Assert.DoesNotContain("sk-not-for-the-shell", terminal.Text);
+    }
+
+    [Fact]
+    public async Task Find_in_Folder_searches_that_folder_of_the_root_and_not_one_of_its_name_deeper_down()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        h.Write("src/app.ts", "value\n");
+        h.Write("lib/src/deep.ts", "value\n");
+        h.Write("src.ts", "value\n");
+        await using var web = await WebRun.StartAsync(h);
+        static string[] Files(JsonNode r) => [.. r["files"]!.AsArray().Select(f => f!["path"]!.GetValue<string>()).Order(StringComparer.Ordinal)];
+
+        Assert.Equal(["lib/src/deep.ts", "src.ts", "src/app.ts"], Files(await web.GetJsonAsync("/api/search?q=value")));
+        Assert.Equal(["src/app.ts"], Files(await web.GetJsonAsync("/api/search?q=value&include=" + Uri.EscapeDataString("./src"))));
+        Assert.Equal(["lib/src/deep.ts"], Files(await web.GetJsonAsync("/api/search?q=value&include=" + Uri.EscapeDataString("./lib/src/"))));
     }
 
     [Fact]

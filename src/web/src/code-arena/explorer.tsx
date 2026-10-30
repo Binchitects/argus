@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronRight, ChevronsDownUp, Columns2, Copy, FilePlus, FolderInput, FolderOpen, FolderPlus, GitCompareArrows, MessageSquarePlus, Pencil, RefreshCw, SquareDashedMousePointer, Trash2, X } from 'lucide-react'
+import { ChevronRight, ChevronsDownUp, Columns2, Copy, FilePlus, FileSearch, FolderInput, FolderOpen, FolderPlus, GitCompareArrows, Link, MessageSquarePlus, Pencil, RefreshCw, SquareDashedMousePointer, SquareTerminal, Trash2, X } from 'lucide-react'
 import { ContextMenu } from 'radix-ui'
-import { useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useConfirm } from '@/components/ui/confirm'
 import { menuContent, menuItem } from '@/components/ui/dropdown-menu'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -13,7 +13,11 @@ import { useEditor } from './editor-state'
 import { useIconTheme } from './extensions'
 import { FileIcon, FolderIcon } from './file-icon'
 import { PartHelp } from './help'
-import { changesQuery, createEntry, deleteEntry, folderQuery, join, nameOf, parentOf, renameEntry, within, type Change, type Entry } from './ide-api'
+import { changesQuery, createEntry, deleteEntry, folderQuery, gitStatusQuery, join, nameOf, parentOf, renameEntry, within, type Change, type Entry, type GitFile } from './ide-api'
+import { takeReveal, useReveal } from './explorer-reveal'
+import { useProblems } from './problems-store'
+import { useSettings } from './settings'
+import { wholePath } from './whole-path'
 import { chatBridge } from './bridge'
 import { runCommand, useCommands } from './commands'
 import { useKeyFor } from './keyboard'
@@ -27,23 +31,81 @@ interface Target {
   kind: 'file' | 'dir'
 }
 
-/** What a tree row shows: the agent's change to it, or that one is under it. */
+/** A file's change as git has it, as VS Code's Explorer marks it: modified, untracked, added, renamed. */
+type GitMark = 'M' | 'U' | 'A' | 'R'
+
+/**
+ * What a tree row shows: the agent's change to it, or that one is under it; git's change, and what git ignores; its
+ * problems' errors and warnings, and those under a folder. Colours and letters as the settings have them.
+ */
 interface Marks {
   files: Map<string, Change>
   folders: Set<string>
+  git: Map<string, GitMark>
+  gitFolders: Set<string>
+  ignored: Set<string>
+  errors: Map<string, number>
+  warnings: Map<string, number>
+  errorFolders: Set<string>
+  warningFolders: Set<string>
+  colors: boolean
+  badges: boolean
 }
 
+const above = (path: string, into: Set<string>) => {
+  for (let p = parentOf(path); p; p = parentOf(p)) into.add(p)
+}
+
+const gitMarkOf = (f: GitFile): GitMark | null =>
+  f.changed === '?' ? 'U' : f.staged === 'R' ? 'R' : f.staged === 'A' && !f.changed ? 'A' : f.changed === 'D' || (f.staged === 'D' && !f.changed) ? null : 'M'
+
 /** The changed files, and every folder above one. */
-function marksOf(changes: Change[] | undefined): Marks {
-  const files = new Map<string, Change>()
-  const folders = new Set<string>()
+function marksOf(
+  changes: Change[] | undefined,
+  git: { files?: GitFile[]; ignored?: string[] } | undefined,
+  problems: { path: string; severity: string }[],
+  settings: { colors: boolean; badges: boolean; git: boolean; problems: boolean },
+): Marks {
+  const m: Marks = {
+    files: new Map(), folders: new Set(), git: new Map(), gitFolders: new Set(), ignored: new Set(), errors: new Map(), warnings: new Map(),
+    errorFolders: new Set(), warningFolders: new Set(), colors: settings.colors, badges: settings.badges,
+  }
   for (const c of changes ?? []) {
     if (c.deleted) continue
-    files.set(c.path, c)
-    for (let p = parentOf(c.path); p; p = parentOf(p)) folders.add(p)
+    m.files.set(c.path, c)
+    above(c.path, m.folders)
   }
-  return { files, folders }
+  if (settings.git) {
+    for (const f of git?.files ?? []) {
+      const mark = gitMarkOf(f)
+      if (!mark) continue
+      m.git.set(f.path, mark)
+      above(f.path, m.gitFolders)
+    }
+    for (const p of git?.ignored ?? []) m.ignored.add(p)
+  }
+  if (settings.problems) {
+    for (const p of problems) {
+      if (p.severity === 'error') {
+        m.errors.set(p.path, (m.errors.get(p.path) ?? 0) + 1)
+        above(p.path, m.errorFolders)
+      } else if (p.severity === 'warning') {
+        m.warnings.set(p.path, (m.warnings.get(p.path) ?? 0) + 1)
+        above(p.path, m.warningFolders)
+      }
+    }
+  }
+  return m
 }
+
+/** Whether git ignores this path: it, or a folder above it. */
+const ignoredIn = (marks: Marks, path: string) => {
+  if (marks.ignored.size === 0) return false
+  for (let p = path; p; p = parentOf(p)) if (marks.ignored.has(p)) return true
+  return false
+}
+
+const gitWords: Record<GitMark, string> = { M: 'modified', U: 'untracked', A: 'added', R: 'renamed' }
 
 /** A row being made (a new file or folder) or renamed: its name typed in place. */
 type Editing = { kind: 'new'; parent: string; type: 'file' | 'dir' } | { kind: 'rename'; path: string }
@@ -54,17 +116,60 @@ type Editing = { kind: 'new'; parent: string; type: 'file' | 'dir' } | { kind: '
  * toolbar, the keys or the context menu; the files the agent changed are
  * marked, as an editor marks a repository's changes.
  */
-export function Explorer({ project, onOpenChanges }: { project: string; onOpenChanges: (path: string) => void }) {
+export function Explorer({
+  project,
+  folder,
+  onOpenChanges,
+  onFindIn,
+  onTerminalIn,
+}: {
+  project: string
+  /** The folder's full path, for Copy Path. */
+  folder: string
+  onOpenChanges: (path: string) => void
+  /** Find in Folder: Search, with the folder as the files to include. */
+  onFindIn: (folder: string) => void
+  /** Open in Integrated Terminal: a shell in that folder. */
+  onTerminalIn: (folder: string) => void
+}) {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const editor = useEditor()
+  const settings = useSettings()
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [selected, setSelected] = useState<Target | null>(null)
   const [editing, setEditing] = useState<Editing | null>(null)
   const [menuFor, setMenuFor] = useState<Target | null>(null)
   const root = useQuery({ ...folderQuery(''), refetchOnWindowFocus: true })
   const changes = useQuery(changesQuery)
-  const marks = marksOf(changes.data)
+  const git = useQuery(gitStatusQuery)
+  const problems = useProblems()
+  const on = (key: string) => settings.get(key) !== false
+  const marks = marksOf(changes.data, git.data, problems, {
+    colors: on('explorer.decorations.colors'), badges: on('explorer.decorations.badges'), git: on('git.decorations.enabled'), problems: on('problems.decorations.enabled'),
+  })
+
+  // Reveal: the file the editor shows (explorer.autoReveal), or one asked for (Reveal in Explorer View): its folders
+  // opened, it selected, and the row scrolled to once it is drawn (its folders' entries may still be on their way).
+  const [scrollTo, setScrollTo] = useState<string | null>(null)
+  const reveal = (path: string, scroll: boolean) => {
+    const folders = new Set<string>()
+    above(path, folders)
+    setExpanded((s) => (folders.size === 0 || [...folders].every((f) => s.has(f)) ? s : new Set([...s, ...folders])))
+    setSelected({ path, kind: 'file' })
+    if (scroll) setScrollTo(path)
+  }
+  const autoReveal = settings.get('explorer.autoReveal')
+  const shown = editor.active && (editor.active.kind === 'file' || editor.active.kind === 'preview') ? editor.active.path : null
+  const [followed, setFollowed] = useState<string | null>(null)
+  if (shown !== followed) {
+    setFollowed(shown)
+    if (shown && autoReveal !== false && autoReveal !== 'false') reveal(shown, autoReveal !== 'focusNoScroll')
+  }
+  const asked = useReveal()
+  useEffect(() => {
+    if (asked && takeReveal(asked)) reveal(asked.path, asked.scroll)
+  }, [asked])
 
   const toggle = (path: string, open?: boolean) =>
     setExpanded((s) => {
@@ -189,7 +294,10 @@ export function Explorer({ project, onOpenChanges }: { project: string; onOpenCh
     }
   }
 
-  const rows = { expanded, selected, editing, marks, onActivate: activate, onSelect: setSelected, onFinish: (name: string) => void finish(name), onMenu: setMenuFor, onKey }
+  const rows = {
+    expanded, selected, editing, marks, onActivate: activate, onSelect: setSelected, onFinish: (name: string) => void finish(name), onMenu: setMenuFor, onKey,
+    scrollTo, onScrolled: () => setScrollTo(null),
+  }
   // The folders added to the workspace (Add Folder), each a root below this folder's files.
   const folders = useQuery(foldersQuery)
   const added = folders.data?.added ?? []
@@ -278,9 +386,21 @@ export function Explorer({ project, onOpenChanges }: { project: string; onOpenCh
                     )}
                   </>
                 )}
-                <ContextMenu.Item className={menuItem} onSelect={() => void navigator.clipboard?.writeText(at.path).catch(() => undefined)}>
-                  <Copy /> Copy path
+                <ContextMenu.Separator className="-mx-1 my-1 h-px bg-border" />
+                <ContextMenu.Item className={menuItem} onSelect={() => void navigator.clipboard?.writeText(wholePath(folder, at.path)).catch(() => undefined)}>
+                  <Copy /> Copy Path
                 </ContextMenu.Item>
+                <ContextMenu.Item className={menuItem} onSelect={() => void navigator.clipboard?.writeText(at.path).catch(() => undefined)}>
+                  <Copy /> Copy Relative Path
+                </ContextMenu.Item>
+                <ContextMenu.Separator className="-mx-1 my-1 h-px bg-border" />
+                <ContextMenu.Item className={menuItem} onSelect={() => onFindIn(folderFor(at))}>
+                  <FileSearch /> Find in Folder…
+                </ContextMenu.Item>
+                <ContextMenu.Item className={menuItem} onSelect={() => onTerminalIn(folderFor(at))}>
+                  <SquareTerminal /> Open in Integrated Terminal
+                </ContextMenu.Item>
+                <ContextMenu.Separator className="-mx-1 my-1 h-px bg-border" />
                 <ContextMenu.Item className={menuItem} onSelect={() => setEditing({ kind: 'rename', path: at.path })}>
                   <Pencil /> Rename {renameKey && <span className="ml-auto text-xs text-muted-foreground">{renameKey}</span>}
                 </ContextMenu.Item>
@@ -345,12 +465,15 @@ interface RowProps {
   onFinish: (name: string) => void
   onMenu: (t: Target) => void
   onKey: (e: KeyboardEvent<HTMLElement>) => void
+  /** The row to scroll to as it is drawn (a file revealed), and that it was. */
+  scrollTo: string | null
+  onScrolled: () => void
 }
 
 const indent = (level: number) => ({ paddingLeft: `${0.5 + level * 0.75}rem` })
 
 function Row({ entry, level, first, ...props }: RowProps & { entry: Entry; level: number; first?: boolean }) {
-  const { expanded, selected, editing, marks, onActivate, onSelect, onFinish, onMenu, onKey } = props
+  const { expanded, selected, editing, marks, onActivate, onSelect, onFinish, onMenu, onKey, scrollTo, onScrolled } = props
   const dir = entry.kind === 'dir'
   const open = dir && expanded.has(entry.path)
   const target: Target = { path: entry.path, kind: entry.kind }
@@ -358,12 +481,50 @@ function Row({ entry, level, first, ...props }: RowProps & { entry: Entry; level
   const change = marks.files.get(entry.path)
   const changedUnder = dir && marks.folders.has(entry.path)
   const icons = useIconTheme()
+  const described = useId()
+  const rowRef = useRef<HTMLDivElement>(null)
+  // Revealed: scrolled to as it is drawn (its folder's entries may have come after the reveal).
+  const scrollHere = scrollTo === entry.path
+  useEffect(() => {
+    if (!scrollHere) return
+    rowRef.current?.scrollIntoView?.({ block: 'nearest' })
+    onScrolled()
+  }, [scrollHere, onScrolled])
+  const gitMark = dir ? undefined : marks.git.get(entry.path)
+  const errors = dir ? 0 : (marks.errors.get(entry.path) ?? 0)
+  const warnings = dir ? 0 : (marks.warnings.get(entry.path) ?? 0)
+  const errorsUnder = dir && marks.errorFolders.has(entry.path)
+  const warningsUnder = dir && marks.warningFolders.has(entry.path)
+  const ignored = ignoredIn(marks, entry.path)
+  // What the colours and letters say, for a screen reader: git's change, the problems, ignored, a link.
+  const says = [
+    gitMark && gitWords[gitMark],
+    errors > 0 && `${errors} ${errors === 1 ? 'error' : 'errors'}`,
+    warnings > 0 && `${warnings} ${warnings === 1 ? 'warning' : 'warnings'}`,
+    errorsUnder && 'errors in it',
+    !errorsUnder && warningsUnder && 'warnings in it',
+    dir && marks.gitFolders.has(entry.path) && 'git changes in it',
+    ignored && 'ignored by git',
+    entry.link && 'a link',
+  ].filter((x): x is string => !!x)
+  const color = !marks.colors
+    ? undefined
+    : errors > 0 || errorsUnder
+      ? 'text-destructive-ink'
+      : warnings > 0 || warningsUnder
+        ? 'text-warning-ink'
+        : change
+          ? change.created ? 'text-success-ink' : 'text-warning-ink'
+          : gitMark
+            ? gitMark === 'M' || gitMark === 'R' ? 'text-warning-ink' : 'text-success-ink'
+            : dir && marks.gitFolders.has(entry.path) ? 'text-warning-ink' : undefined
   if (editing?.kind === 'rename' && editing.path === entry.path) {
     return <NameInput level={level} type={entry.kind} initial={entry.name} onFinish={onFinish} />
   }
   return (
     <li role="none">
       <div
+        ref={rowRef}
         role="treeitem"
         aria-level={level + 1}
         aria-expanded={dir ? open : undefined}
@@ -372,7 +533,8 @@ function Row({ entry, level, first, ...props }: RowProps & { entry: Entry; level
         aria-label={entry.name + (change ? (change.created ? ', made by the agent' : ', changed by the agent') : '') + (changedUnder && !open ? ', the agent changed files in it' : '')}
         data-path={entry.path}
         data-kind={entry.kind}
-        title={change ? `${entry.path} · ${change.created ? 'made' : 'changed'} by the agent` : entry.path}
+        aria-describedby={says.length > 0 ? described : undefined}
+        title={[entry.path, change && `${change.created ? 'made' : 'changed'} by the agent`, ...says].filter(Boolean).join(' · ')}
         onClick={() => onActivate(target)}
         onDoubleClick={() => target.kind === 'file' && onActivate(target, false)}
         onKeyDown={onKey}
@@ -385,9 +547,15 @@ function Row({ entry, level, first, ...props }: RowProps & { entry: Entry; level
         className={cn(
           'flex h-[1.375rem] cursor-pointer items-center gap-1 pr-2 outline-none select-none hover:bg-accent/70 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset',
           isSelected && 'bg-accent text-accent-foreground',
-          change && (change.created ? 'text-success-ink' : 'text-warning-ink'),
+          color,
+          ignored && 'opacity-60',
         )}
       >
+        {says.length > 0 && (
+          <span id={described} hidden>
+            {says.join(', ')}
+          </span>
+        )}
         {dir ? (
           <>
             {/* An icon theme whose folder icons say open or closed may hide the arrows, as in VS Code. */}
@@ -401,12 +569,27 @@ function Row({ entry, level, first, ...props }: RowProps & { entry: Entry; level
           </>
         )}
         <span className="min-w-0 flex-1 truncate">{entry.name}</span>
-        {change && (
+        {entry.link && <Link className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />}
+        {marks.badges && (errors > 0 || warnings > 0) && (
+          <span className="shrink-0 text-[0.6875rem] font-semibold" aria-hidden="true">
+            {errors > 0 ? errors : warnings}
+          </span>
+        )}
+        {change ? (
           <span className="shrink-0 font-mono text-[0.6875rem] font-semibold" aria-hidden="true">
             {change.created ? 'A' : 'M'}
           </span>
+        ) : (
+          marks.badges && gitMark && (
+            <span className="shrink-0 font-mono text-[0.6875rem] font-semibold" aria-hidden="true">
+              {gitMark}
+            </span>
+          )
         )}
         {changedUnder && !open && <span className="size-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />}
+        {!changedUnder && (errorsUnder || warningsUnder) && marks.colors && !open && (
+          <span className={cn('size-1.5 shrink-0 rounded-full', errorsUnder ? 'bg-destructive' : 'bg-warning')} aria-hidden="true" />
+        )}
       </div>
       {open && <Children path={entry.path} level={level + 1} {...props} />}
     </li>

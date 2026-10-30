@@ -342,10 +342,24 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   them.
 - **Explorer**: the project's files, with New file, New folder, Refresh and
   Collapse at its top. Click opens; a right-click menu has new file, new
-  folder, Copy path, Rename (F2) and Delete (Del, asks first); the arrow
-  keys move through the tree. F2 and Del are the keymap's (`renameFile`,
-  `deleteFile`): keybindings.json changes them or takes them away. The files the agent changed are marked, and so
-  are the folders they are in. A file deleted with unsaved changes keeps its
+  folder, **Copy Path** (the whole path), **Copy Relative Path**, **Find in
+  Folder…** (Search, with the folder as the files to include: `./src/lib`),
+  **Open in Integrated Terminal** (a shell in the folder), Rename (F2) and
+  Delete (Del, asks first); the arrow keys move through the tree. F2 and Del
+  are the keymap's (`renameFile`, `deleteFile`): keybindings.json changes them
+  or takes them away. It follows the file the editor shows, as VS Code's
+  does: its folders open, it is selected and scrolled to
+  (`explorer.autoReveal`: `true`, `false`, or `"focusNoScroll"` to select it
+  without scrolling); **Reveal in Explorer View**, in a tab's menu and the
+  command palette, does it when that is off. The files the agent changed are
+  marked (A, M), and so are the folders they are in; and as in VS Code, git's
+  changes are marked too (M modified, U untracked, A added, R renamed), what
+  the repository ignores is dimmed (a folder its `.gitignore` names, and all
+  in it), a link has an arrow, and a file with problems is coloured with its
+  count (errors red, warnings yellow), and its folders with it. The colours
+  and the letters are `explorer.decorations.colors` and
+  `explorer.decorations.badges`; git's and the problems' are
+  `git.decorations.enabled` and `problems.decorations.enabled`. A file deleted with unsaved changes keeps its
   tab (the question says so): saving it makes the file again. After a reload
   (or the window closed and opened again) the tabs come back as they were,
   pinned and previews too, the one shown at its cursor; and with **hot exit**

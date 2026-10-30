@@ -354,7 +354,9 @@ internal sealed partial class WebApp
                 {
                     var body = Body(req);
                     var start = body["program"] is null ? null : DebuggeeStart(body);
-                    var terminal = await Task.Run(() => _terminals.Open(body.Int("cols") ?? 80, body.Int("rows") ?? 24, start), ct);
+                    // A shell in a folder of the folder's (Open in Integrated Terminal).
+                    var shellIn = start is null && body.Str("cwd") is { Length: > 0 } dir ? FolderInside(dir, "A terminal opens in the folder, or in a folder inside it.") : null;
+                    var terminal = await Task.Run(() => _terminals.Open(body.Int("cols") ?? 80, body.Int("rows") ?? 24, start, shellIn), ct);
                     await res.JsonAsync(200, terminal.Json(), ct);
                     return true;
                 }
@@ -546,12 +548,7 @@ internal sealed partial class WebApp
     {
         var program = body.Str("program") is { Length: > 0 } p ? p : throw new IdeError(400, "invalid", "Say which program to run.");
         var args = body["args"] is JsonArray list ? list.Select(a => a is JsonValue v && v.TryGetValue<string>(out var s) ? s : a?.ToJsonString() ?? "").ToList() : [];
-        string? cwd = null;
-        if (body.Str("cwd") is { Length: > 0 } dir)
-        {
-            var full = Path.GetFullPath(dir, _rt.Workspace.Root);
-            cwd = _rt.Workspace.Inside(full) && Directory.Exists(full) ? full : throw new IdeError(403, "outside", "A debuggee runs in the folder, or in a folder inside it.");
-        }
+        var cwd = body.Str("cwd") is { Length: > 0 } dir ? FolderInside(dir, "A debuggee runs in the folder, or in a folder inside it.") : null;
         var env = new Dictionary<string, string?>(StringComparer.Ordinal);
         foreach (var (key, value) in body["env"] as JsonObject ?? [])
         {
@@ -561,6 +558,13 @@ internal sealed partial class WebApp
             }
         }
         return new TerminalStart(program, args, cwd, env, body.Str("title") ?? Path.GetFileName(program), TerminalKind.Debuggee);
+    }
+
+    /// <summary>A folder of the folder's (or of one added to it), as a full path; 403 for any other, or one not there.</summary>
+    private string FolderInside(string dir, string refusal)
+    {
+        var full = Path.GetFullPath(dir, _rt.Workspace.Root);
+        return _rt.Workspace.Inside(full) && Directory.Exists(full) ? full : throw new IdeError(403, "outside", refusal);
     }
 
     private static string? Query(HttpRequest req, string name) => req.Query.GetValueOrDefault(name);

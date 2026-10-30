@@ -15,11 +15,21 @@ export function CommandDialog({
   shouldFilter,
   value,
   onValueChange,
+  onCloseAutoFocus,
   ...props
-}: ComponentProps<typeof Dialog> & { title: string; description: string; shouldFilter?: boolean; /** The item chosen, when the caller follows it. */ value?: string; onValueChange?: (value: string) => void }) {
+}: ComponentProps<typeof Dialog> & {
+  title: string
+  description: string
+  shouldFilter?: boolean
+  /** The item chosen, when the caller follows it. */
+  value?: string
+  onValueChange?: (value: string) => void
+  /** Where the focus goes as it closes (by default, back where it was). */
+  onCloseAutoFocus?: ComponentProps<typeof DialogContent>['onCloseAutoFocus']
+}) {
   return (
     <Dialog {...props}>
-      <DialogContent className="top-[20%] translate-y-0 overflow-hidden p-0 sm:max-w-xl" hideClose>
+      <DialogContent className="top-[20%] translate-y-0 overflow-hidden p-0 sm:max-w-xl" hideClose onCloseAutoFocus={onCloseAutoFocus}>
         <DialogTitle className="sr-only">{title}</DialogTitle>
         <DialogDescription className="sr-only">{description}</DialogDescription>
         <Command shouldFilter={shouldFilter} value={value} onValueChange={onValueChange} className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground">

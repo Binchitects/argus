@@ -15,6 +15,21 @@ public sealed class TerminalTests : IDisposable
     internal static string Output(Terminal terminal) => Encoding.UTF8.GetString(terminal.Attach().Backlog);
 
     [Fact]
+    public async Task A_shell_opens_in_the_folder_it_is_given()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        var sub = Directory.CreateDirectory(Path.Combine(_root, "src", "lib")).FullName;
+        // The "shell" here prints where it is and ends: what a shell would start in.
+        await using var terminals = new Terminals(new Workspace(_root), new Config { TerminalShell = "/bin/pwd" }, _ => null);
+        var terminal = terminals.Open(80, 24, null, sub);
+        Assert.Equal(0, await terminal.Exited.WaitAsync(TimeSpan.FromSeconds(15)));
+        Assert.Contains(sub + "\r\n", Output(terminal));
+    }
+
+    [Fact]
     public async Task A_terminal_runs_a_named_program_in_its_folder_with_its_variables_and_ends_with_its_exit_code()
     {
         if (OperatingSystem.IsWindows())

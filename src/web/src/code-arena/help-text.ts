@@ -55,7 +55,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   explorer: {
     name: 'Explorer',
-    text: 'The folder\'s files. Click opens one; a right-click has New file, New folder, Copy path, Rename (F2) and Delete. The files the agent changed are marked, and so are the folders they are in. **Outline**, at its foot, lists the symbols of the file shown (the one the cursor is in marked); a click goes to one.',
+    text: 'The folder\'s files, following the file the editor shows. Click opens one; a right-click has New file, New folder, Copy Path, Copy Relative Path, Find in Folder, Open in Integrated Terminal, Rename (F2) and Delete. The files the agent changed are marked, and git\'s changes (M, U, A), what git ignores (dimmed) and the files with problems (red, yellow) too, with their folders. **Outline**, at its foot, lists the symbols of the file shown (the one the cursor is in marked); a click goes to one.',
     manual: 'the-ide',
   },
   search: {

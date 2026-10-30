@@ -3304,6 +3304,94 @@ describe('Code Arena, the IDE, as its review asked', () => {
     expect(fireEvent.keyDown(document.body, { key: 'F7', code: 'F7' })).toBe(true)
   })
 
+  it("follows the file shown, marks git's changes, what it ignores, links and problems, and its menu copies paths, finds in a folder and opens a terminal there", async () => {
+    const folders: Record<string, Entry[]> = {
+      '': [
+        { name: 'build', path: 'build', kind: 'dir' },
+        { name: 'src', path: 'src', kind: 'dir' },
+        { name: 'README.md', path: 'README.md', kind: 'file', size: 7 },
+      ],
+      build: [],
+      src: [
+        { name: 'lib', path: 'src/lib', kind: 'dir' },
+        { name: 'app.ts', path: 'src/app.ts', kind: 'file', size: 34 },
+      ],
+      'src/lib': [
+        { name: 'cart.ts', path: 'src/lib/cart.ts', kind: 'file', size: 10 },
+        { name: 'tax.ts', path: 'src/lib/tax.ts', kind: 'file', size: 10, link: true },
+      ],
+    }
+    const { calls } = backend({
+      'GET /api/files': (_, __, url) => {
+        const path = url.searchParams.get('path') ?? ''
+        return folders[path] ? { json: { path: path || '.', entries: folders[path] } } : { status: 404, json: { status: 'not_found', error: `There is no folder ${path}.` } }
+      },
+      'GET /api/git/status': () => ({
+        json: {
+          repository: true, branch: 'main', ignored: ['build'],
+          files: [{ path: 'README.md', staged: null, changed: 'M', from: null }, { path: 'src/lib/tax.ts', staged: null, changed: '?', from: null }],
+        },
+      }),
+      'GET /api/problems': () => ({
+        json: { command: 'tsc', running: false, ran: '2026-10-11T10:00:00Z', exitCode: 2, said: null, problems: [{ path: 'src/lib/cart.ts', line: 1, column: 1, severity: 'error', code: 'TS1', message: 'Broken.' }] },
+      }),
+    })
+    renderIde()
+    await openApp()
+
+    // Opened by quick open: its folders open in the Explorer, and its row is selected.
+    await userEvent.keyboard('{Control>}p{/Control}')
+    await userEvent.type(await screen.findByLabelText('File to open'), 'cart')
+    await userEvent.keyboard('{Enter}')
+    expect(await within(tabs()).findByRole('tab', { name: 'cart.ts' })).toBeInTheDocument()
+    const cart = await screen.findByRole('treeitem', { name: 'cart.ts' })
+    await waitFor(() => expect(cart).toHaveAttribute('aria-selected', 'true'))
+    expect(screen.getByRole('treeitem', { name: 'lib' })).toHaveAttribute('aria-expanded', 'true')
+
+    // Marked: a problem (and its folders), git's changes, what git ignores (dimmed), and a link.
+    await waitFor(() => expect(cart).toHaveAccessibleDescription('1 error'))
+    expect(cart).toHaveClass('text-destructive-ink')
+    expect(screen.getByRole('treeitem', { name: 'lib' })).toHaveAccessibleDescription('errors in it, git changes in it')
+    expect(screen.getByRole('treeitem', { name: 'README.md' })).toHaveAccessibleDescription('modified')
+    expect(screen.getByRole('treeitem', { name: 'tax.ts' })).toHaveAccessibleDescription('untracked, a link')
+    const build = screen.getByRole('treeitem', { name: 'build' })
+    expect(build).toHaveAccessibleDescription('ignored by git')
+    expect(build).toHaveClass('opacity-60')
+
+    // Copy Path, the whole one and the folder's own.
+    const writeText = vi.fn(() => Promise.resolve())
+    const had = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    onTestFinished(() => {
+      if (had) Object.defineProperty(navigator, 'clipboard', had)
+      else Reflect.deleteProperty(navigator, 'clipboard')
+    })
+    await userEvent.pointer({ keys: '[MouseRight]', target: cart })
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Copy Path' }))
+    expect(writeText).toHaveBeenLastCalledWith('/home/ada/shop/src/lib/cart.ts')
+    await userEvent.pointer({ keys: '[MouseRight]', target: cart })
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Copy Relative Path' }))
+    expect(writeText).toHaveBeenLastCalledWith('src/lib/cart.ts')
+
+    // A shell in the folder.
+    await userEvent.pointer({ keys: '[MouseRight]', target: screen.getByRole('treeitem', { name: 'lib' }) })
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Open in Integrated Terminal' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.path === '/api/terminals').at(-1)?.body).toMatchObject({ cwd: 'src/lib' }))
+
+    // Find in Folder: Search, with the folder to include.
+    await userEvent.pointer({ keys: '[MouseRight]', target: await screen.findByRole('treeitem', { name: 'cart.ts' }) })
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Find in Folder…' }))
+    expect(await screen.findByLabelText('files to include')).toHaveValue('./src/lib')
+
+    // Reveal in Explorer View, from the tab's menu, after the folders were folded.
+    await userEvent.click(screen.getByRole('button', { name: 'Explorer' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Collapse folders' }))
+    expect(screen.queryByRole('treeitem', { name: 'cart.ts' })).not.toBeInTheDocument()
+    await userEvent.pointer({ keys: '[MouseRight]', target: within(tabs()).getByRole('tab', { name: 'cart.ts' }) })
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Reveal in Explorer View' }))
+    await waitFor(() => expect(screen.getByRole('treeitem', { name: 'cart.ts' })).toHaveAttribute('aria-selected', 'true'))
+  })
+
   it("renames and deletes in the explorer with the keymap's keys, which keybindings.json changes", async () => {
     backend({}, {}, { 'keybindings.json': '[{ "key": "f2", "command": "-renameFile" }, { "key": "ctrl+alt+r", "command": "renameFile", "when": "filesExplorerFocus" }]' })
     renderIde()

@@ -23,6 +23,7 @@ import { MemoryPanel } from './memory-panel'
 import { ManageMenu } from './manage-menu'
 import { AccountsMenu } from './accounts-menu'
 import { PlanPanel } from './plan-panel'
+import { revealInExplorer } from './explorer-reveal'
 import { ProblemsPanel } from './problems'
 import { countProblems, useProblems } from './problems-store'
 import { ReviewPanel } from './review'
@@ -34,7 +35,7 @@ import { rankFiles, useEditor } from './editor-state'
 import { Explorer } from './explorer'
 import { HelpProvider } from './help'
 import { useOpenHelp } from './help-context'
-import { openProgram, terminalsQuery, type TerminalInfo } from './ide-api'
+import { openProgram, openTerminal, terminalsQuery, type TerminalInfo } from './ide-api'
 import { allFilesQuery, changesQuery, folderQuery, gitBranchesQuery, gitFileLog, gitLogQuery, gitStatusQuery, readFile, saveWorkspaceState, workspaceStateQuery, type DiskChanges, type WorkspaceState, parentOf, preferencesQuery, problemsQuery, savePreferences, writeFile } from './ide-api'
 import { useDiskChanges } from './disk-watch'
 import { setContext, useKeyboard, useKeyFor } from './keyboard'
@@ -443,6 +444,8 @@ function Workbench({
   const [terminalFocus, setTerminalFocus] = useState(0)
   const [newTerminal, setNewTerminal] = useState(0)
   const [terminalShown, setTerminalShown] = useState<{ id: string; at: number } | undefined>()
+  /** Find in Folder's folder, for Search's files to include. */
+  const [searchIn, setSearchIn] = useState<{ include: string; at: number } | undefined>()
   /** A terminal a task or a run opened: in the list at once, and shown in the panel. */
   const showTerminal = useCallback(
     (t: TerminalInfo | null | undefined) => {
@@ -873,6 +876,18 @@ function Workbench({
     const text = model && piece ? model.getValueInRange({ startLineNumber: piece.startLine, startColumn: 1, endLineNumber: piece.endLine, endColumn: model.getLineMaxColumn(piece.endLine) }) : undefined
     return { file: active?.kind === 'file' && active.path && !active.path.startsWith('user:') ? active.path : undefined, lineNumber: ed.cursor?.line, selectedText: text, settings: settings.all() }
   }
+  /** Open in Integrated Terminal: a shell in a folder of the folder's, shown in the panel. */
+  const terminalIn = async (folder: string) => {
+    try {
+      const t = await openTerminal(80, 24, folder || undefined)
+      setPanelUsed(true)
+      showTerminal(t)
+      change({ panelOpen: true, panelTab: 'terminal' })
+    } catch (e) {
+      toast.error(errorMessage(e))
+    }
+  }
+
   const startOne = async (name: string, noDebug: boolean, group: string | null) => {
     const done = await startConfiguration(name, noDebug, editorContext(), queryClient, group)
     if (!done) return
@@ -1116,6 +1131,17 @@ function Workbench({
       setReplaceKey((n) => n + 1)
     } },
     { id: 'workbench.view.explorer', category: 'View', title: 'Show Explorer', run: () => show('explorer') },
+    {
+      id: 'workbench.files.action.showActiveFileInExplorer',
+      category: 'File',
+      title: 'Reveal Active File in Explorer View',
+      enabled: () => active?.kind === 'file' || active?.kind === 'preview',
+      run: () => {
+        if (active?.kind !== 'file' && active?.kind !== 'preview') return
+        show('explorer')
+        revealInExplorer(active.path)
+      },
+    },
     { id: 'workbench.view.scm', category: 'View', title: 'Show Source Control', run: () => show('git') },
     { id: 'workbench.actions.view.problems', category: 'View', title: 'Show Problems', run: () => show('problems') },
     { id: 'codeArena.view.changes', category: 'View', title: "Show the Agent's Changes", run: () => show('changes') },
@@ -1190,9 +1216,20 @@ function Workbench({
   const viewPart = (v: View, shown: boolean): ReactNode => {
     switch (v) {
       case 'explorer':
-        return <Explorer project={state.project} onOpenChanges={(path) => void openDiff(path)} />
+        return (
+          <Explorer
+            project={state.project}
+            folder={state.folder}
+            onOpenChanges={(path) => void openDiff(path)}
+            onFindIn={(folder) => {
+              setSearchIn({ include: folder, at: Date.now() })
+              show('search')
+            }}
+            onTerminalIn={(folder) => void terminalIn(folder)}
+          />
+        )
       case 'search':
-        return <SearchPanel focusKey={searchFocus} replaceKey={replaceKey} />
+        return <SearchPanel focusKey={searchFocus} replaceKey={replaceKey} searchIn={searchIn} />
       case 'git':
         return <SourceControlPanel />
       case 'debug':

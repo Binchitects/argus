@@ -400,6 +400,8 @@ export interface GitStatus {
   ahead?: number | null
   behind?: number | null
   files?: GitFile[]
+  /** What the repository ignores: a file, or a folder a pattern names (all in it ignored). */
+  ignored?: string[]
 }
 
 export interface GitCommit {
@@ -477,7 +479,8 @@ export const gitSwitch = (branch: string) => api<GitStatus>('/api/git/switch', {
 /** Code completion at the editor's cursor: what goes there (empty: nothing). */
 export const completeCode = (body: { path: string; prefix: string; suffix: string }, signal: AbortSignal) => api<{ text: string }>('/api/complete', { body, signal })
 
-export const openTerminal = (cols: number, rows: number) => api<TerminalInfo>('/api/terminals', { body: { cols, rows } })
+/** A shell in a terminal of its own: in the folder's root, or in a folder of it (Open in Integrated Terminal). */
+export const openTerminal = (cols: number, rows: number, cwd?: string) => api<TerminalInfo>('/api/terminals', { body: cwd ? { cols, rows, cwd } : { cols, rows } })
 
 /** A debuggee's program in a terminal of its own (a debug adapter's runInTerminal). */
 export const openProgram = (body: { program: string; args: string[]; cwd?: string; env?: Record<string, string | null>; title?: string; cols: number; rows: number }) => api<TerminalInfo>('/api/terminals', { body })

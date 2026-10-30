@@ -536,12 +536,18 @@ internal sealed class IdeFiles(Workspace workspace)
         return new JsonObject { ["files"] = changed, ["count"] = total, ["truncated"] = found.Bool("truncated") == true };
     }
 
-    /// <summary>"src/**/*.ts, docs": globs, a name alone matching at any depth, a folder matching what is in it. One not valid is refused (400).</summary>
+    /// <summary>
+    /// "src/**/*.ts, docs": globs, a name alone matching at any depth, a folder matching what is in it; "./src" (Find in
+    /// Folder's) the folder's own src only. One not valid is refused (400).
+    /// </summary>
     private static List<Regex> Globs(string? list)
     {
         try
         {
-            return [.. (list ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).SelectMany(g => new[] { Files.Glob(g), Files.Glob(g.TrimEnd('/') + "/**") })];
+            return [.. (list ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).SelectMany(g =>
+                g.StartsWith("./", StringComparison.Ordinal) && g[2..].TrimEnd('/') is { Length: > 0 } at
+                    ? new[] { new Regex($"^{Regex.Escape(at)}$", RegexOptions.None, TimeSpan.FromSeconds(1)), Files.Glob(at + "/**") }
+                    : [Files.Glob(g), Files.Glob(g.TrimEnd('/') + "/**")])];
         }
         catch (ToolError e)
         {

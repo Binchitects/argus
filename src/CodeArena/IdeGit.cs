@@ -17,6 +17,9 @@ internal sealed partial class IdeGit(Workspace workspace)
     /// <summary>The most files listed.</summary>
     public const int MostFiles = 2_000;
 
+    /// <summary>The most ignored files and folders a status lists.</summary>
+    public const int MostIgnored = 2_000;
+
     /// <summary>The most commits a log lists.</summary>
     public const int MostCommits = 1_000;
 
@@ -84,10 +87,12 @@ internal sealed partial class IdeGit(Workspace workspace)
         }
         var (_, branch) = await Git(workspace.Root, ["rev-parse", "--abbrev-ref", "HEAD"], ct);
         var (counted, counts) = await Git(workspace.Root, ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"], ct);
-        var (_, status) = await Git(workspace.Root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"], ct);
+        // The ignored too, as the Explorer dims them: a folder a pattern names is one entry ("build/"), not its files.
+        var (_, status) = await Git(workspace.Root, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching"], ct);
         var files = new JsonArray();
+        var ignored = new JsonArray();
         var entries = status.Split('\0');
-        for (var i = 0; i < entries.Length && files.Count < MostFiles; i++)
+        for (var i = 0; i < entries.Length && (files.Count < MostFiles || ignored.Count < MostIgnored); i++)
         {
             var e = entries[i];
             if (e.Length < 4)
@@ -95,11 +100,23 @@ internal sealed partial class IdeGit(Workspace workspace)
                 continue;
             }
             var (x, y, path) = (e[0], e[1], e[3..]);
+            if (x == '!')
+            {
+                if (ignored.Count < MostIgnored && Ours(root, path.TrimEnd('/')) is { Length: > 0 } dimmed)
+                {
+                    ignored.Add(dimmed);
+                }
+                continue;
+            }
             string? from = null;
             if (x is 'R' or 'C')
             {
                 // A rename: the next entry is where it was.
                 from = i + 1 < entries.Length ? entries[++i] : null;
+            }
+            if (files.Count >= MostFiles)
+            {
+                continue;
             }
             if (Ours(root, path) is not { } ours)
             {
@@ -121,6 +138,7 @@ internal sealed partial class IdeGit(Workspace workspace)
             ["behind"] = behindAhead.Length == 2 ? int.Parse(behindAhead[0]) : null,
             ["ahead"] = behindAhead.Length == 2 ? int.Parse(behindAhead[1]) : null,
             ["files"] = files,
+            ["ignored"] = ignored,
         };
     }
 
