@@ -416,7 +416,6 @@ public sealed partial class WebTests : IDisposable
         Assert.Empty(fresh["messages"]!.AsArray());
         // An empty session is not made twice.
         Assert.Equal(fresh["id"]!.GetValue<string>(), (await Json(await web.PostAsync("/api/sessions/new", new JsonObject())))["id"]!.GetValue<string>());
-        await Task.Delay(50);
         await (await web.SendAsync("second question")).RestAsync();
 
         var sessions = (await web.GetJsonAsync("/api/sessions")).AsArray();
