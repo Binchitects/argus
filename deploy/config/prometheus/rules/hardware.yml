@@ -31,6 +31,19 @@ groups:
           summary: "GPU temperature critical ({{ $value | printf \"%.0f\" }} degC)"
           description: "Hardware protection may shut down the GPU. Reduce load now."
 
+      # power-limits steps a hot card's power cap down from 83 degC: one held there anyway needs air.
+      - alert: GpuHeldHotDespiteThrottling
+        expr: (nvidia_smi_temperature_gpu > 83 and nvidia_smi_power_limit_watts < nvidia_smi_power_default_limit_watts * 0.6)
+        for: 15m
+        labels:
+          severity: warning
+          component: gpu
+        annotations:
+          summary: "GPU still hot at a low power cap ({{ $value | printf \"%.0f\" }})"
+          description: >-
+            The temperature policy (power-limits, THERMAL_POLICY) has stepped the card's power cap well
+            below its own and it stays above 83 degC: the cooling cannot carry it. Check the fans and airflow.
+
       - alert: GpuMemoryNearlyFull
         expr: >-
           (nvidia_smi_memory_used_bytes / nvidia_smi_memory_total_bytes) > 0.97
@@ -83,6 +96,30 @@ groups:
   - name: host
     interval: 30s
     rules:
+
+      # power-limits steps the CPU's RAPL limit (or its highest frequency) down from 90 degC.
+      - alert: CpuTemperatureHigh
+        expr: max(cpu_temperature_celsius) > 90
+        for: 5m
+        labels:
+          severity: warning
+          component: host
+        annotations:
+          summary: "CPU running hot ({{ $value | printf \"%.0f\" }} degC)"
+          description: >-
+            Sustained above 90 degC for 5 minutes. The temperature policy (power-limits,
+            CPU_TEMP_LIMIT_C) is lowering the CPU's limit; models whose layers run on the CPU slow down.
+            Check the cooler and airflow, or set CPU_POWER_LIMIT_W lower.
+
+      - alert: CpuTemperatureCritical
+        expr: max(cpu_temperature_celsius) > 95
+        for: 2m
+        labels:
+          severity: critical
+          component: host
+        annotations:
+          summary: "CPU temperature critical ({{ $value | printf \"%.0f\" }} degC)"
+          description: "The CPU is at its limit: the temperature policy holds it at its floor. Reduce load now."
 
       - alert: HostMemoryPressure
         expr: >-
