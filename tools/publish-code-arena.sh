@@ -11,8 +11,8 @@
 #
 # --offline needs the .NET runtime and host packs for each system in
 # tools/offline-nuget/ (its README says how to fill it once), at the runtime
-# version the SDK publishes with: without them it builds nothing and exits
-# with 3. Uses dotnet when installed, tools/dn (the SDK in a container) otherwise.
+# version the SDK publishes with: without them, or without another package the
+# restore asks for, it builds nothing and exits with 3. Uses dotnet when installed, tools/dn (the SDK in a container) otherwise.
 #
 # First it builds the web interface's page (code-arena web) from src/web into
 # src/CodeArena/web, which the program embeds: with Node.js and src/web's own
@@ -94,8 +94,13 @@ mkdir -p "$out"
 # Quoted for MSBuild: ; inside a property's value, not between properties.
 all="\"$(IFS=';'; echo "${rids[*]}")\""
 echo "== restore (${rids[*]})"
-"${dotnet[@]}" restore src/CodeArena/CodeArena.csproj "-p:RuntimeIdentifiers=$all" \
-  "${sources[@]}" -p:RestoreIgnoreFailedSources=false -nologo
+if ! "${dotnet[@]}" restore src/CodeArena/CodeArena.csproj "-p:RuntimeIdentifiers=$all" \
+  "${sources[@]}" -p:RestoreIgnoreFailedSources=false -nologo; then
+  # Offline, a pack the SDK asks for beyond those checked above (ASP.NET's runtime pack, which an SDK
+  # update began to ask for) is missing too: as for the others, 3, so a build falls back to nuget.org's.
+  [ -n "$offline" ] && { echo "tools/offline-nuget lacks a package the restore asks for (above)." >&2; exit 3; }
+  exit 1
+fi
 pids=()
 for rid in "${rids[@]}"; do
   echo "== $rid (at once)"

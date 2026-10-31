@@ -37,6 +37,10 @@ if args[:1] == ["restore"]:
     if os.environ.get("FAKE_NUGET_UNREACHABLE") and "--source" not in args:
         print("error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json.", file=sys.stderr)
         sys.exit(1)
+    # A pack beyond the runtime and host ones that the SDK asks for (ASP.NET's), not in the offline folder.
+    if os.environ.get("FAKE_OFFLINE_LACKS_ASPNET") and "--source" in args:
+        print("error NU1101: Unable to find package Microsoft.AspNetCore.App.Runtime.linux-x64.", file=sys.stderr)
+        sys.exit(1)
     sys.exit(0)
 if args[:1] == ["publish"]:
     if "--no-restore" not in args:
@@ -124,6 +128,19 @@ class CodeArenaPacksTests(unittest.TestCase):
         self.assertIn("Fetch them at version 10.0.13", r.stderr)
         self.assertEqual(self.publishes(), [])
         self.assertEqual(self.built(), [])
+
+    def test_a_pack_the_restore_asks_for_beyond_those_checked_is_the_same_case_and_the_image_takes_nuget_orgs(self):
+        self.packs("10.0.13")
+        r = self.publish("10.0.13", "--offline", FAKE_OFFLINE_LACKS_ASPNET="1")
+        self.assertEqual(r.returncode, 3, r.stderr)
+        self.assertIn("tools/offline-nuget lacks a package the restore asks for", r.stderr)
+        self.assertEqual(self.publishes(), [])
+        self.log.write_text("")
+        r = self.image_step("10.0.13", FAKE_OFFLINE_LACKS_ASPNET="1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("publishing with nuget.org's packs instead", r.stdout)
+        self.assertEqual(len(self.built()), len(RIDS))
+        self.assertNotIn("--source", self.restores()[-1])
 
     def test_an_empty_folder_is_the_same_case(self):
         r = self.publish("10.0.12", "--offline", "linux-x64")
