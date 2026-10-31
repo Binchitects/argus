@@ -1182,13 +1182,17 @@ check_gpu_early() {
   local id gpu_wanted=0 ref file
   for id in ${FEATURES_ON[@]+"${FEATURES_ON[@]}"}; do [[ ${FEAT_NEEDS[$id]:-} == gpu ]] && gpu_wanted=1; done
   [[ $gpu_wanted -eq 1 ]] || return 0
+  local loaded=0
   if [[ -z "$(image_id "$HELPER")" && -n "$BUNDLE" ]]; then
     while IFS=$'\t' read -r ref file _ _ _; do
       [[ "${ref#docker.io/library/}" == "$HELPER" && $file != - ]] || continue
-      E load -q -i "$BUNDLE/images/$file" >/dev/null 2>&1 || req_bad "$ENGINE load of $HELPER (the GPU test's image) failed"
+      if E load -q -i "$BUNDLE/images/$file" >/dev/null 2>&1; then loaded=1; else req_bad "$ENGINE load of $HELPER (the GPU test's image) failed"; fi
     done < <(bundle_images)
   fi
   check_gpu_passthrough
+  # The checks change nothing: the image taken in for the test goes again (the install loads it with the rest).
+  [[ $loaded -eq 1 ]] && E image rm "$HELPER" >/dev/null 2>&1
+  return 0
 }
 
 # Every check before anything is done: the bundle, the host's requirements (put right when that is
@@ -1378,7 +1382,8 @@ is_user_path() {
     .env|.env.*|docker-compose.override.yml|certs/*|config/traefik/certificate.yml|backups/*|models/*|*.before-*|*.new-*|*.changed-*|.airgap-*|*/__pycache__/*|__pycache__/*) return 0 ;;
   esac
   local rel
-  for rel in "${MODELS_DIR#"$DEPLOY"/}" "${BACKUP_DIR#"$DEPLOY"/}"; do
+  local m="${MODELS_DIR:-}" b="${BACKUP_DIR:-}"
+  for rel in "${m#"$DEPLOY"/}" "${b#"$DEPLOY"/}"; do
     [[ "$rel" != /* && -n "$rel" && "$1" == "$rel"/* ]] && return 0
   done
   return 1

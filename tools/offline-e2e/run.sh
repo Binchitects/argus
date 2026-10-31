@@ -58,7 +58,7 @@ fi
 docker image inspect "$IMAGE" >/dev/null 2>&1 || docker build -q -t "$IMAGE" "$here" >/dev/null || fail "building the test host's image failed"
 # A fresh host: nothing of an earlier run on its disk (its files are root's: removed from a container).
 if [[ $REUSE -eq 0 ]]; then
-  docker run --rm -v "$DIR:/e2e" "$IMAGE" sh -c 'rm -rf /e2e/docker /e2e/containerd /e2e/srv && mkdir -p /e2e/docker /e2e/containerd /e2e/srv' \
+  docker run --rm -v "$DIR:/e2e" "$IMAGE" sh -c 'rm -rf /e2e/docker /e2e/containerd /e2e/srv /e2e/bundle/.argus-arena-unpack.* && mkdir -p /e2e/docker /e2e/containerd /e2e/srv' \
     || fail "could not clear the test host's disk in $DIR"
 fi
 
@@ -151,7 +151,12 @@ H /srv/arena/deploy/scripts/installer.sh status --dir /srv/arena > "$LOG/status.
 say "  status: $(grep -cE '^  [a-z0-9-]+ +running' "$LOG/status.log") services running, $(grep -cE '^ *FAIL ' "$LOG/status.log" || true) failing; $(grep -m1 '(says ' "$LOG/status.log" | sed 's/.*(says /the app says /; s/)$//')"
 H /srv/arena/deploy/scripts/installer.sh verify --dir /srv/arena > "$LOG/verify.log" 2>&1 || { tail -n 20 "$LOG/verify.log"; fail "verify failed"; }
 say "  verify: $(tail -n1 "$LOG/verify.log")"
-unhealthy="$(H sh -c 'docker ps -a --format "{{.Names}} {{.Status}}"' | grep -vE 'Up .*\(healthy\)|Up [0-9]+ (seconds|minutes|hours)( |$)' || true)"
+# Every container up, and healthy where it has a health check (one still starting is given 2 minutes).
+for _ in $(seq 24); do
+  H sh -c 'docker ps -a --format "{{.Names}} {{.Status}}"' | grep -q '(health: starting)' || break
+  sleep 5
+done
+unhealthy="$(H sh -c 'docker ps -a --format "{{.Names}} {{.Status}}"' | grep -vE ' Up ' ; H sh -c 'docker ps -a --format "{{.Names}} {{.Status}}"' | grep -E 'unhealthy|health: starting|Restarting' || true)"
 [[ -z "$unhealthy" ]] || { printf '%s\n' "$unhealthy" | sed 's/^/    /' | tee -a "$LOG/run.log"; fail "containers not up and healthy (above)"; }
 say "  containers: $(H docker ps -q | wc -l) up, none unhealthy"
 if [[ -n "$FIRST" ]]; then
@@ -166,7 +171,8 @@ port="$(H sh -c "sed -n 's/^HTTPS_PORT=//p' /srv/arena/deploy/.env" | tr -d '"')
 curl_in() { H curl -sk --resolve "$domain:$port:127.0.0.1" --resolve "gateway.$domain:$port:127.0.0.1" -o /dev/null -w '%{http_code}' "$@"; }
 code="$(curl_in "https://$domain:$port/")"; [[ $code == 200 ]] || fail "https://$domain/ answered $code"
 say "  the site: 200"
-code="$(curl_in "https://$domain:$port/api/auth/me")"; [[ $code == 200 ]] || fail "/api/auth/me answered $code"
+# Nobody signed in yet: the API says so (401), it does not fail.
+code="$(curl_in "https://$domain:$port/api/auth/me")"; [[ $code == 401 || $code == 200 ]] || fail "/api/auth/me answered $code"
 # The admin signs in with the first password (.env's, on the test host only; never printed).
 code="$(H sh -c "p=\$(sed -n 's/^ADMIN_PASSWORD=//p' /srv/arena/deploy/.env | tr -d '\"'); printf '{\"userName\":\"admin\",\"password\":\"%s\"}' \"\$p\" \
   | curl -sk --resolve '$domain:$port:127.0.0.1' -c /tmp/e2e.cookies -H 'Content-Type: application/json' -H 'X-Requested-With: e2e' \
