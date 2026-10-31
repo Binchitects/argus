@@ -95,7 +95,8 @@ class AirgapTests(unittest.TestCase):
             ref, file, image_id = line.split("\t")
             self.assertIn(f"arena-airgap/images/{file}", names)
             self.assertTrue(image_id.startswith("sha256:"))
-            self.assertEqual(self.read(f"images/{file}"), f"fake image {ref}\n")
+            with tarfile.open(self.out) as tar, tarfile.open(fileobj=tar.extractfile(f"arena-airgap/images/{file}")) as image:
+                self.assertEqual(image.extractfile("layer.tar").read().decode(), f"fake image {ref}\n")
         r = subprocess.run(["sha256sum", "-c", self.out.name + ".sha256"], cwd=self.out.parent, capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         work = self.s.dir / "x"

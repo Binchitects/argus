@@ -265,6 +265,19 @@ if [[ $ACTION == pack ]]; then
 
   say "==> images"
   : > "$B/images/IMAGES"
+  # What an archive's manifest.json names and the archive lacks; nothing (and 0) when it is whole.
+  archive_missing() {
+    python3 -I - "$1" <<'PY'
+import json, sys, tarfile
+with tarfile.open(sys.argv[1]) as t:
+    names = set(t.getnames())
+    if "manifest.json" not in names:
+        print("no manifest.json"); sys.exit(1)
+    lost = [p for m in json.load(t.extractfile("manifest.json")) for p in [m.get("Config"), *m.get("Layers", [])] if p and p not in names]
+    if lost:
+        print(f"{len(lost)} of its blobs, such as {lost[0]}"); sys.exit(1)
+PY
+  }
   # Podman's progress lines are noise in a log; Docker's save prints none.
   QUIET=(); [[ $ENGINE == podman ]] && QUIET=(-q)
   for ref in "${IMAGES[@]}"; do
@@ -276,7 +289,18 @@ if [[ $ACTION == pack ]]; then
     fi
     id="$("$ENGINE" image inspect --format '{{.Id}}' "$ref" 2>/dev/null)" || die "$ref is not on this host: build or pull it first (this script pulls nothing)"
     file="$(image_file "$ref")"
+    # make-installer's cache (ARENA_IMAGE_CACHE) has this very image packed already: not saved again.
+    if [[ -n "${ARENA_IMAGE_CACHE:-}" && -f "$ARENA_IMAGE_CACHE/${id#sha256:}.tar.gz" ]]; then
+      printf '%s\t%s\t%s\n' "$ref" "$file" "$id" >> "$B/images/IMAGES"
+      printf '  %-60s %8s\n' "$ref" "(cached)"
+      continue
+    fi
     "$ENGINE" save ${QUIET[@]+"${QUIET[@]}"} -o "$B/images/$file" "$ref" || die "$ENGINE save $ref failed"
+    # A store can lose an image's blobs (containerd's, for a platform pulled long ago): save then writes
+    # an archive without them, which no host can load. Every config and layer its manifests name is in it.
+    if ! missing="$(archive_missing "$B/images/$file")"; then
+      die "$ref is missing content here ($missing): $ENGINE save wrote an archive no host can load; pull it again ($ENGINE pull $ref), then pack again"
+    fi
     printf '%s\t%s\t%s\n' "$ref" "$file" "$id" >> "$B/images/IMAGES"
     printf '  %-60s %8s\n' "$ref" "$(human "$(stat -c %s "$B/images/$file")")"
   done

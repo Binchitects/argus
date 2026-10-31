@@ -320,6 +320,15 @@ def cmd_doctor(a) -> int:
 
 
 # ----------------------------------------------------------------------------- build
+def pinned_images() -> dict[str, str]:
+    """deploy/pinned-images: each tag of our own, and the digest reference it stands for."""
+    f = DEPLOY / "pinned-images"
+    if not f.exists():
+        return {}
+    rows = (line.split("\t") for line in f.read_text().splitlines() if line.strip() and not line.startswith("#"))
+    return {tag.strip(): digest.strip() for tag, digest in rows}
+
+
 def build_images(engine: Engine, profiles: list[str], pull: bool = True, services: list[str] | None = None) -> None:
     compose = Compose(engine, profiles)
     try:
@@ -334,6 +343,13 @@ def build_images(engine: Engine, profiles: list[str], pull: bool = True, service
         if pull and others:
             missing = [s for s in others if not engine.has_image(svcs[s].get("image", ""))]
             step(f"the other images: {len(others)}, {len(missing)} pulled")
+            # Those pinned by a tag of our own: their digest pulled (when not here), then tagged.
+            pinned = pinned_images()
+            for ref in sorted({svcs[s].get("image", "") for s in missing} & set(pinned)):
+                if not engine.has_image(pinned[ref]):
+                    run([engine.need(), "pull", pinned[ref]])
+                run([engine.need(), "tag", pinned[ref], ref])
+            missing = [s for s in missing if svcs[s].get("image", "") not in pinned]
             if missing:
                 compose.run("pull", *missing)
     finally:

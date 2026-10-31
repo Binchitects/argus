@@ -28,6 +28,10 @@
 #   --images-in-engine the images named, not saved: they stay in the engine, built or pulled there
 #                      (arenactl install, from a checkout); no speech models, Code Arena or .run
 #   --stage-only DIR   the bundle unpacked into DIR/argus-arena-VERSION, not a .run
+#   --image-cache DIR  each image packed once, by its id (default OUT/.image-cache): the next bundle
+#                      saves and gzips only the images that changed (the release's own); the images
+#                      this bundle did not use are taken out of it at the end
+#   --no-image-cache   every image saved and gzipped again
 #   --dry-run          the plan; nothing is written or saved
 #
 # The bundle, argus-arena-VERSION/ inside the file:
@@ -85,7 +89,7 @@ vercmp() {
 }
 
 OUT_ARG="" VERSION_ARG="" PROJECT=arena ENGINE=docker WITH_MODELS=0 MODELS_ARG="" PACKS=0 CA_ARG="" WITHOUT="" LEAVE="" DRY=0
-DEPS_ARG="" NO_KNOWN=0 IN_ENGINE=0 STAGE_ONLY=""
+DEPS_ARG="" NO_KNOWN=0 IN_ENGINE=0 STAGE_ONLY="" CACHE_ARG="" NO_CACHE=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --out) [[ $# -gt 1 ]] || usage_error "--out needs a folder"; OUT_ARG="$2"; shift ;;
@@ -101,6 +105,8 @@ while [[ $# -gt 0 ]]; do
     --no-known) NO_KNOWN=1 ;;
     --images-in-engine) IN_ENGINE=1 ;;
     --stage-only) [[ $# -gt 1 ]] || usage_error "--stage-only needs a folder"; STAGE_ONLY="$2"; shift ;;
+    --image-cache) [[ $# -gt 1 ]] || usage_error "--image-cache needs a folder"; CACHE_ARG="$2"; shift ;;
+    --no-image-cache) NO_CACHE=1 ;;
     --dry-run) DRY=1 ;;
     -h|--help) usage ;;
     *) usage_error "unknown option: $1" ;;
@@ -172,6 +178,13 @@ AIRGAP_ENV=(env COMPOSE_PROJECT_NAME="$PROJECT" COMPOSE_FILE="$ROOT/docker-compo
 AIRGAP=(bash "$ROOT/scripts/airgap.sh" pack)
 [[ $ENGINE == podman ]] && AIRGAP+=(--podman)
 [[ $IN_ENGINE -eq 1 ]] && AIRGAP+=(--images-in-engine)
+# Each image gzipped once, by its id: unchanged ones are neither saved nor packed again.
+CACHE=""
+if [[ $NO_CACHE -eq 0 && $IN_ENGINE -eq 0 && $DRY -eq 0 ]]; then
+  CACHE="$(abspath "${CACHE_ARG:-$OUT_DIR/.image-cache}")"
+  mkdir -p "$CACHE" || die "cannot make the image cache $CACHE"
+  AIRGAP_ENV+=(ARENA_IMAGE_CACHE="$CACHE")
+fi
 [[ $WITH_MODELS -eq 1 ]] && AIRGAP+=(--models)
 [[ -n "$MODELS_ARG" ]] && AIRGAP+=(--models-dir "$MODELS_ARG")
 # Code Arena's packages of this release (older ones in dist/ stay out); made here when there are none and they
@@ -277,15 +290,36 @@ if git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
   say "  $(find "$B/deploy" -type f | wc -l) files; $n left out that git does not have"
 fi
 
-say "==> images, gzipped"
+say "==> images, gzipped${CACHE:+ (those packed before taken from $CACHE)}"
 GZ=(gzip -6); command -v pigz >/dev/null && GZ=(pigz -6)
 : > "$B/images/IMAGES.new"
+declare -A CACHED_SUM=()
 while IFS=$'\t' read -r ref file id; do
   [[ -n "$ref" ]] || continue
   # Named only (--images-in-engine): the engine has it, or it is built or pulled when needed.
   if [[ $file == - ]]; then printf '%s\t-\t%s\t0\t0\n' "$ref" "$id" >> "$B/images/IMAGES.new"; continue; fi
+  key="${id#sha256:}"
+  if [[ -n "$CACHE" && -f "$CACHE/$key.tar.gz" && -f "$CACHE/$key.raw" && -f "$CACHE/$key.sha256" ]]; then
+    # Packed by an earlier bundle: linked in (copied across file systems), its checksum kept.
+    ln -f "$CACHE/$key.tar.gz" "$B/images/$file.gz" 2>/dev/null || cp -f "$CACHE/$key.tar.gz" "$B/images/$file.gz" || die "copying $file.gz from $CACHE failed (disk full?)"
+    raw="$(cat "$CACHE/$key.raw")"; CACHED_SUM["images/$file.gz"]="$(cat "$CACHE/$key.sha256")"
+    touch "$CACHE/$key.tar.gz"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$ref" "$file.gz" "$id" "$(stat -c %s "$B/images/$file.gz")" "$raw" >> "$B/images/IMAGES.new"
+    printf '  %-60s %9s (cached)\n' "$ref" "$(human "$(stat -c %s "$B/images/$file.gz")")"
+    continue
+  fi
+  # What it takes once loaded (the engine's size for it: content and unpacked), not its archive's: the
+  # installer checks the disk for that.
   raw="$(stat -c %s "$B/images/$file")"
+  inside="$("$ENGINE" image inspect --format '{{.Size}}' "$ref" 2>/dev/null)"
+  [[ "$inside" =~ ^[0-9]+$ && $inside -gt $raw ]] && raw=$inside
   "${GZ[@]}" "$B/images/$file" || die "gzipping $file failed (disk full?)"
+  if [[ -n "$CACHE" ]]; then
+    sum="$(sha256sum "$B/images/$file.gz" | cut -d' ' -f1)"; CACHED_SUM["images/$file.gz"]="$sum"
+    { ln -f "$B/images/$file.gz" "$CACHE/$key.tar.gz.part" 2>/dev/null || cp -f "$B/images/$file.gz" "$CACHE/$key.tar.gz.part"; } \
+      && echo "$raw" > "$CACHE/$key.raw" && echo "$sum" > "$CACHE/$key.sha256" && mv -f "$CACHE/$key.tar.gz.part" "$CACHE/$key.tar.gz" \
+      || note "could not keep $file.gz in $CACHE (the next bundle packs it again)"
+  fi
   printf '%s\t%s\t%s\t%s\t%s\n' "$ref" "$file.gz" "$id" "$(stat -c %s "$B/images/$file.gz")" "$raw" >> "$B/images/IMAGES.new"
   printf '  %-60s %9s -> %9s\n' "$ref" "$(human "$raw")" "$(human "$(stat -c %s "$B/images/$file.gz")")"
 done < "$B/images/IMAGES"
@@ -373,6 +407,10 @@ ai() { sed -n "s/^$1: //p" <<<"$AIRGAP_MANIFEST" | head -n1; }
   echo "engine: $ENGINE"
   echo "images: $(grep -c . "$B/images/IMAGES") ($(awk -F'\t' '{ s += $4 } END { printf "%d", s }' "$B/images/IMAGES") bytes, $(awk -F'\t' '{ s += $5 } END { printf "%d", s }' "$B/images/IMAGES") unpacked)"
   echo "release-images: $(cut -f1 "$B/images/RELEASE" | tr '\n' ' ' | sed 's/ $//')"
+  # The architecture its images are built for (the release's app): a host of another cannot run them.
+  a="$("$ENGINE" image inspect --format '{{.Architecture}}' "$PROJECT-app" 2>/dev/null)"
+  [[ "$a" =~ ^(amd64|arm64|arm|386|ppc64le|s390x|riscv64)$ ]] || a=unknown
+  echo "arch: $a"
   echo "left-out: ${LEAVE//,/ }"
   echo "features-left-out: ${WITHOUT//,/ }"
   echo "models: $(ai models)"
@@ -385,8 +423,10 @@ ai() { sed -n "s/^$1: //p" <<<"$AIRGAP_MANIFEST" | head -n1; }
   # From a checkout (arenactl install): the images are the engine's, and missing ones are built from it.
   [[ $IN_ENGINE -eq 1 ]] && { echo "images-in: engine"; echo "source: $REPO"; }
 } > "$B/MANIFEST"
-(cd "$B" && find . -type f ! -name SHA256SUMS -printf '%P\n' | sort | xargs -d '\n' sha256sum > SHA256SUMS) || die "checksums failed"
-(cd "$B" && sha256sum -c --quiet --strict SHA256SUMS) || die "the bundle does not verify"
+# Each file's checksum, the images' from when they were packed (the cache's): each big file is read once.
+(cd "$B" && find . -type f ! -name SHA256SUMS -printf '%P\n' | sort | while IFS= read -r f; do
+  if [[ -n "${CACHED_SUM[$f]:-}" ]]; then printf '%s  %s\n' "${CACHED_SUM[$f]}" "$f"; else sha256sum -- "$f"; fi
+done > SHA256SUMS) || die "checksums failed"
 if [[ -n "$STAGE_ONLY" ]]; then
   say "==> $B (unpacked; bash $B/installer.sh COMMAND ...)"
   exit 0
@@ -400,9 +440,11 @@ grep -E '^(installer\.sh|MANIFEST|SHA256SUMS|VERSION|LICENSE\.md|LICENSING\.md|i
 grep -vxF -f "$WORK/head" "$WORK/all" > "$WORK/body"
 TARF=(--owner=0 --group=0 --numeric-owner --no-recursion)
 (cd "$STAGE" && sed "s|^|$TOP/|" "$WORK/head" | tar -cf "$WORK/head.tar" "${TARF[@]}" -T -) || die "writing the bundle failed"
-(cd "$STAGE" && sed "s|^|$TOP/|" "$WORK/body" | tar -cf "$STAGE/body.tar" "${TARF[@]}" -T -) || die "writing the bundle failed (disk full?)"
-HB="$(stat -c %s "$WORK/head.tar")" BB="$(stat -c %s "$STAGE/body.tar")"
-UNPACKED="$(human $(( HB + BB )))"
+HB="$(stat -c %s "$WORK/head.tar")"
+# The body is written straight after the header and the head (not to a tar first, then copied): its
+# size, known once it is written, goes into the header's fixed-width field after.
+BB_EST="$(cd "$B" && xargs -d '\n' stat -c %s < "$WORK/body" 2>/dev/null | awk '{ s += $1 } END { print s + 0 }')"
+UNPACKED="$(human $(( HB + BB_EST )))"
 
 cat > "$WORK/header" <<'HEADER'
 #!/bin/sh
@@ -456,6 +498,7 @@ else
   dest=$(mktemp -d "$WORK/.argus-arena-unpack.XXXXXX") || die "cannot make a folder in $WORK"
   [ "$KEEP" = 1 ] || trap 'rm -rf "$dest"' EXIT
   trap 'exit 130' INT TERM
+  trap 'exit 129' HUP
 fi
 tail -c +$((HEAD_START + 1)) "$self" | head -c "$HEAD_BYTES" | tar -xf - -C "$dest" \
   || die "unpacking failed: a damaged or cut-off copy? (sha256sum -c ${self##*/}.sha256)"
@@ -479,13 +522,23 @@ sed -i -e "s|@VERSION@|$VERSION|g" -e "s|@COMMIT@|$COMMIT|g" -e "s|@SIZE@|$UNPAC
 HS="$(stat -c %s "$WORK/header")"
 # Each number in a field of the placeholder's width, so the header's length stays what it was.
 sed -i -e "s|^HEAD_START=________________|HEAD_START=$(printf '%-16s' "$HS")|" \
-  -e "s|^HEAD_BYTES=________________|HEAD_BYTES=$(printf '%-16s' "$HB")|" \
-  -e "s|^BODY_BYTES=________________|BODY_BYTES=$(printf '%-16s' "$BB")|" "$WORK/header"
+  -e "s|^HEAD_BYTES=________________|HEAD_BYTES=$(printf '%-16s' "$HB")|" "$WORK/header"
 [[ "$(stat -c %s "$WORK/header")" == "$HS" ]] || die "the header's length changed"
-cat "$WORK/header" "$WORK/head.tar" "$STAGE/body.tar" > "$RUN.part" || die "writing $RUN failed (disk full?)"
-rm -f "$STAGE/body.tar"
+cat "$WORK/header" "$WORK/head.tar" > "$RUN.part" || die "writing $RUN failed (disk full?)"
+(cd "$STAGE" && sed "s|^|$TOP/|" "$WORK/body" | tar -cf - "${TARF[@]}" -T -) >> "$RUN.part" || die "writing $RUN failed (disk full?)"
+BB=$(( $(stat -c %s "$RUN.part") - HS - HB ))
+sed -i -e "s|^BODY_BYTES=________________|BODY_BYTES=$(printf '%-16s' "$BB")|" "$WORK/header"
+[[ "$(stat -c %s "$WORK/header")" == "$HS" ]] || die "the header's length changed"
+dd if="$WORK/header" of="$RUN.part" conv=notrunc status=none || die "writing $RUN's header failed"
 chmod 755 "$RUN.part" && mv "$RUN.part" "$RUN" || die "writing $RUN failed"
 (cd "$OUT_DIR" && sha256sum "$(basename "$RUN")" > "$(basename "$RUN").sha256")
+if [[ -n "$CACHE" ]]; then
+  used=" $(cut -f3 "$B/images/IMAGES" | sed 's/^sha256://' | tr '\n' ' ') "
+  for f in "$CACHE"/*.tar.gz; do
+    [[ -f "$f" ]] || continue
+    k="$(basename "$f" .tar.gz)"; [[ "$used" == *" $k "* ]] || rm -f "$CACHE/$k".*
+  done
+fi
 say "  $(human "$(stat -c %s "$RUN")") ($(grep -c . "$B/SHA256SUMS") files, $UNPACKED unpacked), and $(basename "$RUN").sha256"
 say ""
 say "On the host with no network:"

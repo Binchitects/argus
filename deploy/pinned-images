@@ -1,0 +1,4 @@
+# Images the stack names by a tag of its own, each with the digest it stands for (TAG<TAB>DIGEST REFERENCE).
+# ./arenactl build pulls the digest and gives it the tag; an offline bundle carries the image under the tag,
+# which every image store finds after a load (a digest alone is not kept on Docker's classic store).
+ghcr.io/leejet/stable-diffusion.cpp:arena-1aee2217d5e2	ghcr.io/leejet/stable-diffusion.cpp@sha256:1aee2217d5e20ddfb19dfcbca21db3cbe1dcb0ae3b9bc4151773e503dca8aede
