@@ -588,7 +588,10 @@ start_log() {   # start_log [soft]: soft, a log that cannot be written is left o
   [[ -d "$STATE" ]] && chmod 700 "$STATE" "$STATE/logs" 2>/dev/null
   # fd 3: the terminal alone, for what a person must see once and no log may keep.
   exec 3>&1 4>&2
-  exec > >(tee -a "$LOG") 2>&1
+  # The log's tee ignores Ctrl-C, TERM and a hang-up: they reach the whole process group, and a tee gone
+  # would end the installer at its next line (SIGPIPE) before it undoes a stopped install. It ends when
+  # the installer closes its output (finish).
+  exec > >(trap '' INT TERM HUP; exec tee -a "$LOG") 2>&1
   TEE_PID=$!
   say "installer.sh $CMD, $(date '+%Y-%m-%d %H:%M:%S'), log: $LOG"
 }
@@ -602,7 +605,8 @@ lock() {
 TMPFILES=()
 finish() {
   local rc=$?
-  trap '' INT TERM HUP
+  # A write to a closed pipe fails, it no longer ends the installer: the undo below always runs.
+  trap '' INT TERM HUP PIPE
   if [[ $rc -ne 0 && ${UNDO_ARMED:-0} -eq 1 ]]; then
     UNDO_ARMED=0
     [[ -n "${LOAD_PIDS[*]+x}" && ${#LOAD_PIDS[@]} -gt 0 ]] && wait "${LOAD_PIDS[@]}" 2>/dev/null
