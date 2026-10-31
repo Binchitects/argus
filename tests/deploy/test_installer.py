@@ -7,6 +7,7 @@ v5.2.0 tagged, then this release, 9.9.9.
 from __future__ import annotations
 
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -595,7 +596,7 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue(asks)
         self.assertTrue(all(c[c.index("--noproxy") + 1] == "*" for c in asks), asks)
         # Loaded quietly: the engines' progress lines are noise in a log.
-        self.assertTrue(self.r.s.called("load", "-q", "-i"))
+        self.assertTrue(self.r.s.called("load", "-q"))
         # Third-party images that were here before: recorded so, and remove leaves them.
         rows = [line.split("\t") for line in (self.dir / ".arena-install" / "IMAGES").read_text().splitlines()]
         self.assertEqual([r_[2] for r_ in rows if r_[0] == "traefik:v3.6.7"], ["1"])
@@ -1022,9 +1023,67 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("laya", running)
         self.assertNotIn("cpu-temp-exporter", running)
         self.assertIn("loaded arena-laya:9.9.9", r.stdout)
-        # Monitoring's image is the helper backups read the volumes with: loaded all the same.
-        self.assertIn("loaded python:3.13-slim", r.stdout)
+        # Monitoring's image is the helper backups read the volumes with: there all the same (loaded, or the
+        # very image the bundle carries, there already).
+        self.assertIn("python:3.13-slim\t", (self.dir / ".arena-install" / "IMAGES").read_text())
         self.assertIn("features: 4 on, off: chat-models monitoring", r.stdout)
+
+    # ----------------------------------------- every check first; a failed install leaves nothing
+
+    def test_Every_requirement_is_checked_before_anything_is_done(self):
+        r = self.r.run("install", "--dir", str(self.dir), "--yes", "--cpu-only", "--domain", "arena.test", "--https-port", "18443",
+                       "--http-port", "18080", extra={"FAKE_CONFIG_FAIL": "1"})
+        self.assertEqual(r.returncode, 3, self.output(r))
+        self.assertIn("docker compose cannot read the stack's files with this host's answers", r.stdout)
+        self.assertIn("    services must be a mapping", r.stdout)
+        self.assertIn("requirement(s) not met (above): nothing was changed", r.stderr)
+        self.assertFalse(self.dir.exists(), "nothing written")
+        self.assertFalse(any(c[1:2] == ["load"] for c in self.r.calls()), "nothing loaded")
+
+    def test_The_override_says_nothing_in_a_way_compose_reads_and_a_bare_one_is_written_again(self):
+        self.install()
+        override = self.dir / "deploy" / "docker-compose.override.yml"
+        self.assertIn("\nservices: {}\n", override.read_text())
+        # 7.6.0 to 7.6.2 wrote "services:" with nothing under it: compose cannot read that.
+        override.write_text("# Written by installer.sh (7.6.2) for this host.\nservices:\n")
+        r = self.install()
+        self.assertIn('said "services:" with nothing under it (an earlier installer\'s), which compose cannot read: written again', r.stdout)
+        self.assertIn("\nservices: {}\n", override.read_text())
+
+    def test_A_failed_install_takes_away_what_it_did_and_keeps_its_log(self):
+        data = self.r.s.dir / f"data-{self._testMethodName}"
+        before = set(self.r.store()["images"])
+        r = self.install("--data-dir", str(data), code=1, extra_env={"FAKE_UP_FAIL": "1"})
+        self.assertIn("the install did not finish: what it did is undone (--keep-failed keeps it, to look at)", r.stdout)
+        self.assertIn("Nothing of the install is left but its log", r.stdout)
+        self.assertFalse((self.dir / "deploy").exists())
+        self.assertFalse(data.exists(), "the data folders it made")
+        self.assertEqual([], self.containers())
+        self.assertEqual(before, set(self.r.store()["images"]), "the images it loaded")
+        self.assertTrue(list((self.dir / ".arena-install" / "logs").glob("install-*.log")), "its log stays")
+        self.assertEqual({"logs", "lock"}, {p.name for p in (self.dir / ".arena-install").iterdir()})
+
+    def test_A_cut_off_install_is_taken_away_and_installed_anew(self):
+        r = self.install("--keep-failed", code=1, extra_env={"FAKE_UP_FAIL": "1"})
+        self.assertNotIn("what it did is undone", r.stdout)
+        self.assertTrue((self.dir / "deploy" / ".env").exists(), "--keep-failed keeps it")
+        r = self.install()
+        self.assertIn("an install of 9.9.9 was cut off here: what it left is taken away after the checks", r.stdout)
+        self.assertIn("what the cut-off install left is taken away first", r.stdout)
+        self.assertIn("Installed", r.stdout)
+
+    def test_An_empty_secret_the_installer_makes_is_made_when_it_runs_again(self):
+        self.install()
+        env = self.dir / "deploy" / ".env"
+        # As an upgrade from 6.7 left it: there, and empty.
+        env.write_text(re.sub(r"(?m)^WORKSPACES_KEY=.*\n", "", env.read_text()) + "WORKSPACES_KEY=\n")
+        r = self.install()
+        self.assertIn(".env: WORKSPACES_KEY was empty: a new secret, generated", r.stdout)
+        self.assertRegex(env.read_text(), r"(?m)^WORKSPACES_KEY=[0-9a-f]{64}$")
+
+    def test_A_relative_models_folder_is_one_of_deploy_not_a_named_volume(self):
+        self.install("--models-dir", "library")
+        self.assertIn("MODELS_DIR=./library", (self.dir / "deploy" / ".env").read_text())
 
     def test_A_feature_others_need_is_not_turned_off_without_them_and_names_are_checked(self):
         for args, code, message in [

@@ -220,7 +220,7 @@ case "$CMD" in
 esac
 DIR="" BUNDLE_ARG="" ENGINE="" PROJECT_ARG="" YES=0 DRY=0 LOG_ARG="" TIMEOUT=15
 DOMAIN_ARG="" EMAIL_ARG="" MODELS_ARG="" DATA_ARG="" MODEL_ARG="" HTTP_ARG="" HTTPS_ARG="" ACME_ARG="" GITLAB_ARG="" GITLAB_TOKEN_FILE=""
-CPU_ONLY=0 WITH_ARG="" WITHOUT_ARG="" KEEP_IMAGES=0 NO_CERT=0 HOSTS=0 SKIP_REQ=0 FIX_REQ=0 PURGE=0 CONFIRM_ARG="" FINAL_BACKUP="" ROLLBACK=0 DEFAULTS_ARG=""
+CPU_ONLY=0 WITH_ARG="" WITHOUT_ARG="" KEEP_IMAGES=0 KEEP_FAILED=0 NO_CERT=0 HOSTS=0 SKIP_REQ=0 FIX_REQ=0 PURGE=0 CONFIRM_ARG="" FINAL_BACKUP="" ROLLBACK=0 DEFAULTS_ARG=""
 only() { local c; for c in "${@:2}"; do [[ $CMD == "$c" ]] && return 0; done; usage_error "$1 is for ${*:2}"; }
 value() { [[ $2 -gt 1 ]] || usage_error "$1 needs a value"; }
 while [[ $# -gt 0 ]]; do
@@ -253,6 +253,7 @@ while [[ $# -gt 0 ]]; do
     --no-cert) only "$1" install upgrade repair; NO_CERT=1 ;;
     --hosts) only "$1" install; HOSTS=1 ;;
     --skip-requirements) only "$1" install; SKIP_REQ=1 ;;
+    --keep-failed) only "$1" install; KEEP_FAILED=1 ;;
     --fix) only "$1" requirements; FIX_REQ=1 ;;
     --install-requirements) only "$1" install; FIX_REQ=1 ;;
     --rollback) only "$1" upgrade; ROLLBACK=1 ;;
@@ -479,6 +480,9 @@ make_data_dirs() {   # make_data_dirs plan|do: DATA_DIR and a folder in it for e
     [[ -d "$DATA_DIR/$v" ]] && continue
     if [[ $1 == plan ]]; then would "make $DATA_DIR/$v"; continue; fi
     (umask 077; mkdir -p "$DATA_DIR/$v") || die "cannot make $DATA_DIR/$v"
+    # The app (uid 1000) reads the signature sign-code-arena.sh writes there as root.
+    [[ $v == code-arena-signature ]] && chmod 755 "$DATA_DIR/$v"
+    UNDO_DATA_MADE+=("$v")
     made=$((made + 1))
   done
   [[ $1 == do && $made -gt 0 ]] && did "$made folder(s) for the data in $DATA_DIR"
@@ -598,11 +602,91 @@ lock() {
 TMPFILES=()
 finish() {
   local rc=$?
+  trap '' INT TERM HUP
+  if [[ $rc -ne 0 && $UNDO_ARMED -eq 1 ]]; then
+    UNDO_ARMED=0
+    wait 2>/dev/null
+    undo_install || :
+  elif [[ $rc -ne 0 && $CMD == install && $KEEP_FAILED -eq 1 && -f "$DEPLOY/.env" ]]; then
+    say "The install did not finish; what it did stays (--keep-failed). The admin's first password: ADMIN_PASSWORD in $DEPLOY/.env. Running it again takes it away and installs anew; $(rerun_cmd install --keep-failed) carries on instead."
+  fi
   [[ ${#TMPFILES[@]} -gt 0 ]] && rm -rf "${TMPFILES[@]}"
   if [[ -n "$TEE_PID" ]]; then exec 1>&3 2>&4; wait "$TEE_PID" 2>/dev/null; fi
   exit "$rc"
 }
 trap finish EXIT
+trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
+
+# ============================================== a failed or stopped install, undone
+# What a fresh install did is taken away again when it fails or is stopped (Ctrl-C, a hang-up), unless
+# --keep-failed: the stack's containers, networks and volumes, the images it loaded (those here before
+# stay), the data folders and the model files it made, deploy/ and the installer's record when it
+# made them. Its log stays. The stack never ran for anyone, so no one's data goes with it.
+UNDO_ARMED=0 UNDO_DIR_NEW=0 UNDO_DEPLOY_NEW=0 UNDO_DATA_NEW=0 UNDO_MODELS_NEW=0 UNDO_HOSTS=0
+UNDO_LOADED=() UNDO_TAGS=() UNDO_DATA_MADE=() UNDO_FILES=()
+arm_undo() {
+  [[ $KEEP_FAILED -eq 1 || $DRY -eq 1 ]] && return 0
+  [[ -e "$DIR" ]] || UNDO_DIR_NEW=1
+  [[ -e "$DEPLOY" ]] || UNDO_DEPLOY_NEW=1
+  [[ -n "$DATA_DIR" && ! -e "$DATA_DIR" ]] && UNDO_DATA_NEW=1
+  [[ -n "$MODELS_DIR" && ! -e "$MODELS_DIR" ]] && UNDO_MODELS_NEW=1
+  UNDO_ARMED=1
+}
+undo_install() {   # undo_install [leftover]: leftover, what an earlier, cut-off install left here
+  local ref id svc v n=0 why="the install did not finish: what it did is undone (--keep-failed keeps it, to look at)"
+  [[ ${1:-} == leftover ]] && why="what the cut-off install left is taken away first"
+  step "$why"
+  mkdir -p "$STATE" 2>/dev/null
+  if [[ -f "$DEPLOY/docker-compose.yml" ]] && E ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null | grep -q .; then
+    if dc down --remove-orphans --volumes --timeout 20 >> "$STATE/undo.log" 2>&1; then did "the stack's containers, networks and volumes removed"
+    else bad "$ENGINE compose down failed (see $STATE/undo.log): $ENGINE ps -a --filter label=com.docker.compose.project=$PROJECT"; fi
+  fi
+  # A volume made beside compose (an earlier release's speech volume) goes too.
+  while IFS= read -r v; do [[ -n "$v" ]] && E volume rm "$v" >/dev/null 2>&1 && did "the $v volume removed"; done \
+    < <(E volume ls -q --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null)
+  # The images it loaded; a leftover's, but those this bundle carries as they are (they are not loaded again).
+  if [[ ${1:-} == leftover ]]; then
+    local carried; carried=" $(bundle_images | awk -F'\t' '{ print $1 }' | tr '\n' ' ') "
+    while IFS=$'\t' read -r ref id v _; do
+      [[ -n "$ref" && $v == 0 ]] || continue
+      [[ "$carried" == *" $ref "* ]] && continue
+      E image rm -f "$ref" >/dev/null 2>&1 && n=$((n + 1))
+    done < "$STATE/IMAGES" 2>/dev/null
+  else
+    # Those it loaded, and those it was loading when it stopped (not here before it).
+    while IFS=$'\t' read -r ref v; do [[ -n "$ref" && $v == 0 ]] && UNDO_LOADED+=("$ref"); done < "$STATE/load/refs" 2>/dev/null
+    for ref in $(printf '%s\n' ${UNDO_LOADED[@]+"${UNDO_LOADED[@]}"} | sort -u); do E image rm -f "$ref" >/dev/null 2>&1 && n=$((n + 1)); done
+    # The release's own as compose names them: the tags it made (one that was there before stays).
+    for ref in ${UNDO_TAGS[@]+"${UNDO_TAGS[@]}"}; do E image rm "$ref" >/dev/null 2>&1; done
+  fi
+  [[ $n -gt 0 ]] && did "$n image(s) it loaded, removed"
+  # The data folders: the stack's own in DATA_DIR (a leftover's: each of them; else those it made).
+  if [[ -n "$DATA_DIR" && -d "$DATA_DIR" ]]; then
+    n=0
+    if [[ ${1:-} == leftover ]]; then for v in $(data_volumes "$BUNDLE/deploy"); do [[ -d "$DATA_DIR/$v" ]] && rm -rf "${DATA_DIR:?}/$v" && n=$((n + 1)); done
+    else for v in ${UNDO_DATA_MADE[@]+"${UNDO_DATA_MADE[@]}"}; do rm -rf "${DATA_DIR:?}/$v" && n=$((n + 1)); done; fi
+    [[ $UNDO_DATA_NEW -eq 1 ]] && rmdir "$DATA_DIR" 2>/dev/null
+    [[ $n -gt 0 ]] && did "$n data folder(s) removed from $DATA_DIR"
+  fi
+  # The model files it put in MODELS_DIR (all of it, when it made the folder).
+  if [[ $UNDO_MODELS_NEW -eq 1 && -n "$MODELS_DIR" && -d "$MODELS_DIR" && "$MODELS_DIR" != "$DEPLOY"/* ]]; then rm -rf "${MODELS_DIR:?}" && did "$MODELS_DIR removed"
+  else for v in ${UNDO_FILES[@]+"${UNDO_FILES[@]}"}; do rm -f "$v"; done; fi
+  [[ $UNDO_HOSTS -eq 1 && -f "$DEPLOY/scripts/setup-hosts.sh" ]] && (cd "$DEPLOY" && bash scripts/setup-hosts.sh --remove >/dev/null 2>&1) && did "the names taken out of /etc/hosts again"
+  # deploy/ (a leftover's certificates stay: they may be someone's own) and the installer's record; the log stays.
+  if [[ ${1:-} == leftover && -d "$DEPLOY" ]]; then
+    find "$DEPLOY" -mindepth 1 -maxdepth 1 ! -name certs -exec rm -rf {} + && did "$DEPLOY's files removed (its certificates kept)"
+  elif [[ $UNDO_DEPLOY_NEW -eq 1 && -d "$DEPLOY" ]]; then rm -rf "${DEPLOY:?}" && did "$DEPLOY removed"; fi
+  find "$STATE" -mindepth 1 -maxdepth 1 ! -name logs ! -name lock -exec rm -rf {} + 2>/dev/null
+  rm -f "$DIR/VERSION" 2>/dev/null
+  [[ ${1:-} == leftover ]] && return 0
+  say "Nothing of the install is left but its log ($STATE/logs): put right what is named above, then run it again: $(rerun_cmd install)"
+}
+# How to run this command again: the .run, when it came from one (its unpacked folder goes as it ends).
+rerun_cmd() {
+  if [[ -n "$RUNFILE" ]]; then printf 'sh %s %s' "$RUNFILE" "$*"
+  elif [[ -f "$DEPLOY/scripts/installer.sh" ]]; then printf '%s %s --dir %s' "$DEPLOY/scripts/installer.sh" "$*" "$DIR"
+  else printf 'bash %s %s' "$SELF" "$*"; fi
+}
 
 # ================================================================== requirements
 # Each requirement is checked; one that is not met says why and, where the installer can put it right,
@@ -910,6 +994,10 @@ check_requirements() {   # check_requirements fresh|upgrade
   # The system.
   if [[ $(uname -s) != Linux ]]; then req_bad "$(uname -s): the stack runs on Linux"; fi
   case "$(uname -m)" in x86_64|aarch64) ok "system: ${OS_NAME:-Linux} ($(uname -m))${PKG:+, packages: $PKG}" ;; *) req_bad "$(uname -m): the images are built for x86_64 and aarch64" ;; esac
+  # The bundle's images are for one architecture (its MANIFEST says which).
+  local barch harch; barch="$(bundle_get arch 2>/dev/null)"
+  case "$(uname -m)" in x86_64) harch=amd64 ;; aarch64) harch=arm64 ;; *) harch="$(uname -m)" ;; esac
+  if [[ "$barch" =~ ^(amd64|arm64|arm|386|ppc64le|s390x|riscv64)$ && "$barch" != "$harch" ]]; then req_bad "this bundle's images are built for $barch; this host is $harch ($(uname -m)): a bundle made on a $harch host"; fi
   [[ -z "$PKG" ]] && note "a system this installer does not know ($OS_ID): what is missing is said, not installed"
   grep -qsi microsoft /proc/version && note "WSL: GPUs reach containers through Docker Desktop's WSL integration; a power cap and the DCGM exporter do not work here"
   command -v systemctl >/dev/null || note "no systemd: start the engine yourself at boot"
@@ -1049,11 +1137,77 @@ check_gpu_passthrough() {
   if out="$(E run --rm --pull never --network none "${flags[@]}" -e NVIDIA_DRIVER_CAPABILITIES=utility "$HELPER" nvidia-smi -L 2>&1)" && grep -q '^GPU' <<< "$out"; then
     ok "$(grep -c '^GPU' <<< "$out") GPU(s) reach containers: $(grep -m1 '^GPU' <<< "$out" | cut -d'(' -f1)"
   else
-    bad "a container does not see the GPU: $(tail -n1 <<< "$out")"
-        note "$SELF requirements --fix (./arenactl requirements --fix from a checkout) wires NVIDIA's container toolkit into $ENGINE; or install again with --cpu-only"
-    [[ $SKIP_REQ -eq 1 ]] && return 0
-    refuse "the GPU does not reach containers"
+    req_bad "a container does not see the GPU: $(tail -n1 <<< "$out")"
+    note "$(rerun_cmd requirements --fix) wires NVIDIA's container toolkit into $ENGINE; or install again with --cpu-only"
   fi
+}
+
+# Compose reads the release's files with this host's answers, before any is written: the .env install
+# would write (or the one there, with what the release adds), the override, the features chosen.
+check_compose_files() {   # check_compose_files fresh|upgrade
+  local tmp out key n
+  step "the stack's files, as $ENGINE compose reads them"
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/arena-preflight.XXXXXX")" || die "cannot make a scratch folder in ${TMPDIR:-/tmp}"
+  cp -a "$BUNDLE/deploy/." "$tmp/" || { rm -rf "$tmp"; die "cannot copy the bundle's deploy/ to $tmp"; }
+  if [[ -f "$DEPLOY/.env" ]]; then
+    cp -p "$DEPLOY/.env" "$tmp/.env"
+    # What merge_env would add: each key the release's compose file cannot start without.
+    for key in $(required_keys "$tmp"); do grep -q "^$key=." "$tmp/.env" || printf '%s=preflight\n' "$key" >> "$tmp/.env"; done
+  else
+    make_env "$tmp"
+  fi
+  [[ -f "$DEPLOY/docker-compose.override.yml" ]] && cp -p "$DEPLOY/docker-compose.override.yml" "$tmp/"
+  write_override do "$tmp"
+  local cf=""; [[ $ENGINE == podman ]] && { cf="docker-compose.yml:podman.yml"; [[ -f "$tmp/docker-compose.override.yml" ]] && cf+=":docker-compose.override.yml"; }
+  local profiles; profiles="$(features_csv)"; [[ -n "$profiles" ]] || profiles="$(sed -n 's/^COMPOSE_PROFILES=//p' "$tmp/.env" | tail -n1)"
+  if out="$(cd "$tmp" && env COMPOSE_PROJECT_NAME="$PROJECT" COMPOSE_PROFILES="$profiles" ${cf:+COMPOSE_FILE="$cf"} "$ENGINE" compose config --services 2>&1)"; then
+    n="$(grep -c . <<< "$out")"
+    ok "compose reads them: $n services for the features chosen"
+  else
+    printf '%s\n' "$out" | grep -v '^time=' | tail -n 8 | sed 's/^/    /'
+    req_bad "$ENGINE compose cannot read the stack's files with this host's answers (above)"
+  fi
+  rm -rf "$tmp"
+}
+
+# A container sees the GPU, before the stack's images are loaded: only the helper image is (it is small).
+check_gpu_early() {
+  [[ $CPU_ONLY -eq 1 || $DRY -eq 1 ]] && return 0
+  local id gpu_wanted=0 ref file
+  for id in ${FEATURES_ON[@]+"${FEATURES_ON[@]}"}; do [[ ${FEAT_NEEDS[$id]:-} == gpu ]] && gpu_wanted=1; done
+  [[ $gpu_wanted -eq 1 ]] || return 0
+  if [[ -z "$(image_id "$HELPER")" && -n "$BUNDLE" ]]; then
+    while IFS=$'\t' read -r ref file _ _ _; do
+      [[ "${ref#docker.io/library/}" == "$HELPER" && $file != - ]] || continue
+      E load -q -i "$BUNDLE/images/$file" >/dev/null 2>&1 || req_bad "$ENGINE load of $HELPER (the GPU test's image) failed"
+    done < <(bundle_images)
+  fi
+  check_gpu_passthrough
+}
+
+# Every check before anything is done: the bundle, the host's requirements (put right when that is
+# allowed: --install-requirements, or yes on a terminal), compose reading the release's files with
+# this host's answers, and the GPU from a container. Nothing is written, loaded or started until
+# each is met; what is not met is said together, with what to do.
+preflight() {   # preflight fresh|upgrade
+  [[ -n "$BUNDLE" ]] && check_bundle
+  check_requirements "$1"
+  if [[ $REQ_FAIL -gt 0 && ${#FIXES[@]} -gt 0 && $SKIP_REQ -eq 0 ]]; then
+    # Changing the host's system is asked for, never assumed: --install-requirements when unattended.
+    if [[ $FIX_REQ -eq 1 ]] || { [[ $YES -eq 0 && $TTY -eq 1 ]] && confirm "Put the requirements right (above), as root where needed?"; }; then
+      fix_requirements "$1" || :
+    else
+      note "--install-requirements puts them right: $(rerun_cmd "$CMD" --install-requirements) (or $(rerun_cmd requirements --fix))"
+    fi
+  fi
+  # Compose and the GPU need the engine the requirements put right.
+  if command -v "$ENGINE" >/dev/null && E compose version >/dev/null 2>&1; then check_compose_files "$1"; fi
+  [[ $1 == fresh && $REQ_FAIL -eq 0 ]] && check_gpu_early
+  if [[ $REQ_FAIL -gt 0 ]]; then
+    [[ $SKIP_REQ -eq 1 ]] && { note "$REQ_FAIL requirement(s) not met; going on (--skip-requirements)"; return 0; }
+    refuse "$REQ_FAIL requirement(s) not met (above): nothing was changed; --skip-requirements goes on anyway"
+  fi
+  ok "every requirement is met: nothing has been changed yet"
 }
 
 # Puts right what check_requirements found, in order, then checks again. 0: every requirement met.
@@ -1084,41 +1238,80 @@ fix_requirements() {   # fix_requirements MODE
 # Argus Arena was installed (remove leaves those).
 state_image_id() { awk -F'\t' -v r="$1" '$1 == r { print $2 }' "$STATE/IMAGES" 2>/dev/null | tail -n1; }
 state_image_pre() { awk -F'\t' -v r="$1" '$1 == r { print $3 }' "$STATE/IMAGES" 2>/dev/null | tail -n1; }
+# The bundle's id of the image it was loaded from (an upgrade's bundle may carry a newer one under the same tag).
+state_image_bid() { awk -F'\t' -v r="$1" '$1 == r { print $4 }' "$STATE/IMAGES" 2>/dev/null | tail -n1; }
 # The bundle's images into the engine, each only when it is not there already; the release's own
 # images tagged as compose names them. fresh: an image already here is recorded as not ours.
 load_images() {   # load_images fresh|upgrade|repair
-  local ref file have pre n=0 skipped=0 tmp svc id out need
+  local ref file bid size have pre n=0 skipped=0 tmp svc id need row jobs total=0 logs rc slug
   if [[ -n "$SOURCE" ]]; then step "images (in $ENGINE already: built and pulled from $SOURCE)"; else step "images ($ENGINE load; nothing is pulled)"; fi
   tmp="$STATE/IMAGES.new"; : > "$tmp" || die "cannot write $tmp"
   # Only those of the core and the features on (FEATURES_ON).
   need=" $(needed_refs ${FEATURES_ON[@]+"${FEATURES_ON[@]}"} | tr '\n' ' ') "
   [[ -n "$SOURCE" ]] && source_images "$need"
-  while IFS=$'\t' read -r ref file _ _ _; do
+  local -a rows=() todo=()
+  while IFS=$'\t' read -r ref file bid size _; do
     [[ -n "$ref" && ( "$need" == *" $ref "* || "${ref#docker.io/library/}" == "$HELPER" ) ]] || continue
     have="$(image_id "$ref")"
     pre="$(state_image_pre "$ref")"
     if [[ -z "$pre" ]]; then pre=0; [[ $1 == fresh && -n "$have" ]] && pre=1; fi
-    if [[ -n "$have" && ( "$have" == "$(state_image_id "$ref")" || $file == - ) ]]; then
+    # There already: the very image the bundle carries, or as an earlier run loaded it from this same image
+    # (a newer one under the same tag, as llama.cpp's server-cuda, is loaded).
+    if [[ -n "$have" && ( "$have" == "${bid#sha256:}" || $file == - \
+          || ( "$(state_image_bid "$ref")" == "${bid#sha256:}" && "$have" == "$(state_image_id "$ref")" ) ) ]]; then
       skipped=$((skipped + 1))
     elif [[ $file == - ]]; then
       die "$ref is not in $ENGINE (python3 $SOURCE/arenactl build, then again)"
     else
       [[ -f "$BUNDLE/images/$file" ]] || die "the bundle has no images/$file (unpacked only in part?)"
-      if ! out="$(E load -q -i "$BUNDLE/images/$file" 2>&1)"; then
-        printf '%s\n' "$out" | tail -n 5 | sed 's/^/    /'
+      todo+=("${size:-0}"$'\t'"$ref"$'\t'"$file"$'\t'"$pre")
+      total=$((total + ${size:-0}))
+    fi
+    rows+=("$ref"$'\t'"$pre"$'\t'"${bid#sha256:}")
+  done < <(bundle_images)
+  if [[ ${#todo[@]} -gt 0 ]]; then
+    # A few at a time, the biggest first: each load is mostly one core unpacking, the disk takes more.
+    jobs="${ARENA_LOAD_JOBS:-$(( $(nproc 2>/dev/null || echo 4) / 4 ))}"
+    [[ $jobs -ge 1 ]] || jobs=1; [[ $jobs -le 4 ]] || jobs=4
+    say "  loading ${#todo[@]} image(s), $(human "$total") packed, $jobs at a time"
+    logs="$STATE/load"; rm -rf "$logs"; mkdir -p "$logs" || die "cannot write $logs"
+    while IFS=$'\t' read -r size ref file pre; do
+      while [[ $(jobs -rp | wc -l) -ge $jobs ]]; do wait -n 2>/dev/null || :; done
+      slug="$(printf '%s' "$ref" | tr -c 'A-Za-z0-9._-' '_')"
+      (
+        # pigz unpacks faster than the engine's own gzip where the host has it.
+        if command -v pigz >/dev/null; then pigz -dc "$BUNDLE/images/$file" | E load -q
+        else E load -q -i "$BUNDLE/images/$file"; fi
+        echo $? > "$logs/$slug.rc"
+      ) > "$logs/$slug.log" 2>&1 &
+      printf '%s\t%s\n' "$ref" "$pre" >> "$logs/refs"
+    done < <(printf '%s\n' "${todo[@]}" | sort -t$'\t' -k1,1nr)
+    wait
+    while IFS=$'\t' read -r ref pre; do
+      slug="$(printf '%s' "$ref" | tr -c 'A-Za-z0-9._-' '_')"
+      rc="$(cat "$logs/$slug.rc" 2>/dev/null || echo 1)"
+      if [[ $rc != 0 ]]; then
+        tail -n 5 "$logs/$slug.log" | sed 's/^/    /'
         die "$ENGINE load of $ref failed (disk full? see $ENGINE system df)"
       fi
-      have="$(image_id "$ref")"
-      [[ -n "$have" ]] || die "$ref is not in $ENGINE after loading images/$file"
+    done < "$logs/refs"
+  fi
+  for row in ${rows[@]+"${rows[@]}"}; do
+    IFS=$'\t' read -r ref pre bid <<< "$row"
+    have="$(image_id "$ref")"
+    [[ -n "$have" ]] || die "$ref is not in $ENGINE after loading it from the bundle"
+    if printf '%s\n' ${todo[@]+"${todo[@]}"} | cut -f2 | grep -qxF "$ref"; then
       n=$((n + 1)); say "  loaded $ref$([[ $pre -eq 1 && "$have" != "$(state_image_id "$ref")" ]] && echo " (it was here before the install: remove keeps it)")"
+      [[ $pre -eq 0 ]] && UNDO_LOADED+=("$ref")
     fi
-    printf '%s\t%s\t%s\n' "$ref" "$have" "$pre" >> "$tmp"
-  done < <(bundle_images)
+    printf '%s\t%s\t%s\t%s\n' "$ref" "$have" "$pre" "$bid" >> "$tmp"
+  done
   while IFS=$'\t' read -r svc ref; do
     [[ -n "$svc" && "$need" == *" $ref "* ]] || continue
     id="$(image_id "$ref")"
     [[ -n "$id" ]] || die "the release's image $ref is not in $ENGINE"
     if [[ "$(image_id "$(compose_image "$svc")")" != "$id" ]]; then
+      [[ -z "$(image_id "$(compose_image "$svc")")" ]] && UNDO_TAGS+=("$(compose_image "$svc")")
       E tag "$ref" "$(compose_image "$svc")" || die "tagging $ref as $(compose_image "$svc") failed"
     fi
     printf '%s\t%s\t0\n' "$(compose_image "$svc")" "$id" >> "$tmp"
@@ -1342,6 +1535,8 @@ write_extras() {   # write_extras plan|do
 example_keys() { sed -n -E 's/^#?[[:space:]]*([A-Z][A-Z0-9_]*)=([^[:space:]]*).*/\1\t\2/p' "$1" | awk -F'\t' '!seen[$1]++'; }
 example_set_keys() { sed -n -E 's/^([A-Z][A-Z0-9_]*)=(.*)$/\1\t\2/p' "$1"; }
 # Keys compose cannot start without (${KEY:?...}).
+# The secrets the installer makes: an upgrade that adds one of these keys makes it too.
+GEN_SECRETS="DB_PASSWORD APP_KEY ENGINE_KEY ARGUS_KEY WORKSPACES_KEY"
 required_keys() { grep -ohE '\$\{[A-Z][A-Z0-9_]*:\?' "${1:-$DEPLOY}"/docker-compose.yml 2>/dev/null | sed -E 's/\$\{([A-Z0-9_]+):\?/\1/' | sort -u; }
 compose_keys() { grep -ohE '\$\{[A-Z][A-Z0-9_]*' "${1:-$DEPLOY}"/*.yml 2>/dev/null | cut -c3- | sort -u; }
 # Adds to .env every key the release's .env.example sets that .env lacks (its default; a
@@ -1357,8 +1552,16 @@ merge_env() {   # merge_env plan|do (the release's .env.example and compose file
     [[ -n "$key" && -z "${have[$key]:-}" ]] || continue
     # The features are chosen, not the example's default.
     [[ $key == COMPOSE_PROFILES && $FEAT_CHOSEN -eq 1 ]] && def="$(features_csv)"
-    if [[ -z "$def" && -n "${req[$key]:-}" ]]; then add+=("$key"$'\t'"@secret"); else add+=("$key"$'\t'"$def"); fi
+    if [[ -z "$def" && ( -n "${req[$key]:-}" || " $GEN_SECRETS " == *" $key "* ) ]]; then add+=("$key"$'\t'"@secret"); else add+=("$key"$'\t'"$def"); fi
   done < <(example_set_keys "$example")
+  # One of the secrets the installer makes, there but empty (an earlier upgrade added it so): made now.
+  local empty=()
+  for key in $GEN_SECRETS; do [[ -n "${have[$key]:-}" && -z "$(env_get "$key")" ]] && empty+=("$key"); done
+  if [[ ${#empty[@]} -gt 0 ]]; then
+    for key in "${empty[@]}"; do
+      if [[ $1 == do ]]; then env_edit "$env" "$key" "$key=$(gen_secret)" && did ".env: $key was empty: a new secret, generated"; else would "make $key in .env: it is empty"; fi
+    done
+  fi
   ENV_ADDED=()
   if [[ ${#add[@]} -gt 0 ]]; then
     if [[ $1 == do ]]; then
@@ -1395,14 +1598,15 @@ merge_env() {   # merge_env plan|do (the release's .env.example and compose file
 
 # A new .env from .env.example: the answers, and secrets generated (none of them printed or logged).
 ADMIN_PASSWORD_NEW="" NEW_GITLAB="" NEW_GITLAB_TOKEN="" NO_GITLAB=0
-make_env() {
-  local env="$DEPLOY/.env" tmp key line val model example="$DEPLOY/.env.example"
+make_env() {   # make_env [DIR]: DIR/.env (default the installation's); another folder's quietly
+  local dir="${1:-$DEPLOY}"
+  local env="$dir/.env" tmp key line val model example="$dir/.env.example"
   local -A V=()
   V[DOMAIN]="$NEW_DOMAIN"; V[ADMIN_EMAIL]="$NEW_EMAIL"; V[MODELS_DIR]="$NEW_MODELS_DIR"; V[MODEL]="$NEW_MODEL"; V[DATA_DIR]="$DATA_DIR"
   V[DEFAULT_MODELS]="$([[ "${NEW_DEFAULTS:-}" == download ]] && echo download)"
   V[COMPOSE_PROFILES]="$(features_csv)"
   # Every key compose cannot start without gets a secret of its own (the gateway's starts with sk-).
-  for key in DB_PASSWORD APP_KEY ENGINE_KEY ARGUS_KEY WORKSPACES_KEY $(required_keys "$DEPLOY"); do [[ -n "${V[$key]:-}" ]] || V[$key]="$(gen_secret)"; done
+  for key in $GEN_SECRETS $(required_keys "$dir"); do [[ -n "${V[$key]:-}" ]] || V[$key]="$(gen_secret)"; done
   V[GATEWAY_KEY]="sk-$(gen_secret)"
   ADMIN_PASSWORD_NEW="$(gen_secret | cut -c1-24)"; V[ADMIN_PASSWORD]="$ADMIN_PASSWORD_NEW"
   tmp="$env.installer-new"
@@ -1428,20 +1632,27 @@ make_env() {
     if [[ "${V[DEFAULT_MODELS]}" == download ]] && ! grep -q '^DEFAULT_MODELS=' "$example"; then echo "DEFAULT_MODELS=download"; fi
   ) > "$tmp" || die "cannot write $tmp"
   mv -f "$tmp" "$env" && chmod 600 "$env" || die "writing $env failed"
+  [[ "$dir" == "$DEPLOY" ]] || return 0
   did ".env written (0600): the features ($(feat_count)), DOMAIN=$NEW_DOMAIN, MODELS_DIR=$NEW_MODELS_DIR, DATA_DIR=$DATA_DIR, MODEL=${NEW_MODEL:-none yet}$([[ "${NEW_DEFAULTS:-}" == download ]] && echo ", DEFAULT_MODELS=download")${NEW_GITLAB:+, GITLAB_URL=$NEW_GITLAB and its token}; the secrets generated, none printed"
 }
 
 # docker-compose.override.yml for this host, when it has none: what it leaves out, and the
 # speech server kept off the network. Yours afterwards: upgrades and repairs keep it.
-write_override() {   # write_override plan|do
-  local act=$1 f="$DEPLOY/docker-compose.override.yml" audio_on=1 offline=""
+write_override() {   # write_override plan|do [DIR]: DIR's (default the installation's); another folder's quietly
+  local act=$1 dir="${2:-$DEPLOY}" audio_on=1 offline=""
+  local f="$dir/docker-compose.override.yml"
   # The speech server: on unless its feature is off.
   local sf; sf="$(svc_feature audio)"
   [[ -n "$sf" && " ${FEATURES_ON[*]} " != *" $sf "* ]] && audio_on=0
   # Offline only when its models come from a folder: with a network an admin may download speech models later.
   [[ $audio_on -eq 1 && $CMD == install && -n "${NEW_DEFAULTS:-}" && -d "${NEW_DEFAULTS:-}" ]] && offline="; the speech server offline (HF_HUB_OFFLINE=1)"
-  if [[ -f "$f" ]]; then
-    note "docker-compose.override.yml is there: kept as it is"
+  if [[ -f "$f" ]] && override_bare "$f"; then
+    # 7.6.0 to 7.6.2 wrote one with "services:" and nothing under it, which compose cannot read.
+    [[ $act == plan ]] && { would "write docker-compose.override.yml again: the one there says \"services:\" with nothing under it, which compose cannot read"; return 0; }
+    rm -f "$f" || die "cannot replace $f"
+    [[ "$dir" == "$DEPLOY" ]] && note "docker-compose.override.yml said \"services:\" with nothing under it (an earlier installer's), which compose cannot read: written again"
+  elif [[ -f "$f" ]]; then
+    [[ "$dir" == "$DEPLOY" ]] && note "docker-compose.override.yml is there: kept as it is"
     return 0
   fi
   if [[ $act == plan ]]; then
@@ -1451,14 +1662,22 @@ write_override() {   # write_override plan|do
   {
     echo "# Written by installer.sh ($BVERSION) for this host. Yours to change: upgrades and repairs keep it."
     echo "# The features that run are in .env (COMPOSE_PROFILES): installer.sh repair --with and --without change them."
-    echo "services:"
     if [[ -n $offline ]]; then
+      echo "services:"
       echo "  # Its models were copied from a folder: the speech server uses the models it has and never looks for others."
       echo "  audio: { environment: { HF_HUB_OFFLINE: \"1\" } }"
+    else
+      echo "# Nothing changed yet. To change a service on this host, put its settings in place of {}, for example:"
+      echo "#   services:"
+      echo "#     app: { environment: { TZ: Europe/Berlin } }"
+      echo "services: {}"
     fi
   } > "$f" || die "cannot write $f"
-  did "docker-compose.override.yml${offline:+:$offline}"
+  [[ "$dir" == "$DEPLOY" ]] && did "docker-compose.override.yml${offline:+:$offline}"
+  return 0
 }
+# An override that says "services:" and nothing else (comments aside): not a mapping, so compose stops.
+override_bare() { [[ "$(grep -vE '^[[:space:]]*(#|$)' "$1" 2>/dev/null)" == "services:" ]]; }
 
 # ======================================================================= features
 # deploy/features (the bundle's, else the installation's): each feature's services, whether it is
@@ -1495,6 +1714,7 @@ feat_close() {   # feat_close ID...
     for id in "${!on[@]}"; do for r in ${FEAT_REQ[$id]}; do [[ -n "${on[$r]:-}" ]] || { on[$r]=1; more=1; }; done; done
   done
   for id in "${FEAT_IDS[@]}"; do [[ -n "${on[$id]:-}" ]] && echo "$id"; done
+  return 0
 }
 # The features on that need ID, directly or through another.
 feat_needing() {   # feat_needing ID ON...
@@ -1601,6 +1821,11 @@ choose_features() {   # choose_features MODE BASE_ID...
       [[ ${#w[@]} -gt 0 ]] && refuse "$id cannot be off while ${w[*]} need$([[ ${#w[@]} -eq 1 ]] && echo s) it: turn those off too (--without $id,$(IFS=,; echo "${w[*]}"))"
     done
     mapfile -t FEATURES_ON < <(feat_close "${!on[@]}")
+    if [[ $NO_GITLAB -eq 1 ]]; then
+      for id in "${FEATURES_ON[@]}"; do
+        [[ ${FEAT_NEEDS[$id]:-} == gitlab ]] && refuse "$id needs a GitLab$([[ -z "${on[$id]:-}" ]] && echo " ($(feat_needing "$id" "${!on[@]}" | paste -sd' ' -) need$([[ $(feat_needing "$id" "${!on[@]}" | wc -l) -eq 1 ]] && echo s) it)"): --gitlab-url and --gitlab-token-file, or --without $id"
+      done
+    fi
     for id in "${FEATURES_ON[@]}"; do [[ -n "${on[$id]:-}" ]] || note "$id is on too: $(feat_needing "$id" "${!on[@]}" | paste -sd' ' -) need$([[ $(feat_needing "$id" "${!on[@]}" | wc -l) -eq 1 ]] && echo s) it"; on[$id]=1; done
     for id in "${FEATURES_ON[@]}"; do
       [[ -n "$BUNDLE" ]] && ! bundle_has "$id" && refuse "this bundle has no image for $id (made without it): --without $id, or a bundle that has it"
@@ -1755,7 +1980,10 @@ place_models() {   # place_models plan|do
       while IFS= read -r f; do
         [[ -f "$MODELS_DIR/$f" && "$(stat -c %s "$MODELS_DIR/$f")" == "$(stat -c %s "$BUNDLE/models/library/$f")" ]] && continue
         mkdir -p "$MODELS_DIR/$(dirname "$f")" || die "cannot write $MODELS_DIR"
-        ln -f "$BUNDLE/models/library/$f" "$MODELS_DIR/$f" 2>/dev/null || cp "$BUNDLE/models/library/$f" "$MODELS_DIR/$f" || die "copying $f into $MODELS_DIR failed (disk full?)"
+        ln -f "$BUNDLE/models/library/$f" "$MODELS_DIR/$f" 2>/dev/null \
+          || { cp "$BUNDLE/models/library/$f" "$MODELS_DIR/$f.installer-new" && mv -f "$MODELS_DIR/$f.installer-new" "$MODELS_DIR/$f"; } \
+          || { rm -f "$MODELS_DIR/$f.installer-new"; die "copying $f into $MODELS_DIR failed (disk full?)"; }
+        UNDO_FILES+=("$MODELS_DIR/$f")
         n=$((n + 1)); say "  model $f"
       done < <(printf '%s\n' "${!carried[@]}" | sort)
       ok "$n model file(s) put in $MODELS_DIR"
@@ -1775,7 +2003,9 @@ place_models() {   # place_models plan|do
         f="${f#"$from"/}"
         [[ "$f" == audio.tar.gz || -f "$MODELS_DIR/$f" ]] && continue
         mkdir -p "$MODELS_DIR/$(dirname "$f")" || die "cannot write $MODELS_DIR"
-        cp "$from/$f" "$MODELS_DIR/$f" || die "copying $f into $MODELS_DIR failed (disk full?)"
+        { cp "$from/$f" "$MODELS_DIR/$f.installer-new" && mv -f "$MODELS_DIR/$f.installer-new" "$MODELS_DIR/$f"; } \
+          || { rm -f "$MODELS_DIR/$f.installer-new"; die "copying $f into $MODELS_DIR failed (disk full?)"; }
+        UNDO_FILES+=("$MODELS_DIR/$f")
         n=$((n + 1)); say "  model $f"
       done < <(find "$from" -type f -print0 | sort -z)
       ok "$n model file(s) copied from $from into $MODELS_DIR"
@@ -1800,10 +2030,28 @@ place_models() {   # place_models plan|do
 
 # The speech server's models into the audio volume, when it has none.
 fill_audio() {   # fill_audio plan|do
-  local vol="${PROJECT}_audio" from="$BUNDLE/audio"
+  local vol="${PROJECT}_audio" from="$BUNDLE/audio" dir=""
   # The speech server's models from the folder the default models are copied from, when it has them.
   [[ $CMD == install && -n "${NEW_DEFAULTS:-}" && -f "${NEW_DEFAULTS:-}/audio.tar.gz" ]] && from="$(cd "$NEW_DEFAULTS" && pwd)"
   [[ -f "$from/audio.tar.gz" || ( $PARTIAL == 1 && "$(bundle_get audio)" == yes ) ]] || return 0
+  # The audio volume is bound to DATA_DIR/audio (docker-compose.yml): its models go there, never into a
+  # volume of the engine's own, which compose would then keep using. Without DATA_DIR (an older
+  # installation's .env), into the volume as before.
+  if [[ -n "$DATA_DIR" ]] && grep -q 'device: "${DATA_DIR[^}]*}/audio"' "$BUNDLE/deploy/docker-compose.yml" 2>/dev/null; then
+    dir="$DATA_DIR/audio"
+    # Filled whole once (the state says so); an upgrade's folder has an earlier release's models.
+    if [[ -n "$(ls -A "$dir" 2>/dev/null | head -n1)" ]] && [[ -n "$(state_get audio)" || $CMD == upgrade ]]; then
+      ok "the speech server's models: $dir has them, kept"; return 0
+    fi
+    if [[ $1 == plan ]]; then would "put the speech server's models in $dir"; return 0; fi
+    mkdir -p "$dir" || die "cannot make $dir"
+    # A cut-off fill is filled again over itself: tar writes each file whole.
+    in_helper -v "$dir:/target" -v "$from:/bundle:ro" "$HELPER" tar -xzf /bundle/audio.tar.gz --numeric-owner -C /target \
+      || die "putting the speech server's models in $dir failed (disk full?)"
+    state_set audio "$BVERSION"
+    did "the speech server's models in $dir"
+    return 0
+  fi
   if volume_exists "$vol" && [[ -n "$(in_helper -v "$vol:/v:ro" "$HELPER" sh -c 'ls -A /v | head -n1' 2>/dev/null)" ]]; then
     ok "the speech server's models: $vol has them, kept"; return 0
   fi
@@ -1938,7 +2186,7 @@ fix_permissions() {   # fix_permissions plan|do -> FIX_FAILED, FIX_FOUND (owners
   if [[ $ENGINE == docker && -d "$MODELS_DIR" && "$(stat -c %u "$MODELS_DIR")" != "$APP_UID" ]]; then
     FIX_FOUND=$((FIX_FOUND + 1))
     if [[ $1 == plan ]]; then would "give $MODELS_DIR to uid $APP_UID (the app writes there)"
-    elif [[ ${MODELS_HAD:-0} -gt 0 ]] && ! confirm "$MODELS_DIR holds $MODELS_HAD model file(s) of its own: give it to uid $APP_UID, so the app can download into it too? (no: the app reads them, and downloads fail)"; then
+    elif [[ ${MODELS_HAD:-0} -gt 0 ]] && ! choose "$MODELS_DIR holds $MODELS_HAD model file(s) of its own: give it to uid $APP_UID, so the app can download into it too? (no: the app reads them, and downloads fail)" n; then
       note "$MODELS_DIR stays as it is: the app reads its models; to let it download there: sudo chown -R $APP_UID:$APP_UID $MODELS_DIR"
     elif [[ $EUID -eq 0 ]] && chown -R "$APP_UID:$APP_UID" "$MODELS_DIR"; then did "$MODELS_DIR is now uid $APP_UID's (the app writes there)"
     else bad "$MODELS_DIR is not uid $APP_UID's and the app writes there: sudo chown -R $APP_UID:$APP_UID $MODELS_DIR"; FIX_FAILED=1; fi
@@ -1990,11 +2238,20 @@ cmd_install() {
   need_bundle
   iv="$(state_get version)"
   if [[ -n "$iv" && "$iv" != "$BVERSION" ]]; then refuse "$DIR has $iv installed: upgrade it (or remove it first)"; fi
-  # Again over the same version, or carrying on one that was cut off: each step checks first.
-  [[ -n "$iv" || "$(state_get target)" == "$BVERSION" ]] && again=1
+  # Again over the same version, or carrying on one that was cut off (by this release or an earlier
+  # one, whose files it brings to this release's): each step checks first.
+  local cutoff leftover=0; cutoff="$(state_get target)"
+  [[ -n "$iv" || -n "$cutoff" ]] && again=1
+  # An install that never finished (this release's or an earlier one's): what it left is taken away after
+  # the checks, then it is installed anew with the answers it had.
+  if [[ -z "$iv" && -n "$cutoff" ]]; then
+    leftover=1
+    note "an install of $cutoff was cut off here: what it left is taken away after the checks, then $BVERSION is installed anew$([[ $KEEP_FAILED -eq 1 ]] && echo " (--keep-failed: carried on instead)")"
+    [[ $KEEP_FAILED -eq 1 ]] && leftover=0
+  fi
   if [[ $again -eq 0 ]]; then
     [[ -f "$DEPLOY/docker-compose.yml" ]] && refuse "$DEPLOY holds an installation this installer did not make: upgrade it"
-    if E ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null | grep -q .; then refuse "a stack named $PROJECT runs in $ENGINE already: upgrade it, or --project another name"; fi
+    if E ps -aq --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null | grep -q .; then refuse "a stack named $PROJECT runs in $ENGINE already: upgrade it (its installer.sh upgrade), or remove it first; a second one cannot run beside it (its containers have fixed names)"; fi
     if E volume ls -q 2>/dev/null | grep -q "^${PROJECT}_postgres\$"; then refuse "the volume ${PROJECT}_postgres holds data from an earlier installation, whose .env opens it: restore that .env and upgrade, or remove those volumes (remove --purge)"; fi
   fi
   read_features "$BUNDLE/deploy/features"
@@ -2061,6 +2318,7 @@ cmd_install() {
   [[ "$NEW_MODEL" == *:* && "$NEW_DEFAULTS" == skip ]] \
     && note "MODEL=$NEW_MODEL is a Hugging Face name: it is added once its files are in MODELS_DIR (Admin -> Models -> Default models downloads them)"
   HTTP_PORT="$NEW_HTTP" HTTPS_PORT="$NEW_HTTPS" DOMAIN="$NEW_DOMAIN"
+  case "$NEW_MODELS_DIR" in /*|./*|../*) ;; *) NEW_MODELS_DIR="./$NEW_MODELS_DIR" ;; esac
   MODELS_DIR="$NEW_MODELS_DIR"; case "$MODELS_DIR" in /*) ;; *) MODELS_DIR="$DEPLOY/${MODELS_DIR#./}" ;; esac
   BACKUP_DIR="$DEPLOY/backups"
   [[ "$DATA_DIR" == /* && "$DATA_DIR" != / ]] || usage_error "DATA_DIR is an absolute folder (not /): $DATA_DIR"
@@ -2078,6 +2336,7 @@ cmd_install() {
     [[ -n "$BUNDLE" ]] && check_bundle
     check_requirements fresh
     [[ $REQ_FAIL -gt 0 && ${#FIXES[@]} -gt 0 ]] && fix_requirements fresh
+    command -v "$ENGINE" >/dev/null && E compose version >/dev/null 2>&1 && check_compose_files fresh
     [[ $REQ_FAIL -gt 0 ]] && note "$REQ_FAIL requirement(s) not met: install would stop here$([[ $SKIP_REQ -eq 1 ]] && echo " (not with --skip-requirements)")"
     step "the plan"
     would "load the $(needed_refs "${FEATURES_ON[@]}" | wc -l) images of the core and the features on into $ENGINE (those there already kept) and tag the release's own for $PROJECT"
@@ -2098,51 +2357,46 @@ cmd_install() {
     would "start it ($ENGINE compose up -d --pull never), wait until every service is healthy and check the versions"
     return 0
   fi
+  preflight fresh
   confirm "Install Argus Arena $BVERSION in $DIR?" || refuse "not confirmed"
+  if [[ $leftover -eq 1 ]]; then
+    lock; start_log
+    undo_install leftover
+    again=0 iv="" cutoff=""
+  fi
+  [[ -z "$iv" ]] && arm_undo
   mkdir -p "$DIR" || die "cannot make $DIR"
-  lock; start_log
-  check_bundle
-  check_requirements fresh
-  if [[ $REQ_FAIL -gt 0 && ${#FIXES[@]} -gt 0 && $SKIP_REQ -eq 0 ]]; then
-    # Changing the host's system is asked for, never assumed: --install-requirements when unattended.
-    if [[ $FIX_REQ -eq 1 ]] || { [[ $YES -eq 0 && $TTY -eq 1 ]] && confirm "Put the requirements right (above), as root where needed?"; }; then
-      fix_requirements fresh || :
-    else
-      note "install-requirements puts them right: installer.sh install --install-requirements (or installer.sh requirements --fix)"
-    fi
-  fi
-  if [[ $REQ_FAIL -gt 0 ]]; then
-    [[ $SKIP_REQ -eq 1 ]] && note "$REQ_FAIL requirement(s) not met; going on (--skip-requirements)" || refuse "$REQ_FAIL requirement(s) not met (above); --skip-requirements goes on anyway"
-  fi
+  [[ $LOCKED -eq 1 ]] || { lock; start_log; }
   state_set status installing target "$BVERSION" engine "$ENGINE" project "$PROJECT"
   load_images fresh
-  check_gpu_passthrough
   record_images
   step "files in $DIR"
-  sync_deploy install "" do
+  # Files an earlier release's cut-off install left as it shipped them are that release's: brought to this one's.
+  sync_deploy install "$([[ -z "$iv" && -n "$cutoff" && "$cutoff" != "$BVERSION" ]] && echo "$cutoff")" do
   ok "deploy/: $SYNC_SUMMARY"
   write_extras do
   step ".env"
   if [[ -f "$DEPLOY/.env" ]]; then note ".env is there: kept"; merge_env do; write_features do; else make_env; fi
   write_override do
+  step "data"
+  make_data_dirs do
+  ok "the stack's data goes in $DATA_DIR ($(human $(( $(free_kb "$(existing_parent "$DATA_DIR")") * 1024 ))) free there)"
   step "models"
   place_models do
   fill_audio do
   ensure_cert do
   if [[ $HOSTS -eq 1 ]]; then
     step "/etc/hosts"
-    if [[ $EUID -eq 0 ]]; then (cd "$DEPLOY" && bash scripts/setup-hosts.sh) || bad "scripts/setup-hosts.sh failed"
+    if [[ $EUID -eq 0 ]]; then (cd "$DEPLOY" && bash scripts/setup-hosts.sh) && UNDO_HOSTS=1 || bad "scripts/setup-hosts.sh failed"
     else note "it needs root: sudo $DEPLOY/scripts/setup-hosts.sh"; fi
   fi
-  step "data"
-  make_data_dirs do
-  ok "the stack's data goes in $DATA_DIR ($(human $(( $(free_kb "$(existing_parent "$DATA_DIR")") * 1024 ))) free there)"
   step "permissions"
   fix_permissions do
   start_stack || die "the stack did not start; fix what is named above and run install again"
   fix_started
   wait_healthy || die "the stack is not healthy; repair (or install again) after the cause is fixed"
   check_versions "$BVERSION" || die "the stack does not run $BVERSION as it should; see above"
+  UNDO_ARMED=0
   sign_builds
   record_state
   record_kept ${SYNC_KEPT[@]+"${SYNC_KEPT[@]}"} ${SYNC_BESIDE[@]+"${SYNC_BESIDE[@]}"}
@@ -2576,11 +2830,9 @@ cmd_upgrade() {
     would "on a failure: roll back by itself to $FROM (its files, its images, and the data from the backup, the data as it is kept first)"
     return 0
   fi
+  preflight upgrade
   confirm "Upgrade from $FROM to $BVERSION? (a backup is taken first)" || refuse "not confirmed"
   lock; start_log
-  check_bundle
-  check_requirements upgrade
-  [[ $REQ_FAIL -gt 0 ]] && refuse "$REQ_FAIL requirement(s) not met (above): nothing was changed"
   # This release's backup.sh (5.2.0's takes neither --deploy nor --podman), kept with the rollback
   # copy: the bundle's folder is gone when the .run ends, and a rollback by hand needs it.
   BACKUP_SCRIPT="$SNAP/backup.sh"
