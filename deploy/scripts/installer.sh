@@ -1492,8 +1492,8 @@ say_file_changes() {   # say_file_changes "REPLACED FILES" "KEPT, RELEASE'S BESI
   [[ -n "${3// /}" ]] && say "  kept as you changed them ($BVERSION ships them as they were): $(xargs <<<"$3")"
   return 0
 }
-record_deploy() {   # what this installer wrote, to tell later what was changed
-  (umask 077; bundle_deploy_sums | awk -F'\t' '{ print $2 "  " $1 }' > "$STATE/deploy.sha256")
+record_deploy() {   # what this installer wrote, to tell later what was changed (not the host's own paths: never written)
+  (umask 077; bundle_deploy_sums | while IFS=$'\t' read -r f sum; do is_user_path "$f" || printf '%s  %s\n' "$sum" "$f"; done > "$STATE/deploy.sha256")
 }
 # The shipped files an install or upgrade left as the host had changed them, as they are now:
 # repair and verify do not take them for damage.
@@ -1504,8 +1504,11 @@ record_kept() {   # record_kept FILE...
 kept_sum() { awk -F'\t' -v f="$1" '$1 == f { print $2 }' "$STATE/kept" 2>/dev/null | tail -n1; }
 # What verify expects in DEPLOY: as written, or as kept.
 expected_sums() {
+  # The host's own paths (backups/, models/, .env ...) are not the installer's to check: 7.6.0 to 7.6.2
+  # recorded backups/.gitkeep, which install never writes, and verify took that for a file gone.
   { cat "$STATE/kept" 2>/dev/null; echo "--"; cat "$STATE/deploy.sha256"; } \
-    | awk -F'\t' '$0 == "--" { s = 1; next } !s { k[$1] = $2; next } { f = substr($0, 67); print ((f in k) ? k[f] : substr($0, 1, 64)) "  " f }'
+    | awk -F'\t' '$0 == "--" { s = 1; next } !s { k[$1] = $2; next } { f = substr($0, 67); print ((f in k) ? k[f] : substr($0, 1, 64)) "  " f }' \
+    | while IFS= read -r line; do is_user_path "${line:66}" || printf '%s\n' "$line"; done
 }
 
 # Beside deploy/: the docs, the licences, Code Arena's packages, the knowledge packs, VERSION. Only

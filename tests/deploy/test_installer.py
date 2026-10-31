@@ -1030,6 +1030,13 @@ class InstallerTests(unittest.TestCase):
 
     # ----------------------------------------- every check first; a failed install leaves nothing
 
+    def test_Verify_passes_right_after_an_install(self):
+        # The host's own paths (backups/.gitkeep among them) are never written, so never expected.
+        self.install()
+        r = self.r.run("verify", "--dir", str(self.dir))
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertNotIn("backups/", (self.dir / ".arena-install" / "deploy.sha256").read_text())
+
     def test_It_never_waits_for_every_child_at_once(self):
         # Its log is a tee it started (start_log): on bash 5.2 a bare wait waits for that tee too, for ever, as an
         # install on Debian 13 did after its images loaded. Each wait names what it waits for.
