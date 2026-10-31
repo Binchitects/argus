@@ -15,6 +15,61 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v7.6.3 (2026-10-31)
+
+A hotfix: the offline installer works, checks everything before it starts,
+leaves nothing behind when it fails, and builds and installs faster; the GPUs
+and the CPU are throttled before they run too hot.
+
+### :bug: Bugs fixed
+
+- The 7.6.2 offline installer could not install on a fresh host. The
+  override it wrote said `services:` with nothing under it ("services must be
+  a mapping" at `docker compose up`); before that, on a GPU host, the picture
+  and video servers' image, pinned by digest, was found by no image store
+  after it loaded; the bundle's promtail was an empty archive. Each is fixed,
+  and the bundle now refuses an image archive that is not whole. Found and
+  checked on a fresh offline host, end to end (`tools/offline-e2e/run.sh`).
+- From a review of the whole install path: the disk check counted the
+  images' packed size; the speech models went into a volume of the engine's
+  own instead of `DATA_DIR/audio`; Code Arena's signature folder was not
+  readable by the app; an upgrade added `WORKSPACES_KEY` empty; `--without` a
+  feature another one needs was ignored; a feature that needs a GitLab came on
+  without one as another's requirement; a bare models folder became a named
+  volume; `--yes` re-owned an existing model library; an upgrade kept an older
+  image whose tag had not changed; a hang-up left the `.run`'s 40 GB unpacked
+  folder; hints named an installer that is gone once the `.run` ends.
+- The chat searches the web again: the web-search feature's SearXNG is used
+  when no address is set (lost since 2026-10-03).
+- The disk and network graphs show no negative values (written and sent bytes
+  were drawn below zero); disk totals no longer count LVM and md devices twice.
+- A model just saved is never written out of the engine's presets by the
+  watcher's pass (one writer at a time, on every replica).
+- vLLM's and SGLang's supervisor no longer logs an error every round while its
+  engine has no model.
+- Code Arena lists sessions by their last message; Argus's pages never show an
+  earlier search's answer as the latest one.
+
+### :sparkles: New features & Enhancements
+
+- **Every check first.** Install and upgrade check the bundle, every
+  requirement of the host, the images' architecture, compose reading the
+  stack's files with the host's answers, and the GPU from a container, before
+  anything is written, loaded or started; what is not met is said together.
+- **Nothing left behind.** An install that fails or is stopped (Ctrl-C, a
+  dropped session) takes away its containers, networks, volumes, the images
+  it loaded, the data folders and files it made; its log stays.
+  `--keep-failed` keeps it to look at. An install an earlier release left cut
+  off is taken away first, then installed anew.
+- **Faster.** Images load four at a time and are skipped when already there;
+  bundles keep each packed image by its id, so a new bundle packs only the
+  images that changed, and its 40 GB are no longer copied and read twice.
+- **A temperature policy** (the power-limits feature, on by default): a GPU at
+  83 degC has its power cap stepped down, to its lowest at 90; the CPU the same
+  at 90 and 95 through its RAPL limit or its frequency; each comes back as it
+  cools (`THERMAL_POLICY`, `GPU_TEMP_LIMIT_C`, `CPU_TEMP_LIMIT_C` and the rest
+  in `.env`). New alerts for a hot CPU and a GPU still hot at a low cap.
+
 ## v7.6.2 (2026-10-30)
 
 A hotfix: what the app tells people to run names the commands of today.
