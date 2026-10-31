@@ -49,8 +49,8 @@ public static class OperationsEndpoints
     {
         var g = app.MapGroup("/api/admin").RequirePermissions(Llm.Core.Access.Permissions.MonitoringRead, Llm.Core.Access.Permissions.SettingsManage);
         g.MapGet("/overview", OverviewAsync);
-        g.MapGet("/services", async (IHttpClientFactory f, IOptions<StackOptions> s, IOptions<ArgusOptions> a, IOptions<Dashboards.DashboardOptions> d, Models.MediaControl media,
-            CancellationToken ct) => Results.Ok(await ProbeAllAsync(f, s.Value, a.Value, d.Value, media, ct)));
+        g.MapGet("/services", async (IHttpClientFactory f, IOptions<StackOptions> s, IOptions<ArgusOptions> a, IOptions<Dashboards.DashboardOptions> d, Features features,
+            Models.MediaControl media, CancellationToken ct) => Results.Ok(await ProbeAllAsync(f, s.Value, a.Value, d.Value, features, media, ct)));
         g.MapGet("/people.csv", PeopleCsvAsync);
 
         var argus = g.MapGroup("/argus").RequirePermissions(Llm.Core.Access.Permissions.ArgusRead, Llm.Core.Access.Permissions.ArgusManage, new Dictionary<string, string>
@@ -289,7 +289,7 @@ public static class OperationsEndpoints
     private static async Task<IResult> OverviewAsync(AppDbContext db, UserManager<AppUser> users, Ledger ledger, ArgusAdmin argus,
         IHttpClientFactory factory, IOptions<StackOptions> stack, IOptions<ArgusOptions> argusOptions, IOptions<Dashboards.DashboardOptions> dashboards, Chat.ChatModels models,
         Dashboards.PromDatasource prom, TimeProvider clock, Replicas replicas, Storage.StorageDisks disks, IOptionsMonitor<Storage.StorageOptions> storage,
-        Models.MediaControl media, Access.AccessService access, Downloads.CodeArenaClients codeArena, CancellationToken ct)
+        Models.MediaControl media, Access.AccessService access, Downloads.CodeArenaClients codeArena, Features features, CancellationToken ct)
     {
         var people = await db.Users.AsNoTracking().Where(u => !u.IsDisabled).ToListAsync(ct);
         var admins = (await access.OwnersAsync(ct: ct)).Count;
@@ -298,7 +298,7 @@ public static class OperationsEndpoints
         var warning = spending.Problem;
         var over = people.Where(p => spending.Over(p).Count > 0).Select(p => p.UserName).ToList();
 
-        var probes = ProbeAllAsync(factory, stack.Value, argusOptions.Value, dashboards.Value, media, ct);
+        var probes = ProbeAllAsync(factory, stack.Value, argusOptions.Value, dashboards.Value, features, media, ct);
         var certificate = Certificates.ReadAsync(prom, stack.Value, clock.GetUtcNow(), ct);
         var space = disks.ListAsync(ct);
         JsonNode? index = null;
@@ -355,39 +355,44 @@ public static class OperationsEndpoints
     }
 
     /// <summary>
-    /// Each service's probe. The picture and video servers run only while their model is loaded (MediaControl): one whose
-    /// model is unloaded, as meant (idle ten minutes, or never asked for), is idle, not down.
+    /// Each service's probe, of the services the stack runs (a feature that is off runs none: it is not down). The
+    /// picture and video servers run only while their model is loaded (MediaControl): one whose model is unloaded, as
+    /// meant (idle ten minutes, or never asked for), or that has no model in the library yet, is idle, not down.
     /// </summary>
     public static async Task<IReadOnlyList<Probe>> ProbeAllAsync(IHttpClientFactory factory, StackOptions s, ArgusOptions a, Dashboards.DashboardOptions d,
-        Models.MediaControl? media = null, CancellationToken ct = default)
+        Features features, Models.MediaControl? media = null, CancellationToken ct = default)
     {
         var http = factory.CreateClient("probe");
-        var checks = new List<Task<Probe>>
+        var services = new (string Service, string Name, string Purpose, string Url)[]
         {
-            ProbeAsync(http, "Model gateway", "LiteLLM: API keys, credit, the chat's model", s.LiteLlmProbeUrl.TrimEnd('/') + "/health/liveliness"),
-            ProbeAsync(http, "Prometheus", "metrics and alert rules", s.PrometheusUrl.TrimEnd('/') + "/-/healthy"),
-            ProbeAsync(http, "Alertmanager", "firing alerts and their notifications", d.AlertmanagerUrl.TrimEnd('/') + "/-/healthy"),
-            ProbeAsync(http, "Loki", "every service's logs", d.LokiUrl.TrimEnd('/') + "/ready"),
-            ProbeAsync(http, "Engine", "llama.cpp: the chat models", "http://llamacpp:8080/health"),
-            ProbeAsync(http, "Pictures", "the image tool's server", Models.MediaModels.ImageUrl + "/v1/models"),
-            ProbeAsync(http, "Video", "the video tool's server", Models.MediaModels.VideoUrl + "/v1/models"),
-            ProbeAsync(http, "Speech", "speech to text and text to speech", Models.MediaModels.AudioUrl + "/health"),
-            ProbeAsync(http, "Web search", "SearXNG, the web tool's search", "http://searxng:8080/healthz"),
+            ("litellm", "Model gateway", "LiteLLM: API keys, credit, the chat's model", s.LiteLlmProbeUrl.TrimEnd('/') + "/health/liveliness"),
+            ("prometheus", "Prometheus", "metrics and alert rules", s.PrometheusUrl.TrimEnd('/') + "/-/healthy"),
+            ("alertmanager", "Alertmanager", "firing alerts and their notifications", d.AlertmanagerUrl.TrimEnd('/') + "/-/healthy"),
+            ("loki", "Loki", "every service's logs", d.LokiUrl.TrimEnd('/') + "/ready"),
+            ("llamacpp", "Engine", "llama.cpp: the chat models", "http://llamacpp:8080/health"),
+            ("imagegen", "Pictures", "the image tool's server", Models.MediaModels.ImageUrl + "/v1/models"),
+            ("videogen", "Video", "the video tool's server", Models.MediaModels.VideoUrl + "/v1/models"),
+            ("audio", "Speech", "speech to text and text to speech", Models.MediaModels.AudioUrl + "/health"),
+            ("searxng", "Web search", "SearXNG, the web tool's search", "http://searxng:8080/healthz"),
+            ("argus", "Argus", "the code index", a.Url.TrimEnd('/') + "/healthz"),
         };
-        if (a.Enabled)
-        {
-            checks.Add(ProbeAsync(http, "Argus", "the code index", a.Url.TrimEnd('/') + "/healthz"));
-        }
-        var probes = await Task.WhenAll(checks);
+        var probes = await Task.WhenAll(services
+            .Where(x => features.Runs(x.Service) && (x.Service != "argus" || a.Enabled))
+            .Select(x => ProbeAsync(http, x.Name, x.Purpose, x.Url)));
         if (media is null)
         {
             return probes;
         }
         // The picture and video servers, one model each (the speech server's several models run in one that always does).
         var now = (await media.ListAsync(ct)).Where(x => x.Model.Id is null).ToDictionary(x => x.Model.Server, x => x.Now, StringComparer.Ordinal);
-        return [.. probes.Select(p => !p.Ok && (p.Name switch { "Pictures" => now.GetValueOrDefault("imagegen"), "Video" => now.GetValueOrDefault("videogen"), _ => null }) is "unloaded" or "off"
-            ? p with { Ok = true, Detail = "idle: its model is not loaded (it loads when asked for)" }
-            : p)];
+        return [.. probes.Select(p => p.Ok || p.Name is not ("Pictures" or "Video")
+            ? p
+            : now.GetValueOrDefault(p.Name == "Pictures" ? "imagegen" : "videogen") switch
+            {
+                "unloaded" or "off" => p with { Ok = true, Detail = "idle: its model is not loaded (it loads when asked for)" },
+                "waiting" or null => p with { Ok = true, Detail = "idle: its model is not in the library yet (Admin, Models)" },
+                _ => p,
+            })];
     }
 
     /// <summary>Is something answering, and how fast. An HTTP error below 500 is still an answer.</summary>

@@ -343,11 +343,13 @@ services:
 
   # Pictures and video (stable-diffusion.cpp): each runs the model the app names in its
   # control file (Admin -> Models: load, unload, keep loaded, the model's settings), and
-  # says what it does in its status file (services/sd-serve.sh).
+  # says what it does in its status file (services/sd-serve.sh). The image is pinned by a tag
+  # of our own (deploy/pinned-images: arenactl build pulls its digest and tags it): an image an
+  # offline bundle loads has no digest to be found by on every store, only its tag.
   imagegen:
     <<: [*service, *gpu]
     profiles: [pictures]
-    image: ghcr.io/leejet/stable-diffusion.cpp@sha256:1aee2217d5e20ddfb19dfcbca21db3cbe1dcb0ae3b9bc4151773e503dca8aede
+    image: ghcr.io/leejet/stable-diffusion.cpp:arena-1aee2217d5e2
     container_name: imagegen
     user: "65534:65534"
     read_only: true
@@ -358,7 +360,7 @@ services:
   videogen:
     <<: [*service, *gpu]
     profiles: [video]
-    image: ghcr.io/leejet/stable-diffusion.cpp@sha256:1aee2217d5e20ddfb19dfcbca21db3cbe1dcb0ae3b9bc4151773e503dca8aede
+    image: ghcr.io/leejet/stable-diffusion.cpp:arena-1aee2217d5e2
     container_name: videogen
     user: "65534:65534"
     read_only: true
@@ -649,9 +651,17 @@ services:
     container_name: power-limits
     privileged: true
     network_mode: none
+    # The caps, and the temperature policy that steps them down while a GPU or the CPU runs hot (power-limits.sh).
     environment:
       GPU_POWER_LIMIT_W: ${GPU_POWER_LIMIT_W:-}
       CPU_POWER_LIMIT_W: ${CPU_POWER_LIMIT_W:-}
+      THERMAL_POLICY: ${THERMAL_POLICY:-on}
+      GPU_TEMP_LIMIT_C: ${GPU_TEMP_LIMIT_C:-83}
+      GPU_TEMP_CRITICAL_C: ${GPU_TEMP_CRITICAL_C:-90}
+      CPU_TEMP_LIMIT_C: ${CPU_TEMP_LIMIT_C:-90}
+      CPU_TEMP_CRITICAL_C: ${CPU_TEMP_CRITICAL_C:-95}
+      THERMAL_STEP_PCT: ${THERMAL_STEP_PCT:-10}
+      THERMAL_FLOOR_PCT: ${THERMAL_FLOOR_PCT:-50}
     volumes: [./services/power-limits.sh:/power-limits.sh:ro, power-limits:/state]
     entrypoint: [/bin/sh, /power-limits.sh]
 

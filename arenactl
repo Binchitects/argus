@@ -320,6 +320,15 @@ def cmd_doctor(a) -> int:
 
 
 # ----------------------------------------------------------------------------- build
+def pinned_images() -> dict[str, str]:
+    """deploy/pinned-images: each tag of our own, and the digest reference it stands for."""
+    f = DEPLOY / "pinned-images"
+    if not f.exists():
+        return {}
+    rows = (line.split("\t") for line in f.read_text().splitlines() if line.strip() and not line.startswith("#"))
+    return {tag.strip(): digest.strip() for tag, digest in rows}
+
+
 def build_images(engine: Engine, profiles: list[str], pull: bool = True, services: list[str] | None = None) -> None:
     compose = Compose(engine, profiles)
     try:
@@ -334,6 +343,13 @@ def build_images(engine: Engine, profiles: list[str], pull: bool = True, service
         if pull and others:
             missing = [s for s in others if not engine.has_image(svcs[s].get("image", ""))]
             step(f"the other images: {len(others)}, {len(missing)} pulled")
+            # Those pinned by a tag of our own: their digest pulled (when not here), then tagged.
+            pinned = pinned_images()
+            for ref in sorted({svcs[s].get("image", "") for s in missing} & set(pinned)):
+                if not engine.has_image(pinned[ref]):
+                    run([engine.need(), "pull", pinned[ref]])
+                run([engine.need(), "tag", pinned[ref], ref])
+            missing = [s for s in missing if svcs[s].get("image", "") not in pinned]
             if missing:
                 compose.run("pull", *missing)
     finally:
@@ -485,14 +501,33 @@ def cmd_code_arena(a) -> int:
             raise Stop("--offline: tools/offline-nuget lacks " + ", ".join(missing) + " (tools/fetch-code-arena-packs.sh fetches them; without --offline nuget.org is used)", 3)
         sources = ["--source", rel(TOOLS / "offline-nuget"), "-p:RestoreIgnoreFailedSources=false"]
     built = DIST / "code-arena"
+    # Restored once for every system, then each published at the same time (each builds in its own
+    # obj/Release/net10.0/RID folder; only the restore shares a file).
+    every = '"' + ";".join(rids) + '"'  # quoted for MSBuild: ; inside a property's value, not between properties
+    step(f"Code Arena: restored for {', '.join(rids)}, then published for each at once")
+    run([*dotnet, "restore", rel(ROOT / "src/CodeArena/CodeArena.csproj"), f"-p:RuntimeIdentifiers={every}", *sources, "-nologo"], cwd=ROOT)
+    jobs = []
     for rid in rids:
-        step(f"Code Arena for {rid}")
         target = built / rid
         shutil.rmtree(target, ignore_errors=True)
-        run([*dotnet, "publish", rel(ROOT / "src/CodeArena/CodeArena.csproj"), "-c", "Release", "-r", rid, "-o", rel(target), *sources, "-nologo"], cwd=ROOT)
+        log = built / f"{rid}.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        cmd = [*dotnet, "publish", rel(ROOT / "src/CodeArena/CodeArena.csproj"), "-c", "Release", "-r", rid, "-o", rel(target), "--no-restore",
+               f"-p:RuntimeIdentifiers={every}", "-nologo"]
+        jobs.append((rid, target, log, subprocess.Popen(cmd, cwd=ROOT, stdout=log.open("w"), stderr=subprocess.STDOUT)))
+    failed = []
+    for rid, target, log, proc in jobs:
+        if proc.wait() != 0:
+            failed.append(rid)
+            say(f"  {rid} failed; its log:\n" + "\n".join(log.read_text().splitlines()[-30:]))
+            continue
+        log.unlink(missing_ok=True)
+        say(f"  {rid}: published")
         for f in target.iterdir():
             if f.is_file() and f.name not in ("code-arena", "code-arena.exe"):
                 f.unlink()
+    if failed:
+        raise Stop(f"Code Arena did not publish for {', '.join(failed)} (above)")
     step("the packages")
     out.mkdir(parents=True, exist_ok=True)
     epoch = int(os.environ.get("SOURCE_DATE_EPOCH") or (output(["git", "-C", str(ROOT), "log", "-1", "--format=%ct"]) or str(int(time.time()))).strip())
@@ -650,10 +685,12 @@ def cmd_bundle(a) -> int:
     cmd = ["bash", str(SCRIPTS / "make-installer.sh"), "--project", "arena"]
     if engine.name == "podman":
         cmd.append("--podman")
-    for flag, value in (("--out", a.out), ("--models-dir", a.models_dir), ("--code-arena", a.code_arena), ("--without", a.without)):
+    for flag, value in (("--out", a.out), ("--models-dir", a.models_dir), ("--code-arena", a.code_arena), ("--without", a.without),
+                        ("--image-cache", a.image_cache)):
         if value:
             cmd += [flag, value]
     cmd += (["--models"] if a.models else []) + (["--packs"] if a.packs else []) + (["--no-known"] if no_known else []) + (["--dry-run"] if a.dry_run else [])
+    cmd += ["--no-image-cache"] if a.no_image_cache else []
     if deps_dir:
         cmd += ["--deps", str(deps_dir)]
     step("the bundle (deploy/scripts/make-installer.sh)")
@@ -872,6 +909,8 @@ def main(argv: list[str]) -> int:
     s.add_argument("--without", help="features left out of the bundle")
     s.add_argument("--code-arena", help="Code Arena's packages from this folder (default dist/, made when missing)")
     s.add_argument("--out", help="where the .run goes (default dist/)")
+    s.add_argument("--image-cache", help="each image packed once, by its id (default OUT/.image-cache): unchanged ones are not saved again")
+    s.add_argument("--no-image-cache", action="store_true", help="every image saved and gzipped again")
     s.add_argument("--no-build", action="store_true", help="the images as they are here")
     s.add_argument("--podman", action="store_true")
     s.add_argument("--engine", choices=["docker", "podman"])

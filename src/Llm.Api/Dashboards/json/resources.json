@@ -1166,13 +1166,13 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(node_disk_read_bytes_total[5m]))",
+          "expr": "sum(rate(node_disk_read_bytes_total{device!~\"dm-.*|md.*\"}[5m]))",
           "legendFormat": "read"
         },
         {
           "refId": "B",
-          "expr": "-sum(rate(node_disk_written_bytes_total[5m]))",
-          "legendFormat": "write"
+          "expr": "sum(rate(node_disk_written_bytes_total{device!~\"dm-.*|md.*\"}[5m]))",
+          "legendFormat": "written"
         }
       ],
       "fieldConfig": {
@@ -1212,12 +1212,12 @@
         {
           "refId": "A",
           "expr": "sum(rate(node_network_receive_bytes_total{device!~\"lo|veth.*|docker.*|br-.*\"}[5m]))",
-          "legendFormat": "rx"
+          "legendFormat": "received"
         },
         {
           "refId": "B",
-          "expr": "-sum(rate(node_network_transmit_bytes_total{device!~\"lo|veth.*|docker.*|br-.*\"}[5m]))",
-          "legendFormat": "tx"
+          "expr": "sum(rate(node_network_transmit_bytes_total{device!~\"lo|veth.*|docker.*|br-.*\"}[5m]))",
+          "legendFormat": "sent"
         }
       ],
       "fieldConfig": {

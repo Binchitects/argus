@@ -35,7 +35,7 @@ scanners       | off | scanners | - | argus | Security scanners for code reviews
 monitoring     | on  | prometheus alertmanager loki promtail node-exporter cpu-temp-exporter | - | - | Dashboards, logs and alerts
 gpu-monitoring | on  | gpu-exporter | gpu | monitoring | The GPUs' metrics on the dashboards
 dcgm           | off | dcgm-exporter | gpu | monitoring | Data-centre GPU detail (NVIDIA DCGM, bare metal only)
-power-limits   | on  | power-limits | gpu | - | GPU and CPU power limits kept applied
+power-limits   | on  | power-limits | gpu | - | GPU and CPU power limits, and a temperature policy that throttles them
 ha             | off | valkey | - | - | Shared counts for several gateway replicas (Valkey)
 meetings       | on  | - | - | speech | Meetings: recorded, written out and summed up
 lab            | on  | - | - | sandbox | The science lab

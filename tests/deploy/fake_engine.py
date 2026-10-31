@@ -152,6 +152,28 @@ class Store:
         return self.s["origins"].get(image_id, "")
 
 
+def write_archive(path: str | None, text: str) -> None:
+    """A tiny image archive as docker save writes one: manifest.json and the config and layer it names
+    (to stdout without a path, as save without -o)."""
+    import io, tarfile
+    with (tarfile.open(path, "w") if path else tarfile.open(fileobj=sys.stdout.buffer, mode="w|")) as t:
+        for name, data in (("manifest.json", json.dumps([{"Config": "config.json", "Layers": ["layer.tar"]}]).encode()),
+                           ("config.json", b"{}"), ("layer.tar", text.encode())):
+            info = tarfile.TarInfo(name)
+            info.size, info.mtime = len(data), 0
+            t.addfile(info, io.BytesIO(data))
+
+
+def archive_text(raw: bytes) -> str:
+    """What write_archive put in an archive (or the archive itself, an older fake's plain text)."""
+    import io, tarfile
+    try:
+        with tarfile.open(fileobj=io.BytesIO(raw)) as t:
+            return t.extractfile("layer.tar").read().decode()
+    except tarfile.TarError:
+        return raw.decode()
+
+
 def stateful(args: list[str]) -> int | None:
     """installer.sh's calls against the store; None: not one of them."""
     st = Store(os.environ["FAKE_STATE"])
@@ -171,11 +193,11 @@ def stateful(args: list[str]) -> int | None:
         print("sha256:" + image_id)
         return 0
     if args[0] == "load":
-        path = args[args.index("-i") + 1]
-        raw = open(path, "rb").read()
+        # From a file (-i), or from stdin (the installer pipes pigz's output in).
+        raw = open(args[args.index("-i") + 1], "rb").read() if "-i" in args else sys.stdin.buffer.read()
         if raw[:2] == b"\x1f\x8b":
             raw = gzip.decompress(raw)
-        ref = raw.decode().split()[2]
+        ref = archive_text(raw).split()[2]
         image_id = hashlib.sha256(raw).hexdigest()
         s["images"][store_key(ref)] = image_id
         s["origins"][image_id] = norm(ref)
@@ -183,10 +205,9 @@ def stateful(args: list[str]) -> int | None:
         print(f"Loaded image: {ref}")
         return 0
     if args[0] == "save":
-        out = args[args.index("-o") + 1]
+        out = args[args.index("-o") + 1] if "-o" in args else None
         image_id = st.image(args[-1]) or "missing"
-        with open(out, "w") as f:
-            f.write(f"fake image {norm(args[-1])} {image_id}\n")
+        write_archive(out, f"fake image {norm(args[-1])} {image_id}\n")
         return 0
     if args[0] == "tag":
         image_id = st.image(args[1])
@@ -371,6 +392,9 @@ def compose(st: Store, args: list[str], project: str) -> int:
     s = st.s
     model = compose_model(args, project)
     if "config" in args:
+        if os.environ.get("FAKE_CONFIG_FAIL"):
+            print("services must be a mapping", file=sys.stderr)
+            return 1
         if "--images" in args:
             if "FAKE_IMAGES" in os.environ:
                 print("\n".join(lines("FAKE_IMAGES")))
@@ -452,7 +476,11 @@ def main() -> int:
         return 0
     # The store is one engine's (FAKE_STATE_ENGINE, docker by default); the other has nothing.
     if os.environ.get("FAKE_STATE") and os.path.basename(sys.argv[0]) == os.environ.get("FAKE_STATE_ENGINE", "docker"):
-        rc = stateful(args)
+        # One call at a time against the store: the installer loads several images at once.
+        import fcntl
+        with open(os.environ["FAKE_STATE"] + ".lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            rc = stateful(args)
         if rc is not None:
             return rc
     if args[0] == "compose":
@@ -481,12 +509,13 @@ def main() -> int:
     if args[0] == "tag":
         return 0
     if args[0] == "save":
-        out = args[args.index("-o") + 1]
-        with open(out, "w") as f:
-            f.write(f"fake image {args[-1]}\n")
+        out = args[args.index("-o") + 1] if "-o" in args else None
+        write_archive(out, f"fake image {args[-1]}\n")
         return 0
     if args[0] == "load":
-        print(f"Loaded image from {args[args.index('-i') + 1]}")
+        if "-i" not in args:
+            sys.stdin.buffer.read()
+        print(f"Loaded image from {args[args.index('-i') + 1] if '-i' in args else 'stdin'}")
         return 0
     if args[:2] == ["volume", "inspect"]:
         return 0 if args[-1] in lines("FAKE_VOLUMES") else 1

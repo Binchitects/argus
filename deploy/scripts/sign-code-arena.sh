@@ -73,6 +73,8 @@ chmod 600 signing/code-signing.key
 openssl dgst -sha256 -sign signing/code-signing.key -out "$work/SHA256SUMS.sig" "$work/SHA256SUMS"
 umask 022
 mkdir -p "$out"
+# The app reads it as uid 1000: a folder made 0700 by root (7.6.2's installer) hides the signature.
+chmod 755 "$out"
 cp "$work/SHA256SUMS" "$out/SHA256SUMS"
 cp "$work/SHA256SUMS.sig" "$out/SHA256SUMS.sig"
 cp signing/code-signing.crt "$out/code-signing.crt"

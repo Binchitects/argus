@@ -954,9 +954,11 @@ sha256sum -c argus-arena-5.6.1-offline.run.sha256
 sudo sh argus-arena-5.6.1-offline.run install --dir /srv/arena
 ```
 
-It checks the bundle and the host first: the system (Ubuntu, Debian, Fedora,
-RHEL and its kin, openSUSE, Arch), 4 CPU cores and 16 GB of memory, the tools
-it uses, disk for the images and the files, Docker or Podman with compose, the
+It asks its questions, then checks everything before it does anything: the
+bundle's checksums, the system (Ubuntu, Debian, Fedora, RHEL and its kin,
+openSUSE, Arch) and that the bundle's images are built for its architecture,
+4 CPU cores and 16 GB of memory, the tools it uses, disk for the images (what
+they take once loaded) and the files, Docker or Podman with compose, the
 engine's daemon (and Podman's socket) running, an NVIDIA GPU with its driver and
 NVIDIA's container toolkit wired into the engine (or `--cpu-only`), the two ports
 free and open in the firewall (ufw, firewalld), the clock synchronised and the
@@ -968,9 +970,24 @@ toolkit wired into Docker (its runtime) or Podman (a CDI spec, kept current
 as the driver changes), the ports opened and the limits raised, each step
 checked again after. A missing NVIDIA driver is installed too, and the
 installer stops for the reboot it needs (exit 7: run it again after).
-`sh argus-arena-VERSION-offline.run requirements` checks a host before anything
-else (`--fix` puts it right; `./arenactl requirements` is the same from a checkout). After the images load, a
-container runs `nvidia-smi` to prove the GPU reaches it. Then it asks the domain, the admin's e-mail, where models live, the
+Then compose reads the release's files with this host's answers (the `.env`
+and the override it would write, the features chosen), and a container runs
+`nvidia-smi` to prove the GPU reaches it. Only when every check is met is
+anything written, loaded or started; what is not met is said together, and
+nothing has been changed. `sh argus-arena-VERSION-offline.run requirements`
+checks a host on its own (`--fix` puts it right; `./arenactl requirements` is
+the same from a checkout).
+
+An install that fails or is stopped (Ctrl-C, a dropped SSH session) takes away
+what it did: the stack's containers, networks and volumes, the images it
+loaded (those that were there before stay), the data folders and model files
+it made, and `deploy/`. Its log stays, in `.arena-install/logs`. Run it again
+once the cause is put right. `--keep-failed` keeps everything to look at; run
+again with `--keep-failed`, it carries on from there. Run again without it over
+an install an earlier release left cut off (7.6.0 to 7.6.2 could), it takes
+away what that one left first, keeping the images this release carries.
+
+The questions: the domain, the admin's e-mail, where models live, the
 **default models** (download them from Hugging Face once, at the first start;
 copy them from a folder, the model library's layout, with `audio.tar.gz` for the
 speech server's; or skip, and an admin downloads them later under Admin →
