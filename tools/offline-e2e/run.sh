@@ -11,6 +11,8 @@
 #     --upgrade-from RUN  install RUN, then upgrade it with the bundle
 #     --interrupt-after S an install stopped by Ctrl-C after S seconds first: nothing of it may be left
 #                         (no deploy/, containers, images or data folders); then installed again
+#     --again             install once more over the finished installation (it must pass again)
+#     --reuse             keep the test host's disk from the last run (default: a fresh host each run)
 #     --cpu-only          no GPU in the test host (the features that need one are off)
 #     --keep              leave the test host running afterwards (docker exec -it NAME bash)
 #     --clean             remove the test host's disk (DIR) afterwards
@@ -20,7 +22,7 @@
 # The test host shares this machine's GPU (through CDI), never its network, its Docker or its stack.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
-BUNDLE="" FIRST="" UPGRADE_FROM="" INTERRUPT="" CPU=0 KEEP=0 CLEAN=0 DIR="${HOME}/arena-e2e" NAME=arena-e2e IMAGE=arena-offline-host:1
+BUNDLE="" FIRST="" UPGRADE_FROM="" INTERRUPT="" AGAIN=0 REUSE=0 CPU=0 KEEP=0 CLEAN=0 DIR="${HOME}/arena-e2e" NAME=arena-e2e IMAGE=arena-offline-host:1
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --bundle) BUNDLE="$2"; shift ;;
@@ -28,6 +30,8 @@ while [[ $# -gt 0 ]]; do
     --upgrade-from) UPGRADE_FROM="$2"; shift ;;
     --interrupt-after) INTERRUPT="$2"; shift ;;
     --cpu-only) CPU=1 ;;
+    --again) AGAIN=1 ;;
+    --reuse) REUSE=1 ;;
     --keep) KEEP=1 ;;
     --clean) CLEAN=1 ;;
     --dir) DIR="$2"; shift ;;
@@ -50,6 +54,11 @@ if docker container inspect "$NAME" >/dev/null 2>&1; then
   docker rm -f "$NAME" >/dev/null
 fi
 docker image inspect "$IMAGE" >/dev/null 2>&1 || docker build -q -t "$IMAGE" "$here" >/dev/null || fail "building the test host's image failed"
+# A fresh host: nothing of an earlier run on its disk (its files are root's: removed from a container).
+if [[ $REUSE -eq 0 ]]; then
+  docker run --rm -v "$DIR:/e2e" "$IMAGE" sh -c 'rm -rf /e2e/docker /e2e/containerd /e2e/srv && mkdir -p /e2e/docker /e2e/containerd /e2e/srv' \
+    || fail "could not clear the test host's disk in $DIR"
+fi
 
 # The bundles copied onto the test host's disk (a hard link when they share a file system).
 copy_in() { local f="$1"; ln -f "$f" "$DIR/bundle/" 2>/dev/null || cp -f "$f" "$DIR/bundle/"; [[ -f "$f.sha256" ]] && cp -f "$f.sha256" "$DIR/bundle/"; basename "$f"; }
@@ -150,6 +159,12 @@ H sh -c "curl -sk --resolve '$domain:$port:127.0.0.1' -b /tmp/e2e.cookies -H 'X-
   || fail "the admin overview did not answer"
 grep -q '"services"' "$LOG/overview.json" || fail "the admin overview has no services: $(head -c 300 "$LOG/overview.json")"
 say "  the admin signs in; the overview: $(python3 -c "import json,sys; d=json.load(open('$LOG/overview.json')); s=d['services']; print(sum(x['ok'] for x in s), 'of', len(s), 'services ok; not ok:', ', '.join(x['name'] for x in s if not x['ok']) or 'none')" 2>/dev/null)"
+if [[ $AGAIN -eq 1 ]]; then
+  install_run "$RUN" again || fail "install again over the finished installation failed"
+  H /srv/arena/deploy/scripts/installer.sh status --dir /srv/arena > "$LOG/status-again.log" 2>&1 || fail "status after install again"
+  [[ "$(curl_in "https://$domain:$port/")" == 200 ]] || fail "the site after install again"
+  say "  again: installed, status well, the site 200"
+fi
 say "E2E PASS ($LOG)"
 
 if [[ $KEEP -eq 0 ]]; then docker rm -f "$NAME" >/dev/null; fi
