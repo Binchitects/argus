@@ -144,6 +144,13 @@ say "  verify: $(tail -n1 "$LOG/verify.log")"
 unhealthy="$(H sh -c 'docker ps -a --format "{{.Names}} {{.Status}}"' | grep -vE 'Up .*\(healthy\)|Up [0-9]+ (seconds|minutes|hours)( |$)' || true)"
 [[ -z "$unhealthy" ]] || { printf '%s\n' "$unhealthy" | sed 's/^/    /' | tee -a "$LOG/run.log"; fail "containers not up and healthy (above)"; }
 say "  containers: $(H docker ps -q | wc -l) up, none unhealthy"
+if [[ -n "$FIRST" ]]; then
+  # What the first release's cut-off install loaded of its own is gone (what this one carries is kept).
+  old_version="$(basename "$FIRST" | sed -n 's/^argus-arena-\(.*\)-offline\.run$/\1/p')"
+  left_images="$(H sh -c "docker images --format '{{.Repository}}:{{.Tag}}' | grep -E ':$old_version\$' || true")"
+  [[ -z "$left_images" ]] || fail "the cut-off $old_version install's images are left: $(printf '%s' "$left_images" | paste -sd' ' -)"
+  say "  none of $old_version's own images is left"
+fi
 domain="$(H sh -c "sed -n 's/^DOMAIN=//p' /srv/arena/deploy/.env" | tr -d '"')"
 port="$(H sh -c "sed -n 's/^HTTPS_PORT=//p' /srv/arena/deploy/.env" | tr -d '"')"; port="${port:-443}"
 curl_in() { H curl -sk --resolve "$domain:$port:127.0.0.1" --resolve "gateway.$domain:$port:127.0.0.1" -o /dev/null -w '%{http_code}' "$@"; }
