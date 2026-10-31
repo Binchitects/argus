@@ -13,6 +13,10 @@
 #                         (no deploy/, containers, images or data folders); then installed again
 #     --interrupt-at TEXT stopped once its output shows TEXT (then --interrupt-after S seconds more)
 #     --again             install once more over the finished installation (it must pass again)
+#     --model FILE        a chat model (.gguf) copied onto the test host and installed with it
+#                         (--models-dir, --model, --hosts); then the functional test
+#                         (deploy/scripts/functional-test.py) runs there: as the admin and a person
+#                         it makes, every check through HTTPS, a chat answered by that model
 #     --reuse             keep the test host's disk from the last run (default: a fresh host each run)
 #     --cpu-only          no GPU in the test host (the features that need one are off)
 #     --keep              leave the test host running afterwards (docker exec -it NAME bash)
@@ -23,11 +27,12 @@
 # The test host shares this machine's GPU (through CDI), never its network, its Docker or its stack.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
-BUNDLE="" FIRST="" UPGRADE_FROM="" INTERRUPT="" INTERRUPT_AT="" AGAIN=0 REUSE=0 CPU=0 KEEP=0 CLEAN=0 DIR="${HOME}/arena-e2e" NAME=arena-e2e IMAGE=arena-offline-host:1
+BUNDLE="" FIRST="" MODEL="" UPGRADE_FROM="" INTERRUPT="" INTERRUPT_AT="" AGAIN=0 REUSE=0 CPU=0 KEEP=0 CLEAN=0 DIR="${HOME}/arena-e2e" NAME=arena-e2e IMAGE=arena-offline-host:1
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --bundle) BUNDLE="$2"; shift ;;
     --first) FIRST="$2"; shift ;;
+    --model) MODEL="$2"; shift ;;
     --upgrade-from) UPGRADE_FROM="$2"; shift ;;
     --interrupt-after) INTERRUPT="$2"; shift ;;
     --interrupt-at) INTERRUPT_AT="$2"; shift ;;
@@ -44,6 +49,7 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 [[ -f "$BUNDLE" ]] || { echo "--bundle names no file: $BUNDLE" >&2; exit 2; }
+[[ -z "$MODEL" || ( -f "$MODEL" && "$MODEL" == *.gguf ) ]] || { echo "--model names no .gguf file: $MODEL" >&2; exit 2; }
 LOG="$DIR/logs/$(date +%Y%m%d-%H%M%S)"
 say() { printf '%s\n' "$*" | tee -a "$LOG/run.log"; }
 fail() { say "E2E FAIL: $*"; exit 1; }
@@ -67,6 +73,13 @@ copy_in() { local f="$1"; ln -f "$f" "$DIR/bundle/" 2>/dev/null || cp -f "$f" "$
 RUN="$(copy_in "$BUNDLE")"
 [[ -n "$FIRST" ]] && FIRST_RUN="$(copy_in "$FIRST")"
 [[ -n "$UPGRADE_FROM" ]] && OLD_RUN="$(copy_in "$UPGRADE_FROM")"
+# The model copied (never linked: the installer may own it), from a folder the copy only reads.
+MODEL_FLAGS=()
+if [[ -n "$MODEL" ]]; then
+  docker run --rm -v "$DIR:/e2e" -v "$(cd "$(dirname "$MODEL")" && pwd):/src:ro" "$IMAGE" \
+    sh -c "mkdir -p /e2e/srv/models && cp /src/$(basename "$MODEL") /e2e/srv/models/" || fail "could not copy $MODEL onto the test host"
+  MODEL_FLAGS=(--models-dir /srv/models --model "$(basename "$MODEL")" --hosts)
+fi
 
 gpu=(); [[ $CPU -eq 0 ]] && gpu=(--device nvidia.com/gpu=all)
 say "==> the test host ($NAME: no network, its own Docker in $DIR)"
@@ -111,7 +124,7 @@ if [[ -n "$FIRST" ]]; then install_run "$FIRST_RUN" first || say "  (the first i
 
 # Stopped part way as a person stops it (Ctrl-C reaches every process of the install): nothing may stay.
 interrupted_run() {   # interrupted_run RUN.run SECONDS
-  local run="$1" after="$2" flags=(--dir /srv/arena --yes --install-requirements) images_before left
+  local run="$1" after="$2" flags=(--dir /srv/arena --yes --install-requirements) images_before
   [[ $CPU -eq 1 ]] && flags+=(--cpu-only)
   images_before="$(H sh -c 'docker images -q 2>/dev/null | sort -u | wc -l' 2>/dev/null || echo 0)"
   say "==> interrupted: sh $run install ${flags[*]}, stopped after $after s"
@@ -131,7 +144,6 @@ interrupted_run() {   # interrupted_run RUN.run SECONDS
   wait "$exec_pid" || true
   say "  stopped; it ended $(( SECONDS - t0 )) s later; the last lines:"
   tail -n 12 "$LOG/interrupted.log" | sed 's/^/    /' | tee -a "$LOG/run.log"
-  left="$(H sh -c 'ls -A /srv/arena 2>/dev/null; ls -A /srv/arena/.arena-install 2>/dev/null; docker ps -aq | wc -l; ls -d /bundle/.argus-arena-unpack* 2>/dev/null' 2>&1)"
   H test ! -e /srv/arena/deploy || fail "deploy/ is left after the stopped install"
   [[ "$(H sh -c 'docker ps -aq | wc -l')" == 0 ]] || fail "containers are left after the stopped install"
   H sh -c 'ls -d /bundle/.argus-arena-unpack* >/dev/null 2>&1' && fail "the .run's unpacked folder is left"
@@ -143,7 +155,7 @@ interrupted_run() {   # interrupted_run RUN.run SECONDS
 }
 [[ -n "$INTERRUPT" || -n "$INTERRUPT_AT" ]] && interrupted_run "$RUN" "${INTERRUPT:-0}"
 if [[ -n "$UPGRADE_FROM" ]]; then install_run "$OLD_RUN" old-install || fail "the old release did not install"; upgrade_run "$RUN" upgrade
-else install_run "$RUN" install || fail "install failed"; fi
+else install_run "$RUN" install ${MODEL_FLAGS[@]+"${MODEL_FLAGS[@]}"} || fail "install failed"; fi
 
 # What a person sees afterwards.
 say "==> checks"
@@ -181,7 +193,32 @@ code="$(H sh -c "p=\$(sed -n 's/^ADMIN_PASSWORD=//p' /srv/arena/deploy/.env | tr
 H sh -c "curl -sk --resolve '$domain:$port:127.0.0.1' -b /tmp/e2e.cookies -H 'X-Requested-With: e2e' 'https://$domain:$port/api/admin/overview'" > "$LOG/overview.json" \
   || fail "the admin overview did not answer"
 grep -q '"services"' "$LOG/overview.json" || fail "the admin overview has no services: $(head -c 300 "$LOG/overview.json")"
-say "  the admin signs in; the overview: $(python3 -c "import json,sys; d=json.load(open('$LOG/overview.json')); s=d['services']; print(sum(x['ok'] for x in s), 'of', len(s), 'services ok; not ok:', ', '.join(x['name'] for x in s if not x['ok']) or 'none')" 2>/dev/null)"
+# Every service the overview names is well (Loki takes a while on a from-zero start: two minutes at most).
+not_ok() { python3 -c "import json; s=json.load(open('$LOG/overview.json'))['services']; print(', '.join(f\"{x['name']} ({x['detail']})\" for x in s if not x['ok']))"; }
+for _ in $(seq 24); do
+  [[ -z "$(not_ok)" ]] && break
+  sleep 5
+  H sh -c "curl -sk --resolve '$domain:$port:127.0.0.1' -b /tmp/e2e.cookies -H 'X-Requested-With: e2e' 'https://$domain:$port/api/admin/overview'" > "$LOG/overview.json" || true
+done
+[[ -z "$(not_ok)" ]] || fail "the admin overview says not ok: $(not_ok)"
+say "  the admin signs in; the overview: every one of $(python3 -c "import json; print(len(json.load(open('$LOG/overview.json'))['services']))") services ok"
+if [[ -n "$MODEL" ]]; then
+  # The functional test, on the test host (no python there: in the stack's own python image, with the host's
+  # docker for its LiteLLM questions and the names --hosts wrote).
+  say "==> the functional test (deploy/scripts/functional-test.py, on the test host)"
+  H docker image inspect python:3.13-slim >/dev/null 2>&1 || fail "python:3.13-slim is not on the test host"
+  t0=$SECONDS
+  dockerbin="$(H sh -c 'command -v docker')" || fail "no docker command on the test host"
+  if H docker run --rm --network host -v /etc/hosts:/etc/hosts:ro -v /srv/arena/deploy:/srv/arena/deploy:ro \
+      -v /var/run/docker.sock:/var/run/docker.sock -v "$dockerbin:/usr/local/bin/docker:ro" \
+      python:3.13-slim python3 -I /srv/arena/deploy/scripts/functional-test.py > "$LOG/functional.log" 2>&1; then
+    say "  functional: $(grep -c 'PASS' "$LOG/functional.log") checks passed, none failed, in $(( SECONDS - t0 )) s (log: $LOG/functional.log)"
+  else
+    grep -a 'FAIL' "$LOG/functional.log" | sed 's/^/    /' | tee -a "$LOG/run.log"
+    tail -n 5 "$LOG/functional.log" | sed 's/^/    /' | tee -a "$LOG/run.log"
+    fail "the functional test failed (above; $LOG/functional.log)"
+  fi
+fi
 if [[ $AGAIN -eq 1 ]]; then
   install_run "$RUN" again || fail "install again over the finished installation failed"
   H /srv/arena/deploy/scripts/installer.sh status --dir /srv/arena > "$LOG/status-again.log" 2>&1 || fail "status after install again"

@@ -49,6 +49,12 @@ and the CPU are throttled before they run too hot.
   engine has no model.
 - Code Arena lists sessions by their last message; Argus's pages never show an
   earlier search's answer as the latest one.
+- A picture asked for through the gateway with a key that may not use that
+  model, or with a key the gateway does not know, no longer has the GPU load
+  the model before the gateway refuses it.
+- The admin overview names only the services the installation runs: a fresh
+  install without a GitLab, or without a GPU, no longer shows Argus or the
+  engine as down, nor the picture server before it has a model.
 
 ### :sparkles: New features & Enhancements
 
@@ -63,7 +69,9 @@ and the CPU are throttled before they run too hot.
   off is taken away first, then installed anew.
 - **Faster.** Images load four at a time and are skipped when already there;
   bundles keep each packed image by its id, so a new bundle packs only the
-  images that changed, and its 40 GB are no longer copied and read twice.
+  images that changed, and its 40 GB are no longer copied and read twice;
+  images are saved and packed three at a time, and Code Arena is built for
+  every platform at once after a single restore.
 - **A temperature policy** (the power-limits feature, on by default): a GPU at
   83 degC has its power cap stepped down, to its lowest at 90; the CPU the same
   at 90 and 95 through its RAPL limit or its frequency; each comes back as it

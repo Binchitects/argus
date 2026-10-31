@@ -26,7 +26,8 @@ public static class KeySpeech
 
     /// <summary>
     /// The gateway's speech and picture paths that come by the app (with and without /v1, as LiteLLM takes both): a picture
-    /// model that is not loaded is loaded first (its server runs one model at a time), as for the chat's own pictures.
+    /// model that is not loaded is loaded first (its server runs one model at a time), as for the chat's own pictures, for
+    /// a key that may use it.
     /// </summary>
     public static readonly IReadOnlyList<string> Paths =
         ["/v1/audio/speech", "/audio/speech", "/v1/audio/transcriptions", "/audio/transcriptions", "/v1/images/generations", "/images/generations"];
@@ -54,11 +55,16 @@ public static class KeySpeech
                 http.Response.StatusCode = StatusCodes.Status400BadRequest;
                 return;
             }
-            // A picture model of this stack's, whoever's key it is: loaded first (a few minutes the first time), or the caller told why not.
-            if (SpokenBy(body) is { } model && media.Find(model) is { Mode: Llm.Core.Models.MediaModes.Image } local)
+            // A picture model of this stack's: loaded first (a few minutes the first time), or the caller told why not. Only for
+            // a key the gateway knows that may use it: no key, a blocked or expired one, or one without the model goes on as it
+            // came, for the gateway to refuse, and never has the GPU load a model for nothing.
+            if (SpokenBy(body) is { } model && media.Find(model) is { Mode: Llm.Core.Models.MediaModes.Image } local
+                && await KeyAsync(request.Headers.Authorization.ToString(), gateway, ct) is { Blocked: false } key
+                && (key.Expires is null || key.Expires > http.RequestServices.GetRequiredService<TimeProvider>().GetUtcNow())
+                && (key.Models.Count == 0 || key.Models.Contains(model, StringComparer.Ordinal)))
             {
                 // The key's person's picture credit first: a request the gateway refuses anyway does not load the model for nothing.
-                if (await PersonAsync(request.Headers.Authorization.ToString(), gateway, db, http.RequestServices.GetRequiredService<Access.AccessService>(), ct) is { } owner
+                if (await PersonAsync(key, db, http.RequestServices.GetRequiredService<Access.AccessService>(), ct) is { } owner
                     && await http.RequestServices.GetRequiredService<Credit>().RefusalAsync(owner, Llm.Core.Access.CreditKind.Pictures, ct) is { } refusal)
                 {
                     http.Response.StatusCode = StatusCodes.Status400BadRequest;
@@ -78,7 +84,8 @@ public static class KeySpeech
             length = body.Length;
         }
         // Only a person's speech is changed: who it is comes first, from the key alone, and anyone else's goes on as it came.
-        else if (HttpMethods.IsPost(request.Method) && !picture && await PersonAsync(request.Headers.Authorization.ToString(), gateway, db, http.RequestServices.GetRequiredService<Access.AccessService>(), ct) is { } person)
+        else if (HttpMethods.IsPost(request.Method) && !picture
+            && await PersonAsync(await KeyAsync(request.Headers.Authorization.ToString(), gateway, ct), db, http.RequestServices.GetRequiredService<Access.AccessService>(), ct) is { } person)
         {
             if (request.Path.Value?.EndsWith("/transcriptions", StringComparison.Ordinal) == true)
             {
@@ -262,23 +269,27 @@ public static class KeySpeech
         return (new Spliced([.. part, .. start], body), part.Length);
     }
 
-    /// <summary>The person a key belongs to: null for no key, a key the gateway does not know or blocked, or one of nobody here.</summary>
-    private static async Task<AppUser?> PersonAsync(string authorization, ILiteLlm gateway, AppDbContext db, Access.AccessService access, CancellationToken ct)
+    /// <summary>What the gateway knows of the request's key: null for no key, or one it does not know.</summary>
+    private static async Task<GatewayKeyInfo?> KeyAsync(string authorization, ILiteLlm gateway, CancellationToken ct)
     {
         var key = authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? authorization[7..].Trim() : "";
         if (key.Length == 0)
         {
             return null;
         }
-        GatewayKeyInfo? info;
         try
         {
-            info = await gateway.KeyInfoAsync(key, ct);
+            return await gateway.KeyInfoAsync(key, ct);
         }
         catch (GatewayException)
         {
             return null;
         }
+    }
+
+    /// <summary>The person a key belongs to: null for no key, a key the gateway does not know or blocked, or one of nobody here.</summary>
+    private static async Task<AppUser?> PersonAsync(GatewayKeyInfo? info, AppDbContext db, Access.AccessService access, CancellationToken ct)
+    {
         if (info is not { Blocked: false, UserId: { Length: > 0 } email })
         {
             return null;

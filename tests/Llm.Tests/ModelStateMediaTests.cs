@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
+using Llm.Api.Gateway;
 using Llm.Api.Models;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -436,6 +437,38 @@ public sealed class ModelStateMediaTests(AppFixture app) : IDisposable
         await Task.Delay(1000);
         Assert.Equal("off", s.File);
         Assert.Empty(Pictures.Paths);
+    }
+
+    [Fact]
+    public async Task An_API_keys_picture_of_a_model_it_may_not_use_or_with_no_known_key_never_loads_it()
+    {
+        await using var s = await NewAsync();
+        await s.Media.SetKeptAsync(Image, false);
+        await UntilFileAsync(s, "off", "the picture server is off");
+        var admin = await new TestBrowser(s.App).SignedInAsync("admin", AppFixture.AdminPassword);
+        var name = "k" + Guid.NewGuid().ToString("N")[..10];
+        var key = (await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }))).GetProperty("apiKey").GetString()!;
+        // The model given to admins only: the app takes it off the person's key at the gateway.
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(
+            new Uri($"/api/admin/models/{Uri.EscapeDataString(Image)}/access", UriKind.Relative), new { audience = "Admins", groups = Array.Empty<string>() }));
+        var gateway = (FakeGateway)s.App.Services.GetRequiredService<ILiteLlm>();
+        await UntilAsync(s, () => Task.FromResult(gateway.Keys.Values.Single(k => k.Secret == key).Models is { Count: > 0 } m && !m.Contains(Image)),
+            "the person's key no longer has the picture model");
+        var client = s.App.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://gateway.{AppFixture.Domain}"), HandleCookies = false });
+        foreach (var bearer in new[] { key, "sk-nobody-knows-this-key" })
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, new Uri("/v1/images/generations", UriKind.Relative))
+            {
+                Content = new StringContent($$"""{"model":"{{Image}}","prompt":"an apple","size":"512x512"}""", Encoding.UTF8, "application/json"),
+            };
+            req.Headers.Authorization = new("Bearer", bearer);
+            // On to the gateway at once, which refuses it; the picture server stays off.
+            await StatusAssert.Is(HttpStatusCode.OK, await client.SendAsync(req).WaitAsync(Deadline));
+        }
+        Assert.Equal(2, Pictures.Paths.Count);
+        s.Media.Wake();
+        await Task.Delay(1000);
+        Assert.Equal("off", s.File);
     }
 
     [Fact]
