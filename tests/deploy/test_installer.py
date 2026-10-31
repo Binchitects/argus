@@ -1030,6 +1030,14 @@ class InstallerTests(unittest.TestCase):
 
     # ----------------------------------------- every check first; a failed install leaves nothing
 
+    def test_It_never_waits_for_every_child_at_once(self):
+        # Its log is a tee it started (start_log): on bash 5.2 a bare wait waits for that tee too, for ever, as an
+        # install on Debian 13 did after its images loaded. Each wait names what it waits for.
+        text = (REPO / "deploy" / "scripts" / "installer.sh").read_text()
+        bare = [line.strip() for line in text.splitlines()
+                if re.search(r"(^|[;&|{(]|\bdo|\bthen|\belse)\s*wait(\s*$|\s*[;&|)]|\s+2>|\s+-n\b)", line.split("#")[0])]
+        self.assertEqual([], bare)
+
     def test_Every_requirement_is_checked_before_anything_is_done(self):
         r = self.r.run("install", "--dir", str(self.dir), "--yes", "--cpu-only", "--domain", "arena.test", "--https-port", "18443",
                        "--http-port", "18080", extra={"FAKE_CONFIG_FAIL": "1"})

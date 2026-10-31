@@ -603,11 +603,11 @@ TMPFILES=()
 finish() {
   local rc=$?
   trap '' INT TERM HUP
-  if [[ $rc -ne 0 && $UNDO_ARMED -eq 1 ]]; then
+  if [[ $rc -ne 0 && ${UNDO_ARMED:-0} -eq 1 ]]; then
     UNDO_ARMED=0
-    wait 2>/dev/null
+    [[ -n "${LOAD_PIDS[*]+x}" && ${#LOAD_PIDS[@]} -gt 0 ]] && wait "${LOAD_PIDS[@]}" 2>/dev/null
     undo_install || :
-  elif [[ $rc -ne 0 && $CMD == install && $KEEP_FAILED -eq 1 && -f "$DEPLOY/.env" ]]; then
+  elif [[ $rc -ne 0 && $CMD == install && ${KEEP_FAILED:-0} -eq 1 && -f "$DEPLOY/.env" ]]; then
     say "The install did not finish; what it did stays (--keep-failed). The admin's first password: ADMIN_PASSWORD in $DEPLOY/.env. Running it again takes it away and installs anew; $(rerun_cmd install --keep-failed) carries on instead."
   fi
   [[ ${#TMPFILES[@]} -gt 0 ]] && rm -rf "${TMPFILES[@]}"
@@ -624,6 +624,7 @@ trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 # made them. Its log stays. The stack never ran for anyone, so no one's data goes with it.
 UNDO_ARMED=0 UNDO_DIR_NEW=0 UNDO_DEPLOY_NEW=0 UNDO_DATA_NEW=0 UNDO_MODELS_NEW=0 UNDO_HOSTS=0
 UNDO_LOADED=() UNDO_TAGS=() UNDO_DATA_MADE=() UNDO_FILES=()
+LOAD_PIDS=()   # the image loads running (waited for by their ids: a bare wait waits for the log's tee too, for ever)
 arm_undo() {
   [[ $KEEP_FAILED -eq 1 || $DRY -eq 1 ]] && return 0
   [[ -e "$DIR" ]] || UNDO_DIR_NEW=1
@@ -646,15 +647,16 @@ undo_install() {   # undo_install [leftover]: leftover, what an earlier, cut-off
     < <(E volume ls -q --filter "label=com.docker.compose.project=$PROJECT" 2>/dev/null)
   # The images it loaded; a leftover's, but those this bundle carries as they are (they are not loaded again).
   if [[ ${1:-} == leftover ]]; then
+    # What it loaded: its record, and its own log's "loaded" lines (one cut off while loading has no record).
     local carried; carried=" $(bundle_images | awk -F'\t' '{ print $1 }' | tr '\n' ' ') "
-    while IFS=$'\t' read -r ref id v _; do
-      [[ -n "$ref" && $v == 0 ]] || continue
-      [[ "$carried" == *" $ref "* ]] && continue
+    while IFS= read -r ref; do
+      [[ -n "$ref" && "$carried" != *" $ref "* ]] || continue
       E image rm -f "$ref" >/dev/null 2>&1 && n=$((n + 1))
-    done < "$STATE/IMAGES" 2>/dev/null
+    done < <({ [[ -f "$STATE/IMAGES" ]] && awk -F'\t' '$3 == 0 { print $1 }' "$STATE/IMAGES"
+               cat "$STATE"/logs/install-*.log 2>/dev/null | sed -n 's/^  loaded \([^ ]*\)$/\1/p'; } | sort -u)
   else
     # Those it loaded, and those it was loading when it stopped (not here before it).
-    while IFS=$'\t' read -r ref v; do [[ -n "$ref" && $v == 0 ]] && UNDO_LOADED+=("$ref"); done < "$STATE/load/refs" 2>/dev/null
+    [[ -f "$STATE/load/refs" ]] && while IFS=$'\t' read -r ref v; do [[ -n "$ref" && $v == 0 ]] && UNDO_LOADED+=("$ref"); done < "$STATE/load/refs"
     for ref in $(printf '%s\n' ${UNDO_LOADED[@]+"${UNDO_LOADED[@]}"} | sort -u); do E image rm -f "$ref" >/dev/null 2>&1 && n=$((n + 1)); done
     # The release's own as compose names them: the tags it made (one that was there before stays).
     for ref in ${UNDO_TAGS[@]+"${UNDO_TAGS[@]}"}; do E image rm "$ref" >/dev/null 2>&1; done
@@ -1275,8 +1277,16 @@ load_images() {   # load_images fresh|upgrade|repair
     [[ $jobs -ge 1 ]] || jobs=1; [[ $jobs -le 4 ]] || jobs=4
     say "  loading ${#todo[@]} image(s), $(human "$total") packed, $jobs at a time"
     logs="$STATE/load"; rm -rf "$logs"; mkdir -p "$logs" || die "cannot write $logs"
+    local -a running=()
     while IFS=$'\t' read -r size ref file pre; do
-      while [[ $(jobs -rp | wc -l) -ge $jobs ]]; do wait -n 2>/dev/null || :; done
+      # A place free among the loads running (each by its id; never a bare wait, which waits for the log's tee).
+      while :; do
+        local alive=() p
+        for p in ${running[@]+"${running[@]}"}; do kill -0 "$p" 2>/dev/null && alive+=("$p"); done
+        running=(${alive[@]+"${alive[@]}"})
+        [[ ${#running[@]} -lt $jobs ]] && break
+        sleep 1
+      done
       slug="$(printf '%s' "$ref" | tr -c 'A-Za-z0-9._-' '_')"
       (
         # pigz unpacks faster than the engine's own gzip where the host has it.
@@ -1284,9 +1294,11 @@ load_images() {   # load_images fresh|upgrade|repair
         else E load -q -i "$BUNDLE/images/$file"; fi
         echo $? > "$logs/$slug.rc"
       ) > "$logs/$slug.log" 2>&1 &
+      running+=("$!"); LOAD_PIDS+=("$!")
       printf '%s\t%s\n' "$ref" "$pre" >> "$logs/refs"
     done < <(printf '%s\n' "${todo[@]}" | sort -t$'\t' -k1,1nr)
-    wait
+    wait "${LOAD_PIDS[@]}" 2>/dev/null
+    LOAD_PIDS=()
     while IFS=$'\t' read -r ref pre; do
       slug="$(printf '%s' "$ref" | tr -c 'A-Za-z0-9._-' '_')"
       rc="$(cat "$logs/$slug.rc" 2>/dev/null || echo 1)"
