@@ -32,12 +32,17 @@ if args[:1] == ["--list-runtimes"]:
         print(f"Microsoft.AspNetCore.App {v} [/usr/share/dotnet/shared/Microsoft.AspNetCore.App]")
         print(f"Microsoft.NETCore.App {v} [/usr/share/dotnet/shared/Microsoft.NETCore.App]")
     sys.exit(0)
-if args[:1] == ["publish"]:
-    if os.environ.get("FAKE_PUBLISH_FAILS"):
-        print("error CS1002: ; expected", file=sys.stderr)
-        sys.exit(1)
+if args[:1] == ["restore"]:
+    # Restored once for every system (-p:RuntimeIdentifiers), from where --source says, else nuget.org.
     if os.environ.get("FAKE_NUGET_UNREACHABLE") and "--source" not in args:
         print("error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json.", file=sys.stderr)
+        sys.exit(1)
+    sys.exit(0)
+if args[:1] == ["publish"]:
+    if "--no-restore" not in args:
+        sys.exit(f"fake dotnet: publish restores: {args}")
+    if os.environ.get("FAKE_PUBLISH_FAILS"):
+        print("error CS1002: ; expected", file=sys.stderr)
         sys.exit(1)
     out = pathlib.Path(args[args.index("-o") + 1])
     rid = args[args.index("-r") + 1]
@@ -102,6 +107,9 @@ class CodeArenaPacksTests(unittest.TestCase):
     def publishes(self) -> list[list[str]]:
         return [c for c in (json.loads(line) for line in self.log.read_text().splitlines()) if c[:1] == ["publish"]]
 
+    def restores(self) -> list[list[str]]:
+        return [c for c in (json.loads(line) for line in self.log.read_text().splitlines()) if c[:1] == ["restore"]]
+
     def built(self) -> list[str]:
         out = self.repo / "dist" / "code-arena"
         return sorted(str(p.relative_to(out)) for p in out.rglob("code-arena*")) if out.exists() else []
@@ -129,10 +137,11 @@ class CodeArenaPacksTests(unittest.TestCase):
         r = self.publish("10.0.13", "--offline")
         self.assertEqual(r.returncode, 0, r.stderr)
         calls = self.publishes()
-        self.assertEqual([c[c.index("-r") + 1] for c in calls], RIDS)
-        for c in calls:
-            self.assertIn("--source", c)
-            self.assertEqual(c[c.index("--source") + 1], "tools/offline-nuget")
+        self.assertEqual(sorted(c[c.index("-r") + 1] for c in calls), sorted(RIDS))
+        # Restored once, for every system, from that folder only; each then published without restoring.
+        [restore] = self.restores()
+        self.assertEqual(restore[restore.index("--source") + 1], "tools/offline-nuget")
+        self.assertIn(f'-p:RuntimeIdentifiers="{";".join(RIDS)}"', restore)
         self.assertEqual(self.built(), sorted(f"{rid}/code-arena{'.exe' if rid.startswith('win') else ''}" for rid in RIDS))
         sums = (self.repo / "dist" / "code-arena" / "SHA256SUMS").read_text()
         self.assertEqual(len(sums.splitlines()), 5)
@@ -171,7 +180,7 @@ class CodeArenaPacksTests(unittest.TestCase):
         self.assertIn("Code Arena: publishing with nuget.org's packs instead", r.stdout)
         self.assertIn("runtime 10.0.13", r.stderr)
         self.assertEqual(len(self.built()), 5)
-        self.assertTrue(all("--source" not in c for c in self.publishes()))
+        self.assertTrue(all("--source" not in c for c in self.restores()))
 
         shutil.rmtree(self.repo / "dist")
         r = self.image_step("10.0.13", FAKE_NUGET_UNREACHABLE="1")

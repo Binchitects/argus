@@ -501,14 +501,33 @@ def cmd_code_arena(a) -> int:
             raise Stop("--offline: tools/offline-nuget lacks " + ", ".join(missing) + " (tools/fetch-code-arena-packs.sh fetches them; without --offline nuget.org is used)", 3)
         sources = ["--source", rel(TOOLS / "offline-nuget"), "-p:RestoreIgnoreFailedSources=false"]
     built = DIST / "code-arena"
+    # Restored once for every system, then each published at the same time (each builds in its own
+    # obj/Release/net10.0/RID folder; only the restore shares a file).
+    every = '"' + ";".join(rids) + '"'  # quoted for MSBuild: ; inside a property's value, not between properties
+    step(f"Code Arena: restored for {', '.join(rids)}, then published for each at once")
+    run([*dotnet, "restore", rel(ROOT / "src/CodeArena/CodeArena.csproj"), f"-p:RuntimeIdentifiers={every}", *sources, "-nologo"], cwd=ROOT)
+    jobs = []
     for rid in rids:
-        step(f"Code Arena for {rid}")
         target = built / rid
         shutil.rmtree(target, ignore_errors=True)
-        run([*dotnet, "publish", rel(ROOT / "src/CodeArena/CodeArena.csproj"), "-c", "Release", "-r", rid, "-o", rel(target), *sources, "-nologo"], cwd=ROOT)
+        log = built / f"{rid}.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        cmd = [*dotnet, "publish", rel(ROOT / "src/CodeArena/CodeArena.csproj"), "-c", "Release", "-r", rid, "-o", rel(target), "--no-restore",
+               f"-p:RuntimeIdentifiers={every}", "-nologo"]
+        jobs.append((rid, target, log, subprocess.Popen(cmd, cwd=ROOT, stdout=log.open("w"), stderr=subprocess.STDOUT)))
+    failed = []
+    for rid, target, log, proc in jobs:
+        if proc.wait() != 0:
+            failed.append(rid)
+            say(f"  {rid} failed; its log:\n" + "\n".join(log.read_text().splitlines()[-30:]))
+            continue
+        log.unlink(missing_ok=True)
+        say(f"  {rid}: published")
         for f in target.iterdir():
             if f.is_file() and f.name not in ("code-arena", "code-arena.exe"):
                 f.unlink()
+    if failed:
+        raise Stop(f"Code Arena did not publish for {', '.join(failed)} (above)")
     step("the packages")
     out.mkdir(parents=True, exist_ok=True)
     epoch = int(os.environ.get("SOURCE_DATE_EPOCH") or (output(["git", "-C", str(ROOT), "log", "-1", "--format=%ct"]) or str(int(time.time()))).strip())

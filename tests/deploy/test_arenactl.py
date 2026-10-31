@@ -25,6 +25,8 @@ args = sys.argv[1:]
 if args == ["--list-sdks"]:
     print("10.0.100 [/usr/share/dotnet/sdk]")
     sys.exit(0)
+if args[:1] == ["restore"]:
+    sys.exit(0)
 if args[:1] == ["publish"]:
     out = pathlib.Path(args[args.index("-o") + 1])
     rid = args[args.index("-r") + 1]

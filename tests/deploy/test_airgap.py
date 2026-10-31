@@ -198,7 +198,7 @@ class AirgapTests(unittest.TestCase):
     def test_Podman_packs_from_its_own_store_with_its_compose_files(self):
         self.pack("--podman")
         self.assertTrue(self.s.called("podman", "compose", "-f", "docker-compose.yml", "-f", "podman.yml"))
-        self.assertTrue(self.s.called("podman", "save", "-q", "-o"))
+        self.assertTrue(self.s.called("podman", "save", "-q"))
         self.assertFalse(any(c[0] == "docker" for c in self.s.calls()))
         self.assertIn("engine: podman\n", self.read("MANIFEST"))
 

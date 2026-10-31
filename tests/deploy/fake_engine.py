@@ -152,10 +152,11 @@ class Store:
         return self.s["origins"].get(image_id, "")
 
 
-def write_archive(path: str, text: str) -> None:
-    """A tiny image archive as docker save writes one: manifest.json and the config and layer it names."""
+def write_archive(path: str | None, text: str) -> None:
+    """A tiny image archive as docker save writes one: manifest.json and the config and layer it names
+    (to stdout without a path, as save without -o)."""
     import io, tarfile
-    with tarfile.open(path, "w") as t:
+    with (tarfile.open(path, "w") if path else tarfile.open(fileobj=sys.stdout.buffer, mode="w|")) as t:
         for name, data in (("manifest.json", json.dumps([{"Config": "config.json", "Layers": ["layer.tar"]}]).encode()),
                            ("config.json", b"{}"), ("layer.tar", text.encode())):
             info = tarfile.TarInfo(name)
@@ -204,7 +205,7 @@ def stateful(args: list[str]) -> int | None:
         print(f"Loaded image: {ref}")
         return 0
     if args[0] == "save":
-        out = args[args.index("-o") + 1]
+        out = args[args.index("-o") + 1] if "-o" in args else None
         image_id = st.image(args[-1]) or "missing"
         write_archive(out, f"fake image {norm(args[-1])} {image_id}\n")
         return 0
@@ -508,7 +509,7 @@ def main() -> int:
     if args[0] == "tag":
         return 0
     if args[0] == "save":
-        out = args[args.index("-o") + 1]
+        out = args[args.index("-o") + 1] if "-o" in args else None
         write_archive(out, f"fake image {args[-1]}\n")
         return 0
     if args[0] == "load":

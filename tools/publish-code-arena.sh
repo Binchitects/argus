@@ -89,14 +89,30 @@ fi
 
 out=dist/code-arena
 mkdir -p "$out"
+# Restored once for every system, then each published at the same time (each builds in its own
+# obj/Release/net10.0/RID folder; only the restore shares a file): about a fifth of the time.
+# Quoted for MSBuild: ; inside a property's value, not between properties.
+all="\"$(IFS=';'; echo "${rids[*]}")\""
+echo "== restore (${rids[*]})"
+"${dotnet[@]}" restore src/CodeArena/CodeArena.csproj "-p:RuntimeIdentifiers=$all" \
+  "${sources[@]}" -p:RestoreIgnoreFailedSources=false -nologo
+pids=()
 for rid in "${rids[@]}"; do
-  echo "== $rid"
+  echo "== $rid (at once)"
   rm -rf "${out:?}/$rid"
-  "${dotnet[@]}" publish src/CodeArena/CodeArena.csproj -c Release -r "$rid" -o "$out/$rid" \
-    "${sources[@]}" -p:RestoreIgnoreFailedSources=false -nologo
-  # Only the program: no symbols or other leftovers beside it.
-  find "$out/$rid" -type f ! -name code-arena ! -name code-arena.exe -delete
+  (
+    "${dotnet[@]}" publish src/CodeArena/CodeArena.csproj -c Release -r "$rid" -o "$out/$rid" --no-restore \
+      "-p:RuntimeIdentifiers=$all" -nologo \
+      && find "$out/$rid" -type f ! -name code-arena ! -name code-arena.exe -delete
+  ) > "$out/$rid.log" 2>&1 &
+  pids+=("$!")
 done
+failed=0
+for i in "${!rids[@]}"; do
+  if wait "${pids[$i]}"; then rm -f "$out/${rids[$i]}.log"
+  else echo "== ${rids[$i]} failed:" >&2; tail -n 30 "$out/${rids[$i]}.log" >&2; failed=1; fi
+done
+[ "$failed" -eq 0 ] || exit 1
 
 (cd "$out" && find . -type f \( -name code-arena -o -name code-arena.exe \) | sed 's|^\./||' | sort | xargs sha256sum > SHA256SUMS)
 echo

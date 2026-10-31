@@ -180,6 +180,8 @@ AIRGAP_ENV=(env COMPOSE_PROJECT_NAME="$PROJECT" COMPOSE_FILE="$ROOT/docker-compo
 AIRGAP=(bash "$ROOT/scripts/airgap.sh" pack)
 [[ $ENGINE == podman ]] && AIRGAP+=(--podman)
 [[ $IN_ENGINE -eq 1 ]] && AIRGAP+=(--images-in-engine)
+# Each image saved, checked and gzipped in one stream, a few at once (airgap.sh, ARENA_IMAGE_PACK=gz).
+AIRGAP_ENV+=(ARENA_IMAGE_PACK=gz)
 # Each image gzipped once, by its id: unchanged ones are neither saved nor packed again.
 CACHE=""
 if [[ $NO_CACHE -eq 0 && $IN_ENGINE -eq 0 && $DRY -eq 0 ]]; then
@@ -312,15 +314,22 @@ while IFS=$'\t' read -r ref file id; do
   fi
   # What it takes once loaded (the engine's size for it: content and unpacked), not its archive's: the
   # installer checks the disk for that.
-  raw="$(stat -c %s "$B/images/$file")"
+  if [[ -f "$B/images/$file.gz" && -f "$B/images/$file.gz.sha256" && -f "$B/images/$file.raw" ]]; then
+    # Packed as it was saved (airgap.sh): its size unpacked and its checksum came with it.
+    raw="$(cat "$B/images/$file.raw")"; sum="$(cat "$B/images/$file.gz.sha256")"
+    rm -f "$B/images/$file.raw" "$B/images/$file.gz.sha256"
+  else
+    raw="$(stat -c %s "$B/images/$file")"
+    "${GZ[@]}" "$B/images/$file" || die "gzipping $file failed (disk full?)"
+    sum="$(sha256sum "$B/images/$file.gz" | cut -d' ' -f1)"
+  fi
+  CACHED_SUM["images/$file.gz"]="$sum"
   inside="$("$ENGINE" image inspect --format '{{.Size}}' "$ref" 2>/dev/null)"
   [[ "$inside" =~ ^[0-9]+$ && $inside -gt $raw ]] && raw=$inside
-  "${GZ[@]}" "$B/images/$file" || die "gzipping $file failed (disk full?)"
   if [[ -n "$CACHE" ]]; then
-    sum="$(sha256sum "$B/images/$file.gz" | cut -d' ' -f1)"; CACHED_SUM["images/$file.gz"]="$sum"
     { ln -f "$B/images/$file.gz" "$CACHE/$key.tar.gz.part" 2>/dev/null || cp -f "$B/images/$file.gz" "$CACHE/$key.tar.gz.part"; } \
       && echo "$raw" > "$CACHE/$key.raw" && echo "$sum" > "$CACHE/$key.sha256" && mv -f "$CACHE/$key.tar.gz.part" "$CACHE/$key.tar.gz" \
-      || note "could not keep $file.gz in $CACHE (the next bundle packs it again)"
+      || say "  note: could not keep $file.gz in $CACHE (the next bundle packs it again)"
   fi
   printf '%s\t%s\t%s\t%s\t%s\n' "$ref" "$file.gz" "$id" "$(stat -c %s "$B/images/$file.gz")" "$raw" >> "$B/images/IMAGES.new"
   printf '  %-60s %9s -> %9s\n' "$ref" "$(human "$raw")" "$(human "$(stat -c %s "$B/images/$file.gz")")"
@@ -425,10 +434,14 @@ ai() { sed -n "s/^$1: //p" <<<"$AIRGAP_MANIFEST" | head -n1; }
   # From a checkout (arenactl install): the images are the engine's, and missing ones are built from it.
   [[ $IN_ENGINE -eq 1 ]] && { echo "images-in: engine"; echo "source: $REPO"; }
 } > "$B/MANIFEST"
-# Each file's checksum, the images' from when they were packed (the cache's): each big file is read once.
-(cd "$B" && find . -type f ! -name SHA256SUMS -printf '%P\n' | sort | while IFS= read -r f; do
-  if [[ -n "${CACHED_SUM[$f]:-}" ]]; then printf '%s  %s\n' "${CACHED_SUM[$f]}" "$f"; else sha256sum -- "$f"; fi
-done > SHA256SUMS) || die "checksums failed"
+# Each file's checksum: the images' from when they were packed (or the cache's), the rest at once on
+# every core; no big file is read again for it.
+(cd "$B" && find . -type f ! -name SHA256SUMS -printf '%P\n' | sort > "$WORK/files" \
+  && { for f in "${!CACHED_SUM[@]}"; do printf '%s  %s\n' "${CACHED_SUM[$f]}" "$f"; done
+       printf '%s\n' "${!CACHED_SUM[@]}" > "$WORK/cached"
+       grep -vxF -f "$WORK/cached" "$WORK/files" | tr '\n' '\0' | xargs -0 -r -P "$(nproc)" -n 16 sha256sum --; } \
+  | sort -k2 > SHA256SUMS) || die "checksums failed"
+[[ "$(grep -c . "$B/SHA256SUMS")" == "$(grep -c . "$WORK/files")" ]] || die "checksums failed: $(grep -c . "$B/SHA256SUMS") of $(grep -c . "$WORK/files") files"
 if [[ -n "$STAGE_ONLY" ]]; then
   say "==> $B (unpacked; bash $B/installer.sh COMMAND ...)"
   exit 0

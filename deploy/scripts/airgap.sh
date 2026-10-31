@@ -265,21 +265,44 @@ if [[ $ACTION == pack ]]; then
 
   say "==> images"
   : > "$B/images/IMAGES"
-  # What an archive's manifest.json names and the archive lacks; nothing (and 0) when it is whole.
-  archive_missing() {
-    python3 -I - "$1" <<'PY'
+  # Each archive is read once as it is saved, by a checker that passes it on: it says how many bytes it
+  # saw and whether every config and layer its manifest.json names is in it (a store can lose an image's
+  # blobs, as containerd had promtail's here: save then writes an archive no host can load).
+  CHECKER="$(mktemp "${TMPDIR:-/tmp}/airgap-check.XXXXXX.py")" || die "cannot write a scratch file"
+  cat > "$CHECKER" <<'PY'
 import json, sys, tarfile
-with tarfile.open(sys.argv[1]) as t:
-    names = set(t.getnames())
-    if "manifest.json" not in names:
-        print("no manifest.json"); sys.exit(1)
-    lost = [p for m in json.load(t.extractfile("manifest.json")) for p in [m.get("Config"), *m.get("Layers", [])] if p and p not in names]
-    if lost:
-        print(f"{len(lost)} of its blobs, such as {lost[0]}"); sys.exit(1)
+out, report = sys.stdout.buffer, sys.argv[1]
+seen = 0
+class Tee:
+    def read(self, n=-1):
+        global seen
+        b = sys.stdin.buffer.read(n)
+        seen += len(b)
+        out.write(b)
+        return b
+names, manifest = set(), None
+with tarfile.open(fileobj=Tee(), mode="r|", bufsize=1 << 20) as t:
+    for m in t:
+        names.add(m.name)
+        if m.name == "manifest.json":
+            manifest = json.load(t.extractfile(m))
+tee = Tee()
+while tee.read(1 << 20):
+    pass
+out.flush()
+lost = ["manifest.json"] if manifest is None else [p for e in manifest for p in [e.get("Config"), *e.get("Layers", [])] if p and p not in names]
+with open(report, "w") as f:
+    f.write(f"{seen}\t{len(lost)}\t{lost[0] if lost else ''}\n")
 PY
-  }
   # Podman's progress lines are noise in a log; Docker's save prints none.
   QUIET=(); [[ $ENGINE == podman ]] && QUIET=(-q)
+  # make-installer's (ARENA_IMAGE_PACK=gz): saved, checked and gzipped in one stream, its checksum taken on
+  # the way, ARENA_SAVE_JOBS (3) at once: no archive is written unpacked, and none is read back.
+  GZ_PACK=0; [[ "${ARENA_IMAGE_PACK:-}" == gz ]] && GZ_PACK=1
+  JOBS="${ARENA_SAVE_JOBS:-3}"; [[ $JOBS -ge 1 ]] || JOBS=1
+  THREADS=$(( $(nproc 2>/dev/null || echo 4) / JOBS )); [[ $THREADS -ge 2 ]] || THREADS=2
+  GZIP_CMD=(gzip -6); command -v pigz >/dev/null && GZIP_CMD=(pigz -6 -p "$THREADS")
+  declare -a SAVED=()
   for ref in "${IMAGES[@]}"; do
     if [[ $IN_ENGINE -eq 1 ]]; then
       # Named only: the installer takes it from the engine (or has it built or pulled there).
@@ -289,21 +312,46 @@ PY
     fi
     id="$("$ENGINE" image inspect --format '{{.Id}}' "$ref" 2>/dev/null)" || die "$ref is not on this host: build or pull it first (this script pulls nothing)"
     file="$(image_file "$ref")"
+    printf '%s\t%s\t%s\n' "$ref" "$file" "$id" >> "$B/images/IMAGES"
     # make-installer's cache (ARENA_IMAGE_CACHE) has this very image packed already: not saved again.
     if [[ -n "${ARENA_IMAGE_CACHE:-}" && -f "$ARENA_IMAGE_CACHE/${id#sha256:}.tar.gz" ]]; then
-      printf '%s\t%s\t%s\n' "$ref" "$file" "$id" >> "$B/images/IMAGES"
       printf '  %-60s %8s\n' "$ref" "(cached)"
       continue
     fi
-    "$ENGINE" save ${QUIET[@]+"${QUIET[@]}"} -o "$B/images/$file" "$ref" || die "$ENGINE save $ref failed"
-    # A store can lose an image's blobs (containerd's, for a platform pulled long ago): save then writes
-    # an archive without them, which no host can load. Every config and layer its manifests name is in it.
-    if ! missing="$(archive_missing "$B/images/$file")"; then
-      die "$ref is missing content here ($missing): $ENGINE save wrote an archive no host can load; pull it again ($ENGINE pull $ref), then pack again"
+    while [[ $(jobs -rp | wc -l) -ge $JOBS ]]; do wait -n 2>/dev/null || :; done
+    if [[ $GZ_PACK -eq 1 ]]; then
+      (
+        set -o pipefail
+        "$ENGINE" save ${QUIET[@]+"${QUIET[@]}"} "$ref" | python3 -I "$CHECKER" "$B/images/$file.check" | "${GZIP_CMD[@]}" \
+          | tee "$B/images/$file.gz" | sha256sum | cut -d' ' -f1 > "$B/images/$file.gz.sha256"
+        echo $? > "$B/images/$file.rc"
+      ) &
+    else
+      (
+        set -o pipefail
+        "$ENGINE" save ${QUIET[@]+"${QUIET[@]}"} "$ref" | python3 -I "$CHECKER" "$B/images/$file.check" > "$B/images/$file"
+        echo $? > "$B/images/$file.rc"
+      ) &
     fi
-    printf '%s\t%s\t%s\n' "$ref" "$file" "$id" >> "$B/images/IMAGES"
-    printf '  %-60s %8s\n' "$ref" "$(human "$(stat -c %s "$B/images/$file")")"
+    SAVED+=("$ref"$'\t'"$file")
   done
+  wait
+  for row in ${SAVED[@]+"${SAVED[@]}"}; do
+    ref="${row%%$'\t'*}" file="${row#*$'\t'}"
+    [[ "$(cat "$B/images/$file.rc" 2>/dev/null)" == 0 ]] || die "$ENGINE save $ref failed"
+    IFS=$'\t' read -r seen lost first < "$B/images/$file.check"
+    [[ $lost == 0 ]] || die "$ref is missing content here ($lost of its blobs, such as $first): $ENGINE save wrote an archive no host can load; pull it again ($ENGINE pull $ref), then pack again"
+    rm -f "$B/images/$file.rc"
+    if [[ $GZ_PACK -eq 1 ]]; then
+      # What make-installer reads: the bytes unpacked, and the gzipped file's checksum.
+      echo "$seen" > "$B/images/$file.raw"; rm -f "$B/images/$file.check"
+      printf '  %-60s %8s\n' "$ref" "$(human "$seen")"
+    else
+      rm -f "$B/images/$file.check"
+      printf '  %-60s %8s\n' "$ref" "$(human "$(stat -c %s "$B/images/$file")")"
+    fi
+  done
+  rm -f "$CHECKER"
   [[ $IN_ENGINE -eq 1 ]] && say "  ${#IMAGES[@]} named, in $ENGINE (not saved)"
 
   say "==> deploy/"
