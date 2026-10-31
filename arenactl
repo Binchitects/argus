@@ -685,10 +685,12 @@ def cmd_bundle(a) -> int:
     cmd = ["bash", str(SCRIPTS / "make-installer.sh"), "--project", "arena"]
     if engine.name == "podman":
         cmd.append("--podman")
-    for flag, value in (("--out", a.out), ("--models-dir", a.models_dir), ("--code-arena", a.code_arena), ("--without", a.without)):
+    for flag, value in (("--out", a.out), ("--models-dir", a.models_dir), ("--code-arena", a.code_arena), ("--without", a.without),
+                        ("--image-cache", a.image_cache)):
         if value:
             cmd += [flag, value]
     cmd += (["--models"] if a.models else []) + (["--packs"] if a.packs else []) + (["--no-known"] if no_known else []) + (["--dry-run"] if a.dry_run else [])
+    cmd += ["--no-image-cache"] if a.no_image_cache else []
     if deps_dir:
         cmd += ["--deps", str(deps_dir)]
     step("the bundle (deploy/scripts/make-installer.sh)")
@@ -907,6 +909,8 @@ def main(argv: list[str]) -> int:
     s.add_argument("--without", help="features left out of the bundle")
     s.add_argument("--code-arena", help="Code Arena's packages from this folder (default dist/, made when missing)")
     s.add_argument("--out", help="where the .run goes (default dist/)")
+    s.add_argument("--image-cache", help="each image packed once, by its id (default OUT/.image-cache): unchanged ones are not saved again")
+    s.add_argument("--no-image-cache", action="store_true", help="every image saved and gzipped again")
     s.add_argument("--no-build", action="store_true", help="the images as they are here")
     s.add_argument("--podman", action="store_true")
     s.add_argument("--engine", choices=["docker", "podman"])
