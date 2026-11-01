@@ -751,6 +751,7 @@ The notice the company sets (acceptable use, the privacy notice) is on the sign-
 
 - `Llm.Tests/NoticeTests.Everyone_accepts_the_current_version_before_anything_else_and_a_new_version_again`
 - `Llm.Tests/NoticeTests.Without_a_notice_nothing_waits_and_the_check_asks_for_one`
+- `Llm.Tests/NoticeTests.With_two_factor_sign_in_to_set_up_as_well_the_notice_is_accepted_first_and_the_setup_follows`
 
 **Watched by** `app:notice` (Admin → Compliance, and `./arenactl check compliance`)
 
