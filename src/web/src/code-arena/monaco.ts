@@ -4,6 +4,7 @@ import CssWorker from 'monaco-editor/language/css/css.worker?worker'
 import HtmlWorker from 'monaco-editor/language/html/html.worker?worker'
 import JsonWorker from 'monaco-editor/language/json/json.worker?worker'
 import TsWorker from 'monaco-editor/language/typescript/ts.worker?worker'
+import { arenaMonacoThemes } from './arena-themes'
 import { keepEditorFormatters } from './format'
 import { globMatch } from './glob'
 import { languageByFirstLine } from './language-detect'
@@ -107,53 +108,8 @@ export function stepAside(language: string, kept: Kept | null) {
   }
 }
 
-// Argus Arena's colours (src/styles/index.css, as sRGB: Monaco takes hex).
-monaco.editor.defineTheme('arena-light', {
-  base: 'vs',
-  inherit: true,
-  rules: [],
-  colors: {
-    'editor.background': '#fbfcfe',
-    'editor.foreground': '#12161d',
-    'editorLineNumber.foreground': '#8b929c',
-    'editorLineNumber.activeForeground': '#12161d',
-    'editor.lineHighlightBackground': '#eff2f580',
-    'editor.selectionBackground': '#2474cf33',
-    'editor.inactiveSelectionBackground': '#2474cf1f',
-    'editorCursor.foreground': '#2474cf',
-    'editorWidget.background': '#ffffff',
-    'editorWidget.border': '#dfe3e8',
-    'editorGutter.background': '#fbfcfe',
-    'focusBorder': '#2474cf8c',
-    'diffEditor.insertedTextBackground': '#00885624',
-    'diffEditor.removedTextBackground': '#cc272e24',
-    'diffEditor.insertedLineBackground': '#00885614',
-    'diffEditor.removedLineBackground': '#cc272e14',
-  },
-})
-monaco.editor.defineTheme('arena-dark', {
-  base: 'vs-dark',
-  inherit: true,
-  rules: [],
-  colors: {
-    'editor.background': '#0c0e13',
-    'editor.foreground': '#e9ebee',
-    'editorLineNumber.foreground': '#5d646e',
-    'editorLineNumber.activeForeground': '#e9ebee',
-    'editor.lineHighlightBackground': '#1c1f2480',
-    'editor.selectionBackground': '#4c94ec40',
-    'editor.inactiveSelectionBackground': '#4c94ec26',
-    'editorCursor.foreground': '#4c94ec',
-    'editorWidget.background': '#13161c',
-    'editorWidget.border': '#282c31',
-    'editorGutter.background': '#0c0e13',
-    'focusBorder': '#4c94ec99',
-    'diffEditor.insertedTextBackground': '#44b78230',
-    'diffEditor.removedTextBackground': '#ed535030',
-    'diffEditor.insertedLineBackground': '#44b7821a',
-    'diffEditor.removedLineBackground': '#ed53501a',
-  },
-})
+// Argus Arena's colour themes, each light and dark.
+for (const [name, theme] of arenaMonacoThemes()) monaco.editor.defineTheme(name, theme)
 
 // VS Code's JSON files: comments and trailing commas allowed, and settings.json and keybindings.json checked against what
 // Code Arena reads (schemas() sets them again as commands come and go).
