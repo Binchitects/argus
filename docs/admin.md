@@ -941,7 +941,8 @@ Each asks first, saying what it cuts, and is audited as `runtime.reload`,
 `runtime.restart` or `runtime.reset` with the engine or sandbox and what it
 concerned ("1 model (Qwen3-8B); 2 answers cut", "1 running, 3 waiting told");
 the audit log's **Restarts** filter shows them. While one is on its way (until
-the service has taken it, at most 3 minutes), another is refused. An engine
+the service has taken it, or for llama.cpp's Reload until its last model has
+been loaded again; at most 3 minutes), another is refused. An engine
 is not reloaded or restarted while the GPU is lent to a picture or a video.
 Admin → Models' engine card has the same Reload and Restart for each engine.
 Reload needs `models.load`; Restart and Reset need `runtimes.restart`, which

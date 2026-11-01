@@ -142,6 +142,27 @@ public sealed class RuntimeEndpointsTests(AppFixture app) : IDisposable
         await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/runtimes/llamacpp/reset"));
         await StatusAssert.Is(HttpStatusCode.NotFound, await admin.PostAsync("/api/admin/runtimes/nothing/restart"));
         Assert.Equal(2, (await AuditAsync(admin)).Count);
+
+        // Done, the reload is no longer on its way: its model unloaded later (the app making room, an admin), or loading
+        // again and never done, does not make it so, and an admin may restart a llama.cpp that hangs. The file says it is
+        // done, for every replica.
+        app.Engine.LostLoads = 1000;
+        try
+        {
+            await f.Services.GetRequiredService<LlamaCppBackend>().UnloadAsync(model, CancellationToken.None);
+            await EventuallyAsync(() =>
+            {
+                f.Services.GetRequiredService<EngineWatcher>().Wake();
+                return Task.FromResult(f.Services.GetRequiredService<EngineState>().StatusOf(model) is "unloaded" or "loading");
+            }, "the model unloaded");
+            Assert.Contains(await StateAsync(admin, "llamacpp"), new[] { "up", "loading" });
+            Assert.Contains(await File.ReadAllLinesAsync(Path.Combine(config, LlamaCppBackend.ReloadFile)), l => l.StartsWith("done=", StringComparison.Ordinal));
+            await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/runtimes/llamacpp/restart"));
+        }
+        finally
+        {
+            app.Engine.LostLoads = 0;
+        }
     }
 
     [Fact]

@@ -11,10 +11,11 @@ namespace Llm.Api.Operations;
 
 /// <summary>
 /// An admin's ask of an engine or a sandbox (Admin → Monitoring): a file of key=value lines that the service it is for
-/// reads and never runs (gen=, action=, by=, at=, and model= for each model it concerns), written whole. Each ask raises
-/// its generation, so the service acts once on each.
+/// reads and never runs (gen=, action=, by=, at=, and model= for each model it concerns; done= when the app does it
+/// itself, llama.cpp's Reload, once it is through), written whole. Each ask raises its generation, so the service acts
+/// once on each.
 /// </summary>
-public sealed record RuntimeAsk(long Gen, string Action, string By, DateTimeOffset At, IReadOnlyList<string> Models)
+public sealed record RuntimeAsk(long Gen, string Action, string By, DateTimeOffset At, IReadOnlyList<string> Models, DateTimeOffset? Done = null)
 {
     public static RuntimeAsk? Read(string path)
     {
@@ -28,7 +29,8 @@ public sealed record RuntimeAsk(long Gen, string Action, string By, DateTimeOffs
             string? Get(string key) => lines.FirstOrDefault(l => l.StartsWith(key + "=", StringComparison.Ordinal))?[(key.Length + 1)..];
             return long.TryParse(Get("gen"), CultureInfo.InvariantCulture, out var gen)
                 ? new RuntimeAsk(gen, Get("action") ?? "", Get("by") ?? "", DateTimeOffset.FromUnixTimeSeconds(long.TryParse(Get("at"), CultureInfo.InvariantCulture, out var at) ? at : 0),
-                    [.. lines.Where(l => l.StartsWith("model=", StringComparison.Ordinal)).Select(l => l[6..])])
+                    [.. lines.Where(l => l.StartsWith("model=", StringComparison.Ordinal)).Select(l => l[6..])],
+                    long.TryParse(Get("done"), CultureInfo.InvariantCulture, out var done) ? DateTimeOffset.FromUnixTimeSeconds(done) : null)
                 : null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -42,17 +44,35 @@ public sealed record RuntimeAsk(long Gen, string Action, string By, DateTimeOffs
     {
         static string Line(string s) => s.Replace('\r', ' ').Replace('\n', ' ');
         var ask = new RuntimeAsk((Read(path)?.Gen ?? 0) + 1, action, Line(by), at, [.. (models ?? []).Select(Line)]);
+        Save(path, ask);
+        return ask;
+    }
+
+    /// <summary><paramref name="ask"/> marked done at <paramref name="at"/>, while it is still the last one asked (a newer one is left as it is).</summary>
+    public static void Finish(string path, RuntimeAsk ask, DateTimeOffset at)
+    {
+        if (Read(path)?.Gen == ask.Gen)
+        {
+            Save(path, ask with { Done = at });
+        }
+    }
+
+    private static void Save(string path, RuntimeAsk ask)
+    {
         var text = new StringBuilder();
         text.Append(CultureInfo.InvariantCulture, $"gen={ask.Gen}\naction={ask.Action}\nby={ask.By}\nat={ask.At.ToUnixTimeSeconds()}\n");
         foreach (var m in ask.Models)
         {
             text.Append(CultureInfo.InvariantCulture, $"model={m}\n");
         }
+        if (ask.Done is { } done)
+        {
+            text.Append(CultureInfo.InvariantCulture, $"done={done.ToUnixTimeSeconds()}\n");
+        }
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var temporary = $"{path}.{Guid.NewGuid():N}.tmp";
         File.WriteAllText(temporary, text.ToString());
         File.Move(temporary, path, overwrite: true);
-        return ask;
     }
 }
 
@@ -75,8 +95,9 @@ public sealed record RuntimeRefusal(int Status, string Code, string Message);
 /// file the app writes on the volume they share (Docker Compose and Kubernetes alike), or the app does it over the
 /// engine's own API.
 /// <list type="bullet">
-/// <item>llama.cpp: Reload unloads each loaded model and loads it again, one after another (the router's API); Restart writes
-/// llamacpp.restart, and the router starts llama-server again (services/llamacpp/router.sh).</item>
+/// <item>llama.cpp: Reload unloads each loaded model and loads it again, one after another (the router's API), and marks
+/// llamacpp.reload done once through; Restart writes llamacpp.restart, and the router starts llama-server again
+/// (services/llamacpp/router.sh).</item>
 /// <item>vLLM and SGLang: Reload and Restart write the instance's reload and restart files, which its supervisor follows
 /// (services/vllm/supervisor.sh): every model drained and started again, or the supervisor too.</item>
 /// <item>The picture and video servers: Restart raises their control file's generation (MediaControl.Restart).</item>
@@ -108,9 +129,6 @@ public sealed partial class Runtimes(IOptions<EngineOptions> engine, Features fe
 
     /// <summary>What one is doing now.</summary>
     private sealed record Now(string State, DateTimeOffset? Since, string? Detail, int Busy = 0, int Waiting = 0);
-
-    /// <summary>Whether this replica is unloading and loading llama.cpp's models again now.</summary>
-    private volatile bool _reloading;
 
     private IEnumerable<(string Id, JobRunner Runner)> Sandboxes => [("sandbox", sandbox), ("blender", blender), ("lean", lean)];
 
@@ -209,8 +227,8 @@ public sealed partial class Runtimes(IOptions<EngineOptions> engine, Features fe
         {
             return new Now("restarting", r.At, $"Asked by {r.By}: llama-server starts again, then the models kept loaded load again.", busy, waiting);
         }
-        if (reload is { } l && at - l.At < ComeBack && (restart is null || restart.At < l.At)
-            && (_reloading || l.Models.Any(m => state.StatusOf(m) is "loading" or "unloading" or "unloaded")))
+        // Reloading until the replica doing it says it is done (a replica that went away meanwhile: until the ask is old).
+        if (reload is { } l && l.Done is null && at - l.At < ComeBack && (restart is null || restart.At < l.At))
         {
             return new Now("reloading", l.At, $"Asked by {l.By}: {Names(l.Models)} unloaded and loaded again, one after another.", busy, waiting);
         }
@@ -344,18 +362,20 @@ public sealed partial class Runtimes(IOptions<EngineOptions> engine, Features fe
         {
             return (null, new RuntimeRefusal(409, "nothing", "llama.cpp has no model loaded: there is nothing to reload."));
         }
-        RuntimeAsk.Write(LlamaFile(LlamaCppBackend.ReloadFile), Reload, who, clock.GetUtcNow(), loaded);
-        _reloading = true;
-        _ = Task.Run(() => ReloadLlamaAsync(loaded, who, lifetime.ApplicationStopping), CancellationToken.None);
+        var ask = RuntimeAsk.Write(LlamaFile(LlamaCppBackend.ReloadFile), Reload, who, clock.GetUtcNow(), loaded);
+        _ = Task.Run(() => ReloadLlamaAsync(ask, who, lifetime.ApplicationStopping), CancellationToken.None);
         return ($"{Count(loaded.Count, "model")} ({Names(loaded)}); {Count(now.Busy, "answer")} cut", null);
     }
 
-    /// <summary>Each model unloaded (requests no longer go to it), then loaded again once the engine has stopped it: one at a time, so the others answer meanwhile.</summary>
-    private async Task ReloadLlamaAsync(IReadOnlyList<string> models, string who, CancellationToken ct)
+    /// <summary>
+    /// Each model unloaded (requests no longer go to it), then loaded again once the engine has stopped it: one at a time,
+    /// so the others answer meanwhile. Then the ask is marked done, for every replica.
+    /// </summary>
+    private async Task ReloadLlamaAsync(RuntimeAsk ask, string who, CancellationToken ct)
     {
         try
         {
-            foreach (var m in models)
+            foreach (var m in ask.Models)
             {
                 try
                 {
@@ -381,7 +401,15 @@ public sealed partial class Runtimes(IOptions<EngineOptions> engine, Features fe
         }
         finally
         {
-            _reloading = false;
+            try
+            {
+                RuntimeAsk.Finish(LlamaFile(LlamaCppBackend.ReloadFile), ask, clock.GetUtcNow());
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Then it is pending until it is old (ComeBack).
+                LogReloadNotMarked(logger, ex.Message);
+            }
             watcher.Wake();
         }
     }
@@ -431,4 +459,7 @@ public sealed partial class Runtimes(IOptions<EngineOptions> engine, Features fe
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Reloading {Model} on llama.cpp: {Error}")]
     private static partial void LogReloadFailed(ILogger logger, string model, string error);
+
+    [LoggerMessage(Level = LogLevel.Warning, Message = "Marking llama.cpp's reload done: {Error}")]
+    private static partial void LogReloadNotMarked(ILogger logger, string error);
 }
