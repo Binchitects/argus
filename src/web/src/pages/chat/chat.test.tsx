@@ -529,6 +529,19 @@ describe('chat', () => {
     expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
   })
 
+  it('an answer an admin stopped says so and why, in place of a plain Stopped', async () => {
+    const why = 'Stopped by an admin: A runaway agent'
+    backend({
+      events: [{ type: 'question', id: 'q1', parentId: null }, { type: 'assistant', id: 'a1', parentId: 'q1', model: 'Main-Model' }, { type: 'content', text: 'partial answer' }, { type: 'stopped', id: 'a1', why }],
+      saved: [msg('q1', null, 'user', { content: 'long one' }), msg('a1', 'q1', 'assistant', { content: 'partial answer', status: 'stopped', error: why })],
+    })
+    renderApp('/chat')
+    await ask('long one')
+    expect(await screen.findByText(why)).toBeInTheDocument()
+    expect(screen.getByText('partial answer')).toBeInTheDocument()
+    expect(screen.queryByText('Stopped.')).not.toBeInTheDocument()
+  })
+
   it('a chat still answering (its page was closed) is watched again from the start, and Stop asks the server', async () => {
     const question = msg('q1', null, 'user', { content: 'long one' })
     const calls = backend({

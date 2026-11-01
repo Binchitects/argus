@@ -311,7 +311,8 @@ export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince
                 {a.error}
               </Alert>
             )}
-            {a.status === 'stopped' && (
+            {/* Stopped by an admin, the error above says so and why. */}
+            {a.status === 'stopped' && !a.error && (
               <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Square className="size-3" aria-hidden="true" /> Stopped.
               </p>

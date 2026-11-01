@@ -148,6 +148,15 @@ describe('live answer', () => {
     expect(s.messages[1]).toMatchObject({ status: 'stopped', content: 'half' })
   })
 
+  it('a stop by an admin says why, on the answer or, before it had a word, as a notice', () => {
+    const why = 'Stopped by an admin: A runaway agent'
+    const s = play([{ type: 'question', id: 'q1', parentId: null }, { type: 'assistant', id: 'a1', parentId: 'q1', model: 'M' }, { type: 'content', text: 'half' }, { type: 'stopped', id: 'a1', why }])
+    expect(s.messages[1]).toMatchObject({ status: 'stopped', content: 'half', error: why })
+    expect(s.notices).toEqual([])
+    const early = play([{ type: 'question', id: 'q1', parentId: null }, { type: 'stopped', id: null, why }])
+    expect(early.notices).toEqual([{ kind: 'stopped', text: why }])
+  })
+
   it('a compaction keeps its summary on the message it ends at, and its failure never lands on the last answer', () => {
     const saved = play([{ type: 'question', id: 'q1', parentId: null }, { type: 'assistant', id: 'a1', parentId: 'q1', model: 'M' }, { type: 'content', text: 'old answer' }])
     let s: LiveState = { ...saved, mode: 'compact' }

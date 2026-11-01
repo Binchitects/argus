@@ -19,6 +19,12 @@ describe('exporting a chat', () => {
     expect(md).toContain('They found DecodeFrame.')
   })
 
+  it('marks a stopped answer, and says why when an admin stopped it', () => {
+    const stopped = { ...blank('a3', 'assistant', 'q', 'half'), model: 'Main', status: 'stopped' as const }
+    expect(chatToMarkdown('Decode', [q, stopped])).toContain('half\n\n*Stopped.*')
+    expect(chatToMarkdown('Decode', [q, { ...stopped, error: 'Stopped by an admin: A runaway agent' }])).toContain('half\n\n*Stopped by an admin: A runaway agent*')
+  })
+
   it('writes the part of an answer a question quotes as a Markdown quote above it, and keeps it in the data', () => {
     const quoted = { ...blank('q2', 'user', 'a2', 'Why there?'), quote: 'In `src/decode.c`.\n\nLine two' }
     expect(chatToMarkdown('Decode', [q, a2, quoted])).toContain('## You\n\n> In `src/decode.c`.\n>\n> Line two\n\nWhy there?')

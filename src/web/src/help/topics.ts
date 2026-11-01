@@ -1032,8 +1032,15 @@ export const topics = {
       { name: 'Waiting', text: 'Each request waiting its turn: its place, whose it is, the model, chat or API, how long it has waited and its priority.' },
       { name: 'Running', text: 'What runs now, the longest first.' },
       { name: 'The limits', text: 'How many run at once for everyone, per person, the longest line and how long a wait lasts (Settings → Chat), and each model\'s places.' },
+      {
+        name: 'Remove and Stop',
+        text: 'With usage.line (the Operator role): Remove takes a waiting request out of the line, Stop stops a running one. Say why: the person reads it in the chat, an API caller in its error (403 removed_by_admin). Audited as line.remove or line.stop, on whichever replica has the request.',
+      },
     ],
-    tasks: [{ title: 'Find out why someone waits', steps: ['Find them under **Waiting**.', 'See who runs before them, and the limits above.', 'Raise a limit in Settings → Chat, or theirs in Admin → People.'] }],
+    tasks: [
+      { title: 'Find out why someone waits', steps: ['Find them under **Waiting**.', 'See who runs before them, and the limits above.', 'Raise a limit in Settings → Chat, or theirs in Admin → People.'] },
+      { title: 'Take a request out of the line', steps: ['Press **Remove** on its row under **Waiting** (or **Stop** under **Running**).', 'Pick a reason or write one.', 'Press **Take it out** (or **Stop it**): they are told why.'] },
+    ],
     manual: { doc: 'admin', section: 'line' },
   },
 
