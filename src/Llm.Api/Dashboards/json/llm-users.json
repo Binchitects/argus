@@ -725,7 +725,7 @@
     {
       "type": "stat",
       "title": "Refused (1 h)",
-      "description": "Refused by the line in the last hour: as busy (the line was full) or after waiting too long.",
+      "description": "Refused by the line in the last hour: as busy (the line was full), after waiting too long, or taken out by an admin (Admin → Line).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"

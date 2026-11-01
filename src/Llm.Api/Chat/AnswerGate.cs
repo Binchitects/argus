@@ -12,7 +12,8 @@ namespace Llm.Api.Chat;
 /// groups' priority, Admin → Groups), then, within a priority, to whoever has waited while having
 /// the fewest answers running, and among those to whoever was served longest ago: one person's
 /// many questions cannot keep the others waiting. With several replicas each keeps its own
-/// lines, with its share of the places.
+/// lines, with its share of the places. Each request has a ticket: an admin takes a waiting one
+/// out of the line, or stops a running one, by it (Admin → Line), saying why.
 /// </summary>
 public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvider clock)
 {
@@ -28,6 +29,8 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
 
     private sealed class Waiter(Guid person, int priority, string model, long order, int limit, string kind, DateTimeOffset since)
     {
+        /// <summary>Its ticket, which its place keeps (Admin → Line).</summary>
+        public Guid Id { get; } = Guid.NewGuid();
         public string Kind { get; } = kind;
         public DateTimeOffset Since { get; } = since;
         public Guid Person { get; } = person;
@@ -40,15 +43,27 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
     }
 
     /// <summary>A place taken: give it back by disposing it.</summary>
-    public sealed class Place(AnswerGate gate, Guid person, string model, string kind, DateTimeOffset since) : IDisposable
+    public sealed class Place(AnswerGate gate, Guid id, Guid person, string model, string kind, DateTimeOffset since) : IDisposable
     {
+        // Not disposed: it has no timer, and an admin's stop may come as the place is given back.
+        private readonly CancellationTokenSource _stop = new();
         private int _released;
 
+        /// <summary>The ticket it waited with (Admin → Line).</summary>
+        public Guid Id { get; } = id;
         public Guid Person { get; } = person;
         public string Model { get; } = model;
         /// <summary>"chat" (an answer) or "api" (a request with a key).</summary>
         public string Kind { get; } = kind;
         public DateTimeOffset Since { get; } = since;
+
+        /// <summary>Fires when an admin stops it (Admin → Line); <see cref="StopReason"/> says why. Whoever holds the place stops then.</summary>
+        public CancellationToken Stopped => _stop.Token;
+
+        /// <summary>Why an admin stopped it; null while nobody did.</summary>
+        public string? StopReason { get; internal set; }
+
+        internal void Stop() => _stop.Cancel();
 
         public void Dispose()
         {
@@ -59,33 +74,43 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
         }
     }
 
-    /// <summary>A request running or waiting, as Admin → Line shows it: whose, on which model, of which kind, since when; a waiter's place (1: next) and priority.</summary>
-    public sealed record Entry(Guid Person, string Model, string Kind, DateTimeOffset Since, int? Position = null, int? Priority = null);
+    /// <summary>A request running or waiting, as Admin → Line shows it: its ticket, whose, on which model, of which kind, since when; a waiter's place (1: next) and priority.</summary>
+    public sealed record Entry(Guid Id, Guid Person, string Model, string Kind, DateTimeOffset Since, int? Position = null, int? Priority = null);
+
+    /// <summary>A request an admin took out of the line (it was waiting) or stopped (it was running): whose, on which model, of which kind, for how long.</summary>
+    public sealed record Removed(Guid Person, string Model, string Kind, bool Running, TimeSpan For);
+
+    /// <summary>What a person or a caller is told of an admin's stop of their running request.</summary>
+    public static string StoppedBy(string reason) => $"Stopped by an admin: {reason}";
 
     /// <summary>Everything running now, and everyone waiting in the order they will be served.</summary>
     public (List<Entry> Running, List<Entry> Waiting) Snapshot()
     {
         lock (_lock)
         {
-            var running = _held.OrderBy(p => p.Since).Select(p => new Entry(p.Person, p.Model, p.Kind, p.Since)).ToList();
+            var running = _held.OrderBy(p => p.Since).Select(p => new Entry(p.Id, p.Person, p.Model, p.Kind, p.Since)).ToList();
             var order = _waiting.ToList();
             order.Sort((a, b) => a == b ? 0 : Before(a, b) ? -1 : 1);
-            return (running, [.. order.Select((w, i) => new Entry(w.Person, w.Model, w.Kind, w.Since, i + 1, w.Priority))]);
+            return (running, [.. order.Select((w, i) => new Entry(w.Id, w.Person, w.Model, w.Kind, w.Since, i + 1, w.Priority))]);
         }
     }
 
     private readonly HashSet<Place> _held = [];
 
-    // What the line refused and how long its requests waited, by kind, since the app started (Admin → Dashboards).
+    // What the line refused, what admins stopped and how long its requests waited, by kind, since the app started (Admin → Dashboards).
     private readonly Dictionary<(string Reason, string Kind), long> _refused = [];
+    private readonly Dictionary<string, long> _stopped = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (long Count, double Seconds)> _waited = new(StringComparer.Ordinal);
 
-    /// <summary>The line's numbers for Prometheus: refusals by reason ("busy", "too_long") and kind, and the time waited by kind.</summary>
-    public (Dictionary<(string Reason, string Kind), long> Refused, Dictionary<string, (long Count, double Seconds)> Waited) Counters()
+    /// <summary>
+    /// The line's numbers for Prometheus: refusals by reason ("busy", "too_long", "removed" by an admin) and kind, running
+    /// requests an admin stopped by kind, and the time waited by kind.
+    /// </summary>
+    public (Dictionary<(string Reason, string Kind), long> Refused, Dictionary<string, long> Stopped, Dictionary<string, (long Count, double Seconds)> Waited) Counters()
     {
         lock (_lock)
         {
-            return (new(_refused), new(_waited, StringComparer.Ordinal));
+            return (new(_refused), new(_stopped, StringComparer.Ordinal), new(_waited, StringComparer.Ordinal));
         }
     }
 
@@ -103,6 +128,9 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
 
     /// <summary>Thrown at once when the line is as long as <see cref="ChatOptions.QueueLength"/> allows: nothing was sent, try again later.</summary>
     public sealed class BusyException(string message) : InvalidOperationException(message);
+
+    /// <summary>Thrown when an admin took the request out of the line (Admin → Line): nothing was sent, and the message says why.</summary>
+    public sealed class RemovedException(string message) : InvalidOperationException(message);
 
     private int PerPerson => Math.Max(1, options.CurrentValue.AnswersPerPerson);
 
@@ -225,6 +253,41 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
         }
     }
 
+    /// <summary>
+    /// For an admin (Admin → Line): the request with this ticket leaves the line when it waits (it gives up with
+    /// <see cref="RemovedException"/>, nothing sent), or is stopped when it runs (its <see cref="Place.Stopped"/> fires).
+    /// <paramref name="reason"/> is what its person or caller is told. Null when no request here has the ticket: it ended,
+    /// or another replica has it.
+    /// </summary>
+    public Removed? Remove(Guid id, string reason)
+    {
+        Place? place;
+        lock (_lock)
+        {
+            if (_waiting.Find(w => w.Id == id) is { } w)
+            {
+                _waiting.Remove(w);
+                Count("removed", w.Kind);
+                w.Granted.TrySetException(new RemovedException($"An admin took this request out of the line, and nothing was sent to the model: {reason}"));
+                return new Removed(w.Person, w.Model, w.Kind, false, clock.GetUtcNow() - w.Since);
+            }
+            place = _held.FirstOrDefault(p => p.Id == id);
+            if (place is null)
+            {
+                return null;
+            }
+            // Stopped twice (two admins at once): counted once, the first reason kept.
+            if (place.StopReason is null)
+            {
+                place.StopReason = reason;
+                _stopped[place.Kind] = _stopped.GetValueOrDefault(place.Kind) + 1;
+            }
+        }
+        // Outside the lock: whoever holds the place stops in its callbacks, and gives the place back.
+        place.Stop();
+        return new Removed(place.Person, place.Model, place.Kind, true, clock.GetUtcNow() - place.Since);
+    }
+
     /// <summary>Answers running now, and answers waiting, on every model (for Admin → Overview and tests).</summary>
     public (int Total, int Waiting) Now()
     {
@@ -321,7 +384,7 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
             _runningOn[next.Model] = _runningOn.GetValueOrDefault(next.Model) + 1;
             _total++;
             _lastServed[next.Person] = ++_tick;
-            var place = new Place(this, next.Person, next.Model, next.Kind, clock.GetUtcNow());
+            var place = new Place(this, next.Id, next.Person, next.Model, next.Kind, clock.GetUtcNow());
             var (count, seconds) = _waited.GetValueOrDefault(next.Kind);
             _waited[next.Kind] = (count + 1, seconds + (place.Since - next.Since).TotalSeconds);
             _held.Add(place);

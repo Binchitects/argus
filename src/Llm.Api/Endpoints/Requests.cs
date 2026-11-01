@@ -16,3 +16,6 @@ public sealed record LimitsRequest(int? RequestsPerMinute = null, int? TokensPer
 
 /// <summary>The people to move to directory sign-in.</summary>
 public sealed record MoveRequest(List<Guid>? Ids);
+
+/// <summary>Why an admin takes a request out of the line, or stops it (Admin → Line): the person or the caller is told.</summary>
+public sealed record LineRemoveRequest(string? Reason);

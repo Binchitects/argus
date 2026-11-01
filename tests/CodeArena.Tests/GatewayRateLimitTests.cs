@@ -90,6 +90,18 @@ public sealed class GatewayRateLimitTests
     }
 
     [Fact]
+    public async Task An_admin_taking_the_request_out_of_the_line_is_said_in_their_words_not_as_a_refused_key()
+    {
+        const string why = "An admin took this request out of the line, and nothing was sent to the model: The model is needed for others now";
+        var e = await RefusedAsync(HttpStatusCode.Forbidden, $$$"""{"error":{"message":"{{{why}}}","type":"removed_by_admin","code":"403"}}""");
+        Assert.Equal(why, e.Message);
+        // Asking again at once would put it back in the line the admin took it out of.
+        Assert.False(GatewayClient.Retryable(e));
+        var key = await RefusedAsync(HttpStatusCode.Forbidden, """{"error":{"message":"Authentication Error","type":"auth_error"}}""");
+        Assert.StartsWith("The gateway refused your API key (403).", key.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Another_429_keeps_the_gateways_own_words()
     {
         var e = await RefusedAsync(HttpStatusCode.TooManyRequests, """{"error":{"message":"Budget has been exceeded! Current cost: 5, Max budget: 5"}}""");

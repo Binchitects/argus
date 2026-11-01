@@ -53,7 +53,10 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   the app's), temperature, top-p, and the longest answer. Empty means the
   model's default.
 - **Streaming, stop, answer again.**
-  - **Stop** keeps what was written, marked *Stopped*.
+  - **Stop** keeps what was written, marked *Stopped*. An admin can stop an
+    answer too, or take one out of the line before it starts (Admin → Line):
+    the answer then says *Stopped by an admin* with their reason, and the bell
+    says so when no page was open.
   - **Answer again** writes a new answer beside the old one; both stay. It can
     also use another model or thinking level, for that answer only.
   - **Shorter** and **Longer** (in the same menu) answer again at about half
@@ -1962,7 +1965,10 @@ their turn:
   requests at once when an admin set it (none set: only their key's own line
   holds them). A line as long as Longest line allows refuses the next at
   once with HTTP 503 and `Retry-After`; a wait past Longest wait in line gets
-  HTTP 429.
+  HTTP 429. One an admin takes out of the line (Admin → Line) gets HTTP 403
+  `removed_by_admin` with their reason and no `Retry-After` (the clients ask
+  again at once after a 429 or a 5xx); one they stop while it streams ends
+  with an error chunk of that type, "Stopped by an admin: …".
 - **API keys** (coding agents, IDEs, scripts) have four requests answered at
   once (API requests at once, per key; fewer for a key its person set so on
   Account → API keys); more wait their turn in the order they

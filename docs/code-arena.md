@@ -2444,6 +2444,10 @@ on from where it stopped, up to three times a turn.
   used too.
 - **"The gateway refused your API key (401)"**: the key was revoked or mistyped.
   Make a new one under **Your account → API key** and run `code-arena login`.
+- **"An admin took this request out of the line …"** or **"… Stopped by an
+  admin: …"**: an admin took the request out of the Arena's line, or stopped
+  it, and says why (Admin → Line). The key is fine. Code Arena does not ask
+  again by itself: send the message again when it makes sense.
 - **"Your API key reached its limit of … a minute"**: an admin gave your key a
   rate limit (requests or tokens a minute). Wait a minute and ask again; **Your
   account → API key** shows the limits and what you used. Code Arena does not

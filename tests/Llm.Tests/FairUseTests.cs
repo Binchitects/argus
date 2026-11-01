@@ -157,6 +157,116 @@ public sealed class FairUseTests(AppFixture app)
     }
 
     [Fact]
+    public async Task An_admin_takes_a_waiting_request_out_and_stops_a_running_one_by_its_ticket_saying_why()
+    {
+        var gate = Gate(perPerson: 1, atOnce: 1);
+        var (ann, ben, cy) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        Task Nothing(AnswerGate.Line _) => Task.CompletedTask;
+        var running = await gate.EnterAsync(ann, 0, "m", Nothing, default, kind: "api");
+        var waiting = gate.EnterAsync(ben, "m", Nothing, default);
+        var next = gate.EnterAsync(cy, "m", Nothing, default);
+        var line = gate.Snapshot().Waiting;
+        var (benTicket, cyTicket) = (line.Single(e => e.Person == ben).Id, line.Single(e => e.Person == cy).Id);
+
+        // Waiting: out of the line, nothing sent, and why; the one behind moves up.
+        var removed = gate.Remove(benTicket, "The model is needed for others now");
+        Assert.Equal((ben, "m", "chat", false), (removed!.Person, removed.Model, removed.Kind, removed.Running));
+        var refused = await Assert.ThrowsAsync<AnswerGate.RemovedException>(() => waiting);
+        Assert.Equal("An admin took this request out of the line, and nothing was sent to the model: The model is needed for others now", refused.Message);
+        Assert.Equal((1, 1), gate.Now());
+        Assert.Equal(1, Assert.Single(gate.Snapshot().Waiting).Position);
+        Assert.Null(gate.Remove(benTicket, "again"));
+
+        // Running: its place's token fires with the reason, counted once however often it is asked; the place is held
+        // until whoever has it gives it back, and then goes to the next, with the ticket it waited with.
+        Assert.Equal(running.Id, Assert.Single(gate.Snapshot().Running).Id);
+        Assert.False(running.Stopped.IsCancellationRequested);
+        Assert.True(gate.Remove(running.Id, "A runaway agent")!.Running);
+        Assert.True(running.Stopped.IsCancellationRequested);
+        Assert.True(gate.Remove(running.Id, "A second admin")!.Running);
+        Assert.Equal("A runaway agent", running.StopReason);
+        Assert.False(next.IsCompleted);
+        running.Dispose();
+        using (var place = await next.WaitAsync(TimeSpan.FromSeconds(5)))
+        {
+            Assert.Equal(cyTicket, place.Id);
+            Assert.Null(gate.Remove(running.Id, "gone"));
+        }
+        var text = LineMetrics.Render(gate);
+        Assert.Contains("arena_line_refused_total{reason=\"removed\",kind=\"chat\"} 1", text, StringComparison.Ordinal);
+        Assert.Contains("arena_line_stopped_total{kind=\"api\"} 1", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task An_admin_takes_a_waiting_answer_out_and_stops_a_running_one_and_the_person_is_told_why()
+    {
+        await using var f = app.Create(app.ConnectionStringFor("kick_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
+            new Dictionary<string, string?> { ["Chat:AnswersPerPerson"] = "1", ["Chat:AnswersAtOnce"] = "4", ["Auth:DataKey"] = "a-data-key-for-fair-tests" });
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var name = "kq" + Guid.NewGuid().ToString("N")[..10];
+        var person = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
+        var b = await new TestBrowser(f).SignedInAsync(name, person.GetProperty("password").GetString()!);
+        async Task<Guid> ChatAsync() => (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
+        var (one, two) = (await ChatAsync(), await ChatAsync());
+        async Task<List<JsonElement>> AskAsync(Guid chat, string text) =>
+            [.. (await (await b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = text })).Content.ReadAsStringAsync())
+                .Split("\n\n", StringSplitOptions.RemoveEmptyEntries).Where(l => l.StartsWith("data: ", StringComparison.Ordinal))
+                .Select(l => JsonDocument.Parse(l[6..]).RootElement)];
+        var gate = f.Services.GetRequiredService<AnswerGate>();
+        async Task UntilAsync((int, int) now)
+        {
+            for (var i = 0; i < 200 && gate.Now() != now; i++)
+            {
+                await Task.Delay(50);
+            }
+            Assert.Equal(now, gate.Now());
+        }
+
+        // The first answers slowly; the second, the same person's, waits for it.
+        var first = AskAsync(one, "Write a lot [slow]");
+        await UntilAsync((1, 0));
+        var second = AskAsync(two, "hello");
+        await UntilAsync((1, 1));
+        var line = await admin.JsonAsync(await admin.GetAsync("/api/admin/line"));
+        var waiting = Assert.Single(line.GetProperty("waiting").EnumerateArray()).GetProperty("id").GetGuid();
+        var running = Assert.Single(line.GetProperty("running").EnumerateArray()).GetProperty("id").GetGuid();
+
+        // A reason is needed, and the person themselves (no usage.line) may not.
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync($"/api/admin/line/{waiting}/remove", new { reason = "  " }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync($"/api/admin/line/{waiting}/remove", new { reason = new string('x', 301) }));
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await b.PostAsync($"/api/admin/line/{waiting}/remove", new { reason = "Mine" }));
+
+        // Waiting: out of the line, and the chat says why; nothing was asked of the model.
+        var removed = await admin.PostAsync($"/api/admin/line/{waiting}/remove", new { reason = "The model is needed for others now" });
+        await StatusAssert.Is(HttpStatusCode.OK, removed);
+        Assert.Equal("waiting", (await admin.JsonAsync(removed)).GetProperty("was").GetString());
+        var refused = await second.WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Equal("error", refused.Last().GetProperty("type").GetString());
+        Assert.EndsWith("nothing was sent to the model: The model is needed for others now", refused.Last().GetProperty("message").GetString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(refused, e => e.GetProperty("type").GetString() == "assistant");
+        await StatusAssert.Is(HttpStatusCode.NotFound, await admin.PostAsync($"/api/admin/line/{waiting}/remove", new { reason = "Again" }));
+
+        // Running: stopped, keeping what it wrote, and the saved answer says why.
+        var stopping = await admin.PostAsync($"/api/admin/line/{running}/remove", new { reason = "A runaway agent" });
+        await StatusAssert.Is(HttpStatusCode.OK, stopping);
+        Assert.Equal("running", (await admin.JsonAsync(stopping)).GetProperty("was").GetString());
+        var stopped = (await first.WaitAsync(TimeSpan.FromSeconds(20))).Last();
+        Assert.Equal(("stopped", "Stopped by an admin: A runaway agent"), (stopped.GetProperty("type").GetString(), stopped.GetProperty("why").GetString()));
+        var answer = (await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{one}"))).GetProperty("messages").EnumerateArray().Last();
+        Assert.Equal(("stopped", "Stopped by an admin: A runaway agent"), (answer.GetProperty("status").GetString(), answer.GetProperty("error").GetString()));
+        Assert.Equal((0, 0), gate.Now());
+
+        // Both in the audit log, whose request, its model and kind, and why.
+        var audit = (await admin.JsonAsync(await admin.GetAsync("/api/admin/audit"))).EnumerateArray()
+            .Where(e => e.GetProperty("action").GetString() is "line.remove" or "line.stop")
+            .ToDictionary(e => e.GetProperty("action").GetString()!, e => (Target: e.GetProperty("target").GetString(), Detail: e.GetProperty("detail").GetString()!, Actor: e.GetProperty("actor").GetString()));
+        Assert.Equal((name, "admin"), (audit["line.remove"].Target, audit["line.remove"].Actor));
+        Assert.Matches(@"^\S+, chat, waited \d+ s: The model is needed for others now$", audit["line.remove"].Detail);
+        Assert.Equal(name, audit["line.stop"].Target);
+        Assert.Matches(@"^\S+, chat, ran \d+ s: A runaway agent$", audit["line.stop"].Detail);
+    }
+
+    [Fact]
     public async Task A_second_answer_of_the_same_person_waits_its_turn_and_says_so()
     {
         await using var f = app.Create(app.ConnectionStringFor("fair_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),

@@ -32,6 +32,7 @@ public static class Permissions
     public const string CreditsManage = "credits.manage";
     public const string BillingRead = "billing.read";
     public const string UsageRead = "usage.read";
+    public const string UsageLine = "usage.line";
     public const string AuditRead = "audit.read";
     public const string ComplianceRead = "compliance.read";
     public const string ComplianceManage = "compliance.manage";
@@ -174,6 +175,7 @@ public static class Permissions
         new(CreditsManage, "Money and usage", "Set people's and groups' credit.", true),
         new(BillingRead, "Money and usage", "See spend by person and group, and the chargeback report.", true),
         new(UsageRead, "Money and usage", "See the usage dashboards and the prompt library's use.", true),
+        new(UsageLine, "Money and usage", "Take requests out of the answers' line and stop running ones (Admin → Line), saying why: the person or the caller is told.", true),
         new(AuditRead, "Oversight", "Read the audit log.", true),
         new(ComplianceRead, "Oversight", "See the Compliance center: each control, its checks and the evidence.", true),
         new(ComplianceManage, "Oversight", "Attest the company's part of the controls and run access reviews.", true),
@@ -354,8 +356,8 @@ public static class BuiltInRoles
             [Permissions.PeopleRead, Permissions.PeopleManage, Permissions.PeopleDisable, Permissions.CreditsManage, Permissions.BillingRead, Permissions.UsageRead]),
         new(Supervisor, "Supervisor", "Watches the service: dashboards, alerts, logs, traces, usage and the audit log; changes nothing.",
             [Permissions.MonitoringRead, Permissions.HardwareRead, Permissions.LogsRead, Permissions.UsageRead, Permissions.AuditRead, Permissions.ModelsRead]),
-        new(Operator, "Operator", "Runs the service day to day: takes alerts, loads and unloads models, cleans up storage, reads logs and dashboards.",
-            [Permissions.MonitoringRead, Permissions.HardwareRead, Permissions.LogsRead, Permissions.AlertsManage, Permissions.ModelsRead, Permissions.ModelsLoad, Permissions.StorageManage]),
+        new(Operator, "Operator", "Runs the service day to day: takes alerts, loads and unloads models, cleans up storage, clears the answers' line, reads logs and dashboards.",
+            [Permissions.MonitoringRead, Permissions.HardwareRead, Permissions.LogsRead, Permissions.AlertsManage, Permissions.ModelsRead, Permissions.ModelsLoad, Permissions.StorageManage, Permissions.UsageLine]),
         new(SafetyOfficer, "Safety officer", "The safeguards: their rules, what they did, and people's requests to review a refusal; reads the audit log.",
             [Permissions.SafeguardsRead, Permissions.SafeguardsManage, Permissions.AuditRead]),
         new(ComplianceOfficer, "Compliance officer", "The Compliance center: the controls and their checks, the company's part attested, access reviews, people's data requests and the evidence; reads the audit log.",

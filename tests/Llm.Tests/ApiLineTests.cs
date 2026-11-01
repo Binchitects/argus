@@ -70,4 +70,71 @@ public sealed class ApiLineTests(AppFixture app)
         using var answered = await second.WaitAsync(TimeSpan.FromSeconds(30));
         Assert.Equal(HttpStatusCode.OK, answered.StatusCode);
     }
+
+    [Fact]
+    public async Task An_admin_takes_a_waiting_API_request_out_with_a_403_and_stops_a_running_stream_with_an_error_chunk_saying_why()
+    {
+        await using var f = app.Create(app.ConnectionStringFor("apikick_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway());
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var name = "ak" + Guid.NewGuid().ToString("N")[..10];
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
+        var (id, key) = (made.GetProperty("id").GetGuid(), made.GetProperty("apiKey").GetString()!);
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{id}/limits", UriKind.Relative), new { answersAtOnce = 1 }));
+        Task<HttpResponseMessage> Ask(string text)
+        {
+            var client = f.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://gateway.{AppFixture.Domain}"), HandleCookies = false });
+            var req = new HttpRequestMessage(HttpMethod.Post, new Uri("/v1/chat/completions", UriKind.Relative))
+            {
+                Content = new StringContent(JsonSerializer.Serialize(new { model = "Qwen3.8-Flash-Next", messages = new[] { new { role = "user", content = text } }, stream = true }), Encoding.UTF8, "application/json"),
+            };
+            req.Headers.Authorization = new("Bearer", key);
+            return client.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
+        }
+        var gate = f.Services.GetRequiredService<AnswerGate>();
+        using var first = await Ask("one [slow]");
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        var second = Ask("two");
+        for (var waited = 0; gate.Now().Waiting == 0 && waited < 10_000; waited += 50)
+        {
+            await Task.Delay(50);
+        }
+        var line = await admin.JsonAsync(await admin.GetAsync("/api/admin/line"));
+        var waiting = Assert.Single(line.GetProperty("waiting").EnumerateArray()).GetProperty("id").GetGuid();
+        var running = Assert.Single(line.GetProperty("running").EnumerateArray()).GetProperty("id").GetGuid();
+
+        // Waiting: 403 with the admin's words and no Retry-After, as the clients would ask again at once after a 429 or a 503.
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.PostAsync($"/api/admin/line/{waiting}/remove", new { reason = "Too long a request for the model" }));
+        using var refused = await second.WaitAsync(TimeSpan.FromSeconds(30));
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+        Assert.Null(refused.Headers.RetryAfter);
+        var error = JsonDocument.Parse(await refused.Content.ReadAsStringAsync()).RootElement.GetProperty("error");
+        Assert.Equal(("removed_by_admin", "403"), (error.GetProperty("type").GetString(), error.GetProperty("code").GetString()));
+        Assert.EndsWith("nothing was sent to the model: Too long a request for the model", error.GetProperty("message").GetString(), StringComparison.Ordinal);
+
+        // Running: the stream under way ends with an error chunk, as the gateway's own errors do, and no [DONE].
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.PostAsync($"/api/admin/line/{running}/remove", new { reason = "A runaway agent" }));
+        var streamed = await first.Content.ReadAsStringAsync().WaitAsync(TimeSpan.FromSeconds(30));
+        var chunks = streamed.Split("\n\n", StringSplitOptions.RemoveEmptyEntries).Where(l => l.StartsWith("data: ", StringComparison.Ordinal)).Select(l => l[6..]).ToList();
+        Assert.True(chunks.Count > 1, streamed);
+        var stopped = JsonDocument.Parse(chunks[^1]).RootElement.GetProperty("error");
+        Assert.Equal(("Stopped by an admin: A runaway agent", "removed_by_admin"), (stopped.GetProperty("message").GetString(), stopped.GetProperty("type").GetString()));
+        Assert.DoesNotContain("[DONE]", streamed, StringComparison.Ordinal);
+        Assert.Equal((0, 0), gate.Now());
+
+        // The prompt log has both, with why.
+        List<JsonElement> items = [];
+        for (var waited = 0; waited < 10_000; waited += 50)
+        {
+            items = [.. (await admin.JsonAsync(await admin.GetAsync($"/api/admin/prompts?person={name}&source=api"))).GetProperty("items").EnumerateArray()];
+            if (items.Count == 2 && items.All(i => i.GetProperty("state").GetString() is "refused" or "stopped"))
+            {
+                break;
+            }
+            await Task.Delay(50);
+        }
+        var asked = items.ToDictionary(i => i.GetProperty("question").GetString()!);
+        Assert.Equal("refused", asked["two"].GetProperty("state").GetString());
+        Assert.EndsWith("Too long a request for the model", asked["two"].GetProperty("error").GetString(), StringComparison.Ordinal);
+        Assert.Equal(("stopped", "Stopped by an admin: A runaway agent"), (asked["one [slow]"].GetProperty("state").GetString(), asked["one [slow]"].GetProperty("error").GetString()));
+    }
 }

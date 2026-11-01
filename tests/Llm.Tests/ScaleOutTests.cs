@@ -209,6 +209,38 @@ public sealed class ScaleOutTests(AppFixture app)
     }
 
     [Fact]
+    public async Task An_admin_on_the_other_replica_stops_a_request_in_the_line_and_the_replica_that_has_it_audits_it()
+    {
+        var (a, b) = await TwoAsync();
+        await using var _a = a;
+        await using var _b = b;
+        var (onA, _, _) = await PersonOnBothAsync(a, b);
+        var chat = (await onA.JsonAsync(await onA.PostAsync("/api/chat/conversations", new { useArgus = false }))).GetProperty("id").GetGuid();
+        var answering = SendAsync(onA, chat, "Write a lot [slow]");
+        var gate = a.Services.GetRequiredService<AnswerGate>();
+        await UntilAsync(() => gate.Now().Total == 1, "the answer running on A");
+        // A's line, as Admin → Line on A shows it, named for its replica.
+        var adminA = await new TestBrowser(a).SignedInAsync("admin", AppFixture.AdminPassword);
+        var line = await adminA.JsonAsync(await adminA.GetAsync("/api/admin/line"));
+        Assert.Equal(Replicas(a).Id, line.GetProperty("replica").GetString());
+        var ticket = Assert.Single(line.GetProperty("running").EnumerateArray()).GetProperty("id").GetGuid();
+
+        // Posted to B, whose own line does not have it: A stops it.
+        var adminB = await new TestBrowser(b).SignedInAsync("admin", AppFixture.AdminPassword);
+        await StatusAssert.Is(HttpStatusCode.Accepted, await adminB.PostAsync($"/api/admin/line/{ticket}/remove", new { reason = "Maintenance on this model" }));
+        var stopped = (await answering).Last();
+        Assert.Equal(("stopped", "Stopped by an admin: Maintenance on this model"), (stopped.GetProperty("type").GetString(), stopped.GetProperty("why").GetString()));
+        // A audits it (it knows whose it was), naming itself, with the admin who asked on B.
+        JsonElement? entry = null;
+        await UntilAsync(async () => (entry = (await adminB.JsonAsync(await adminB.GetAsync("/api/admin/audit"))).EnumerateArray()
+            .Cast<JsonElement?>().FirstOrDefault(e => e!.Value.GetProperty("action").GetString() == "line.stop")) is not null, "the stop audited");
+        Assert.Equal("admin", entry!.Value.GetProperty("actor").GetString());
+        Assert.EndsWith($", on {Replicas(a).Id}: Maintenance on this model", entry.Value.GetProperty("detail").GetString(), StringComparison.Ordinal);
+        // Neither has it any more.
+        await StatusAssert.Is(HttpStatusCode.NotFound, await adminB.PostAsync($"/api/admin/line/{ticket}/remove", new { reason = "Again" }));
+    }
+
+    [Fact]
     public async Task A_setting_saved_on_one_replica_applies_on_the_other()
     {
         var (a, b) = await TwoAsync();
