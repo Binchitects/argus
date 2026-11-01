@@ -2,6 +2,7 @@ import { useEffect, useMemo, useSyncExternalStore } from 'react'
 import { colorThemeOf } from '@/lib/color-themes'
 import { useTheme } from '@/lib/theme'
 import { ensureTheme, setIconTheme, themeColors, themeReady, useExtensionsVersion } from './extensions'
+import { ownPage } from './http'
 import { useSetting } from './settings'
 import { arenaMonacoTheme, themeNamed } from './settings-schema'
 import { pageColors, pageColorVariables, terminalColors } from './vscode-theme'
@@ -44,14 +45,16 @@ export function useShownTheme(): string {
 /**
  * The colour theme the settings name: "workbench.colorTheme", or with "window.autoDetectColorScheme" the preferred light
  * or dark one as the system is. The page's own light or dark follows it (and the browser keeps it, for the next page's
- * first paint), and so do its colours: one of the app's colour themes (Sakura...) while the IDE is open, without
- * keeping it (Code Studio's IDE is in the person's own page); an extension's theme is read, and its workbench colours
- * become the page's. The file icon theme too.
+ * first paint), and so do its colours: one of the app's colour themes (Sakura...) while the IDE is open, kept by the
+ * browser only on code-arena's own page (Code Studio's IDE is in the person's own page, whose colour theme is theirs);
+ * an extension's theme is read, and its workbench colours become the page's. The file icon theme too.
  */
 export function useThemeSync() {
-  const { setPreference, preference, showColorTheme } = useTheme()
+  const { setPreference, preference, showColorTheme, setColorTheme, resolved } = useTheme()
   const auto = useSetting<boolean>('window.autoDetectColorScheme')
   const name = useSetting<string>('workbench.colorTheme')
+  const dark = useSetting<string>('workbench.preferredDarkColorTheme')
+  const light = useSetting<string>('workbench.preferredLightColorTheme')
   const shown = useShownTheme()
   const previewing = usePreview()
   const theme = themeNamed(shown)
@@ -63,6 +66,12 @@ export function useThemeSync() {
   const family = theme.family ?? 'default'
   useEffect(() => showColorTheme(family), [family, showColorTheme])
   useEffect(() => () => showColorTheme(null), [showColorTheme])
+  // On code-arena's own page nothing else keeps a colour theme: the settings' (not one previewed) is kept, so theme-init.js
+  // paints the next page in it at once rather than in Arena's own first.
+  const settled = themeNamed(auto ? (resolved === 'dark' ? dark : light) : name).family ?? 'default'
+  useEffect(() => {
+    if (ownPage()) setColorTheme(settled)
+  }, [settled, setColorTheme])
 
   useEffect(() => {
     if (theme.extension) void ensureTheme(theme.name)

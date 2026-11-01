@@ -10,6 +10,7 @@ import { fakeApi, type Handler } from '@/test/utils'
 import type { CodePlan, CodeState } from './api'
 import { App } from './app'
 import { debug } from './debug/session'
+import { setIdeBase } from './http'
 import { languageServers } from './lsp/servers'
 import * as monaco from 'monaco-editor'
 import type * as Monaco from 'monaco-editor'
@@ -2436,13 +2437,13 @@ describe('Code Arena, the IDE', () => {
 
   it("wears one of the app's colour themes: the page's colours, Monaco's and the terminal's; light or dark keeps it", async () => {
     const { now } = backend({}, {}, { 'settings.json': '{\n  "window.autoDetectColorScheme": false,\n  "workbench.colorTheme": "Sakura Dark"\n}\n' })
-    // The person's own colour theme in this browser: Forest.
+    // Another colour theme in this browser from before: Forest.
     localStorage.setItem('color-theme', 'forest')
-    const { rerender, client } = renderIde()
+    renderIde()
     await waitFor(() => expect(document.documentElement.dataset.colorTheme).toBe('sakura'))
     expect(document.documentElement).toHaveClass('dark')
-    // Shown while the IDE is open, not kept as the browser's choice (Code Studio's IDE is in the person's own page).
-    expect(localStorage.getItem('color-theme')).toBe('forest')
+    // On code-arena's own page the browser keeps it, so the next page is painted in it at once (theme-init.js).
+    expect(localStorage.getItem('color-theme')).toBe('sakura')
     await openApp()
     expect(editor().options.theme).toBe('arena-sakura-dark')
     await userEvent.keyboard('{Control>}j{/Control}')
@@ -2466,6 +2467,30 @@ describe('Code Arena, the IDE', () => {
     expect(now.user['settings.json']).toContain('"workbench.preferredDarkColorTheme": "Copper Dark"')
     expect(now.user['settings.json']).toContain('"workbench.preferredLightColorTheme": "Copper Light"')
     await waitFor(() => expect(document.documentElement.dataset.colorTheme).toBe('copper'))
+    expect(localStorage.getItem('color-theme')).toBe('copper')
+
+    // One previewed in the picker is shown, not kept: Escape goes back to the settings' own.
+    await userEvent.keyboard('{Control>}k{/Control}{Control>}t{/Control}')
+    const picker = await screen.findByRole('dialog', { name: 'Color theme' })
+    await userEvent.type(within(picker).getByRole('combobox'), 'midnight light')
+    await waitFor(() => expect(document.documentElement.dataset.colorTheme).toBe('midnight'))
+    expect(localStorage.getItem('color-theme')).toBe('copper')
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(document.documentElement.dataset.colorTheme).toBe('copper'))
+  })
+
+  it("in Code Studio shows the app's colour theme without keeping it, and the person's own again once closed", async () => {
+    backend({}, {}, { 'settings.json': '{\n  "window.autoDetectColorScheme": false,\n  "workbench.colorTheme": "Sakura Dark"\n}\n' })
+    // As Code Studio opens the IDE: its requests under the workspace's address, answered by the same fake.
+    setIdeBase('/api/studio/w/w1')
+    onTestFinished(() => setIdeBase(''))
+    const answer = vi.mocked(globalThis.fetch).getMockImplementation()!
+    vi.mocked(globalThis.fetch).mockImplementation((input, init) => answer(String(input).replace('/api/studio/w/w1/', '/api/'), init))
+    // The person's own colour theme in this browser: Forest.
+    localStorage.setItem('color-theme', 'forest')
+    const { rerender, client } = renderIde()
+    await waitFor(() => expect(document.documentElement.dataset.colorTheme).toBe('sakura'))
+    expect(localStorage.getItem('color-theme')).toBe('forest')
 
     // Closed (Code Studio's back button): the person's own colour theme again.
     rerender(<Providers client={client}>{null}</Providers>)

@@ -679,7 +679,9 @@ whole workbench (the side bar, the panels, menus and buttons), the editor
 text and cursor. The theme button at the activity bar's foot lists them
 under **Color theme**: choosing one makes its dark and light modes the
 preferred ones, so light, dark and the system's keep it, and **Light** or
-**Dark** goes to the same theme's other mode. In Code Studio the IDE shows
+**Dark** goes to the same theme's other mode. In Code Arena's own window the
+browser keeps it, so the next page opens in its colours at once (one only
+previewed in the picker is not kept). In Code Studio the IDE shows
 its theme's colours while it is open; going back, Arena's pages wear the
 person's own colour theme again (Your account → Appearance). Visual Studio's
 themes, High Contrast and an extension's themes keep Arena's own colours
