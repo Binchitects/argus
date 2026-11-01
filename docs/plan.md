@@ -2432,7 +2432,25 @@ Docker Hub by default (nvcr.io refuses many networks), so both install and
 ride in the offline bundle. v7.6.2 the same day: what the app tells people
 to run names `arenactl`'s commands, not the scripts it replaced or removed.
 
-### v7.7 — Argus's code graphs
+### v7.7.0 — Network access, every setting at install, Code Arena signed for Windows (2026-11-01)
+
+Shipped the requests of 2026-11-01, after an airgapped install, instead of
+Argus's code graphs: an allow and a block list of addresses (Settings →
+Network access, and `IP_ALLOW` for Traefik); every `.env` setting at install,
+upgrade and repair, and `arenactl config` later, with `arenactl` on the
+installed host; Code Arena's Windows builds Authenticode-signed, a Windows on
+Arm build and the app's icon; sub-agents seen at work in Code Arena; pictures
+and files in the prompt log; sandboxes that queue many people at once, sized
+in `.env`; a model moved from llama.cpp to vLLM or SGLang in its Edit dialog;
+fourteen more skills, in Code Arena too; easter eggs. Also the own gateway's
+commits 7 to 9 (the app makes and reads the API keys, and its ledger feeds
+credit, usage and the dashboards) and the IDE plan's Source Control sync,
+Explorer edits and follow, Problems store and peek. Left: the gateway's
+commits 10 to 21 and the IDE plan's editor groups.
+
+### v7.8 — Argus's code graphs
+
+Moved from v7.7, which shipped the requests of 2026-11-01.
 
 Asked 2026-10-30: "I want to make argus (code indexer) stronger … more complex
 graphs … consider huge improvement on argus for next version". The design is
@@ -2449,15 +2467,15 @@ agents get `symbol_graph`, `mr_impact` and `service_contracts`, off until the
 gates in its §7 are met with a model and without (a baseline harness first).
 31 commits in its §9; the headline is reachable at its commit 27.
 
-Also in v7.7: the app's own gateway, commits 10 to 21 of
-[design/own-gateway.md](design/own-gateway.md) (9 shipped after v7.6.1), and
+Also in v7.8: the app's own gateway, commits 10 to 21 of
+[design/own-gateway.md](design/own-gateway.md) (9 shipped in v7.7.0), and
 the IDE plan's editor groups.
 
-### v7.8 — A model of your own
+### v7.9 — A model of your own
 
 Moved from v7.3, which shipped the science lab and the Kubernetes install, from
-v7.5 and v7.6, which shipped the requests of 2026-10-28 and 2026-10-29, and
-from v7.7, which is Argus's code graphs.
+v7.5, v7.6 and v7.7, which shipped the requests of 2026-10-28, 2026-10-29 and
+2026-11-01, and from v7.8, which is Argus's code graphs.
 
 1. **Model lab.** Teach a small model the company's words on the local GPU
    (a LoRA from chosen knowledge sources, prompts and good answers), then
