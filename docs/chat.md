@@ -606,6 +606,16 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
 - **Width.** Pages and the chat grow with the screen. **Width** in the account
   menu (or Your account → Appearance) picks Comfortable, Wide (the default) or
   Full width, remembered per browser.
+- **Colour theme.** Arena (the default: cool grey and blue), **Sakura**
+  (blossom pink), **Midnight** (indigo and navy), **Copper** (burnt orange and
+  warm stone), **Forest** (pine green), **Ocean** (teal) or **Lavender**
+  (violet), each with a light and a dark mode. Your account → Appearance shows
+  each as a swatch; **Colour theme** in the account menu and the search
+  (Ctrl K, "Sakura theme") choose one too. It is kept with your account, so
+  every device you sign in on takes it; light, dark or the system's stays a
+  choice of each device. Every theme keeps text at 4.5:1 or more on its
+  backgrounds (WCAG AA); the status colours (good, warning, critical) and the
+  charts' series colours are the same in all of them.
 - **Phones.** The chat list, the Files panel and the canvas open over the
   thread; the header fits a narrow screen.
 

@@ -64,6 +64,8 @@ public static class AuthEndpoints
             signedInAt = AppClaimsFactory.SignedInAt(principal)?.ToUnixTimeSeconds(),
             // The features that are off here (deploy/features): their pages are left out.
             featuresOff = features.Off,
+            // Their colour theme: every device they sign in on takes it.
+            colorTheme = user.ColorTheme ?? ColorThemes.Default,
         });
     }
 

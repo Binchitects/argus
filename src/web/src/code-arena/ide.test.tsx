@@ -2434,6 +2434,44 @@ describe('Code Arena, the IDE', () => {
     await waitFor(() => expect(fakes.themes.at(-1)).toBe('arena-dark'))
   })
 
+  it("wears one of the app's colour themes: the page's colours, Monaco's and the terminal's; light or dark keeps it", async () => {
+    const { now } = backend({}, {}, { 'settings.json': '{\n  "window.autoDetectColorScheme": false,\n  "workbench.colorTheme": "Sakura Dark"\n}\n' })
+    // The person's own colour theme in this browser: Forest.
+    localStorage.setItem('color-theme', 'forest')
+    const { rerender, client } = renderIde()
+    await waitFor(() => expect(document.documentElement.dataset.colorTheme).toBe('sakura'))
+    expect(document.documentElement).toHaveClass('dark')
+    // Shown while the IDE is open, not kept as the browser's choice (Code Studio's IDE is in the person's own page).
+    expect(localStorage.getItem('color-theme')).toBe('forest')
+    await openApp()
+    expect(editor().options.theme).toBe('arena-sakura-dark')
+    await userEvent.keyboard('{Control>}j{/Control}')
+    await waitFor(() => expect(fakes.terminals).toHaveLength(1))
+    expect(fakes.terminals[0]!.options.theme).toMatchObject({ background: '#150c11', foreground: '#f2eaee', cursor: '#ed90b5', selectionBackground: '#ed90b54d', red: '#cd3131' })
+
+    // Light keeps the colour theme: Sakura Light, not the preferred light theme.
+    await userEvent.click(screen.getByRole('button', { name: 'Theme' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Light' }))
+    await waitFor(() => expect(now.user['settings.json']).toContain('"workbench.colorTheme": "Sakura Light"'))
+    await waitFor(() => expect(document.documentElement).not.toHaveClass('dark'))
+    expect(document.documentElement.dataset.colorTheme).toBe('sakura')
+    await waitFor(() => expect(fakes.themes.at(-1)).toBe('arena-sakura-light'))
+    await waitFor(() => expect(fakes.terminals[0]!.options.theme).toMatchObject({ background: '#fff8fa', cursor: '#c14177' }))
+
+    // Another colour theme: both of its modes become the preferred ones, and the one of the mode now is chosen.
+    await userEvent.click(screen.getByRole('button', { name: 'Theme' }))
+    expect(await screen.findByRole('menuitemradio', { name: 'Sakura' })).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(screen.getByRole('menuitemradio', { name: 'Copper' }))
+    await waitFor(() => expect(now.user['settings.json']).toContain('"workbench.colorTheme": "Copper Light"'))
+    expect(now.user['settings.json']).toContain('"workbench.preferredDarkColorTheme": "Copper Dark"')
+    expect(now.user['settings.json']).toContain('"workbench.preferredLightColorTheme": "Copper Light"')
+    await waitFor(() => expect(document.documentElement.dataset.colorTheme).toBe('copper'))
+
+    // Closed (Code Studio's back button): the person's own colour theme again.
+    rerender(<Providers client={client}>{null}</Providers>)
+    expect(document.documentElement.dataset.colorTheme).toBe('forest')
+  })
+
   it('compares as VS Code does: with the saved file, the clipboard (pasted when the browser refuses), another file; a file\'s side is live', async () => {
     const { calls } = backend()
     renderIde()
@@ -3001,7 +3039,7 @@ describe('Code Arena, the IDE', () => {
     await userEvent.keyboard('{Control>}k{/Control}{Control>}t{/Control}')
     let picker = await screen.findByRole('dialog', { name: 'Color theme' })
     expect(within(picker).getByRole('option', { name: /Night Sky/ })).toHaveTextContent('acme.night')
-    await userEvent.type(within(picker).getByRole('combobox'), 'night')
+    await userEvent.type(within(picker).getByRole('combobox'), 'night sky')
     await waitFor(() => expect(fakes.themes.at(-1)).toBe('ext-acme-night-night-sky'))
     const theme = fakes.definedThemes.get('ext-acme-night-night-sky')!
     expect(theme.base).toBe('vs-dark')
@@ -3017,7 +3055,7 @@ describe('Code Arena, the IDE', () => {
     // Enter takes it: written into the person's settings.json, as VS Code writes it.
     await userEvent.keyboard('{Control>}k{/Control}{Control>}t{/Control}')
     picker = await screen.findByRole('dialog', { name: 'Color theme' })
-    await userEvent.type(within(picker).getByRole('combobox'), 'night{Enter}')
+    await userEvent.type(within(picker).getByRole('combobox'), 'night sky{Enter}')
     await waitFor(() => expect(now.user['settings.json']).toContain('"workbench.colorTheme": "Night Sky"'))
     expect(now.user['settings.json']).toContain('"window.autoDetectColorScheme": false')
     await waitFor(() => expect(fakes.themes.at(-1)).toBe('ext-acme-night-night-sky'))

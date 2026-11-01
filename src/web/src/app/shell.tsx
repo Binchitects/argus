@@ -14,6 +14,7 @@ import { HelpButton, HelpPanel } from '@/help/help-button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { infoQuery, meQuery, type AppInfo, type Me } from '@/lib/api'
 import { AcceptNotice } from './accept-notice'
+import { useFollowColorTheme } from './color-theme'
 import { continueTo } from './continue'
 import { SetUpTwoFactor } from './set-up-two-factor'
 import { cn } from '@/lib/utils'
@@ -35,6 +36,7 @@ export function Shell() {
   const me = useQuery(meQuery)
   const location = useLocation()
   const navigate = useNavigate()
+  useFollowColorTheme(me.data?.colorTheme)
 
   useEffect(() => {
     if (me.data === null) navigate(`/login?rd=${encodeURIComponent(location.pathname + location.search)}`, { replace: true })

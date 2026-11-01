@@ -296,6 +296,44 @@ describe('account', () => {
     expect(localStorage.getItem('theme')).toBe('dark')
   })
 
+  it('a colour theme applies at once, is kept in this browser and saved to the account', async () => {
+    let colorTheme = 'default'
+    const calls = fakeApi(member, {
+      'GET /api/account/preferences': () => ({ json: { answerLength: 'normal', compactAt: null, compactAtDefault: 80, colorTheme } }),
+      'PUT /api/account/preferences': (body) => {
+        colorTheme = (body as { colorTheme: string }).colorTheme
+        return { json: { answerLength: 'normal', compactAt: null, compactAtDefault: 80, colorTheme } }
+      },
+    })
+    renderApp('/account')
+    const group = await screen.findByRole('radiogroup', { name: 'Colour theme' })
+    expect(within(group).getAllByRole('radio').map((r) => r.textContent)).toEqual(['Arena', 'Sakura', 'Midnight', 'Copper', 'Forest', 'Ocean', 'Lavender'])
+    expect(within(group).getByRole('radio', { name: 'Arena' })).toBeChecked()
+    await userEvent.click(within(group).getByRole('radio', { name: 'Sakura' }))
+    expect(document.documentElement.dataset.colorTheme).toBe('sakura')
+    expect(localStorage.getItem('color-theme')).toBe('sakura')
+    expect(within(group).getByRole('radio', { name: 'Sakura' })).toBeChecked()
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT' && c.path === '/api/account/preferences').map((c) => c.body)).toEqual([{ colorTheme: 'sakura' }]))
+    // Light or dark stays as it was: the colour theme is the other half of the look.
+    await userEvent.click(screen.getByRole('radio', { name: 'Dark' }))
+    expect(document.documentElement).toHaveClass('dark')
+    expect(document.documentElement.dataset.colorTheme).toBe('sakura')
+
+    await userEvent.click(within(group).getByRole('radio', { name: 'Arena' }))
+    expect(document.documentElement.dataset.colorTheme).toBeUndefined()
+    await waitFor(() => expect(colorTheme).toBe('default'))
+  })
+
+  it('a colour theme the account refuses says why, and stays on this device', async () => {
+    fakeApi(member, {
+      'PUT /api/account/preferences': () => ({ status: 400, json: { status: 'color_theme', error: 'The colour theme is one of default, sakura.' } }),
+    })
+    renderApp('/account')
+    await userEvent.click(within(await screen.findByRole('radiogroup', { name: 'Colour theme' })).getByRole('radio', { name: 'Ocean' }))
+    expect(await screen.findByText('The colour theme is one of default, sakura.')).toBeInTheDocument()
+    expect(document.documentElement.dataset.colorTheme).toBe('ocean')
+  })
+
   it('keys of your own are added with a name and limits, shown once, and revoked one by one', async () => {
     let keys: OwnKey[] = [
       { id: 'm1', name: 'Your key', kind: 'main', preview: 'sk-...main', spend: 1, blocked: false, createdAt: null, limits: null, effective: { requestsPerMinute: 60, tokensPerMinute: null, parallel: 4, monthlyBudget: null } },

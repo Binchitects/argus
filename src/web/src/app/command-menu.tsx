@@ -1,10 +1,12 @@
-import { BookOpen, Gift, LogOut, Monitor, Moon, Sun, UserRound, type LucideIcon } from 'lucide-react'
+import { BookOpen, Gift, LogOut, Monitor, Moon, Sun, SwatchBook, UserRound, type LucideIcon } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import type { Me } from '@/lib/api'
+import { colorThemes } from '@/lib/color-themes'
 import { commandFilter } from '@/lib/command-filter'
 import { useTheme } from '@/lib/theme'
+import { useChooseColorTheme } from './color-theme'
 import { visibleNavigation } from './nav'
 import { useSignOut } from './use-sign-out'
 
@@ -18,14 +20,16 @@ interface Command {
 }
 
 /**
- * Ctrl/⌘ K: go anywhere, change the theme, sign out. While searching, the
- * matches are one list, best first (ranked here: cmdk reorders items but not
- * the groups around them, so a keyword hit in an earlier group would win).
+ * Ctrl/⌘ K: go anywhere, change the theme or the colour theme, sign out.
+ * While searching, the matches are one list, best first (ranked here: cmdk
+ * reorders items but not the groups around them, so a keyword hit in an
+ * earlier group would win).
  */
 export function CommandMenu({ open, onOpenChange, me, onWhatsNew }: { open: boolean; onOpenChange: (o: boolean) => void; me: Me; onWhatsNew?: () => void }) {
   const navigate = useNavigate()
   const signOut = useSignOut()
   const { setPreference } = useTheme()
+  const chooseColorTheme = useChooseColorTheme()
   const [search, setSearch] = useState('')
 
   const commands = useMemo<Command[]>(
@@ -39,9 +43,10 @@ export function CommandMenu({ open, onOpenChange, me, onWhatsNew }: { open: bool
       { id: 'light', title: 'Light theme', group: 'Account', icon: Sun, keywords: ['appearance'], run: () => setPreference('light') },
       { id: 'dark', title: 'Dark theme', group: 'Account', icon: Moon, keywords: ['appearance'], run: () => setPreference('dark') },
       { id: 'system', title: 'System theme', group: 'Account', icon: Monitor, keywords: ['appearance'], run: () => setPreference('system') },
+      ...colorThemes.map((t) => ({ id: `colors-${t.id}`, title: `${t.label} theme`, group: 'Account', icon: SwatchBook, keywords: ['appearance', 'colour theme', 'color theme'], run: () => chooseColorTheme(t.id) })),
       { id: 'sign-out', title: 'Sign out', group: 'Account', icon: LogOut, keywords: ['log out', 'logout'], run: () => void signOut() },
     ],
-    [me, navigate, setPreference, signOut, onWhatsNew],
+    [me, navigate, setPreference, chooseColorTheme, signOut, onWhatsNew],
   )
 
   const matches = useMemo(

@@ -4,12 +4,13 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
 import { ApiError, errorMessage } from '@/lib/api'
+import { colorThemes as appColorThemes, type ColorThemeId } from '@/lib/color-themes'
 import { useTheme, type ThemePreference } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import { configQuery, streamChat } from '@/pages/chat/api'
@@ -72,7 +73,8 @@ import { PartHelp } from './help'
 import { SyncStatus } from './sync-status'
 import { changesQuery } from './ide-api'
 import { useSettings } from './settings'
-import { themeNamed } from './settings-schema'
+import { familyThemeName, themeNamed } from './settings-schema'
+import { useShownTheme } from './theme'
 
 // The agent's chat, in the IDE's side panel: the folder's sessions (the side
 // bar's Chat view), the thread, the composer, the model and the mode.
@@ -270,18 +272,31 @@ export function Sessions({ state, onNavigate }: { state: CodeState; onNavigate?:
   )
 }
 
-/** Light, dark, or the system's; kept by code-arena, so the next run (on another port) opens in it too. */
+/** Light, dark, or the system's, and the colour theme; kept by code-arena, so the next run (on another port) opens in it too. */
 export function ThemeMenu({ side = 'bottom', align = 'end' }: { side?: 'right' | 'left' | 'bottom' | 'top'; align?: 'start' | 'end' }) {
   const { resolved } = useTheme()
   const settings = useSettings()
   const auto = settings.get<boolean>('window.autoDetectColorScheme')
   const preference: ThemePreference = auto ? 'system' : themeNamed(settings.get<string>('workbench.colorTheme')).kind
+  // The colour theme shown now (none for Visual Studio's, High Contrast and an extension's).
+  const family = themeNamed(useShownTheme()).family
   // Kept in the person's settings.json, as VS Code keeps it: "workbench.colorTheme" and "window.autoDetectColorScheme".
+  // Light or dark keeps a colour theme (Sakura Dark becomes Sakura Light); another theme becomes the preferred one.
   const setPreference = (theme: ThemePreference) => {
     const write = async () => {
       if (theme === 'system') return settings.update('window.autoDetectColorScheme', true)
-      await settings.update('workbench.colorTheme', settings.get<string>(theme === 'dark' ? 'workbench.preferredDarkColorTheme' : 'workbench.preferredLightColorTheme'))
+      const next = family && family !== 'default' ? familyThemeName(family, theme) : settings.get<string>(theme === 'dark' ? 'workbench.preferredDarkColorTheme' : 'workbench.preferredLightColorTheme')
+      await settings.update('workbench.colorTheme', next)
       if (auto) await settings.update('window.autoDetectColorScheme', false)
+    }
+    void write().catch((e: unknown) => toast.error(errorMessage(e)))
+  }
+  // A colour theme in both its modes: the preferred dark and light themes, and the theme now unless the system chooses.
+  const setFamily = (f: ColorThemeId) => {
+    const write = async () => {
+      await settings.update('workbench.preferredDarkColorTheme', familyThemeName(f, 'dark'))
+      await settings.update('workbench.preferredLightColorTheme', familyThemeName(f, 'light'))
+      if (!auto) await settings.update('workbench.colorTheme', familyThemeName(f, resolved))
     }
     void write().catch((e: unknown) => toast.error(errorMessage(e)))
   }
@@ -304,6 +319,15 @@ export function ThemeMenu({ side = 'bottom', align = 'end' }: { side?: 'right' |
           <DropdownMenuRadioItem value="system">
             <Monitor /> System
           </DropdownMenuRadioItem>
+        </DropdownMenuRadioGroup>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel>Color theme</DropdownMenuLabel>
+        <DropdownMenuRadioGroup value={family ?? ''} onValueChange={(v) => setFamily(v as ColorThemeId)}>
+          {appColorThemes.map((t) => (
+            <DropdownMenuRadioItem key={t.id} value={t.id}>
+              <span className="size-3.5 shrink-0 rounded-full border border-foreground/20" style={{ background: t[resolved].primary }} aria-hidden="true" /> {t.id === 'default' ? 'Code Arena' : t.label}
+            </DropdownMenuRadioItem>
+          ))}
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>

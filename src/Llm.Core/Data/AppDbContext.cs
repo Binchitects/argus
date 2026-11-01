@@ -189,6 +189,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(u => u.ScimExternalId).HasMaxLength(255);
             e.HasIndex(u => u.OidcSubject);
             e.Property(u => u.AnswerLength).HasMaxLength(16);
+            e.Property(u => u.ColorTheme).HasMaxLength(16);
             e.Property(u => u.LegalHoldReason).HasMaxLength(500);
             e.Property(u => u.DirectoryGroups).HasDefaultValueSql("'{}'::text[]");
             e.HasIndex(u => u.NormalizedEmail).IsUnique();

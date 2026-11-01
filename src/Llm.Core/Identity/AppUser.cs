@@ -52,6 +52,8 @@ public sealed class AppUser : IdentityUser<Guid>
     public string? AnswerLength { get; set; }
     /// <summary>When the person's chats compact, in percent of the model's context (0: only when a message would not fit); null: the company's default (Chat:CompactAt). Code Arena takes it as its default too.</summary>
     public int? CompactAt { get; set; }
+    /// <summary>Their colour theme (Your account → Appearance: "sakura", "midnight"...), which every device they sign in on takes; null: Arena's own.</summary>
+    public string? ColorTheme { get; set; }
     /// <summary>The person turned memory off: their answers neither read nor offer memories (Your account → Memory).</summary>
     public bool MemoryOff { get; set; }
     /// <summary>What memory proposes from the person's quiet chats is kept at once, rather than waiting for them (Memory → Remember on its own).</summary>

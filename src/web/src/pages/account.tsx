@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useOutletContext } from 'react-router'
 import { z } from 'zod'
+import { useChooseColorTheme } from '@/app/color-theme'
 import { ApiKey } from '@/components/app/api-key'
 import { OwnKeys } from '@/components/app/own-keys'
 import { YourFeedback } from '@/components/app/your-feedback'
@@ -24,6 +25,7 @@ import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage, type Me } from '@/lib/api'
+import { colorThemes, type ColorThemeId, type Palette } from '@/lib/color-themes'
 import { ago } from '@/lib/format'
 import { useTheme, type ThemePreference } from '@/lib/theme'
 import { cn } from '@/lib/utils'
@@ -180,6 +182,7 @@ interface Preferences {
   answerLength: AnswerLength
   compactAt: number | null
   compactAtDefault: number
+  colorTheme: ColorThemeId
 }
 
 const lengths: { value: AnswerLength; label: string; icon: typeof Sun }[] = [
@@ -316,16 +319,39 @@ function Memory() {
   )
 }
 
+/** A colour theme as a little page of its own: its background and border, its accent, and a line of text and one of muted text. */
+function Swatch({ palette }: { palette: Palette }) {
+  return (
+    <span aria-hidden="true" className="flex h-10 w-full items-center gap-2 rounded-md border px-2.5" style={{ background: palette.background, borderColor: palette.border }}>
+      <span className="size-4 shrink-0 rounded-full" style={{ background: palette.primary }} />
+      <span className="grid flex-1 gap-1">
+        <span className="h-1.5 w-4/5 rounded-full" style={{ background: palette.foreground }} />
+        <span className="h-1.5 w-1/2 rounded-full" style={{ background: palette.lineNumber }} />
+      </span>
+    </span>
+  )
+}
+
 function Appearance() {
-  const { preference, setPreference } = useTheme()
+  const { preference, setPreference, resolved, colorTheme } = useTheme()
+  const chooseColorTheme = useChooseColorTheme()
   const width = useWidth()
   return (
-    <Card>
+    <Card id="appearance">
       <CardHeader>
         <CardTitle>Appearance</CardTitle>
-        <CardDescription>Remembered on this device.</CardDescription>
+        <CardDescription>Your colour theme follows you to every device; light or dark and the width are remembered on this one.</CardDescription>
       </CardHeader>
       <CardContent>
+        <p className="mb-2 text-sm font-medium">Colour theme</p>
+        <RadioGroup.Root value={colorTheme} onValueChange={(v) => chooseColorTheme(v as ColorThemeId)} aria-label="Colour theme" className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {colorThemes.map((t) => (
+            <RadioGroup.Item key={t.id} value={t.id} className={choice} title={t.description}>
+              <Swatch palette={t[resolved]} />
+              {t.label}
+            </RadioGroup.Item>
+          ))}
+        </RadioGroup.Root>
         <p className="mb-2 text-sm font-medium">Theme</p>
         <RadioGroup.Root value={preference} onValueChange={(v) => setPreference(v as ThemePreference)} aria-label="Theme" className="grid grid-cols-3 gap-2">
           {themes.map((t) => (

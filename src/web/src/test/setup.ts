@@ -15,6 +15,7 @@ afterEach(() => {
   }
   document.documentElement.className = ''
   delete document.documentElement.dataset.width
+  delete document.documentElement.dataset.colorTheme
 })
 
 // What jsdom lacks and Radix, cmdk and the theme use.

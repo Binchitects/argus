@@ -2,7 +2,7 @@
 // pushed while no page is open, and what another app shares to Arena (kept until the
 // chat takes it). Never the API: /api, /connect and /.well-known always go to the
 // network, and their answers are never kept.
-const SHELL = 'shell-v1'
+const SHELL = 'shell-v2'
 const SHARED = 'shared-v1'
 // The most a share keeps (its files together): more is left out.
 const MAX_SHARED_BYTES = 50 * 1024 * 1024

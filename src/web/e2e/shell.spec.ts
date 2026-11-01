@@ -27,6 +27,24 @@ for (const theme of ['light', 'dark'] as const) {
   }
 }
 
+// Each colour theme in each mode: the components (/design) and the chat, with axe's contrast checks.
+for (const colorTheme of ['sakura', 'midnight', 'copper', 'forest', 'ocean', 'lavender']) {
+  for (const theme of ['light', 'dark'] as const) {
+    test(`the ${colorTheme} colour theme is accessible in the ${theme} theme`, async ({ page }, info) => {
+      const errors = watchConsole(page)
+      await withTheme(page, theme, colorTheme)
+      for (const path of ['/design', '/chat']) {
+        await page.goto(path)
+        await page.getByRole('heading', { level: 1 }).first().waitFor()
+        await expectTheme(page, theme, colorTheme)
+        await expectAccessible(page, info, `${colorTheme}-${theme}${path.replace(/\//g, '-')}`)
+      }
+      await screenshot(page, info, `${colorTheme}-${theme}`)
+      expect(errors).toEqual([])
+    })
+  }
+}
+
 test('the command palette goes to a page', async ({ page, isMobile }) => {
   await page.goto('/')
   // The shortcut exists once the shell is up (after it knows who is signed in).
@@ -80,6 +98,15 @@ test('the theme follows the choice, before the first paint', async ({ page }) =>
   await expect(page.locator('html')).toHaveClass(/dark/)
   await page.getByRole('radio', { name: 'Light' }).click()
   await expect(page.locator('html')).not.toHaveClass(/dark/)
+})
+
+test('the colour theme this browser kept is on the page before the first paint', async ({ page }) => {
+  await withTheme(page, 'dark', 'ocean')
+  // Who is signed in never comes: only theme-init.js can have set it.
+  await page.route('**/api/auth/me', () => {})
+  await page.goto('/account')
+  await expect(page.locator('html')).toHaveAttribute('data-color-theme', 'ocean')
+  await expect(page.locator('html')).toHaveClass(/dark/)
 })
 
 test('the bell lists each kind of news, leads to it, and can say it on the desktop', async ({ page, context }, info) => {

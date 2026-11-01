@@ -316,8 +316,9 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   (with a count of the files changed since the last commit), Agent changes
   (with a count of the files), Problems (with a count of the errors) and Chat
   switch the side bar; the one shown hides it.
-  At its foot: the terminal panel, the theme (light, dark or the system's:
-  kept in the person's `settings.json`, below), **Manage** (the gear:
+  At its foot: the terminal panel, the theme (light, dark or the system's,
+  and the colour theme: kept in the person's `settings.json`, below),
+  **Manage** (the gear:
   Settings, Keyboard Shortcuts, Color Theme, Extensions and the Command
   Palette one click away, and the model's tools: as Arena says, direct, as
   code or both, kept in config.json), Help and About.
@@ -619,7 +620,7 @@ VS Code settings mean the same here:
   cursor, scrollback, applied at once to those open; the keys they let
   through), the colour theme (`workbench.colorTheme`, or
   `window.autoDetectColorScheme` with the preferred light and dark ones:
-  **Ctrl+K Ctrl+Alt+T**), the file icon theme
+  **Ctrl+K Ctrl+Alt+T**; see Colour themes below), the file icon theme
   (`workbench.iconTheme`) and Code Arena's code completion
   (`codeArena.inlineCompletion.enabled`, the status bar's **Complete**: the
   person's own, which a project's settings cannot turn on, since what is typed
@@ -668,6 +669,21 @@ and the menu removes, resets or changes when one applies, written into the
 person's keybindings.json as VS Code writes it (a default taken away is a
 `-command` rule), which an open tab of it shows at once. The `{}` button of
 either opens its JSON file.
+
+**Colour themes.** Besides Code Arena Light and Dark (Arena's own colours),
+the IDE has Arena's colour themes, each light and dark: **Sakura**,
+**Midnight**, **Copper**, **Forest**, **Ocean** and **Lavender** (`Sakura
+Light`, `Sakura Dark`… in `workbench.colorTheme`). One chosen colours the
+whole workbench (the side bar, the panels, menus and buttons), the editor
+(its own Monaco theme from the same colours) and the terminals' background,
+text and cursor. The theme button at the activity bar's foot lists them
+under **Color theme**: choosing one makes its dark and light modes the
+preferred ones, so light, dark and the system's keep it, and **Light** or
+**Dark** goes to the same theme's other mode. In Code Studio the IDE shows
+its theme's colours while it is open; going back, Arena's pages wear the
+person's own colour theme again (Your account → Appearance). Visual Studio's
+themes, High Contrast and an extension's themes keep Arena's own colours
+under what they set.
 
 In a terminal the keys go to the shell, but those of the commands that skip
 it (the palette, quick open, the panels and views, the debugger's), and the

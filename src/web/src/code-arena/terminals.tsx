@@ -17,14 +17,9 @@ import { useSetting } from './settings'
 import { useTerminalColors } from './theme'
 import { closeTerminal, openTerminal, terminalSocketUrl, terminalsQuery, type TerminalInfo } from './ide-api'
 
-// The page's colours around the ANSI palette editors use, for a light and a dark background.
-const themes: Record<'light' | 'dark', ITheme> = {
+// The ANSI palette editors use, for a light and a dark background; the colours around it are the colour theme's (useTerminalColors).
+const ansi: Record<'light' | 'dark', ITheme> = {
   light: {
-    background: '#fbfcfe',
-    foreground: '#12161d',
-    cursor: '#2474cf',
-    cursorAccent: '#fbfcfe',
-    selectionBackground: '#2474cf40',
     black: '#000000',
     red: '#cd3131',
     green: '#00a000',
@@ -43,11 +38,6 @@ const themes: Record<'light' | 'dark', ITheme> = {
     brightWhite: '#a5a5a5',
   },
   dark: {
-    background: '#0c0e13',
-    foreground: '#e9ebee',
-    cursor: '#4c94ec',
-    cursorAccent: '#0c0e13',
-    selectionBackground: '#4c94ec4d',
     black: '#000000',
     red: '#cd3131',
     green: '#0dbc79',
@@ -231,9 +221,9 @@ export default function TerminalPanel({ shown, onHide, focusKey, newKey = 0, sho
 function XtermView({ terminal, active, focusKey, onSize, onExit }: { terminal: TerminalInfo; active: boolean; focusKey: number; onSize: (cols: number, rows: number) => void; onExit: (code: number) => void }) {
   const host = useRef<HTMLDivElement>(null)
   const { resolved } = useTheme()
-  // An extension's colour theme gives its terminal colours over the page's.
+  // The colour theme's background, text and cursor (an extension's theme's own terminal colours over them).
   const own = useTerminalColors()
-  const colors = useMemo<ITheme>(() => ({ ...themes[resolved], ...own }), [resolved, own])
+  const colors = useMemo<ITheme>(() => ({ ...ansi[resolved], ...own }), [resolved, own])
   const theme = useRef(colors)
   const term = useRef<Terminal | null>(null)
   const fit = useRef<FitAddon | null>(null)

@@ -69,6 +69,19 @@ describe('settings.json', () => {
     }
   })
 
+  it("has each of the app's colour themes light and dark, which the page then wears", () => {
+    expect(themeNamed('Copper Dark')).toEqual({ name: 'Copper Dark', kind: 'dark', monaco: 'arena-copper-dark', family: 'copper' })
+    expect(themeNamed('Sakura Light')).toEqual({ name: 'Sakura Light', kind: 'light', monaco: 'arena-sakura-light', family: 'sakura' })
+    expect(themeNamed('Code Arena Dark')).toMatchObject({ monaco: 'arena-dark', family: 'default' })
+    // Visual Studio's and High Contrast keep Arena's own colours around the editor.
+    expect(themeNamed('High Contrast').family).toBeUndefined()
+    const names = settingDef.get('workbench.colorTheme')!.enum!
+    for (const family of ['Code Arena', 'Sakura', 'Midnight', 'Copper', 'Forest', 'Ocean', 'Lavender']) expect(names).toEqual(expect.arrayContaining([`${family} Light`, `${family} Dark`]))
+    expect(settingDef.get('workbench.preferredLightColorTheme')!.enum).toContain('Lavender Light')
+    // A theme from elsewhere with "light" in its name still reads as Code Arena Light.
+    expect(themeNamed('Solarized Light').name).toBe('Code Arena Light')
+  })
+
   it('reads nested objects as dotted names, and refuses values of the wrong kind', () => {
     const l = readLayer('{ "editor": { "minimap": { "enabled": false }, "fontSize": "big" }, "files.autoSave": "sometimes", "someExtension.thing": 1 }')
     expect(l.values['editor.minimap.enabled']).toBe(false)

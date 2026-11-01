@@ -2,6 +2,8 @@
 // differ, the description says so). One list gives the defaults, the JSON schema the settings files are checked with,
 // and the rows of the Settings editor.
 
+import { colorThemeOf, colorThemes as appColorThemes, type ColorThemeId } from '@/lib/color-themes'
+
 export type SettingType = 'boolean' | 'number' | 'integer' | 'string' | 'array' | 'object'
 
 export interface SettingDef {
@@ -46,12 +48,20 @@ export interface ColorTheme {
   monaco: string
   /** The extension it comes from; none: Code Arena's own. */
   extension?: string
+  /** The app's colour theme it is (lib/color-themes.ts), which the whole page then shows; none: Arena's own colours. */
+  family?: ColorThemeId
 }
 
-/** The themes Code Arena has, by VS Code's names for their kind. */
+/** Monaco's theme for one of the app's colour themes, light or dark (monaco.ts defines them). */
+export const arenaMonacoTheme = (family: ColorThemeId, kind: 'light' | 'dark') => (family === 'default' ? `arena-${kind}` : `arena-${family}-${kind}`)
+
+/** The name of one of the app's colour themes, light or dark, in settings.json: "Code Arena Dark", "Sakura Light"... */
+export const familyThemeName = (family: ColorThemeId, kind: 'light' | 'dark') =>
+  `${family === 'default' ? 'Code Arena' : colorThemeOf(family).label} ${kind === 'light' ? 'Light' : 'Dark'}`
+
+/** The themes Code Arena has, by VS Code's names for their kind: the app's colour themes, each dark and light, then VS Code's own. */
 export const colorThemes: ColorTheme[] = [
-  { name: 'Code Arena Dark', kind: 'dark', monaco: 'arena-dark' },
-  { name: 'Code Arena Light', kind: 'light', monaco: 'arena-light' },
+  ...appColorThemes.flatMap((t) => (['dark', 'light'] as const).map((kind) => ({ name: familyThemeName(t.id, kind), kind, monaco: arenaMonacoTheme(t.id, kind), family: t.id }))),
   { name: 'Dark (Visual Studio)', kind: 'dark', monaco: 'vs-dark' },
   { name: 'Light (Visual Studio)', kind: 'light', monaco: 'vs' },
   { name: 'High Contrast', kind: 'dark', monaco: 'hc-black' },
@@ -201,7 +211,7 @@ export const settingDefs: SettingDef[] = [
   { key: 'files.eol', type: 'string', default: 'auto', enum: ['\n', '\r\n', 'auto'], enumDescriptions: ['LF', 'CRLF', "The system's"], description: 'The line ending of new files.', category: 'Files', scope: lang },
   { key: 'files.associations', type: 'object', default: {}, description: 'Languages for files by name or pattern, e.g. {"*.inc": "php"}.', category: 'Files' },
   // Workbench
-  { key: 'workbench.colorTheme', type: 'string', default: 'Code Arena Dark', get enum() { return allColorThemes().map((t) => t.name) }, open: true, description: 'The colour theme (Ctrl+K Ctrl+Alt+T): Code Arena\'s, or one an extension brings. VS Code\'s theme names that are not here read as the nearest of Code Arena\'s.', category: 'Workbench' },
+  { key: 'workbench.colorTheme', type: 'string', default: 'Code Arena Dark', get enum() { return allColorThemes().map((t) => t.name) }, open: true, description: 'The colour theme (Ctrl+K Ctrl+Alt+T): Code Arena\'s (its own, Sakura, Midnight, Copper, Forest, Ocean and Lavender, each light and dark: the whole page takes its colours), or one an extension brings. VS Code\'s theme names that are not here read as the nearest of Code Arena\'s.', category: 'Workbench' },
   { key: 'window.autoDetectColorScheme', type: 'boolean', default: true, description: 'Follows the system\'s light or dark: "workbench.preferredLightColorTheme" or "workbench.preferredDarkColorTheme". (VS Code: off.)', category: 'Workbench' },
   { key: 'workbench.preferredDarkColorTheme', type: 'string', default: 'Code Arena Dark', get enum() { return allColorThemes().map((t) => t.name) }, open: true, description: 'The theme when the system is dark, with "window.autoDetectColorScheme".', category: 'Workbench' },
   { key: 'workbench.preferredLightColorTheme', type: 'string', default: 'Code Arena Light', get enum() { return allColorThemes().map((t) => t.name) }, open: true, description: 'The theme when the system is light, with "window.autoDetectColorScheme".', category: 'Workbench' },

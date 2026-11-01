@@ -92,6 +92,33 @@ public sealed class IdentityTests(AppFixture app)
         Assert.False(keys.GetProperty("apiOff").GetBoolean());
     }
 
+    [Fact]
+    public async Task A_person_s_colour_theme_follows_them_to_every_device()
+    {
+        var admin = await Admin();
+        var (_, password, _, email) = await CreatePersonAsync(admin);
+        var laptop = await Browser().SignedInAsync(email, password);
+        var phone = await Browser().SignedInAsync(email, password);
+        Assert.Equal("default", (await phone.JsonAsync(await phone.GetAsync("/api/auth/me"))).GetProperty("colorTheme").GetString());
+
+        // Only what is sent changes: the answers stay as they were.
+        var saved = await laptop.JsonAsync(await laptop.Http.PutAsJsonAsync(new Uri("/api/account/preferences", UriKind.Relative), new { colorTheme = "sakura" }));
+        Assert.Equal(("sakura", "normal"), (saved.GetProperty("colorTheme").GetString(), saved.GetProperty("answerLength").GetString()));
+        Assert.Equal("sakura", (await phone.JsonAsync(await phone.GetAsync("/api/auth/me"))).GetProperty("colorTheme").GetString());
+        Assert.Equal("sakura", (await phone.JsonAsync(await phone.GetAsync("/api/account/preferences"))).GetProperty("colorTheme").GetString());
+        await laptop.Http.PutAsJsonAsync(new Uri("/api/account/preferences", UriKind.Relative), new { answerLength = "short" });
+        Assert.Equal("sakura", (await phone.JsonAsync(await phone.GetAsync("/api/auth/me"))).GetProperty("colorTheme").GetString());
+
+        foreach (var wrong in new[] { "neon", "Sakura", "", "<script>" })
+        {
+            var res = await laptop.Http.PutAsJsonAsync(new Uri("/api/account/preferences", UriKind.Relative), new { colorTheme = wrong });
+            await StatusAssert.Is(HttpStatusCode.BadRequest, res);
+            Assert.Contains("color_theme", await res.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        }
+        await laptop.Http.PutAsJsonAsync(new Uri("/api/account/preferences", UriKind.Relative), new { colorTheme = "default" });
+        Assert.Equal("default", (await phone.JsonAsync(await phone.GetAsync("/api/auth/me"))).GetProperty("colorTheme").GetString());
+    }
+
     [Theory]
     [InlineData("Bad Name", "ok@example.test")]
     [InlineData("okname", "not-an-email")]
