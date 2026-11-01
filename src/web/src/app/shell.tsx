@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { BookOpen, ChevronsLeft, ChevronsRight, CodeXml, Menu, Search } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, Outlet, useLocation, useMatch, useMatches, useNavigate, useResolvedPath } from 'react-router'
+import { confetti, useKonami, useQuickClicks } from '@/components/app/games-kit'
 import { NotificationBell } from '@/components/app/notifications'
 import { Button } from '@/components/ui/button'
 import { Kbd } from '@/components/ui/kbd'
@@ -55,6 +56,11 @@ function SignedIn({ me }: { me: Me }) {
   const [whatsNew, setWhatsNew] = useState(false)
   const sections = visibleNavigation(me)
   const name = info.data?.name ?? 'Argus Arena'
+  // The old cheat code, anywhere but a text box.
+  useKonami(useCallback(() => {
+    confetti()
+    toast('Cheat code accepted', { description: 'Thirty lives, no tokens charged. (Only the first part is true.)' })
+  }, []))
 
   const location = useLocation()
   const fullBleed = useMatches().some((m) => (m.handle as { fullBleed?: boolean } | undefined)?.fullBleed)
@@ -236,9 +242,21 @@ function ManualLink({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?
   )
 }
 
+/** What the eye says when its logo is clicked seven times quickly. */
+const eyeSays = [
+  'Argus Panoptes had a hundred eyes. This one has one, and it has read your code.',
+  'The eye never sleeps. The GPU sometimes naps.',
+  'Seven clicks. The eye blinks back.',
+]
+
 function Brand({ name, collapsed }: { name: string; collapsed: boolean }) {
+  const said = useRef(0)
+  const blink = useQuickClicks(7, useCallback(() => {
+    confetti()
+    toast(eyeSays[said.current++ % eyeSays.length])
+  }, []))
   return (
-    <Link to="/" className={cn('flex h-14 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-4 font-semibold', collapsed && 'justify-center px-0')}>
+    <Link to="/" onClick={blink} className={cn('flex h-14 shrink-0 items-center gap-2.5 border-b border-sidebar-border px-4 font-semibold', collapsed && 'justify-center px-0')}>
       <img src="/favicon.svg" alt="" className="size-7 rounded-md" />
       {!collapsed && <span className="truncate">{name}</span>}
     </Link>

@@ -1,7 +1,7 @@
 import { AlertTriangle, AudioLines, Brain, Calculator, Check, ChevronRight, CircleX, Clapperboard, Clock, Download, FilePen, FileText, FolderTree, Globe, Image as ImageIcon, ListChecks, ListTree, Loader2, Network, Orbit, PenTool, Scale, Search, ShieldQuestion, ShieldX, SquareTerminal, Telescope, TextSearch, Wrench, Zap, type LucideIcon } from 'lucide-react'
 import { Link } from 'react-router'
 import { Collapsible } from 'radix-ui'
-import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNow } from './use-now'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -16,6 +16,8 @@ import { seconds, toolTitle } from './format'
 import { agentParts, argsSummary, partsSummary, splitArgs } from './tool-args'
 import { ToolOutput } from './tool-output'
 import { AgentsView } from './agents'
+import { GameDialog, type Game } from '@/components/app/games'
+import { useQuickClicks } from '@/components/app/games-kit'
 import { partsDone } from './research'
 import { useCanvasOpener } from './canvas-context'
 import type { ToolRunning } from './live'
@@ -165,6 +167,10 @@ export const ToolCard = memo(function ToolCard({
   const [watched] = useState(() => agentCall && !result && live)
   const open = chosen ?? (!!waiting || (agentCall && (watched || (!result && live))))
   const [viewing, setViewing] = useState<number | null>(null)
+  // Five quick clicks on a picture or a video being made: something to play while it is.
+  const [game, setGame] = useState<Game | null>(null)
+  const snake = useQuickClicks(5, useCallback(() => setGame('snake'), []))
+  const stars = useQuickClicks(5, useCallback(() => setGame('stars'), []))
   const pictures = result?.attachments.filter((a) => a.kind === 'image') ?? []
   const media = result?.attachments.filter(isMedia) ?? []
   const made = result?.attachments.filter((a) => a.kind !== 'image' && !isMedia(a)) ?? []
@@ -290,9 +296,11 @@ export const ToolCard = memo(function ToolCard({
         </div>
       )}
       {drawing && (
-        <output className="drawing mt-2 flex aspect-square w-64 max-w-full flex-col items-center justify-center gap-2 rounded-xl border text-sm text-muted-foreground">
-          <ImageIcon className="size-6" aria-hidden="true" />
-          <span>Drawing the picture…{ran >= 1000 && <span className="tabular-nums"> {seconds(Math.floor(ran / 1000) * 1000)}</span>}</span>
+        <output className="drawing mt-2 flex aspect-square w-64 max-w-full rounded-xl border text-sm text-muted-foreground">
+          <button type="button" onClick={snake} className="flex size-full flex-col items-center justify-center gap-2 rounded-xl outline-none select-none focus-visible:ring-[3px] focus-visible:ring-ring">
+            <ImageIcon className="size-6" aria-hidden="true" />
+            <span>Drawing the picture…{ran >= 1000 && <span className="tabular-nums"> {seconds(Math.floor(ran / 1000) * 1000)}</span>}</span>
+          </button>
         </output>
       )}
       {pictures.length > 0 && (
@@ -313,11 +321,14 @@ export const ToolCard = memo(function ToolCard({
         </ul>
       )}
       {filming && (
-        <output className="drawing mt-2 flex aspect-video w-96 max-w-full flex-col items-center justify-center gap-2 rounded-xl border text-sm text-muted-foreground">
-          <Clapperboard className="size-6" aria-hidden="true" />
-          <span>Making the video, a few minutes…{ran >= 1000 && <span className="tabular-nums"> {seconds(Math.floor(ran / 1000) * 1000)}</span>}</span>
+        <output className="drawing mt-2 flex aspect-video w-96 max-w-full rounded-xl border text-sm text-muted-foreground">
+          <button type="button" onClick={stars} className="flex size-full flex-col items-center justify-center gap-2 rounded-xl outline-none select-none focus-visible:ring-[3px] focus-visible:ring-ring">
+            <Clapperboard className="size-6" aria-hidden="true" />
+            <span>Making the video, a few minutes…{ran >= 1000 && <span className="tabular-nums"> {seconds(Math.floor(ran / 1000) * 1000)}</span>}</span>
+          </button>
         </output>
       )}
+      <GameDialog game={game} onClose={() => setGame(null)} />
       {media.length > 0 && (
         <ul className="mt-2 flex flex-wrap gap-2" aria-label="Sound and video">
           {media.map((f) => (

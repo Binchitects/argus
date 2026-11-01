@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Blocks, Brain, Bug, CircleAlert, CircleHelp, Files, GitBranch, GitCompareArrows, Info, ListChecks, MessagesSquare, ScanSearch, Search, SquareTerminal, type LucideIcon } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { confetti, useKonami } from '@/components/app/games-kit'
 import { toast } from '@/components/ui/toaster'
 import { Alert } from '@/components/ui/alert'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -80,6 +81,11 @@ const TerminalPanel = lazy(() => import('./terminals'))
  * web on 127.0.0.1, behind the key in the address it printed.
  */
 export function App() {
+  // The old cheat code, where no editor or box has the keys.
+  useKonami(useCallback(() => {
+    confetti()
+    toast('Cheat code accepted', { description: 'git push --force is still not a good idea.' })
+  }, []))
   // Read again every 30 seconds; every 5 while an MCP server is connecting or down (the status bar says when it connects),
   // or while the session is kept with a chat in Arena (what the web adds shows within seconds).
   const state = useQuery({
