@@ -22,6 +22,7 @@ import { serverPerModel, type EngineInstance } from './engine-api'
 import { EngineProblems } from './engine-fields'
 import { engineSlot } from './engine-slot'
 import { ModelDialog, type ModelDialogOpen } from './model-dialog'
+import { EngineActions } from './runtimes'
 import { OnDiskCard } from './model-disk'
 import { type SavedModel } from './model-form'
 import { WorkingHours } from './model-hours'
@@ -244,6 +245,7 @@ function EngineSummary({ engine }: { engine: ModelsView['engine'] }) {
             ? 'Any other loads when someone asks for it. At the limit, an idle one makes room first; one kept loaded, the one new chats use, and the one for small steps while a place is left beside it, never do.'
             : 'Every place is kept loaded, or held by the model new chats use or the one for small steps, so no other model loads on request. Raise "Models loaded at once" under Settings for more.'}
         </CardDescription>
+        <EngineActions instances={engine.instances ?? []} />
       </CardHeader>
       {plan && (plan.gpus.length > 0 || plan.problems.length > 0) && (
         <CardContent className="grid gap-3">

@@ -25,11 +25,12 @@ export interface AuditEvent {
 const PAGE = 500
 
 /** What kind of event, for the filter. */
-function kind(action: string): 'sign-in' | 'people' | 'settings' | 'argus' | 'other' {
+function kind(action: string): 'sign-in' | 'people' | 'settings' | 'argus' | 'operations' | 'other' {
   if (action.startsWith('sign_') || action.startsWith('account.')) return 'sign-in'
   if (action.startsWith('person.') || action === 'ldap.sync' || action.startsWith('scim.')) return 'people'
   if (action.startsWith('settings.')) return 'settings'
   if (action.startsWith('argus.')) return 'argus'
+  if (action.startsWith('runtime.')) return 'operations'
   return 'other'
 }
 
@@ -62,7 +63,7 @@ const columns: ColumnDef<AuditEvent>[] = [
 ]
 
 export function AuditPage() {
-  const [filter, setFilter] = useState<'all' | 'failed' | 'sign-in' | 'people' | 'settings' | 'argus'>('all')
+  const [filter, setFilter] = useState<'all' | 'failed' | 'sign-in' | 'people' | 'settings' | 'argus' | 'operations'>('all')
   const events = useInfiniteQuery({
     queryKey: ['admin', 'audit'],
     initialPageParam: null as number | null,
@@ -113,6 +114,7 @@ export function AuditPage() {
                 { value: 'people', label: 'People' },
                 { value: 'settings', label: 'Settings' },
                 { value: 'argus', label: 'Argus' },
+                { value: 'operations', label: 'Restarts' },
               ]}
             />
           }

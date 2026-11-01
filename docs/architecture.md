@@ -249,7 +249,7 @@ installer makes the folders with their services' owners.
 | `directory` | the app | the people Argus reads (`users.yml`: user name, display name, email) |
 | `audit` | the app | the audit log's daily anchors |
 | `code-arena-signature` | `sign-code-arena.sh` | the signature of the Code Arena builds the app hands out, and the Windows builds Authenticode-signed |
-| `sandbox`, `blender`, `lean` | the app and those services | jobs in and results out |
+| `sandbox`, `blender`, `lean` | the app and those services | jobs in and results out, and an admin's reset (`reset`, removed once done) |
 | `workspaces` | `workspaces` | each workspace's clone, its engine's home, what is not pushed yet |
 | `argus` | Argus | its index |
 | `audio` | the speech server | its models |
@@ -286,8 +286,8 @@ to llama.cpp's router.
 
 | engine | service | how the app drives it | what it is for |
 |---|---|---|---|
-| llama.cpp | `llamacpp` | its router's HTTP API (load, unload, slots), and the presets it writes into `engine`: `models.ini`, `keep`, `max`, `kvcache`. `services/llamacpp/router.sh` restarts llama-server when the list or the count changes | GGUF files; layers or experts in RAM when the GPU is short; a few people at once; each conversation kept in its slot |
-| vLLM, SGLang | `vllm`, `sglang` | files: the app writes the models each may run (`presets.json`) and the ones it wants (`models.json`) into `engine`; `services/vllm/supervisor.sh` runs one server per model on that model's GPUs, drains one taken away, sleeps and wakes them, and writes their status and a heartbeat into `vllm-status`. Load is read from each server's `/metrics` | safetensors snapshots; tensor parallel; copies of a model; a prefix cache shared by every request; many people at once |
+| llama.cpp | `llamacpp` | its router's HTTP API (load, unload, slots), and the presets it writes into `engine`: `models.ini`, `keep`, `max`, `kvcache`. `services/llamacpp/router.sh` restarts llama-server when the list or the count changes, or an admin's Restart writes a new `gen=` in `llamacpp.restart` (one that does not stop within 15 s is killed) | GGUF files; layers or experts in RAM when the GPU is short; a few people at once; each conversation kept in its slot |
+| vLLM, SGLang | `vllm`, `sglang` | files: the app writes the models each may run (`presets.json`) and the ones it wants (`models.json`) into `engine`; `services/vllm/supervisor.sh` runs one server per model on that model's GPUs, drains one taken away, sleeps and wakes them, drains and starts every model again on an admin's Reload (`reload`) or Restart (`restart`, the supervisor too), and writes their status and a heartbeat into `vllm-status`. Load is read from each server's `/metrics` | safetensors snapshots; tensor parallel; copies of a model; a prefix cache shared by every request; many people at once |
 | other GPU servers | none here | registered at the gateway and checked, never loaded or unloaded (Admin → Models → Other servers and providers; their keys kept encrypted) | another vLLM, SGLang, TGI, Ollama, or a cloud |
 | pictures, video | `imagegen`, `videogen` | a control file each in `engine` (on or off, the model, the GPU); `services/sd-serve.sh` follows it and writes its status into `media-status` | stable-diffusion.cpp |
 | speech | `audio` | its own API: models loaded and unloaded | speaches: Whisper, Kokoro |
@@ -634,7 +634,7 @@ installer prepares the host.
 | `postgres` | the gateway's database (`POSTGRES_DB`, `litellm`) |
 | `litellm` | its tables: about 160 migrations on a first start, a minute or more. The app's first chat waits up to 90 seconds for it |
 | `app` | its own database (`llmapp`) and its migrations, one replica at a time; the first admin from `ADMIN_EMAIL` and `ADMIN_PASSWORD`; the directory Argus reads; the OIDC clients; the chat key; the engines' presets and desired state; the media servers' on and off; Prometheus's targets; the models registered at LiteLLM; the keys at LiteLLM; the downloads, when asked (`DEFAULT_MODELS=download`, or an admin), and `MODEL` added once its files are in the library |
-| `llamacpp` | nothing: `router.sh` waits for the app's model list, starts llama-server in router mode, restarts it when the list changes, and prunes old caches |
+| `llamacpp` | nothing: `router.sh` waits for the app's model list, starts llama-server in router mode, restarts it when the list changes or an admin asks, and prunes old caches |
 | `vllm`, `sglang` | nothing: the supervisor follows the app's desired state, and writes what it sees of the GPUs |
 | `imagegen`, `videogen`, `embed` | nothing: they wait for their files (`sd-serve.sh` also follows the app's on and off) |
 | `audio` | fetches its models when the app asks |
@@ -712,7 +712,9 @@ names the app reaches them by, one release per namespace. `./arenactl kube`
   autoscaler each. Their shared volumes (the model library, `engine`, the
   sandboxes', the status folders) must be ReadWriteMany across nodes.
 - **Engines**: one Deployment per vLLM or SGLang instance, each driven by the
-  same files on claims, with no Kubernetes API. The sandboxes, Laya, the
+  same files on claims, with no Kubernetes API; an admin's Reload, Restart and
+  Reset are files there too, and a process that ends is started again by its
+  pod's restart policy, as Compose's does. The sandboxes, Laya, the
   scanners, the studio and the workspaces have NetworkPolicies.
 - **Not in the chart**: the browser (point `browser.url` at one you run),
   Promtail (log shipping is the cluster's), the GPU exporters and the power
