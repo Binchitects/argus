@@ -275,7 +275,8 @@ public static class AdminEndpoints
 
     /// <summary>
     /// Admin → Line: takes a waiting request out of the line, or stops a running one, on whichever replica has it. The reason
-    /// is required: the person (in the chat) or the caller (in the API's error) is told it, and it is audited.
+    /// is required: the person (in the chat) or the caller (in the API's error) is told it, and it is audited. Running says
+    /// which the admin asked for: one that started since it was seen waiting is not stopped, and a second stop changes nothing.
     /// </summary>
     private static async Task<IResult> RemoveFromLineAsync(Guid ticket, LineRemoveRequest body, ClaimsPrincipal p, UserManager<AppUser> users, Chat.AnswerJobs jobs,
         CancellationToken ct)
@@ -285,11 +286,15 @@ public static class AdminEndpoints
         {
             return AuthEndpoints.Problem(400, "reason", $"Say why, in up to {MostLineReason} characters: the person is told.");
         }
-        return await jobs.RemoveAnywhereAsync(ticket, reason, (await users.GetUserAsync(p))!, ct) switch
+        var (here, elsewhere) = await jobs.RemoveAnywhereAsync(ticket, reason, body.Running, (await users.GetUserAsync(p))!, ct);
+        return here switch
         {
+            { Done: true } => Results.Ok(new { was = here.Running ? "running" : "waiting" }),
+            { Stopping: { } first } => AuthEndpoints.Problem(409, "already_stopping", $"An admin stopped it already, and it ends in a moment. Their reason holds: {first}"),
+            { Running: true } => AuthEndpoints.Problem(409, "started", "It started meanwhile and runs now: nothing was changed. Stop it under Running if it should stop."),
+            { } => AuthEndpoints.Problem(409, "waiting", "It still waits, so nothing was changed: take it out under Waiting."),
+            null when elsewhere => Results.Accepted(value: new { was = (string?)null }),
             null => AuthEndpoints.Problem(404, "not_in_line", "That request is no longer in the line: it may have just ended."),
-            "elsewhere" => Results.Accepted(value: new { was = (string?)null }),
-            var was => Results.Ok(new { was }),
         };
     }
 

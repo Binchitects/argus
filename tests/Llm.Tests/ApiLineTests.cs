@@ -112,7 +112,7 @@ public sealed class ApiLineTests(AppFixture app)
         Assert.EndsWith("nothing was sent to the model: Too long a request for the model", error.GetProperty("message").GetString(), StringComparison.Ordinal);
 
         // Running: the stream under way ends with an error chunk, as the gateway's own errors do, and no [DONE].
-        await StatusAssert.Is(HttpStatusCode.OK, await admin.PostAsync($"/api/admin/line/{running}/remove", new { reason = "A runaway agent" }));
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.PostAsync($"/api/admin/line/{running}/remove", new { reason = "A runaway agent", running = true }));
         var streamed = await first.Content.ReadAsStringAsync().WaitAsync(TimeSpan.FromSeconds(30));
         var chunks = streamed.Split("\n\n", StringSplitOptions.RemoveEmptyEntries).Where(l => l.StartsWith("data: ", StringComparison.Ordinal)).Select(l => l[6..]).ToList();
         Assert.True(chunks.Count > 1, streamed);
@@ -136,5 +136,7 @@ public sealed class ApiLineTests(AppFixture app)
         Assert.Equal("refused", asked["two"].GetProperty("state").GetString());
         Assert.EndsWith("Too long a request for the model", asked["two"].GetProperty("error").GetString(), StringComparison.Ordinal);
         Assert.Equal(("stopped", "Stopped by an admin: A runaway agent"), (asked["one [slow]"].GetProperty("state").GetString(), asked["one [slow]"].GetProperty("error").GetString()));
+        // The stopped one keeps the answer as far as it went out, as one whose caller went away does.
+        Assert.StartsWith("w0 ", asked["one [slow]"].GetProperty("answer").GetString(), StringComparison.Ordinal);
     }
 }

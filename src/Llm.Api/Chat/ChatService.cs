@@ -120,7 +120,50 @@ public sealed partial class ChatService(
     /// <summary>The answer's clock, for its trace (one answer per scope).</summary>
     private AnswerClock? _answerClock;
 
+    /// <summary>The answer's model and its place in line, from its turn until its first message is made (one answer per scope).</summary>
+    private (string Model, AnswerGate.Place? Place)? _placed;
+
+    /// <summary>
+    /// Answers <paramref name="question"/>. An admin's stop (Admin → Line) after its turn came and before its first word (its
+    /// tools starting, its chat compacting) is kept as a stop while it writes is: an answer, stopped, that says why.
+    /// </summary>
     public async Task AnswerAsync(AppUser user, Conversation conversation, ChatMessage question, AnswerOverrides overrides, Func<object, Task> emit, CancellationToken ct)
+    {
+        _placed = null;
+        try
+        {
+            await WriteAnswerAsync(user, conversation, question, overrides, emit, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested && _placed is ({ } model, { StopReason: { } reason }))
+        {
+            var id = await KeepUnansweredAsync(user, conversation, question, model, MessageStatus.Stopped, AnswerGate.StoppedBy(reason), emit);
+            await emit(new { type = "stopped", id });
+        }
+    }
+
+    /// <summary>
+    /// An answer without a word, kept so the chat says why when it is read again (and a scheduled task, and the prompt log): its model
+    /// refused, its line refused it (busy, waited too long, taken out by an admin), or an admin stopped it before it began. Its id.
+    /// </summary>
+    private async Task<Guid> KeepUnansweredAsync(AppUser user, Conversation conversation, ChatMessage question, string modelName, MessageStatus status, string why,
+        Func<object, Task> emit)
+    {
+        // Saved without the answer's token: a stop cancelled it.
+        var sequence = (await db.ChatMessages.Where(m => m.ConversationId == conversation.Id).MaxAsync(m => (int?)m.Sequence, CancellationToken.None) ?? 0) + 1;
+        var kept = new ChatMessage
+        {
+            ConversationId = conversation.Id, ParentId = question.Id, Role = "assistant", Sequence = sequence, Model = modelName,
+            Status = status, Error = why, AuthorId = user.Id,
+        };
+        kept.AnswerId = kept.Id;
+        db.ChatMessages.Add(kept);
+        conversation.CurrentLeafId = kept.Id;
+        await emit(new { type = "assistant", id = kept.Id, parentId = question.Id, model = modelName });
+        await FinishAsync(conversation, CancellationToken.None);
+        return kept.Id;
+    }
+
+    private async Task WriteAnswerAsync(AppUser user, Conversation conversation, ChatMessage question, AnswerOverrides overrides, Func<object, Task> emit, CancellationToken ct)
     {
         _answerClock = new AnswerClock();
         var email = user.Email!.ToLowerInvariant();
@@ -135,17 +178,7 @@ public sealed partial class ChatService(
         }
         if (refusal is not null)
         {
-            var sequence = (await db.ChatMessages.Where(m => m.ConversationId == conversation.Id).MaxAsync(m => (int?)m.Sequence, ct) ?? 0) + 1;
-            var refused = new ChatMessage
-            {
-                ConversationId = conversation.Id, ParentId = question.Id, Role = "assistant", Sequence = sequence, Model = modelName,
-                Status = MessageStatus.Failed, Error = refusal, AuthorId = user.Id,
-            };
-            refused.AnswerId = refused.Id;
-            db.ChatMessages.Add(refused);
-            conversation.CurrentLeafId = refused.Id;
-            await emit(new { type = "assistant", id = refused.Id, parentId = question.Id, model = modelName });
-            await FinishAsync(conversation, ct);
+            await KeepUnansweredAsync(user, conversation, question, modelName, MessageStatus.Failed, refusal, emit);
             await emit(new { type = "error", message = refusal });
             return;
         }
@@ -153,7 +186,20 @@ public sealed partial class ChatService(
 
         // Fair use: a place among the few this model serves at once, in turn (AnswerGate); other models' lines are not this one's.
         var inLine = Stopwatch.StartNew();
-        using var place = overrides.Line is { } line ? await line(modelName, ct) : null;
+        IDisposable? taken;
+        try
+        {
+            taken = overrides.Line is { } line ? await line(modelName, ct) : null;
+        }
+        catch (Exception ex) when (ex is AnswerGate.BusyException or AnswerGate.TooLongException or AnswerGate.RemovedException)
+        {
+            // Nothing was sent: kept as a refusal is, with why.
+            await KeepUnansweredAsync(user, conversation, question, modelName, MessageStatus.Failed, ex.Message, emit);
+            await emit(new { type = "error", message = ex.Message });
+            return;
+        }
+        using var place = taken;
+        _placed = (modelName, place as AnswerGate.Place);
         _answerClock.Placed((int)inLine.ElapsedMilliseconds);
         // An admin stopped the answer in its place (Admin → Line): what the stopped message says.
         string? StoppedByAdmin() => (place as AnswerGate.Place)?.StopReason is { } reason ? AnswerGate.StoppedBy(reason) : null;
@@ -455,6 +501,8 @@ public sealed partial class ChatService(
         for (var round = 0; ; round++)
         {
             var msg = new ChatMessage { ConversationId = conversation.Id, ParentId = parent, Role = "assistant", Sequence = ++next, Model = modelName, AuthorId = user.Id };
+            // It has a message now: a stop keeps it (below), not a new one (AnswerAsync).
+            _placed = null;
             answerId ??= msg.Id;
             msg.AnswerId = answerId;
             db.ChatMessages.Add(msg);

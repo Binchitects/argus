@@ -454,12 +454,18 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
       abort.current = controller
       let received = false
       let wasStopped = false
+      // An error, or an admin's stop, before this run's answer had a message: no saved answer says it, so the page does.
+      let answered = false
+      let unanswered: string | null = null
       try {
         await streamChat(
           `/api/chat/conversations/${conversationId}/${endpoint}`,
           body,
           (e) => {
             received = true
+            if (e.type === 'assistant') answered = true
+            else if (!answered && endpoint !== 'compact' && e.type === 'error') unanswered = e.message
+            else if (!answered && e.type === 'stopped' && e.why) unanswered = e.why
             watch?.(e)
             canvasEvents.current(e)
             setLive((s) => reduce(s ?? start, e, localId))
@@ -509,6 +515,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
         // clearing now would wipe the new answer off the screen as it streams.
         if (runs.current === me) {
           setLive(null)
+          if (unanswered) setError(unanswered)
           afterRun.current(leaf)
         }
       }

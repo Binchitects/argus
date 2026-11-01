@@ -821,6 +821,20 @@ describe('chat', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('You have used all your credit.')
   })
 
+  it('an error before the answer had a message stays once the chat is read again, and the answer before it did not fail', async () => {
+    const before = [msg('q1', null, 'user', { content: 'first' }), msg('a1', 'q1', 'assistant', { content: 'The first answer.' })]
+    backend({
+      start: conversation({ messages: before, currentLeafId: 'a1' }),
+      events: [{ type: 'question', id: 'q2', parentId: 'a1' }, { type: 'error', message: 'The answer failed on the server.' }],
+      saved: [...before, msg('q2', 'a1', 'user', { content: 'second' })],
+    })
+    renderApp('/chat/c1')
+    expect(await screen.findByText('The first answer.')).toBeInTheDocument()
+    await ask('second')
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('The answer failed on the server.'))
+    expect(screen.getByText('The first answer.').closest('section')).not.toContainElement(screen.getByRole('alert'))
+  })
+
   it('a message that never reached the server goes back into the box', async () => {
     backend({ extra: { 'POST /api/chat/conversations/c1/messages': () => ({ offline: true }) } })
     renderApp('/chat')

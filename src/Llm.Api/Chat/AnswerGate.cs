@@ -77,8 +77,12 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
     /// <summary>A request running or waiting, as Admin → Line shows it: its ticket, whose, on which model, of which kind, since when; a waiter's place (1: next) and priority.</summary>
     public sealed record Entry(Guid Id, Guid Person, string Model, string Kind, DateTimeOffset Since, int? Position = null, int? Priority = null);
 
-    /// <summary>A request an admin took out of the line (it was waiting) or stopped (it was running): whose, on which model, of which kind, for how long.</summary>
-    public sealed record Removed(Guid Person, string Model, string Kind, bool Running, TimeSpan For);
+    /// <summary>
+    /// A request an admin took out of the line (it was waiting) or stopped (it was running): whose, on which model, of which kind, for how long.
+    /// <see cref="Done"/> false: nothing changed, as it was not as the admin saw it (it started since it was seen waiting), or another admin
+    /// stopped it already (<see cref="Stopping"/>: their reason, which holds).
+    /// </summary>
+    public sealed record Removed(Guid Person, string Model, string Kind, bool Running, TimeSpan For, bool Done = true, string? Stopping = null);
 
     /// <summary>What a person or a caller is told of an admin's stop of their running request.</summary>
     public static string StoppedBy(string reason) => $"Stopped by an admin: {reason}";
@@ -256,16 +260,21 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
     /// <summary>
     /// For an admin (Admin → Line): the request with this ticket leaves the line when it waits (it gives up with
     /// <see cref="RemovedException"/>, nothing sent), or is stopped when it runs (its <see cref="Place.Stopped"/> fires).
-    /// <paramref name="reason"/> is what its person or caller is told. Null when no request here has the ticket: it ended,
-    /// or another replica has it.
+    /// <paramref name="running"/> is how the admin saw it: one seen waiting that runs now is not stopped, nor one seen
+    /// running taken out (<see cref="Removed.Done"/> false). <paramref name="reason"/> is what its person or caller is told.
+    /// Null when no request here has the ticket: it ended, or another replica has it.
     /// </summary>
-    public Removed? Remove(Guid id, string reason)
+    public Removed? Remove(Guid id, string reason, bool running)
     {
         Place? place;
         lock (_lock)
         {
             if (_waiting.Find(w => w.Id == id) is { } w)
             {
+                if (running)
+                {
+                    return new Removed(w.Person, w.Model, w.Kind, false, clock.GetUtcNow() - w.Since, Done: false);
+                }
                 _waiting.Remove(w);
                 Count("removed", w.Kind);
                 w.Granted.TrySetException(new RemovedException($"An admin took this request out of the line, and nothing was sent to the model: {reason}"));
@@ -276,12 +285,18 @@ public sealed class AnswerGate(IOptionsMonitor<ChatOptions> options, TimeProvide
             {
                 return null;
             }
-            // Stopped twice (two admins at once): counted once, the first reason kept.
-            if (place.StopReason is null)
+            if (!running)
             {
-                place.StopReason = reason;
-                _stopped[place.Kind] = _stopped.GetValueOrDefault(place.Kind) + 1;
+                // Its turn came as the admin wrote why: what runs is not stopped by a Remove.
+                return new Removed(place.Person, place.Model, place.Kind, true, clock.GetUtcNow() - place.Since, Done: false);
             }
+            // Stopped twice (two admins at once): counted once, the first reason kept, and the second admin told it.
+            if (place.StopReason is { } first)
+            {
+                return new Removed(place.Person, place.Model, place.Kind, true, clock.GetUtcNow() - place.Since, Done: false, Stopping: first);
+            }
+            place.StopReason = reason;
+            _stopped[place.Kind] = _stopped.GetValueOrDefault(place.Kind) + 1;
         }
         // Outside the lock: whoever holds the place stops in its callbacks, and gives the place back.
         place.Stop();

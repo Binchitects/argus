@@ -11,25 +11,33 @@ public sealed partial class AnswerJobs
 {
     private const string RemoveTopic = "line:remove";
 
-    /// <summary>An admin's removal from the line, as it goes to the other replicas: the request's ticket, why, and who asked.</summary>
-    private sealed record Removal(Guid Ticket, string Reason, Guid Actor);
+    /// <summary>An admin's removal from the line, as it goes to the other replicas: the request's ticket, why, whether they saw it running, and who asked.</summary>
+    private sealed record Removal(Guid Ticket, string Reason, bool Running, Guid Actor);
 
     /// <summary>
-    /// For Admin → Line: takes the request with this ticket out of the line, or stops it running, on whichever replica
-    /// holds it (each keeps its own line), and audits it there. "waiting" or "running" when this replica held it,
-    /// "elsewhere" when another did, null when none had it (it ended meanwhile).
+    /// For Admin → Line: takes the request with this ticket out of the line, or stops it running (<paramref name="running"/>: as
+    /// the admin saw it), on whichever replica holds it (each keeps its own line), and audits it there when it was done. What
+    /// this replica found when it held it (<see cref="AnswerGate.Removed.Done"/> false: nothing changed, nothing audited);
+    /// else whether another replica did it (false: none had it, as it ended meanwhile).
     /// </summary>
-    public async Task<string?> RemoveAnywhereAsync(Guid ticket, string reason, AppUser actor, CancellationToken ct)
+    public async Task<(AnswerGate.Removed? Here, bool Elsewhere)> RemoveAnywhereAsync(Guid ticket, string reason, bool running, AppUser actor, CancellationToken ct)
     {
-        if (gate.Remove(ticket, reason) is { } removed)
+        if (gate.Remove(ticket, reason, running) is { } removed)
         {
-            await AuditRemovalAsync(removed, reason, actor.Id, here: true);
-            return removed.Running ? "running" : "waiting";
+            if (removed.Done)
+            {
+                await AuditRemovalAsync(removed, reason, actor.Id, here: true);
+            }
+            return (removed, false);
         }
-        return await replicas.AskAsync(RemoveTopic, JsonSerializer.Serialize(new Removal(ticket, reason, actor.Id), Json), ct) ? "elsewhere" : null;
+        return (null, await replicas.AskAsync(RemoveTopic, JsonSerializer.Serialize(new Removal(ticket, reason, running, actor.Id), Json), ct));
     }
 
-    /// <summary>Another replica's admin asked: done here when this replica holds the request, and audited here.</summary>
+    /// <summary>
+    /// Another replica's admin asked: done here when this replica holds the request as the admin saw it, and audited here. One
+    /// that started since, or that another admin stopped already, is not changed: the admin's replica says it is gone, and its
+    /// line shows it as it is.
+    /// </summary>
     private bool RemoveHere(string payload)
     {
         Removal? removal;
@@ -41,7 +49,7 @@ public sealed partial class AnswerJobs
         {
             return false;
         }
-        if (removal is null || gate.Remove(removal.Ticket, removal.Reason) is not { } removed)
+        if (removal is null || gate.Remove(removal.Ticket, removal.Reason, removal.Running) is not { Done: true } removed)
         {
             return false;
         }

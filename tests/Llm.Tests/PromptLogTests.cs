@@ -248,6 +248,8 @@ public sealed class PromptLogTests(AppFixture app)
         items = await LogWhenAsync(admin, $"person={name}", i => StateOf(i, "[slow] A long story.") == "stopped" && StateOf(i, "Another one, please.") == "refused"
             && StateOf(i, "[budget] Spend more.") == "failed");
         Assert.Equal("stopped", StateOf(items, "[slow] A long story."));
+        // What had gone out is kept.
+        Assert.StartsWith("w0 ", Asked(items, "[slow] A long story.").GetProperty("answer").GetString(), StringComparison.Ordinal);
         var refused = Asked(items, "Another one, please.");
         Assert.Equal("refused", refused.GetProperty("state").GetString());
         Assert.Contains("waited longer than", refused.GetProperty("error").GetString(), StringComparison.Ordinal);

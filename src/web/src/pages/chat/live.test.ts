@@ -118,6 +118,16 @@ describe('live answer', () => {
     expect(s.messages[1]).toMatchObject({ status: 'stopped', content: 'part' })
   })
 
+  it('an error before its answer had a message is a notice, never a failure of an earlier answer', () => {
+    // The chat as saved: a whole answer. The next question fails before an answer of its own began (the chat was gone).
+    const saved = play([{ type: 'question', id: 'q1', parentId: null }, { type: 'assistant', id: 'a1', parentId: 'q1', model: 'M' }, { type: 'content', text: 'a0' }, { type: 'done', id: 'a1' }])
+    let s = withQuestion({ ...saved, current: null }, 'local-2', 'a1', 'and then?', [])
+    s = reduce(s, { type: 'question', id: 'q2', parentId: 'a1' }, 'local-2')
+    s = reduce(s, { type: 'error', message: 'This chat is gone.' }, 'local-2')
+    expect(s.messages.find((m) => m.id === 'a1')).toMatchObject({ status: 'complete', error: null, content: 'a0' })
+    expect(s.notices).toEqual([{ kind: 'error', text: 'This chat is gone.' }])
+  })
+
   it('an answer watched again from its start rebuilds over what was saved, without doubles', () => {
     const events: ChatEvent[] = [
       { type: 'question', id: 'q1', parentId: null },

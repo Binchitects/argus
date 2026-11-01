@@ -1035,7 +1035,7 @@ export const topics = {
       { name: 'The limits', text: 'How many run at once for everyone, per person, the longest line and how long a wait lasts (Settings → Chat), and each model\'s places.' },
       {
         name: 'Remove and Stop',
-        text: 'With usage.line (the Operator role): Remove takes a waiting request out of the line, Stop stops a running one. Say why: the person reads it in the chat, an API caller in its error (403 removed_by_admin). Audited as line.remove or line.stop, on whichever replica has the request.',
+        text: 'With usage.line (the Operator role): Remove takes a waiting request out of the line, Stop stops a running one. Say why: the person reads it in the chat, an API caller in its error (403 removed_by_admin). Audited as line.remove or line.stop, on whichever replica has the request. One that started while you wrote why is not stopped by Remove, and a second Stop changes nothing: the page says so.',
       },
     ],
     tasks: [

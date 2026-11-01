@@ -55,8 +55,9 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
 - **Streaming, stop, answer again.**
   - **Stop** keeps what was written, marked *Stopped*. An admin can stop an
     answer too, or take one out of the line before it starts (Admin → Line):
-    the answer then says *Stopped by an admin* with their reason, and the bell
-    says so when no page was open.
+    the answer then says *Stopped by an admin* with their reason (or that an
+    admin took it out of the line, and why), also when the chat is read
+    again, and the bell says so when no page was open.
   - **Answer again** writes a new answer beside the old one; both stay. It can
     also use another model or thinking level, for that answer only.
   - **Shorter** and **Longer** (in the same menu) answer again at about half

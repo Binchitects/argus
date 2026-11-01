@@ -168,29 +168,39 @@ public sealed class FairUseTests(AppFixture app)
         var line = gate.Snapshot().Waiting;
         var (benTicket, cyTicket) = (line.Single(e => e.Person == ben).Id, line.Single(e => e.Person == cy).Id);
 
-        // Waiting: out of the line, nothing sent, and why; the one behind moves up.
-        var removed = gate.Remove(benTicket, "The model is needed for others now");
-        Assert.Equal((ben, "m", "chat", false), (removed!.Person, removed.Model, removed.Kind, removed.Running));
+        // Waiting: out of the line, nothing sent, and why; the one behind moves up. Asked to stop it, as if it ran, nothing changes.
+        var seenRunning = gate.Remove(benTicket, "Stop it", running: true);
+        Assert.Equal((false, false, (string?)null), (seenRunning!.Done, seenRunning.Running, seenRunning.Stopping));
+        var removed = gate.Remove(benTicket, "The model is needed for others now", running: false);
+        Assert.Equal((ben, "m", "chat", false, true), (removed!.Person, removed.Model, removed.Kind, removed.Running, removed.Done));
         var refused = await Assert.ThrowsAsync<AnswerGate.RemovedException>(() => waiting);
         Assert.Equal("An admin took this request out of the line, and nothing was sent to the model: The model is needed for others now", refused.Message);
         Assert.Equal((1, 1), gate.Now());
         Assert.Equal(1, Assert.Single(gate.Snapshot().Waiting).Position);
-        Assert.Null(gate.Remove(benTicket, "again"));
+        Assert.Null(gate.Remove(benTicket, "again", running: false));
 
         // Running: its place's token fires with the reason, counted once however often it is asked; the place is held
         // until whoever has it gives it back, and then goes to the next, with the ticket it waited with.
         Assert.Equal(running.Id, Assert.Single(gate.Snapshot().Running).Id);
         Assert.False(running.Stopped.IsCancellationRequested);
-        Assert.True(gate.Remove(running.Id, "A runaway agent")!.Running);
+        var stopped = gate.Remove(running.Id, "A runaway agent", running: true);
+        Assert.Equal((true, true, (string?)null), (stopped!.Done, stopped.Running, stopped.Stopping));
         Assert.True(running.Stopped.IsCancellationRequested);
-        Assert.True(gate.Remove(running.Id, "A second admin")!.Running);
+        // A second admin's stop does nothing more: the first reason holds, and it says so.
+        var again = gate.Remove(running.Id, "A second admin", running: true);
+        Assert.Equal((false, true, "A runaway agent"), (again!.Done, again.Running, again.Stopping));
         Assert.Equal("A runaway agent", running.StopReason);
         Assert.False(next.IsCompleted);
         running.Dispose();
         using (var place = await next.WaitAsync(TimeSpan.FromSeconds(5)))
         {
             Assert.Equal(cyTicket, place.Id);
-            Assert.Null(gate.Remove(running.Id, "gone"));
+            Assert.Null(gate.Remove(running.Id, "gone", running: true));
+            // Seen waiting, it runs now: taking it out of the line does not stop it.
+            var started = gate.Remove(cyTicket, "The model is needed for others now", running: false);
+            Assert.Equal((false, true, (string?)null), (started!.Done, started.Running, started.Stopping));
+            Assert.False(place.Stopped.IsCancellationRequested);
+            Assert.Null(place.StopReason);
         }
         var text = LineMetrics.Render(gate);
         Assert.Contains("arena_line_refused_total{reason=\"removed\",kind=\"chat\"} 1", text, StringComparison.Ordinal);
@@ -243,11 +253,15 @@ public sealed class FairUseTests(AppFixture app)
         var refused = await second.WaitAsync(TimeSpan.FromSeconds(20));
         Assert.Equal("error", refused.Last().GetProperty("type").GetString());
         Assert.EndsWith("nothing was sent to the model: The model is needed for others now", refused.Last().GetProperty("message").GetString(), StringComparison.Ordinal);
-        Assert.DoesNotContain(refused, e => e.GetProperty("type").GetString() == "assistant");
+        // Kept as an answer that failed, with why, as a refusal is: the chat still says it when it is read again.
+        var kept = refused.Single(e => e.GetProperty("type").GetString() == "assistant").GetProperty("id").GetGuid();
+        var unanswered = (await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{two}"))).GetProperty("messages").EnumerateArray().Last();
+        Assert.Equal((kept, "failed", ""), (unanswered.GetProperty("id").GetGuid(), unanswered.GetProperty("status").GetString(), unanswered.GetProperty("content").GetString()));
+        Assert.Equal(refused.Last().GetProperty("message").GetString(), unanswered.GetProperty("error").GetString());
         await StatusAssert.Is(HttpStatusCode.NotFound, await admin.PostAsync($"/api/admin/line/{waiting}/remove", new { reason = "Again" }));
 
         // Running: stopped, keeping what it wrote, and the saved answer says why.
-        var stopping = await admin.PostAsync($"/api/admin/line/{running}/remove", new { reason = "A runaway agent" });
+        var stopping = await admin.PostAsync($"/api/admin/line/{running}/remove", new { reason = "A runaway agent", running = true });
         await StatusAssert.Is(HttpStatusCode.OK, stopping);
         Assert.Equal("running", (await admin.JsonAsync(stopping)).GetProperty("was").GetString());
         var stopped = (await first.WaitAsync(TimeSpan.FromSeconds(20))).Last();
@@ -264,6 +278,91 @@ public sealed class FairUseTests(AppFixture app)
         Assert.Matches(@"^\S+, chat, waited \d+ s: The model is needed for others now$", audit["line.remove"].Detail);
         Assert.Equal(name, audit["line.stop"].Target);
         Assert.Matches(@"^\S+, chat, ran \d+ s: A runaway agent$", audit["line.stop"].Detail);
+    }
+
+    [Fact]
+    public async Task An_answer_an_admin_stops_before_its_first_word_is_kept_stopped_and_says_why()
+    {
+        await using var f = app.Create(app.ConnectionStringFor("kickearly_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
+            new Dictionary<string, string?> { ["Auth:DataKey"] = "a-data-key-for-fair-tests" });
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        // A tool whose server is slow to answer holds the answer in its place, before its first word.
+        var made = await admin.PostAsync("/api/admin/tools/servers", new { name = "Slow Desk", url = "https://tools.example.test/mcp", headerName = "X-Api-Key", headerValue = FakeMcp.ApiKey });
+        var toolId = (await admin.JsonAsync(made)).GetProperty("toolId").GetString()!;
+        var name = "ke" + Guid.NewGuid().ToString("N")[..10];
+        var person = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
+        var b = await new TestBrowser(f).SignedInAsync(name, person.GetProperty("password").GetString()!);
+        var chat = (await b.JsonAsync(await b.PostAsync("/api/chat/conversations", new { tools = new[] { toolId } }))).GetProperty("id").GetGuid();
+
+        app.Mcp.Hold = new TaskCompletionSource();
+        try
+        {
+            int Initializes() { lock (app.Mcp.Calls) { return app.Mcp.Calls.Count(c => c.Method == "initialize"); } }
+            var before = Initializes();
+            var asked = b.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "hello" });
+            for (var i = 0; i < 100 && Initializes() == before; i++)
+            {
+                await Task.Delay(50);
+            }
+            var line = await admin.JsonAsync(await admin.GetAsync("/api/admin/line"));
+            var ticket = Assert.Single(line.GetProperty("running").EnumerateArray()).GetProperty("id").GetGuid();
+            await StatusAssert.Is(HttpStatusCode.OK, await admin.PostAsync($"/api/admin/line/{ticket}/remove", new { reason = "Maintenance on this model", running = true }));
+            List<JsonElement> events = [.. (await (await asked.WaitAsync(TimeSpan.FromSeconds(20))).Content.ReadAsStringAsync())
+                .Split("\n\n", StringSplitOptions.RemoveEmptyEntries).Where(l => l.StartsWith("data: ", StringComparison.Ordinal))
+                .Select(l => JsonDocument.Parse(l[6..]).RootElement)];
+
+            // The answer is kept, stopped, with why: the chat says it when it is read again, not only while it streams.
+            var answer = events.Single(e => e.GetProperty("type").GetString() == "assistant").GetProperty("id").GetGuid();
+            var stopped = events.Last();
+            Assert.Equal(("stopped", answer, "Stopped by an admin: Maintenance on this model"),
+                (stopped.GetProperty("type").GetString(), stopped.GetProperty("id").GetGuid(), stopped.GetProperty("why").GetString()));
+            var saved = (await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{chat}"))).GetProperty("messages").EnumerateArray().Last();
+            Assert.Equal((answer, "stopped", "Stopped by an admin: Maintenance on this model"),
+                (saved.GetProperty("id").GetGuid(), saved.GetProperty("status").GetString(), saved.GetProperty("error").GetString()));
+            Assert.Equal((0, 0), f.Services.GetRequiredService<AnswerGate>().Now());
+        }
+        finally
+        {
+            app.Mcp.Hold?.TrySetResult();
+            app.Mcp.Hold = null;
+        }
+    }
+
+    [Fact]
+    public async Task An_admin_who_saw_a_request_waiting_changes_nothing_once_it_runs_and_a_second_stop_is_not_audited_again()
+    {
+        await using var f = app.Create(app.ConnectionStringFor("kickrace_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
+            new Dictionary<string, string?> { ["Chat:AnswersPerPerson"] = "1" });
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var name = "kr" + Guid.NewGuid().ToString("N")[..10];
+        var person = (await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }))).GetProperty("id").GetGuid();
+        var gate = f.Services.GetRequiredService<AnswerGate>();
+        Task Nothing(AnswerGate.Line _) => Task.CompletedTask;
+        var first = await gate.EnterAsync(person, "m", Nothing, default);
+        var next = gate.EnterAsync(person, "m", Nothing, default);
+        var ticket = Assert.Single(gate.Snapshot().Waiting).Id;
+
+        // Its turn comes while the admin, who saw it waiting, writes why: Remove stops nothing, and says it started.
+        first.Dispose();
+        using var place = await next.WaitAsync(TimeSpan.FromSeconds(5));
+        var started = await admin.PostAsync($"/api/admin/line/{ticket}/remove", new { reason = "The model is needed for others now" });
+        await StatusAssert.Is(HttpStatusCode.Conflict, started);
+        Assert.Equal("started", (await admin.JsonAsync(started)).GetProperty("status").GetString());
+        Assert.False(place.Stopped.IsCancellationRequested);
+
+        // Stopped, then stopped again while it ends: the first reason holds, the second admin is told it, and only the stop is audited.
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.PostAsync($"/api/admin/line/{ticket}/remove", new { reason = "A runaway agent", running = true }));
+        Assert.True(place.Stopped.IsCancellationRequested);
+        var again = await admin.PostAsync($"/api/admin/line/{ticket}/remove", new { reason = "A second admin", running = true });
+        await StatusAssert.Is(HttpStatusCode.Conflict, again);
+        var stopping = await admin.JsonAsync(again);
+        Assert.Equal("already_stopping", stopping.GetProperty("status").GetString());
+        Assert.EndsWith(": A runaway agent", stopping.GetProperty("error").GetString(), StringComparison.Ordinal);
+        Assert.Equal("A runaway agent", place.StopReason);
+        var audit = (await admin.JsonAsync(await admin.GetAsync("/api/admin/audit"))).EnumerateArray()
+            .Where(e => e.GetProperty("action").GetString() is "line.remove" or "line.stop").ToList();
+        Assert.Matches(@"^m, chat, ran \d+ s: A runaway agent$", Assert.Single(audit).GetProperty("detail").GetString()!);
+        Assert.Contains("arena_line_stopped_total{kind=\"chat\"} 1", LineMetrics.Render(gate), StringComparison.Ordinal);
     }
 
     [Fact]

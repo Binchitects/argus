@@ -52,7 +52,7 @@ describe('line', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: 'The model is needed for others now' }))
     await userEvent.type(within(dialog).getByLabelText('Reason'), ' (the review at noon)')
     await userEvent.click(within(dialog).getByRole('button', { name: 'Take it out' }))
-    await waitFor(() => expect(calls.find((c) => c.method === 'POST')).toMatchObject({ path: '/api/admin/line/t2/remove', body: { reason: 'The model is needed for others now (the review at noon)' } }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST')).toMatchObject({ path: '/api/admin/line/t2/remove', body: { reason: 'The model is needed for others now (the review at noon)', running: false } }))
     expect(await screen.findByText('Taken out of the line')).toBeInTheDocument()
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
 
@@ -62,6 +62,34 @@ describe('line', () => {
     await userEvent.type(within(stop).getByLabelText('Reason'), 'A runaway agent')
     await userEvent.click(within(stop).getByRole('button', { name: 'Stop it' }))
     expect(await screen.findByText('It had ended already')).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(calls.find((c) => c.path === '/api/admin/line/t1/remove')).toMatchObject({ body: { reason: 'A runaway agent', running: true } })
+  })
+
+  it('one that moved on while the reason was written is left as it is, and the admin is told: started, or stopped by another admin', async () => {
+    const calls = fakeApi({ ...member, permissions: ['usage.read', 'usage.line'] }, {
+      'GET /api/admin/line': () => ({ json: line }),
+      'POST /api/admin/line/t3/remove': () => ({ status: 409, json: { status: 'started', error: 'It started meanwhile and runs now: nothing was changed. Stop it under Running if it should stop.' } }),
+      'POST /api/admin/line/t1/remove': () => ({ status: 409, json: { status: 'already_stopping', error: 'An admin stopped it already, and it ends in a moment. Their reason holds: A runaway agent' } }),
+    })
+    renderApp('/admin/line')
+
+    // Seen waiting, it runs now: the toast says so, rather than "Taken out of the line".
+    await userEvent.click(await screen.findByRole('button', { name: 'Remove cy’s request on Qwen3-4B' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Take cy’s request out of the line?' })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'A runaway agent' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Take it out' }))
+    expect(await screen.findByText('It started meanwhile')).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(calls.find((c) => c.path === '/api/admin/line/t3/remove')).toMatchObject({ body: { reason: 'A runaway agent', running: false } })
+
+    // Stopped already by another admin: their reason holds, and is shown.
+    await userEvent.click(screen.getByRole('button', { name: 'Stop Ann’s request on Qwen3-4B' }))
+    const stop = await screen.findByRole('dialog', { name: 'Stop Ann’s request?' })
+    await userEvent.type(within(stop).getByLabelText('Reason'), 'Me too')
+    await userEvent.click(within(stop).getByRole('button', { name: 'Stop it' }))
+    expect(await screen.findByText('Already being stopped')).toBeInTheDocument()
+    expect(screen.getByText(/Their reason holds: A runaway agent/)).toBeInTheDocument()
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
 })

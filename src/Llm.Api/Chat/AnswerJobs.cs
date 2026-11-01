@@ -362,10 +362,6 @@ public sealed partial class AnswerJobs : IHostedService
             job.AtOnce = (await access.AnswersAtOnceAsync(user, ct)).Value;
             await work(services, user, conversation, ct);
         }
-        catch (Exception ex) when (ex is AnswerGate.TooLongException or AnswerGate.BusyException or AnswerGate.RemovedException)
-        {
-            job.Emit(new { type = "error", message = ex.Message });
-        }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             // Stopped before a word was written (in line, or reading the chat).
