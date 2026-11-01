@@ -63,10 +63,12 @@ test('every dashboard draws every panel without an error', async ({ page }) => {
   test.skip(noObserve, 'the metric and log panels read Prometheus and Loki')
   const errors = watchConsole(page)
   await page.goto('/admin/dashboards')
-  const links = page.getByRole('list', { name: 'Dashboards' }).getByRole('link')
+  // A list a role's area (LLM and users, System, Hardware): every dashboard in each.
+  const links = page.getByRole('main').getByRole('listitem').getByRole('link')
   await expect(links.first()).toBeVisible()
   const hrefs = await links.evaluateAll((a) => a.map((x) => x.getAttribute('href')!))
-  expect(hrefs.length).toBe(9)
+  expect(hrefs.length).toBeGreaterThanOrEqual(9)
+  expect(hrefs.every((h) => h.startsWith('/admin/dashboards/'))).toBe(true)
   for (const href of hrefs) {
     await page.goto(href)
     await expect(page.locator('main [data-panel]').first()).toBeVisible()
