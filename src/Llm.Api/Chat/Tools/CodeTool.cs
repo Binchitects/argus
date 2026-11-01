@@ -132,7 +132,7 @@ public sealed partial class CodeTool(SandboxClient sandbox, PythonTool files, Ap
                     theirs.AddRange(outcome.Files ?? []);
                     spent = outcome.Cost is { } cost ? (spent ?? 0) + cost : spent;
                     return outcome.IsError ? new JsonObject { ["ok"] = false, ["error"] = outcome.Text } : new JsonObject { ["ok"] = true, ["result"] = outcome.Text };
-                });
+                }, sandbox.InLine(context));
             }
             catch (SandboxException ex)
             {

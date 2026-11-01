@@ -303,7 +303,7 @@ public sealed partial class BlenderTool(BlenderClient blender, AppDbContext db, 
         try
         {
             var inputs = (await files.InputsAsync(context.Conversation.Id, token)).Where(f => extra.All(e => e.Name != f.Name)).Concat(extra).ToList();
-            result = await blender.RunAsync(code, inputs, options.CurrentValue.TimeoutSeconds, token);
+            result = await blender.RunAsync(code, inputs, options.CurrentValue.TimeoutSeconds, token, waiting: blender.InLine(context));
         }
         catch (SandboxException ex)
         {

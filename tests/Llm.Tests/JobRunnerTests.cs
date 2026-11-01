@@ -80,6 +80,67 @@ public sealed class JobRunnerTests : IDisposable
     }
 
     [Fact]
+    public async Task A_job_waits_in_line_while_its_sandbox_answers_saying_how_many_are_ahead_and_its_time_counts_from_its_start()
+    {
+        Beat(started: 1);
+        // Two jobs before it, in line (their ids sort first, as their time does).
+        foreach (var early in new[] { "00000000000000000000000000000001", "00000000000000000000000000000002" })
+        {
+            Directory.CreateDirectory(Path.Combine(_dir, "in", early));
+        }
+        var said = new List<int?>();
+        var running = Client().RunAsync("print(1)", [], timeoutSeconds: 60, CancellationToken.None, waiting: n =>
+        {
+            lock (said)
+            {
+                said.Add(n);
+            }
+            return Task.CompletedTask;
+        });
+        var job = await QueuedAsync2();
+        // Ten minutes in line, the sandbox answering all along: far past the job's own time, it still waits.
+        for (var i = 0; i < 10; i++)
+        {
+            _clock.Now += TimeSpan.FromMinutes(1);
+            Beat(started: 1);
+            await Task.Delay(150);
+        }
+        await Task.Delay(1200);
+        Assert.False(running.IsCompleted, "a job in line is not given up while its sandbox answers");
+        Directory.Delete(Path.Combine(_dir, "in", "00000000000000000000000000000001"));
+        await Task.Delay(1500);
+        // Taken: from now on, its own time.
+        Directory.Delete(Path.Combine(_dir, "in", "00000000000000000000000000000002"));
+        Directory.Move(job, Path.Combine(_dir, "run", Path.GetFileName(job)));
+        await Task.Delay(1500);
+        _clock.Now += TimeSpan.FromSeconds(30);
+        Beat(started: 1);
+        await Task.Delay(1500);
+        Assert.False(running.IsCompleted, "within its own time once it runs");
+        _clock.Now += TimeSpan.FromSeconds(61);
+        Beat(started: 1);
+        await Assert.ThrowsAsync<SandboxException>(() => running.WaitAsync(TimeSpan.FromSeconds(10)));
+        lock (said)
+        {
+            Assert.Equal([2, 1, null], said);
+        }
+    }
+
+    /// <summary>This test's own job: the one whose id is not one of those put in line before it.</summary>
+    private async Task<string> QueuedAsync2()
+    {
+        for (var i = 0; i < 100; i++)
+        {
+            if (Directory.GetDirectories(Path.Combine(_dir, "in")).FirstOrDefault(d => !Path.GetFileName(d).StartsWith('.') && !Path.GetFileName(d).StartsWith("0000000000", StringComparison.Ordinal)) is { } job)
+            {
+                return job;
+            }
+            await Task.Delay(50);
+        }
+        throw new TimeoutException("no job was queued");
+    }
+
+    [Fact]
     public async Task A_runner_that_starts_again_before_taking_the_job_runs_it_still()
     {
         Beat(started: 1);

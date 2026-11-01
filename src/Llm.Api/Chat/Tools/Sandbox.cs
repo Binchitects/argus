@@ -57,8 +57,14 @@ public sealed class SandboxClient(IOptionsMonitor<SandboxOptions> options, TimeP
 /// </summary>
 public abstract class JobRunner(Func<string> dir, string name, string howToStart, TimeProvider clock)
 {
-    /// <summary>Longest a job may wait for a free slot, beyond its own time.</summary>
-    private static readonly TimeSpan QueueAllowance = TimeSpan.FromMinutes(3);
+    /// <summary>
+    /// Longest a job waits in line for a free slot while its sandbox answers (many people at once, a slow 3D render
+    /// ahead): its own time counts from when it starts.
+    /// </summary>
+    public static readonly TimeSpan QueueLimit = TimeSpan.FromMinutes(15);
+
+    /// <summary>Beyond a job's own time, from when it starts, before it is given up (the runner stops it at its time).</summary>
+    private static readonly TimeSpan RunGrace = TimeSpan.FromSeconds(30);
 
     /// <summary>A runner silent this long while it has a job has stopped: the job is not waited for any more.</summary>
     public static readonly TimeSpan SilentLimit = TimeSpan.FromSeconds(30);
@@ -127,8 +133,9 @@ public abstract class JobRunner(Func<string> dir, string name, string howToStart
     /// Runs a job. With <paramref name="calls"/>, its program may call the chat's tools (arena, run_code): each call the
     /// runner relays (calls/&lt;id&gt;/&lt;n&gt;.json) is answered here, one at a time, while the job runs.
     /// </summary>
+    /// <param name="waiting">Told how many jobs are ahead while this one waits in line (the chat shows it beside the call), then null once it runs.</param>
     public async Task<SandboxResult> RunAsync(string code, IReadOnlyList<SandboxFile> files, int timeoutSeconds, CancellationToken ct,
-        Func<string, JsonObject, CancellationToken, Task<JsonObject>>? calls = null)
+        Func<string, JsonObject, CancellationToken, Task<JsonObject>>? calls = null, Func<int?, Task>? waiting = null)
     {
         var id = Guid.CreateVersion7().ToString("N");
         var draft = Path.Combine(Dir, "in", ".tmp-" + id);
@@ -145,7 +152,10 @@ public abstract class JobRunner(Func<string> dir, string name, string howToStart
         Directory.Move(draft, queued);
 
         var done = Path.Combine(Dir, "out", id);
-        var deadline = clock.GetUtcNow() + TimeSpan.FromSeconds(timeoutSeconds) + QueueAllowance;
+        // In line while the job is in in/: as long as the sandbox answers, up to the queue's limit; once taken, its own time.
+        var inLineUntil = clock.GetUtcNow() + QueueLimit;
+        DateTimeOffset? deadline = null;
+        int? ahead = -1;
         // The runner is watched while it has the job: one that stops answering, or starts again (and so drops what it was
         // running), is not waited for until the deadline, which reads as a tool that never answers.
         var startedAt = Heartbeat()?.Started;
@@ -157,14 +167,33 @@ public abstract class JobRunner(Func<string> dir, string name, string howToStart
             while (!Directory.Exists(done))
             {
                 var now = clock.GetUtcNow();
-                if (now > deadline)
+                if (deadline is null && !Directory.Exists(queued))
+                {
+                    deadline = now + TimeSpan.FromSeconds(timeoutSeconds) + RunGrace;
+                }
+                if (deadline is null && now > inLineUntil)
                 {
                     TryDelete(queued);
+                    throw new SandboxException($"{name} is busy: this job waited {QueueLimit.TotalMinutes:0} minutes in line behind others and was not run. Try again later; "
+                        + "an admin can give it more room (its jobs at once, in .env).");
+                }
+                if (deadline is { } end && now > end)
+                {
                     throw new SandboxException("The sandbox did not answer in time: it may be busy. Try again in a minute.");
                 }
                 if (Environment.TickCount64 - looked >= 1000)
                 {
                     looked = Environment.TickCount64;
+                    if (waiting is not null)
+                    {
+                        // The jobs the runner takes before this one (it takes them in their ids' order, which is their time's).
+                        int? now2 = deadline is null ? Ahead(id) : null;
+                        if (now2 != ahead)
+                        {
+                            ahead = now2;
+                            await waiting(now2);
+                        }
+                    }
                     var beat = Heartbeat();
                     if (beat is null || now.ToUnixTimeMilliseconds() / 1000.0 - beat.Value.At > 20)
                     {
@@ -226,6 +255,32 @@ public abstract class JobRunner(Func<string> dir, string name, string howToStart
         }
     }
 
+    /// <summary>What the chat shows beside a call whose job waits in line: how many are ahead, then nothing once it runs.</summary>
+    public Func<int?, Task>? InLine(ToolContext context) => context.Progress is not { } progress ? null : ahead => progress.ReportAsync(new McpProgress(0, null,
+        ahead switch
+        {
+            null => null,
+            0 => $"Waiting for {Short}: next in line",
+            1 => $"Waiting for {Short}: 1 job ahead",
+            var n => $"Waiting for {Short}: {n} jobs ahead",
+        }));
+
+    /// <summary>Its name in a line ("the 3D sandbox"), from its name ("The 3D sandbox (Blender)").</summary>
+    private string Short => (name.IndexOf(" (", StringComparison.Ordinal) is var at and > 0 ? name[..at] : name) is var s && s.StartsWith("The ", StringComparison.Ordinal) ? "the " + s[4..] : s;
+
+    /// <summary>How many jobs wait in line before this one.</summary>
+    private int Ahead(string id)
+    {
+        try
+        {
+            return Directory.GetDirectories(Path.Combine(Dir, "in")).Select(Path.GetFileName).Count(n => n is { } x && !x.StartsWith('.') && string.CompareOrdinal(x, id) < 0);
+        }
+        catch (IOException)
+        {
+            return 0;
+        }
+    }
+
     private static void TryDelete(string dir)
     {
         try
@@ -284,7 +339,7 @@ public sealed class PythonTool(SandboxClient sandbox, AppDbContext db, IOptionsM
             SandboxResult result;
             try
             {
-                result = await sandbox.RunAsync(code, await InputsAsync(context.Conversation.Id, token), options.CurrentValue.TimeoutSeconds, token);
+                result = await sandbox.RunAsync(code, await InputsAsync(context.Conversation.Id, token), options.CurrentValue.TimeoutSeconds, token, waiting: sandbox.InLine(context));
             }
             catch (SandboxException ex)
             {

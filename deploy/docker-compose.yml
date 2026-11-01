@@ -392,10 +392,13 @@ services:
     cap_drop: [ALL]
     cap_add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER, KILL]
     security_opt: [no-new-privileges:true]
-    pids_limit: 256
-    mem_limit: 4g
-    cpus: 2
-    tmpfs: ["/work:size=1g,mode=0711", "/tmp:size=64m,mode=0700"]
+    # Its jobs at once and its room (.env: SANDBOX_SLOTS, SANDBOX_MEMORY, SANDBOX_CPUS); more wait in line, the chat
+    # saying how many are ahead. Each job has at most SANDBOX_JOB_MEMORY_MB of the memory.
+    environment: { SANDBOX_SLOTS: "${SANDBOX_SLOTS:-2}", SANDBOX_JOB_MEMORY_MB: "${SANDBOX_JOB_MEMORY_MB:-3072}" }
+    pids_limit: ${SANDBOX_PIDS:-256}
+    mem_limit: ${SANDBOX_MEMORY:-7g}
+    cpus: ${SANDBOX_CPUS:-2}
+    tmpfs: ["/work:size=${SANDBOX_WORK:-1g},mode=0711", "/tmp:size=64m,mode=0700"]
     volumes: [sandbox:/jobs]
 
   # The browser agent's browser (the chat's Browser tool): Debian's Chromium, headless, driven by the app over its
@@ -434,11 +437,12 @@ services:
     cap_drop: [ALL]
     cap_add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER, KILL]
     security_opt: [no-new-privileges:true]
-    environment: { SANDBOX_SLOTS: "1", SANDBOX_MAX_TIMEOUT: "600" }
+    # Its jobs at once and its room (.env: BLENDER_SLOTS, BLENDER_MEMORY, BLENDER_CPUS): a render takes the CPUs it has.
+    environment: { SANDBOX_SLOTS: "${BLENDER_SLOTS:-1}", SANDBOX_MAX_TIMEOUT: "600", SANDBOX_JOB_MEMORY_MB: "${BLENDER_JOB_MEMORY_MB:-3072}" }
     pids_limit: 512
-    mem_limit: 8g
-    cpus: 4
-    tmpfs: ["/work:size=4g,mode=0711", "/tmp:size=1g,mode=0700"]
+    mem_limit: ${BLENDER_MEMORY:-8g}
+    cpus: ${BLENDER_CPUS:-4}
+    tmpfs: ["/work:size=${BLENDER_WORK:-4g},mode=0711", "/tmp:size=1g,mode=0700"]
     volumes: [blender:/jobs]
 
   # The science lab's proof checker: Lean 4 with Mathlib, run as the sandbox is (no network, a read-only root, each
@@ -456,10 +460,10 @@ services:
     cap_drop: [ALL]
     cap_add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER, KILL]
     security_opt: [no-new-privileges:true]
-    environment: { SANDBOX_SLOTS: "2", SANDBOX_MAX_TIMEOUT: "300" }
+    environment: { SANDBOX_SLOTS: "${LEAN_SLOTS:-2}", SANDBOX_MAX_TIMEOUT: "300" }
     pids_limit: 512
-    mem_limit: 14g
-    cpus: 4
+    mem_limit: ${LEAN_MEMORY:-14g}
+    cpus: ${LEAN_CPUS:-4}
     tmpfs: ["/work:size=1g,mode=0711", "/tmp:size=512m,mode=0700"]
     volumes: [lean:/jobs]
 
