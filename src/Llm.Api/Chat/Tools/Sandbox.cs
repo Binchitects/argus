@@ -178,6 +178,12 @@ public abstract class JobRunner(Func<string> dir, string name, string howToStart
         await File.WriteAllTextAsync(Path.Combine(draft, "job.json"),
             new JsonObject { ["code"] = code, ["timeout"] = timeoutSeconds, ["files"] = new JsonArray([.. names.Select(n => (JsonNode)n)]), ["calls"] = calls is null ? null : true }.ToJsonString(), ct);
         var queued = Path.Combine(Dir, "in", id);
+        // Not while an admin's reset is asked: the runner would only give it back.
+        if (File.Exists(ResetPath))
+        {
+            TryDelete(draft);
+            throw new SandboxException($"{name} is being reset by an admin: try again in a minute.");
+        }
         Directory.Move(draft, queued);
 
         var done = Path.Combine(Dir, "out", id);
@@ -186,8 +192,10 @@ public abstract class JobRunner(Func<string> dir, string name, string howToStart
         DateTimeOffset? deadline = null;
         int? ahead = -1;
         // The runner is watched while it has the job: one that stops answering, or starts again (and so drops what it was
-        // running), is not waited for until the deadline, which reads as a tool that never answers.
-        var startedAt = Heartbeat()?.Started;
+        // running), is not waited for until the deadline, which reads as a tool that never answers. The runner that has it
+        // is the one there when it left in/ (each says when it started before it takes a job), not when it was written: a
+        // runner that started again meanwhile runs it.
+        double? startedAt = null;
         DateTimeOffset? silentSince = null;
         var looked = Environment.TickCount64;
         try
@@ -199,6 +207,7 @@ public abstract class JobRunner(Func<string> dir, string name, string howToStart
                 if (deadline is null && !Directory.Exists(queued))
                 {
                     deadline = now + TimeSpan.FromSeconds(timeoutSeconds) + RunGrace;
+                    startedAt = Heartbeat()?.Started;
                 }
                 if (deadline is null && now > inLineUntil)
                 {

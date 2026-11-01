@@ -63,6 +63,16 @@ app.kubernetes.io/instance: {{ .root.Release.Name }}
 {{ .Values.persistence.models.existingClaim | default "arena-models" }}
 {{- end }}
 
+{{/* A pod's annotation with a checksum of the chart's files it runs from arena-config, (list $ "router.sh" ...): a
+subPath mount never sees the ConfigMap change, so a change to one of them rolls the pod. Its own files only: a change
+to another's leaves its models loaded. */}}
+{{- define "arena.scriptsChecksum" -}}
+{{- $root := first . -}}
+{{- $files := dict -}}
+{{- range rest . }}{{ $_ := set $files . ($root.Files.Get (print "files/" .)) }}{{ end -}}
+checksum/scripts: {{ toJson $files | sha256sum }}
+{{- end }}
+
 {{/* Pod settings every pod shares. */}}
 {{- define "arena.podDefaults" -}}
 enableServiceLinks: false

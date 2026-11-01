@@ -6,8 +6,9 @@ namespace Llm.Tests;
 
 /// <summary>
 /// A sandbox job while its runner stops answering or starts again (runner.py's heartbeat): the job is given up within
-/// seconds, not after its whole time and the queue's (minutes the tool seems not to answer). One an admin's reset stops,
-/// or never runs, tells its caller so.
+/// seconds, not after its whole time and the queue's (minutes the tool seems not to answer); one a runner took after it
+/// started again is not lost. One an admin's reset stops, or never runs, tells its caller so, and none is written while
+/// a reset is asked.
 /// </summary>
 public sealed class JobRunnerTests : IDisposable
 {
@@ -70,10 +71,20 @@ public sealed class JobRunnerTests : IDisposable
     public async Task A_runner_that_starts_again_while_it_runs_the_job_has_lost_it_and_says_so()
     {
         Beat(started: 1);
-        var running = Client().RunAsync("print(1)", [], timeoutSeconds: 600, CancellationToken.None);
+        var taken = new TaskCompletionSource();
+        var running = Client().RunAsync("print(1)", [], timeoutSeconds: 600, CancellationToken.None, waiting: n =>
+        {
+            if (n is null)
+            {
+                taken.TrySetResult();
+            }
+            return Task.CompletedTask;
+        });
         var job = await QueuedAsync();
-        // Taken (it runs), then the runner starts again: prepare() dropped what was in run/.
+        // Taken (it runs), and seen taken by the runner that started at 1 (no longer in line); then the runner starts
+        // again: prepare() dropped what was in run/.
         Directory.Move(job, Path.Combine(_dir, "run", Path.GetFileName(job)));
+        await taken.Task.WaitAsync(TimeSpan.FromSeconds(10));
         Directory.Delete(Path.Combine(_dir, "run", Path.GetFileName(job)), recursive: true);
         Beat(started: 2);
         var error = await Assert.ThrowsAsync<SandboxException>(() => running.WaitAsync(TimeSpan.FromSeconds(10)));
@@ -195,8 +206,13 @@ public sealed class JobRunnerTests : IDisposable
         Beat(started: 2);
         await Task.Delay(2500);
         Assert.False(running.IsCompleted, "the job waits in in/ for the new runner");
-        // The new runner takes it and answers.
+        // The new runner takes it: the runner that runs it is the one that took it, so it is not lost.
         var id = Path.GetFileName(job);
+        Directory.Move(job, Path.Combine(_dir, "run", id));
+        job = Path.Combine(_dir, "run", id);
+        await Task.Delay(1500);
+        Assert.False(running.IsCompleted, "a job the new runner took is not lost with the one before it");
+        // It answers.
         var draft = Path.Combine(_dir, "out", ".tmp-" + id);
         Directory.CreateDirectory(Path.Combine(draft, "files"));
         await File.WriteAllTextAsync(Path.Combine(draft, "result.json"), """{"exit_code":0,"timed_out":false,"cancelled":false,"stdout":"1\n","stdout_cut":false,"stderr":"","stderr_cut":false,"killed":null,"error":null,"skipped_files":[],"duration_ms":5}""");
@@ -204,5 +220,17 @@ public sealed class JobRunnerTests : IDisposable
         Directory.Move(draft, Path.Combine(_dir, "out", id));
         var result = await running.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.Equal("1\n", result.Stdout);
+    }
+
+    [Fact]
+    public async Task No_job_is_written_while_an_admins_reset_is_asked()
+    {
+        // The runner gives back what waits when it resets: a job written meanwhile would only be given back too.
+        Beat(started: 1);
+        await File.WriteAllTextAsync(Path.Combine(_dir, JobRunner.ResetFile), "gen=1\naction=reset\nby=ada\nat=1\n");
+        var refused = await Assert.ThrowsAsync<SandboxException>(() =>
+            Client().RunAsync("print(1)", [new SandboxFile("data.csv", [1, 2])], timeoutSeconds: 60, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("The Python sandbox is being reset by an admin: try again in a minute.", refused.Message);
+        Assert.Empty(Directory.GetFileSystemEntries(Path.Combine(_dir, "in")));
     }
 }
