@@ -451,8 +451,9 @@ service: acceptable use, the privacy notice, links to the full policies
 (Markdown), with a title and a version. The sign-in page shows it to anyone.
 After signing in (with a password, the directory or company sign-in), each
 person accepts its current version before anything else: until they have, the
-app answers nothing but the notice (`403 notice`). A new version is accepted
-again by everyone at their next step. Each acceptance is kept with its version,
+app answers nothing but the notice (`403 notice`). Who must also set up
+two-factor sign-in accepts the notice first, then sets it up. A new version is
+accepted again by everyone at their next step. Each acceptance is kept with its version,
 when and from where, is in the audit log (`notice.accept`) and in the evidence
 (`notice.csv`). API keys are not sessions and are not held up.
 
