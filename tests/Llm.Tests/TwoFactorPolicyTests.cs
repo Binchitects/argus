@@ -52,6 +52,10 @@ public sealed class TwoFactorPolicyTests(AppFixture app)
         }
         await StatusAssert.Is(HttpStatusCode.Forbidden, await person.GetAsync("/api/account/keys"));
         await StatusAssert.Is(HttpStatusCode.OK, await person.GetAsync("/api/info"));
+        // On the way to another app's sign-in through this one: the web's setup first, then on to the same request.
+        var held = await person.GetAsync("/connect/authorize?client_id=langfuse&response_type=code&state=s1");
+        Assert.Equal(HttpStatusCode.Redirect, held.StatusCode);
+        Assert.Equal("/continue?rd=" + Uri.EscapeDataString("/connect/authorize?client_id=langfuse&response_type=code&state=s1"), held.Headers.Location!.ToString());
         var status = await person.JsonAsync(await person.GetAsync("/api/account/2fa"));
         Assert.Equal("the company requires it of everyone", status.GetProperty("required").GetString());
 

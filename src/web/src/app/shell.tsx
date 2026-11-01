@@ -14,6 +14,7 @@ import { HelpButton, HelpPanel } from '@/help/help-button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { infoQuery, meQuery, type AppInfo, type Me } from '@/lib/api'
 import { AcceptNotice } from './accept-notice'
+import { continueTo } from './continue'
 import { SetUpTwoFactor } from './set-up-two-factor'
 import { cn } from '@/lib/utils'
 import { CommandMenu } from './command-menu'
@@ -39,9 +40,17 @@ export function Shell() {
     if (me.data === null) navigate(`/login?rd=${encodeURIComponent(location.pathname + location.search)}`, { replace: true })
   }, [me.data, location.pathname, location.search, navigate])
 
+  // Sent here by the app to take a step of signing in first: once nothing holds it back, on to where it was going.
+  const next = continueTo(location)
+  const ready = me.data && !me.data.mustAcceptNotice && !me.data.mustSetUpTwoFactor
+  useEffect(() => {
+    if (ready && next) window.location.replace(next)
+  }, [ready, next])
+
   if (me.isPending || !me.data) return <ShellSkeleton />
   if (me.data.mustAcceptNotice) return <AcceptNotice me={me.data} />
   if (me.data.mustSetUpTwoFactor) return <SetUpTwoFactor me={me.data} />
+  if (next) return <ShellSkeleton />
   return <SignedIn me={me.data} />
 }
 

@@ -74,7 +74,8 @@ public static class NoticeGate
 {
     /// <summary>
     /// A session whose person has not accepted the current notice reaches only who is signed in, signing in and out, the notice,
-    /// setting up two-factor sign-in and the app's info: the rest answers 403 notice. Keys are not sessions: they pass.
+    /// setting up two-factor sign-in and the app's info: the rest answers 403 notice, and a browser on its way to another app's
+    /// sign-in (/connect/authorize) is shown the notice first, then sent on. Keys are not sessions: they pass.
     /// </summary>
     public static IApplicationBuilder UseNoticeGate(this IApplicationBuilder app) =>
         app.Use(async (ctx, next) =>
@@ -83,10 +84,14 @@ public static class NoticeGate
             if (ctx.User.Identity is { IsAuthenticated: true, AuthenticationType: var scheme } && scheme == Microsoft.AspNetCore.Identity.IdentityConstants.ApplicationScheme
                 && (path.StartsWithSegments("/api") || path.StartsWithSegments("/connect"))
                 && !path.StartsWithSegments("/api/auth") && !path.StartsWithSegments("/api/account/notice") && !path.StartsWithSegments("/api/account/2fa")
-                && !path.StartsWithSegments("/api/info")
+                && !path.StartsWithSegments("/api/info") && !SessionGates.IsSignOut(path)
                 && Guid.TryParse(ctx.User.FindFirstValue(ClaimTypes.NameIdentifier), out var id)
                 && await ctx.RequestServices.GetRequiredService<Notice>().MustAcceptAsync(id, ctx.RequestAborted))
             {
+                if (await SessionGates.SendBrowserOnAsync(ctx))
+                {
+                    return;
+                }
                 ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
                 await ctx.Response.WriteAsJsonAsync(new { status = "notice", error = "Read and accept the notice first." });
                 return;

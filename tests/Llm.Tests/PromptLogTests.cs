@@ -118,7 +118,8 @@ public sealed class PromptLogTests(AppFixture app)
         using (var req = new HttpRequestMessage(HttpMethod.Post, new Uri("/v1/chat/completions", UriKind.Relative)))
         {
             var parts = new object[] { new { type = "text", text = "Describe it." }, new { type = "image_url", image_url = new { url = "data:image/png;base64," + Convert.ToBase64String(Png) } } };
-            req.Content = new StringContent(JsonSerializer.Serialize(new { model = "Qwen3.8-Flash-Next", messages = new object[] { new { role = "user", content = parts } } }), Encoding.UTF8, "application/json");
+            // A system message first, as text: the other tests read each request's first message as a string, from the one fake model they share.
+            req.Content = new StringContent(JsonSerializer.Serialize(new { model = "Qwen3.8-Flash-Next", messages = new object[] { new { role = "system", content = "Answer briefly." }, new { role = "user", content = parts } } }), Encoding.UTF8, "application/json");
             req.Headers.Authorization = new("Bearer", made.GetProperty("apiKey").GetString()!);
             await (await client.SendAsync(req)).Content.ReadAsStringAsync();
         }

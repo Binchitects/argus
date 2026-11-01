@@ -57,6 +57,52 @@ public sealed class NoticeTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Signing_in_to_another_app_through_this_one_shows_the_notice_first_and_goes_on_after_it_is_accepted()
+    {
+        await using var f = app.Create(app.ConnectionStringFor("notice_oidc_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), new Dictionary<string, string?>
+        {
+            ["Notice:Text"] = "Use this service for work.",
+            ["Notice:Version"] = "1",
+        });
+        const string callback = "https://traces.llm.test/api/auth/callback/custom";
+        var authorize = Microsoft.AspNetCore.WebUtilities.QueryHelpers.AddQueryString("/connect/authorize", new Dictionary<string, string?>
+        {
+            ["client_id"] = "langfuse", ["response_type"] = "code", ["redirect_uri"] = callback, ["scope"] = "openid profile", ["state"] = "s1",
+        });
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+
+        // Not a page of JSON: the web's notice, which goes on to the same request once accepted.
+        var held = await admin.GetAsync(authorize);
+        Assert.Equal(HttpStatusCode.Redirect, held.StatusCode);
+        var to = held.Headers.Location!.ToString();
+        Assert.StartsWith("/continue?rd=", to, StringComparison.Ordinal);
+        var rd = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(to.Split('?', 2)[1])["rd"].ToString();
+        Assert.Equal(authorize, rd);
+        // As form_post sends it: the same request, its fields in the query.
+        using (var form = new HttpRequestMessage(HttpMethod.Post, new Uri("/connect/authorize", UriKind.Relative))
+        {
+            Content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["client_id"] = "langfuse", ["response_type"] = "code", ["redirect_uri"] = callback, ["scope"] = "openid", ["state"] = "s 2",
+            }),
+        })
+        {
+            var posted = await admin.Http.SendAsync(form);
+            Assert.Equal(HttpStatusCode.Redirect, posted.StatusCode);
+            Assert.Equal("/continue?rd=" + Uri.EscapeDataString($"/connect/authorize?client_id=langfuse&response_type=code&redirect_uri={Uri.EscapeDataString(callback)}&scope=openid&state=s%202"),
+                posted.Headers.Location!.ToString());
+        }
+        // Signing out is never held back.
+        Assert.NotEqual(HttpStatusCode.Forbidden, (await admin.GetAsync("/connect/logout")).StatusCode);
+
+        var again = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        await StatusAssert.Is(HttpStatusCode.NoContent, await again.PostAsync("/api/account/notice/accept", new { version = "1" }));
+        var authorized = await again.GetAsync(rd);
+        Assert.Equal(HttpStatusCode.Redirect, authorized.StatusCode);
+        Assert.StartsWith(callback, authorized.Headers.Location!.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     [Trait("Control", "GOV-02")]
     public async Task Without_a_notice_nothing_waits_and_the_check_asks_for_one()
     {
