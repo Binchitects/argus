@@ -76,7 +76,7 @@ class CodeArenaPackageTests(unittest.TestCase):
         return subprocess.run([sys.executable, str(self.root / "arenactl"), *args], cwd=self.root, env=env, capture_output=True, text=True, timeout=120)
 
     def test_Each_system_gets_its_package_with_the_program_alone_a_readme_and_the_licences(self):
-        r = self.run_it("code-arena", "linux-x64", "win-x64")
+        r = self.run_it("code-arena", "linux-x64", "win-x64", "win-arm64")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("Code Arena's page: built already", r.stdout)
         dist = self.root / "dist"
@@ -94,10 +94,13 @@ class CodeArenaPackageTests(unittest.TestCase):
             self.assertIn("code-arena-9.9.9-win-x64/code-arena.exe", z.namelist())
             # Notepad's line ends.
             self.assertIn(b"\r\n", z.read("code-arena-9.9.9-win-x64/README.txt"))
+        with zipfile.ZipFile(dist / "code-arena-9.9.9-win-arm64.zip") as z:
+            self.assertIn("code-arena-9.9.9-win-arm64/code-arena.exe", z.namelist())
+            self.assertIn(b"Windows (ARM64)", z.read("code-arena-9.9.9-win-arm64/README.txt"))
         # Only the program is kept from the publish.
         self.assertEqual(sorted(p.name for p in (dist / "code-arena" / "linux-x64").iterdir()), ["code-arena"])
         sums = (dist / "SHA256SUMS").read_text().splitlines()
-        self.assertEqual([line.split()[1] for line in sums], ["code-arena-9.9.9-linux-x64.tar.gz", "code-arena-9.9.9-win-x64.zip"])
+        self.assertEqual([line.split()[1] for line in sums], ["code-arena-9.9.9-linux-x64.tar.gz", "code-arena-9.9.9-win-arm64.zip", "code-arena-9.9.9-win-x64.zip"])
 
     def test_The_same_files_give_the_same_package(self):
         self.assertEqual(self.run_it("code-arena", "linux-x64").returncode, 0)

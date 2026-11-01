@@ -25,6 +25,8 @@ internal sealed record ToolResult(string Text, bool Error = false)
     public FileChange? Change { get; init; }
     /// <summary>Pictures for the model (a screenshot): they follow the tool's result as a message of their own.</summary>
     public JsonArray? Pictures { get; init; }
+    /// <summary>What sub-agents did for the call (task): each one's thinking, tool calls with their results, and words, as the page shows them.</summary>
+    public JsonArray? Agents { get; init; }
 }
 
 /// <summary>A file as an edit found it (null: it was new) and as it left it.</summary>
@@ -83,7 +85,7 @@ internal sealed class ToolContext
     /// <summary>Runs steps of the plan at once (run_steps); null where none may (a sub-agent).</summary>
     public Func<IReadOnlyList<int>, CancellationToken, Task<string>>? RunSteps { get; set; }
     /// <summary>Runs a sub-agent (description, prompt, which of the person's own if any) and returns its report.</summary>
-    public Func<string, string, string?, CancellationToken, Task<string>>? SubAgent { get; set; }
+    public Func<string, string, string?, CancellationToken, Task<(string Report, JsonObject? Work)>>? SubAgent { get; set; }
     /// <summary>Whether a step's check is a command to run before the step is done (its first word a program here); null: none is.</summary>
     public Func<string, bool>? IsCommand { get; set; }
     /// <summary>Told when a step of the plan begins (doing): the checkpoint before it, for /plan undo.</summary>

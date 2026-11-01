@@ -570,7 +570,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         };
         Context.CharsPerToken = () => Agent.CharsPerToken;
         Context.ResultChars = () => Agent.KeepWhole;
-        Context.SubAgent = (description, prompt, agent, token) => RunSubAgentAsync(inputs, description, prompt, agent, token);
+        Context.SubAgent = (description, prompt, agent, token) => RunSubAgentWorkAsync(inputs, description, prompt, agent, token);
         Context.RunSteps = RunStepsAsync;
         Agent.Critique = Config.PlanCritique ? (plan, token) => CritiqueAsync(inputs, plan, token) : null;
         Agent.Ground = GroundAsync;
@@ -1550,7 +1550,14 @@ internal sealed partial class Runtime : IAsyncDisposable
         return notes.Length == 0 || notes.StartsWith(PlanHolds, StringComparison.OrdinalIgnoreCase) ? null : notes.Length <= 4000 ? notes : notes[..4000];
     }
 
-    private async Task<string> RunSubAgentAsync(SystemPrompt.Inputs inputs, string description, string prompt, string? agent, CancellationToken ct)
+    private async Task<string> RunSubAgentAsync(SystemPrompt.Inputs inputs, string description, string prompt, string? agent, CancellationToken ct) =>
+        (await RunSubAgentWorkAsync(inputs, description, prompt, agent, ct)).Report;
+
+    /// <summary>
+    /// A sub-agent's run, and what it did: for a task call, its steps go to the page as it works (the call's "agent"
+    /// events) and are kept with the result.
+    /// </summary>
+    private async Task<(string Report, JsonObject? Work)> RunSubAgentWorkAsync(SystemPrompt.Inputs inputs, string description, string prompt, string? agent, CancellationToken ct)
     {
         CustomAgent? own = null;
         if (agent is { Length: > 0 } && (own = Extensions.Agents.FirstOrDefault(a => string.Equals(a.Name, agent, StringComparison.OrdinalIgnoreCase))) is null)
@@ -1580,8 +1587,25 @@ internal sealed partial class Runtime : IAsyncDisposable
             MaxSteps = 60,
             Compaction = Compaction,
         };
-        var report = await sub.RunAsync(prompt, Turn ?? new Spend(), ct);
-        return report.Trim().Length > 0 ? report : $"The sub-agent ({description}) returned no report.";
+        SubAgentWork? work = null;
+        if (Agent.CurrentCall.Value is { Length: > 0 } call)
+        {
+            work = new SubAgentWork(call, description, prompt, Agent.Events);
+            sub.Events = work;
+            work.Start();
+        }
+        string report;
+        try
+        {
+            report = await sub.RunAsync(prompt, Turn ?? new Spend(), ct);
+        }
+        catch (Exception e) when (work is not null)
+        {
+            work.Done(model.Name, e is OperationCanceledException ? "Stopped." : e.Message);
+            throw;
+        }
+        work?.Done(model.Name, null);
+        return (report.Trim().Length > 0 ? report : $"The sub-agent ({description}) returned no report.", work?.Json);
     }
 
     /// <summary>An MCP tool as the model sees it, calling the server when run; a call that finds the server gone has it connect again.</summary>

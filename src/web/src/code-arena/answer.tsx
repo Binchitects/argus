@@ -16,7 +16,7 @@ import { NoticeLine, Thinking, ToolCard } from '@/pages/chat/parts'
 import type { Quote } from '@/pages/chat/quote'
 import { QuotePartDialog } from '@/pages/chat/quote-parts'
 import { AnswerAgainMenu, type AgainChange } from '@/pages/chat/turns'
-import type { ChatConfig, Message } from '@/pages/chat/types'
+import type { AgentWork, ChatConfig, Message } from '@/pages/chat/types'
 import type { FileDiff } from './api'
 import { rawFileUrl } from './ide-api'
 import { mediaNamed } from './media'
@@ -236,6 +236,8 @@ interface AnswerProps {
   /** Laya's probabilities for a command waiting, by call. */
   risks?: Record<string, string>
   calls?: Record<string, ToolRunning>
+  /** Sub-agents of task calls, as they work. */
+  agents?: Record<string, AgentWork[]>
   diffs: Record<string, FileDiff>
   onDecide: (callId: string, answer: 'allow' | 'always' | 'deny') => void
   /** Puts part of this answer (chosen by keyboard, in a dialog) above the message box as a quote. */
@@ -254,7 +256,7 @@ function sameAnswer(a: AnswerProps, b: AnswerProps): boolean {
   if (a.live !== b.live || a.thinkingSince !== b.thinkingSince || a.notices !== b.notices || a.config !== b.config || a.onDecide !== b.onDecide || a.onQuote !== b.onQuote) return false
   if (a.question !== b.question || a.onAgain !== b.onAgain) return false
   if (a.answer.length !== b.answer.length || a.answer.some((m, i) => m !== b.answer[i])) return false
-  if (b.live && (a.waiting !== b.waiting || a.always !== b.always || a.risks !== b.risks || a.calls !== b.calls)) return false
+  if (b.live && (a.waiting !== b.waiting || a.always !== b.always || a.risks !== b.risks || a.calls !== b.calls || a.agents !== b.agents)) return false
   return b.answer.every((m) => m.role !== 'tool' || a.diffs[m.id] === b.diffs[m.id])
 }
 
@@ -263,7 +265,7 @@ function sameAnswer(a: AnswerProps, b: AnswerProps): boolean {
  * diffs and questions, and a line with the model, time and tokens (the share
  * read from the cache with them), as Arena's chat shows an answer.
  */
-export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince, notices, config, waiting, always, risks, calls, diffs, onDecide, onQuote, question, onAgain }: AnswerProps) {
+export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince, notices, config, waiting, always, risks, calls, agents, diffs, onDecide, onQuote, question, onAgain }: AnswerProps) {
   const [quoting, setQuoting] = useState(false)
   const results = new Map(answer.filter((m) => m.role === 'tool').map((m) => [m.toolCallId, m]))
   const assistants = answer.filter((m) => m.role === 'assistant')
@@ -296,7 +298,7 @@ export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince
               const diff = result ? diffs[result.id] : undefined
               return (
                 <div key={t.id}>
-                  <ToolCard call={t} result={result} live={live} waiting={asking} progress={calls?.[t.id]} />
+                  <ToolCard call={t} result={result} live={live} waiting={asking} progress={calls?.[t.id]} agents={agents?.[t.id]} />
                   {result && result.status === 'complete' && !result.error && <OpenFile name={t.function.name} args={t.function.arguments} diff={diff} said={result.content} />}
                   {result && result.status === 'complete' && <MadeMedia said={result.content} />}
                   {diff && <DiffView diff={diff} />}

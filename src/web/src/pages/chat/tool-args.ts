@@ -124,6 +124,17 @@ export function partsOf(raw: string): { title: string; instructions: string }[] 
   }
 }
 
+/** The parts of a call that hands work to sub-agents: a delegate call's, or Code Arena's task (one, its description and prompt). */
+export function agentParts(name: string, raw: string): { title: string; instructions: string }[] {
+  if (name !== 'task') return partsOf(raw)
+  try {
+    const a = JSON.parse(raw || '{}') as { description?: unknown; prompt?: unknown }
+    return [{ title: String(a.description ?? 'task'), instructions: String(a.prompt ?? '') }]
+  } catch {
+    return []
+  }
+}
+
 /** A delegate call in a line: how many parts, and their titles. */
 export function partsSummary(raw: string): [string, string][] {
   const parts = partsOf(raw)

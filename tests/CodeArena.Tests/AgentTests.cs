@@ -334,6 +334,20 @@ public sealed class AgentTests : IDisposable
         Assert.DoesNotContain("run_shell", tools);
         Assert.DoesNotContain("task", tools);
         Assert.Contains("⎿ ", h.Err);
+
+        // What it did is kept with the task's result, beside the message the model reads, and the page shows it.
+        var data = SessionStore.Load(Assert.Single(Directory.GetFiles(h.Paths.SessionsDir)));
+        var (place, work) = Assert.Single(data.Agents);
+        Assert.Equal("tool", data.Messages[place]["role"]!.GetValue<string>());
+        Assert.Null(data.Messages[place]["agents"]);
+        var agent = Assert.IsType<JsonObject>(Assert.Single(work));
+        Assert.Equal(("find the parser", "Find where class Parser is defined.", "done"), (agent.Str("title"), agent.Str("instructions"), agent.Str("status")));
+        Assert.Equal("Parser is in src/a.cs:1.", agent.Str("text"));
+        var step = Assert.IsType<JsonObject>(Assert.Single(agent["steps"]!.AsArray()));
+        Assert.Equal("grep", step.Str("name"));
+        Assert.Contains("src/a.cs", step.Str("result"), StringComparison.Ordinal);
+        var shown = History.Messages(data).OfType<JsonObject>().Single(m => m.Str("role") == "tool");
+        Assert.Equal("find the parser", shown["details"]!["agents"]![0]!.Str("title"));
     }
 
     [Fact]

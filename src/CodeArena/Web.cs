@@ -1767,6 +1767,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
 
     void IAgentEvents.Notice(string text) => Notice(text);
 
+    void IAgentEvents.SubAgent(JsonObject e) => Emit(e);
+
     void IAgentEvents.Attached(IReadOnlyList<string> files) =>
         Emit(new JsonObject { ["type"] = "attached", ["id"] = $"m{_rt.Agent.Messages.Count}", ["files"] = new JsonArray([.. files.Select(f => (JsonNode)f)]) });
 
@@ -2094,8 +2096,10 @@ internal static partial class History
                 ["noAccess"] = false,
                 ["summary"] = summary,
                 ["files"] = attached is { Count: > 0 } ? new JsonArray([.. attached.Select(f => (JsonNode)f)]) : null,
-                // Code Arena's own word to the model (the connection dropped), shown as a notice, not as the person's.
-                ["details"] = entry?.Kind == "note" ? new JsonObject { ["note"] = true } : null,
+                // Code Arena's own word to the model (the connection dropped), shown as a notice, not as the person's; a task
+                // call's sub-agents, with what each did.
+                ["details"] = entry?.Kind == "note" ? new JsonObject { ["note"] = true }
+                    : data.Agents.TryGetValue(i, out var agents) ? new JsonObject { ["agents"] = agents.DeepClone() } : null,
             });
         }
         return list;

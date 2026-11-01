@@ -24,6 +24,7 @@ public static class DownloadEndpoints
         ("osx-arm64", "macOS (Apple silicon)"),
         ("osx-x64", "macOS (Intel)"),
         ("win-x64", "Windows (x64)"),
+        ("win-arm64", "Windows (ARM64)"),
     ];
 
     public static void MapDownloads(this IEndpointRouteBuilder app)
@@ -190,7 +191,7 @@ public static class DownloadEndpoints
         $chain.ChainPolicy.ApplicationPolicy.Add([System.Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.3')) | Out-Null
         $sums = [IO.File]::ReadAllBytes((Join-Path $sig 'SHA256SUMS'))
         $key = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPublicKey($leaf)
-        $good = $chain.Build($leaf) -and $key.VerifyData($sums, [IO.File]::ReadAllBytes((Join-Path $sig 'SHA256SUMS.sig')), [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1) -and ([Text.Encoding]::ASCII.GetString($sums) -split "`n" -contains '{sum}  win-x64/code-arena.exe')
+        $good = $chain.Build($leaf) -and $key.VerifyData($sums, [IO.File]::ReadAllBytes((Join-Path $sig 'SHA256SUMS.sig')), [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1) -and ([Text.Encoding]::ASCII.GetString($sums) -split "`n" -contains "$sum  $rid/code-arena.exe")
         Remove-Item -Recurse -Force $sig
         if (-not $good) { Remove-Item $tmp; throw "Code Arena: the build is not the one this Arena's CA signed (or Windows does not trust that CA: certutil -addstore -f Root ca.crt): nothing installed" }
         Write-Host "Signed by $($leaf.GetNameInfo('SimpleName', $false)), checked."
@@ -219,28 +220,35 @@ public static class DownloadEndpoints
         """;
 
     /// <summary>
-    /// The installer for Windows (irm …/install.ps1 | iex): the build checked against its SHA-256, in
-    /// %LOCALAPPDATA%\Programs\code-arena (CODE_ARENA_DIR), that folder on the person's PATH, then how to sign in.
+    /// The installer for Windows (irm …/install.ps1 | iex): the build for the machine (x64, or ARM64 on Windows on Arm)
+    /// checked against its SHA-256, in %LOCALAPPDATA%\Programs\code-arena (CODE_ARENA_DIR), that folder on the person's
+    /// PATH, then how to sign in.
     /// </summary>
     public static string InstallPs1(string arena, IReadOnlyList<CodeArenaBuild> builds, bool isSigned = false)
     {
-        var sum = builds.FirstOrDefault(b => b.Rid == "win-x64")?.Sha256;
-        if (sum is null)
+        var windows = builds.Where(b => b.Rid.StartsWith("win-", StringComparison.Ordinal) && b.Sha256 is not null).ToList();
+        if (windows.Count == 0)
         {
             return "Write-Error 'Code Arena: this Arena has no build for Windows yet (an admin adds them: ./arenactl repair, in a checkout of the release, builds them into the app)'\n";
         }
+        var sums = string.Join("; ", windows.Select(b => $"'{b.Rid}' = '{b.Sha256}'"));
         return $$"""
             # Code Arena from {{arena}}: the build for Windows, checked, on your PATH.
             $ErrorActionPreference = 'Stop'
             $arena = '{{arena}}'
+            # The machine's own system, not this PowerShell's (an x64 one runs emulated on Windows on Arm).
+            $rid = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64') { 'win-arm64' } else { 'win-x64' }
+            $sums = @{ {{sums}} }
+            if (-not $sums.ContainsKey($rid)) { throw "Code Arena: this Arena has no build for $rid yet (an admin adds it: ./arenactl repair, in a checkout of the release)" }
+            $sum = $sums[$rid]
             $dir = if ($env:CODE_ARENA_DIR) { $env:CODE_ARENA_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\code-arena' }
             New-Item -ItemType Directory -Force -Path $dir | Out-Null
             $exe = Join-Path $dir 'code-arena.exe'
             $tmp = "$exe.new"
-            Write-Host 'Downloading Code Arena {{AppInfo.Current.Version}} for Windows...'
-            Invoke-WebRequest -UseBasicParsing -Uri "$arena/api/downloads/code-arena/win-x64" -OutFile $tmp
-            if ((Get-FileHash $tmp -Algorithm SHA256).Hash.ToLowerInvariant() -ne '{{sum}}') { Remove-Item $tmp; throw 'Code Arena: the download does not match its SHA-256: nothing installed' }
-            {{(isSigned ? SignedPs1.Replace("{sum}", sum, StringComparison.Ordinal) : "Write-Host 'Code Arena: this Arena does not sign its builds: checked by its SHA-256 only.'\n")}}Move-Item -Force $tmp $exe
+            Write-Host "Downloading Code Arena {{AppInfo.Current.Version}} for Windows ($rid)..."
+            Invoke-WebRequest -UseBasicParsing -Uri "$arena/api/downloads/code-arena/$rid" -OutFile $tmp
+            if ((Get-FileHash $tmp -Algorithm SHA256).Hash.ToLowerInvariant() -ne $sum) { Remove-Item $tmp; throw 'Code Arena: the download does not match its SHA-256: nothing installed' }
+            {{(isSigned ? SignedPs1 : "Write-Host 'Code Arena: this Arena does not sign its builds: checked by its SHA-256 only.'\n")}}Move-Item -Force $tmp $exe
             $path = [Environment]::GetEnvironmentVariable('Path', 'User')
             if (-not (($path -split ';') -contains $dir)) { [Environment]::SetEnvironmentVariable('Path', "$path;$dir", 'User'); Write-Host "Added $dir to your PATH (new terminals have it)." }
             Write-Host "Code Arena is in $exe. Next, sign in: code-arena login --url $arena"

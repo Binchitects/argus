@@ -40,6 +40,8 @@ internal sealed class SyncEntry
     public string? Kind { get; init; }
     /// <summary>How an answer from the web ended, when not as it should: "stopped", "failed", "declined".</summary>
     public string? Status { get; init; }
+    /// <summary>A tool result's sub-agents' work (task), as the page shows it: kept beside the message, never sent to the model.</summary>
+    public JsonArray? Agents { get; init; }
 
     /// <summary>A tool result's tool: the call it answers, in the messages before it.</summary>
     public static string? ToolName(IReadOnlyList<SyncEntry> stream, int index)
@@ -79,6 +81,8 @@ internal sealed class SessionData
     public long Completion { get; set; }
     /// <summary>Each answer's (by its place in Messages) model and tokens, for the web interface.</summary>
     public Dictionary<int, (string? Model, TokenUsage? Usage)> Answers { get; } = [];
+    /// <summary>Each tool result's (by its place in Messages) sub-agents' work, for the web interface.</summary>
+    public Dictionary<int, JsonArray> Agents { get; } = [];
     /// <summary>The chat in Arena this session is kept in step with; null: none yet (or it was deleted there).</summary>
     public string? Conversation { get; set; }
     /// <summary>The chat in Arena was deleted: the session is no longer kept in step.</summary>
@@ -176,6 +180,10 @@ internal sealed class SessionData
                             Known = (usage, Messages.Count + 1);
                         }
                     }
+                    if (entry["agents"] is JsonArray agents)
+                    {
+                        Agents[Messages.Count] = (JsonArray)agents.DeepClone();
+                    }
                     Messages.Add(m.Clone());
                 }
                 _pending = null;
@@ -255,6 +263,7 @@ internal sealed class SessionData
                 {
                     Messages.Clear();
                     Answers.Clear();
+                    Agents.Clear();
                     Known = null;
                     Messages.AddRange(all.OfType<JsonObject>().Select(c => c.Clone()));
                 }
@@ -374,9 +383,9 @@ internal sealed class SessionStore
     /// A message the session adds, with the model that wrote it and its tokens (an answer), or "note" (<paramref name="kind"/>:
     /// Code Arena's own word to the model, not the person's); Arena is sent it.
     /// </summary>
-    public void Message(JsonObject message, string? model = null, TokenUsage? usage = null, string? kind = null)
+    public void Message(JsonObject message, string? model = null, TokenUsage? usage = null, string? kind = null, JsonArray? agents = null)
     {
-        Write(Line(new SyncEntry { Message = message, At = DateTimeOffset.UtcNow, Model = model, Usage = usage, Kind = kind }));
+        Write(Line(new SyncEntry { Message = message, At = DateTimeOffset.UtcNow, Model = model, Usage = usage, Kind = kind, Agents = agents }));
         Added?.Invoke(message);
     }
 
@@ -413,6 +422,10 @@ internal sealed class SessionStore
         if (e.Status is not null)
         {
             line["status"] = e.Status;
+        }
+        if (e.Agents is not null)
+        {
+            line["agents"] = e.Agents.DeepClone();
         }
         // Last: what the line says of itself is read without it (the list's scan, Head).
         line["message"] = e.Message.Clone();
@@ -612,12 +625,17 @@ internal sealed class SessionStore
                             data.Known = (usage, data.Messages.Count + 1);
                         }
                     }
+                    if (entry["agents"] is JsonArray agents)
+                    {
+                        data.Agents[data.Messages.Count] = (JsonArray)agents.DeepClone();
+                    }
                     pending = null;
                     data.Messages.Add(m.Clone());
                     break;
                 case "compact" when entry["messages"] is JsonArray all:
                     data.Messages.Clear();
                     data.Answers.Clear();
+                    data.Agents.Clear();
                     data.Known = null;
                     pending = null;
                     data.Messages.AddRange(all.OfType<JsonObject>().Select(m => m.Clone()));

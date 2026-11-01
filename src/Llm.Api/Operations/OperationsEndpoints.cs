@@ -383,8 +383,20 @@ public static class OperationsEndpoints
         {
             return probes;
         }
-        // The picture and video servers, one model each (the speech server's several models run in one that always does).
-        var now = (await media.ListAsync(ct)).Where(x => x.Model.Id is null).ToDictionary(x => x.Model.Server, x => x.Now, StringComparer.Ordinal);
+        // The picture and video servers, one model loaded at a time (the speech server's several models run in one that always
+        // does): what each runs now, the model loaded, loading or failed first. A list that cannot be read leaves the probes as
+        // they are: the page shows the services, never an error for one of them.
+        Dictionary<string, string> now;
+        try
+        {
+            now = (await media.ListAsync(ct)).Where(x => x.Model.Id is null).GroupBy(x => x.Model.Server, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.Select(x => x.Now).OrderBy(n => n switch { "loaded" => 0, "loading" or "unloading" => 1, "failed" => 2, _ => 3 }).First(),
+                    StringComparer.Ordinal);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return probes;
+        }
         return [.. probes.Select(p => p.Ok || p.Name is not ("Pictures" or "Video")
             ? p
             : now.GetValueOrDefault(p.Name == "Pictures" ? "imagegen" : "videogen") switch
@@ -411,6 +423,11 @@ public static class OperationsEndpoints
         catch (TaskCanceledException)
         {
             return new Probe(name, purpose, false, "no answer in time");
+        }
+        catch (Exception ex) when (ex is UriFormatException or InvalidOperationException or ArgumentException)
+        {
+            // Its address is not one (a setting left empty or mistyped): that service is not reached, the others are.
+            return new Probe(name, purpose, false, $"its address is not valid ({url}): {ex.Message}");
         }
     }
 

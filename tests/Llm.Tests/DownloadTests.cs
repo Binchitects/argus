@@ -59,12 +59,14 @@ public sealed class DownloadTests(AppFixture app)
             var served = Path.Combine(dir, "served", "api", "downloads", "code-arena");
             Directory.CreateDirectory(Path.Combine(dir, "code-arena", "linux-x64"));
             Directory.CreateDirectory(Path.Combine(dir, "code-arena", "win-x64"));
+            Directory.CreateDirectory(Path.Combine(dir, "code-arena", "win-arm64"));
             Directory.CreateDirectory(served);
             await File.WriteAllTextAsync(Path.Combine(dir, "code-arena", "linux-x64", "code-arena"), "#!/bin/sh\necho code-arena 9.9.9\n");
             await File.WriteAllTextAsync(Path.Combine(dir, "code-arena", "win-x64", "code-arena.exe"), "MZ pretend!");
+            await File.WriteAllTextAsync(Path.Combine(dir, "code-arena", "win-arm64", "code-arena.exe"), "MZ pretend, on Arm!");
             File.Copy(Path.Combine(dir, "code-arena", "linux-x64", "code-arena"), Path.Combine(served, "linux-x64"));
             var sum = Convert.ToHexStringLower(SHA256.HashData(await File.ReadAllBytesAsync(Path.Combine(dir, "code-arena", "linux-x64", "code-arena"))));
-            await File.WriteAllTextAsync(Path.Combine(dir, "code-arena", "SHA256SUMS"), $"{sum}  linux-x64/code-arena\ndef456  win-x64/code-arena.exe\n");
+            await File.WriteAllTextAsync(Path.Combine(dir, "code-arena", "SHA256SUMS"), $"{sum}  linux-x64/code-arena\ndef456  win-x64/code-arena.exe\n789abc  win-arm64/code-arena.exe\n");
             await using var f = app.Create(app.ConnectionStringFor("install_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
                 new Dictionary<string, string?> { ["Downloads:Directory"] = dir });
             using var http = f.CreateClient();
@@ -74,7 +76,10 @@ public sealed class DownloadTests(AppFixture app)
             Assert.Contains($"  linux-x64) sum={sum} ;;", sh, StringComparison.Ordinal);
             Assert.DoesNotContain("def456", sh, StringComparison.Ordinal);
             var ps1 = await http.GetStringAsync("/api/downloads/code-arena/install.ps1");
-            Assert.Contains("-ne 'def456'", ps1, StringComparison.Ordinal);
+            // Each Windows build's SHA-256, the one for the machine's own system chosen as it runs.
+            Assert.Contains("$sums = @{ 'win-x64' = 'def456'; 'win-arm64' = '789abc' }", ps1, StringComparison.Ordinal);
+            Assert.Contains("-ne $sum)", ps1, StringComparison.Ordinal);
+            Assert.Contains("\"$arena/api/downloads/code-arena/$rid\"", ps1, StringComparison.Ordinal);
             Assert.Contains($"$arena = 'https://{AppFixture.Domain}'", ps1, StringComparison.Ordinal);
 
             if (!OperatingSystem.IsLinux() || System.Runtime.InteropServices.RuntimeInformation.OSArchitecture != System.Runtime.InteropServices.Architecture.X64)
@@ -105,6 +110,28 @@ public sealed class DownloadTests(AppFixture app)
             Assert.Equal(1, code);
             Assert.Contains("does not match its SHA-256: nothing installed", output, StringComparison.Ordinal);
             Assert.False(File.Exists(Path.Combine(dir, "bin", "code-arena")));
+
+            // install.ps1 as Windows on Arm runs it (PowerShell is in the SDK's image; the downloads answered from here): the
+            // ARM64 build is the one fetched and checked against its own SHA-256.
+            if (File.Exists("/usr/bin/pwsh"))
+            {
+                var fetched = Path.Combine(dir, "fetched.txt");
+                var mocked = $$"""
+                    function Invoke-WebRequest { param([string]$Uri, [string]$OutFile, [switch]$UseBasicParsing) Add-Content -Path '{{fetched}}' -Value $Uri; Set-Content -Path $OutFile -Value 'MZ' -NoNewline }
+                    $env:LOCALAPPDATA = '{{dir}}'
+                    """ + ps1;
+                await File.WriteAllTextAsync(Path.Combine(dir, "install.ps1"), mocked);
+                var start = new System.Diagnostics.ProcessStartInfo("pwsh", ["-NoProfile", "-NonInteractive", "-File", Path.Combine(dir, "install.ps1")]) { RedirectStandardOutput = true, RedirectStandardError = true };
+                start.Environment["PROCESSOR_ARCHITECTURE"] = "ARM64";
+                using var run = System.Diagnostics.Process.Start(start)!;
+                var said = await run.StandardOutput.ReadToEndAsync() + await run.StandardError.ReadToEndAsync();
+                await run.WaitForExitAsync();
+                Assert.Contains("for Windows (win-arm64)", said, StringComparison.Ordinal);
+                Assert.Equal([$"https://{AppFixture.Domain}/api/downloads/code-arena/win-arm64"], await File.ReadAllLinesAsync(fetched));
+                // The pretend build is not what the list says: nothing installed.
+                Assert.Contains("does not match its SHA-256", said, StringComparison.Ordinal);
+                Assert.False(File.Exists(Path.Combine(dir, "Programs", "code-arena", "code-arena.exe")));
+            }
         }
         finally
         {
@@ -168,7 +195,8 @@ public sealed class DownloadTests(AppFixture app)
             Assert.Contains("is not the one this Arena's CA signed", sh, StringComparison.Ordinal);
             var ps1 = await http.GetStringAsync("/api/downloads/code-arena/install.ps1");
             Assert.Contains("[System.Security.Cryptography.X509Certificates.X509Chain]::new()", ps1, StringComparison.Ordinal);
-            Assert.Contains($"-contains '{winSum}  win-x64/code-arena.exe'", ps1, StringComparison.Ordinal);
+            Assert.Contains($"$sums = @{{ 'win-x64' = '{winSum}' }}", ps1, StringComparison.Ordinal);
+            Assert.Contains("-contains \"$sum  $rid/code-arena.exe\")", ps1, StringComparison.Ordinal);
 
             if (OperatingSystem.IsLinux() && System.Runtime.InteropServices.RuntimeInformation.OSArchitecture == System.Runtime.InteropServices.Architecture.X64
                 && File.Exists("/usr/bin/openssl"))

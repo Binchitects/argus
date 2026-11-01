@@ -237,8 +237,8 @@ internal static class LocalTools
             {
                 throw new ToolError("Sub-agents cannot start sub-agents.");
             }
-            var report = await c.SubAgent(a.Str("description") ?? "task", prompt, a.Str("agent"), ct);
-            return new ToolResult(report) { Display = Fmt.OneLine(report, 160) };
+            var (report, work) = await c.SubAgent(a.Str("description") ?? "task", prompt, a.Str("agent"), ct);
+            return new ToolResult(report) { Display = Fmt.OneLine(report, 160), Agents = work is null ? null : [work] };
         },
     };
 

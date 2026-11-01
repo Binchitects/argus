@@ -74,8 +74,10 @@ says who signed them. Windows' own Authenticode signature (the publisher
 Explorer shows) is not made: it needs a certificate Windows trusts for that.
 
 The systems: `linux-x64`, `linux-arm64`, `osx-arm64` (Apple silicon),
-`osx-x64` and `win-x64` (`code-arena.exe`). `/api/downloads/code-arena` lists
-them with their SHA-256.
+`osx-x64`, `win-x64` and `win-arm64` (Windows on Arm; `code-arena.exe`, with
+the app's icon and its name, maker and version in its properties).
+`/api/downloads/code-arena` lists them with their SHA-256; `install.ps1` takes
+the machine's own (ARM64 even from an x64 PowerShell).
 
 - **macOS** marks a file downloaded in a browser, and refuses to open it until
   the mark is gone: `xattr -d com.apple.quarantine code-arena`. The builds are
@@ -1749,7 +1751,12 @@ with a reason the model passes on. Sub-agents cannot start one.
 
 **Sub-agents** (`task`): the model hands a self-contained piece of research to
 a fresh conversation with only the reading tools (local and Arena's), which
-returns one report. Several run at once. Their tokens count in the turn.
+returns one report. Several run at once. Their tokens count in the turn. In
+the IDE (`code-arena web`) each `task` card shows its sub-agent as it works, as
+Arena's chat shows its own: what it was asked, its thinking, each tool call
+with its result, and its report, with its time, model and tokens; the session
+keeps it beside the result (never sent to the model), so it is there after a
+reload too.
 
 Calls that do not wait on each other run at once (the model asks for them
 together); questions are asked one at a time first.

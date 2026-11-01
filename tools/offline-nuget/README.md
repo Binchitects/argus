@@ -30,7 +30,7 @@ microsoft.netcore.app.runtime.<rid>.<version>.nupkg
 microsoft.netcore.app.host.<rid>.<version>.nupkg
 ```
 
-for `<rid>` in `linux-x64 linux-arm64 win-x64 osx-x64 osx-arm64`.
+for `<rid>` in `linux-x64 linux-arm64 win-x64 win-arm64 osx-x64 osx-arm64`.
 
 The SDK's runtime moves with each monthly .NET patch: a newer
 `mcr.microsoft.com/dotnet/sdk:10.0` pulled (or a newer SDK installed) asks for
@@ -53,7 +53,7 @@ when neither is to be had). By hand, it does this:
 
 ```bash
 version=10.0.12
-for rid in linux-x64 linux-arm64 win-x64 osx-x64 osx-arm64; do
+for rid in linux-x64 linux-arm64 win-x64 win-arm64 osx-x64 osx-arm64; do
   for pack in runtime host; do
     id="microsoft.netcore.app.$pack.$rid"
     curl -fLo "tools/offline-nuget/$id.$version.nupkg" \

@@ -159,6 +159,11 @@ internal interface IAgentEvents
     void Attached(IReadOnlyList<string> files)
     {
     }
+
+    /// <summary>A sub-agent's step, as the chat's "agent" event (<see cref="SubAgentWork"/>).</summary>
+    void SubAgent(JsonObject e)
+    {
+    }
 }
 
 /// <summary>
@@ -300,11 +305,14 @@ internal sealed class Agent
         Add(new JsonObject { ["role"] = "assistant", ["content"] = "Noted." }, kind: "note");
     }
 
-    private void Add(JsonObject message, TokenUsage? usage = null, string? kind = null)
+    private void Add(JsonObject message, TokenUsage? usage = null, string? kind = null, JsonArray? agents = null)
     {
         Messages.Add(message);
-        Session?.Message(message, message.Str("role") == "assistant" ? Model.Name : null, usage, kind);
+        Session?.Message(message, message.Str("role") == "assistant" ? Model.Name : null, usage, kind, agents);
     }
+
+    /// <summary>The tool call running in this flow (each call of a round runs in its own): a sub-agent's events are that call's.</summary>
+    internal static readonly AsyncLocal<string?> CurrentCall = new();
 
     /// <summary>What ends an answer the person stopped, as the model reads it back.</summary>
     internal const string StoppedMark = "(stopped by the person)";
@@ -1031,6 +1039,7 @@ internal sealed class Agent
         {
             ToolResult result;
             var clock = System.Diagnostics.Stopwatch.StartNew();
+            CurrentCall.Value = p.Id;
             if (p.Refusal is not null || p.Tool is null)
             {
                 result = new ToolResult(p.Refusal ?? "Not run.", true) { Display = Ui.Yellow(Fmt.OneLine(p.Refusal, 140)) };
@@ -1076,7 +1085,7 @@ internal sealed class Agent
             {
                 text = text[..(limit * 2 / 3)] + $"\n\n… ({text.Length - limit:N0} characters cut: ask for less, e.g. a line range or a narrower search) …\n\n" + text[^(limit / 3)..];
             }
-            Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = planned[i].Id, ["content"] = text });
+            Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = planned[i].Id, ["content"] = text }, agents: results[i].Agents);
             _spending?.Called(planned[i].Name, text.Length);
         }
         // Pictures a tool took (a screenshot) follow the results, as the person's message: a tool's result is text only.

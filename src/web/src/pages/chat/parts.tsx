@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils'
 import { argsOf, parseResult, resultCount } from './argus'
 import { CodeBlock } from './code-block'
 import { seconds, toolTitle } from './format'
-import { argsSummary, partsOf, partsSummary, splitArgs } from './tool-args'
+import { agentParts, argsSummary, partsSummary, splitArgs } from './tool-args'
 import { ToolOutput } from './tool-output'
 import { AgentsView } from './agents'
 import { partsDone } from './research'
@@ -156,11 +156,14 @@ export const ToolCard = memo(function ToolCard({
 }) {
   const delegate = call.function.name === 'delegate'
   const work = agents ?? result?.details?.agents
+  // Code Arena's task call: one sub-agent, shown as the delegate's parts are once its work is known (live, or kept with the result).
+  const agentCall = delegate || call.function.name === 'task'
+  const subAgents = delegate || (agentCall && !!work?.length)
   // Open while it waits for the person (they read what it would run before they allow it), and
   // while sub-agents work: watched as they worked, it stays open after, unless folded.
   const [chosen, setOpen] = useState<boolean | null>(null)
-  const [watched] = useState(() => delegate && !result && live)
-  const open = chosen ?? (!!waiting || (delegate && (watched || (!result && live))))
+  const [watched] = useState(() => agentCall && !result && live)
+  const open = chosen ?? (!!waiting || (agentCall && (watched || (!result && live))))
   const [viewing, setViewing] = useState<number | null>(null)
   const pictures = result?.attachments.filter((a) => a.kind === 'image') ?? []
   const media = result?.attachments.filter(isMedia) ?? []
@@ -180,7 +183,7 @@ export const ToolCard = memo(function ToolCard({
   const value = useMemo(() => (result && !declined ? parseResult(result.content) : undefined), [result, declined])
   const count = resultCount(value)
   // Sub-agents at work: how many of the parts are done, rather than just "Running".
-  const parts = delegate && running ? Math.max(partsOf(call.function.arguments).length, work?.length ?? 0) : 0
+  const parts = agentCall && running ? Math.max(agentParts(call.function.name, call.function.arguments).length, work?.length ?? 0) : 0
   // A canvas the call made or changed: opened beside the chat from here.
   const openCanvas = useCanvasOpener()
   const canvas = result?.status === 'complete' ? result.details?.canvas : undefined
@@ -246,8 +249,8 @@ export const ToolCard = memo(function ToolCard({
         )}
         <Collapsible.Content className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
           <div className="grid grid-cols-[minmax(0,1fr)] gap-3 border-t px-3 py-3">
-            {delegate && (work?.length || partsOf(call.function.arguments).length) ? (
-              <AgentsView parts={partsOf(call.function.arguments)} agents={work ?? []} live={live && !result} onOpenFile={onOpenFile} onPreview={onPreview} />
+            {subAgents && (work?.length || agentParts(call.function.name, call.function.arguments).length) ? (
+              <AgentsView parts={agentParts(call.function.name, call.function.arguments)} agents={work ?? []} live={live && !result} onOpenFile={onOpenFile} onPreview={onPreview} />
             ) : null}
             {!delegate && args.length > 0 && (
               <div>

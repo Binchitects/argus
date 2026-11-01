@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-RIDS = ["linux-x64", "linux-arm64", "win-x64", "osx-x64", "osx-arm64"]
+RIDS = ["linux-x64", "linux-arm64", "win-x64", "win-arm64", "osx-x64", "osx-arm64"]
 
 # dotnet as far as the script uses it: the runtime version the SDK publishes with (FAKE_RUNTIME), the
 # runtimes installed (that one and FAKE_OTHER_RUNTIMES), and publish, which writes the program where -o
@@ -122,7 +122,7 @@ class CodeArenaPacksTests(unittest.TestCase):
         self.packs("10.0.12")
         r = self.publish("10.0.13", "--offline")
         self.assertEqual(r.returncode, 3, r.stderr)
-        self.assertIn("lacks 10 of the 10 .NET packs this SDK publishes with (runtime 10.0.13)", r.stderr)
+        self.assertIn("lacks 12 of the 12 .NET packs this SDK publishes with (runtime 10.0.13)", r.stderr)
         self.assertIn("microsoft.netcore.app.runtime.linux-x64.10.0.13.nupkg", r.stderr)
         self.assertIn("microsoft.netcore.app.host.osx-arm64.10.0.13.nupkg", r.stderr)
         self.assertIn("Fetch them at version 10.0.13", r.stderr)
@@ -161,7 +161,7 @@ class CodeArenaPacksTests(unittest.TestCase):
         self.assertIn(f'-p:RuntimeIdentifiers="{";".join(RIDS)}"', restore)
         self.assertEqual(self.built(), sorted(f"{rid}/code-arena{'.exe' if rid.startswith('win') else ''}" for rid in RIDS))
         sums = (self.repo / "dist" / "code-arena" / "SHA256SUMS").read_text()
-        self.assertEqual(len(sums.splitlines()), 5)
+        self.assertEqual(len(sums.splitlines()), len(RIDS))
 
     def test_only_the_systems_asked_for_need_packs_and_any_case_of_the_names_does(self):
         self.packs("10.0.13", ["linux-x64"], name=lambda pack, rid, v: f"Microsoft.NETCore.App.{pack.title()}.{rid}.{v}.nupkg")
@@ -178,7 +178,7 @@ class CodeArenaPacksTests(unittest.TestCase):
         self.packs("10.0.12")
         r = self.publish("10.0.12", "--offline", FAKE_OTHER_RUNTIMES="11.0.0-rc.2.26473.103 10.0.13")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(len(self.built()), 5)
+        self.assertEqual(len(self.built()), len(RIDS))
 
     def test_an_sdk_that_does_not_say_its_runtime_fails_rather_than_skipping(self):
         self.packs("10.0.12")
@@ -196,7 +196,7 @@ class CodeArenaPacksTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("Code Arena: publishing with nuget.org's packs instead", r.stdout)
         self.assertIn("runtime 10.0.13", r.stderr)
-        self.assertEqual(len(self.built()), 5)
+        self.assertEqual(len(self.built()), len(RIDS))
         self.assertTrue(all("--source" not in c for c in self.restores()))
 
         shutil.rmtree(self.repo / "dist")
@@ -208,7 +208,7 @@ class CodeArenaPacksTests(unittest.TestCase):
 
         r = self.image_step("10.0.12", FAKE_NUGET_UNREACHABLE="1")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(len(self.built()), 5)
+        self.assertEqual(len(self.built()), len(RIDS))
 
     def test_the_image_fails_on_a_real_build_error_and_skips_with_none(self):
         self.packs("10.0.12")

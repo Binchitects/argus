@@ -23,7 +23,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 root="$(dirname "$here")"
 cd "$root"
 
-all=(linux-x64 linux-arm64 win-x64 osx-x64 osx-arm64)
+all=(linux-x64 linux-arm64 win-x64 win-arm64 osx-x64 osx-arm64)
 offline=
 web=1
 rids=()
@@ -32,7 +32,7 @@ for arg in "$@"; do
     --offline) offline=1 ;;
     --no-web) web= ;;
     -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    linux-x64|linux-arm64|win-x64|osx-x64|osx-arm64) rids+=("$arg") ;;
+    linux-x64|linux-arm64|win-x64|win-arm64|osx-x64|osx-arm64) rids+=("$arg") ;;
     *) echo "unknown argument: $arg (systems: ${all[*]})" >&2; exit 2 ;;
   esac
 done
@@ -106,7 +106,8 @@ for rid in "${rids[@]}"; do
   echo "== $rid (at once)"
   rm -rf "${out:?}/$rid"
   (
-    "${dotnet[@]}" publish src/CodeArena/CodeArena.csproj -c Release -r "$rid" -o "$out/$rid" --no-restore \
+    # Each its own compiler (no build server shared by the publishes running at once).
+    "${dotnet[@]}" publish src/CodeArena/CodeArena.csproj -c Release -r "$rid" -o "$out/$rid" --no-restore --disable-build-servers \
       "-p:RuntimeIdentifiers=$all" -nologo \
       && find "$out/$rid" -type f ! -name code-arena ! -name code-arena.exe -delete
   ) > "$out/$rid.log" 2>&1 &

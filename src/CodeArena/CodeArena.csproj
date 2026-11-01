@@ -11,6 +11,13 @@
     <IsPackable>false</IsPackable>
     <!-- The terminals' pseudo-terminals: forkpty and ConPTY through the C API. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- What Windows shows for code-arena.exe: the app's icon (src/web/public/icons/icon-512.png at each size), and
+         its name, maker and version in the file's properties. -->
+    <ApplicationIcon>code-arena.ico</ApplicationIcon>
+    <Product>Code Arena</Product>
+    <AssemblyTitle>Code Arena</AssemblyTitle>
+    <Company>Binchitects</Company>
+    <Copyright>Copyright (C) 2026 Binchitects and contributors</Copyright>
   </PropertyGroup>
 
   <ItemGroup>

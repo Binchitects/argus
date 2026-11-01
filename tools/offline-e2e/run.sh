@@ -19,6 +19,7 @@
 #                         it makes, every check through HTTPS, a chat answered by that model
 #     --reuse             keep the test host's disk from the last run (default: a fresh host each run)
 #     --cpu-only          no GPU in the test host (the features that need one are off)
+#     --with LIST         features on beside the defaults, as installer.sh --with takes them (all: every one)
 #     --keep              leave the test host running afterwards (docker exec -it NAME bash)
 #     --clean             remove the test host's disk (DIR) afterwards
 #     --dir DIR           where the test host keeps its disk (default ~/arena-e2e)
@@ -27,12 +28,13 @@
 # The test host shares this machine's GPU (through CDI), never its network, its Docker or its stack.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
-BUNDLE="" FIRST="" MODEL="" UPGRADE_FROM="" INTERRUPT="" INTERRUPT_AT="" AGAIN=0 REUSE=0 CPU=0 KEEP=0 CLEAN=0 DIR="${HOME}/arena-e2e" NAME=arena-e2e IMAGE=arena-offline-host:1
+BUNDLE="" FIRST="" MODEL="" WITH="" UPGRADE_FROM="" INTERRUPT="" INTERRUPT_AT="" AGAIN=0 REUSE=0 CPU=0 KEEP=0 CLEAN=0 DIR="${HOME}/arena-e2e" NAME=arena-e2e IMAGE=arena-offline-host:1
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --bundle) BUNDLE="$2"; shift ;;
     --first) FIRST="$2"; shift ;;
     --model) MODEL="$2"; shift ;;
+    --with) WITH="$2"; shift ;;
     --upgrade-from) UPGRADE_FROM="$2"; shift ;;
     --interrupt-after) INTERRUPT="$2"; shift ;;
     --interrupt-at) INTERRUPT_AT="$2"; shift ;;
@@ -49,6 +51,7 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 [[ -f "$BUNDLE" ]] || { echo "--bundle names no file: $BUNDLE" >&2; exit 2; }
+[[ $WITH == all ]] && WITH="$(sed -n 's/^\([a-z0-9-]*\) *|.*/\1/p' "$here/../../deploy/features" | paste -sd, -)"
 [[ -z "$MODEL" || ( -f "$MODEL" && "$MODEL" == *.gguf ) ]] || { echo "--model names no .gguf file: $MODEL" >&2; exit 2; }
 LOG="$DIR/logs/$(date +%Y%m%d-%H%M%S)"
 say() { printf '%s\n' "$*" | tee -a "$LOG/run.log"; }
@@ -99,6 +102,7 @@ say "  systemd: $s; network: $(H ip -o link show | awk -F': ' '{ print $2 }' | p
 install_run() {   # install_run RUN.run LABEL [EXTRA...]
   local run="$1" label="$2"; shift 2
   local flags=(--dir /srv/arena --yes --install-requirements) ; [[ $CPU -eq 1 ]] && flags+=(--cpu-only)
+  [[ -n "$WITH" ]] && flags+=(--with "$WITH")
   say "==> $label: sh $run install ${flags[*]} $*"
   H sh -c "cd /bundle && sha256sum -c $run.sha256" >> "$LOG/$label.log" 2>&1 || fail "$run does not match its checksum"
   local t0=$SECONDS
@@ -126,6 +130,7 @@ if [[ -n "$FIRST" ]]; then install_run "$FIRST_RUN" first || say "  (the first i
 interrupted_run() {   # interrupted_run RUN.run SECONDS
   local run="$1" after="$2" flags=(--dir /srv/arena --yes --install-requirements) images_before
   [[ $CPU -eq 1 ]] && flags+=(--cpu-only)
+  [[ -n "$WITH" ]] && flags+=(--with "$WITH")
   images_before="$(H sh -c 'docker images -q 2>/dev/null | sort -u | wc -l' 2>/dev/null || echo 0)"
   say "==> interrupted: sh $run install ${flags[*]}, stopped after $after s"
   H sh -c "cd /bundle && exec setsid -w sh -c 'echo \$\$ > /tmp/install.pgid; exec sh ./$run install ${flags[*]}'" > "$LOG/interrupted.log" 2>&1 &

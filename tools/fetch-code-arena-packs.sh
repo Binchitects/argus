@@ -37,7 +37,7 @@ fi
 dir=tools/offline-nuget
 mkdir -p "$dir"
 missing=()
-for rid in linux-x64 linux-arm64 win-x64 osx-x64 osx-arm64; do
+for rid in linux-x64 linux-arm64 win-x64 win-arm64 osx-x64 osx-arm64; do
   for pack in runtime host; do
     file="microsoft.netcore.app.$pack.$rid.$runtime.nupkg"
     [ -s "$dir/$file" ] || missing+=("$file")

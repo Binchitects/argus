@@ -122,7 +122,7 @@ a build is the one this server signed. By hand:
 ## Code Arena's packages
 
 ```bash
-./arenactl code-arena                     # linux-x64 linux-arm64 osx-x64 osx-arm64 win-x64
+./arenactl code-arena                     # linux-x64 linux-arm64 osx-x64 osx-arm64 win-x64 win-arm64
 ./arenactl code-arena linux-x64 win-x64   # some of them
 ./arenactl code-arena --offline           # the .NET packs from tools/offline-nuget only
 ```

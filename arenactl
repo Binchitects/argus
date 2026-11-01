@@ -43,7 +43,7 @@ TOOLS = ROOT / "tools"
 DIST = ROOT / "dist"
 VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip() if (ROOT / "VERSION").exists() else "0.0.0"
 WINDOWS = os.name == "nt"
-RIDS = ["linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64"]
+RIDS = ["linux-x64", "linux-arm64", "osx-x64", "osx-arm64", "win-x64", "win-arm64"]
 DOTNET_SDK_IMAGE = "mcr.microsoft.com/dotnet/sdk:10.0"
 NODE_IMAGE = "node:22-alpine"
 # The secrets compose insists on, as placeholders: an image never depends on them (make-installer.sh does the same).
@@ -425,7 +425,7 @@ def readme(rid: str, exe: str) -> str:
                    "  macOS marks files from the internet: xattr -d com.apple.quarantine code-arena\n"
                    "  (the build is not notarized by Apple).")
     else:
-        system = "Windows (x64)"
+        system = "Windows (" + ("ARM64" if rid == "win-arm64" else "x64") + ")"
         install = ("  Put code-arena.exe in a folder on your PATH. If SmartScreen stops it:\n"
                    "  More info, then Run anyway (or unblock it in the file's properties).")
     return README.format(version=VERSION, system=system, install=install, exe=exe)
@@ -512,7 +512,7 @@ def cmd_code_arena(a) -> int:
         shutil.rmtree(target, ignore_errors=True)
         log = built / f"{rid}.log"
         log.parent.mkdir(parents=True, exist_ok=True)
-        cmd = [*dotnet, "publish", rel(ROOT / "src/CodeArena/CodeArena.csproj"), "-c", "Release", "-r", rid, "-o", rel(target), "--no-restore",
+        cmd = [*dotnet, "publish", rel(ROOT / "src/CodeArena/CodeArena.csproj"), "-c", "Release", "-r", rid, "-o", rel(target), "--no-restore", "--disable-build-servers",
                f"-p:RuntimeIdentifiers={every}", "-nologo"]
         jobs.append((rid, target, log, subprocess.Popen(cmd, cwd=ROOT, stdout=log.open("w"), stderr=subprocess.STDOUT)))
     failed = []

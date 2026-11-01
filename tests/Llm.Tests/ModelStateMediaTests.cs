@@ -200,6 +200,19 @@ public sealed class ModelStateMediaTests(AppFixture app) : IDisposable
         await s.Media.SetKeptAsync(Image, false);
         await UntilFileAsync(s, "off", "the app turns the picture server off");
         await UntilStatusAsync(s, "unloaded", "Admin -> Models says Not loaded");
+        // A second picture model for the same server (an admin adds one): the Overview still answers.
+        using (var scope = s.App.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+            var flux = await db.MediaModels.AsNoTracking().SingleAsync(m => m.Name == Image);
+            db.MediaModels.Add(new Llm.Core.Models.MediaModel
+            {
+                Name = "FLUX-8", Mode = flux.Mode, Files = [.. flux.Files.Select(f => new Llm.Core.Models.MediaModelFile { Role = f.Role, Path = f.Path })],
+                MaxVramGb = flux.MaxVramGb, FlashAttention = true, Steps = 8, CfgScale = 1.0,
+            });
+            await db.SaveChangesAsync();
+        }
+        await s.Media.ChangedAsync(CancellationToken.None);
 
         var admin = await new TestBrowser(s.App).SignedInAsync("admin", AppFixture.AdminPassword);
         var services = await admin.JsonAsync(await admin.GetAsync("/api/admin/services"));

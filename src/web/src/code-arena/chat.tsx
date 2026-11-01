@@ -912,6 +912,7 @@ export function Thread({
                           always={view.always}
                           risks={view.risks}
                           calls={isLive ? view.calls : undefined}
+                          agents={isLive ? view.agents : undefined}
                           diffs={view.diffs}
                           onDecide={decide}
                           onQuote={replyQuote}
