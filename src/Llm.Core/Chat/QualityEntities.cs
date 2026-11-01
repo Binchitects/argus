@@ -66,6 +66,23 @@ public sealed class PromptLogEntry
 }
 
 /// <summary>
+/// A picture an API request's question carried (its image_url parts, as data), kept with its line in the prompt log and gone
+/// with it (Retention:PromptLogDays).
+/// </summary>
+public sealed class PromptLogFile
+{
+    /// <summary>At most this many of a question's pictures are kept, each at most <see cref="MaxBytes"/>.</summary>
+    public const int MaxFiles = 8;
+    public const int MaxBytes = 10 * 1024 * 1024;
+
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid EntryId { get; set; }
+    public required string Name { get; set; }
+    public required string ContentType { get; set; }
+    public required byte[] Data { get; set; }
+}
+
+/// <summary>
 /// What a person said about Arena itself (Send feedback): an idea, a problem, praise or anything else, with the page it was
 /// sent from; read, marked and answered on Admin → Feedback (the answer reaches their bell).
 /// </summary>

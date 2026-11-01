@@ -27,6 +27,50 @@ public sealed partial class PromptLogWriter(IServiceScopeFactory scopes, TimePro
         };
     }
 
+    /// <summary>
+    /// The pictures a request's last question carried as data (its image_url parts: data:TYPE;base64,...), at most
+    /// <see cref="PromptLogFile.MaxFiles"/>, each at most <see cref="PromptLogFile.MaxBytes"/>; a picture by address is not fetched.
+    /// </summary>
+    public static IReadOnlyList<PromptLogFile> PicturesOf(JsonObject request)
+    {
+        if (request["messages"] is not JsonArray messages || messages.LastOrDefault(m => m?["role"]?.GetValue<string>() == "user") is not JsonObject { } last
+            || last["content"] is not JsonArray parts)
+        {
+            return [];
+        }
+        var pictures = new List<PromptLogFile>();
+        foreach (var part in parts.OfType<JsonObject>().Where(p => p["type"]?.GetValue<string>() == "image_url"))
+        {
+            var url = part["image_url"] is JsonObject o ? o["url"]?.GetValue<string>() : part["image_url"]?.GetValue<string>();
+            var at = url?.IndexOf(";base64,", StringComparison.Ordinal) ?? -1;
+            if (url is null || !url.StartsWith("data:", StringComparison.Ordinal) || at < 0)
+            {
+                continue;
+            }
+            var type = url[5..at];
+            byte[] data;
+            try
+            {
+                data = Convert.FromBase64String(url[(at + 8)..]);
+            }
+            catch (FormatException)
+            {
+                continue;
+            }
+            if (data.Length > PromptLogFile.MaxBytes || !type.StartsWith("image/", StringComparison.Ordinal) || type.Length > 100)
+            {
+                continue;
+            }
+            var extension = type[6..] switch { "jpeg" => "jpg", "svg+xml" => "svg", var t when t.All(char.IsAsciiLetterOrDigit) => t, _ => "img" };
+            pictures.Add(new PromptLogFile { Name = $"picture-{pictures.Count + 1}.{extension}", ContentType = type, Data = data });
+            if (pictures.Count == PromptLogFile.MaxFiles)
+            {
+                break;
+            }
+        }
+        return pictures;
+    }
+
     /// <summary>What a completion said: its words, else the tools it called.</summary>
     public static string? AnswerOf(JsonObject? completion)
     {
@@ -71,7 +115,7 @@ public sealed partial class PromptLogWriter(IServiceScopeFactory scopes, TimePro
         private Task _last;
         private bool _ended;
 
-        internal Line(PromptLogWriter writer, PromptLogEntry entry)
+        internal Line(PromptLogWriter writer, PromptLogEntry entry, IReadOnlyList<PromptLogFile> pictures)
         {
             _writer = writer;
             Entry = entry;
@@ -79,6 +123,12 @@ public sealed partial class PromptLogWriter(IServiceScopeFactory scopes, TimePro
             _last = writer.WriteAsync(db =>
             {
                 db.PromptLog.Add(entry);
+                // The question's pictures go in with it, and go with it (the line's retention).
+                foreach (var picture in pictures)
+                {
+                    picture.EntryId = entry.Id;
+                    db.PromptLogFiles.Add(picture);
+                }
                 return db.SaveChangesAsync();
             });
         }
@@ -172,15 +222,18 @@ public sealed partial class PromptLogWriter(IServiceScopeFactory scopes, TimePro
     /// <summary>A request arrived: in the log at once, waiting for its turn. Null when it asks no question (nothing to show).</summary>
     public Line? Begin(Guid person, string? keyToken, JsonObject request)
     {
-        if (LastQuestion(request) is not { Length: > 0 } question)
+        var question = LastQuestion(request) ?? "";
+        var pictures = PicturesOf(request);
+        if (question.Length == 0 && pictures.Count == 0)
         {
             return null;
         }
         return new Line(this, new PromptLogEntry
         {
-            UserId = person, KeyToken = keyToken, Model = request["model"]?.GetValue<string>() ?? "", Prompt = Cut(question), Status = 0,
+            UserId = person, KeyToken = keyToken, Model = request["model"]?.GetValue<string>() ?? "",
+            Prompt = question.Length > 0 ? Cut(question) : pictures.Count == 1 ? "(a picture)" : $"({pictures.Count} pictures)", Status = 0,
             State = PromptLogEntry.Waiting, At = clock.GetUtcNow(),
-        });
+        }, pictures);
     }
 
     /// <summary>A request answered at once (from the answer cache): in the log done, with its answer.</summary>

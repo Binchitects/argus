@@ -2171,6 +2171,36 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("prompt_log", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Chat.PromptLogFile", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<byte[]>("Data")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<Guid>("EntryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EntryId");
+
+                    b.ToTable("prompt_log_files", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Chat.PushSubscription", b =>
                 {
                     b.Property<Guid>("Id")
@@ -8157,6 +8187,15 @@ namespace Llm.Core.Data.Migrations
                     b.HasOne("Llm.Core.Identity.AppUser", null)
                         .WithMany()
                         .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.PromptLogFile", b =>
+                {
+                    b.HasOne("Llm.Core.Chat.PromptLogEntry", null)
+                        .WithMany()
+                        .HasForeignKey("EntryId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

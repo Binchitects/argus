@@ -86,6 +86,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Gateway.ApiKey> ApiKeys => Set<Gateway.ApiKey>();
     public DbSet<ProductFeedback> ProductFeedback => Set<ProductFeedback>();
     public DbSet<PromptLogEntry> PromptLog => Set<PromptLogEntry>();
+    public DbSet<PromptLogFile> PromptLogFiles => Set<PromptLogFile>();
     public DbSet<Checklist> Checklists => Set<Checklist>();
     public DbSet<ChecklistRun> ChecklistRuns => Set<ChecklistRun>();
     public DbSet<Code.StudioWorkspace> StudioWorkspaces => Set<Code.StudioWorkspace>();
@@ -803,6 +804,14 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasIndex(x => x.At);
             e.HasIndex(x => new { x.UserId, x.At });
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<PromptLogFile>(e =>
+        {
+            e.ToTable("prompt_log_files");
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.ContentType).HasMaxLength(100);
+            e.HasIndex(x => x.EntryId);
+            e.HasOne<PromptLogEntry>().WithMany().HasForeignKey(x => x.EntryId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<KnowledgeFile>(e =>
         {

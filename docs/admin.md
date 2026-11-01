@@ -968,9 +968,13 @@ Search by words (in the question, and in an API answer), by person (user name
 or email), by state and by where (all, chat, API); **Older** goes on 50 at a
 time (with a state chosen, each page looks through the newest 1,000 chat
 questions for it). A long question or answer shows its start; **Show all**
-opens the whole of it. Every
+opens the whole of it. **With the question** shows what went with it (a
+chat's pictures and documents; the pictures an API request sent as data, at
+most 8 of 10 MB each, kept with its line and gone with it), and **Made by the
+answer** what the answer's tools made (pictures, Python's files, documents):
+pictures shown small and opened whole in a tab, other files to save. Every
 search is in the audit log as `prompts.viewed`, with what was searched for and
-how many were shown. **Your account → Your data** tells each person that their
+how many were shown, and every file opened as `prompts.file.viewed`. **Your account → Your data** tells each person that their
 questions can be read this way.
 
 ### Quality

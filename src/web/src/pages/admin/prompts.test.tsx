@@ -13,6 +13,24 @@ const row = (n: number, source: 'chat' | 'api') => ({
 })
 
 describe('prompt log', () => {
+  it("shows a question's pictures and the files its answer made, each read from the log's own address", async () => {
+    const file = (id: string, name: string, kind: string, contentType: string) => ({ id, name, kind, contentType, size: 2048, url: `/api/admin/prompts/files/chat/${id}` })
+    fakeApi(admin, {
+      'GET /api/admin/prompts': () => ({
+        json: {
+          items: [{ ...row(0, 'chat'), files: [file('f1', 'diagram.png', 'image', 'image/png')], made: [file('f2', 'report.csv', 'text', 'text/csv'), file('f3', 'chart.png', 'image', 'image/png')] }],
+          next: null,
+        },
+      }),
+    })
+    renderApp('/admin/prompts')
+    const asked = await screen.findByRole('region', { name: 'With the question' })
+    expect(within(asked).getByRole('img', { name: 'diagram.png' })).toHaveAttribute('src', '/api/admin/prompts/files/chat/f1')
+    const made = screen.getByRole('region', { name: 'Made by the answer' })
+    expect(within(made).getByRole('img', { name: 'chart.png' })).toHaveAttribute('src', '/api/admin/prompts/files/chat/f3')
+    expect(within(made).getByRole('link', { name: /report\.csv/ })).toHaveAttribute('href', '/api/admin/prompts/files/chat/f2')
+  })
+
   it('lists questions and answers, searches by words, person and where, and pages to older ones', async () => {
     const calls = fakeApi(admin, {
       'GET /api/admin/prompts': (_, __, url) => {

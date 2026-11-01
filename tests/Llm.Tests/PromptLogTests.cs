@@ -3,6 +3,8 @@ using System.Text;
 using System.Text.Json;
 using Llm.Api.Gateway;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Llm.Tests;
 
@@ -73,6 +75,87 @@ public sealed class PromptLogTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/access/assignments", new { roleId = role, subjectKind = "Person", subjectId = auditor.GetProperty("id").GetGuid() }));
         var them = await new TestBrowser(f).SignedInAsync(auditorName, auditor.GetProperty("password").GetString()!);
         await StatusAssert.Is(HttpStatusCode.Forbidden, await them.GetAsync("/api/admin/prompts"));
+    }
+
+    /// <summary>A PNG's start: what makes an upload a picture.</summary>
+    private static readonly byte[] Png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 1, 2, 3, 4];
+
+    [Fact]
+    public async Task A_questions_pictures_and_the_files_its_answer_made_are_in_the_log_for_reviewers_only()
+    {
+        await using var f = app.Create(app.ConnectionStringFor("promptfiles_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway());
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var name = "pf" + Guid.NewGuid().ToString("N")[..8];
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
+        var person = await new TestBrowser(f).SignedInAsync(name, made.GetProperty("password").GetString()!);
+
+        // In the chat: a picture with the question, and a file the answer made (as a tool that writes one keeps it).
+        using var form = new MultipartFormDataContent();
+        var upload = new ByteArrayContent(Png);
+        upload.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+        form.Add(upload, "file", "diagram.png");
+        var picture = (await person.JsonAsync(await person.Http.PostAsync(new Uri("/api/chat/attachments", UriKind.Relative), form))).GetProperty("id").GetGuid();
+        var chat = (await person.JsonAsync(await person.PostAsync("/api/chat/conversations", new { }))).GetProperty("id").GetGuid();
+        await (await person.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "What is in this diagram?", attachments = new[] { picture } })).Content.ReadAsStringAsync();
+        Guid report;
+        using (var scope = f.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+            var answer = await db.ChatMessages.Where(m => m.ConversationId == chat && m.Role == "assistant").OrderBy(m => m.Sequence).FirstAsync();
+            var owner = await db.Users.SingleAsync(u => u.UserName == name);
+            var file = new Llm.Core.Chat.ChatAttachment { UserId = owner.Id, FileName = "report.csv", ContentType = "text/csv", Size = 8, Text = "a,b\n1,2\n", Kind = "text" };
+            db.ChatAttachments.Add(file);
+            db.ChatMessages.Add(new Llm.Core.Chat.ChatMessage
+            {
+                ConversationId = chat, ParentId = answer.Id, Role = "tool", Sequence = answer.Sequence + 1, ToolCallId = "c1", ToolName = "python", Content = "Wrote report.csv",
+                AnswerId = answer.AnswerId ?? answer.Id, AttachmentsJson = JsonSerializer.Serialize(new[] { file.Id }),
+            });
+            await db.SaveChangesAsync();
+            report = file.Id;
+        }
+        // With an API key: a question with a picture as data.
+        var client = f.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://gateway.{AppFixture.Domain}"), HandleCookies = false });
+        using (var req = new HttpRequestMessage(HttpMethod.Post, new Uri("/v1/chat/completions", UriKind.Relative)))
+        {
+            var parts = new object[] { new { type = "text", text = "Describe it." }, new { type = "image_url", image_url = new { url = "data:image/png;base64," + Convert.ToBase64String(Png) } } };
+            req.Content = new StringContent(JsonSerializer.Serialize(new { model = "Qwen3.8-Flash-Next", messages = new object[] { new { role = "user", content = parts } } }), Encoding.UTF8, "application/json");
+            req.Headers.Authorization = new("Bearer", made.GetProperty("apiKey").GetString()!);
+            await (await client.SendAsync(req)).Content.ReadAsStringAsync();
+        }
+
+        List<JsonElement> items = [];
+        for (var waited = 0; waited < 10_000 && !items.Any(i => i.GetProperty("source").GetString() == "api"); waited += 100)
+        {
+            items = [.. (await admin.JsonAsync(await admin.GetAsync($"/api/admin/prompts?person={name}"))).GetProperty("items").EnumerateArray()];
+            await Task.Delay(100);
+        }
+        var asked = items.Single(i => i.GetProperty("source").GetString() == "chat");
+        var shown = Assert.Single(asked.GetProperty("files").EnumerateArray());
+        Assert.Equal(("diagram.png", "image"), (shown.GetProperty("name").GetString(), shown.GetProperty("kind").GetString()));
+        var reportShown = Assert.Single(asked.GetProperty("made").EnumerateArray());
+        Assert.Equal("report.csv", reportShown.GetProperty("name").GetString());
+        var api = items.Single(i => i.GetProperty("source").GetString() == "api");
+        Assert.Equal("Describe it.", api.GetProperty("question").GetString());
+        var apiPicture = Assert.Single(api.GetProperty("files").EnumerateArray());
+        Assert.Equal(("picture-1.png", "image/png"), (apiPicture.GetProperty("name").GetString(), apiPicture.GetProperty("contentType").GetString()));
+
+        // A reviewer opens each: the pictures as pictures, the file to save; each look is audited.
+        var seen = await admin.GetAsync(shown.GetProperty("url").GetString()!);
+        Assert.Equal("image/png", seen.Content.Headers.ContentType?.MediaType);
+        Assert.Equal(Png, await seen.Content.ReadAsByteArrayAsync());
+        Assert.Equal(Png, await (await admin.GetAsync(apiPicture.GetProperty("url").GetString()!)).Content.ReadAsByteArrayAsync());
+        var saved = await admin.GetAsync(reportShown.GetProperty("url").GetString()!);
+        Assert.Equal("attachment", saved.Content.Headers.ContentDisposition?.DispositionType);
+        Assert.Equal("a,b\n1,2\n", await saved.Content.ReadAsStringAsync());
+        using (var scope = f.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+            Assert.Equal(3, await db.AuditEvents.CountAsync(a => a.Action == "prompts.file.viewed"));
+        }
+        // Nobody else: not the person (no prompts.review), and no file that is no message's.
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await person.GetAsync(shown.GetProperty("url").GetString()!));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await admin.GetAsync($"/api/admin/prompts/files/chat/{Guid.NewGuid()}"));
+        Assert.NotEqual(Guid.Empty, report);
     }
 
     [Fact]

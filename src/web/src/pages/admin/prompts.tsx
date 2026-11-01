@@ -1,5 +1,5 @@
 import { useInfiniteQuery } from '@tanstack/react-query'
-import { Ban, CircleCheck, CircleStop, CircleX, Clock, LoaderCircle } from 'lucide-react'
+import { Ban, CircleCheck, CircleStop, CircleX, Clock, Download, FileText, LoaderCircle } from 'lucide-react'
 import { useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -33,6 +33,19 @@ interface Logged {
   state: State
   error: string | null
   durationMs: number | null
+  /** What went with the question (pictures, documents), and what the answer's tools made (pictures, files). */
+  files?: LoggedFile[]
+  made?: LoggedFile[]
+}
+
+/** A file of the log: shown at `url` when a picture, else saved from it. */
+interface LoggedFile {
+  id: string
+  name: string
+  kind: string
+  contentType: string
+  size: number
+  url: string
 }
 
 type Source = 'all' | 'chat' | 'api'
@@ -172,7 +185,9 @@ function Entry({ item: i }: { item: Logged }) {
       </header>
       <div className="grid gap-3 p-4 text-sm">
         <Said label="Question" text={i.question} lines={4} />
+        {!!i.files?.length && <Files label="With the question" files={i.files} />}
         {i.answer && <Said label={i.state === 'stopped' ? 'Answer, as far as it went' : 'Answer'} text={i.answer} lines={6} answer />}
+        {!!i.made?.length && <Files label="Made by the answer" files={i.made} />}
         {!i.answer && (i.state === 'running' || i.state === 'waiting') && (
           <p className="flex items-center gap-2 text-muted-foreground">
             <LoaderCircle className="size-4 motion-safe:animate-spin" aria-hidden="true" />
@@ -186,6 +201,44 @@ function Entry({ item: i }: { item: Logged }) {
         )}
       </div>
     </article>
+  )
+}
+
+/** Files of a question or an answer: pictures shown small (opened whole in a new tab), the others to save. */
+function Files({ label, files }: { label: string; files: LoggedFile[] }) {
+  const pictures = files.filter((f) => f.kind === 'image' && f.contentType.startsWith('image/'))
+  const others = files.filter((f) => !pictures.includes(f))
+  return (
+    <section aria-label={label} className="grid gap-1.5">
+      <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{label}</h3>
+      {pictures.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {pictures.map((f) => (
+            <a key={f.id} href={f.url} target="_blank" rel="noopener noreferrer" className="block overflow-hidden rounded-lg border bg-muted/30 outline-none focus-visible:ring-[3px] focus-visible:ring-ring" title={f.name}>
+              <img src={f.url} alt={f.name} loading="lazy" className="h-28 w-auto max-w-56 object-contain" />
+            </a>
+          ))}
+        </div>
+      )}
+      {others.length > 0 && (
+        <ul className="flex flex-wrap gap-2">
+          {others.map((f) => (
+            <li key={f.id}>
+              <a
+                href={f.url}
+                download={f.name}
+                className="inline-flex max-w-72 items-center gap-1.5 rounded-md border bg-card px-2 py-1 text-xs outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring"
+              >
+                <FileText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span className="min-w-0 truncate">{f.name}</span>
+                <span className="shrink-0 text-muted-foreground tabular-nums">{formatValue(f.size, 'bytes')}</span>
+                <Download className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
 
