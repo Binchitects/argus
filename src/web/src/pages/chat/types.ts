@@ -484,6 +484,6 @@ export type ChatEvent =
   | { type: 'compacting'; reason?: CompactReason }
   /** Compacted at message `id`: `covered` messages became `summary`; why, and the request's `tokens` of the `context`, when it was automatic. */
   | { type: 'compacted'; id: string; summary: string; auto: boolean; covered: number; model?: string; reason?: CompactReason; tokens?: number; context?: number }
-  /** Stopped (by the person, from any tab): what was written is kept. */
-  | { type: 'stopped'; id: string | null }
+  /** Stopped (by the person, from any tab): what was written is kept. why: an admin stopped it (Admin → Line), and why. */
+  | { type: 'stopped'; id: string | null; why?: string | null }
   | { type: 'done'; id: string }

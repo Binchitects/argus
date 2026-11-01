@@ -206,16 +206,20 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
       if (a) Object.assign(a, { status: 'failed', error: e.message, errorKind: e.kind ?? null })
       return { ...state, messages, thinkingSince: null }
     }
-    case 'stopped':
-      return stopped({ ...state, messages })
+    case 'stopped': {
+      const next = stopped({ ...state, messages }, e.why)
+      // Stopped by an admin before the answer had a word: a notice says why.
+      if (e.why && !messages.some((m) => m.id === state.leaf && m.role === 'assistant')) return { ...next, notices: [...next.notices, { kind: 'stopped', text: e.why }] }
+      return next
+    }
     case 'done':
       return state
   }
 }
 
-/** Stop pressed: the answer being written keeps what it has, marked stopped. */
-export function stopped(state: LiveState): LiveState {
-  const messages = state.messages.map((m) => (m.id === state.leaf && m.role === 'assistant' ? { ...m, status: 'stopped' as const } : m))
+/** Stop pressed: the answer being written keeps what it has, marked stopped; stopped by an admin, it says why. */
+export function stopped(state: LiveState, why?: string | null): LiveState {
+  const messages = state.messages.map((m) => (m.id === state.leaf && m.role === 'assistant' ? { ...m, status: 'stopped' as const, error: why ?? m.error } : m))
   return { ...state, messages, thinkingSince: null }
 }
 

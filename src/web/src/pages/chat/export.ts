@@ -51,7 +51,7 @@ export function chatToMarkdown(title: string, path: Message[], at = new Date()):
         }
       }
       if (m.status === 'failed' && m.error) out.push(`*The answer failed: ${m.error}*`, '')
-      if (m.status === 'stopped') out.push('*Stopped.*', '')
+      if (m.status === 'stopped') out.push(m.error ? `*${m.error}*` : '*Stopped.*', '')
     }
     if (m.summary) out.push('---', '', '*The chat was compacted here. The summary the next answers read:*', '', m.summary.trim(), '', '---', '')
   }

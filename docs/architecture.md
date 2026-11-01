@@ -487,7 +487,11 @@ or `x-api-key` from Anthropic's clients) → app. For `/v1/chat/completions`:
    own key says so, the rest waiting in order. After 10 minutes' wait the
    request is refused with 429 and `Retry-After`.
 4. **The model's line** (`AnswerGate`), with the chat's answers, by the
-   person's priority. A full line answers 503 `service_busy`.
+   person's priority. A full line answers 503 `service_busy`. Each request
+   has a ticket: an admin who takes it out (Admin → Line) gets it a 403
+   `removed_by_admin`, and one who stops it while it runs ends its stream
+   with an error chunk of that type. Another replica's admin reaches it
+   through the replicas' signals, as a stop does.
 5. **The engine slot.** The agent's session (its key, model and first
    messages) goes back to the slot that holds its start. A model that cannot
    be made ready answers 503 `model_not_ready`.
@@ -728,6 +732,7 @@ names the app reaches them by, one release per namespace. `./arenactl kube`
 | an API call answers 502 `gateway_unreachable`, or the chat says the gateway is unreachable | LiteLLM is starting (its migrations) or down |
 | an API call answers 429 after a long wait | it waited too long for its turn: in the key's line (its places at once were taken for 10 minutes) or in the model's line. A 429 at once is LiteLLM's rate limit |
 | 503 `service_busy` | the line of waiting requests is as long as `Chat:QueueLength` allows: try again in a while. The line holds every model's chat answers and API requests together, each replica its share; it has no limit unless an admin sets one |
+| 403 `removed_by_admin`, or "Stopped by an admin: …" | an admin took the request out of the line or stopped it (Admin → Line); the message has their reason, and the audit log has `line.remove` or `line.stop` |
 | 503 `model_not_ready`, or "… is not loaded right now" | the model could not be loaded: the engine is full and no model is idle, or it failed to load and waits to try again (Admin → Models) |
 | nobody can sign in on a new stack | "there are no people and ADMIN_PASSWORD is not set" in the app's log |
 | "Starting without the start lock" | the server's `postgres` database refused: start one replica at a time |

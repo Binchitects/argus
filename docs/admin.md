@@ -137,7 +137,8 @@ What each person may do is decided in one place, from three things:
   **Review admin**, **Team manager** (a group's people, their credit and
   limits, its spend; given over a group), **Supervisor** (dashboards, alerts,
   logs, usage and the audit log, read-only), **Operator** (takes alerts, loads
-  and unloads models, cleans up storage), **Safety officer** (the safeguards),
+  and unloads models, cleans up storage, takes requests out of the line with
+  `usage.line`), **Safety officer** (the safeguards),
   **Compliance officer** (Admin → Compliance: the controls and their checks;
   reads the audit log; see [compliance](compliance/README.md)) and **Member**. A role is held by a person, by a group (an
   app group, a directory group linked to one, or a SCIM group) or by
@@ -1492,7 +1493,37 @@ will be served (a higher priority first, then whoever has fewest running,
 then whoever was served longest ago), with its place. Above them are the
 line's settings (Settings → Chat: Answers at once for everyone and per
 person, Longest line, Longest wait in line) and each model's places. Each
-app replica keeps its own line: the page shows the one that answered.
+app replica keeps its own line: the page shows the one that answered, and
+names it when there are several.
+
+With `usage.line` (the Operator role holds it; it gives `usage.read` too),
+each row has a button: **Remove** takes a waiting request out of the line,
+and **Stop** stops a running one, keeping what it wrote. Either asks why, in
+up to 300 characters, with a few reasons to start from; the person or the
+caller is told it:
+
+- **A chat answer** taken out says, as its error, that an admin took it out
+  of the line and nothing was sent to the model, with the reason. One
+  stopped says *Stopped by an admin:* and the reason under what it wrote, and
+  keeps that when the chat is read again. When no page was open, the bell
+  says so.
+- **An API request** taken out gets HTTP 403 `removed_by_admin` with the
+  reason, and no `Retry-After`: the OpenAI and Anthropic clients ask again
+  at once after a 429 or a 5xx, which would put it back in the line. One
+  stopped while it streams ends with an error chunk of that type
+  (`data: {"error":{"message":"Stopped by an admin: …","type":"removed_by_admin","code":"403"}}`),
+  which the clients raise. The prompt log has it as refused or stopped, with
+  the reason. Code Arena shows the admin's words rather than a refused key.
+
+Each is in the audit log as `line.remove` (it waited) or `line.stop` (it
+ran), with whose request it was, its model, chat or API, how long it had
+waited or run, and the reason. A request held by another replica is found
+there (the replicas' signals, as a stop of an answer is): that replica does
+it and writes the entry, naming itself, and the page says that replica did it. A
+request that ended meanwhile is said to be gone. A role held for some groups
+only may not take requests out: the line is everyone's. A request waiting
+in its key's own line (its places at once taken) is not in the model's line
+yet, and is not shown.
 
 ### Dashboards
 
@@ -1511,7 +1542,9 @@ permission. Each file names its area and permission (`"area"`,
 without them is the system's, with `monitoring.read`). The line's numbers come
 from the app itself (Prometheus job `app`: `arena_line_running`,
 `arena_line_waiting` by model and chat or API, `arena_line_people`,
-`arena_line_refused_total` by reason, `arena_line_waited_seconds`), read on
+`arena_line_refused_total` by reason (`busy`, `too_long`, `removed` by an
+admin), `arena_line_stopped_total` (running requests an admin stopped),
+`arena_line_waited_seconds`), read on
 the stack's network only: Traefik routes no `/metrics` to the app, and the app
 refuses one that came through it. NVIDIA's DCGM detail (SM activity, tensor
 cores, XID errors, ECC, NVLink) needs the **dcgm** profile

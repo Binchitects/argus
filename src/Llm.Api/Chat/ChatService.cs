@@ -155,6 +155,8 @@ public sealed partial class ChatService(
         var inLine = Stopwatch.StartNew();
         using var place = overrides.Line is { } line ? await line(modelName, ct) : null;
         _answerClock.Placed((int)inLine.ElapsedMilliseconds);
+        // An admin stopped the answer in its place (Admin → Line): what the stopped message says.
+        string? StoppedByAdmin() => (place as AnswerGate.Place)?.StopReason is { } reason ? AnswerGate.StoppedBy(reason) : null;
 
         // The chat's tools that this person may use, each made ready for this answer.
         var runs = new Dictionary<string, (ToolChoice Choice, IToolRun Run)>();
@@ -685,6 +687,7 @@ public sealed partial class ChatService(
             {
                 // Stop: keep what arrived. The stop cancelled the token, so save without it.
                 Keep(MessageStatus.Stopped);
+                msg.Error = StoppedByAdmin();
                 await FinishAsync(conversation, CancellationToken.None);
                 await emit(new { type = "stopped", id = msg.Id });
                 return;
@@ -845,6 +848,11 @@ public sealed partial class ChatService(
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
+                    if (StoppedByAdmin() is { } why)
+                    {
+                        // An admin stopped it in a tool call: the answer that called it keeps why.
+                        (msg.Status, msg.Error) = (MessageStatus.Stopped, why);
+                    }
                     await FinishAsync(conversation, CancellationToken.None);
                     await emit(new { type = "stopped", id = (Guid?)null });
                     return;

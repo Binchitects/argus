@@ -574,6 +574,9 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
         }
         return status switch
         {
+            // An admin took the request out of Arena's line, or stopped it (Admin → Line): the key is fine, and their words say why.
+            HttpStatusCode.Forbidden when Json.ParseObject(body)?["error"]?["type"] is JsonValue t && t.TryGetValue<string>(out var type) && type == "removed_by_admin" =>
+                new GatewayException(detail, 403),
             HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden =>
                 new GatewayException($"The gateway refused your API key ({(int)status}). Make a new one under Your account → API key, then run code-arena login.", (int)status),
             HttpStatusCode.NotFound when detail.Length == 0 || detail.StartsWith('<') =>

@@ -20,7 +20,8 @@ namespace Llm.Api.Chat;
 /// per chat; shutting down stops them all, and each keeps what it had. When one ends,
 /// the next message queued in its chat starts (QueuedMessages). With several
 /// replicas an answer runs on the one that was asked (Traefik keeps a person on one);
-/// a stop or "answer now" posted to another is passed to it.
+/// a stop or "answer now" posted to another is passed to it, and so is an admin's
+/// removal of a request from the line (Admin → Line).
 /// </summary>
 public sealed partial class AnswerJobs : IHostedService
 {
@@ -46,6 +47,7 @@ public sealed partial class AnswerJobs : IHostedService
         (this.scopes, this.gate, this.replicas, this.rooms, _lifetime, this.logger) = (scopes, gate, replicas, rooms, lifetime, logger);
         replicas.On(StopTopic, id => Guid.TryParse(id, out var c) && Stop(c));
         replicas.On(HurryTopic, id => Guid.TryParse(id, out var c) && HurryHere(c));
+        replicas.On(RemoveTopic, RemoveHere);
     }
 
     /// <summary>One answer being written: its events so far and the pages watching it.</summary>
@@ -79,6 +81,9 @@ public sealed partial class AnswerJobs : IHostedService
         /// <summary>Its end goes to the person's bell when no page watched it (off for a scheduled task's, which says so itself, and a compaction).</summary>
         public bool Notify { get; set; } = true;
 
+        /// <summary>Why an admin stopped it (Admin → Line); null while nobody did. Its "stopped" event says so.</summary>
+        internal string? StopReason { get; set; }
+
         /// <summary>How it ended (done, error, stopped), with the error's words; and whether a page was watching then.</summary>
         internal (string? Outcome, string? Error, bool Watched) Ending()
         {
@@ -97,8 +102,13 @@ public sealed partial class AnswerJobs : IHostedService
         public void Emit(object e)
         {
             var node = JsonSerializer.SerializeToNode(e, Json)!.AsObject();
-            var line = node.ToJsonString(Json);
             var type = node["type"]?.GetValue<string>();
+            if (type == "stopped" && StopReason is { } reason)
+            {
+                // Stopped by an admin: every page says why, wherever the stop caught the answer.
+                node["why"] = AnswerGate.StoppedBy(reason);
+            }
+            var line = node.ToJsonString(Json);
             lock (_lock)
             {
                 if (_ended)
@@ -352,7 +362,7 @@ public sealed partial class AnswerJobs : IHostedService
             job.AtOnce = (await access.AnswersAtOnceAsync(user, ct)).Value;
             await work(services, user, conversation, ct);
         }
-        catch (Exception ex) when (ex is AnswerGate.TooLongException or AnswerGate.BusyException)
+        catch (Exception ex) when (ex is AnswerGate.TooLongException or AnswerGate.BusyException or AnswerGate.RemovedException)
         {
             job.Emit(new { type = "error", message = ex.Message });
         }
@@ -397,22 +407,35 @@ public sealed partial class AnswerJobs : IHostedService
             {
                 await NotifyAsync(job, outcome == "error" ? error ?? "The answer failed." : null);
             }
+            else if (job.Notify && !watched && outcome == "stopped" && job.StopReason is { } reason)
+            {
+                // An admin's stop is news to the person, as a failure is; their own is not.
+                await NotifyAsync(job, AnswerGate.StoppedBy(reason), stopped: true);
+            }
         }
     }
 
     /// <summary>
     /// A place for the job's answer in <paramref name="model"/>'s line (AnswerGate), in turn, first for the higher
-    /// priority. The pages watching are told the line while it waits; in an arena without the model's name.
+    /// priority. The pages watching are told the line while it waits; in an arena without the model's name. An admin's
+    /// stop of the place (Admin → Line) stops the answer as the person's own would, and says why.
     /// </summary>
     private async Task<IDisposable> PlaceAsync(Job job, string model, bool blind, CancellationToken ct)
     {
         gate.Replicas = replicas.Count;
-        return await gate.EnterAsync(job.Person, job.Priority, model,
+        var place = await gate.EnterAsync(job.Person, job.Priority, model,
             line => job.EmitAsync(new { type = "queued", ahead = line.Ahead, model = blind ? null : line.Model, yours = line.Yours }), ct, job.AtOnce);
+        place.Stopped.Register(() =>
+        {
+            job.StopReason = place.StopReason;
+            job.Stopping.Cancel();
+        });
+        return place;
     }
 
     /// <summary>An answer that ended while no page watched it (the person left, or closed the tab): the bell says so.</summary>
-    private async Task NotifyAsync(Job job, string? error)
+    /// <param name="stopped">An admin stopped it: <paramref name="error"/> says why.</param>
+    private async Task NotifyAsync(Job job, string? error, bool stopped = false)
     {
         try
         {
@@ -427,7 +450,7 @@ public sealed partial class AnswerJobs : IHostedService
                 .Where(m => m.ConversationId == job.Conversation && m.Role == "assistant" && m.Content != "")
                 .OrderByDescending(m => m.Sequence).Select(m => m.Content).FirstOrDefaultAsync();
             await scope.ServiceProvider.GetRequiredService<Notifications.Notifier>().SendAsync(job.Person,
-                new Notifications.News("answer", error is null ? $"Answer ready: {title}" : $"Answer failed: {title}", said?.Trim(), $"/chat/{job.Conversation}"));
+                new Notifications.News("answer", error is null ? $"Answer ready: {title}" : stopped ? $"Answer stopped: {title}" : $"Answer failed: {title}", said?.Trim(), $"/chat/{job.Conversation}"));
         }
         catch (Exception ex) when (ex is DbUpdateException or InvalidOperationException or Npgsql.NpgsqlException)
         {

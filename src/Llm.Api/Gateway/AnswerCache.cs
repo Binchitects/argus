@@ -365,6 +365,9 @@ public static class AnswerCacheEndpoints
     // The most of an answer the prompt log reads (it keeps 20,000 characters of it; a stream carries more than its words).
     private const int MostLoggedAnswer = 8 * 1024 * 1024;
 
+    /// <summary>The error's type when an admin took the request out of the line or stopped it (Admin → Line).</summary>
+    public const string RemovedType = "removed_by_admin";
+
     /// <summary>Not passed on: they belong to one connection, or to the app's own site.</summary>
     internal static readonly HashSet<string> Dropped = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -567,11 +570,15 @@ public static class AnswerCacheEndpoints
             ? prompts.Begin(asker.Id, AnswerCache.HashOf(key), json)
             : null;
         using var _closing = logged?.Closing(ct);
-        async Task RefuseAsync(int status, string message, string type)
+        // again: worth asking again in a while (Retry-After); not after an admin's removal.
+        async Task RefuseAsync(int status, string message, string type, bool again = true)
         {
             logged?.End(PromptLogEntry.Refused, status, error: message);
             http.Response.StatusCode = status;
-            http.Response.Headers.RetryAfter = "30";
+            if (again)
+            {
+                http.Response.Headers.RetryAfter = "30";
+            }
             await http.Response.WriteAsJsonAsync(new { error = new { message, type, code = status.ToString(System.Globalization.CultureInfo.InvariantCulture) } }, ct);
         }
 
@@ -611,6 +618,12 @@ public static class AnswerCacheEndpoints
                 await RefuseAsync(StatusCodes.Status429TooManyRequests, ex.Message, "rate_limit_error");
                 return;
             }
+            catch (Chat.AnswerGate.RemovedException ex)
+            {
+                // Taken out of the line by an admin: 403, as the clients ask again at once after a 429 or a 5xx.
+                await RefuseAsync(StatusCodes.Status403Forbidden, ex.Message, RemovedType, again: false);
+                return;
+            }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 logged?.End(PromptLogEntry.Stopped, 499, error: "The caller went away while it waited for its turn.");
@@ -618,6 +631,31 @@ public static class AnswerCacheEndpoints
             }
         }
         using var _turn = turn;
+        // An admin's stop (Admin → Line) ends the request as the caller going away would, and the caller is told why.
+        using var stopping = turn is null ? null : CancellationTokenSource.CreateLinkedTokenSource(ct, turn.Stopped);
+        var work = stopping?.Token ?? ct;
+        bool StoppedByAdmin() => turn?.StopReason is not null && !ct.IsCancellationRequested;
+        async Task StopAsync(bool sse)
+        {
+            var why = Chat.AnswerGate.StoppedBy(turn!.StopReason!);
+            logged?.End(PromptLogEntry.Stopped, StatusCodes.Status403Forbidden, error: why);
+            if (!http.Response.HasStarted)
+            {
+                http.Response.Clear();
+                await RefuseAsync(StatusCodes.Status403Forbidden, why, RemovedType, again: false);
+            }
+            else if (sse)
+            {
+                // Under way: an error chunk, as the gateway sends one; the clients raise it.
+                var error = JsonSerializer.Serialize(new { error = new { message = why, type = RemovedType, code = "403" } });
+                await http.Response.WriteAsync($"data: {error}\n\n", ct);
+                await http.Response.Body.FlushAsync(ct);
+            }
+            else
+            {
+                http.Abort();
+            }
+        }
         logged?.Running();
         // The agent's session goes back to the engine slot that holds its start (and its cache, from disk when it lost it),
         // as a chat's conversation does: each turn reads only what is new. A model that cannot be made ready says so (503,
@@ -627,11 +665,16 @@ public static class AnswerCacheEndpoints
         {
             try
             {
-                sending = await route.TakeAsync(pinned, session, ct);
+                sending = await route.TakeAsync(pinned, session, work);
             }
             catch (Chat.ChatGatewayException ex) when (!ct.IsCancellationRequested)
             {
                 await RefuseAsync(StatusCodes.Status503ServiceUnavailable, ex.Message, "model_not_ready");
+                return;
+            }
+            catch (OperationCanceledException) when (StoppedByAdmin())
+            {
+                await StopAsync(sse: false);
                 return;
             }
         }
@@ -678,7 +721,12 @@ public static class AnswerCacheEndpoints
         HttpResponseMessage res;
         try
         {
-            res = await factory.CreateClient(AnswerCache.Client).SendAsync(forward, HttpCompletionOption.ResponseHeadersRead, ct);
+            res = await factory.CreateClient(AnswerCache.Client).SendAsync(forward, HttpCompletionOption.ResponseHeadersRead, work);
+        }
+        catch (OperationCanceledException) when (StoppedByAdmin())
+        {
+            await StopAsync(sse: false);
+            return;
         }
         catch (HttpRequestException)
         {
@@ -706,13 +754,13 @@ public static class AnswerCacheEndpoints
             // The prompt log: the answer as it went out, whole (or as far as it went), or the error the caller got.
             var written = logged is not null ? new MemoryStream() : null;
             var sse = res.Content.Headers.ContentType?.MediaType == "text/event-stream" || streamed;
-            await using var upstream = await res.Content.ReadAsStreamAsync(ct);
+            await using var upstream = await res.Content.ReadAsStreamAsync(work);
             var buffer = new byte[16 * 1024];
             int n;
             try
             {
                 // Each piece goes on as it comes: a streamed answer reaches the caller word by word.
-                while ((n = await upstream.ReadAsync(buffer, ct)) > 0)
+                while ((n = await upstream.ReadAsync(buffer, work)) > 0)
                 {
                     await http.Response.Body.WriteAsync(buffer.AsMemory(0, n), ct);
                     await http.Response.Body.FlushAsync(ct);
@@ -732,6 +780,12 @@ public static class AnswerCacheEndpoints
                         }
                     }
                 }
+            }
+            catch (Exception ex) when ((ex is OperationCanceledException or IOException) && StoppedByAdmin())
+            {
+                // Stopped by an admin while it answered: in the prompt log as stopped, with why.
+                await StopAsync(sse);
+                return;
             }
             catch (Exception ex) when (logged is not null && (ex is OperationCanceledException or IOException || ct.IsCancellationRequested))
             {

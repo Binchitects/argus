@@ -77,7 +77,7 @@ public static class LineMetrics
     public static string Render(AnswerGate gate)
     {
         var (running, waiting) = gate.Snapshot();
-        var (refused, waited) = gate.Counters();
+        var (refused, stopped, waited) = gate.Counters();
         var sb = new StringBuilder();
         void Gauge(string name, string help, IEnumerable<AnswerGate.Entry> entries)
         {
@@ -90,10 +90,15 @@ public static class LineMetrics
         Gauge("arena_line_running", "Requests running now (chat answers and API requests).", running);
         Gauge("arena_line_waiting", "Requests waiting their turn now.", waiting);
         sb.Append(CultureInfo.InvariantCulture, $"# HELP arena_line_people People with a request running now.\n# TYPE arena_line_people gauge\narena_line_people {running.Select(e => e.Person).Distinct().Count()}\n");
-        sb.Append("# HELP arena_line_refused_total Requests the line refused: busy (the line was full) or too_long (waited past the limit).\n# TYPE arena_line_refused_total counter\n");
+        sb.Append("# HELP arena_line_refused_total Requests the line refused: busy (the line was full), too_long (waited past the limit) or removed (an admin took it out).\n# TYPE arena_line_refused_total counter\n");
         foreach (var ((reason, kind), n) in refused)
         {
             sb.Append(CultureInfo.InvariantCulture, $"arena_line_refused_total{{reason=\"{reason}\",kind=\"{kind}\"}} {n}\n");
+        }
+        sb.Append("# HELP arena_line_stopped_total Running requests an admin stopped (Admin, Line).\n# TYPE arena_line_stopped_total counter\n");
+        foreach (var (kind, n) in stopped)
+        {
+            sb.Append(CultureInfo.InvariantCulture, $"arena_line_stopped_total{{kind=\"{kind}\"}} {n}\n");
         }
         sb.Append("# HELP arena_line_waited_seconds Time requests waited for their turn.\n# TYPE arena_line_waited_seconds summary\n");
         foreach (var (kind, (count, seconds)) in waited)
