@@ -263,8 +263,12 @@ test('members cannot open admin pages', async ({ browser, baseURL }) => {
   await page.getByLabel('Password').fill(password)
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page).not.toHaveURL(/\/login/)
-  // A new person is shown "What's new" over their first page, once.
+  // A stack with a sign-in notice has them accept it first.
   const tour = page.getByRole('dialog')
+  const accept = page.getByRole('button', { name: 'I have read it and accept it' })
+  await expect(tour.or(accept)).toBeVisible()
+  if (await accept.isVisible()) await accept.click()
+  // A new person is shown "What's new" over their first page, once.
   await expect(tour).toContainText("What's new in Argus Arena")
   await page.keyboard.press('Escape')
   await expect(tour).toBeHidden()

@@ -152,7 +152,7 @@ function MemoryHistory({ on }: { on: boolean }) {
         ) : (
           <ul className="grid gap-3" aria-label="Changes">
             {changes.map((c: MemoryChange) => (
-              <li key={c.id} className="grid gap-1 rounded-md border p-3 text-sm">
+              <li key={c.id} className="grid min-w-0 gap-1 rounded-md border p-3 text-sm [overflow-wrap:anywhere]">
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant="secondary">{changeLabel[c.action]}</Badge>
                   <span className="text-xs text-muted-foreground">
