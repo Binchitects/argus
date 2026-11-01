@@ -207,9 +207,19 @@ public static class CodeArenaSync
         }
         var usable = (await registry.ForAsync(await access.MembershipAsync(me, http.RequestAborted), http.RequestAborted)).Select(t => t.Tool.Id).ToHashSet();
         var skills = await Plugins.PluginContent.SkillsAsync(db, usable, http.RequestAborted);
+        // The skills made in Arena that the person may use (theirs, their groups', the company's), before the plugins' of the
+        // same name: Code Arena has them as the web chat does.
+        var made = (await SkillEndpoints.UsableAsync(me, access, db, http.RequestAborted)).Where(s => !s.BuiltIn && s.ServerId is null)
+            .GroupBy(s => s.Name, StringComparer.Ordinal).Select(g => g.First()).ToList();
+        var taken = made.Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
         return Results.Ok(new
         {
-            skills = skills.Select(s => new { s.Skill.Name, s.Skill.Description, s.Plugin, s.Version, files = s.Skill.Files }),
+            skills = made.Select(s => new
+            {
+                s.Name, s.Description, Plugin = (string?)null, Version = s.Version.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                files = new Dictionary<string, string> { ["SKILL.md"] = SkillLibrary.ToSkillMd(s) },
+            }).Cast<object>()
+                .Concat(skills.Where(s => !taken.Contains(s.Skill.Name)).Select(s => (object)new { s.Skill.Name, s.Skill.Description, s.Plugin, s.Version, files = s.Skill.Files })),
             // Arena's own skills an admin turned off: Code Arena leaves them out too.
             off = await db.Skills.AsNoTracking().Where(s => s.BuiltIn && s.Off).Select(s => s.Name).ToListAsync(http.RequestAborted),
         });

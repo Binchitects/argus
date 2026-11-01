@@ -2142,10 +2142,12 @@ too. `/commands` lists what was found.
   `description` in its front matter). The prompt lists each skill's name and
   what it is for; the model loads one with its `skill` tool when the task needs
   it, and the files beside it one by one.
-- **Skills from Arena's plugins**: the skills the plugins you may use bring
-  (Admin → Plugins), kept in the config folder's `plugin-skills/` and written
-  anew at each start when Arena answers (kept as they were when it does not).
-  The project's and your own skills of the same name win over them.
+- **Skills from Arena**: the skills made in Arena that you may use (yours,
+  your groups', the company's: the Skills page) and those the plugins you may
+  use bring (Admin → Plugins), kept in the config folder's `plugin-skills/` and
+  written anew at each start when Arena answers (kept as they were when it
+  does not). One made in Arena wins over a plugin's of the same name; the
+  project's and your own skills of the same name win over them all.
 - **Arena's own skills**: the skills people use most come built into Code
   Arena, the chat's own too (`code-review`, `write-tests`, `debug`,
   `refactor`, `plan-change`, `commit-message`, `mr-description` and the

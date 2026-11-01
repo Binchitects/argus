@@ -58,6 +58,40 @@ public sealed class SkillTests(AppFixture app)
     private static string System(JsonObject request) => request["messages"]!.AsArray().First()!["content"]!.GetValue<string>();
 
     [Fact]
+    public async Task A_skill_made_in_Arena_goes_to_its_owners_Code_Arena_as_a_SKILL_md_and_to_nobody_elses()
+    {
+        await using var f = NewApp();
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        async Task<(TestBrowser Browser, HttpClient CodeArena)> Person()
+        {
+            var name = "q" + Guid.NewGuid().ToString("N")[..10];
+            var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
+            var arena = f.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://{AppFixture.Domain}"), HandleCookies = false });
+            arena.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", made.GetProperty("apiKey").GetString());
+            return (await new TestBrowser(f).SignedInAsync(name, made.GetProperty("password").GetString()!), arena);
+        }
+        var (a, aArena) = await Person();
+        var (_, bArena) = await Person();
+        await StatusAssert.Is(HttpStatusCode.Created, await a.PostAsync("/api/skills", new
+        {
+            name = "/release_check", title = "بررسی انتشار", description = "Check a release: notes, \"version\", tags.",
+            instructions = "Check {{version}} before it ships.",
+            parameters = new object[] { new { name = "version", description = "The version: x.y.z" } },
+        }));
+
+        async Task<List<JsonElement>> Skills(HttpClient c) =>
+            [.. JsonDocument.Parse(await c.GetStringAsync(new Uri("/api/code-arena/skills", UriKind.Relative))).RootElement.GetProperty("skills").EnumerateArray()];
+        var skill = Assert.Single(await Skills(aArena));
+        Assert.Equal("release_check", skill.GetProperty("name").GetString());
+        var md = skill.GetProperty("files").GetProperty("SKILL.md").GetString()!;
+        // Any language as it is; its own quotes made single.
+        Assert.StartsWith("---\nname: release_check\ntitle: \"بررسی انتشار\"\ndescription: \"Check a release: notes, 'version', tags.\"\nparameters:\n", md, StringComparison.Ordinal);
+        Assert.Contains("  - { name: version, description: \"The version: x.y.z\", required: true }\n", md, StringComparison.Ordinal);
+        Assert.EndsWith("---\nCheck {{version}} before it ships.\n", md, StringComparison.Ordinal);
+        Assert.Empty(await Skills(bArena));
+    }
+
+    [Fact]
     public async Task A_skill_is_its_owners_shared_with_their_groups_or_the_companys_and_only_its_owner_changes_it()
     {
         await using var f = NewApp();

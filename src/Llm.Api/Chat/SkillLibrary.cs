@@ -42,6 +42,40 @@ public static partial class SkillLibrary
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
 
+    /// <summary>
+    /// A skill as a SKILL.md, as the repository's skills/ are written (front matter: name, title, description, parameters;
+    /// then its instructions): how a skill made in Arena goes to Code Arena.
+    /// </summary>
+    public static string ToSkillMd(Skill skill)
+    {
+        // In double quotes, as one line, its own quotes made single: read by Code Arena's front matter as it is (any language).
+        static string Q(string? s) => "\"" + (s ?? "").Replace('"', '\'').ReplaceLineEndings(" ").Trim() + "\"";
+        var md = new System.Text.StringBuilder("---\n");
+        md.Append("name: ").Append(skill.Name).Append('\n');
+        md.Append("title: ").Append(Q(skill.Title)).Append('\n');
+        md.Append("description: ").Append(Q(skill.Description)).Append('\n');
+        var parameters = ParametersOf(skill);
+        if (parameters.Count > 0)
+        {
+            md.Append("parameters:\n");
+            foreach (var p in parameters)
+            {
+                md.Append("  - { name: ").Append(p.Name);
+                if (p.Description is { Length: > 0 } d)
+                {
+                    md.Append(", description: ").Append(Q(d));
+                }
+                md.Append(", required: ").Append(p.Required ? "true" : "false");
+                if (p.Default is { } def)
+                {
+                    md.Append(", default: ").Append(Q(def));
+                }
+                md.Append(" }\n");
+            }
+        }
+        return md.Append("---\n").Append(skill.Instructions.TrimEnd()).Append('\n').ToString();
+    }
+
     /// <summary>The {{variables}} of instructions, in the order they first appear: "{{file}}" is "file".</summary>
     public static List<string> Variables(string text) =>
         [.. Variable().Matches(text).Select(m => m.Groups[1].Value).Distinct(StringComparer.Ordinal)];

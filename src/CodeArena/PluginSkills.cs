@@ -4,8 +4,9 @@ using System.Text.RegularExpressions;
 namespace CodeArena;
 
 /// <summary>
-/// The skills Arena's plugins bring (/api/code-arena/skills, only those of plugins the person may use), kept under the
-/// config folder's plugin-skills/ and read after the person's own and the project's (which win by name). Written anew
+/// Arena's skills (/api/code-arena/skills): those made in Arena that the person may use (theirs, their groups', the
+/// company's) and those of the plugins they may use, kept under the config folder's plugin-skills/ and read after the
+/// person's own and the project's (which win by name). Written anew
 /// at each start when Arena answers; what was kept stays when it does not (offline, an older Arena).
 /// </summary>
 internal static partial class PluginSkills
@@ -55,6 +56,6 @@ internal static partial class PluginSkills
         return problems;
     }
 
-    [GeneratedRegex("^[a-z0-9][a-z0-9-]{0,63}$")]
+    [GeneratedRegex("^[a-z0-9][a-z0-9_-]{0,63}$")]
     private static partial Regex SkillName();
 }

@@ -1734,8 +1734,12 @@ model reads it to choose it), its **instructions** and its **parameters**.
   `/debug`, `/refactor`, `/explain-code`, `/commit-message`,
   `/mr-description`, `/release-notes`, `/document-project`, `/plan-change`,
   `/brainstorm`, `/summarize`, `/meeting-notes`, `/write-email`,
-  `/analyze-data`, `/make-deck`, `/translate`, `/sql-explain`, `/api-review`
-  and `/postmortem` (the repository's `skills/` folder). Nobody edits them;
+  `/analyze-data`, `/make-deck`, `/translate`, `/sql-explain`, `/api-review`,
+  `/postmortem`, and for the work around the code `/threat-model`, `/adr`,
+  `/design-doc`, `/incident-response`, `/runbook`, `/test-plan`,
+  `/user-stories`, `/accessibility-review`, `/performance-investigation`,
+  `/dependency-upgrade`, `/privacy-review`, `/log-analysis`, `/status-report`
+  and `/proposal` (the repository's `skills/` folder). Nobody edits them;
   yours, a group's or the company's of the same name wins over one, and an
   admin turns one off for everyone (**Turn off for everyone** on the Skills
   page, audited as `skill.off`; Code Arena leaves it out too).
