@@ -585,7 +585,7 @@ public static class IdentityWiring
             var path = ctx.Request.Path;
             if (ctx.User.HasClaim(c => c.Type == TwoFactorPolicy.EnrolClaim) && (path.StartsWithSegments("/api") || path.StartsWithSegments("/connect"))
                 && !path.StartsWithSegments("/api/auth") && !path.StartsWithSegments("/api/account/2fa") && !path.StartsWithSegments("/api/info")
-                && !SessionGates.IsSignOut(path))
+                && !SessionGates.Passes(path))
             {
                 if (await SessionGates.SendBrowserOnAsync(ctx))
                 {

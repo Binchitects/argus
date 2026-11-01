@@ -29,6 +29,11 @@ public static class SessionGates
         return true;
     }
 
-    /// <summary>Signing out, here or through OIDC, is never held back.</summary>
-    public static bool IsSignOut(PathString path) => path.StartsWithSegments("/connect/logout");
+    /// <summary>
+    /// What a gate never holds back: signing out, here or through OIDC, and Traefik's check of the caller's address before
+    /// every request (Settings → Network access), which carries the person's cookie but asks about their network, not them:
+    /// held back, its refusal would be every page's, the one that shows the step too.
+    /// </summary>
+    public static bool Passes(PathString path) =>
+        path.StartsWithSegments("/connect/logout") || path.StartsWithSegments(Oidc.AddressFilter.Path);
 }

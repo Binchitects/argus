@@ -84,7 +84,7 @@ public static class NoticeGate
             if (ctx.User.Identity is { IsAuthenticated: true, AuthenticationType: var scheme } && scheme == Microsoft.AspNetCore.Identity.IdentityConstants.ApplicationScheme
                 && (path.StartsWithSegments("/api") || path.StartsWithSegments("/connect"))
                 && !path.StartsWithSegments("/api/auth") && !path.StartsWithSegments("/api/account/notice") && !path.StartsWithSegments("/api/account/2fa")
-                && !path.StartsWithSegments("/api/info") && !SessionGates.IsSignOut(path)
+                && !path.StartsWithSegments("/api/info") && !SessionGates.Passes(path)
                 && Guid.TryParse(ctx.User.FindFirstValue(ClaimTypes.NameIdentifier), out var id)
                 && await ctx.RequestServices.GetRequiredService<Notice>().MustAcceptAsync(id, ctx.RequestAborted))
             {

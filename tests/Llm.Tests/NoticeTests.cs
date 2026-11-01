@@ -92,6 +92,9 @@ public sealed class NoticeTests(AppFixture app)
             Assert.Equal("/continue?rd=" + Uri.EscapeDataString($"/connect/authorize?client_id=langfuse&response_type=code&redirect_uri={Uri.EscapeDataString(callback)}&scope=openid&state=s%202"),
                 posted.Headers.Location!.ToString());
         }
+        // Traefik's check of the address before every request comes with the person's cookie: it is about the network, never
+        // held back (or its refusal would be every page's, the notice's own too).
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.GetAsync(Llm.Api.Oidc.AddressFilter.Path));
         // Signing out is never held back.
         Assert.NotEqual(HttpStatusCode.Forbidden, (await admin.GetAsync("/connect/logout")).StatusCode);
 
