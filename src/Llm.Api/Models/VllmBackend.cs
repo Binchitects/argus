@@ -57,6 +57,12 @@ public sealed class VllmBackend(VllmEngineOptions instance, EngineOptions engine
     public const string PresetsFile = "presets.json";
     public const string DesiredFile = "models.json";
 
+    /// <summary>An admin's Reload (Admin → Monitoring): a new gen drains every model and starts each again.</summary>
+    public const string ReloadFile = "reload";
+
+    /// <summary>An admin's Restart: a new gen drains every model and starts the supervisor again.</summary>
+    public const string RestartFile = "restart";
+
     /// <summary>The supervisor's heartbeat older than this: the engine is not running.</summary>
     public static readonly TimeSpan Silent = TimeSpan.FromSeconds(30);
 
@@ -193,6 +199,41 @@ public sealed class VllmBackend(VllmEngineOptions instance, EngineOptions engine
             return $"The {Label} engine {Name}'s heartbeat cannot be read ({ex.Message}).";
         }
     }
+
+    /// <summary>The supervisor's heartbeat: when it started (unix seconds), and the generations of the restart and the reload it has done; null when it says nothing.</summary>
+    public (long Started, long Restart, long Reload)? Heartbeat()
+    {
+        try
+        {
+            var path = Path.Combine(StatusDir, "supervisor.json");
+            return File.Exists(path) && JsonNode.Parse(File.ReadAllText(path)) is JsonObject beat
+                ? (beat["started"]?.GetValue<long>() ?? 0, beat["restart"]?.GetValue<long>() ?? 0, beat["reload"]?.GetValue<long>() ?? 0)
+                : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException or FormatException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// An admin's Reload or Restart (<see cref="ReloadFile"/>, <see cref="RestartFile"/>) written for the supervisor, which acts on
+    /// each new generation once; an EngineException when it cannot be written.
+    /// </summary>
+    public Operations.RuntimeAsk Ask(string file, string action, string by)
+    {
+        try
+        {
+            return Operations.RuntimeAsk.Write(Path.Combine(ConfigDir, file), action, by, clock.GetUtcNow());
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new EngineException($"The {Label} engine {Name}'s {file} file cannot be written ({ex.Message}).");
+        }
+    }
+
+    /// <summary>The last Reload or Restart asked of it, or null.</summary>
+    public Operations.RuntimeAsk? Asked(string file) => Operations.RuntimeAsk.Read(Path.Combine(ConfigDir, file));
 
     /// <summary>
     /// Each model it may run, as its processes stand: loaded when every copy is ready, sleeping when they sleep, loading

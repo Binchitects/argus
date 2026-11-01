@@ -87,6 +87,35 @@ public sealed class VllmBackendTests : IDisposable
     }
 
     [Fact]
+    public void An_admins_reload_and_restart_are_files_the_supervisor_follows_and_its_heartbeat_says_which_it_has_done()
+    {
+        var o = Options();
+        var vllm = new FakeVllm(Path.Combine(o.ConfigDir, "vllm"), Path.Combine(o.VllmStatusDir, "vllm"));
+        var backend = new VllmBackend(o.VllmEngines[0], o, new OneClient(vllm), TimeProvider.System);
+        Assert.Null(backend.Heartbeat());
+        vllm.Tick();
+        Assert.Equal((0, 0), (backend.Heartbeat()!.Value.Restart, backend.Heartbeat()!.Value.Reload));
+        var started = backend.Heartbeat()!.Value.Started;
+
+        // Each ask raises its generation, in its own file beside the desired state: what is asked, by whom, when.
+        var reload = backend.Ask(VllmBackend.ReloadFile, "reload", "ada\nwith=a line of its own");
+        Assert.Equal((1, "reload", "ada with=a line of its own"), (reload.Gen, reload.Action, reload.By));
+        Assert.Equal("gen=1\naction=reload\nby=ada with=a line of its own\n", string.Concat(File.ReadAllLines(Path.Combine(o.ConfigDir, "vllm", "reload")).Take(3).Select(l => l + "\n")));
+        Assert.Equal(2, backend.Ask(VllmBackend.ReloadFile, "reload", "grace").Gen);
+        Assert.Equal(("grace", 2), (backend.Asked(VllmBackend.ReloadFile)!.By, backend.Asked(VllmBackend.ReloadFile)!.Gen));
+        Assert.Null(backend.Asked(VllmBackend.RestartFile));
+        vllm.Tick();
+        Assert.Equal((0, 2, started), (backend.Heartbeat()!.Value.Restart, backend.Heartbeat()!.Value.Reload, backend.Heartbeat()!.Value.Started));
+
+        // A restart: the supervisor starts again.
+        Assert.Equal(1, backend.Ask(VllmBackend.RestartFile, "restart", "ada").Gen);
+        vllm.Tick();
+        Assert.Equal(1, backend.Heartbeat()!.Value.Restart);
+        Assert.True(backend.Heartbeat()!.Value.Started > started);
+        Assert.Equal(2, vllm.Restarts);
+    }
+
+    [Fact]
     public void Copies_take_their_run_of_the_gpus_and_a_model_added_never_moves_another_s_port()
     {
         var two = ModelCatalog.VllmEntries(Model("flash", "0,1,2,3", replicas: 2), "/library", new Dictionary<string, int>(), new HashSet<int>(), 8001);
