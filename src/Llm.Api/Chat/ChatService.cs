@@ -606,7 +606,7 @@ public sealed partial class ChatService(
                         case ReasoningDelta r:
                             thoughtFrom ??= clock.Elapsed;
                             reasoning.Append(r.Text);
-                            await emit(new { type = "reasoning", text = r.Text });
+                            await emit(new { type = "reasoning", text = r.Text, at = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });
                             break;
                         case ContentDelta c:
                             if (thoughtFrom is not null && msg.ThinkingMs is null)
@@ -777,7 +777,8 @@ public sealed partial class ChatService(
                     // Called straight from the list: it is loaded now.
                     demand.Load([name]);
                 }
-                await emit(new { type = "tool_call", id, name, arguments = rawArgs, tool = known ? target.Choice.Tool.Id : null });
+                // When it started (Unix ms): a page that joins the answer later, or comes back to it, counts its wait from then.
+                await emit(new { type = "tool_call", id, name, arguments = rawArgs, tool = known ? target.Choice.Tool.Id : null, at = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });
                 ToolResult outcome;
                 var declined = false;
                 var took = Stopwatch.StartNew();

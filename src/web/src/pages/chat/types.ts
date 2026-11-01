@@ -429,12 +429,13 @@ export type ChatEvent =
   | { type: 'memories'; id: string; memories: MemoryRead[] }
   /** A comparison's answer starts: `step` of `of`, one after the other. */
   | { type: 'arena'; id: string; questionId: string; side: 'a' | 'b'; step: number; of: number }
-  | { type: 'reasoning'; text: string }
+  | { type: 'reasoning'; text: string; at?: number }
   | { type: 'thought'; ms: number; cutShort?: boolean }
   | { type: 'content'; text: string }
   | { type: 'replace'; text: string }
   | { type: 'usage'; prompt: number | null; cached: number | null; completion: number | null; cost?: number | null; thinkingMs: number | null; durationMs: number | null; context?: MeasuredContext | null }
-  | { type: 'tool_call'; id: string; name: string; arguments: string; tool?: string | null }
+  /** `at`: when the call started (Unix ms, the server's clock), its wait counted from then even when the page joins later. */
+  | { type: 'tool_call'; id: string; name: string; arguments: string; tool?: string | null; at?: number }
   | { type: 'approval'; id: string; name: string; arguments: string; tool: string; title: string }
   /** How far a long tool call is, as its server says (`total` when it knows the end). */
   | { type: 'tool_progress'; id: string; progress: number; total: number | null; message: string | null }

@@ -141,7 +141,7 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
     case 'reasoning': {
       const a = lastAssistant()
       if (a) a.reasoning = (a.reasoning ?? '') + e.text
-      return { ...state, messages, thinkingSince: state.thinkingSince ?? now, queued: null }
+      return { ...state, messages, thinkingSince: state.thinkingSince ?? started(e.at, now), queued: null }
     }
     case 'thought': {
       const a = lastAssistant()
@@ -172,7 +172,7 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
     case 'tool_call': {
       const a = lastAssistant()
       if (a) a.toolCalls = [...(a.toolCalls ?? []), { id: e.id, function: { name: e.name, arguments: e.arguments } }]
-      return { ...state, messages, calls: { ...state.calls, [e.id]: { since: now } } }
+      return { ...state, messages, calls: { ...state.calls, [e.id]: { since: started(e.at, now) } } }
     }
     case 'agent':
       return { ...state, agents: { ...state.agents, [e.id]: agentStep(state.agents?.[e.id] ?? [], e) } }
@@ -250,6 +250,14 @@ export function keepSame(before: Message[], after: Message[]): Message[] {
     return kept
   })
   return changed ? out : before
+}
+
+/**
+ * When something the server stamped began, on this page's clock: its stamp (the answer's events replay when a page joins
+ * it later, or comes back to it), never later than now (a clock a little ahead of the server's).
+ */
+function started(at: number | undefined, now: number): number {
+  return typeof at === 'number' && at > 0 ? Math.min(at, now) : now
 }
 
 /** One sub-agent step folded into what the page shows of it. */

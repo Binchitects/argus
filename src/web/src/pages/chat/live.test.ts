@@ -39,6 +39,34 @@ describe('live answer', () => {
     expect(s.calls?.c1).toEqual({ since: 1000, progress: 2, total: 4, message: 'Cloning' })
   })
 
+  it('a page that joins a running answer later counts a call and its thinking from when they began, not from the replay', () => {
+    // The answer's events replay when the page comes back (another tab, another page): the server stamped them.
+    const s = play([
+      { type: 'question', id: 'q1', parentId: null },
+      { type: 'assistant', id: 'a1', parentId: 'q1', model: 'M' },
+      { type: 'reasoning', text: 'hmm', at: 400 },
+      { type: 'tool_call', id: 'c1', name: 'make_image', arguments: '{}', at: 600 },
+      { type: 'tool_progress', id: 'c1', progress: 0, total: null, message: null },
+    ])
+    expect(s.calls?.c1?.since).toBe(600)
+    // A stamp ahead of this clock is now: the time shown never runs backwards.
+    const ahead = play([
+      { type: 'question', id: 'q1', parentId: null },
+      { type: 'assistant', id: 'a1', parentId: 'q1', model: 'M' },
+      { type: 'tool_call', id: 'c1', name: 'make_image', arguments: '{}', at: 5000 },
+    ])
+    expect(ahead.calls?.c1?.since).toBe(1000)
+  })
+
+  it('thinking that began before the page joined is timed from its stamp', () => {
+    const s = play([
+      { type: 'question', id: 'q1', parentId: null },
+      { type: 'assistant', id: 'a1', parentId: 'q1', model: 'M' },
+      { type: 'reasoning', text: 'hmm', at: 250 },
+    ])
+    expect(s.thinkingSince).toBe(250)
+  })
+
   it("sub-agents' work builds up step by step under their delegate call", () => {
     const s = play([
       { type: 'question', id: 'q1', parentId: null },
