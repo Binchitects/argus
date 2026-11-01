@@ -6,19 +6,28 @@
 #   /presets/max   how many may be loaded at once, those kept included (2)
 #   /presets/kvcache  how much the conversations' caches on disk (/kvcache, KV_CACHE_DIR) may
 #                  hold (gb=) and for how long after their last use (days=; 0: for ever)
+#   /presets/llamacpp.restart  an admin's Restart (Admin -> Monitoring): a new gen= in it
+#                  starts llama-server again, as a change to the list does (read, never run)
 #
 # Presets are read only when llama-server starts, so a change to the list (or
 # to max) restarts it here; keeping or unloading a model does not. A model that
 # is not loaded loads when a request asks for it: the app makes room for it
 # first (it unloads an idle model that may make room), so the engine never
 # chooses for itself which model goes.
+#
+# llama-server is stopped with TERM, and killed when it has not ended within ROUTER_DRAIN
+# seconds (15): one that hangs never holds the router.
 set -u
 key="${ENGINE_KEY:?set ENGINE_KEY in .env}"
 models=/presets/models.ini
 keep=/presets/keep
+restart=/presets/llamacpp.restart
+drain=${ROUTER_DRAIN:-15}
+tick=${ROUTER_TICK:-5}
 
 max() { m=$(cat /presets/max 2>/dev/null); echo "${m:-2}"; }
 stamp() { cat "$models" /presets/max 2>/dev/null | cksum; }
+asked() { sed -n 's/^gen=//p' "$restart" 2>/dev/null | head -n 1; }
 kept() {
   [ -f "$keep" ] || return 0
   while IFS= read -r m; do [ -n "$m" ] && grep -qxF "[$m]" "$models" && echo "$m"; done < "$keep"
@@ -43,10 +52,22 @@ kv_keep() {
 }
 ( while true; do kv_keep; sleep 600; done ) &
 
+# Stops llama-server: TERM, then KILL once the drain is over.
+halt() {
+  kill -TERM "$pid" 2>/dev/null
+  i=0
+  while kill -0 "$pid" 2>/dev/null && [ "$i" -lt "$drain" ]; do sleep 1; i=$((i + 1)); done
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "router: llama-server did not stop within ${drain} s; killing it"
+    kill -KILL "$pid" 2>/dev/null
+  fi
+  wait "$pid" 2>/dev/null
+}
+
 pid=
-trap 'if [ -n "$pid" ]; then kill -TERM "$pid" 2>/dev/null; wait "$pid"; fi; exit 0' TERM INT
+trap 'if [ -n "$pid" ]; then halt; fi; exit 0' TERM INT
 while true; do
-  seen=$(stamp)
+  seen=$(stamp) told=$(asked)
   echo "router: $(grep -c '^\[' "$models") model(s), up to $(max) at once; kept loaded: $(kept | tr '\n' ' ')"
   # Each model's folder for its conversations' caches, which the engine writes but does not make.
   sed -n 's/^slot-save-path = //p' "$models" | while IFS= read -r d; do mkdir -p "$d"; done
@@ -68,11 +89,15 @@ while true; do
     done
   ) &
   while kill -0 "$pid" 2>/dev/null; do
-    sleep 5
+    sleep "$tick"
     if [ "$(stamp)" != "$seen" ]; then
       echo "router: the model list changed; restarting llama-server"
-      kill -TERM "$pid" 2>/dev/null
-      wait "$pid"
+      halt
+      continue 2
+    fi
+    if [ "$(asked)" != "$told" ]; then
+      echo "router: a restart was asked$(sed -n 's/^by=/ by /p' "$restart" 2>/dev/null | head -n 1); restarting llama-server"
+      halt
       continue 2
     fi
   done

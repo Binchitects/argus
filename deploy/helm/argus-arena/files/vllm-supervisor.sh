@@ -15,11 +15,19 @@
 # change to it starts it at once; "sleep": true puts a ready model to sleep (its weights to RAM:
 # vLLM's sleep mode, SGLang's memory saver) and false wakes it.
 #
+#   /presets/vllm/reload    an admin's Reload (Admin -> Monitoring): a new gen= drains every model
+#                           and starts each again at once
+#   /presets/vllm/restart   an admin's Restart: a new gen= drains every model, forgets what it ran,
+#                           and starts this supervisor again (read line by line, never run)
+#
+# What it ran before it started (a container started again keeps its /tmp) is forgotten at start.
+#
 #   /status/<name>.json   phase (loading, ready, sleeping, draining, failed), pid, port, gpus, since,
 #                         how it last exited, its tries and next try, the last lines of its log
 #   /status/<name>.log    its output (trimmed to 1 MB)
 #   /status/hardware.json the GPUs it sees (gpu-probe.py: nvidia-smi or rocm-smi), for the app
-#   /status/supervisor.json  its heartbeat, every tick
+#   /status/supervisor.json  its heartbeat, every tick: when, its pid, when it started, and the gen
+#                         of the restart and the reload it has done
 #
 # The key (ENGINE_KEY) goes to each server by the environment (VLLM_API_KEY; SGLANG_API_KEY, which
 # sglang/serve.py hands SGLang inside its process), never on a command line, where ps shows it to
@@ -58,6 +66,10 @@ fi
 mkdir -p "$status" "$run/want" "$run/state"
 
 now() { date +%s; }
+started=$(now)
+# The gen of an admin's ask (reload or restart), digits only; empty: none asked.
+gen_of() { sed -n 's/^gen=//p' "$presets/$1" 2>/dev/null | head -n 1 | tr -dc 0-9; }
+by_of() { sed -n 's/^by=/ by /p' "$presets/$1" 2>/dev/null | head -n 1; }
 # A field of the model's state, or of what is wanted of it.
 st() { cat "$run/state/$1/$2" 2>/dev/null; }
 put() { printf '%s' "$3" > "$run/state/$1/$2"; }
@@ -191,7 +203,14 @@ retire() {
   echo "$server: $n stopped"
 }
 
-shutdown() {
+# Its heartbeat: the app takes the engine for down when this is old.
+beat() {
+  printf '{"at":%s,"pid":%s,"started":%s,"restart":%s,"reload":%s}\n' "$(now)" "$$" "$started" "${restarted:-0}" "${reloaded:-0}" \
+    > "$status/supervisor.json.tmp" && mv -f "$status/supervisor.json.tmp" "$status/supervisor.json"
+}
+
+# Every model drained (SIGTERM, then SIGKILL after VLLM_DRAIN seconds), its status gone.
+drain_all() {
   for d in "$run"/state/*/; do
     [ -d "$d" ] || continue
     n=$(basename "$d")
@@ -201,18 +220,55 @@ shutdown() {
   for d in "$run"/state/*/; do
     [ -d "$d" ] || continue
     n=$(basename "$d")
-    while alive "$n" && [ "$(now)" -lt "$end" ]; do sleep 1; done
+    while alive "$n" && [ "$(now)" -lt "$end" ]; do beat; sleep 1; done
     alive "$n" && kill -KILL "$(st "$n" pid)" 2>/dev/null
     rm -f "$status/$n.json"
   done
+}
+
+shutdown() {
+  drain_all
   exit 0
+}
+
+# An admin's Restart: every model drained, what it ran forgotten, and the supervisor started again (the key is in
+# VLLM_API_KEY, exported).
+restart_all() {
+  echo "$server: a restart was asked$(by_of restart); draining every model and starting again"
+  drain_all
+  rm -rf "${run:?}/want" "${run:?}/state"
+  exec /bin/sh "$0"
+}
+
+# An admin's Reload: every model drained and started again at once (a stopped one at once too).
+reload_all() {
+  echo "$server: a reload was asked$(by_of reload); starting every model again"
+  for d in "$run"/state/*/; do
+    [ -d "$d" ] || continue
+    n=$(basename "$d")
+    put "$n" tries 0
+    if alive "$n"; then stop "$n" "a reload was asked"; else put "$n" next 0; fi
+  done
 }
 
 # Its tests source it for the functions alone.
 [ -z "${VLLM_SUPERVISOR_LIB:-}" ] && trap shutdown TERM INT || return 0
 
+# Nothing of a run before this one: its processes are gone, and their status with them (a container started again
+# keeps /tmp, whose pids would be taken for crashes).
+rm -rf "${run:?}/want" "${run:?}/state" && mkdir -p "$run/want" "$run/state"
+for f in "$status"/*.json; do
+  case ${f##*/} in supervisor.json | hardware.json | '*.json') ;; *) rm -f "$f" ;; esac
+done
+# The asks there at start are done: this start is one.
+restarted=$(gen_of restart) reloaded=$(gen_of reload)
+
 seen= ticks=0
 while true; do
+  g=$(gen_of restart)
+  [ -n "$g" ] && [ "$g" != "$restarted" ] && restart_all
+  g=$(gen_of reload)
+  if [ -n "$g" ] && [ "$g" != "$reloaded" ]; then reloaded=$g; reload_all; fi
   # No models.json yet (no model on this engine): nothing to run, and nothing to say.
   if [ -f "$models" ]; then stamp=$(cksum < "$models"); else stamp=none; fi
   if [ "$stamp" != "$seen" ]; then
@@ -238,8 +294,7 @@ while true; do
     # tee-less logs are appended to: trimmed in place.
     if [ -f "$status/$n.log" ] && [ "$(wc -c < "$status/$n.log")" -ge 1048576 ]; then t=$(tail -c 65536 "$status/$n.log"); printf '%s\n' "$t" > "$status/$n.log"; fi
   done
-  # Its heartbeat: the app takes the engine for down when this is old.
-  printf '{"at":%s,"pid":%s}\n' "$(now)" "$$" > "$status/supervisor.json.tmp" && mv -f "$status/supervisor.json.tmp" "$status/supervisor.json"
+  beat
   if [ $((ticks % 15)) -eq 0 ] && [ -f "$probe" ]; then python3 "$probe" --out "$status/hardware.json" 2>/dev/null || true; fi
   ticks=$((ticks + 1))
   sleep "$tick" &
