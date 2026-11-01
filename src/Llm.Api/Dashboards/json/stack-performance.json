@@ -1565,8 +1565,8 @@
     {
       "id": 57,
       "type": "timeseries",
-      "title": "CPU temperature",
-      "description": "The hottest CPU sensor and the average of all of them: two lines whatever the core count. The Resources dashboard has a line per sensor. Sustained CPU load can make the CPU throttle, which shows up as tok/s decay over a long run.",
+      "title": "CPU temperature: the hottest sensors",
+      "description": "Every CPU sensor: the seven hottest on average over the range keep a line each; the rest are one line, their average, with a faint band from the coolest to the hottest of them (the tooltip gives that range). Sustained CPU load can make the CPU throttle, which shows up as tok/s decay over a long run.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1584,23 +1584,11 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "max(cpu_temperature_celsius)",
-          "legendFormat": "hottest",
+          "expr": "cpu_temperature_celsius",
+          "legendFormat": "{{sensor}}",
           "range": true,
           "instant": false,
           "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "editorMode": "code",
-          "expr": "avg(cpu_temperature_celsius)",
-          "legendFormat": "average",
-          "range": true,
-          "instant": false,
-          "refId": "B"
         }
       ],
       "options": {

@@ -1431,22 +1431,12 @@
     },
     {
       "type": "timeseries",
-      "title": "Cores: busiest, average, quietest",
+      "title": "Cores: the busiest, and the rest’s average",
       "targets": [
         {
           "refId": "A",
-          "expr": "max(1 - rate(node_cpu_seconds_total{mode=\"idle\"}[5m]))",
-          "legendFormat": "busiest core"
-        },
-        {
-          "refId": "B",
-          "expr": "avg(1 - rate(node_cpu_seconds_total{mode=\"idle\"}[5m]))",
-          "legendFormat": "average"
-        },
-        {
-          "refId": "C",
-          "expr": "min(1 - rate(node_cpu_seconds_total{mode=\"idle\"}[5m]))",
-          "legendFormat": "quietest core"
+          "expr": "1 - avg by (cpu) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m]))",
+          "legendFormat": "core {{cpu}}"
         }
       ],
       "fieldConfig": {
@@ -1467,7 +1457,7 @@
           "placement": "bottom"
         }
       },
-      "description": "Three lines however many cores the machine has. Busiest far above average: one thread does the work (a single-threaded step). All three high: the CPU is the limit. Each core's own: Show as table.",
+      "description": "Each core's share of time busy. The seven busiest on average over the range keep a line each; the rest are one line, their average, with a faint band from the quietest to the busiest of them (the tooltip gives that range). One core far above the rest: one thread does the work (a single-threaded step). All of them high: the CPU is the limit. Every core: Show as table.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -1510,9 +1500,9 @@
       "description": "The share of time at least one task was ready to run but waited for a CPU (the kernel's pressure figures). Above about 20% for long, the CPU is what holds the work back.",
       "gridPos": {
         "h": 8,
-        "w": 6,
+        "w": 12,
         "x": 0,
-        "y": 52
+        "y": 60
       },
       "datasource": {
         "type": "prometheus",
@@ -1552,9 +1542,9 @@
       "description": "The load average divided by the logical CPUs: 1 is every CPU busy, above 1 work queues for them.",
       "gridPos": {
         "h": 8,
-        "w": 6,
-        "x": 6,
-        "y": 52
+        "w": 12,
+        "x": 12,
+        "y": 60
       },
       "datasource": {
         "type": "prometheus",
@@ -1563,20 +1553,15 @@
     },
     {
       "type": "timeseries",
-      "title": "CPU clock",
+      "title": "CPU clock: the fastest cores",
       "targets": [
         {
           "refId": "A",
-          "expr": "avg(avg_over_time(node_cpu_scaling_frequency_hertz[1m]))",
-          "legendFormat": "average"
+          "expr": "avg_over_time(node_cpu_scaling_frequency_hertz[1m])",
+          "legendFormat": "core {{cpu}}"
         },
         {
           "refId": "B",
-          "expr": "max(avg_over_time(node_cpu_scaling_frequency_hertz[1m]))",
-          "legendFormat": "fastest core"
-        },
-        {
-          "refId": "C",
           "expr": "max(node_cpu_frequency_max_hertz)",
           "legendFormat": "its most"
         }
@@ -1597,11 +1582,11 @@
           "placement": "bottom"
         }
       },
-      "description": "The cores' clock over each minute, against the most it can reach. Low under load means it is held back (heat, power).",
+      "description": "Each core's clock over each minute, against the most it can reach. The seven fastest on average over the range keep a line each; the rest are one line, their average, with a faint band from the slowest to the fastest of them (the tooltip gives that range). Low under load means it is held back (heat, power).",
       "gridPos": {
         "h": 8,
-        "w": 6,
-        "x": 12,
+        "w": 12,
+        "x": 0,
         "y": 52
       },
       "datasource": {
@@ -1611,7 +1596,7 @@
     },
     {
       "type": "timeseries",
-      "title": "CPU temperature",
+      "title": "CPU temperature: the hottest sensors",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1619,13 +1604,8 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "max(cpu_temperature_celsius)",
-          "legendFormat": "hottest"
-        },
-        {
-          "refId": "B",
-          "expr": "avg(cpu_temperature_celsius)",
-          "legendFormat": "average"
+          "expr": "cpu_temperature_celsius",
+          "legendFormat": "{{sensor}}"
         }
       ],
       "fieldConfig": {
@@ -1649,11 +1629,11 @@
         },
         "hideWhenEmpty": true
       },
-      "description": "The hottest CPU sensor and the average of all of them, from the cpu-temp-exporter: two lines whatever the core count. A gap between them is one core or one die running hot; CPU temperature per sensor, below, shows which. Linux reads coretemp/k10temp via hwmon; Windows scrapes LibreHardwareMonitor on the host.",
+      "description": "Every CPU sensor the cpu-temp-exporter reads: on Intel one per core and one for the package, on AMD one per die. The seven hottest on average over the range keep a line each; the rest are one line, their average, with a faint band from the coolest to the hottest of them (the tooltip gives that range). Every sensor: Show as table. Linux reads coretemp/k10temp via hwmon; Windows scrapes LibreHardwareMonitor on the host.",
       "gridPos": {
         "h": 8,
-        "w": 6,
-        "x": 18,
+        "w": 12,
+        "x": 12,
         "y": 52
       }
     },
@@ -1666,7 +1646,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 60
+        "y": 68
       }
     },
     {
@@ -1751,7 +1731,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 61
+        "y": 69
       }
     },
     {
@@ -1790,7 +1770,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 61
+        "y": 69
       },
       "datasource": {
         "type": "prometheus",
@@ -1835,7 +1815,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 61
+        "y": 69
       },
       "datasource": {
         "type": "prometheus",
@@ -1851,7 +1831,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 69
+        "y": 77
       }
     },
     {
@@ -1910,7 +1890,7 @@
         "h": 8,
         "w": 6,
         "x": 0,
-        "y": 70
+        "y": 78
       }
     },
     {
@@ -1955,7 +1935,7 @@
         "h": 8,
         "w": 6,
         "x": 6,
-        "y": 70
+        "y": 78
       }
     },
     {
@@ -2000,7 +1980,7 @@
         "h": 8,
         "w": 6,
         "x": 12,
-        "y": 70
+        "y": 78
       }
     },
     {
@@ -2043,7 +2023,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 70
+        "y": 78
       }
     }
   ]

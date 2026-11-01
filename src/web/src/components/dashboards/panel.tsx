@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils'
 import { LogsPanel } from './logs-panel'
 import { reduceEach } from './reduce'
 import { merge } from './tables'
+import { queryUnits } from './units'
 import type { Column, PanelData, PanelDef, Threshold } from './types'
 import type { Chosen } from './variables'
 import { thresholdColor, tone } from './colors'
@@ -234,7 +235,8 @@ function QueryPanel({ uid, panel, range, tick, vars, level, onEmpty }: {
         )
       }
     } else if (isChart) {
-      const series = results.flatMap((r) => r.series ?? [])
+      // Each series knows its query: a GPU's temperature and its power never fold into one line.
+      const series = results.flatMap((r) => (r.series ?? []).map((x) => ({ ...x, group: r.refId })))
       const custom = panel.fieldConfig?.defaults?.custom
       body = !series.length ? (
         <p className="py-10 text-center text-sm text-muted-foreground">{defaults?.noValue ?? 'No data in this time range.'}</p>
@@ -244,6 +246,7 @@ function QueryPanel({ uid, panel, range, tick, vars, level, onEmpty }: {
         <TimeChart
           series={series}
           unit={unit}
+          units={queryUnits(panel, results)}
           stacked={custom?.stacking?.mode === 'normal'}
           bars={custom?.drawStyle === 'bars'}
           label={panel.title ?? 'chart'}

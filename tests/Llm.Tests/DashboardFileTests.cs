@@ -83,7 +83,7 @@ public sealed partial class DashboardFileTests(Promtool promtool) : IClassFixtur
     }
 
     [Fact]
-    public void A_list_that_grows_with_the_core_count_is_never_a_stat_and_has_a_line_of_the_grid_to_itself()
+    public void A_list_that_grows_with_the_core_count_is_never_a_stat_and_is_a_chart_wide_enough_to_name_its_hottest()
     {
         var perSensor = 0;
         foreach (var (d, p, t) in PromTargets())
@@ -92,17 +92,17 @@ public sealed partial class DashboardFileTests(Promtool promtool) : IClassFixtur
             {
                 Assert.False(PerCore().IsMatch(t.Expr! + " " + t.LegendFormat), $"{d.Uid} / {p.Title}: a value per core or sensor makes the row as tall as the core count");
             }
-            // One line per sensor is one per core. Beside other panels the hottest and the average
-            // say it in two; a chart of every sensor has the dashboard's whole width.
-            if (RawCpuTemperature().IsMatch(t.Expr!))
+            // One line per sensor is one per core: a chart folds them to the seven hottest and the rest's
+            // average, which needs a third of the width at least for its legend to name them.
+            if (RawCpuTemperature().IsMatch(t.Expr!) || (p.Type == "timeseries" && PerCore().IsMatch(t.Expr! + " " + t.LegendFormat)))
             {
-                Assert.True(p.Type == "timeseries" && p.Definition["gridPos"]!["w"]!.GetValue<int>() == 24,
-                    $"{d.Uid} / {p.Title}: cpu_temperature_celsius per sensor beside other panels: {t.Expr}");
-                perSensor++;
+                Assert.True(p.Type == "timeseries" && p.Definition["gridPos"]!["w"]!.GetValue<int>() >= 8,
+                    $"{d.Uid} / {p.Title}: a line per core or sensor in a panel narrower than a third: {t.Expr}");
+                perSensor += RawCpuTemperature().IsMatch(t.Expr!) ? 1 : 0;
             }
         }
-        // Which core runs hot is still on a dashboard.
-        Assert.True(perSensor > 0, "no dashboard draws each CPU sensor");
+        // Which core runs hot is on every machine dashboard.
+        Assert.True(perSensor >= 3, $"{perSensor} dashboards draw each CPU sensor: Hardware, Resources and Stack Performance should");
     }
 
     [Fact]

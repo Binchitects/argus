@@ -1541,10 +1541,11 @@ model; the device comes first so two drives of one model stay apart in a narrow
 cell. On a machine with more than one GPU, each is named by the index
 nvidia-smi gives it and the model it reports (`nvidia_smi_gpu_info`), as in
 `GPU 1 · GeForce RTX 3090`; with one GPU the names stay short (`temp`, `draw`).
-The CPU temperature is the hottest sensor and the average of all of them
-however many cores there are, and **CPU temperature per sensor** (Resources,
-under the temperatures) has a line for each, across the whole width so it
-never stretches a panel beside it. The load average has the machine's logical
+The CPU charts show the cores and sensors that matter however many there are:
+**CPU temperature: the hottest sensors**, **Cores: the busiest, and the rest's
+average** and **CPU clock: the fastest cores** keep a line for each of the
+seven hottest, busiest or fastest, and the rest as their average with its band
+(Show as table lists every one). The load average has the machine's logical
 CPU count beside it. No file names one machine's drives, CPU, GPU or core
 count: a test checks that, and checks every Prometheus query with the stack's
 own `promtool`.
@@ -1574,9 +1575,16 @@ panels, null values and percentages out of range:
 
 One value axis per chart. Colours come in a fixed order, checked for
 colour-vision deficiency against the light and dark backgrounds; a series keeps
-its colour by name. At most eight series are drawn: the seven largest, and the
-rest summed as "Other", or averaged where a sum means nothing (temperatures,
-percentages, clock speeds and durations, unless the chart is stacked). Every
+its colour by name. At most eight lines are drawn: the series highest on
+average over the range keep a line each (the hottest cores, the busiest GPUs),
+and the rest are one line, summed as "Other", or averaged where a sum means
+nothing (temperatures, percentages, clock speeds and durations, unless the chart
+is stacked): "17 cooler, average" for temperatures, "17 lower, average" for the
+rest, with a faint band from the lowest to the highest of them and that range
+in the tooltip. A gap in a series never ranks it lower: it is its average over
+the times it has a value. Each query of a panel folds apart (a GPU's
+temperature is never averaged with its power, each in its own unit), the eight
+lines shared between them. Every
 chart has a legend when it has more than one series, a tooltip, and **Show as
 table**, which lists every series, the folded ones too; in a narrow panel that
 button is only its icon, so the title beside it is not cut short. The legend is

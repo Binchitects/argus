@@ -31,7 +31,7 @@ which one answered:
 | `acpi` | `/sys/class/thermal` | Last resort, labelled `source="acpi"`, and only the zones that are the CPU: `x86_pkg_temp`, `cpu...`, `soc...`. |
 
 Every series it reports is a temperature of the CPU itself, because the
-dashboards take the hottest and the average of all of them. So it leaves out:
+dashboards draw the hottest of them and the average of the rest. So it leaves out:
 
 - LHM's **Distance to TjMax** sensors (how far a core is below its throttle
   point, about 100 minus the core) and LHM's own **Core Max** and **Core

@@ -419,7 +419,7 @@
     {
       "type": "timeseries",
       "title": "Per-core utilisation",
-      "description": "A single saturated core alongside idle ones usually means a single-threaded bottleneck rather than genuine CPU pressure.",
+      "description": "A single saturated core alongside idle ones usually means a single-threaded bottleneck rather than genuine CPU pressure. The seven busiest on average over the range keep a line each; the rest are one line, their average, with a faint band from the quietest to the busiest of them (the tooltip gives that range).",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1311,53 +1311,6 @@
       }
     },
     {
-      "type": "timeseries",
-      "title": "Host CPU temperature over time",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 8,
-        "x": 8,
-        "y": 55
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "expr": "max(cpu_temperature_celsius)",
-          "legendFormat": "hottest"
-        },
-        {
-          "refId": "B",
-          "expr": "avg(cpu_temperature_celsius)",
-          "legendFormat": "average"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "celsius",
-          "noValue": "No CPU sensor",
-          "custom": {
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "lineWidth": 2,
-            "showPoints": "never"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        }
-      },
-      "description": "The hottest CPU sensor and the average of all of them, from the cpu-temp-exporter: two lines whatever the core count. A gap between them is one core or one die running hot; CPU temperature per sensor, below, shows which. Linux reads coretemp/k10temp via hwmon; Windows scrapes LibreHardwareMonitor on the host."
-    },
-    {
       "type": "stat",
       "title": "NVMe temperature",
       "description": "Each NVMe drive's composite temperature (SMART temp1) from node-exporter's hwmon collector, which reads the kernel's own nvme sensors -- node-exporter already mounts the host /sys, so no extra exporter is needed. A drive is named by its device, then the model it reports (node_nvme_info), as in nvme0 · <model>, or by its device alone when it reports no model. Some drives also report their NAND and controller as temp2/temp3, which the composite lags under sustained writes. SATA drives have no sensor here.",
@@ -1425,8 +1378,8 @@
       },
       "gridPos": {
         "h": 7,
-        "w": 8,
-        "x": 16,
+        "w": 16,
+        "x": 8,
         "y": 55
       },
       "targets": [
@@ -1459,8 +1412,8 @@
     },
     {
       "type": "timeseries",
-      "title": "CPU temperature per sensor",
-      "description": "Every CPU sensor the cpu-temp-exporter reads: on Intel one per core and one for the package, on AMD one per die. With two CPUs a name starts with its CPU, as in coretemp.0/Core 0 and coretemp.1/Core 0. The seven hottest keep a line each and the rest are averaged into Other; Show as table lists every sensor.",
+      "title": "Host CPU temperature: the hottest sensors",
+      "description": "Every CPU sensor the cpu-temp-exporter reads: on Intel one per core and one for the package, on AMD one per die. With two CPUs a name starts with its CPU, as in coretemp.0/Core 0 and coretemp.1/Core 0. The seven hottest on average over the range keep a line each; the rest are one line, their average, with a faint band from the coolest to the hottest of them (the tooltip gives that range). Every sensor: Show as table. Linux reads coretemp/k10temp via hwmon; Windows scrapes LibreHardwareMonitor on the host.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
