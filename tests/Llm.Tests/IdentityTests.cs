@@ -442,6 +442,10 @@ public sealed class IdentityTests(AppFixture app)
         Assert.Equal("/", await RedirectFor("//evil.example/"));
         Assert.Equal("/", await RedirectFor("https://llm.test.evil.example/"));
         Assert.Equal("/", await RedirectFor("http://traces.llm.test/"));
+        // A browser drops tabs and line breaks from an address before reading it: "/\t/evil" is "//evil" to it.
+        Assert.Equal("/", await RedirectFor("/\t/evil.example/"));
+        Assert.Equal("/", await RedirectFor("/\n/evil.example/"));
+        Assert.Equal("/", await RedirectFor("/\r\\evil.example/"));
     }
 
     [Fact]

@@ -6,5 +6,13 @@
 export function continueTo(location: { pathname: string; search: string }): string | null {
   if (location.pathname !== '/continue') return null
   const rd = new URLSearchParams(location.search).get('rd')
-  return rd && rd.startsWith('/') && !rd.startsWith('//') && !rd.startsWith('/\\') ? rd : '/'
+  if (!rd?.startsWith('/')) return '/'
+  // Read as the browser will read it: it drops tabs and line breaks, and a backslash is a slash ("/\t/evil.test" is another site).
+  const origin = window.location.origin
+  try {
+    const to = new URL(rd, origin)
+    return to.origin === origin ? to.pathname + to.search + to.hash : '/'
+  } catch {
+    return '/'
+  }
 }
