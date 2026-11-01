@@ -53,17 +53,28 @@ export async function expectAccessible(page: Page, info: TestInfo, label: string
 
 /**
  * The theme for every page this test opens, set before any page loads: no reload
- * in the middle of a page's requests.
+ * in the middle of a page's requests. A colour theme is kept in the browser and
+ * said to be the account's for this page only (the admin's own is left as it is:
+ * the tests run at once).
  */
-export async function withTheme(page: Page, theme: 'light' | 'dark') {
+export async function withTheme(page: Page, theme: 'light' | 'dark', colorTheme?: string) {
   // Init scripts run in every frame: a sandboxed preview has no storage to set.
-  await page.addInitScript((t) => {
-    if (window === window.top) localStorage.setItem('theme', t)
-  }, theme)
+  await page.addInitScript(([t, c]) => {
+    if (window !== window.top) return
+    localStorage.setItem('theme', t)
+    if (c) localStorage.setItem('color-theme', c)
+  }, [theme, colorTheme ?? ''])
+  if (colorTheme) {
+    await page.route('**/api/auth/me', async (route) => {
+      const response = await route.fetch()
+      await route.fulfill({ response, json: { ...(await response.json()), colorTheme } })
+    })
+  }
 }
 
-export async function expectTheme(page: Page, theme: 'light' | 'dark') {
+export async function expectTheme(page: Page, theme: 'light' | 'dark', colorTheme?: string) {
   await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /^(?!.*dark)/)
+  if (colorTheme) await expect(page.locator('html')).toHaveAttribute('data-color-theme', colorTheme)
 }
 
 /** A screenshot for reviewing the look, kept with the test's results. */

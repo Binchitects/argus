@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { BookOpen, Columns2, Download, Gift, LifeBuoy, LogOut, Maximize2, MessageSquareHeart, Monitor, Moon, Palette, RectangleHorizontal, Sun, UserRound } from 'lucide-react'
+import { BookOpen, Columns2, Download, Gift, LifeBuoy, LogOut, Maximize2, MessageSquareHeart, Monitor, Moon, Palette, RectangleHorizontal, Sun, SwatchBook, UserRound } from 'lucide-react'
 import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { SendFeedbackDialog } from '@/components/app/send-feedback'
@@ -18,15 +18,18 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { api, infoQuery, supportHref, type Me } from '@/lib/api'
+import { colorThemes, type ColorThemeId } from '@/lib/color-themes'
 import { useInstall } from '@/lib/pwa'
 import { useTheme, type ThemePreference } from '@/lib/theme'
 import { setWidth, useWidth, type WidthPreference } from '@/lib/width'
+import { useChooseColorTheme } from './color-theme'
 import { useSignOut } from './use-sign-out'
 
 export function UserMenu({ me, onWhatsNew }: { me: Me; onWhatsNew?: () => void }) {
   const navigate = useNavigate()
   const signOut = useSignOut()
-  const { preference, setPreference } = useTheme()
+  const { preference, setPreference, resolved, colorTheme } = useTheme()
+  const chooseColorTheme = useChooseColorTheme()
   const width = useWidth()
   const support = useQuery(infoQuery).data?.supportContact
   const supportLink = support ? supportHref(support) : null
@@ -71,6 +74,20 @@ export function UserMenu({ me, onWhatsNew }: { me: Me; onWhatsNew?: () => void }
               <DropdownMenuRadioItem value="system">
                 <Monitor /> System
               </DropdownMenuRadioItem>
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <SwatchBook /> Colour theme
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            <DropdownMenuRadioGroup value={colorTheme} onValueChange={(v) => chooseColorTheme(v as ColorThemeId)}>
+              {colorThemes.map((t) => (
+                <DropdownMenuRadioItem key={t.id} value={t.id}>
+                  <span className="size-3.5 shrink-0 rounded-full border border-foreground/20" style={{ background: t[resolved].primary }} aria-hidden="true" /> {t.label}
+                </DropdownMenuRadioItem>
+              ))}
             </DropdownMenuRadioGroup>
           </DropdownMenuSubContent>
         </DropdownMenuSub>

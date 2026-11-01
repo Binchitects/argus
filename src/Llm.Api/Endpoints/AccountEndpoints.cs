@@ -49,6 +49,10 @@ public static class AccountEndpoints
             {
                 return AuthEndpoints.Problem(400, "answer_length", "The answer length is short, normal or thorough.");
             }
+            if (body.ColorTheme is { } theme && !ColorThemes.All.Contains(theme))
+            {
+                return AuthEndpoints.Problem(400, "color_theme", $"The colour theme is one of {string.Join(", ", ColorThemes.All)}.");
+            }
             // compactAt: a number (0, or 20 to 95), or null for the company's default; left out, it stays.
             int? compactAt = null;
             var compactSent = body.CompactAt.ValueKind is not JsonValueKind.Undefined;
@@ -61,11 +65,15 @@ public static class AccountEndpoints
                 compactAt = at;
             }
             var user = (await users.GetUserAsync(p))!;
-            if (body.AnswerLength is not null || compactSent)
+            if (body.AnswerLength is not null || compactSent || body.ColorTheme is not null)
             {
                 if (body.AnswerLength is not null)
                 {
                     user.AnswerLength = body.AnswerLength == Chat.AnswerLengths.Normal ? null : body.AnswerLength;
+                }
+                if (body.ColorTheme is not null)
+                {
+                    user.ColorTheme = body.ColorTheme == ColorThemes.Default ? null : body.ColorTheme;
                 }
                 if (compactSent)
                 {
@@ -101,6 +109,7 @@ public static class AccountEndpoints
         answerLength = user.AnswerLength ?? Chat.AnswerLengths.Normal,
         compactAt = user.CompactAt,
         compactAtDefault = chat.CompactAt,
+        colorTheme = user.ColorTheme ?? ColorThemes.Default,
     };
 
     private static async Task<IResult> ChangePasswordAsync(ChangePasswordRequest body, ClaimsPrincipal p, UserManager<AppUser> users,
@@ -281,7 +290,8 @@ public static class AccountEndpoints
 public sealed record SeenRelease(string? Release);
 
 /// <summary>
-/// A person's own choices for their answers. Only what is sent changes. <paramref name="CompactAt"/>: when their chats compact
-/// (and Code Arena's, unless chosen there), a number, or null for the company's default.
+/// A person's own choices for their answers and their colours. Only what is sent changes. <paramref name="CompactAt"/>: when
+/// their chats compact (and Code Arena's, unless chosen there), a number, or null for the company's default.
+/// <paramref name="ColorTheme"/>: one of <see cref="ColorThemes.All"/>, which every device they sign in on takes.
 /// </summary>
-public sealed record Preferences(string? AnswerLength = null, JsonElement CompactAt = default);
+public sealed record Preferences(string? AnswerLength = null, JsonElement CompactAt = default, string? ColorTheme = null);

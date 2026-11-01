@@ -130,6 +130,33 @@ describe('shell', () => {
     expect(screen.getByRole('main')).toHaveClass('max-w-(--page-max)')
   })
 
+  it('the colour theme the account keeps is taken on this device as it loads', async () => {
+    localStorage.setItem('color-theme', 'copper')
+    const calls = fakeApi({ ...member, colorTheme: 'midnight' })
+    renderApp('/')
+    await waitFor(() => expect(document.documentElement.dataset.colorTheme).toBe('midnight'))
+    expect(localStorage.getItem('color-theme')).toBe('midnight')
+    // Taken, not saved again.
+    expect(calls.some((c) => c.method === 'PUT')).toBe(false)
+  })
+
+  it('the colour theme is chosen in the user menu, and in the command palette', async () => {
+    const calls = fakeApi(member, { 'PUT /api/account/preferences': (body) => ({ json: { answerLength: 'normal', compactAt: null, compactAtDefault: 80, ...(body as object) } }) })
+    renderApp('/')
+    await userEvent.click(await screen.findByRole('button', { name: /Account menu/ }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Colour theme' }))
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Forest' }))
+    expect(document.documentElement.dataset.colorTheme).toBe('forest')
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ colorTheme: 'forest' }))
+
+    await userEvent.keyboard('{Control>}k{/Control}')
+    await userEvent.type(await screen.findByPlaceholderText('Go to a page or run a command…'), 'lavender')
+    await userEvent.keyboard('{Enter}')
+    expect(document.documentElement.dataset.colorTheme).toBe('lavender')
+    expect(localStorage.getItem('color-theme')).toBe('lavender')
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PUT').at(-1)?.body).toEqual({ colorTheme: 'lavender' }))
+  })
+
   it('the collapsed sidebar keeps each link laid out and the current page marked', async () => {
     fakeApi(admin)
     renderApp('/admin/people')

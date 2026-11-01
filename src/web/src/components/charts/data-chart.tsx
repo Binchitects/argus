@@ -38,7 +38,8 @@ export function DataChart({ result, chart, label, height = 280 }: { result: Data
 
 function Plot({ result, type, x, y, time, label, height }: { result: DataResult; type: 'bar' | 'line'; x: number; y: number[]; time: boolean; label: string; height: number | string }) {
   const ref = useRef<HTMLDivElement>(null)
-  const { resolved } = useTheme()
+  // The text, grid and tooltip colours are read again as the theme or the colour theme changes.
+  const { resolved, shownColorTheme } = useTheme()
 
   useEffect(() => {
     const el = ref.current
@@ -83,7 +84,7 @@ function Plot({ result, type, x, y, time, label, height }: { result: DataResult;
       resize.disconnect()
       chart.dispose()
     }
-  }, [result, type, x, y, time, resolved])
+  }, [result, type, x, y, time, resolved, shownColorTheme])
 
   // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- ECharts draws into a div; the table view carries the data
   return <div ref={ref} style={{ height }} role="img" aria-label={label} className="w-full" />

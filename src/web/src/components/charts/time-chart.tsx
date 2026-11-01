@@ -43,7 +43,8 @@ export function TimeChart({ series: raw, unit, units, stacked, bars, height = 26
   label: string
 }) {
   const ref = useRef<HTMLDivElement>(null)
-  const { resolved } = useTheme()
+  // The text, grid and tooltip colours are read again as the theme or the colour theme changes.
+  const { resolved, shownColorTheme } = useTheme()
   const series = useMemo(() => {
     const unitOf = (group: string | undefined) => (group !== undefined && units?.[group]) || unit
     const folded = foldSeries(raw, 8, (group) => foldBy(unitOf(group), stacked), unitOf)
@@ -123,7 +124,7 @@ export function TimeChart({ series: raw, unit, units, stacked, bars, height = 26
       resize.disconnect()
       chart.dispose()
     }
-  }, [series, unit, units, stacked, bars, from, to, resolved, fixed])
+  }, [series, unit, units, stacked, bars, from, to, resolved, shownColorTheme, fixed])
 
   // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- ECharts draws into a div; the table view carries the data
   return <div ref={ref} style={{ height }} role="img" aria-label={label} className="w-full" />

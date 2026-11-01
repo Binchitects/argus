@@ -5520,6 +5520,10 @@ namespace Llm.Core.Data.Migrations
                     b.Property<decimal?>("ChatCredit")
                         .HasColumnType("numeric");
 
+                    b.Property<string>("ColorTheme")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
                     b.Property<int?>("CompactAt")
                         .HasColumnType("integer");
 

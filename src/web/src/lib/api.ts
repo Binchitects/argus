@@ -35,6 +35,8 @@ export interface Me {
   signedInAt: number | null
   /** The features that are off here (deploy/features): their pages are left out. */
   featuresOff?: string[]
+  /** Their colour theme ("default", "sakura"...): every device they sign in on takes it. */
+  colorTheme?: string
 }
 
 /** An API answer that was not 2xx. `status` is the app's code ("invalid", "locked", ...), `message` is for people. */
