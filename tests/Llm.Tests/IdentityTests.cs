@@ -117,6 +117,23 @@ public sealed class IdentityTests(AppFixture app)
         }
         await laptop.Http.PutAsJsonAsync(new Uri("/api/account/preferences", UriKind.Relative), new { colorTheme = "default" });
         Assert.Equal("default", (await phone.JsonAsync(await phone.GetAsync("/api/auth/me"))).GetProperty("colorTheme").GetString());
+
+        // Changes made at once (on two devices, or two controls) are all kept: none is answered as saved when it was not.
+        for (var round = 0; round < 3; round++)
+        {
+            var theme = round % 2 == 0 ? "forest" : "ocean";
+            var at = await Task.WhenAll(
+                laptop.Http.PutAsJsonAsync(new Uri("/api/account/preferences", UriKind.Relative), new { colorTheme = theme }),
+                phone.Http.PutAsJsonAsync(new Uri("/api/account/preferences", UriKind.Relative), new { answerLength = round % 2 == 0 ? "thorough" : "short" }),
+                laptop.Http.PutAsJsonAsync(new Uri("/api/account/preferences", UriKind.Relative), new { compactAt = 60 + round }));
+            foreach (var res in at)
+            {
+                await StatusAssert.Is(HttpStatusCode.OK, res);
+            }
+            var prefs = await phone.JsonAsync(await phone.GetAsync("/api/account/preferences"));
+            Assert.Equal((theme, round % 2 == 0 ? "thorough" : "short", 60 + round),
+                (prefs.GetProperty("colorTheme").GetString(), prefs.GetProperty("answerLength").GetString(), prefs.GetProperty("compactAt").GetInt32()));
+        }
     }
 
     [Theory]

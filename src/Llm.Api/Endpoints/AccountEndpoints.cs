@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using Llm.Api.Gateway;
 using Llm.Api.Identity;
+using Llm.Core.Data;
 using Llm.Core.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
@@ -43,7 +44,8 @@ public static class AccountEndpoints
         me.MapPost("/2fa/disable", DisableTwoFactorAsync);
         me.MapGet("/preferences", async (ClaimsPrincipal p, UserManager<AppUser> users, IOptionsMonitor<Chat.ChatOptions> chat) =>
             Results.Ok(PreferencesOf((await users.GetUserAsync(p))!, chat.CurrentValue)));
-        me.MapPut("/preferences", async (Preferences body, ClaimsPrincipal p, UserManager<AppUser> users, IOptionsMonitor<Chat.ChatOptions> chat) =>
+        me.MapPut("/preferences", async (Preferences body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db,
+            IOptionsMonitor<Chat.ChatOptions> chat, CancellationToken ct) =>
         {
             if (body.AnswerLength is { } length && !Chat.AnswerLengths.All.Contains(length))
             {
@@ -65,7 +67,11 @@ public static class AccountEndpoints
                 compactAt = at;
             }
             var user = (await users.GetUserAsync(p))!;
-            if (body.AnswerLength is not null || compactSent || body.ColorTheme is not null)
+            if (body.AnswerLength is null && !compactSent && body.ColorTheme is null)
+            {
+                return Results.Ok(PreferencesOf(user, chat.CurrentValue));
+            }
+            for (var tries = 1; ; tries++)
             {
                 if (body.AnswerLength is not null)
                 {
@@ -79,9 +85,18 @@ public static class AccountEndpoints
                 {
                     user.CompactAt = compactAt;
                 }
-                await users.UpdateAsync(user);
+                var result = await users.UpdateAsync(user);
+                if (result.Succeeded)
+                {
+                    return Results.Ok(PreferencesOf(user, chat.CurrentValue));
+                }
+                if (tries == PreferenceTries || result.Errors.All(e => e.Code != nameof(IdentityErrorDescriber.ConcurrencyFailure)))
+                {
+                    return AuthEndpoints.Problem(409, "busy", "Your preferences could not be saved just now: try again.");
+                }
+                // Another change of theirs was saved meanwhile (another control, another device): this one goes on top of it.
+                await db.Entry(user).ReloadAsync(ct);
             }
-            return Results.Ok(PreferencesOf(user, chat.CurrentValue));
         });
         me.MapGet("/keys", KeysAsync);
         me.MapGet("/keys/limits", LimitsAsync);
@@ -102,6 +117,9 @@ public static class AccountEndpoints
             return Results.NoContent();
         }));
     }
+
+    /// <summary>How often a change of preferences is tried again on top of another saved meanwhile.</summary>
+    private const int PreferenceTries = 5;
 
     /// <summary>A person's choices as the account page shows them: compactAt null follows the company's, compactAtDefault.</summary>
     private static object PreferencesOf(AppUser user, Chat.ChatOptions chat) => new
