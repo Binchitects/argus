@@ -927,8 +927,10 @@ app (`/api/authz/address`) before every request with the caller's address as
 it saw it, so a change applies to the next request; a refused one gets 403 and
 a sentence naming the setting. A list that would refuse the address of the
 admin saving it is refused, so nobody locks themselves out from the page.
-Behind another proxy or load balancer, the address Traefik sees is that
-proxy's.
+While the app is down (starting again, upgrading) Traefik cannot ask it, and
+refuses every request rather than let one in unchecked: the web and Argus too
+answer 500 until the app is back. Behind another proxy or load balancer, the
+address Traefik sees is that proxy's.
 
 `IP_ALLOW` in `.env` (comma separated) is Traefik's own allow list in front of
 everything, even while the app is down; the installer asks for it
