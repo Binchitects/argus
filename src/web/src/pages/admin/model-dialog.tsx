@@ -285,8 +285,20 @@ export function ModelDialog({
       {choice && !mismatch && choice.group === 'parts' && <Alert title={choice.title}>{choice.why} It is put in among the files below, by its role.</Alert>}
       {!edit && <p className="-mt-2 text-xs text-muted-foreground">{kindDescription[kind]}</p>}
 
+      {edit?.kind === 'chat' && !vllmModel && snapshot && (
+        <Alert title={`Moves ${edit.model.name} to ${serverNames}`}>
+          It keeps its name, who may use it, its prices and sampling; it leaves llama.cpp (unloaded there) and loads on its new engine when
+          asked for. What only llama.cpp has (its GGUF file, layers by hand, experts in RAM, preset lines) is not carried over.
+        </Alert>
+      )}
       {kind === 'chat' && (vllmModel || snapshot) ? (
-        <VllmModelSection saved={vllmModel} snapshot={vllmModel?.file ?? snapshot ?? ''} gpus={gpus} instances={instances} onClose={onClose} />
+        <VllmModelSection
+          saved={vllmModel ?? (edit?.kind === 'chat' ? (edit.model as EngineModel) : null)}
+          snapshot={snapshot ?? vllmModel?.file ?? ''}
+          gpus={gpus}
+          instances={instances}
+          onClose={onClose}
+        />
       ) : kind === 'chat' ? (
         <ChatModelSection
           saved={edit?.kind === 'chat' ? edit.model : null}

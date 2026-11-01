@@ -1,4 +1,6 @@
 using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
 using Llm.Api.Models;
 using Llm.Core.Models;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -122,6 +124,29 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
         // On GPUs it does not fit, or a split its heads refuse: refused.
         var refused = await admin.PostAsync("/api/admin/models", new { name = "oss3", engineKind = "vllm", file = "hf/openai/gpt-oss-120b@main", context = 131072, devices = "0,1,2" });
         await StatusAssert.Is(HttpStatusCode.BadRequest, refused);
+    }
+
+    [Fact]
+    public async Task A_llama_cpp_model_moves_to_vllm_keeping_its_name_access_and_prices_and_leaves_llama_cpp()
+    {
+        await using var f = NewApp();
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", new
+        {
+            name = "tiny", file = "tiny/Tiny-4B-Q4_K_M.gguf", context = 8192, ubatch = 512, yarn = false, extra = "flash-attn = on", inputPerMtok = 0.2, outputPerMtok = 0.8,
+        }));
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/models/tiny/access", UriKind.Relative), new { audience = "Admins", groups = Array.Empty<string>() }));
+        Assert.Contains("[tiny]", await File.ReadAllTextAsync(Path.Combine(Config, "models.ini")), StringComparison.Ordinal);
+
+        // Its snapshot instead of its GGUF file, on vLLM: llama.cpp's own settings go with the move.
+        using var moved = await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny", UriKind.Relative), new { engineKind = "vllm", file = "hf/acme/Flash@abc123", context = 32768 });
+        await StatusAssert.Is(HttpStatusCode.OK, moved);
+        var row = (await admin.JsonAsync(await admin.GetAsync("/api/admin/models"))).GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == "tiny");
+        Assert.Equal(("vllm", "hf/acme/Flash@abc123", "fp8"), (row.GetProperty("engineKind").GetString(), row.GetProperty("file").GetString(), row.GetProperty("kvType").GetString()));
+        Assert.True(row.GetProperty("ubatch").ValueKind == JsonValueKind.Null);
+        Assert.Equal(0.8m, row.GetProperty("outputPerMtok").GetDecimal());
+        Assert.Equal("Admins", row.GetProperty("access").GetProperty("audience").GetString());
+        Assert.DoesNotContain("[tiny]", await File.ReadAllTextAsync(Path.Combine(Config, "models.ini")), StringComparison.Ordinal);
     }
 
     [Fact]

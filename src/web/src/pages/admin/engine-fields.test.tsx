@@ -69,6 +69,31 @@ describe('admin models: vLLM', () => {
     expect(sent).toMatchObject({ name: 'gpt-oss-120b', engineKind: 'vllm', file: 'hf/openai/gpt-oss-120b@main', devices: '2,3', replicas: 2, sleep: false, fallback: 'Qwen', kvType: 'fp8' })
   })
 
+  it("moves a llama.cpp model to vLLM: its snapshot chosen in its own dialog, saved under its name with vLLM's defaults", async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/models': () => ({ json: { engine: engine(), small: null, models } }),
+      'GET /api/admin/models/library': () => ({ json: [] }),
+      'GET /api/admin/models/library/snapshots': () => ({ json: snapshots }),
+      'GET /api/admin/models/media/files': () => ({ json: [] }),
+      'POST /api/admin/models/advice': () => ({ json: advice }),
+      'PATCH /api/admin/models/Qwen': () => ({ json: { restarting: false, warning: null } }),
+    })
+    renderApp('/admin/models')
+    const card = (await screen.findByRole('heading', { name: /Qwen/ })).closest('section')!
+    await userEvent.click(within(card).getByRole('button', { name: /Edit/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit Qwen' })
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'File or model' }))
+    await userEvent.click(await screen.findByRole('option', { name: /gpt-oss-120b@main · .* · vLLM/ }))
+    expect(await within(dialog).findByText('Moves Qwen to vLLM')).toBeInTheDocument()
+    const form = await within(dialog).findByRole('form', { name: 'The vLLM model' })
+    expect(within(form).getByLabelText('Name')).toHaveValue('Qwen')
+    expect(within(form).getByLabelText('Name')).toBeDisabled()
+    await userEvent.click(within(form).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH' && c.path === '/api/admin/models/Qwen')).toBe(true))
+    const sent = calls.find((c) => c.method === 'PATCH' && c.path === '/api/admin/models/Qwen')!.body as Record<string, unknown>
+    expect(sent).toMatchObject({ engineKind: 'vllm', file: 'hf/openai/gpt-oss-120b@main', kvType: 'fp8', parallel: 16 })
+  })
+
   it('adds a snapshot as an SGLang model: the engine chosen, its own flags in the hints, no LMCache; an engine whose feature is off is not offered', async () => {
     const instances = [
       { name: 'llamacpp', kind: 'llamacpp', managed: true, problem: null, on: true },

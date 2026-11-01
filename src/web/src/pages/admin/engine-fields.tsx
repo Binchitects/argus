@@ -128,9 +128,11 @@ interface VllmForm {
 const lastPart = (path: string) => (path.split('/').pop() ?? path).replace(/@.*$/, '')
 
 function start(saved: EngineModel | null, snapshot: string, kind: 'vllm' | 'sglang'): VllmForm {
+  // A llama.cpp model being moved here takes this engine's kind and its own defaults for what llama.cpp counts otherwise.
+  const moving = !!saved && !serverPerModel(saved.engineKind)
   return {
     name: saved?.name ?? lastPart(snapshot),
-    kind: saved?.engineKind === 'sglang' ? 'sglang' : saved ? 'vllm' : kind,
+    kind: saved?.engineKind === 'sglang' ? 'sglang' : saved && !moving ? 'vllm' : kind,
     engine: saved?.engine ?? '',
     devices: saved?.devices ?? '',
     replicas: String(saved?.replicas ?? 1),
@@ -138,7 +140,7 @@ function start(saved: EngineModel | null, snapshot: string, kind: 'vllm' | 'sgla
     quantization: saved?.quantization ?? '',
     kvType: saved?.kvType && ['fp8', 'auto', 'fp8_e4m3', 'fp8_e5m2'].includes(saved.kvType) ? saved.kvType : 'fp8',
     context: String(saved?.context ?? 32768),
-    parallel: String(saved?.parallel ?? 16),
+    parallel: String(moving ? 16 : (saved?.parallel ?? 16)),
     specDecode: saved?.specDecode ?? '',
     draftHead: saved?.draftHead ?? '',
     kvCpuGb: saved?.kvCpuGb ? String(saved.kvCpuGb) : '',

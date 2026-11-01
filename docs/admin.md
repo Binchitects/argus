@@ -522,6 +522,18 @@ would be with them.
   parameters. Its radix cache shares every prefix by itself. LMCache and a disk
   tier are vLLM's alone and refused. Inside SGLang, as inside vLLM, the chat's
   requests go ahead of API keys'.
+- **Moving a model to vLLM or SGLang.** vLLM and SGLang serve a Hugging Face
+  snapshot (safetensors), not a GGUF file: download the model's snapshot first
+  (above; on a host with no network, carry its `hf/<owner>/<repository>@<revision>/`
+  folder into the library). Then **Edit** the llama.cpp model and choose the
+  snapshot under **File or model**: the dialog says it moves, and shows the
+  vLLM (or SGLang) form for the same model. Saved, it keeps its name, who may use
+  it, its prices and its sampling; it is unloaded from llama.cpp and leaves its
+  presets, and loads on its new engine when asked for. What only llama.cpp has
+  (layers by hand, experts in RAM, its prompt step, YaRN, preset lines, its MTP
+  and draft) is not carried over; the cache type becomes fp8 and answers at once
+  16, unless set in the form. The same through the API: `PATCH
+  /api/admin/models/NAME` with `engineKind` and `file`.
 - **Load** loads a model now, beside the kept ones (refused when every place is
   kept). At the limit the app makes room for it, as for a request: an idle model
   that may make room unloads first, and is waited for until it has stopped. When

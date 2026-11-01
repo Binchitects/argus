@@ -313,18 +313,33 @@ public static class ModelEndpoints
     }
 
     private static async Task<IResult> UpdateAsync(string name, LocalModelRequest body, AppDbContext db, ModelCatalog catalog, ModelLibrary library, HardwareProbe hardware,
-        EngineWatcher watcher, PriceBook prices, ChatModels gatewayModels, Audit audit, CancellationToken ct)
+        EngineWatcher watcher, PriceBook prices, ChatModels gatewayModels, Audit audit, LlamaCppBackend llama, EngineState state, CancellationToken ct)
     {
         if (await db.LocalModels.SingleOrDefaultAsync(m => m.Name == name, ct) is not { } model)
         {
             return Results.NotFound();
         }
+        var wasLlama = EngineKinds.Of(model.EngineKind)?.Kind == EngineKinds.LlamaCpp;
         var (problem, warning) = Apply(model, body, library, await hardware.GetAsync(ct), prices.Defaults,
             [.. (await gatewayModels.AllAsync(ct)).Select(x => x.Name), .. await db.LocalModels.Select(x => x.Name).ToListAsync(ct)],
             new Placed(catalog.Kept(), await db.LocalModels.AsNoTracking().ToListAsync(ct)));
         if (problem is not null)
         {
             return problem;
+        }
+        if (wasLlama && EngineKinds.ServerPerModel(model.EngineKind))
+        {
+            // Moved to vLLM or SGLang: out of llama.cpp first (its name answers from its new engine once loaded there).
+            state.Forget(name);
+            state.Release(name);
+            try
+            {
+                await llama.UnloadAsync(name, ct);
+            }
+            catch (EngineException)
+            {
+                // Not loaded there, or llama.cpp is not running: nothing to unload.
+            }
         }
         model.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
@@ -771,7 +786,14 @@ public static class ModelEndpoints
                 ? $"{file} cannot be loaded yet: {why}"
                 : "Choose a Hugging Face snapshot from the model library (hf/ORG/REPO@REVISION, with its config.json)."), null);
         }
+        // A llama.cpp model moved to vLLM or SGLang (its snapshot instead of its GGUF file): its name, access, prices and
+        // sampling stay; what only llama.cpp has goes, unless the request sets it again (and is then refused for it).
+        var moving = EngineKinds.Of(m.EngineKind)?.Kind == EngineKinds.LlamaCpp;
         var draft = Copy(m);
+        if (moving)
+        {
+            FromLlamaCpp(draft);
+        }
         Merge(draft, body, file);
         VllmDefaults(draft, body);
         if (TokenPrice.Check(draft.InputPerMtok, draft.CachedInputPerMtok, draft.OutputPerMtok, prices) is { } price)
@@ -793,6 +815,10 @@ public static class ModelEndpoints
         {
             return (AuthEndpoints.Problem(400, problem.Field, problem.Message), null);
         }
+        if (moving)
+        {
+            FromLlamaCpp(m);
+        }
         Merge(m, body, file);
         VllmDefaults(m, body);
         var warnings = advice.Problems.Where(p => !p.Error).Select(p => p.Message).ToList();
@@ -803,6 +829,13 @@ public static class ModelEndpoints
             warnings.Insert(0, $"It runs on GPUs {proposed}, proposed for this machine.");
         }
         return (null, warnings.Count > 0 ? "Saved. " + string.Join(" ", warnings) : null);
+    }
+
+    /// <summary>llama.cpp's own settings, back to none: its projector, layers by hand, experts in RAM, prompt step, YaRN, preset lines, MTP and draft.</summary>
+    private static void FromLlamaCpp(LocalModel m)
+    {
+        (m.Projector, m.Placement, m.GpuLayers, m.CpuMoe, m.Ubatch, m.Yarn, m.ExtraPreset, m.Mtp, m.DraftHead, m.DraftMax) =
+            (null, "auto", 99, 0, null, false, null, false, null, 3);
     }
 
     /// <summary>A model turned to vLLM keeps none of llama.cpp's own values it did not set again: its cache type becomes vLLM's fp8.</summary>
