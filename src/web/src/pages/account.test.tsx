@@ -334,6 +334,31 @@ describe('account', () => {
     expect(document.documentElement.dataset.colorTheme).toBe('ocean')
   })
 
+  it('quick colour theme choices are saved one at a time, so the account ends with the last', async () => {
+    let letGo!: () => void
+    const held = new Promise<void>((resolve) => (letGo = resolve))
+    let n = 0
+    const calls = fakeApi(member, {
+      'PUT /api/account/preferences': (body) => {
+        const prefs = { answerLength: 'normal', compactAt: null, compactAtDefault: 80, colorTheme: (body as { colorTheme: string }).colorTheme }
+        return n++ === 0 ? { json: prefs, until: held } : { json: prefs }
+      },
+    })
+    const puts = () => calls.filter((c) => c.method === 'PUT' && c.path === '/api/account/preferences').map((c) => c.body)
+    renderApp('/account')
+    const group = await screen.findByRole('radiogroup', { name: 'Colour theme' })
+    await userEvent.click(within(group).getByRole('radio', { name: 'Sakura' }))
+    await userEvent.click(within(group).getByRole('radio', { name: 'Midnight' }))
+    await userEvent.click(within(group).getByRole('radio', { name: 'Copper' }))
+    expect(document.documentElement.dataset.colorTheme).toBe('copper')
+    // The first is still on its way: the others wait for it, and only the last of them is sent.
+    expect(puts()).toEqual([{ colorTheme: 'sakura' }])
+    letGo()
+    await waitFor(() => expect(puts()).toEqual([{ colorTheme: 'sakura' }, { colorTheme: 'copper' }]))
+    expect(within(group).getByRole('radio', { name: 'Copper' })).toBeChecked()
+    expect(localStorage.getItem('color-theme')).toBe('copper')
+  })
+
   it('keys of your own are added with a name and limits, shown once, and revoked one by one', async () => {
     let keys: OwnKey[] = [
       { id: 'm1', name: 'Your key', kind: 'main', preview: 'sk-...main', spend: 1, blocked: false, createdAt: null, limits: null, effective: { requestsPerMinute: 60, tokensPerMinute: null, parallel: 4, monthlyBudget: null } },

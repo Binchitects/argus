@@ -107,6 +107,36 @@ public sealed class NoticeTests(AppFixture app)
 
     [Fact]
     [Trait("Control", "GOV-02")]
+    public async Task With_two_factor_sign_in_to_set_up_as_well_the_notice_is_accepted_first_and_the_setup_follows()
+    {
+        await using var f = app.Create(app.ConnectionStringFor("notice_2fa_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), new Dictionary<string, string?>
+        {
+            ["Notice:Text"] = "Use this service for work.",
+            ["Notice:Version"] = "1",
+            ["Auth:TwoFactorRequired"] = "everyone",
+        });
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var me = await admin.JsonAsync(await admin.GetAsync("/api/auth/me"));
+        Assert.True(me.GetProperty("mustAcceptNotice").GetBoolean());
+        Assert.True(me.GetProperty("mustSetUpTwoFactor").GetBoolean());
+
+        // The setup does not hold the notice back: the web shows the notice first.
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.GetAsync("/api/account/notice"));
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.PostAsync("/api/account/notice/accept", new { version = "1" }));
+        me = await admin.JsonAsync(await admin.GetAsync("/api/auth/me"));
+        Assert.False(me.GetProperty("mustAcceptNotice").GetBoolean());
+        Assert.True(me.GetProperty("mustSetUpTwoFactor").GetBoolean());
+        var refused = await admin.GetAsync("/api/admin/people");
+        await StatusAssert.Is(HttpStatusCode.Forbidden, refused);
+        Assert.Equal("enrol_2fa", (await admin.JsonAsync(refused)).GetProperty("status").GetString());
+
+        var key = (await admin.JsonAsync(await admin.PostAsync("/api/account/2fa/setup"))).GetProperty("sharedKey").GetString()!;
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.PostAsync("/api/account/2fa/enable", new { code = Totp.Code(key) }));
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.GetAsync("/api/admin/people"));
+    }
+
+    [Fact]
+    [Trait("Control", "GOV-02")]
     public async Task Without_a_notice_nothing_waits_and_the_check_asks_for_one()
     {
         await using var f = app.Create(app.ConnectionStringFor("nonotice_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway());

@@ -9,6 +9,9 @@ export function setIdeBase(prefix: string) {
   base = prefix.replace(/\/+$/, '')
 }
 
+/** True on code-arena's own page, false in Arena's Code Studio (the IDE in the person's own page). */
+export const ownPage = () => !base
+
 /** An address of the IDE's API (/api/…) as it is reached from this page. */
 export const ideUrl = (path: string) => (base && path.startsWith('/api/') ? `${base}${path.slice(4)}` : path)
 

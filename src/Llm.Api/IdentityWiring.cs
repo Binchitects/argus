@@ -577,17 +577,17 @@ public static class IdentityWiring
 
     /// <summary>
     /// A session that must set up two-factor sign-in first (TwoFactorPolicy.EnrolClaim) reaches only who is signed in, the setup
-    /// itself, signing out and the app's info: the rest of the API, and other apps' sign-in through this one (OIDC, forwardAuth),
-    /// answer 403 enrol_2fa until it is set up, a browser on its way to another app's sign-in (/connect/authorize) shown the
-    /// setup first, then sent on. Keys are not sessions: they pass.
+    /// itself, the sign-in notice (accepted first when both are due), signing out and the app's info: the rest of the API, and
+    /// other apps' sign-in through this one (OIDC, forwardAuth), answer 403 enrol_2fa until it is set up, a browser on its way
+    /// to another app's sign-in (/connect/authorize) shown the setup first, then sent on. Keys are not sessions: they pass.
     /// </summary>
     public static IApplicationBuilder UseTwoFactorEnrolment(this IApplicationBuilder app) =>
         app.Use(async (ctx, next) =>
         {
             var path = ctx.Request.Path;
             if (ctx.User.HasClaim(c => c.Type == TwoFactorPolicy.EnrolClaim) && (path.StartsWithSegments("/api") || path.StartsWithSegments("/connect"))
-                && !path.StartsWithSegments("/api/auth") && !path.StartsWithSegments("/api/account/2fa") && !path.StartsWithSegments("/api/info")
-                && !SessionGates.Passes(path))
+                && !path.StartsWithSegments("/api/auth") && !path.StartsWithSegments("/api/account/2fa") && !path.StartsWithSegments("/api/account/notice")
+                && !path.StartsWithSegments("/api/info") && !SessionGates.Passes(path))
             {
                 if (await SessionGates.SendBrowserOnAsync(ctx))
                 {

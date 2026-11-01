@@ -49,7 +49,9 @@ describe('the sign-in notice', () => {
   it('goes on only to a path of this site', () => {
     const at = (search: string) => continueTo({ pathname: '/continue', search })
     expect(at('?rd=%2Fconnect%2Fauthorize%3Fx%3D1')).toBe('/connect/authorize?x=1')
-    for (const evil of ['?rd=https%3A%2F%2Fevil.test', '?rd=%2F%2Fevil.test', '?rd=%2F%5Cevil.test', '']) expect(at(evil)).toBe('/')
+    // A browser drops tabs and line breaks from an address before reading it: "/\t/evil.test" is another site to it.
+    for (const evil of ['?rd=https%3A%2F%2Fevil.test', '?rd=%2F%2Fevil.test', '?rd=%2F%5Cevil.test', '?rd=%2F%09%2Fevil.test', '?rd=%2F%0A%2Fevil.test', '?rd=%2F%0D%5Cevil.test', ''])
+      expect(at(evil)).toBe('/')
     expect(continueTo({ pathname: '/chat', search: '?rd=%2Fx' })).toBeNull()
   })
 

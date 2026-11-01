@@ -16,7 +16,8 @@ public static class Redirects
         target = target.Trim();
         if (target.StartsWith('/'))
         {
-            return target.Length > 1 && (target[1] == '/' || target[1] == '\\') ? "/" : target;
+            // A browser drops tabs and line breaks before it reads an address ("/\t/evil" is "//evil" to it); no path has them.
+            return target.Any(char.IsControl) || (target.Length > 1 && (target[1] == '/' || target[1] == '\\')) ? "/" : target;
         }
         if (Uri.TryCreate(target, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps && string.IsNullOrEmpty(uri.UserInfo) &&
             (uri.Host.Equals(domain, StringComparison.OrdinalIgnoreCase) || uri.Host.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase)))
