@@ -41,10 +41,10 @@ public sealed partial class BlenderTool(BlenderClient blender, AppDbContext db, 
 
     public Task<string?> UnavailableAsync(CancellationToken ct) => Task.FromResult(blender.Unavailable());
 
-    /// <summary>Before the script: part(), light(), material() and make_texture() (Blender/builder.py).</summary>
+    /// <summary>Before the script: part(), light(), material() and make_texture() (deploy/services/blender/tool/builder.py).</summary>
     public static string Builder { get; } = Resource("blender-builder.py");
 
-    /// <summary>After the script: pictures (Cycles when it has textures, glass or lights) and model.glb, its patterns baked into images (Blender/epilogue.py).</summary>
+    /// <summary>After the script: pictures (Cycles when it has textures, glass or lights) and model.glb, its patterns baked into images (deploy/services/blender/tool/epilogue.py).</summary>
     public static string Epilogue { get; } = Resource("blender-epilogue.py");
 
     private static string Resource(string name)

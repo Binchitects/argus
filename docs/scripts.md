@@ -183,6 +183,8 @@ its own options with `--help`):
 | `recovery` | `recovery-check.py` | the recovery plan's steps |
 | `sandbox` | `sandbox-check.py` | the code sandbox's isolation and limits |
 | `lean` | `lean-check.py` | the science lab's proof checker |
+| `blender` | `blender-check.py` | the 3D sandbox: a model made, the 3D tool's own script (its model and pictures within its time), no network, a run past its time stopped |
+| `sandboxes` | `sandboxes-check.py` | every sandbox that is on: the code sandbox, the 3D sandbox and Lean with their checks above; the browser, Code Studio's workspaces, the studio's models and Laya running and healthy |
 | `clients` | `clients-check.py` | Code Arena, the CLI and MCP clients against the stack |
 | `gpu` | `gpu-check.sh` | a GPU server's driver, toolkit and engines ([multi-gpu-server.md](multi-gpu-server.md)) |
 | `dashboards` | `audit-dashboards.py` | every dashboard panel's queries answer, with data |

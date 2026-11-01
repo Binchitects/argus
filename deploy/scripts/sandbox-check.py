@@ -34,6 +34,8 @@ def env(key, default=""):
 PROJECT = os.environ.get("COMPOSE_PROJECT_NAME", "arena")
 UID, GID = env("LLM_UID", "1000"), env("LLM_GID", "1000")
 VOLUME = f"{PROJECT}_sandbox"
+# The image the client runs in (its Python): the sandbox's own; the 3D sandbox's check runs it in Blender's.
+CLIENT_IMAGE = "arena-sandbox:latest"
 RESULTS = []
 LAST = {}  # the last run's result: a run that failed to happen fails its checks
 
@@ -79,7 +81,7 @@ def run(code, timeout=20, inputs=None, cancel_after=False, calls=False):
         job["calls"] = True
     # The sandbox's own image, with python itself as the entrypoint: the client, not the runner.
     p = subprocess.run(["docker", "run", "--rm", "-i", "--network", "none", "--user", f"{UID}:{GID}", "-v", f"{VOLUME}:/sandbox",
-                        "--entrypoint", "python", "arena-sandbox:latest", "-c", CLIENT], input=json.dumps(job), capture_output=True, text=True,
+                        "--entrypoint", "python3", CLIENT_IMAGE, "-c", CLIENT], input=json.dumps(job), capture_output=True, text=True,
                        timeout=600, check=False)
     try:
         result = json.loads(p.stdout.strip().splitlines()[-1])

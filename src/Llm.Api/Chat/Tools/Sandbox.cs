@@ -60,6 +60,23 @@ public abstract class JobRunner(Func<string> dir, string name, string howToStart
     /// <summary>Longest a job may wait for a free slot, beyond its own time.</summary>
     private static readonly TimeSpan QueueAllowance = TimeSpan.FromMinutes(3);
 
+    /// <summary>A runner silent this long while it has a job has stopped: the job is not waited for any more.</summary>
+    public static readonly TimeSpan SilentLimit = TimeSpan.FromSeconds(30);
+
+    /// <summary>The runner's heartbeat: when it last wrote it, and when it started (null from a runner before that).</summary>
+    private (double At, double? Started)? Heartbeat()
+    {
+        try
+        {
+            var beat = JsonDocument.Parse(File.ReadAllText(Path.Combine(Dir, "heartbeat"))).RootElement;
+            return (beat.GetProperty("at").GetDouble(), beat.TryGetProperty("started", out var s) && s.ValueKind == JsonValueKind.Number ? s.GetDouble() : null);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
     private string Dir => dir();
 
     /// <summary>Why the sandbox cannot run code now, or null.</summary>
@@ -129,15 +146,43 @@ public abstract class JobRunner(Func<string> dir, string name, string howToStart
 
         var done = Path.Combine(Dir, "out", id);
         var deadline = clock.GetUtcNow() + TimeSpan.FromSeconds(timeoutSeconds) + QueueAllowance;
+        // The runner is watched while it has the job: one that stops answering, or starts again (and so drops what it was
+        // running), is not waited for until the deadline, which reads as a tool that never answers.
+        var startedAt = Heartbeat()?.Started;
+        DateTimeOffset? silentSince = null;
+        var looked = Environment.TickCount64;
         try
         {
             var answered = 0;
             while (!Directory.Exists(done))
             {
-                if (clock.GetUtcNow() > deadline)
+                var now = clock.GetUtcNow();
+                if (now > deadline)
                 {
                     TryDelete(queued);
                     throw new SandboxException("The sandbox did not answer in time: it may be busy. Try again in a minute.");
+                }
+                if (Environment.TickCount64 - looked >= 1000)
+                {
+                    looked = Environment.TickCount64;
+                    var beat = Heartbeat();
+                    if (beat is null || now.ToUnixTimeMilliseconds() / 1000.0 - beat.Value.At > 20)
+                    {
+                        silentSince ??= now;
+                        if (now - silentSince > SilentLimit)
+                        {
+                            TryDelete(queued);
+                            throw new SandboxException($"{name} stopped answering while it had this job, so nothing came back: run it again. If it keeps happening, an admin finds why in Admin → Logs.");
+                        }
+                    }
+                    else
+                    {
+                        silentSince = null;
+                        if (startedAt is not null && beat.Value.Started is { } started && started != startedAt && !Directory.Exists(queued))
+                        {
+                            throw new SandboxException($"{name} started again while it ran this job, which was lost with it: run it again.");
+                        }
+                    }
                 }
                 if (calls is not null)
                 {

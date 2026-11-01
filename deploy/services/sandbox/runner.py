@@ -22,8 +22,9 @@ The protocol, all in /jobs (owned by the app's user, 0700):
   calls/<id>/<n>.json, <n>.out.json   a job with "calls": its program's calls of
                       the chat's tools (arena), relayed by the runner from a socket
                       in the job's directory; the app answers each as the person
-  heartbeat           {"at": epoch seconds, "slots": n, "busy": n}; the app
-                      treats the sandbox as down when it is stale
+  heartbeat           {"at": epoch seconds, "slots": n, "busy": n, "started": epoch
+                      seconds}; the app treats the sandbox as down when it is
+                      stale, and a job it took as lost when "started" changes
 
 A job directory is written as in/.tmp-<id> and renamed, so it is whole when
 seen; results the same way.
@@ -43,6 +44,8 @@ import time
 
 JOBS = "/jobs"
 IN, RUN, OUT, CANCEL, CALLS = (os.path.join(JOBS, d) for d in ("in", "run", "out", "cancel", "calls"))
+# When this runner started: a restart drops the jobs it was running (prepare), and the app, seeing it change, stops waiting.
+STARTED = time.time()
 # A program's calls of the chat's tools: at most so many a run, each waited for at most so long.
 MOST_CALLS = int(os.environ.get("SANDBOX_MOST_CALLS", "200"))
 CALL_WAIT = 120
@@ -422,7 +425,7 @@ def heartbeat():
         try:
             tmp = os.path.join(JOBS, ".heartbeat")
             with open(tmp, "w", encoding="utf-8") as f:
-                json.dump({"at": time.time(), "slots": SLOTS, "busy": busy}, f)
+                json.dump({"at": time.time(), "slots": SLOTS, "busy": busy, "started": STARTED}, f)
             os.chown(tmp, OWNER_UID, OWNER_GID)
             os.replace(tmp, os.path.join(JOBS, "heartbeat"))
             # Leftovers of an app that went away: results never collected, jobs half written.

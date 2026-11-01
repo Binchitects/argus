@@ -772,6 +772,8 @@ CHECKS = {
     "recovery": ("recovery-check.py", "the recovery plan's steps, checked"),
     "sandbox": ("sandbox-check.py", "the sandbox's isolation"),
     "lean": ("lean-check.py", "the Lean prover in the science lab"),
+    "blender": ("blender-check.py", "the 3D sandbox: a model, the 3D tool's own script, its isolation and limits"),
+    "sandboxes": ("sandboxes-check.py", "every sandbox that is on, checked for real (code, 3D, Lean, browser, workspaces, studio, Laya)"),
     "clients": ("clients-check.py", "the clients (Code Arena, the CLI, MCP) against the stack"),
     "gpu": ("gpu-check.sh", "the GPU, its driver and the container toolkit"),
     "dashboards": ("audit-dashboards.py", "every dashboard's queries answer"),
