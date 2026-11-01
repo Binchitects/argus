@@ -14,6 +14,7 @@ spec:
   template:
     metadata:
       labels: {{- include "arena.selector" (dict "root" $ "name" "llamacpp") | nindent 8 }}
+      annotations: {{- include "arena.scriptsChecksum" (list $ "router.sh") | nindent 8 }}
     spec:
       {{- include "arena.podDefaults" . | nindent 6 }}
       {{- with .Values.llamacpp.nodeSelector }}
@@ -87,6 +88,10 @@ spec:
   template:
     metadata:
       labels: {{- include "arena.selector" (dict "root" $ "name" .name) | nindent 8 }}
+      {{- /* The fake's files only when it runs: a change to them leaves a real vLLM's models loaded. */}}
+      {{- $scripts := list $ "vllm-supervisor.sh" "vllm-helper.py" "gpu-probe.py" }}
+      {{- if $.Values.vllm.fake }}{{ $scripts = concat $scripts (list "fake_vllm.py" "fake-vllm") }}{{ end }}
+      annotations: {{- include "arena.scriptsChecksum" $scripts | nindent 8 }}
     spec:
       {{- include "arena.podDefaults" $ | nindent 6 }}
       {{- with .nodeSelector }}
@@ -173,6 +178,9 @@ spec:
   template:
     metadata:
       labels: {{- include "arena.selector" (dict "root" $ "name" .name) | nindent 8 }}
+      {{- $scripts := list $ "vllm-supervisor.sh" "vllm-helper.py" "gpu-probe.py" "sglang-serve.py" }}
+      {{- if $.Values.sglang.fake }}{{ $scripts = concat $scripts (list "fake_vllm.py" "fake-vllm" "fake-sglang-init.py" "fake-sglang-launch.py") }}{{ end }}
+      annotations: {{- include "arena.scriptsChecksum" $scripts | nindent 8 }}
     spec:
       {{- include "arena.podDefaults" $ | nindent 6 }}
       {{- with .nodeSelector }}
@@ -296,6 +304,7 @@ spec:
   template:
     metadata:
       labels: {{- include "arena.selector" (dict "root" $ "name" .name) | nindent 8 }}
+      annotations: {{- include "arena.scriptsChecksum" (list $ "sd-serve.sh") | nindent 8 }}
     spec:
       {{- include "arena.podDefaults" $ | nindent 6 }}
       securityContext: { runAsUser: 65534, runAsGroup: 65534, runAsNonRoot: true }

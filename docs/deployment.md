@@ -426,7 +426,11 @@ answers through its Service. `--database external --db-host HOST
 `--pull-secret`) loads the bundle's images, pushes them there and points the
 chart at them. `upgrade` keeps the release's values and secrets (helm
 `--reset-then-reuse-values`) and rolls back by itself when the new release
-does not come up; `status` says the release, its pods and the app's version;
+does not come up; an engine's pod (llama.cpp, vLLM, SGLang, pictures, video)
+also starts again, and its models load again, when an upgrade changes the
+scripts it runs from the chart (its pod carries their checksum), and not when
+another service's configuration changes;
+`status` says the release, its pods and the app's version;
 `remove` uninstalls and keeps the data, `remove --purge --confirm PURGE` also
 takes its volumes and secrets. `--dry-run` shows the plan and changes nothing.
 `--with A,B` and `--without A,B` choose the [features](#features) on `install`

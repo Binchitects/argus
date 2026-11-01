@@ -718,7 +718,10 @@ names the app reaches them by, one release per namespace. `./arenactl kube`
 - **Engines**: one Deployment per vLLM or SGLang instance, each driven by the
   same files on claims, with no Kubernetes API; an admin's Reload, Restart and
   Reset are files there too, and a process that ends is started again by its
-  pod's restart policy, as Compose's does. The sandboxes, Laya, the
+  pod's restart policy, as Compose's does. The scripts an engine runs (the
+  router, the supervisor, `sd-serve.sh`) are mounted from the chart's
+  ConfigMap, and its pod carries a checksum of them: a `helm upgrade` that
+  changes one starts that engine's pod again, and no other's. The sandboxes, Laya, the
   scanners, the studio and the workspaces have NetworkPolicies.
 - **Not in the chart**: the browser (point `browser.url` at one you run),
   Promtail (log shipping is the cluster's), the GPU exporters and the power
