@@ -31,6 +31,8 @@ public sealed partial class AnswerJobs
                 job.Emit(new { type = "arena", id = match.Id, questionId, side, step, of = 2 });
                 var first = (Guid?)null;
                 var stopped = false;
+                // Its line refused it (busy, waited too long, taken out by an admin): its answer says why.
+                var refused = false;
                 async Task EmitAsync(object e)
                 {
                     var node = JsonSerializer.SerializeToNode(e, Json)!.AsObject();
@@ -66,13 +68,24 @@ public sealed partial class AnswerJobs
                     catch (AnswerGate.TooLongException ex)
                     {
                         // A wait that gave up names the busy model: blind, as every other event of the arena.
+                        refused = true;
                         throw new AnswerGate.TooLongException(Arena.Blind(ex.Message, match.ModelA, match.ModelB));
+                    }
+                    catch (Exception ex) when (ex is AnswerGate.BusyException or AnswerGate.RemovedException)
+                    {
+                        refused = true;
+                        throw;
                     }
                 }
                 await chat.AnswerAsync(user, conversation, question, new AnswerOverrides(model, Hurry: job.Hurry, Compare: true, Line: LineAsync), EmitAsync, ct);
                 if (side == "a")
                 {
                     endA = conversation.CurrentLeafId;
+                }
+                if (refused && side == "a")
+                {
+                    // A's line refused it: the comparison ends there, and B never starts.
+                    return;
                 }
                 if (stopped || ct.IsCancellationRequested)
                 {

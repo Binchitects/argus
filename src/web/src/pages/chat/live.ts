@@ -202,8 +202,11 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
     case 'error': {
       // A compaction the person asked for has no answer to carry it: the page says it.
       if (state.mode === 'compact') return { ...state, compacting: false }
-      const a = lastAssistant()
-      if (a) Object.assign(a, { status: 'failed', error: e.message, errorKind: e.kind ?? null })
+      // It lands on the answer being written. Before there is one (the chat was gone, the server failed), a notice says it:
+      // an earlier turn's answer did not fail.
+      const i = state.current ? messages.findIndex((m) => m.id === state.current) : -1
+      if (i < 0) return { ...state, notices: [...state.notices, { kind: 'error', text: e.message }], thinkingSince: null }
+      messages[i] = { ...messages[i]!, status: 'failed', error: e.message, errorKind: e.kind ?? null }
       return { ...state, messages, thinkingSince: null }
     }
     case 'stopped': {

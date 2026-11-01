@@ -297,7 +297,12 @@ public sealed class AnswerCacheTests(AppFixture app)
         Assert.Equal(message.ToJsonString(), again["choices"]![0]!["message"]!.ToJsonString());
         Assert.Equal(0, again["usage"]!["prompt_tokens"]!.GetValue<int>());
 
-        // Cut short (no finish, no [DONE]): not an answer to keep.
-        Assert.Null(AnswerCache.Assemble(sse[..sse.IndexOf("\"finish_reason\"", StringComparison.Ordinal)], streamed: true));
+        // Cut short (no finish, no [DONE]): not an answer to keep, but for the prompt log what went out, as far as it went.
+        var cut = sse[..sse.IndexOf("\"finish_reason\"", StringComparison.Ordinal)];
+        Assert.Null(AnswerCache.Assemble(cut, streamed: true));
+        var sofar = AnswerCache.Assemble(cut, streamed: true, cut: true)!;
+        Assert.Equal("Let me see.", sofar["choices"]![0]!["message"]!["reasoning_content"]!.GetValue<string>());
+        Assert.Null(sofar["choices"]![0]!["finish_reason"]);
+        Assert.Null(AnswerCache.Assemble("", streamed: true, cut: true));
     }
 }

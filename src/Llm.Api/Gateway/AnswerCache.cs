@@ -164,9 +164,10 @@ public sealed class AnswerCache(AppDbContext db, KeyBook book, AnswerCacheState 
     /// <summary>
     /// The chat.completion a gateway response holds: the JSON itself, or one put together from the
     /// stream's chunks (words, thinking, tool calls, usage). Null when it is not a complete answer:
-    /// an error, a stream cut short, a choice without its finish.
+    /// an error, a stream cut short, a choice without its finish. <paramref name="cut"/>: a stream cut
+    /// short (its caller went away, an admin stopped it), put together as far as it went, for the prompt log.
     /// </summary>
-    public static JsonObject? Assemble(string text, bool streamed)
+    public static JsonObject? Assemble(string text, bool streamed, bool cut = false)
     {
         if (!streamed)
         {
@@ -263,7 +264,7 @@ public sealed class AnswerCache(AppDbContext db, KeyBook book, AnswerCacheState 
                 }
             }
         }
-        if (!done || choices.Count == 0 || choices.Values.Any(c => c.Finish is null))
+        if (choices.Count == 0 || (!cut && (!done || choices.Values.Any(c => c.Finish is null))))
         {
             return null;
         }
@@ -635,10 +636,11 @@ public static class AnswerCacheEndpoints
         using var stopping = turn is null ? null : CancellationTokenSource.CreateLinkedTokenSource(ct, turn.Stopped);
         var work = stopping?.Token ?? ct;
         bool StoppedByAdmin() => turn?.StopReason is not null && !ct.IsCancellationRequested;
-        async Task StopAsync(bool sse)
+        // completion: the answer as far as it went out, for the prompt log.
+        async Task StopAsync(bool sse, JsonObject? completion = null)
         {
             var why = Chat.AnswerGate.StoppedBy(turn!.StopReason!);
-            logged?.End(PromptLogEntry.Stopped, StatusCodes.Status403Forbidden, error: why);
+            logged?.End(PromptLogEntry.Stopped, StatusCodes.Status403Forbidden, error: why, completion: completion);
             if (!http.Response.HasStarted)
             {
                 http.Response.Clear();
@@ -783,14 +785,14 @@ public static class AnswerCacheEndpoints
             }
             catch (Exception ex) when ((ex is OperationCanceledException or IOException) && StoppedByAdmin())
             {
-                // Stopped by an admin while it answered: in the prompt log as stopped, with why.
-                await StopAsync(sse);
+                // Stopped by an admin while it answered: in the prompt log as stopped, with why and what had gone out.
+                await StopAsync(sse, written is not null && res.IsSuccessStatusCode ? AnswerCache.Assemble(Encoding.UTF8.GetString(written.ToArray()), sse, cut: true) : null);
                 return;
             }
             catch (Exception ex) when (logged is not null && (ex is OperationCanceledException or IOException || ct.IsCancellationRequested))
             {
                 // The caller went away (or the gateway broke off): what had come is kept.
-                var partial = written is not null && res.IsSuccessStatusCode ? AnswerCache.Assemble(Encoding.UTF8.GetString(written.ToArray()), sse) : null;
+                var partial = written is not null && res.IsSuccessStatusCode ? AnswerCache.Assemble(Encoding.UTF8.GetString(written.ToArray()), sse, cut: true) : null;
                 logged.End(ct.IsCancellationRequested ? PromptLogEntry.Stopped : PromptLogEntry.Failed, ct.IsCancellationRequested ? 499 : (int)res.StatusCode,
                     error: ct.IsCancellationRequested ? "The caller went away before the answer was whole." : $"The answer broke off: {ex.Message}", completion: partial);
                 throw;

@@ -1025,8 +1025,9 @@ no built-in role but the admins' has; the Auditor's `.read` permissions do not
 include it) shows everyone's questions and the answers they got, newest first,
 whatever became of them. Each has a state: **Waiting** (in line for its turn),
 **Running**, **Done**, **Failed** (with the error the asker got), **Stopped**
-(the asker stopped it or went away; what had come is shown) or **Refused** (the
-line was full, or it waited past its limit, with the message the asker got).
+(the asker stopped it or went away, or an admin stopped it; what had come is
+shown) or **Refused** (the line was full, it waited past its limit, or an admin
+took it out of the line, with the message the asker got).
 While any shown is waiting or running, the page looks again every 5 seconds.
 
 - **Chat**: each question in a chat (Code Arena's sessions kept in Arena and
@@ -1547,26 +1548,32 @@ caller is told it:
 
 - **A chat answer** taken out says, as its error, that an admin took it out
   of the line and nothing was sent to the model, with the reason. One
-  stopped says *Stopped by an admin:* and the reason under what it wrote, and
-  keeps that when the chat is read again. When no page was open, the bell
-  says so.
+  stopped says *Stopped by an admin:* and the reason under what it wrote, or
+  alone when it was stopped before its first word (its tools starting, its
+  chat compacting). Each keeps that when the chat is read again, and a
+  scheduled task's run says it too. When no page was open, the bell says so.
 - **An API request** taken out gets HTTP 403 `removed_by_admin` with the
   reason, and no `Retry-After`: the OpenAI and Anthropic clients ask again
   at once after a 429 or a 5xx, which would put it back in the line. One
   stopped while it streams ends with an error chunk of that type
   (`data: {"error":{"message":"Stopped by an admin: …","type":"removed_by_admin","code":"403"}}`),
   which the clients raise. The prompt log has it as refused or stopped, with
-  the reason. Code Arena shows the admin's words rather than a refused key.
+  the reason; a stopped one keeps the answer as far as it went out. Code
+  Arena shows the admin's words rather than a refused key.
 
 Each is in the audit log as `line.remove` (it waited) or `line.stop` (it
 ran), with whose request it was, its model, chat or API, how long it had
 waited or run, and the reason. A request held by another replica is found
 there (the replicas' signals, as a stop of an answer is): that replica does
 it and writes the entry, naming itself, and the page says that replica did it. A
-request that ended meanwhile is said to be gone. A role held for some groups
-only may not take requests out: the line is everyone's. A request waiting
-in its key's own line (its places at once taken) is not in the model's line
-yet, and is not shown.
+request that ended meanwhile is said to be gone. **Remove** and **Stop** go
+with what the page showed: a request whose turn came while the reason was
+written is not stopped by **Remove** (the page says it started; stop it under
+Running if it should stop), and a second **Stop** of one already stopping
+changes nothing and is not audited again (the page shows the first reason,
+which holds). A role held for some groups only may not take requests out:
+the line is everyone's. A request waiting in its key's own line (its places
+at once taken) is not in the model's line yet, and is not shown.
 
 ### Dashboards
 

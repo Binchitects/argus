@@ -227,7 +227,7 @@ public sealed class ScaleOutTests(AppFixture app)
 
         // Posted to B, whose own line does not have it: A stops it.
         var adminB = await new TestBrowser(b).SignedInAsync("admin", AppFixture.AdminPassword);
-        await StatusAssert.Is(HttpStatusCode.Accepted, await adminB.PostAsync($"/api/admin/line/{ticket}/remove", new { reason = "Maintenance on this model" }));
+        await StatusAssert.Is(HttpStatusCode.Accepted, await adminB.PostAsync($"/api/admin/line/{ticket}/remove", new { reason = "Maintenance on this model", running = true }));
         var stopped = (await answering).Last();
         Assert.Equal(("stopped", "Stopped by an admin: Maintenance on this model"), (stopped.GetProperty("type").GetString(), stopped.GetProperty("why").GetString()));
         // A audits it (it knows whose it was), naming itself, with the admin who asked on B.

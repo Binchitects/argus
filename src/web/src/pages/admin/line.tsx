@@ -121,18 +121,28 @@ function RemoveDialog({ target, open, onClose }: { target: { entry: LineEntry; r
     setError(null)
     onClose()
   }
+  // It goes with how the admin saw it (running or waiting): one seen waiting that started meanwhile is not stopped.
   const remove = useMutation({
-    mutationFn: (v: { id: string; reason: string }) => api<{ was: 'waiting' | 'running' | null }>(`/api/admin/line/${v.id}/remove`, { method: 'POST', body: { reason: v.reason } }),
+    mutationFn: (v: { id: string; reason: string; running: boolean }) =>
+      api<{ was: 'waiting' | 'running' | null }>(`/api/admin/line/${v.id}/remove`, { method: 'POST', body: { reason: v.reason, running: v.running } }),
     onSuccess: (r) => {
       // was null: another replica had it (each keeps its own line), and did it.
-      const done = r.was === null ? 'Done by the replica that had it' : target?.running ? 'Stopped' : 'Taken out of the line'
+      const done = r.was === null ? 'Done by the replica that had it' : r.was === 'running' ? 'Stopped' : 'Taken out of the line'
       toast.success(done, { description: target?.entry.kind === 'api' ? 'The caller’s error says why.' : 'They are told why in the chat.' })
       close()
       void queryClient.invalidateQueries({ queryKey: ['admin', 'line'] })
     },
     onError: (e) => {
-      if (e instanceof ApiError && e.status === 'not_in_line') {
-        toast(target?.running ? 'It had ended already' : 'It had left the line already', { description: e.message })
+      // It moved on while the reason was written: nothing was changed, and the line shows it as it is now.
+      const moved: Record<string, string> = {
+        not_in_line: target?.running ? 'It had ended already' : 'It had left the line already',
+        started: 'It started meanwhile',
+        already_stopping: 'Already being stopped',
+        waiting: 'It still waits',
+      }
+      const said = e instanceof ApiError ? moved[e.status] : undefined
+      if (said) {
+        toast(said, { description: e.message })
         close()
         void queryClient.invalidateQueries({ queryKey: ['admin', 'line'] })
       } else setError(errorMessage(e))
@@ -158,7 +168,7 @@ function RemoveDialog({ target, open, onClose }: { target: { entry: LineEntry; r
             ev.preventDefault()
             setError(null)
             if (!reason.trim()) setError('Say why: they are told.')
-            else remove.mutate({ id: e.id, reason: reason.trim() })
+            else remove.mutate({ id: e.id, reason: reason.trim(), running })
           }}
         >
           {error && <Alert variant="destructive">{error}</Alert>}
