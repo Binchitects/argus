@@ -6,6 +6,9 @@
 # Not here: gosec and the .NET analyzers, which build the project and so fetch its packages; Arena's Go and C# rules
 # stand in for them.
 FROM python:3.13-slim-bookworm
+# PyPI over a slow or lossy link: a minute per read and ten tries before a package counts as missing (a read
+# that timed out read as "no matching distribution"). Only pip reads it.
+ENV PIP_DEFAULT_TIMEOUT=60 PIP_RETRIES=10
 
 ARG OPENGREP_VERSION=1.31.0
 ARG OPENGREP_SHA256=02328d41e710a0305d7407de255bf556f7901f515b6cc3637f68999c54800f6c

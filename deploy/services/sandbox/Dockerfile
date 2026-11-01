@@ -7,6 +7,9 @@
 # odfpy (OpenDocument, for pandas and .ods files), published only as source: it
 # is pure Python, so building it copies files and compiles nothing.
 FROM python:3.13-slim-bookworm
+# PyPI over a slow or lossy link: a minute per read and ten tries before a package counts as missing (a read
+# that timed out read as "no matching distribution"). Only pip reads it.
+ENV PIP_DEFAULT_TIMEOUT=60 PIP_RETRIES=10
 
 # System tools, headless: LibreOffice (documents to PDF and between formats),
 # pandoc (Markdown, HTML, docx, EPUB), ffmpeg (audio and video), ImageMagick,

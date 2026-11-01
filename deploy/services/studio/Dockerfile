@@ -3,6 +3,9 @@
 # transformers) are not taken: they run on these. The weights are not in the image: the app
 # fetches them into the model library (MODELS_DIR/studio), and this reads them from there.
 FROM python:3.13-slim
+# PyPI over a slow or lossy link: a minute per read and ten tries before a package counts as missing (a read
+# that timed out read as "no matching distribution"). Only pip reads it.
+ENV PIP_DEFAULT_TIMEOUT=60 PIP_RETRIES=10
 
 RUN pip install --no-cache-dir torch==2.11.0 torchaudio==2.11.0 torchvision==0.26.0
 
