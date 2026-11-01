@@ -1253,10 +1253,11 @@ function Workbench({
   }
 
   const activityBar = (
-    <nav key="activity" aria-label="Activity bar" className={cn('flex w-12 shrink-0 flex-col bg-sidebar', left ? 'border-r' : 'border-l')}>
-      {/* Dropped below the views: the view goes last (one from the panel comes back to the side bar). */}
+    <nav key="activity" aria-label="Activity bar" className={cn('flex min-h-0 w-12 shrink-0 flex-col overflow-clip bg-sidebar', left ? 'border-r' : 'border-l')}>
+      {/* Dropped below the views: the view goes last (one from the panel comes back to the side bar). In a window too short
+          for every view, they scroll here, the buttons under them staying. */}
       <div
-        className="flex min-h-0 flex-1 flex-col"
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-width:none]"
         onDragOver={(e) => {
           if (dragged.current !== null && views.some((v) => v.id === dragged.current)) e.preventDefault()
         }}
@@ -1293,7 +1294,7 @@ function Workbench({
   )
 
   const sideBar = (
-    <aside key="side" data-side={layout.sideAt} hidden={!layout.sideOpen} aria-label={views.find((v) => v.id === layout.view)?.label} style={{ width: layout.side }} className="min-h-0 shrink-0 bg-sidebar text-sidebar-foreground">
+    <aside key="side" data-side={layout.sideAt} hidden={!layout.sideOpen} aria-label={views.find((v) => v.id === layout.view)?.label} style={{ width: layout.side }} className="min-h-0 shrink-0 overflow-clip bg-sidebar text-sidebar-foreground">
       {side.map((v) => (
         <div key={v} hidden={layout.view !== v} className="h-full">
           {viewPart(v, layout.sideOpen && layout.view === v)}
@@ -1358,7 +1359,7 @@ function Workbench({
       {layout.panelTabs
         .filter((t): t is View => !(panelParts as readonly string[]).includes(t))
         .map((v) => (
-          <div key={v} hidden={layout.panelTab !== v} className="min-h-0 flex-1 overflow-hidden">
+          <div key={v} hidden={layout.panelTab !== v} className="min-h-0 flex-1 overflow-clip">
             {viewPart(v, layout.panelOpen && layout.panelTab === v)}
           </div>
         ))}
@@ -1384,7 +1385,7 @@ function Workbench({
   )
   const mainArea = (
     // Its parts never spill over the side bar or the chat, however narrow the window.
-    <main key="main" data-panel={layout.panelAt} className={cn('relative flex min-w-0 flex-1 overflow-hidden', across ? 'flex-row' : 'flex-col')}>
+    <main key="main" data-panel={layout.panelAt} className={cn('relative flex min-w-0 flex-1 overflow-clip', across ? 'flex-row' : 'flex-col')}>
       {/* By key: the panel moving round the editor moves them, never draws them again. */}
       {layout.panelAt === 'left' ? [panel, panelSplitter, editorBox] : [editorBox, panelSplitter, panel]}
     </main>
@@ -1394,7 +1395,7 @@ function Workbench({
     <Splitter key="chat-splitter" label="Resize the chat" orientation="vertical" value={layout.chat} min={bounds.chat[0]} max={bounds.chat[1]} grow={left ? -1 : 1} onChange={(size) => change({ chat: size })} />
   )
   const chatSide = (
-    <aside key="chat" hidden={!layout.chatOpen} aria-label="Agent" style={{ width: layout.chat }} className="min-h-0 shrink-0">
+    <aside key="chat" hidden={!layout.chatOpen} aria-label="Agent" style={{ width: layout.chat }} className="min-h-0 shrink-0 overflow-clip">
       <Thread
         key={state.session}
         state={state}
@@ -1412,7 +1413,9 @@ function Workbench({
   const workbenchParts = [activityBar, sideBar, sideSplitter, mainArea, chatSplitter, chatSide]
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-background text-foreground">
+    // Clipped, not hidden: a container that hides its overflow can still be scrolled (focus, scrollIntoView), which moved the
+    // whole workbench up and left an empty band under it; one that clips cannot.
+    <div className="flex h-dvh flex-col overflow-clip bg-background text-foreground">
       {!!lost && <Unreachable error={lost} />}
       {opening && (
         <output className="fixed inset-0 z-[100] grid place-items-center bg-background/90 backdrop-blur-sm">
