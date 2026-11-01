@@ -268,6 +268,7 @@ public static class IdentityWiring
         services.AddSingleton<Operations.Features>();
         services.AddSingleton<Operations.Modules>();
         services.AddHttpClient("probe", c => c.Timeout = TimeSpan.FromSeconds(3));
+        services.AddSingleton<Oidc.AddressFilter>();
         services.AddHttpClient<Operations.ArgusAdmin>(c => c.Timeout = TimeSpan.FromSeconds(15));
         services.AddScoped<Operations.ArgusWebhook>();
 
@@ -650,6 +651,7 @@ public static class IdentityWiring
         Plans.PlanEndpoints.MapPlans(app);
         Lab.LabEndpoints.MapLab(app);
         app.MapForwardAuth();
+        Oidc.AddressFilter.MapAddressFilter(app);
         app.MapKeyCheck();
         app.MapOidc();
         Company.CompanyEndpoints.MapCompany(app);

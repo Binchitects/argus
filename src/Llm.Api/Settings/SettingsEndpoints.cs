@@ -37,6 +37,17 @@ public static class SettingsEndpoints
             {
                 return AuthEndpoints.Problem(403, "settings", $"You may not change: {string.Join(", ", refused)}.");
             }
+            // Network access: never a list that shuts out the person saving it (their address as Traefik saw it).
+            if (body.Changes.Any(c => c.Key is Oidc.AddressFilter.AllowKey or Oidc.AddressFilter.BlockKey) && http.Connection.RemoteIpAddress is { } mine)
+            {
+                var config = services.GetRequiredService<IConfiguration>();
+                string? Next(string key) => body.Changes.LastOrDefault(c => c.Key == key) is { } c ? c.Value : config[key];
+                if (Oidc.AddressFilter.Refusal(mine, Oidc.AddressFilter.Parse(Next(Oidc.AddressFilter.AllowKey)).Ranges,
+                        Oidc.AddressFilter.Parse(Next(Oidc.AddressFilter.BlockKey)).Ranges) is { } why)
+                {
+                    return AuthEndpoints.Problem(400, "addresses", $"Not saved: your own address would be refused ({why}). Add it to the allow list, or take it off the block list.");
+                }
+            }
             try
             {
                 await settings.SaveAsync(body.Changes, ct);

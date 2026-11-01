@@ -303,6 +303,10 @@ public sealed partial class SettingsService(
         {
             return d.PatternHelp is { } help ? $"Expected {help}." : "Not in the expected form.";
         }
+        if (d.Key is Oidc.AddressFilter.AllowKey or Oidc.AddressFilter.BlockKey && Oidc.AddressFilter.Parse(value).Wrong is { } wrong)
+        {
+            return $"\"{wrong}\" is not an address or a range (10.0.0.0/8, 192.168.1.20, 2001:db8::/32).";
+        }
         return null;
     }
 

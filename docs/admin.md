@@ -915,6 +915,26 @@ studio's: **Show the servers' own files too** lists them). Each deletion is
 audited as `model.files.delete`, with what was deleted and the room freed.
 Admin → Storage's **Models nothing uses** clean-up deletes the same files,
 several at once.
+### Network access
+
+**Settings → Network access** decides which network addresses reach Argus
+Arena at all: the web, the API, the gateway (API keys) and Argus. **Only these
+addresses may reach Argus Arena** is an allow list (empty: every address);
+**Never these addresses** a block list, refused whatever the allow list says.
+Each is one address or range a line (`10.0.0.0/8`, `192.168.1.20`,
+`2001:db8::/32`; commas also separate, `#` starts a comment). Traefik asks the
+app (`/api/authz/address`) before every request with the caller's address as
+it saw it, so a change applies to the next request; a refused one gets 403 and
+a sentence naming the setting. A list that would refuse the address of the
+admin saving it is refused, so nobody locks themselves out from the page.
+Behind another proxy or load balancer, the address Traefik sees is that
+proxy's.
+
+`IP_ALLOW` in `.env` (comma separated) is Traefik's own allow list in front of
+everything, even while the app is down; the installer asks for it
+([deployment.md](deployment.md)). The Helm chart's ingress does not apply
+either list.
+
 ### Security
 
 Admin → Security (for those who may manage every review, `reviews.admin`,

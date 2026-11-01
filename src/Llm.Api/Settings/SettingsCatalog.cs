@@ -30,6 +30,7 @@ public static class SettingsCatalog
     private const string Retention = "Data retention";
     private const string StorageGroup = "Storage";
     private const string Api = "API keys";
+    private const string Network = "Network access";
     private const string BotsGroup = "Chat bots";
     private const string Oidc = "CompanySignIn:Protocol=oidc";
     private const string Saml = "CompanySignIn:Protocol=saml";
@@ -293,6 +294,15 @@ public static class SettingsCatalog
             { Default = "6", Unit = "years", Min = 0, Max = 100, Optional = false },
         new("Retention:GatewayLogDays", Retention, "Keep the gateway's request log for", "Each request through the gateway (who, which model, tokens, cost): usage, credit and the dashboards read it. 0: forever.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "400", Unit = "days", Min = 0, Max = 36500, Optional = false },
+        new(global::Llm.Api.Oidc.AddressFilter.AllowKey, Network, "Only these addresses may reach Argus Arena",
+            "One address or range a line (10.0.0.0/8, 192.168.1.20, 2001:db8::/32; # starts a comment): the web, the API, the gateway and Argus answer only these, "
+            + "as Traefik sees the caller (behind another proxy, its address). Empty: every address. A list that would leave out your own address is refused.",
+            SettingType.Text, SettingScope.Live)
+            { Max = 20_000, Lines = 5, Dangerous = true, Impact = "Every request from another address is refused at once (403), sign-in and API keys included." },
+        new(global::Llm.Api.Oidc.AddressFilter.BlockKey, Network, "Never these addresses",
+            "One address or range a line, as above: refused whatever the list above says. A list that would block your own address is refused.",
+            SettingType.Text, SettingScope.Live)
+            { Max = 20_000, Lines = 5, Dangerous = true, Impact = "Every request from these addresses is refused at once (403)." },
         new("Retention:PromptLogDays", Retention, "Keep API requests in the prompt log for", "Each API request's last question and its answer (Admin → Prompt log, with prompts.review); the chat's are kept with the chats. 0: forever.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "90", Min = 0, Max = 3650, Unit = "days", Optional = false },
         new("Gateway:LogPrompts", Api, "Prompt log of API requests", "Keeps each API request's last question and its answer, for those with prompts.review (Admin → Prompt log); the chat's questions and answers are there from the chats themselves. Off: API requests are not kept.", SettingType.Boolean, SettingScope.Live)
