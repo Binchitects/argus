@@ -25,11 +25,14 @@ The protocol, all in /jobs (owned by the app's user, 0700):
   heartbeat           {"at": epoch seconds, "slots": n, "busy": n, "started": epoch
                       seconds}; the app treats the sandbox as down when it is
                       stale, and a job it took as lost when "started" changes
+                      from the one when the job left in/ (written before a
+                      runner takes its first job)
   reset               an admin's reset (Admin -> Monitoring; gen= and by= lines, read
                       and never run): the running jobs are stopped and the waiting
                       ones answered, each result saying so ("reset": "running" or
-                      "waiting"), what is left of them killed, and the runner starts
-                      again; the file is gone once it is done
+                      "waiting"), what is left of them killed, the jobs written
+                      meanwhile answered too, and the runner starts again; the file
+                      is gone once it is done (the app writes no job while it is there)
 
 A main loop that has not turned for a minute (it hangs) ends the runner, and its
 restart policy starts it again.
@@ -440,6 +443,18 @@ def asked_by():
         return ""
 
 
+def answer_waiting():
+    """The jobs waiting in in/ answered as never run (a reset's) and taken away: how many."""
+    waiting = sorted(n for n in os.listdir(IN) if not n.startswith("."))
+    for job_id in waiting:
+        try:
+            deliver(job_id, reset_result("waiting"), os.path.join(OUT, f".tmp-reset-{job_id}"))
+        except OSError as ex:
+            log("reset: could not answer", job_id, repr(ex))
+        shutil.rmtree(os.path.join(IN, job_id), ignore_errors=True)
+    return len(waiting)
+
+
 def reset():
     """An admin's reset: the running jobs stopped and the waiting ones answered, each told so, what is left killed, and
     the runner started again in place (a new "started"). The main loop calls it, so nothing new runs meanwhile."""
@@ -451,14 +466,8 @@ def reset():
         cancel = os.path.join(CANCEL, job_id)
         open(cancel, "w").close()
         owned(cancel, 0o600)
-    waiting = sorted(n for n in os.listdir(IN) if not n.startswith("."))
-    for job_id in waiting:
-        try:
-            deliver(job_id, reset_result("waiting"), os.path.join(OUT, f".tmp-reset-{job_id}"))
-        except OSError as ex:
-            log("reset: could not answer", job_id, repr(ex))
-        shutil.rmtree(os.path.join(IN, job_id), ignore_errors=True)
-    log(f"reset asked{' by ' + by if by else ''}: stopping {len(running)} running, {len(waiting)} waiting answered")
+    waiting = answer_waiting()
+    log(f"reset asked{' by ' + by if by else ''}: stopping {len(running)} running, {waiting} waiting answered")
     until = time.monotonic() + RESET_WAIT
     while busy > 0 and time.monotonic() < until:
         last_tick = time.monotonic()
@@ -478,6 +487,10 @@ def reset():
     for name in os.listdir(WORK):
         path = os.path.join(WORK, name)
         shutil.rmtree(path, ignore_errors=True) if os.path.isdir(path) else os.remove(path)
+    # Jobs written while it ran are answered too, while the ask is still there: none is left for the runner after.
+    late = answer_waiting()
+    if late:
+        log(f"reset: {late} more waiting answered")
     try:
         os.remove(RESET)
     except FileNotFoundError:
@@ -548,6 +561,9 @@ def main():
         jobs = queue.Queue()
         threading.Thread(target=worker, args=(slot, jobs, slots), daemon=True).start()
         slots.put((slot, jobs))
+    # This runner's "started" is in the heartbeat before it takes a job: the app reads it when the job leaves in/, and
+    # so tells a job this runner took from one the runner before it lost.
+    beat()
     threading.Thread(target=heartbeat, daemon=True).start()
     log(f"sandbox: {SLOTS} slots, {MEMORY_MB} MB and at most {MAX_TIMEOUT} s a job, no network")
     free = {}

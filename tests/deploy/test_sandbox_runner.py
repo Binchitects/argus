@@ -108,6 +108,76 @@ class ResetTests(RunnerBase):
         execv.assert_called_once_with(sys.executable, sys.orig_argv)
         self.assertIn("reset asked by ada: stopping 1 running, 1 waiting answered", self.said)
 
+    def test_a_job_written_while_a_reset_runs_is_answered_too_and_not_left_for_the_runner_after(self):
+        r = self.runner
+        done = threading.Event()
+        written = threading.Event()
+
+        def main():
+            try:
+                r.main()
+            except Started:
+                done.set()
+
+        read_stream = r.read_stream
+
+        def slow(path):
+            # The job stopped takes its time to give its result: meanwhile the app writes another.
+            written.wait(20)
+            return read_stream(path)
+
+        popen = subprocess.Popen
+        with mock.patch.object(r, "heartbeat", lambda: None), mock.patch.object(r, "kill_user"), mock.patch.object(r.os, "chown"), \
+                mock.patch.object(r.subprocess, "Popen", self.as_ourselves(popen)), mock.patch.object(r, "read_stream", slow), \
+                mock.patch.object(r.os, "execv", side_effect=Started):
+            threading.Thread(target=main, daemon=True).start()
+            self.job("00000000000000000000000000000001", "import time\ntime.sleep(60)\n")
+            self.until(lambda: r.busy == 1, "the job runs")
+            (self.dir / "jobs" / "reset").write_text("gen=1\naction=reset\nby=ada\nat=1\n")
+            self.until(lambda: any(s.startswith("reset asked") for s in self.said), "the reset answered what waited")
+            self.job("00000000000000000000000000000009", "print('late')\n")
+            written.set()
+            self.assertTrue(done.wait(20), "the runner started again")
+
+        self.assertEqual("running", self.result("00000000000000000000000000000001")["reset"])
+        late = self.result("00000000000000000000000000000009")
+        self.assertEqual(("waiting", True, ""), (late["reset"], late["cancelled"], late["stdout"]))
+        self.assertFalse((self.dir / "jobs" / "in" / "00000000000000000000000000000009").exists(), "nothing left for the runner that starts again")
+        self.assertIn("reset: 1 more waiting answered", self.said)
+
+    def test_a_runner_says_when_it_started_before_it_takes_a_job(self):
+        # The app tells a job this runner took from one the runner before it lost by the "started" it reads then.
+        r = self.runner
+        done = threading.Event()
+        seen = []
+        rename = os.rename
+
+        def main():
+            try:
+                r.main()
+            except Started:
+                done.set()
+
+        def take(src, dst):
+            if os.path.dirname(dst) == r.RUN:
+                heartbeat = self.dir / "jobs" / "heartbeat"
+                seen.append(json.loads(heartbeat.read_text())["started"] if heartbeat.exists() else None)
+            return rename(src, dst)
+
+        popen = subprocess.Popen
+        with mock.patch.object(r, "heartbeat", lambda: None), mock.patch.object(r, "kill_user"), mock.patch.object(r.os, "chown"), \
+                mock.patch.object(r.subprocess, "Popen", self.as_ourselves(popen)), mock.patch.object(r.os, "rename", take), \
+                mock.patch.object(r.os, "execv", side_effect=Started):
+            # Waiting already when the runner starts, as one written while it started again.
+            self.job("00000000000000000000000000000004", "print('hello')\n")
+            threading.Thread(target=main, daemon=True).start()
+            self.until(lambda: (self.dir / "jobs" / "out" / "00000000000000000000000000000004").exists(), "the job ran")
+            (self.dir / "jobs" / "reset").write_text("gen=1\naction=reset\nby=ada\nat=1\n")
+            self.assertTrue(done.wait(20), "the runner started again")
+
+        self.assertEqual([r.STARTED], seen)
+        self.assertEqual("hello\n", self.result("00000000000000000000000000000004")["stdout"])
+
     def test_a_job_that_ends_on_its_own_says_nothing_of_a_reset(self):
         r = self.runner
         r.prepare()

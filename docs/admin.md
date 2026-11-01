@@ -935,7 +935,7 @@ list refreshes every 3 seconds while one is on its way back.
 | **Restart** | llama.cpp | llama-server starts again (killed if it has not stopped within 15 s), then the models kept loaded load again. |
 | **Restart** | vLLM, SGLang | Every model is drained, the supervisor forgets what it ran and starts again, then every model starts again. |
 | **Restart** | pictures, video | The server starts again with its model (a picture or video being made is lost). |
-| **Reset** | a sandbox | Its running jobs are stopped and its waiting ones given back, each person told that an admin reset it; what is left of them is killed, and the runner starts again. |
+| **Reset** | a sandbox | Its running jobs are stopped and its waiting ones given back, and any asked for until it is done, each person told that an admin reset it; what is left of them is killed, and the runner starts again. |
 
 Each asks first, saying what it cuts, and is audited as `runtime.reload`,
 `runtime.restart` or `runtime.reset` with the engine or sandbox and what it
