@@ -416,8 +416,9 @@ ensure_cert() {   # ensure_cert plan|do
   fi
 }
 # Code Arena's builds, as the app serves them, signed with a code-signing certificate of the stack's
-# CA (scripts/sign-code-arena.sh, on the host: no container sees the key). Never fatal: an unsigned
-# build still installs by its SHA-256.
+# CA, the Windows builds with Authenticode too (scripts/sign-code-arena.sh, on the host: the key goes
+# only to a container of the app's image with no network). Never fatal: an unsigned build still
+# installs by its SHA-256.
 sign_builds() {
   [[ -f "$DEPLOY/certs/ca.key" || -f "$DEPLOY/signing/code-signing.crt" ]] || return 0
   local cf said; cf="$(compose_files)"

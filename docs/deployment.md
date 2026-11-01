@@ -136,8 +136,9 @@ Traefik does TLS and nothing else does.
   The same CA signs the Code Arena builds the stack serves: on install, upgrade
   and repair the installer runs `scripts/sign-code-arena.sh`, which makes a
   code-signing certificate from it (`signing/code-signing.crt` and `.key`, 3
-  years, kept out of every container and of airgap bundles) and signs the
-  builds' list into `DATA_DIR/code-arena-signature/`, which the app serves.
+  years, kept out of airgap bundles and of every running container) and signs
+  the builds' list, and the Windows builds with Authenticode (so Windows names
+  their publisher), into `DATA_DIR/code-arena-signature/`, which the app serves.
   `./arenactl sign` does it by hand after changing the builds; `./arenactl sign
 --check` says whether what is served is signed ([code-arena.md](code-arena.md#getting-it)).
 

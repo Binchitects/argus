@@ -248,7 +248,7 @@ installer makes the folders with their services' owners.
 | `engine` | the app | the engines' presets and desired state, the media servers' control files, Prometheus's engine targets |
 | `directory` | the app | the people Argus reads (`users.yml`: user name, display name, email) |
 | `audit` | the app | the audit log's daily anchors |
-| `code-arena-signature` | `sign-code-arena.sh` | the signature of the Code Arena builds the app hands out |
+| `code-arena-signature` | `sign-code-arena.sh` | the signature of the Code Arena builds the app hands out, and the Windows builds Authenticode-signed |
 | `sandbox`, `blender`, `lean` | the app and those services | jobs in and results out |
 | `workspaces` | `workspaces` | each workspace's clone, its engine's home, what is not pushed yet |
 | `argus` | Argus | its index |
@@ -741,6 +741,7 @@ names the app reaches them by, one release per namespace. `./arenactl kube`
 | with `scale.yml`, the app's log levels are missing, or the line's metrics show one replica | Promtail parses the container named `app`, and Prometheus scrapes the one name `app:8080` |
 | alerts fire, nobody hears outside the app | the app's email (Settings → Email) and its alerts webhook are not set up, and Alertmanager's default receiver sends nothing until one is set up |
 | Code Arena's builds are unsigned | no CA or code-signing certificate in `certs/` or `signing/`, or `sign-code-arena.sh` failed |
+| Windows says "Unknown publisher" for Code Arena | the machine does not trust the stack's CA (`certutil -addstore -f Root ca.crt`), or the builds were not signed again after the app's image changed (`arenactl sign`) |
 | the browser warns about the certificate | trust `certs/ca.crt`, or set `ACME_EMAIL` |
 | `backup.sh` cannot write `BACKUP_DIR` | Docker made it, as root: change its owner, or `backup.sh --install-timer` |
 | an upgrade exits 4, or 5 | 4: it failed and rolled back. 5: the rollback failed too: fix the cause and upgrade again |

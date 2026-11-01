@@ -1,10 +1,11 @@
 using Llm.Api.Access;
 namespace Llm.Api.Downloads;
 
-/// <summary>A build of Code Arena the app serves: its system, file name, size and SHA-256.</summary>
-public sealed record CodeArenaBuild(string Rid, string System, string FileName, long Size, string? Sha256);
+/// <summary>A build of Code Arena the app serves: its system, file name, size and SHA-256 (and, not shown, where it is).</summary>
+public sealed record CodeArenaBuild(string Rid, string System, string FileName, long Size, string? Sha256,
+    [property: System.Text.Json.Serialization.JsonIgnore] string Path = "");
 
-/// <summary>Who signed the builds' list (SHA256SUMS), and until when the certificate holds.</summary>
+/// <summary>Who signed the builds (the list, SHA256SUMS, and the Windows builds themselves), and until when the certificate holds.</summary>
 public sealed record CodeArenaSignature(string Signer, string Issuer, DateTimeOffset Expires);
 
 /// <summary>
@@ -33,13 +34,13 @@ public static class DownloadEndpoints
         g.MapGet("", List);
         // One line installs it: the build for the machine, checked against its SHA-256, on the person's PATH.
         g.MapGet("/install.sh", (IConfiguration config, Microsoft.Extensions.Options.IOptions<Identity.AuthOptions> auth) =>
-            Results.Text(InstallSh($"https://{auth.Value.Domain}", Builds(Root(config)), Signature(config) is not null), "text/x-shellscript; charset=utf-8"));
+            Results.Text(InstallSh($"https://{auth.Value.Domain}", Builds(config), Signature(config) is not null), "text/x-shellscript; charset=utf-8"));
         g.MapGet("/install.ps1", (IConfiguration config, Microsoft.Extensions.Options.IOptions<Identity.AuthOptions> auth) =>
-            Results.Text(InstallPs1($"https://{auth.Value.Domain}", Builds(Root(config)), Signature(config) is not null), "text/plain; charset=utf-8"));
+            Results.Text(InstallPs1($"https://{auth.Value.Domain}", Builds(config), Signature(config) is not null), "text/plain; charset=utf-8"));
         // The builds' list and its signature (scripts/sign-code-arena.sh, on the host with the CA's key): installers and
         // code-arena update check a build against them with the CA they trust, not only against the SHA-256 listed here.
-        g.MapGet("/SHA256SUMS", (IConfiguration config) => File.Exists(Path.Combine(Root(config), "SHA256SUMS"))
-            ? Results.File(Path.Combine(Root(config), "SHA256SUMS"), "text/plain") : Results.NotFound(new { error = "No builds here." }));
+        g.MapGet("/SHA256SUMS", (IConfiguration config) => Path.Combine(Signature(config) is not null ? SignatureRoot(config) : Root(config), "SHA256SUMS") is var list
+            && File.Exists(list) ? Results.File(list, "text/plain") : Results.NotFound(new { error = "No builds here." }));
         g.MapGet("/SHA256SUMS.sig", (IConfiguration config) => Signature(config) is not null
             ? Results.File(Path.Combine(SignatureRoot(config), "SHA256SUMS.sig"), "application/octet-stream") : Results.NotFound(new { error = "The builds are not signed." }));
         g.MapGet("/code-signing.crt", (IConfiguration config) => Signature(config) is not null
@@ -68,27 +69,28 @@ public static class DownloadEndpoints
     private static string SignatureRoot(IConfiguration config) => config["Downloads:SignatureDirectory"] is { Length: > 0 } d ? d : "/downloads-signature";
 
     /// <summary>
-    /// Who signed the builds, when the signature there is of exactly the list of the builds served (an older one, made
-    /// before an upgrade changed them, signs nothing) and holds for its certificate's key; null: not signed.
+    /// Who signed the builds, when the signature there is of the image's builds as they are (SHA256SUMS.image: one made
+    /// before an upgrade changed them signs nothing) and its list (SHA256SUMS, with the SHA-256 of the Authenticode-signed
+    /// Windows builds beside it in place of the image's) holds for its certificate's key; null: not signed.
     /// </summary>
     public static CodeArenaSignature? Signature(IConfiguration config)
     {
-        var (sums, signed, sig, crt) = (Path.Combine(Root(config), "SHA256SUMS"), Path.Combine(SignatureRoot(config), "SHA256SUMS"),
-            Path.Combine(SignatureRoot(config), "SHA256SUMS.sig"), Path.Combine(SignatureRoot(config), "code-signing.crt"));
+        var (image, madeFrom, list, sig, crt) = (Path.Combine(Root(config), "SHA256SUMS"), Path.Combine(SignatureRoot(config), "SHA256SUMS.image"),
+            Path.Combine(SignatureRoot(config), "SHA256SUMS"), Path.Combine(SignatureRoot(config), "SHA256SUMS.sig"), Path.Combine(SignatureRoot(config), "code-signing.crt"));
         try
         {
-            if (!File.Exists(sums) || !File.Exists(signed) || !File.Exists(sig) || !File.Exists(crt))
+            if (!File.Exists(image) || !File.Exists(madeFrom) || !File.Exists(list) || !File.Exists(sig) || !File.Exists(crt))
             {
                 return null;
             }
-            var list = File.ReadAllBytes(sums);
-            if (!list.AsSpan().SequenceEqual(File.ReadAllBytes(signed)))
+            if (!File.ReadAllBytes(image).AsSpan().SequenceEqual(File.ReadAllBytes(madeFrom)))
             {
                 return null;
             }
+            var signed = File.ReadAllBytes(list);
             using var cert = System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPem(File.ReadAllText(crt));
             using var key = System.Security.Cryptography.X509Certificates.RSACertificateExtensions.GetRSAPublicKey(cert);
-            return key is not null && key.VerifyData(list, File.ReadAllBytes(sig), System.Security.Cryptography.HashAlgorithmName.SHA256, System.Security.Cryptography.RSASignaturePadding.Pkcs1)
+            return key is not null && key.VerifyData(signed, File.ReadAllBytes(sig), System.Security.Cryptography.HashAlgorithmName.SHA256, System.Security.Cryptography.RSASignaturePadding.Pkcs1)
                 ? new CodeArenaSignature(cert.GetNameInfo(System.Security.Cryptography.X509Certificates.X509NameType.SimpleName, false),
                     cert.GetNameInfo(System.Security.Cryptography.X509Certificates.X509NameType.SimpleName, true), cert.NotAfter.ToUniversalTime())
                 : null;
@@ -99,11 +101,18 @@ public static class DownloadEndpoints
         }
     }
 
-    /// <summary>The builds there are, with their checksums (SHA256SUMS beside them).</summary>
-    public static List<CodeArenaBuild> Builds(string root)
+    /// <summary>The builds served: the image's, each Windows one Authenticode-signed when the builds are signed (<see cref="Signature"/>).</summary>
+    public static List<CodeArenaBuild> Builds(IConfiguration config) =>
+        Signature(config) is not null ? Builds(Root(config), SignatureRoot(config)) : Builds(Root(config));
+
+    /// <summary>
+    /// The builds there are, with their checksums (SHA256SUMS beside them); with <paramref name="signedRoot"/>, the signed
+    /// copies there of the builds that have one, and the checksums of its list.
+    /// </summary>
+    public static List<CodeArenaBuild> Builds(string root, string? signedRoot = null)
     {
         var sums = new Dictionary<string, string>(StringComparer.Ordinal);
-        var sumsFile = Path.Combine(root, "SHA256SUMS");
+        var sumsFile = Path.Combine(signedRoot ?? root, "SHA256SUMS");
         if (File.Exists(sumsFile))
         {
             foreach (var line in File.ReadLines(sumsFile))
@@ -120,16 +129,21 @@ public static class DownloadEndpoints
         {
             var name = rid.StartsWith("win-", StringComparison.Ordinal) ? "code-arena.exe" : "code-arena";
             var file = new FileInfo(Path.Combine(root, rid, name));
-            if (file.Exists)
+            if (!file.Exists)
             {
-                builds.Add(new CodeArenaBuild(rid, system, name, file.Length, sums.GetValueOrDefault($"{rid}/{name}")));
+                continue;
             }
+            if (signedRoot is not null && new FileInfo(Path.Combine(signedRoot, rid, name)) is { Exists: true } copy)
+            {
+                file = copy;
+            }
+            builds.Add(new CodeArenaBuild(rid, system, name, file.Length, sums.GetValueOrDefault($"{rid}/{name}"), file.FullName));
         }
         return builds;
     }
 
     private static IResult List(IConfiguration config) =>
-        Results.Ok(new { version = AppInfo.Current.Version, builds = Builds(Root(config)), signature = Signature(config) });
+        Results.Ok(new { version = AppInfo.Current.Version, builds = Builds(config), signature = Signature(config) });
 
     /// <summary>
     /// The installer for Linux and macOS (curl -fsSL …/install.sh | sh): the build for this system, its SHA-256 checked as
@@ -195,6 +209,9 @@ public static class DownloadEndpoints
         Remove-Item -Recurse -Force $sig
         if (-not $good) { Remove-Item $tmp; throw "Code Arena: the build is not the one this Arena's CA signed (or Windows does not trust that CA: certutil -addstore -f Root ca.crt): nothing installed" }
         Write-Host "Signed by $($leaf.GetNameInfo('SimpleName', $false)), checked."
+        $auth = Get-AuthenticodeSignature $tmp
+        if ($auth.Status -eq 'Valid') { Write-Host "Windows names its publisher: $($auth.SignerCertificate.GetNameInfo('SimpleName', $false))." }
+        else { Write-Host "Windows does not take its Authenticode signature ($($auth.Status): $($auth.StatusMessage)): it runs, with no publisher named." }
 
         """;
 
@@ -259,11 +276,10 @@ public static class DownloadEndpoints
 
     private static IResult Download(string rid, IConfiguration config)
     {
-        if (Builds(Root(config)).FirstOrDefault(b => b.Rid == rid) is not { } build)
+        if (Builds(config).FirstOrDefault(b => b.Rid == rid) is not { } build)
         {
             return Results.NotFound(new { error = $"No Code Arena build for {rid}." });
         }
-        var path = Path.Combine(Root(config), build.Rid, build.FileName);
-        return Results.File(path, "application/octet-stream", build.FileName, enableRangeProcessing: true);
+        return Results.File(build.Path, "application/octet-stream", build.FileName, enableRangeProcessing: true);
     }
 }

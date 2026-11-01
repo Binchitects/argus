@@ -110,7 +110,8 @@ leaves Traefik's own. Trust `deploy/certs/ca.crt` on the machines and in the
 tools that use the stack. The same CA signs the Code Arena builds the app
 serves (`scripts/sign-code-arena.sh`) after every install, upgrade and
 repair, so `install.sh`, `install.ps1` and `code-arena update` can check that
-a build is the one this server signed. By hand:
+a build is the one this server signed, and Windows names the publisher of the
+Windows builds (Authenticode). By hand:
 
 ```bash
 ./arenactl cert --domain chat.example.com   # again to renew, with the same CA

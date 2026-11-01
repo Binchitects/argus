@@ -9,6 +9,12 @@ if (args is ["healthcheck"])
 {
     return await HealthProbe.RunAsync();
 }
+// scripts/sign-code-arena.sh: the Windows builds Authenticode-signed, in a container of this image with no network.
+if (args is ["sign-code-arena", .. var signFolder] && signFolder.Length <= 1)
+{
+    return await Llm.Api.Downloads.CodeArenaSigner.RunAsync(Console.OpenStandardInput(), Console.OpenStandardOutput(), Console.Error,
+        signFolder is [var folder] ? folder : "/downloads/code-arena");
+}
 
 var builder = WebApplication.CreateBuilder(args);
 

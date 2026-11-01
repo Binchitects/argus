@@ -140,7 +140,7 @@ public sealed class DownloadTests(AppFixture app)
     }
 
     /// <summary>A CA, and a code-signing certificate it signs, as scripts/sign-code-arena.sh makes them.</summary>
-    private static (X509Certificate2 Ca, X509Certificate2 Leaf) CodeSigning(string name)
+    internal static (X509Certificate2 Ca, X509Certificate2 Leaf) CodeSigning(string name)
     {
         using var caKey = RSA.Create(2048);
         var caRequest = new CertificateRequest($"CN={name} CA", caKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
@@ -172,10 +172,17 @@ public sealed class DownloadTests(AppFixture app)
             await File.WriteAllTextAsync(Path.Combine(builds, "linux-x64", "code-arena"), "#!/bin/sh\necho code-arena 9.9.9\n");
             var sum = Convert.ToHexStringLower(SHA256.HashData(await File.ReadAllBytesAsync(Path.Combine(builds, "linux-x64", "code-arena"))));
             await File.WriteAllTextAsync(Path.Combine(builds, "win-x64", "code-arena.exe"), "MZ pretend!");
-            var winSum = Convert.ToHexStringLower(SHA256.HashData(await File.ReadAllBytesAsync(Path.Combine(builds, "win-x64", "code-arena.exe"))));
+            var imageWinSum = Convert.ToHexStringLower(SHA256.HashData(await File.ReadAllBytesAsync(Path.Combine(builds, "win-x64", "code-arena.exe"))));
+            var image = Encoding.ASCII.GetBytes($"{sum}  linux-x64/code-arena\n{imageWinSum}  win-x64/code-arena.exe\n");
+            await File.WriteAllBytesAsync(Path.Combine(builds, "SHA256SUMS"), image);
+            // As sign-code-arena.sh leaves it: the Windows build Authenticode-signed beside the list, which has its SHA-256.
+            Directory.CreateDirectory(Path.Combine(signed, "win-x64"));
+            var signedExe = Encoding.ASCII.GetBytes("MZ pretend, signed!");
+            await File.WriteAllBytesAsync(Path.Combine(signed, "win-x64", "code-arena.exe"), signedExe);
+            var winSum = Convert.ToHexStringLower(SHA256.HashData(signedExe));
             var sums = Encoding.ASCII.GetBytes($"{sum}  linux-x64/code-arena\n{winSum}  win-x64/code-arena.exe\n");
-            await File.WriteAllBytesAsync(Path.Combine(builds, "SHA256SUMS"), sums);
             var (ca, leaf) = CodeSigning("test");
+            await File.WriteAllBytesAsync(Path.Combine(signed, "SHA256SUMS.image"), image);
             await File.WriteAllBytesAsync(Path.Combine(signed, "SHA256SUMS"), sums);
             await File.WriteAllBytesAsync(Path.Combine(signed, "SHA256SUMS.sig"), leaf.GetRSAPrivateKey()!.SignData(sums, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
             await File.WriteAllTextAsync(Path.Combine(signed, "code-signing.crt"), leaf.ExportCertificatePem() + "\n" + ca.ExportCertificatePem() + "\n");
@@ -186,6 +193,9 @@ public sealed class DownloadTests(AppFixture app)
             var list = JsonDocument.Parse(await http.GetStringAsync("/api/downloads/code-arena")).RootElement;
             Assert.Equal(("Code Arena (test)", "test CA"), (list.GetProperty("signature").GetProperty("signer").GetString(), list.GetProperty("signature").GetProperty("issuer").GetString()));
             Assert.Equal(sums, await http.GetByteArrayAsync("/api/downloads/code-arena/SHA256SUMS"));
+            Assert.Equal(winSum, list.GetProperty("builds").EnumerateArray().Single(b => b.GetProperty("rid").GetString() == "win-x64").GetProperty("sha256").GetString());
+            Assert.Equal(signedExe, await http.GetByteArrayAsync("/api/downloads/code-arena/win-x64"));
+            Assert.False(list.GetProperty("builds")[0].TryGetProperty("path", out _));
             foreach (var file in new[] { "SHA256SUMS", "SHA256SUMS.sig", "code-signing.crt" })
             {
                 await File.WriteAllBytesAsync(Path.Combine(served, file), await http.GetByteArrayAsync($"/api/downloads/code-arena/{file}"));
@@ -227,10 +237,12 @@ public sealed class DownloadTests(AppFixture app)
                 Assert.False(File.Exists(Path.Combine(dir, "bin", "code-arena")));
             }
 
-            // A signature of another list (made before an upgrade changed the builds) signs nothing.
-            await File.WriteAllTextAsync(Path.Combine(builds, "SHA256SUMS"), $"{new string('f', 64)}  linux-x64/code-arena\n");
+            // A signature of another list (made before an upgrade changed the builds) signs nothing: the image's builds, as they are.
+            await File.WriteAllTextAsync(Path.Combine(builds, "SHA256SUMS"), $"{new string('f', 64)}  linux-x64/code-arena\n{imageWinSum}  win-x64/code-arena.exe\n");
             list = JsonDocument.Parse(await http.GetStringAsync("/api/downloads/code-arena")).RootElement;
             Assert.Equal(JsonValueKind.Null, list.GetProperty("signature").ValueKind);
+            Assert.Equal("MZ pretend!", await http.GetStringAsync("/api/downloads/code-arena/win-x64"));
+            Assert.Contains(imageWinSum, await http.GetStringAsync("/api/downloads/code-arena/SHA256SUMS"), StringComparison.Ordinal);
             Assert.Equal(HttpStatusCode.NotFound, (await http.GetAsync("/api/downloads/code-arena/SHA256SUMS.sig")).StatusCode);
             Assert.Contains("does not sign its builds", await http.GetStringAsync("/api/downloads/code-arena/install.sh"), StringComparison.Ordinal);
         }
