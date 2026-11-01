@@ -15,6 +15,121 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v7.7.0 (2026-11-02)
+
+What an airgapped install asked for: who may reach the stack, every setting
+chosen at install and changed later with one command, Code Arena signed for
+Windows and on Windows on Arm, its sub-agents seen at work, sandboxes that hold
+many people at once; admins who take a request out of the line or restart an
+engine or a sandbox from the app; six colour themes; and the app keeping its
+own API keys and ledger.
+
+### :rocket: Epics and highlights
+
+- **Network access.** Settings → Network access: an allow list and a block
+  list of addresses and ranges (IPv4 and IPv6, with comments), checked by
+  Traefik before every request to every host; a list that would shut out the
+  admin saving it is refused. `IP_ALLOW` in `.env` is Traefik's own list
+  below it, for the whole stack.
+- **Every setting at install, and `arenactl` on the host.** Install, upgrade
+  and repair can ask every `.env` setting an operator chooses (the address,
+  models, GitLab, backups, power and heat, the sandboxes' size, the
+  database), take them as `--set KEY=VALUE` (`KEY=@FILE` for a secret), and
+  `arenactl config` shows and changes them later, starting again the
+  services they touch. The installer puts `arenactl` on the PATH: status,
+  config, upgrade and repair from a `.run`, logs, restart, backup, cert,
+  sign and the live checks, in one command.
+- **Code Arena signed for Windows, and on Arm.** The Windows builds carry an
+  Authenticode signature by the stack's code-signing certificate, so on a
+  machine that trusts the stack's CA Windows names their publisher instead of
+  "Unknown publisher"; the app's own image signs them in a container with no
+  network. A build for Windows on Arm (`win-arm64`), and the app's icon,
+  name, maker and version on `code-arena.exe`.
+- **Six colour themes.** Sakura, Midnight, Copper, Forest, Ocean and Lavender
+  beside Arena's own, each with a light and a dark side, for the web and Code
+  Arena's IDE (its workbench, editor and terminals). Chosen in Your account →
+  Appearance, the user menu or Ctrl K, the theme follows the person to every
+  device; light or dark stays each device's. Every theme keeps WCAG AA
+  contrast, checked by a test that computes it from the CSS.
+- **Out of the line.** Admin → Line has **Remove** for a request waiting and
+  **Stop** for one running, with a reason the person sees: the chat says
+  "Stopped by an admin: …", an API caller gets 403 `removed_by_admin` (not
+  retried), audited as `line.remove` and `line.stop`, on any app replica
+  (`usage.line`, in the Operator role).
+- **Engines and sandboxes, restarted from the app.** Admin → Monitoring lists
+  them with **Reload** (the models loaded again), **Restart** (the process
+  started again) and, for the Python, 3D and Lean sandboxes, **Reset** (running
+  and waiting jobs stopped and their callers told, the runner started again);
+  Admin → Models has them for each engine. Each service follows a control file
+  the app writes, with no Docker socket, on Docker and Kubernetes alike;
+  audited (`runtimes.restart`, in the Operator and Model admin roles). A
+  sandbox's runner that stops answering exits and is started again.
+
+### :sparkles: New features & Enhancements
+
+- **Charts show the hottest, and the rest's average.** A chart of many series
+  keeps a line for each of the seven highest on average over the range (the
+  hottest CPU sensors, the busiest cores, the fastest clocks) and folds the
+  rest into one, "17 cooler, average", with a faint band from the coolest to
+  the hottest of them and that range in the tooltip. Each query of a panel
+  folds apart, in its own unit: a GPU's temperature is never averaged with its
+  power. The CPU temperature, cores and clock charts draw each sensor or core
+  this way.
+- **Sub-agents at work in Code Arena.** A `task` call shows its agent: its
+  thinking, the tools it calls and what they return, as it works and after,
+  in the chat and the IDE, kept with the session.
+- **The prompt log shows pictures and files.** A question's pictures and
+  files, and what its answer made, open from the log (audited); a question
+  of a picture alone is logged too.
+- **Sandboxes for many people at once.** Jobs wait in line while others run,
+  and the chat says how many are ahead ("Waiting for the 3D sandbox: 3 jobs
+  ahead"); a job's time counts from when it starts. Each sandbox's room
+  (jobs at once, memory, CPUs, each job's memory) is set in `.env` and at
+  install. Measured: 20 Python jobs at once in 5 s, 10 renders at once all
+  done at one slot. `arenactl check sandboxes` runs every sandbox for real.
+- **A model moves engines.** A llama.cpp model moves to vLLM or SGLang from
+  its own Edit dialog (choose its Hugging Face snapshot), keeping its name,
+  who may use it and its prices; the llama.cpp copy is unloaded.
+- **Fourteen more skills**: threat model, ADR, design doc, incident response,
+  runbook, test plan, user stories, accessibility review, performance
+  investigation, dependency upgrade, privacy review, log analysis, status
+  report and proposal. The skills made in Arena reach Code Arena too.
+- **Easter eggs.** Five quick clicks on a picture being drawn open Snake; on a
+  video being made, a star game; a few more for those who look.
+- **The app keeps the API keys** (the own gateway's commits 7 to 9): every
+  key is made by the app and read from its own table, and credit, usage,
+  rate limits, the prompt list and 53 of the 54 dashboard panels read the
+  app's own ledger of model requests; every refusal is told apart.
+- **Code Arena's IDE as VS Code**: Source Control pulls, pushes, fetches and
+  syncs and has Commit & Push; the Explorer follows the file shown, marks
+  git's changes and problems, selects several rows, cuts, copies, pastes and
+  drags; one Problems store for the check, the language servers and the
+  editor; Peek shows files that are not open.
+- Images that `pip install` wait longer for PyPI and try again.
+
+### :bug: Bugs fixed
+
+- With a sign-in notice to accept (or two-factor sign-in to set up), signing in
+  to Argus or Code Arena through the app ended on a page of JSON. The browser
+  is now shown the notice (or the setup) and then goes on to that sign-in.
+- Admin → Monitoring no longer fails as a whole when one probe does: each is
+  answered on its own, and only the features the installation runs.
+- Code Arena's chat no longer shows a large empty space in its scroll, and
+  the IDE never scrolls as a page with space under it; its activity bar fits
+  a short window.
+- The 3D sandbox: a job is no longer waited for when the sandbox stopped or
+  started again, and jobs no longer fail for waiting in line behind others.
+- A picture's, video's or any tool call's wait, and the thinking's, no longer
+  start again at zero when the page or tab comes back.
+- The app image falls back to nuget.org's packs when the offline restore
+  needs one more.
+- When the notice and two-factor sign-in were both due, the notice could not
+  be read: two-factor setup now waits until it is accepted. A sign-in's way
+  back (`/continue`, the login's redirect) never leaves the site, even with a
+  tab or line break in it.
+- A person's avatar keeps its initials readable at every colour; the memory
+  garden's changes fit a phone's width.
+
 ## v7.6.3 (2026-10-31)
 
 A hotfix: the offline installer works, checks everything before it starts,

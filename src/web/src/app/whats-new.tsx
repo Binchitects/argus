@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ArrowRight, BarChart, BookOpenText, ExternalLink, Library, ShieldAlert, SquareCode, Workflow, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Bot, ExternalLink, Laptop, ListX, Palette, RefreshCw, ShieldCheck, SquareSlash, type LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
@@ -29,52 +29,60 @@ interface Tour {
 }
 
 const latestTour: Tour = {
-  release: '7.6',
-  title: "What's new in Argus Arena 7.6",
+  release: '7.7',
+  title: "What's new in Argus Arena 7.7",
   slides: [
     {
-      icon: BookOpenText,
-      title: 'A wiki of everything',
-      text: "The company's documents, code and data in one place, searched and read with no model: what knowledge holds, the repositories Argus reads, and the data's tables.",
-      to: '/wiki',
-      action: 'Open the wiki',
+      icon: Palette,
+      title: 'Six colour themes',
+      text: 'Sakura, Midnight, Copper, Forest, Ocean and Lavender, each light and dark, in the web and in Code Arena. Your theme follows you to every device; light or dark stays each device’s.',
+      to: '/account',
+      action: 'Choose a theme',
     },
     {
-      icon: SquareCode,
-      title: 'Code Arena, more like VS Code',
-      text: 'Preview and pinned tabs, tabs and unsaved text back after a reload, breadcrumbs and an Outline, Go to Symbol in the whole folder (Ctrl+T), Markdown preview, and pictures, sound and video in tabs.',
+      icon: Bot,
+      title: 'Code Arena’s sub-agents, at work',
+      text: 'A task Code Arena hands to a sub-agent shows what it thinks, the tools it calls and what they return, as it works and after, in the chat and the IDE.',
       to: '/help/code-arena',
       action: 'Read about Code Arena',
     },
     {
-      icon: BarChart,
-      title: 'Ask your data, on more',
-      text: 'Ask questions of MySQL, MariaDB and SQL Server databases as of PostgreSQL ones, and of CSV, Excel and JSON files uploaded as a source.',
-      to: '/data',
-      action: 'Open Data',
+      icon: Laptop,
+      title: 'Code Arena, signed for Windows and on Arm',
+      text: 'Windows names its publisher instead of “Unknown publisher”, and there is a build for Windows on Arm, with Code Arena’s icon.',
+      to: '/setup',
+      action: 'Connect your tools',
     },
     {
-      icon: Workflow,
-      title: 'Agent Studio reacts to GitLab',
-      text: 'A workflow can start on fifteen GitLab events (a merge request opened, a pipeline failed, an issue labelled…), filtered by branch, label or words, and act: comment, label, open an issue, run code, query data, call a service, wait or notify.',
-      to: '/studio',
-      action: 'Open Agent Studio',
+      icon: SquareSlash,
+      title: 'Fourteen more skills',
+      text: 'A threat model, an ADR, a design doc, an incident response, a runbook, a test plan, user stories, an accessibility or privacy review and more, in the chat and in Code Arena.',
+      to: '/skills',
+      action: 'Open Skills',
     },
     {
-      icon: Library,
-      title: 'Knowledge from anywhere',
-      text: 'Upload documents and pictures (read with OCR when they are scans), or add GitHub, Gitea, Jira, Notion, WebDAV, S3 or a feed as a source.',
-      to: '/admin/knowledge',
-      action: 'Open Knowledge',
-      permission: 'knowledge.read',
+      icon: ListX,
+      title: 'Out of the line',
+      text: 'Take a waiting request out of the line, or stop a running one, with a reason the person sees.',
+      to: '/admin/line',
+      action: 'Open the line',
+      permission: 'usage.line',
     },
     {
-      icon: ShieldAlert,
-      title: 'Safeguards that are harder to get round',
-      text: 'Disguised words, injections hidden in other languages, base64 or HTML, more kinds of personal data and secrets, and commands that would send data away are caught; six new templates to start from.',
-      to: '/admin/safeguards',
-      action: 'Open Safeguards',
-      permission: 'safeguards.read',
+      icon: RefreshCw,
+      title: 'Engines and sandboxes, restarted from here',
+      text: 'Reload an engine’s models, restart it, or reset a sandbox, from Admin → Monitoring, with no shell.',
+      to: '/admin/monitoring',
+      action: 'Open Monitoring',
+      permission: 'runtimes.restart',
+    },
+    {
+      icon: ShieldCheck,
+      title: 'Who may reach Argus Arena',
+      text: 'An allow list and a block list of addresses and ranges, checked before every request to every page, the gateway and Argus.',
+      to: '/admin/settings#network-access',
+      action: 'Open Network access',
+      permission: 'settings.read',
     },
   ],
 }
