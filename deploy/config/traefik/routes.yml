@@ -5,6 +5,8 @@
 {{ $project := env "COMPOSE_PROJECT_NAME" | default "arena" }}
 {{/* HSTS: a year with Let's Encrypt's certificate; with your own CA, only once browsers trust it (HSTS_SECONDS in .env). */}}
 {{ $hsts := env "HSTS_SECONDS" | default (ternary "31536000" "0" (ne $acme "")) }}
+{{/* IP_ALLOW in .env: only these addresses or ranges (comma separated) reach anything here, whether or not the app runs. */}}
+{{ $allow := env "IP_ALLOW" | trim }}
 http:
   routers:
     # The web on the bare domain, except the app's paths (/mcp: Arena MCP, each person's tools for their agents; /mcp/code: the same as code).
@@ -53,8 +55,16 @@ http:
     argus: { loadBalancer: { servers: [{ url: "http://argus:7700" }] } }
 
   middlewares:
+    # Every route: the addresses .env allows (Traefik's own list), then those Settings → Network access allows and blocks
+    # (the app says, before each request), then the headers.
     secure:
-      chain: { middlewares: [headers, compress] }
+      chain: { middlewares: [{{ if $allow }}allowed, {{ end }}addresses, headers, compress] }
+{{ if $allow }}
+    allowed:
+      ipAllowList: { sourceRange: [{{ range $i, $r := splitList "," $allow }}{{ if $i }}, {{ end }}"{{ trim $r }}"{{ end }}] }
+{{ end }}
+    addresses:
+      forwardAuth: { address: "http://app:8080/api/authz/address" }
     headers:
       headers: { contentTypeNosniff: true, referrerPolicy: same-origin, stsSeconds: {{ $hsts }}, stsIncludeSubdomains: true }
     # Not the answer streams: compressing them would hold words back.
