@@ -34,7 +34,7 @@ heading, and has a box above it that keeps the rows holding what is typed.
 | **Indexing** | The Argus code index: which repositories GitLab lists are indexed and which branches of each (with each branch's latest commit), every indexed branch at its commit (hash, message, when), **Update** per repository, the reindex schedule (in words or cron, in a time zone), the GitLab push and merge webhook (its secret, shown once, the steps for GitLab, and the last deliveries), and a run's progress (a percentage overall and per repository) and log. See [Choosing what is indexed](argus/README.md#choosing-what-is-indexed). |
 | **Packs** | Knowledge packs, loaded like the models: the **pack library** (built packs on the host, the repository's `packs/` or `ARGUS_PACK_LIBRARY_DIR`) lists each with **Load** and **Unload**. Loading links the pack into Argus, instantly and without a copy, and only a pack built with Argus's embedding model loads (another's vectors would not compare). A pack not in the library can still be installed from a URL (with its SHA-256), updated from the published index, and removed. |
 | **Explore** | What Argus holds, searched across every repository: **symbols and paths**; **references**, every line where a name is used, the definitions marked (as `find_references` answers a model); **code**, words in the files (`"a phrase"`, `prefix*`); and the **documentation** packs by their words, an API's name, or meaning. Each result opens: a file at its line, or a page of a pack. For "a tool found nothing: is it absent, named differently, or never indexed?". |
-| **Monitoring** | Live probes of the gateway, Prometheus, Alertmanager, Loki and Argus, and links to Prometheus's and Alertmanager's own pages. |
+| **Monitoring** | Live probes of the gateway, Prometheus, Alertmanager, Loki and Argus, and links to Prometheus's and Alertmanager's own pages. **Engines and sandboxes**: each engine, picture and video server and sandbox with its state, and **Reload**, **Restart** or **Reset**. See [Engines and sandboxes](#engines-and-sandboxes) below. |
 | **Dashboards** | Ten dashboards, drawn by the app: the model and the gateway (LLM Overview, Stack Performance), the machine (Resources, GPU Hardware, Host & Containers), the services (Stack Health & Alerts, Logs), Argus and its index, and usage by person. See [Dashboards](#dashboards) below. |
 | **Logs** | Every service's logs from Loki, newest first: by container, level (all, warnings and errors, errors) and text, over five minutes to a month, and **Live** for new lines as they are written. The filters are in the address, so a view can be linked. |
 | **Alerts** | What fires now (from Alertmanager, with silenced ones marked), every time an alert fired over a day, a week or a month, and every rule with its state, severity, how long its condition must hold, and its query (the app's own disk rule says what it checks in words: it is not PromQL). The certificate alerts warn 30 days before it expires and are critical 7 days before. An alert that starts firing reaches every admin's bell, and by email (when set up) and the alerts webhook (**Settings → Notifications**), once per firing. |
@@ -137,7 +137,8 @@ What each person may do is decided in one place, from three things:
   **Review admin**, **Team manager** (a group's people, their credit and
   limits, its spend; given over a group), **Supervisor** (dashboards, alerts,
   logs, usage and the audit log, read-only), **Operator** (takes alerts, loads
-  and unloads models, cleans up storage, takes requests out of the line with
+  and unloads models, restarts engines and resets sandboxes with
+  `runtimes.restart`, cleans up storage, takes requests out of the line with
   `usage.line`), **Safety officer** (the safeguards),
   **Compliance officer** (Admin → Compliance: the controls and their checks;
   reads the audit log; see [compliance](compliance/README.md)) and **Member**. A role is held by a person, by a group (an
@@ -916,6 +917,48 @@ studio's: **Show the servers' own files too** lists them). Each deletion is
 audited as `model.files.delete`, with what was deleted and the room freed.
 Admin → Storage's **Models nothing uses** clean-up deletes the same files,
 several at once.
+
+### Engines and sandboxes
+
+**Admin → Monitoring → Engines and sandboxes** lists llama.cpp, each vLLM and
+SGLang engine, the picture and video servers and the sandboxes (Python, 3D,
+Lean) that this stack runs: each one's state (up, idle, loading, down, or
+reloading, restarting or resetting while an ask is on its way), why, the
+answers being written and waiting on an engine (this replica's), the jobs
+running and waiting in a sandbox, and what was done to it last, by whom. The
+list refreshes every 3 seconds while one is on its way back.
+
+| Button | On | What it does |
+|---|---|---|
+| **Reload** | llama.cpp | Each loaded model is unloaded and loaded again, one after another, so the others answer meanwhile. |
+| **Reload** | vLLM, SGLang | Every model is drained (its answers end, up to 60 s) and started again. |
+| **Restart** | llama.cpp | llama-server starts again (killed if it has not stopped within 15 s), then the models kept loaded load again. |
+| **Restart** | vLLM, SGLang | Every model is drained, the supervisor forgets what it ran and starts again, then every model starts again. |
+| **Restart** | pictures, video | The server starts again with its model (a picture or video being made is lost). |
+| **Reset** | a sandbox | Its running jobs are stopped and its waiting ones given back, each person told that an admin reset it; what is left of them is killed, and the runner starts again. |
+
+Each asks first, saying what it cuts, and is audited as `runtime.reload`,
+`runtime.restart` or `runtime.reset` with the engine or sandbox and what it
+concerned ("1 model (Qwen3-8B); 2 answers cut", "1 running, 3 waiting told");
+the audit log's **Restarts** filter shows them. While one is on its way (until
+the service has taken it, at most 3 minutes), another is refused. An engine
+is not reloaded or restarted while the GPU is lent to a picture or a video.
+Admin → Models' engine card has the same Reload and Restart for each engine.
+Reload needs `models.load`; Restart and Reset need `runtimes.restart`, which
+the Operator and Model admin roles hold.
+
+None of it needs the Docker socket, on Docker Compose and Kubernetes alike:
+each service follows a file the app writes on the volume they share (read,
+never run). llama.cpp's router starts llama-server again on a new `gen=` in
+`llamacpp.restart`; a vLLM or SGLang supervisor follows `reload` and
+`restart` beside its desired state, and its heartbeat says which it has done;
+a picture or video server starts its control file's next generation; a
+sandbox's runner follows `reset` in its jobs folder and removes it once done.
+A sandbox whose runner hangs ends itself within a minute and its restart
+policy starts it again. llama.cpp's Reload goes through its own API. The
+speech server and the media studio have no Restart here: restart their
+containers.
+
 ### Network access
 
 **Settings → Network access** decides which network addresses reach Argus

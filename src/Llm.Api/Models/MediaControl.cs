@@ -397,6 +397,13 @@ public sealed partial class MediaControl : BackgroundService
         }
     }
 
+    /// <summary>The model a picture or video server is to run now (wanted on), or null: it runs nothing.</summary>
+    public string? RunningOn(string server) => _onSince.ContainsKey(server) ? _target.GetValueOrDefault(server) : null;
+
+    /// <summary>Whether <paramref name="server"/> runs the generation the app wrote last and its model answers: a restart is through.</summary>
+    public bool Current(string server) => StatusOf(server) is { Phase: "running" } status && status.Gen == Gen(server).ToString(CultureInfo.InvariantCulture)
+        && _target.GetValueOrDefault(server) is { } name && _now.GetValueOrDefault(name) == "loaded";
+
     /// <summary>Why <paramref name="name"/> loads now, for Admin → Models (a job made room for it).</summary>
     public void Explain(string name, string why) => Because(name, why);
 

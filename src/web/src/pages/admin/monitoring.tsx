@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { api } from '@/lib/api'
 import { serviceUrl } from '@/app/nav'
 import type { Probe } from './ops-api'
+import { RuntimesCard } from './runtimes'
 import { ServiceList } from './services'
 
 export function MonitoringPage() {
@@ -20,6 +21,7 @@ export function MonitoringPage() {
       <PageHeader title="Monitoring" description="Live probes of every service, refreshed every 15 seconds." />
       <div className="grid gap-6">
         {s.isPending ? <PageSkeleton /> : s.error ? <QueryError error={s.error} retry={() => s.refetch()} /> : <ServiceList services={s.data} />}
+        <RuntimesCard />
         <Card>
           <CardHeader>
             <CardTitle>Elsewhere</CardTitle>

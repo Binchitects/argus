@@ -6,7 +6,8 @@ namespace Llm.Tests;
 
 /// <summary>
 /// A sandbox job while its runner stops answering or starts again (runner.py's heartbeat): the job is given up within
-/// seconds, not after its whole time and the queue's (minutes the tool seems not to answer).
+/// seconds, not after its whole time and the queue's (minutes the tool seems not to answer). One an admin's reset stops,
+/// or never runs, tells its caller so.
 /// </summary>
 public sealed class JobRunnerTests : IDisposable
 {
@@ -138,6 +139,51 @@ public sealed class JobRunnerTests : IDisposable
             await Task.Delay(50);
         }
         throw new TimeoutException("no job was queued");
+    }
+
+    /// <summary>The runner's answer to a job an admin's reset stopped or never ran (runner.py's reset_result), then its new start.</summary>
+    private async Task ResetAnswerAsync(string job, string reset, double started)
+    {
+        var id = Path.GetFileName(job);
+        var draft = Path.Combine(_dir, "out", ".tmp-reset-" + id);
+        Directory.CreateDirectory(Path.Combine(draft, "files"));
+        await File.WriteAllTextAsync(Path.Combine(draft, "result.json"), $$"""{"exit_code":null,"timed_out":false,"cancelled":true,"stdout":"","stdout_cut":false,"stderr":"","stderr_cut":false,"files":[],"skipped_files":[],"reset":"{{reset}}","duration_ms":0}""");
+        if (Directory.Exists(job))
+        {
+            Directory.Delete(job, recursive: true);
+        }
+        Directory.Move(draft, Path.Combine(_dir, "out", id));
+        Beat(started);
+    }
+
+    [Fact]
+    public async Task A_job_an_admins_reset_stops_or_never_runs_tells_its_caller_so()
+    {
+        Beat(started: 1);
+        var running = Client().RunAsync("print(1)", [], timeoutSeconds: 600, CancellationToken.None);
+        var job = await QueuedAsync();
+        var taken = Path.Combine(_dir, "run", Path.GetFileName(job));
+        Directory.Move(job, taken);
+        var waiting = Client().RunAsync("print(2)", [], timeoutSeconds: 600, CancellationToken.None);
+        var second = await QueuedAsync();
+
+        // The admin asks: the sandbox says so to the tools meanwhile.
+        await File.WriteAllTextAsync(Path.Combine(_dir, JobRunner.ResetFile), "gen=1\naction=reset\nby=ada\nat=1\n");
+        Assert.Equal("The Python sandbox is being reset by an admin: try again in a minute.", Client().Unavailable());
+        await Task.Delay(1500);
+        Assert.False(running.IsCompleted, "nothing happens before the runner does it");
+
+        // The runner answers both, then starts again: each caller is told why, not that its job was lost.
+        await ResetAnswerAsync(second, "waiting", started: 1);
+        await ResetAnswerAsync(taken, "running", started: 2);
+        File.Delete(Path.Combine(_dir, JobRunner.ResetFile));
+        var stopped = await Assert.ThrowsAsync<SandboxException>(() => running.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("An admin reset the Python sandbox while this job was running: run it again.", stopped.Message);
+        var told = await Assert.ThrowsAsync<SandboxException>(() => waiting.WaitAsync(TimeSpan.FromSeconds(10)));
+        Assert.Equal("An admin reset the Python sandbox while this job waited in line: run it again.", told.Message);
+        Assert.Null(Client().Unavailable());
+        // Its slots and jobs, as its heartbeat says (one slot, busy), none waiting.
+        Assert.Equal((1, 1, 0), Client().Load());
     }
 
     [Fact]

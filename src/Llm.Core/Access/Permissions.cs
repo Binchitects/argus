@@ -39,6 +39,7 @@ public static class Permissions
     public const string PrivacyManage = "privacy.manage";
     public const string LogsRead = "logs.read";
     public const string MonitoringRead = "monitoring.read";
+    public const string RuntimesRestart = "runtimes.restart";
     public const string HardwareRead = "hardware.read";
     public const string FeedbackManage = "feedback.manage";
     /// <summary>Not a ".read": the Auditor role, which holds every read, does not get it with them.</summary>
@@ -163,7 +164,7 @@ public static class Permissions
         new(AccessManage, "Access", "Make and change roles, assignments and rules.", true),
         new(ModelsRead, "Models, tools and knowledge", "See the models, their state and the GPU.", true),
         new(ModelsManage, "Models, tools and knowledge", "Add, change and remove models, their hours, servers and who may use them.", true),
-        new(ModelsLoad, "Models, tools and knowledge", "Load and unload models.", true),
+        new(ModelsLoad, "Models, tools and knowledge", "Load, unload and reload models.", true),
         new(ToolsManage, "Models, tools and knowledge", "Turn the chat's tools on and off and choose who may use them.", true),
         new(PluginsManage, "Models, tools and knowledge", "Install, update and remove plugins.", true),
         new(McpServersManage, "Models, tools and knowledge", "Add and change MCP servers and APIs.", true),
@@ -182,6 +183,7 @@ public static class Permissions
         new(PrivacyManage, "Data", "Answer people's requests about their data: a copy, a correction, restriction, objection and erasure.", true),
         new(LogsRead, "Oversight", "Read the stack's logs and the answers' traces.", true),
         new(MonitoringRead, "Oversight", "See the monitoring dashboards, the quality reports and the stack's state.", true),
+        new(RuntimesRestart, "Oversight", "Restart the engines and the picture and video servers, and reset the sandboxes: what runs there is stopped.", true),
         new(HardwareRead, "Oversight", "See the hardware dashboards: the GPUs, CPUs, memory, disks, network, temperatures and power.", true),
         new(FeedbackManage, "Oversight", "Read what people send about Arena (Send feedback), mark it and answer it.", true),
         new(PromptsReview, "Oversight", "Read everyone's questions and answers, in the chat and with API keys (the prompt log); each search is audited.", true),
@@ -343,8 +345,8 @@ public static class BuiltInRoles
         new(Owner, "Owner", "Everything, and every resource, unless a rule for the person themselves takes one away.", [.. Permissions.All.Select(p => p.Key)]),
         new(PeopleAdmin, "People admin", "People, groups and their credit; scoped to some groups, only theirs.",
             [Permissions.PeopleRead, Permissions.PeopleManage, Permissions.PeopleDisable, Permissions.GroupsManage, Permissions.CreditsManage]),
-        new(ModelAdmin, "Model admin", "Models, tools, MCP servers and plugins.",
-            [Permissions.ModelsRead, Permissions.ModelsManage, Permissions.ModelsLoad, Permissions.ToolsManage, Permissions.McpServersManage, Permissions.PluginsManage]),
+        new(ModelAdmin, "Model admin", "Models, tools, MCP servers and plugins; restarts the engines.",
+            [Permissions.ModelsRead, Permissions.ModelsManage, Permissions.ModelsLoad, Permissions.RuntimesRestart, Permissions.ToolsManage, Permissions.McpServersManage, Permissions.PluginsManage]),
         new(Billing, "Billing", "Credit, spend and usage; scoped to some groups, only theirs.", [Permissions.CreditsManage, Permissions.BillingRead, Permissions.UsageRead]),
         new(Auditor, "Auditor", "Reads everything an admin can see, and changes nothing.",
             [.. Permissions.All.Where(p => p.Admin && p.Key.EndsWith(".read", StringComparison.Ordinal)).Select(p => p.Key)]),
@@ -356,8 +358,9 @@ public static class BuiltInRoles
             [Permissions.PeopleRead, Permissions.PeopleManage, Permissions.PeopleDisable, Permissions.CreditsManage, Permissions.BillingRead, Permissions.UsageRead]),
         new(Supervisor, "Supervisor", "Watches the service: dashboards, alerts, logs, traces, usage and the audit log; changes nothing.",
             [Permissions.MonitoringRead, Permissions.HardwareRead, Permissions.LogsRead, Permissions.UsageRead, Permissions.AuditRead, Permissions.ModelsRead]),
-        new(Operator, "Operator", "Runs the service day to day: takes alerts, loads and unloads models, cleans up storage, clears the answers' line, reads logs and dashboards.",
-            [Permissions.MonitoringRead, Permissions.HardwareRead, Permissions.LogsRead, Permissions.AlertsManage, Permissions.ModelsRead, Permissions.ModelsLoad, Permissions.StorageManage, Permissions.UsageLine]),
+        new(Operator, "Operator", "Runs the service day to day: takes alerts, loads and unloads models, restarts engines and resets sandboxes, cleans up storage, clears the answers' line, reads logs and dashboards.",
+            [Permissions.MonitoringRead, Permissions.HardwareRead, Permissions.LogsRead, Permissions.AlertsManage, Permissions.ModelsRead, Permissions.ModelsLoad, Permissions.RuntimesRestart,
+                Permissions.StorageManage, Permissions.UsageLine]),
         new(SafetyOfficer, "Safety officer", "The safeguards: their rules, what they did, and people's requests to review a refusal; reads the audit log.",
             [Permissions.SafeguardsRead, Permissions.SafeguardsManage, Permissions.AuditRead]),
         new(ComplianceOfficer, "Compliance officer", "The Compliance center: the controls and their checks, the company's part attested, access reviews, people's data requests and the evidence; reads the audit log.",

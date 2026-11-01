@@ -25,6 +25,14 @@ The protocol, all in /jobs (owned by the app's user, 0700):
   heartbeat           {"at": epoch seconds, "slots": n, "busy": n, "started": epoch
                       seconds}; the app treats the sandbox as down when it is
                       stale, and a job it took as lost when "started" changes
+  reset               an admin's reset (Admin -> Monitoring; gen= and by= lines, read
+                      and never run): the running jobs are stopped and the waiting
+                      ones answered, each result saying so ("reset": "running" or
+                      "waiting"), what is left of them killed, and the runner starts
+                      again; the file is gone once it is done
+
+A main loop that has not turned for a minute (it hangs) ends the runner, and its
+restart policy starts it again.
 
 A job directory is written as in/.tmp-<id> and renamed, so it is whole when
 seen; results the same way.
@@ -42,15 +50,21 @@ import sys
 import threading
 import time
 
-JOBS = "/jobs"
+# Its folders (the tests' own by SANDBOX_JOBS_DIR, SANDBOX_WORK_DIR and SANDBOX_PRIVATE_DIR).
+JOBS = os.environ.get("SANDBOX_JOBS_DIR", "/jobs")
 IN, RUN, OUT, CANCEL, CALLS = (os.path.join(JOBS, d) for d in ("in", "run", "out", "cancel", "calls"))
+RESET = os.path.join(JOBS, "reset")
+# How long a reset waits for the jobs it stopped to give their results, before it kills what is left of them.
+RESET_WAIT = 15
+# The main loop silent this long: it hangs, and the runner ends so that it is started again.
+STALL_LIMIT = int(os.environ.get("SANDBOX_STALL_LIMIT", "60"))
 # When this runner started: a restart drops the jobs it was running (prepare), and the app, seeing it change, stops waiting.
 STARTED = time.time()
 # A program's calls of the chat's tools: at most so many a run, each waited for at most so long.
 MOST_CALLS = int(os.environ.get("SANDBOX_MOST_CALLS", "200"))
 CALL_WAIT = 120
-WORK = "/work"
-PRIVATE = "/tmp/runner"
+WORK = os.environ.get("SANDBOX_WORK_DIR", "/work")
+PRIVATE = os.environ.get("SANDBOX_PRIVATE_DIR", "/tmp/runner")
 
 SLOTS = max(1, int(os.environ.get("SANDBOX_SLOTS", "2")))
 OWNER_UID = int(os.environ.get("SANDBOX_OWNER_UID", "1000"))
@@ -393,7 +407,15 @@ def run_job(slot, job_id):
         cancel = os.path.join(CANCEL, job_id)
         if os.path.exists(cancel):
             os.remove(cancel)
+    if result["cancelled"] and resetting.is_set():
+        result["reset"] = "running"
     result["duration_ms"] = int((time.monotonic() - started) * 1000)
+    deliver(job_id, result, tmp_out)
+    log("job", job_id, "slot", slot, "exit", result["exit_code"], "timed out" if result["timed_out"] else "", f"{result['duration_ms']} ms")
+
+
+def deliver(job_id, result, tmp_out):
+    """A job's result (and the files beside it in tmp_out) put where the app reads it, whole."""
     os.makedirs(os.path.join(tmp_out, "files"), exist_ok=True)
     with open(os.path.join(tmp_out, "result.json"), "w", encoding="utf-8") as f:
         json.dump(result, f)
@@ -401,47 +423,125 @@ def run_job(slot, job_id):
         for p in [root] + [os.path.join(root, x) for x in dirs + files]:
             os.chown(p, OWNER_UID, OWNER_GID)
     os.rename(tmp_out, os.path.join(OUT, job_id))
-    log("job", job_id, "slot", slot, "exit", result["exit_code"], "timed out" if result["timed_out"] else "", f"{result['duration_ms']} ms")
+
+
+def reset_result(why):
+    """The result of a job an admin's reset stopped ("running") or never ran ("waiting")."""
+    return {"exit_code": None, "timed_out": False, "cancelled": True, "stdout": "", "stdout_cut": False, "stderr": "", "stderr_cut": False,
+            "files": [], "skipped_files": [], "reset": why, "duration_ms": 0}
+
+
+def asked_by():
+    """Who asked for the reset, as the app wrote it (for the log)."""
+    try:
+        with open(RESET, encoding="utf-8") as f:
+            return next((line[3:].strip() for line in f if line.startswith("by=")), "")
+    except OSError:
+        return ""
+
+
+def reset():
+    """An admin's reset: the running jobs stopped and the waiting ones answered, each told so, what is left killed, and
+    the runner started again in place (a new "started"). The main loop calls it, so nothing new runs meanwhile."""
+    global last_tick
+    by = asked_by()
+    running = sorted(os.listdir(RUN))
+    resetting.set()
+    for job_id in running:
+        cancel = os.path.join(CANCEL, job_id)
+        open(cancel, "w").close()
+        owned(cancel, 0o600)
+    waiting = sorted(n for n in os.listdir(IN) if not n.startswith("."))
+    for job_id in waiting:
+        try:
+            deliver(job_id, reset_result("waiting"), os.path.join(OUT, f".tmp-reset-{job_id}"))
+        except OSError as ex:
+            log("reset: could not answer", job_id, repr(ex))
+        shutil.rmtree(os.path.join(IN, job_id), ignore_errors=True)
+    log(f"reset asked{' by ' + by if by else ''}: stopping {len(running)} running, {len(waiting)} waiting answered")
+    until = time.monotonic() + RESET_WAIT
+    while busy > 0 and time.monotonic() < until:
+        last_tick = time.monotonic()
+        time.sleep(0.05)
+    # A job that did not give its result in time is told here instead.
+    for job_id in list(taken.values()):
+        try:
+            deliver(job_id, reset_result("running"), os.path.join(OUT, f".tmp-reset-{job_id}"))
+        except OSError as ex:
+            log("reset: could not answer", job_id, repr(ex))
+    for slot in range(SLOTS):
+        last_tick = time.monotonic()
+        try:
+            kill_user(FIRST_UID + slot)
+        except Exception as ex:
+            log("reset: could not clear user", FIRST_UID + slot, repr(ex))
+    for name in os.listdir(WORK):
+        path = os.path.join(WORK, name)
+        shutil.rmtree(path, ignore_errors=True) if os.path.isdir(path) else os.remove(path)
+    try:
+        os.remove(RESET)
+    except FileNotFoundError:
+        pass
+    log("reset done: starting again")
+    sys.stdout.flush()
+    os.execv(sys.executable, sys.orig_argv)
 
 
 busy = 0
 busy_lock = threading.Lock()
+# The job each slot runs now, by slot.
+taken = {}
+# Set while an admin's reset stops the running jobs: their results say so.
+resetting = threading.Event()
+# When the main loop last turned (time.monotonic()): the heartbeat ends a runner whose loop hangs.
+last_tick = time.monotonic()
 
 
 def worker(slot, jobs, free):
     global busy
     while True:
         job_id = jobs.get()
+        taken[slot] = job_id
         try:
             run_job(slot, job_id)
         finally:
+            taken.pop(slot, None)
             with busy_lock:
                 busy -= 1
             free.put((slot, jobs))
 
 
+def beat():
+    """The heartbeat written and leftovers cleared; a main loop that hangs ends the runner, to be started again."""
+    if time.monotonic() - last_tick > STALL_LIMIT:
+        log(f"the main loop has not turned for {STALL_LIMIT} s: ending, to be started again")
+        sys.stdout.flush()
+        os._exit(70)
+    try:
+        tmp = os.path.join(JOBS, ".heartbeat")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"at": time.time(), "slots": SLOTS, "busy": busy, "started": STARTED}, f)
+        os.chown(tmp, OWNER_UID, OWNER_GID)
+        os.replace(tmp, os.path.join(JOBS, "heartbeat"))
+        # Leftovers of an app that went away: results never collected, jobs half written.
+        now = time.time()
+        for d in (IN, OUT, CANCEL):
+            for name in os.listdir(d):
+                path = os.path.join(d, name)
+                if now - os.path.getmtime(path) > 900:
+                    shutil.rmtree(path, ignore_errors=True) if os.path.isdir(path) else os.remove(path)
+    except Exception as ex:
+        log("heartbeat:", repr(ex))
+
+
 def heartbeat():
     while True:
-        try:
-            tmp = os.path.join(JOBS, ".heartbeat")
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump({"at": time.time(), "slots": SLOTS, "busy": busy, "started": STARTED}, f)
-            os.chown(tmp, OWNER_UID, OWNER_GID)
-            os.replace(tmp, os.path.join(JOBS, "heartbeat"))
-            # Leftovers of an app that went away: results never collected, jobs half written.
-            now = time.time()
-            for d in (IN, OUT, CANCEL):
-                for name in os.listdir(d):
-                    path = os.path.join(d, name)
-                    if now - os.path.getmtime(path) > 900:
-                        shutil.rmtree(path, ignore_errors=True) if os.path.isdir(path) else os.remove(path)
-        except Exception as ex:
-            log("heartbeat:", repr(ex))
+        beat()
         time.sleep(2)
 
 
 def main():
-    global busy
+    global busy, last_tick
     prepare()
     slots = queue.Queue()
     for slot in range(SLOTS):
@@ -452,6 +552,9 @@ def main():
     log(f"sandbox: {SLOTS} slots, {MEMORY_MB} MB and at most {MAX_TIMEOUT} s a job, no network")
     free = {}
     while True:
+        last_tick = time.monotonic()
+        if os.path.exists(RESET):
+            reset()
         # A slot whose job ended is free again.
         while not slots.empty():
             slot, jobs = slots.get()

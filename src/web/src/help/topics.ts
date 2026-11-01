@@ -877,7 +877,7 @@ export const topics = {
     about: 'Every model at the gateway, and who may use each. The engine holds several at once: the ones kept loaded stay, the others load when asked for.',
     admin: true,
     parts: [
-      { name: 'The engine', text: 'How many models it holds, which are kept loaded, and how full each GPU would be.' },
+      { name: 'The engine', text: 'How many models it holds, which are kept loaded, and how full each GPU would be. **Reload** and **Restart** for each engine the app runs, as under Monitoring.' },
       { name: 'Each model', text: 'Its state (loaded, loading, not loaded, could not load), **Keep loaded**, **Load**, **Unload**, **Edit**, and who may use it.' },
       { name: 'Working hours', text: 'Other models kept loaded at some hours: a small fast one by day, the big one at night.' },
       { name: 'Other servers and providers', text: 'Another machine\'s OpenAI-compatible engine, or a provider\'s API (OpenAI, Anthropic, Gemini, OpenRouter...) with the company\'s key: their models the gateway serves beside these, to the chat, API keys and Code Arena.' },
@@ -1130,14 +1130,18 @@ export const topics = {
 
   monitoring: {
     title: 'Monitoring',
-    about: 'Live probes of every service, refreshed every 15 seconds.',
+    about: 'Live probes of every service, refreshed every 15 seconds, and the engines and sandboxes, which you can reload, restart or reset.',
     admin: true,
     parts: [
       { name: 'Services', text: 'Each service with its state, and why it is down.' },
+      { name: 'Engines and sandboxes', text: 'llama.cpp, vLLM and SGLang, the picture and video servers, and the sandboxes: each one\'s state, the answers or jobs on it, and what was done to it last. **Reload** loads an engine\'s models again, **Restart** starts its process again, **Reset** stops a sandbox\'s jobs (their callers are told) and starts it again. Each asks first, says what it cuts, and is in the audit log. Reload needs `models.load`; Restart and Reset `runtimes.restart`.' },
       { name: 'Elsewhere', text: 'Links to Prometheus\'s and Alertmanager\'s own pages, with the same sign-in.' },
     ],
-    tasks: [],
-    manual: { doc: 'admin', section: 'admin' },
+    tasks: [
+      { title: 'Bring back an engine that hangs', steps: ['Under **Engines and sandboxes**, press **Reload** on it: its models load again, one after another.', 'Still stuck? Press **Restart**: its process starts again, and the models kept loaded load again.', 'It shows Restarting, then Loading, then Up; Admin → Logs has its output if it does not come back.'] },
+      { title: 'Free a sandbox whose jobs hang', steps: ['Press **Reset** on it.', 'Its running jobs stop and its waiting ones are given back, each person told an admin reset it; then it starts again within seconds.'] },
+    ],
+    manual: { doc: 'admin', section: 'engines-and-sandboxes' },
   },
 
   dashboards: {

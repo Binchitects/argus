@@ -7,7 +7,8 @@ namespace Llm.Tests;
 
 /// <summary>
 /// A vLLM engine as the app sees it, in process: services/vllm/supervisor.sh (each <see cref="Tick"/> reads the desired
-/// state and writes each process's status and the heartbeat, a process ready at once, or after <see cref="LoadTicks"/>)
+/// state and an admin's restart and reload files, and writes each process's status and the heartbeat, a process ready at
+/// once, or after <see cref="LoadTicks"/>)
 /// and its processes' HTTP (/metrics with the requests running and waiting the test sets, by port). The real
 /// supervisor and fake vLLM are tested in tests/deploy and by VllmBackendTests in a container.
 /// </summary>
@@ -30,12 +31,37 @@ public sealed class FakeVllm(string config, string status) : HttpMessageHandler
     /// <summary>The /sleep and /wake_up the supervisor sent, in order (entry name and which).</summary>
     public ConcurrentQueue<string> Sleeps { get; } = new();
 
+    /// <summary>The generations of an admin's restart and reload done (the supervisor's heartbeat says them), and when it started.</summary>
+    private long _restart = -1, _reload = -1, _started = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+
+    /// <summary>How many times an admin's restart or reload started every process again.</summary>
+    public int Restarts { get; private set; }
+
+    private long Gen(string file)
+    {
+        var path = Path.Combine(config, file);
+        var line = File.Exists(path) ? File.ReadLines(path).FirstOrDefault(l => l.StartsWith("gen=", StringComparison.Ordinal)) : null;
+        return line is not null && long.TryParse(line[4..], System.Globalization.CultureInfo.InvariantCulture, out var g) ? g : 0;
+    }
+
     public void Tick()
     {
         Directory.CreateDirectory(status);
+        // An admin's restart or reload, once each (those there at its start are done): every process starts again.
+        var (restart, reload) = (Gen("restart"), Gen("reload"));
+        if (_restart >= 0 && (restart != _restart || reload != _reload))
+        {
+            _ticks.Clear();
+            Restarts++;
+            if (restart != _restart)
+            {
+                _started++;
+            }
+        }
+        (_restart, _reload) = (restart, reload);
         if (Running)
         {
-            File.WriteAllText(Path.Combine(status, "supervisor.json.tmp"), $$"""{"at":{{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}}}""");
+            File.WriteAllText(Path.Combine(status, "supervisor.json.tmp"), $$"""{"at":{{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}},"started":{{_started}},"restart":{{_restart}},"reload":{{_reload}}}""");
             File.Move(Path.Combine(status, "supervisor.json.tmp"), Path.Combine(status, "supervisor.json"), overwrite: true);
         }
         var path = Path.Combine(config, "models.json");

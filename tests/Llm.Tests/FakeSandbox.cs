@@ -8,7 +8,8 @@ namespace Llm.Tests;
 /// (services/sandbox/runner.py), without running any Python. What a job does:
 ///   stdout lists the files it was given and echoes its first line;
 ///   "# chart" writes a picture, "# csv" a CSV, "# binary" a file that is neither;
-///   "# fail" exits 1 with a traceback; "# slow" runs until it is stopped;
+///   "# fail" exits 1 with a traceback; "# slow" runs until it is stopped (an admin's reset stops it too, and answers
+///   the jobs waiting, as runner.py does: <see cref="HoldReset"/>);
 ///   "# pages" draws the pages it asks for ("first, last = 1, 20") of a document of <see cref="DocumentPages"/> pages (page-01.jpg...);
 ///   the media script (it runs ffprobe) makes sound.mp3, and for a video two frames, 4 seconds long;
 ///   "# canvas pdf" turns canvas.docx into canvas.pdf (a PDF header, then the Word file's size);
@@ -27,6 +28,19 @@ public sealed class FakeSandbox : IAsyncDisposable
     /// <summary>How many pages a document drawn by "# pages" has.</summary>
     public int DocumentPages { get; set; } = 3;
 
+    /// <summary>
+    /// Whether an admin's reset waits (the reset file stays): else, as runner.py does, the job running is stopped, the
+    /// ones waiting answered, each result saying so, the file removed, and the runner starts again (a new "started").
+    /// </summary>
+    public bool HoldReset { get; set; }
+
+    /// <summary>When the runner started, as its heartbeat says.</summary>
+    private double _started = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0;
+
+    private string ResetFile => Path.Combine(Dir, "reset");
+
+    private bool Resetting => !HoldReset && File.Exists(ResetFile);
+
     public FakeSandbox(bool alive = true)
     {
         foreach (var d in new[] { "in", "out", "cancel" })
@@ -41,8 +55,11 @@ public sealed class FakeSandbox : IAsyncDisposable
         while (!_stop.IsCancellationRequested)
         {
             // Written whole and renamed, as runner.py does: the app never reads half a heartbeat.
-            await File.WriteAllTextAsync(Path.Combine(Dir, ".heartbeat"), new JsonObject { ["at"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0, ["slots"] = 2, ["busy"] = 0 }.ToJsonString());
-            File.Move(Path.Combine(Dir, ".heartbeat"), Path.Combine(Dir, "heartbeat"), overwrite: true);
+            await BeatAsync(busy: 0);
+            if (Resetting)
+            {
+                await ResetAsync();
+            }
             foreach (var job in Directory.GetDirectories(Path.Combine(Dir, "in")).Where(d => !Path.GetFileName(d).StartsWith('.')))
             {
                 await RunAsync(job);
@@ -56,6 +73,40 @@ public sealed class FakeSandbox : IAsyncDisposable
                 return;
             }
         }
+    }
+
+    private async Task BeatAsync(int busy)
+    {
+        await File.WriteAllTextAsync(Path.Combine(Dir, ".heartbeat"), new JsonObject
+        {
+            ["at"] = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000.0, ["slots"] = 2, ["busy"] = busy, ["started"] = _started,
+        }.ToJsonString());
+        File.Move(Path.Combine(Dir, ".heartbeat"), Path.Combine(Dir, "heartbeat"), overwrite: true);
+    }
+
+    /// <summary>An admin's reset, as runner.py does it: the jobs waiting answered, the file removed, and a new start.</summary>
+    private async Task ResetAsync()
+    {
+        foreach (var job in Directory.GetDirectories(Path.Combine(Dir, "in")).Where(d => !Path.GetFileName(d).StartsWith('.')))
+        {
+            await AnswerAsync(Path.GetFileName(job), "waiting");
+            Directory.Delete(job, recursive: true);
+        }
+        File.Delete(ResetFile);
+        _started += 1;
+        await BeatAsync(busy: 0);
+    }
+
+    private async Task AnswerAsync(string id, string reset)
+    {
+        var draft = Path.Combine(Dir, "out", ".tmp-reset-" + id);
+        Directory.CreateDirectory(Path.Combine(draft, "files"));
+        await File.WriteAllTextAsync(Path.Combine(draft, "result.json"), new JsonObject
+        {
+            ["exit_code"] = null, ["timed_out"] = false, ["cancelled"] = true, ["stdout"] = "", ["stdout_cut"] = false, ["stderr"] = "", ["stderr_cut"] = false,
+            ["files"] = new JsonArray(), ["skipped_files"] = new JsonArray(), ["reset"] = reset, ["duration_ms"] = 0,
+        }.ToJsonString());
+        Directory.Move(draft, Path.Combine(Dir, "out", id));
     }
 
     private async Task RunAsync(string job)
@@ -73,8 +124,26 @@ public sealed class FakeSandbox : IAsyncDisposable
         var cancelled = false;
         if (code.Contains("# slow", StringComparison.Ordinal))
         {
+            // Taken out of the line, as runner.py takes a job (into run/): the jobs after it wait.
+            var taken = Path.Combine(Dir, "run", id);
+            Directory.CreateDirectory(Path.Combine(Dir, "run"));
+            Directory.Move(job, taken);
+            job = taken;
             for (var i = 0; i < 200 && !(cancelled = File.Exists(Path.Combine(Dir, "cancel", id))); i++)
             {
+                if (i % 10 == 0)
+                {
+                    await BeatAsync(busy: 1);
+                }
+                if (Resetting)
+                {
+                    // Stopped by an admin's reset: told so, and the reset goes on.
+                    Directory.Delete(draft, recursive: true);
+                    Directory.Delete(job, recursive: true);
+                    await AnswerAsync(id, "running");
+                    await ResetAsync();
+                    return;
+                }
                 await Task.Delay(50);
             }
         }

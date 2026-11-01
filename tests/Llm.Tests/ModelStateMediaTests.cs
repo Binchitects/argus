@@ -425,6 +425,41 @@ public sealed class ModelStateMediaTests(AppFixture app) : IDisposable
         Assert.Equal("/v1/images/generations", Assert.Single(Pictures.Paths));
     }
 
+    /// <summary>The picture server's state on Admin → Monitoring (Engines and sandboxes).</summary>
+    private static async Task<string?> RuntimeAsync(TestBrowser admin) =>
+        (await admin.JsonAsync(await admin.GetAsync("/api/admin/runtimes"))).EnumerateArray().Single(r => r.GetProperty("id").GetString() == "imagegen").GetProperty("state").GetString();
+
+    [Fact]
+    public async Task An_admins_restart_starts_the_picture_server_again_as_a_new_generation_and_waits_until_it_runs_it()
+    {
+        await using var s = await NewAsync();
+        var admin = await new TestBrowser(s.App).SignedInAsync("admin", AppFixture.AdminPassword);
+        // Nothing runs on it: nothing to restart.
+        await s.Media.SetKeptAsync(Image, false);
+        await UntilAsync(s, async () => await RuntimeAsync(admin) == "idle", "the picture server idle");
+        await StatusAssert.Is(HttpStatusCode.Conflict, await admin.PostAsync("/api/admin/runtimes/imagegen/restart"));
+
+        await s.Media.SetKeptAsync(Image, true);
+        await UntilFileAsync(s, "on", "the app turns the picture server on");
+        var gen = Conf(s, "gen");
+        await StatusAsync(s, gen, "running", s.Clock.Now);
+        s.Server.Up = true;
+        await UntilAsync(s, async () => await RuntimeAsync(admin) == "up", "up, running its model");
+
+        // A new generation, which its script starts; until it runs it, restarting, and asked again meanwhile, refused.
+        await StatusAssert.Is(HttpStatusCode.Accepted, await admin.PostAsync("/api/admin/runtimes/imagegen/restart"));
+        await UntilAsync(s, () => Task.FromResult(Conf(s, "gen") != gen), "the app raises gen to start it again");
+        Assert.Equal("restarting", await RuntimeAsync(admin));
+        await StatusAssert.Is(HttpStatusCode.Conflict, await admin.PostAsync("/api/admin/runtimes/imagegen/restart"));
+        Assert.Contains("restarted by admin", (await s.Media.ListAsync(CancellationToken.None)).Single(m => m.Model.Name == Image).Why, StringComparison.Ordinal);
+        await StatusAsync(s, Conf(s, "gen"), "running", s.Clock.Now);
+        await UntilAsync(s, async () => await RuntimeAsync(admin) == "up", "it runs the new generation: up");
+        Assert.Contains($"model={Image}", await File.ReadAllLinesAsync(Path.Combine(s.Dir.FullName, "config", "imagegen.restart")));
+        var audit = await admin.JsonAsync(await admin.GetAsync("/api/admin/audit?take=20"));
+        Assert.Contains(audit.EnumerateArray(), e => e.GetProperty("action").GetString() == "runtime.restart" && e.GetProperty("target").GetString() == "imagegen"
+            && e.GetProperty("detail").GetString() == Image);
+    }
+
     [Fact]
     public async Task An_API_keys_picture_without_picture_credit_is_refused_before_its_model_loads()
     {

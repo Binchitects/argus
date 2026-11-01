@@ -537,6 +537,8 @@ public static class IdentityWiring
         services.AddHostedService(sp => sp.GetRequiredService<Models.KeyAccessWatcher>());
         services.AddSingleton<Models.EngineWatcher>();
         services.AddHostedService(sp => sp.GetRequiredService<Models.EngineWatcher>());
+        // Admin → Monitoring's Reload, Restart and Reset of the engines and sandboxes, through files they follow.
+        services.AddSingleton<Operations.Runtimes>();
         Bots.BotEndpoints.AddBots(services, config);
         Notifications.PushEndpoints.AddPush(services, config);
     }
@@ -669,6 +671,7 @@ public static class IdentityWiring
         Dashboards.LogEndpoints.MapLogs(app);
         Dashboards.AlertEndpoints.MapAlerts(app);
         Operations.OperationsEndpoints.MapOperations(app);
+        Operations.RuntimeEndpoints.MapRuntimes(app);
         Settings.SettingsEndpoints.MapSettings(app);
         Chat.ChatEndpoints.MapChat(app);
         Chat.CodeArenaSync.MapCodeArenaSync(app);

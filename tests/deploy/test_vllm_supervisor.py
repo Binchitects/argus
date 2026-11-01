@@ -223,6 +223,78 @@ class SupervisorTests(SupervisorBase):
         self.assertEqual(0, self.proc.wait(timeout=20))
         self.assertNotIn("cannot open", self.proc.stdout.read())
 
+    def ask(self, what: str, gen: int, by: str = "ada"):
+        p = self.dir / "presets" / what
+        p.with_suffix(".tmp").write_text(f"gen={gen}\naction={what}\nby={by}\nat={int(time.time())}\n")
+        p.with_suffix(".tmp").replace(p)
+
+    def heartbeat(self) -> dict:
+        try:
+            return json.loads((self.dir / "status" / "supervisor.json").read_text())
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def test_a_reload_drains_every_model_and_starts_each_again_at_once(self):
+        a, b = free_port(), free_port()
+        # An ask there at start is done: the start is one.
+        self.ask("reload", 4)
+        self.want(self.model("a", a), self.model("b", b, gpus=(2,), sleep=True))
+        self.run_supervisor()
+        self.until(lambda: self.status("a").get("phase") == "ready" and self.status("b").get("phase") == "sleeping", "a ready, b asleep")
+        before = {n: self.status(n)["pid"] for n in ("a", "b")}
+        self.assertEqual(4, self.heartbeat()["reload"])
+        time.sleep(1)
+        self.assertEqual(before, {n: self.status(n)["pid"] for n in ("a", "b")}, "the reload it started with is not done again")
+
+        self.ask("reload", 5, by="grace")
+        self.until(lambda: self.heartbeat().get("reload") == 5, "the reload done")
+        self.until(lambda: self.status("a").get("phase") == "ready" and self.status("a").get("pid") != before["a"], "a started again")
+        # b asleep before: started again, then asleep again, as wanted.
+        self.until(lambda: self.status("b").get("phase") == "sleeping" and self.status("b").get("pid") != before["b"], "b started again and asleep")
+        self.assertEqual(0, self.status("a")["tries"])
+        self.proc.send_signal(signal.SIGTERM)
+        self.assertEqual(0, self.proc.wait(timeout=20))
+        self.assertIn("a reload was asked by grace", self.proc.stdout.read())
+
+    def test_a_restart_drains_every_model_forgets_what_it_ran_and_starts_the_supervisor_again(self):
+        port = free_port()
+        self.want(self.model("m", port))
+        self.run_supervisor()
+        self.until(lambda: self.status("m").get("phase") == "ready", "m ready")
+        first, beat = self.status("m")["pid"], self.heartbeat()
+        self.assertEqual(0, beat["restart"])
+        time.sleep(1.1)  # its start is in whole seconds
+
+        self.ask("restart", 1)
+        self.until(lambda: self.heartbeat().get("restart") == 1, "the restart done")
+        again = self.heartbeat()
+        # The same process (exec), started anew.
+        self.assertEqual((beat["pid"], True), (again["pid"], again["started"] > beat["started"]))
+        self.until(lambda: self.status("m").get("phase") == "ready" and self.status("m").get("pid") != first, "m started again")
+        self.until(lambda: not Path(f"/proc/{first}").exists() or b"zombie" in Path(f"/proc/{first}/status").read_bytes().lower(), "its first server gone")
+        self.assertEqual(0, self.status("m")["tries"])
+        self.proc.send_signal(signal.SIGTERM)
+        self.assertEqual(0, self.proc.wait(timeout=20))
+        self.assertIn("a restart was asked by ada", self.proc.stdout.read())
+
+    def test_what_a_run_before_left_is_forgotten_at_start(self):
+        # A container started again keeps /tmp: a model's state with a pid long gone, and a model no longer wanted.
+        for n in ("m", "ghost"):
+            d = self.dir / "run" / "state" / n
+            d.mkdir(parents=True)
+            for k, v in {"pid": "999999", "phase": "ready", "tries": "3", "hash": "old", "port": "1", "since": "1"}.items():
+                (d / k).write_text(v)
+            (self.dir / "status" / f"{n}.json").write_text(json.dumps({"name": n, "phase": "ready"}))
+        port = free_port()
+        self.want(self.model("m", port))
+        self.run_supervisor()
+        # Its own status, not the one left before.
+        self.until(lambda: self.status("m").get("phase") == "ready" and "tries" in self.status("m"), "m ready")
+        # Started at once, not taken for a crash and made to wait.
+        self.assertEqual((0, None), (self.status("m")["tries"], self.status("m")["exit"]))
+        self.assertFalse((self.dir / "status" / "ghost.json").exists())
+        self.assertFalse((self.dir / "run" / "state" / "ghost").exists())
+
     def test_no_key_no_start(self):
         e = {"PATH": "/usr/bin:/bin", "VLLM_PRESETS": str(self.dir / "presets"), "VLLM_STATUS": str(self.dir / "status")}
         out = subprocess.run(["/bin/sh", str(SUPERVISOR)], env=e, capture_output=True, text=True, timeout=10)

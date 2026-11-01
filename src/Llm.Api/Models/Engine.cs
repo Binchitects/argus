@@ -153,6 +153,12 @@ public sealed class LlamaCppBackend(IHttpClientFactory http, IOptions<EngineOpti
     /// <summary>The engine's HTTP client (its timeout set where the app's services are).</summary>
     public const string Client = "engine";
 
+    /// <summary>An admin's Restart (Admin → Monitoring), in the engine's presets: the router starts llama-server again on a new gen.</summary>
+    public const string RestartFile = "llamacpp.restart";
+
+    /// <summary>An admin's Reload, for the app alone: which models it unloads and loads again, by whom, since when.</summary>
+    public const string ReloadFile = "llamacpp.reload";
+
     public string Name => "llamacpp";
 
     public EngineCapabilities Capabilities => EngineKinds.LlamaCppCapabilities;

@@ -37,7 +37,8 @@ public sealed record SandboxResult(
     [property: JsonPropertyName("killed")] string? Killed,
     [property: JsonPropertyName("error")] string? Error,
     [property: JsonPropertyName("skipped_files")] IReadOnlyList<string> Skipped,
-    [property: JsonPropertyName("duration_ms")] int DurationMs)
+    [property: JsonPropertyName("duration_ms")] int DurationMs,
+    [property: JsonPropertyName("reset")] string? Reset = null)
 {
     [JsonIgnore]
     public IReadOnlyList<SandboxFile> Files { get; init; } = [];
@@ -69,6 +70,30 @@ public abstract class JobRunner(Func<string> dir, string name, string howToStart
     /// <summary>A runner silent this long while it has a job has stopped: the job is not waited for any more.</summary>
     public static readonly TimeSpan SilentLimit = TimeSpan.FromSeconds(30);
 
+    /// <summary>An admin's reset (Admin → Monitoring), in its folder: there until the runner has done it.</summary>
+    public const string ResetFile = "reset";
+
+    /// <summary>Its name in a list ("Python sandbox", "3D sandbox (Blender)").</summary>
+    public string Label => name.StartsWith("The ", StringComparison.Ordinal) ? char.ToUpperInvariant(name[4]) + name[5..] : name;
+
+    /// <summary>Where the app asks for a reset, and the runner removes the ask once it is done.</summary>
+    public string ResetPath => Path.Combine(Dir, ResetFile);
+
+    /// <summary>What the runner says it does: its slots, how many are busy, and the jobs waiting in line; null when it says nothing.</summary>
+    public (int Slots, int Busy, int Waiting)? Load()
+    {
+        try
+        {
+            var beat = JsonDocument.Parse(File.ReadAllText(Path.Combine(Dir, "heartbeat"))).RootElement;
+            var waiting = Directory.GetDirectories(Path.Combine(Dir, "in")).Count(d => !Path.GetFileName(d).StartsWith('.'));
+            return (beat.GetProperty("slots").GetInt32(), beat.GetProperty("busy").GetInt32(), waiting);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or KeyNotFoundException or InvalidOperationException or FormatException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>The runner's heartbeat: when it last wrote it, and when it started (null from a runner before that).</summary>
     private (double At, double? Started)? Heartbeat()
     {
@@ -94,6 +119,10 @@ public abstract class JobRunner(Func<string> dir, string name, string howToStart
             if (!File.Exists(heartbeat))
             {
                 return $"{name} is not running. {howToStart}";
+            }
+            if (File.Exists(ResetPath))
+            {
+                return $"{name} is being reset by an admin: try again in a minute.";
             }
             var at = JsonDocument.Parse(File.ReadAllText(heartbeat)).RootElement.GetProperty("at").GetDouble();
             return clock.GetUtcNow().ToUnixTimeMilliseconds() / 1000.0 - at > 20 ? $"{name} stopped answering." : null;
@@ -207,7 +236,8 @@ public abstract class JobRunner(Func<string> dir, string name, string howToStart
                     else
                     {
                         silentSince = null;
-                        if (startedAt is not null && beat.Value.Started is { } started && started != startedAt && !Directory.Exists(queued))
+                        // Its result first: a runner an admin reset answers the job, then starts again.
+                        if (startedAt is not null && beat.Value.Started is { } started && started != startedAt && !Directory.Exists(queued) && !Directory.Exists(done))
                         {
                             throw new SandboxException($"{name} started again while it ran this job, which was lost with it: run it again.");
                         }
@@ -238,6 +268,10 @@ public abstract class JobRunner(Func<string> dir, string name, string howToStart
         {
             var result = JsonSerializer.Deserialize<SandboxResult>(await File.ReadAllTextAsync(Path.Combine(done, "result.json"), ct))
                 ?? throw new SandboxException("The sandbox gave no result.");
+            if (result.Reset is { } reset)
+            {
+                throw new SandboxException($"An admin reset {Short} while this job {(reset == "waiting" ? "waited in line" : "was running")}: run it again.");
+            }
             var made = new List<SandboxFile>();
             var dir = Path.Combine(done, "files");
             if (Directory.Exists(dir))
