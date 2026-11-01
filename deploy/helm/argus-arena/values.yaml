@@ -236,7 +236,10 @@ audio:
 # The chat's Python: no network (a NetworkPolicy), a read-only root, jobs through a shared volume.
 sandbox:
   enabled: true
-  resources: { limits: { cpu: "2", memory: 4Gi } }
+  # Jobs at once (more wait in line), and each job's memory: the limits below hold them all.
+  slots: 2
+  jobMemoryMb: 3072
+  resources: { limits: { cpu: "2", memory: 7Gi } }
 
 # Code Studio's workspaces: Code Arena's own engine per workspace, each as its own user (services/workspaces). Off
 # unless turned on. Its pod reaches the app, the gateway and the internet (the code host, package registries), not
@@ -249,11 +252,14 @@ workspaces:
 # The chat's 3D models: Blender headless, as the sandbox is (no network, a read-only root), with more room.
 blender:
   enabled: false
+  slots: 1
+  jobMemoryMb: 3072
   resources: { limits: { cpu: "4", memory: 8Gi } }
 
 # The science lab's proof checker: Lean 4 with Mathlib, as the sandbox is (no network, a read-only root).
 lean:
   enabled: false
+  slots: 2
   resources: { limits: { cpu: "4", memory: 14Gi } }
 
 # The security scanners for code reviews (opengrep with Arena's rules, Bandit, gitleaks, Trivy's configuration checks):

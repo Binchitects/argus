@@ -1,0 +1,75 @@
+# Argus Arena's settings in .env that an operator chooses: what each is, its kind and its default.
+#
+# installer.sh asks them on install, upgrade and repair (on a terminal, when asked to: "Change other
+# settings"), takes them as --set KEY=VALUE (--set KEY=@FILE reads a secret from a file, never from the
+# command line), and installer.sh config (arenactl config) shows and changes them later, the stack
+# started again with them. The secrets the installer makes (DB_PASSWORD, APP_KEY and the others) and
+# the features (COMPOSE_PROFILES: installer.sh features, --with and --without) are not here.
+#
+# One setting a line, its fields separated by "|":
+#   key       the .env key
+#   group     where it is shown
+#   kind      text, host (a domain name), email, url, path, port, number, size (8g, 512m), ranges
+#             (addresses or CIDRs, comma separated), time (HH:MM), secret (never shown), or
+#             choice:A/B/C (one of them; empty is also allowed when the default is empty)
+#   default   what empty means (the compose file's default); "-" for none
+#   what      what it does, in a few words
+#
+DOMAIN               | Address       | host    | llm.localhost | The address people open: https://DOMAIN (also gateway.DOMAIN and argus.DOMAIN)
+ADMIN_EMAIL          | Address       | email   | admin@example.com | The first admin's email (their user name is admin)
+HTTP_PORT            | Address       | port    | 80            | The port for http:// (it sends people on to https)
+HTTPS_PORT           | Address       | port    | 443           | The port for https://
+ACME_EMAIL           | Address       | email   | -             | Real certificates from Let's Encrypt (a public DOMAIN): their contact address
+HSTS_SECONDS         | Address       | number  | -             | Browsers keep to https for this long (empty: a year with ACME_EMAIL, none with your own CA)
+IP_ALLOW             | Network       | ranges  | -             | Only these addresses or ranges reach the stack at all (Traefik's own list); empty: every one
+MODELS_DIR           | Models        | path    | ./models      | Where models live, on a fast disk the app (uid 1000) can write
+MODEL                | Models        | text    | -             | The first chat model: a .gguf in MODELS_DIR, or a Hugging Face repo:quant
+DEFAULT_MODELS       | Models        | choice:download/skip | - | The default models: download them at the app's first start (needs the network), or skip
+HF_TOKEN             | Models        | secret  | -             | A Hugging Face token, for gated models
+LLAMACPP_BACKEND     | Models        | choice:cuda/rocm/vulkan/sycl/metal/cpu | cuda | llama.cpp's GPU backend
+MEDIA_GPU            | Models        | number  | -             | The GPU the picture server runs on (empty: the first)
+EMBED_GPU            | Models        | number  | -             | The GPU the embedder runs on (empty: the CPU)
+ENGINE_RAM_PROTECT   | Models        | size    | -             | RAM protected for the engine under pressure (never a limit), e.g. 40g
+VLLM_IMAGE           | Models        | text    | vllm/vllm-openai:v0.31.0 | vLLM's image (the vllm feature)
+VLLM_SHM             | Models        | size    | 16gb          | vLLM's shared memory
+SGLANG_IMAGE         | Models        | text    | lmsysorg/sglang:v0.5.21-cu130-runtime | SGLang's image (the sglang feature)
+SGLANG_SHM           | Models        | size    | 16gb          | SGLang's shared memory
+KVCACHE_DIR          | Models        | path    | ./kvcache     | LMCache's disk tier for vLLM models: fast NVMe
+GITLAB_URL           | GitLab        | url     | -             | The GitLab Argus indexes
+GITLAB_TOKEN         | GitLab        | secret  | -             | Its read-only token (read_api and read_repository)
+GITLAB_LDAP          | GitLab        | text    | -             | An LDAP account for Argus's own sign-in: a provider's name, or off
+GITLAB_VERIFY_TLS    | GitLab        | choice:true/false | true | Check GitLab's certificate (false: testing only)
+GITHUB_API_URL       | GitLab        | text    | -             | Reviews of GitHub pull requests: empty is github.com, an Enterprise API, or off
+GITEA_URL            | GitLab        | url     | -             | Reviews of Gitea pull requests: your Gitea
+BACKUP_DIR           | Backups       | path    | ./backups     | Where backups go
+BACKUP_COPY_DIR      | Backups       | path    | -             | A second copy of each backup (another disk)
+BACKUP_KEEP          | Backups       | number  | 14            | How many backups are kept
+BACKUP_TIME          | Backups       | time    | 03:30         | When the daily backup runs (scripts/backup.sh --install-timer)
+GPU_POWER_LIMIT_W    | Power and heat | number | -             | Watts per GPU (empty: the card's own)
+CPU_POWER_LIMIT_W    | Power and heat | number | -             | CPU package watts (Intel; empty: the firmware's)
+THERMAL_POLICY       | Power and heat | choice:on/off | on      | While a GPU or the CPU runs hot, its cap steps down
+GPU_TEMP_LIMIT_C     | Power and heat | number | 83            | A GPU at or above: its power cap down a step every 10 s
+GPU_TEMP_CRITICAL_C  | Power and heat | number | 90            | A GPU at or above: its lowest cap at once
+CPU_TEMP_LIMIT_C     | Power and heat | number | 90            | The CPU at or above: its limit down a step
+CPU_TEMP_CRITICAL_C  | Power and heat | number | 95            | The CPU at or above: straight to the floor
+THERMAL_STEP_PCT     | Power and heat | number | 10            | A step, a share of the cap
+THERMAL_FLOOR_PCT    | Power and heat | number | 50            | The lowest a step goes, a share of the cap
+SANDBOX_SLOTS        | Sandboxes     | number  | 2             | The code sandbox's jobs at once (more wait in line)
+SANDBOX_MEMORY       | Sandboxes     | size    | 7g            | The code sandbox's memory, for all its jobs
+SANDBOX_CPUS         | Sandboxes     | number  | 2             | The code sandbox's CPUs
+SANDBOX_JOB_MEMORY_MB | Sandboxes    | number  | 3072          | Each code job's memory, in MB
+BLENDER_SLOTS        | Sandboxes     | number  | 1             | The 3D sandbox's renders at once
+BLENDER_MEMORY       | Sandboxes     | size    | 8g            | The 3D sandbox's memory
+BLENDER_CPUS         | Sandboxes     | number  | 4             | The 3D sandbox's CPUs (a render takes those it has)
+LEAN_SLOTS           | Sandboxes     | number  | 2             | The proof checker's jobs at once
+LEAN_MEMORY          | Sandboxes     | size    | 14g           | The proof checker's memory
+LEAN_CPUS            | Sandboxes     | number  | 4             | The proof checker's CPUs
+WORKSPACES_MEMORY    | Sandboxes     | size    | 16g           | Code Studio's workspaces' memory
+WORKSPACES_CPUS      | Sandboxes     | number  | 4             | Code Studio's workspaces' CPUs
+APP_REPLICAS         | Scale         | number  | -             | Several app replicas behind Traefik (with scale.yml)
+LITELLM_REPLICAS     | Scale         | number  | -             | The gateway's replicas (with ha.yml)
+LMCACHE_REMOTE       | Scale         | text    | -             | LMCache's shared store (redis://valkey:6379 with the ha feature)
+DB_HOST              | Database      | text    | -             | An external Postgres (16 or newer) instead of the stack's
+DB_PORT              | Database      | port    | 5432          | Its port
+DB_USER              | Database      | text    | arena         | Its user
+DB_SSL_MODE          | Database      | choice:disable/require/verify-full | - | Its TLS

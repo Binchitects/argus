@@ -36,6 +36,15 @@
 #   verify    the bundle's checksums; with an installation, its files' too
 #   features  the features (deploy/features): each on or off here (or in a new installation), the
 #             disk its images take, what it needs and requires
+#   config    the settings in .env an operator chooses (deploy/settings: the address, models, GitLab,
+#             backups, power and heat, the sandboxes' size, the network...), shown by group (secrets
+#             only as set or not), changed on a terminal or with --set, and the services they touch
+#             started again with them
+#
+# Settings: install, upgrade and repair take --set KEY=VALUE (repeated; KEY=@FILE reads a secret from a
+#   file, never from the command line) for any of deploy/settings, checked before anything is done; on
+#   a terminal they also offer to change any of them. A new installation sizes the sandboxes for this
+#   host (its CPUs and memory) unless they are set.
 #
 # Features: COMPOSE_PROFILES in .env is the list of those on, and only they run. install, upgrade
 #   and repair take --with A,B and --without A,B, and on a terminal show the list to change; a
@@ -213,11 +222,12 @@ confirm() {   # confirm QUESTION: yes or no (default no)
 CMD="${1:-}"
 [[ $# -gt 0 ]] && shift
 case "$CMD" in
-  install|upgrade|repair|remove|status|verify|requirements|features) ;;
+  install|upgrade|repair|remove|status|verify|requirements|features|config) ;;
   help|-h|--help) usage ;;
-  "") usage_error "say what to do: requirements, install, upgrade, repair, remove, status, verify or features" ;;
+  "") usage_error "say what to do: requirements, install, upgrade, repair, remove, status, verify, features or config" ;;
   *) usage_error "unknown command: $CMD" ;;
 esac
+SETS=()
 DIR="" BUNDLE_ARG="" ENGINE="" PROJECT_ARG="" YES=0 DRY=0 LOG_ARG="" TIMEOUT=15
 DOMAIN_ARG="" EMAIL_ARG="" MODELS_ARG="" DATA_ARG="" MODEL_ARG="" HTTP_ARG="" HTTPS_ARG="" ACME_ARG="" GITLAB_ARG="" GITLAB_TOKEN_FILE=""
 CPU_ONLY=0 WITH_ARG="" WITHOUT_ARG="" KEEP_IMAGES=0 KEEP_FAILED=0 NO_CERT=0 HOSTS=0 SKIP_REQ=0 FIX_REQ=0 PURGE=0 CONFIRM_ARG="" FINAL_BACKUP="" ROLLBACK=0 DEFAULTS_ARG=""
@@ -260,6 +270,7 @@ while [[ $# -gt 0 ]]; do
     --purge) only "$1" remove; PURGE=1 ;;
     --confirm) only "$1" remove; value "$1" $#; CONFIRM_ARG="$2"; shift ;;
     --final-backup) only "$1" remove; value "$1" $#; FINAL_BACKUP="$2"; shift ;;
+    --set) only "$1" install upgrade repair config; value "$1" $#; [[ "$2" =~ ^[A-Z][A-Z0-9_]*= ]] || usage_error "--set is KEY=VALUE (KEY=@FILE reads the value from a file)"; SETS+=("$2"); shift ;;
     -h|--help) usage ;;
     *) usage_error "unknown option: $1" ;;
   esac
@@ -1162,6 +1173,7 @@ check_compose_files() {   # check_compose_files fresh|upgrade
   else
     make_env "$tmp"
   fi
+  apply_settings "$tmp/.env" quiet
   [[ -f "$DEPLOY/docker-compose.override.yml" ]] && cp -p "$DEPLOY/docker-compose.override.yml" "$tmp/"
   write_override do "$tmp"
   local cf=""; [[ $ENGINE == podman ]] && { cf="docker-compose.yml:podman.yml"; [[ -f "$tmp/docker-compose.override.yml" ]] && cf+=":docker-compose.override.yml"; }
@@ -2087,6 +2099,54 @@ fill_audio() {   # fill_audio plan|do
   did "the speech server's models in $vol"
 }
 
+# ============================================================== config
+cmd_config() {
+  local key before_domain
+  [[ -f "$DEPLOY/.env" ]] || refuse "no installation in $DIR (no deploy/.env)"
+  if [[ -n "$BUNDLE" && -f "$BUNDLE/deploy/settings" ]]; then load_setting_defs "$BUNDLE/deploy/settings"; else load_setting_defs "$DEPLOY/settings"; fi
+  [[ ${#SET_KEYS[@]} -gt 0 ]] || refuse "this installation has no deploy/settings (a release before it): upgrade it, or change $DEPLOY/.env by hand"
+  take_sets
+  read_settings
+  before_domain="$DOMAIN"
+  say "The settings of Argus Arena $(installed_version) in $DIR ($DEPLOY/.env; secrets only as set or not)"
+  if [[ ${#SET_ORDER[@]} -eq 0 ]]; then
+    if [[ $YES -eq 0 && $DRY -eq 0 && $TTY -eq 1 ]]; then
+      edit_settings "$DEPLOY/.env"
+    else
+      list_settings "$DEPLOY/.env"
+      say "installer.sh config --set KEY=VALUE changes one (on a terminal, config asks)"
+      return 0
+    fi
+  fi
+  [[ ${#SET_ORDER[@]} -gt 0 ]] || { ok "nothing changed"; return 0; }
+  if [[ $DRY -eq 1 ]]; then
+    for key in "${SET_ORDER[@]}"; do would "set $key in .env$([[ "${SET_KIND[$key]}" != secret ]] && echo " to ${SET_VAL[$key]:-its default}")"; done
+    would "start again, with them, the services they touch ($ENGINE compose up -d: only those whose settings changed)"
+    return 0
+  fi
+  confirm "Save $(IFS=' '; echo "${SET_ORDER[*]}") in .env, and start again the services they touch?" || refuse "not confirmed"
+  lock; start_log
+  step ".env"
+  apply_settings "$DEPLOY/.env"
+  [[ $SETTINGS_CHANGED -eq 1 ]] || { ok "as they were: nothing to do"; return 0; }
+  read_settings
+  # A new address with the stack's own CA: its certificate made for it (the same CA, so nothing to trust again).
+  if [[ "$DOMAIN" != "$before_domain" && -f "$DEPLOY/certs/ca.key" && -z "$(env_get ACME_EMAIL)" && ! -e "$DEPLOY/config/traefik/certificate.yml" ]]; then
+    step "certificate"
+    if (cd "$DEPLOY" && sh scripts/make-cert.sh --domain "$DOMAIN" >/dev/null); then did "certs/tls.crt for $DOMAIN and *.$DOMAIN, from the same CA"
+    else bad "scripts/make-cert.sh failed: Traefik serves its own certificate until it is run again"; fi
+  fi
+  step "starting again what the settings touch ($ENGINE compose up -d)"
+  images_present || die "images are missing: repair from the bundle"
+  dc up -d --no-build --pull never --remove-orphans > "$STATE/up.log" 2>&1 \
+    || { tail -n 20 "$STATE/up.log" | sed 's/^/    /'; die "$ENGINE compose up failed with them (above): .env keeps them; installer.sh config changes them back"; }
+  ok "started"
+  wait_healthy || die "the stack is not healthy with the new settings: installer.sh config changes them back, repair puts the rest right"
+  [[ " ${SET_ORDER[*]} " == *" DOMAIN "* ]] && note "the address changed: Code Arena's builds are signed again on the next repair (scripts/sign-code-arena.sh), and people sign in at https://$DOMAIN"
+  [[ " ${SET_ORDER[*]} " == *" BACKUP_TIME "* ]] && note "the daily backup's time: scripts/backup.sh --install-timer sets it"
+  return 0
+}
+
 # ============================================================== start and check
 start_stack() {
   step "starting $PROJECT ($ENGINE compose up; nothing pulled or built)"
@@ -2232,6 +2292,26 @@ fix_started() {
   if dc restart "${restart[@]}" >> "$STATE/up.log" 2>&1; then did "restarted: ${restart[*]}"; else bad "restarting ${restart[*]} failed"; fi
 }
 
+# arenactl on the PATH, for this installation (the last one installed, upgraded or repaired here): as root in
+# /usr/local/bin (ARENA_CLI_DIR another folder); otherwise said how.
+link_cli() {
+  local target="$DEPLOY/scripts/arenactl" dir="${ARENA_CLI_DIR:-}"
+  [[ -f "$target" ]] || return 0
+  chmod 755 "$target" 2>/dev/null || true
+  [[ -n "$dir" ]] || { [[ $EUID -eq 0 ]] && dir=/usr/local/bin; }
+  if [[ -z "$dir" ]]; then note "arenactl, this installation's one command: $target (ln -s it into a folder on your PATH)"; return 0; fi
+  if mkdir -p "$dir" 2>/dev/null && ln -sfn "$target" "$dir/arenactl" 2>/dev/null; then ok "arenactl is on the PATH ($dir/arenactl): arenactl help says what it does"
+  else note "arenactl could not be put in $dir: $target is the same command"; fi
+}
+unlink_cli() {
+  local l
+  for l in "${ARENA_CLI_DIR:-/usr/local/bin}/arenactl" "$HOME/.local/bin/arenactl"; do
+    # Only a link to this installation's (as link_cli made it).
+    [[ -L "$l" && "$(readlink "$l")" == "$DEPLOY/scripts/arenactl" ]] && rm -f "$l" && did "arenactl taken off the PATH ($l)"
+  done
+  return 0
+}
+
 # ================================================================== the summary
 print_access() {
   local port=""
@@ -2279,6 +2359,16 @@ cmd_install() {
     if E volume ls -q 2>/dev/null | grep -q "^${PROJECT}_postgres\$"; then refuse "the volume ${PROJECT}_postgres holds data from an earlier installation, whose .env opens it: restore that .env and upgrade, or remove those volumes (remove --purge)"; fi
   fi
   read_features "$BUNDLE/deploy/features"
+  load_setting_defs "$BUNDLE/deploy/settings"
+  take_sets
+  # What --set chose for what the questions ask: their answers by default.
+  [[ -n "${SET_VAL[DOMAIN]:-}" ]] && DOMAIN_ARG="${SET_VAL[DOMAIN]}"
+  [[ -n "${SET_VAL[ADMIN_EMAIL]:-}" ]] && EMAIL_ARG="${SET_VAL[ADMIN_EMAIL]}"
+  [[ -n "${SET_VAL[MODELS_DIR]:-}" ]] && MODELS_ARG="${SET_VAL[MODELS_DIR]}"
+  [[ -n "${SET_VAL[MODEL]:-}" ]] && MODEL_ARG="${SET_VAL[MODEL]}"
+  [[ -n "${SET_VAL[HTTP_PORT]:-}" ]] && HTTP_ARG="${SET_VAL[HTTP_PORT]}"
+  [[ -n "${SET_VAL[HTTPS_PORT]:-}" ]] && HTTPS_ARG="${SET_VAL[HTTPS_PORT]}"
+  [[ -n "${SET_VAL[ACME_EMAIL]:-}" ]] && ACME_ARG="${SET_VAL[ACME_EMAIL]}"
   # A bundle made without a GPU service is for hosts with none.
   if [[ -n "$BLEFT" && $CPU_ONLY -eq 0 ]]; then
     for svc in $GPU_SERVICES; do [[ " $BLEFT " == *" $svc "* ]] && { CPU_ONLY=1; break; }; done
@@ -2338,6 +2428,7 @@ cmd_install() {
     [[ $NO_GITLAB -eq 1 && ${FEAT_NEEDS[$id]:-} == gitlab ]] && refuse "$id needs a GitLab: --gitlab-url and --gitlab-token-file"
   done
   choose_features install ${base[@]+"${base[@]}"}
+  edit_settings "$([[ -f "$DEPLOY/.env" ]] && echo "$DEPLOY/.env")"
   NEW_DEFAULTS="${NEW_DEFAULTS:-${DEFAULTS_ARG:-skip}}"
   [[ "$NEW_MODEL" == *:* && "$NEW_DEFAULTS" == skip ]] \
     && note "MODEL=$NEW_MODEL is a Hugging Face name: it is added once its files are in MODELS_DIR (Admin -> Models -> Default models downloads them)"
@@ -2371,7 +2462,8 @@ cmd_install() {
       would "write $(bundle_deploy_sums | wc -l) files into $DEPLOY"
     fi
     write_extras plan
-    [[ -f "$DEPLOY/.env" ]] && would "keep the .env there, adding what it lacks, with the features: $(feat_count)" || would "write $DEPLOY/.env: these answers and the features ($(feat_count)), the secrets generated (none printed; the admin's first password shown once, on the terminal)"
+    [[ -f "$DEPLOY/.env" ]] && would "keep the .env there, adding what it lacks, with the features: $(feat_count)" || would "write $DEPLOY/.env: these answers and the features ($(feat_count)), the secrets generated (none printed; the admin's first password shown once, on the terminal), the sandboxes sized for this host"
+    for id in ${SET_ORDER[@]+"${SET_ORDER[@]}"}; do would "set $id in .env$([[ "${SET_KIND[$id]}" != secret ]] && echo " to ${SET_VAL[$id]:-its default}")"; done
     write_override plan
     make_data_dirs plan
     place_models plan
@@ -2400,7 +2492,8 @@ cmd_install() {
   ok "deploy/: $SYNC_SUMMARY"
   write_extras do
   step ".env"
-  if [[ -f "$DEPLOY/.env" ]]; then note ".env is there: kept"; merge_env do; write_features do; else make_env; fi
+  if [[ -f "$DEPLOY/.env" ]]; then note ".env is there: kept"; merge_env do; write_features do; else make_env; size_sandboxes "$DEPLOY/.env"; fi
+  apply_settings "$DEPLOY/.env"
   write_override do
   step "data"
   make_data_dirs do
@@ -2422,6 +2515,7 @@ cmd_install() {
   check_versions "$BVERSION" || die "the stack does not run $BVERSION as it should; see above"
   UNDO_ARMED=0
   sign_builds
+  link_cli
   record_state
   record_kept ${SYNC_KEPT[@]+"${SYNC_KEPT[@]}"} ${SYNC_BESIDE[@]+"${SYNC_BESIDE[@]}"}
   state_set target ""
@@ -2503,6 +2597,143 @@ env_edit() {   # env_edit FILE KEY [LINE]: LINE in place of KEY's lines, or KEY 
   chmod --reference="$file" "$tmp" 2>/dev/null; chown --reference="$file" "$tmp" 2>/dev/null
   mv -f "$tmp" "$file"
 }
+# ============================================================== settings (deploy/settings)
+# What an operator chooses in .env, by group: --set KEY=VALUE, and on a terminal the editor below.
+declare -A SET_GROUP=() SET_KIND=() SET_DEF=() SET_WHAT=() SET_VAL=()
+SET_KEYS=() SET_ORDER=() SETTINGS_CHANGED=0
+load_setting_defs() {   # load_setting_defs FILE: deploy/settings, the bundle's or the installation's
+  local key group kind def what
+  SET_KEYS=()
+  [[ -f "$1" ]] || return 0
+  while IFS='|' read -r key group kind def what; do
+    key="$(trim "$key")"
+    [[ -z "$key" || "$key" == \#* ]] && continue
+    SET_KEYS+=("$key")
+    SET_GROUP[$key]="$(trim "$group")"; SET_KIND[$key]="$(trim "$kind")"; SET_WHAT[$key]="$(trim "$what")"
+    def="$(trim "$def")"; [[ "$def" == - ]] && def=""; SET_DEF[$key]="$def"
+  done < "$1"
+}
+# Why VALUE is not one for KEY, or nothing (empty is always one: the default).
+setting_problem() {   # setting_problem KEY VALUE
+  local key=$1 v=$2 kind="${SET_KIND[$1]:-}" r
+  [[ -n "$kind" ]] || { echo "there is no setting $key (installer.sh config lists them)"; return; }
+  [[ -z "$v" ]] && return 0
+  [[ "$v" =~ [[:space:]] ]] && { echo "$key has no spaces in it"; return; }
+  case "$kind" in
+    host) [[ "$v" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] || echo "$key is a host name (arena.example.com)" ;;
+    email) [[ "$v" =~ ^[^@]+@[^@]+$ ]] || echo "$key is an email address" ;;
+    url) [[ "$v" =~ ^https?://. ]] || echo "$key is an address starting with http:// or https://" ;;
+    port) [[ "$v" =~ ^[0-9]+$ ]] && (( v >= 1 && v <= 65535 )) || echo "$key is a port, 1 to 65535" ;;
+    number) [[ "$v" =~ ^[0-9]+$ ]] || echo "$key is a whole number" ;;
+    size) [[ "$v" =~ ^[0-9]+(\.[0-9]+)?([kKmMgGtT][bB]?)?$ ]] || echo "$key is a size (8g, 512m)" ;;
+    time) [[ "$v" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || echo "$key is a time of day (03:30)" ;;
+    ranges)
+      for r in ${v//,/ }; do
+        [[ "$r" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}(/([0-9]|[12][0-9]|3[0-2]))?$ || "$r" =~ ^[0-9A-Fa-f:]+:[0-9A-Fa-f:.]*(/[0-9]{1,3})?$ ]] \
+          || { echo "$key is addresses or ranges, comma separated (10.0.0.0/8,192.168.1.5): not $r"; return; }
+      done ;;
+    choice:*) [[ "/${kind#choice:}/" == *"/$v/"* ]] || echo "$key is one of: $(tr '/' ' ' <<< "${kind#choice:}")" ;;
+  esac
+}
+# The --set options, each checked (a file read for @FILE): all of them before anything is done.
+take_sets() {
+  local item key val why
+  for item in ${SETS[@]+"${SETS[@]}"}; do
+    key="${item%%=*}" val="${item#*=}"
+    if [[ "$val" == @* ]]; then
+      [[ -r "${val#@}" ]] || usage_error "--set $key=@FILE: cannot read ${val#@}"
+      val="$(head -n1 "${val#@}" | tr -d '\r')"; val="$(trim "$val")"
+    fi
+    [[ ${#SET_KEYS[@]} -gt 0 ]] || usage_error "--set: this release has no deploy/settings to check $key against"
+    why="$(setting_problem "$key" "$val")"
+    [[ -z "$why" ]] || usage_error "--set: $why"
+    [[ -n "${SET_VAL[$key]+x}" ]] || SET_ORDER+=("$key")
+    SET_VAL[$key]="$val"
+  done
+}
+# A setting as it is now: chosen here, else in the .env given, else empty.
+setting_now() {   # setting_now KEY [ENV]
+  if [[ -n "${SET_VAL[$1]+x}" ]]; then printf '%s' "${SET_VAL[$1]}"; else env_get "$1" "${2:-$DEPLOY/.env}"; fi
+}
+setting_shown() {   # setting_shown KEY [ENV]: as it is shown (a secret as set or not)
+  local v; v="$(setting_now "$@")"
+  if [[ "${SET_KIND[$1]}" == secret ]]; then [[ -n "$v" ]] && printf '(set)' || printf '(not set)'
+  elif [[ -n "$v" ]]; then printf '%s' "$v"
+  elif [[ -n "${SET_DEF[$1]}" ]]; then printf '(default: %s)' "${SET_DEF[$1]}"
+  else printf '(none)'; fi
+}
+# Every setting, by group, numbered as the editor takes them.
+list_settings() {   # list_settings [ENV]
+  local key group="" n=0
+  for key in "${SET_KEYS[@]}"; do
+    n=$((n + 1))
+    [[ "${SET_GROUP[$key]}" != "$group" ]] && { group="${SET_GROUP[$key]}"; say "  $group"; }
+    printf '    %2d. %-22s %s\n' "$n" "$key" "$(setting_shown "$key" "${1:-}")"
+  done
+}
+# On a terminal: any setting changed, by its number or its name, until an empty answer.
+edit_settings() {   # edit_settings [ENV]
+  local env="${1:-}" pick key val why secret_note
+  [[ $YES -eq 1 || $DRY -eq 1 || $TTY -eq 0 || ${#SET_KEYS[@]} -eq 0 ]] && return 0
+  [[ $CMD == config ]] || confirm "Change other settings in .env (the address, models, GitLab, backups, power and heat, the sandboxes' size, the network...)?" || return 0
+  while :; do
+    list_settings "$env"
+    printf 'A setting to change, by its number or name (empty: done): ' >&2
+    read -r pick <&7 || pick=""
+    pick="$(trim "$pick")"
+    [[ -z "$pick" ]] && break
+    if [[ "$pick" =~ ^[0-9]+$ ]] && (( pick >= 1 && pick <= ${#SET_KEYS[@]} )); then key="${SET_KEYS[$((pick - 1))]}"; else key="${pick^^}"; fi
+    [[ -n "${SET_KIND[$key]:-}" ]] || { say "  there is no setting $pick"; continue; }
+    secret_note=""; [[ "${SET_KIND[$key]}" == secret ]] && secret_note=" (not shown as you type)"
+    say "  $key: ${SET_WHAT[$key]}. ${SET_KIND[$key]/choice:/one of }${SET_DEF[$key]:+; empty: ${SET_DEF[$key]}}"
+    printf '  %s, now %s; the new value (- empties it, Enter keeps it)%s: ' "$key" "$(setting_shown "$key" "$env")" "$secret_note" >&2
+    if [[ -n "$secret_note" ]]; then read -rs val <&7 || val=""; echo >&2; else read -r val <&7 || val=""; fi
+    val="$(trim "$val")"
+    [[ -z "$val" ]] && continue
+    [[ "$val" == - ]] && val=""
+    why="$(setting_problem "$key" "$val")"
+    if [[ -n "$why" ]]; then say "  not changed: $why"; continue; fi
+    [[ -n "${SET_VAL[$key]+x}" ]] || SET_ORDER+=("$key")
+    SET_VAL[$key]="$val"
+  done
+}
+# The settings chosen, written into ENV; each said (a secret by name only).
+apply_settings() {   # apply_settings ENV [quiet]
+  local env=$1 key val
+  for key in ${SET_ORDER[@]+"${SET_ORDER[@]}"}; do
+    val="${SET_VAL[$key]}"
+    [[ "$(env_get "$key" "$env")" == "$val" ]] && continue
+    env_edit "$env" "$key" "$key=$val" || die "writing $key in $env failed"
+    SETTINGS_CHANGED=1
+    [[ -n "${2:-}" ]] && continue
+    if [[ "${SET_KIND[$key]}" == secret ]]; then did ".env: $key set"; elif [[ -n "$val" ]]; then did ".env: $key=$val"; else did ".env: $key emptied (${SET_DEF[$key]:-none}: the default)"; fi
+  done
+}
+# A new installation's sandboxes, for this host: more jobs at once with more CPUs and memory, each kept
+# within a share of the machine. What --set or the editor chose is kept.
+size_sandboxes() {   # size_sandboxes ENV
+  local env=$1 cpus mem_gb slots bslots key val
+  cpus="$(nproc 2>/dev/null || echo 4)"
+  mem_gb="$(awk '/^MemTotal:/ { printf "%d", $2 / 1048576 }' /proc/meminfo 2>/dev/null)"; mem_gb="${mem_gb:-16}"
+  slots=$(( cpus / 4 )); (( slots < 2 )) && slots=2; (( slots > 8 )) && slots=8
+  (( slots * 3 + 1 > mem_gb / 4 )) && slots=$(( (mem_gb / 4 - 1) / 3 )); (( slots < 1 )) && slots=1
+  bslots=$(( cpus / 12 )); (( bslots < 1 )) && bslots=1; (( bslots > 4 )) && bslots=4
+  (( bslots * 4 + 2 > mem_gb / 4 )) && bslots=1
+  local -A size=(
+    [SANDBOX_SLOTS]=$slots [SANDBOX_MEMORY]="$(( slots * 3 + 1 ))g" [SANDBOX_CPUS]=$(( slots * 2 < cpus ? slots * 2 : cpus ))
+    [BLENDER_SLOTS]=$bslots [BLENDER_MEMORY]="$(( bslots * 4 + 4 ))g" [BLENDER_CPUS]=$(( bslots * 4 < cpus ? bslots * 4 : cpus ))
+  )
+  local said=()
+  for key in SANDBOX_SLOTS SANDBOX_MEMORY SANDBOX_CPUS BLENDER_SLOTS BLENDER_MEMORY BLENDER_CPUS; do
+    [[ -n "${SET_VAL[$key]+x}" || -n "$(env_get "$key" "$env")" ]] && continue
+    val="${size[$key]}"
+    env_edit "$env" "$key" "$key=$val" || die "writing $key in $env failed"
+    said+=("$key=$val")
+  done
+  [[ ${#said[@]} -gt 0 ]] && did "the sandboxes sized for this host ($cpus CPUs, $mem_gb GB): ${said[*]} (installer.sh config changes them)"
+  return 0
+}
+
 keep_later_change() {   # keep_later_change FILE: kept in SNAP/files-before-rollback when changed here
   local f=$1 sum
   [[ $f == .env || $f == *.before-* || $f == *.new-* ]] && return 0
@@ -2831,6 +3062,9 @@ cmd_upgrade() {
     else note "new in $BVERSION, off: $id (${FEAT_TITLE[$id]}); sh argus-arena-$BVERSION-offline.run repair --with $id --dir $DIR (or ./arenactl repair --with $id in a checkout) turns it on"; fi
   done
   choose_features upgrade ${base[@]+"${base[@]}"}
+  load_setting_defs "$BUNDLE/deploy/settings"
+  take_sets
+  edit_settings "$DEPLOY/.env"
   if [[ $DRY -eq 1 ]]; then
     check_bundle
     step "the plan"
@@ -2843,6 +3077,7 @@ cmd_upgrade() {
     [[ $SYNC_CHANGES -eq 0 ]] && ok "no file changes"
     step ".env"
     merge_env plan
+    for id in ${SET_ORDER[@]+"${SET_ORDER[@]}"}; do would "set $id in .env$([[ "${SET_KIND[$id]}" != secret ]] && echo " to ${SET_VAL[$id]:-its default}")"; done
     write_features plan
     write_extras plan
     make_data_dirs plan
@@ -2913,6 +3148,7 @@ cmd_upgrade() {
     step ".env"
     ENV_ADDED_FILE="$SNAP/env-added"; : > "$ENV_ADDED_FILE"
     merge_env do
+    apply_settings "$DEPLOY/.env"
     write_features do
     # .env as the upgrade left it (its checksum only): a rollback tells a later change from it.
     (umask 077; sha_of "$DEPLOY/.env" > "$SNAP/env-sha")
@@ -2936,6 +3172,7 @@ cmd_upgrade() {
     check_versions "$BVERSION" || return 1
     ensure_cert do
     sign_builds
+    link_cli
   }
   if ( upgrade_steps ); then :; else failed=1; fi
   BACKUP="$(marker_get backup)"
@@ -3043,6 +3280,9 @@ cmd_repair() {
   mapfile -t before < <(features_now)
   for f in ${before[@]+"${before[@]}"}; do feat_known "$f" || note "COMPOSE_PROFILES names $f, which is no feature: it goes"; done
   choose_features repair ${before[@]+"${before[@]}"}
+  if [[ -n "$BUNDLE" ]]; then load_setting_defs "$BUNDLE/deploy/settings"; else load_setting_defs "$DEPLOY/settings"; fi
+  take_sets
+  edit_settings "$DEPLOY/.env"
   for f in ${before[@]+"${before[@]}"}; do [[ " ${FEATURES_ON[*]} " == *" $f "* ]] || turned_off+=("$f"); done
   step "features"
   if [[ "$(features_csv)" != "$(IFS=,; echo "${before[*]}")" ]]; then
@@ -3100,6 +3340,11 @@ cmd_repair() {
   if [[ -f "$DEPLOY/.env" ]]; then
     while IFS= read -r f; do have["$f"]=1; done < <(env_keys "$DEPLOY/.env" nonempty)
     for f in $(required_keys "$DEPLOY"); do [[ -n "${have[$f]:-}" ]] || { bad ".env has no value for $f, which the stack needs (never changed without asking: set it, or restore .env)"; problems=$((problems + 1)); }; done
+    if [[ ${#SET_ORDER[@]} -gt 0 ]]; then
+      step "settings"
+      if [[ $act == do ]]; then apply_settings "$DEPLOY/.env"; [[ $SETTINGS_CHANGED -eq 1 ]] || ok "as they were"
+      else for f in "${SET_ORDER[@]}"; do would "set $f in .env$([[ "${SET_KIND[$f]}" != secret ]] && echo " to ${SET_VAL[$f]:-its default}")"; done; fi
+    fi
   fi
 
   step "images"
@@ -3168,6 +3413,12 @@ cmd_repair() {
     fi
   else
     ok "every service has a running container"
+    # Settings changed: the services they touch start again with them (compose recreates only those).
+    if [[ $SETTINGS_CHANGED -eq 1 && $act == do ]]; then
+      images_present || die "images are missing (above): repair from the bundle"
+      dc up -d --no-build --pull never --remove-orphans > "$STATE/up.log" 2>&1 && did "started again with the settings: what they touch" \
+        || { tail -n 20 "$STATE/up.log" | sed 's/^/    /'; bad "$ENGINE compose up failed"; }
+    fi
   fi
 
   if [[ $act == plan ]]; then
@@ -3178,6 +3429,7 @@ cmd_repair() {
   if wait_healthy && check_versions "${iv:-$BVERSION}" && [[ $fix_failed -eq 0 ]]; then
     ensure_cert do
     sign_builds
+    link_cli
     [[ -n "$BUNDLE" && -n "$(state_get version)" ]] && record_images
     remove_off_images do
     say ""; say "Repaired: $problems finding(s) dealt with; every service is up and healthy. Features: $(feat_count)."
@@ -3335,6 +3587,7 @@ cmd_remove() {
     fi
     find "$STATE" -mindepth 1 -maxdepth 1 ! -name logs ! -name lock -exec rm -rf {} + 2>/dev/null
     did "the installer's record (its logs stay in $STATE/logs)"
+    unlink_cli
     say ""; say "Purged: Argus Arena and its data are gone from this host$([[ -n "$FINAL_BACKUP" ]] && echo "; the last backup is in $FINAL_BACKUP")."
   else
     say ""; say "Removed the containers and images. Kept: the volumes ($(wc -w <<<"$vols")), $DEPLOY/.env, the backups and the models. install (or upgrade) brings it back; remove --purge deletes the data."
@@ -3449,6 +3702,7 @@ cmd_requirements() {
 }
 
 case "$CMD" in
+  config) cmd_config ;;
   requirements) cmd_requirements ;;
   install) cmd_install ;;
   upgrade) cmd_upgrade ;;

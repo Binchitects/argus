@@ -106,6 +106,10 @@ spec:
           image: {{ include "arena.image" (dict "root" $ "image" .Values.images.sandbox) }}
           imagePullPolicy: {{ .Values.images.pullPolicy }}
           resources: {{- toYaml .Values.sandbox.resources | nindent 12 }}
+          env:
+            # Its jobs at once, each job's memory (compose: SANDBOX_SLOTS, SANDBOX_JOB_MEMORY_MB).
+            - { name: SANDBOX_SLOTS, value: {{ .Values.sandbox.slots | quote }} }
+            - { name: SANDBOX_JOB_MEMORY_MB, value: {{ .Values.sandbox.jobMemoryMb | quote }} }
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
@@ -157,8 +161,9 @@ spec:
           imagePullPolicy: {{ .Values.images.pullPolicy }}
           resources: {{- toYaml .Values.blender.resources | nindent 12 }}
           env:
-            - { name: SANDBOX_SLOTS, value: "1" }
+            - { name: SANDBOX_SLOTS, value: {{ .Values.blender.slots | quote }} }
             - { name: SANDBOX_MAX_TIMEOUT, value: "600" }
+            - { name: SANDBOX_JOB_MEMORY_MB, value: {{ .Values.blender.jobMemoryMb | quote }} }
           securityContext:
             readOnlyRootFilesystem: true
             allowPrivilegeEscalation: false
@@ -210,7 +215,7 @@ spec:
           imagePullPolicy: {{ .Values.images.pullPolicy }}
           resources: {{- toYaml .Values.lean.resources | nindent 12 }}
           env:
-            - { name: SANDBOX_SLOTS, value: "2" }
+            - { name: SANDBOX_SLOTS, value: {{ .Values.lean.slots | quote }} }
             - { name: SANDBOX_MAX_TIMEOUT, value: "300" }
           securityContext:
             readOnlyRootFilesystem: true

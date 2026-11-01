@@ -549,6 +549,79 @@ class InstallerTests(unittest.TestCase):
         self.install("--no-cert")
         self.assertFalse((self.dir / "deploy" / "certs" / "tls.crt").exists())
 
+    def own(self, *args: str) -> subprocess.CompletedProcess:
+        """The installation's own installer.sh."""
+        return subprocess.run(["bash", str(self.dir / "deploy" / "scripts" / "installer.sh"), *args, "--dir", str(self.dir)], env=self.r.env(),
+                              capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)
+
+    def env_values(self) -> dict[str, str]:
+        return dict(line.split("=", 1) for line in (self.dir / "deploy" / ".env").read_text().splitlines() if "=" in line and not line.startswith("#"))
+
+    def test_Settings_given_with_the_install_are_checked_before_anything_and_the_sandboxes_sized_for_this_host(self):
+        # A setting there is none of, or a value that is none: refused before anything is done.
+        for bad, said in (("NO_SUCH=1", "there is no setting NO_SUCH"), ("HTTPS_PORT=99999", "HTTPS_PORT is a port"),
+                          ("IP_ALLOW=10.0.0.0/8,intranet", "not intranet"), ("THERMAL_POLICY=maybe", "one of: on off")):
+            r = self.r.run("install", "--dir", str(self.dir), "--yes", "--cpu-only", "--skip-requirements", "--set", bad)
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn(said, r.stdout + r.stderr)
+            self.assertFalse((self.dir / "deploy").exists())
+        secret = self.r.s.dir / "hf-token"
+        secret.write_text("hf_a_token_for_the_test\n")
+        r = self.install("--set", "SANDBOX_SLOTS=5", "--set", "IP_ALLOW=10.0.0.0/8,192.168.1.5", "--set", f"HF_TOKEN=@{secret}", "--set", "BACKUP_KEEP=30")
+        values = self.env_values()
+        self.assertEqual((values["SANDBOX_SLOTS"], values["IP_ALLOW"], values["HF_TOKEN"], values["BACKUP_KEEP"]), ("5", "10.0.0.0/8,192.168.1.5", "hf_a_token_for_the_test", "30"))
+        self.assertNotIn("hf_a_token_for_the_test", self.output(r) + self.logs())
+        self.assertIn(".env: HF_TOKEN set", r.stdout)
+        # Those not given are sized for this host's CPUs and memory.
+        for key in ("SANDBOX_MEMORY", "SANDBOX_CPUS", "BLENDER_SLOTS", "BLENDER_MEMORY", "BLENDER_CPUS"):
+            self.assertRegex(values[key], r"^[0-9]+g?$", key)
+        self.assertIn("the sandboxes sized for this host", r.stdout)
+
+    def test_Config_lists_the_settings_and_changes_them_starting_again_what_they_touch(self):
+        self.install()
+        listed = self.own("config")
+        self.assertEqual(listed.returncode, 0, self.output(listed))
+        self.assertIn("Sandboxes", listed.stdout)
+        self.assertRegex(listed.stdout, r"GITLAB_TOKEN\s+\(set\)")
+        self.assertNotIn("glpat-a-token-for-the-test", listed.stdout)
+        self.assertRegex(listed.stdout, r"DOMAIN\s+arena.test")
+        before = (self.dir / "deploy" / ".env").read_text()
+        self.assertEqual(self.own("config", "--set", "BLENDER_SLOTS=two", "--yes").returncode, 2)
+        self.assertEqual(before, (self.dir / "deploy" / ".env").read_text())
+        self.r.s.log.write_text("")
+        changed = self.own("config", "--set", "BLENDER_SLOTS=3", "--set", "THERMAL_POLICY=off", "--yes")
+        self.assertEqual(changed.returncode, 0, self.output(changed))
+        self.assertEqual((self.env_values()["BLENDER_SLOTS"], self.env_values()["THERMAL_POLICY"]), ("3", "off"))
+        self.assertIn(".env: BLENDER_SLOTS=3", changed.stdout)
+        self.assertTrue(any(c[:3] == ["docker", "compose", "up"] or ("compose" in c and "up" in c) for c in self.r.calls()), self.r.calls()[-5:])
+        # Again as they are: nothing to do.
+        again = self.own("config", "--set", "BLENDER_SLOTS=3", "--yes")
+        self.assertIn("as they were: nothing to do", again.stdout)
+
+    def test_Arenactl_is_put_on_the_path_and_runs_the_installations_commands(self):
+        bin_dir = self.r.s.dir / "cli-bin"
+        self.install(extra_env={"ARENA_CLI_DIR": str(bin_dir)})
+        link = bin_dir / "arenactl"
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(os.readlink(link), str(self.dir / "deploy" / "scripts" / "arenactl"))
+        env = self.r.env({"ARENA_CLI_DIR": str(bin_dir)})
+        def cli(*args: str) -> subprocess.CompletedProcess:
+            return subprocess.run([str(link), *args], env=env, capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)
+        self.assertIn("arenactl status", cli("help").stdout)
+        listed = cli("config")
+        self.assertEqual(listed.returncode, 0, self.output(listed))
+        self.assertRegex(listed.stdout, r"DOMAIN\s+arena.test")
+        changed = cli("config", "--set", "LEAN_SLOTS=3", "--yes")
+        self.assertEqual(changed.returncode, 0, self.output(changed))
+        self.assertEqual(self.env_values()["LEAN_SLOTS"], "3")
+        self.assertEqual(cli("check", "nonsense").returncode, 2)
+        self.assertEqual(cli("upgrade").returncode, 2)
+        # Purged: taken off the PATH with it.
+        r = cli("remove", "--purge", "--confirm", "PURGE", "--yes")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertFalse(link.is_symlink())
+        self.assertIn("arenactl taken off the PATH", r.stdout)
+
     def test_Install_writes_the_folder_env_and_override_and_starts_it(self):
         # A certificate of its own CA by default (--no-cert leaves Traefik's own).
         r = self.install()

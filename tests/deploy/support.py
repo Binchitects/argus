@@ -16,7 +16,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 SCRIPTS = ["airgap.sh", "backup.sh", "test-project.sh", "restore-test.sh", "rollback-test.sh", "recovery-check.py", "restore-drill.sh",
-           "installer.sh", "make-installer.sh", "make-cert.sh", "setup-hosts.sh"]
+           "installer.sh", "make-installer.sh", "make-cert.sh", "setup-hosts.sh", "arenactl"]
 COMPOSE = """name: arena
 services:
   traefik:
@@ -65,6 +65,8 @@ class Sandbox:
         (self.repo / "VERSION").write_text("9.9.9\n")
         self.write("docker-compose.yml", COMPOSE)
         self.write("features", FEATURES)
+        # The settings an operator chooses: the release's own list.
+        self.write("settings", (REPO / "deploy" / "settings").read_text())
         self.write("podman.yml", "services: {}\n")
         self.bin = self.dir / "bin"
         self.bin.mkdir()

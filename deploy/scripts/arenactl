@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# arenactl: an installation's one command, for everything an operator does with it. The installer
+# puts it on the PATH (/usr/local/bin/arenactl as root, ~/.local/bin/arenactl otherwise), for the
+# installation it last installed, upgraded or repaired; --dir DIR names another.
+#
+#   arenactl status | verify | features | config | repair | remove | requirements [options]
+#                                       the installer's commands, on this installation (installer.sh)
+#   arenactl config [--set KEY=VALUE]   the settings in .env (the address, models, GitLab, backups,
+#                                       power and heat, the sandboxes' size, the network...): shown,
+#                                       changed, and the services they touch started again
+#   arenactl upgrade FILE.run [options] upgrade to a new release, from its offline installer
+#   arenactl repair FILE.run [options]  repair from the release's offline installer (files, images)
+#   arenactl ps                         the containers and their state
+#   arenactl logs [SERVICE...] [-f]     the services' logs (the last 200 lines each; -f follows)
+#   arenactl restart [SERVICE...]       start services again (none named: every one)
+#   arenactl backup [options]           a backup now (scripts/backup.sh; --install-timer: daily)
+#   arenactl restore BACKUP [options]   a backup restored (scripts/backup.sh --restore)
+#   arenactl cert [options]             the certificate (scripts/make-cert.sh)
+#   arenactl sign [--check]             Code Arena's builds signed (scripts/sign-code-arena.sh)
+#   arenactl hosts                      the stack's names in /etc/hosts (scripts/setup-hosts.sh)
+#   arenactl check NAME [options]       a live check: sandboxes, blender, sandbox, lean, functional,
+#                                       dashboards, gpu, compliance, recovery, clients
+#   arenactl help
+set -euo pipefail
+
+here="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+DEPLOY="$(dirname "$here")"
+DIR="$(dirname "$DEPLOY")"
+args=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dir) [[ $# -gt 1 ]] || { echo "arenactl: --dir needs a folder" >&2; exit 2; }
+      DIR="$(readlink -f "$2")"; DEPLOY="$DIR/deploy"; shift ;;
+    *) args+=("$1") ;;
+  esac
+  shift
+done
+set -- ${args[@]+"${args[@]}"}
+cmd="${1:-help}"
+[[ $# -gt 0 ]] && shift
+[[ -f "$DEPLOY/docker-compose.yml" ]] || { echo "arenactl: no installation in $DIR (--dir names one)" >&2; exit 2; }
+
+env_get() {
+  sed -n -E "s/^[[:space:]]*(export[[:space:]]+)?$1[[:space:]]*=[[:space:]]*//p" "$DEPLOY/.env" 2>/dev/null | tail -n1 \
+    | sed -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/' -e "s/^'\\(.*\\)'\$/\\1/"
+}
+# The engine and project the installation runs on, as its installer recorded them.
+engine="$(sed -n 's/^engine=//p' "$DIR/.arena-install/state" 2>/dev/null | tail -n1)"
+if [[ -z "$engine" ]]; then
+  if command -v docker >/dev/null && docker info >/dev/null 2>&1; then engine=docker; else engine=podman; fi
+fi
+project="$(env_get COMPOSE_PROJECT_NAME)"; project="${project:-arena}"
+dc() {
+  local cf=""
+  if [[ $engine == podman && -z "$(env_get COMPOSE_FILE)" ]]; then
+    cf="docker-compose.yml:podman.yml"; [[ -f "$DEPLOY/docker-compose.override.yml" ]] && cf+=":docker-compose.override.yml"
+  fi
+  (cd "$DEPLOY" && env COMPOSE_PROJECT_NAME="$project" COMPOSE_PROFILES="$(env_get COMPOSE_PROFILES)" ${cf:+COMPOSE_FILE="$cf"} "$engine" compose "$@")
+}
+installer() { exec bash "$DEPLOY/scripts/installer.sh" "$@" --dir "$DIR"; }
+script() { local s="$1"; shift; cd "$DEPLOY" && exec env ENGINE="$engine" COMPOSE_PROJECT_NAME="$project" bash "scripts/$s" "$@"; }
+
+case "$cmd" in
+  help|-h|--help) awk 'NR > 1 && !/^#/ { exit } NR > 1 { sub(/^# ?/, ""); print }' "$0" ;;
+  status|verify|features|config|remove|requirements) installer "$cmd" "$@" ;;
+  upgrade|repair)
+    # A release's .run: its own installer runs (it unpacks itself beside the file and goes when done).
+    if [[ $# -gt 0 && "$1" == *.run ]]; then
+      run="$(readlink -f "$1")"; shift
+      [[ -f "$run" ]] || { echo "arenactl: no file $run" >&2; exit 2; }
+      exec sh "$run" "$cmd" --dir "$DIR" "$@"
+    fi
+    [[ $cmd == upgrade ]] && { echo "arenactl: upgrade needs the new release's offline installer: arenactl upgrade argus-arena-VERSION-offline.run" >&2; exit 2; }
+    installer repair "$@" ;;
+  ps) dc ps --format 'table {{.Service}}\t{{.Status}}\t{{.Image}}' ;;
+  logs)
+    follow=() svcs=()
+    for a in "$@"; do if [[ $a == -f || $a == --follow ]]; then follow=(-f); else svcs+=("$a"); fi; done
+    dc logs --tail 200 ${follow[@]+"${follow[@]}"} ${svcs[@]+"${svcs[@]}"} ;;
+  restart)
+    if [[ $# -eq 0 ]]; then dc up -d --no-build --pull never --force-recreate; else dc up -d --no-build --pull never --force-recreate "$@"; fi ;;
+  backup) script backup.sh "$@" ;;
+  restore) script backup.sh --restore "$@" ;;
+  cert) script make-cert.sh "$@" ;;
+  sign) script sign-code-arena.sh "$@" ;;
+  hosts) script setup-hosts.sh "$@" ;;
+  check)
+    name="${1:-}"; [[ $# -gt 0 ]] && shift
+    case "$name" in
+      sandboxes) s=sandboxes-check.py ;; blender) s=blender-check.py ;; sandbox) s=sandbox-check.py ;; lean) s=lean-check.py ;;
+      functional) s=functional-test.py ;; dashboards) s=audit-dashboards.py ;; compliance) s=compliance-check.py ;;
+      recovery) s=recovery-check.py ;; clients) s=clients-check.py ;; gpu) s=gpu-check.sh ;;
+      *) echo "arenactl: check sandboxes, blender, sandbox, lean, functional, dashboards, gpu, compliance, recovery or clients" >&2; exit 2 ;;
+    esac
+    cd "$DEPLOY"
+    if [[ $s == *.py ]]; then
+      command -v python3 >/dev/null || { echo "arenactl: the checks need python3 on this host" >&2; exit 2; }
+      exec env COMPOSE_PROJECT_NAME="$project" python3 "scripts/$s" "$@"
+    fi
+    exec env ENGINE="$engine" bash "scripts/$s" "$@" ;;
+  *) echo "arenactl: no command $cmd (arenactl help)" >&2; exit 2 ;;
+esac

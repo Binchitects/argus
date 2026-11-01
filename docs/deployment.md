@@ -155,6 +155,41 @@ it (from Traefik's metrics). The alert **CertificateExpiresSoon** warns 30 days
 before it expires (for a day: Traefik renews Let's Encrypt's within that time
 by itself), and **CertificateExpiresVerySoon** is critical 7 days before.
 
+## Settings and arenactl
+
+The settings an operator chooses in `.env` (the address and ports, the
+certificates' contact, `IP_ALLOW`, the models' folder and engines, GitLab,
+backups, power and heat, the sandboxes' size, scale, an external database) are
+listed in [`deploy/settings`](../deploy/settings) with their kind, default and
+meaning. **install, upgrade and repair** take any of them as
+`--set KEY=VALUE` (repeated; `--set KEY=@FILE` reads a secret from a file, never
+from the command line), each checked before anything is done; on a terminal they
+also offer to change any of them, by number or name. A new installation sizes
+the sandboxes for its host (more jobs at once with more CPUs and memory) unless
+they are set.
+
+**`installer.sh config`** (and `arenactl config`) shows them by group, secrets
+only as set or not, and changes them: on a terminal by asking, otherwise with
+`--set`. Saved, the services they touch start again with them (compose
+recreates only those), a new address with the stack's own CA gets its
+certificate, and it waits until every service is healthy.
+
+**`arenactl`** is an installation's one command, put on the PATH
+(`/usr/local/bin/arenactl`, as root; `ARENA_CLI_DIR` another folder) by every
+install, upgrade and repair, for that installation (`--dir` another), and taken
+away by `remove --purge`:
+
+| command | what |
+|---|---|
+| `arenactl status`, `verify`, `features`, `config`, `repair`, `remove`, `requirements` | the installer's own commands on this installation |
+| `arenactl upgrade argus-arena-VERSION-offline.run` | an upgrade from a new release's offline installer (`repair FILE.run` repairs from one) |
+| `arenactl ps`, `logs [SERVICE...] [-f]`, `restart [SERVICE...]` | the containers, their logs, starting them again |
+| `arenactl backup`, `restore BACKUP`, `cert`, `sign`, `hosts` | the operator's scripts |
+| `arenactl check NAME` | a live check: `sandboxes` (every sandbox for real), `blender`, `sandbox`, `lean`, `functional`, `dashboards`, `gpu`, `compliance`, `recovery`, `clients` |
+
+In a checkout, `./arenactl` at the repository's root also builds, bundles and
+tests ([scripts.md](scripts.md)).
+
 ## Features
 
 `traefik`, `web`, `app`, `postgres` and `litellm` always run. Everything else is
