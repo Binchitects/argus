@@ -92,6 +92,11 @@ public sealed class CodeArenaLiveSyncTests(AppFixture app) : IDisposable
         Assert.Equal(["Fix the parser", "Fixed the parser."], (await WebChatAsync(web, chat)).Select(m => m.Content));
         var listed = (await web.JsonAsync(await web.GetAsync("/api/chat/conversations"))).EnumerateArray().Single(c => c.GetProperty("id").GetString() == chat);
         Assert.Equal("code-arena", listed.GetProperty("origin").GetString());
+        // Code Arena lists the person's chats (the IDE's Chats in Arena, /web) and finds this one there, with its folder.
+        var mine = Assert.Single(await Ca.ChatSync.ListAsync(config, http, CancellationToken.None), c => c.Id == chat);
+        Assert.Equal(("code-arena", "/home/pat/shop", 2), (mine.Origin, mine.Place, mine.Messages));
+        Assert.True(await Ca.ChatSync.ExistsAsync(config, http, chat, CancellationToken.None));
+        Assert.EndsWith("@example.test)", await Ca.ChatSync.WhoAsync(config, http, CancellationToken.None), StringComparison.Ordinal);
 
         // The person carries on on the web: the session takes it in, once.
         await (await web.PostAsync($"/api/chat/conversations/{chat}/messages", new { content = "And the tests?" })).Content.ReadAsStringAsync();
