@@ -561,8 +561,17 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   any other. A picture, a sound or a video one of Arena's tools made (kept in
   the folder under `.code-arena/media/`, the tool's result naming it) shows
   under its card: the picture opens larger at a click, the sound and the video
-  play in place. A long session opens on its last 30 turns: **Show earlier**
-  at the top adds 30 more each time, the turns being read staying where they
+  play in place. A compaction leaves the thread whole: only what the model
+  reads is compacted. Every message stays where it was, the place where the
+  conversation was compacted is marked after its turn (**Show summary** shows
+  what the model reads instead), and a turn compacted while it runs goes on
+  in place, with its approvals; a question a compaction covers is not asked
+  again from there. The chat's **context** ring is the web chat's: how full
+  the window is, what fills it by kind (the system prompt and notes, the
+  memory, the tools' definitions, the summary, files, your messages, the
+  answers, the tool calls and results), the room kept for the answer, what is
+  free, and the biggest messages. A long session opens on its last 30 turns:
+  **Show earlier** at the top adds 30 more each time, the turns being read staying where they
   were. The thread draws what streams in once per frame, and only the turn
   being written: a session of thousands of messages streams as smoothly as a
   short one. The Chat activity lists this folder's sessions; the list is read
@@ -1367,7 +1376,7 @@ status (403 `outside` for a path outside the folder).
 
 | call | what it does |
 |---|---|
-| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting); `context` (the window), `contextUsed` (about how much of it is in use), `compactAt` and `compactTarget` (percent; `compactAt` 0: only when a request would not fit), `compactAtSource` (`flag`, `config`, `account`, `arena` or `default`) and `compactAtAccount` (the Arena account's threshold, null when Arena did not say); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output); `arenaChats` (sessions are kept with chats in Arena here), `account` (whose chats: the key's account, null until Arena said), `chat` (this session's chat there, null: none yet) and `synced` (how many times the web chat's news came in while nothing ran: the page reads the session again when it changes; taking it in is not `busy`); `sync` (`{chat, account, waiting, trouble, behind}`: the chat, whose chats, how many messages Arena lacks, what stops them, whether the web chat has news not taken in; null without the sync) and `notices` (`[{id, text, at}]`: the last 20 said while nothing ran, the page shows each once) |
+| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting); `context` (the window), `contextUsed` (about how much of it is in use), `contextReserve` (how much of it is kept for the answer), `compactAt` and `compactTarget` (percent; `compactAt` 0: only when a request would not fit), `compactAtSource` (`flag`, `config`, `account`, `arena` or `default`) and `compactAtAccount` (the Arena account's threshold, null when Arena did not say); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output); `arenaChats` (sessions are kept with chats in Arena here), `account` (whose chats: the key's account, null until Arena said), `chat` (this session's chat there, null: none yet) and `synced` (how many times the web chat's news came in while nothing ran: the page reads the session again when it changes; taking it in is not `busy`); `sync` (`{chat, account, waiting, trouble, behind}`: the chat, whose chats, how many messages Arena lacks, what stops them, whether the web chat has news not taken in; null without the sync) and `notices` (`[{id, text, at}]`: the last 20 said while nothing ran, the page shows each once) |
 | `GET /api/folders?path=` | for Open Folder: a folder's folders by name (hidden ones last, no files, at most 2,000) as `{path, parent, folders, why, current, home, separator, drives, recent, added, files}` (`why`: what is not listed; `recent`: the folders opened lately, the one open now first; `added`: the folders added to this workspace; `files`: its files' names, with `files=1`, for @ in the chat); with no path, the open folder's parent; 404 `not_found` when it is not a folder |
 | `POST /api/folders/add` `{path}` | Add Folder to Workspace: the tools may use it, kept with this folder: `{folder, added}` (`added`: the folders added, whole); 409 `inside` for the folder open now or one in it |
 | `POST /api/folders/remove` `{path}` | takes an added folder out again: `{added}`; 404 `not_added` |
@@ -1506,7 +1515,14 @@ request would not fit; null: the Arena account's again) and `compactTarget`
 text}` (a few times a second, for as long as the command runs; a page that
 comes back during the turn is sent the last 64 KB of each) and
 `{"type":"job_end", job, status, exitCode, stopped}` for its commands with no
-time limit.
+time limit. `/api/session` gives the whole conversation, each message by its
+place in the session (`m0`, `m1`…, which no compaction changes), the last one
+each compaction covers with its `summary`, and each answer with `context`:
+what filled its request, by kind in characters (`system`, `memory`, `tools`,
+`summary`, `files`, `you`, `answers`, `toolResults`) and its `biggest`
+messages, as the web chat's answers carry it; a stream's usage event carries
+it too, and after a compaction the stream sends `{"type":"reset", messages,
+diffs}`: the whole conversation again, now marked.
 
 ## Modes
 
@@ -2010,7 +2026,12 @@ A long session never gets stuck on the window:
 - **One long turn compacts itself**: when nothing before the turn is left to
   summarize, the turn's earlier steps are (the person's message and the
   latest steps kept whole). A compaction that would change nothing writes
-  nothing and does not reset the IDE's page.
+  nothing and does not reset the IDE's page. After an answer cut at the
+  output limit, what is kept starts at the note that asks the model to carry
+  on, so it always has something to answer.
+- **The session keeps every message**: a compaction changes only what the
+  model reads. The IDE shows the whole conversation, marked where it was
+  compacted, and the chat in Arena has all of it too.
 - **A request that would not fit is compacted first**, whatever the
   threshold (and with it off): "Compacting: the next request (~N tokens) would
   not fit the window (M) with room for the answer."
@@ -2268,8 +2289,10 @@ chat comes in a page of 200 messages at a time.
 A compaction here is sent too: Arena keeps its summary where the web's own
 compaction keeps one (on the last message it covers), so the web's next answer
 reads it instead of those messages. The other way, a chat compacted on the
-web is read here as its summary and what follows it. Every message on the
-branch counts, on both sides and in the lists: an answer the model gave with
+web is read here as its summary and what follows it, within seconds as any
+news of the web's (a compaction changes the chat's stamp, though it adds no
+message). On both sides the whole conversation stays shown. Every message on
+the branch counts, on both sides and in the lists: an answer the model gave with
 nothing in it is not kept here (the thread says the model said nothing), and
 one that failed on the web with nothing in it is read here as "(no answer)".
 

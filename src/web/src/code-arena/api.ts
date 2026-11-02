@@ -173,8 +173,9 @@ export interface CodeSession {
 }
 
 /**
- * Arena's chat events, and what Code Arena adds: a diff with an edit's result, "always" and Laya's look with a question, the history
- * afresh after compaction, and the commands run with no time limit (their start, their output as it comes, their end).
+ * Arena's chat events, and what Code Arena adds: a diff with an edit's result, "always" and Laya's look with a question, the
+ * conversation afresh after a compaction (each message in its place, the last one it covers marked with its summary), and the
+ * commands run with no time limit (their start, their output as it comes, their end).
  */
 export type CodeEvent =
   | Exclude<ChatEvent, { type: 'tool_result' } | { type: 'approval' }>

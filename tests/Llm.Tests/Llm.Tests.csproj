@@ -22,6 +22,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Llm.Api\Llm.Api.csproj" />
     <ProjectReference Include="..\..\src\Llm.Core\Llm.Core.csproj" />
+    <!-- Code Arena's own sync, end to end against this app (CodeArenaLiveSyncTests). Under an alias: it carries
+         copies of a few of Llm.Core's files. -->
+    <ProjectReference Include="..\..\src\CodeArena\CodeArena.csproj" Aliases="CodeArenaCli" />
   </ItemGroup>
 
   <ItemGroup>

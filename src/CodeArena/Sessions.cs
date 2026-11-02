@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 
 namespace CodeArena;
 
@@ -42,6 +43,8 @@ internal sealed class SyncEntry
     public string? Status { get; init; }
     /// <summary>A tool result's sub-agents' work (task), as the page shows it: kept beside the message, never sent to the model.</summary>
     public JsonArray? Agents { get; init; }
+    /// <summary>What filled the request an answer was written for, by kind in characters (<see cref="Agent.Measure"/>): the page's context gauge.</summary>
+    public JsonObject? Context { get; init; }
 
     /// <summary>A tool result's tool: the call it answers, in the messages before it.</summary>
     public static string? ToolName(IReadOnlyList<SyncEntry> stream, int index)
@@ -94,6 +97,11 @@ internal sealed class SessionData
     public List<SyncEntry> Stream { get; } = [];
     /// <summary>Where in <see cref="Stream"/> what the model reads word for word starts (before it: a summary, or nothing).</summary>
     public int From { get; set; }
+    /// <summary>
+    /// Each compaction's summary, by the place in <see cref="Stream"/> of the last message it covers: the IDE shows the whole
+    /// conversation, marked where it was compacted (only what the model reads is compacted).
+    /// </summary>
+    public Dictionary<int, string> Marks { get; } = [];
     /// <summary>The session went back to before a turn Arena has (/rewind): what it adds next goes on a branch of its own there.</summary>
     public bool Branch { get; set; }
     /// <summary>A compaction's summary Arena has not had: of <see cref="Stream"/> up to UpTo.</summary>
@@ -199,6 +207,8 @@ internal sealed class SessionData
                     Usage = usage,
                     Kind = entry.Str("kind"),
                     Status = entry.Str("status"),
+                    Agents = light ? null : entry["agents"]?.DeepClone() as JsonArray,
+                    Context = light ? null : entry["context"]?.DeepClone() as JsonObject,
                 });
                 Keys = Math.Max(Keys, (entry.Int("n") ?? Keys) + 1);
                 break;
@@ -253,6 +263,10 @@ internal sealed class SessionData
                 {
                     Summary = null;
                 }
+                foreach (var gone in Marks.Keys.Where(k => k >= keep).ToList())
+                {
+                    Marks.Remove(gone);
+                }
                 break;
             case "summary" when entry.Int("upTo") is { } upTo && entry.Str("text") is { } text:
                 Summary = (upTo, text);
@@ -270,6 +284,10 @@ internal sealed class SessionData
                 _pending = null;
                 From = Math.Clamp(entry.Int("from") ?? Stream.Count - (all?.Count ?? 0), 0, Stream.Count);
                 WebSummary = entry.Str("web") ?? WebSummary;
+                if (!light && From > 0 && Agent.SummaryText(Messages.Take(Prefix)) is { } mark)
+                {
+                    Marks[From - 1] = mark;
+                }
                 break;
             case "model":
                 Model = entry.Str("model") ?? Model;
@@ -383,9 +401,9 @@ internal sealed class SessionStore
     /// A message the session adds, with the model that wrote it and its tokens (an answer), or "note" (<paramref name="kind"/>:
     /// Code Arena's own word to the model, not the person's); Arena is sent it.
     /// </summary>
-    public void Message(JsonObject message, string? model = null, TokenUsage? usage = null, string? kind = null, JsonArray? agents = null)
+    public void Message(JsonObject message, string? model = null, TokenUsage? usage = null, string? kind = null, JsonArray? agents = null, JsonObject? context = null)
     {
-        Write(Line(new SyncEntry { Message = message, At = DateTimeOffset.UtcNow, Model = model, Usage = usage, Kind = kind, Agents = agents }));
+        Write(Line(new SyncEntry { Message = message, At = DateTimeOffset.UtcNow, Model = model, Usage = usage, Kind = kind, Agents = agents, Context = context }));
         Added?.Invoke(message);
     }
 
@@ -423,12 +441,17 @@ internal sealed class SessionStore
         {
             line["status"] = e.Status;
         }
+        // After what the line says of itself, which is read without it (the list's scan, Head, reads a line's first 4 KB only).
+        line["message"] = e.Message.Clone();
+        // After the message: shown by the page only, and long (a task's sub-agents), so the scan never reads them.
         if (e.Agents is not null)
         {
             line["agents"] = e.Agents.DeepClone();
         }
-        // Last: what the line says of itself is read without it (the list's scan, Head).
-        line["message"] = e.Message.Clone();
+        if (e.Context is not null)
+        {
+            line["context"] = e.Context.DeepClone();
+        }
         return line;
     }
 
@@ -575,14 +598,21 @@ internal sealed class SessionStore
         {
             if (line.Str("type") == "message")
             {
-                // Its number before the message, with what the line says of itself (the list's scan reads only that much).
-                var message = line["message"];
-                line.Remove("message");
+                // Its number before the message, with what the line says of itself (the list's scan reads only that much); what
+                // only the page shows, after it.
+                var after = new[] { "message", "agents", "context" }.Where(line.ContainsKey).Select(k => (k, line[k])).ToList();
+                foreach (var (k, _) in after)
+                {
+                    line.Remove(k);
+                }
                 if (line.Int("n") is null)
                 {
                     line["n"] = _state.Keys;
                 }
-                line["message"] = message;
+                foreach (var (k, v) in after)
+                {
+                    line[k] = v;
+                }
             }
             PrivateFiles.AppendLine(File, Json.Line(line));
             _state.Apply(line, DateTimeOffset.UtcNow);
@@ -741,7 +771,11 @@ internal sealed class SessionStore
         var at = span.IndexOf(span.StartsWith(TypeCompact) ? MessagesField : MessageField);
         if (at < 0)
         {
-            return null;
+            // Code Arena 7.7.0 wrote a task's sub-agents' work before the message, often past the 4 KB read: such a message
+            // still counts, at its time (its number is its place; Arena's id for it comes with its "sent" line).
+            return line.Length >= HeadBytes && span.StartsWith(TypeMessage)
+                ? new JsonObject { ["type"] = "message", ["at"] = Regex.Match(Encoding.UTF8.GetString(span[..200]), "^\\{\"type\":\"message\",\"at\":\"([^\"]+)\"") is { Success: true } m ? m.Groups[1].Value : null }
+                : null;
         }
         var head = Json.ParseObject(Encoding.UTF8.GetString(span[..at]) + "}");
         // A line of an older Code Arena: the message first, whether it came from the web at its end.

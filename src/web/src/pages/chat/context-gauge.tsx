@@ -9,10 +9,10 @@ import { compactsText, kindFill, kinds, type CompactSetting, type ContextView } 
 import { MessageContextButtons, MessageContextNote, type ContextChange } from './message-context'
 import type { ContextItem, Message } from './types'
 
-/** The chat's messages the gauge's biggest items are, and how one is pinned or left out. */
+/** The chat's messages the gauge's biggest items are, and how one is pinned or left out (none: they are listed only, as in Code Arena). */
 export interface ContextItems {
   find: (id: string) => Message | undefined
-  change: (m: Message, change: ContextChange) => void
+  change?: (m: Message, change: ContextChange) => void
 }
 
 const itemName = (i: ContextItem) => (i.role === 'user' ? 'Your message' : i.role === 'assistant' ? 'An answer' : `${i.tool ?? 'A tool'}'s result`)
@@ -110,15 +110,18 @@ export function ContextGauge({ context, onCompact, busy, compact, items }: { con
                       <span className="block truncate text-muted-foreground" title={item.preview}>{message!.leftOut || message!.pinned ? <MessageContextNote m={message!} /> : item.preview}</span>
                     </span>
                     <span className="shrink-0 text-muted-foreground tabular-nums">{formatValue(tokens)}</span>
-                    {item.role === 'tool' ? (
-                      <MessageContextButtons m={message!} what="result" onChange={items.change} pin={false} />
-                    ) : (
-                      <MessageContextButtons m={message!} what={item.role === 'user' ? 'question' : 'answer'} onChange={items.change} />
-                    )}
+                    {items.change &&
+                      (item.role === 'tool' ? (
+                        <MessageContextButtons m={message!} what="result" onChange={items.change} pin={false} />
+                      ) : (
+                        <MessageContextButtons m={message!} what={item.role === 'user' ? 'question' : 'answer'} onChange={items.change} />
+                      ))}
                   </li>
                 ))}
               </ul>
-              <p className="text-xs text-muted-foreground">Pinned: kept word for word when the chat compacts. Left out: not read by the model from the next answer on, and still here.</p>
+              {items.change && (
+                <p className="text-xs text-muted-foreground">Pinned: kept word for word when the chat compacts. Left out: not read by the model from the next answer on, and still here.</p>
+              )}
             </div>
           ) : null}
           <p className="text-xs text-muted-foreground">

@@ -371,9 +371,10 @@ const ignore = () => undefined
 
 /**
  * A question in the thread: drawn again only when its message changes. `onJump` goes to the answer it quotes; `onEdit`
- * asks it again with new words (not while an answer is written, nor before code-arena has it).
+ * asks it again with new words (not while an answer is written, nor before code-arena has it, nor once a compaction
+ * covers it: the model reads its summary instead).
  */
-const Question = memo(function Question({ m, onJump, onEdit, busy }: { m: Message; onJump: (m: Message) => boolean; onEdit: (m: Message, text: string, quote: string | null) => void; busy: boolean }) {
+const Question = memo(function Question({ m, onJump, onEdit, busy }: { m: Message; onJump: (m: Message) => boolean; onEdit?: (m: Message, text: string, quote: string | null) => void; busy: boolean }) {
   return <QuestionTurn m={m} siblings={[m]} busy={busy} onSwitch={ignore} onJumpToQuote={onJump} onEdit={m.id.startsWith('local-') ? undefined : onEdit} />
 })
 
@@ -502,12 +503,20 @@ export function Thread({
   const model = config.models.find((m) => m.name === state.model)
   const answering = streaming && view.mode !== 'compact'
   // ↑ in the box: this session's messages, newest first, then what this folder sent before (the terminal's too).
-  const sentHere = useMemo(() => path.flatMap((m) => (m.role === 'user' && !m.summary ? [m.content] : [])).reverse(), [path])
+  const sentHere = useMemo(() => path.flatMap((m) => (m.role === 'user' ? [m.content] : [])).reverse(), [path])
   const older = useFolderHistory()
   const history: RecallSource = { here: sentHere, older }
   const lastUsage = [...path].reverse().find((m) => m.role === 'assistant' && m.promptTokens != null)
-  // The room the session keeps for the answer, as the web chat's gauge shows its own.
-  const context = contextOf(lastUsage, state.context, state.reserve ?? null)
+  // The whole conversation stays: the last message a compaction covers carries its summary. Compacted since the last
+  // answer, the gauge works out what the next request carries (the summary instead), as the web chat's does.
+  const compactedAt = path.findLastIndex((m) => m.summary)
+  const compacted = compactedAt >= 0 && (!lastUsage || compactedAt >= path.indexOf(lastUsage)) ? path[compactedAt]!.summary : null
+  const context = contextOf(lastUsage, state.context, state.reserve ?? null, compacted)
+  // The biggest messages the gauge lists, found in the thread (listed only: Code Arena has no pinning).
+  const contextItems = useMemo(() => ({ find: (id: string) => path.find((m) => m.id === id) }), [path])
+  // The questions a compaction covers: the model reads its summary instead, so they are not asked again from here.
+  const placeOf = useMemo(() => new Map(path.map((m, i) => [m.id, i])), [path])
+  const covered = (m: Message) => (placeOf.get(m.id) ?? Infinity) <= compactedAt
   // The commands the turn watches, and any still running that no turn here watches (each with its Stop).
   const jobs = [
     ...view.jobs,
@@ -835,6 +844,7 @@ export function Thread({
             onCompact={!streaming && path.length >= 2 ? () => void compact() : undefined}
             busy={streaming}
             compact={{ at: state.compactAt, who: compactWho(state), change: 'Change it with Context in the status bar, or /compact-at in the terminal.' }}
+            items={contextItems}
           />
         ) : null
       }
@@ -921,11 +931,13 @@ export function Thread({
                 {turns.slice(firstShown).map((t, at) => {
                   const i = firstShown + at
                   const isLive = answering && i === lastTurn
-                  // The older conversation, summarized to fit the model's window: shown folded, as the chat shows a compaction.
-                  if (t.question?.summary) return <CompactedMark key={t.question.id} summary={t.question.summary} onOpenFile={openNamed} />
+                  // Where the conversation was compacted to fit the model's window: marked after the turn, its summary folded,
+                  // as the web chat marks it. The turn itself stays as it was (a live one with its answer and its questions).
+                  const summary = [t.question, ...t.answer].find((m) => m?.summary)?.summary
+                  const asked = t.question && !covered(t.question) ? t.question.id : undefined
                   return (
                     <div key={t.question?.id ?? t.answer[0]?.id ?? i} className="grid gap-4">
-                      {t.question && <Question m={t.question} onJump={jumpToQuoted} onEdit={editQuestion} busy={streaming} />}
+                      {t.question && <Question m={t.question} onJump={jumpToQuoted} onEdit={asked ? editQuestion : undefined} busy={streaming} />}
                       {(t.answer.length > 0 || isLive) && (
                         <CodeAnswer
                           answer={t.answer}
@@ -941,10 +953,11 @@ export function Thread({
                           diffs={view.diffs}
                           onDecide={decide}
                           onQuote={replyQuote}
-                          question={!isLive && t.question && !t.question.id.startsWith('local-') && !t.question.details?.note ? t.question.id : undefined}
+                          question={!isLive && asked && !asked.startsWith('local-') && !t.question?.details?.note ? asked : undefined}
                           onAgain={askAgain}
                         />
                       )}
+                      {summary && <CompactedMark summary={summary} onOpenFile={openNamed} />}
                     </div>
                   )
                 })}

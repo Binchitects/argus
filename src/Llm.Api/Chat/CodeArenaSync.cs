@@ -392,7 +392,7 @@ public static class CodeArenaSync
         {
             return AuthEndpoints.Problem(409, "answering", "The chat is answering on the web: its messages come when the answer ends.");
         }
-        if (stamp is not null && stamp == Stamp(c.CurrentLeafId))
+        if (stamp is not null && stamp == Stamp(c.CurrentLeafId, await SummarizedAsync(db, id, http.RequestAborted)))
         {
             return Results.Ok(new { unchanged = true, stamp });
         }
@@ -508,7 +508,7 @@ public static class CodeArenaSync
         }
         Renew(c);
         await db.SaveChangesAsync(ct);
-        return Results.Ok(new { ids, count, stamp = Stamp(c.CurrentLeafId), summarized });
+        return Results.Ok(new { ids, count, stamp = Stamp(c.CurrentLeafId, await SummarizedAsync(db, id, ct)), summarized });
     }
 
     /// <summary>
@@ -635,8 +635,17 @@ public static class CodeArenaSync
         }
     }
 
-    /// <summary>The branch on screen as one word: any message added to the chat, or another branch shown, changes it.</summary>
-    private static string Stamp(Guid? leaf) => leaf?.ToString("N") ?? "empty";
+    /// <summary>
+    /// The branch on screen as one word: any message added to the chat, another branch shown, or a compaction (its summary on
+    /// <paramref name="summarized"/>, the chat's latest) changes it. A compaction adds no message: without it, Code Arena would
+    /// hear of the web's summary only with the next message.
+    /// </summary>
+    private static string Stamp(Guid? leaf, Guid? summarized) =>
+        (leaf?.ToString("N") ?? "empty") + (summarized is { } s ? "." + s.ToString("N") : "");
+
+    /// <summary>The chat's latest message with a compaction's summary (null: none).</summary>
+    private static Task<Guid?> SummarizedAsync(AppDbContext db, Guid conversation, CancellationToken ct) =>
+        db.ChatMessages.Where(m => m.ConversationId == conversation && m.Summary != null).OrderByDescending(m => m.Sequence).Select(m => (Guid?)m.Id).FirstOrDefaultAsync(ct);
 
     /// <summary>A message as the tree knows it, without its words: what finding the branch and the places on it needs.</summary>
     private sealed record Node(Guid Id, Guid? ParentId, int Sequence, string Role, bool Calls, bool Summarized, string? SyncRef);
@@ -726,7 +735,8 @@ public static class CodeArenaSync
         var files = fileIds.Count == 0 ? new Dictionary<Guid, ChatAttachment>() : await db.ChatAttachments.AsNoTracking().Where(a => fileIds.Contains(a.Id) && a.UserId == c.UserId)
             .Select(a => new ChatAttachment { Id = a.Id, FileName = a.FileName, ContentType = a.ContentType, Kind = a.Kind, Text = a.Text, Truncated = a.Truncated, Seconds = a.Seconds })
             .ToDictionaryAsync(a => a.Id, ct);
-        return new SyncRead(c.Id, c.Title, c.Model, c.Origin, c.OriginPlace, tree.Path.Count, Stamp(c.CurrentLeafId), @base, fork, start + page.Count < tree.Path.Count, summary,
+        var stamp = Stamp(c.CurrentLeafId, tree.Nodes.Where(n => n.Summarized).MaxBy(n => n.Sequence)?.Id);
+        return new SyncRead(c.Id, c.Title, c.Model, c.Origin, c.OriginPlace, tree.Path.Count, stamp, @base, fork, start + page.Count < tree.Path.Count, summary,
             [.. page.Select(i => Out(bodies[i], files, outward))]);
     }
 

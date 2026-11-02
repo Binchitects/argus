@@ -1003,8 +1003,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     /// <summary>The session open now, as the page shows it.</summary>
     private JsonObject SessionJson()
     {
-        var data = File.Exists(_rt.Session.File) ? SessionStore.Load(_rt.Session.File) : new SessionData { Id = _rt.Session.Id };
-        var diffs = History.Diffs(data);
+        // The session as it stands in memory: every message of it (the file's earlier lines are not read again).
+        var (messages, diffs, prompt, cached, completion) = _rt.Session.Read(d => (History.Messages(d), History.Diffs(d), d.Prompt, d.Cached, d.Completion));
         lock (_diffs)
         {
             if (_diffsOf == _rt.Session.Id)
@@ -1018,14 +1018,23 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         return new JsonObject
         {
             ["id"] = _rt.Session.Id,
-            ["messages"] = History.Messages(data),
+            ["messages"] = messages,
             ["diffs"] = diffs,
             ["busy"] = Busy(),
             // Which answer runs, or ran last: the page attaches to each new one.
             ["turn"] = Volatile.Read(ref _turns),
-            ["usage"] = new JsonObject { ["prompt"] = data.Prompt, ["cached"] = data.Cached, ["completion"] = data.Completion },
+            ["usage"] = new JsonObject { ["prompt"] = prompt, ["cached"] = cached, ["completion"] = completion },
         };
     }
+
+    /// <summary>
+    /// The page's id of the message the session adds next (and <paramref name="later"/> after it): its place in the whole
+    /// conversation, which no compaction changes.
+    /// </summary>
+    private string NextId(int later = 0) => $"m{_rt.Session.Read(d => d.Stream.Count) + later}";
+
+    /// <summary>The page's id of the message before the next one; null: none.</summary>
+    private string? LastId() => _rt.Session.Read(d => d.Stream.Count) is > 0 and var count ? $"m{count - 1}" : null;
 
     /// <summary>
     /// POST /api/plan/review: the person's answer to the plan the agent proposed (approve, approve-ask, change with a
@@ -1094,8 +1103,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
 
     /// <summary>
     /// A question of the session asked again, as the web chat's Answer again and Edit do: <paramref name="At"/> its place
-    /// (m3), <paramref name="Text"/> its new words (null: as it was) and <paramref name="Quote"/> the part of an answer it
-    /// quotes then (when <paramref name="Requoted"/>: null, none), <paramref name="Length"/> "shorter" or "longer" than
+    /// in the session (m3: what the model reads word for word, not what a compaction summarized), <paramref name="Text"/>
+    /// its new words (null: as it was) and <paramref name="Quote"/> the part of an answer it quotes then (when
+    /// <paramref name="Requoted"/>: null, none), <paramref name="Length"/> "shorter" or "longer" than
     /// the answer it had, another model or thinking for this answer only, and <paramref name="Files"/>: the files its turn
     /// and those after it wrote put back first (when this run kept its checkpoint).
     /// </summary>
@@ -1153,7 +1163,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     private async Task AskAgainAsync(Job job, Again again, Spend turn)
     {
         var messages = _rt.Agent.Messages;
-        if (again.At >= messages.Count || messages[again.At] is not { } question || question.Str("role") != "user" || question.Str("content")?.StartsWith("[The conversation so far", StringComparison.Ordinal) == true)
+        // Its place in the model's history: what the model reads word for word (a compaction's summary stands for what came before).
+        var at = _rt.Session.Read(d => again.At >= d.From && again.At < d.Stream.Count ? again.At - d.From + d.Prefix : -1);
+        if (at < 0 || at >= messages.Count || messages[at] is not { } question || question.Str("role") != "user")
         {
             job.Emit(new JsonObject { ["type"] = "error", ["message"] = "That question is not in the session any more (it was compacted, or the session changed): ask it anew." });
             return;
@@ -1161,7 +1173,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         // Its words as the model read them (its quote, what went with it), and its pictures.
         var words = question["content"] is JsonArray parts ? parts.OfType<JsonObject>().FirstOrDefault(p => p.Str("type") == "text")?.Str("text") ?? "" : question.Str("content") ?? "";
         var pictures = question["content"] is JsonArray all ? new JsonArray([.. all.OfType<JsonObject>().Where(p => p.Str("type") != "text").Select(p => p.DeepClone())]) : null;
-        var answered = messages.Skip(again.At + 1).TakeWhile(m => m.Str("role") != "user").Where(m => m.Str("role") == "assistant")
+        var answered = messages.Skip(at + 1).TakeWhile(m => m.Str("role") != "user").Where(m => m.Str("role") == "assistant")
             .Sum(m => (m.Str("content") ?? "").Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length);
         var (quote, rest) = Quotes.Split(words);
         var (withoutFiles, files) = Uploads.Split(rest);
@@ -1173,7 +1185,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             words = Quotes.Compose(quote, Mentions.Expand(edited, _rt.Workspace).Text + rest[withoutFiles.Length..]);
             typed = edited;
         }
-        if (await _rt.BackToAsync(again.At, again.Files, job.Stop.Token) is { } said)
+        if (await _rt.BackToAsync(at, again.Files, job.Stop.Token) is { } said)
         {
             job.Emit(new JsonObject { ["type"] = "notice", ["text"] = said });
         }
@@ -1188,10 +1200,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         };
         try
         {
-            var count = _rt.Agent.Messages.Count;
             job.Emit(new JsonObject
             {
-                ["type"] = "question", ["id"] = $"m{count}", ["parentId"] = count == 0 ? null : $"m{count - 1}", ["text"] = typed, ["quote"] = quote,
+                ["type"] = "question", ["id"] = NextId(), ["parentId"] = LastId(), ["text"] = typed, ["quote"] = quote,
                 ["attachments"] = files.Count > 0 ? Uploads.Shown(files) : null,
             });
             await _rt.Agent.AskAgainAsync(words, pictures is { Count: > 0 } ? pictures : null, typed, turn, job.Stop.Token);
@@ -1350,7 +1361,6 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                     Interlocked.Increment(ref _synced);
                 }
             }
-            var count = _rt.Agent.Messages.Count;
             if (again is not null)
             {
                 await AskAgainAsync(job, again, turn);
@@ -1362,7 +1372,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 text = _rt.Prepare(text);
                 job.Emit(new JsonObject
                 {
-                    ["type"] = "question", ["id"] = $"m{count}", ["parentId"] = count == 0 ? null : $"m{count - 1}", ["text"] = text, ["quote"] = quote,
+                    ["type"] = "question", ["id"] = NextId(), ["parentId"] = LastId(), ["text"] = text, ["quote"] = quote,
                     ["attachments"] = uploads is { Count: > 0 } ? Uploads.Shown(uploads) : null,
                 });
                 // The files attached: their text read from Arena, their pictures for a model that sees them.
@@ -1671,12 +1681,11 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
 
     void IAgentEvents.Step()
     {
-        var count = _rt.Agent.Messages.Count;
-        _answerId = $"m{count}";
+        _answerId = NextId();
         _stepStarted = Stopwatch.GetTimestamp();
         _thinkingStarted = 0;
         _thinkingMs = null;
-        Emit(new JsonObject { ["type"] = "assistant", ["id"] = _answerId, ["parentId"] = count == 0 ? null : $"m{count - 1}", ["model"] = _rt.Model.Name });
+        Emit(new JsonObject { ["type"] = "assistant", ["id"] = _answerId, ["parentId"] = LastId(), ["model"] = _rt.Model.Name });
     }
 
     void IAgentEvents.Reasoning(string text)
@@ -1714,6 +1723,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             ["completion"] = usage?.Completion,
             ["thinkingMs"] = _thinkingMs,
             ["durationMs"] = (long)Stopwatch.GetElapsedTime(_stepStarted).TotalMilliseconds,
+            // What filled the request, by kind: the context gauge shows it as the web chat's does.
+            ["context"] = usage is null ? null : _rt.Agent.Measured?.DeepClone(),
         });
     }
 
@@ -1724,7 +1735,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     {
         // The results are added to the history after the answer's message, in the calls' order.
         var text = result.Text.Length <= MaxResultChars ? result.Text : result.Text[..MaxResultChars] + $"\n… ({result.Text.Length - MaxResultChars:N0} more characters)";
-        var messageId = $"m{_rt.Agent.Messages.Count + index}";
+        var messageId = NextId(index);
         var e = new JsonObject
         {
             ["type"] = "tool_result",
@@ -1757,11 +1768,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
 
     void IAgentEvents.Compacted(string notice)
     {
-        // The messages are not the same any more (nor their places): the page takes the history afresh.
-        lock (_diffs)
-        {
-            _diffs.Clear();
-        }
+        // The page takes the conversation afresh: each message keeps its place (and its diff), the last one a compaction
+        // covers now marked with its summary; a message taken out (it did not fit) is gone.
         var session = SessionJson();
         Emit(new JsonObject { ["type"] = "reset", ["messages"] = session["messages"]!.DeepClone(), ["diffs"] = session["diffs"]!.DeepClone() });
         Emit(new JsonObject { ["type"] = "notice", ["kind"] = "compacted", ["text"] = notice });
@@ -1772,7 +1780,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     void IAgentEvents.SubAgent(JsonObject e) => Emit(e);
 
     void IAgentEvents.Attached(IReadOnlyList<string> files) =>
-        Emit(new JsonObject { ["type"] = "attached", ["id"] = $"m{_rt.Agent.Messages.Count}", ["files"] = new JsonArray([.. files.Select(f => (JsonNode)f)]) });
+        Emit(new JsonObject { ["type"] = "attached", ["id"] = NextId(), ["files"] = new JsonArray([.. files.Select(f => (JsonNode)f)]) });
 
     // ------------------------------------------------- commands with no time limit
 
@@ -2006,31 +2014,30 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
 internal static partial class History
 {
     private const string StoppedMark = Agent.StoppedMark;
-    private const string SummaryMark = "[The conversation so far, summarized";
 
     /// <summary>
-    /// The messages the model reads, each with what the session keeps of it (its time, model, tokens, how it ended, whether it
-    /// is a note of Code Arena's own): the conversation's last ones are the model's last word for word.
+    /// The whole conversation, each message with what the session keeps of it (its time, model, tokens, how it ended, whether
+    /// it is a note of Code Arena's own, what filled an answer's request), by its place in the session (m0, m1…): a
+    /// compaction leaves it whole. Only what the model reads is compacted: the last message each compaction covers carries
+    /// its summary, and the page marks it there, as the web chat does.
     /// </summary>
     public static JsonArray Messages(SessionData data)
     {
         var list = new JsonArray();
         var names = new Dictionary<string, string>(StringComparer.Ordinal);
-        var prefix = data.Prefix;
-        for (var i = 0; i < data.Messages.Count; i++)
+        for (var i = 0; i < data.Stream.Count; i++)
         {
-            var m = data.Messages[i];
-            var entry = i >= prefix && data.From + i - prefix < data.Stream.Count ? data.Stream[data.From + i - prefix] : null;
+            var entry = data.Stream[i];
+            var m = entry.Message;
             var role = m.Str("role") ?? "user";
             // A picture from the web goes with its words as parts: the words are shown.
             var content = m["content"] is JsonArray parts
                 ? string.Join("\n", parts.OfType<JsonObject>().Where(p => p.Str("type") == "text").Select(p => p.Str("text")))
                 : m.Str("content") ?? "";
-            var status = entry?.Status ?? "complete";
+            var status = entry.Status ?? "complete";
             JsonArray? calls = null;
             string? toolName = null;
             string? callId = null;
-            string? summary = null;
             string? quote = null;
             List<string>? attached = null;
             List<Upload> uploads = [];
@@ -2059,11 +2066,6 @@ internal static partial class History
                 toolName = callId is null ? null : names.GetValueOrDefault(callId);
                 status = ToolStatus(content);
             }
-            else if (role == "user" && content.StartsWith(SummaryMark, StringComparison.Ordinal))
-            {
-                var start = content.IndexOf("\n\n", StringComparison.Ordinal);
-                summary = start < 0 ? content : content[(start + 2)..];
-            }
             else if (role == "user")
             {
                 // What was typed; the part of an answer it quotes, and what went with it (@files, the lines chosen in the editor), apart.
@@ -2072,8 +2074,7 @@ internal static partial class History
                 attached = Mentions.Attached(content);
                 content = Mentions.Typed(content);
             }
-            var answer = data.Answers.TryGetValue(i, out var a) ? a : default;
-            var usage = entry?.Usage ?? answer.Usage;
+            var usage = entry.Usage;
             list.Add(new JsonObject
             {
                 ["id"] = $"m{i}",
@@ -2088,20 +2089,21 @@ internal static partial class History
                 ["attachments"] = Uploads.Shown(uploads),
                 ["status"] = status,
                 ["error"] = null,
-                ["model"] = role == "assistant" ? entry?.Model ?? answer.Model : null,
+                ["model"] = role == "assistant" ? entry.Model : null,
                 ["promptTokens"] = usage?.Prompt,
                 ["cachedTokens"] = usage?.Cached,
                 ["completionTokens"] = usage?.Completion,
                 ["thinkingMs"] = null,
                 ["durationMs"] = null,
-                ["createdAt"] = entry?.At.ToString("o") ?? "",
+                ["createdAt"] = entry.At.ToString("o"),
                 ["noAccess"] = false,
-                ["summary"] = summary,
+                ["summary"] = data.Marks.GetValueOrDefault(i),
+                ["context"] = role == "assistant" ? entry.Context?.DeepClone() : null,
                 ["files"] = attached is { Count: > 0 } ? new JsonArray([.. attached.Select(f => (JsonNode)f)]) : null,
                 // Code Arena's own word to the model (the connection dropped), shown as a notice, not as the person's; a task
                 // call's sub-agents, with what each did.
-                ["details"] = entry?.Kind == "note" ? new JsonObject { ["note"] = true }
-                    : data.Agents.TryGetValue(i, out var agents) ? new JsonObject { ["agents"] = agents.DeepClone() } : null,
+                ["details"] = entry.Kind == "note" ? new JsonObject { ["note"] = true }
+                    : entry.Agents is { } agents ? new JsonObject { ["agents"] = agents.DeepClone() } : null,
             });
         }
         return list;
@@ -2128,9 +2130,9 @@ internal static partial class History
     {
         var diffs = new JsonObject();
         var calls = new Dictionary<string, JsonObject>(StringComparer.Ordinal);
-        for (var i = 0; i < data.Messages.Count; i++)
+        for (var i = 0; i < data.Stream.Count; i++)
         {
-            var m = data.Messages[i];
+            var m = data.Stream[i].Message;
             foreach (var call in (m["tool_calls"] as JsonArray ?? []).OfType<JsonObject>())
             {
                 calls[call.Str("id") ?? ""] = call;

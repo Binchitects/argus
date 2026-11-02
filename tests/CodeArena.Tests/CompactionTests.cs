@@ -360,4 +360,31 @@ public sealed class CompactionTests : IDisposable
         Assert.True(await rt.Agent.MaybeCompactAsync(CancellationToken.None));
         Assert.Equal(1_000, Assert.Single(_gateway.Requests, Summarizing)["max_tokens"]!.GetValue<int>());
     }
+
+    [Fact]
+    public async Task A_tool_call_cut_at_the_output_limit_compacts_and_the_model_is_still_asked_to_do_it_again()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        var asked = 0;
+        _gateway.Answer = req => Summarizing(req) ? Reply.Say("SUMMARY.") : ++asked switch
+        {
+            1 => Reply.Call(("write_file", """{"path":"big.txt","content":"aaaa""")) with { Finish = "length", Completion = 6_000 },
+            2 => Reply.Call(("write_file", """{"path":"big.txt","content":"a"}""")),
+            _ => Reply.Say("Written in parts."),
+        };
+        await using var rt = await StartAsync(h);
+        Conversation(rt);
+        rt.Permissions.Mode = Mode.Yolo;
+        Assert.Equal("Written in parts.", await rt.Agent.RunAsync("write big.txt", new Spend(), CancellationToken.None));
+        Assert.Equal(3, asked);
+        // Compacted after the cut, the request still ends with the person's question and the note to do it in parts, word
+        // for word (the earlier turns are what was summarized): the model is never left with nothing to answer.
+        var after = _gateway.Requests.Where(r => !Summarizing(r)).ElementAt(1);
+        var history = FakeGateway.History(after);
+        Assert.StartsWith("[The conversation so far, summarized", history[0]!["content"]!.ToString(), StringComparison.Ordinal);
+        Assert.Equal("user", history[^1]!["role"]!.GetValue<string>());
+        Assert.Contains("Do it again in smaller parts", FakeGateway.Last(after), StringComparison.Ordinal);
+        Assert.Contains(history, m => m!["content"]?.ToString() == "write big.txt");
+        Assert.Equal("a", File.ReadAllText(Path.Combine(h.Work, "big.txt")));
+    }
 }
