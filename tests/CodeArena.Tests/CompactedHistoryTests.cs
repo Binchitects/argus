@@ -62,6 +62,16 @@ public sealed class CompactedHistoryTests : IDisposable
             InOrder(session);
             Assert.NotNull(session[3]["summary"]);
             Assert.False((await web.GetJsonAsync("/api/session"))["busy"]!.GetValue<bool>());
+
+            // A question after the compaction is asked again by its id; one it covers is not (the model reads its summary).
+            var covered = await (await web.StreamAsync(HttpMethod.Post, "/api/again", new JsonObject { ["question"] = "m0" })).RestAsync();
+            Assert.Contains("compacted", covered.Single(e => e["type"]!.GetValue<string>() == "error")["message"]!.GetValue<string>(), StringComparison.Ordinal);
+            var again = await (await web.StreamAsync(HttpMethod.Post, "/api/again", new JsonObject { ["question"] = "m4", ["text"] = "third, again" })).RestAsync();
+            Assert.Equal("m4", again.First(e => e["type"]!.GetValue<string>() == "question")["id"]!.GetValue<string>());
+            Assert.Equal("third, again", FakeGateway.Last(_gateway.Requests[^1]));
+            session = Messages(await web.GetJsonAsync("/api/session"));
+            Assert.Equal(["first", "answer to first", "second", "answer to second", "third, again", "answer to third, again"], session.Select(Text));
+            Assert.NotNull(session[3]["summary"]);
         }
 
         // code-arena again, on the same session: the same, and it answers.
