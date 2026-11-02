@@ -41,10 +41,15 @@ interface HfRepo {
   models: { name: string; quant: string | null; size: number; projector: boolean; parts: number; inLibrary: boolean; path: string }[]
   /** Every file a picture or video model may be made of, with the role its name suggests. */
   files?: { path: string; size: number; role: string; library: string; inLibrary: boolean }[]
+  /** Its snapshot for vLLM and SGLang (safetensors, config, tokenizer), what it leaves out, and its folder in the library; null: none either loads. */
+  snapshot?: { size: number; skipped: number; files: number; path: string; inLibrary: boolean } | null
 }
 
-/** What is searched for: chat models (GGUF), picture or video models (their pipelines), or speech models (the speech server's registry). */
-type Kind = 'chat' | 'image' | 'video' | 'speech'
+/**
+ * What is searched for: chat models for llama.cpp (GGUF), snapshots for vLLM and SGLang (safetensors), picture or video
+ * models (their pipelines), or speech models (the speech server's registry).
+ */
+type Kind = 'chat' | 'snapshot' | 'image' | 'video' | 'speech'
 
 interface SpeechEntry {
   id: string
@@ -64,6 +69,8 @@ export interface HfDownload {
   speed: number | null
   error: string | null
   createdAt: string
+  /** A snapshot's folder in the library (hf/OWNER/REPO@REVISION), added as a model by it; null: files. */
+  snapshot?: string | null
   files: { path: string; size: number; library: string }[]
 }
 
@@ -77,8 +84,9 @@ function fit(size: number, gpu: number | null, ram: number | null): { label: str
 }
 
 /**
- * Hugging Face, in a dialog: search chat models (GGUF), picture or video models, or the speech server's models; open one to
- * see its files (with sizes and, for a chat model, whether each fits this machine), and download into the library.
+ * Hugging Face, in a dialog: search chat models (GGUF files for llama.cpp, snapshots for vLLM and SGLang), picture or video
+ * models, or the speech server's models; open one to see its files (with sizes and, for a chat model, whether each fits
+ * this machine), and download into the library.
  */
 export function HuggingFaceBrowser({ onClose }: { onClose: () => void }) {
   const [kind, setKind] = useState<Kind>('chat')
@@ -90,7 +98,7 @@ export function HuggingFaceBrowser({ onClose }: { onClose: () => void }) {
     queryFn: ({ signal }) => api<HfModel[]>(`/api/admin/models/hf/search?q=${encodeURIComponent(asked)}&kind=${kind}`, { signal }),
     enabled: asked.length >= 2 && kind !== 'speech',
   })
-  if (repo) return <RepoView id={repo} media={kind === 'image' || kind === 'video'} onBack={() => setRepo(null)} onClose={onClose} />
+  if (repo) return <RepoView id={repo} media={kind === 'image' || kind === 'video'} snapshots={kind === 'snapshot'} onBack={() => setRepo(null)} onClose={onClose} />
   return (
     <>
       <DialogHeader>
@@ -99,13 +107,16 @@ export function HuggingFaceBrowser({ onClose }: { onClose: () => void }) {
           {kind === 'speech'
             ? 'The models the speech server can fetch: it downloads them itself, into its own store.'
             : kind === 'chat'
-              ? 'GGUF models, most downloaded first. Open one to see its files and whether they fit this machine.'
-              : `${kind === 'image' ? 'Text to image' : 'Text to video'} models, most downloaded first. Open one to pick its files: its diffusion model, text encoders and decoder.`}
+              ? 'GGUF models, for llama.cpp, most downloaded first. Open one to see its files and whether they fit this machine.'
+              : kind === 'snapshot'
+                ? 'Repositories with safetensors weights, for vLLM and SGLang, most downloaded first. Open one to download its snapshot, with its size and whether it fits this machine.'
+                : `${kind === 'image' ? 'Text to image' : 'Text to video'} models, most downloaded first. Open one to pick its files: its diffusion model, text encoders and decoder.`}
         </DialogDescription>
       </DialogHeader>
       <Tabs value={kind} onValueChange={(v) => setKind(v as Kind)}>
         <TabsList aria-label="What to find">
           <TabsTrigger value="chat">Chat</TabsTrigger>
+          <TabsTrigger value="snapshot">Snapshots</TabsTrigger>
           <TabsTrigger value="image">Pictures</TabsTrigger>
           <TabsTrigger value="video">Video</TabsTrigger>
           <TabsTrigger value="speech">Speech</TabsTrigger>
@@ -126,7 +137,7 @@ export function HuggingFaceBrowser({ onClose }: { onClose: () => void }) {
               type="search"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder={kind === 'chat' ? 'qwen3, llama 3.3, gemma…' : kind === 'image' ? 'flux, sdxl, stable diffusion…' : 'wan, ltx…'}
+              placeholder={kind === 'chat' || kind === 'snapshot' ? 'qwen3, llama 3.3, gemma…' : kind === 'image' ? 'flux, sdxl, stable diffusion…' : 'wan, ltx…'}
               aria-label="Search Hugging Face"
               autoFocus
             />
@@ -235,18 +246,35 @@ function SpeechRegistry({ onClose }: { onClose: () => void }) {
   )
 }
 
-function RepoView({ id, media = false, onBack, onClose }: { id: string; media?: boolean; onBack: () => void; onClose: () => void }) {
+/**
+ * A repository: its GGUF files as models (or a picture or video model's files), and its snapshot for vLLM and SGLang, which
+ * downloads alone (opened from Snapshots, it comes first and is said when there is none).
+ */
+function RepoView({ id, media = false, snapshots = false, onBack, onClose }: { id: string; media?: boolean; snapshots?: boolean; onBack: () => void; onClose: () => void }) {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const repo = useQuery({ queryKey: ['admin', 'hf', 'repo', id], queryFn: ({ signal }) => api<HfRepo>(`/api/admin/models/hf/repo?id=${encodeURIComponent(id)}`, { signal }) })
   const [picked, setPicked] = useState<string[]>([])
+  // Its snapshot, ticked: downloaded alone, without its GGUF files (the API refuses the two together).
+  const [snap, setSnap] = useState(false)
   const r = repo.data
-  const chosen = media
-    ? (r?.files ?? []).filter((f) => picked.includes(f.path)).map((f) => ({ name: f.path, size: f.size }))
-    : (r?.models.filter((m) => picked.includes(m.name)) ?? [])
+  const shot = !media ? r?.snapshot : null
+  const chosen =
+    snap && shot
+      ? [{ name: `the snapshot of ${id}`, size: shot.size }]
+      : media
+        ? (r?.files ?? []).filter((f) => picked.includes(f.path)).map((f) => ({ name: f.path, size: f.size }))
+        : (r?.models.filter((m) => picked.includes(m.name)) ?? [])
   const total = chosen.reduce((s, m) => s + m.size, 0)
+  const pick = (name: string, on: boolean) => {
+    setSnap(false)
+    setPicked(on ? [...picked, name] : picked.filter((x) => x !== name))
+  }
+  // vLLM and SGLang hold the whole model on the GPUs, with room for the cache besides.
+  const gpu = r?.gpuForModels ?? null
+  const shotFit = shot && gpu !== null ? (shot.size * 1.15 <= gpu ? { label: 'Fits the GPUs', tone: 'success' as const } : { label: 'Too big for the GPUs', tone: 'destructive' as const }) : null
   const start = useMutation({
-    mutationFn: () => api('/api/admin/models/hf/downloads', { body: media ? { repo: id, files: picked } : { repo: id, models: picked } }),
+    mutationFn: () => api('/api/admin/models/hf/downloads', { body: snap ? { repo: id, snapshot: true } : media ? { repo: id, files: picked } : { repo: id, models: picked } }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['admin', 'hf', 'downloads'] })
       toast.success('Download started', { description: 'Follow it under Downloads; once it is in, add it as a model.' })
@@ -266,7 +294,13 @@ function RepoView({ id, media = false, onBack, onClose }: { id: string; media?: 
         <DialogDescription>
           {r ? (
             <>
-              {[r.architecture, r.parameters ? `${formatValue(r.parameters)} parameters` : null, r.context ? `${formatValue(r.context)} tokens of context` : null, r.license ? `licence ${r.license}` : null]
+              {[
+                r.architecture,
+                r.parameters ? `${formatValue(r.parameters)} parameters` : null,
+                r.context ? `${formatValue(r.context)} tokens of context` : null,
+                r.license ? `licence ${r.license}` : null,
+                r.gated ? 'gated (HF_TOKEN of an account that accepted its terms)' : null,
+              ]
                 .filter(Boolean)
                 .join(' · ')}{' '}
               <a href={`https://huggingface.co/${id}`} target="_blank" rel="noreferrer" className="text-primary-ink underline underline-offset-2">
@@ -315,7 +349,45 @@ function RepoView({ id, media = false, onBack, onClose }: { id: string; media?: 
           </ul>
         </fieldset>
       )}
-      {!media && r && r.models.length === 0 && <Alert>This repository has no GGUF files.</Alert>}
+      {!media && r && !r.snapshot && snapshots && (
+        <Alert>This repository has no snapshot vLLM or SGLang can load: no safetensors weights with a config.json at its root.{r.models.length > 0 ? ' Its GGUF files are for llama.cpp.' : ''}</Alert>
+      )}
+      {shot && (
+        <fieldset className="grid gap-1.5">
+          <legend className="mb-1 text-sm font-medium">Snapshot</legend>
+          <label
+            aria-label="Snapshot for vLLM and SGLang"
+            className={cn(
+              'flex cursor-pointer items-start gap-2.5 rounded-md border px-3 py-2 text-sm has-[:checked]:border-primary has-[:checked]:bg-primary/5 has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring',
+              shot.inLibrary && 'cursor-default',
+            )}
+          >
+            <input
+              type="checkbox"
+              className="mt-0.5 size-3.5 shrink-0 accent-primary outline-none"
+              checked={snap}
+              disabled={shot.inLibrary}
+              onChange={(e) => {
+                setSnap(e.target.checked)
+                setPicked([])
+              }}
+            />
+            <span className="grid min-w-0 flex-1 gap-0.5">
+              <span className="flex flex-wrap items-center gap-1.5">
+                <span className="font-medium">Snapshot for vLLM and SGLang</span>
+                {shot.inLibrary && <Badge variant="success">In the library</Badge>}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {shot.files} files · {bytes(shot.size)}
+                {shot.skipped > 0 ? ` · leaves out ${bytes(shot.skipped)} neither engine reads (original/ and metal/ copies, GGUF files, other formats)` : ''}
+              </span>
+              <span className="font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]">{shot.path}/</span>
+            </span>
+            {shotFit && <Badge variant={shotFit.tone}>{shotFit.label}</Badge>}
+          </label>
+        </fieldset>
+      )}
+      {!media && !snapshots && r && r.models.length === 0 && !r.snapshot && <Alert>This repository has no GGUF files.</Alert>}
       {!media && r && r.models.length > 0 && (
         <fieldset className="grid gap-1.5">
           <legend className="mb-1 text-sm font-medium">Files</legend>
@@ -341,7 +413,7 @@ function RepoView({ id, media = false, onBack, onClose }: { id: string; media?: 
                       className="mt-0.5 size-3.5 shrink-0 accent-primary outline-none"
                       checked={picked.includes(m.name)}
                       disabled={m.inLibrary}
-                      onChange={(e) => setPicked(e.target.checked ? [...picked, m.name] : picked.filter((x) => x !== m.name))}
+                      onChange={(e) => pick(m.name, e.target.checked)}
                     />
                     <span className="grid min-w-0 flex-1 gap-0.5">
                       <span className="flex flex-wrap items-center gap-1.5">
@@ -373,7 +445,9 @@ function RepoView({ id, media = false, onBack, onClose }: { id: string; media?: 
           disabled={chosen.length === 0}
           loading={start.isPending}
           onClick={async () => {
-            if (await confirm({ title: `Download ${chosen.length === 1 ? chosen[0]!.name : `${chosen.length} files`}?`, description: `${bytes(total)} from huggingface.co/${id} into the model library.`, confirm: 'Download' }))
+            const into = `into the model library${snap && shot ? ` (${shot.path}/)` : ''}${r?.license ? `, under its licence (${r.license})` : ''}`
+            const gated = r?.gated ? ' It is gated: the account of HF_TOKEN must have accepted its terms on huggingface.co.' : ''
+            if (await confirm({ title: `Download ${chosen.length === 1 ? chosen[0]!.name : `${chosen.length} files`}?`, description: `${bytes(total)} from huggingface.co/${id} ${into}.${gated}`, confirm: 'Download' }))
               start.mutate()
           }}
         >
@@ -413,7 +487,8 @@ export function DownloadsCard({ onAdd }: { onAdd: (source: ModelSource) => void 
         {list.data.map((d) => {
           const pct = d.total ? Math.round((100 * d.bytes) / d.total) : 0
           const eta = d.state === 'running' && d.speed ? (d.total - d.bytes) / d.speed : null
-          const model = d.kind === 'speech' ? undefined : (d.files.find((f) => !/mmproj/i.test(f.path)) ?? d.files[0])
+          // A snapshot is added by its folder; a GGUF download by its model (not its vision projector).
+          const model = d.kind === 'speech' ? undefined : d.snapshot ? { library: d.snapshot } : (d.files.find((f) => !/mmproj/i.test(f.path)) ?? d.files[0])
           return (
             <div key={d.id} className="grid gap-1.5 rounded-lg border p-3">
               <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -451,7 +526,11 @@ export function DownloadsCard({ onAdd }: { onAdd: (source: ModelSource) => void 
                 </span>
               </div>
               <p className="font-mono text-xs text-muted-foreground [overflow-wrap:anywhere]">
-                {d.kind === 'speech' ? 'Fetched by the speech server: Add as a model adds it as a text to speech or speech to text model.' : d.files.map((f) => f.path).join(', ')}
+                {d.kind === 'speech'
+                  ? 'Fetched by the speech server: Add as a model adds it as a text to speech or speech to text model.'
+                  : d.snapshot
+                    ? `The snapshot ${d.snapshot}/, for vLLM and SGLang (${d.files.length} files)`
+                    : d.files.map((f) => f.path).join(', ')}
               </p>
               {d.state !== 'done' && d.kind !== 'speech' && (
                 <>

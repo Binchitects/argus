@@ -81,3 +81,74 @@ describe('admin models: finding picture, video and speech models', () => {
     expect(calls.find((c) => c.method === 'POST')!.body).toEqual({ id: 'speaches-ai/piper-de_DE-thorsten-medium' })
   })
 })
+
+// A chat model for vLLM or SGLang is a repository's snapshot (safetensors), not a GGUF file: found and downloaded here too.
+
+describe('admin models: snapshots for vLLM and SGLang from Hugging Face', () => {
+  const sha = '9c925d64d72725edaf899c6cb9c377fd0709d9c5'
+  const repo = {
+    id: 'Qwen/Qwen3-8B', sha, gated: false, license: 'apache-2.0', architecture: null, parameters: null, context: null, downloads: 9000, likes: 800,
+    gpuForModels: 100e9, ramForModels: 60e9, models: [], files: [],
+    snapshot: { size: 16.4e9, skipped: 2e9, files: 12, path: `hf/Qwen/Qwen3-8B@${sha}`, inLibrary: false },
+  }
+
+  it("searches repositories with safetensors, shows a snapshot's size and licence, and downloads it alone", async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/models': () => ({ json: view }),
+      'GET /api/admin/models/hf/downloads': () => ({ json: [] }),
+      'GET /api/admin/models/hf/search': (_b, _i, url) => ({
+        json: url.searchParams.get('kind') === 'snapshot' ? [{ id: 'Qwen/Qwen3-8B', downloads: 9000, likes: 800, lastModified: null, gated: false, pipelineTag: 'text-generation', tags: [] }] : [],
+      }),
+      'GET /api/admin/models/hf/repo': () => ({ json: repo }),
+      'POST /api/admin/models/hf/downloads': () => ({ status: 201, json: {} }),
+    })
+    renderApp('/admin/models')
+    await userEvent.click(await screen.findByRole('button', { name: /Find on Hugging Face/ }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.click(within(dialog).getByRole('tab', { name: 'Snapshots' }))
+    expect(within(dialog).getByText(/Repositories with safetensors weights, for vLLM and SGLang/)).toBeInTheDocument()
+    await userEvent.type(within(dialog).getByRole('searchbox', { name: 'Search Hugging Face' }), 'qwen3')
+    await userEvent.click(within(dialog).getByRole('button', { name: /Search/ }))
+    await userEvent.click(await within(dialog).findByRole('button', { name: /Qwen\/Qwen3-8B/ }))
+    expect(calls.find((c) => c.path.startsWith('/api/admin/models/hf/search'))!.path).toContain('kind=snapshot')
+    const snapshot = await within(dialog).findByRole('checkbox', { name: 'Snapshot for vLLM and SGLang' })
+    expect(within(dialog).getByText(/12 files · 15\.3 GiB · leaves out 1\.9 GiB neither engine reads/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/licence apache-2\.0/)).toBeInTheDocument()
+    await userEvent.click(snapshot)
+    expect(within(dialog).getByText('15.3 GiB to download')).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: /Download/ }))
+    const confirm = await screen.findByRole('alertdialog', { name: 'Download the snapshot of Qwen/Qwen3-8B?' })
+    expect(confirm).toHaveTextContent(`into the model library (hf/Qwen/Qwen3-8B@${sha}/), under its licence (apache-2.0)`)
+    await userEvent.click(within(confirm).getByRole('button', { name: 'Download' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/models/hf/downloads')).toBe(true))
+    expect(calls.find((c) => c.method === 'POST')!.body).toEqual({ repo: 'Qwen/Qwen3-8B', snapshot: true })
+  })
+
+  it('says when a repository has no snapshot vLLM or SGLang can load, and shows one in the library as there', async () => {
+    fakeApi(admin, {
+      'GET /api/admin/models': () => ({ json: view }),
+      'GET /api/admin/models/hf/downloads': () => ({ json: [] }),
+      'GET /api/admin/models/hf/search': () => ({
+        json: [
+          { id: 'Qwen/Qwen3-8B', downloads: 9000, likes: 800, lastModified: null, gated: false, pipelineTag: null, tags: [] },
+          { id: 'acme/Only-GGUF', downloads: 10, likes: 1, lastModified: null, gated: false, pipelineTag: null, tags: [] },
+        ],
+      }),
+      'GET /api/admin/models/hf/repo': (_b, _i, url) => ({
+        json: url.searchParams.get('id') === 'acme/Only-GGUF' ? { ...repo, id: 'acme/Only-GGUF', snapshot: null } : { ...repo, snapshot: { ...repo.snapshot, inLibrary: true } },
+      }),
+    })
+    renderApp('/admin/models')
+    await userEvent.click(await screen.findByRole('button', { name: /Find on Hugging Face/ }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.click(within(dialog).getByRole('tab', { name: 'Snapshots' }))
+    await userEvent.type(within(dialog).getByRole('searchbox', { name: 'Search Hugging Face' }), 'qwen3')
+    await userEvent.click(within(dialog).getByRole('button', { name: /Search/ }))
+    await userEvent.click(await within(dialog).findByRole('button', { name: /acme\/Only-GGUF/ }))
+    expect(await within(dialog).findByText(/This repository has no snapshot vLLM or SGLang can load/)).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Back to the search' }))
+    await userEvent.click(await within(dialog).findByRole('button', { name: /Qwen\/Qwen3-8B/ }))
+    expect(await within(dialog).findByRole('checkbox', { name: 'Snapshot for vLLM and SGLang' })).toBeDisabled()
+    expect(within(dialog).getByText('In the library')).toBeInTheDocument()
+  })
+})

@@ -578,7 +578,13 @@ how). **no**: missing, with the reason.
   wants, on that model's GPUs, from the app's desired state in the `engine`
   volume; it says what each does in `vllm-status`. The key goes by
   `VLLM_API_KEY`, never a command line. Models come from the library's Hugging
-  Face snapshots (Admin → Models → Hugging Face, *snapshot*).
+  Face snapshots (Admin → Models → Find on Hugging Face → **Snapshots**, a
+  repository's **Snapshot for vLLM and SGLang**). On a host with no network,
+  download one on a machine that has one with
+  `hf download OWNER/REPO --revision REV --local-dir LIBRARY/hf/OWNER/REPO@REV`
+  and carry that folder to the same place in the host's library
+  (`LLAMACPP_LIBRARY_DIR`): it reads `hf/<owner>/<repository>@<revision>/`
+  ([admin.md](admin.md#models)).
 - **SGLang** is off until asked for: the `sglang` feature, `--with sglang` on
   install, upgrade or repair. `SGLANG_IMAGE` is SGLang's own image
   (`lmsysorg/sglang:v0.5.21-cu130-runtime` by default, about 14 GB;

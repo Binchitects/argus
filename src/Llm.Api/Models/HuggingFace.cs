@@ -42,7 +42,7 @@ public sealed record HfSnapshot(long Size, IReadOnlyList<HfFile> Files, long Ski
 public sealed record HfRepo(string Id, string Sha, bool Gated, string? License, string? Architecture, long? Parameters, int? Context,
     long Downloads, long Likes, string? LastModified, IReadOnlyList<HfGguf> Models, IReadOnlyList<HfFile> Weights, HfSnapshot? Snapshot = null);
 
-/// <summary>Hugging Face's API: searching GGUF models, a repository's files, and downloading one (with resume).</summary>
+/// <summary>Hugging Face's API: searching GGUF models and snapshots, a repository's files, and downloading one (with resume).</summary>
 public sealed partial class HuggingFace(HttpClient http, IOptionsMonitor<HuggingFaceOptions> options)
 {
     private string Base => options.CurrentValue.BaseUrl.TrimEnd('/');
@@ -92,12 +92,13 @@ public sealed partial class HuggingFace(HttpClient http, IOptionsMonitor<Hugging
         : "This repository is gated: accept its terms on huggingface.co with the account whose token is set (HF_TOKEN).";
 
     /// <summary>
-    /// Repositories matching the words, most downloaded first: GGUF ones for chat models, or those of a pipeline
-    /// (text-to-image, text-to-video) for picture and video models, in any format stable-diffusion.cpp reads.
+    /// Repositories matching the words, most downloaded first: GGUF ones for llama.cpp's chat models, those with safetensors
+    /// for a snapshot (vLLM's and SGLang's), or those of a pipeline (text-to-image, text-to-video) for picture and video
+    /// models, in any format stable-diffusion.cpp reads.
     /// </summary>
-    public async Task<IReadOnlyList<HfModel>> SearchAsync(string query, CancellationToken ct, string? pipeline = null)
+    public async Task<IReadOnlyList<HfModel>> SearchAsync(string query, CancellationToken ct, string? pipeline = null, bool snapshots = false)
     {
-        var filter = pipeline is null ? "&filter=gguf" : $"&pipeline_tag={Uri.EscapeDataString(pipeline)}";
+        var filter = pipeline is not null ? $"&pipeline_tag={Uri.EscapeDataString(pipeline)}" : snapshots ? "&filter=safetensors" : "&filter=gguf";
         var url = $"{Base}/api/models?search={Uri.EscapeDataString(query)}{filter}&sort=downloads&direction=-1&limit=30";
         var list = await GetJsonAsync(url, ct) as JsonArray ?? [];
         return [.. list.OfType<JsonObject>().Select(m => new HfModel(
