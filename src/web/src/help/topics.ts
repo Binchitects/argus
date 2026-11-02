@@ -893,7 +893,7 @@ export const topics = {
           'Press **Find on Hugging Face** and search: under **Chat** for a GGUF file (llama.cpp), under **Snapshots** for a snapshot (vLLM and SGLang).',
           'Open a result, tick a file that fits (or **Snapshot for vLLM and SGLang**), and press **Download**.',
           'When it is in, press **Add as a model** under **Downloads**.',
-          'On a host with no network, download it on a machine that has one, with `hf download OWNER/REPO --revision REV --local-dir LIBRARY/hf/OWNER/REPO@REV` for a snapshot (or `hf download OWNER/REPO FILE.gguf --local-dir LIBRARY/OWNER/REPO` for a GGUF file), and carry the folder to the same place in the library here.',
+          'On a host with no network, download it on a machine that has one, with `hf download OWNER/REPO --revision REV --local-dir LIBRARY/hf/OWNER/REPO@REV --exclude \'original/*\' \'metal/*\' \'*.gguf\'` for a snapshot (what neither engine reads left out) (or `hf download OWNER/REPO FILE.gguf --local-dir LIBRARY/OWNER/REPO` for a GGUF file), and carry the folder to the same place in the library here.',
         ],
       },
       { title: 'Move a model to another engine', steps: ['Press **Change engine…** on its card.', 'Choose the engine under **Engine**: **File or model** takes the same model in that engine\'s form from the library, or says how to get it.', 'Check the file and press **Save**: its card says how far the move is.'] },

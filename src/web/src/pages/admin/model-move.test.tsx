@@ -267,7 +267,7 @@ describe('admin models: the Engine field', () => {
     expect(within(dialog).getByText(/Find on Hugging Face/)).toBeInTheDocument()
     expect(within(dialog).getByText('Snapshots')).toBeInTheDocument()
     // With no network here: downloaded on a machine that has one, into the folder the library reads, and carried over.
-    expect(within(dialog).getByText('hf download <owner>/<repository> --revision <revision> --local-dir <library>/hf/<owner>/<repository>@<revision>')).toBeInTheDocument()
+    expect(within(dialog).getByText("hf download <owner>/<repository> --revision <revision> --local-dir <library>/hf/<owner>/<repository>@<revision> --exclude 'original/*' 'metal/*' '*.gguf'")).toBeInTheDocument()
     expect(within(dialog).queryByRole('form', { name: 'The chat model' })).not.toBeInTheDocument()
     const save = within(dialog).getByRole('button', { name: 'Save' })
     expect(save).toBeDisabled()
@@ -330,10 +330,14 @@ describe('admin models: the Engine field', () => {
     const dialog = await edit('Qwen3')
     expect(within(dialog).getByRole('combobox', { name: 'Engine' })).toBeEnabled()
     const at = '2026-11-02T10:00:00Z'
-    set([{ ...qwen3, move: { phase: 'draining', from: 'llamacpp', to: 'vllm', fromEngine: 'llamacpp', toEngine: 'vllm', old: 'serving', since: at, at, by: 'ada', error: null } }])
+    // As the API has it from the move's start: named on its new engine, the move under way.
+    set([{ ...qwen3, engineKind: 'vllm', move: { phase: 'draining', from: 'llamacpp', to: 'vllm', fromEngine: 'llamacpp', toEngine: 'vllm', old: 'serving', since: at, at, by: 'ada', error: null } }])
     await client.invalidateQueries({ queryKey: ['admin', 'models'] })
     await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'Engine' })).toBeDisabled())
     expect(within(dialog).getByRole('combobox', { name: 'Engine' })).toHaveAccessibleDescription(/It is moving from llama\.cpp to vLLM/)
+    // The body says the same, not that it moved.
+    expect(within(dialog).getByText('It is moving to vLLM')).toBeInTheDocument()
+    expect(within(dialog).queryByText(/while this was open/)).not.toBeInTheDocument()
   })
 
   it('opens Edit with the Engine field focused from Change engine… on the card, and names each engine of a kind that has several', async () => {

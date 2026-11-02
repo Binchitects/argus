@@ -238,7 +238,7 @@ function HowToGet({ form, others }: { form: FileForm; others: boolean }) {
         model): its <strong>Snapshots</strong> tab finds the repositories that have one. On a host with no network, download it on a machine that has one (the
         revision is a commit of the repository; the library is LLAMACPP_LIBRARY_DIR):
       </p>
-      {command('hf download <owner>/<repository> --revision <revision> --local-dir <library>/hf/<owner>/<repository>@<revision>')}
+      {command("hf download <owner>/<repository> --revision <revision> --local-dir <library>/hf/<owner>/<repository>@<revision> --exclude 'original/*' 'metal/*' '*.gguf'")}
       <p>
         then carry that folder to the same place in this host's library. File or model lists it once it is whole.
         {others ? ' The other snapshots it lists may be this model under another name.' : ''}
@@ -286,8 +286,9 @@ export function ModelDialog({
   /** The engine instances: llama.cpp's takes a GGUF file as a chat model, vLLM's and SGLang's a snapshot. */
   instances?: EngineInstance[]
   /**
-   * The edited chat model as the page has it now: its engine, and its move to another one (its engine does not change while it
-   * moves). Another admin may have moved it while this was open. Undefined: as it was opened.
+   * The edited chat model as the page has it now: its engine, and its move to another one (the API names the new engine from the
+   * move's start, and the old one again when it fails). Another admin may have moved it while this was open. Undefined: as it was
+   * opened.
    */
   live?: { engineKind?: string; engine?: string | null; move?: ModelMove | null }
 }) {
@@ -369,8 +370,8 @@ export function ModelDialog({
     if (choice.kind && can(choice.kind)) setKind(choice.kind)
   }
 
-  // Its engine does not change while it moves (the API refuses it then); a failed move may be tried again. Moved elsewhere
-  // while this was open (by another admin), its form here is for the engine it left: saved, it would move back.
+  // It is not changed while it moves (the API refuses it then); a failed move may be tried again. Moved elsewhere while this was
+  // open (by another admin), its form here is for the engine it left: saved, it would move back. A move under way says so first.
   const underway = (live !== undefined ? live.move : saved?.move) ?? null
   const moving = underway && underway.phase !== 'failed' ? underway : null
   const now = saved && live ? homeOf(live, instances) : null
@@ -577,13 +578,13 @@ export function ModelDialog({
           gpus={gpus}
           onClose={onClose}
         />
-      ) : moved ? (
-        <Held title={`It moved to ${moved} while this was open`} saved={!!saved} onClose={onClose}>
-          This form is for {ownChoice?.label ?? engineLabel(own?.kind)}, where it was: saved, it would move back. Close this and edit it again.
-        </Held>
       ) : moving ? (
         <Held variant="info" title={`It is moving to ${engineLabel(moving.to)}`} saved={!!saved} onClose={onClose}>
           It is not changed while it moves: edit it once it is there, or once its move has failed.
+        </Held>
+      ) : moved ? (
+        <Held title={`It moved to ${moved} while this was open`} saved={!!saved} onClose={onClose}>
+          This form is for {ownChoice?.label ?? engineLabel(own?.kind)}, where it was: saved, it would move back. Close this and edit it again.
         </Held>
       ) : chosen.why && chosen.value !== own?.name ? (
         <Held title={`${chosen.label} does not run here`} saved={!!saved} onClose={onClose}>
