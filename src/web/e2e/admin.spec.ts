@@ -252,6 +252,35 @@ test("the engine's models each say whether they are loaded, and more come from t
   await expect(dialog).toBeHidden()
 })
 
+test("each chat model's card names its engine, and Change engine… opens Edit at the Engine field with every engine", async ({ page }, info) => {
+  await page.goto('/admin/models')
+  await settled(page, 'Models')
+  test.skip(noGateway, 'no model added here: a stack without a gateway (CI\'s) has none')
+  const models = page.locator('main section').filter({ has: page.getByText(/^Engine: (llama\.cpp|vLLM|SGLang)/) })
+  await expect(models.first()).toBeVisible()
+  await screenshot(page, info, 'models-with-engines')
+  // Read-only: the dialog is only opened and closed, nothing saved.
+  const card = models.first()
+  const name = (await card.getByRole('heading').first().innerText()).split('\n')[0]!.trim()
+  await card.getByRole('button', { name: 'Change engine…' }).click()
+  const dialog = page.getByRole('dialog', { name: `Edit ${name}` })
+  const engine = dialog.getByRole('combobox', { name: 'Engine' })
+  // Focused once the library is read (held with "Reading the library…" until then).
+  await expect(engine).toBeEnabled({ timeout: 30_000 })
+  await expect(engine).toBeFocused()
+  await engine.click()
+  for (const kind of ['llama.cpp', 'vLLM', 'SGLang']) {
+    // Each engine is listed, those that do not run here too (disabled, saying why).
+    await expect(page.getByRole('option', { name: new RegExp(`^${kind.replace('.', '\\.')}`) }).first()).toBeVisible()
+  }
+  await screenshot(page, info, 'engine-field')
+  // Esc closes the list, then the dialog.
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('listbox')).toBeHidden()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+})
+
 test('members cannot open admin pages', async ({ browser, baseURL }) => {
   test.skip(noGateway, 'makes a person')
   const admin = await browser.newContext({ ignoreHTTPSErrors: true, baseURL, storageState: 'e2e/.auth/state.json' })
