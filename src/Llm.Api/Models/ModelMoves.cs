@@ -57,14 +57,20 @@ public sealed partial class ModelMoves(AppDbContext db, ModelCatalog catalog, En
     }
 
     /// <summary>
-    /// Why <paramref name="m"/> cannot move to its new engine now (it does not run), or null. A move to an engine that cannot
-    /// load it would only fail there.
+    /// Why <paramref name="m"/> cannot move to its new engine now (it does not run, or its feature is off), or null. A move to an
+    /// engine that cannot load it would only fail there.
     /// </summary>
-    public static string? Refusal(LocalModel m, VllmBackends vllm, EngineOptions options)
+    public static string? Refusal(LocalModel m, VllmBackends vllm, EngineOptions options, Operations.Features features)
     {
         if (!EngineKinds.ServerPerModel(m.EngineKind))
         {
-            return options.LlamaCpp ? null : "llama.cpp does not run on this stack.";
+            if (!options.LlamaCpp)
+            {
+                return "llama.cpp does not run on this stack.";
+            }
+            return features.Runs(EngineKinds.LlamaCpp) || Operations.Features.All.FirstOrDefault(f => f.Services.Contains(EngineKinds.LlamaCpp)) is not { } feature
+                ? null
+                : $"llama.cpp is off on this stack (its feature, {feature.Id}): the installer turns it on with ./arenactl repair --with {feature.Id} from the checkout, or sh argus-arena-{AppInfo.Current.Version}-offline.run repair --with {feature.Id} with the offline installer. It cannot move there before it runs.";
         }
         if (vllm.For(m.Engine, m.EngineKind) is not { } backend)
         {

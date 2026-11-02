@@ -188,6 +188,10 @@ public sealed class HuggingFaceTests(AppFixture app) : IDisposable
     {
         await using var f = NewApp();
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        // Found among the repositories with safetensors, not only the GGUF ones.
+        await admin.JsonAsync(await admin.GetAsync("/api/admin/models/hf/search?q=flash&kind=snapshot"));
+        Assert.Contains("filter=safetensors", app.HuggingFace.Searches.Last(), StringComparison.Ordinal);
+        Assert.DoesNotContain("filter=gguf", app.HuggingFace.Searches.Last(), StringComparison.Ordinal);
         var repo = await admin.JsonAsync(await admin.GetAsync($"/api/admin/models/hf/repo?id={FakeHuggingFace.SnapshotRepo}"));
         var snapshot = repo.GetProperty("snapshot");
         var wanted = FakeHuggingFace.SnapshotFiles.Where(x => !x.Key.StartsWith("original/", StringComparison.Ordinal) && !x.Key.StartsWith("metal/", StringComparison.Ordinal)
@@ -204,6 +208,8 @@ public sealed class HuggingFaceTests(AppFixture app) : IDisposable
         await StatusAssert.Is(HttpStatusCode.Created, made);
         var done = await DownloadAsync(admin, (await admin.JsonAsync(made)).GetProperty("id").GetGuid());
         Assert.Equal("done", done.GetProperty("state").GetString());
+        // Added as a model by its folder, not one of its files.
+        Assert.Equal($"hf/acme/Flash-FP8@{FakeHuggingFace.Sha}", done.GetProperty("snapshot").GetString());
         var folder = Path.Combine(_library, "hf", "acme", "Flash-FP8@" + FakeHuggingFace.Sha);
         foreach (var (file, bytes) in wanted)
         {

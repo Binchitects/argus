@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AudioLines, Boxes, CircleDot, Clapperboard, Clock, Eye, Search, HelpCircle, Image as ImageIcon, Loader2, Mic, Moon, Pencil, Pin, Plus, Power, PowerOff, Sparkles, Trash2, XCircle } from 'lucide-react'
+import { ArrowRightLeft, AudioLines, Boxes, CircleDot, Clapperboard, Clock, Eye, Search, HelpCircle, Image as ImageIcon, Loader2, Mic, Moon, Pencil, Pin, Plus, Power, PowerOff, Sparkles, Trash2, XCircle } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils'
 import { AccessPicker, type AccessRule } from './access-picker'
 import { type SavedMediaModel } from './media-model-form'
 import { serverPerModel, type EngineInstance, type ModelMove } from './engine-api'
+import { engineName } from './engine-choice'
 import { EngineProblems, MoveState } from './engine-fields'
 import { engineSlot } from './engine-slot'
 import { ModelDialog, type ModelDialogOpen } from './model-dialog'
@@ -159,6 +160,8 @@ export function ModelsPage() {
   if (models.isPending) return <PageSkeleton />
   if (models.error) return <QueryError error={models.error} retry={() => models.refetch()} />
   const { engine, small, gpu } = models.data
+  // The chat model being edited as the page has it now: its move to another engine, or its move done meanwhile, holds the dialog.
+  const editing = dialog && 'edit' in dialog && dialog.edit.kind === 'chat' ? models.data.models.find((m) => m.source === 'local' && m.name === dialog.edit.model.name) : undefined
   return (
     <>
       <PageHeader
@@ -205,6 +208,7 @@ export function ModelsPage() {
             engine={engine}
             small={m.name === small?.name && (m.mode ?? 'chat') === 'chat'}
             onEdit={() => setDialog({ edit: m.source === 'media' ? { kind: 'media', model: m as SavedMediaModel } : { kind: 'chat', model: m } })}
+            onChangeEngine={() => setDialog({ edit: { kind: 'chat', model: m }, focus: 'engine' })}
             onChanged={() => queryClient.invalidateQueries({ queryKey: ['admin', 'models'] })}
           />
         ))}
@@ -221,6 +225,7 @@ export function ModelsPage() {
               onClose={() => setDialog(null)}
               chatSlot={engineSlot}
               instances={engine.instances}
+              live={editing}
             />
           )}
         </DialogContent>
@@ -376,7 +381,22 @@ function GpuSharing({ gpu }: { gpu: NonNullable<ModelsView['gpu']> }) {
   )
 }
 
-function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: ModelRow; engine: ModelsView['engine']; small: boolean; onEdit: () => void; onChanged: () => void }) {
+function ModelCard({
+  model: m,
+  engine,
+  small,
+  onEdit,
+  onChangeEngine,
+  onChanged,
+}: {
+  model: ModelRow
+  engine: ModelsView['engine']
+  small: boolean
+  onEdit: () => void
+  /** Edit with its Engine field focused. */
+  onChangeEngine: () => void
+  onChanged: () => void
+}) {
   const confirm = useConfirm()
   const keep = useMutation({
     mutationFn: (on: boolean) => api<{ warning: string | null }>(`/api/admin/models/${encodeURIComponent(m.name)}/keep`, { method: 'PUT', body: { keep: on } }),
@@ -494,6 +514,7 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
               : [m.source === 'remote' ? `${m.remote} on ${m.server}` : m.file, m.context ? contextLine(m.context, m.window, m.output) : null].filter(Boolean).join(' · ') ||
                 (image ? 'An image model' : 'Served by the gateway')}
           </CardDescription>
+          {m.source === 'local' && <p className="mt-1 text-xs text-muted-foreground">{`Engine: ${engineName(m, engine.instances ?? [])}`}</p>}
           {m.profile && <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{summary(m.profile)}</p>}
           {priceLine(m) && <p className="mt-1 text-xs text-muted-foreground tabular-nums">{priceLine(m)}</p>}
           {m.cache && <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{cacheLine(m.cache)}</p>}
@@ -632,6 +653,15 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
             <>
               <Button size="sm" variant="outline" onClick={onEdit} disabled={moving} title={moving ? 'It is moving to another engine: edit it once it is there' : undefined}>
                 <Pencil /> Edit
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onChangeEngine}
+                disabled={moving}
+                title={moving ? 'It is moving to another engine: change it once it is there' : 'llama.cpp, vLLM or SGLang: it moves there with the stack running'}
+              >
+                <ArrowRightLeft /> Change engine…
               </Button>
               <Button
                 size="sm"

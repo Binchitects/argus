@@ -17,7 +17,7 @@ public sealed record HfDownloadRequest(string Repo, string[]? Models = null, str
 /// <summary>A speech model for the speech server to fetch: its id there (a Hugging Face repository).</summary>
 public sealed record SpeechDownloadRequest(string Id);
 
-/// <summary>Admin → Models → Hugging Face: find GGUF models, see their files and whether they fit, download them into the library.</summary>
+/// <summary>Admin → Models → Hugging Face: find GGUF models and snapshots, see their files and whether they fit, download them into the library.</summary>
 public static class HuggingFaceEndpoints
 {
     public static void MapHuggingFace(this IEndpointRouteBuilder app)
@@ -53,10 +53,10 @@ public static class HuggingFaceEndpoints
         }
     }
 
-    /// <param name="kind">chat (GGUF), image or video (their pipelines).</param>
+    /// <param name="kind">chat (GGUF), snapshot (safetensors, for vLLM and SGLang), image or video (their pipelines).</param>
     private static Task<IResult> SearchAsync(string? q, string? kind, HuggingFace hf, CancellationToken ct) => Try(async () =>
         (q ?? "").Trim() is { Length: >= 2 } words
-            ? Results.Ok(await hf.SearchAsync(words, ct, kind switch { "image" => "text-to-image", "video" => "text-to-video", _ => null }))
+            ? Results.Ok(await hf.SearchAsync(words, ct, kind switch { "image" => "text-to-image", "video" => "text-to-video", _ => null }, snapshots: kind == "snapshot"))
             : AuthEndpoints.Problem(400, "query", "Search for two letters or more, e.g. qwen3 or llama."));
 
     /// <summary>A repository's GGUF models, each with whether it is in the library already, and the machine's room for models to judge the fit by.</summary>
@@ -103,6 +103,8 @@ public static class HuggingFaceEndpoints
         return new
         {
             d.Id, d.Kind, d.Repo, d.Revision, d.State, bytes = live?.Bytes ?? d.Bytes, d.Total, speed = live?.Speed, d.Error, d.CreatedBy, d.CreatedAt, d.FinishedAt,
+            // A snapshot for vLLM and SGLang is added as a model by its folder, not one of its files.
+            snapshot = d.Dir.StartsWith("hf/", StringComparison.Ordinal) ? d.Dir : null,
             files = d.Files.Select(f => new { f.Path, f.Size, library = $"{d.Dir}/{f.Target ?? f.Path}" }),
         };
     }

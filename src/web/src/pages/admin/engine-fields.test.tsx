@@ -100,7 +100,7 @@ describe('admin models: vLLM', () => {
     expect(sent.clear).toContain('maxOutput')
   })
 
-  it('adds a snapshot as an SGLang model: the engine chosen, its own flags in the hints, no LMCache; an engine whose feature is off is not offered', async () => {
+  it('adds a snapshot as an SGLang model: the engine chosen, its own flags in the hints, no LMCache; an engine whose feature is off is disabled, saying why', async () => {
     const instances = [
       { name: 'llamacpp', kind: 'llamacpp', managed: true, problem: null, on: true },
       { name: 'vllm', kind: 'vllm', managed: true, problem: null, on: true },
@@ -120,9 +120,10 @@ describe('admin models: vLLM', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Add a model' })
     await userEvent.click(within(dialog).getByRole('combobox', { name: 'File or model' }))
     await userEvent.click(await screen.findByRole('option', { name: /gpt-oss-120b@main · .* · vLLM or SGLang/ }))
+    expect(within(dialog).getByText(/SGLang · sglang-b is off here: the installer turns it on with \.\/arenactl repair --with sglang/)).toBeInTheDocument()
     await userEvent.click(await within(dialog).findByRole('combobox', { name: 'Engine' }))
-    expect(screen.queryByRole('option', { name: /sglang-b/ })).not.toBeInTheDocument()
-    await userEvent.click(await screen.findByRole('option', { name: 'SGLang · sglang' }))
+    expect(await screen.findByRole('option', { name: 'SGLang · sglang-b (off here)' })).toHaveAttribute('aria-disabled', 'true')
+    await userEvent.click(screen.getByRole('option', { name: 'SGLang · sglang' }))
     const form = await within(dialog).findByRole('form', { name: 'The SGLang model' })
     expect(within(form).getByText(/--mem-fraction-static/)).toBeInTheDocument()
     expect(within(form).getByText(/--max-running-requests/)).toBeInTheDocument()

@@ -472,32 +472,56 @@ would be with them.
   choice does once at the first start (`DEFAULT_MODELS=download`); or copy their
   files into the library. `MODEL` is added and kept loaded once its files are
   there, however they came.
-- **Find on Hugging Face** searches GGUF models (most downloaded first), opens
-  one to list its files grouped as models (a split model's parts together, by
-  quantisation, vision projectors apart) with their sizes, whether each fits
-  this machine (the GPUs, GPUs and RAM, or too big) and whether it is in the
-  library already, and downloads the ones ticked into the library
-  (`<library>/<owner>/<repository>/`). **Downloads** shows each one's progress,
-  speed and time left; one runs at a time, a paused or cut off one goes on from
-  where it got to (HTTP range), every file is checked against Hugging Face's
-  SHA-256 and only then renamed into place, so the library never lists half a
-  model. A finished one has **Add as a model**, which opens **Add a model** with
-  its file chosen (a speech model the speech server fetched: that model), taken
-  as what it is. The app needs the library writable by its user (`LLM_UID`) and,
-  for gated repositories, `HF_TOKEN` of an account that accepted their terms.
-  A download is refused when the disk would keep less than 2 GB free.
-- **Snapshots for vLLM and SGLang.** A repository with safetensors weights and a
-  `config.json` also offers its **snapshot** (`snapshot` in
+- **Find on Hugging Face** searches GGUF models for llama.cpp under **Chat**
+  (most downloaded first), opens one to list its files grouped as models (a
+  split model's parts together, by quantisation, vision projectors apart) with
+  their sizes, whether each fits this machine (the GPUs, GPUs and RAM, or too
+  big) and whether it is in the library already, and downloads the ones ticked
+  into the library (`<library>/<owner>/<repository>/`). **Downloads** shows each
+  one's progress, speed and time left; one runs at a time, a paused or cut off
+  one goes on from where it got to (HTTP range), every file is checked against
+  Hugging Face's SHA-256 and only then renamed into place, so the library never
+  lists half a model. A finished one has **Add as a model**, which opens **Add a
+  model** with its file chosen (a speech model the speech server fetched: that
+  model), taken as what it is. The app needs the library writable by its user
+  (`LLM_UID`) and, for gated repositories, `HF_TOKEN` of an account that
+  accepted their terms. A download is refused when the disk would keep less than
+  2 GB free.
+- **Snapshots for vLLM and SGLang.** Under **Snapshots**, Find on Hugging Face
+  searches the repositories with safetensors weights (`kind=snapshot`, not only
+  the GGUF ones). A repository with safetensors weights and a `config.json`
+  offers its **Snapshot for vLLM and SGLang** (`snapshot` in
   `GET /api/admin/models/hf/repo`), with its size shown before anything is
-  downloaded and what it leaves out: the `original/` and `metal/` copies, GGUF
-  files, other weight formats and the read-me, which neither engine reads (for
-  `openai/gpt-oss-120b` that is about two thirds of the repository). It
-  downloads (`POST /api/admin/models/hf/downloads` with `snapshot: true`) into
-  `<library>/hf/<owner>/<repository>@<revision>/`, every file at the same
-  commit and checked as above. `GET /api/admin/models/library/snapshots` lists
-  the snapshots with their size and whether each is whole (its config, its
-  weights, every shard its index names, nothing still downloading); only a
-  whole one can be a vLLM or an SGLang model.
+  downloaded, whether it fits the GPUs, and what it leaves out: the `original/`
+  and `metal/` copies, GGUF files, other weight formats and the read-me, which
+  neither engine reads (for `openai/gpt-oss-120b` that is about two thirds of
+  the repository). Ticked (alone: not with its GGUF files) and downloaded
+  (`POST /api/admin/models/hf/downloads` with `snapshot: true`), after a
+  question that says its size, its folder and its licence (and, for a gated
+  repository, that `HF_TOKEN`'s account must have accepted its terms), it goes
+  into `<library>/hf/<owner>/<repository>@<revision>/`, every file at the same
+  commit and checked as above. **Add as a model** under **Downloads** adds it
+  by that folder. `GET /api/admin/models/library/snapshots` lists the snapshots
+  with their size and whether each is whole (its config, its weights, every
+  shard its index names, nothing still downloading); only a whole one can be a
+  vLLM or an SGLang model.
+- **On a host with no network**, download a model on a machine that has one,
+  with Hugging Face's `hf` command (the `huggingface_hub` Python package), into
+  the folder the library reads, then carry that folder (or file) to the same
+  place in this host's library (`LLAMACPP_LIBRARY_DIR`, readable by the app's
+  user):
+
+  ```bash
+  # a snapshot for vLLM and SGLang, at a commit of the repository (its revision)
+  hf download OWNER/REPO --revision REV --local-dir LIBRARY/hf/OWNER/REPO@REV \
+    --exclude 'original/*' 'metal/*' '*.gguf'   # what neither engine reads
+  # a GGUF file for llama.cpp
+  hf download OWNER/REPO FILE.gguf --local-dir LIBRARY/OWNER/REPO
+  ```
+
+  A snapshot's folder is `hf/<owner>/<repository>@<revision>/`, its
+  `config.json` at its top; the library lists it once it is whole, and
+  **File or model** offers it.
 - **vLLM models** (`engineKind: vllm` on `POST /api/admin/models`; the form's
   fields come with the next step): a snapshot, its GPUs (empty: the ones the
   advisor proposes for this machine, kept on save), copies (`replicas`, each on
@@ -515,8 +539,8 @@ would be with them.
   loaded at once). The models list shows each engine (`engine.instances`, each
   `on` when this stack runs it) and why one is not running.
 - **SGLang models** (`engineKind: sglang`, the `sglang` feature): the same form
-  and settings, the form's **Engine** choosing vLLM or SGLang (and the machine).
-  The app writes SGLang's own flags: answers at once is its
+  and settings, the dialog's **Engine** field choosing vLLM or SGLang (and the
+  machine). The app writes SGLang's own flags: answers at once is its
   `--max-running-requests`, the share of each GPU its `--mem-fraction-static`,
   fp8 its `fp8_e4m3`; *May sleep* is its memory saver; MTP is its NEXTN and
   EAGLE-3 its EAGLE3 with the draft snapshot; the CPU tier is its hierarchical
@@ -526,15 +550,41 @@ would be with them.
   requests go ahead of API keys'.
 - **Moving a model to another engine.** A model moves at runtime, with the stack
   running: llama.cpp to vLLM or SGLang and back, and between vLLM and SGLang (or
-  another machine's engine of a kind). vLLM and SGLang serve a Hugging Face
-  snapshot (safetensors), llama.cpp a GGUF file: have the model's other form in the
-  library first (above; on a host with no network, carry its
-  `hf/<owner>/<repository>@<revision>/` folder or its GGUF file into the library).
-  Then **Edit** the model: for a llama.cpp model choose the snapshot under **File or
-  model**, for a vLLM or SGLang model its GGUF file (to llama.cpp) or the other
-  **Engine** (vLLM or SGLang). The dialog says it moves, and shows the new engine's
-  form for the same model. Saved, it keeps its name, who may use it, its prices and
-  its sampling, and its card says how far the move is:
+  another machine's engine of a kind). Each chat model's card says its engine
+  (*Engine: llama.cpp*, or *vLLM · name* when a kind has several), and **Change
+  engine…** opens **Edit** at its **Engine** field. The field lists llama.cpp,
+  vLLM and SGLang (each engine of a kind that has several), the model's own
+  chosen; one that does not run here is listed disabled, and the field says why:
+  its feature is off (`./arenactl repair --with chat-models`, `vllm` or `sglang`
+  from the checkout turns it on, or
+  `sh argus-arena-VERSION-offline.run repair --with chat-models` with the
+  offline installer, see [deployment.md](deployment.md#features); vLLM also
+  needs `VLLM_IMAGE`, under `arenactl config`), the stack has none (on
+  Kubernetes, `llamacpp.enabled`, `vllm.enabled` or `sglang.enabled`), or it is
+  not running. The field waits for the library to be read (*Reading the
+  library…*). While a model moves the field and the form are held; after a
+  failed move it can be chosen again. A dialog left open while another admin
+  moved the model is held too (*It moved to SGLang while this was open*): its
+  form was for the engine it left, and saved, it would move back. vLLM and
+  SGLang serve a Hugging Face snapshot (safetensors), llama.cpp a GGUF file, and
+  **File or model** lists the chosen engine's form first. Another engine of the
+  other form takes the same model in that form from the library: the snapshot
+  whose repository has the GGUF file's name (or the name in its header), its
+  architecture first, or the GGUF file of the snapshot's repository. The dialog
+  says how it matched; choose another under **File or model** if it is not the
+  same model. vLLM to SGLang and back keeps the snapshot, and back to an engine
+  of the form left brings back the file chosen there. When the library has none,
+  the dialog says so and holds **Save**: have the model's other form in the
+  library first (**Snapshots** or **Chat** under Find on Hugging Face, or, on a
+  host with no network, `hf download` on a machine that has one, as above). The
+  other way works too: a file of the other form chosen under **File or model**
+  moves the **Engine** field with it (a snapshot to vLLM or SGLang, a GGUF file
+  to llama.cpp), when that engine runs here; else the field stays and **File or
+  model** says what turns it on. The dialog says it moves whenever the engine is
+  not the model's own and runs here, and shows the new engine's form for the
+  same model. Whenever **Save** (or **Add model**) is held, the dialog says why.
+  Saved, it keeps its name, who may use it, its prices and its sampling, and its
+  card says how far the move is:
   - New requests go to its new engine and wait there until it is ready. Its answers
     in flight end on its old engine, which lets it go once none is left (after 15
     minutes it lets it go all the same).
@@ -552,8 +602,8 @@ would be with them.
   unless set in the form); from vLLM or SGLang, copies, the share of each GPU,
   quantisation, speculative decoding and the cache's tiers (the cache type becomes
   q8_0, and the form puts it on every GPU); from vLLM to SGLang, LMCache. A move
-  to an engine that does not run is refused, and while a model moves it is not
-  edited, loaded or unloaded.
+  to an engine that does not run (or whose feature is off) is refused, and while a
+  model moves it is not edited, loaded or unloaded.
   llama.cpp starts again when its list of models changes (it reads its presets as
   it starts), as when a model is added or removed: the answers of its other models
   in flight then are cut. The same through the API: `PATCH /api/admin/models/NAME`
@@ -921,7 +971,8 @@ and removed there.
 - **Remove** takes the model away (from the gateway and the chat's tools too);
   its files stay in the library unless **Also delete its files from disk** is
   ticked ([On disk](#on-disk)).
-- **Find on Hugging Face** has tabs: Chat (GGUF), Pictures and Video (the
+- **Find on Hugging Face** has tabs: Chat (GGUF, for llama.cpp), Snapshots
+  (safetensors, for vLLM and SGLang), Pictures and Video (the
   text-to-image and text-to-video repositories, any format stable-diffusion.cpp
   reads; pick the files a model needs) and Speech (the speech server's
   registry: Download asks the speech server to fetch a model, listed under

@@ -97,7 +97,8 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
         Assert.Equal(EngineKinds.LlamaCpp, System.Text.Json.JsonSerializer.Deserialize<LocalModel>(draining.From!)!.EngineKind);
     }
 
-    private WebApplicationFactory<Program> NewApp()
+    /// <summary>An app with a GGUF file and two snapshot folders in its library; <paramref name="features"/>: only those on (Features:On).</summary>
+    private WebApplicationFactory<Program> NewApp(IEnumerable<string>? features = null)
     {
         GgufFile.Language("qwen3", name: "Tiny", context: 40960).Write(Path.Combine(Library, "tiny", "Tiny-4B-Q4_K_M.gguf"));
         Directory.CreateDirectory(Path.Combine(Library, "hf", "acme", "Flash@abc123"));
@@ -109,8 +110,58 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
         return app.Create(app.ConnectionStringFor("kinds_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), new Dictionary<string, string?>
         {
             ["Engine:Enabled"] = "true", ["Engine:ApiKey"] = FakeEngine.Key, ["Engine:ConfigDir"] = Config, ["Engine:LibraryDir"] = Library,
-            ["Engine:VllmStatusDir"] = Path.Combine(_dir, "vllm-status"),
+            ["Engine:VllmStatusDir"] = Path.Combine(_dir, "vllm-status"), ["Features:On"] = features is null ? null : string.Join(',', features),
         });
+    }
+
+    [Fact]
+    public async Task A_move_to_llama_cpp_is_refused_while_its_feature_is_off_as_the_engine_field_says_it()
+    {
+        await using var f = NewApp(Llm.Api.Operations.Features.All.Select(x => x.Id).Where(id => id != "chat-models"));
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", new { name = "flash", engineKind = "vllm", file = "hf/acme/Flash@abc123", context = 32768 }));
+        var models = await admin.JsonAsync(await admin.GetAsync("/api/admin/models"));
+        // The Engine field shows llama.cpp off by its instance.
+        Assert.False(models.GetProperty("engine").GetProperty("instances").EnumerateArray().Single(i => i.GetProperty("name").GetString() == "llamacpp").GetProperty("on").GetBoolean());
+
+        // A move there would only fail: refused, with what turns it on; the model stays on vLLM.
+        using var refused = await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/flash", UriKind.Relative), new { engineKind = "llamacpp", file = "tiny/Tiny-4B-Q4_K_M.gguf" });
+        await StatusAssert.Is(HttpStatusCode.Conflict, refused);
+        var why = (await admin.JsonAsync(refused)).GetProperty("error").GetString();
+        Assert.Contains("./arenactl repair --with chat-models", why, StringComparison.Ordinal);
+        // On a host with no network, the offline installer of this release does it.
+        Assert.Contains($"sh argus-arena-{Llm.Api.AppInfo.Current.Version}-offline.run repair --with chat-models", why, StringComparison.Ordinal);
+        var row = (await admin.JsonAsync(await admin.GetAsync("/api/admin/models"))).GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == "flash");
+        Assert.Equal(("vllm", "hf/acme/Flash@abc123", JsonValueKind.Null), (row.GetProperty("engineKind").GetString(), row.GetProperty("file").GetString(), row.GetProperty("move").ValueKind));
+    }
+
+    [Fact]
+    public async Task The_engine_fields_request_moves_a_vllm_model_to_sglang_on_its_snapshot_with_one_engine_of_each()
+    {
+        await using var f = NewApp();
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", new
+        {
+            name = "flash", engineKind = "vllm", file = "hf/acme/Flash@abc123", context = 32768, kvTier = "lmcache", kvCpuGb = 8, kvDiskGb = 50,
+        }));
+        foreach (var engine in new[] { "vllm", "sglang" })
+        {
+            Directory.CreateDirectory(Path.Combine(_dir, "vllm-status", engine));
+            File.WriteAllText(Path.Combine(_dir, "vllm-status", engine, "supervisor.json"), $$"""{"at":{{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}},"started":0,"restart":0,"reload":0}""");
+        }
+
+        // What the dialog sends with SGLang chosen in its Engine field: its whole form, the first SGLang engine (none named), LMCache cleared.
+        using var moved = await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/flash", UriKind.Relative), new
+        {
+            engineKind = "sglang", file = "hf/acme/Flash@abc123", replicas = 1, kvType = "fp8", context = 32768, parallel = 16, kvCpuGb = 8, sleep = true,
+            clear = new[] { "devices", "gpuMemoryUtilization", "quantization", "maxOutput", "specDecode", "draftHead", "kvTier", "fallback", "engine" },
+        });
+        await StatusAssert.Is(HttpStatusCode.OK, moved);
+        var row = (await admin.JsonAsync(await admin.GetAsync("/api/admin/models"))).GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == "flash");
+        Assert.Equal(("sglang", "hf/acme/Flash@abc123", "vllm", "sglang"), (row.GetProperty("engineKind").GetString(), row.GetProperty("file").GetString(),
+            row.GetProperty("move").GetProperty("fromEngine").GetString(), row.GetProperty("move").GetProperty("toEngine").GetString()));
+        Assert.Equal((JsonValueKind.Null, JsonValueKind.Null, JsonValueKind.Null), (row.GetProperty("engine").ValueKind, row.GetProperty("kvTier").ValueKind, row.GetProperty("kvDiskGb").ValueKind));
+        Assert.Equal(8, row.GetProperty("kvCpuGb").GetInt32());
     }
 
     [Fact]
