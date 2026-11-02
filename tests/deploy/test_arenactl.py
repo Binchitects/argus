@@ -179,6 +179,54 @@ class CommandLineTests(unittest.TestCase):
         for name, (script, _) in a.OPS.items():
             self.assertTrue((REPO / "deploy" / "scripts" / script).is_file(), name)
 
+class Engine:
+    name = "docker"
+
+
+class BuildTests(unittest.TestCase):
+    """build_images: the release's images built at once, and, when that fails, each again alone."""
+
+    def build_with(self, fails):
+        arenactl = load_arenactl()
+        calls = []
+
+        class FakeCompose:
+            def __init__(self, engine, profiles, project="arena"):
+                pass
+
+            def config(self):
+                return {"services": {s: {"build": {"context": ".."}} for s in ("app", "web", "studio")} | {"postgres": {"image": "postgres:17"}}}
+
+            def run(self, *args):
+                calls.append(args)
+                if fails(args):
+                    raise arenactl.Stop("docker failed (exit 1)", 1)
+
+            def close(self):
+                pass
+
+        arenactl.Compose = FakeCompose
+        arenactl.say = lambda *a, **k: None
+        arenactl.step = lambda *a, **k: None
+        return arenactl, calls
+
+    def test_images_that_time_out_together_are_built_again_one_at_a_time(self):
+        # PyPI times out while three images read it at once; each alone builds.
+        arenactl, calls = self.build_with(lambda args: args[0] == "build" and len(args) > 2)
+        arenactl.build_images(Engine(), ["core"], pull=False)
+        self.assertEqual(calls, [("build", "app", "studio", "web"), ("build", "app"), ("build", "studio"), ("build", "web")])
+
+    def test_an_image_that_fails_alone_fails_the_build(self):
+        arenactl, calls = self.build_with(lambda args: args[0] == "build" and "studio" in args)
+        with self.assertRaises(arenactl.Stop):
+            arenactl.build_images(Engine(), ["core"], pull=False)
+        self.assertEqual(calls[-1], ("build", "studio"))
+        # One image asked for: it is not built twice.
+        arenactl, calls = self.build_with(lambda args: True)
+        with self.assertRaises(arenactl.Stop):
+            arenactl.build_images(Engine(), ["core"], pull=False, services=["studio"])
+        self.assertEqual(calls, [("build", "studio")])
+
 
 if __name__ == "__main__":
     unittest.main()

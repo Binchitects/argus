@@ -339,7 +339,17 @@ def build_images(engine: Engine, profiles: list[str], pull: bool = True, service
         others = [s for s in names if s in svcs and not svcs[s].get("build")]
         step(f"the release's own images: {len(built)} built ({engine.name} compose build)")
         if built:
-            compose.run("build", *built)
+            try:
+                compose.run("build", *built)
+            except Stop:
+                if len(built) == 1:
+                    raise
+                # Built at once, many images reading PyPI or apt over a slow or lossy link can time out ("no matching
+                # distribution"): each is built again alone, one after another, what did build coming from the cache.
+                # Only an image that fails alone fails the build.
+                say("  some did not build at the same time as the others: each again, alone")
+                for s in built:
+                    compose.run("build", s)
         if pull and others:
             missing = [s for s in others if not engine.has_image(svcs[s].get("image", ""))]
             step(f"the other images: {len(others)}, {len(missing)} pulled")
