@@ -1342,6 +1342,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         _answerId = null;
         try
         {
+            // A skill or command added or changed since the last turn works in this one.
+            _rt.ReloadExtensions();
             // What the web chat added comes in first (inside the job, so Stop ends it and nothing it does leaves the IDE busy),
             // then the question takes its place after it.
             if (_rt.Sync is not null)

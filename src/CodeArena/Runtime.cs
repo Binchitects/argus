@@ -37,6 +37,8 @@ internal sealed partial class Runtime : IAsyncDisposable
     public SessionStore Session { get; private set; } = null!;
     /// <summary>The person's and the project's own commands, sub-agents and skills.</summary>
     public Extensions Extensions { get; private set; } = new();
+    /// <summary>Where the project's own commands, sub-agents and skills are: its repository's root (else the working directory).</summary>
+    public string ProjectRoot { get; private set; } = "";
     /// <summary>What the agent remembers; the prompt has it as the session started.</summary>
     public MemoryStore Memory { get; private set; } = null!;
     private string _memory = "";
@@ -368,6 +370,7 @@ internal sealed partial class Runtime : IAsyncDisposable
                 Ui.Warn($"The plugins' skills could not be kept in {PluginSkills.Folder(Env.Paths)}: {e.Message}");
             }
         }
+        ProjectRoot = project;
         Extensions = Extensions.Load(Env.Paths, project);
         foreach (var problem in Extensions.Problems)
         {
@@ -940,8 +943,33 @@ internal sealed partial class Runtime : IAsyncDisposable
         return verb == "remove" ? $"Removed {rule}." : $"{(verb == "allow" ? "Allowed without asking" : "Never allowed")}: {rule}. Kept in config.json.";
     }
 
-    /// <summary>What is sent for what was typed: a command of the person's or the project's own (/name args) is its prompt.</summary>
+    /// <summary>
+    /// What is sent for what was typed: a command of the person's or the project's own (/name args) is its prompt; a skill's
+    /// name, what was typed with the skill's instructions after it.
+    /// </summary>
     public string Prepare(string input) => Extensions.Expand(input) ?? input;
+
+    /// <summary>
+    /// The commands, sub-agents and skills read again (at each turn, and as the IDE lists them), so one added, changed or
+    /// taken away since works now, not from the next session: the prompt lists them as they are, and the skill tool follows.
+    /// </summary>
+    public Extensions ReloadExtensions()
+    {
+        if (ProjectRoot.Length == 0)
+        {
+            return Extensions;
+        }
+        var fresh = Extensions.Load(Env.Paths, ProjectRoot);
+        var before = Extensions;
+        Extensions = fresh;
+        if (!fresh.Skills.SequenceEqual(before.Skills))
+        {
+            Tools.Update(all => fresh.Skills.Count == 0 ? all.Where(t => t.Name != "skill")
+                : all.Any(t => t.Name == "skill") ? all.Select(t => t.Name == "skill" ? fresh.SkillTool() : t)
+                : all.Append(fresh.SkillTool()));
+        }
+        return fresh;
+    }
 
     /// <summary>
     /// Back to before turn <paramref name="number"/> of the checkpoints: the files its tools (and later turns' tools) wrote as

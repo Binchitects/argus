@@ -430,6 +430,12 @@ internal sealed partial class WebApp
                 case ("GET", "/api/user-files/vscode"):
                     await res.JsonAsync(200, _userFiles.FromVsCode(Query(req, "name"), _rt.Env.Env), ct);
                     return true;
+                case ("GET", "/api/skills"):
+                    await res.JsonAsync(200, IdeSkills.List(_rt), ct);
+                    return true;
+                case ("POST", "/api/skills"):
+                    await res.JsonAsync(200, IdeSkills.Create(_rt, Body(req)), ct);
+                    return true;
                 case ("GET", "/api/processes"):
                     await res.JsonAsync(200, await Task.Run(OwnProcesses.List, ct), ct);
                     return true;

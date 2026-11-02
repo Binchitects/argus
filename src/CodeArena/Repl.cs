@@ -195,6 +195,8 @@ internal sealed class Repl(Runtime rt)
                 await ShellAsync(input[1..].Trim(), ct);
                 continue;
             }
+            // A skill or command added or changed since the last line works now (/commands lists it too).
+            rt.ReloadExtensions();
             if (input.StartsWith('/'))
             {
                 if (!await CommandAsync(input, ct))

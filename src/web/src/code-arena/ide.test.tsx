@@ -862,7 +862,7 @@ describe('Code Arena, the IDE', () => {
     const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
     // The agent's changes are counted on their button.
     expect(await within(bar).findByRole('button', { name: 'Agent changes (1)' })).toBeInTheDocument()
-    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Plan', 'Memory', 'Chat', 'Terminal', 'Theme', 'Accounts', 'Manage', 'Help', 'About Code Arena'])
+    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Plan', 'Memory', 'Skills', 'Chat', 'Terminal', 'Theme', 'Accounts', 'Manage', 'Help', 'About Code Arena'])
     expect(within(bar).getByRole('button', { name: 'Explorer' })).toHaveAttribute('aria-pressed', 'true')
     expect(await screen.findByRole('tree', { name: 'Files' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'No file is open' })).toBeInTheDocument()
@@ -1324,7 +1324,7 @@ describe('Code Arena, the IDE', () => {
 
     // Kept for the next run, as arranged.
     await waitFor(() =>
-      expect(now.preferences.layout).toMatchObject({ sideAt: 'right', panelAt: 'right', order: ['search', 'problems', 'explorer', 'git', 'debug', 'extensions', 'changes', 'review', 'plan', 'memory', 'chat'] }),
+      expect(now.preferences.layout).toMatchObject({ sideAt: 'right', panelAt: 'right', order: ['search', 'problems', 'explorer', 'git', 'debug', 'extensions', 'changes', 'review', 'plan', 'memory', 'skills', 'chat'] }),
     )
   })
 
@@ -2351,6 +2351,189 @@ describe('Code Arena, the IDE', () => {
     expect(within(panel).getByRole('list', { name: 'Commits' })).toHaveTextContent('First')
   })
 
+  it("folds Source Control's groups and folders as VS Code does: chevrons, arrows, Collapse All, kept with the folder", async () => {
+    const status = {
+      repository: true, branch: 'main', ahead: 0, behind: 0,
+      files: [
+        { path: 'src/lib/cart.ts', staged: 'M', changed: null, from: null },
+        { path: 'src/app.ts', staged: null, changed: 'M', from: null },
+        { path: 'src/lib/tax.ts', staged: null, changed: 'M', from: null },
+        { path: 'notes.txt', staged: null, changed: '?', from: null },
+        { path: 'tests/unit/cart.test.ts', staged: null, changed: 'M', from: null },
+        { path: 'clash.txt', staged: 'U', changed: 'U', from: null, conflict: true },
+      ],
+    }
+    let kept: Record<string, unknown> = {}
+    const { calls } = backend({
+      'GET /api/git/status': () => ({ json: status }),
+      'GET /api/git/log': () => ({ json: [{ hash: 'abc1234', subject: 'First', author: 'Pat', at: '2026-10-11T09:00:00Z' }] }),
+      'GET /api/git/branches': () => ({ json: [{ name: 'main', current: true }] }),
+      'GET /api/workspace/state': () => ({ json: kept }),
+      'POST /api/workspace/state': (body) => {
+        kept = { ...kept, ...(body as Record<string, unknown>) }
+        return { json: kept }
+      },
+    })
+    const { unmount } = renderIde()
+    await userEvent.keyboard('{Control>}{Shift>}g{/Shift}{/Control}')
+    const panel = await screen.findByRole('complementary', { name: 'Source control' })
+    const group = (name: RegExp) => within(panel).getByRole('button', { name })
+
+    // A conflict is in Merge Changes alone; each group has a chevron, open.
+    expect(await within(panel).findByRole('list', { name: 'Files in conflict' })).toHaveTextContent('clash.txt')
+    expect(within(panel).getByRole('list', { name: 'Changed files' })).not.toHaveTextContent('clash.txt')
+    for (const name of [/^Merge changes, 1 file/, /^Staged changes, 1 file/, /^Changes, 4 files/, /^Branch/, /^Last commits/]) expect(group(name)).toHaveAttribute('aria-expanded', 'true')
+
+    // A click folds a group, and the folder keeps it so.
+    await userEvent.click(group(/^Changes, 4 files/))
+    expect(group(/^Changes, 4 files/)).toHaveAttribute('aria-expanded', 'false')
+    expect(within(panel).queryByRole('list', { name: 'Changed files' })).not.toBeInTheDocument()
+    await waitFor(() => expect(kept['scm.folded']).toEqual(['changes']))
+
+    // The keys of a tree: Right unfolds, Down goes in, Left goes up to the group and folds it.
+    group(/^Changes, 4 files/).focus()
+    await userEvent.keyboard('{ArrowRight}')
+    expect(group(/^Changes, 4 files/)).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.keyboard('{ArrowDown}')
+    expect(document.activeElement).toBe(within(within(panel).getByRole('list', { name: 'Changed files' })).getByRole('button', { name: /^app\.ts/ }))
+    await userEvent.keyboard('{ArrowLeft}')
+    expect(document.activeElement).toBe(group(/^Changes, 4 files/))
+    await userEvent.keyboard('{ArrowLeft}')
+    expect(group(/^Changes, 4 files/)).toHaveAttribute('aria-expanded', 'false')
+    await userEvent.keyboard('{ArrowRight}')
+
+    // As a tree: the files under their folders (tests/unit in one row, as VS Code compacts them), each folding.
+    await userEvent.click(within(panel).getByRole('button', { name: 'View as Tree' }))
+    await waitFor(() => expect(kept['scm.viewMode']).toBe('tree'))
+    const changes = within(panel).getByRole('list', { name: 'Changed files' })
+    const src = within(changes).getByRole('button', { name: /^src, 2 files/ })
+    expect(src).toHaveAttribute('aria-expanded', 'true')
+    expect(within(changes).getByRole('button', { name: /^lib, 1 file/ })).toHaveAttribute('aria-expanded', 'true')
+    expect(within(changes).getByRole('button', { name: /^tests\/unit, 1 file/ })).toHaveAttribute('aria-expanded', 'true')
+    expect(within(changes).getByRole('button', { name: /^tax\.ts/ })).toBeInTheDocument()
+    await userEvent.click(src)
+    expect(src).toHaveAttribute('aria-expanded', 'false')
+    expect(within(changes).queryByRole('button', { name: /^app\.ts/ })).not.toBeInTheDocument()
+    expect(within(changes).getByRole('button', { name: /^notes\.txt/ })).toBeInTheDocument()
+    // A folder's own + stages every file in it.
+    await userEvent.click(within(changes).getByRole('button', { name: 'Stage src' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/git/stage')?.body).toEqual({ paths: ['src/app.ts', 'src/lib/tax.ts'] }))
+
+    // Collapse All folds every group and folder.
+    await userEvent.click(within(panel).getByRole('button', { name: 'Collapse All' }))
+    for (const name of [/^Merge changes/, /^Staged changes/, /^Changes, 4 files/, /^Branch/, /^Last commits/]) expect(group(name)).toHaveAttribute('aria-expanded', 'false')
+    await waitFor(() => expect(kept['scm.folded']).toEqual(expect.arrayContaining(['merge', 'staged', 'changes', 'branch', 'commits', 'changes:src'])))
+
+    // In the next run of the page, as it was left.
+    unmount()
+    kept = { 'scm.folded': ['staged'], 'scm.viewMode': 'tree' }
+    renderIde()
+    await userEvent.keyboard('{Control>}{Shift>}g{/Shift}{/Control}')
+    const again = await screen.findByRole('complementary', { name: 'Source control' })
+    expect(await within(again).findByRole('button', { name: /^Staged changes, 1 file/ })).toHaveAttribute('aria-expanded', 'false')
+    expect(within(again).getByRole('button', { name: /^Changes, 4 files/ })).toHaveAttribute('aria-expanded', 'true')
+    expect(within(again).getByRole('button', { name: 'View as List' })).toBeInTheDocument()
+    expect(within(within(again).getByRole('list', { name: 'Changed files' })).getByRole('button', { name: /^src, 2 files/ })).toBeInTheDocument()
+  })
+
+  it("folds Agent changes' groups and folders too, and keeps them folded", async () => {
+    let kept: Record<string, unknown> = {}
+    const { now } = backend({
+      'GET /api/git/status': () => ({ json: { repository: true, branch: 'main', ahead: 0, behind: 0, files: [{ path: 'docs/guide.md', staged: null, changed: 'M', from: null }] } }),
+      'GET /api/workspace/state': () => ({ json: kept }),
+      'POST /api/workspace/state': (body) => {
+        kept = { ...kept, ...(body as Record<string, unknown>) }
+        return { json: kept }
+      },
+    })
+    now.changes = [...now.changes, { path: 'src/lib/cart.ts', created: true, deleted: false, added: 3, removed: 0 }]
+    renderIde()
+    await userEvent.click(await screen.findByRole('button', { name: 'Agent changes (2)' }))
+    const panel = await screen.findByRole('complementary', { name: 'Agent changes' })
+    const agents = within(panel).getByRole('button', { name: /^The agent's changes, 2 files/ })
+    const mine = await within(panel).findByRole('button', { name: /^Your changes, 1 file/ })
+    expect(agents).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.click(mine)
+    expect(within(panel).queryByRole('list', { name: 'Files you changed' })).not.toBeInTheDocument()
+    await waitFor(() => expect(kept['changes.folded']).toEqual(['mine']))
+
+    await userEvent.click(within(panel).getByRole('button', { name: 'View as Tree' }))
+    const list = within(panel).getByRole('list', { name: 'Changed files' })
+    const lib = within(list).getByRole('button', { name: /^lib, 1 file/ })
+    lib.focus()
+    await userEvent.keyboard('{ArrowLeft}')
+    expect(lib).toHaveAttribute('aria-expanded', 'false')
+    expect(within(list).queryByRole('button', { name: /^cart\.ts/ })).not.toBeInTheDocument()
+    expect(within(list).getByRole('button', { name: /^app\.ts/ })).toBeInTheDocument()
+
+    await userEvent.click(within(panel).getByRole('button', { name: 'Collapse All' }))
+    expect(agents).toHaveAttribute('aria-expanded', 'false')
+    await waitFor(() => expect(kept['changes.folded']).toEqual(expect.arrayContaining(['agent', 'mine', 'agent:src'])))
+  })
+
+  it('lists the skills in the Skills view and in the chat’s / menu: one opens to edit, one goes into the box, one is made', async () => {
+    let skills = [
+      { name: 'ship', description: 'How we ship', source: 'project', path: '.arena/skills/ship/SKILL.md' },
+      { name: 'tidy', description: 'Tidy my notes', source: 'person', path: 'user:skills/tidy/SKILL.md' },
+      { name: 'triage', description: 'Sort the issues', source: 'arena', path: null },
+      { name: 'code-review', description: 'Review code or a change for bugs', source: 'builtin', path: null },
+    ]
+    const { calls, disk } = backend({
+      'GET /api/skills': () => ({ json: { skills, commands: [{ name: 'hello', description: 'Say hello', argumentHint: 'NAME' }] } }),
+      'POST /api/skills': (body) => {
+        const made = { name: (body as { name: string }).name, description: 'When to use it', source: 'project', path: `.arena/skills/${(body as { name: string }).name}/SKILL.md` }
+        skills = [made, ...skills]
+        disk[made.path] = { text: '---\nname: release\n---\nSteps.\n', version: 'k1' }
+        return { json: made }
+      },
+      'POST /api/messages': () => answerOnly(),
+    })
+    disk['.arena/skills/ship/SKILL.md'] = { text: '---\nname: ship\n---\nRun make ship.\n', version: 's1' }
+    renderIde()
+    await userEvent.click(await screen.findByRole('button', { name: 'Skills' }))
+    const panel = await screen.findByRole('complementary', { name: 'Skills' })
+    for (const name of ['This project, 1 skill', 'Yours, 1 skill', 'From Arena, 1 skill', 'Built in, 1 skill']) expect(await within(panel).findByRole('button', { name })).toHaveAttribute('aria-expanded', 'true')
+
+    // The project's opens in the editor; Arena's own goes into the chat's box as /name.
+    await userEvent.click(within(panel).getByRole('button', { name: /^\/ship/ }))
+    expect(await within(tabs()).findByRole('tab', { name: 'SKILL.md', selected: true })).toBeInTheDocument()
+    await waitFor(() => expect(editor().model?.value).toBe('---\nname: ship\n---\nRun make ship.\n'))
+    await userEvent.click(within(panel).getByRole('button', { name: 'Use /code-review in the chat' }))
+    const box = screen.getByRole('textbox', { name: 'Message' })
+    expect(box).toHaveValue('/code-review ')
+
+    // / at the start of the box lists the chat's commands, the person's and the skills; Enter puts one there.
+    await userEvent.clear(box)
+    await userEvent.type(box, '/')
+    const menu = await screen.findByRole('listbox', { name: 'Skills and commands' })
+    expect(within(menu).getAllByRole('option').map((o) => o.textContent)).toEqual([
+      "/compactSummarize the conversation to free the model's window, a command",
+      '/clearStart a new session (this one stays saved), a command',
+      '/helloSay hello (NAME), a command',
+      '/shipHow we ship, a skill',
+      '/tidyTidy my notes, a skill',
+      '/triageSort the issues, a skill',
+      '/code-reviewReview code or a change for bugs, a skill',
+    ])
+    await userEvent.type(box, 'sh')
+    expect(within(screen.getByRole('listbox', { name: 'Skills and commands' })).getAllByRole('option')).toHaveLength(1)
+    await userEvent.keyboard('{Enter}')
+    expect(box).toHaveValue('/ship ')
+    expect(screen.queryByRole('listbox', { name: 'Skills and commands' })).not.toBeInTheDocument()
+    await userEvent.type(box, 'the beta{Enter}')
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/messages')?.body).toMatchObject({ text: '/ship the beta' }))
+
+    // New Skill: named, made for the project and opened to be written.
+    await userEvent.click(within(panel).getByRole('button', { name: 'New Skill' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'For this project (.arena/skills)…' }))
+    // Its name's box has the focus (not the menu's button, nor the chat's box): typing names it.
+    await waitFor(() => expect(within(panel).getByRole('textbox', { name: "The new skill's name, for this project" })).toHaveFocus())
+    await userEvent.keyboard('Release{Enter}')
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/skills')?.body).toEqual({ name: 'release', scope: 'project' }))
+    expect(await within(panel).findByRole('button', { name: 'This project, 2 skills' })).toBeInTheDocument()
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/file?path=.arena%2Fskills%2Frelease%2FSKILL.md')).toBe(true))
+  })
+
   it('replaces what the search finds, in one file or in all of them after asking', async () => {
     const { calls } = backend({ 'POST /api/replace': () => ({ json: { files: [{ path: 'src/app.ts', replaced: 2, version: 'v2' }], count: 2, truncated: false } }) })
     renderIde()
@@ -2448,7 +2631,7 @@ describe('Code Arena, the IDE', () => {
     expect(editor().options.theme).toBe('arena-sakura-dark')
     await userEvent.keyboard('{Control>}j{/Control}')
     await waitFor(() => expect(fakes.terminals).toHaveLength(1))
-    expect(fakes.terminals[0]!.options.theme).toMatchObject({ background: '#150c11', foreground: '#f2eaee', cursor: '#ed90b5', selectionBackground: '#ed90b54d', red: '#cd3131' })
+    expect(fakes.terminals[0]!.options.theme).toMatchObject({ background: '#120d0f', foreground: '#eeeaeb', cursor: '#d76797', selectionBackground: '#d767974d', red: '#cd3131' })
 
     // Light keeps the colour theme: Sakura Light, not the preferred light theme.
     await userEvent.click(screen.getByRole('button', { name: 'Theme' }))
@@ -2457,7 +2640,7 @@ describe('Code Arena, the IDE', () => {
     await waitFor(() => expect(document.documentElement).not.toHaveClass('dark'))
     expect(document.documentElement.dataset.colorTheme).toBe('sakura')
     await waitFor(() => expect(fakes.themes.at(-1)).toBe('arena-sakura-light'))
-    await waitFor(() => expect(fakes.terminals[0]!.options.theme).toMatchObject({ background: '#fff8fa', cursor: '#c14177' }))
+    await waitFor(() => expect(fakes.terminals[0]!.options.theme).toMatchObject({ background: '#fefcfc', cursor: '#ba4374' }))
 
     // Another colour theme: both of its modes become the preferred ones, and the one of the mode now is chosen.
     await userEvent.click(screen.getByRole('button', { name: 'Theme' }))
@@ -3806,7 +3989,7 @@ describe('Code Arena, the help', () => {
     await screen.findByRole('navigation', { name: 'Breadcrumbs' })
     for (const r of regionsShown()) seen.add(r)
     // Every view of the side bar, and the terminal panel, drawn once.
-    for (const name of ['Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Chat']) {
+    for (const name of ['Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Skills', 'Chat']) {
       await userEvent.click(within(bar).getByRole('button', { name }))
       for (const r of regionsShown()) seen.add(r)
     }

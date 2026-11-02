@@ -8,7 +8,7 @@ namespace CodeArena;
 /// The agent keeps what it worked out as a skill, to do it the same way next time: for this project, a SKILL.md in
 /// .arena/skills/NAME/ (in the repository, shared with the team when committed; a better version replaces it); for the person,
 /// one of their skills in Arena (on the Skills page, kept by them unless they keep what is learned on their own), which every
-/// project and the web chat use. Sessions read skills as they start: a skill saved here is used from the next.
+/// project and the web chat use. Skills are read again at each turn: a skill saved here is used from the next message.
 /// </summary>
 internal static partial class SkillSave
 {
@@ -63,7 +63,7 @@ internal static partial class SkillSave
             await File.WriteAllTextAsync(file,
                 $"---\nname: {name}\ndescription: {description.ReplaceLineEndings(" ")}\nlearned: {DateTime.UtcNow.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}, by Code Arena\n---\n\n{instructions}\n", ct);
             var shown = Path.GetRelativePath(c.Workspace.Root, file).Replace('\\', '/');
-            return new ToolResult($"{(replaced ? "Replaced" : "Kept")} /{name} in {shown}: sessions use it from the next one (commit it to share it with the team).")
+            return new ToolResult($"{(replaced ? "Replaced" : "Kept")} /{name} in {shown}: it is used from the next message (commit it to share it with the team).")
             {
                 Display = c.Ui.Dim($"{shown} {(replaced ? "replaced" : "kept")}"),
             };

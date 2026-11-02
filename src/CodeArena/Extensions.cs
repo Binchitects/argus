@@ -80,8 +80,27 @@ internal sealed record CustomCommand(string Name, string Description, string? Ar
 /// <summary>A sub-agent of the person's or the project's: its instructions, the read-only tools it may use, its model.</summary>
 internal sealed record CustomAgent(string Name, string Description, string Prompt, IReadOnlyList<string> Tools, string? Model, string File);
 
-/// <summary>A skill (agentskills.io's SKILL.md): instructions loaded when the task needs them, with the files beside them.</summary>
-internal sealed record Skill(string Name, string Description, string Instructions, string Folder);
+/// <summary>
+/// A skill (agentskills.io's SKILL.md): instructions loaded when the task needs them, with the files beside them. Whose it
+/// is: the project's, the person's (their config folder), Arena's (made there, or a plugin's) or Code Arena's own (builtin).
+/// </summary>
+internal sealed record Skill(string Name, string Description, string Instructions, string Folder, string Source = "project")
+{
+    /// <summary>The instructions as the model is given them: parameters named for it to take from the request (BuiltInSkills.Filled).</summary>
+    public string Filled(string? arguments = null)
+    {
+        var skillMd = Path.Combine(Folder, "SKILL.md");
+        var instructions = arguments is null ? Instructions : Instructions.Replace("$ARGUMENTS", arguments, StringComparison.Ordinal);
+        return File.Exists(skillMd) ? BuiltInSkills.Filled(File.ReadAllText(skillMd), instructions) : instructions;
+    }
+
+    /// <summary>
+    /// What goes with a message that used the skill (/name and the words after it), as what went with it (Mentions' section):
+    /// the page shows what was typed, the model reads the instructions after it, the words in them for $ARGUMENTS.
+    /// </summary>
+    public string Use(string typed, string words) =>
+        typed + Mentions.Marker + $"\n<skill name=\"{Name}\">\nThe person used the skill /{Name} ({Description}). Follow its instructions:\n\n{Filled(words)}\n</skill>" + Mentions.End;
+}
 
 /// <summary>
 /// The person's and the project's own commands, sub-agents and skills: Markdown files under .arena/ in the project and in
@@ -98,17 +117,17 @@ internal sealed class Extensions
 
     private static readonly string[] ProjectFolders = [".arena", ".claude", ".qwen"];
 
-    /// <summary>The folders read, the project's first (they win).</summary>
-    private static IEnumerable<string> Folders(AppPaths paths, string projectRoot, string kind) =>
-        ProjectFolders.Select(f => Path.Combine(projectRoot, f, kind)).Append(Path.Combine(paths.ConfigDir, kind))
+    /// <summary>The folders read, the project's first (they win), and whose each is.</summary>
+    private static IEnumerable<(string Dir, string Source)> Folders(AppPaths paths, string projectRoot, string kind) =>
+        ProjectFolders.Select(f => (Path.Combine(projectRoot, f, kind), "project")).Append((Path.Combine(paths.ConfigDir, kind), "person"))
             // The skills Arena's plugins bring come after the project's and the person's own, and Arena's own last: those of the same name win.
-            .Concat(kind == "skills" ? [PluginSkills.Folder(paths), BuiltInSkills.Folder(paths)] : []);
+            .Concat(kind == "skills" ? [(PluginSkills.Folder(paths), "arena"), (BuiltInSkills.Folder(paths), "builtin")] : []);
 
     public static Extensions Load(AppPaths paths, string projectRoot)
     {
         var problems = new List<string>();
         var commands = new Dictionary<string, CustomCommand>(StringComparer.OrdinalIgnoreCase);
-        foreach (var dir in Folders(paths, projectRoot, "commands").Where(Directory.Exists))
+        foreach (var (dir, _) in Folders(paths, projectRoot, "commands").Where(f => Directory.Exists(f.Dir)))
         {
             foreach (var file in Directory.EnumerateFiles(dir, "*.md", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
             {
@@ -125,7 +144,7 @@ internal sealed class Extensions
             }
         }
         var agents = new Dictionary<string, CustomAgent>(StringComparer.OrdinalIgnoreCase);
-        foreach (var dir in Folders(paths, projectRoot, "agents").Where(Directory.Exists))
+        foreach (var (dir, _) in Folders(paths, projectRoot, "agents").Where(f => Directory.Exists(f.Dir)))
         {
             foreach (var file in Directory.EnumerateFiles(dir, "*.md").Order(StringComparer.Ordinal))
             {
@@ -141,7 +160,7 @@ internal sealed class Extensions
             }
         }
         var skills = new Dictionary<string, Skill>(StringComparer.OrdinalIgnoreCase);
-        foreach (var dir in Folders(paths, projectRoot, "skills").Where(Directory.Exists))
+        foreach (var (dir, source) in Folders(paths, projectRoot, "skills").Where(f => Directory.Exists(f.Dir)))
         {
             foreach (var folder in Directory.EnumerateDirectories(dir).Order(StringComparer.Ordinal))
             {
@@ -153,7 +172,7 @@ internal sealed class Extensions
                 var name = (fm.Field("name") ?? Path.GetFileName(folder)).ToLowerInvariant();
                 if (Valid(name) && !skills.ContainsKey(name))
                 {
-                    skills[name] = new Skill(name, fm.Field("description") ?? FirstLine(fm.Body), fm.Body, folder);
+                    skills[name] = new Skill(name, fm.Field("description") ?? FirstLine(fm.Body), fm.Body, folder, source);
                 }
             }
         }
@@ -183,7 +202,10 @@ internal sealed class Extensions
         }
     }
 
-    /// <summary>The prompt a typed /name args stands for; null when no command of that name exists.</summary>
+    /// <summary>
+    /// The message a typed /name args stands for: a command's prompt, or what was typed with a skill's instructions after it
+    /// (<see cref="Skill.Use"/>); null when no command or skill has that name. A command wins over a skill of its name.
+    /// </summary>
     public string? Expand(string input)
     {
         if (!input.StartsWith('/'))
@@ -191,9 +213,12 @@ internal sealed class Extensions
             return null;
         }
         var parts = input[1..].Split([' ', '\n'], 2);
-        return Commands.FirstOrDefault(c => string.Equals(c.Name, parts[0], StringComparison.OrdinalIgnoreCase)) is { } command
-            ? command.Fill(parts.Length > 1 ? parts[1].Trim() : "")
-            : null;
+        var words = parts.Length > 1 ? parts[1].Trim() : "";
+        if (Commands.FirstOrDefault(c => string.Equals(c.Name, parts[0], StringComparison.OrdinalIgnoreCase)) is { } command)
+        {
+            return command.Fill(words);
+        }
+        return Skills.FirstOrDefault(s => string.Equals(s.Name, parts[0], StringComparison.OrdinalIgnoreCase)) is { } skill ? skill.Use(input, words) : null;
     }
 
     /// <summary>The skill tool: a skill's instructions, or one of the files beside them.</summary>
@@ -226,8 +251,7 @@ internal sealed class Extensions
                 var text = File.ReadAllText(full);
                 return Task.FromResult(new ToolResult(text.Length <= 60_000 ? text : text[..60_000] + "\n… (cut)") { Display = c.Ui.Dim($"{skill.Name}/{name}") });
             }
-            var skillMd = Path.Combine(folder, "SKILL.md");
-            var sb = new StringBuilder(File.Exists(skillMd) ? BuiltInSkills.Filled(File.ReadAllText(skillMd), skill.Instructions) : skill.Instructions);
+            var sb = new StringBuilder(skill.Filled());
             if (files.Count > 0)
             {
                 sb.Append("\n\nFiles of this skill (skill with file reads one): ").Append(string.Join(", ", files));

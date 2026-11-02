@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Blocks, Brain, Bug, CircleAlert, CircleHelp, Files, GitBranch, GitCompareArrows, Info, ListChecks, MessagesSquare, ScanSearch, Search, SquareTerminal, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, Blocks, Brain, Bug, CircleAlert, CircleHelp, Files, GitBranch, GitCompareArrows, Info, ListChecks, MessagesSquare, ScanSearch, Search, SquareTerminal, WandSparkles, type LucideIcon } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { confetti, useKonami } from '@/components/app/games-kit'
 import { toast } from '@/components/ui/toaster'
@@ -21,6 +21,7 @@ import { chooseAndAddFolder, chooseAndOpenFolder, foldersQuery, openRecentFolder
 import { completion } from './completion'
 import { CommandPalette, recentLimit, type PaletteCommand } from './palette'
 import { MemoryPanel } from './memory-panel'
+import { SkillsPanel } from './skills-panel'
 import { ManageMenu } from './manage-menu'
 import { AccountsMenu } from './accounts-menu'
 import { PlanPanel } from './plan-panel'
@@ -38,7 +39,7 @@ import { Explorer } from './explorer'
 import { HelpProvider } from './help'
 import { useOpenHelp } from './help-context'
 import { openProgram, openTerminal, terminalsQuery, type TerminalInfo } from './ide-api'
-import { allFilesQuery, changesQuery, folderQuery, gitBranchesQuery, gitFileLog, gitLogQuery, gitStatusQuery, readFile, saveWorkspaceState, workspaceStateQuery, type DiskChanges, type WorkspaceState, parentOf, preferencesQuery, problemsQuery, savePreferences, writeFile } from './ide-api'
+import { allFilesQuery, changesQuery, folderQuery, gitBranchesQuery, gitFileLog, gitLogQuery, gitStatusQuery, readFile, saveWorkspaceState, workspaceStateQuery, type DiskChanges, type WorkspaceState, parentOf, preferencesQuery, problemsQuery, savePreferences, skillsQuery, writeFile } from './ide-api'
 import { useDiskChanges } from './disk-watch'
 import { setContext, useKeyboard, useKeyFor } from './keyboard'
 import { quickPick } from './quick-pick'
@@ -233,6 +234,7 @@ const views: { id: View; label: string; icon: LucideIcon; command: string }[] = 
   { id: 'review', label: 'Review', icon: ScanSearch, command: 'codeArena.view.review' },
   { id: 'plan', label: 'Plan', icon: ListChecks, command: 'codeArena.view.plan' },
   { id: 'memory', label: 'Memory', icon: Brain, command: 'codeArena.view.memory' },
+  { id: 'skills', label: 'Skills', icon: WandSparkles, command: 'codeArena.view.skills' },
   { id: 'chat', label: 'Chat', icon: MessagesSquare, command: 'codeArena.view.sessions' },
 ]
 
@@ -555,6 +557,8 @@ function Workbench({
       const read = (key: readonly unknown[]) => void queryClient.invalidateQueries({ queryKey: key })
       read(gitStatusQuery.queryKey)
       read(changesQuery.queryKey)
+      // A skill or command written by hand (or by the agent) is listed at once.
+      read(skillsQuery.queryKey)
       if (!d) {
         void refresh()
         read(['code', 'files'])
@@ -1158,6 +1162,7 @@ function Workbench({
       show('memory')
     } },
     { id: 'codeArena.view.plan', category: 'View', title: "Show the Agent's Plan", run: () => show('plan') },
+    { id: 'codeArena.view.skills', category: 'View', title: 'Show Skills', run: () => show('skills') },
     { id: 'codeArena.view.sessions', category: 'View', title: 'Show the Chat Sessions', run: () => show('chat') },
     { id: 'codeArena.acceptAllChanges', category: 'Code Arena', title: "Accept All the Agent's Changes", enabled: () => count > 0, run: () => void accept() },
     { id: 'workbench.action.terminal.toggleTerminal', category: 'View', title: 'Toggle Terminal', run: toggleTerminal },
@@ -1253,6 +1258,8 @@ function Workbench({
         return shown && <PlanPanel arena={state.manual ? new URL(state.manual).origin : null} />
       case 'memory':
         return memoryUsed && <MemoryPanel />
+      case 'skills':
+        return shown && <SkillsPanel />
       case 'chat':
         return <Sessions state={state} />
     }

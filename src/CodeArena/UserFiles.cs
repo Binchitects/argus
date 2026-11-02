@@ -1,14 +1,15 @@
 using System.Text;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 
 namespace CodeArena;
 
 /// <summary>
-/// The person's own settings.json and keybindings.json, as VS Code keeps them: in the config folder, for every project.
-/// Read and saved by the page with the version it read (a stale one is refused, as files are); never logged. VS Code's
-/// own copies on this computer can be read, to bring them over.
+/// The person's own settings.json and keybindings.json, as VS Code keeps them: in the config folder, for every project;
+/// and their own skills there (skills/NAME/SKILL.md). Read and saved by the page with the version it read (a stale one is
+/// refused, as files are); never logged. VS Code's own copies on this computer can be read, to bring them over.
 /// </summary>
-internal sealed class UserFiles(string configDir)
+internal sealed partial class UserFiles(string configDir)
 {
     /// <summary>The most either file holds.</summary>
     public const int MaxBytes = 1024 * 1024;
@@ -43,7 +44,7 @@ internal sealed class UserFiles(string configDir)
             {
                 throw new IdeError(409, "changed", $"{name} changed since it was opened. Reload it, or save again to overwrite it.");
             }
-            Directory.CreateDirectory(configDir);
+            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
             // Whole or not at all, readable by the person alone: it may hold paths and names they keep to themselves.
             var temp = $"{full}.{Environment.ProcessId}.tmp";
             File.WriteAllText(temp, text);
@@ -93,5 +94,11 @@ internal sealed class UserFiles(string configDir)
     }
 
     private string Full(string? name) =>
-        name is not null && Names.Contains(name) ? Path.Combine(configDir, name) : throw new IdeError(400, "invalid", "Ask for settings.json or keybindings.json.");
+        name is not null && (Names.Contains(name) || SkillFile().IsMatch(name))
+            ? Path.Combine([configDir, .. name.Split('/')])
+            : throw new IdeError(400, "invalid", "Ask for settings.json, keybindings.json or one of your skills (skills/NAME/SKILL.md).");
+
+    /// <summary>A skill of the person's own, as the Skills view names it.</summary>
+    [GeneratedRegex("^skills/[a-z0-9][a-z0-9_-]{0,63}/SKILL\\.md$")]
+    private static partial Regex SkillFile();
 }
