@@ -35,7 +35,8 @@
 #     --reuse             keep the test host's disk from the last run (default: a fresh host each run)
 #     --cpu-only          no GPU in the test host (the features that need one are off)
 #     --with LIST         features on beside the defaults, as installer.sh --with takes them (all: every one); with
-#                         argus or the scanners, installed with a GitLab address where nothing answers
+#                         argus or the scanners, installed with a GitLab address where nothing answers; never
+#                         power-limits: the test host shares this machine's GPU and CPU, whose caps are the machine's
 #     --keep              leave the test host running afterwards (docker exec -it NAME bash)
 #     --clean             remove the test host's disk (DIR) afterwards
 #     --dir DIR           where the test host keeps its disk (default ~/arena-e2e)
@@ -76,6 +77,10 @@ while [[ $# -gt 0 ]]; do
 done
 [[ -f "$BUNDLE" ]] || { echo "--bundle names no file: $BUNDLE" >&2; exit 2; }
 [[ $WITH == all ]] && WITH="$(sed -n 's/^\([a-z0-9-]*\) *|.*/\1/p' "$here/../../deploy/features" | paste -sd, -)"
+# A test host shares this machine's GPU and CPU: its own power-limits would set their power caps and temperature policy
+# for the whole machine, over the machine's own (it put the GPU back to its default 350 W while a test ran). It stays off.
+WITH="$(tr ',' '\n' <<< "$WITH" | grep -vx power-limits | paste -sd, -)"
+HOST_FLAGS=(--without power-limits)
 [[ -z "$MODEL" || ( -f "$MODEL" && "$MODEL" == *.gguf ) ]] || { echo "--model names no .gguf file: $MODEL" >&2; exit 2; }
 LOG="$DIR/logs/$(date +%Y%m%d-%H%M%S)"
 say() { printf '%s\n' "$*" | tee -a "$LOG/run.log"; }
@@ -142,7 +147,7 @@ say "  systemd: $s; network: $(H ip -o link show | awk -F': ' '{ print $2 }' | p
 # Installs the .run there as a person does: as root, unattended, putting the requirements right.
 install_run() {   # install_run RUN.run LABEL [EXTRA...]
   local run="$1" label="$2"; shift 2
-  local flags=(--dir /srv/arena --yes --install-requirements ${GITLAB_FLAGS[@]+"${GITLAB_FLAGS[@]}"}) ; [[ $CPU -eq 1 ]] && flags+=(--cpu-only)
+  local flags=(--dir /srv/arena --yes --install-requirements ${GITLAB_FLAGS[@]+"${GITLAB_FLAGS[@]}"} "${HOST_FLAGS[@]}") ; [[ $CPU -eq 1 ]] && flags+=(--cpu-only)
   [[ -n "$WITH" ]] && flags+=(--with "$WITH")
   say "==> $label: sh $run install ${flags[*]} $*"
   H sh -c "cd /bundle && sha256sum -c $run.sha256" >> "$LOG/$label.log" 2>&1 || fail "$run does not match its checksum"
@@ -223,7 +228,7 @@ if [[ -n "$FIRST" ]]; then install_run "$FIRST_RUN" first || say "  (the first i
 
 # Stopped part way as a person stops it (Ctrl-C reaches every process of the install): nothing may stay.
 interrupted_run() {   # interrupted_run RUN.run SECONDS
-  local run="$1" after="$2" flags=(--dir /srv/arena --yes --install-requirements ${GITLAB_FLAGS[@]+"${GITLAB_FLAGS[@]}"}) images_before
+  local run="$1" after="$2" flags=(--dir /srv/arena --yes --install-requirements ${GITLAB_FLAGS[@]+"${GITLAB_FLAGS[@]}"} "${HOST_FLAGS[@]}") images_before
   [[ $CPU -eq 1 ]] && flags+=(--cpu-only)
   [[ -n "$WITH" ]] && flags+=(--with "$WITH")
   images_before="$(H sh -c 'docker images -q 2>/dev/null | sort -u | wc -l' 2>/dev/null || echo 0)"
