@@ -2027,7 +2027,9 @@ A long session never gets stuck on the window:
   learned from the gateway's counts (and from the size a refusal gives); a
   resumed session starts from its last count. The answer's room (the model's
   longest answer as the gateway says, 4,096 tokens otherwise, at most an
-  eighth of the window) stays free below the window, whatever the threshold.
+  eighth of the window) stays free below the window, whatever the threshold;
+  the IDE's context gauge shows it as **Kept for the answer**, as the web
+  chat's does. A summary asks for no more than the model's longest answer.
 - **The start of every request stays the same**, so the engine does not read
   the whole conversation again after a change: the same tools in every mode,
   MCP servers' tools in the order they came (a new server's at the end), and

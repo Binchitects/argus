@@ -618,6 +618,9 @@ internal sealed class Repl(Runtime rt)
             var bar = new string('█', (int)Math.Clamp(Math.Round(tokens / window * 40), 1, 40));
             Ui.Line($"  {kind,-24} {Fmt.Tokens(tokens),8}  {Ui.Blue(bar)}");
         }
+        // The room kept for the answer, as the IDE's gauge shows it: a request holds its prompt and its answer together.
+        var kept = rt.Agent.Reserve;
+        Ui.Line($"  {"kept for the answer",-24} {Fmt.Tokens(kept),8}  {Ui.Dim(new string('░', (int)Math.Clamp(Math.Round(kept / window * 40), 1, 40)))}");
         if (biggest.Count > 0)
         {
             Ui.Line(Ui.Bold("Biggest"));

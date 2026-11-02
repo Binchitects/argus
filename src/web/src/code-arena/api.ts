@@ -20,6 +20,8 @@ export interface CodeState {
   context: number
   /** About how many of them the conversation fills now (the prompt, the tools and the history). */
   contextUsed: number
+  /** The room the session keeps in the window for the answer, in tokens: a request holds its prompt and its answer together. */
+  reserve?: number
   /** When the session compacts itself, in percent of the window (0: only when a request would not fit), and what the recent part may keep whole. */
   compactAt: number
   compactTarget: number

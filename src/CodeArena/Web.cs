@@ -642,8 +642,10 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             ["branch"] = git is null ? null : SystemPrompt.GitBranch(git),
             ["model"] = _rt.Model.Name,
             ["context"] = _rt.Model.Context,
-            // How full the window is (about), and when the session compacts itself: the status bar and the settings show them.
+            // How full the window is (about), the room kept in it for the answer, and when the session compacts itself: the
+            // status bar, the chat's gauge and the settings show them.
             ["contextUsed"] = Current() is null ? _lastUsed = _rt.Agent.Estimate() : _lastUsed,
+            ["reserve"] = _rt.Agent.Reserve,
             // A newer Code Arena on the Arena (the status bar offers it), and whether this one was replaced already.
             ["update"] = _updated ?? _rt.UpdateNotice,
             // How the model is given its tools now, whether that is the person's choice, and Arena's word for the model.

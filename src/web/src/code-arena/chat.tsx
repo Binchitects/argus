@@ -506,7 +506,8 @@ export function Thread({
   const older = useFolderHistory()
   const history: RecallSource = { here: sentHere, older }
   const lastUsage = [...path].reverse().find((m) => m.role === 'assistant' && m.promptTokens != null)
-  const context = contextOf(lastUsage, state.context, null)
+  // The room the session keeps for the answer, as the web chat's gauge shows its own.
+  const context = contextOf(lastUsage, state.context, state.reserve ?? null)
   // The commands the turn watches, and any still running that no turn here watches (each with its Stop).
   const jobs = [
     ...view.jobs,

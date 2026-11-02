@@ -129,6 +129,8 @@ public sealed class FakeGateway : FakeServer
 
     public string[] Models { get; set; } = ["model-a", "model-b"];
     public int Context { get; set; } = 32768;
+    /// <summary>The models' longest answer, as the gateway says it (max_output_tokens); null: it says none.</summary>
+    public int? MaxOutput { get; set; }
     /// <summary>The models see pictures (the gateway says so).</summary>
     public bool Vision { get; set; }
     public Func<JsonObject, Reply> Answer { get; set; } = _ => Reply.Say("Hello from the model.");
@@ -188,7 +190,8 @@ public sealed class FakeGateway : FakeServer
                     ["model_name"] = m,
                     ["model_info"] = new JsonObject
                     {
-                        ["max_input_tokens"] = Context, ["supports_function_calling"] = true, ["supports_reasoning"] = true, ["supports_vision"] = Vision, ["mode"] = "chat",
+                        ["max_input_tokens"] = Context, ["max_output_tokens"] = MaxOutput, ["supports_function_calling"] = true, ["supports_reasoning"] = true,
+                        ["supports_vision"] = Vision, ["mode"] = "chat",
                     },
                 })]),
             });

@@ -167,6 +167,9 @@ public sealed class CompactionTests : IDisposable
         using var h = new Harness(_gateway, _mcp);
         Assert.Equal(0, await h.Run("hello\n/exit\n", "chat"));
         Assert.Matches(@"· context [\d.]+k? / 20k \(\d+%\), compacts at 80%", h.Out);
+        // /context shows the room kept for the answer too, as the IDE's gauge does: an eighth of the window here.
+        Assert.Equal(0, await h.Run("/context\n/exit\n", "chat"));
+        Assert.Matches(@"kept for the answer +2\.5k", h.Out);
     }
 
     [Fact]
@@ -180,6 +183,8 @@ public sealed class CompactionTests : IDisposable
         Assert.Equal(("arena", 80), (state["compactAtSource"]!.GetValue<string>(), state["compactAtAccount"]!.GetValue<int>()));
         Assert.InRange(state["contextUsed"]!.GetValue<long>(), 1, 20_000);
         Assert.Equal(20_000, state["context"]!.GetValue<int>());
+        // The room kept for the answer, as the gauge shows it: an eighth of the window (the gateway says no longest answer).
+        Assert.Equal(2_500, state["reserve"]!.GetValue<long>());
 
         var set = await web.PostAsync("/api/settings", new JsonObject { ["compactAt"] = 70, ["compactTarget"] = 30 });
         Assert.Equal(HttpStatusCode.OK, set.StatusCode);
@@ -338,5 +343,21 @@ public sealed class CompactionTests : IDisposable
         Assert.Contains(FakeGateway.History(second), m => m["content"]?.ToString() == "The first half of a long answer");
         // An answer that long keeps room for the next ones like it (at most a third of the window).
         Assert.True(rt.Agent.Limit <= rt.Model.Context - 6_000, $"{rt.Agent.Limit}");
+    }
+
+    [Fact]
+    public async Task A_summary_asks_for_no_more_than_the_models_longest_answer()
+    {
+        _gateway.MaxOutput = 1_000;
+        using var h = new Harness(_gateway, _mcp);
+        _gateway.Answer = req => Summarizing(req) ? Reply.Say("SUMMARY of the older turns.") : Reply.Say("ok");
+        await using var rt = await StartAsync(h);
+        Assert.Equal(1_000, rt.Model.Info.MaxOutput);
+        // The room kept for an answer is within it too.
+        Assert.Equal(1_000, rt.Agent.Reserve);
+        Conversation(rt);
+        Assert.Null(rt.Compaction.Set(20, 5));
+        Assert.True(await rt.Agent.MaybeCompactAsync(CancellationToken.None));
+        Assert.Equal(1_000, Assert.Single(_gateway.Requests, Summarizing)["max_tokens"]!.GetValue<int>());
     }
 }

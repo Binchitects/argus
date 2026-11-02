@@ -594,6 +594,18 @@ describe('Code Arena in the browser', () => {
     expect(ok.jobs[0]!.failed).toBe(false)
   })
 
+  it('shows in the context gauge the room the session keeps for the answer, as the web chat does', async () => {
+    const context = { system: 500, tools: 300, instructions: 0, memory: 0, summary: 0, files: 0, you: 200, answers: 100, toolResults: 0 }
+    const messages = [...saved.slice(0, 3), { ...saved[3]!, context }]
+    backend({ session: { id: 's2', messages, diffs: { m2: diff }, busy: false }, state: { reserve: 4096 } })
+    renderCode()
+    // 1,100 read and 10 written of 32,768: the next request starts from there.
+    await userEvent.click(await screen.findByRole('button', { name: 'Context: 3% full. Details and compact' }))
+    const parts = await screen.findByRole('list', { name: 'What fills it' })
+    expect(within(parts).getByText('Kept for the answer').parentElement).toHaveTextContent('Kept for the answer4.1 K13%')
+    expect(within(parts).getByText('Free').parentElement).toHaveTextContent('Free27.56 K84%')
+  })
+
   it("draws a long session's last turns, and the earlier ones when asked for", async () => {
     const long: Message[] = Array.from({ length: 35 }, (_, i) => [
       msg(`m${2 * i}`, 'user', { content: `Question ${i + 1}` }),

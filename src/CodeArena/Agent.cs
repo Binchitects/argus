@@ -1238,9 +1238,10 @@ internal sealed class Agent
     /// <summary>
     /// The room left for the answer: the model's longest answer as the gateway says (4,096 when it does not), at most an
     /// eighth of the window; or, when this session's answers have been longer, the longest of them and a fifth more (at
-    /// most a third of the window), so the conversation is compacted before an answer like it would be cut.
+    /// most a third of the window), so the conversation is compacted before an answer like it would be cut. The IDE's
+    /// context gauge shows it, as the web chat's shows the room it keeps.
     /// </summary>
-    private long Reserve => Math.Max(Math.Min(Model.Info.MaxOutput is > 0 and var most ? most : DefaultReserve, Model.Context / 8),
+    public long Reserve => Math.Max(Math.Min(Model.Info.MaxOutput is > 0 and var most ? most : DefaultReserve, Model.Context / 8),
         Math.Min((long)(_longestAnswer * 1.2), Model.Context / 3));
 
     /// <summary>The longest answer of this session, in tokens.</summary>
@@ -1588,7 +1589,8 @@ internal sealed class Agent
     private async Task<string> SummarizeAsync(int upTo, string instruction, CancellationToken ct)
     {
         var messages = Conversation(upTo);
-        var answer = Math.Min(SummaryTokens, Model.Context / 4);
+        // Never more than the model's longest answer: the summary is an answer like any other.
+        var answer = Math.Min(Math.Min(SummaryTokens, Model.Context / 4), Model.Info.MaxOutput is > 0 and var most ? most : int.MaxValue);
         var budget = (long)(Math.Min(SummaryBudget ?? Model.Context - answer, Model.Context - answer) * CharsPerToken);
         var chars = Chars(upTo) + instruction.Length;
         // A window so small that the tools fill most of the budget: the summary is asked without them (the tools' start
