@@ -62,6 +62,8 @@ export function Composer({
   onClearQuote,
   focusSignal,
   initialText,
+  fill,
+  onFilled,
 }: {
   streaming: boolean
   onSend: (text: string, skill?: SkillUse) => Promise<boolean>
@@ -100,6 +102,9 @@ export function Composer({
   focusSignal?: number
   /** What the box starts with (what another app shared). */
   initialText?: string
+  /** Words put in the box in place of what it holds (a question rewound to, to edit and send again), once: then onFilled. */
+  fill?: string | null
+  onFilled?: () => void
 }) {
   const [text, setText] = useState(initialText ?? '')
   const area = useRef<HTMLTextAreaElement>(null)
@@ -107,6 +112,13 @@ export function Composer({
   useEffect(() => {
     if (focusSignal) area.current?.focus()
   }, [focusSignal])
+  useEffect(() => {
+    if (fill === null || fill === undefined) return
+    // oxlint-disable-next-line react/set-state-in-effect -- words from outside the box (a rewind), taken once: the page then lets them go
+    setText(fill)
+    area.current?.focus()
+    onFilled?.()
+  }, [fill, onFilled])
 
   // The / menu: the skills are fetched once a message starts with "/".
   const menuId = useId()

@@ -138,10 +138,14 @@ public sealed class MemoryReflectionTests(AppFixture app)
             var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
             var session = new Conversation { UserId = me, Origin = CodeArenaSync.Origin, OriginRef = "s1", ProjectKey = "gitlab.corp/payments/api", Title = "Fix the build" };
             var room = new Conversation { UserId = me, Kind = RoomMember.Room, Title = "A room" };
+            // A branch, as every chat has: what is read is the branch on screen.
+            var asked = new ChatMessage { ConversationId = session.Id, Role = "user", Sequence = 1, Content = """The tests need tools/dn, not dotnet. [propose {"text":"Build and test with tools/dn.","kind":"howto","scope":"project"}]""" };
+            var done = new ChatMessage { ConversationId = session.Id, ParentId = asked.Id, Role = "assistant", Sequence = 2, Content = "Done: I ran tools/dn test." };
+            session.CurrentLeafId = done.Id;
             db.Conversations.AddRange(session, room);
             db.ChatMessages.AddRange(
-                new ChatMessage { ConversationId = session.Id, Role = "user", Sequence = 1, Content = """The tests need tools/dn, not dotnet. [propose {"text":"Build and test with tools/dn.","kind":"howto","scope":"project"}]""" },
-                new ChatMessage { ConversationId = session.Id, Role = "assistant", Sequence = 2, Content = "Done: I ran tools/dn test." },
+                asked,
+                done,
                 new ChatMessage { ConversationId = room.Id, Role = "user", Sequence = 1, Content = """[propose {"text":"Likes rooms.","kind":"fact","scope":"person"}]""" });
             await db.SaveChangesAsync();
         }

@@ -14,7 +14,8 @@ import { takeShared } from '@/lib/shared'
 import type { SkillUse } from '@/lib/skills'
 import { useMedia } from '@/lib/use-media'
 import { cn } from '@/lib/utils'
-import { archiveChat, assistantQuery, cancelQueued, chatModel, chatWindow, configQuery, conversationQuery, forkChat, hurryChat, queueMessage, sendQueuedNow, stampQuery, stopChat, streamChat, uploadFile, widenWindow } from './api'
+import { archiveChat, assistantQuery, cancelQueued, chatModel, chatWindow, configQuery, conversationQuery, endBranchAt, forkChat, hurryChat, queueMessage, sendQueuedNow, stampQuery, stopChat, streamChat, uploadFile, widenWindow } from './api'
+import { typedOf } from './attached'
 import { useScreenShare } from './screen'
 import { PublishDialog, type ToPublish } from '../apps/publish-dialog'
 import { BrowserBar } from './browser-bar'
@@ -41,10 +42,11 @@ import { ChatTree, toTurns } from './tree'
 import { AnswerTurn, CompactedMark, QuestionTurn } from './turns'
 import { ArenaTurn, ComparePicker } from './arena'
 import { arenaView, type CompareChoice } from './quality'
-import type { Attachment, ChatConfig, ChatEvent, ChatSettings, Conversation, Message, QueuedMessage } from './types'
+import type { Attachment, ChatConfig, ChatEvent, ChatSettings, Conversation, Message, QueuedMessage, Rewound } from './types'
 import { useUploads } from './uploads'
 import { AssistantView } from './assistant-view'
 import { ShareDialog } from './share-dialog'
+import { RewindDialog } from './rewind-dialog'
 import { chatToJson, chatToMarkdown, exportName, markdownToHtml } from './export'
 import type { ExportKind } from './header'
 import { saveBlob } from '@/lib/zip'
@@ -926,6 +928,49 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     }
   }
 
+  // Rewind to here: the question asked about (the dialog says what goes), and the words it puts back in the box.
+  const [rewinding, setRewinding] = useState<Message | null>(null)
+  const [fill, setFill] = useState<string | null>(null)
+  const filled = useCallback(() => setFill(null), [])
+  const rewound = async (question: Message, r: Rewound, keep: boolean) => {
+    if (!id) return
+    const chat = id
+    const show = async (leaf: string | null) => {
+      // A read under way would put the branch before back.
+      await queryClient.cancelQueries({ queryKey: conversationQuery(chat).queryKey })
+      queryClient.setQueryData<Conversation>(conversationQuery(chat).queryKey, (c) => (c ? { ...c, currentLeafId: leaf } : c))
+      void queryClient.invalidateQueries({ queryKey: conversationQuery(chat).queryKey })
+    }
+    await show(r.currentLeafId)
+    // Back to before the person's own question: its words, quote and files go back in the box, to edit and send again.
+    const again = !keep && (!room || question.author?.id === me?.id)
+    if (again) {
+      setFill(question.files ? question.content : typedOf(question.content))
+      setQuote(question.quote ? { text: question.quote, words: question.quote, cut: false } : null)
+      uploads.clear()
+      uploads.attach(question.attachments)
+    }
+    const previous = r.previousLeafId
+    toast.success(`Rewound: ${r.gone} ${r.gone === 1 ? 'message' : 'messages'} left the chat`, {
+      description: r.forgotten > 0 ? `${r.forgotten} ${r.forgotten === 1 ? 'memory' : 'memories'} forgotten. The messages stay as another version.` : 'They stay as another version: Undo puts them back.',
+      action: previous
+        ? {
+            label: 'Undo',
+            onClick: () =>
+              void endBranchAt(chat, previous)
+                .then(async () => {
+                  await show(previous)
+                  if (!again) return
+                  setFill('')
+                  setQuote(null)
+                  uploads.clear()
+                })
+                .catch((e) => toast.error(errorMessage(e))),
+          }
+        : undefined,
+    })
+  }
+
   // The connection back (or the chat opened again with it): what waited is sent, one at a time, oldest first.
   const flushing = useRef(false)
   useEffect(() => {
@@ -1212,6 +1257,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                 <Composer
                   key={seed?.n ?? 0}
                   initialText={seed?.text}
+                  fill={fill}
+                  onFilled={filled}
                   streaming={streaming}
                   onSend={(text, skill) => send(text, undefined, undefined, undefined, undefined, skill)}
                   onStop={() => void stop()}
@@ -1316,6 +1363,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                               onEdit={room && t.question.author?.id !== me?.id ? undefined : edit}
                               onJumpToQuote={jumpToQuoted}
                               onContext={room ? undefined : changeContext}
+                              onRewind={id && (!room || room.role === 'owner') ? setRewinding : undefined}
                               room={room ? { me: me?.id ?? '', replyOf, onReply: room.role === 'viewer' ? undefined : setReplyTo, translation: (m) => translations.of(m.id) } : undefined}
                             />
                           )}
@@ -1475,6 +1523,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   quote={quote}
                   onClearQuote={() => setQuote(null)}
                   focusSignal={focusBox}
+                  fill={fill}
+                  onFilled={filled}
                   autoFocus
                 />
                 )}
@@ -1504,6 +1554,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
         )}
         {me?.isAdmin && <TraceSheet answerId={tracing} onClose={() => setTracing(null)} />}
         {id && <ShareDialog chatId={id} leafId={view.leaf} open={sharing} onOpenChange={setSharing} />}
+        {id && <RewindDialog chatId={id} question={rewinding} onClose={() => setRewinding(null)} onRewound={(r, keep) => rewinding && void rewound(rewinding, r, keep)} />}
         {id && room && <RoomPanel chatId={id} room={room} me={me?.id ?? ''} open={peopleOpen} onOpenChange={setPeopleOpen} here={roomLive.here} />}
         {id && data && !room && <NewRoomDialog open={makingRoom} onOpenChange={setMakingRoom} from={{ id, title: title ?? data.title }} />}
         {dragging && (

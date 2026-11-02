@@ -871,6 +871,90 @@ describe('chat', () => {
     expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ messageId: 'q1' })
   })
 
+  it('rewinds to a question by keyboard: the confirmation says what goes, its words go back in the box, and Undo puts the branch back', async () => {
+    const four = [
+      msg('q1', null, 'user', { content: 'first question' }),
+      msg('a1', 'q1', 'assistant', { content: 'answer one' }),
+      msg('q2', 'a1', 'user', { content: 'second question', quote: 'answer one', attachments: [{ id: 'f1', fileName: 'notes.txt', size: 12, truncated: false, kind: 'text', contentType: 'text/plain' }] }),
+      msg('a2', 'q2', 'assistant', { content: 'answer two' }),
+    ]
+    let leaf = 'a2'
+    const calls = backend({
+      extra: {
+        'GET /api/chat/conversations/c1': () => ({ json: conversation({ messages: four, currentLeafId: leaf }) }),
+        'GET /api/chat/conversations/c1/rewind': (_b, _i, url) =>
+          url.searchParams.get('keep') === 'true'
+            ? { json: { gone: 0, currentLeafId: 'a2', memories: [] } }
+            : { json: { gone: 2, currentLeafId: 'a1', memories: [{ id: 'mem1', text: 'Likes short answers.', proposed: false }] } },
+        'POST /api/chat/conversations/c1/rewind': () => {
+          leaf = 'a1'
+          return { json: { currentLeafId: 'a1', previousLeafId: 'a2', gone: 2, forgotten: 1 } }
+        },
+        'PUT /api/chat/conversations/c1/leaf': (body) => {
+          leaf = (body as { messageId: string }).messageId
+          return { json: { currentLeafId: leaf } }
+        },
+      },
+    })
+    renderApp('/chat/c1')
+    expect(await screen.findByText('answer two')).toBeInTheDocument()
+    // Each question has it; the keyboard reaches it.
+    const rewinds = screen.getAllByRole('button', { name: 'Rewind to here' })
+    expect(rewinds).toHaveLength(2)
+    rewinds[1]!.focus()
+    await userEvent.keyboard('{Enter}')
+    const dialog = await screen.findByRole('dialog', { name: 'Rewind to here?' })
+    expect(await within(dialog).findByText('2 messages')).toBeInTheDocument()
+    // Nothing comes after the last answer: only back to before the question.
+    expect(within(dialog).getByRole('radio', { name: /After its answer/ })).toBeDisabled()
+    expect(within(dialog).getByText('Likes short answers.')).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('checkbox'))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Rewind' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c1/rewind')?.body).toEqual({ messageId: 'q2', keep: false, forget: true }))
+
+    // Back to before it: gone from the thread, its words, quote and file back in the box.
+    await waitFor(() => expect(screen.queryByText('answer two')).toBeNull())
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('second question')
+    expect(screen.getByText('notes.txt')).toBeInTheDocument()
+    // Its own note's Undo (the notes of the tests before stay in the page's one toaster).
+    const note = (await screen.findByText('Rewound: 2 messages left the chat')).closest<HTMLElement>('[data-sonner-toast]')!
+    await userEvent.click(within(note).getByRole('button', { name: 'Undo' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT' && c.path === '/api/chat/conversations/c1/leaf')?.body).toEqual({ messageId: 'a2', exact: true }))
+    expect(await screen.findByText('answer two')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('')
+  })
+
+  it('rewinds keeping the question and its answer: only what came after goes, and the box stays as it is', async () => {
+    const four = [
+      msg('q1', null, 'user', { content: 'first question' }),
+      msg('a1', 'q1', 'assistant', { content: 'answer one' }),
+      msg('q2', 'a1', 'user', { content: 'second question' }),
+      msg('a2', 'q2', 'assistant', { content: 'answer two' }),
+    ]
+    let leaf = 'a2'
+    const calls = backend({
+      extra: {
+        'GET /api/chat/conversations/c1': () => ({ json: conversation({ messages: four, currentLeafId: leaf }) }),
+        'GET /api/chat/conversations/c1/rewind': (_b, _i, url) => ({ json: url.searchParams.get('keep') === 'true' ? { gone: 2, currentLeafId: 'a1', memories: [] } : { gone: 4, currentLeafId: null, memories: [] } }),
+        'POST /api/chat/conversations/c1/rewind': () => {
+          leaf = 'a1'
+          return { json: { currentLeafId: 'a1', previousLeafId: 'a2', gone: 2, forgotten: 0 } }
+        },
+      },
+    })
+    renderApp('/chat/c1')
+    await userEvent.click((await screen.findAllByRole('button', { name: 'Rewind to here' }))[0]!)
+    const dialog = await screen.findByRole('dialog', { name: 'Rewind to here?' })
+    expect(await within(dialog).findByText('4 messages')).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('radio', { name: /After its answer/ }))
+    expect(await within(dialog).findByText('2 messages')).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Rewind' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c1/rewind')?.body).toEqual({ messageId: 'q1', keep: true, forget: false }))
+    await waitFor(() => expect(screen.queryByText('answer two')).toBeNull())
+    expect(screen.getByText('answer one')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('')
+  })
+
   it('answering again right after a stop keeps the new answer on screen as it streams', async () => {
     const stoppedTry = msg('a2', 'q1', 'assistant', { content: 'first try', status: 'stopped' })
     let tries = 0

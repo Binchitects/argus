@@ -296,6 +296,26 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   - Arrows show "2 / 3" on a question or an answer with other versions, and
     switch between them.
   - What is on screen, and what the model reads, is the branch you are on.
+  - **Rewind to here** (the rewind button beside a question, which Tab
+    reaches too) takes the chat back to that question, as Claude Code's rewind
+    goes back to a message. Choose **Before this question** (it goes too, and
+    its words, quote and files go back in the box, to edit and send again) or
+    **After its answer** (the question and its answer stay). The confirmation
+    says how many messages go. They leave the branch the model reads, so the
+    next answer reads the chat from there; rewound to before a compaction, the
+    model reads those left word for word again, not a summary that covered
+    some of the gone ones. They stay in the chat as another version (the
+    arrows show it once something else is asked there, and search still finds
+    them), and **Undo** in the note that follows puts the branch back as it
+    was. The memories written from them are listed, to forget them too (Undo
+    does not bring those back); later memory proposals and the chat's digest
+    read only the branch on screen, and a digest that read them is written
+    anew. The Files panel follows the branch; a canvas keeps its documents
+    (each version is in its history). A Code Arena session kept with the chat
+    goes on from there at its next turn. Not while an answer is written, here
+    or by Code Arena. In a room only its owner rewinds, for everyone in it. A
+    link to the branch on screen keeps showing the branch it shared; a link
+    to the whole chat shows it rewound.
 - **Tools.** **Tools** beside the paperclip lists the tools you may use and
   which of them this chat has on; a new chat starts with those an admin put
   on in new chats. The model calls a tool when a question needs it.
@@ -733,8 +753,9 @@ a room holds (Settings → Chat → **Most people in a room**, 50).
 - **Live.** Who has the room open, who is typing, and whom the model is
   answering show as they happen.
 - **Roles.** The owner changes settings, adds and removes people, changes
-  their roles and hands the room over; members read, ask, attach files,
-  edit the canvas, and stop or decide on their own answers; viewers read.
+  their roles, hands the room over and rewinds it (for everyone); members
+  read, ask, attach files, edit the canvas, and stop or decide on their own
+  answers; viewers read.
   Owners can let members invite. Anyone but the owner can leave. When an
   owner's account is deleted the room goes to its longest-standing member;
   what someone wrote stays after they leave, as a former member's.
@@ -2131,7 +2152,15 @@ current leaf. `POST .../messages` takes a `parentId` (default: the leaf) or
 `root: true`. `POST .../regenerate` takes the question and, optionally, a model
 and a thinking level. A chat on Auto has `auto` as its model; each answer
 on Auto keeps who answered and why (`details.route` on its first message).
-`PUT .../leaf` switches branch. `POST .../fork` takes a `messageId` (default:
+`PUT .../leaf` switches branch (to the newest line below the message, or
+with `exact: true` ending at it). `GET .../rewind?messageId=&keep=` says what
+rewinding to a question would do (`gone`, the `currentLeafId` it leaves, the
+`memories` written from what goes), and `POST .../rewind` (`messageId`,
+`keep`, `forget`) does it: the leaf moves to just before the question (or
+after its answer, kept) and the answer is `currentLeafId`, `previousLeafId`
+(Undo: `PUT .../leaf` with it, `exact`), `gone` and `forgotten`. Only the
+chat's owner rewinds, and not while an answer is written (409).
+`POST .../fork` takes a `messageId` (default:
 the leaf) and copies the path to it into a new chat. The fork must end on a
 question or a finished answer, never inside a tool round. `PATCH` with
 `archived` archives a chat, and `GET /conversations?archived=true` lists the

@@ -58,7 +58,8 @@ public sealed record CompactRequest(Guid? MessageId = null);
 /// <param name="Length">"shorter" or "longer" than the answer <paramref name="AnswerId"/> (its last message), for this answer only.</param>
 public sealed record Regenerate(Guid? MessageId = null, string? Model = null, string? Thinking = null, string? Length = null, Guid? AnswerId = null);
 
-public sealed record LeafChange(Guid MessageId);
+/// <param name="Exact">That message itself ends the branch on screen (Undo of a rewind), not the newest line below it.</param>
+public sealed record LeafChange(Guid MessageId, bool Exact = false);
 
 /// <summary>How a message counts in what the model reads: pinned, left out (left out of the request: as it was).</summary>
 public sealed record MessageContext(bool? Pinned = null, bool? LeftOut = null);
@@ -88,6 +89,8 @@ public static partial class ChatEndpoints
         g.MapGet("/conversations/{id:guid}/stamp", StampAsync);
         g.MapPost("/conversations/{id:guid}/compact", CompactAsync);
         g.MapPut("/conversations/{id:guid}/leaf", LeafAsync);
+        g.MapGet("/conversations/{id:guid}/rewind", RewindPreviewAsync);
+        g.MapPost("/conversations/{id:guid}/rewind", RewindAsync);
         g.MapPut("/conversations/{id:guid}/messages/{messageId:guid}/context", MessageContextAsync);
         g.MapPost("/conversations/{id:guid}/fork", ForkAsync).RequirePermission(Llm.Core.Access.Permissions.Chat);
         g.MapPost("/conversations/{id:guid}/tool-calls/{callId}", DecideAsync);
@@ -563,8 +566,8 @@ public static partial class ChatEndpoints
             : AuthEndpoints.Problem(409, "not_waiting", "That tool call is not waiting for an answer any more.");
     }
 
-    /// <summary>Shows another branch: the newest line of messages below the one chosen.</summary>
-    private static async Task<IResult> LeafAsync(Guid id, LeafChange body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db)
+    /// <summary>Shows another branch: the newest line of messages below the one chosen (exact: ending at it).</summary>
+    private static async Task<IResult> LeafAsync(Guid id, LeafChange body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, RoomHub rooms)
     {
         var me = await Me(p, users);
         if (await Owned(db, id, me, Need.Manage) is not { } c)
@@ -578,12 +581,17 @@ public static partial class ChatEndpoints
         }
         var children = all.Where(m => m.ParentId is not null).ToLookup(m => m.ParentId!.Value);
         var leaf = body.MessageId;
-        while (children[leaf].OrderByDescending(m => m.Sequence).FirstOrDefault() is { } newest)
+        while (!body.Exact && children[leaf].OrderByDescending(m => m.Sequence).FirstOrDefault() is { } newest)
         {
             leaf = newest.Id;
         }
         c.CurrentLeafId = leaf;
         await db.SaveChangesAsync();
+        if (c.IsRoom)
+        {
+            // A room's branch on screen is everyone's in it: their pages read it again.
+            rooms.Changed(c.Id, "branch");
+        }
         return Results.Ok(new { currentLeafId = leaf });
     }
 
