@@ -285,6 +285,12 @@ public sealed partial class EngineRoute
         {
             return null;
         }
+        if (engine.Moves.TryGetValue(model, out var move) && move.Phase == Llm.Core.Models.ModelMove.Draining)
+        {
+            // Moving to another engine on the same GPUs: nothing loads it until its answers on the old one have ended.
+            var why = $"{model} is moving to {Models.ModelMoves.Label(move.To)}: it starts there once its answers on {Models.ModelMoves.Label(move.From)} have ended.";
+            return FallbackOf(model) is { } fallback ? $"{why} {fallback} answers in its place: send the request to {fallback}." : $"{why} Try again in a minute or two.";
+        }
         if (!engine.Counted(model))
         {
             return await StartForKeyAsync(model, ct);
@@ -417,8 +423,12 @@ public sealed partial class EngineRoute
         replicas.Tell(UnloadingTopic, model);
     }
 
-    /// <summary>Whether <paramref name="model"/> is this engine's (not the gateway's, nor only another GPU server's).</summary>
-    private bool Ours([NotNullWhen(true)] string? model) => model is not null && options.Value.Enabled && engine.StatusOf(model) is not null;
+    /// <summary>
+    /// Whether <paramref name="model"/> is this engine's (not the gateway's, nor only another GPU server's): listed, or moving
+    /// to another engine of this stack that does not list it yet (llama.cpp reads a new model as it starts again).
+    /// </summary>
+    private bool Ours([NotNullWhen(true)] string? model) =>
+        model is not null && options.Value.Enabled && (engine.StatusOf(model) is not null || engine.Moves.ContainsKey(model));
 
     /// <summary>A request that this replica does not follow to the end was let through to <paramref name="model"/> (<see cref="Starting"/>).</summary>
     private void Want(string model)
@@ -447,6 +457,7 @@ public sealed partial class EngineRoute
     {
         // In use: not quiet.
         _quiet.TryRemove(model, out _);
+        await WhileMovingAsync(model, ct);
         await WhileLentAsync(model, ct);
         Refuse(model);
         await RoomAsync(model, ct);
@@ -529,6 +540,29 @@ public sealed partial class EngineRoute
     /// around its turn, and flowing to the requests it makes; null for the others (an API key's, a side request's).
     /// </summary>
     public static readonly AsyncLocal<Func<string, Task>?> Waiting = new();
+
+    /// <summary>
+    /// While <paramref name="model"/> moves to another engine on the same GPUs and its answers on the old one have not ended
+    /// (EngineState.Draining), a request for it waits, rather than load it on either engine: it goes to the new one once the
+    /// old one has let it go, and is told why once.
+    /// </summary>
+    private async Task WhileMovingAsync(string model, CancellationToken ct)
+    {
+        var told = false;
+        while (engine.Moves.TryGetValue(model, out var move) && move.Phase == Llm.Core.Models.ModelMove.Draining)
+        {
+            if (!told)
+            {
+                told = true;
+                LogMoveWait(logger, model, move.To);
+                if (Waiting.Value is { } say)
+                {
+                    await say($"{model} is moving to {Models.ModelMoves.Label(move.To)}: it starts there once its answers on {Models.ModelMoves.Label(move.From)} have ended.");
+                }
+            }
+            await Task.Delay(TimeSpan.FromSeconds(1), clock, ct);
+        }
+    }
 
     /// <summary>
     /// While the GPU is lent to a picture or video job (EngineState.Lent), a request for a model that is not loaded waits
@@ -1310,6 +1344,9 @@ public sealed partial class EngineRoute
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Could not unload {Spare} to make room: {Message}")]
     private static partial void LogRoomFailed(ILogger logger, string spare, string message);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "A request for {Model} waits: it moves to {Engine} once its answers on its old engine have ended")]
+    private static partial void LogMoveWait(ILogger logger, string model, string engine);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "A request for {Model} waits: the GPU is lent to {Media}")]
     private static partial void LogLentWait(ILogger logger, string model, string media);

@@ -10,7 +10,7 @@ import { formatValue } from '@/lib/format'
 import { MediaModelSection, type LibraryRow, type SavedMediaModel, type SpeechRow } from './media-model-form'
 import { roleLabel, type MediaMode } from './media-modes'
 import { engineLabel, serverPerModel, useSnapshots, type EngineInstance, type EngineModel } from './engine-api'
-import { VllmModelSection } from './engine-fields'
+import { MovesAlert, VllmModelSection } from './engine-fields'
 import { ChatModelSection, type ChatModelSlot, type SavedModel } from './model-form'
 import { kindLabel, summary, type LibraryFile } from './model-profile'
 
@@ -179,6 +179,9 @@ export function ModelDialog({
   ]
   const snapshot = source && 'file' in source && (snapshots.data ?? []).some((s) => s.path === source.file) ? source.file : null
   const vllmModel = edit?.kind === 'chat' && serverPerModel((edit.model as EngineModel).engineKind) ? (edit.model as EngineModel) : null
+  // A vLLM or SGLang model given a GGUF file from the library moves to llama.cpp, as a llama.cpp model given a snapshot moves to vLLM or SGLang.
+  const gguf = !!source && 'file' in source && (library.data ?? []).some((f) => f.path === source.file && f.profile.kind === 'language')
+  const toLlama = !!vllmModel && gguf && !snapshot
   const value = sourceValue(source)
   const found = all.find((c) => c.value === value)
   // A picture or video model's other file (a text encoder, a decoder) belongs to either: it reads as the one being added.
@@ -285,13 +288,9 @@ export function ModelDialog({
       {choice && !mismatch && choice.group === 'parts' && <Alert title={choice.title}>{choice.why} It is put in among the files below, by its role.</Alert>}
       {!edit && <p className="-mt-2 text-xs text-muted-foreground">{kindDescription[kind]}</p>}
 
-      {edit?.kind === 'chat' && !vllmModel && snapshot && (
-        <Alert title={`Moves ${edit.model.name} to ${serverNames}`}>
-          It keeps its name, who may use it, its prices and sampling; it leaves llama.cpp (unloaded there) and loads on its new engine when
-          asked for. What only llama.cpp has (its GGUF file, layers by hand, experts in RAM, preset lines) is not carried over.
-        </Alert>
-      )}
-      {kind === 'chat' && (vllmModel || snapshot) ? (
+      {edit?.kind === 'chat' && !vllmModel && snapshot && <MovesAlert name={edit.model.name} from="llama.cpp" to={serverNames} />}
+      {toLlama && <MovesAlert name={vllmModel.name} from={engineLabel(vllmModel.engineKind)} to="llama.cpp" />}
+      {kind === 'chat' && (snapshot || (vllmModel && !toLlama)) ? (
         <VllmModelSection
           saved={vllmModel ?? (edit?.kind === 'chat' ? (edit.model as EngineModel) : null)}
           snapshot={snapshot ?? vllmModel?.file ?? ''}
@@ -306,6 +305,7 @@ export function ModelDialog({
           gpus={gpus}
           onClose={onClose}
           slot={chatSlot}
+          moving={toLlama}
         />
       ) : (
         <MediaModelSection

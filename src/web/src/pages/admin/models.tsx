@@ -18,8 +18,8 @@ import { money } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { AccessPicker, type AccessRule } from './access-picker'
 import { type SavedMediaModel } from './media-model-form'
-import { serverPerModel, type EngineInstance } from './engine-api'
-import { EngineProblems } from './engine-fields'
+import { serverPerModel, type EngineInstance, type ModelMove } from './engine-api'
+import { EngineProblems, MoveState } from './engine-fields'
 import { engineSlot } from './engine-slot'
 import { ModelDialog, type ModelDialogOpen } from './model-dialog'
 import { EngineActions } from './runtimes'
@@ -44,6 +44,8 @@ interface ModelRow extends SavedModel {
   status: 'loaded' | 'loading' | 'unloading' | 'unloaded' | 'failed' | 'missing' | 'waiting' | 'off' | 'sleeping' | null
   /** Its engine's kind: llama.cpp's, vLLM's or SGLang's. */
   engineKind?: 'llamacpp' | 'vllm' | 'sglang'
+  /** Its move to another engine, underway or failed. */
+  move?: ModelMove | null
   /** Loading or unloading: why ("loaded by ada", "for a chat or an API request", "making room for X", "kept loaded"), and since when. */
   why?: string | null
   since?: string | null
@@ -433,6 +435,13 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
     onSettled: onChanged,
     onError: (e) => toast.error(errorMessage(e)),
   })
+  const dismiss = useMutation({
+    mutationFn: () => api(`/api/admin/models/${encodeURIComponent(m.name)}/move`, { method: 'DELETE' }),
+    onSettled: onChanged,
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  // Moving to another engine: it loads there by itself, and is edited once it is there.
+  const moving = !!m.move && m.move.phase !== 'failed'
   const media = m.source === 'media'
   const onEngine = media ? m.status !== 'off' : m.status !== null && m.status !== 'missing'
   const image = m.mode === 'image_generation'
@@ -493,6 +502,7 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
       </CardHeader>
       <CardContent className="grid gap-4">
         {m.source === 'local' && m.atGateway === false && <Alert variant="warning">Not at the gateway yet: it is added again within a minute.</Alert>}
+        {m.move && <MoveState name={m.name} move={m.move} onDismiss={() => dismiss.mutate()} />}
         {m.status === 'missing' && (
           <Alert variant="warning" title="The engine does not list it">
             It restarts to read a new or changed model, which takes seconds. If this stays, the engine refused the model list and serves the .env model alone:{' '}
@@ -561,7 +571,7 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
             <Button
               size="sm"
               loading={load.isPending}
-              disabled={m.status === 'loading' || m.status === 'unloading' || !canLoad}
+              disabled={m.status === 'loading' || m.status === 'unloading' || !canLoad || moving}
               title={canLoad ? undefined : 'Every place in the engine keeps a model loaded'}
               onClick={async () => {
                 const full = !media && engine.loaded.length + engine.loading.length >= engine.max
@@ -587,6 +597,7 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
               size="sm"
               variant="outline"
               loading={unload.isPending}
+              disabled={moving}
               onClick={async () => {
                 const description = m.kept
                   ? 'It stops being kept loaded, too. Chats that use it wait for it to load again when asked for.'
@@ -619,7 +630,7 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
           )}
           {m.source === 'local' && (
             <>
-              <Button size="sm" variant="outline" onClick={onEdit}>
+              <Button size="sm" variant="outline" onClick={onEdit} disabled={moving} title={moving ? 'It is moving to another engine: edit it once it is there' : undefined}>
                 <Pencil /> Edit
               </Button>
               <Button

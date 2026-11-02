@@ -287,6 +287,31 @@ public sealed class EngineClient(LlamaCppBackend llama, VllmBackends vllm, Exter
 {
     private volatile Dictionary<string, IEngineBackend> _owners = new(StringComparer.Ordinal);
     private volatile IReadOnlyDictionary<string, string> _problems = new Dictionary<string, string>(StringComparer.Ordinal);
+    private volatile IReadOnlyDictionary<string, string> _homes = new Dictionary<string, string>(StringComparer.Ordinal);
+
+    /// <summary>What each engine listed last, by its name: each model's status there.</summary>
+    private volatile Dictionary<string, Dictionary<string, string>> _listed = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The engine each model the app added runs on, by its name (the watcher sets it from the database, and a save at once):
+    /// a model is that engine's, though another lists it too. llama.cpp lists the models of its presets until it starts
+    /// again, and a model moving to another engine is listed by both a while. A model not in it (the .env one) is the
+    /// first engine's that lists it.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> Homes
+    {
+        get => _homes;
+        set => _homes = value;
+    }
+
+    /// <summary>One model's engine changed (it moves): its own from now on, before the watcher reads the database again.</summary>
+    public void Home(string model, string engine) => _homes = new Dictionary<string, string>(_homes, StringComparer.Ordinal) { [model] = engine };
+
+    /// <summary>The engine of this stack by its name; null when there is none.</summary>
+    public IEngineBackend? Backend(string name) => Managed.FirstOrDefault(b => b.Name == name);
+
+    /// <summary>What <paramref name="engine"/> said of <paramref name="model"/> last, whether or not the model is its own; null: it did not list it.</summary>
+    public string? StatusOn(string engine, string model) => _listed.TryGetValue(engine, out var listed) ? listed.GetValueOrDefault(model) : null;
 
     /// <summary>The engines the app runs (llama.cpp when on, each vLLM instance), and the servers it does not.</summary>
     public IReadOnlyList<IEngineBackend> Backends => [.. Managed, external];
@@ -310,6 +335,8 @@ public sealed class EngineClient(LlamaCppBackend llama, VllmBackends vllm, Exter
         var models = new List<EngineModel>();
         var owners = new Dictionary<string, IEngineBackend>(StringComparer.Ordinal);
         var problems = new Dictionary<string, string>(StringComparer.Ordinal);
+        var all = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
+        var homes = _homes;
         foreach (var backend in Managed)
         {
             IReadOnlyList<EngineModel> listed;
@@ -322,7 +349,9 @@ public sealed class EngineClient(LlamaCppBackend llama, VllmBackends vllm, Exter
                 problems[backend.Name] = ex.Message;
                 continue;
             }
-            foreach (var m in listed.Where(m => owners.TryAdd(m.Name, backend)))
+            all[backend.Name] = listed.GroupBy(m => m.Name, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First().Status, StringComparer.Ordinal);
+            // Another engine's model, listed here too (llama.cpp not started again yet, a model moving away): not this one's.
+            foreach (var m in listed.Where(m => (!homes.TryGetValue(m.Name, out var home) || home == backend.Name) && owners.TryAdd(m.Name, backend)))
             {
                 models.Add(m);
             }
@@ -331,13 +360,17 @@ public sealed class EngineClient(LlamaCppBackend llama, VllmBackends vllm, Exter
                 problems[v.Name] = why;
             }
         }
-        (_owners, _problems) = (owners, problems);
+        (_owners, _problems, _listed) = (owners, problems, all);
         return models;
     }
 
-    /// <summary>The engine that has <paramref name="model"/>, as last listed; llama.cpp's when none listed it (its router loads by name).</summary>
+    /// <summary>
+    /// The engine that has <paramref name="model"/>: its own (<see cref="Homes"/>), else the one that listed it last;
+    /// llama.cpp's when none listed it (its router loads by name).
+    /// </summary>
     public IEngineBackend BackendOf(string model) =>
-        _owners.TryGetValue(model, out var b) ? b : vllm.Find(model) ?? (IEngineBackend)llama;
+        _homes.TryGetValue(model, out var home) && Backend(home) is { } own ? own
+            : _owners.TryGetValue(model, out var b) ? b : vllm.Find(model) ?? (IEngineBackend)llama;
 
     /// <summary>Its engine's kind (EngineKinds).</summary>
     public string KindOf(string model) => BackendOf(model).Capabilities.Kind;

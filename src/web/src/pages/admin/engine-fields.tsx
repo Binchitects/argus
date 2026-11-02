@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Moon } from 'lucide-react'
+import { Loader2, Moon } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -14,7 +14,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { useDebounced } from '@/lib/use-debounced'
 import { cn } from '@/lib/utils'
-import { engineLabel, serverPerModel, useFallbacks, useSnapshots, type EngineGpu, type EngineInstance, type EngineModel } from './engine-api'
+import { engineLabel, serverPerModel, useFallbacks, useSnapshots, type EngineGpu, type EngineInstance, type EngineModel, type ModelMove } from './engine-api'
 import { bytes, defaultMaxOutput, tokens } from './model-profile'
 
 export function FallbackField({ self, value, onChange, error }: { self: string | undefined; value: string; onChange: (v: string) => void; error?: string }) {
@@ -130,13 +130,14 @@ interface VllmForm {
 const lastPart = (path: string) => (path.split('/').pop() ?? path).replace(/@.*$/, '')
 
 function start(saved: EngineModel | null, snapshot: string, kind: 'vllm' | 'sglang'): VllmForm {
-  // A llama.cpp model being moved here takes this engine's kind and its own defaults for what llama.cpp counts otherwise.
+  // A llama.cpp model being moved here takes this engine's kind and its own defaults for what llama.cpp counts otherwise:
+  // its answers at once, and the GPUs proposed for this machine (its draft head is a GGUF file, not a snapshot).
   const moving = !!saved && !serverPerModel(saved.engineKind)
   return {
     name: saved?.name ?? lastPart(snapshot),
     kind: saved?.engineKind === 'sglang' ? 'sglang' : saved && !moving ? 'vllm' : kind,
     engine: saved?.engine ?? '',
-    devices: saved?.devices ?? '',
+    devices: moving ? '' : (saved?.devices ?? ''),
     replicas: String(saved?.replicas ?? 1),
     gpuMemoryUtilization: saved?.gpuMemoryUtilization ? String(saved.gpuMemoryUtilization) : '',
     quantization: saved?.quantization ?? '',
@@ -144,8 +145,8 @@ function start(saved: EngineModel | null, snapshot: string, kind: 'vllm' | 'sgla
     context: String(saved?.context ?? 32768),
     maxOutput: saved?.maxOutput ? String(saved.maxOutput) : '',
     parallel: String(moving ? 16 : (saved?.parallel ?? 16)),
-    specDecode: saved?.specDecode ?? '',
-    draftHead: saved?.draftHead ?? '',
+    specDecode: moving ? '' : (saved?.specDecode ?? ''),
+    draftHead: moving ? '' : (saved?.draftHead ?? ''),
     kvCpuGb: saved?.kvCpuGb ? String(saved.kvCpuGb) : '',
     kvTier: saved?.kvTier ?? '',
     kvDiskGb: saved?.kvDiskGb ? String(saved.kvDiskGb) : '',
@@ -224,6 +225,8 @@ export function VllmModelSection({
   const label = engineLabel(form.kind)
   const firstOf = (kind: string) => servers.find((i) => i.kind === kind)?.name
   const chosen = form.engine || firstOf(form.kind) || ''
+  // A vLLM or SGLang model put on another engine (SGLang for vLLM, another machine's) moves there.
+  const moves = !!saved && serverPerModel(saved.engineKind) && chosen !== (saved.engine || firstOf(saved.engineKind ?? ''))
   const choose = (name: string) => {
     const i = servers.find((x) => x.name === name)
     if (!i) return
@@ -239,6 +242,8 @@ export function VllmModelSection({
     onSuccess: async (r) => {
       await queryClient.invalidateQueries({ queryKey: ['admin', 'models'] })
       if (r?.warning) toast.warning(r.warning)
+      else if (saved && (moves || !serverPerModel(saved.engineKind)))
+        toast.success(`${saved.name} moves to ${label}`, { description: 'Its card says how far it is: its answers end where it was, then it loads here.' })
       else toast.success(saved ? `${saved.name} saved` : `${form.name} added`, { description: 'It starts when it is loaded or asked for.' })
       onClose()
     },
@@ -259,6 +264,7 @@ export function VllmModelSection({
     >
       {error && <Alert variant="destructive">{error}</Alert>}
       {errors.file && <Alert variant="destructive">{errors.file}</Alert>}
+      {moves && saved && <MovesAlert name={saved.name} from={engineLabel(saved.engineKind)} to={label} />}
       {shot && (
         <p className="text-sm text-muted-foreground">
           {shot.repo} at {shot.revision.slice(0, 12)} · {bytes(shot.size)} · {shot.architectures.join(', ') || 'architecture not said'}
@@ -433,6 +439,48 @@ export function VllmModelSection({
         </Button>
       </DialogFooter>
     </form>
+  )
+}
+
+/** What moving a model to another engine does, as the dialog says it before it is saved (the engines by their names for people). */
+export function MovesAlert({ name, from: old, to: next }: { name: string; from: string; to: string }) {
+  return (
+    <Alert title={`Moves ${name} to ${next}`}>
+      It keeps its name, who may use it, its prices and sampling. Its answers in flight end on {old}; new requests wait for it on {next}, where it loads
+      at once on other GPUs, or once {old} has let it go on the same ones. Should it not start there, it stays on {old} and says why. What only {old} has is
+      not carried over.
+    </Alert>
+  )
+}
+
+/** A model's move to another engine on its card: how far it is, or why it failed (put away with Dismiss). */
+export function MoveState({ name, move, onDismiss }: { name: string; move: ModelMove; onDismiss: () => void }) {
+  const [from, to] = [engineLabel(move.from), engineLabel(move.to)]
+  if (move.phase === 'failed') {
+    return (
+      <Alert variant="destructive" title={`${name} could not move to ${to}`}>
+        {move.error} It stays on {from}, as it was. Edit it to try again.
+        <div className="mt-2">
+          <Button type="button" size="sm" variant="outline" onClick={onDismiss}>
+            Dismiss
+          </Button>
+        </div>
+      </Alert>
+    )
+  }
+  const text =
+    move.phase === 'draining'
+      ? `Its answers on ${from} end first, on the same GPUs; then it loads on ${to}. Requests for it wait meanwhile.`
+      : move.phase === 'loading'
+        ? `Loading on ${to}: requests for it wait until it is ready there.${move.old !== 'gone' ? ` Its last answers on ${from} end beside it.` : ''}`
+        : `Ready on ${to}, where its requests go. Its last answers on ${from} are ending.`
+  return (
+    <Alert title={`Moving to ${to}`}>
+      <span className="inline-flex items-center gap-1.5">
+        <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+        {text}
+      </span>
+    </Alert>
   )
 }
 

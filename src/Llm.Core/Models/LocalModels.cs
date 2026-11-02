@@ -92,6 +92,56 @@ public sealed class LocalModel
     /// <summary>Per million prompt tokens the engine read from its cache; null: the default, never above <see cref="InputPerMtok"/>.</summary>
     public decimal? CachedInputPerMtok { get; set; }
     public decimal? OutputPerMtok { get; set; }
+    /// <summary>Its move to another engine, underway or failed (<see cref="ModelMove"/>); null: none.</summary>
+    public ModelMove? Move { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
+/// A model moving to another engine at runtime (Admin → Models → Edit, another engine). Its row has its new settings from
+/// the start, so new requests go to its new engine and wait there until it is ready. Its old engine keeps it
+/// (<see cref="From"/>) until its answers in flight there have ended, then lets it go. It loads on its new engine beside
+/// the old one when they share no GPU (or the old one did not have it loaded), else once the old one has let it go.
+/// Should it fail to start there, its row is put back as it was, on its old engine (loaded again if it was), and
+/// <see cref="Error"/> says why.
+/// </summary>
+public sealed class ModelMove
+{
+    /// <summary>Its answers on its old engine end first, on the same GPUs: new requests wait.</summary>
+    public const string Draining = "draining";
+    /// <summary>Loading on its new engine.</summary>
+    public const string Loading = "loading";
+    /// <summary>Ready on its new engine; its last answers on the old one still ending.</summary>
+    public const string Ready = "ready";
+    /// <summary>It could not start on its new engine: back on its old one, <see cref="Error"/> says why.</summary>
+    public const string Failed = "failed";
+
+    /// <summary>Its old engine has it, answering (until its answers end), stopping, or no more.</summary>
+    public const string Serving = "serving";
+    public const string Stopping = "stopping";
+    public const string Gone = "gone";
+
+    /// <summary>Its settings on the engine it leaves (a LocalModel as JSON); null once it failed (its row has them again).</summary>
+    public string? From { get; set; }
+    public string FromKind { get; set; } = "";
+    /// <summary>The engine instance it leaves, by name: llamacpp, vllm, sglang, another machine's.</summary>
+    public string FromEngine { get; set; } = "";
+    public string ToKind { get; set; } = "";
+    public string ToEngine { get; set; } = "";
+    public string Phase { get; set; } = Draining;
+    /// <summary>Whether its old engine still has it: <see cref="Serving"/>, <see cref="Stopping"/> or <see cref="Gone"/>.</summary>
+    public string Old { get; set; } = Gone;
+    /// <summary>It was loaded on its old engine as the move began: loaded there again should it fail.</summary>
+    public bool WasLoaded { get; set; }
+    public string? Error { get; set; }
+    /// <summary>Who moved it.</summary>
+    public string? By { get; set; }
+    public DateTimeOffset Since { get; set; }
+    /// <summary>When its phase began.</summary>
+    public DateTimeOffset At { get; set; }
+    /// <summary>When its new engine was asked to load it; null: not yet.</summary>
+    public DateTimeOffset? LoadAt { get; set; }
+    /// <summary>When its old engine was asked to let it go.</summary>
+    public DateTimeOffset? OldAt { get; set; }
 }

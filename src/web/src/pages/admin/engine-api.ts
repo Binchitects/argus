@@ -11,8 +11,30 @@ export interface EngineGpu {
   backend?: string
 }
 
+/**
+ * A model moving to another engine at runtime (Llm.Core ModelMove): draining (its answers on the old engine end first, on
+ * the same GPUs), loading on the new one, ready there (its last answers on the old one ending), or failed (back on the old one).
+ */
+export interface ModelMove {
+  phase: 'draining' | 'loading' | 'ready' | 'failed'
+  /** The kinds it leaves and goes to, and those engines by name. */
+  from: string
+  to: string
+  fromEngine: string
+  toEngine: string
+  /** Whether its old engine still has it: serving, stopping or gone. */
+  old: 'serving' | 'stopping' | 'gone'
+  since: string
+  at: string
+  by: string | null
+  /** Why it failed. */
+  error: string | null
+}
+
 /** A saved model with what only some engines have (Llm.Core EngineKinds). */
 export type EngineModel = SavedModel & {
+  /** Its move to another engine, underway or failed; null: none. */
+  move?: ModelMove | null
   engineKind?: 'llamacpp' | 'vllm' | 'sglang'
   engine?: string | null
   replicas?: number

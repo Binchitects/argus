@@ -529,6 +529,7 @@ public static class IdentityWiring
             services.AddHostedService(sp => sp.GetRequiredService<Gateway.LedgerImport>());
         }
         services.AddScoped<Models.ModelCatalog>();
+        services.AddScoped<Models.ModelMoves>();
         services.AddScoped<Models.ModelPolicy>();
         services.AddScoped<Models.ToolModeBook>();
         services.AddSingleton<Gateway.KeyWriters>();

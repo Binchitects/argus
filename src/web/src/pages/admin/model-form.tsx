@@ -133,8 +133,13 @@ const baseName = (path: string) => (path.split('/').pop() ?? '').replace(/(-\d{5
 
 type FormState = ReturnType<typeof initial>
 
-function initial(saved: SavedModel | null) {
+/** llama.cpp's token cache types: a model moved from vLLM or SGLang (fp8, auto) takes q8_0. */
+const llamaCacheTypes = ['f16', 'bf16', 'q8_0', 'q5_1', 'q5_0', 'q4_1', 'q4_0', 'iq4_nl']
+
+function initial(saved: SavedModel | null, moving = false) {
   const s = (v: number | null | undefined) => (v === null || v === undefined ? '' : String(v))
+  // A vLLM or SGLang model moved here starts from llama.cpp's own: every GPU, its cache type, and what fits (taken from the advice).
+  if (moving && saved) saved = { ...saved, devices: null, kvType: llamaCacheTypes.includes(saved.kvType ?? '') ? saved.kvType : 'q8_0', draftHead: null, mtp: false }
   return {
     name: saved?.name ?? '',
     file: saved?.file ?? '',
@@ -238,6 +243,7 @@ export function ChatModelSection({
   onClose,
   gpus = [],
   slot,
+  moving = false,
 }: {
   saved: SavedModel | null
   /** The library file chosen in the dialog (its "File or model"). */
@@ -247,10 +253,12 @@ export function ChatModelSection({
   gpus?: { index: number; name: string; total: number }[]
   /** Fields another component mounts here. */
   slot?: ChatModelSlot
+  /** A vLLM or SGLang model moving to llama.cpp: its GGUF file chosen, saved as llama.cpp's under its name. */
+  moving?: boolean
 }) {
   const queryClient = useQueryClient()
   const library = useQuery({ queryKey: ['admin', 'models', 'library'], queryFn: ({ signal }) => api<LibraryFile[]>('/api/admin/models/library', { signal }) })
-  const [form, setForm] = useState(() => initial(saved))
+  const [form, setForm] = useState(() => initial(saved, moving))
   const [extra, setExtra] = useState<Record<string, unknown>>(() => slot?.initial?.(saved) ?? {})
   const [nameTouched, setNameTouched] = useState(!!saved)
   const [error, setError] = useState<string | null>(null)
@@ -261,7 +269,7 @@ export function ChatModelSection({
   const defaultPrice = (k: 'input' | 'cachedInput' | 'output') => (saved?.price && !saved.price.own[k] ? `${saved.price[k]} (the default)` : 'the default')
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm((f) => ({ ...f, [k]: v }))
 
-  const request = useMemo(() => ({ ...body(form), ...extra }), [form, extra])
+  const request = useMemo(() => ({ ...body(form), ...extra, ...(moving ? { engineKind: 'llamacpp' } : {}) }), [form, extra, moving])
   const debounced = useDebounced(request, 350)
   const advice = useQuery({
     queryKey: ['admin', 'models', 'advice', debounced],
@@ -305,7 +313,7 @@ export function ChatModelSection({
     const picked = files.find((x) => x.path === path)
     // The name follows the file until it is typed by hand.
     setForm((cur) => ({ ...cur, file: path, name: nameTouched ? cur.name : baseName(path) }))
-    if (saved || picked?.profile.kind !== 'language') return
+    if ((saved && !moving) || picked?.profile.kind !== 'language') return
     try {
       const first = await api<Advice>('/api/admin/models/advice', { body: { file: path } })
       if (first.recommended) recommend(first.recommended)
@@ -330,6 +338,7 @@ export function ChatModelSection({
     onSuccess: async (r) => {
       await queryClient.invalidateQueries({ queryKey: ['admin', 'models'] })
       if (r?.warning) toast.warning(r.warning)
+      else if (moving && saved) toast.success(`${saved.name} moves to llama.cpp`, { description: 'Its card says how far it is: its answers end where it was, then it loads here.' })
       else toast.success(saved ? `${saved.name} saved` : `${form.name} added`, { description: 'The engine restarts to read it: the loaded model is back in a moment. Load it from its card.' })
       onClose()
     },
