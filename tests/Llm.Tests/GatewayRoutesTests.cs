@@ -27,6 +27,8 @@ public sealed class GatewayRoutesTests(AppFixture app)
             var protect = scope.ServiceProvider.GetRequiredService<RemoteServerClient>();
             db.LocalModels.Add(new LocalModel { Name = "tiny", File = "tiny.gguf", Context = 32768, Parallel = 4 });
             db.LocalModels.Add(new LocalModel { Name = "shared", File = "shared.gguf", Context = 16384, Parallel = 2 });
+            // Its longest answer saved for one slot of 16,384; four slots now hold 4,096 each.
+            db.LocalModels.Add(new LocalModel { Name = "crowded", File = "crowded.gguf", Context = 16384, Parallel = 4, MaxOutput = 8192 });
             db.RemoteServers.Add(new RemoteServer
             {
                 Name = "gpu2", BaseUrl = "https://gpu2.example.test/v1", ApiKeyProtected = protect.Protect("remote-" + "secret"), VerifyTls = false,
@@ -49,6 +51,11 @@ public sealed class GatewayRoutesTests(AppFixture app)
         var tiny = Assert.Single(routes, r => r.Name == "tiny");
         Assert.Equal((Deployment.LlamaCpp, "http://llamacpp:8080/v1", "tiny", true, (string?)null, 1), (tiny.Kind, tiny.BaseUrl, tiny.Model, tiny.EngineKey, tiny.Key, tiny.Copies));
         Assert.Equal(8192, tiny.Info["max_input_tokens"]!.GetValue<int>());
+        // Its longest answer, half the window when it sets none, under both of LiteLLM's names: max_tokens is not the window.
+        Assert.Equal((4096, 4096), (tiny.Info["max_output_tokens"]!.GetValue<int>(), tiny.Info["max_tokens"]!.GetValue<int>()));
+        // A longest answer the window no longer holds leaves room for a prompt.
+        var crowded = Assert.Single(routes, r => r.Name == "crowded");
+        Assert.Equal((4096, 3072), (crowded.Info["max_input_tokens"]!.GetValue<int>(), crowded.Info["max_output_tokens"]!.GetValue<int>()));
         // Another server's model: its own name there, its key, its certificate not checked as asked.
         var big = Assert.Single(routes, r => r.Name == "big");
         Assert.Equal((Deployment.Remote, "https://gpu2.example.test/v1", "org/big", false, "remote-secret", (bool?)false, "gpu2"),

@@ -175,9 +175,11 @@ public static class RemoteServerEndpoints
             {
                 return AuthEndpoints.Problem(400, "models", $"{as_} is there twice: give each model its own name.");
             }
-            if (m.Context is < 1024 or > ModelAdvisor.MaxContext || m.MaxOutput is < 1 || (m.Context is { } c && m.MaxOutput > c))
+            // A request holds its prompt and its answer in the context: the longest answer leaves room for a prompt.
+            if (m.Context is < 1024 or > ModelAdvisor.MaxContext || m.MaxOutput is < 1 || (m.Context is { } c && m.MaxOutput > ModelAdvisor.OutputBounds(c).Max))
             {
-                return AuthEndpoints.Problem(400, "models", $"{as_}: the context is 1,024 to {ModelAdvisor.MaxContext:N0} tokens, and the longest answer at most the context.");
+                return AuthEndpoints.Problem(400, "models",
+                    $"{as_}: the context is 1,024 to {ModelAdvisor.MaxContext:N0} tokens, and the longest answer at most the context less {ModelAdvisor.PromptRoom:N0} tokens for a prompt.");
             }
             if (TokenPrice.Check(m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok, prices.Defaults) is { } price)
             {

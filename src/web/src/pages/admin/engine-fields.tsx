@@ -15,7 +15,7 @@ import { api, errorMessage } from '@/lib/api'
 import { useDebounced } from '@/lib/use-debounced'
 import { cn } from '@/lib/utils'
 import { engineLabel, serverPerModel, useFallbacks, useSnapshots, type EngineGpu, type EngineInstance, type EngineModel } from './engine-api'
-import { bytes } from './model-profile'
+import { bytes, defaultMaxOutput, tokens } from './model-profile'
 
 export function FallbackField({ self, value, onChange, error }: { self: string | undefined; value: string; onChange: (v: string) => void; error?: string }) {
   const names = useFallbacks(self)
@@ -98,7 +98,7 @@ export function GpuChooser({ gpus, value, onChange, error, hint }: { gpus: Engin
 }
 
 interface VllmAdvice {
-  limits: { context: { min: number; max: number }; parallel: { min: number; max: number } } | null
+  limits: { context: { min: number; max: number }; maxOutput: { min: number; max: number }; parallel: { min: number; max: number } } | null
   recommended: { context: number; maxOutput: number; parallel: number; kvType: string; devices: string | null } | null
   estimate: { gpuWeights: number; gpuCache: number; gpuTotal: number; gpuBudget: number | null; ramTotal: number; fit: string; approximate: boolean } | null
   problems: { field: string; message: string; error: boolean }[]
@@ -115,6 +115,8 @@ interface VllmForm {
   quantization: string
   kvType: string
   context: string
+  /** The longest answer; empty: half the context. */
+  maxOutput: string
   parallel: string
   specDecode: string
   draftHead: string
@@ -140,6 +142,7 @@ function start(saved: EngineModel | null, snapshot: string, kind: 'vllm' | 'sgla
     quantization: saved?.quantization ?? '',
     kvType: saved?.kvType && ['fp8', 'auto', 'fp8_e4m3', 'fp8_e5m2'].includes(saved.kvType) ? saved.kvType : 'fp8',
     context: String(saved?.context ?? 32768),
+    maxOutput: saved?.maxOutput ? String(saved.maxOutput) : '',
     parallel: String(moving ? 16 : (saved?.parallel ?? 16)),
     specDecode: saved?.specDecode ?? '',
     draftHead: saved?.draftHead ?? '',
@@ -154,7 +157,9 @@ function start(saved: EngineModel | null, snapshot: string, kind: 'vllm' | 'sgla
 /** What the API takes for a vLLM or SGLang model: what is empty is cleared (the default), what is set is sent. */
 function request(form: VllmForm, file: string) {
   const n = (s: string) => (s.trim() === '' ? undefined : Number(s))
-  const clear = (['devices', 'gpuMemoryUtilization', 'quantization', 'specDecode', 'draftHead', 'kvCpuGb', 'kvTier', 'kvDiskGb', 'fallback', 'engine'] as const).filter((k) => String(form[k]).trim() === '')
+  const clear = (['devices', 'gpuMemoryUtilization', 'quantization', 'maxOutput', 'specDecode', 'draftHead', 'kvCpuGb', 'kvTier', 'kvDiskGb', 'fallback', 'engine'] as const).filter(
+    (k) => String(form[k]).trim() === '',
+  )
   return {
     engineKind: form.kind,
     file,
@@ -165,6 +170,7 @@ function request(form: VllmForm, file: string) {
     quantization: form.quantization || undefined,
     kvType: form.kvType,
     context: n(form.context),
+    maxOutput: n(form.maxOutput),
     parallel: n(form.parallel),
     specDecode: form.specDecode || undefined,
     draftHead: form.draftHead || undefined,
@@ -298,8 +304,19 @@ export function VllmModelSection({
         <Field label="Quantisation" hint="Empty: what its config says." error={errors.quantization}>
           <Input value={form.quantization} onChange={(ev) => set('quantization', ev.target.value)} placeholder="auto" />
         </Field>
-        <Field label="Context" hint={a?.limits ? `${a.limits.context.min.toLocaleString()} to ${a.limits.context.max.toLocaleString()} tokens.` : 'Tokens.'} error={errors.context}>
+        <Field
+          label="Context"
+          hint={`${a?.limits ? `${tokens(a.limits.context.min)} to ${tokens(a.limits.context.max)} tokens` : 'Tokens'}: what each request holds, its prompt and its answer together.`}
+          error={errors.context}
+        >
           <Input inputMode="numeric" value={form.context} onChange={(ev) => set('context', ev.target.value)} />
+        </Field>
+        <Field
+          label="Longest answer"
+          hint={`${a?.limits ? `${tokens(a.limits.maxOutput.min)} to ${tokens(a.limits.maxOutput.max)}: the context less room for a prompt. ` : ''}Empty: ${tokens(defaultMaxOutput(Number(form.context) || 32768))}.`}
+          error={errors.maxOutput}
+        >
+          <Input inputMode="numeric" value={form.maxOutput} placeholder={String(defaultMaxOutput(Number(form.context) || 32768))} onChange={(ev) => set('maxOutput', ev.target.value)} />
         </Field>
         <Field label="Answers at once" hint={`Per copy (${form.kind === 'sglang' ? '--max-running-requests' : '--max-num-seqs'}).`} error={errors.parallel}>
           <Input inputMode="numeric" value={form.parallel} onChange={(ev) => set('parallel', ev.target.value)} />

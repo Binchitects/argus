@@ -25,8 +25,12 @@ public sealed class LocalModel
     public required string File { get; set; }
     /// <summary>A vision projector (mmproj) in the library, for a model that can see.</summary>
     public string? Projector { get; set; }
-    /// <summary>The context, shared by the answers in parallel (one cache): the most one conversation can use.</summary>
+    /// <summary>
+    /// The context (llama.cpp's ctx-size, vLLM's --max-model-len, SGLang's --context-length). On llama.cpp the answers in
+    /// parallel share it, each slot held to its share; on vLLM and SGLang each request may hold all of it (ModelCatalog.Window).
+    /// </summary>
     public int Context { get; set; } = 32768;
+    /// <summary>The longest answer, in tokens, within what one request holds (its prompt needs room too); null: half of that.</summary>
     public int? MaxOutput { get; set; }
     /// <summary>"auto": llama.cpp fits the model to the GPU when it loads (layers or experts to RAM as needed); "manual": <see cref="GpuLayers"/> and <see cref="CpuMoe"/>.</summary>
     public string Placement { get; set; } = "auto";

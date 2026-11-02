@@ -158,6 +158,9 @@ describe('admin models', () => {
     await waitFor(() => expect(within(dialog).getByLabelText('Context (tokens)')).toHaveValue('131072'))
     expect(within(dialog).getByLabelText('Longest answer (tokens)')).toHaveValue('32768')
     expect(await within(dialog).findByText(/4,096 to 262,144 \(trained for 262,144\)/)).toBeInTheDocument()
+    // Its 2 answers at once share the context: what one conversation holds bounds its answer, and half of it is the default.
+    expect(within(dialog).getByText(/The 2 answers at once share it: 65,536 a conversation, its prompt and its answer together\./)).toBeInTheDocument()
+    expect(within(dialog).getByText(/: what a conversation holds \(65,536\) less room for its prompt\. Empty: 32,768\./)).toBeInTheDocument()
     // A dense model is not asked about experts, even placed by hand.
     await userEvent.click(within(dialog).getByRole('combobox', { name: 'Placement' }))
     await userEvent.click(await screen.findByRole('option', { name: 'By hand' }))
@@ -400,12 +403,15 @@ describe('admin models', () => {
     expect(screen.getByText(/each small step waits for it to load/)).toBeInTheDocument()
   })
 
-  it("a model with several slots says each conversation's share of its context", async () => {
+  it("a model with several slots says each conversation's share of its context, and each model its longest answer", async () => {
     const v = view()
-    fakeApi(admin, { 'GET /api/admin/models': () => ({ json: { ...v, models: [{ ...v.models[0], window: 32768 }, ...v.models.slice(1)] } }) })
+    const vllm = { ...v.models[1], name: 'Flash', engineKind: 'vllm', file: 'hf/org/flash@r', context: 65536, window: 65536, output: 32768, parallel: 16 }
+    fakeApi(admin, { 'GET /api/admin/models': () => ({ json: { ...v, models: [{ ...v.models[0], window: 32768, output: 16384 }, ...v.models.slice(1), vllm] } }) })
     renderApp('/admin/models')
-    expect(await screen.findByText('big/Big-Q4.gguf · 131,072 tokens of context, 32,768 a conversation')).toBeInTheDocument()
+    expect(await screen.findByText('big/Big-Q4.gguf · 131,072 tokens of context, 32,768 a conversation, answers up to 16,384')).toBeInTheDocument()
     expect(screen.getByText('small/Small-Q8.gguf · 32,768 tokens of context')).toBeInTheDocument()
+    // vLLM's 16 at once share its cache, not its window: each request may hold the whole context.
+    expect(screen.getByText('hf/org/flash@r · 65,536 tokens of context, answers up to 32,768')).toBeInTheDocument()
   })
 
   it('the GPU lent to a video says so, with the room made and given back', async () => {

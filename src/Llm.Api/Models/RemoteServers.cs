@@ -108,10 +108,13 @@ public sealed class RemoteServerClient(IHttpClientFactory http, IDataProtectionP
         }
     }
 
-    /// <summary>The window a server reports, under the name it uses: vLLM, llama.cpp, LiteLLM and others.</summary>
+    /// <summary>
+    /// The window a server reports, under the name it uses: vLLM, llama.cpp, LiteLLM and others. Never llama.cpp's n_ctx_train:
+    /// what the model was trained for, not what the server holds for a request (its -c, shared by its slots).
+    /// </summary>
     private static int? ContextOf(JsonObject m)
     {
-        foreach (var node in new[] { m["max_model_len"], m["meta"]?["n_ctx"], m["meta"]?["n_ctx_train"], m["context_length"], m["context_window"], m["max_input_tokens"] })
+        foreach (var node in new[] { m["max_model_len"], m["meta"]?["n_ctx"], m["context_length"], m["context_window"], m["max_input_tokens"] })
         {
             if (node is not JsonValue v)
             {

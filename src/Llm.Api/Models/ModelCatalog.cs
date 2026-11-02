@@ -546,7 +546,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         sb.Append(inv, $"ctx-size = {m.Context}\nparallel = {m.Parallel}\nkv-unified = true\n");
         if (m.Parallel > 1)
         {
-            sb.Append(inv, $"kv-unified-per-slot = {SlotWindow(m)}\n");
+            sb.Append(inv, $"kv-unified-per-slot = {Window(m)}\n");
         }
         sb.Append(inv, $"cache-type-k = {m.KvType}\ncache-type-v = {m.KvType}\n");
         if (m.Placement == "manual")
@@ -667,10 +667,21 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     }
 
     /// <summary>
-    /// What one conversation of a model may hold: its context shared by its slots (Answers at once), each its share, as
-    /// the engine holds them (kv-unified-per-slot) and the gateway says (max_input_tokens). Fewer slots, a longer window.
+    /// What one request to a model may hold, its prompt and its answer together, as the gateway says (max_input_tokens): on
+    /// llama.cpp its context shared by its slots (Answers at once), each its share, as the engine holds them
+    /// (kv-unified-per-slot), so fewer slots give a longer window; on vLLM and SGLang the whole context (--max-model-len,
+    /// --context-length), as their answers at once share the cache, not the window.
     /// </summary>
-    public static int SlotWindow(LocalModel m) => m.Context / Math.Max(1, m.Parallel);
+    public static int Window(LocalModel m) => EngineKinds.ServerPerModel(m.EngineKind) ? m.Context : m.Context / Math.Max(1, m.Parallel);
+
+    /// <summary>The longest answer of a model's requests, as the gateway says (max_output_tokens): its own, else half its window, within what the window leaves.</summary>
+    public static int OutputLimit(LocalModel m) => OutputLimit(Window(m), m.MaxOutput);
+
+    /// <summary>
+    /// The longest answer in a window of <paramref name="window"/> tokens: <paramref name="maxOutput"/>, else half the window
+    /// (<see cref="DefaultMaxOutput"/>); never more than the window less room for a prompt (one saved before its window shrank).
+    /// </summary>
+    public static int OutputLimit(int window, int? maxOutput) => Math.Min(maxOutput ?? DefaultMaxOutput(window), ModelAdvisor.OutputBounds(window).Max);
 
     /// <summary>
     /// llama.cpp's fit target for a model that fits itself to the GPU, when a picture model kept loaded runs beside it: what
@@ -1049,8 +1060,8 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         chatModels.Forget();
     }
 
-    /// <summary>The longest answer when none is set: half the context, at most 32,768 tokens.</summary>
-    public static int DefaultMaxOutput(int context) => Math.Max(ModelAdvisor.MinOutput, Math.Min(32768, context / 2 / 1024 * 1024));
+    /// <summary>The longest answer when none is set: half the window (<see cref="Window"/>), at most 32,768 tokens.</summary>
+    public static int DefaultMaxOutput(int window) => Math.Max(ModelAdvisor.MinOutput, Math.Min(32768, window / 2 / 1024 * 1024));
 
     /// <summary>The fallbacks each gateway was last given (by any catalog of this replica): set again only when they change, and at start.</summary>
     private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ILiteLlm, string> GivenFallbacks = [];

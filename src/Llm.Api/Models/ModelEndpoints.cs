@@ -137,8 +137,10 @@ public static class ModelEndpoints
                 instead = state.LoadedInstead.Contains(m.Name),
                 // The engine unloaded it by its own choice this often lately (it holds fewer models than the app thinks).
                 evicted = state.Evicted(m.Name),
-                // What one conversation may hold: its slot's share of the context (the gateway says so too).
-                file = m.File, m.Projector, context = m.Context, window = ModelCatalog.SlotWindow(m), m.MaxOutput, m.Placement, m.GpuLayers, m.CpuMoe, m.KvType, m.Parallel, m.Ubatch,
+                // What one conversation may hold (a slot's share of the context on llama.cpp, the whole on vLLM and SGLang) and the
+                // longest answer within it, as the gateway says them.
+                file = m.File, m.Projector, context = m.Context, window = ModelCatalog.Window(m), output = ModelCatalog.OutputLimit(m), m.MaxOutput, m.Placement, m.GpuLayers,
+                m.CpuMoe, m.KvType, m.Parallel, m.Ubatch,
                 m.Mtp, m.DraftHead, m.DraftMax, m.Yarn, m.Temperature, m.TopP, m.TopK, m.MinP, m.PresencePenalty,
                 m.ExtraPreset, m.Thinking, m.Tools, m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok, price = Price(m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok),
                 vision = m.Projector is { Length: > 0 }, atGateway = At(m.Name) is not null, access = Access(m.Name),
@@ -159,7 +161,8 @@ public static class ModelEndpoints
                 rows.Add(new
                 {
                     name = m.Name, source = "remote", server = s.Name, remote = m.Remote, mode = "chat", toolMode = ToolMode(m.Name), status = (string?)null, context = m.Context,
-                    maxOutput = m.MaxOutput, vision = m.Vision, atGateway = At(m.Name) is not null, access = Access(m.Name),
+                    output = m.Context is { } held ? ModelCatalog.OutputLimit(held, m.MaxOutput) : m.MaxOutput, maxOutput = m.MaxOutput, vision = m.Vision,
+                    atGateway = At(m.Name) is not null, access = Access(m.Name),
                     price = Price(m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok),
                 });
             }
@@ -189,8 +192,8 @@ public static class ModelEndpoints
         {
             rows.Add(new
             {
-                name = m.Name, source = "gateway", mode = m.Mode, toolMode = m.Mode == "chat" ? ToolMode(m.Name) : null, status = (string?)null, context = m.Context, vision = m.Vision,
-                access = Access(m.Name),
+                name = m.Name, source = "gateway", mode = m.Mode, toolMode = m.Mode == "chat" ? ToolMode(m.Name) : null, status = (string?)null, context = m.Context,
+                output = m.MaxOutput, vision = m.Vision, access = Access(m.Name),
             });
         }
         return Results.Ok(new

@@ -265,11 +265,16 @@ public static class VllmAdvisor
             KvBytesPerToken = new Dictionary<string, long> { ["fp8"] = p.KvPerToken, ["auto"] = p.KvPerToken * 2 }, RecurrentBytesPerSlot = p.StatePerSequence,
             Approximate = p.Approximate, Thinking = true, Tools = true,
         };
-        var limits = new ModelLimits(new Bounds(ctxMin, trained), new Bounds(Math.Min(ModelAdvisor.MinOutput, context / 2), Math.Max(ModelAdvisor.MinOutput, context - ModelAdvisor.PromptRoom)),
+        // Each request may hold the whole context (--max-model-len), its answer included: the answers at once share the cache, not the window.
+        var limits = new ModelLimits(new Bounds(ctxMin, trained), ModelAdvisor.OutputBounds(context),
             new Bounds(1, 1024), new Bounds(0, 0), null, new Bounds(1, 8), ModelAdvisor.VllmCacheTypes, [], p.MtpLayers > 0, false, [], []);
         if (m.Context < limits.Context.Min || m.Context > limits.Context.Max)
         {
             problems.Add(new("context", string.Create(inv, $"The context is {limits.Context.Min:N0} to {limits.Context.Max:N0} tokens for this model (its config's longest)."), true));
+        }
+        if (m.MaxOutput is { } o && (o < limits.MaxOutput.Min || o > limits.MaxOutput.Max))
+        {
+            problems.Add(new("maxOutput", string.Create(inv, $"The longest answer is {limits.MaxOutput.Min:N0} to {limits.MaxOutput.Max:N0} tokens: the context less room for the prompt."), true));
         }
         if (m.SpecDecode == "mtp" && p.MtpLayers == 0)
         {
@@ -391,7 +396,7 @@ public static class VllmAdvisor
         var state = p.StatePerSequence;
         var context = (int)Math.Min(p.TrainedContext, Math.Max(0, (room - state) / perToken));
         var parallel = (int)Math.Clamp(room / Math.Max(1, ((long)Math.Min(context, TypicalContext) * perToken) + state), 1, 256);
-        var maxOutput = Math.Max(ModelAdvisor.MinOutput, Math.Min(32768, context / 2 / 1024 * 1024));
+        var maxOutput = ModelCatalog.DefaultMaxOutput(context);
         return new ModelRecommendation(context, maxOutput, parallel, kvType.StartsWith("fp8", StringComparison.Ordinal) ? kvType : "fp8", null, p.MtpLayers > 0, null, 3, null, true, true)
         {
             Devices = string.Join(',', proposed),

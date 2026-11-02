@@ -15,7 +15,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { useDebounced } from '@/lib/use-debounced'
 import { cn } from '@/lib/utils'
-import { attentionLabel, bytes, params, tokens, type LibraryFile, type ModelProfile } from './model-profile'
+import { attentionLabel, bytes, defaultMaxOutput, params, tokens, type LibraryFile, type ModelProfile } from './model-profile'
 
 interface Bounds {
   min: number
@@ -89,9 +89,12 @@ export interface SavedModel {
   file?: string | null
   projector?: string | null
   context?: number | null
-  /** What one conversation may hold: the context shared by its slots (Answers at once). */
+  /** What one request holds, its prompt and its answer together: on llama.cpp the context shared by its slots (Answers at once), on vLLM and SGLang the whole. */
   window?: number | null
+  /** The longest answer it was given; null: half the window. */
   maxOutput?: number | null
+  /** The longest answer the gateway says: its own, else half the window, within what the window leaves for a prompt. */
+  output?: number | null
   placement?: 'auto' | 'manual'
   /** The GPUs it runs on ("0,1"); empty: all. */
   devices?: string | null
@@ -125,9 +128,6 @@ export interface ModelPrice {
   output: number
   own: { input: boolean; cachedInput: boolean; output: boolean }
 }
-
-/** The longest answer when none is set, as the API registers it at the gateway: half the context, at most 32,768. */
-const defaultMaxOutput = (context: number) => Math.max(256, Math.min(32768, Math.floor(context / 2 / 1024) * 1024))
 
 const baseName = (path: string) => (path.split('/').pop() ?? '').replace(/(-\d{5}-of-\d{5})?\.gguf$/i, '')
 
@@ -338,7 +338,10 @@ export function ChatModelSection({
 
   const blocked = !form.file || !form.name.trim() || !language || Object.keys(errors).length > 0 || (!current && !!a)
   const ctx = Number(form.context) || 0
-  const outDefault = defaultMaxOutput(ctx || 32768)
+  // The answers at once share the context, each slot held to its share: what one conversation holds, its prompt and its answer together.
+  const slots = Math.max(1, Math.floor(Number(form.parallel)) || 1)
+  const held = Math.floor((ctx || 32768) / slots)
+  const outDefault = defaultMaxOutput(held)
   const moe = profile?.structure === 'moe'
   const samplingHint = profile?.sampling
     ? `Empty: its makers' ${[
@@ -407,7 +410,7 @@ export function ChatModelSection({
                 error={errors.context}
                 hint={
                   limits
-                    ? `${tokens(limits.context.min)} to ${tokens(limits.context.max)}${profile?.trainedContext ? ` (trained for ${tokens(profile.trainedContext)}${form.yarn ? ', stretched' : ''})` : ''}. One conversation can use all of it; answers at once share it.`
+                    ? `${tokens(limits.context.min)} to ${tokens(limits.context.max)}${profile?.trainedContext ? ` (trained for ${tokens(profile.trainedContext)}${form.yarn ? ', stretched' : ''})` : ''}. ${slots > 1 ? `The ${slots} answers at once share it: ${tokens(held)} a conversation, its prompt and its answer together.` : 'One conversation holds all of it, its prompt and its answer together.'}`
                     : 'Checking the limits…'
                 }
               >
@@ -416,14 +419,14 @@ export function ChatModelSection({
               <Field
                 label="Longest answer (tokens)"
                 error={errors.maxOutput}
-                hint={limits ? `${tokens(limits.maxOutput.min)} to ${tokens(limits.maxOutput.max)}, the context less room for a prompt. Empty: ${tokens(outDefault)}.` : undefined}
+                hint={limits ? `${tokens(limits.maxOutput.min)} to ${tokens(limits.maxOutput.max)}: what a conversation holds (${tokens(held)}) less room for its prompt. Empty: ${tokens(outDefault)}.` : undefined}
               >
                 <Input inputMode="numeric" value={form.maxOutput} placeholder={String(outDefault)} onChange={(e) => set('maxOutput', e.target.value)} />
               </Field>
               <Field
                 label="Answers at once"
                 error={errors.parallel}
-                hint={`1 to ${limits?.parallel.max ?? 32}: the engine's slots, each keeping a conversation's prompt. They share the context${profile?.recurrentBytesPerSlot ? `; each keeps ${bytes(profile.recurrentBytesPerSlot)} of recurrent state` : ''}. From 3, small steps (titles, checks, summaries) go to the last one first.`}
+                hint={`1 to ${limits?.parallel.max ?? 32}: the engine's slots, each keeping a conversation's prompt. They share the context, each its share${profile?.recurrentBytesPerSlot ? `; each keeps ${bytes(profile.recurrentBytesPerSlot)} of recurrent state` : ''}. From 3, small steps (titles, checks, summaries) go to the last one first.`}
               >
                 <Input inputMode="numeric" value={form.parallel} onChange={(e) => set('parallel', e.target.value)} />
               </Field>

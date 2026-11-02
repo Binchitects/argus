@@ -170,4 +170,18 @@ public sealed class VllmAdvisorTests
             Assert.Equal([0, 1], VllmAdvisor.Propose(Load("Qwen3.5-397B-A17B-NVFP4-V2"), hw, 1, 0.90, 262144, "fp8"));
         }
     }
+
+    [Fact]
+    public void A_vllm_models_longest_answer_leaves_its_prompt_room_in_the_whole_context()
+    {
+        var flash = Load("Qwen3.8-Flash-Next-FP8");
+        var m = Model("flash", context: 32768);
+        m.MaxOutput = 32768;
+        var advice = VllmAdvisor.Advise(m, flash, null);
+        // Each of its 16 at once may hold the whole context: the answer is bounded by it, not by a sixteenth of it.
+        Assert.Equal(new Bounds(256, 31744), advice.Limits!.MaxOutput);
+        Assert.True(Assert.Single(advice.Problems, p => p.Field == "maxOutput").Error);
+        m.MaxOutput = 31744;
+        Assert.DoesNotContain(VllmAdvisor.Advise(m, flash, null).Problems, p => p.Field == "maxOutput");
+    }
 }

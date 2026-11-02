@@ -132,8 +132,7 @@ public sealed class GatewayRoutes(AppDbContext db, ModelLibrary library, RemoteS
             // What its projector reads: pictures, sound (an omni model's), or both.
             var projector = m.Projector is { Length: > 0 } p ? library.Find(p)?.Profile.Projector ?? new ProjectorInfo(true, false, null, null) : null;
             // The window one conversation really has: its slot's share of the context.
-            var window = ModelCatalog.SlotWindow(m);
-            var info = Info(window, Math.Min(m.MaxOutput ?? ModelCatalog.DefaultMaxOutput(window), window), projector?.Vision == true, m.Tools, m.Thinking, projector?.Audio == true);
+            var info = Info(ModelCatalog.Window(m), ModelCatalog.OutputLimit(m), projector?.Vision == true, m.Tools, m.Thinking, projector?.Audio == true);
             var litellm = new JsonObject { ["model"] = "openai/" + m.Name, ["api_base"] = "os.environ/ENGINE_API_BASE", ["api_key"] = "os.environ/ENGINE_API_KEY" };
             var price = TokenPrice.Of(m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok, defaults);
             Prices(litellm, price);
@@ -141,8 +140,8 @@ public sealed class GatewayRoutes(AppDbContext db, ModelLibrary library, RemoteS
             {
                 Name = m.Name, Kind = Deployment.LlamaCpp, BaseUrl = engine.Value.Url.TrimEnd('/') + "/v1", Model = m.Name, EngineKey = true, Mode = "chat", Price = price, Info = info, LiteLlm = litellm, Fingerprint = "",
             };
-            deployments.Add((d, ["local", m.Name, m.File, m.Context, m.Parallel, m.MaxOutput, m.Projector, projector?.Audio, m.Tools, m.Thinking, price.Input, price.CachedInput, price.Output],
-                m.Parallel));
+            deployments.Add((d, ["local", m.Name, m.File, m.Context, m.Parallel, m.MaxOutput, m.Projector, projector?.Audio, m.Tools, m.Thinking, price.Input, price.CachedInput, price.Output,
+                info.ToJsonString()], m.Parallel));
         }
         // vLLM's and SGLang's models: each copy at its own port, never sent more at once than its answers at once, a pool when
         // there are several; each copy also under its own name (NAME@i, kept out of every list) for the chat to keep a conversation
@@ -155,7 +154,8 @@ public sealed class GatewayRoutes(AppDbContext db, ModelLibrary library, RemoteS
                 continue;
             }
             var vision = VllmAdvisor.Read(library.FullPath(m.File))?.Vision == true;
-            var info = Info(m.Context, Math.Min(m.MaxOutput ?? ModelCatalog.DefaultMaxOutput(m.Context), m.Context), vision, m.Tools, m.Thinking);
+            // Each request may hold the whole context: the answers at once share the cache, not the window.
+            var info = Info(ModelCatalog.Window(m), ModelCatalog.OutputLimit(m), vision, m.Tools, m.Thinking);
             if (m.Fallback is { Length: > 0 } fallback)
             {
                 info["llm_app_fallbacks"] = new JsonArray(fallback);
@@ -170,7 +170,7 @@ public sealed class GatewayRoutes(AppDbContext db, ModelLibrary library, RemoteS
                 };
                 Prices(litellm, price);
                 object?[] print = [m.EngineKind, m.Name, e.Name, backend.Host, e.Port, m.Context, m.Parallel, m.MaxOutput, vision, m.Tools, m.Thinking, m.Fallback,
-                    price.Input, price.CachedInput, price.Output];
+                    price.Input, price.CachedInput, price.Output, info.ToJsonString()];
                 var d = new Deployment
                 {
                     Name = m.Name, Kind = m.EngineKind, BaseUrl = url, Model = e.Name, EngineKey = true, MaxParallel = Math.Max(1, m.Parallel), Fallback = m.Fallback, Mode = "chat",
@@ -190,7 +190,8 @@ public sealed class GatewayRoutes(AppDbContext db, ModelLibrary library, RemoteS
             var key = remote.Unprotect(server.ApiKeyProtected);
             foreach (var m in server.Models)
             {
-                var info = Info(m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking);
+                // Its window as the admin set it (or its server said), and its longest answer within it.
+                var info = Info(m.Context, m.Context is { } window ? ModelCatalog.OutputLimit(window, m.MaxOutput) : m.MaxOutput, m.Vision, m.Tools, m.Thinking);
                 info["llm_app_server"] = server.Name;
                 var litellm = new JsonObject { ["model"] = "openai/" + m.Remote, ["api_base"] = server.BaseUrl, ["api_key"] = key ?? "none" };
                 bool? verify = null;
@@ -209,7 +210,7 @@ public sealed class GatewayRoutes(AppDbContext db, ModelLibrary library, RemoteS
                     Server = server.Name, Mode = "chat", Price = price, Info = info, LiteLlm = litellm, Fingerprint = "",
                 };
                 deployments.Add((d, ["remote", server.Id, server.BaseUrl, keyPrint, server.VerifyTls, m.Remote, m.Name, m.Context, m.MaxOutput, m.Vision, m.Tools, m.Thinking,
-                    price.Input, price.CachedInput, price.Output], m.Parallel));
+                    price.Input, price.CachedInput, price.Output, info.ToJsonString()], m.Parallel));
             }
         }
         foreach (var pool in deployments.GroupBy(d => d.D.Name, StringComparer.Ordinal))
@@ -302,20 +303,25 @@ public sealed class GatewayRoutes(AppDbContext db, ModelLibrary library, RemoteS
         return litellm;
     }
 
-    private static JsonObject Info(int? context, int? maxOutput, bool vision, bool tools, bool thinking, bool audio = false)
+    /// <summary>
+    /// What the gateway says of a chat model (its /model/info, which Code Arena and the chat read): its window, what one
+    /// request holds, its prompt and its answer together (max_input_tokens, as LiteLLM names a model's context); its
+    /// longest answer (max_output_tokens, and max_tokens, LiteLLM's older name for it); and what it can do.
+    /// </summary>
+    private static JsonObject Info(int? window, int? maxOutput, bool vision, bool tools, bool thinking, bool audio = false)
     {
         var info = new JsonObject
         {
             ["mode"] = "chat", ["supports_vision"] = vision, ["supports_function_calling"] = tools, ["supports_reasoning"] = thinking, ["supports_audio_input"] = audio,
         };
-        if (context is { } c)
+        if (window is { } w)
         {
-            info["max_input_tokens"] = c;
-            info["max_tokens"] = c;
+            info["max_input_tokens"] = w;
         }
         if (maxOutput is { } o)
         {
             info["max_output_tokens"] = o;
+            info["max_tokens"] = o;
         }
         return info;
     }

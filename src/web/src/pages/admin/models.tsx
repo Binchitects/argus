@@ -343,13 +343,17 @@ function Status({ status, why, since, draining }: { status: ModelRow['status']; 
   return null
 }
 
-/** "262,144 tokens of context, 65,536 a conversation": the context, and each slot's share of it when it has several. */
 /** The remove dialog's choice: its files deleted from disk too (those no other model uses). */
 const filesCheck = (onChange: (on: boolean) => void) => ({ label: 'Also delete its files from disk (those no other model uses)', onChange })
 
-function contextLine(context: number, window?: number | null): string {
+/**
+ * "262,144 tokens of context, 65,536 a conversation, answers up to 32,768": the context; what one conversation holds, its prompt
+ * and its answer together, when that is less (a llama.cpp slot's share); and the longest answer in it, as the gateway says them.
+ */
+function contextLine(context: number, window?: number | null, output?: number | null): string {
   const all = `${context.toLocaleString('en-US')} tokens of context`
-  return window && window < context ? `${all}, ${window.toLocaleString('en-US')} a conversation` : all
+  const held = window && window < context ? `${all}, ${window.toLocaleString('en-US')} a conversation` : all
+  return output ? `${held}, answers up to ${output.toLocaleString('en-US')}` : held
 }
 
 /** The GPU shared by the chat models and the picture and video jobs: lent to a job now, and what the jobs did lately. */
@@ -478,7 +482,7 @@ function ModelCard({ model: m, engine, small, onEdit, onChanged }: { model: Mode
           <CardDescription className="[overflow-wrap:anywhere]">
             {media
               ? `On the ${m.server} server`
-              : [m.source === 'remote' ? `${m.remote} on ${m.server}` : m.file, m.context ? contextLine(m.context, m.window) : null].filter(Boolean).join(' · ') ||
+              : [m.source === 'remote' ? `${m.remote} on ${m.server}` : m.file, m.context ? contextLine(m.context, m.window, m.output) : null].filter(Boolean).join(' · ') ||
                 (image ? 'An image model' : 'Served by the gateway')}
           </CardDescription>
           {m.profile && <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{summary(m.profile)}</p>}

@@ -161,6 +161,12 @@ public static class ModelAdvisor
     private const long GpuOverhead = 256L << 20;
     private const long ProjectorCompute = 256L << 20;
 
+    /// <summary>
+    /// The longest answer a request of <paramref name="window"/> tokens may have (<see cref="ModelCatalog.Window"/>): its
+    /// window less room for the prompt. The answer and its prompt share the window.
+    /// </summary>
+    public static Bounds OutputBounds(int window) => new(Math.Min(MinOutput, window / 2), Math.Max(MinOutput, window - PromptRoom));
+
     private sealed record Inputs(int Context, int Parallel, double CacheBytes, int Ubatch, bool Mtp, long DraftBytes, long ProjectorBytes);
 
     private static string G(long b) => (b / (double)(1L << 30)).ToString("0.0", CultureInfo.InvariantCulture) + " GiB";
@@ -191,12 +197,14 @@ public static class ModelAdvisor
                 && f.Profile.EmbeddingLength == p.EmbeddingLength && (f.Profile.VocabSize is null || f.Profile.VocabSize == p.VocabSize))
             .OrderBy(f => Path.GetDirectoryName(f.File.Path) == dir ? 0 : 1).ThenBy(f => f.File.Path, StringComparer.Ordinal).Select(f => f.File.Path).ToList();
         var moe = p.Structure == "moe";
+        // The answers at once share the context, each held to its share: an answer and its prompt fit in that share.
+        var window = ctx / Math.Clamp(m.Parallel, 1, MaxParallel);
         var limits = new ModelLimits(
-            new Bounds(ctxMin, ctxMax), new Bounds(Math.Min(MinOutput, ctx / 2), Math.Max(MinOutput, ctx - PromptRoom)), new Bounds(1, MaxParallel),
+            new Bounds(ctxMin, ctxMax), OutputBounds(window), new Bounds(1, MaxParallel),
             new Bounds(0, layers + 1), moe ? new Bounds(0, layers) : null, new Bounds(1, 8), cacheTypes, UbatchSizes,
             p.MtpLayers > 0 || drafts.Count > 0, p.CanStretch, projectors, drafts);
 
-        Check(m, p, limits, trained, problems);
+        Check(m, p, limits, trained, window, problems);
 
         var draft = m.Mtp && m.DraftHead is { } head ? library.FirstOrDefault(f => f.File.Path == head) : null;
         var projector = m.Projector is { } pp ? library.FirstOrDefault(f => f.File.Path == pp) : null;
@@ -314,7 +322,7 @@ public static class ModelAdvisor
     private static bool Compatible(ModelProfile model, ModelProfile projector) =>
         projector.Projector?.ProjectionDim is not { } dim || model.EmbeddingLength is not { } embd || dim == embd;
 
-    private static void Check(LocalModel m, ModelProfile p, ModelLimits limits, int? trained, List<ModelProblem> problems)
+    private static void Check(LocalModel m, ModelProfile p, ModelLimits limits, int? trained, int window, List<ModelProblem> problems)
     {
         var inv = CultureInfo.InvariantCulture;
         if (m.Context < limits.Context.Min || m.Context > limits.Context.Max)
@@ -325,7 +333,9 @@ public static class ModelAdvisor
         }
         if (m.MaxOutput is { } o && (o < limits.MaxOutput.Min || o > limits.MaxOutput.Max))
         {
-            problems.Add(new("maxOutput", string.Create(inv, $"The longest answer is {limits.MaxOutput.Min:N0} to {limits.MaxOutput.Max:N0} tokens: the context less room for the prompt."), true));
+            problems.Add(new("maxOutput", m.Parallel > 1
+                ? string.Create(inv, $"The longest answer is {limits.MaxOutput.Min:N0} to {limits.MaxOutput.Max:N0} tokens: what a conversation holds ({window:N0}, the context shared by {m.Parallel} answers at once) less room for its prompt.")
+                : string.Create(inv, $"The longest answer is {limits.MaxOutput.Min:N0} to {limits.MaxOutput.Max:N0} tokens: the context less room for the prompt."), true));
         }
         if (m.Parallel < 1 || m.Parallel > MaxParallel)
         {
@@ -511,7 +521,8 @@ public static class ModelAdvisor
             }
             ubatch = moe && fit == "experts" ? 1024 : null;
         }
-        var maxOutput = Math.Max(MinOutput, Math.Min(32768, context / 2 / 1024 * 1024));
+        // Half of what one of the answers at once holds.
+        var maxOutput = ModelCatalog.DefaultMaxOutput(context / parallel);
         // Drafting is a win for a dense model on the GPU (measured +50% on a 27B), not with experts in RAM; and only if its draft context fits too.
         var mtp = p.MtpLayers > 0 && p.Structure == "dense" && fit == "gpu"
             && Auto(p, new Inputs(context, parallel, bytes, 512, true, 0, projectorBytes), hw).Fit == "gpu";

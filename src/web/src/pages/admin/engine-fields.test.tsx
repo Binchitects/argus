@@ -27,7 +27,7 @@ const snapshots = [
   { path: 'hf/openai/gpt-oss-120b@main', repo: 'openai/gpt-oss-120b', revision: 'b5c939de8f754692c1647ca79fbf85e8c1e70f8a', size: 65.2e9, complete: true, why: null, architectures: ['GptOssForCausalLM'], usedBy: [] },
 ]
 const advice = {
-  limits: { context: { min: 4096, max: 131072 }, parallel: { min: 1, max: 1024 } },
+  limits: { context: { min: 4096, max: 131072 }, maxOutput: { min: 256, max: 31744 }, parallel: { min: 1, max: 1024 } },
   recommended: { context: 131072, maxOutput: 32768, parallel: 41, kvType: 'fp8', devices: '1' },
   estimate: { gpuWeights: 65.2e9, gpuCache: 23.9e9, gpuTotal: 92.4e9, gpuBudget: 101.6e9, ramTotal: 65.2e9, fit: 'gpu', approximate: false },
   problems: [],
@@ -53,6 +53,10 @@ describe('admin models: vLLM', () => {
     // The advisor's fit and proposal show as it is filled in.
     expect(await within(form).findByText(/GPUs 1, proposed for this machine/)).toBeInTheDocument()
     expect(within(form).getByText(/Fits this machine: GPUs 1, 131,072 tokens of context, 41 answers at once/)).toBeInTheDocument()
+    // Each request holds the whole context, its answer included: the longest answer leaves its prompt room in it, and is half of it when empty.
+    expect(within(form).getByText('4,096 to 131,072 tokens: what each request holds, its prompt and its answer together.')).toBeInTheDocument()
+    expect(within(form).getByText('256 to 31,744: the context less room for a prompt. Empty: 16,384.')).toBeInTheDocument()
+    await userEvent.type(within(form).getByLabelText('Longest answer'), '8192')
     // The GPUs by vendor and size: a group can be ticked whole.
     expect(within(form).getByRole('checkbox', { name: /Every nvidia · NVIDIA RTX PRO 6000/ })).toBeInTheDocument()
     // Two copies on GPUs 2 and 3, by ticking them; a fallback; no sleep.
@@ -66,7 +70,7 @@ describe('admin models: vLLM', () => {
     await userEvent.click(within(form).getByRole('button', { name: 'Add model' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/models')).toBe(true))
     const sent = calls.find((c) => c.method === 'POST' && c.path === '/api/admin/models')!.body as Record<string, unknown>
-    expect(sent).toMatchObject({ name: 'gpt-oss-120b', engineKind: 'vllm', file: 'hf/openai/gpt-oss-120b@main', devices: '2,3', replicas: 2, sleep: false, fallback: 'Qwen', kvType: 'fp8' })
+    expect(sent).toMatchObject({ name: 'gpt-oss-120b', engineKind: 'vllm', file: 'hf/openai/gpt-oss-120b@main', devices: '2,3', replicas: 2, sleep: false, fallback: 'Qwen', kvType: 'fp8', maxOutput: 8192 })
   })
 
   it("moves a llama.cpp model to vLLM: its snapshot chosen in its own dialog, saved under its name with vLLM's defaults", async () => {
@@ -92,6 +96,8 @@ describe('admin models: vLLM', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH' && c.path === '/api/admin/models/Qwen')).toBe(true))
     const sent = calls.find((c) => c.method === 'PATCH' && c.path === '/api/admin/models/Qwen')!.body as Record<string, unknown>
     expect(sent).toMatchObject({ engineKind: 'vllm', file: 'hf/openai/gpt-oss-120b@main', kvType: 'fp8', parallel: 16 })
+    // It set no longest answer: half of what each request holds.
+    expect(sent.clear).toContain('maxOutput')
   })
 
   it('adds a snapshot as an SGLang model: the engine chosen, its own flags in the hints, no LMCache; an engine whose feature is off is not offered', async () => {

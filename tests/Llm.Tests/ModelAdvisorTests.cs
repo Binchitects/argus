@@ -185,4 +185,39 @@ public sealed class ModelAdvisorTests : IDisposable
         Assert.Equal(6 * ((3 * (1024 + (2 * 4 * 128))) + (1024 * 128)) * 4, p.RecurrentBytesPerSlot);
         Assert.True(p.CanStretch);
     }
+
+    [Fact]
+    public void The_longest_answer_fits_what_one_conversation_holds_beside_its_prompt()
+    {
+        var (model, all) = Library("dense/Slots-Q8_0.gguf", GgufFile.Language("llama", layers: 4, layerBytes: 64 * MiB, context: 131072));
+        // 65,536 shared by 4 answers at once: 16,384 a conversation, its prompt and its answer together.
+        var shared = new LocalModel { Name = "s", File = model.File.Path, Context = 65536, Parallel = 4, MaxOutput = 32768 };
+        var advice = ModelAdvisor.Advise(shared, model, all, Machine(8 * GiB));
+        Assert.Equal(new Bounds(256, 15360), advice.Limits!.MaxOutput);
+        var problem = Assert.Single(advice.Problems, p => p.Field == "maxOutput");
+        Assert.True(problem.Error);
+        Assert.Contains("what a conversation holds (16,384, the context shared by 4 answers at once) less room for its prompt", problem.Message, StringComparison.Ordinal);
+        // One at a time, a conversation holds the whole context.
+        Assert.Equal(new Bounds(256, 64512), ModelAdvisor.Advise(new LocalModel { Name = "s", File = model.File.Path, Context = 65536, Parallel = 1 }, model, all, Machine(8 * GiB)).Limits!.MaxOutput);
+        // What it recommends fits too: half of what one of its answers at once holds.
+        var r = advice.Recommended!;
+        Assert.True(r.Parallel > 1);
+        Assert.Equal(ModelCatalog.DefaultMaxOutput(r.Context / r.Parallel), r.MaxOutput);
+        Assert.InRange(r.MaxOutput, 256, ModelAdvisor.OutputBounds(r.Context / r.Parallel).Max);
+    }
+
+    [Fact]
+    public void A_request_holds_a_slots_share_on_llama_cpp_and_the_whole_context_on_vllm_and_sglang()
+    {
+        Assert.Equal(16384, ModelCatalog.Window(new LocalModel { Name = "l", File = "l.gguf", Context = 65536, Parallel = 4 }));
+        Assert.Equal(65536, ModelCatalog.Window(new LocalModel { Name = "l", File = "l.gguf", Context = 65536, Parallel = 1 }));
+        // vLLM's --max-model-len and SGLang's --context-length are each request's, however many run at once.
+        Assert.Equal(65536, ModelCatalog.Window(new LocalModel { Name = "v", File = "hf/v@r", EngineKind = EngineKinds.Vllm, Context = 65536, Parallel = 16 }));
+        Assert.Equal(65536, ModelCatalog.Window(new LocalModel { Name = "g", File = "hf/g@r", EngineKind = EngineKinds.Sglang, Context = 65536, Parallel = 16 }));
+        // The longest answer: its own, else half the window (at most 32,768), always leaving a prompt room.
+        Assert.Equal(8192, ModelCatalog.OutputLimit(new LocalModel { Name = "l", File = "l.gguf", Context = 65536, Parallel = 4 }));
+        Assert.Equal(32768, ModelCatalog.OutputLimit(new LocalModel { Name = "v", File = "hf/v@r", EngineKind = EngineKinds.Vllm, Context = 131072, Parallel = 16 }));
+        Assert.Equal(15360, ModelCatalog.OutputLimit(new LocalModel { Name = "l", File = "l.gguf", Context = 65536, Parallel = 4, MaxOutput = 32768 }));
+        Assert.Equal(1000, ModelCatalog.OutputLimit(16384, 1000));
+    }
 }

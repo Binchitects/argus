@@ -87,7 +87,8 @@ public sealed class VllmGatewayTests(AppFixture app) : IDisposable
             Assert.All(pool, m => Assert.Equal(2, m.Info["llm_app_pool"]!.GetValue<int>()));
             Assert.All(pool, m => Assert.Equal("Qwen3.8-Flash-Next", m.Info["llm_app_fallbacks"]![0]!.GetValue<string>()));
             Assert.All(pool, m => Assert.True(m.Info["supports_vision"]!.GetValue<bool>()));
-            Assert.Equal(65536, pool[0].Info["max_input_tokens"]!.GetValue<int>());
+            // Each request may hold the whole context (16 at once share the cache, not the window), and half of it at most is the answer.
+            Assert.Equal((65536, 32768), (pool[0].Info["max_input_tokens"]!.GetValue<int>(), pool[0].Info["max_output_tokens"]!.GetValue<int>()));
             var copies = gateway.Managed.Values.Where(m => m.Name.StartsWith("flash@", StringComparison.Ordinal)).OrderBy(m => m.Name).ToList();
             Assert.Equal(["flash@0", "flash@1"], copies.Select(m => m.Name));
             Assert.All(copies, m => Assert.Equal("flash", m.Info["llm_app_replica_of"]!.GetValue<string>()));

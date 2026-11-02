@@ -12,8 +12,14 @@ public sealed class FakeRemote : HttpMessageHandler
     public const string Base = "http://gpu-box:8000/v1";
     public const string Key = "remote-secret-key";
 
-    /// <summary>The /models answer's data, as JSON objects.</summary>
-    public string Models { get; set; } = """[{"id":"big-remote","object":"model","max_model_len":65536},{"id":"small-remote","object":"model","meta":{"n_ctx_train":32768}}]""";
+    /// <summary>
+    /// The /models answer's data, as JSON objects: vLLM's window (max_model_len); llama.cpp's (meta.n_ctx, a slot's share
+    /// of its -c) beside what the model was trained for; and an older llama.cpp's, which says only what it was trained for.
+    /// </summary>
+    public string Models { get; set; } = """
+        [{"id":"big-remote","object":"model","max_model_len":65536},{"id":"small-remote","object":"model","meta":{"n_ctx":32768,"n_ctx_train":262144}},
+         {"id":"old-remote","object":"model","meta":{"n_ctx_train":131072}}]
+        """;
 
     public bool Down { get; set; }
 

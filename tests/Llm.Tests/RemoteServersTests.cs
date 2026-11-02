@@ -33,9 +33,10 @@ public sealed class RemoteServersTests(AppFixture app)
         var admin = await AdminAsync(f);
 
         var offers = await admin.JsonAsync(await admin.PostAsync("/api/admin/servers/probe", new { baseUrl = FakeRemote.Base, apiKey = FakeRemote.Key }));
-        var models = offers.GetProperty("models").EnumerateArray().ToDictionary(m => m.GetProperty("id").GetString()!, m => m.GetProperty("context").GetInt32());
-        // The window each reports, under the names vLLM and llama.cpp use.
-        Assert.Equal(new Dictionary<string, int> { ["big-remote"] = 65536, ["small-remote"] = 32768 }, models);
+        var models = offers.GetProperty("models").EnumerateArray()
+            .ToDictionary(m => m.GetProperty("id").GetString()!, m => m.GetProperty("context").ValueKind == JsonValueKind.Null ? (int?)null : m.GetProperty("context").GetInt32());
+        // The window each reports, under the names vLLM and llama.cpp use; never what the model was trained for, which is not what the server holds.
+        Assert.Equal(new Dictionary<string, int?> { ["big-remote"] = 65536, ["small-remote"] = 32768, ["old-remote"] = null }, models);
 
         var badKey = await admin.PostAsync("/api/admin/servers/probe", new { baseUrl = FakeRemote.Base, apiKey = "wrong" });
         await StatusAssert.Is(HttpStatusCode.BadRequest, badKey);
@@ -53,6 +54,10 @@ public sealed class RemoteServersTests(AppFixture app)
         var (f, gateway) = NewApp();
         await using var _f = f;
         var admin = await AdminAsync(f);
+        // An answer as long as the whole context leaves no room for its prompt.
+        var whole = await admin.PostAsync("/api/admin/servers", Server([new { remote = "big-remote", name = "big", context = 65536, maxOutput = 65536 }]));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, whole);
+        Assert.Contains("the longest answer at most the context less 1,024 tokens for a prompt", await whole.Content.ReadAsStringAsync(), StringComparison.Ordinal);
         var made = await admin.PostAsync("/api/admin/servers", Server([
             new { remote = "big-remote", name = "big", context = 65536, maxOutput = 8192, thinking = true },
             // Named like the .env model: a second copy of it, and the gateway spreads requests between them.
@@ -65,9 +70,12 @@ public sealed class RemoteServersTests(AppFixture app)
         Assert.Equal(FakeRemote.Base, big.Params["api_base"]!.GetValue<string>());
         Assert.Equal(FakeRemote.Key, big.Params["api_key"]!.GetValue<string>());
         Assert.Null(big.Params["ssl_verify"]);
-        Assert.Equal(65536, big.Info["max_input_tokens"]!.GetValue<int>());
+        // Its window, and its longest answer under both of LiteLLM's names for it (max_tokens is not the window).
+        Assert.Equal((65536, 8192, 8192), (big.Info["max_input_tokens"]!.GetValue<int>(), big.Info["max_output_tokens"]!.GetValue<int>(), big.Info["max_tokens"]!.GetValue<int>()));
         Assert.Equal("GPU box", big.Info["llm_app_server"]!.GetValue<string>());
-        Assert.Single(gateway.Managed.Values, m => m.Name == "Qwen3.8-Flash-Next");
+        // Without a longest answer of its own: half its window, as a model of this machine's.
+        var named = Assert.Single(gateway.Managed.Values, m => m.Name == "Qwen3.8-Flash-Next");
+        Assert.Equal((32768, 16384), (named.Info["max_input_tokens"]!.GetValue<int>(), named.Info["max_output_tokens"]!.GetValue<int>()));
 
         // Kept encrypted, and never sent back.
         using (var scope = f.Services.CreateScope())

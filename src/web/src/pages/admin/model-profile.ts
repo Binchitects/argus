@@ -62,6 +62,12 @@ export const attentionLabel = { hybrid: 'Hybrid attention', sliding: 'Sliding wi
 export const bytes = (b: number) => formatValue(b, 'bytes')
 export const tokens = (n: number) => n.toLocaleString('en-US')
 
+/**
+ * The longest answer when none is set, as the API registers it at the gateway (ModelCatalog.DefaultMaxOutput): half of what one
+ * request holds (its window: a slot's share of the context on llama.cpp, the whole on vLLM and SGLang), at most 32,768.
+ */
+export const defaultMaxOutput = (held: number) => Math.max(256, Math.min(32768, Math.floor(held / 2 / 1024) * 1024))
+
 /** 26,900,000,000 -> "26.9B", 6,670,000,000 -> "6.7B", 600,000,000 -> "600M". */
 export function params(n: number | null | undefined): string | null {
   if (!n) return null
