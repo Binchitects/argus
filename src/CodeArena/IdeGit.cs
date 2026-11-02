@@ -134,13 +134,19 @@ internal sealed partial class IdeGit(Workspace workspace)
             {
                 continue;
             }
-            files.Add(new JsonObject
+            var file = new JsonObject
             {
                 ["path"] = ours,
                 ["staged"] = x is ' ' or '?' ? null : x.ToString(),
                 ["changed"] = y == ' ' ? null : y == '?' ? "?" : y.ToString(),
                 ["from"] = from is null ? null : Ours(root, from),
-            });
+            };
+            // Unmerged (a merge, rebase or cherry-pick stopped on it): both added or deleted, or either side U.
+            if (x == 'U' || y == 'U' || (x == y && x is 'A' or 'D'))
+            {
+                file["conflict"] = true;
+            }
+            files.Add(file);
         }
         var behindAhead = counted == 0 ? counts.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries) : [];
         return new JsonObject

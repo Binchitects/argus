@@ -396,6 +396,8 @@ export interface GitFile {
   changed: string | null
   /** A rename's old path. */
   from: string | null
+  /** In conflict (a merge, rebase or cherry-pick left it unmerged): Merge Changes has it, staging settles it. */
+  conflict?: boolean
 }
 
 export interface GitStatus {

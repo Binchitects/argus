@@ -527,10 +527,15 @@ public sealed class SourceControlTests : IDisposable
         Assert.Equal(HttpStatusCode.BadRequest, (await Get(web, "/api/git/log", ("path", "docs"))).StatusCode);
         Assert.Equal(["Start"], (await web.GetJsonAsync("/api/git/log?path=docs%2Fd.txt")).AsArray().Select(c => c!["subject"]!.GetValue<string>()));
 
-        // In conflict, the index has no text of the file's own; staging one settles it, the file left with its markers.
+        // In conflict, said so (Merge Changes has it); the index has no text of the file's own; staging one settles it,
+        // the file left with its markers.
+        var clashing = (await web.GetJsonAsync("/api/git/status"))["files"]!.AsArray().Single(f => f!["path"]!.GetValue<string>() == "c.txt")!;
+        Assert.Equal(("U", "U", true), (clashing["staged"]!.GetValue<string>(), clashing["changed"]!.GetValue<string>(), clashing["conflict"]!.GetValue<bool>()));
         Assert.False((await Show(web, "c.txt", ":"))["exists"]!.GetValue<bool>());
-        var settled = Files(await Json(await web.PostAsync("/api/git/stage-text", new JsonObject { ["path"] = "c.txt", ["text"] = "c settled\n" })));
+        var after = await Json(await web.PostAsync("/api/git/stage-text", new JsonObject { ["path"] = "c.txt", ["text"] = "c settled\n" }));
+        var settled = Files(after);
         Assert.Equal(("M", "M"), settled["c.txt"]);
+        Assert.Null(after["files"]!.AsArray().Single(f => f!["path"]!.GetValue<string>() == "c.txt")!["conflict"]);
         Assert.Matches(@"^100644 [0-9a-f]+ 0\tc\.txt$", GitOut(h.Work, "ls-files", "-s", "c.txt"));
         Assert.Equal("c settled\n", Text(await Show(web, "c.txt", ":")));
         Assert.Contains("<<<<<<<", File.ReadAllText(Path.Combine(h.Work, "c.txt")));

@@ -2351,6 +2351,126 @@ describe('Code Arena, the IDE', () => {
     expect(within(panel).getByRole('list', { name: 'Commits' })).toHaveTextContent('First')
   })
 
+  it("folds Source Control's groups and folders as VS Code does: chevrons, arrows, Collapse All, kept with the folder", async () => {
+    const status = {
+      repository: true, branch: 'main', ahead: 0, behind: 0,
+      files: [
+        { path: 'src/lib/cart.ts', staged: 'M', changed: null, from: null },
+        { path: 'src/app.ts', staged: null, changed: 'M', from: null },
+        { path: 'src/lib/tax.ts', staged: null, changed: 'M', from: null },
+        { path: 'notes.txt', staged: null, changed: '?', from: null },
+        { path: 'tests/unit/cart.test.ts', staged: null, changed: 'M', from: null },
+        { path: 'clash.txt', staged: 'U', changed: 'U', from: null, conflict: true },
+      ],
+    }
+    let kept: Record<string, unknown> = {}
+    const { calls } = backend({
+      'GET /api/git/status': () => ({ json: status }),
+      'GET /api/git/log': () => ({ json: [{ hash: 'abc1234', subject: 'First', author: 'Pat', at: '2026-10-11T09:00:00Z' }] }),
+      'GET /api/git/branches': () => ({ json: [{ name: 'main', current: true }] }),
+      'GET /api/workspace/state': () => ({ json: kept }),
+      'POST /api/workspace/state': (body) => {
+        kept = { ...kept, ...(body as Record<string, unknown>) }
+        return { json: kept }
+      },
+    })
+    const { unmount } = renderIde()
+    await userEvent.keyboard('{Control>}{Shift>}g{/Shift}{/Control}')
+    const panel = await screen.findByRole('complementary', { name: 'Source control' })
+    const group = (name: RegExp) => within(panel).getByRole('button', { name })
+
+    // A conflict is in Merge Changes alone; each group has a chevron, open.
+    expect(await within(panel).findByRole('list', { name: 'Files in conflict' })).toHaveTextContent('clash.txt')
+    expect(within(panel).getByRole('list', { name: 'Changed files' })).not.toHaveTextContent('clash.txt')
+    for (const name of [/^Merge changes, 1 file/, /^Staged changes, 1 file/, /^Changes, 4 files/, /^Branch/, /^Last commits/]) expect(group(name)).toHaveAttribute('aria-expanded', 'true')
+
+    // A click folds a group, and the folder keeps it so.
+    await userEvent.click(group(/^Changes, 4 files/))
+    expect(group(/^Changes, 4 files/)).toHaveAttribute('aria-expanded', 'false')
+    expect(within(panel).queryByRole('list', { name: 'Changed files' })).not.toBeInTheDocument()
+    await waitFor(() => expect(kept['scm.folded']).toEqual(['changes']))
+
+    // The keys of a tree: Right unfolds, Down goes in, Left goes up to the group and folds it.
+    group(/^Changes, 4 files/).focus()
+    await userEvent.keyboard('{ArrowRight}')
+    expect(group(/^Changes, 4 files/)).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.keyboard('{ArrowDown}')
+    expect(document.activeElement).toBe(within(within(panel).getByRole('list', { name: 'Changed files' })).getByRole('button', { name: /^app\.ts/ }))
+    await userEvent.keyboard('{ArrowLeft}')
+    expect(document.activeElement).toBe(group(/^Changes, 4 files/))
+    await userEvent.keyboard('{ArrowLeft}')
+    expect(group(/^Changes, 4 files/)).toHaveAttribute('aria-expanded', 'false')
+    await userEvent.keyboard('{ArrowRight}')
+
+    // As a tree: the files under their folders (tests/unit in one row, as VS Code compacts them), each folding.
+    await userEvent.click(within(panel).getByRole('button', { name: 'View as Tree' }))
+    await waitFor(() => expect(kept['scm.viewMode']).toBe('tree'))
+    const changes = within(panel).getByRole('list', { name: 'Changed files' })
+    const src = within(changes).getByRole('button', { name: /^src, 2 files/ })
+    expect(src).toHaveAttribute('aria-expanded', 'true')
+    expect(within(changes).getByRole('button', { name: /^lib, 1 file/ })).toHaveAttribute('aria-expanded', 'true')
+    expect(within(changes).getByRole('button', { name: /^tests\/unit, 1 file/ })).toHaveAttribute('aria-expanded', 'true')
+    expect(within(changes).getByRole('button', { name: /^tax\.ts/ })).toBeInTheDocument()
+    await userEvent.click(src)
+    expect(src).toHaveAttribute('aria-expanded', 'false')
+    expect(within(changes).queryByRole('button', { name: /^app\.ts/ })).not.toBeInTheDocument()
+    expect(within(changes).getByRole('button', { name: /^notes\.txt/ })).toBeInTheDocument()
+    // A folder's own + stages every file in it.
+    await userEvent.click(within(changes).getByRole('button', { name: 'Stage src' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/git/stage')?.body).toEqual({ paths: ['src/app.ts', 'src/lib/tax.ts'] }))
+
+    // Collapse All folds every group and folder.
+    await userEvent.click(within(panel).getByRole('button', { name: 'Collapse All' }))
+    for (const name of [/^Merge changes/, /^Staged changes/, /^Changes, 4 files/, /^Branch/, /^Last commits/]) expect(group(name)).toHaveAttribute('aria-expanded', 'false')
+    await waitFor(() => expect(kept['scm.folded']).toEqual(expect.arrayContaining(['merge', 'staged', 'changes', 'branch', 'commits', 'changes:src'])))
+
+    // In the next run of the page, as it was left.
+    unmount()
+    kept = { 'scm.folded': ['staged'], 'scm.viewMode': 'tree' }
+    renderIde()
+    await userEvent.keyboard('{Control>}{Shift>}g{/Shift}{/Control}')
+    const again = await screen.findByRole('complementary', { name: 'Source control' })
+    expect(await within(again).findByRole('button', { name: /^Staged changes, 1 file/ })).toHaveAttribute('aria-expanded', 'false')
+    expect(within(again).getByRole('button', { name: /^Changes, 4 files/ })).toHaveAttribute('aria-expanded', 'true')
+    expect(within(again).getByRole('button', { name: 'View as List' })).toBeInTheDocument()
+    expect(within(within(again).getByRole('list', { name: 'Changed files' })).getByRole('button', { name: /^src, 2 files/ })).toBeInTheDocument()
+  })
+
+  it("folds Agent changes' groups and folders too, and keeps them folded", async () => {
+    let kept: Record<string, unknown> = {}
+    const { now } = backend({
+      'GET /api/git/status': () => ({ json: { repository: true, branch: 'main', ahead: 0, behind: 0, files: [{ path: 'docs/guide.md', staged: null, changed: 'M', from: null }] } }),
+      'GET /api/workspace/state': () => ({ json: kept }),
+      'POST /api/workspace/state': (body) => {
+        kept = { ...kept, ...(body as Record<string, unknown>) }
+        return { json: kept }
+      },
+    })
+    now.changes = [...now.changes, { path: 'src/lib/cart.ts', created: true, deleted: false, added: 3, removed: 0 }]
+    renderIde()
+    await userEvent.click(await screen.findByRole('button', { name: 'Agent changes (2)' }))
+    const panel = await screen.findByRole('complementary', { name: 'Agent changes' })
+    const agents = within(panel).getByRole('button', { name: /^The agent's changes, 2 files/ })
+    const mine = await within(panel).findByRole('button', { name: /^Your changes, 1 file/ })
+    expect(agents).toHaveAttribute('aria-expanded', 'true')
+    await userEvent.click(mine)
+    expect(within(panel).queryByRole('list', { name: 'Files you changed' })).not.toBeInTheDocument()
+    await waitFor(() => expect(kept['changes.folded']).toEqual(['mine']))
+
+    await userEvent.click(within(panel).getByRole('button', { name: 'View as Tree' }))
+    const list = within(panel).getByRole('list', { name: 'Changed files' })
+    const lib = within(list).getByRole('button', { name: /^lib, 1 file/ })
+    lib.focus()
+    await userEvent.keyboard('{ArrowLeft}')
+    expect(lib).toHaveAttribute('aria-expanded', 'false')
+    expect(within(list).queryByRole('button', { name: /^cart\.ts/ })).not.toBeInTheDocument()
+    expect(within(list).getByRole('button', { name: /^app\.ts/ })).toBeInTheDocument()
+
+    await userEvent.click(within(panel).getByRole('button', { name: 'Collapse All' }))
+    expect(agents).toHaveAttribute('aria-expanded', 'false')
+    await waitFor(() => expect(kept['changes.folded']).toEqual(expect.arrayContaining(['agent', 'mine', 'agent:src'])))
+  })
+
   it('replaces what the search finds, in one file or in all of them after asking', async () => {
     const { calls } = backend({ 'POST /api/replace': () => ({ json: { files: [{ path: 'src/app.ts', replaced: 2, version: 'v2' }], count: 2, truncated: false } }) })
     renderIde()

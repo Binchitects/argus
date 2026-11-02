@@ -470,7 +470,9 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   **Accept** (keeps it) for the whole file, and Agent changes has **Accept
   all**. Below the agent's, **Your changes** lists the files changed by
   hand (in the editor or anywhere else: git's changes that are not the
-  agent's), each opening as git's compare. A changed file's right-click menu
+  agent's), each opening as git's compare. Both fold, as a list or a tree of
+  their folders, with **Collapse All**, as Source control's groups do (see
+  Source control). A changed file's right-click menu
   (either list) opens its compare or the file, adds it to the chat, asks the
   agent to **Explain these changes** or **Fix these changes**, copies its path,
   and for the agent's accepts or reverts it. In a compare, the "now" side's
@@ -1150,14 +1152,25 @@ reads the quote before the message, and the editor's lines after it.
 ### Source control
 
 **Source control** in the activity bar (Ctrl+Shift+G) is the folder's git as you work it, beside the agent's own turn
-commits: what changed since the last commit, **Staged** (in the next commit)
-and **Changes** (not yet). A file opens as a diff tab, as the last commit has
-it and as it is now; **+** stages it, **−** unstages it, **↺** puts it back as
-the index has it (a file git does not know is deleted; it asks first). Write
-the message and **Commit** (Ctrl+Enter): what is staged, or all of it when
-nothing is. Your own git name and email commit. Below: the branch, to switch
-to another, how far it is ahead of and behind its upstream, and the last
-commits. A repository bigger than the folder shows the folder's files only.
+commits: what changed since the last commit, **Merge Changes** (files a merge,
+rebase or cherry-pick left in conflict: one opens as it is, with its markers,
+and **+** settles it), **Staged Changes** (in the next commit) and **Changes**
+(not yet). A file opens as a diff tab, as the last commit has it and as it is
+now; **+** stages it, **−** unstages it, **↺** puts it back as the index has
+it (a file git does not know is deleted; it asks first); a group's own
+buttons do it to all of its files. Write the message and **Commit**
+(Ctrl+Enter): what is staged, or all of it when nothing is. Your own git name
+and email commit. Below: the branch, to switch to another, how far it is
+ahead of and behind its upstream, and the last commits. A repository bigger
+than the folder shows the folder's files only.
+
+As in VS Code, each group (and the branch and the last commits) folds with
+its chevron, and **View as Tree** shows the files under their folders, each
+folding too, with its own buttons for all the files in it (a folder with only
+one folder in it shares its row: `scm.compactFolders`); **View as List** goes
+back (`scm.defaultViewMode` is the first). **Collapse All** folds everything.
+The keys are a tree's: ↑ and ↓ move, → unfolds or goes in, ← folds or goes up
+to the group. What is folded, and list or tree, are kept for the folder.
 
 As in VS Code, the commit button's arrow has **Commit (Amend)** (into the
 last commit, its message kept when you write none), **Commit & Push** and
@@ -1379,7 +1392,7 @@ status (403 `outside` for a path outside the folder).
 | `POST /api/servers/retry` `{name}` | tries that MCP server again now (every one not connected without `name`); the state |
 | `POST /api/jobs/stop` `{id}` | stops a command run with no time limit; 404 for no such job |
 | `POST /api/replace` `{q, case, word, regex, include, exclude, replacement, paths}` | replaces what that search finds (in `paths` only, when given): `{files: [{path, replaced, version}], count, truncated}` |
-| `GET /api/git/status` | `{repository, branch, ahead, behind, files: [{path, staged, changed, from}]}` (`staged`, `changed`: git's letters M, A, D, R, `?` untracked; null: none) |
+| `GET /api/git/status` | `{repository, branch, ahead, behind, files: [{path, staged, changed, from, conflict}]}` (`staged`, `changed`: git's letters M, A, D, R, U, `?` untracked; null: none; `conflict`: true for a file left unmerged) |
 | `POST /api/git/stage`, `/api/git/unstage`, `/api/git/discard` `{paths}` | the status after; 409 `git` with what git said |
 | `POST /api/git/commit` `{message, all}` | commits what is staged (all of it first, with `all`): `{hash, status}`; 409 `nothing` when nothing is staged |
 | `GET /api/git/log`, `GET /api/git/branches`, `POST /api/git/switch` `{branch}` | the last 30 commits `[{hash, subject, author, at}]` (`limit` for another number, 1 to 1,000); the branches `[{name, current}]`; switches |

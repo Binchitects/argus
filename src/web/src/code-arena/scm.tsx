@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, Check, ChevronDown, CloudUpload, Ellipsis, GitBranch, GitCommitHorizontal, Minus, Plus, RefreshCw, Undo2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, CloudUpload, Ellipsis, GitBranch, GitCommitHorizontal, Minus, Plus, RefreshCw, Undo2 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { useConfirm } from '@/components/ui/confirm'
@@ -11,6 +11,8 @@ import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
 import { errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { folderKeys, folderTree, rowKeys, treeIndent, useChangeView } from './change-folds'
+import { ChangeFiles, FoldGroup, ViewTools } from './change-tree'
 import { useEditor } from './editor-state'
 import { FileIcon } from './file-icon'
 import { useGit } from './git-actions'
@@ -41,25 +43,31 @@ function CommitRow({ commit: c }: { commit: GitCommit }) {
   const [open, setOpen] = useState(false)
   const files = useQuery({ queryKey: ['code', 'git', 'commit', c.hash], queryFn: () => gitCommitFiles(c.hash), enabled: open, staleTime: Infinity })
   return (
-    <li>
+    <li data-node>
       <button
         type="button"
+        data-row
+        data-head
+        onKeyDown={rowKeys}
         aria-expanded={open}
         onClick={() => setOpen(!open)}
         title={`${c.hash} ${c.subject} — ${c.author}, ${new Date(c.at).toLocaleString()}`}
-        className="flex w-full min-w-0 items-baseline gap-2 px-3 py-0.5 text-left outline-none hover:bg-accent/70 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
+        className="flex w-full min-w-0 items-center gap-1 py-0.5 pr-3 pl-3 text-left outline-none hover:bg-accent/70 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
       >
+        <ChevronRight className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform duration-150', open && 'rotate-90')} aria-hidden="true" />
         <code className="shrink-0 font-mono text-[0.6875rem] text-muted-foreground">{c.hash.slice(0, 7)}</code>
         <span className="min-w-0 truncate">{c.subject}</span>
       </button>
       {open && (
-        <ul aria-label={`Files of ${c.hash.slice(0, 7)}`} className="pl-4">
+        <ul aria-label={`Files of ${c.hash.slice(0, 7)}`} className="pl-5">
           {files.isPending && <Skeleton className="mx-3 my-1 h-3.5" />}
           {files.error && <li className="px-3 text-xs text-muted-foreground">{errorMessage(files.error)}</li>}
           {files.data?.files.map((f) => (
             <li key={f.path}>
               <button
                 type="button"
+                data-row
+                onKeyDown={rowKeys}
                 onClick={() => {
                   const root = (files.data?.parents.length ?? 0) === 0
                   const left: Side = f.status === 'A' || root ? { kind: 'empty', path: f.path } : { kind: 'git', path: f.from ?? f.path, rev: `${files.data!.hash}^` }
@@ -88,9 +96,10 @@ const letters: Record<string, string> = { M: 'changed', A: 'added', D: 'deleted'
 const tones: Record<string, string> = { M: 'text-warning-ink', A: 'text-success-ink', '?': 'text-success-ink', D: 'text-destructive-ink', U: 'text-destructive-ink' }
 
 /**
- * Source Control: what changed since the last commit, staged (in the next commit) and not; each file opens as it was
- * then and is now; + stages, − unstages, ↺ puts it back; the message and Commit (all of it when nothing is staged);
- * the branch, to switch, and the last commits.
+ * Source Control: what changed since the last commit, in conflict, staged (in the next commit) and not; each file opens
+ * as it was then and is now (one in conflict, as it is); + stages, − unstages, ↺ puts it back; the message and Commit
+ * (all of it when nothing is staged); the branch, to switch, and the last commits. Each group folds, its files a list or
+ * a tree of their folders (change-tree.tsx).
  */
 export function SourceControlPanel() {
   const editor = useEditor()
@@ -112,8 +121,14 @@ export function SourceControlPanel() {
     onError: (e) => toast.error(errorMessage(e)),
   })
   const files = status.data?.files ?? []
-  const staged = files.filter((f) => f.staged)
-  const changed = files.filter((f) => f.changed)
+  // A file in conflict is in Merge Changes alone, as VS Code has it.
+  const merge = files.filter((f) => f.conflict)
+  const staged = files.filter((f) => f.staged && !f.conflict)
+  const changed = files.filter((f) => f.changed && !f.conflict)
+  const pathOf = (f: GitFile) => f.path
+  const groups = [['merge', merge], ['staged', staged], ['changes', changed]] as const
+  const keys = ['merge', 'staged', 'changes', 'branch', 'commits', ...groups.flatMap(([g, list]) => folderKeys(g, folderTree(list, pathOf)))]
+  const view = useChangeView('scm', keys)
   const git = useGit()
   /** Commit (Amend: into the last commit), then, as asked, push or sync. */
   const commit = useMutation({
@@ -158,36 +173,45 @@ export function SourceControlPanel() {
   // No upstream (ahead and behind unknown): the branch is to be published.
   const unpublished = !!status.data?.branch && status.data.ahead == null
 
-  const row = (f: GitFile, list: 'staged' | 'changed') => {
-    const letter = (list === 'staged' ? f.staged : f.changed) ?? ''
+  /** A group's actions on these files (all of it, or a folder's): stage, unstage, put back. */
+  const actions = (list: 'merge' | 'staged' | 'changed', paths: string[], what: string) => (
+    <>
+      {list === 'changed' && (
+        <Tooltip content="Discard the changes">
+          <button type="button" aria-label={`Discard ${what}`} onClick={() => void discard(paths)} disabled={busy} className={action}>
+            <Undo2 />
+          </button>
+        </Tooltip>
+      )}
+      <Tooltip content={list === 'staged' ? 'Unstage' : 'Stage'}>
+        <button type="button" aria-label={`${list === 'staged' ? 'Unstage' : 'Stage'} ${what}`} onClick={() => act.mutate({ op: list === 'staged' ? 'unstage' : 'stage', paths })} disabled={busy} className={action}>
+          {list === 'staged' ? <Minus /> : <Plus />}
+        </button>
+      </Tooltip>
+    </>
+  )
+
+  /** A file of a group: in the list with its folder beside it (depth null), or in the tree at its depth. */
+  const row = (f: GitFile, list: 'merge' | 'staged' | 'changed', depth: number | null) => {
+    const letter = list === 'merge' ? '!' : ((list === 'staged' ? f.staged : f.changed) ?? '')
     return (
       <li key={`${list}:${f.path}`} className="group flex h-[1.375rem] items-center pr-1.5 hover:bg-accent/70 focus-within:bg-accent/70">
         <button
           type="button"
-          onClick={() => void editor.openDiff(f.path, list === 'staged' ? 'staged' : 'git')}
-          title={list === 'staged' ? `${f.path}: as the last commit has it, and as staged` : `${f.path}: as staged (or committed), and now`}
-          className="flex h-full min-w-0 flex-1 items-center gap-1.5 pl-3 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
+          data-row
+          onKeyDown={rowKeys}
+          onClick={() => void (list === 'merge' ? editor.open(f.path) : editor.openDiff(f.path, list === 'staged' ? 'staged' : 'git'))}
+          title={list === 'merge' ? `${f.path}: in conflict; staging it settles it` : list === 'staged' ? `${f.path}: as the last commit has it, and as staged` : `${f.path}: as staged (or committed), and now`}
+          style={depth === null ? undefined : treeIndent(depth)}
+          className={cn('flex h-full min-w-0 flex-1 items-center gap-1.5 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset', depth === null && 'pl-3')}
         >
           <FileIcon path={f.path} />
           <span className={cn('truncate', letter === 'D' && 'line-through')}>{nameOf(f.path)}</span>
-          <span className="min-w-0 truncate text-xs text-muted-foreground">{parentOf(f.path)}</span>
-          <span className="sr-only">, {letters[letter] ?? letter}</span>
+          {depth === null && <span className="min-w-0 truncate text-xs text-muted-foreground">{parentOf(f.path)}</span>}
+          <span className="sr-only">, {list === 'merge' ? letters.U : (letters[letter] ?? letter)}</span>
         </button>
-        <span className="hidden shrink-0 items-center group-hover:flex group-focus-within:flex">
-          {list === 'changed' && (
-            <Tooltip content="Discard the changes">
-              <button type="button" aria-label={`Discard ${f.path}`} onClick={() => void discard([f.path])} disabled={busy} className={action}>
-                <Undo2 />
-              </button>
-            </Tooltip>
-          )}
-          <Tooltip content={list === 'staged' ? 'Unstage' : 'Stage'}>
-            <button type="button" aria-label={`${list === 'staged' ? 'Unstage' : 'Stage'} ${f.path}`} onClick={() => act.mutate({ op: list === 'staged' ? 'unstage' : 'stage', paths: [f.path] })} disabled={busy} className={action}>
-              {list === 'staged' ? <Minus /> : <Plus />}
-            </button>
-          </Tooltip>
-        </span>
-        <span className={cn('ml-1 w-3 shrink-0 text-center font-mono text-[0.6875rem] font-semibold', tones[letter] ?? 'text-muted-foreground')} aria-hidden="true">
+        <span className="hidden shrink-0 items-center group-hover:flex group-focus-within:flex">{actions(list, [f.path], f.path)}</span>
+        <span className={cn('ml-1 w-3 shrink-0 text-center font-mono text-[0.6875rem] font-semibold', list === 'merge' ? tones.U : (tones[letter] ?? 'text-muted-foreground'))} aria-hidden="true">
           {letter === '?' ? 'U' : letter}
         </span>
       </li>
@@ -198,6 +222,7 @@ export function SourceControlPanel() {
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-9 shrink-0 items-center gap-1 pr-1.5 pl-3">
         <h2 className="min-w-0 flex-1 truncate text-[0.6875rem] font-semibold tracking-wider text-muted-foreground uppercase">Source control</h2>
+        {status.data?.repository && <ViewTools view={view} keys={keys} />}
         <Tooltip content="Read git's state again">
           <button type="button" aria-label="Refresh source control" onClick={() => void queryClient.invalidateQueries({ queryKey: ['code', 'git'] })} className={action}>
             <RefreshCw />
@@ -227,7 +252,7 @@ export function SourceControlPanel() {
         )}
         <PartHelp part="git" />
       </div>
-      <div className="min-h-0 flex-1 overflow-auto pb-4 text-[0.8125rem]">
+      <div className="min-h-0 flex-1 overflow-auto pb-4 text-[0.8125rem]" data-tree>
         {status.isPending && Array.from({ length: 3 }, (_, i) => <Skeleton key={i} className="mx-3 my-1.5 h-4" />)}
         {status.error && <p className="px-3 py-2 text-muted-foreground">{errorMessage(status.error)}</p>}
         {status.data && !status.data.repository && <p className="px-3 py-2 text-muted-foreground">This folder is in no git repository. `git init` in a terminal makes one.</p>}
@@ -286,63 +311,70 @@ export function SourceControlPanel() {
                 </Button>
               )}
             </form>
-            <section aria-label="Staged changes">
-              <h3 className="flex h-[1.375rem] items-center px-3 text-xs font-semibold text-muted-foreground">
-                Staged <span className="ml-1 tabular-nums">({staged.length})</span>
-                {staged.length > 0 && (
-                  <button type="button" onClick={() => act.mutate({ op: 'unstage', paths: staged.map((f) => f.path) })} disabled={busy} className="ml-auto text-xs font-normal hover:text-foreground">
-                    Unstage all
-                  </button>
-                )}
-              </h3>
-              <ul aria-label="Staged files">{staged.map((f) => row(f, 'staged'))}</ul>
-            </section>
-            <section aria-label="Changes">
-              <h3 className="flex h-[1.375rem] items-center px-3 text-xs font-semibold text-muted-foreground">
-                Changes <span className="ml-1 tabular-nums">({changed.length})</span>
-                {changed.length > 0 && (
-                  <button type="button" onClick={() => act.mutate({ op: 'stage', paths: changed.map((f) => f.path) })} disabled={busy} className="ml-auto text-xs font-normal hover:text-foreground">
-                    Stage all
-                  </button>
-                )}
-              </h3>
-              <ul aria-label="Changed files">{changed.map((f) => row(f, 'changed'))}</ul>
+            {merge.length > 0 && (
+              <FoldGroup label="Merge changes" count={merge.length} open={!view.folded('merge')} onToggle={() => view.toggle('merge')} actions={actions('merge', merge.map(pathOf), 'all merge changes')}>
+                <ChangeFiles label="Files in conflict" group="merge" items={merge} pathOf={pathOf} view={view} row={(f, depth) => row(f, 'merge', depth)} folderActions={(d, paths) => actions('merge', paths, d.path)} />
+              </FoldGroup>
+            )}
+            <FoldGroup label="Staged changes" count={staged.length} open={!view.folded('staged')} onToggle={() => view.toggle('staged')} actions={staged.length > 0 && actions('staged', staged.map(pathOf), 'all')}>
+              <ChangeFiles label="Staged files" group="staged" items={staged} pathOf={pathOf} view={view} row={(f, depth) => row(f, 'staged', depth)} folderActions={(d, paths) => actions('staged', paths, d.path)} />
+            </FoldGroup>
+            <FoldGroup label="Changes" count={changed.length} open={!view.folded('changes')} onToggle={() => view.toggle('changes')} actions={changed.length > 0 && actions('changed', changed.map(pathOf), 'all')}>
+              <ChangeFiles label="Changed files" group="changes" items={changed} pathOf={pathOf} view={view} row={(f, depth) => row(f, 'changed', depth)} folderActions={(d, paths) => actions('changed', paths, d.path)} />
               {files.length === 0 && <p className="px-3 py-1 text-xs text-muted-foreground">Nothing changed since the last commit.</p>}
-            </section>
-            <section aria-label="Branch" className="mt-3 grid gap-1 px-3">
-              <h3 className="flex items-center gap-1 text-xs font-semibold text-muted-foreground">
-                <GitBranch className="size-3.5" aria-hidden="true" /> Branch
-                {(status.data.ahead ?? 0) + (status.data.behind ?? 0) > 0 && (
-                  <span className="ml-auto font-normal tabular-nums">
+            </FoldGroup>
+            <FoldGroup
+              label="Branch"
+              title={
+                <span className="flex items-center gap-1">
+                  <GitBranch className="size-3.5" aria-hidden="true" /> Branch
+                </span>
+              }
+              aside={
+                (status.data.ahead ?? 0) + (status.data.behind ?? 0) > 0 && (
+                  <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">
                     ↑{status.data.ahead} ↓{status.data.behind}
                   </span>
-                )}
-              </h3>
+                )
+              }
+              open={!view.folded('branch')}
+              onToggle={() => view.toggle('branch')}
+              className="mt-3"
+            >
               {branches.data && status.data.branch && (
-                <Select value={status.data.branch} onValueChange={(b) => b !== status.data?.branch && switchTo.mutate(b)} disabled={busy}>
-                  <SelectTrigger size="sm" aria-label="Switch branch" className="h-7 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {branches.data.map((b) => (
-                      <SelectItem key={b.name} value={b.name}>
-                        {b.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="px-3 pt-1">
+                  <Select value={status.data.branch} onValueChange={(b) => b !== status.data?.branch && switchTo.mutate(b)} disabled={busy}>
+                    <SelectTrigger size="sm" aria-label="Switch branch" className="h-7 w-full text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {branches.data.map((b) => (
+                        <SelectItem key={b.name} value={b.name}>
+                          {b.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               )}
-            </section>
-            <section aria-label="Last commits" className="mt-3">
-              <h3 className="flex h-[1.375rem] items-center gap-1 px-3 text-xs font-semibold text-muted-foreground">
-                <GitCommitHorizontal className="size-3.5" aria-hidden="true" /> Last commits
-              </h3>
+            </FoldGroup>
+            <FoldGroup
+              label="Last commits"
+              title={
+                <span className="flex items-center gap-1">
+                  <GitCommitHorizontal className="size-3.5" aria-hidden="true" /> Last commits
+                </span>
+              }
+              open={!view.folded('commits')}
+              onToggle={() => view.toggle('commits')}
+              className="mt-3"
+            >
               <ul aria-label="Commits">
                 {(log.data ?? []).slice(0, 15).map((c) => (
                   <CommitRow key={c.hash} commit={c} />
                 ))}
               </ul>
-            </section>
+            </FoldGroup>
           </>
         )}
       </div>

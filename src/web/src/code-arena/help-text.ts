@@ -65,7 +65,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   changes: {
     name: 'Agent changes',
-    text: "The files the agent changed in this run that you have not kept or put back yet, and below them **Your changes**: those changed by hand (git's that are not the agent's). Each opens as it was and as it is now. **Accept** keeps a change, **Revert** puts the file back, **Accept all** keeps them all; a file's right-click menu adds it to the chat, or asks the agent to explain or fix the change.",
+    text: "The files the agent changed in this run that you have not kept or put back yet, and below them **Your changes**: those changed by hand (git's that are not the agent's). Each opens as it was and as it is now. **Accept** keeps a change, **Revert** puts the file back, **Accept all** keeps them all; a file's right-click menu adds it to the chat, or asks the agent to explain or fix the change. Each group folds; **View as Tree** shows the files under their folders, and **Collapse All** folds everything.",
     manual: 'the-ide',
   },
   problems: {
@@ -80,7 +80,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   git: {
     name: 'Source control',
-    text: "The folder's git: what changed since the last commit, **staged** for the next commit or not. A file opens as the last commit has it and as it is now; **+** stages it, **−** unstages it, **↺** puts it back. Write the message and **Commit** (all of it when nothing is staged; its arrow has Amend, Commit & Push and Commit & Sync); **Sync Changes** pulls and pushes, **Publish Branch** gives a branch its upstream, and **⋯** has Pull, Push, Fetch, Checkout to…, the branches and Undo Last Commit. Switch the branch below, and see the last commits.",
+    text: "The folder's git: what changed since the last commit, in conflict (**Merge Changes**), **staged** for the next commit or not. A file opens as the last commit has it and as it is now; **+** stages it, **−** unstages it, **↺** puts it back; a group's or a folder's buttons, all of its files. Each group folds with its chevron (← and → too); **View as Tree** shows the files under their folders, **Collapse All** folds everything, and the folder keeps it so. Write the message and **Commit** (all of it when nothing is staged; its arrow has Amend, Commit & Push and Commit & Sync); **Sync Changes** pulls and pushes, **Publish Branch** gives a branch its upstream, and **⋯** has Pull, Push, Fetch, Checkout to…, the branches and Undo Last Commit. Switch the branch below, and see the last commits.",
     manual: 'source-control',
   },
   sessions: {
