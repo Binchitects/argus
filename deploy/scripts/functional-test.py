@@ -110,7 +110,14 @@ class Browser:
 
     def login(self, username, password):
         code, body = self.app("POST", "/api/auth/login", {"userName": username, "password": password})
-        return code == 200 and body.get("status") == "ok"
+        if code != 200 or body.get("status") != "ok":
+            return False
+        # A sign-in notice (Settings -> Compliance) is accepted first, as the web asks after signing in: until then every
+        # other call is refused (403 notice).
+        code, notice = self.app("GET", "/api/account/notice")
+        if code == 200 and notice.get("on") and notice.get("acceptedVersion") != notice.get("version"):
+            return self.app("POST", "/api/account/notice/accept", {"version": notice.get("version")})[0] == 204
+        return True
 
     def app(self, method, path, data=None):
         """A call to the app's API as this browser: (status, parsed JSON or {})."""
