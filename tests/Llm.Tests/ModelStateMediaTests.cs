@@ -520,6 +520,40 @@ public sealed class ModelStateMediaTests(AppFixture app) : IDisposable
     }
 
     [Fact]
+    public async Task A_model_taken_from_a_key_it_was_just_used_with_is_never_loaded_for_it_again()
+    {
+        await using var s = await NewAsync();
+        await s.Media.SetKeptAsync(Image, false);
+        await UntilFileAsync(s, "off", "the picture server is off");
+        var admin = await new TestBrowser(s.App).SignedInAsync("admin", AppFixture.AdminPassword);
+        var name = "k" + Guid.NewGuid().ToString("N")[..10];
+        var key = (await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }))).GetProperty("apiKey").GetString()!;
+        // The key used a moment ago: the app believes what it may call for a while (Gateway:KeyCacheSeconds).
+        var book = s.App.Services.GetRequiredService<KeyBook>();
+        var before = await book.ForAsync(key, CancellationToken.None);
+        Assert.True(before!.Models.Count == 0 || before.Models.Contains(Image));
+
+        // The model given to admins only: the key may not call it from that moment, with no time passing.
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(
+            new Uri($"/api/admin/models/{Uri.EscapeDataString(Image)}/access", UriKind.Relative), new { audience = "Admins", groups = Array.Empty<string>() }));
+        var after = await book.ForAsync(key, CancellationToken.None);
+        Assert.True(after!.Models.Count > 0 && !after.Models.Contains(Image), $"the key still may call: {string.Join(", ", after.Models)}");
+
+        // So its picture goes on to the gateway at once, which refuses it; the picture server stays off.
+        var client = s.App.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://gateway.{AppFixture.Domain}"), HandleCookies = false });
+        using var req = new HttpRequestMessage(HttpMethod.Post, new Uri("/v1/images/generations", UriKind.Relative))
+        {
+            Content = new StringContent($$"""{"model":"{{Image}}","prompt":"an apple","size":"512x512"}""", Encoding.UTF8, "application/json"),
+        };
+        req.Headers.Authorization = new("Bearer", key);
+        await StatusAssert.Is(HttpStatusCode.OK, await client.SendAsync(req).WaitAsync(Deadline));
+        Assert.Equal("/v1/images/generations", Assert.Single(Pictures.Paths));
+        s.Media.Wake();
+        await Task.Delay(1000);
+        Assert.Equal("off", s.File);
+    }
+
+    [Fact]
     public async Task The_speech_servers_voice_detector_unloads_when_unused_and_an_admins_load_says_so()
     {
         var clock = new MovableClock(DateTimeOffset.UtcNow);

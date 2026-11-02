@@ -106,17 +106,19 @@ public sealed partial class KeyAccessWatcher : BackgroundService
     private readonly SemaphoreSlim _wake = new(0);
     private readonly IServiceScopeFactory scopes;
     private readonly Replicas replicas;
+    private readonly KeyBook book;
     private readonly ILogger<KeyAccessWatcher> logger;
     private readonly bool _watch;
     private readonly IDisposable? _onChange;
     private readonly IDisposable? _onRates;
 
-    public KeyAccessWatcher(IServiceScopeFactory scopes, Replicas replicas, ILogger<KeyAccessWatcher> logger, IOptionsMonitor<ChatOptions> chat,
+    public KeyAccessWatcher(IServiceScopeFactory scopes, Replicas replicas, KeyBook book, ILogger<KeyAccessWatcher> logger, IOptionsMonitor<ChatOptions> chat,
         IOptionsMonitor<Gateway.RateLimitOptions> rates, IConfiguration config)
     {
         this.scopes = scopes;
         _watch = config.GetValue("Keys:Watch", true);
         this.replicas = replicas;
+        this.book = book;
         this.logger = logger;
         replicas.On(WakeTopic, _ =>
         {
@@ -145,8 +147,14 @@ public sealed partial class KeyAccessWatcher : BackgroundService
         });
     }
 
+    /// <summary>
+    /// What a key may do changed (a model's access, a group, a person's rules or limits): the app's own answer to whose a key is
+    /// and what it may call is read again at once on every replica, as the gateway's keys are synced now. Believed for its ten
+    /// seconds, it would let a key load a model its gateway key no longer has.
+    /// </summary>
     public void Wake()
     {
+        book.Changed();
         WakeHere();
         replicas.Tell(WakeTopic);
     }
