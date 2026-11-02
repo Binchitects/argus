@@ -6,12 +6,15 @@ v5.2.0 tagged, then this release, 9.9.9.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import os
 import shutil
+import signal
 import subprocess
 import tarfile
+import time
 import unittest
 from pathlib import Path
 
@@ -223,6 +226,35 @@ class BundleTests(unittest.TestCase):
         self.assertNotIn("arena-app:9.9.9", images)
         self.assertIn("arena-app:latest", images)
         self.assertFalse(any(c[1:2] == ["pull"] for c in self.r.calls()))
+
+
+class ImageCacheTests(unittest.TestCase):
+    """The next release's bundle from the same image cache (dist/.image-cache)."""
+
+    def test_An_image_the_next_release_did_not_change_loads_by_its_new_name(self):
+        # The cache was by the image alone, and an archive loads by the name it was saved under: a hotfix's image
+        # the release before had already (the same build) went in as arena-SERVICE:OLD, and its install and upgrade
+        # stopped at "arena-SERVICE:NEW is not in docker after loading it from the bundle".
+        r = Release()
+        try:
+            (r.repo / "VERSION").write_text("9.9.10\n")
+            made = r.s.run("make-installer.sh")
+            self.assertEqual(made.returncode, 0, made.stdout + made.stderr)
+            self.assertIn("(cached)", made.stdout, "the images the release before packed are packed once")
+            out = r.s.dir / "next"
+            out.mkdir()
+            x = subprocess.run(["sh", str(r.dist / "argus-arena-9.9.10-offline.run"), "--extract", str(out)], capture_output=True,
+                               text=True, env=r.env(), timeout=120)
+            self.assertEqual(x.returncode, 0, x.stdout + x.stderr)
+            b = out / "argus-arena-9.9.10"
+            rows = [line.split("\t") for line in (b / "images" / "IMAGES").read_text().splitlines()]
+            for ref, file, *_ in rows:
+                with tarfile.open(b / "images" / file) as t:
+                    text = t.extractfile("layer.tar").read().decode()
+                self.assertEqual(text.split()[2], ref, f"{file} loads as {text.split()[2]}")
+            self.assertIn("arena-app:9.9.10", [row[0] for row in rows])
+        finally:
+            r.s.cleanup()
 
 
 class LeaveOutTests(unittest.TestCase):
@@ -841,6 +873,42 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(r.returncode, 6, self.output(r))
         self.assertIn("config/litellm.yaml", r.stdout)
 
+    def test_An_upgrade_needs_disk_only_for_the_images_it_loads(self):
+        # The images here already as the bundle has them are not loaded again: 7.7.0 asked for room for every one
+        # (140 GB with every feature on, of which 18 of 29 images were there), and refused a host with less.
+        self.old_install(version_file=True)
+        rows = [line.split("\t") for line in (self.r.unpack() / "images" / "IMAGES").read_text().splitlines() if line]
+        store = self.r.store()["images"]
+        loads = [row for row in rows if store.get(row[0]) != row[2].removeprefix("sha256:") and row[0] != "python:3.13-slim"]
+        self.assertTrue(loads and len(loads) < len(rows), rows)
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        need = sum(int(row[4]) for row in loads if row[0] != "arena-laya:9.9.9") * 11 // 10 // 1024
+        line = next(x for x in r.stdout.splitlines() if "disk for the images:" in x)
+        self.assertTrue(line.endswith(f", {self.human(need * 1024)} needed"), line)
+
+    def test_An_upgrade_a_requirement_stops_goes_on_with_skip_requirements(self):
+        # The refusal named --skip-requirements, which upgrade did not take ("--skip-requirements is for install"): a
+        # host that knew better than a check had no way on.
+        self.old_install(version_file=True)
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--docker", "--yes", "--timeout", "5s", extra={"FAKE_INFO_FAIL": "1"})
+        self.assertEqual(r.returncode, 3, self.output(r))
+        self.assertIn("docker does not answer (docker info)", r.stdout)
+        self.assertIn("nothing was changed; --skip-requirements goes on anyway", r.stderr)
+        self.assertFalse((self.dir / ".arena-install" / "upgrade").exists())
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--docker", "--yes", "--timeout", "5s", "--skip-requirements",
+                       extra={"FAKE_INFO_FAIL": "1"})
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("1 requirement(s) not met; going on (--skip-requirements)", r.stdout)
+        self.assertIn("Upgraded from 5.2.0 to 9.9.9", r.stdout)
+
+    def human(self, n: int) -> str:
+        """installer.sh's human()."""
+        units, i, v = ["B", "KB", "MB", "GB", "TB"], 0, float(n)
+        while v >= 1024 and i < 4:
+            v, i = v / 1024, i + 1
+        return f"{int(v)} B" if i == 0 else f"{v:.1f} {units[i]}"
+
     def test_An_app_that_answers_a_few_seconds_late_is_waited_for(self):
         """Traefik reaches a recreated container a little after compose calls it healthy."""
         deploy = self.old_install(version_file=True)
@@ -952,6 +1020,35 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(r.returncode, 3, self.output(r))
         self.assertIn("no upgrade of this installer to roll back here", r.stderr)
 
+    def test_After_upgrade_rollback_the_installation_is_this_installers_again(self):
+        # 5.2.0 installed by this installer: its record (the files' checksums, the bundle it came from). The rollback
+        # took the record away, so verify said nothing was installed here, and repair and remove did not know it.
+        deploy = self.old_install(version_file=True)
+        state = self.dir / ".arena-install"
+        state.mkdir()
+        record = "".join(f"{sha}  {f}\n" for sha, f in (line.split(None, 1) for line in
+                         (self.r.unpack() / "known" / "5.2.0.sha256").read_text().splitlines()) if not f.startswith((".env", "certs/")))
+        (state / "deploy.sha256").write_text(record)
+        (state / "MANIFEST").write_text("format: argus-arena-offline 1\nversion: 5.2.0\n")
+        (state / "state").write_text("version=5.2.0\nengine=docker\nproject=arena\nstatus=installed\n")
+        (state / "kept").write_text(f"config/edited.yml\t{self.sha(deploy / 'config' / 'edited.yml')}\n"
+                                    f"config/litellm.yaml\t{self.sha(deploy / 'config' / 'litellm.yaml')}\n")
+        before = {f: (state / f).read_text() for f in ("deploy.sha256", "MANIFEST", "kept")}
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertNotEqual(before["deploy.sha256"], (state / "deploy.sha256").read_text())
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--rollback", "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertEqual(before, {f: (state / f).read_text() for f in before})
+        r = subprocess.run(["bash", str(deploy / "scripts" / "installer.sh"), "verify", "--dir", str(self.dir)], cwd=self.r.s.dir,
+                           env=self.r.env(), capture_output=True, text=True, timeout=120)
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("every file is as it was installed, or kept as you changed it", r.stdout)
+
+    @staticmethod
+    def sha(path: Path) -> str:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
     def test_A_rollback_puts_back_only_what_the_upgrade_changed_and_asks_about_the_rest(self):
         deploy = self.old_install(version_file=True)
         r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s")
@@ -1004,6 +1101,141 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, self.output(r))
         self.assertIn("carrying on the upgrade from 5.2.0 that was interrupted", r.stdout)
         self.assertEqual(len(list((self.dir / "deploy" / "backups").glob("20*"))), 1, "a second backup was taken")
+
+    def stopped(self, *args: str, at: str, call: str = "", sig: int = signal.SIGINT, extra: dict[str, str] | None = None) -> str:
+        """installer.sh ARGS, stopped (SIG to its whole process group, as a terminal's Ctrl-C or hang-up) once it says AT
+        and, with CALL, once the engine has been called so (`load`): its output."""
+        # Into a file, not a pipe: what it leaves running may hold its output open, and the person's prompt is back
+        # once the installer itself has ended.
+        out = self.r.s.dir / f"stopped-{self._testMethodName}.out"
+        with open(out, "w") as f:
+            p = subprocess.Popen(["bash", str(self.r.unpack() / "installer.sh"), *args], cwd=self.r.s.dir, env=self.r.env(extra),
+                                 stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
+        while at not in out.read_text() or (call and not self.r.s.called(call)):
+            self.assertIsNone(p.poll(), f"it ended before it said {at!r}: {out.read_text()}")
+            time.sleep(0.05)
+        os.killpg(p.pid, sig)
+        p.wait(timeout=60)
+        return out.read_text()
+
+    def test_An_upgrade_stopped_while_its_images_load_carries_on_at_once(self):
+        # Ctrl-C reaches every process of the run, but the loads it started in the background ignore it (bash does
+        # that to what it starts with &): they went on loading, holding the installer's lock, and upgrade again
+        # said another run held it.
+        self.old_install(version_file=True)
+        out = self.stopped("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s", at="  loading ", call="load",
+                           extra={"FAKE_LOAD_SECONDS": "20"})
+        self.assertIn("The upgrade was stopped part way: the same upgrade run again carries it on", out)
+        self.assertTrue((self.dir / ".arena-install" / "upgrade").exists(), "the upgrade's record")
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("carrying on the upgrade from 5.2.0 that was interrupted", r.stdout)
+        self.assertIn("Upgraded from 5.2.0 to 9.9.9", r.stdout)
+
+    def test_An_upgrade_carried_on_after_its_env_changes_still_rolls_them_back(self):
+        # Carried on, it wrote its record of the .env keys it added anew, empty (they were there by then): a rollback
+        # later left them in .env.
+        deploy = self.old_install(version_file=True)
+        self.stopped("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s", at="==> data in")
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("carrying on the upgrade from 5.2.0 that was interrupted", r.stdout)
+        # A week on, a setting changed: the rollback takes out only the keys the upgrade added.
+        env = (deploy / ".env").read_text().replace("DOMAIN=old.example\n", "DOMAIN=new.example\n")
+        (deploy / ".env").write_text(env)
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--rollback", "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn(".env: took out the keys the upgrade added: COMPOSE_PROFILES DATA_DIR NEW_KEY NEW_SETTING", r.stdout)
+        values = dict(line.split("=", 1) for line in (deploy / ".env").read_text().splitlines() if "=" in line and not line.startswith("#"))
+        self.assertEqual(values["DOMAIN"], "new.example")
+        self.assertFalse({"NEW_KEY", "NEW_SETTING", "DATA_DIR", "COMPOSE_PROFILES"} & set(values), values)
+
+    def test_An_upgrade_cut_off_can_be_rolled_back_instead(self):
+        # upgrade --rollback looked only for a finished upgrade: one cut off was refused ("no upgrade of this installer
+        # to roll back here"), with the new release half started.
+        deploy = self.old_install(version_file=True)
+        old_app = next(c for c in self.containers() if c["service"] == "app")["image_id"]
+        self.stopped("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s", at="==> waiting for every service")
+        self.assertIn("started=1\n", (self.dir / ".arena-install" / "upgrade").read_text())
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--rollback", "--dry-run")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("An upgrade of", r.stdout)
+        self.assertIn("would  stop it, put back 5.2.0's files and images, restore", r.stdout)
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--rollback", "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("Rolled back: 5.2.0 runs again, with the data of", r.stdout)
+        # The data, not the configuration: backup.sh said "and config" whenever --with-config was not 1 but set at all (0).
+        self.assertIn("This OVERWRITES the current volumes.\n", r.stdout)
+        # What the new release shipped is the bundle's: nothing it wrote is taken for a change made here since.
+        self.assertNotIn("changed here since", r.stdout)
+        self.assertEqual((deploy / "docker-compose.yml").read_text(), COMPOSE_OLD)
+        self.assertEqual((deploy / ".env").read_text(), OLD_ENV)
+        self.assertFalse((deploy / "config" / "added.yml").exists())
+        self.assertEqual(next(c for c in self.containers() if c["service"] == "app")["image_id"], old_app)
+        self.assertFalse((self.dir / ".arena-install" / "upgrade").exists())
+        self.assertIn("version=5.2.0\n", (self.dir / ".arena-install" / "state").read_text())
+
+    def test_A_newer_bundle_carries_on_an_upgrade_an_older_one_left_cut_off(self):
+        # A hotfix's bundle on a host whose upgrade to the release before it was cut off: it was refused ("run that
+        # bundle's upgrade again"), so the host could only go on with the release that had failed it.
+        deploy = self.old_install(version_file=True)
+        self.stopped("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s", at="==> data in")
+        marker = self.dir / ".arena-install" / "upgrade"
+        marker.write_text(marker.read_text().replace("to=9.9.9\n", "to=9.9.8\n"))
+        # The images the cut-off 9.9.8 run had loaded of its own.
+        store = self.r.store()
+        store["images"].update({"arena-app:9.9.8": "8" * 64, "arena-web:9.9.8": "9" * 64})
+        self.r.state.write_text(json.dumps(store))
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("the upgrade to 9.9.8 that was cut off here is carried on to 9.9.9", r.stdout)
+        self.assertIn("Upgraded from 5.2.0 to 9.9.9", r.stdout)
+        self.assertIn("2 image(s) of 9.9.8 that the cut-off upgrade loaded, removed", r.stdout)
+        self.assertFalse({"arena-app:9.9.8", "arena-web:9.9.8"} & set(self.r.store()["images"]))
+        self.assertEqual((deploy / "docker-compose.yml").read_text(), COMPOSE_NEW)
+        self.assertEqual(len(list((deploy / "backups").glob("20*"))), 1, "a second backup was taken")
+        # An older bundle does not take over a newer one's.
+        marker.write_text("from=5.2.0\nto=9.9.10\nbackup=\nstarted=0\n")
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s")
+        self.assertEqual(r.returncode, 3, self.output(r))
+        self.assertIn("an upgrade to 9.9.10 was interrupted here: run that bundle's upgrade again", r.stderr)
+
+    def test_The_run_file_removes_what_a_run_killed_outright_left(self):
+        # Killed (the machine lost, kill -9), a run cannot remove its unpacked bundle: the next one needed room for
+        # two, and stopped at "unpacking needs ... MB" on a host with room for one.
+        where = self.r.run_file.parent
+        stale, live, kept = (where / f".argus-arena-unpack.{n}" for n in ("STALE1", "LIVE01", "KEPT01"))
+        for d in (stale, live, kept):
+            (d / "argus-arena-9.9.9" / "images").mkdir(parents=True)
+        (kept / ".keep").write_text("")
+        running = subprocess.Popen(["sh", "-c", "sleep 60", str(live / "argus-arena-9.9.9" / "installer.sh")])
+        try:
+            r = self.r.run("status", "--dir", str(self.dir), via_run=True)
+            self.assertIn(f"argus-arena: removed {stale}, which a run that was cut off left", r.stderr)
+            self.assertFalse(stale.exists())
+            self.assertTrue(live.exists(), "a run going on")
+            self.assertTrue(kept.exists(), "--keep-workdir")
+        finally:
+            running.kill()
+            running.wait()
+            shutil.rmtree(live, ignore_errors=True)
+            shutil.rmtree(kept, ignore_errors=True)
+
+    def test_An_install_stopped_while_its_images_load_says_what_it_undid(self):
+        # The log's tee went with Ctrl-C (bash hands a process substitution's command SIGINT back as it was, whatever
+        # trap '' said): the undo ran, but nothing it said reached the terminal or the log.
+        token = self.r.s.dir / "gitlab-token"
+        token.write_text("glpat-a-token-for-the-test\n")
+        before = set(self.r.store()["images"])
+        out = self.stopped("install", "--dir", str(self.dir), "--yes", "--cpu-only", "--skip-requirements", "--timeout", "5s",
+                           "--domain", "arena.test", "--https-port", "18443", "--http-port", "18080",
+                           "--gitlab-url", "https://gitlab.test", "--gitlab-token-file", str(token),
+                           at="  loading ", call="load", extra={"FAKE_LOAD_SECONDS": "3"})
+        self.assertIn("the install did not finish: what it did is undone", out)
+        self.assertIn("Nothing of the install is left but its log", out)
+        self.assertIn("Nothing of the install is left but its log", self.logs())
+        self.assertFalse((self.dir / "deploy").exists())
+        self.assertEqual(before, set(self.r.store()["images"]), "the images it loaded")
 
     def test_On_rootless_Podman_the_backup_is_yours_and_Docker_only_looked_at(self):
         podman = {"FAKE_STATE_ENGINE": "podman", "FAKE_VOLUMES": "arena_engine\narena_argus"}

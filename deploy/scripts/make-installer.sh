@@ -28,9 +28,10 @@
 #   --images-in-engine the images named, not saved: they stay in the engine, built or pulled there
 #                      (arenactl install, from a checkout); no speech models, Code Arena or .run
 #   --stage-only DIR   the bundle unpacked into DIR/argus-arena-VERSION, not a .run
-#   --image-cache DIR  each image packed once, by its id (default OUT/.image-cache): the next bundle
-#                      saves and gzips only the images that changed (the release's own); the images
-#                      this bundle did not use are taken out of it at the end
+#   --image-cache DIR  each image packed once, by its id and the name it is saved under (default
+#                      OUT/.image-cache): the next bundle saves and gzips only the images that changed
+#                      or are named anew (the release's own, by version); those this bundle did not use
+#                      are taken out of it at the end
 #   --no-image-cache   every image saved and gzipped again
 #   --dry-run          the plan; nothing is written or saved
 #
@@ -295,6 +296,9 @@ if git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
 fi
 
 say "==> images, gzipped${CACHE:+ (those packed before taken from $CACHE)}"
+# The cache holds an image's archive by the image and the name it was saved under (airgap.sh's cache_key): an archive
+# loads by that name, so arena-app:7.7.0's is not 7.7.1's, even when a hotfix left the image as it was.
+cache_key() { printf '%s-%s' "${2#sha256:}" "$(printf '%s' "$1" | sha256sum | cut -c1-12)"; }   # cache_key REF ID
 GZ=(gzip -6); command -v pigz >/dev/null && GZ=(pigz -6)
 : > "$B/images/IMAGES.new"
 declare -A CACHED_SUM=()
@@ -302,7 +306,7 @@ while IFS=$'\t' read -r ref file id; do
   [[ -n "$ref" ]] || continue
   # Named only (--images-in-engine): the engine has it, or it is built or pulled when needed.
   if [[ $file == - ]]; then printf '%s\t-\t%s\t0\t0\n' "$ref" "$id" >> "$B/images/IMAGES.new"; continue; fi
-  key="${id#sha256:}"
+  key="$(cache_key "$ref" "$id")"
   if [[ -n "$CACHE" && -f "$CACHE/$key.tar.gz" && -f "$CACHE/$key.raw" && -f "$CACHE/$key.sha256" ]]; then
     # Packed by an earlier bundle: linked in (copied across file systems), its checksum kept.
     ln -f "$CACHE/$key.tar.gz" "$B/images/$file.gz" 2>/dev/null || cp -f "$CACHE/$key.tar.gz" "$B/images/$file.gz" || die "copying $file.gz from $CACHE failed (disk full?)"
@@ -472,7 +476,8 @@ cat > "$WORK/header" <<'HEADER'
 #   sh argus-arena-@VERSION@-offline.run upgrade --dir /srv/arena
 #   sh argus-arena-@VERSION@-offline.run verify
 #
-#   --workdir DIR    where it unpacks (default: beside this file, else /var/tmp); @SIZE@ free
+#   --workdir DIR    where it unpacks (default: beside this file, else /var/tmp); @SIZE@ free (what a
+#                    run killed outright left there is removed first)
 #   --keep-workdir   leave the unpacked bundle there: its installer.sh runs it again
 #   --extract DIR    only unpack it into DIR and check it
 #
@@ -483,7 +488,7 @@ HEAD_BYTES=@HEAD_BYTES@
 BODY_BYTES=@BODY_BYTES@
 TOP=argus-arena-@VERSION@
 die() { printf 'argus-arena: %s\n' "$*" >&2; exit 1; }
-for t in bash tar tail head df mktemp; do command -v "$t" >/dev/null 2>&1 || die "$t is needed"; done
+for t in bash tar tail head df mktemp tr; do command -v "$t" >/dev/null 2>&1 || die "$t is needed"; done
 self=$0
 case $self in /*) ;; *) self="$(pwd)/$self" ;; esac
 WORK="" KEEP=0 EXTRACT="" CMD="" SMALL=0 SEEN=0
@@ -505,13 +510,24 @@ case $CMD in status|remove|help|-h|--help|"") SMALL=1 ;; esac
 need=$HEAD_BYTES; [ "$SMALL" = 1 ] || need=$((HEAD_BYTES + BODY_BYTES))
 if [ -z "$WORK" ]; then WORK=$(dirname "$self"); [ -w "$WORK" ] || WORK=${TMPDIR:-/var/tmp}; fi
 mkdir -p "$WORK" || die "cannot make $WORK"
+# What a run stopped outright left here (killed, the machine lost): its unpacked bundle, which no process names
+# any more. It would take the room this one unpacks into.
+for old in "$WORK"/.argus-arena-unpack.*; do
+  [ -d "$old" ] && [ ! -e "$old/.keep" ] || continue
+  busy=0
+  for c in /proc/[0-9]*/cmdline; do
+    case $(tr '\0' ' ' < "$c" 2>/dev/null) in *"$old"*) busy=1; break ;; esac
+  done
+  [ "$busy" = 0 ] && rm -rf "$old" && printf 'argus-arena: removed %s, which a run that was cut off left\n' "$old" >&2
+done
 free=$(df -Pk "$WORK" | awk 'NR == 2 { print $4 }')
 [ "${free:-0}" -ge $((need / 1024 + 1024)) ] || die "$WORK has $((${free:-0} / 1024)) MB free; unpacking needs $((need / 1048576 + 1)) MB: --workdir another folder"
 if [ -n "$EXTRACT" ]; then
   dest=$(cd "$WORK" && pwd); [ -e "$dest/$TOP" ] && die "$dest/$TOP is there already"
 else
   dest=$(mktemp -d "$WORK/.argus-arena-unpack.XXXXXX") || die "cannot make a folder in $WORK"
-  [ "$KEEP" = 1 ] || trap 'rm -rf "$dest"' EXIT
+  # --keep-workdir: kept on purpose, so a later run leaves it (it removes one a run that was cut off left).
+  if [ "$KEEP" = 1 ]; then : > "$dest/.keep"; else trap 'rm -rf "$dest"' EXIT; fi
   trap 'exit 130' INT TERM
   trap 'exit 129' HUP
 fi
@@ -548,7 +564,7 @@ dd if="$WORK/header" of="$RUN.part" conv=notrunc status=none || die "writing $RU
 chmod 755 "$RUN.part" && mv "$RUN.part" "$RUN" || die "writing $RUN failed"
 (cd "$OUT_DIR" && sha256sum "$(basename "$RUN")" > "$(basename "$RUN").sha256")
 if [[ -n "$CACHE" ]]; then
-  used=" $(cut -f3 "$B/images/IMAGES" | sed 's/^sha256://' | tr '\n' ' ') "
+  used=" $(while IFS=$'\t' read -r ref _ id _; do [[ -n "$ref" ]] && cache_key "$ref" "$id" && echo; done < "$B/images/IMAGES" | tr '\n' ' ') "
   for f in "$CACHE"/*.tar.gz; do
     [[ -f "$f" ]] || continue
     k="$(basename "$f" .tar.gz)"; [[ "$used" == *" $k "* ]] || rm -f "$CACHE/$k".*
