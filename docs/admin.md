@@ -515,8 +515,8 @@ would be with them.
   loaded at once). The models list shows each engine (`engine.instances`, each
   `on` when this stack runs it) and why one is not running.
 - **SGLang models** (`engineKind: sglang`, the `sglang` feature): the same form
-  and settings, the form's **Engine** choosing vLLM or SGLang (and the machine).
-  The app writes SGLang's own flags: answers at once is its
+  and settings, the dialog's **Engine** field choosing vLLM or SGLang (and the
+  machine). The app writes SGLang's own flags: answers at once is its
   `--max-running-requests`, the share of each GPU its `--mem-fraction-static`,
   fp8 its `fp8_e4m3`; *May sleep* is its memory saver; MTP is its NEXTN and
   EAGLE-3 its EAGLE3 with the draft snapshot; the CPU tier is its hierarchical
@@ -526,15 +526,32 @@ would be with them.
   requests go ahead of API keys'.
 - **Moving a model to another engine.** A model moves at runtime, with the stack
   running: llama.cpp to vLLM or SGLang and back, and between vLLM and SGLang (or
-  another machine's engine of a kind). vLLM and SGLang serve a Hugging Face
-  snapshot (safetensors), llama.cpp a GGUF file: have the model's other form in the
-  library first (above; on a host with no network, carry its
+  another machine's engine of a kind). Each chat model's card says its engine
+  (*Engine: llama.cpp*, or *vLLM · name* when a kind has several), and **Change
+  engine…** opens **Edit** at its **Engine** field. The field lists llama.cpp,
+  vLLM and SGLang (each engine of a kind that has several), the model's own
+  chosen; one that does not run here is listed disabled, and the field says why:
+  its feature is off (`./arenactl repair --with chat-models`, `vllm` or `sglang`
+  turns it on, see [deployment.md](deployment.md#features); vLLM also needs
+  `VLLM_IMAGE`, under `arenactl config`), the stack has none (on Kubernetes,
+  `llamacpp.enabled`, `vllm.enabled` or `sglang.enabled`), or it is not running.
+  While a model moves the field is held; after a failed move it can be chosen
+  again. vLLM and SGLang serve a Hugging Face snapshot (safetensors), llama.cpp a
+  GGUF file, and **File or model** lists the chosen engine's form first. Another
+  engine of the other form takes the same model in that form from the library:
+  the snapshot whose repository has the GGUF file's name (or the name in its
+  header), its architecture first, or the GGUF file of the snapshot's repository.
+  The dialog says how it matched; choose another under **File or model** if it is
+  not the same model. vLLM to SGLang and back keeps the snapshot. When the
+  library has none, the dialog says so and holds **Save**: have the model's other
+  form in the library first (above; on a host with no network, carry its
   `hf/<owner>/<repository>@<revision>/` folder or its GGUF file into the library).
-  Then **Edit** the model: for a llama.cpp model choose the snapshot under **File or
-  model**, for a vLLM or SGLang model its GGUF file (to llama.cpp) or the other
-  **Engine** (vLLM or SGLang). The dialog says it moves, and shows the new engine's
-  form for the same model. Saved, it keeps its name, who may use it, its prices and
-  its sampling, and its card says how far the move is:
+  The other way works too: a file of the other form chosen under **File or model**
+  moves the **Engine** field with it (a snapshot to vLLM or SGLang, a GGUF file to
+  llama.cpp). The dialog says it moves whenever the engine is not the model's own,
+  and shows the new engine's form for the same model. Saved, it keeps its name,
+  who may use it, its prices and its sampling, and its card says how far the move
+  is:
   - New requests go to its new engine and wait there until it is ready. Its answers
     in flight end on its old engine, which lets it go once none is left (after 15
     minutes it lets it go all the same).
@@ -552,8 +569,8 @@ would be with them.
   unless set in the form); from vLLM or SGLang, copies, the share of each GPU,
   quantisation, speculative decoding and the cache's tiers (the cache type becomes
   q8_0, and the form puts it on every GPU); from vLLM to SGLang, LMCache. A move
-  to an engine that does not run is refused, and while a model moves it is not
-  edited, loaded or unloaded.
+  to an engine that does not run (or whose feature is off) is refused, and while a
+  model moves it is not edited, loaded or unloaded.
   llama.cpp starts again when its list of models changes (it reads its presets as
   it starts), as when a model is added or removed: the answers of its other models
   in flight then are cut. The same through the API: `PATCH /api/admin/models/NAME`

@@ -879,15 +879,16 @@ export const topics = {
     admin: true,
     parts: [
       { name: 'The engine', text: 'How many models it holds, which are kept loaded, and how full each GPU would be. **Reload** and **Restart** for each engine the app runs, as under Monitoring.' },
-      { name: 'Each model', text: 'Its state (loaded, loading, not loaded, could not load), **Keep loaded**, **Load**, **Unload**, **Edit**, and who may use it.' },
+      { name: 'Each model', text: 'Its state (loaded, loading, not loaded, could not load), its engine, **Keep loaded**, **Load**, **Unload**, **Edit**, **Change engine…**, and who may use it.' },
       { name: 'Working hours', text: 'Other models kept loaded at some hours: a small fast one by day, the big one at night.' },
       { name: 'Other servers and providers', text: 'Another machine\'s OpenAI-compatible engine, or a provider\'s API (OpenAI, Anthropic, Gemini, OpenRouter...) with the company\'s key: their models the gateway serves beside these, to the chat, API keys and Code Arena.' },
       { name: 'Find on Hugging Face', text: 'Search GGUF models, see whether they fit this machine, and download them into the library. **Downloads** shows the progress.' },
-      { name: 'Add a model', text: 'One dialog for every kind: choose a file from the model library or a model the speech server has, and it is taken as what it is (a chat, picture, video or speech model), which you can change. A chat model\'s form shows what fits this machine. **Edit** on a card opens the same dialog.' },
+      { name: 'Add a model', text: 'One dialog for every kind: choose a file from the model library or a model the speech server has, and it is taken as what it is (a chat, picture, video or speech model), which you can change. A chat model has an **Engine** (llama.cpp, vLLM or SGLang; one that does not run here is disabled, saying why) and its **File or model** in that engine\'s form: a GGUF file for llama.cpp, a Hugging Face snapshot for vLLM and SGLang. Its form shows what fits this machine. **Edit** on a card opens the same dialog.' },
     ],
     tasks: [
       { title: 'Switch the chat to another model', steps: ['Press **Load** on the model (or **Keep loaded** to keep it).', 'Wait while it loads: seconds from memory, minutes from disk.', 'Set **Model new chats use** under Settings → Model to make it the default.'] },
       { title: 'Download a model', steps: ['Press **Find on Hugging Face** and search.', 'Open a result, tick a file that fits, and press **Download**.', 'When it is in, press **Add as a model** under **Downloads**.'] },
+      { title: 'Move a model to another engine', steps: ['Press **Change engine…** on its card.', 'Choose the engine under **Engine**: **File or model** takes the same model in that engine\'s form from the library, or says how to get it.', 'Check the file and press **Save**: its card says how far the move is.'] },
     ],
     manual: { doc: 'admin', section: 'models' },
   },
