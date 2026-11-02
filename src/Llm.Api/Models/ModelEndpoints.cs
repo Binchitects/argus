@@ -327,11 +327,11 @@ public static class ModelEndpoints
     /// <summary>
     /// A model's new settings. On another engine (another kind, or another engine of its kind), it moves there at runtime
     /// (ModelMoves): its answers in flight end on its old engine, new requests go to its new one once it is ready there,
-    /// and a failure there leaves it on its old engine. Refused while it moves, and to an engine that does not run.
+    /// and a failure there leaves it on its old engine. Refused while it moves, and to an engine that does not run (or whose feature is off).
     /// </summary>
     private static async Task<IResult> UpdateAsync(string name, LocalModelRequest body, HttpContext http, AppDbContext db, ModelCatalog catalog, ModelLibrary library,
         HardwareProbe hardware, EngineWatcher watcher, PriceBook prices, ChatModels gatewayModels, Audit audit, EngineClient engines, EngineState state, VllmBackends vllm,
-        IOptions<EngineOptions> engine, TimeProvider clock, CancellationToken ct)
+        IOptions<EngineOptions> engine, Operations.Features features, TimeProvider clock, CancellationToken ct)
     {
         if (await db.LocalModels.SingleOrDefaultAsync(m => m.Name == name, ct) is not { } model)
         {
@@ -355,7 +355,7 @@ public static class ModelEndpoints
         var home = ModelMoves.HomeOf(model, vllm);
         if (home != ModelMoves.HomeOf(before, vllm))
         {
-            if (ModelMoves.Refusal(model, vllm, engine.Value) is { } refusal)
+            if (ModelMoves.Refusal(model, vllm, engine.Value, features) is { } refusal)
             {
                 return AuthEndpoints.Problem(409, "engine", refusal);
             }
