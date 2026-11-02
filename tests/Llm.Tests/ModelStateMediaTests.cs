@@ -128,6 +128,56 @@ public sealed class ModelStateMediaTests(AppFixture app) : IDisposable
 
     private static Task UntilStatusAsync(Setup s, string status, string what) => UntilAsync(s, async () => await s.StatusAsync() == status, what);
 
+    /// <summary>The GPU the control file names for the picture server (gpu=), or null.</summary>
+    private static string? GpuIn(Setup s) =>
+        File.Exists(s.Control) ? File.ReadLines(s.Control).FirstOrDefault(l => l.StartsWith("gpu=", StringComparison.Ordinal))?[4..] : null;
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public async Task The_picture_server_goes_on_the_least_placed_gpu_not_the_first_and_a_gpu_its_model_names_is_kept(int gpus)
+    {
+        await using var s = await NewAsync();
+        var state = s.App.Services.GetRequiredService<EngineState>();
+        // A vLLM model on GPU 0, llama.cpp models on the next ones but the last, and one on every GPU (which weighs on each alike).
+        var places = new Dictionary<string, EngineState.ModelPlace>(StringComparer.Ordinal)
+        {
+            ["oss"] = new("vllm", new Dictionary<int, long> { [0] = 86 * FakeHardware.GiB }),
+            ["everywhere"] = new("llamacpp", Enumerable.Range(0, gpus).ToDictionary(g => g, _ => 10 * FakeHardware.GiB)),
+        };
+        foreach (var g in Enumerable.Range(1, gpus - 2))
+        {
+            places[$"small{g}"] = new("llamacpp", new Dictionary<int, long> { [g] = (40 + g) * FakeHardware.GiB });
+        }
+        state.Places = places;
+        // The GPUs after what is on them: no pass places the server on GPUs whose models it does not see yet. Until then it is
+        // placed nowhere (its model is kept loaded from the start, so its server may be on already, on every GPU it sees).
+        state.Hardware = FakeHardware.Many(gpus);
+        await s.Media.SetKeptAsync(Image, false);
+        s.Media.Load(Image);
+        await UntilAsync(s, () => Task.FromResult(s.File == "on" && GpuIn(s) is not null), "the app turns the picture server on, on a GPU");
+        // Before, no GPU was named: the server saw them all and ran on CUDA's first, GPU 0, beside the vLLM model.
+        Assert.Equal((gpus - 1).ToString(System.Globalization.CultureInfo.InvariantCulture), GpuIn(s));
+        Assert.Contains(s.Media.Placed(), r => r.PerGpu.ContainsKey(gpus - 1) && r.Name.StartsWith(HardwareProbe.Picture, StringComparison.Ordinal));
+        // Placed, it stays there though its GPU is the busiest now: started again, it is not moved.
+        state.Places = new Dictionary<string, EngineState.ModelPlace>(StringComparer.Ordinal) { ["big"] = new("vllm", new Dictionary<int, long> { [gpus - 1] = 86 * FakeHardware.GiB }) };
+        string? Gen() => File.ReadLines(s.Control).FirstOrDefault(l => l.StartsWith("gen=", StringComparison.Ordinal));
+        var gen = Gen();
+        s.Media.Restart("imagegen", "a test");
+        await UntilAsync(s, () => Task.FromResult(Gen() != gen), "the picture server is started again");
+        Assert.Equal((gpus - 1).ToString(System.Globalization.CultureInfo.InvariantCulture), GpuIn(s));
+        // The GPU its model names (an admin's choice) is kept, however placed that GPU is.
+        await using (var scope = s.App.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+            (await db.MediaModels.SingleAsync(m => m.Name == Image)).Gpu = 0;
+            await db.SaveChangesAsync();
+        }
+        await s.Media.RefreshAsync(CancellationToken.None);
+        await UntilAsync(s, () => Task.FromResult(GpuIn(s) == "0"), "the picture server goes on the GPU its model names");
+    }
+
     [Fact]
     public async Task A_picture_asked_for_as_the_idle_unload_happens_turns_its_server_on_again_before_it_is_told_ready()
     {

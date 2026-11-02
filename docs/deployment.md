@@ -610,9 +610,12 @@ how). **no**: missing, with the reason.
   `engines.backend: rocm`. GPUs are read by `services/gpu-probe.py`
   (`rocm-smi`) into the hardware file the app reads.
 - **The picture server and the embedder** go on any GPU (`MEDIA_GPU`,
-  `EMBED_GPU`; a picture model's own GPU first) or the CPU; the app charges
-  their memory to that GPU only, and lends only that GPU to a job short of
-  room (a vLLM model there sleeps, then wakes).
+  `EMBED_GPU`; a picture model's own GPU first) or the CPU; without one named,
+  the picture and the video server each go on the least placed GPU (the app
+  writes `gpu=` in its control file, `services/sd-serve.sh` runs it there), and
+  the media studio loads each model on the GPU with the most free memory. The
+  app charges their memory to that GPU only, and lends only that GPU to a job
+  short of room (a vLLM model there sleeps, then wakes).
 - **Several machines**: one `Engine__Vllm__N__Name`/`Kind`/`Host`/`ConfigDir`/`StatusDir`
   per vLLM or SGLang machine (`Kind`: `vllm` or `sglang`; its folders on storage
   both machines see; listing them replaces this stack's `vllm` and `sglang`, so

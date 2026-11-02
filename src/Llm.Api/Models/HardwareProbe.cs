@@ -19,16 +19,74 @@ public sealed class HardwareProbe(IHttpClientFactory http, IOptions<StackOptions
     private readonly SemaphoreSlim _gate = new(1, 1);
     private (Hardware? Value, DateTimeOffset At) _last = (null, DateTimeOffset.MinValue);
 
+    /// <summary>The picture server's reserve, by name.</summary>
+    public const string Picture = "the picture server";
+
+    /// <summary>The embedder's reserve, by name.</summary>
+    public const string Embedder = "the embedder";
+
+    /// <summary>What a GPU is doing now: how busy it is (0 to 1; null: not known) and the memory in use (null: not known).</summary>
+    public sealed record GpuLoad(double? Busy, long? Used);
+
+    private sealed record LoadSeen(IReadOnlyDictionary<int, GpuLoad> Value, DateTimeOffset At);
+
+    private static readonly TimeSpan LoadFresh = TimeSpan.FromSeconds(5);
+    private LoadSeen _load = new(new Dictionary<int, GpuLoad>(), DateTimeOffset.MinValue);
+
     public void Dispose() => _gate.Dispose();
+
+    /// <summary>
+    /// What each GPU is doing now, by its index: how busy it is and the memory in use, from the NVIDIA exporter (read again
+    /// after 5 seconds); else the memory in use the hardware file says (any vendor). Empty when neither says.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<int, GpuLoad>> LoadAsync(CancellationToken ct = default)
+    {
+        if (_load is { } seen && DateTimeOffset.UtcNow - seen.At < LoadFresh)
+        {
+            return seen.Value;
+        }
+        Dictionary<int, GpuLoad> value;
+        try
+        {
+            value = Loads(await QueryAsync("nvidia_smi_index", ct), await QueryAsync("nvidia_smi_utilization_gpu_ratio", ct), await QueryAsync("nvidia_smi_memory_used_bytes", ct));
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            // No Prometheus: the hardware file may say.
+            value = new Dictionary<int, GpuLoad>();
+        }
+        if (value.Count == 0 && ReadFile(engine.Value)?.Devices is { } devices)
+        {
+            value = devices.Where(d => d.Free is not null).ToDictionary(d => d.Index, d => new GpuLoad(null, Math.Max(0, d.Total - d.Free!.Value)));
+        }
+        _load = new(value, DateTimeOffset.UtcNow);
+        return value;
+    }
+
+    /// <summary>The NVIDIA exporter's rows as each GPU's load, by its index (nvidia_smi_index, matched by its uuid; a GPU without one is left out).</summary>
+    public static Dictionary<int, GpuLoad> Loads(IReadOnlyList<(Dictionary<string, string> Labels, double Value)> index,
+        IReadOnlyList<(Dictionary<string, string> Labels, double Value)> busy, IReadOnlyList<(Dictionary<string, string> Labels, double Value)> used)
+    {
+        static Dictionary<string, double> ByUuid(IReadOnlyList<(Dictionary<string, string> Labels, double Value)> rows) =>
+            rows.GroupBy(r => r.Labels.GetValueOrDefault("uuid") ?? "").Where(g => g.Key.Length > 0).ToDictionary(g => g.Key, g => g.First().Value, StringComparer.Ordinal);
+        var busyOf = ByUuid(busy);
+        var usedOf = ByUuid(used);
+        return ByUuid(index).GroupBy(x => (int)x.Value).ToDictionary(g => g.Key, g => g.First().Key is var uuid
+            ? new GpuLoad(busyOf.TryGetValue(uuid, out var b) ? Math.Clamp(b, 0, 1) : null, usedOf.TryGetValue(uuid, out var u) ? (long)u : null)
+            : new GpuLoad(null, null));
+    }
 
     public async Task<Hardware?> GetAsync(CancellationToken ct = default) => WithReserves(await ReadCachedAsync(ct), engine.Value, PictureGpu());
 
-    /// <summary>The GPU the picture model runs on, as Admin → Models sets it; null when it names none (or none can be read now).</summary>
+    /// <summary>
+    /// The GPU the picture server runs on: its control file's (MediaControl placed it), else the GPU its model names in
+    /// Admin → Models; null when neither says (or nothing can be read now).
+    /// </summary>
     private int? PictureGpu()
     {
         try
         {
-            return services.GetService<MediaControl>()?.Pick(Llm.Core.Models.MediaModes.Image)?.Row.Gpu;
+            return services.GetService<MediaControl>() is { } media ? media.GpuOf("imagegen") ?? media.Pick(Llm.Core.Models.MediaModes.Image)?.Row.Gpu : null;
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.Data.Common.DbException)
         {
@@ -51,11 +109,11 @@ public sealed class HardwareProbe(IHttpClientFactory http, IOptions<StackOptions
         var picture = pictureGpu ?? o.MediaGpu ?? devices[0].Index;
         if (o.ImageReserveBytes > 0 && devices.Any(d => d.Index == picture))
         {
-            reserves.Add(new GpuReserve(picture, "the picture server", o.ImageReserveBytes));
+            reserves.Add(new GpuReserve(picture, Picture, o.ImageReserveBytes));
         }
         if (o.EmbedGpu is { } embed && o.EmbedReserveBytes > 0 && devices.Any(d => d.Index == embed))
         {
-            reserves.Add(new GpuReserve(embed, "the embedder", o.EmbedReserveBytes));
+            reserves.Add(new GpuReserve(embed, Embedder, o.EmbedReserveBytes));
         }
         return hw with { Reserves = reserves };
     }

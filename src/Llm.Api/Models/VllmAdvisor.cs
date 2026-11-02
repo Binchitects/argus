@@ -202,19 +202,24 @@ public static class VllmAdvisor
     /// <summary>
     /// GPUs for <paramref name="replicas"/> copies of this model on this machine, for whatever it has: the smallest tensor
     /// parallel size whose copies fit with room for <see cref="MinCache"/> of cache and a whole context each, on GPUs of a
-    /// backend vLLM runs on, the ones with the most room first (beside <paramref name="others"/>), alike in size where
-    /// possible. Null when no set of its GPUs holds it.
+    /// backend vLLM runs on, alike in size where possible, the least placed first (<paramref name="placed"/>: what the models
+    /// that name their GPUs and the media servers keep there, kept loaded or not), so a new model goes where the others are
+    /// not; else the ones with the most room (beside <paramref name="others"/>, what is kept loaded). Null when no set of its
+    /// GPUs holds it.
     /// </summary>
     public static IReadOnlyList<int>? Propose(VllmProfile p, Hardware hw, int replicas, double utilization, int context, string kvType,
-        IReadOnlyDictionary<int, long>? others = null)
+        IReadOnlyDictionary<int, long>? others = null, IReadOnlyDictionary<int, long>? placed = null)
     {
         var usable = GpuPlan.DevicesOf(hw).Where(d => EngineKinds.VllmCapabilities.Backends.Contains(d.Backend)).ToList();
+        IEnumerable<GpuDevice> Roomiest(IEnumerable<GpuDevice> gpus) => gpus.OrderByDescending(d => d.Total - (others?.GetValueOrDefault(d.Index) ?? 0)).ThenBy(d => d.Index);
         foreach (var tp in TpSizes.Where(tp => TpProblem(p, tp) is null && tp * replicas <= usable.Count))
         {
-            // Alike first (the group goes at its smallest GPU's pace), then the most room.
-            var chosen = usable.GroupBy(d => (d.Vendor, d.Total)).Where(g => g.Count() >= tp * replicas)
-                .Select(g => g.OrderByDescending(d => d.Total - (others?.GetValueOrDefault(d.Index) ?? 0)).ThenBy(d => d.Index).Take(tp * replicas).ToList())
-                .Append(usable.OrderByDescending(d => d.Total - (others?.GetValueOrDefault(d.Index) ?? 0)).ThenBy(d => d.Index).Take(tp * replicas).ToList())
+            // Alike first (the group goes at its smallest GPU's pace), the least placed; then the most room.
+            var alike = usable.GroupBy(d => (d.Vendor, d.Total)).Where(g => g.Count() >= tp * replicas).ToList();
+            var chosen = alike.Select(g => GpuPlan.Least(g, placed ?? others).Take(tp * replicas).ToList())
+                .Append([.. GpuPlan.Least(usable, placed ?? others).Take(tp * replicas)])
+                .Concat(alike.Select(g => Roomiest(g).Take(tp * replicas).ToList()))
+                .Append([.. Roomiest(usable).Take(tp * replicas)])
                 .FirstOrDefault(set => Enumerable.Range(0, replicas).All(r => Fits(p, [.. set.Skip(r * tp).Take(tp)], utilization, context, kvType, others)));
             if (chosen is not null)
             {
@@ -243,9 +248,11 @@ public static class VllmAdvisor
     /// <summary>
     /// Advice for a vLLM model: its GPUs (its own, else proposed), whether each copy fits them, its cache, the longest
     /// context and answers at once that fit, and the RAM for sleep and the CPU tier. <paramref name="others"/>: what else
-    /// is kept on each GPU (other vLLM groups, the reserves), as GpuPlan counts it.
+    /// is kept on each GPU (other vLLM groups, the reserves), as GpuPlan counts it; <paramref name="placed"/>: what is placed
+    /// on each, kept loaded or not, which the GPUs proposed avoid.
     /// </summary>
-    public static ModelAdvice Advise(LocalModel m, VllmProfile p, Hardware? hw, IReadOnlyDictionary<int, long>? others = null)
+    public static ModelAdvice Advise(LocalModel m, VllmProfile p, Hardware? hw, IReadOnlyDictionary<int, long>? others = null,
+        IReadOnlyDictionary<int, long>? placed = null)
     {
         var problems = new List<ModelProblem>();
         var inv = CultureInfo.InvariantCulture;
@@ -294,7 +301,7 @@ public static class VllmAdvisor
             problems.Add(new("devices", $"{label} needs GPUs, and this machine's engines have none: run this model's GGUF on llama.cpp instead, or on an engine with GPUs.", true));
             return new ModelAdvice(profile, limits, null, null, problems, hw);
         }
-        var proposed = Propose(p, hw, replicas, utilization, context, m.KvType, others);
+        var proposed = Propose(p, hw, replicas, utilization, context, m.KvType, others, placed);
         var gpus = Hardware.ParseDevices(m.Devices) ?? proposed;
         var recommended = Recommend(p, hw, replicas, utilization, others, proposed, m.KvType);
         if (gpus is null)

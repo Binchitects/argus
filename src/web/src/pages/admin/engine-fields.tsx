@@ -298,10 +298,10 @@ export function VllmModelSection({
         value={form.devices}
         onChange={(v) => set('devices', v)}
         error={errors.devices ?? errors.replicas}
-        hint={form.devices ? 'Only these, split among its copies in order.' : `None ticked: ${r?.devices ? `GPUs ${r.devices}, proposed for this machine` : 'those the advisor proposes'}.`}
+        hint={form.devices ? 'Only these, split among its copies in order.' : `None ticked: ${r?.devices ? `GPUs ${r.devices}, proposed for this machine (the least placed)` : 'those the advisor proposes, the least placed'}.`}
       />
       <div className="grid gap-4 sm:grid-cols-3">
-        <Field label="Copies" hint="Each on its share of the GPUs; a conversation stays on one." error={errors.replicas}>
+        <Field label="Copies" hint="Each on its share of the GPUs; a conversation goes to the least busy and stays there while it has room." error={errors.replicas}>
           <Input inputMode="numeric" value={form.replicas} onChange={(ev) => set('replicas', ev.target.value)} />
         </Field>
         <Field label="Share of each GPU" hint={`0.10 to 0.98; empty: 0.90 (${form.kind === 'sglang' ? '--mem-fraction-static' : '--gpu-memory-utilization'}).`} error={errors.gpuMemoryUtilization}>

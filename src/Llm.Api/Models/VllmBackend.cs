@@ -316,9 +316,9 @@ public sealed class VllmBackend(VllmEngineOptions instance, EngineOptions engine
     }
 
     /// <summary>
-    /// What its copies are doing, from their /metrics: requests running and waiting, the cache's use (the most of any
-    /// copy) and the share of prompt tokens read from it. Its places are its answers at once times its copies; the first
-    /// that many as are running count busy (no slots: any request reuses any cached prefix).
+    /// What its copies are doing, from their /metrics: requests running and waiting (in all, and each copy's), the cache's
+    /// use (the most of any copy) and the share of prompt tokens read from it. Its places are its answers at once times its
+    /// copies; the first that many as are running count busy (no slots: any request reuses any cached prefix).
     /// </summary>
     public async Task<EngineCapacity?> CapacityAsync(string model, TimeSpan patience, CancellationToken ct)
     {
@@ -332,8 +332,11 @@ public sealed class VllmBackend(VllmEngineOptions instance, EngineOptions engine
         int running = 0, waiting = 0;
         double? usage = null;
         double queries = 0, hits = 0;
+        var load = new int[entries.Count];
         foreach (var e in entries)
         {
+            // Its copy's number (NAME@i), as the chat sends to it.
+            var copy = e.Name.LastIndexOf('@') is var at and >= 0 && int.TryParse(e.Name[(at + 1)..], NumberStyles.None, CultureInfo.InvariantCulture, out var i) && i < load.Length ? i : 0;
             string text;
             try
             {
@@ -354,6 +357,7 @@ public sealed class VllmBackend(VllmEngineOptions instance, EngineOptions engine
                 // SGLang's: its token pool's use, and its radix cache's hit rate (a share already, so weighed by the copy's prompt tokens).
                 running += (int)m.GetValueOrDefault("sglang:num_running_reqs");
                 waiting += (int)m.GetValueOrDefault("sglang:num_queue_reqs");
+                load[copy] += (int)(m.GetValueOrDefault("sglang:num_running_reqs") + m.GetValueOrDefault("sglang:num_queue_reqs"));
                 if (m.TryGetValue("sglang:token_usage", out var t))
                 {
                     usage = Math.Max(usage ?? 0, t);
@@ -369,6 +373,7 @@ public sealed class VllmBackend(VllmEngineOptions instance, EngineOptions engine
             var v = Metrics(text);
             running += (int)v.GetValueOrDefault("vllm:num_requests_running");
             waiting += (int)v.GetValueOrDefault("vllm:num_requests_waiting");
+            load[copy] += (int)(v.GetValueOrDefault("vllm:num_requests_running") + v.GetValueOrDefault("vllm:num_requests_waiting"));
             if (v.TryGetValue("vllm:kv_cache_usage_perc", out var u) || v.TryGetValue("vllm:gpu_cache_usage_perc", out u))
             {
                 usage = Math.Max(usage ?? 0, u);
@@ -377,7 +382,7 @@ public sealed class VllmBackend(VllmEngineOptions instance, EngineOptions engine
             hits += v.GetValueOrDefault("vllm:prefix_cache_hits_total");
         }
         var count = entries.Sum(e => Math.Max(1, e.Parallel));
-        return new EngineCapacity(count, Enumerable.Range(0, Math.Min(running, count)).ToHashSet(), running, waiting, usage, queries > 0 ? hits / queries : null);
+        return new EngineCapacity(count, Enumerable.Range(0, Math.Min(running, count)).ToHashSet(), running, waiting, usage, queries > 0 ? hits / queries : null, load);
     }
 
     /// <summary>

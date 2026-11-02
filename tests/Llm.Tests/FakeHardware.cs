@@ -34,6 +34,9 @@ public static class FakeHardware
     /// <summary>The design's server: four RTX PRO 6000 Blackwell (97,887 MiB each, as nvidia-smi says), 1 TB of RAM; the picture server on <paramref name="pictureGpu"/>.</summary>
     public static Hardware Four96(int? pictureGpu = 3) => Of(1024 * GiB, pictureGpu, [.. Enumerable.Repeat(("NVIDIA RTX PRO 6000 Blackwell Server Edition", 97887L, "nvidia", "cuda"), 4)]);
 
+    /// <summary><paramref name="gpus"/> 96 GB cards alike (2, 4, 8...), the picture server's reserve on the first.</summary>
+    public static Hardware Many(int gpus) => Of(gpus * 256 * GiB, null, [.. Enumerable.Repeat(("NVIDIA RTX PRO 6000 Blackwell Server Edition", 97887L, "nvidia", "cuda"), gpus)]);
+
     public static Hardware Eight80 => Of(2048 * GiB, 7, [.. Enumerable.Repeat(("NVIDIA H100 80GB HBM3", 81559L, "nvidia", "cuda"), 8)]);
 
     public static Hardware Rocm2x192 => Of(1536 * GiB, 1, ("AMD Instinct MI300X", 196592, "amd", "rocm"), ("AMD Instinct MI300X", 196592, "amd", "rocm"));
