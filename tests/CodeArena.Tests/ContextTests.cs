@@ -117,7 +117,7 @@ public sealed class ContextTests : IDisposable
     }
 
     [Fact]
-    public void A_rewind_puts_back_the_files_the_turns_wrote_and_says_how_long_the_conversation_was()
+    public void A_rewind_puts_back_the_files_the_turns_wrote_and_says_where_the_conversation_goes_back_to()
     {
         var project = Project(("a.txt", "one"));
         var a = Path.Combine(project, "a.txt");
@@ -134,15 +134,24 @@ public sealed class ContextTests : IDisposable
         c.BeforeWrite(a);
         File.WriteAllText(a, "four");
 
-        var (messages, restored, lost) = c.Rewind(2, files: true);
-        Assert.Equal(3, messages);
+        // What going back would change, as the files are now: a.txt put back, new.txt removed.
+        var (changes, tooBig) = c.Changes(2);
+        Assert.Equal([(a, false), (made, true)], changes);
+        Assert.Empty(tooBig);
+        var (place, restored, lost) = c.Rewind(2, files: true);
+        Assert.Equal(3, place);
         Assert.Equal("two", File.ReadAllText(a));
         Assert.False(File.Exists(made));
         Assert.Equal(2, restored.Count);
         Assert.Empty(lost);
         Assert.Single(c.Turns);
 
-        Assert.Equal(0, c.Rewind(1, files: false).Messages);
+        // A file written back as it was is no change.
+        Assert.Equal([(a, false)], c.Changes(1).Files);
+        File.WriteAllText(a, "one");
+        Assert.Empty(c.Changes(1).Files);
+        File.WriteAllText(a, "two");
+        Assert.Equal(0, c.Rewind(1, files: false).Place);
         Assert.Equal("two", File.ReadAllText(a));
         Assert.Empty(c.Turns);
     }

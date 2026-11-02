@@ -239,6 +239,24 @@ internal sealed class ChatSync : IAsyncDisposable
                 }
                 if (plan.Batch.Count == 0 && plan.Summary is null)
                 {
+                    if (plan.Branch && plan.Conversation is not null && !plan.Unknown)
+                    {
+                        // Gone back to before a turn Arena has (/rewind): the web shows the session's branch at once, not at its
+                        // next message (Arena's branch on screen ends where the session's does).
+                        var shown = await SendAsync(HttpMethod.Post, $"/api/code-arena/chats/{plan.Conversation}/messages",
+                            new JsonObject { ["parent"] = plan.Parent, ["branch"] = true, ["messages"] = new JsonArray() }, ct);
+                        if (shown.Status != HttpStatusCode.OK)
+                        {
+                            return Refused(shown);
+                        }
+                        _store.Shown();
+                        lock (_gate)
+                        {
+                            _stamp = shown.Body?.Str("stamp");
+                            _problem = null;
+                        }
+                        continue;
+                    }
                     // Every message is there: the plan, when it changed since Arena last had it.
                     return plan.Conversation is null ? TimeSpan.Zero : await PushPlanAsync(plan.Conversation, ct);
                 }
@@ -885,18 +903,19 @@ internal sealed class ChatSync : IAsyncDisposable
         reference is { } r && r.StartsWith(_store.Id + ":", StringComparison.Ordinal) && int.TryParse(r.AsSpan(_store.Id.Length + 1), out var index) ? index : null;
 
     /// <summary>
-    /// Goes back to the first <paramref name="messages"/> of the model's history (/rewind), once no send is under way: what
-    /// Arena has past there stays on the web, and what the session adds next goes on a branch of its own. The history now.
+    /// Goes back to the first <paramref name="place"/> messages of the whole conversation (/rewind), once no send is under
+    /// way: what Arena has past there stays on the web as another branch, and the web shows the session as it is now (sent
+    /// at once). The history now.
     /// </summary>
-    public async Task<List<JsonObject>> RewindAsync(int messages, CancellationToken ct)
+    public async Task<List<JsonObject>> RewindAsync(int place, CancellationToken ct)
     {
         var held = await _store.Busy.WaitAsync(RequestLimit, ct);
         try
         {
-            var history = _store.Rewind(messages);
+            var history = _store.Rewind(place);
             if (_store.Read(d => d.Branch && !d.Unlinked && d.Conversation is not null))
             {
-                _notice(false, "The chat in Arena goes on from there on a branch of its own: the web shows the turns gone back from as another branch.");
+                _notice(false, "The chat in Arena goes back there too: the web shows the turns gone back from as another branch.");
             }
             return history;
         }

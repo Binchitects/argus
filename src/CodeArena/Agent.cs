@@ -438,7 +438,8 @@ internal sealed class Agent
                 // The part of an answer it replies to goes first (the checkpoint keeps what was typed).
                 input = Quotes.Compose(quote, input);
             }
-            Checkpoints?.Begin(Messages.Count, asked);
+            // Where the turn begins in the whole conversation (a compaction changes how many messages the model reads, not this).
+            Checkpoints?.Begin(Session?.Read(d => d.Stream.Count) ?? Messages.Count, asked);
             Context.Turn++;
         }
         var before = await SnapshotAsync(ct);
@@ -830,7 +831,7 @@ internal sealed class Agent
         Messages.RemoveAt(Messages.Count - 1);
         _notes.RemoveAll(n => n.At > Messages.Count);
         // Out of the session as if gone back from (/rewind): what Arena has of it stays there, on a branch of its own.
-        Session?.Rewind(Messages.Count);
+        Session?.Rewind(Session.Read(d => d.Stream.Count) - 1);
         Events?.Compacted("The message that did not fit is out of the conversation: send it again, smaller, or after /compact.");
     }
 

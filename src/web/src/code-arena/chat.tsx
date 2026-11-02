@@ -24,6 +24,7 @@ import { ToolsPicker } from '@/pages/chat/tools-picker'
 import { batched } from '@/pages/chat/batch'
 import { keepSame, stopped, withQuestion, type Notice } from '@/pages/chat/live'
 import { useRecall, type Older, type RecallSource } from '@/pages/chat/recall'
+import { typedOf } from '@/pages/chat/attached'
 import { toTurns } from '@/pages/chat/tree'
 import { CompactedMark, QuestionTurn, type AgainChange } from '@/pages/chat/turns'
 import { useQuotableSelection } from '@/pages/chat/quotable'
@@ -69,6 +70,7 @@ import { useFileMention } from './mention'
 import { useSlashMenu } from './slash'
 import { isUserFile } from './editor-options'
 import { CodeAnswer } from './answer'
+import { RewindDialog } from './rewind'
 import { useCommands } from './commands'
 import { useKeyFor } from './keyboard'
 import { PartHelp } from './help'
@@ -374,10 +376,10 @@ const ignore = () => undefined
 /**
  * A question in the thread: drawn again only when its message changes. `onJump` goes to the answer it quotes; `onEdit`
  * asks it again with new words (not while an answer is written, nor before code-arena has it, nor once a compaction
- * covers it: the model reads its summary instead).
+ * covers it: the model reads its summary instead). `onRewind`: Rewind to here, before a compaction too.
  */
-const Question = memo(function Question({ m, onJump, onEdit, busy }: { m: Message; onJump: (m: Message) => boolean; onEdit?: (m: Message, text: string, quote: string | null) => void; busy: boolean }) {
-  return <QuestionTurn m={m} siblings={[m]} busy={busy} onSwitch={ignore} onJumpToQuote={onJump} onEdit={m.id.startsWith('local-') ? undefined : onEdit} />
+const Question = memo(function Question({ m, onJump, onEdit, onRewind, busy }: { m: Message; onJump: (m: Message) => boolean; onEdit?: (m: Message, text: string, quote: string | null) => void; onRewind: (m: Message) => void; busy: boolean }) {
+  return <QuestionTurn m={m} siblings={[m]} busy={busy} onSwitch={ignore} onJumpToQuote={onJump} onEdit={m.id.startsWith('local-') ? undefined : onEdit} onRewind={onRewind} />
 })
 
 const suggestions = [
@@ -750,6 +752,18 @@ export function Thread({
   const askAgain = useCallback((question: string, change?: AgainChange & { files?: boolean }) => void againNow.current(question, change), [])
   const editQuestion = useCallback((m: Message, text: string, quote: string | null) => void againNow.current(m.id, { text, quote }), [])
 
+  // Rewind to here: the question asked about (the dialog says what goes); the conversation gone back, its words go back in the box.
+  const [rewinding, setRewinding] = useState<Message | null>(null)
+  const rewound = async (question: Message, said: string, chat: boolean) => {
+    await refresh()
+    if (chat) {
+      setDraft(question.files ? question.content : typedOf(question.content))
+      setQuote(question.quote ? { text: question.quote, words: question.quote, cut: false } : null)
+      setFocusBox((n) => n + 1)
+    }
+    toast.success(said)
+  }
+
   /** Ask about this: a question about the selection, sent at once with it (queued while an answer runs); the box is left as it is. */
   const askAbout = (q: Quote, text: string) => {
     quotable.clear(true)
@@ -945,7 +959,7 @@ export function Thread({
                   const asked = t.question && !covered(t.question) ? t.question.id : undefined
                   return (
                     <div key={t.question?.id ?? t.answer[0]?.id ?? i} className="grid gap-4">
-                      {t.question && <Question m={t.question} onJump={jumpToQuoted} onEdit={asked ? editQuestion : undefined} busy={streaming} />}
+                      {t.question && <Question m={t.question} onJump={jumpToQuoted} onEdit={asked ? editQuestion : undefined} onRewind={setRewinding} busy={streaming} />}
                       {(t.answer.length > 0 || isLive) && (
                         <CodeAnswer
                           answer={t.answer}
@@ -997,6 +1011,7 @@ export function Thread({
           </div>
         </>
       )}
+      <RewindDialog question={rewinding} onClose={() => setRewinding(null)} onRewound={(said, chat) => rewinding && void rewound(rewinding, said, chat)} />
     </section>
   )
 }

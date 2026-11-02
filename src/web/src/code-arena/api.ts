@@ -331,6 +331,24 @@ export interface AgainBody {
   thinking?: string
   files?: boolean
 }
+/**
+ * What Rewind to here would do from a question (m3): how many of the session's messages go, whether its code can go back
+ * too (this run kept that turn's checkpoint), and then the files that would change (removed: a turn made it) and those too
+ * big to keep, which stay as they are.
+ */
+export interface RewindPreview {
+  message: string
+  messages: number
+  code: boolean
+  files: { path: string; removed: boolean }[]
+  lost: string[]
+}
+export const rewindPreviewQuery = (message: string) => ({
+  queryKey: ['code', 'rewind', message] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<RewindPreview>(`/api/rewind?message=${encodeURIComponent(message)}`, { signal }),
+})
+/** Back to before a question, as /rewind: the conversation and the code, only the conversation, or only the code; what it says. */
+export const rewindSession = (body: { message: string; chat: boolean; code: boolean }) => api<{ said: string }>('/api/rewind', { body })
 /** A message for after the answer being written (at once when none is), with the lines chosen in the editor and the part of an answer it quotes. */
 export const queueMessage = (text: string, context?: Piece[], quote?: string, attachments?: Attachment[]) =>
   api<{ queued: number }>('/api/queue', { body: { text, ...(context?.length && { context }), ...(quote && { quote }), ...(attachments?.length && { attachments }) } })

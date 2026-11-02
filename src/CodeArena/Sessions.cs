@@ -253,6 +253,9 @@ internal sealed class SessionData
             case "branch":
                 Branch = true;
                 break;
+            case "shown":
+                Branch = false;
+                break;
             case "rewrite":
                 var keep = Math.Clamp(entry.Int("keep") ?? Stream.Count, 0, Stream.Count);
                 var sentPast = Stream.Skip(keep).Any(e => e.Id is not null);
@@ -284,6 +287,11 @@ internal sealed class SessionData
                 _pending = null;
                 From = Math.Clamp(entry.Int("from") ?? Stream.Count - (all?.Count ?? 0), 0, Stream.Count);
                 WebSummary = entry.Str("web") ?? WebSummary;
+                if (From == 0)
+                {
+                    // The model reads the whole conversation again (gone back to before a compaction): no summary stands.
+                    Marks.Clear();
+                }
                 if (!light && From > 0 && Agent.SummaryText(Messages.Take(Prefix)) is { } mark)
                 {
                     Marks[From - 1] = mark;
@@ -548,27 +556,37 @@ internal sealed class SessionStore
     }
 
     /// <summary>
-    /// Back to the first <paramref name="messages"/> of the model's history (/rewind): what came after is gone from the session,
-    /// and goes on a branch of its own in Arena when Arena has it. The history now.
+    /// Back to the first <paramref name="place"/> messages of the whole conversation (/rewind, the IDE's Rewind to here):
+    /// what came after is gone from the session, and goes on a branch of its own in Arena when Arena has it. Back to before
+    /// a compaction, the model reads the whole messages again: its summary covered some that are gone. The history now.
     /// </summary>
-    public List<JsonObject> Rewind(int messages)
+    public List<JsonObject> Rewind(int place)
     {
         int keep;
-        int raw;
+        int from;
         List<JsonObject> history;
         lock (_gate)
         {
-            var prefix = _state.Prefix;
-            messages = Math.Clamp(messages, 0, _state.Messages.Count);
-            // Back to before a compaction: its summary is all there is of what it covered.
-            raw = Math.Max(0, messages - prefix);
-            keep = Math.Min(_state.Stream.Count, _state.From + raw);
-            history = [.. _state.Messages.Take(messages).Select(m => m.Clone())];
+            keep = Math.Clamp(place, 0, _state.Stream.Count);
+            if (keep >= _state.From)
+            {
+                // What the model reads now, up to there (a long result cut to fit stays cut).
+                from = _state.From;
+                history = [.. _state.Messages.Take(_state.Prefix + keep - from).Select(m => m.Clone())];
+            }
+            else
+            {
+                from = 0;
+                history = [.. _state.Stream.Take(keep).Select(e => e.Message.Clone())];
+            }
         }
         Write(new JsonObject { ["type"] = "rewrite", ["keep"] = keep, ["rewind"] = true });
-        Write(Compaction(new JsonArray([.. history.Select(m => (JsonNode)m.Clone())]), keep - raw));
+        Write(Compaction(new JsonArray([.. history.Select(m => (JsonNode)m.Clone())]), from));
         return history;
     }
+
+    /// <summary>Arena shows the session's branch now (it went back to before a turn there): what it adds next goes on after it.</summary>
+    public void Shown() => Write(new JsonObject { ["type"] = "shown" });
 
     public void Model(string model) => Write(new JsonObject { ["type"] = "model", ["model"] = model });
 

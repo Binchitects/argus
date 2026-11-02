@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, FileCode2, FileText, FoldVertical, GitFork, Info, Pencil, RefreshCw, Reply, Square, Telescope, TextQuote, Timer } from 'lucide-react'
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, FileCode2, FileText, FoldVertical, GitFork, Info, Pencil, RefreshCw, Reply, Rewind, Square, Telescope, TextQuote, Timer } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -157,7 +157,8 @@ function QuestionFiles({ files }: { files: string[] }) {
 
 /**
  * A question; onEdit absent: read-only (a shared chat). The part of an answer it quotes shows above it; `onJumpToQuote` goes to
- * that answer (false: it is not on screen). An edit keeps the quote, unless it is taken away in the edit.
+ * that answer (false: it is not on screen). An edit keeps the quote, unless it is taken away in the edit. `onRewind`: Rewind to
+ * here, which asks first what goes.
  */
 export function QuestionTurn({
   m,
@@ -167,6 +168,7 @@ export function QuestionTurn({
   onEdit,
   onJumpToQuote,
   onContext,
+  onRewind,
   room,
 }: {
   m: Message
@@ -177,6 +179,8 @@ export function QuestionTurn({
   onJumpToQuote?: (m: Message) => boolean
   /** Pin it, or leave it out of what the model reads (absent: read-only). */
   onContext?: (m: Message, change: ContextChange) => void
+  /** Rewind to here: the chat goes back to this question (absent: it may not). */
+  onRewind?: (m: Message) => void
   /** In a room: whose it is (the person's own on the right, others' on the left, with their names), what it replies to, and replying to it. */
   room?: { me: string; replyOf?: (id: string) => { name: string; text: string } | null; onReply?: (m: Message) => void; translation?: (m: Message) => Translation | undefined }
 }) {
@@ -311,6 +315,13 @@ export function QuestionTurn({
                 aria-label="Edit question"
               >
                 <Pencil />
+              </Button>
+            </Tooltip>
+          )}
+          {onRewind && !m.id.startsWith('local-') && (
+            <Tooltip content="Rewind to here: the chat goes back to this question">
+              <Button variant="ghost" size="icon-sm" className="size-7" disabled={busy} onClick={() => onRewind(m)} aria-label="Rewind to here">
+                <Rewind />
               </Button>
             </Tooltip>
           )}
