@@ -60,7 +60,18 @@ function color(tokens: Tokens, name: string): Color {
   return ref ? color(tokens, ref[1]!) : oklch(value)
 }
 
-const hex = (h: string): Color => ({ rgb: [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255) as Rgb, alpha: 1, inGamut: true, oklch: [0, 0, 0] })
+/** A hex colour (lib/color-themes.ts), its OKLCH computed back from sRGB. */
+function hex(h: string): Color {
+  const rgb = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255) as Rgb
+  const [r, g, b] = rgb.map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)) as Rgb
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+  const A = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s
+  const B = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s
+  const L = 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s
+  return { rgb, alpha: 1, inGamut: true, oklch: [L, Math.hypot(A, B), ((Math.atan2(B, A) * 180) / Math.PI + 360) % 360] }
+}
 
 /** A colour at part opacity over another (Tailwind's bg-primary/10 over a card). */
 const over = (top: Color, under: Color, alpha = top.alpha): Color => ({ ...under, rgb: top.rgb.map((c, i) => c * alpha + under.rgb[i]! * (1 - alpha)) as Rgb })
@@ -96,6 +107,8 @@ const every = colorThemeIds.flatMap((id) => (['light', 'dark'] as const).map((mo
 // The grounds things sit on, and the text on them.
 const surfaces = ['--background', '--card', '--popover', '--secondary', '--muted', '--accent', '--border', '--input', '--sidebar', '--sidebar-accent', '--sidebar-border']
 const texts = ['--foreground', '--card-foreground', '--popover-foreground', '--secondary-foreground', '--muted-foreground', '--accent-foreground', '--sidebar-foreground']
+// The accent's shades (its hover, its text on tints, the focus ring) and the sign-in page's ground and lids.
+const shades = ['--primary-hover', '--primary-ink', '--ring', '--eyes-bg', '--eyes-lid']
 
 describe('colour themes', () => {
   it('has a light and a dark block for each theme the app offers, and no other', () => {
@@ -147,7 +160,8 @@ describe('colour themes', () => {
   })
 
   // Calm as the default: a theme's surfaces and text are the default's lightness and only as faintly tinted (its card
-  // too, where the chart palette was validated); its accent is about as light and no more vivid.
+  // too, where the chart palette was validated); its accent is about as light and no more vivid, and so are the
+  // accent's shades and the sign-in page's ground and lids.
   it.each(themed.flatMap((id) => (['light', 'dark'] as const).map((mode) => ({ id, mode }))))(
     '$id $mode: its surfaces and text are tinted about as faintly as the default’s, its accent as strong',
     ({ id, mode }) => {
@@ -158,6 +172,11 @@ describe('colour themes', () => {
         const [L, C] = color(t, name).oklch
         const [L0, C0] = color(d, name).oklch
         if (Math.abs(L - L0) > 0.02 || Math.abs(C - C0) > 0.004) off.push(`${name}: oklch(${L} ${C}), the default's oklch(${L0} ${C0})`)
+      }
+      for (const name of shades) {
+        const [L, C] = color(t, name).oklch
+        const [L0, C0] = color(d, name).oklch
+        if (Math.abs(L - L0) > 0.03 || C > C0 + 0.004) off.push(`${name}: oklch(${L} ${C}), the default's oklch(${L0} ${C0})`)
       }
       expect(off).toEqual([])
       const [L, C] = color(t, '--primary').oklch
@@ -176,7 +195,11 @@ describe('colour themes', () => {
       const table = hex(palette[name]).rgb.map((c) => Math.round(c * 255))
       expect(Math.max(...css.map((c, i) => Math.abs(c - table[i]!))), `${name}: ${palette[name]}`).toBeLessThanOrEqual(2)
     }
+    // The line numbers have no CSS: 3:1 on the background, and only as faintly tinted as the default's.
     expect(contrast(hex(palette.lineNumber), hex(palette.background))).toBeGreaterThanOrEqual(3)
+    const chroma = hex(palette.lineNumber).oklch[1]
+    const defaultChroma = hex(colorThemes.find((c) => c.id === 'default')![mode].lineNumber).oklch[1]
+    expect(Math.abs(chroma - defaultChroma), `lineNumber ${palette.lineNumber}`).toBeLessThanOrEqual(0.004)
   })
 
   it("offers what the server allows (Llm.Api/Identity/ColorThemes.cs)", () => {
