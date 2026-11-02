@@ -411,12 +411,18 @@ def main():
         f"{len(rows)} checked" if not wrong else f"mismatch {wrong[:1]}")
     start = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
     end = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
-    code, mine = person.app("GET", "/api/usage/me?" + urllib.parse.urlencode({"from": start, "to": end}))
-    t = mine.get("totals", {}) if code == 200 else {}
-    mine_cost = float(t.get("cost") or 0)
     logged_cost = sum(float(r.get("spend") or 0) for r in rows)
     # Requests the gateway refused (a limit, no credit) are logged at no cost and are not the person's prompts.
     priced = [r for r in rows if float(r.get("spend") or 0) > 0]
+    # The usage page reads the app's ledger, which brings LiteLLM's log over every five seconds (LedgerImport): the rows
+    # just listed above may not be there yet. Wait until it holds them (a minute at most), then compare.
+    for _ in range(30):
+        code, mine = person.app("GET", "/api/usage/me?" + urllib.parse.urlencode({"from": start, "to": end}))
+        t = mine.get("totals", {}) if code == 200 else {}
+        mine_cost = float(t.get("cost") or 0)
+        if code == 200 and (t.get("requests") or 0) >= len(priced) and mine_cost >= logged_cost - 1e-9:
+            break
+        time.sleep(2)
     rec("usage", "the person's own usage page shows their requests and cost", code == 200 and (t.get("requests") or 0) >= len(priced) > 0
         and mine_cost >= logged_cost - 1e-9, f"{t.get('requests')} requests, ${mine_cost:.6f} (logged ${logged_cost:.6f})")
     rows_chat = []
