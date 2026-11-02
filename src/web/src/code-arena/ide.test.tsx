@@ -3515,6 +3515,30 @@ describe('Code Arena, the language servers', () => {
     expect(item).toHaveAttribute('title', expect.stringContaining('npm install -g typescript-language-server typescript'))
     expect(lsp()).toBeUndefined()
   })
+
+  it("shows a server not installed and a formatter that cannot run in italics, never dimmed on the status bar's accent", async () => {
+    backend(
+      {
+        'GET /api/lsp': () => ({ json: [{ ...servers[0], found: false, path: null, reason: 'typescript-language-server is not installed (looked for on PATH).', install: 'npm install -g typescript-language-server typescript' }] }),
+        'GET /api/workspace/state': () => ({ json: { trust: 'trusted' } }),
+        'GET /api/formatters': () => ({
+          json: { language: 'typescript', default: null, formatters: [{ id: 'prettier', name: 'Prettier', version: '3.3.3', source: 'project', available: false, range: true, path: 'node_modules/prettier/bin/prettier.cjs', reason: 'trust', hint: 'Trust this folder to run the formatter it holds.' }] },
+        }),
+      },
+      {},
+      { 'settings.json': '{ "editor.defaultFormatter": "esbenp.prettier-vscode" }' },
+    )
+    renderIde()
+    await openApp()
+    const status = screen.getByRole('contentinfo', { name: 'Status bar' })
+    const server = await within(status).findByRole('button', { name: 'Language server typescript-language-server: not installed' })
+    const formatter = await within(status).findByRole('button', { name: /Formatter Prettier, cannot run here/ })
+    expect(server).toHaveClass('italic')
+    expect(formatter).toHaveClass('italic')
+    // Text at part opacity on the accent falls under 4.5:1 in every colour theme, the default's too.
+    const dimmed = [...status.querySelectorAll('*')].filter((e) => /(^|\s)opacity-\d/.test(e.getAttribute('class') ?? '') && e.textContent?.trim())
+    expect(dimmed.map((e) => e.textContent)).toEqual([])
+  })
 })
 
 describe('Code Arena, the IDE, as its review asked', () => {

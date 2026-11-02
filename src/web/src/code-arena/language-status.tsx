@@ -95,7 +95,7 @@ export function LanguageStatus() {
           onClick={() => runCommand('editor.action.formatDocument.multiple')}
           title={`Formats with ${formatter.name}${formatter.version ? ` ${formatter.version}` : ''} (${formatter.source === 'project' ? "the project's" : formatter.source === 'config' ? 'config.json' : 'installed'})${formatter.available ? '' : `: ${formatter.hint ?? 'it cannot run here'}`}. Click to choose another.`}
           aria-label={`Formatter ${formatter.name}${formatter.available ? '' : ', cannot run here'}: choose another`}
-          className={cn('hidden md:flex', !formatter.available && 'opacity-60')}
+          className={cn('hidden md:flex', !formatter.available && 'italic')}
         >
           <Braces className="size-3.5" aria-hidden="true" /> {formatter.name}
         </Item>

@@ -48,7 +48,8 @@ export function LanguageServerStatus() {
       aria-label={`Language server ${s.name}: ${said}`}
       className={cn(
         'hidden h-full min-w-0 shrink items-center gap-1 px-2 outline-none hover:bg-white/15 focus-visible:bg-white/20 focus-visible:ring-1 focus-visible:ring-white/70 focus-visible:ring-inset md:flex',
-        (s.state === 'missing' || s.state === 'off' || s.state === 'restricted' || s.state === 'taken') && 'opacity-60',
+        // Not running: its icon and italics say so. Dimmed text on the accent would fall under 4.5:1.
+        (s.state === 'missing' || s.state === 'off' || s.state === 'restricted' || s.state === 'taken') && 'italic',
         s.state === 'failed' && 'bg-warning text-black',
       )}
     >

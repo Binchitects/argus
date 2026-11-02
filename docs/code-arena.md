@@ -743,9 +743,10 @@ Code's extension ids, `esbenp.prettier-vscode`, mean the same, and its
 built-in formatters, `vscode.typescript-language-features`,
 `vscode.json-language-features`, `vscode.css-language-features` and
 `vscode.html-language-features`, mean the editor's own). The status
-bar names the file's formatter. `editor.formatOnSave` formats as the file is
-saved, within `codeArena.formatOnSaveTimeout` (past it, or failing, the file
-is saved as it is, and a message says why); **Save without Formatting**
+bar names the file's formatter (in italics when it cannot run here: its
+tooltip says why). `editor.formatOnSave` formats as the file is saved,
+within `codeArena.formatOnSaveTimeout` (past it, or failing, the file is
+saved as it is, and a message says why); **Save without Formatting**
 (Ctrl+K Ctrl+Shift+S) skips it; `editor.formatOnPaste` formats what is pasted.
 VS Code's `prettier.*` settings (`printWidth`, `semi`, `singleQuote`…) go to
 Prettier as flags; a project's own Prettier config wins over them. A file
@@ -1098,8 +1099,9 @@ to get it.
 
 **The status bar** names the file's server and its state: starting, ready
 (and what it is doing: indexing…), failed, off until the folder is trusted,
-in use by another page, not installed. Clicking it offers **Restart Language
-Server** and **Show Language Server Log** (both in the palette too). The
+in use by another page, not installed (one that is not running is in
+italics). Clicking it offers **Restart Language Server** and **Show Language
+Server Log** (both in the palette too). The
 panel's **Output** tab (**Toggle Output**) has a channel per server: when it
 started, its messages, why it ended, and the last 200 lines it wrote to
 stderr. A server that ends by itself starts again (three times in three
