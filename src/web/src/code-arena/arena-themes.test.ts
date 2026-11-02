@@ -34,7 +34,7 @@ describe("Monaco's themes for the app's colour themes", () => {
   })
 
   it("a colour theme's are its own colours", () => {
-    expect(themes.get('arena-sakura-dark')!.colors).toMatchObject({ 'editor.background': '#150c11', 'editor.foreground': '#f2eaee', 'editorCursor.foreground': '#ed90b5', 'editorWidget.background': '#1e1419' })
-    expect(themes.get('arena-ocean-light')!.colors).toMatchObject({ 'editor.background': '#f4fbfc', 'editor.selectionBackground': '#0c768633', 'editorLineNumber.foreground': '#7c9097' })
+    expect(themes.get('arena-sakura-dark')!.colors).toMatchObject({ 'editor.background': '#120d0f', 'editor.foreground': '#eeeaeb', 'editorCursor.foreground': '#d76797', 'editorWidget.background': '#1a1417' })
+    expect(themes.get('arena-ocean-light')!.colors).toMatchObject({ 'editor.background': '#fbfdfd', 'editor.selectionBackground': '#007e9033', 'editorLineNumber.foreground': '#879499' })
   })
 })

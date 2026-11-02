@@ -93,6 +93,10 @@ const text: [string, string][] = [
 
 const every = colorThemeIds.flatMap((id) => (['light', 'dark'] as const).map((mode) => ({ id, mode })))
 
+// The grounds things sit on, and the text on them.
+const surfaces = ['--background', '--card', '--popover', '--secondary', '--muted', '--accent', '--border', '--input', '--sidebar', '--sidebar-accent', '--sidebar-border']
+const texts = ['--foreground', '--card-foreground', '--popover-foreground', '--secondary-foreground', '--muted-foreground', '--accent-foreground', '--sidebar-foreground']
+
 describe('colour themes', () => {
   it('has a light and a dark block for each theme the app offers, and no other', () => {
     const inCss = new Set([...all.keys()].flatMap((s) => /data-color-theme='(\w+)'/.exec(s)?.[1] ?? []))
@@ -142,13 +146,25 @@ describe('colour themes', () => {
     expect(low).toEqual([])
   })
 
+  // Calm as the default: a theme's surfaces and text are the default's lightness and only as faintly tinted (its card
+  // too, where the chart palette was validated); its accent is about as light and no more vivid.
   it.each(themed.flatMap((id) => (['light', 'dark'] as const).map((mode) => ({ id, mode }))))(
-    '$id $mode: its card is near the default card, where the chart palette was validated',
+    '$id $mode: its surfaces and text are tinted about as faintly as the default’s, its accent as strong',
     ({ id, mode }) => {
-      const [L, C] = color(tokensOf(id, mode), '--card').oklch
-      const [L0, C0] = color(tokensOf('default', mode), '--card').oklch
+      const t = tokensOf(id, mode)
+      const d = tokensOf('default', mode)
+      const off: string[] = []
+      for (const name of [...surfaces, ...texts]) {
+        const [L, C] = color(t, name).oklch
+        const [L0, C0] = color(d, name).oklch
+        if (Math.abs(L - L0) > 0.02 || Math.abs(C - C0) > 0.004) off.push(`${name}: oklch(${L} ${C}), the default's oklch(${L0} ${C0})`)
+      }
+      expect(off).toEqual([])
+      const [L, C] = color(t, '--primary').oklch
+      const [L0, C0] = color(d, '--primary').oklch
       expect(Math.abs(L - L0)).toBeLessThanOrEqual(0.03)
-      expect(Math.abs(C - C0)).toBeLessThanOrEqual(0.03)
+      expect(C).toBeLessThanOrEqual(C0)
+      expect(C).toBeGreaterThanOrEqual(0.09)
     },
   )
 

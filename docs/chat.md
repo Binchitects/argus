@@ -610,7 +610,9 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
 - **Colour theme.** Arena (the default: cool grey and blue), **Sakura**
   (blossom pink), **Midnight** (indigo and navy), **Copper** (burnt orange and
   warm stone), **Forest** (pine green), **Ocean** (teal) or **Lavender**
-  (violet), each with a light and a dark mode. Your account → Appearance shows
+  (violet), each with a light and a dark mode. Each keeps Arena's calm greys,
+  only faintly tinted, and its text as crisp; its own colour is the accent
+  (buttons, links, the focus ring, what is selected). Your account → Appearance shows
   each as a swatch; **Colour theme** in the account menu and the search
   (Ctrl K, "Sakura theme") choose one too. It is kept with your account, so
   every device you sign in on takes it; light, dark or the system's stays a
