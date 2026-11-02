@@ -1392,6 +1392,8 @@ status (403 `outside` for a path outside the folder).
 | `POST /api/servers/retry` `{name}` | tries that MCP server again now (every one not connected without `name`); the state |
 | `POST /api/jobs/stop` `{id}` | stops a command run with no time limit; 404 for no such job |
 | `POST /api/replace` `{q, case, word, regex, include, exclude, replacement, paths}` | replaces what that search finds (in `paths` only, when given): `{files: [{path, replaced, version}], count, truncated}` |
+| `GET /api/skills` | `{skills: [{name, description, source, path}], commands: [{name, description, argumentHint}]}`, read again first; `source`: project, person, arena or builtin; `path`: where the editor opens it (the project's in the folder, the person's as `user:skills/NAME/SKILL.md`; null: not edited here) |
+| `POST /api/skills` `{name, scope}` | a new skill's SKILL.md to fill in, the project's (`.arena/skills`) or the person's (`scope` person): the skill as listed; 409 `exists` |
 | `GET /api/git/status` | `{repository, branch, ahead, behind, files: [{path, staged, changed, from, conflict}]}` (`staged`, `changed`: git's letters M, A, D, R, U, `?` untracked; null: none; `conflict`: true for a file left unmerged) |
 | `POST /api/git/stage`, `/api/git/unstage`, `/api/git/discard` `{paths}` | the status after; 409 `git` with what git said |
 | `POST /api/git/commit` `{message, all}` | commits what is staged (all of it first, with `all`): `{hash, status}`; 409 `nothing` when nothing is staged |
@@ -1445,7 +1447,7 @@ status (403 `outside` for a path outside the folder).
 | `POST /api/preferences` `{key: value}` | keeps these keys, merged over the others (`null` forgets one); 413 `too_large` past 16 KB |
 | `GET /api/formatters?path=FILE&language=ID` | the file's formatters, in order: `{language, formatters: [{id, name, version, source, available, reason, hint, range, path}], default}`. `language` is Monaco's id, from the file's name or as sent. `source` is `project` (in the folder: runs only once it is trusted), `global` or `config`. A formatter that cannot run has `reason` `trust`, `missing` or `node` (Prettier without node on PATH), and `hint` (what to install, or "trust this folder"). `path` is the program, or Prettier's script, that would run. `default` is the first available one (null: none). A global formatter is listed only while the folder's own with the same `id` cannot run. 400 for a folder, 403 `outside` |
 | `POST /api/format` `{path, text, formatter, range: {start, end}, options: {tabSize, insertSpaces, prettier}, language}` | the text through the formatter `formatter` (an `id` from the list; the default without it): `{text, formatter, source}` (`formatter` the `id` that ran, `source` where it came from), always the whole text, even for a range (`start` and `end` are UTF-16 offsets). Errors: 422 `format_failed` `{error, line, column}` (the first 20 lines the tool said, colours removed; `line` and `column` when it named them); 422 `no_range` for a whole-file formatter; 504 `timeout` (10 s, 30 s for dotnet format, or a config entry's `timeout`); 413 `too_large` past 5 MB; 403 `not_trusted` for the folder's own formatter before the folder is trusted; 404 `no_formatter` (none for the language, not installed, or no such `id`); 400 for a bad range or a missing `text`. `options.prettier` takes VS Code's `prettier.*` settings (`printWidth`, `tabWidth`, `useTabs`, `semi`, `singleQuote`, `jsxSingleQuote`, `trailingComma`, `bracketSpacing`, `bracketSameLine`, `arrowParens`, `endOfLine`, `proseWrap`, `quoteProps`, `singleAttributePerLine`, `htmlWhitespaceSensitivity`, `embeddedLanguageFormatting`, `vueIndentScriptAndStyle`) as flags; a project's config file wins over them |
-| `GET /api/user-files?name=settings.json` (or `keybindings.json`) | the person's own file in the config folder: `{name, text, version, exists}` (`text` empty, `version` `none` before the first save); 400 for any other name |
+| `GET /api/user-files?name=settings.json` (or `keybindings.json`, or one of their skills: `skills/NAME/SKILL.md`) | the person's own file in the config folder: `{name, text, version, exists}` (`text` empty, `version` `none` before the first save); 400 for any other name |
 | `POST /api/user-files` `{name, text, version}` | saves it as sent (comments kept; readable by the person alone); 409 `changed` when it changed since `version`, 413 `too_large` past 1 MB |
 | `GET /api/user-files/vscode?name=…` | VS Code's own copy on this computer (Code, then Insiders, then VSCodium): `{name, text, from}`; 404 when there is none |
 | `GET /api/processes` | the person's own processes, newest first, Code Arena itself left out: `[{pid, name, command}]` (`command` null where the system does not say; 2,000 at most), for `${command:pickProcess}` |
@@ -2129,8 +2131,8 @@ version replaces it; commit it to share it), asking first as any edit does
 in the ask mode; or for the person (`"scope": "person"`), one of their
 skills in Arena, used in every project and the web chat, waiting on Arena's
 Skills page unless they keep what is learned on their own (one of theirs of
-that name gets a better version instead). Sessions read skills as they
-start: one saved is used from the next. After a turn of 8 steps or more,
+that name gets a better version instead). Skills are read again at each
+turn: one saved is used from the next message. After a turn of 8 steps or more,
 Code Arena's note reminds the model to keep what it worked out (a skill, or
 the project's memory). Arena also learns skills from the sessions it keeps
 in step with its chats, as it does from the web chat.
@@ -2171,7 +2173,9 @@ turn's commits on, the files put back are committed as Code Arena's
 Markdown files, the project's under `.arena/` at its root and the person's in
 the config folder (the project's win over the person's of the same name);
 those written for Claude Code (`.claude/`) and Qwen Code (`.qwen/`) are read
-too. `/commands` lists what was found.
+too. `/commands` lists what was found. They are read again at each turn (and
+each line typed in the terminal), so one added or changed works from the next
+message, without starting Code Arena again.
 
 - **Commands**: `commands/NAME.md` is `/NAME` (`commands/git/commit.md` is
   `/git:commit`). The file is the prompt sent: `$ARGUMENTS` is what was typed
@@ -2185,7 +2189,20 @@ too. `/commands` lists what was found.
 - **Skills**: `skills/NAME/SKILL.md` (agentskills.io's format: `name` and
   `description` in its front matter). The prompt lists each skill's name and
   what it is for; the model loads one with its `skill` tool when the task needs
-  it, and the files beside it one by one.
+  it, and the files beside it one by one. **/NAME** and your words uses one
+  yourself, as the web chat's / does: the model reads its instructions with
+  your words (`$ARGUMENTS` in them is your words), while the chat shows what
+  you typed. A command of the same name wins over a skill.
+- **The IDE's Skills view** (the wand in the activity bar) lists every skill
+  the agent reads, by whose it is: **This project** (`.arena/skills`, and
+  `.claude/` or `.qwen/`), **Yours** (the config folder's `skills/`, for every
+  project), **From Arena** and **Built in**; each group folds. One of the
+  project's or yours opens in the editor (yours as a user file, as
+  `settings.json` is); any other goes into the chat's box as `/NAME`, and so
+  does **Use in the chat** on any. **New Skill** makes one for this project
+  or for you, from a few lines to fill in, and opens it. In the chat, **/** at
+  the start of the box lists `/compact`, `/clear`, your commands and the
+  skills; ↑ and ↓ choose, Enter or Tab puts one in the box.
 - **Skills from Arena**: the skills made in Arena that you may use (yours,
   your groups', the company's: the Skills page) and those the plugins you may
   use bring (Admin → Plugins), kept in the config folder's `plugin-skills/` and

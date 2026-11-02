@@ -740,6 +740,9 @@ public sealed class FakeChats
     /// <summary>Arena's own skills its admins turned off, as /api/code-arena/skills says (null: it does not answer that).</summary>
     public List<string>? SkillsOff { get; set; }
 
+    /// <summary>The skills made in Arena and the plugins' that /api/code-arena/skills brings (each its name and files).</summary>
+    public JsonArray? ArenaSkills { get; set; }
+
     /// <summary>Whether Arena keeps Code Arena's memory (/api/code-arena/memories; an older one does not).</summary>
     public bool Memory { get; set; } = true;
 
@@ -1122,13 +1125,13 @@ public sealed class FakeChats
             }
             return;
         }
-        if (parts is ["skills"] && method == "GET" && SkillsOff is { } off)
+        if (parts is ["skills"] && method == "GET" && (SkillsOff is not null || ArenaSkills is not null))
         {
             ctx.Response.StatusCode = 200;
             ctx.Response.ContentType = "application/json";
             await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes(new JsonObject
             {
-                ["skills"] = new JsonArray(), ["off"] = new JsonArray([.. off.Select(n => (JsonNode)n)]),
+                ["skills"] = ArenaSkills?.DeepClone() ?? new JsonArray(), ["off"] = new JsonArray([.. (SkillsOff ?? []).Select(n => (JsonNode)n)]),
             }.ToJsonString()));
             return;
         }

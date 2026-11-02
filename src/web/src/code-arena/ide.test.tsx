@@ -862,7 +862,7 @@ describe('Code Arena, the IDE', () => {
     const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
     // The agent's changes are counted on their button.
     expect(await within(bar).findByRole('button', { name: 'Agent changes (1)' })).toBeInTheDocument()
-    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Plan', 'Memory', 'Chat', 'Terminal', 'Theme', 'Accounts', 'Manage', 'Help', 'About Code Arena'])
+    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Plan', 'Memory', 'Skills', 'Chat', 'Terminal', 'Theme', 'Accounts', 'Manage', 'Help', 'About Code Arena'])
     expect(within(bar).getByRole('button', { name: 'Explorer' })).toHaveAttribute('aria-pressed', 'true')
     expect(await screen.findByRole('tree', { name: 'Files' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'No file is open' })).toBeInTheDocument()
@@ -1324,7 +1324,7 @@ describe('Code Arena, the IDE', () => {
 
     // Kept for the next run, as arranged.
     await waitFor(() =>
-      expect(now.preferences.layout).toMatchObject({ sideAt: 'right', panelAt: 'right', order: ['search', 'problems', 'explorer', 'git', 'debug', 'extensions', 'changes', 'review', 'plan', 'memory', 'chat'] }),
+      expect(now.preferences.layout).toMatchObject({ sideAt: 'right', panelAt: 'right', order: ['search', 'problems', 'explorer', 'git', 'debug', 'extensions', 'changes', 'review', 'plan', 'memory', 'skills', 'chat'] }),
     )
   })
 
@@ -2469,6 +2469,69 @@ describe('Code Arena, the IDE', () => {
     await userEvent.click(within(panel).getByRole('button', { name: 'Collapse All' }))
     expect(agents).toHaveAttribute('aria-expanded', 'false')
     await waitFor(() => expect(kept['changes.folded']).toEqual(expect.arrayContaining(['agent', 'mine', 'agent:src'])))
+  })
+
+  it('lists the skills in the Skills view and in the chat’s / menu: one opens to edit, one goes into the box, one is made', async () => {
+    let skills = [
+      { name: 'ship', description: 'How we ship', source: 'project', path: '.arena/skills/ship/SKILL.md' },
+      { name: 'tidy', description: 'Tidy my notes', source: 'person', path: 'user:skills/tidy/SKILL.md' },
+      { name: 'triage', description: 'Sort the issues', source: 'arena', path: null },
+      { name: 'code-review', description: 'Review code or a change for bugs', source: 'builtin', path: null },
+    ]
+    const { calls, disk } = backend({
+      'GET /api/skills': () => ({ json: { skills, commands: [{ name: 'hello', description: 'Say hello', argumentHint: 'NAME' }] } }),
+      'POST /api/skills': (body) => {
+        const made = { name: (body as { name: string }).name, description: 'When to use it', source: 'project', path: `.arena/skills/${(body as { name: string }).name}/SKILL.md` }
+        skills = [made, ...skills]
+        disk[made.path] = { text: '---\nname: release\n---\nSteps.\n', version: 'k1' }
+        return { json: made }
+      },
+      'POST /api/messages': () => answerOnly(),
+    })
+    disk['.arena/skills/ship/SKILL.md'] = { text: '---\nname: ship\n---\nRun make ship.\n', version: 's1' }
+    renderIde()
+    await userEvent.click(await screen.findByRole('button', { name: 'Skills' }))
+    const panel = await screen.findByRole('complementary', { name: 'Skills' })
+    for (const name of ['This project, 1 skill', 'Yours, 1 skill', 'From Arena, 1 skill', 'Built in, 1 skill']) expect(await within(panel).findByRole('button', { name })).toHaveAttribute('aria-expanded', 'true')
+
+    // The project's opens in the editor; Arena's own goes into the chat's box as /name.
+    await userEvent.click(within(panel).getByRole('button', { name: /^\/ship/ }))
+    expect(await within(tabs()).findByRole('tab', { name: 'SKILL.md', selected: true })).toBeInTheDocument()
+    await waitFor(() => expect(editor().model?.value).toBe('---\nname: ship\n---\nRun make ship.\n'))
+    await userEvent.click(within(panel).getByRole('button', { name: 'Use /code-review in the chat' }))
+    const box = screen.getByRole('textbox', { name: 'Message' })
+    expect(box).toHaveValue('/code-review ')
+
+    // / at the start of the box lists the chat's commands, the person's and the skills; Enter puts one there.
+    await userEvent.clear(box)
+    await userEvent.type(box, '/')
+    const menu = await screen.findByRole('listbox', { name: 'Skills and commands' })
+    expect(within(menu).getAllByRole('option').map((o) => o.textContent)).toEqual([
+      "/compactSummarize the conversation to free the model's window, a command",
+      '/clearStart a new session (this one stays saved), a command',
+      '/helloSay hello (NAME), a command',
+      '/shipHow we ship, a skill',
+      '/tidyTidy my notes, a skill',
+      '/triageSort the issues, a skill',
+      '/code-reviewReview code or a change for bugs, a skill',
+    ])
+    await userEvent.type(box, 'sh')
+    expect(within(screen.getByRole('listbox', { name: 'Skills and commands' })).getAllByRole('option')).toHaveLength(1)
+    await userEvent.keyboard('{Enter}')
+    expect(box).toHaveValue('/ship ')
+    expect(screen.queryByRole('listbox', { name: 'Skills and commands' })).not.toBeInTheDocument()
+    await userEvent.type(box, 'the beta{Enter}')
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/messages')?.body).toMatchObject({ text: '/ship the beta' }))
+
+    // New Skill: named, made for the project and opened to be written.
+    await userEvent.click(within(panel).getByRole('button', { name: 'New Skill' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'For this project (.arena/skills)…' }))
+    // Its name's box has the focus (not the menu's button, nor the chat's box): typing names it.
+    await waitFor(() => expect(within(panel).getByRole('textbox', { name: "The new skill's name, for this project" })).toHaveFocus())
+    await userEvent.keyboard('Release{Enter}')
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/skills')?.body).toEqual({ name: 'release', scope: 'project' }))
+    expect(await within(panel).findByRole('button', { name: 'This project, 2 skills' })).toBeInTheDocument()
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/file?path=.arena%2Fskills%2Frelease%2FSKILL.md')).toBe(true))
   })
 
   it('replaces what the search finds, in one file or in all of them after asking', async () => {
@@ -3926,7 +3989,7 @@ describe('Code Arena, the help', () => {
     await screen.findByRole('navigation', { name: 'Breadcrumbs' })
     for (const r of regionsShown()) seen.add(r)
     // Every view of the side bar, and the terminal panel, drawn once.
-    for (const name of ['Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Chat']) {
+    for (const name of ['Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Skills', 'Chat']) {
       await userEvent.click(within(bar).getByRole('button', { name }))
       for (const r of regionsShown()) seen.add(r)
     }

@@ -16,6 +16,8 @@ export interface ChatBridgeApi {
   ask: (text: string, pieces: Piece[]) => void
   /** A file or folder named in the box (@path): the whole of it goes with the message. */
   mention: (path: string) => void
+  /** A skill or command put at the start of the box (/name), for the person to add their words and send. */
+  use: (name: string) => void
 }
 
 /** The chat's, while it is open in the page; null before. */

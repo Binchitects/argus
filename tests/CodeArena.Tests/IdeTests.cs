@@ -287,6 +287,8 @@ public sealed class IdeTests : IDisposable
             ("GET", "/api/user-files?name=settings.json", null),
             ("POST", "/api/user-files", new() { ["name"] = "settings.json", ["text"] = "{}" }),
             ("GET", "/api/user-files/vscode?name=settings.json", null),
+            ("GET", "/api/skills", null),
+            ("POST", "/api/skills", new() { ["name"] = "mine", ["scope"] = "project" }),
             ("GET", "/api/workspace/state", null),
             ("GET", "/api/processes", null),
             ("POST", "/api/workspace/state", new() { ["watch"] = new JsonArray("x") }),

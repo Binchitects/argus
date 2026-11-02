@@ -66,6 +66,8 @@ import {
 import { chatBridge, pieceLabel, type Piece } from './bridge'
 import { useEditor } from './editor-state'
 import { useFileMention } from './mention'
+import { useSlashMenu } from './slash'
+import { isUserFile } from './editor-options'
 import { CodeAnswer } from './answer'
 import { useCommands } from './commands'
 import { useKeyFor } from './keyboard'
@@ -767,6 +769,12 @@ export function Thread({
         setFocusBox((n) => n + 1)
         onShow?.()
       },
+      use: (name) => {
+        // In place of a /name there already.
+        setDraft((now) => `/${name} ${now.replace(/^\/\S*\s*/, '')}`)
+        setFocusBox((n) => n + 1)
+        onShow?.()
+      },
     }
     return () => {
       chatBridge.current = null
@@ -1130,9 +1138,11 @@ function Composer({
   const canAttach = maxUploadBytes > 0
   const recall = useRecall({ area, setText, source: history })
   const mention = useFileMention({ area, text, setText })
+  const slash = useSlashMenu({ area, text, setText })
   // The file shown in the editor, and the lines chosen there: a click sends them with the message.
   const { active, selection, cursor } = useEditor()
-  const here = active?.kind === 'file' && active.status === 'ready' ? selection(false) : null
+  // Not from the person's own files (settings.json, their skills): those are no file of the folder to send.
+  const here = active?.kind === 'file' && active.status === 'ready' && !isUserFile(active.path) ? selection(false) : null
   void cursor
   useEffect(() => {
     if (focusSignal > 0) area.current?.focus()
@@ -1159,7 +1169,7 @@ function Composer({
     area.current?.focus()
   }
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (mention.onKeyDown(e)) return
+    if (slash.onKeyDown(e) || mention.onKeyDown(e)) return
     // Backspace at the start of an empty box takes the quote away.
     if (e.key === 'Backspace' && quote && !text && e.currentTarget.selectionStart === 0 && e.currentTarget.selectionEnd === 0) {
       e.preventDefault()
@@ -1203,6 +1213,7 @@ function Composer({
         void submit()
       }}
     >
+      {slash.list}
       {mention.list}
       <UploadChips uploads={uploads} model={model} />
       {quote && (
@@ -1258,8 +1269,12 @@ function Composer({
         onChange={(e) => {
           setText(e.target.value)
           mention.onTyped(e.target.value)
+          slash.onTyped(e.target.value)
         }}
-        onSelect={mention.onCaret}
+        onSelect={() => {
+          mention.onCaret()
+          slash.onCaret()
+        }}
         onKeyDown={onKey}
         onPaste={(e) => {
           if (canAttach && e.clipboardData.files.length) {
@@ -1267,8 +1282,8 @@ function Composer({
             uploads.add(e.clipboardData.files)
           }
         }}
-        aria-controls={mention.open ? 'mention-files' : undefined}
-        aria-activedescendant={mention.activeId}
+        aria-controls={slash.open ? 'slash-commands' : mention.open ? 'mention-files' : undefined}
+        aria-activedescendant={slash.activeId ?? mention.activeId}
         aria-autocomplete="list"
         placeholder={streaming ? 'Code Arena is working… type the next message: it is sent when this answer ends' : 'Ask Code Arena to read, change or run something'}
         aria-label="Message"
@@ -1288,7 +1303,7 @@ function Composer({
         )}
         {mode}
         <span className="hidden text-xs text-muted-foreground @2xl:inline">
-          Enter to send · Shift+Enter for a new line<span className="hidden @4xl:inline"> · ↑ for what you sent before</span> · /compact · /clear
+          Enter to send · Shift+Enter for a new line<span className="hidden @4xl:inline"> · ↑ for what you sent before</span> · / for skills and commands
         </span>
         <span className="ml-auto" />
         {context}

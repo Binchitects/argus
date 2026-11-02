@@ -65,8 +65,8 @@ internal static partial class Mentions
     [GeneratedRegex("""(?::(?<a>\d+)(?:-(?<b>\d+))?|#L(?<a>\d+)(?:-L?(?<b>\d+))?)$""")]
     private static partial Regex Range();
 
-    // What went with a message, as the page lists it.
-    [GeneratedRegex("""<(?<kind>file|folder|selection) path="(?<path>[^"]*)"(?: lines="(?<lines>\d+-\d+)")?""")]
+    // What went with a message, as the page lists it (a skill used with /name went too, but is not a file to list).
+    [GeneratedRegex("""<(?<kind>file|folder|selection|skill) (?:path|name)="(?<path>[^"]*)"(?: lines="(?<lines>\d+-\d+)")?""")]
     private static partial Regex Block();
 
     /// <summary>What the person typed of a message (what went with it left out).</summary>
@@ -88,7 +88,7 @@ internal static partial class Mentions
         while (Block().Match(content, from) is { Success: true } m && m.Index == from + 1 && content[from] == '\n')
         {
             var label = m.Groups["lines"].Success ? Label(m.Groups["path"].Value, m.Groups["lines"].Value) : m.Groups["path"].Value;
-            if (!found.Contains(label))
+            if (m.Groups["kind"].Value != "skill" && !found.Contains(label))
             {
                 found.Add(label);
             }
@@ -136,7 +136,8 @@ internal static partial class Mentions
             sb.Append(block.Text);
             files.Add(block.Label);
         }
-        foreach (Match m in Mention().Matches(input))
+        // Only what was typed names files: not the instructions of a skill that went with it.
+        foreach (Match m in Mention().Matches(Typed(input)))
         {
             var path = m.Groups["q"].Success ? m.Groups["q"].Value : m.Groups["p"].Value.TrimEnd('.', ':', '!', '?');
             (int First, int Last)? lines = null;
@@ -224,7 +225,13 @@ internal static partial class Mentions
             sb.Append($"\n<file path=\"{path}\"{attr}>\n{text}\n</file>");
             files.Add(label);
         }
-        return (sb.Length == 0 ? input : input + Marker + sb + End, files);
+        if (sb.Length == 0)
+        {
+            return (input, files);
+        }
+        // What went with it already (a skill used with /name) stays in the same section, after the files.
+        var at = input.IndexOf(Marker, StringComparison.Ordinal);
+        return (at < 0 ? input + Marker + sb + End : input[..at] + Marker + sb + input[(at + Marker.Length)..], files);
     }
 
     /// <summary>Lines chosen in the editor, as a block: the editor's text when unsaved, else the file's lines on disk; null: nothing to send.</summary>

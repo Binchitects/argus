@@ -8,7 +8,7 @@ import { modKey } from './editor-state'
  */
 
 /** The parts of the workbench. */
-export type Part = 'activity' | 'explorer' | 'search' | 'changes' | 'problems' | 'review' | 'git' | 'sessions' | 'editor' | 'terminal' | 'chat' | 'status' | 'settings' | 'keybindings' | 'debug' | 'console' | 'extensions' | 'output'
+export type Part = 'activity' | 'explorer' | 'search' | 'changes' | 'problems' | 'review' | 'git' | 'sessions' | 'editor' | 'terminal' | 'chat' | 'status' | 'settings' | 'keybindings' | 'debug' | 'console' | 'extensions' | 'output' | 'skills'
 
 export interface PartHelp extends HelpPart {
   /** Where the manual's Code Arena page (docs/code-arena.md) tells the rest: one of its headings. */
@@ -50,7 +50,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   activity: {
     name: 'Activity bar',
-    text: 'The icons down the side bar\'s edge. **Explorer**, **Search**, **Source control**, **Run and Debug**, **Extensions**, **Agent changes** (with the number of files), **Problems** and **Chat** switch the side bar; pressing the one shown hides it. Drag an icon to put it elsewhere in the bar, or onto the panel\'s tabs to move its view there (drag the tab back to return it); its right-click menu has the same moves, puts the side bar on the other side (the chat goes opposite) and resets them. At its foot: **Terminal**, the theme (light, dark or the system\'s, and the colour theme: Code Arena, Sakura, Midnight, Copper, Forest, Ocean or Lavender), **Manage** (the gear: Settings, Keyboard Shortcuts, Color Theme, Extensions, the palette, and how the model gets its tools), **Help** and **About Code Arena**.',
+    text: 'The icons down the side bar\'s edge. **Explorer**, **Search**, **Source control**, **Run and Debug**, **Extensions**, **Agent changes** (with the number of files), **Problems**, **Skills** and **Chat** switch the side bar; pressing the one shown hides it. Drag an icon to put it elsewhere in the bar, or onto the panel\'s tabs to move its view there (drag the tab back to return it); its right-click menu has the same moves, puts the side bar on the other side (the chat goes opposite) and resets them. At its foot: **Terminal**, the theme (light, dark or the system\'s, and the colour theme: Code Arena, Sakura, Midnight, Copper, Forest, Ocean or Lavender), **Manage** (the gear: Settings, Keyboard Shortcuts, Color Theme, Extensions, the palette, and how the model gets its tools), **Help** and **About Code Arena**.',
     manual: 'the-ide',
   },
   explorer: {
@@ -78,6 +78,11 @@ export const parts: Record<Part, PartHelp> = {
     text: 'A review of the changes not yet committed, or of the branch over its base, by a reviewer that reads the code and changes nothing. Its findings, worst first, open the file at their line and are marked there; **Apply fix** makes a fix that fits the file in the editor (undo takes it back), **Ask the agent** hands one over, **Dismiss** leaves it.',
     manual: 'review',
   },
+  skills: {
+    name: 'Skills',
+    text: "Every skill the agent reads, by whose it is: **This project**'s (.arena/skills, in the repository), **Yours** (every project), **From Arena** (made on Arena's Skills page, or a plugin's) and **Built in**. The model loads one when a task needs it; **/name** in the chat uses one (/ lists them). A click opens one of the project's or yours to edit (any other goes into the chat's box); **New Skill** makes one, for this project or for you. A skill saved is used from the next message.",
+    manual: 'your-own-commands-sub-agents-and-skills',
+  },
   git: {
     name: 'Source control',
     text: "The folder's git: what changed since the last commit, in conflict (**Merge Changes**), **staged** for the next commit or not. A file opens as the last commit has it and as it is now; **+** stages it, **−** unstages it, **↺** puts it back; a group's or a folder's buttons, all of its files. Each group folds with its chevron (← and → too); **View as Tree** shows the files under their folders, **Collapse All** folds everything, and the folder keeps it so. Write the message and **Commit** (all of it when nothing is staged; its arrow has Amend, Commit & Push and Commit & Sync); **Sync Changes** pulls and pushes, **Publish Branch** gives a branch its upstream, and **⋯** has Pull, Push, Fetch, Checkout to…, the branches and Undo Last Commit. Switch the branch below, and see the last commits.",
@@ -100,7 +105,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   chat: {
     name: 'Chat with the agent',
-    text: 'Ask for an answer or a change. The model and its thinking are at the top; each tool the agent uses is a card, with the diff under each edit. A file it cites (`src/app.ts:12`), the path and line numbers of a diff, and the chip under the card of a tool that read or edited a file open it in the editor at those lines. A command it runs with no time limit shows above the box with its output and **Stop**; the turn waits for it. **Stop** under the box ends a turn. The mode under the box says what runs without asking: **Ask**, **Auto-edit**, **Plan** or **Yolo**. Select words in an answer to **Reply** quoting them (Ctrl+Shift+\'), **Ask about this** or **Copy**; **Quote part of this answer…** under an answer does it by keyboard.',
+    text: 'Ask for an answer or a change. The model and its thinking are at the top; each tool the agent uses is a card, with the diff under each edit. A file it cites (`src/app.ts:12`), the path and line numbers of a diff, and the chip under the card of a tool that read or edited a file open it in the editor at those lines. A command it runs with no time limit shows above the box with its output and **Stop**; the turn waits for it. **Stop** under the box ends a turn. The mode under the box says what runs without asking: **Ask**, **Auto-edit**, **Plan** or **Yolo**. **/** at the start of the box lists /compact, /clear, your commands and the skills: **/name** and your words uses one. Select words in an answer to **Reply** quoting them (Ctrl+Shift+\'), **Ask about this** or **Copy**; **Quote part of this answer…** under an answer does it by keyboard.',
     manual: 'modes',
   },
   status: {
@@ -218,6 +223,7 @@ export const regions: Record<string, Part> = {
   Problems: 'problems',
   Review: 'review',
   'Source control': 'git',
+  Skills: 'skills',
   Sessions: 'sessions',
   Editor: 'editor',
   Terminal: 'terminal',

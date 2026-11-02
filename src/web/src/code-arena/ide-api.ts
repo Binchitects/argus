@@ -215,7 +215,8 @@ export interface UserFile {
   version: string
 }
 
-export type UserFileName = 'settings.json' | 'keybindings.json'
+/** The person's settings, keybindings, and their own skills (the Skills view opens them so). */
+export type UserFileName = 'settings.json' | 'keybindings.json' | `skills/${string}/SKILL.md`
 
 export const userFileQuery = (name: UserFileName) => ({
   queryKey: ['code', 'user-file', name] as const,
@@ -225,6 +226,36 @@ export const userFileQuery = (name: UserFileName) => ({
 })
 
 export const writeUserFile = (name: UserFileName, text: string, version: string | null) => api<{ name: string; version: string }>('/api/user-files', { body: { name, text, version } })
+
+/**
+ * A skill the agent reads (code-arena's .arena/skills, the person's, Arena's, its own): whose it is, and where the editor
+ * opens its SKILL.md (the project's by its path, the person's as user:skills/NAME/SKILL.md; null: Arena's or Code Arena's
+ * own, not edited here).
+ */
+export interface SkillInfo {
+  name: string
+  description: string
+  source: 'project' | 'person' | 'arena' | 'builtin'
+  path: string | null
+}
+
+/** A command of the person's or the project's own (.arena/commands): /name in the chat. */
+export interface CommandInfo {
+  name: string
+  description: string
+  argumentHint: string | null
+}
+
+/** The skills and the commands, read again by code-arena as they are asked for (one added since is there). */
+export const skillsQuery = {
+  queryKey: ['code', 'skills'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ skills: SkillInfo[]; commands: CommandInfo[] }>('/api/skills', { signal }),
+  staleTime: 5_000,
+  refetchOnWindowFocus: true,
+}
+
+/** A new skill from a few lines to fill in: the project's, or the person's for every project. */
+export const createSkill = (name: string, scope: 'project' | 'person') => api<SkillInfo>('/api/skills', { body: { name, scope } })
 
 /** VS Code's own copy of the file on this computer, to bring over. */
 export const vscodeUserFile = (name: UserFileName) => api<{ name: string; text: string; from: string }>(`/api/user-files/vscode?name=${name}`)

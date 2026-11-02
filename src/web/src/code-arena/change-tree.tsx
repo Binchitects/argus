@@ -29,16 +29,17 @@ export function ViewTools({ view, keys }: { view: ChangeView; keys: readonly str
   )
 }
 
-const files = (n: number) => `${n} ${n === 1 ? 'file' : 'files'}`
+const files = (n: number, noun = 'file') => `${n} ${noun}${n === 1 ? '' : 's'}`
 
 /**
  * A group of a view under its heading, as VS Code's: the chevron (or Left and Right) folds it, its actions show on hover
- * or focus, its count or `aside` at the end.
+ * or focus, its count (of files, or of the `noun` given) or `aside` at the end.
  */
 export function FoldGroup({
   label,
   title = label,
   count,
+  noun,
   aside,
   open,
   onToggle,
@@ -49,6 +50,7 @@ export function FoldGroup({
   label: string
   title?: ReactNode
   count?: number
+  noun?: string
   aside?: ReactNode
   open: boolean
   onToggle: () => void
@@ -65,7 +67,7 @@ export function FoldGroup({
           data-head
           onKeyDown={rowKeys}
           aria-expanded={open}
-          aria-label={count === undefined ? label : `${label}, ${files(count)}`}
+          aria-label={count === undefined ? label : `${label}, ${files(count, noun)}`}
           onClick={onToggle}
           className="flex h-full min-w-0 flex-1 items-center gap-0.5 pl-1 text-left text-xs font-semibold text-muted-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
         >

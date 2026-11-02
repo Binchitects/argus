@@ -21,7 +21,7 @@ import { installCompletions } from './completion'
 import { compareId, renamed, revertChanges, sideLabel, sidePath, takeChanges, touched, type LineChange, type Side } from './compare'
 import { CompareToolbar } from './compare-toolbar'
 import { EditorContext, loadMonaco, mediaKind, rankFiles, useEditor, type DiffModels, type DiffSource, type EditorApi, type FileModel, type MonacoModule, type Reveal, type SaveReason, type Tab, type Unsaved } from './editor-state'
-import { acceptChange, allFilesQuery, changesQuery, changeTexts, gitShow, gitStageText, gitStatusQuery, keepBackup, listBackups, nameOf, rawFileUrl, readFile, revertChange, saveWorkspaceState, symbolsQuery, userFileQuery, within, workspaceStateQuery, writeFile, writeUserFile, type Change, type CheckProblem, type OpenedFile, type Saved, type UserFileName } from './ide-api'
+import { acceptChange, allFilesQuery, changesQuery, changeTexts, gitShow, gitStageText, gitStatusQuery, keepBackup, listBackups, nameOf, rawFileUrl, readFile, revertChange, saveWorkspaceState, skillsQuery, symbolsQuery, userFileQuery, within, workspaceStateQuery, writeFile, writeUserFile, type Change, type CheckProblem, type OpenedFile, type Saved, type UserFileName } from './ide-api'
 import { addDebugActions, installDebugEditor } from './debug/editor-debug'
 import { installExtensions } from './extensions'
 import { bindEditorContext, keymap, useKeyFor } from './keyboard'
@@ -975,6 +975,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       // The settings files apply as they are saved.
       if (f.path === 'user:settings.json' || f.path === workspaceSettingsPath) void settingsRef.current.reload()
       if (f.path === 'user:keybindings.json') void queryClient.invalidateQueries({ queryKey: userFileQuery('keybindings.json').queryKey })
+      // One of the person's own skills (the config folder is not watched): the Skills view and / read it again.
+      if (f.path.startsWith('user:skills/')) void queryClient.invalidateQueries({ queryKey: skillsQuery.queryKey })
       void queryClient.invalidateQueries({ queryKey: changesQuery.queryKey })
       // What git sees changed since the last commit, with it.
       void queryClient.invalidateQueries({ queryKey: ['code', 'git', 'status'] })
