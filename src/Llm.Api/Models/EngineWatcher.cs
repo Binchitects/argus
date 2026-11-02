@@ -106,6 +106,10 @@ public sealed partial class EngineWatcher : BackgroundService
                     await catalog.SyncGatewayAsync(stoppingToken);
                     nextSync = DateTimeOffset.UtcNow.AddMinutes(1);
                 }
+                // Which engine each model is on, and the moves underway, before the engines are asked: a model another engine
+                // still lists (one it leaves) is its own engine's.
+                await ModelMoves.PublishAsync(scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>(), engine, state,
+                    scope.ServiceProvider.GetRequiredService<VllmBackends>(), stoppingToken);
                 var asked = state.Asking();
                 state.Set(await engine.ModelsAsync(stoppingToken), asked);
                 // As the engine said, with the models the app told to unload unloaded (the engine lists them loaded until they stop).
@@ -161,8 +165,10 @@ public sealed partial class EngineWatcher : BackgroundService
                     // kill while it was being stopped, which is not broken (EngineState.MayRetry). One the engine keeps
                     // unloading by its own choice to load another waits too (EngineState.MayReload): it holds fewer models
                     // than Models loaded at once says, and two would push each other out for ever.
-                    var keptNext = kept.FirstOrDefault(k => Status(k) == "unloaded" && !state.Blocks(k) && Reload(k)) ?? kept.FirstOrDefault(k => !state.Blocks(k) && state.MayRetry(k));
-                    var askedNext = models.FirstOrDefault(m => m.Status == "unloaded" && !state.Blocks(m.Name) && state.StillAsked(m.Name) && Reload(m.Name))?.Name;
+                    // A model moving to another engine is loaded there by its move (ModelMoves), which this follows up once asked.
+                    var keptNext = kept.FirstOrDefault(k => Status(k) == "unloaded" && !state.Blocks(k) && !state.Moves.ContainsKey(k) && Reload(k))
+                        ?? kept.FirstOrDefault(k => !state.Blocks(k) && !state.Moves.ContainsKey(k) && state.MayRetry(k));
+                    var askedNext = models.FirstOrDefault(m => m.Status == "unloaded" && !state.Blocks(m.Name) && !state.Draining(m.Name) && state.StillAsked(m.Name) && Reload(m.Name))?.Name;
                     if (keptNext is { } next)
                     {
                         if (await route.RoomForAsync(next, TimeSpan.Zero, stoppingToken))
@@ -177,7 +183,7 @@ public sealed partial class EngineWatcher : BackgroundService
                         LogAsked(logger, asked2);
                         loading = await LoadAsync(asked2, "loaded by an admin, again after the engine restarted", stoppingToken);
                     }
-                    else if (options.Value.ModelsMax >= 2 && usual is { } back && held.Contains(back) && !state.WasDropped(back) && !state.Blocks(back)
+                    else if (options.Value.ModelsMax >= 2 && usual is { } back && held.Contains(back) && !state.WasDropped(back) && !state.Blocks(back) && !state.Moves.ContainsKey(back)
                         && ((Status(back) == "unloaded" && Reload(back)) || state.MayRetry(back))
                         && await route.RoomForAsync(back, EngineRoute.Quiet, stoppingToken))
                     {
@@ -186,7 +192,7 @@ public sealed partial class EngineWatcher : BackgroundService
                         LogBack(logger, back);
                         loading = await LoadAsync(back, "the model new chats use", stoppingToken);
                     }
-                    else if (options.Value.ModelsMax >= 2 && small is { } helper && helper != usual && !state.WasDropped(helper) && !state.Blocks(helper)
+                    else if (options.Value.ModelsMax >= 2 && small is { } helper && helper != usual && !state.WasDropped(helper) && !state.Blocks(helper) && !state.Moves.ContainsKey(helper)
                         && ((Status(helper) == "unloaded" && Reload(helper)) || state.MayRetry(helper))
                         && await route.RoomForAsync(helper, held.Contains(helper) ? EngineRoute.Quiet : SmallQuiet, stoppingToken))
                     {
@@ -204,6 +210,12 @@ public sealed partial class EngineWatcher : BackgroundService
                             reported = string.Join(',', kept);
                         }
                     }
+                }
+                if (lead)
+                {
+                    // Each model moving to another engine a step on (ModelMoves), after the loads above: one it asks to load
+                    // now is seen loading by the next pass, not loaded twice by this one.
+                    await scope.ServiceProvider.GetRequiredService<ModelMoves>().StepAsync(stoppingToken);
                 }
                 var now = string.Join(',', names.Order(StringComparer.Ordinal));
                 if (now != loaded)

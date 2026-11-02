@@ -426,6 +426,39 @@ public sealed class EngineState(TimeProvider clock)
     /// <summary>The GPU is the chat models' again.</summary>
     public void Return() => _lent = null;
 
+    /// <summary>A model moving to another engine (ModelMove), as requests and the watcher need it: its phase, and its engines' kinds.</summary>
+    public sealed record Moving(string Phase, string From, string To);
+
+    private volatile IReadOnlyDictionary<string, Moving> _moves = new Dictionary<string, Moving>(StringComparer.Ordinal);
+
+    /// <summary>The models moving to another engine, the failed moves left out (the watcher keeps it from the database; a save at once).</summary>
+    public IReadOnlyDictionary<string, Moving> Moves
+    {
+        get => _moves;
+        set => _moves = value;
+    }
+
+    /// <summary>One model's move as a save began it, or as it ended (null), before the watcher reads the database again.</summary>
+    public void Move(string model, Moving? move)
+    {
+        var moves = new Dictionary<string, Moving>(_moves, StringComparer.Ordinal);
+        if (move is null)
+        {
+            moves.Remove(model);
+        }
+        else
+        {
+            moves[model] = move;
+        }
+        _moves = moves;
+    }
+
+    /// <summary>
+    /// Whether requests for <paramref name="model"/> wait, and nothing loads it: it moves to another engine on the same GPUs,
+    /// and its answers on the old one have not ended yet.
+    /// </summary>
+    public bool Draining(string model) => _moves.TryGetValue(model, out var m) && m.Phase == ModelMove.Draining;
+
     /// <summary>
     /// "loaded", "loading", "unloading" (the app told it to unload and the engine has not stopped it yet), "unloaded", "failed"
     /// (its last load ended in an error), or null when the engine does not have that model.
@@ -709,8 +742,10 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
 
     private async Task WritePresetsOnceAsync(CancellationToken ct)
     {
-        // llama.cpp's models only: the other kinds have their own engines' desired state.
-        var models = await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.LlamaCpp).OrderBy(m => m.Name).ToListAsync(ct);
+        // llama.cpp's models only: the other kinds have their own engines' desired state. A model moving away from llama.cpp
+        // stays as it was there until its answers there have ended (ModelMove).
+        var models = (await db.LocalModels.AsNoTracking().OrderBy(m => m.Name).ToListAsync(ct))
+            .Select(m => m.EngineKind == EngineKinds.LlamaCpp ? m : ModelMoves.Leaving(m)).Where(m => m?.EngineKind == EngineKinds.LlamaCpp).OfType<LocalModel>().ToList();
         // Each file's profile: its attention decides the checkpoints, its training the YaRN stretch.
         var profiles = models.Count > 0 ? library.List().ToDictionary(e => e.File.Path, e => e.Profile, StringComparer.Ordinal) : [];
         // A picture model kept loaded runs beside the chat models: those that fit themselves to the GPU leave it its room.
@@ -956,8 +991,9 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
 
     private async Task WriteVllmPresetsOnceAsync(CancellationToken ct)
     {
-        var models = await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.Vllm || m.EngineKind == EngineKinds.Sglang)
-            .OrderBy(m => m.CreatedAt).ThenBy(m => m.Name).ToListAsync(ct);
+        // A model moving away from one of them stays as it was there until its answers there have ended (ModelMove).
+        var models = (await db.LocalModels.AsNoTracking().OrderBy(m => m.CreatedAt).ThenBy(m => m.Name).ToListAsync(ct))
+            .SelectMany(m => new[] { m, ModelMoves.Leaving(m) }).Where(m => EngineKinds.ServerPerModel(m?.EngineKind)).OfType<LocalModel>().ToList();
         foreach (var backend in vllm.All)
         {
             // A model on the engine it names, else on the first of its kind.

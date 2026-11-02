@@ -281,8 +281,10 @@ the volumes, except `audio`, `acme`, `sandbox`, `blender`, `lean`,
 The app drives the chat engines through one interface (`IEngineBackend`:
 list, load, unload, sleep, capacity, health), and the media servers through
 their control files or their own APIs. None is driven through a Docker socket
-or the Kubernetes API. Each chat model goes to the engine that lists it, else
-to llama.cpp's router.
+or the Kubernetes API. Each chat model the app added goes to the engine its
+settings name, though another lists it too (llama.cpp until it starts again,
+the engine a model moves away from); the others go to the engine that lists
+them, else to llama.cpp's router.
 
 | engine | service | how the app drives it | what it is for |
 |---|---|---|---|

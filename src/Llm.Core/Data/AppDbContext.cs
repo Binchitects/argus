@@ -622,6 +622,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(m => m.DraftHead).HasMaxLength(1000);
             e.Property(m => m.DraftMax).HasDefaultValue(3);
             e.Property(m => m.ExtraPreset).HasMaxLength(4000);
+            e.OwnsOne(m => m.Move, mv => mv.ToJson());
         });
         builder.Entity<MediaModel>(e =>
         {

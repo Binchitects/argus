@@ -52,6 +52,7 @@ public static class ModelEndpoints
             ["DELETE /api/admin/models/{name}"] = Llm.Core.Access.Permissions.ModelsDelete,
             ["DELETE /api/admin/models/library/disk"] = Llm.Core.Access.Permissions.ModelsDelete,
             ["PUT /api/admin/models/{name}/keep"] = Llm.Core.Access.Permissions.ModelsEdit,
+            ["DELETE /api/admin/models/{name}/move"] = Llm.Core.Access.Permissions.ModelsEdit,
             ["PUT /api/admin/models/{name}/tools"] = Llm.Core.Access.Permissions.ModelsEdit,
             ["PUT /api/admin/models/{name}/access"] = Llm.Core.Access.Permissions.ModelsAccess,
             ["POST /api/admin/models/advice"] = Llm.Core.Access.Permissions.ModelsRead,
@@ -65,6 +66,7 @@ public static class ModelEndpoints
         g.MapPost("", AddAsync);
         g.MapPatch("/{name}", UpdateAsync);
         g.MapDelete("/{name}", RemoveAsync);
+        g.MapDelete("/{name}/move", ForgetMoveAsync);
         // Loading and unloading is an operator's duty too, without changing the models (models.load).
         g.MapPost("/{name}/load", LoadAsync).RequirePermission(Llm.Core.Access.Permissions.ModelsLoad);
         g.MapPost("/{name}/unload", UnloadAsync).RequirePermission(Llm.Core.Access.Permissions.ModelsLoad);
@@ -150,6 +152,10 @@ public static class ModelEndpoints
                     : TokenCache.Of(m, files.GetValueOrDefault(m.File), onServers.Contains(m.Name), engine.Value.SessionCacheGb),
                 // Its engine, and what only some kinds have (EngineKinds).
                 engineKind = m.EngineKind, m.Engine, m.Replicas, m.GpuMemoryUtilization, m.Quantization, m.SpecDecode, m.KvCpuGb, m.Sleep, m.Fallback, m.KvTier, m.KvDiskGb,
+                // Moving to another engine (or a move that failed): from which kind to which, how far, and why it failed.
+                move = m.Move is { } mv
+                    ? new { mv.Phase, from = mv.FromKind, to = mv.ToKind, mv.FromEngine, mv.ToEngine, mv.Old, mv.Since, mv.At, mv.By, mv.Error }
+                    : null,
             });
         }
         foreach (var s in servers)
@@ -267,6 +273,7 @@ public static class ModelEndpoints
             {
                 return AuthEndpoints.Problem(400, "file", "Choose a Hugging Face snapshot from the model library.");
             }
+            Leave(model, body.EngineKind ?? model.EngineKind);
             Merge(model, body, file);
             VllmDefaults(model, body);
             var hw = await hardware.GetAsync(ct);
@@ -277,7 +284,9 @@ public static class ModelEndpoints
         {
             return AuthEndpoints.Problem(400, "file", "Choose a GGUF file from the model library.");
         }
+        Leave(model, body.EngineKind ?? model.EngineKind);
         Merge(model, body, file);
+        LlamaDefaults(model, body);
         return Results.Ok(ModelAdvisor.Advise(model, entry, library.List(), await hardware.GetAsync(ct)));
     }
 
@@ -312,39 +321,77 @@ public static class ModelEndpoints
         return Results.Created($"/api/admin/models/{name}", await AfterChangeAsync(catalog, watcher, warning, ct));
     }
 
-    private static async Task<IResult> UpdateAsync(string name, LocalModelRequest body, AppDbContext db, ModelCatalog catalog, ModelLibrary library, HardwareProbe hardware,
-        EngineWatcher watcher, PriceBook prices, ChatModels gatewayModels, Audit audit, LlamaCppBackend llama, EngineState state, CancellationToken ct)
+    /// <summary>
+    /// A model's new settings. On another engine (another kind, or another engine of its kind), it moves there at runtime
+    /// (ModelMoves): its answers in flight end on its old engine, new requests go to its new one once it is ready there,
+    /// and a failure there leaves it on its old engine. Refused while it moves, and to an engine that does not run.
+    /// </summary>
+    private static async Task<IResult> UpdateAsync(string name, LocalModelRequest body, HttpContext http, AppDbContext db, ModelCatalog catalog, ModelLibrary library,
+        HardwareProbe hardware, EngineWatcher watcher, PriceBook prices, ChatModels gatewayModels, Audit audit, EngineClient engines, EngineState state, VllmBackends vllm,
+        IOptions<EngineOptions> engine, TimeProvider clock, CancellationToken ct)
     {
         if (await db.LocalModels.SingleOrDefaultAsync(m => m.Name == name, ct) is not { } model)
         {
             return Results.NotFound();
         }
-        var wasLlama = EngineKinds.Of(model.EngineKind)?.Kind == EngineKinds.LlamaCpp;
-        var (problem, warning) = Apply(model, body, library, await hardware.GetAsync(ct), prices.Defaults,
+        if (model.Move is { Phase: not ModelMove.Failed } underway)
+        {
+            return AuthEndpoints.Problem(409, "moving", Moving(name, underway) + " Edit it once it is there, or once its move has failed.");
+        }
+        var before = Copy(model);
+        var hw = await hardware.GetAsync(ct);
+        var (problem, warning) = Apply(model, body, library, hw, prices.Defaults,
             [.. (await gatewayModels.AllAsync(ct)).Select(x => x.Name), .. await db.LocalModels.Select(x => x.Name).ToListAsync(ct)],
             new Placed(catalog.Kept(), await db.LocalModels.AsNoTracking().ToListAsync(ct)));
         if (problem is not null)
         {
             return problem;
         }
-        if (wasLlama && EngineKinds.ServerPerModel(model.EngineKind))
+        // A failed move's word goes with the next change.
+        model.Move = null;
+        var home = ModelMoves.HomeOf(model, vllm);
+        if (home != ModelMoves.HomeOf(before, vllm))
         {
-            // Moved to vLLM or SGLang: out of llama.cpp first (its name answers from its new engine once loaded there).
+            if (ModelMoves.Refusal(model, vllm, engine.Value) is { } refusal)
+            {
+                return AuthEndpoints.Problem(409, "engine", refusal);
+            }
+            model.Move = ModelMoves.Begin(before, model, state.StatusOf(name), hw, vllm, http.User.Identity?.Name, clock.GetUtcNow());
+            // No admin's Load of it is followed up, nor is it held for one: it loads on its new engine as the move goes.
             state.Forget(name);
             state.Release(name);
-            try
-            {
-                await llama.UnloadAsync(name, ct);
-            }
-            catch (EngineException)
-            {
-                // Not loaded there, or llama.cpp is not running: nothing to unload.
-            }
         }
         model.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
         await audit.WriteAsync("model.update", name);
+        if (model.Move is { } move)
+        {
+            // At once on this replica (the others read it within a pass): its requests go by its new engine, and wait while it drains.
+            engines.Home(name, home!);
+            state.Move(name, ModelMoves.View(move));
+            await audit.WriteAsync("model.move", name, detail: $"{ModelMoves.Label(move.FromKind)} to {ModelMoves.Label(move.ToKind)}");
+        }
         return Results.Ok(await AfterChangeAsync(catalog, watcher, warning, ct));
+    }
+
+    /// <summary>What a move underway is, said for an admin.</summary>
+    private static string Moving(string name, ModelMove move) =>
+        $"{name} is moving from {ModelMoves.Label(move.FromKind)} to {ModelMoves.Label(move.ToKind)}.";
+
+    /// <summary>A failed move's word put away (Admin → Models); refused while a move is underway.</summary>
+    private static async Task<IResult> ForgetMoveAsync(string name, AppDbContext db, CancellationToken ct)
+    {
+        if (await db.LocalModels.SingleOrDefaultAsync(m => m.Name == name, ct) is not { Move: { } move } model)
+        {
+            return Results.NotFound();
+        }
+        if (move.Phase != ModelMove.Failed)
+        {
+            return AuthEndpoints.Problem(409, "moving", Moving(name, move));
+        }
+        model.Move = null;
+        await db.SaveChangesAsync(ct);
+        return Results.NoContent();
     }
 
     /// <summary>
@@ -455,6 +502,10 @@ public static class ModelEndpoints
             await audit.WriteAsync("model.load", name);
             return Results.Accepted();
         }
+        if (state.Moves.TryGetValue(name, out var moving))
+        {
+            return AuthEndpoints.Problem(409, "moving", $"{name} is moving from {ModelMoves.Label(moving.From)} to {ModelMoves.Label(moving.To)}: it loads there as it moves.");
+        }
         if (!await KnownAsync(name, engine, state, ct))
         {
             return AuthEndpoints.Problem(404, "unknown", $"The engine has no model named {name} (yet: a model just added is there once the engine has restarted).");
@@ -513,6 +564,10 @@ public static class ModelEndpoints
             await media.UnloadAsync(name, ct);
             await audit.WriteAsync("model.unload", name);
             return Results.Accepted();
+        }
+        if (state.Moves.TryGetValue(name, out var moving))
+        {
+            return AuthEndpoints.Problem(409, "moving", $"{name} is moving from {ModelMoves.Label(moving.From)} to {ModelMoves.Label(moving.To)}: unload it once it is there.");
         }
         if (!await KnownAsync(name, engine, state, ct))
         {
@@ -733,7 +788,7 @@ public static class ModelEndpoints
         }
         if (EngineKinds.ServerPerModel(kind.Kind))
         {
-            return ApplyVllm(m, body, file, library, hardware, prices, placed);
+            return ApplyVllm(m, body, file, kind.Kind, library, hardware, prices, placed);
         }
         if (file.Length == 0 || file.StartsWith('/') || !file.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase) || library.Find(file) is not { } entry)
         {
@@ -757,7 +812,9 @@ public static class ModelEndpoints
             }
         }
         var draft = Copy(m);
+        Leave(draft, kind.Kind);
         Merge(draft, body, file);
+        LlamaDefaults(draft, body);
         // Its prices as they will be: a value kept, set or emptied (the default).
         if (TokenPrice.Check(draft.InputPerMtok, draft.CachedInputPerMtok, draft.OutputPerMtok, prices) is { } price)
         {
@@ -768,7 +825,9 @@ public static class ModelEndpoints
         {
             return (AuthEndpoints.Problem(400, error.Field, error.Message), null);
         }
+        Leave(m, kind.Kind);
         Merge(m, body, file);
+        LlamaDefaults(m, body);
         var warnings = advice.Problems.Where(p => !p.Error).Select(p => p.Message).ToList();
         return (null, warnings.Count > 0 ? "Saved. " + string.Join(" ", warnings) : null);
     }
@@ -777,8 +836,8 @@ public static class ModelEndpoints
     /// A vLLM model's settings: its folder a whole Hugging Face snapshot in the library, only what vLLM has, and (VllmAdvisor)
     /// GPUs that hold it beside what is kept on them: its own, else the ones proposed for this machine, which it keeps.
     /// </summary>
-    private static (IResult? Problem, string? Warning) ApplyVllm(LocalModel m, LocalModelRequest body, string file, ModelLibrary library, Hardware? hardware, PriceOptions prices,
-        Placed placed)
+    private static (IResult? Problem, string? Warning) ApplyVllm(LocalModel m, LocalModelRequest body, string file, string kind, ModelLibrary library, Hardware? hardware,
+        PriceOptions prices, Placed placed)
     {
         if (library.Snapshot(file) is not { Complete: true })
         {
@@ -786,14 +845,8 @@ public static class ModelEndpoints
                 ? $"{file} cannot be loaded yet: {why}"
                 : "Choose a Hugging Face snapshot from the model library (hf/ORG/REPO@REVISION, with its config.json)."), null);
         }
-        // A llama.cpp model moved to vLLM or SGLang (its snapshot instead of its GGUF file): its name, access, prices and
-        // sampling stay; what only llama.cpp has goes, unless the request sets it again (and is then refused for it).
-        var moving = EngineKinds.Of(m.EngineKind)?.Kind == EngineKinds.LlamaCpp;
         var draft = Copy(m);
-        if (moving)
-        {
-            FromLlamaCpp(draft);
-        }
+        Leave(draft, kind);
         Merge(draft, body, file);
         VllmDefaults(draft, body);
         if (TokenPrice.Check(draft.InputPerMtok, draft.CachedInputPerMtok, draft.OutputPerMtok, prices) is { } price)
@@ -815,10 +868,7 @@ public static class ModelEndpoints
         {
             return (AuthEndpoints.Problem(400, problem.Field, problem.Message), null);
         }
-        if (moving)
-        {
-            FromLlamaCpp(m);
-        }
+        Leave(m, kind);
         Merge(m, body, file);
         VllmDefaults(m, body);
         var warnings = advice.Problems.Where(p => !p.Error).Select(p => p.Message).ToList();
@@ -831,14 +881,38 @@ public static class ModelEndpoints
         return (null, warnings.Count > 0 ? "Saved. " + string.Join(" ", warnings) : null);
     }
 
-    /// <summary>llama.cpp's own settings, back to none: its projector, layers by hand, experts in RAM, prompt step, YaRN, preset lines, MTP and draft.</summary>
-    private static void FromLlamaCpp(LocalModel m)
+    /// <summary>
+    /// A model moving to another kind of engine (<paramref name="to"/>) keeps its name, who may use it, its prices, sampling and
+    /// context; what only its old kind has goes, unless the request sets it again (and is then refused for it), and it runs on
+    /// the new kind's first engine unless the request names another.
+    /// </summary>
+    private static void Leave(LocalModel m, string to)
     {
-        (m.Projector, m.Placement, m.GpuLayers, m.CpuMoe, m.Ubatch, m.Yarn, m.ExtraPreset, m.Mtp, m.DraftHead, m.DraftMax) =
-            (null, "auto", 99, 0, null, false, null, false, null, 3);
+        if (m.EngineKind == to)
+        {
+            return;
+        }
+        if (m.EngineKind == EngineKinds.LlamaCpp)
+        {
+            // llama.cpp's own: its projector, layers by hand, experts in RAM, prompt step, YaRN, preset lines, MTP and draft.
+            (m.Projector, m.Placement, m.GpuLayers, m.CpuMoe, m.Ubatch, m.Yarn, m.ExtraPreset, m.Mtp, m.DraftHead, m.DraftMax) =
+                (null, "auto", 99, 0, null, false, null, false, null, 3);
+        }
+        else if (to == EngineKinds.LlamaCpp)
+        {
+            // vLLM's and SGLang's own: copies, share of each GPU, quantisation, speculative decoding and its draft, the cache's tiers.
+            (m.Replicas, m.GpuMemoryUtilization, m.Quantization, m.SpecDecode, m.DraftHead, m.DraftMax, m.KvCpuGb, m.KvTier, m.KvDiskGb) =
+                (1, null, null, null, null, 3, null, null, null);
+        }
+        else if (m.KvTier == "lmcache")
+        {
+            // LMCache is vLLM's alone: SGLang keeps its own tier in RAM.
+            (m.KvTier, m.KvDiskGb) = (null, null);
+        }
+        m.Engine = null;
     }
 
-    /// <summary>A model turned to vLLM keeps none of llama.cpp's own values it did not set again: its cache type becomes vLLM's fp8.</summary>
+    /// <summary>A vLLM or SGLang model keeps none of llama.cpp's own values it did not set again: its cache type becomes fp8.</summary>
     private static void VllmDefaults(LocalModel m, LocalModelRequest body)
     {
         if (body.KvType is null && !ModelAdvisor.VllmCacheTypes.Contains(m.KvType))
@@ -847,15 +921,35 @@ public static class ModelEndpoints
         }
     }
 
-    private static LocalModel Copy(LocalModel m) => new()
+    /// <summary>A llama.cpp model keeps none of vLLM's or SGLang's own values it did not set again: its cache type becomes q8_0.</summary>
+    private static void LlamaDefaults(LocalModel m, LocalModelRequest body)
     {
-        Name = m.Name, File = m.File, Projector = m.Projector, Context = m.Context, MaxOutput = m.MaxOutput, Placement = m.Placement, GpuLayers = m.GpuLayers,
-        CpuMoe = m.CpuMoe, KvType = m.KvType, Parallel = m.Parallel, Ubatch = m.Ubatch, Mtp = m.Mtp, DraftHead = m.DraftHead, DraftMax = m.DraftMax, Yarn = m.Yarn,
-        Temperature = m.Temperature, TopP = m.TopP, TopK = m.TopK, MinP = m.MinP, PresencePenalty = m.PresencePenalty, ExtraPreset = m.ExtraPreset,
-        Thinking = m.Thinking, Tools = m.Tools, InputPerMtok = m.InputPerMtok, CachedInputPerMtok = m.CachedInputPerMtok, OutputPerMtok = m.OutputPerMtok, Devices = m.Devices,
-        EngineKind = m.EngineKind, Engine = m.Engine, Replicas = m.Replicas, GpuMemoryUtilization = m.GpuMemoryUtilization, Quantization = m.Quantization,
-        SpecDecode = m.SpecDecode, KvCpuGb = m.KvCpuGb, Sleep = m.Sleep, Fallback = m.Fallback, KvTier = m.KvTier, KvDiskGb = m.KvDiskGb,
-    };
+        if (body.KvType is null && !ModelProfiler.CacheTypeBytes.ContainsKey(m.KvType))
+        {
+            m.KvType = "q8_0";
+        }
+    }
+
+    internal static LocalModel Copy(LocalModel m)
+    {
+        var copy = new LocalModel { Name = m.Name, File = m.File, CreatedAt = m.CreatedAt, UpdatedAt = m.UpdatedAt };
+        Assign(copy, m);
+        return copy;
+    }
+
+    /// <summary>Every setting of <paramref name="from"/> onto <paramref name="m"/> (its name, its move and when it was added stay).</summary>
+    internal static void Assign(LocalModel m, LocalModel from)
+    {
+        (m.File, m.Projector, m.Context, m.MaxOutput, m.Placement, m.GpuLayers, m.CpuMoe, m.KvType, m.Parallel, m.Ubatch, m.Mtp, m.DraftHead, m.DraftMax, m.Yarn) =
+            (from.File, from.Projector, from.Context, from.MaxOutput, from.Placement, from.GpuLayers, from.CpuMoe, from.KvType, from.Parallel, from.Ubatch, from.Mtp,
+                from.DraftHead, from.DraftMax, from.Yarn);
+        (m.Temperature, m.TopP, m.TopK, m.MinP, m.PresencePenalty, m.ExtraPreset, m.Thinking, m.Tools, m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok, m.Devices) =
+            (from.Temperature, from.TopP, from.TopK, from.MinP, from.PresencePenalty, from.ExtraPreset, from.Thinking, from.Tools, from.InputPerMtok, from.CachedInputPerMtok,
+                from.OutputPerMtok, from.Devices);
+        (m.EngineKind, m.Engine, m.Replicas, m.GpuMemoryUtilization, m.Quantization, m.SpecDecode, m.KvCpuGb, m.Sleep, m.Fallback, m.KvTier, m.KvDiskGb) =
+            (from.EngineKind, from.Engine, from.Replicas, from.GpuMemoryUtilization, from.Quantization, from.SpecDecode, from.KvCpuGb, from.Sleep, from.Fallback, from.KvTier,
+                from.KvDiskGb);
+    }
 
     /// <summary>The request's values over the model's: a missing value is kept, one named in "clear" emptied.</summary>
     private static void Merge(LocalModel m, LocalModelRequest body, string file)

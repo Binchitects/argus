@@ -75,6 +75,28 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
         Assert.False(EngineKinds.Managed(EngineKinds.External));
     }
 
+    [Fact]
+    public void A_move_waits_for_its_answers_on_the_old_engine_only_on_the_same_gpus()
+    {
+        var hw = new Hardware("GPU", 2, 2L << 40, 0, 1L << 40, 0, Devices: [new GpuDevice(0, "GPU", 1L << 40, 0), new GpuDevice(1, "GPU", 1L << 40, 0)]);
+        var vllm = new VllmBackends(Microsoft.Extensions.Options.Options.Create(new EngineOptions()), null!, TimeProvider.System);
+        LocalModel M(string kind, string? devices) => new() { Name = "m", File = "f", EngineKind = kind, Devices = devices };
+        // llama.cpp naming no GPU is on all of them; a machine whose GPUs are not known shares them all.
+        Assert.True(ModelMoves.Overlap(M(EngineKinds.LlamaCpp, null), M(EngineKinds.Vllm, "1"), hw));
+        Assert.False(ModelMoves.Overlap(M(EngineKinds.Vllm, "0"), M(EngineKinds.Sglang, "1"), hw));
+        Assert.True(ModelMoves.Overlap(M(EngineKinds.Vllm, "0"), M(EngineKinds.Sglang, "1"), null));
+
+        var now = DateTimeOffset.UtcNow;
+        var draining = ModelMoves.Begin(M(EngineKinds.LlamaCpp, null), M(EngineKinds.Vllm, "1"), "loaded", hw, vllm, "ada", now);
+        Assert.Equal((ModelMove.Draining, ModelMove.Serving, true, "llamacpp", "vllm"), (draining.Phase, draining.Old, draining.WasLoaded, draining.FromEngine, draining.ToEngine));
+        // On other GPUs, or not loaded where it was: it loads on its new engine at once.
+        Assert.Equal((ModelMove.Loading, ModelMove.Serving), (ModelMoves.Begin(M(EngineKinds.Vllm, "0"), M(EngineKinds.Sglang, "1"), "loaded", hw, vllm, null, now) is var b ? (b.Phase, b.Old) : default));
+        Assert.Equal((ModelMove.Loading, ModelMove.Gone, false), (ModelMoves.Begin(M(EngineKinds.LlamaCpp, null), M(EngineKinds.Vllm, "1"), "unloaded", hw, vllm, null, now) is var c
+            ? (c.Phase, c.Old, c.WasLoaded) : default));
+        // Its old settings go with it, to put it back should it fail.
+        Assert.Equal(EngineKinds.LlamaCpp, System.Text.Json.JsonSerializer.Deserialize<LocalModel>(draining.From!)!.EngineKind);
+    }
+
     private WebApplicationFactory<Program> NewApp()
     {
         GgufFile.Language("qwen3", name: "Tiny", context: 40960).Write(Path.Combine(Library, "tiny", "Tiny-4B-Q4_K_M.gguf"));
@@ -87,6 +109,7 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
         return app.Create(app.ConnectionStringFor("kinds_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), new Dictionary<string, string?>
         {
             ["Engine:Enabled"] = "true", ["Engine:ApiKey"] = FakeEngine.Key, ["Engine:ConfigDir"] = Config, ["Engine:LibraryDir"] = Library,
+            ["Engine:VllmStatusDir"] = Path.Combine(_dir, "vllm-status"),
         });
     }
 
@@ -127,7 +150,7 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
     }
 
     [Fact]
-    public async Task A_llama_cpp_model_moves_to_vllm_keeping_its_name_access_and_prices_and_leaves_llama_cpp()
+    public async Task A_llama_cpp_model_moves_to_vllm_once_it_runs_keeping_its_name_access_and_prices_and_leaves_llama_cpp()
     {
         await using var f = NewApp();
         var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
@@ -138,11 +161,22 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
         await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/models/tiny/access", UriKind.Relative), new { audience = "Admins", groups = Array.Empty<string>() }));
         Assert.Contains("[tiny]", await File.ReadAllTextAsync(Path.Combine(Config, "models.ini")), StringComparison.Ordinal);
 
-        // Its snapshot instead of its GGUF file, on vLLM: llama.cpp's own settings go with the move.
+        // To vLLM while vLLM does not run: refused, as it would only fail there; it stays as it was.
+        using var refused = await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny", UriKind.Relative), new { engineKind = "vllm", file = "hf/acme/Flash@abc123", context = 32768 });
+        await StatusAssert.Is(HttpStatusCode.Conflict, refused);
+        Assert.Contains("is not running", (await admin.JsonAsync(refused)).GetProperty("error").GetString(), StringComparison.Ordinal);
+        Assert.Contains("[tiny]", await File.ReadAllTextAsync(Path.Combine(Config, "models.ini")), StringComparison.Ordinal);
+
+        // Its snapshot instead of its GGUF file, on vLLM, once vLLM runs: llama.cpp's own settings go with the move.
+        Directory.CreateDirectory(Path.Combine(_dir, "vllm-status", "vllm"));
+        File.WriteAllText(Path.Combine(_dir, "vllm-status", "vllm", "supervisor.json"), $$"""{"at":{{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}},"started":0,"restart":0,"reload":0}""");
         using var moved = await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny", UriKind.Relative), new { engineKind = "vllm", file = "hf/acme/Flash@abc123", context = 32768 });
         await StatusAssert.Is(HttpStatusCode.OK, moved);
         var row = (await admin.JsonAsync(await admin.GetAsync("/api/admin/models"))).GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == "tiny");
         Assert.Equal(("vllm", "hf/acme/Flash@abc123", "fp8"), (row.GetProperty("engineKind").GetString(), row.GetProperty("file").GetString(), row.GetProperty("kvType").GetString()));
+        // Not loaded on llama.cpp: nothing to wait for there, it loads on vLLM at once.
+        Assert.Equal(("loading", "llamacpp", "vllm"), (row.GetProperty("move").GetProperty("phase").GetString(), row.GetProperty("move").GetProperty("from").GetString(),
+            row.GetProperty("move").GetProperty("to").GetString()));
         Assert.True(row.GetProperty("ubatch").ValueKind == JsonValueKind.Null);
         Assert.Equal(0.8m, row.GetProperty("outputPerMtok").GetDecimal());
         Assert.Equal("Admins", row.GetProperty("access").GetProperty("audience").GetString());

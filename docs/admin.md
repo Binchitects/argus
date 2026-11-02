@@ -524,18 +524,42 @@ would be with them.
   parameters. Its radix cache shares every prefix by itself. LMCache and a disk
   tier are vLLM's alone and refused. Inside SGLang, as inside vLLM, the chat's
   requests go ahead of API keys'.
-- **Moving a model to vLLM or SGLang.** vLLM and SGLang serve a Hugging Face
-  snapshot (safetensors), not a GGUF file: download the model's snapshot first
-  (above; on a host with no network, carry its `hf/<owner>/<repository>@<revision>/`
-  folder into the library). Then **Edit** the llama.cpp model and choose the
-  snapshot under **File or model**: the dialog says it moves, and shows the
-  vLLM (or SGLang) form for the same model. Saved, it keeps its name, who may use
-  it, its prices and its sampling; it is unloaded from llama.cpp and leaves its
-  presets, and loads on its new engine when asked for. What only llama.cpp has
-  (layers by hand, experts in RAM, its prompt step, YaRN, preset lines, its MTP
-  and draft) is not carried over; the cache type becomes fp8 and answers at once
-  16, unless set in the form. The same through the API: `PATCH
-  /api/admin/models/NAME` with `engineKind` and `file`.
+- **Moving a model to another engine.** A model moves at runtime, with the stack
+  running: llama.cpp to vLLM or SGLang and back, and between vLLM and SGLang (or
+  another machine's engine of a kind). vLLM and SGLang serve a Hugging Face
+  snapshot (safetensors), llama.cpp a GGUF file: have the model's other form in the
+  library first (above; on a host with no network, carry its
+  `hf/<owner>/<repository>@<revision>/` folder or its GGUF file into the library).
+  Then **Edit** the model: for a llama.cpp model choose the snapshot under **File or
+  model**, for a vLLM or SGLang model its GGUF file (to llama.cpp) or the other
+  **Engine** (vLLM or SGLang). The dialog says it moves, and shows the new engine's
+  form for the same model. Saved, it keeps its name, who may use it, its prices and
+  its sampling, and its card says how far the move is:
+  - New requests go to its new engine and wait there until it is ready. Its answers
+    in flight end on its old engine, which lets it go once none is left (after 15
+    minutes it lets it go all the same).
+  - On other GPUs (or not loaded where it was) it loads on its new engine at once,
+    beside the old one. On the same GPUs it loads there once the old one has let it
+    go: **Moving** says its answers there end first.
+  - Ready on its new engine, the move is over (`model.moved` in the audit log).
+  - Should it not start there (it fails, or is not ready within
+    `Engine:VllmStartWait`, 20 minutes), it is put back on its old engine as it was,
+    loaded again if it was, and its card says why (`model.move_failed`); **Dismiss**
+    puts that away, and **Edit** tries again.
+  What only its old engine has is not carried over: from llama.cpp, layers by hand,
+  experts in RAM, its prompt step, YaRN, preset lines, its MTP and draft (the cache
+  type becomes fp8 and answers at once 16, on the GPUs proposed for this machine,
+  unless set in the form); from vLLM or SGLang, copies, the share of each GPU,
+  quantisation, speculative decoding and the cache's tiers (the cache type becomes
+  q8_0, and the form puts it on every GPU); from vLLM to SGLang, LMCache. A move
+  to an engine that does not run is refused, and while a model moves it is not
+  edited, loaded or unloaded.
+  llama.cpp starts again when its list of models changes (it reads its presets as
+  it starts), as when a model is added or removed: the answers of its other models
+  in flight then are cut. The same through the API: `PATCH /api/admin/models/NAME`
+  with `engineKind` and `file` (and `engine` for another engine of the kind); the
+  row's `move` says how far it is; `DELETE /api/admin/models/NAME/move` puts away a
+  failed one.
 - **Load** loads a model now, beside the kept ones (refused when every place is
   kept). At the limit the app makes room for it, as for a request: an idle model
   that may make room unloads first, and is waited for until it has stopped. When

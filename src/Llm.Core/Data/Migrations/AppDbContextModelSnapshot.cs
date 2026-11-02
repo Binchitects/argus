@@ -8703,6 +8703,61 @@ namespace Llm.Core.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Llm.Core.Models.LocalModel", b =>
+                {
+                    b.OwnsOne("Llm.Core.Models.ModelMove", "Move", b1 =>
+                        {
+                            b1.Property<string>("LocalModelName");
+
+                            b1.Property<DateTimeOffset>("At");
+
+                            b1.Property<string>("By");
+
+                            b1.Property<string>("Error");
+
+                            b1.Property<string>("From");
+
+                            b1.Property<string>("FromEngine")
+                                .IsRequired();
+
+                            b1.Property<string>("FromKind")
+                                .IsRequired();
+
+                            b1.Property<DateTimeOffset?>("LoadAt");
+
+                            b1.Property<string>("Old")
+                                .IsRequired();
+
+                            b1.Property<DateTimeOffset?>("OldAt");
+
+                            b1.Property<string>("Phase")
+                                .IsRequired();
+
+                            b1.Property<DateTimeOffset>("Since");
+
+                            b1.Property<string>("ToEngine")
+                                .IsRequired();
+
+                            b1.Property<string>("ToKind")
+                                .IsRequired();
+
+                            b1.Property<bool>("WasLoaded");
+
+                            b1.HasKey("LocalModelName");
+
+                            b1.ToTable("local_models");
+
+                            b1
+                                .ToJson("Move")
+                                .HasColumnType("jsonb");
+
+                            b1.WithOwner()
+                                .HasForeignKey("LocalModelName");
+                        });
+
+                    b.Navigation("Move");
+                });
+
             modelBuilder.Entity("Llm.Core.Models.MediaModel", b =>
                 {
                     b.OwnsMany("Llm.Core.Models.MediaModelFile", "Files", b1 =>
