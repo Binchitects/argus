@@ -594,6 +594,88 @@ describe('Code Arena in the browser', () => {
     expect(ok.jobs[0]!.failed).toBe(false)
   })
 
+  it('keeps a turn compacted on its way whole: its question, its answer and the next question for the person, the mark after it', async () => {
+    let end!: () => void
+    const over = new Promise<void>((r) => (end = r))
+    const before = [msg('m0', 'user', { content: 'First question' }), msg('m1', 'assistant', { content: 'First answer.', model: 'model-a' })]
+    const write = { id: 'c1', function: { name: 'write_file', arguments: '{"path":"f1.txt","content":"x"}' } }
+    const command = { id: 'c2', function: { name: 'run_shell', arguments: '{"command":"ls"}' } }
+    // The conversation afresh after the compaction: every message in its place, the one it covers last marked (here the
+    // question itself, as a compaction that covers a question marks it).
+    const afresh = [
+      ...before,
+      msg('m2', 'user', { content: 'Write the files', summary: 'SUMMARY: the first question was answered.' }),
+      msg('m3', 'assistant', { model: 'model-a', toolCalls: [write] }),
+      msg('m4', 'tool', { content: 'Wrote f1.txt.', toolCallId: 'c1', toolName: 'write_file' }),
+    ]
+    backend({
+      session: { id: 's2', messages: before, diffs: {}, busy: false },
+      extra: {
+        'POST /api/messages': () => ({
+          events: [
+            { type: 'question', id: 'm2', parentId: 'm1' },
+            { type: 'assistant', id: 'm3', parentId: 'm2', model: 'model-a' },
+            { type: 'tool_call', id: 'c1', name: 'write_file', arguments: write.function.arguments, tool: 'local' },
+            { type: 'tool_result', id: 'c1', messageId: 'm4', name: 'write_file', text: 'Wrote f1.txt.', isError: false, declined: false, noAccess: false, durationMs: 5 },
+            { type: 'reset', messages: afresh, diffs: {} },
+            { type: 'notice', kind: 'compacted', text: 'Compacted: 2 messages summarized, 3 kept.' },
+            { type: 'assistant', id: 'm5', parentId: 'm4', model: 'model-a' },
+            { type: 'tool_call', id: 'c2', name: 'run_shell', arguments: command.function.arguments, tool: 'local' },
+            { type: 'approval', id: 'c2', name: 'run_shell', arguments: command.function.arguments, tool: 'local', title: 'run_shell' },
+          ],
+          until: over,
+        }),
+      },
+    })
+    renderCode()
+    expect(await screen.findByText('First answer.')).toBeInTheDocument()
+    await ask('Write the files')
+
+    // The command after the compaction still asks, so the turn goes on once the person answers.
+    const question = await screen.findByRole('alert')
+    expect(question).toHaveTextContent('Allow Run shell to run with these arguments?')
+    expect(screen.getByText('Write the files')).toBeInTheDocument()
+    expect(screen.getByText('First answer.')).toBeInTheDocument()
+    const mark = screen.getByRole('note', { name: 'Chat compacted' })
+    await userEvent.click(within(mark).getByRole('button', { name: /Show summary/ }))
+    expect(within(mark).getByText(/the first question was answered/)).toBeInTheDocument()
+    end()
+  })
+
+  it("shows in the context gauge what filled the last request, the room kept for the answer and the biggest messages, as the web chat's", async () => {
+    const context = {
+      system: 4000, instructions: 0, memory: 0, tools: 6000, summary: 0, files: 2000, you: 1000, answers: 1000, toolResults: 6000,
+      biggest: [{ id: 'm2', role: 'tool' as const, tool: 'read_file', chars: 5000, preview: 'class Parser { … }', pinned: false }],
+    }
+    const read = { id: 'c1', function: { name: 'read_file', arguments: '{"path":"src/parser.cs"}' } }
+    const session: CodeSession = {
+      id: 's2',
+      busy: false,
+      diffs: {},
+      messages: [
+        msg('m0', 'user', { content: 'Read the parser' }),
+        msg('m1', 'assistant', { model: 'model-a', toolCalls: [read] }),
+        msg('m2', 'tool', { content: 'class Parser { … }', toolCallId: 'c1', toolName: 'read_file' }),
+        msg('m3', 'assistant', { model: 'model-a', content: 'Read it.', promptTokens: 20_000, completionTokens: 200, context }),
+      ],
+    }
+    backend({ session, state: { contextReserve: 4096 } })
+    renderCode()
+    await userEvent.click(await screen.findByRole('button', { name: 'Context: 62% full. Details and compact' }))
+    const parts = await screen.findByRole('list', { name: 'What fills it' })
+    // 20,000 prompt tokens by the characters of each kind (20,000 in all); the answer's 200 count as answers.
+    expect(within(parts).getByText('Tool calls and results').parentElement).toHaveTextContent('Tool calls and results6 K18%')
+    expect(within(parts).getByText('Tool definitions').parentElement).toHaveTextContent('Tool definitions6 K18%')
+    expect(within(parts).getByText('System prompt and tool notes').parentElement).toHaveTextContent('System prompt and tool notes4 K12%')
+    expect(within(parts).getByText('Kept for the answer').parentElement).toHaveTextContent('Kept for the answer4.1 K13%')
+    expect(within(parts).getByText('Free').parentElement).toHaveTextContent('Free8.47 K26%')
+    const biggest = screen.getByRole('list', { name: 'The biggest messages' })
+    expect(within(biggest).getByText("read_file's result")).toBeInTheDocument()
+    expect(within(biggest).getByText('class Parser { … }')).toBeInTheDocument()
+    // Listed only: Code Arena keeps no pins.
+    expect(within(biggest).queryByRole('button')).not.toBeInTheDocument()
+  })
+
   it("draws a long session's last turns, and the earlier ones when asked for", async () => {
     const long: Message[] = Array.from({ length: 35 }, (_, i) => [
       msg(`m${2 * i}`, 'user', { content: `Question ${i + 1}` }),

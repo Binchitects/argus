@@ -308,7 +308,9 @@ internal sealed class Agent
     private void Add(JsonObject message, TokenUsage? usage = null, string? kind = null, JsonArray? agents = null)
     {
         Messages.Add(message);
-        Session?.Message(message, message.Str("role") == "assistant" ? Model.Name : null, usage, kind, agents);
+        // An answer the gateway counted keeps what filled its request (the page's context gauge).
+        var answer = message.Str("role") == "assistant";
+        Session?.Message(message, answer ? Model.Name : null, usage, kind, agents, answer && usage is not null ? Measured : null);
     }
 
     /// <summary>The tool call running in this flow (each call of a round runs in its own): a sub-agent's events are that call's.</summary>
@@ -682,7 +684,9 @@ internal sealed class Agent
                 }, kind: "note");
                 if (windowFull || calls)
                 {
-                    await CompactAsync(force: true, ct);
+                    // Not forced: what is kept starts at a message of the person's (the note at least), so the model still has
+                    // something to answer. Forced, everything went into the summary and the request ended with its "Understood".
+                    await CompactAsync(force: false, ct);
                 }
                 last = answer.Text;
                 continue;
@@ -923,6 +927,7 @@ internal sealed class Agent
             request["chat_template_kwargs"] = kwargs;
         }
         _sentChars = Chars(Messages.Count);
+        Measured = Measure();
         var uncached = Uncached(_sentChars);
         try
         {
@@ -1265,6 +1270,25 @@ internal sealed class Agent
 
     private const string StepsMark = "[Your earlier steps of this turn, in brief]";
 
+    /// <summary>
+    /// What a compaction's first messages (those before what the model reads word for word) say of what they stand for: the
+    /// summary, or a long turn's earlier steps in brief. Null when they are no compaction's.
+    /// </summary>
+    internal static string? SummaryText(IEnumerable<JsonObject> prefix)
+    {
+        if (prefix.LastOrDefault(m => m.Str("role") == "user" && m.Str("content")?.StartsWith(SummaryMark, StringComparison.Ordinal) == true)?.Str("content") is not { } said)
+        {
+            return null;
+        }
+        if (said.StartsWith(TurnHead, StringComparison.Ordinal))
+        {
+            var steps = said.LastIndexOf("\n\n" + StepsMark + "\n\n", StringComparison.Ordinal);
+            return steps < 0 ? null : said[(steps + StepsMark.Length + 4)..];
+        }
+        var start = said.IndexOf("\n\n", StringComparison.Ordinal);
+        return start < 0 ? said : said[(start + 2)..];
+    }
+
     internal const string Understood = "Understood: I have the summary and carry on from there.";
 
     /// <summary>How the request for a summary ends: the conversation as the model has it, then this.</summary>
@@ -1375,6 +1399,89 @@ internal sealed class Agent
         }
         return ([("instructions", prompt), ("memory", memory), ("tools", ToolChars()), ("Code Arena's notes", notes), ("summary", summary),
             ("your messages", person), ("answers", answers), ("tools' results", results)], [.. items.OrderByDescending(x => x.Chars).Take(5)]);
+    }
+
+    /// <summary>What filled the request sent last (<see cref="Measure"/>): kept with the answer it brought, for the page's context gauge.</summary>
+    public JsonObject? Measured { get; private set; }
+
+    /// <summary>The most messages the context gauge lists as the biggest, and the least a message takes to be listed (the web chat's).</summary>
+    private const int BiggestCount = 5, BiggestAbove = 1_000;
+
+    /// <summary>
+    /// What fills a request of the conversation as it stands, in characters by kind, in the shape of the web chat's context
+    /// gauge (the page scales them to the tokens the model counted): the system prompt with Code Arena's notes, the memory,
+    /// the tools' definitions, a compaction's summary, the files that went with the person's messages, their words, the
+    /// answers, and the tool calls with their results; then the biggest messages the model reads word for word, each by the
+    /// page's id for it (its place in the session).
+    /// </summary>
+    internal JsonObject Measure()
+    {
+        var shown = _notes.Where(n => n.At <= Messages.Count).ToList();
+        var memory = (long)(MemoryChars?.Invoke() ?? 0);
+        var system = SystemPrompt().Length - memory + shown.Where(n => !IsMemory(n)).Sum(n => (long)n.Text.Length + 10);
+        memory += shown.Where(IsMemory).Sum(n => (long)n.Text.Length + 10);
+        // The page's ids: the places in the session of what the model reads word for word (none without a session).
+        var (from, prefix) = Session?.Read(d => (d.From, d.Prefix)) ?? (0, int.MaxValue);
+        long summary = 0, files = 0, you = 0, answers = 0, results = 0;
+        var items = new List<JsonObject>();
+        var tools = new Dictionary<string, string?>(StringComparer.Ordinal);
+        for (var i = 0; i < Messages.Count; i++)
+        {
+            var m = Messages[i];
+            var content = m["content"] is JsonArray parts
+                ? string.Concat(parts.OfType<JsonObject>().Select(p => p.Str("text")))
+                : m.Str("content") ?? "";
+            var (role, tool, chars, preview) = (m.Str("role") ?? "user", (string?)null, (long)content.Length + 10, content);
+            switch (role)
+            {
+                case "user" when content.StartsWith(SummaryMark, StringComparison.Ordinal):
+                    summary += chars;
+                    continue;
+                case "user":
+                    var typed = Mentions.Typed(Uploads.Split(content).Text);
+                    files += content.Length - typed.Length;
+                    you += typed.Length + 10;
+                    preview = Quotes.Split(typed).Text;
+                    break;
+                case "tool":
+                    results += chars;
+                    tool = tools.GetValueOrDefault(m.Str("tool_call_id") ?? "");
+                    break;
+                default:
+                    answers += chars;
+                    if (m["tool_calls"] is JsonArray calls)
+                    {
+                        var made = Json.Line(calls).Length;
+                        results += made;
+                        chars += made;
+                        foreach (var call in calls.OfType<JsonObject>())
+                        {
+                            tools[call.Str("id") ?? ""] = call["function"].Str("name");
+                        }
+                    }
+                    break;
+            }
+            if (i >= prefix && chars >= BiggestAbove)
+            {
+                items.Add(new JsonObject
+                {
+                    ["id"] = $"m{i - prefix + from}", ["role"] = role, ["tool"] = tool, ["chars"] = chars, ["preview"] = Fmt.OneLine(preview, 80), ["pinned"] = false,
+                });
+            }
+        }
+        return new JsonObject
+        {
+            ["system"] = system,
+            ["instructions"] = 0,
+            ["memory"] = memory,
+            ["tools"] = ToolChars(),
+            ["summary"] = summary,
+            ["files"] = files,
+            ["you"] = you,
+            ["answers"] = answers,
+            ["toolResults"] = results,
+            ["biggest"] = new JsonArray([.. items.OrderByDescending(x => x.Long("chars")).Take(BiggestCount)]),
+        };
     }
 
     /// <summary>A request's size in characters: the system prompt, the tools and the first <paramref name="count"/> messages with their notes.</summary>

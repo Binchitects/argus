@@ -92,6 +92,45 @@ public sealed class HangSessionFilesTests(ITestOutputHelper log) : IDisposable
     }
 
     [Fact]
+    public void A_result_with_long_sub_agents_work_counts_in_the_list_and_what_Arena_lacks_of_it()
+    {
+        var store = SessionStore.Create(_dir, "/work/project", "model-a");
+        store.Message(Message("user", "find the parser"));
+        var calls = new JsonArray(new JsonObject { ["id"] = "c1", ["type"] = "function", ["function"] = new JsonObject { ["name"] = "task", ["arguments"] = "{}" } });
+        store.Message(new JsonObject { ["role"] = "assistant", ["content"] = "", ["tool_calls"] = calls }, "model-a", new TokenUsage(900, 0, 20),
+            context: new JsonObject { ["system"] = 4000, ["biggest"] = new JsonArray() });
+        // A task's sub-agents' work: kept with the result, far longer than the 4 KB of a line the scan reads.
+        var work = new JsonArray(new JsonObject { ["title"] = "find the parser", ["text"] = new string('w', 20_000), ["steps"] = new JsonArray() });
+        store.Message(new JsonObject { ["role"] = "tool", ["tool_call_id"] = "c1", ["content"] = "Parser is in src/a.cs." }, agents: work);
+        store.Link("chat-1");
+        store.Sent([(0, "id-0"), (1, "id-1")]);
+
+        var listed = Assert.Single(SessionStore.List(_dir, "/work/project"));
+        Assert.Equal(3, listed.Messages);
+        // Arena lacks the result only: the session is marked so, and sent later.
+        Assert.Equal((1, true), (listed.Waiting, listed.Unsent));
+        Same(SessionStore.Load(store.File, whole: true), SessionStore.Load(store.File));
+        // The page's own fields stay after the message, which the scan reads before.
+        var line = File.ReadAllLines(store.File).Single(l => l.Contains("\"agents\"", StringComparison.Ordinal));
+        Assert.True(line.IndexOf("\"message\"", StringComparison.Ordinal) < line.IndexOf("\"agents\"", StringComparison.Ordinal));
+        Assert.Equal("find the parser", store.Read(d => d.Stream[2].Agents)![0]!["title"]!.GetValue<string>());
+        Assert.Equal(4000, store.Read(d => d.Stream[1].Context)!["system"]!.GetValue<int>());
+
+        // A line Code Arena 7.7.0 wrote, the work before the message: it counts too, and Arena's id for it comes with its "sent" line.
+        File.AppendAllText(store.File, Json.Line(new JsonObject
+        {
+            ["type"] = "message", ["at"] = DateTimeOffset.UtcNow.ToString("o"), ["agents"] = work.DeepClone(), ["n"] = 3,
+            ["message"] = new JsonObject { ["role"] = "assistant", ["content"] = "Found it." },
+        }) + "\n");
+        listed = Assert.Single(SessionStore.List(_dir, "/work/project"));
+        Assert.Equal((4, 2), (listed.Messages, listed.Waiting));
+        File.AppendAllText(store.File, Json.Line(new JsonObject { ["type"] = "sent", ["sent"] = new JsonArray(new JsonArray(2, "id-2"), new JsonArray(3, "id-3")) }) + "\n");
+        listed = Assert.Single(SessionStore.List(_dir, "/work/project"));
+        Assert.Equal((0, false), (listed.Waiting, listed.Unsent));
+        Same(SessionStore.Load(store.File, whole: true), SessionStore.Load(store.File));
+    }
+
+    [Fact]
     public void A_line_cut_short_is_read_once_it_is_whole()
     {
         var store = Write(_dir, compactions: 1, perPart: 2);

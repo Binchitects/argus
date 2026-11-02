@@ -336,7 +336,7 @@ public sealed class AgentTests : IDisposable
         Assert.Contains("⎿ ", h.Err);
 
         // What it did is kept with the task's result, beside the message the model reads, and the page shows it.
-        var data = SessionStore.Load(Assert.Single(Directory.GetFiles(h.Paths.SessionsDir)));
+        var data = SessionStore.Load(Assert.Single(Directory.GetFiles(h.Paths.SessionsDir)), whole: true);
         var (place, work) = Assert.Single(data.Agents);
         Assert.Equal("tool", data.Messages[place]["role"]!.GetValue<string>());
         Assert.Null(data.Messages[place]["agents"]);

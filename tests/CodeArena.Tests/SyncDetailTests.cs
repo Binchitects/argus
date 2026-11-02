@@ -57,8 +57,8 @@ public sealed class SyncDetailTests : IDisposable
         // The model is never sent its thinking back: some providers refuse it.
         Assert.DoesNotContain("reasoning_content", _gateway.Requests[^1].ToJsonString(), StringComparison.Ordinal);
 
-        // The session keeps them too, for the IDE.
-        var data = SessionStore.Load(Directory.GetFiles(h.Paths.SessionsDir, "*.jsonl").Single());
+        // The session keeps them too, for the IDE (which shows the session as its store holds it: every line read).
+        var data = SessionStore.Load(Directory.GetFiles(h.Paths.SessionsDir, "*.jsonl").Single(), whole: true);
         var shown = History.Messages(data).OfType<JsonObject>().ToList();
         Assert.Equal("The file is short.", Str(shown[3], "reasoning"));
         Assert.Equal("model-a", Str(shown[3], "model"));

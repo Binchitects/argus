@@ -20,6 +20,8 @@ export interface CodeState {
   context: number
   /** About how many of them the conversation fills now (the prompt, the tools and the history). */
   contextUsed: number
+  /** How many of them are kept for the answer (the context gauge shows it). */
+  contextReserve?: number
   /** When the session compacts itself, in percent of the window (0: only when a request would not fit), and what the recent part may keep whole. */
   compactAt: number
   compactTarget: number
@@ -171,8 +173,9 @@ export interface CodeSession {
 }
 
 /**
- * Arena's chat events, and what Code Arena adds: a diff with an edit's result, "always" and Laya's look with a question, the history
- * afresh after compaction, and the commands run with no time limit (their start, their output as it comes, their end).
+ * Arena's chat events, and what Code Arena adds: a diff with an edit's result, "always" and Laya's look with a question, the
+ * conversation afresh after a compaction (each message in its place, the last one it covers marked with its summary), and the
+ * commands run with no time limit (their start, their output as it comes, their end).
  */
 export type CodeEvent =
   | Exclude<ChatEvent, { type: 'tool_result' } | { type: 'approval' }>
