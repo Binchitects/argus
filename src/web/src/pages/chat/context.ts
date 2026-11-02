@@ -37,14 +37,15 @@ export interface ContextView {
 }
 
 /**
- * The room kept for the answer, as the server keeps it (PromptBudget.Room): the chat's own longest answer when it set one
- * (at most half the context); else an eighth of the context, at most the model's longest answer, at least 1,024 tokens (a
- * quarter of a tiny context at most). Null when the context is not known.
+ * The room kept for the answer, as the server keeps it (PromptBudget.Room): what the request asks for when the chat set its
+ * own longest answer, at most the model's (half the context when the model says none); else an eighth of the context, at
+ * most the model's longest answer, at least 1,024 tokens (a quarter of a tiny context at most). Null when the context is not known.
  */
 export function answerRoom(context: number | null | undefined, maxOutput: number | null | undefined, chosen: number | null | undefined): number | null {
   if (!context) return null
-  if (chosen && chosen > 0) return Math.min(chosen, Math.floor(context / 2))
-  return Math.max(Math.min(Math.floor(context / 8), maxOutput && maxOutput > 0 ? maxOutput : Infinity), Math.min(1024, Math.floor(context / 4)))
+  const most = maxOutput && maxOutput > 0 ? maxOutput : null
+  if (chosen && chosen > 0) return Math.min(chosen, most ?? Math.floor(context / 2))
+  return Math.max(Math.min(Math.floor(context / 8), most ?? Infinity), Math.min(1024, Math.floor(context / 4)))
 }
 
 /**

@@ -542,7 +542,8 @@ public sealed partial class ChatService(
             {
                 request["top_p"] = topP;
             }
-            if (conversation.MaxTokens is { } maxTokens)
+            // The chat's own longest answer, within this model's: the budget kept the same room for it.
+            if (PromptBudget.Asked(budget.Context, model?.MaxOutput, conversation.MaxTokens) is { } maxTokens)
             {
                 request["max_tokens"] = maxTokens;
             }
@@ -751,7 +752,7 @@ public sealed partial class ChatService(
             }
 
             if (finish == "length" && msg.PromptTokens is { } read && msg.CompletionTokens is { } written && read + written >= budget.Context * 0.95
-                && !(conversation.MaxTokens is { } most && written >= most))
+                && !(request["max_tokens"] is JsonValue asked && asked.TryGetValue<int>(out var most) && written >= most))
             {
                 // Not the answer's own limit: the context ran out while it wrote. The next message compacts by the usual rules.
                 await emit(new { type = "notice", kind = "cut_at_context", text = "The answer reached the end of the model's context. The chat is compacted before your next message." });
@@ -1363,7 +1364,9 @@ public sealed partial class ChatService(
         var holder = Guid.NewGuid();
         // Its rounds grow with its tools' results: past its model's context, the earlier ones are cut to their start.
         var its = await models.ResolveAsync(kit.Model, ct);
-        var budget = new PromptBudget(its?.Context ?? 32768, PromptBudget.Room(its?.Context ?? 32768, its?.MaxOutput, null));
+        // Without thinking, a cap on each step's words (within the model's longest answer), and the room kept for it; a model that thinks needs its room.
+        var stepTokens = kit.Thinking is null or "off" ? AgentMaxTokens : (int?)null;
+        var budget = new PromptBudget(its?.Context ?? 32768, PromptBudget.Room(its?.Context ?? 32768, its?.MaxOutput, stepTokens));
         for (var round = 0; ; round++)
         {
             var request = new JsonObject
@@ -1371,10 +1374,9 @@ public sealed partial class ChatService(
                 ["model"] = kit.Model, ["messages"] = messages.DeepClone(), ["stream"] = true,
                 ["stream_options"] = new JsonObject { ["include_usage"] = true }, ["user"] = kit.Email,
             };
-            // Without thinking, a cap on each step's words; a model that thinks needs its room.
-            if (kit.Thinking is null or "off")
+            if (PromptBudget.Asked(budget.Context, its?.MaxOutput, stepTokens) is { } stepMost)
             {
-                request["max_tokens"] = AgentMaxTokens;
+                request["max_tokens"] = stepMost;
             }
             if (ThinkingPresets.TemplateKwargs(kit.Thinking) is { } kwargs)
             {

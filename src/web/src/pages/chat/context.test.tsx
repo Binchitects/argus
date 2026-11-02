@@ -2,6 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { fakeApi, member, renderApp } from '@/test/utils'
+import { answerRoom } from './context'
 import { blank } from './live'
 import type { ChatConfig, Conversation, Message } from './types'
 
@@ -111,5 +112,19 @@ describe('what the model reads of a chat', () => {
     expect(await screen.findByText('The very first question.')).toBeInTheDocument()
     expect(asked.at(-1)).toBe('900')
     expect(screen.queryByRole('button', { name: /Show earlier messages/ })).not.toBeInTheDocument()
+  })
+})
+
+describe('the room kept for the answer, as the server keeps it', () => {
+  it('is an eighth of the context within the model\'s longest answer, or what the chat asks for within it', () => {
+    expect(answerRoom(32768, 8192, null)).toBe(4096)
+    expect(answerRoom(262144, 32768, null)).toBe(32768)
+    expect(answerRoom(8192, 512, null)).toBe(1024)
+    // The chat's own longest answer is what its requests ask for: never more than the model's (one chosen for another model)...
+    expect(answerRoom(32768, 8192, 16000)).toBe(8192)
+    // ...and all of it when that is more than half the context, so the prompt never takes its room.
+    expect(answerRoom(32768, 31744, 24000)).toBe(24000)
+    expect(answerRoom(32768, null, 24000)).toBe(16384)
+    expect(answerRoom(null, 8192, 1000)).toBeNull()
   })
 })

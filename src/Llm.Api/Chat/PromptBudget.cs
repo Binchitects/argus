@@ -34,12 +34,19 @@ public sealed class PromptBudget(int context, int answerRoom, double charsPerTok
     public long Limit => Context - AnswerRoom - Margin;
 
     /// <summary>
-    /// The room kept for the answer: the chat's own longest answer when it set one; else an eighth of the context, at most the
-    /// model's longest answer, and at least 1,024 tokens (a quarter of the context for a tiny one). The gauge shows the same.
+    /// The room kept for the answer, which the request may not fill: what it asks for when the chat set its own longest answer
+    /// (<see cref="Asked"/>); else an eighth of the context, at most the model's longest answer, and at least 1,024 tokens (a
+    /// quarter of the context for a tiny one). The gauge shows the same.
     /// </summary>
     public static int Room(int context, int? maxOutput, int? chatMaxTokens) =>
-        chatMaxTokens is > 0 and var chosen ? Math.Min(chosen, context / 2)
-            : Math.Max(Math.Min(context / 8, maxOutput is > 0 and var most ? most : int.MaxValue), Math.Min(1024, context / 4));
+        Asked(context, maxOutput, chatMaxTokens) ?? Math.Max(Math.Min(context / 8, maxOutput is > 0 and var most ? most : int.MaxValue), Math.Min(1024, context / 4));
+
+    /// <summary>
+    /// The longest answer a request asks for (max_tokens): <paramref name="chosen"/>, the chat's own or a step's, at most the
+    /// model's longest answer (half the context when the model says none); null when none was chosen.
+    /// </summary>
+    public static int? Asked(int context, int? maxOutput, int? chosen) =>
+        chosen is > 0 and var c ? Math.Min(c, maxOutput is > 0 and var most ? most : context / 2) : null;
 
     /// <summary>The characters a token held in a request measured as <paramref name="contextJson"/> (ContextParts) that the model counted at <paramref name="promptTokens"/>.</summary>
     public static double? Measured(string? contextJson, int? promptTokens)

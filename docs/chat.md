@@ -219,7 +219,8 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     message would not fit: each request is measured before it is sent (its
     messages, files, pictures and tool definitions), at the characters a token
     held in the chat's last answer (3 when none says), with room kept for the
-    answer (the chat's **Longest answer** when set, else an eighth of the
+    answer (the chat's **Longest answer** when set, which is what its requests
+    ask for, at most the model's longest answer; else an eighth of the
     context) and a margin. An answer whose tool calls outgrow the context cuts
     its earlier tool results to their start in what the model reads (the chat
     keeps them whole), then compacts everything before the question. A

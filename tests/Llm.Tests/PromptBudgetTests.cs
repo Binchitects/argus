@@ -46,7 +46,13 @@ public sealed class PromptBudgetTests
         // Never under 1,024 tokens (a quarter of a tiny context at most), and the chat's own longest answer when it set one.
         Assert.Equal(1_024, PromptBudget.Room(8_192, 512, null));
         Assert.Equal(1_000, PromptBudget.Room(4_000, null, null));
-        Assert.Equal(16_000, PromptBudget.Room(32_768, 8_192, 16_000));
+        Assert.Equal(6_000, PromptBudget.Room(32_768, 8_192, 6_000));
+        // What the request asks for (max_tokens) is what is kept: never more than the model's longest answer (one chosen
+        // for another model), and all of it when that is more than half the context, so the prompt never takes its room.
+        Assert.Equal((8_192, 8_192), (PromptBudget.Asked(32_768, 8_192, 16_000), PromptBudget.Room(32_768, 8_192, 16_000)));
+        Assert.Equal((24_000, 24_000), (PromptBudget.Asked(32_768, 31_744, 24_000), PromptBudget.Room(32_768, 31_744, 24_000)));
+        Assert.Equal(16_384, PromptBudget.Asked(32_768, null, 24_000));
+        Assert.Null(PromptBudget.Asked(32_768, 8_192, null));
         var budget = new PromptBudget(32_768, 4_096);
         Assert.Equal(655, budget.Margin);
         Assert.Equal(32_768 - 4_096 - 655, budget.Limit);

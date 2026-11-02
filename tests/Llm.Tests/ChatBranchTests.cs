@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
 namespace Llm.Tests;
@@ -122,6 +123,14 @@ public sealed class ChatBranchTests(AppFixture app)
         await PostStreamAsync(b, $"/api/chat/conversations/{id}/messages", new { content = "again" });
         Assert.False(LastRequest(email).Body.TryGetProperty("temperature", out _));
         Assert.Equal(500, LastRequest(email).Body.GetProperty("max_tokens").GetInt32());
+
+        // Chosen for a model that writes longer: the request asks this one for no more than its own longest answer (8,192).
+        using (var scope = app.Factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<AppDbContext>().Conversations.Where(c => c.Id == id).ExecuteUpdateAsync(s => s.SetProperty(c => c.MaxTokens, 20_000));
+        }
+        await PostStreamAsync(b, $"/api/chat/conversations/{id}/messages", new { content = "longer" });
+        Assert.Equal(8192, LastRequest(email).Body.GetProperty("max_tokens").GetInt32());
 
         foreach (var bad in new object[] { new { temperature = 3.0 }, new { topP = 1.5 }, new { maxTokens = 999_999 }, new { model = "no-such-model" } })
         {
