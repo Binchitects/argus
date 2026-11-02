@@ -70,7 +70,7 @@ public sealed partial class ModelMoves(AppDbContext db, ModelCatalog catalog, En
             }
             return features.Runs(EngineKinds.LlamaCpp) || Operations.Features.All.FirstOrDefault(f => f.Services.Contains(EngineKinds.LlamaCpp)) is not { } feature
                 ? null
-                : $"llama.cpp is off on this stack (its feature, {feature.Id}): the installer turns it on with ./arenactl repair --with {feature.Id}. It cannot move there before it runs.";
+                : $"llama.cpp is off on this stack (its feature, {feature.Id}): the installer turns it on with ./arenactl repair --with {feature.Id} from the checkout, or sh argus-arena-{AppInfo.Current.Version}-offline.run repair --with {feature.Id} with the offline installer. It cannot move there before it runs.";
         }
         if (vllm.For(m.Engine, m.EngineKind) is not { } backend)
         {

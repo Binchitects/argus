@@ -193,13 +193,15 @@ const both = {
 const qwen3 = { ...qwen, name: 'Qwen3', file: qwen3Gguf, mtp: false, draftHead: null }
 const onServer = (b: unknown) => ['vllm', 'sglang'].includes((b as { engineKind?: string }).engineKind ?? '')
 
-function stack(over: { instances?: object[]; models?: object[]; snapshots?: object[] } = {}) {
+/** A stack with these engines, models, library and downloads; `until`: the library and its snapshots are read once it settles. */
+function stack(over: { instances?: object[]; models?: object[]; library?: object[]; snapshots?: object[]; downloads?: object[]; until?: Promise<unknown> } = {}) {
   let models = over.models ?? [qwen3]
   const calls = fakeApi(admin, {
     'GET /api/admin/models': () => ({ json: { engine: { ...engine, instances: over.instances ?? instances }, small: null, models } }),
-    'GET /api/admin/models/library': () => ({ json: both.library }),
-    'GET /api/admin/models/library/snapshots': () => ({ json: over.snapshots ?? both.snapshots }),
+    'GET /api/admin/models/library': () => ({ json: over.library ?? both.library, until: over.until }),
+    'GET /api/admin/models/library/snapshots': () => ({ json: over.snapshots ?? both.snapshots, until: over.until }),
     'GET /api/admin/models/media/files': () => ({ json: [] }),
+    'GET /api/admin/models/hf/downloads': () => ({ json: over.downloads ?? [] }),
     'POST /api/admin/models/advice': (b) => ({ json: onServer(b) ? vllmAdvice : llamaAdvice }),
     'PATCH /api/admin/models/Qwen3': () => ({ json: { restarting: false, warning: null } }),
     'PATCH /api/admin/models/flash': () => ({ json: { restarting: false, warning: null } }),
@@ -263,7 +265,9 @@ describe('admin models: the Engine field', () => {
     await chooseEngine(dialog, 'vLLM')
     expect(await within(dialog).findByText('No Hugging Face snapshot of Qwen3 in the library')).toBeInTheDocument()
     expect(within(dialog).getByText(/Find on Hugging Face/)).toBeInTheDocument()
-    expect(within(dialog).getByText(/hf\/<owner>\/<repository>@<revision>\//)).toBeInTheDocument()
+    expect(within(dialog).getByText('Snapshots')).toBeInTheDocument()
+    // With no network here: downloaded on a machine that has one, into the folder the library reads, and carried over.
+    expect(within(dialog).getByText('hf download <owner>/<repository> --revision <revision> --local-dir <library>/hf/<owner>/<repository>@<revision>')).toBeInTheDocument()
     expect(within(dialog).queryByRole('form', { name: 'The chat model' })).not.toBeInTheDocument()
     const save = within(dialog).getByRole('button', { name: 'Save' })
     expect(save).toBeDisabled()
@@ -344,5 +348,171 @@ describe('admin models: the Engine field', () => {
     await userEvent.click(within(dialog).getByRole('combobox', { name: 'Engine' }))
     expect(await screen.findByRole('option', { name: 'vLLM · vllm' })).toBeInTheDocument()
     expect(screen.getByRole('option', { name: 'vLLM · vllm-b' })).toBeInTheDocument()
+  })
+})
+
+// The Engine field with the library still being read, files chosen and brought back, an engine that is off, and a model
+// another admin moved while its dialog was open.
+
+const qwen3Q8 = 'Qwen/Qwen3-8B-GGUF/Qwen3-8B-Q8_0.gguf'
+
+async function add() {
+  await userEvent.click(await screen.findByRole('button', { name: 'Add a model' }))
+  return screen.findByRole('dialog', { name: 'Add a model' })
+}
+
+async function chooseFile(dialog: HTMLElement, name: RegExp) {
+  await userEvent.click(within(dialog).getByRole('combobox', { name: 'File or model' }))
+  await userEvent.click(await screen.findByRole('option', { name }))
+}
+
+describe('admin models: the Engine field as the library and the page change', () => {
+  it('holds the Engine field while the library is read, so a model moved at once keeps its own snapshot', async () => {
+    let read = () => {}
+    stack({ models: [flash], until: new Promise<void>((resolve) => (read = resolve)) })
+    renderApp('/admin/models')
+    const card = (await screen.findByRole('heading', { name: /flash/ })).closest('section')!
+    await userEvent.click(within(card).getByRole('button', { name: 'Change engine…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Edit flash' })
+    const field = within(dialog).getByRole('combobox', { name: 'Engine' })
+    expect(field).toBeDisabled()
+    expect(field).toHaveAccessibleDescription(/Reading the library…/)
+    read()
+    await waitFor(() => expect(field).toBeEnabled())
+    await waitFor(() => expect(field).toHaveFocus())
+    await chooseEngine(dialog, 'SGLang')
+    expect(await within(dialog).findByRole('form', { name: 'The SGLang model' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('combobox', { name: 'File or model' })).toHaveTextContent('hf/org/flash@r')
+    expect(within(dialog).queryByText(/No Hugging Face snapshot/)).not.toBeInTheDocument()
+  })
+
+  it('saves a vLLM model pinned to the first engine of its kind with that engine, as it was', async () => {
+    const { calls } = stack({ models: [{ ...flash, engine: 'vllm' }] })
+    renderApp('/admin/models')
+    const dialog = await edit('flash')
+    const form = await within(dialog).findByRole('form', { name: 'The vLLM model' })
+    await userEvent.click(within(form).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH' && c.path === '/api/admin/models/flash')).toBe(true))
+    const sent = calls.find((c) => c.method === 'PATCH')!.body as { engine?: string; clear: string[] }
+    expect(sent.engine).toBe('vllm')
+    expect(sent.clear).not.toContain('engine')
+  })
+
+  it('saves a vLLM model whose kind this stack does not list without naming an engine, as it was', async () => {
+    const { calls } = stack({ instances: [instances[0], instances[2]], models: [flash] })
+    renderApp('/admin/models')
+    const dialog = await edit('flash')
+    const form = await within(dialog).findByRole('form', { name: 'The vLLM model' })
+    await userEvent.click(within(form).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH' && c.path === '/api/admin/models/flash')).toBe(true))
+    const sent = calls.find((c) => c.method === 'PATCH')!.body as { engineKind: string; engine?: string; clear: string[] }
+    expect(sent.engineKind).toBe('vllm')
+    expect(sent.engine).toBeUndefined()
+    expect(sent.clear).toContain('engine')
+  })
+
+  it('brings back the file chosen when the engine goes to the other form and back', async () => {
+    const q8 = { path: qwen3Q8, size: 9e9, parts: 1, profile: { ...profile, architecture: 'qwen3', name: 'Qwen3 8B', sizeLabel: '8B', quant: 'Q8_0' }, usedBy: [] }
+    stack({ library: [...both.library, q8] })
+    renderApp('/admin/models')
+    const dialog = await add()
+    await chooseFile(dialog, /Qwen3-8B-Q8_0\.gguf/)
+    await within(dialog).findByRole('form', { name: 'The chat model' })
+    await chooseEngine(dialog, 'vLLM')
+    await within(dialog).findByRole('form', { name: 'The vLLM model' })
+    expect(within(dialog).getByRole('combobox', { name: 'File or model' })).toHaveTextContent(qwen3Snapshot)
+    await chooseEngine(dialog, 'llama.cpp')
+    await within(dialog).findByRole('form', { name: 'The chat model' })
+    expect(within(dialog).getByRole('combobox', { name: 'File or model' })).toHaveTextContent(qwen3Q8)
+    expect(within(dialog).queryByText(/Its GGUF file in the library, by its/)).not.toBeInTheDocument()
+  })
+
+  it('says why Add model is held, and shows File or model as the dialog has it when the other engine finds no match', async () => {
+    stack({ snapshots: [] })
+    renderApp('/admin/models')
+    const dialog = await add()
+    const held = await within(dialog).findByRole('button', { name: 'Add model' })
+    expect(held).toBeDisabled()
+    expect(held).toHaveAccessibleDescription(/Choose its GGUF file under File or model/)
+    await chooseFile(dialog, /Qwen3-8B-Q4_K_M\.gguf/)
+    await within(dialog).findByRole('form', { name: 'The chat model' })
+    // vLLM finds no snapshot of it: the dialog has no file, and File or model says so.
+    await chooseEngine(dialog, 'vLLM')
+    expect(await within(dialog).findByText('No Hugging Face snapshot of Qwen3-8B-Q4_K_M in the library')).toBeInTheDocument()
+    const file = within(dialog).getByRole('combobox', { name: 'File or model' })
+    expect(file).toHaveTextContent('Choose a file or model')
+    expect(within(dialog).getByRole('button', { name: 'Add model' })).toHaveAccessibleDescription(/No Hugging Face snapshot of Qwen3-8B-Q4_K_M in the library/)
+    // The same file chosen again takes llama.cpp back.
+    await chooseFile(dialog, /Qwen3-8B-Q4_K_M\.gguf/)
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'Engine' })).toHaveTextContent('llama.cpp'))
+    await within(dialog).findByRole('form', { name: 'The chat model' })
+    // Away and back with the Engine field: its file comes back with llama.cpp.
+    await chooseEngine(dialog, 'vLLM')
+    await within(dialog).findByText('No Hugging Face snapshot of Qwen3-8B-Q4_K_M in the library')
+    await chooseEngine(dialog, 'llama.cpp')
+    await within(dialog).findByRole('form', { name: 'The chat model' })
+    expect(within(dialog).getByRole('combobox', { name: 'File or model' })).toHaveTextContent(qwen3Gguf)
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Add model' })).toBeEnabled())
+  })
+
+  it('keeps a vLLM model on vLLM when a GGUF file is chosen while llama.cpp is off, saying what turns it on', async () => {
+    stack({ instances: [{ ...instances[0], on: false }, instances[1], instances[2]], models: [flash] })
+    renderApp('/admin/models')
+    const dialog = await edit('flash')
+    await within(dialog).findByRole('form', { name: 'The vLLM model' })
+    await chooseFile(dialog, /Qwen3-8B-Q4_K_M\.gguf/)
+    await within(dialog).findByText('llama.cpp does not run here')
+    expect(within(dialog).getByRole('combobox', { name: 'Engine' })).toHaveTextContent('vLLM')
+    expect(within(dialog).queryByText(/^Moves flash/)).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('combobox', { name: 'File or model' })).toHaveAccessibleDescription(
+      /A GGUF file needs llama\.cpp: choose a snapshot for vLLM\. llama\.cpp is off here: the installer turns it on with .*repair --with chat-models/,
+    )
+    const save = within(dialog).getByRole('button', { name: 'Save' })
+    expect(save).toBeDisabled()
+    expect(save).toHaveAccessibleDescription(/llama\.cpp does not run here/)
+  })
+
+  it('holds an open dialog once another admin moved its model elsewhere, so Save cannot move it back unasked', async () => {
+    const { set, calls } = stack({ models: [flash] })
+    const { client } = renderApp('/admin/models')
+    const dialog = await edit('flash')
+    await within(dialog).findByRole('form', { name: 'The vLLM model' })
+    set([{ ...flash, engineKind: 'sglang' }])
+    await client.invalidateQueries({ queryKey: ['admin', 'models'] })
+    expect(await within(dialog).findByText('It moved to SGLang while this was open: close and edit it again.')).toBeInTheDocument()
+    expect(within(dialog).queryByRole('form', { name: 'The vLLM model' })).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('combobox', { name: 'Engine' })).toBeDisabled()
+    const save = within(dialog).getByRole('button', { name: 'Save' })
+    expect(save).toBeDisabled()
+    expect(save).toHaveAccessibleDescription(/It moved to SGLang while this was open/)
+    expect(calls.some((c) => c.method === 'PATCH')).toBe(false)
+  })
+
+  it('says how to turn an engine on with the offline installer as well as from the checkout', async () => {
+    stack({ instances: [instances[0], { ...instances[1], on: false }, instances[2]] })
+    renderApp('/admin/models')
+    const dialog = await edit('Qwen3')
+    expect(
+      within(dialog).getByText(/vLLM is off here: the installer turns it on with \.\/arenactl repair --with vllm from the checkout, or sh argus-arena-VERSION-offline\.run repair --with vllm with the offline installer/),
+    ).toBeInTheDocument()
+  })
+
+  it('adds a downloaded snapshot as a vLLM or SGLang model: its folder chosen, the Engine field held until the library is read', async () => {
+    let read = () => {}
+    const at = '2026-11-02T10:00:00Z'
+    const files = ['config.json', 'model.safetensors', 'tokenizer.json'].map((f) => ({ path: f, size: 1e9, library: `${qwen3Snapshot}/${f}` }))
+    stack({
+      downloads: [{ id: 'd1', kind: 'files', repo: 'Qwen/Qwen3-8B', state: 'done', bytes: 3e9, total: 3e9, speed: null, error: null, createdAt: at, snapshot: qwen3Snapshot, files }],
+      until: new Promise<void>((resolve) => (read = resolve)),
+    })
+    renderApp('/admin/models')
+    const downloads = await screen.findByRole('region', { name: 'Downloads' })
+    await userEvent.click(within(downloads).getByRole('button', { name: /Add as a model/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add a model' })
+    expect(within(dialog).getByRole('combobox', { name: 'Engine' })).toBeDisabled()
+    read()
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'Engine' })).toHaveTextContent('vLLM'))
+    expect(within(dialog).getByRole('combobox', { name: 'File or model' })).toHaveTextContent(qwen3Snapshot)
+    expect(await within(dialog).findByRole('form', { name: 'The vLLM model' })).toBeInTheDocument()
   })
 })

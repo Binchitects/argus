@@ -127,7 +127,10 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
         // A move there would only fail: refused, with what turns it on; the model stays on vLLM.
         using var refused = await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/flash", UriKind.Relative), new { engineKind = "llamacpp", file = "tiny/Tiny-4B-Q4_K_M.gguf" });
         await StatusAssert.Is(HttpStatusCode.Conflict, refused);
-        Assert.Contains("./arenactl repair --with chat-models", (await admin.JsonAsync(refused)).GetProperty("error").GetString(), StringComparison.Ordinal);
+        var why = (await admin.JsonAsync(refused)).GetProperty("error").GetString();
+        Assert.Contains("./arenactl repair --with chat-models", why, StringComparison.Ordinal);
+        // On a host with no network, the offline installer of this release does it.
+        Assert.Contains($"sh argus-arena-{Llm.Api.AppInfo.Current.Version}-offline.run repair --with chat-models", why, StringComparison.Ordinal);
         var row = (await admin.JsonAsync(await admin.GetAsync("/api/admin/models"))).GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == "flash");
         Assert.Equal(("vllm", "hf/acme/Flash@abc123", JsonValueKind.Null), (row.GetProperty("engineKind").GetString(), row.GetProperty("file").GetString(), row.GetProperty("move").ValueKind));
     }

@@ -160,7 +160,7 @@ export function ModelsPage() {
   if (models.isPending) return <PageSkeleton />
   if (models.error) return <QueryError error={models.error} retry={() => models.refetch()} />
   const { engine, small, gpu } = models.data
-  // The chat model being edited as the page has it now: its move to another engine holds its Engine field.
+  // The chat model being edited as the page has it now: its move to another engine, or its move done meanwhile, holds the dialog.
   const editing = dialog && 'edit' in dialog && dialog.edit.kind === 'chat' ? models.data.models.find((m) => m.source === 'local' && m.name === dialog.edit.model.name) : undefined
   return (
     <>
@@ -225,7 +225,7 @@ export function ModelsPage() {
               onClose={() => setDialog(null)}
               chatSlot={engineSlot}
               instances={engine.instances}
-              move={editing ? (editing.move ?? null) : undefined}
+              live={editing}
             />
           )}
         </DialogContent>

@@ -68,8 +68,9 @@ export function engineChoices(instances: EngineInstance[], { llama, current, mov
         value: i.name, kind, label: name,
         why: off ? 'off here' : down && moving ? 'not running' : null,
         down,
+        // As a feature that is off says it elsewhere: from the checkout, or with the offline installer on a host with no network.
         detail: off
-          ? `${name} is off here: the installer turns it on with ./arenactl repair --with ${featureOf[kind]} (or the offline installer's repair --with ${featureOf[kind]})${kind === 'vllm' ? ', with VLLM_IMAGE set (arenactl config)' : ''}.`
+          ? `${name} is off here: the installer turns it on with ./arenactl repair --with ${featureOf[kind]} from the checkout, or sh argus-arena-VERSION-offline.run repair --with ${featureOf[kind]} with the offline installer${kind === 'vllm' ? ', with VLLM_IMAGE set (arenactl config)' : ''}.`
           : down
             ? `${i.problem} ${moving ? 'A model moves there once it runs.' : 'A model added there waits for it.'}`
             : null,
