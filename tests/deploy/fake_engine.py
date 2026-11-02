@@ -12,6 +12,8 @@ make with small fake files, so they run with no container engine at all.
     FAKE_ENGINE       a folder standing for the engine volume (`cat /engine/X`)
     FAKE_CONFIG       what `compose config` prints (the normalised compose file)
     FAKE_PROFILES     what `compose config --profiles` prints
+    FAKE_LOAD_SECONDS how long each `load` takes
+    FAKE_INFO_FAIL    `info` fails (the engine does not answer)
 
 (With FAKE_STATE, compose config reads the compose files themselves, below.)
 
@@ -39,6 +41,7 @@ import os
 import re
 import sys
 import tarfile
+import time
 
 # The services' users, as installer.sh expects them on their volumes.
 OWNERS = {"engine": "1000:1000", "directory": "1000:1000", "sandbox": "1000:1000", "audio": "1000:1000",
@@ -180,6 +183,8 @@ def stateful(args: list[str]) -> int | None:
     s = st.s
     project = os.environ.get("COMPOSE_PROJECT_NAME", "arena")
     if args[0] == "info":
+        if os.environ.get("FAKE_INFO_FAIL"):
+            return 1
         print("fake engine")
         return 0
     if args[0] == "--version":
@@ -474,6 +479,9 @@ def main() -> int:
         log.write(json.dumps([os.path.basename(sys.argv[0])] + args) + "\n")
     if not args:
         return 0
+    # A load that takes FAKE_LOAD_SECONDS, as a big image's does (a run stopped while it loads), beside the others.
+    if args[0] == "load" and os.environ.get("FAKE_LOAD_SECONDS"):
+        time.sleep(float(os.environ["FAKE_LOAD_SECONDS"]))
     # The store is one engine's (FAKE_STATE_ENGINE, docker by default); the other has nothing.
     if os.environ.get("FAKE_STATE") and os.path.basename(sys.argv[0]) == os.environ.get("FAKE_STATE_ENGINE", "docker"):
         # One call at a time against the store: the installer loads several images at once.

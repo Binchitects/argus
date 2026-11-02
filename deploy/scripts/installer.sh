@@ -24,8 +24,10 @@
 #             rolls back by itself: the files it changed, the images and the data from the backup
 #             (the data as it is kept in a backup first). --rollback goes back to before the last
 #             upgrade the same way, asking about what was changed since (the certificates and the
-#             override stay as they are). A rollback cut off half way is finished when upgrade runs
-#             again. Services waiting for a model file (the embedding server) do not fail it.
+#             override stay as they are). An upgrade cut off (Ctrl-C, a lost session) is carried on
+#             when it runs again, by its bundle or a newer release's, or rolled back by --rollback; a
+#             rollback cut off half way is finished when upgrade runs again. Services waiting for a
+#             model file (the embedding server) do not fail it.
 #   repair    checks the installation against the bundle and puts right what is wrong:
 #             missing or changed files, missing images, volumes' owners, stopped or unhealthy
 #             containers; each finding is reported with what was done
@@ -89,7 +91,7 @@
 #                        one (scripts/make-cert.sh: a CA of its own, which also signs Code Arena's builds)
 #                        unless --acme-email (Let's Encrypt) or one is there already; Traefik's own then
 #   --hosts              the stack's names in /etc/hosts (scripts/setup-hosts.sh; needs root)
-#   --skip-requirements  go on when a requirement is not met
+#   --skip-requirements  go on when a requirement is not met (install and upgrade)
 #   --install-requirements  put the requirements right without asking (on a terminal it asks)
 # repair:
 #   --with A,B  --without A,B   features turned on and off
@@ -262,7 +264,7 @@ while [[ $# -gt 0 ]]; do
     --keep-images) only "$1" repair; KEEP_IMAGES=1 ;;
     --no-cert) only "$1" install upgrade repair; NO_CERT=1 ;;
     --hosts) only "$1" install; HOSTS=1 ;;
-    --skip-requirements) only "$1" install; SKIP_REQ=1 ;;
+    --skip-requirements) only "$1" install upgrade; SKIP_REQ=1 ;;
     --keep-failed) only "$1" install; KEEP_FAILED=1 ;;
     --fix) only "$1" requirements; FIX_REQ=1 ;;
     --install-requirements) only "$1" install; FIX_REQ=1 ;;
@@ -601,9 +603,10 @@ start_log() {   # start_log [soft]: soft, a log that cannot be written is left o
   # fd 3: the terminal alone, for what a person must see once and no log may keep.
   exec 3>&1 4>&2
   # The log's tee ignores Ctrl-C, TERM and a hang-up: they reach the whole process group, and a tee gone
-  # would end the installer at its next line (SIGPIPE) before it undoes a stopped install. It ends when
-  # the installer closes its output (finish).
-  exec > >(trap '' INT TERM HUP; exec tee -a "$LOG") 2>&1
+  # would end the installer at its next line (SIGPIPE) before it undoes a stopped install, and lose what it
+  # says then. It ends when the installer closes its output (finish). Ctrl-C by tee's own -i: bash gives a
+  # process substitution's command SIGINT back as it was, whatever trap '' said.
+  exec > >(trap '' INT TERM HUP; exec tee -ia "$LOG") 2>&1
   TEE_PID=$!
   say "installer.sh $CMD, $(date '+%Y-%m-%d %H:%M:%S'), log: $LOG"
 }
@@ -623,8 +626,15 @@ finish() {
     UNDO_ARMED=0
     [[ -n "${LOAD_PIDS[*]+x}" && ${#LOAD_PIDS[@]} -gt 0 ]] && wait "${LOAD_PIDS[@]}" 2>/dev/null
     undo_install || :
-  elif [[ $rc -ne 0 && $CMD == install && ${KEEP_FAILED:-0} -eq 1 && -f "$DEPLOY/.env" ]]; then
-    say "The install did not finish; what it did stays (--keep-failed). The admin's first password: ADMIN_PASSWORD in $DEPLOY/.env. Running it again takes it away and installs anew; $(rerun_cmd install --keep-failed) carries on instead."
+  else
+    stop_loads
+    if [[ $rc -ge 129 && $CMD == upgrade && -f "$MARKER" ]]; then
+      say ""
+      if [[ "$(marker_get rolling-back)" == 1 ]]; then say "The rollback was stopped part way: upgrade run again finishes it ($([[ -n "$RUNFILE" ]] && echo "sh $RUNFILE" || echo "bash $SELF") upgrade --dir $DIR)."
+      else say "The upgrade was stopped part way: the same upgrade run again carries it on ($([[ -n "$RUNFILE" ]] && echo "sh $RUNFILE" || echo "bash $SELF") upgrade --dir $DIR), or with --rollback goes back to $(marker_get from)."; fi
+    elif [[ $rc -ne 0 && $CMD == install && ${KEEP_FAILED:-0} -eq 1 && -f "$DEPLOY/.env" ]]; then
+      say "The install did not finish; what it did stays (--keep-failed). The admin's first password: ADMIN_PASSWORD in $DEPLOY/.env. Running it again takes it away and installs anew; $(rerun_cmd install --keep-failed) carries on instead."
+    fi
   fi
   [[ ${#TMPFILES[@]} -gt 0 ]] && rm -rf "${TMPFILES[@]}"
   if [[ -n "$TEE_PID" ]]; then exec 1>&3 2>&4; wait "$TEE_PID" 2>/dev/null; fi
@@ -641,6 +651,19 @@ trap 'exit 130' INT; trap 'exit 143' TERM; trap 'exit 129' HUP
 UNDO_ARMED=0 UNDO_DIR_NEW=0 UNDO_DEPLOY_NEW=0 UNDO_DATA_NEW=0 UNDO_MODELS_NEW=0 UNDO_HOSTS=0
 UNDO_LOADED=() UNDO_TAGS=() UNDO_DATA_MADE=() UNDO_FILES=()
 LOAD_PIDS=()   # the image loads running (waited for by their ids: a bare wait waits for the log's tee too, for ever)
+# The image loads still running, stopped with the run that started them: bash has what it starts with & ignore
+# Ctrl-C, so they went on loading after the run had ended, holding its lock, and the next run was refused. Each
+# load's own processes first (pigz, the engine's client), then the load. One stopped half way is loaded again.
+kill_tree() {   # kill_tree PID: it and every process under it (TERM), the lowest first
+  local k
+  for k in $(grep -ls "^PPid:[[:space:]]*$1\$" /proc/[0-9]*/status 2>/dev/null | cut -d/ -f3); do kill_tree "$k"; done
+  kill -TERM "$1" 2>/dev/null
+}
+stop_loads() {
+  local p
+  for p in ${LOAD_PIDS[@]+"${LOAD_PIDS[@]}"}; do kill -0 "$p" 2>/dev/null && kill_tree "$p"; done
+  LOAD_PIDS=()
+}
 arm_undo() {
   [[ $KEEP_FAILED -eq 1 || $DRY -eq 1 ]] && return 0
   [[ -e "$DIR" ]] || UNDO_DIR_NEW=1
@@ -741,11 +764,17 @@ gpu_ready() { nvidia_driver && toolkit_wired; }
 engine_root() {
   if [[ $ENGINE == podman ]]; then E info --format '{{.Store.GraphRoot}}' 2>/dev/null; else E info --format '{{.DockerRootDir}}' 2>/dev/null; fi
 }
-# What the images take unpacked: those the core and the features on need, once chosen; else all of them.
+# What the images to load take unpacked: those the core and the features on need, once chosen (else all of
+# them), but none here already as the bundle has it: an upgrade loads only what changed, and keeps the rest.
 images_raw_kb() {
-  local need=""
+  local need="" ref file bid raw bytes=0
   [[ ${#FEATURES_ON[@]} -gt 0 ]] && need=" $(needed_refs "${FEATURES_ON[@]}" | tr '\n' ' ') "
-  bundle_images | N="$need" awk -F'\t' 'ENVIRON["N"] == "" || index(ENVIRON["N"], " " $1 " ") { s += $5 } END { printf "%d", s / 1024 }'
+  while IFS=$'\t' read -r ref file bid _ raw; do
+    [[ -n "$ref" && ( -z "$need" || "$need" == *" $ref "* ) ]] || continue
+    image_loaded "$ref" "$file" "$bid" && continue
+    bytes=$((bytes + ${raw:-0}))
+  done < <(bundle_images)
+  printf '%d' $((bytes / 1024))
 }
 
 # The system's family, from os-release (ARENA_OS_RELEASE for the tests).
@@ -1263,6 +1292,13 @@ state_image_id() { awk -F'\t' -v r="$1" '$1 == r { print $2 }' "$STATE/IMAGES" 2
 state_image_pre() { awk -F'\t' -v r="$1" '$1 == r { print $3 }' "$STATE/IMAGES" 2>/dev/null | tail -n1; }
 # The bundle's id of the image it was loaded from (an upgrade's bundle may carry a newer one under the same tag).
 state_image_bid() { awk -F'\t' -v r="$1" '$1 == r { print $4 }' "$STATE/IMAGES" 2>/dev/null | tail -n1; }
+# The bundle's image REF is here already: the very image it carries, or as an earlier run loaded it from this
+# same image (a newer one under the same tag, as llama.cpp's server-cuda, is loaded); or it is the engine's own.
+image_loaded() {   # image_loaded REF FILE BUNDLE_ID
+  local have; have="$(image_id "$1")"
+  [[ -n "$have" ]] || return 1
+  [[ "$have" == "${3#sha256:}" || $2 == - || ( "$(state_image_bid "$1")" == "${3#sha256:}" && "$have" == "$(state_image_id "$1")" ) ]]
+}
 # The bundle's images into the engine, each only when it is not there already; the release's own
 # images tagged as compose names them. fresh: an image already here is recorded as not ours.
 load_images() {   # load_images fresh|upgrade|repair
@@ -1278,10 +1314,7 @@ load_images() {   # load_images fresh|upgrade|repair
     have="$(image_id "$ref")"
     pre="$(state_image_pre "$ref")"
     if [[ -z "$pre" ]]; then pre=0; [[ $1 == fresh && -n "$have" ]] && pre=1; fi
-    # There already: the very image the bundle carries, or as an earlier run loaded it from this same image
-    # (a newer one under the same tag, as llama.cpp's server-cuda, is loaded).
-    if [[ -n "$have" && ( "$have" == "${bid#sha256:}" || $file == - \
-          || ( "$(state_image_bid "$ref")" == "${bid#sha256:}" && "$have" == "$(state_image_id "$ref")" ) ) ]]; then
+    if image_loaded "$ref" "$file" "$bid"; then
       skipped=$((skipped + 1))
     elif [[ $file == - ]]; then
       die "$ref is not in $ENGINE (python3 $SOURCE/arenactl build, then again)"
@@ -1410,6 +1443,12 @@ old_deploy_sums() {   # old_deploy_sums VERSION
   elif [[ -f "$BUNDLE/known/$1.sha256" ]]; then sed -E 's/^([0-9a-f]{64}) [ *](.*)$/\2\t\1/' "$BUNDLE/known/$1.sha256" | sort
   fi
 }
+# path<TAB>sha of what release VERSION shipped in deploy/: this bundle's own files, or its list of that release.
+shipped_sums() {   # shipped_sums VERSION
+  if [[ "$1" == "$BVERSION" ]]; then bundle_deploy_sums
+  elif [[ -f "$BUNDLE/known/$1.sha256" ]]; then sed -E 's/^([0-9a-f]{64}) [ *](.*)$/\2\t\1/' "$BUNDLE/known/$1.sha256" | sort
+  fi
+}
 installed_files() {   # the files in DEPLOY that are not the host's own
   (cd "$DEPLOY" 2>/dev/null && find . -type f -printf '%P\n' | sort) | while IFS= read -r f; do is_user_path "$f" || printf '%s\n' "$f"; done
 }
@@ -1429,10 +1468,12 @@ release_owned() { case "$1" in docker-compose.yml|podman.yml|scale.yml|scripts/i
 SYNC_ADDED="" SYNC_REAPPLY=() SYNC_KEPT=() SYNC_BESIDE=()
 sync_deploy() {   # sync_deploy install|upgrade OLD_VERSION plan|do
   local mode=$1 oldv=$2 act=$3 f sum cur old n_add=0 n_upd=0 n_mine=0 n_yours=0 n_both=0 n_rm=0 n_keep=0
-  local -A OLD=() NEW=()
+  local -A OLD=() NEW=() CUT=()
   SYNC_REAPPLY=() SYNC_KEPT=() SYNC_BESIDE=()
   while IFS=$'\t' read -r f sum; do [[ -n "$f" ]] && NEW["$f"]=$sum; done < <(bundle_deploy_sums)
   while IFS=$'\t' read -r f sum; do [[ -n "$f" ]] && OLD["$f"]=$sum; done < <(old_deploy_sums "$oldv")
+  # Carrying on an older bundle's upgrade: what it wrote before it was cut off is that release's, as shipped.
+  [[ $mode == upgrade && -n "$TAKEOVER" ]] && while IFS=$'\t' read -r f sum; do [[ -n "$f" ]] && CUT["$f"]=$sum; done < <(shipped_sums "$TAKEOVER")
   [[ $act == do ]] && mkdir -p "$DEPLOY"
   for f in $(printf '%s\n' "${!NEW[@]}" | sort); do
     is_user_path "$f" && continue
@@ -1445,7 +1486,7 @@ sync_deploy() {   # sync_deploy install|upgrade OLD_VERSION plan|do
     cur="$(sha_of "$DEPLOY/$f")"
     [[ "$cur" == "${NEW[$f]}" ]] && continue
     old="${OLD[$f]:-}"
-    if [[ -n "$old" && "$cur" == "$old" ]]; then
+    if [[ ( -n "$old" && "$cur" == "$old" ) || ( -n "${CUT[$f]:-}" && "$cur" == "${CUT[$f]}" ) ]]; then
       # As shipped before (or as this installer wrote it): the release's new copy.
       n_upd=$((n_upd + 1))
       [[ $act == do ]] && did "updated $f" || would "update $f"
@@ -1482,8 +1523,8 @@ sync_deploy() {   # sync_deploy install|upgrade OLD_VERSION plan|do
   if [[ $mode != install ]]; then
     while IFS= read -r f; do
       [[ -n "$f" && -z "${NEW[$f]:-}" ]] || continue
-      old="${OLD[$f]:-}"
-      if [[ $mode == upgrade && -n "$old" && "$(sha_of "$DEPLOY/$f")" == "$old" ]]; then
+      old="${OLD[$f]:-}" cur="$(sha_of "$DEPLOY/$f")"
+      if [[ $mode == upgrade && ( ( -n "$old" && "$cur" == "$old" ) || ( -n "${CUT[$f]:-}" && "$cur" == "${CUT[$f]}" ) ) ]]; then
         n_rm=$((n_rm + 1))
         if [[ $act == do ]]; then rm -f "$DEPLOY/$f" && did "removed $f: not in $BVERSION (it was $oldv's, unchanged)"; else would "remove $f: not in $BVERSION (it is $oldv's, unchanged)"; fi
       else
@@ -2528,6 +2569,12 @@ cmd_install() {
 
 # ======================================================================= upgrade
 SNAP="" FROM="" BACKUP=""
+# The release an older bundle's upgrade was going to when it was cut off, which this one carries on.
+TAKEOVER=""
+# upgrade --rollback of a finished upgrade: what it shipped is this installer's record, not the bundle's.
+RB_FINISHED=0
+# This installer's record of what is installed (in STATE), kept with a rollback point.
+RECORD_FILES="deploy.sha256 MANIFEST kept"
 # The images the stack runs now, tagged so that a rollback finds them after the new ones load.
 keep_old_images() {
   local ref id slug n=0
@@ -2549,7 +2596,18 @@ snapshot_deploy() {
   (umask 077; tar -cpf "$SNAP/deploy.tar" "${ex[@]}" -C "$DEPLOY" .) || die "keeping a copy of $DEPLOY for a rollback failed (disk full?)"
   # VERSION beside deploy/ says which release this is: the upgrade writes the new one there.
   rm -f "$SNAP/VERSION"; [[ -f "$DIR/VERSION" ]] && cp -p "$DIR/VERSION" "$SNAP/VERSION"
+  rm -rf "$SNAP/record"; keep_record
   ok "a copy of $DEPLOY for a rollback ($(human "$(stat -c %s "$SNAP/deploy.tar")"))"
+}
+# This installer's record of FROM (its files' checksums, the files kept as changed here, the bundle it came from),
+# while it is still FROM's: the upgrade writes the new release's once it is done, and upgrade --rollback puts
+# FROM's back.
+keep_record() {
+  local f
+  [[ -d "$SNAP/record" ]] && return 0
+  mkdir -p "$SNAP/record" || die "cannot write $SNAP/record"
+  for f in $RECORD_FILES; do [[ -f "$STATE/$f" ]] && { cp -p "$STATE/$f" "$SNAP/record/" || die "keeping $STATE/$f for a rollback failed"; }; done
+  return 0
 }
 # Every service but the database stops: nothing writes while the backup is taken, and pg_dumpall
 # still has its server. The backup is then the data the new release starts from.
@@ -2750,11 +2808,13 @@ plan_restore() {
   local -a ask_back=() ask_out=() ask_keep=() changed=() data=() other=()
   local -A left=() added=()
   RB_SHIPPED=() RB_BACK=() RB_OUT=() RB_STAY=() RB_ENV="" RB_ENV_DEL=() RB_ENV_PUT=() RB_ENV_STAY=()
-  # What the new release shipped: its record after upgrade --rollback, else its bundle's.
-  if [[ "$(marker_get manual)" == 1 || $ROLLBACK -eq 1 ]] && [[ -f "$STATE/deploy.sha256" ]]; then
+  # What the new release shipped: its record after upgrade --rollback of a finished upgrade, else what the
+  # upgrade was going to (the bundle's, or its list of that release when another bundle rolls a cut-off one back).
+  if [[ "$(marker_get manual)" == 1 || $RB_FINISHED -eq 1 ]] && [[ -f "$STATE/deploy.sha256" ]]; then
     while IFS=$'\t' read -r f sum; do [[ -n "$f" ]] && RB_SHIPPED["$f"]=$sum; done < <(sed -E 's/^([0-9a-f]{64}) [ *](.*)$/\2\t\1/' "$STATE/deploy.sha256")
   elif [[ -n "$BUNDLE" ]]; then
-    while IFS=$'\t' read -r f sum; do [[ -n "$f" ]] && RB_SHIPPED["$f"]=$sum; done < <(bundle_deploy_sums)
+    while IFS=$'\t' read -r f sum; do [[ -n "$f" ]] && RB_SHIPPED["$f"]=$sum; done < <(shipped_sums "$(marker_get to)")
+    [[ ${#RB_SHIPPED[@]} -gt 0 ]] || while IFS=$'\t' read -r f sum; do [[ -n "$f" ]] && RB_SHIPPED["$f"]=$sum; done < <(bundle_deploy_sums)
   fi
   # The files the upgrade left as the host had changed them.
   while IFS= read -r f; do [[ -n "$f" ]] && left["$f"]=1; done < <(cat "$SNAP/kept" "$SNAP/beside" 2>/dev/null)
@@ -2950,15 +3010,31 @@ by_hand() {
   fi
   say "  $(dc_hint) up -d --pull never"
 }
+# FROM's record back in STATE, as the rollback point kept it (the record of the release rolled back from goes).
+# A rollback point an earlier installer made has none: FROM's files' checksums from the bundle's list of that
+# release, so verify and repair know them again.
+restore_record() {
+  local f
+  if [[ -d "$SNAP/record" ]]; then
+    for f in $RECORD_FILES; do
+      if [[ -f "$SNAP/record/$f" ]]; then cp -p "$SNAP/record/$f" "$STATE/$f"; else rm -f "${STATE:?}/$f"; fi
+    done
+    return 0
+  fi
+  rm -f "$STATE/deploy.sha256" "$STATE/MANIFEST"
+  [[ -n "$BUNDLE" && -f "$BUNDLE/known/$FROM.sha256" ]] || return 0
+  (umask 077; sed -E 's/^([0-9a-f]{64}) [ *](.*)$/\2\t\1/' "$BUNDLE/known/$FROM.sha256" \
+    | while IFS=$'\t' read -r f sum; do is_user_path "$f" || printf '%s  %s\n' "$sum" "$f"; done > "$STATE/deploy.sha256")
+}
 # Rolls back and says how it went: exit 4 (FROM runs again), 0 after upgrade --rollback, 5 (failed too).
 run_rollback() {   # run_rollback STARTED
-  local started=$1 manual
-  manual="$(marker_get manual)"
+  local started=$1 manual asked
+  manual="$(marker_get manual)"; asked="$(marker_get asked)"
   if rollback "$started"; then
     rm -f "$MARKER"
     if [[ $manual == 1 ]]; then
       state_set version "$FROM" previous "" status installed target ""
-      rm -f "$STATE/deploy.sha256" "$STATE/MANIFEST"
+      restore_record
       say ""; say "Rolled back: $FROM runs, with the data of $BACKUP. The data as it was before: $SNAP/data-before-rollback"
       exit 0
     fi
@@ -2967,6 +3043,7 @@ run_rollback() {   # run_rollback STARTED
     say ""
     if [[ $started -eq 1 ]]; then say "Rolled back: $FROM runs again, with the data of $BACKUP (what the new release wrote is in $SNAP/data-before-rollback). The log: $LOG"
     else say "Rolled back: $FROM runs again; its data was not touched (the new release never started). The log: $LOG"; fi
+    [[ $asked == 1 ]] && exit 0
     exit 4
   fi
   by_hand "$started"
@@ -2990,6 +3067,28 @@ finish_rollback() {
   [[ -f "$BACKUP_SCRIPT" ]] || BACKUP_SCRIPT=""
   run_rollback "$started"
 }
+# upgrade --rollback while an upgrade is cut off (Ctrl-C, a lost session): back to FROM as a failed upgrade goes,
+# with the data of its backup once the new release had started, in place of carrying it on.
+rollback_cut_off() {
+  local started
+  FROM="$(marker_get from)"; SNAP="$STATE/rollback/$FROM"; BACKUP="$(marker_get backup)"
+  started="$(marker_get started)"; started="${started:-0}"
+  EXCUSED="$(marker_get excused)"
+  say "An upgrade of $DIR from $FROM to $(marker_get to) was cut off: it is rolled back to $FROM$([[ $DRY -eq 1 ]] && echo " -- dry run: nothing is done")"
+  if [[ $DRY -eq 1 ]]; then
+    would "stop it, put back $FROM's files and images$([[ $started == 1 ]] && echo ", restore $BACKUP (the data as it is kept in a backup first)"), start $FROM"
+    return 0
+  fi
+  confirm "Roll back to $FROM?" || refuse "not confirmed"
+  lock; start_log
+  [[ -f "$SNAP/deploy.tar" && -f "$SNAP/IMAGES" ]] || die "the rollback copy is not in $SNAP: put $FROM back by hand (docs/deployment.md, Upgrades)" 5
+  BACKUP_SCRIPT="$SNAP/backup.sh"
+  [[ -f "$BACKUP_SCRIPT" ]] || BACKUP_SCRIPT=""
+  # The images the cut-off run loaded stay on the host (an upgrade again finds them): remove knows them.
+  record_images
+  marker_set asked 1
+  run_rollback "$started"
+}
 # Disk for the backup: the volumes it takes (an estimate, before compression).
 backup_need_kb() {
   local vol total=0 kb
@@ -3009,10 +3108,16 @@ cmd_upgrade() {
   [[ -f "$DEPLOY/.env" ]] || refuse "$DEPLOY has no .env: its secrets open the data; put it back first"
   read_settings
   if [[ -f "$MARKER" && "$(marker_get rolling-back)" == 1 ]]; then finish_rollback; return; fi
+  if [[ $ROLLBACK -eq 1 && -f "$MARKER" ]]; then rollback_cut_off; return; fi
   if [[ $ROLLBACK -eq 1 ]]; then cmd_rollback; return; fi
   if [[ -f "$MARKER" ]]; then
     iv="$(marker_get from)"
-    [[ "$(marker_get to)" == "$BVERSION" ]] || refuse "an upgrade to $(marker_get to) was interrupted here: run that bundle's upgrade again (it carries on)"
+    if [[ "$(marker_get to)" != "$BVERSION" ]]; then
+      [[ "$(vercmp "$(marker_get to)" "$BVERSION")" == -1 ]] \
+        || refuse "an upgrade to $(marker_get to) was interrupted here: run that bundle's upgrade again (it carries on), or upgrade --rollback goes back to $iv"
+      # A newer release's bundle (a hotfix) carries on what an older one left cut off: from the same rollback point.
+      TAKEOVER="$(marker_get to)"
+    fi
     src="the interrupted upgrade's record"
   else
     iv="$(installed_version)"; src="$(version_source)"
@@ -3029,6 +3134,8 @@ cmd_upgrade() {
   [[ $cmp == 1 ]] && refuse "$iv is installed ($src), newer than this bundle's $BVERSION: going back is a restore of the backup taken before that upgrade (upgrade --rollback with its bundle)"
   FROM="$iv"
   SNAP="$STATE/rollback/$FROM"
+  # A model library with models in it stays as it is: its owner is the host's choice (install asks), never changed by an upgrade.
+  MODELS_HAD="$(find "$MODELS_DIR" -type f \( -name '*.gguf' -o -name '*.safetensors' -o -name '*.onnx' -o -name '*.bin' \) 2>/dev/null | wc -l)"
   # From a release that kept the data in the engine's own storage: where it goes from now on.
   if [[ -z "$DATA_DIR" ]]; then
     DATA_DIR="$(ask "Where the stack's data goes from now on: the database, indexes, metrics, logs (DATA_DIR, an absolute folder)" "${DATA_ARG:-$DIR/data}")"
@@ -3069,7 +3176,7 @@ cmd_upgrade() {
   if [[ $DRY -eq 1 ]]; then
     check_bundle
     step "the plan"
-    if [[ -f "$MARKER" ]]; then would "carry on the upgrade that was interrupted$([[ -n "$(marker_get backup)" ]] && echo " (its backup: $(marker_get backup))")"
+    if [[ -f "$MARKER" ]]; then would "carry on the upgrade that was interrupted$([[ -n "$TAKEOVER" ]] && echo " (to $TAKEOVER: to $BVERSION now)")$([[ -n "$(marker_get backup)" ]] && echo " (its backup: $(marker_get backup))")"
     else would "keep the images $FROM runs (tagged $PROJECT-rollback:$FROM-...) and a copy of $DEPLOY, for a rollback"; fi
     would "load the $(needed_refs "${FEATURES_ON[@]}" | wc -l) images of the core and the features on into $ENGINE (those there already kept), while $FROM still runs"
     [[ -n "$(marker_get backup)" ]] || would "stop every service but postgres, and back up: scripts/backup.sh (the database, the volumes, .env and config) into $BACKUP_DIR"
@@ -3102,7 +3209,14 @@ cmd_upgrade() {
     EXCUSED="$(marker_get excused)"
     note "carrying on the upgrade from $FROM that was interrupted: ${BACKUP:+its backup $BACKUP, }its rollback copy $SNAP"
     [[ -f "$SNAP/deploy.tar" && -f "$SNAP/IMAGES" ]] || die "the interrupted upgrade's rollback copy is not in $SNAP"
+    if [[ -n "$TAKEOVER" ]]; then
+      note "the upgrade to $TAKEOVER that was cut off here is carried on to $BVERSION (its files are taken for $TAKEOVER's as shipped)"
+      cp -p "$BUNDLE/deploy/scripts/backup.sh" "$BACKUP_SCRIPT" || die "cannot write $BACKUP_SCRIPT"
+      marker_set to "$BVERSION"
+    fi
     [[ -f "$BACKUP_SCRIPT" ]] || cp -p "$BUNDLE/deploy/scripts/backup.sh" "$BACKUP_SCRIPT" || die "cannot write $BACKUP_SCRIPT"
+    # A rollback point an earlier installer made has no record of FROM: kept now, while it still is FROM's.
+    keep_record
   else
     step "room for the backup"
     need="$(backup_need_kb)"; mkdir -p "$BACKUP_DIR" 2>/dev/null; free="$(free_kb "$(existing_parent "$BACKUP_DIR")")"
@@ -3126,6 +3240,8 @@ cmd_upgrade() {
   # From here a failure rolls back.
   local failed=""
   upgrade_steps() {
+    # A subshell's own: stopped, its image loads stop with it (finish stops only the main shell's).
+    trap 'stop_loads; exit 130' INT; trap 'stop_loads; exit 143' TERM; trap 'stop_loads; exit 129' HUP
     # While FROM still serves: the longest step, and it changes nothing FROM runs on.
     load_images upgrade || return 1
     if [[ -z "$BACKUP" ]]; then
@@ -3142,12 +3258,14 @@ cmd_upgrade() {
     step "deploy/ ($FROM -> $BVERSION; .env, overrides, certificates, backups and models kept)"
     SYNC_ADDED="$SNAP/added"; touch "$SYNC_ADDED"
     sync_deploy upgrade "$FROM" do
-    printf '%s\n' ${SYNC_REAPPLY[@]+"${SYNC_REAPPLY[@]}"} > "$SNAP/reapply"
+    # Carried on, what the cut-off run did is in these already (the files it replaced, the keys it added) and
+    # this run finds nothing more to do with them: added to, never written anew (the rollback point empties them).
+    { cat "$SNAP/reapply" 2>/dev/null; printf '%s\n' ${SYNC_REAPPLY[@]+"${SYNC_REAPPLY[@]}"}; } | grep . | sort -u > "$SNAP/reapply.new"; mv -f "$SNAP/reapply.new" "$SNAP/reapply"
     printf '%s\n' ${SYNC_KEPT[@]+"${SYNC_KEPT[@]}"} > "$SNAP/kept"
     printf '%s\n' ${SYNC_BESIDE[@]+"${SYNC_BESIDE[@]}"} > "$SNAP/beside"
     ok "$SYNC_SUMMARY"
     step ".env"
-    ENV_ADDED_FILE="$SNAP/env-added"; : > "$ENV_ADDED_FILE"
+    ENV_ADDED_FILE="$SNAP/env-added"; touch "$ENV_ADDED_FILE"
     merge_env do
     apply_settings "$DEPLOY/.env"
     write_features do
@@ -3190,6 +3308,16 @@ cmd_upgrade() {
   record_kept $(cat "$SNAP/kept" "$SNAP/beside" 2>/dev/null)
   state_set target "" previous "$FROM"
   rm -f "$MARKER"
+  # Carried on from an older bundle's cut-off upgrade: the images it loaded of that release's own, which nothing
+  # runs now and no record names, go.
+  if [[ -n "$TAKEOVER" ]]; then
+    local ref n=0
+    while IFS=$'\t' read -r _ ref; do
+      ref="${ref%:*}:$TAKEOVER"
+      [[ -n "$(image_id "$ref")" ]] && E image rm "$ref" >/dev/null 2>&1 && n=$((n + 1))
+    done < <(bundle_release)
+    [[ $n -gt 0 ]] && did "$n image(s) of $TAKEOVER that the cut-off upgrade loaded, removed"
+  fi
   read_settings
   MODEL_WAITING="$(model_waits | xargs)"
   say ""
@@ -3206,6 +3334,7 @@ cmd_upgrade() {
 # certificates, the override and the host's other files stay as they are now.
 cmd_rollback() {
   local prev cur
+  RB_FINISHED=1
   prev="$(state_get previous)"; cur="$(state_get version)"
   [[ -n "$prev" && -f "$STATE/rollback/$prev/info" ]] || refuse "no upgrade of this installer to roll back here"
   FROM="$prev"; SNAP="$STATE/rollback/$prev"; BACKUP="$(sed -n 's/^backup=//p' "$SNAP/info")"
@@ -3607,7 +3736,7 @@ cmd_status() {
   say "Argus Arena in $DIR ($ENGINE, project $PROJECT)"
   say "  installed: ${iv:-unknown} ($(version_source))$([[ -n "$(state_get status)" && "$(state_get status)" != installed ]] && echo "; status: $(state_get status)")"
   if [[ -f "$MARKER" && "$(marker_get rolling-back)" == 1 ]]; then say "  a rollback to $(marker_get from) was cut off: run upgrade again to finish it"
-  elif [[ -f "$MARKER" ]]; then say "  an upgrade to $(marker_get to) was interrupted: run that bundle's upgrade again"; fi
+  elif [[ -f "$MARKER" ]]; then say "  an upgrade to $(marker_get to) was interrupted: that bundle's upgrade (or a newer release's) run again carries it on; upgrade --rollback goes back to $(marker_get from)"; fi
   [[ -n "$BUNDLE" ]] && say "  this bundle: $BVERSION ($(bundle_get commit)), upgrades $UPGRADES_FROM or newer"
   say "  https://$DOMAIN$([[ "$HTTPS_PORT" != 443 ]] && echo ":$HTTPS_PORT")"
   step "services"

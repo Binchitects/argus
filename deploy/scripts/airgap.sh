@@ -117,6 +117,8 @@ abspath() { case "$1" in /*) printf '%s' "$1" ;; *) printf '%s/%s' "$PWD" "${1#.
 human() { awk -v b="${1:-0}" 'BEGIN { split("B KB MB GB TB", u); i = 1; while (b >= 1024 && i < 5) { b /= 1024; i++ } printf (i == 1 ? "%d %s" : "%.1f %s"), b, u[i] }'; }
 # An image reference as a file name.
 image_file() { printf '%s.tar' "$(printf '%s' "$1" | tr '/:@' '___')"; }
+# make-installer's cache (ARENA_IMAGE_CACHE) by the image and the name it is saved under: an archive loads by that name.
+cache_key() { printf '%s-%s' "${2#sha256:}" "$(printf '%s' "$1" | sha256sum | cut -c1-12)"; }   # cache_key REF ID
 
 # Every file of a bundle is listed in SHA256SUMS and matches it; nothing else is there.
 verify_bundle() {   # verify_bundle <bundle dir>
@@ -313,8 +315,8 @@ PY
     id="$("$ENGINE" image inspect --format '{{.Id}}' "$ref" 2>/dev/null)" || die "$ref is not on this host: build or pull it first (this script pulls nothing)"
     file="$(image_file "$ref")"
     printf '%s\t%s\t%s\n' "$ref" "$file" "$id" >> "$B/images/IMAGES"
-    # make-installer's cache (ARENA_IMAGE_CACHE) has this very image packed already: not saved again.
-    if [[ -n "${ARENA_IMAGE_CACHE:-}" && -f "$ARENA_IMAGE_CACHE/${id#sha256:}.tar.gz" ]]; then
+    # make-installer's cache (ARENA_IMAGE_CACHE) has this very image packed under this name already: not saved again.
+    if [[ -n "${ARENA_IMAGE_CACHE:-}" && -f "$ARENA_IMAGE_CACHE/$(cache_key "$ref" "$id").tar.gz" ]]; then
       printf '  %-60s %8s\n' "$ref" "(cached)"
       continue
     fi

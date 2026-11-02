@@ -348,7 +348,7 @@ if [[ $ACTION == restore ]]; then
   if "$ENGINE" compose ps -q 2>/dev/null | grep -q .; then
     die "the stack is running. Stop it first: $ENGINE compose down   (volumes are kept)"
   fi
-  say "Restoring from $FROM. This OVERWRITES the current volumes${WITH_CONFIG:+ and config}."
+  say "Restoring from $FROM. This OVERWRITES the current volumes$([[ $WITH_CONFIG -eq 1 ]] && echo " and config")."
   if [[ $YES -eq 0 ]]; then
     read -r -p "Type RESTORE to continue: " answer; [[ "$answer" == "RESTORE" ]] || die "aborted"
   fi

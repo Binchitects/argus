@@ -13,7 +13,7 @@ What runs today, what it leaves out, and the tests that would close the gap.
 | **Deployment** | `./arenactl check upgrade --zero --stop-live` (and `--from TAG`) | this checkout from zero on fresh volumes: it comes up, provisions its first model, signs in, answers with a file; an upgrade keeps people, groups, chats and files, and survives `up` and `down`/`up` | a GPU host |
 | **Code Arena** | `./tools/dn test tests/CodeArena.Tests`, `npx vitest run src/code-arena` in `src/web`, and CI | the agent against a fake gateway and MCP server (tools, modes, approvals, sessions, compaction); the prompt's line editor on a fake terminal (↑'s history per folder, the draft kept, editing keys, several lines, a paste taller than the screen drawn once, Ctrl+Z stopping it with the keys signals again and the prompt drawn as it was after); the IDE's server: files inside the folder only (absolute paths, `..` and links that lead out refused), search, the agent's changes accepted or reverted, this run's key and the Host and Origin checks on every call and on the terminal's WebSocket; terminals on a real pseudo-terminal with `/bin/sh` (echo, `stty size` after a resize, the exit code, close, a session and controlling terminal, no signal ignored or blocked, no API key), and the macOS helper's path run on Linux; the page (Explorer, tabs, saving, the diff view, search, the terminal panel, with Monaco, xterm.js and the socket faked); CI builds the Linux package with its page and starts it | Linux or macOS |
 | **arena CLI** | `python3 -m unittest discover clients/arena`, and CI | `arena ask`, `review` and `explain-failure` against a fake gateway and GitLab on a local socket: streaming, the model chosen, diffs and logs cut to the budget, the note posted, a private CA, every exit code; the GitLab CI template's jobs run by `sh` (with PyYAML) | nothing running |
-| **Recovery and offline, the scripts** | `python3 -m unittest discover -s tests/deploy`; also CI | the fake vLLM (`tools/fake-vllm`: health, models, streamed answers at a set pace, vLLM's metrics, sleep and wake, the key from the environment, a failed load, a crash, a drain); `airgap.sh`: every image once, `deploy/` without `.env`, backups, keys or models, the registered models listed or copied, checksums written and checked, a damaged bundle or an unlisted file loads nothing, Podman; the offline installer (`make-installer.sh`, `installer.sh`): the bundle's layout and checksums, a damaged bundle or `.run` refused, arguments, dry runs that change nothing, the version gate, install, an upgrade from a 5.2.0 installation (backup, files, `.env` merged), a failed upgrade rolled back, an interrupted one carried on, repair, remove with and without `--purge`, status, on Docker and Podman; `restore-test.sh` and `rollback-test.sh`: their plans, and the guards (never the live project, its volumes or its ports); `recovery-check.py`: a dump's people, chats and settings, and the API checks against a fake app; the Laya server (`services/laya/server.py`): what a request may hold, which checkpoint reads it, its HTTP, with the model stubbed | nothing running (fake `docker` and `podman` on PATH) |
+| **Recovery and offline, the scripts** | `python3 -m unittest discover -s tests/deploy`; also CI | the fake vLLM (`tools/fake-vllm`: health, models, streamed answers at a set pace, vLLM's metrics, sleep and wake, the key from the environment, a failed load, a crash, a drain); `airgap.sh`: every image once, `deploy/` without `.env`, backups, keys or models, the registered models listed or copied, checksums written and checked, a damaged bundle or an unlisted file loads nothing, Podman; the offline installer (`make-installer.sh`, `installer.sh`): the bundle's layout and checksums, a damaged bundle or `.run` refused, arguments, dry runs that change nothing, the version gate, install, an upgrade from a 5.2.0 installation (backup, files, `.env` merged), a failed upgrade rolled back, an interrupted one carried on (also at once after Ctrl-C while its images load, and by a newer release's bundle) or rolled back instead, the record of the old release back after a rollback, the disk asked for only the images loaded, a hotfix's unchanged image loading by its new name, what a killed `.run` left removed by the next, repair, remove with and without `--purge`, status, on Docker and Podman; `restore-test.sh` and `rollback-test.sh`: their plans, and the guards (never the live project, its volumes or its ports); `recovery-check.py`: a dump's people, chats and settings, and the API checks against a fake app; the Laya server (`services/laya/server.py`): what a request may hold, which checkpoint reads it, its HTTP, with the model stubbed | nothing running (fake `docker` and `podman` on PATH) |
 | **Restore and rollback** | `./arenactl check restore [--from DIR]`, `./arenactl check rollback FROM_TAG TO_TAG` | a backup restores into a throwaway project beside the live one, with its people, chats, settings and spend; a release rolls back by restoring the backup taken before the upgrade | a host with the stack's images |
 | **Clients** | `./arenactl check clients` | the API as developers use it: OpenAI and Anthropic protocols, streaming, tool calls, spend per key, Argus over MCP, Qwen Code and DeepSeek Harness through the API and MCP | a running stack |
 | **Scale** | `./arenactl check scale` | many people at once: the chat's queue (and no answer carrying another's secret), every key at once, a burst of sandbox jobs | a running stack |
@@ -48,13 +48,39 @@ servers, and Laya. Not proved there: a second host with no network at all,
 Docker as the engine (the fakes only), a GPU through CDI, and models in the
 bundle.
 
+**Upgrades on a fresh offline host** (`tools/offline-e2e/run.sh`, 2026-11-03,
+for 7.7.1): a privileged container with its own Docker and no network at all,
+sharing the GPU through CDI. 7.6.3's `.run` installed there with every feature
+on (Argus and the scanners with a GitLab address where nothing answers: they
+start without one, and the host has no network to reach one), a chat model on
+the GPU, and what people keep written through the API
+(`tools/offline-e2e/data.py`: a person, a chat the model answered, a file
+attached to it, a key of the admin's own, a setting); then a 7.7.1 bundle of
+this tree (7.7.0's images, the app and Argus saying 7.7.1). Every run ends with
+status and verify, each container up and healthy, the admin's sign-in and
+overview, the data as it was, the model library's owner as it was, and the
+functional test (62 checks). The runs: stopped by Ctrl-C while its images load
+and again while its services start, carried on, then `upgrade --rollback`; the
+new release made unhealthy (`--fail-upgrade`), rolled back by itself (exit 4);
+stopped by a hang-up during its backup and as it starts the stack, carried on;
+7.7.0's upgrade killed while its services start, carried on by the 7.7.1
+bundle. Each upgrade, rollback and carried-on run passed every check of its
+own. The functional test passed whole against 7.6.3 after the rollbacks; against
+7.7.1 (after an upgrade, or a fresh install) one check failed in each run. Mostly
+a key's call to a picture model just given to admins only was answered 503 (or
+not at all), not refused: the app believes a key's models for ten seconds
+(KeyBook, new in 7.7.0) and tried to load the model for it. Else the person's
+usage page was a step behind the gateway's log. Both are the app's, not the
+installer's. The released 7.7.0 bundle itself upgraded and rolled back on that
+host (one GPU, room on the disk); what failed was found by the stopped runs,
+the disk it asked for, the record after a rollback, and the next bundle made
+from the same image cache.
+
 ## 2. What is not tested
 
 | gap | what it would catch |
 |---|---|
 | `restore-test.sh` and `rollback-test.sh` run in CI (they need the stack's images) | a backup that cannot be restored, a release that cannot be rolled back |
-| An offline bundle loaded on a second host with no network, then `up` (the installer's run in Podman pulled nothing, but its host had a network) | a first start that needs the internet |
-| The offline installer with Docker as the engine, and with models and a GPU (proved in Podman without them) | an engine or GPU difference past what the fakes model |
 | The stack running under Podman in CI (needs a GPU runner; CI only renders `podman.yml`) | a Podman regression past the compose files |
 | Video generation in CI (minutes on a GPU) | a change in stable-diffusion.cpp's job API |
 | Code Arena's terminals on a Mac and on Windows (the tests run on Linux, the macOS helper's path included; ConPTY is only built) | a pseudo-terminal that does not start, or loses its size or Ctrl+C, on those systems |
@@ -173,8 +199,8 @@ really is denied.
 | test | status |
 |---|---|
 | S9.1 | airgap bundle builds, its checksums verify, and a damaged one loads nothing | `./arenactl airgap pack` and `load`; the logic in CI (`tests/deploy`) |
-| S9.2 | full round trip: build → extract → load → `up` → the stack serves | **missing**: needs a second host |
-| S9.3 | the stack starts with `--network none` on the compose network, i.e. genuinely offline | **missing** — this is what the offline commits claim |
+| S9.2 | full round trip: build → extract → load → `up` → the stack serves | **done**: `tools/offline-e2e/run.sh`, a test host with no network (install, upgrade, rollback) |
+| S9.3 | the stack starts with `--network none` on the compose network, i.e. genuinely offline | **done**: `tools/offline-e2e/run.sh` runs it on a host with no network at all |
 | S9.4 | images build from a clean cache (all three local ones) | **missing** |
 
 ### S11 — Many people at once (`./arenactl check scale`), 2026-10-03
@@ -356,9 +382,9 @@ Ordered by (risk × likelihood), not by effort:
 | 1 | **S6.2 restore round trip** — **scripted** (`restore-test.sh`); next, run it after every backup | the only operation that can destroy data |
 | 3 | **S2 for the ten unreferenced services** | closes the largest named hole |
 | 4 | **C2 TLS trust per runtime** | this is the failure users actually hit; four small tests |
-| 5 | **S9.3 genuinely offline start** | the offline commits claim it; nothing checks it |
+| ~~5~~ | ~~**S9.3 genuinely offline start**~~ — **done** (`tools/offline-e2e/run.sh`) | |
 | ~~6~~ | ~~**S3.4 hash-free account list**~~ — **done** (`IdentityTests`) | |
-| 7 | **S9.1/S9.2 airgap round trip** — S9.1 **scripted** (`airgap.sh`); S9.2 needs a second host | easy to regress |
+| ~~7~~ | ~~**S9.1/S9.2 airgap round trip**~~ — **done**: S9.1 scripted (`airgap.sh`), S9.2 on a host with no network (`tools/offline-e2e/run.sh`) | |
 | ~~8~~ | ~~**Automate C3.5**~~ — **done.** `./tools/test-gitlab/run.sh` runs the whole lifecycle, and `ARGUS_TEST_WORK` moves the index off the NTFS volume that SQLite's WAL mode cannot use. All sixteen tools are contract-tested over the wire; the six `docs_*` tools are reported as NOT COVERED because the fixture has no documentation pack installed |
 | 9 | **S10 idempotency** | two `up`s, two indexes, one `down`/`up` |
 | 10 | **C4 browser** | highest effort, and the only way to test the UI layer at all |

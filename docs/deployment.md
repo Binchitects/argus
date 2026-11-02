@@ -1020,7 +1020,10 @@ Then compose reads the release's files with this host's answers (the `.env`
 and the override it would write, the features chosen), and a container runs
 `nvidia-smi` to prove the GPU reaches it. Only when every check is met is
 anything written, loaded or started; what is not met is said together, and
-nothing has been changed. `sh argus-arena-VERSION-offline.run requirements`
+nothing has been changed (`--skip-requirements` goes on anyway, for install and
+upgrade). The disk is for the images it loads: those the host has already, as
+the bundle carries them, are not counted (an upgrade loads only what
+changed). `sh argus-arena-VERSION-offline.run requirements`
 checks a host on its own (`--fix` puts it right; `./arenactl requirements` is
 the same from a checkout).
 
@@ -1134,9 +1137,16 @@ back the list there was.
    back or restored over the data and it stops with exit 5 and the steps to
    take. It says what failed and exits 4 when the old release runs again.
 
-An upgrade cut off half way (a crash, a power cut) carries on where it was when
-it is run again, and a rollback cut off half way is finished, never taken for
-the upgrade. `upgrade --rollback` goes back to the release before the last
+An upgrade cut off half way (Ctrl-C, a lost session, a crash, a power cut)
+carries on where it was when it is run again: at once, as the image loads stop
+with it, and from the same bundle or a newer release's (a hotfix carries on an
+upgrade the release before it left cut off). `upgrade --rollback` on an upgrade
+cut off goes back to the old release instead, as a failed upgrade does, and
+exits 0. A rollback cut off half way is finished, never taken for the upgrade.
+The `.run` removes the unpacked bundle a run killed outright left beside it, so
+the next one has the room.
+
+`upgrade --rollback` goes back to the release before the last
 upgrade later on: what was written since is lost (a backup of it is kept). It
 puts back only what the upgrade changed: the old release's copy of each file
 it replaced or removed, what it added taken out, and `.env` without the keys it
@@ -1148,8 +1158,11 @@ in `.env` a key changed since stays, but for `DB_PASSWORD`, `APP_KEY` and
 certificates and the override stay as they are. The `.env` there was, and each
 file changed since the upgrade that is replaced or taken out, are kept in
 `.arena-install/rollback/VERSION/files-before-rollback/`; `--dry-run` lists all
-of it. The old release's images stay for that until you remove them; the
-upgrade prints the command.
+of it. The installer's record of the old release (its files' checksums, the
+files kept as changed here) comes back too, so `verify`, `repair` and `remove`
+know the installation as before. The old release's images stay for that until
+you remove them; the upgrade prints the command. The model library's owner is
+the host's: an upgrade does not change it.
 
 #### Repair, status, verify
 
