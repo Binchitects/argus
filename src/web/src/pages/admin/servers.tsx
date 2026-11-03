@@ -15,6 +15,7 @@ import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { defaultMaxOutput, outputBounds, tokens } from './model-profile'
 
 export interface RemoteModel {
   remote: string
@@ -176,6 +177,13 @@ const typed = (m: RemoteModel): Pick['prices'] => ({
 })
 
 /** What is wrong with a typed price, if anything (empty is the default). The API checks the same, with the default input too. */
+/** A longest answer the context does not hold beside a prompt (ModelAdvisor.OutputBounds), as the API refuses it. */
+function outputError(p: Pick): string | undefined {
+  if (p.maxOutput == null || !p.context) return undefined
+  const { min, max } = outputBounds(p.context)
+  return p.maxOutput < min ? `At least ${tokens(min)} tokens.` : p.maxOutput > max ? `At most ${tokens(max)} tokens.` : undefined
+}
+
 function priceError(prices: Pick['prices'], k: (typeof priceKeys)[number]): string | undefined {
   const text = prices[k].trim()
   if (text === '') return undefined
@@ -250,7 +258,7 @@ function ServerForm({ saved, onDone }: { saved: RemoteServer | null; onDone: () 
   })
   const set = (i: number, change: Partial<Pick>) => setPicks((now) => now.map((p, j) => (j === i ? { ...p, ...change } : p)))
   const chosen = picks.filter((p) => p.on).length
-  const invalid = picks.some((p) => p.on && priceKeys.some((k) => priceError(p.prices, k)))
+  const invalid = picks.some((p) => p.on && (priceKeys.some((k) => priceError(p.prices, k)) || outputError(p)))
   return (
     <form
       className="grid gap-4"
@@ -320,10 +328,18 @@ function ServerForm({ saved, onDone }: { saved: RemoteServer | null; onDone: () 
                   <Field label="Name at the gateway">
                     <Input value={p.name} onChange={(e) => set(i, { name: e.target.value })} aria-label={`Name at the gateway for ${p.remote}`} />
                   </Field>
-                  <Field label="Context (tokens)">
+                  <Field label="Context (tokens)" hint="What one request holds: its prompt and its answer together.">
                     <Input inputMode="numeric" value={p.context ?? ''} onChange={(e) => set(i, { context: e.target.value ? Number(e.target.value) : null })} aria-label={`Context for ${p.remote}`} />
                   </Field>
-                  <Field label="Longest answer">
+                  <Field
+                    label="Longest answer"
+                    error={outputError(p)}
+                    hint={
+                      p.context
+                        ? `${tokens(outputBounds(p.context).min)} to ${tokens(outputBounds(p.context).max)}: the context less a quarter for a prompt. Empty: ${tokens(defaultMaxOutput(p.context))}.`
+                        : 'Empty: half the context.'
+                    }
+                  >
                     <Input inputMode="numeric" value={p.maxOutput ?? ''} onChange={(e) => set(i, { maxOutput: e.target.value ? Number(e.target.value) : null })} aria-label={`Longest answer for ${p.remote}`} />
                   </Field>
                   <Field label="At once" hint="Its parallel slots">

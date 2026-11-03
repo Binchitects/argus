@@ -41,6 +41,17 @@ public sealed class CliTests : IDisposable
     }
 
     [Fact]
+    public async Task Models_says_each_ones_window_and_longest_answer()
+    {
+        _gateway.MaxOutput = 8192;
+        using var h = new Harness(_gateway, _mcp, c => c.Clear());
+        h.Secret = FakeGateway.Key;
+        Assert.Equal(0, await h.Run("", "login", "--url", _mcp.BaseUrl, "--gateway", _gateway.Url));
+        Assert.Equal(0, await h.Run("", "models"));
+        Assert.Contains("model-a  32,768 tokens, answers up to 8,192 · tools · thinking", h.Out);
+    }
+
+    [Fact]
     public async Task Login_asks_for_the_address_and_a_refused_key_saves_nothing()
     {
         using var h = new Harness(_gateway, _mcp, c => c.Clear());

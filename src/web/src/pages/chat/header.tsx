@@ -70,6 +70,7 @@ export function ModelPicker({ config, value, onChange }: { config: ChatConfig; v
               <span className="flex flex-wrap gap-1">
                 {!m.loaded && (m.onRequest ? <Badge variant="secondary">Loads when asked</Badge> : <Badge variant="warning">Not loaded now</Badge>)}
                 {m.context && <Badge variant="secondary">{formatValue(m.context)} context</Badge>}
+                {m.maxOutput && <Badge variant="secondary">answers up to {formatValue(m.maxOutput)}</Badge>}
                 {m.tools && (
                   <Badge variant="secondary">
                     <Wrench /> Tools

@@ -10,8 +10,9 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
 ## What it does
 
 - **Models.** The picker lists the models you may use (Admin → Models), with
-  what each can do: context size, tools, thinking, and whether it can see
-  images. A chat keeps its model. The default is the loaded model. An engine
+  what each can do: its context (what one request holds), its longest answer
+  ("answers up to 16.38 K"), tools, thinking, and whether it can see images
+  (Code Arena's picker says the same). A chat keeps its model. The default is the loaded model. An engine
   model that is not loaded is listed greyed out, "Not loaded now": an admin
   loads it.
 - **A model for small steps.** With **Settings → Model → Model for sub-agents

@@ -118,7 +118,8 @@ API key (**Your account → API key**; typed without echo), checks the key with
 the gateway (`GET https://gateway.DOMAIN/v1/models`), connects to Arena's
 tools to say how many there are, and saves both in its config file, readable
 by its owner only (0600). The key is never printed. `code-arena logout` forgets
-the key; `code-arena models` lists the models the key may use.
+the key; `code-arena models` lists the models the key may use, each with its
+window and its longest answer ("32,768 tokens, answers up to 16,384").
 
 Without a key at hand, press Enter at the key's question (or give
 `login --user NAME`): Code Arena signs in with the user name and password as

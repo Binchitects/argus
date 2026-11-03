@@ -164,6 +164,15 @@ describe('chat', () => {
     expect(waitingText({ ahead: 0, model: 'Big', yours: true })).toBe('Waiting for your other answer to end first.')
   })
 
+  it('each model in the picker says its window and its longest answer', async () => {
+    backend({})
+    renderApp('/chat')
+    await userEvent.click(await screen.findByRole('button', { name: /^Model:/ }))
+    const main = await screen.findByRole('menuitem', { name: /Main-Model/ })
+    expect(within(main).getByText('32.77 K context')).toBeInTheDocument()
+    expect(within(main).getByText('answers up to 8.19 K')).toBeInTheDocument()
+  })
+
   it('a model that is not loaded is listed but cannot be chosen', async () => {
     backend({ config: { models: [config.models[0], { ...config.models[1], loaded: false }] } })
     renderApp('/chat')

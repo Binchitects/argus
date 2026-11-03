@@ -298,6 +298,8 @@ describe('Code Arena in the browser', () => {
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Mode' })).toHaveTextContent('Auto-edit'))
 
     await userEvent.click(screen.getByRole('button', { name: 'Model: model-a' }))
+    // Each says its window and its longest answer, as the web chat's picker does.
+    expect(within(await screen.findByRole('menuitem', { name: /model-b/ })).getByText('answers up to 8.19 K')).toBeInTheDocument()
     await userEvent.click(await screen.findByRole('menuitem', { name: /model-b/ }))
     await waitFor(() => expect(calls.filter((c) => c.path === '/api/settings').map((c) => c.body)).toContainEqual({ model: 'model-b' }))
     expect(await screen.findByRole('button', { name: 'Model: model-b' })).toBeInTheDocument()

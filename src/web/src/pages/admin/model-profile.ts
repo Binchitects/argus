@@ -68,6 +68,12 @@ export const tokens = (n: number) => n.toLocaleString('en-US')
  */
 export const defaultMaxOutput = (held: number) => Math.max(256, Math.min(32768, Math.floor(held / 2 / 1024) * 1024))
 
+/**
+ * The longest answer a request of `held` tokens may have, as the API checks it (ModelAdvisor.OutputBounds): the window less a
+ * quarter of it for a prompt, 1,024 tokens at least.
+ */
+export const outputBounds = (held: number) => ({ min: Math.min(256, Math.floor(held / 2)), max: Math.max(256, held - Math.max(1024, Math.floor(held / 4))) })
+
 /** 26,900,000,000 -> "26.9B", 6,670,000,000 -> "6.7B", 600,000,000 -> "600M". */
 export function params(n: number | null | undefined): string | null {
   if (!n) return null

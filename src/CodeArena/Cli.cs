@@ -571,9 +571,14 @@ internal static partial class Cli
             foreach (var m in await new GatewayClient(http, config.GatewayUrl, config.ApiKey).ModelsAsync(ct))
             {
                 var traits = new List<string>();
+                // The window and the longest answer in it, as the gateway says them.
                 if (m.Context is { } c)
                 {
-                    traits.Add($"{c:N0} tokens");
+                    traits.Add(m.MaxOutput is { } most ? $"{c:N0} tokens, answers up to {most:N0}" : $"{c:N0} tokens");
+                }
+                else if (m.MaxOutput is { } most)
+                {
+                    traits.Add($"answers up to {most:N0}");
                 }
                 if (m.Tools)
                 {

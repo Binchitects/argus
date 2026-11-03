@@ -292,6 +292,14 @@ describe('admin models', () => {
     await userEvent.click(big)
     expect(within(dialog).getByLabelText('Name at the gateway for org/Big-Remote')).toHaveValue('Big-Remote')
     expect(within(dialog).getByLabelText('Context for org/Big-Remote')).toHaveValue('65536')
+    // What one request holds; the longest answer within it, said before it is typed, as the local model's dialog says it.
+    expect(within(dialog).getByText('What one request holds: its prompt and its answer together.')).toBeInTheDocument()
+    expect(within(dialog).getByText('256 to 49,152: the context less a quarter for a prompt. Empty: 32,768.')).toBeInTheDocument()
+    const longest = within(dialog).getByLabelText('Longest answer for org/Big-Remote')
+    await userEvent.type(longest, '60000')
+    expect(within(dialog).getByText('At most 49,152 tokens.')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Add server' })).toBeDisabled()
+    await userEvent.clear(longest)
     await userEvent.clear(within(dialog).getByLabelText('Name at the gateway for org/Big-Remote'))
     await userEvent.type(within(dialog).getByLabelText('Name at the gateway for org/Big-Remote'), 'big')
     // How many requests it serves at once: a pool of servers of one model gives none more.
