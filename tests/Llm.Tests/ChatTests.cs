@@ -911,6 +911,27 @@ public sealed class ChatTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Messages_left_out_so_a_request_fits_are_said()
+    {
+        var (b, email) = await PersonAsync();
+        var id = await NewChatAsync(b, new { tools = Array.Empty<string>() });
+        // 40 exchanges of ~2,500 characters, past the context; the oldest question cannot be summarized, so nothing is.
+        await OldExchangesAsync(id, 40, 2_500);
+        using (var scope = app.Factory.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<AppDbContext>().ChatMessages.Where(m => m.ConversationId == id && m.Sequence == 1)
+                .ExecuteUpdateAsync(s => s.SetProperty(m => m.Content, m => "[summary limit 10] " + m.Content));
+        }
+        var events = await SendAsync(b, id, "the newest question");
+        var notices = events.Where(e => e.GetProperty("type").GetString() == "notice").ToDictionary(e => e.GetProperty("kind").GetString()!, e => e.GetProperty("text").GetString()!);
+        Assert.StartsWith("The chat could not be compacted", notices["compact_failed"], StringComparison.Ordinal);
+        Assert.Matches(@"^The model's context cannot hold the whole chat, even compacted: its \d+ oldest messages are left out of what it reads \(the chat keeps them\)\.$", notices["left_out"]);
+        var sent = RequestsOf(email, summaries: false).Last().ToJsonString();
+        Assert.DoesNotContain("old question 0 ", sent, StringComparison.Ordinal);
+        Assert.Contains("old question 39 ", sent, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_summary_that_overflows_is_written_in_smaller_parts()
     {
         var (b, email) = await PersonAsync();

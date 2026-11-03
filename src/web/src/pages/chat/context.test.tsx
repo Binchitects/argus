@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { fakeApi, member, renderApp } from '@/test/utils'
-import { answerRoom } from './context'
+import { answerRoom, chatAnswerMost } from './context'
 import { blank } from './live'
 import type { ChatConfig, Conversation, Message } from './types'
 
@@ -122,9 +122,19 @@ describe('the room kept for the answer, as the server keeps it', () => {
     expect(answerRoom(8192, 512, null)).toBe(1024)
     // The chat's own longest answer is what its requests ask for: never more than the model's (one chosen for another model)...
     expect(answerRoom(32768, 8192, 16000)).toBe(8192)
-    // ...and all of it when that is more than half the context, so the prompt never takes its room.
-    expect(answerRoom(32768, 31744, 24000)).toBe(24000)
+    // ...nor than half the context, so the conversation keeps the other half to read: one chosen as long as the model's own
+    // (31,744 of 32,768) once left it 369 tokens, and every message after left the whole chat out.
+    expect(answerRoom(32768, 31744, 31744)).toBe(16384)
+    expect(answerRoom(32768, 31744, 24000)).toBe(16384)
     expect(answerRoom(32768, null, 24000)).toBe(16384)
     expect(answerRoom(null, 8192, 1000)).toBeNull()
+  })
+
+  it("bounds the chat's own longest answer by the model's and half its context", () => {
+    expect(chatAnswerMost(32768, 8192)).toBe(8192)
+    expect(chatAnswerMost(32768, 31744)).toBe(16384)
+    expect(chatAnswerMost(32768, null)).toBe(16384)
+    expect(chatAnswerMost(null, 8192)).toBe(8192)
+    expect(chatAnswerMost(null, null)).toBeNull()
   })
 })

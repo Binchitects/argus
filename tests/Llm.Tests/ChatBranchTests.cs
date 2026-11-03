@@ -203,6 +203,37 @@ public sealed class ChatBranchTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_chats_own_longest_answer_as_long_as_the_models_keeps_its_conversation()
+    {
+        // As the live Qwen3.8-27B was: 32,768 tokens a request, answers up to 31,744.
+        var gateway = new FakeGateway();
+        gateway.Models.Add(new GatewayModel("Long-Answers", 32768, 31744, Vision: false, Tools: true, Thinking: true, null, null, null));
+        await using var f = app.Create(app.ConnectionStringFor("answer_" + Guid.NewGuid().ToString("N")[..8]), gateway);
+        var (b, email) = await PersonAsync(f);
+        var id = await NewChatAsync(b, new { useArgus = false, model = "Long-Answers" });
+        // Chosen as long as the model's own (the chat once took it): the request asks for half the context at most, and the
+        // budget keeps no more for it, so each message still reads the ones before it.
+        using (var scope = f.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<AppDbContext>().Conversations.Where(c => c.Id == id).ExecuteUpdateAsync(s => s.SetProperty(c => c.MaxTokens, 31_744));
+        }
+        foreach (var question in new[] { "first", "second", "third" })
+        {
+            await PostStreamAsync(b, $"/api/chat/conversations/{id}/messages", new { content = question });
+        }
+        var (body, roles) = LastRequest(email);
+        Assert.Equal(["system", "user", "assistant", "user", "assistant", "user"], roles);
+        Assert.Equal(16_384, body.GetProperty("max_tokens").GetInt32());
+
+        // The chat's own is chosen within that, and the refusal says so.
+        var refused = await b.Http.PatchAsJsonAsync(new Uri($"/api/chat/conversations/{id}", UriKind.Relative), new { maxTokens = 31_744 });
+        await StatusAssert.Is(HttpStatusCode.BadRequest, refused);
+        Assert.Contains("The longest answer is from 1 to 16,384 tokens for Long-Answers: its own longest (31,744), at most half its context of 32,768 tokens, so the chat keeps the rest to read.",
+            await refused.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        await StatusAssert.Is(HttpStatusCode.NoContent, await b.Http.PatchAsJsonAsync(new Uri($"/api/chat/conversations/{id}", UriKind.Relative), new { maxTokens = 16_384 }));
+    }
+
+    [Fact]
     public async Task Answering_again_with_another_model_and_thinking_uses_them_once()
     {
         var gateway = new FakeGateway();

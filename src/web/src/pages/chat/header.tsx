@@ -23,6 +23,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tooltip } from '@/components/ui/tooltip'
 import { formatValue } from '@/lib/format'
 import { AUTO, assistantsQuery, chatModel, onAuto } from './api'
+import { chatAnswerMost } from './context'
 import { AssistantIcon } from './assistant-icon'
 import type { ChatConfig, ChatSettings } from './types'
 import { useChatActions } from './chat-actions'
@@ -131,6 +132,9 @@ export function ChatSettingsPopover({ config, settings, onChange }: { config: Ch
   const [draft, setDraft] = useState({ systemPrompt: '', temperature: '', topP: '', maxTokens: '' })
   const [error, setError] = useState<string | null>(null)
   const model = chatModel(config, settings.model)
+  // The chat's own longest answer: the model's, at most half its context (the server's bound).
+  const most = chatAnswerMost(model?.context, model?.maxOutput)
+  const tokens = (n: number) => n.toLocaleString('en-US')
   const custom = !!settings.systemPrompt || settings.temperature != null || settings.topP != null || settings.maxTokens != null
   const num = (v: string) => (v.trim() === '' ? null : Number(v))
   const apply = () => {
@@ -139,7 +143,7 @@ export function ChatSettingsPopover({ config, settings, onChange }: { config: Ch
     const m = num(draft.maxTokens)
     if (t !== null && !(t >= 0 && t <= 2)) return setError('Temperature is from 0 to 2.')
     if (p !== null && !(p >= 0 && p <= 1)) return setError('Top-p is from 0 to 1.')
-    if (m !== null && !(Number.isInteger(m) && m >= 1 && m <= (model?.maxOutput ?? Infinity))) return setError(`The longest answer is from 1 to ${model?.maxOutput?.toLocaleString() ?? 'the model’s maximum'} tokens.`)
+    if (m !== null && !(Number.isInteger(m) && m >= 1 && m <= (most ?? Infinity))) return setError(`The longest answer is from 1 to ${most != null ? tokens(most) : 'the model’s maximum'} tokens for this model.`)
     onChange({ systemPrompt: draft.systemPrompt.trim(), temperature: t ?? -1, topP: p ?? -1, maxTokens: m ?? -1 })
     setOpen(false)
   }
@@ -185,10 +189,17 @@ export function ChatSettingsPopover({ config, settings, onChange }: { config: Ch
             <Field label="Top-p">
               <Input inputMode="decimal" value={draft.topP} onChange={(e) => setDraft({ ...draft, topP: e.target.value })} placeholder="default" />
             </Field>
-            <Field label="Max tokens">
+            <Field label="Longest answer">
               <Input inputMode="numeric" value={draft.maxTokens} onChange={(e) => setDraft({ ...draft, maxTokens: e.target.value })} placeholder="default" />
             </Field>
           </div>
+          {model && most != null && (
+            <p className="text-xs text-muted-foreground">
+              {`Longest answer: 1 to ${tokens(most)} tokens for ${model.name}${
+                model.maxOutput && model.maxOutput > most ? ` (its own ${tokens(model.maxOutput)}, at most half its context, so the chat keeps the rest to read)` : ''
+              }. Empty: up to ${model.maxOutput ? tokens(model.maxOutput) : tokens(most)}.`}
+            </p>
+          )}
           {error && (
             <p className="text-xs font-medium text-destructive-ink" role="alert">
               {error}

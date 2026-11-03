@@ -28,6 +28,8 @@ export function ContextGauge({ context, onCompact, busy, compact, items }: { con
   const at = compact && compact.at > 0 ? compact.at / 100 : 0.9
   const percent = Math.round(share * 100)
   const free = Math.max(0, context.limit - context.used - (context.output ?? 0))
+  // What the chat holds and the room kept for its answer are more than the model reads: the next message compacts first.
+  const over = context.used + (context.output ?? 0) > context.limit
   const shown = context.parts?.filter((p) => p.tokens > 0) ?? []
   const of = (n: number) => `${Math.max(0, Math.min(100, (n / context.limit) * 100))}%`
   // A ring: full circle 2πr with r = 7.
@@ -46,7 +48,7 @@ export function ContextGauge({ context, onCompact, busy, compact, items }: { con
               strokeWidth="2.5"
               strokeLinecap="round"
               strokeDasharray={`${share * ring} ${ring}`}
-              className={cn(share >= at ? 'stroke-destructive' : share >= at - 0.15 ? 'stroke-warning' : 'stroke-primary')}
+              className={cn(share >= at || over ? 'stroke-destructive' : share >= at - 0.15 ? 'stroke-warning' : 'stroke-primary')}
             />
           </svg>
           {percent}%
@@ -61,6 +63,11 @@ export function ContextGauge({ context, onCompact, busy, compact, items }: { con
               {formatValue(context.used)} of {formatValue(context.limit)} tokens ({percent}%)
               {context.estimated ? ' since compacting; the next answer counts it' : ''}
             </p>
+            {over && context.output ? (
+              <output className="mt-1 block text-xs font-medium text-warning-ink">
+                With the {formatValue(context.output)} kept for the answer, this is more than the context: the next message compacts the chat first.
+              </output>
+            ) : null}
           </div>
           <div className="relative flex h-2.5 w-full gap-0.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
             {shown.length > 0 ? (

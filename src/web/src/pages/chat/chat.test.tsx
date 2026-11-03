@@ -713,6 +713,15 @@ describe('chat', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c1/compact')).toBe(true))
   })
 
+  it('the context gauge warns when the chat and the room kept for its answer are more than the context', async () => {
+    const full = [answered[0]!, { ...answered[1]!, promptTokens: 29_000, completionTokens: 500 }]
+    backend({ start: conversation({ messages: full, currentLeafId: 'a1' }) })
+    renderApp('/chat/c1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Context: 90% full. Details and compact' }))
+    // 29,500 used and 4,096 kept for the answer: 828 more than the 32,768 the model reads.
+    expect(await screen.findByText('With the 4.1 K kept for the answer, this is more than the context: the next message compacts the chat first.')).toBeInTheDocument()
+  })
+
   it('the context gauge marks where the chat compacts, whose choice it is, and where to change it', async () => {
     const full = [answered[0]!, { ...answered[1]!, promptTokens: 20_000, completionTokens: 200 }]
     backend({ start: conversation({ messages: full, currentLeafId: 'a1' }), config: { compactAt: 60, compactSource: 'account' } })
@@ -1125,6 +1134,23 @@ describe('chat', () => {
     await userEvent.type(screen.getByLabelText('Temperature'), '0.2')
     await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
     await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ systemPrompt: 'Be brief.', temperature: 0.2, topP: -1, maxTokens: -1 }))
+  })
+
+  it("the chat's longest answer says its bound before it is set: the model's, at most half its context", async () => {
+    const long = { ...config.models[0]!, context: 32768, maxOutput: 31744 }
+    const calls = backend({ config: { models: [long, config.models[1]!] }, start: conversation({ messages: answered, currentLeafId: 'a1' }), extra: { 'PATCH /api/chat/conversations/c1': () => ({ status: 204 }) } })
+    renderApp('/chat/c1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Chat settings' }))
+    const field = screen.getByLabelText('Longest answer')
+    expect(screen.getByText('Longest answer: 1 to 16,384 tokens for Main-Model (its own 31,744, at most half its context, so the chat keeps the rest to read). Empty: up to 31,744.')).toBeInTheDocument()
+    await userEvent.type(field, '31744')
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    expect(await screen.findByText('The longest answer is from 1 to 16,384 tokens for this model.')).toBeInTheDocument()
+    expect(calls.some((c) => c.method === 'PATCH')).toBe(false)
+    await userEvent.clear(field)
+    await userEvent.type(field, '16384')
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')?.body).toMatchObject({ maxTokens: 16384 }))
   })
 
   it('a long document shows its first twenty pages, then twenty more at a time to the last, and a batch that failed can be tried again', async () => {

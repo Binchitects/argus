@@ -110,7 +110,8 @@ public sealed partial class ChatService
     /// exchanges stay as they are, from a question of the person's, within <paramref name="keepChars"/> (always the question).
     /// <paramref name="reason"/> says why (<see cref="AtThreshold"/>, <see cref="ToFit"/>, <see cref="AfterOverflow"/>), and
     /// <paramref name="tokens"/> of <paramref name="context"/> how big the request was, for the page. Null when nothing was
-    /// compacted: nothing older than the question, or the summary failed (then the oldest messages are left out instead).
+    /// compacted: nothing older than the question, or the summary failed (then the oldest messages are left out instead, as
+    /// a notice says).
     /// </summary>
     private async Task<(string Summary, int Cut)?> AutoCompactAsync(List<(JsonObject Turn, long Weight, ChatMessage Source)> turns, List<ChatMessage> stored, int from,
         string? earlier, long keepChars, string reason, long tokens, int context, GatewayModel? model, string modelName, string email, Func<object, Task> emit, CancellationToken ct)
@@ -143,7 +144,8 @@ public sealed partial class ChatService
         }
         catch (ChatGatewayException ex)
         {
-            await emit(new { type = "notice", kind = "compact_failed", text = $"The chat could not be compacted ({ex.Message}): its oldest messages are left out instead." });
+            // What is left out instead, if anything, the next notice says (left_out).
+            await emit(new { type = "notice", kind = "compact_failed", text = $"The chat could not be compacted ({ex.Message})." });
             return null;
         }
         var target = stored[at - 1];

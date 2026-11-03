@@ -2032,11 +2032,16 @@ public sealed partial class ChatService(
                 system += plan;
             }
         }
-        // A last resort (the summary failed, or what is kept is still too big): the oldest turns are left out.
+        // A last resort (the summary failed, or what is kept is still too big): the oldest turns are left out, and the person is told.
         var dropped = TrimOldest(turns, (long)(budget.Limit * budget.CharsPerToken) - system.Length - fit.ToolChars - fit.ExtraChars);
         if (dropped > 0)
         {
             LogTrimmed(logger, conversation.Id, dropped);
+            await emit(new
+            {
+                type = "notice", kind = "left_out",
+                text = $"The model's context cannot hold the whole chat, even compacted: its {dropped} oldest messages are left out of what it reads (the chat keeps them).",
+            });
         }
 
         // The messages that take the most of the window, for the gauge to pin or leave out.

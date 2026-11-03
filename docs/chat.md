@@ -50,8 +50,11 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   answer of a chat to be quick, choose a lighter thinking level or *No
   thinking*.
 - **Instructions and parameters.** Per chat: your own instructions (sent after
-  the app's), temperature, top-p, and the longest answer. Empty means the
-  model's default.
+  the app's), temperature, top-p, and the **Longest answer**. Empty means the
+  model's default. The longest answer is at most the model's own and half its
+  context, so the chat keeps the other half to read (the settings say the
+  bound before it is set: "1 to 16,384 tokens for Qwen3.8-27B"); one chosen
+  for another model is asked within that.
 - **Streaming, stop, answer again.**
   - **Stop** keeps what was written, marked *Stopped*. An admin can stop an
     answer too, or take one out of the line before it starts (Admin → Line):
@@ -220,8 +223,10 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     messages, files, pictures and tool definitions), at the characters a token
     held in the chat's last answer (3 when none says), with room kept for the
     answer (the chat's **Longest answer** when set, which is what its requests
-    ask for, at most the model's longest answer; else an eighth of the
-    context) and a margin. An answer whose tool calls outgrow the context cuts
+    ask for, at most the model's longest answer and half the context; else an
+    eighth of the context) and a margin. The gauge warns when what the chat
+    holds and that room are more than the context: the next message compacts
+    first. An answer whose tool calls outgrow the context cuts
     its earlier tool results to their start in what the model reads (the chat
     keeps them whole), then compacts everything before the question. A
     message bigger than the whole context even at its most compact is not sent:
@@ -233,7 +238,10 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     the same actions. When the engine's cache, shared by the chats it answers
     at once, is full, the request is asked again after two seconds. A summary
     the model refuses as too long is written in halves. An answer cut at the
-    end of the context says so, and the next message compacts.
+    end of the context says so, and the next message compacts. When the chat
+    still does not fit (its summary failed, or what is kept is too big), its
+    oldest messages are left out of what the model reads, and a notice says how
+    many (the chat keeps them).
   - **Cleared first.** Before compacting, the results of tools' calls older
     than the last two questions (past 600 characters) are cleared in what the
     model reads, each to a line ("Cleared to make room in the context:

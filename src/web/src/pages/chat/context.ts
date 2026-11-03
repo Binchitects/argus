@@ -38,14 +38,24 @@ export interface ContextView {
 
 /**
  * The room kept for the answer, as the server keeps it (PromptBudget.Room): what the request asks for when the chat set its
- * own longest answer, at most the model's (half the context when the model says none); else an eighth of the context, at
- * most the model's longest answer, at least 1,024 tokens (a quarter of a tiny context at most). Null when the context is not known.
+ * own longest answer, within chatAnswerMost; else an eighth of the context, at most the model's longest answer, at least
+ * 1,024 tokens (a quarter of a tiny context at most). Null when the context is not known.
  */
 export function answerRoom(context: number | null | undefined, maxOutput: number | null | undefined, chosen: number | null | undefined): number | null {
   if (!context) return null
   const most = maxOutput && maxOutput > 0 ? maxOutput : null
-  if (chosen && chosen > 0) return Math.min(chosen, most ?? Math.floor(context / 2))
+  if (chosen && chosen > 0) return Math.min(chosen, chatAnswerMost(context, maxOutput)!)
   return Math.max(Math.min(Math.floor(context / 8), most ?? Infinity), Math.min(1024, Math.floor(context / 4)))
+}
+
+/**
+ * The longest a chat's own longest answer may be, as the server takes it (PromptBudget.Most): the model's, and at most half
+ * its context, so the conversation keeps the other half to read. Null when neither is known.
+ */
+export function chatAnswerMost(context: number | null | undefined, maxOutput: number | null | undefined): number | null {
+  const own = maxOutput && maxOutput > 0 ? maxOutput : null
+  const half = context ? Math.floor(context / 2) : null
+  return own != null && half != null ? Math.min(own, half) : (own ?? half)
 }
 
 /**

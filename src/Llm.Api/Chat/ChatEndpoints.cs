@@ -333,10 +333,15 @@ public static partial class ChatEndpoints
         }
         if (body.MaxTokens is { } maxTokens)
         {
-            var limit = (await models.ResolveAsync(c.Model))?.MaxOutput ?? int.MaxValue;
+            // Within the model's longest answer and half its context: the chat keeps the rest to read (PromptBudget.Most).
+            var model = await models.ResolveAsync(c.Model);
+            var context = model?.Context ?? 32768;
+            var limit = model is null ? int.MaxValue : PromptBudget.Most(context, model.MaxOutput);
             if (maxTokens == 0 || maxTokens > limit)
             {
-                return AuthEndpoints.Problem(400, "max_tokens", $"The longest answer is from 1 to {limit:N0} tokens.");
+                return AuthEndpoints.Problem(400, "max_tokens", model?.MaxOutput is { } own && own > limit
+                    ? $"The longest answer is from 1 to {limit:N0} tokens for {model.Name}: its own longest ({own:N0}), at most half its context of {context:N0} tokens, so the chat keeps the rest to read."
+                    : $"The longest answer is from 1 to {limit:N0} tokens for {model?.Name ?? "this model"}.");
             }
             c.MaxTokens = maxTokens < 0 ? null : maxTokens;
         }

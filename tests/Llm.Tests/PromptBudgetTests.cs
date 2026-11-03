@@ -48,11 +48,15 @@ public sealed class PromptBudgetTests
         Assert.Equal(1_000, PromptBudget.Room(4_000, null, null));
         Assert.Equal(6_000, PromptBudget.Room(32_768, 8_192, 6_000));
         // What the request asks for (max_tokens) is what is kept: never more than the model's longest answer (one chosen
-        // for another model), and all of it when that is more than half the context, so the prompt never takes its room.
+        // for another model), nor than half the context, so the conversation keeps the other half to read. One as long as
+        // the model's own (31,744 of 32,768) once left the prompt 369 tokens: every message after left the chat out.
         Assert.Equal((8_192, 8_192), (PromptBudget.Asked(32_768, 8_192, 16_000), PromptBudget.Room(32_768, 8_192, 16_000)));
-        Assert.Equal((24_000, 24_000), (PromptBudget.Asked(32_768, 31_744, 24_000), PromptBudget.Room(32_768, 31_744, 24_000)));
+        Assert.Equal((16_384, 16_384), (PromptBudget.Asked(32_768, 31_744, 31_744), PromptBudget.Room(32_768, 31_744, 31_744)));
+        Assert.Equal((16_384, 16_384), (PromptBudget.Asked(32_768, 31_744, 24_000), PromptBudget.Room(32_768, 31_744, 24_000)));
         Assert.Equal(16_384, PromptBudget.Asked(32_768, null, 24_000));
         Assert.Null(PromptBudget.Asked(32_768, 8_192, null));
+        // The most a chat may choose: the model's longest answer, at most half its context.
+        Assert.Equal((8_192, 16_384, 16_384), (PromptBudget.Most(32_768, 8_192), PromptBudget.Most(32_768, 31_744), PromptBudget.Most(32_768, null)));
         var budget = new PromptBudget(32_768, 4_096);
         Assert.Equal(655, budget.Margin);
         Assert.Equal(32_768 - 4_096 - 655, budget.Limit);
