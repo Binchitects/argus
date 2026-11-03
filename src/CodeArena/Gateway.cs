@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
@@ -57,6 +58,12 @@ internal sealed class GatewayException(string message, int? status = null, bool 
     /// other requests filled it, so asking again in a moment may do, with no compaction.
     /// </summary>
     public bool SharedCache { get; init; }
+
+    /// <summary>
+    /// Arena held the request back while the model's line is full (EngineRoute: "… is busy: … Try again in 30 seconds.",
+    /// a 400 through LiteLLM's guardrail): how long it said to wait before asking again. Null: not such a refusal.
+    /// </summary>
+    public TimeSpan? Busy { get; init; }
 }
 
 /// <summary>The gateway's OpenAI-compatible API, with the person's key.</summary>
@@ -74,6 +81,12 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
 
     /// <summary>The waits before each new try of a request the gateway could not take (it restarts, a model loads): about a minute and a half.</summary>
     public TimeSpan[] RetryWaits { get; set; } = [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(45)];
+
+    /// <summary>The wait between two asks while the model's line is full (<see cref="GatewayException.Busy"/>); null: as long as Arena says.</summary>
+    public TimeSpan? BusyWait { get; set; }
+
+    /// <summary>How long a request waits in the model's line, at most: as long as an answer may take to start (<see cref="FirstEventWait"/>).</summary>
+    public TimeSpan BusyFor { get; set; } = TimeSpan.FromMinutes(15);
 
     /// <summary>Told before each new try: what failed, the wait, which try; and when an answer is slow to start.</summary>
     public Action<string>? Retrying { get; set; }
@@ -188,6 +201,9 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
     /// been shown yet; a key past its requests or tokens a minute is not (the
     /// minute is not over in a few seconds, and each try counts). The gateway's
     /// timeout (408) is a stalled answer: asked once more, as one that never started.
+    /// A request Arena holds back while the model's line is full waits in the line
+    /// (asked again when Arena says, for up to <see cref="BusyFor"/>), as a person in
+    /// the web chat's line waits.
     /// </summary>
     /// <param name="uncached">
     /// About how many of the prompt's tokens the engine has not cached (0: unknown or few): with the reading speed measured,
@@ -207,11 +223,29 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
             Retrying?.Invoke($"The model first reads about {Fmt.Tokens(uncached)} tokens it has not cached: at the {PrefillRate:0} tokens a second measured, " +
                              $"the answer may take about {Fmt.Duration(reading)} to start.");
         }
-        for (var attempt = 0; ; attempt++)
+        var attempt = 0;
+        var inLine = TimeSpan.Zero;
+        while (true)
         {
             try
             {
                 return await StreamOnceAsync(request, guard, ct, expected);
+            }
+            // The model's line is full: not a try that failed (the gateway is fine), a wait. Said at the first refusal, then
+            // every few minutes, so a long wait is seen to go on.
+            catch (GatewayException e) when (e.Busy is { } said && !shown && inLine < BusyFor && !ct.IsCancellationRequested)
+            {
+                var wait = BusyWait ?? said;
+                if (inLine == TimeSpan.Zero)
+                {
+                    Retrying?.Invoke($"{BusyRefusal().Replace(e.Message, "").Trim()} Waiting in its line: asking again every {wait.TotalSeconds:0} s (Ctrl+C or Stop ends the wait).");
+                }
+                else if ((int)(inLine / BusyNotice) != (int)((inLine + wait) / BusyNotice))
+                {
+                    Retrying?.Invoke($"Still waiting in the model's line ({Fmt.Duration(inLine + wait)} so far).");
+                }
+                await Task.Delay(wait, ct);
+                inLine += wait;
             }
             // An answer that never started is asked once more, not five times: each such try waits the whole first wait.
             catch (Exception e) when (!shown && attempt < RetryWaits.Length && !ct.IsCancellationRequested && Retryable(e) && (!Stalled(e) || stalls++ < 1))
@@ -219,9 +253,13 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
                 var wait = RetryWaits[attempt];
                 Retrying?.Invoke($"The gateway did not answer ({Fmt.OneLine(e.Message, 120)}): trying again in {wait.TotalSeconds:0} s ({attempt + 2} of {RetryWaits.Length + 1}).");
                 await Task.Delay(wait, ct);
+                attempt++;
             }
         }
     }
+
+    /// <summary>How often a long wait in the model's line is said again.</summary>
+    private static readonly TimeSpan BusyNotice = TimeSpan.FromMinutes(2);
 
     /// <summary>The answer never came in time: the stream stayed quiet, or the gateway gave up waiting for the engine (408).</summary>
     private static bool Stalled(Exception e) => e is StreamStalledException or GatewayException { Status: 408 };
@@ -564,6 +602,11 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
         {
             detail = detail[..400] + "…";
         }
+        // Arena's guardrail held the request back while the model's line is full, in Arena's words: when to ask again.
+        if (status == HttpStatusCode.BadRequest && BusyRefusal().Match(detail) is { Success: true } busy)
+        {
+            return new GatewayException(detail, 400) { Busy = TimeSpan.FromSeconds(Math.Clamp(int.Parse(busy.Groups[1].Value, CultureInfo.InvariantCulture), 1, 300)) };
+        }
         // Too big for the window: the whole body says so (and how big, in llama.cpp's own fields), not only its message.
         if ((int)status is 400 or 413 or 422 or 500 && ContextOverflow.Parse(body) is { Overflow: true } overflow)
         {
@@ -601,4 +644,8 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
     /// <summary>The gateway's (LiteLLM's) refusal for a key's rate limit: "Limit type: requests. Current limit: 60, …".</summary>
     [GeneratedRegex(@"Limit type: (\w+)\. Current limit: (\d+)")]
     private static partial Regex RateLimit();
+
+    /// <summary>The end of Arena's refusal while a model's line, queue or cache is full (EngineRoute): "Try again in 30 seconds."</summary>
+    [GeneratedRegex(@"Try again in (\d+) seconds?\.")]
+    private static partial Regex BusyRefusal();
 }

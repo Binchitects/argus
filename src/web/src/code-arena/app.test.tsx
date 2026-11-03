@@ -660,6 +660,85 @@ describe('Code Arena in the browser', () => {
     end()
   })
 
+  it("still says why a turn failed once it is over: the saved session keeps no failed answer, so the agent never just stops", async () => {
+    const busy = 'model-a is busy: 2 answers of the chat wait for it. Try again in 30 seconds.'
+    const read = { id: 'c1', function: { name: 'read_file', arguments: '{"path":"src/a.txt"}' } }
+    const before = [msg('m0', 'user', { content: 'First question' }), msg('m1', 'assistant', { content: 'First answer.', model: 'model-a' })]
+    const { now } = backend({
+      session: { id: 's2', messages: before, diffs: {}, busy: false },
+      extra: {
+        'POST /api/messages': () => {
+          // What the server keeps: the question, the call and its result; the next step was refused before a word.
+          now.session = {
+            ...now.session,
+            messages: [
+              ...before,
+              msg('m2', 'user', { content: 'Read a.txt' }),
+              msg('m3', 'assistant', { model: 'model-a', toolCalls: [read] }),
+              msg('m4', 'tool', { content: 'one', toolCallId: 'c1', toolName: 'read_file' }),
+            ],
+          }
+          return {
+            events: [
+              { type: 'question', id: 'm2', parentId: 'm1' },
+              { type: 'assistant', id: 'm3', parentId: 'm2', model: 'model-a' },
+              { type: 'tool_call', id: 'c1', name: 'read_file', arguments: read.function.arguments, tool: 'local' },
+              { type: 'tool_result', id: 'c1', messageId: 'm4', name: 'read_file', text: 'one', isError: false, declined: false, noAccess: false, durationMs: 5 },
+              { type: 'assistant', id: 'm5', parentId: 'm4', model: 'model-a' },
+              { type: 'error', message: busy },
+              { type: 'done', id: 'm5' },
+            ],
+          }
+        },
+      },
+    })
+    renderCode()
+    expect(await screen.findByText('First answer.')).toBeInTheDocument()
+    await ask('Read a.txt')
+
+    // Over (the box takes a new message), the session read back: the tool's card, and why the turn ended.
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toHaveAttribute('placeholder', 'Ask Code Arena to read, change or run something'))
+    expect(await screen.findByText('Read file')).toBeInTheDocument()
+    expect(await screen.findByText(busy)).toBeInTheDocument()
+  })
+
+  it('runs /compact typed whole at the first Enter, and says it is done only when it is', async () => {
+    const before = [msg('m0', 'user', { content: 'First question' }), msg('m1', 'assistant', { content: 'First answer.', model: 'model-a' })]
+    let events: object[] = [
+      { type: 'compacting' },
+      { type: 'notice', kind: 'warning', text: "Compacting the conversation to fit the model's window…" },
+      { type: 'error', message: 'The model gave no summary: the conversation is as it was.' },
+      { type: 'done', id: null },
+    ]
+    const { calls } = backend({ session: { id: 's2', messages: before, diffs: {}, busy: false }, extra: { 'POST /api/compact': () => ({ events }) } })
+    renderCode()
+    expect(await screen.findByText('First answer.')).toBeInTheDocument()
+
+    await ask('/compact')
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/compact')).toHaveLength(1))
+    expect(await screen.findByText('The model gave no summary: the conversation is as it was.')).toBeInTheDocument()
+    // What it says on the way is not that it is done.
+    expect(screen.queryByText("Compacting the conversation to fit the model's window…")).not.toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('')
+
+    // A code-arena that ends without saying (one from before it said why): nothing is said done.
+    events = [{ type: 'compacting' }, { type: 'notice', kind: 'warning', text: "Compacting the conversation to fit the model's window…" }, { type: 'done', id: null }]
+    await ask('/compact')
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/compact')).toHaveLength(2))
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toHaveAttribute('placeholder', 'Ask Code Arena to read, change or run something'))
+    expect(screen.queryByText("Compacting the conversation to fit the model's window…")).not.toBeInTheDocument()
+
+    events = [
+      { type: 'compacting' },
+      { type: 'notice', kind: 'warning', text: "Compacting the conversation to fit the model's window…" },
+      { type: 'reset', messages: [before[0], { ...before[1], summary: 'SUMMARY: one question answered.' }], diffs: {} },
+      { type: 'notice', kind: 'compacted', text: 'Compacted: 2 messages summarized, 0 kept.' },
+      { type: 'done', id: null },
+    ]
+    await ask('/compact')
+    expect(await screen.findByText('Compacted: 2 messages summarized, 0 kept.')).toBeInTheDocument()
+  })
+
   it("shows in the context gauge what filled the last request, the room kept for the answer and the biggest messages, as the web chat's", async () => {
     const context = {
       system: 4000, instructions: 0, memory: 0, tools: 6000, summary: 0, files: 2000, you: 1000, answers: 1000, toolResults: 6000,
