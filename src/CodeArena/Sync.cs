@@ -177,7 +177,8 @@ internal sealed class ChatSync : IAsyncDisposable
                 var next = wait > TimeSpan.Zero && renew > TimeSpan.Zero ? (wait < renew ? wait : renew) : wait > TimeSpan.Zero ? wait : renew;
                 if (next > TimeSpan.Zero)
                 {
-                    await Task.WhenAny(Task.Delay(next, _stop.Token), _wake.WaitAsync(_stop.Token));
+                    // The semaphore's own timed wait: one that times out leaves no waiter behind to take a later wake-up.
+                    await _wake.WaitAsync(next, _stop.Token);
                 }
                 else
                 {

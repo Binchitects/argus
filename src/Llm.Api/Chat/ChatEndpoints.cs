@@ -957,7 +957,7 @@ public static partial class ChatEndpoints
     /// <summary>
     /// Where the chat stands, cheaply: an open page asks every few seconds and reloads the chat when it changed elsewhere
     /// (in another tab or device, or by Code Arena keeping its session in step). The stamp changes with the branch on
-    /// screen, the chat's last change, its title, its line of queued messages and its settings.
+    /// screen, the chat's last change, its latest compaction, its title, its line of queued messages and its settings.
     /// </summary>
     private static async Task<IResult> StampAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AnswerJobs jobs, QueuedMessages queue, CancellationToken ct)
     {
@@ -976,8 +976,10 @@ public static partial class ChatEndpoints
         // The chat's settings too (they change without a message): its model, thinking, tools, instructions, assistant, archive.
         var settings = string.Join("\u001f", c.Model, c.Thinking, c.Tools is null ? null : string.Join(",", c.Tools), c.SystemPrompt, c.Temperature, c.TopP, c.MaxTokens, c.AssistantId, c.ArchivedAt?.UtcTicks);
         var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(settings)))[..16];
+        // A compaction adds no message and leaves the chat's time as it was (Code Arena's /compact): its summary changes it.
+        var summarized = await CodeArenaSync.SummarizedAsync(db, id, ct);
         var codeArena = CodeArenaSync.Answering(c);
-        return Results.Ok(new { stamp = $"{c.CurrentLeafId}|{c.UpdatedAt.UtcTicks}|{c.Title}|{queued}|{hash}|{codeArena}", answering = jobs.IsAnswering(id), codeArena });
+        return Results.Ok(new { stamp = $"{c.CurrentLeafId}|{summarized}|{c.UpdatedAt.UtcTicks}|{c.Title}|{queued}|{hash}|{codeArena}", answering = jobs.IsAnswering(id), codeArena });
     }
 
     /// <summary>"Answer now": the answer being written stops thinking and answers with what it has.</summary>

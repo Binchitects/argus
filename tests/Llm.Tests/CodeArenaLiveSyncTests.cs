@@ -8,12 +8,14 @@ namespace Llm.Tests;
 
 /// <summary>
 /// Code Arena's own sync (ChatSync, its session file) against this app, end to end: a session's messages, new and
-/// changed, both ways, after a compaction on either side and after Code Arena starts again.
+/// changed, both ways, after a compaction on either side, after Code Arena starts again and after a turn quiet a while.
 /// </summary>
 [Collection(nameof(AppCollection))]
 public sealed class CodeArenaLiveSyncTests(AppFixture app) : IDisposable
 {
     private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(30);
+    /// <summary>At once: far less than a renewal of a turn's hold or a retry would wait for.</summary>
+    private static readonly TimeSpan Soon = TimeSpan.FromSeconds(5);
     private readonly string _dir = Directory.CreateTempSubdirectory("code-arena-sessions-").FullName;
 
     public void Dispose()
@@ -54,6 +56,19 @@ public sealed class CodeArenaLiveSyncTests(AppFixture app) : IDisposable
             await Task.Delay(50);
         }
     }
+
+    private static async Task Until(Func<Task<bool>> condition, string what, TimeSpan most)
+    {
+        var until = DateTime.UtcNow + most;
+        while (!await condition())
+        {
+            Assert.True(DateTime.UtcNow < until, $"Not within {most.TotalSeconds:0} s: {what}.");
+            await Task.Delay(50);
+        }
+    }
+
+    /// <summary>The web page's stamp: what an open chat page asks every few seconds.</summary>
+    private static async Task<JsonElement> StampAsync(TestBrowser web, string chat) => await web.JsonAsync(await web.GetAsync($"/api/chat/conversations/{chat}/stamp"));
 
     /// <summary>The chat's branch on screen, as the web shows it: each message's id, role, words and summary.</summary>
     private static async Task<List<(Guid Id, string Role, string Content, string? Summary)>> WebChatAsync(TestBrowser web, string chat)
@@ -159,10 +174,13 @@ public sealed class CodeArenaLiveSyncTests(AppFixture app) : IDisposable
 
         // A compaction here: Arena keeps its summary on the last message it covers, and the web's next answer reads it.
         var summaryText = "The parser was fixed and the tests pass.";
+        var page = (await StampAsync(web, chat)).GetProperty("stamp").GetString();
         store.Summarized(summaryText, 0);
         store.Compacted([Said("user", "[The conversation so far, summarized to fit the model's window]\n\n" + summaryText), Said("assistant", "Understood.")], 0);
         await Until(() => sync.InStep, "Arena has the summary");
         Assert.Equal(summaryText, (await WebChatAsync(web, chat))[^1].Summary);
+        // The open web page shows the compaction without a reload: its stamp changed, though no message came with it.
+        Assert.NotEqual(page, (await StampAsync(web, chat)).GetProperty("stamp").GetString());
         // What the session adds after its compaction goes on as before, and the summary does not come back to it.
         store.Message(Said("user", "Now the docs"));
         store.Message(Said("assistant", "Docs written."), "model-a");
@@ -219,5 +237,48 @@ public sealed class CodeArenaLiveSyncTests(AppFixture app) : IDisposable
         Assert.False(await sync.LookAsync(CancellationToken.None));
         await sync.DisposeAsync();
         Assert.DoesNotContain(notices, n => n.Contains("not in step", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_turn_quiet_past_its_hold_s_renewals_and_the_next_one_reach_the_web_at_once_and_let_the_chat_go()
+    {
+        var renew = Ca.ChatSync.TurnRenew;
+        Ca.ChatSync.TurnRenew = TimeSpan.FromMilliseconds(200);
+        try
+        {
+            await using var f = NewApp();
+            var (web, key) = await PersonAsync(f);
+            var (config, http) = CodeArena(f, key);
+            var store = Ca.SessionStore.Create(_dir, "/home/pat/shop", "model-a");
+            await using var sync = Ca.ChatSync.Start(config, http, store, "/home/pat/shop", () => "model-a", (_, _) => { })!;
+            store.Message(Said("user", "Fix the parser"));
+            store.Message(Said("assistant", "Fixed the parser."), "model-a");
+            await Until(() => sync.InStep, "Arena has the session's first turn");
+            var chat = sync.Conversation!;
+
+            // A turn whose model (or a long build) says nothing a while: the chat is Code Arena's, its hold renewed meanwhile.
+            await sync.BeginTurnAsync(CancellationToken.None);
+            store.Message(Said("user", "Run the long build"));
+            await Task.Delay(Ca.ChatSync.TurnRenew * 8);
+            Assert.True((await StampAsync(web, chat)).GetProperty("codeArena").GetBoolean());
+            store.Message(Said("assistant", "The build passes."), "model-a");
+            sync.EndTurn();
+            await Until(async () => (await WebChatAsync(web, chat)).Count == 4 && !(await StampAsync(web, chat)).GetProperty("codeArena").GetBoolean(),
+                "the web has the answer and the person may write again", Soon);
+
+            // The next turn goes at once too.
+            await sync.BeginTurnAsync(CancellationToken.None);
+            store.Message(Said("user", "And the docs?"));
+            store.Message(Said("assistant", "Docs written."), "model-a");
+            sync.EndTurn();
+            await Until(async () => (await WebChatAsync(web, chat)).Count == 6 && !(await StampAsync(web, chat)).GetProperty("codeArena").GetBoolean(),
+                "the web has the next turn and the person may write again", Soon);
+            Assert.Equal(["Fix the parser", "Fixed the parser.", "Run the long build", "The build passes.", "And the docs?", "Docs written."],
+                (await WebChatAsync(web, chat)).Select(m => m.Content));
+        }
+        finally
+        {
+            Ca.ChatSync.TurnRenew = renew;
+        }
     }
 }
