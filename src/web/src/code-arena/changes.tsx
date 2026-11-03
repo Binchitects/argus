@@ -8,7 +8,7 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { asks, chatBridge } from './bridge'
-import { folderKeys, folderTree, rowKeys, treeIndent, useChangeView } from './change-folds'
+import { folderKeys, rowKeys, treeIndent, useChangeView } from './change-folds'
 import { ChangeFiles, FoldGroup, ViewTools } from './change-tree'
 import { useEditor } from './editor-state'
 import type { DiffSource } from './editor-state'
@@ -36,7 +36,7 @@ export function ChangesPanel() {
   const agents = new Set(list.map((c) => c.path))
   // What the person changed: the folder's changes git sees that are not the agent's (those are under its own).
   const mine = (git.data?.files ?? []).filter((f) => !agents.has(f.path))
-  const keys = ['agent', 'mine', ...folderKeys('agent', folderTree(list, (c) => c.path)), ...folderKeys('mine', folderTree(mine, (f) => f.path))]
+  const keys = ['agent', 'mine', ...folderKeys('agent', list, (c) => c.path), ...folderKeys('mine', mine, (f) => f.path)]
   const view = useChangeView('changes', keys)
   return (
     <div className="flex h-full min-h-0 flex-col">

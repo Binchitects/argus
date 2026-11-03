@@ -21,6 +21,12 @@ describe('changed files under their folders', () => {
   it('compacts a folder with nothing in it but one folder into one row, as VS Code does', () => {
     const tree = folderTree(paths, (p) => p)
     expect(tree.folders.map((f) => [f.name, f.path])).toEqual([['docs/a', 'docs/a'], ['src', 'src'], ['tests/unit', 'tests/unit']])
-    expect(folderKeys('changes', tree)).toEqual(['changes:docs/a', 'changes:docs/a/b', 'changes:src', 'changes:src/lib', 'changes:tests/unit'])
+  })
+
+  it('has a key for every folder the tree draws, with compact folders and without', () => {
+    const drawn = (f: Folder<string>): string[] => f.folders.flatMap((d) => [`changes:${d.path}`, ...drawn(d)])
+    const keys = folderKeys('changes', paths, (p) => p)
+    expect(keys).toEqual(['changes:src', 'changes:src/lib', 'changes:tests', 'changes:tests/unit', 'changes:docs', 'changes:docs/a', 'changes:docs/a/b'])
+    for (const compact of [true, false]) expect(keys).toEqual(expect.arrayContaining(drawn(folderTree(paths, (p) => p, compact))))
   })
 })

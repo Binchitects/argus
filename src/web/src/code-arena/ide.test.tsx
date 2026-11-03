@@ -2471,6 +2471,69 @@ describe('Code Arena, the IDE', () => {
     await waitFor(() => expect(kept['changes.folded']).toEqual(expect.arrayContaining(['agent', 'mine', 'agent:src'])))
   })
 
+  it('folds and keeps every folder of the trees with scm.compactFolders off, in Source Control and Agent changes', async () => {
+    let kept: Record<string, unknown> = { 'scm.viewMode': 'tree', 'changes.viewMode': 'tree' }
+    const { now } = backend(
+      {
+        'GET /api/git/status': () => ({
+          json: {
+            repository: true, branch: 'main', ahead: 0, behind: 0,
+            files: [
+              { path: 'docs/a/b/c.md', staged: null, changed: 'M', from: null },
+              { path: 'tests/unit/cart.test.ts', staged: null, changed: 'M', from: null },
+            ],
+          },
+        }),
+        'GET /api/git/log': () => ({ json: [] }),
+        'GET /api/git/branches': () => ({ json: [{ name: 'main', current: true }] }),
+        'GET /api/workspace/state': () => ({ json: kept }),
+        'POST /api/workspace/state': (body) => {
+          kept = { ...kept, ...(body as Record<string, unknown>) }
+          return { json: kept }
+        },
+      },
+      {},
+      { 'settings.json': '{ "scm.compactFolders": false }' },
+    )
+    now.changes = [...now.changes, { path: 'tests/unit/cart.test.ts', created: false, deleted: false, added: 1, removed: 0 }]
+    const { unmount } = renderIde()
+    await userEvent.keyboard('{Control>}{Shift>}g{/Shift}{/Control}')
+    const panel = await screen.findByRole('complementary', { name: 'Source control' })
+    const changed = () => within(panel).getByRole('list', { name: 'Changed files' })
+    const folder = (name: string) => within(changed()).getByRole('button', { name: new RegExp(`^${name}, `) })
+
+    // Each folder on its own row, as VS Code draws them with compactFolders off; a folded one is kept.
+    await waitFor(() => expect(folder('a')).toBeInTheDocument())
+    await userEvent.click(folder('docs'))
+    await waitFor(() => expect(kept['scm.folded']).toEqual(['changes:docs']))
+    await userEvent.click(folder('docs'))
+
+    // Collapse All folds every folder there is, docs and tests too.
+    await userEvent.click(within(panel).getByRole('button', { name: 'Collapse All' }))
+    await userEvent.click(within(panel).getByRole('button', { name: /^Changes, 2 files/ }))
+    expect(folder('docs')).toHaveAttribute('aria-expanded', 'false')
+    expect(folder('tests')).toHaveAttribute('aria-expanded', 'false')
+    await waitFor(() => expect(kept['scm.folded']).toEqual(expect.arrayContaining(['merge', 'staged', 'branch', 'commits', 'changes:docs', 'changes:docs/a', 'changes:tests'])))
+
+    // In the next run of the page, docs is folded as it was left.
+    unmount()
+    kept = { ...kept, 'scm.folded': ['changes:docs'] }
+    renderIde()
+    await userEvent.keyboard('{Control>}{Shift>}g{/Shift}{/Control}')
+    const again = await screen.findByRole('complementary', { name: 'Source control' })
+    const list = await within(again).findByRole('list', { name: 'Changed files' })
+    expect(within(list).getByRole('button', { name: /^docs, / })).toHaveAttribute('aria-expanded', 'false')
+    expect(within(list).getByRole('button', { name: /^tests, / })).toHaveAttribute('aria-expanded', 'true')
+
+    // Agent changes the same: Collapse All folds tests, not only tests/unit.
+    await userEvent.click(await screen.findByRole('button', { name: 'Agent changes (2)' }))
+    const agent = await screen.findByRole('complementary', { name: 'Agent changes' })
+    await userEvent.click(within(agent).getByRole('button', { name: 'Collapse All' }))
+    await userEvent.click(within(agent).getByRole('button', { name: /^The agent's changes, 2 files/ }))
+    expect(within(within(agent).getByRole('list', { name: 'Changed files' })).getByRole('button', { name: /^tests, / })).toHaveAttribute('aria-expanded', 'false')
+    await waitFor(() => expect(kept['changes.folded']).toEqual(expect.arrayContaining(['mine', 'agent:src', 'agent:tests', 'agent:tests/unit', 'mine:docs'])))
+  })
+
   it('lists the skills in the Skills view and in the chat’s / menu: one opens to edit, one goes into the box, one is made', async () => {
     let skills = [
       { name: 'ship', description: 'How we ship', source: 'project', path: '.arena/skills/ship/SKILL.md' },
