@@ -570,9 +570,15 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   in place, with its approvals; a question a compaction covers is not asked
   again from there. The chat's **context** ring is the web chat's: how full
   the window is, what fills it by kind (the system prompt and notes, the
-  memory, the tools' definitions, the summary, files, your messages, the
-  answers, the tool calls and results), the room kept for the answer, what is
-  free, and the biggest messages. A long session opens on its last 30 turns:
+  tools' definitions, your instructions (your `ARENA.md`, the project's
+  `AGENTS.md` or `CLAUDE.md`), the memory, the summary, files, your messages,
+  the answers, the tool calls and results), the room kept for the answer,
+  what is free (they add up to the window), and the biggest messages. While
+  no turn runs it shows the next request as Code Arena measures it, the note
+  it adds included, so it agrees with the status bar after an answer written
+  in the web chat and right after **Compact now** ("About …; the next answer
+  counts it"); while a turn runs, each step's request as the model counted
+  it. A long session opens on its last 30 turns:
   **Show earlier** at the top adds 30 more each time, the turns being read staying where they
   were. The thread draws what streams in once per frame, and only the turn
   being written: a session of thousands of messages streams as smoothly as a
@@ -589,8 +595,9 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   the MCP servers (connected of all:
   **MCP servers** lists them, why one is not connected and when it is tried
   next, with **Try again**), how full the model's window is (tokens used /
-  the model's: **Context** sets when the session compacts and what it keeps,
-  kept in `config.json`), the mode, the model and `code-arena <version>`
+  the model's: **Context** shows what fills it as the chat's ring does, the
+  same rows, and sets when the session compacts and what it keeps, kept in
+  `config.json`), the mode, the model and `code-arena <version>`
   (About: the version, the licence, the folder and the Source link) on the
   right.
 
@@ -1389,7 +1396,7 @@ status (403 `outside` for a path outside the folder).
 
 | call | what it does |
 |---|---|
-| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting); `context` (the window), `contextUsed` (about how much of it is in use), `contextReserve` (how much of it is kept for the answer), `compactAt` and `compactTarget` (percent; `compactAt` 0: only when a request would not fit), `compactAtSource` (`flag`, `config`, `account`, `arena` or `default`) and `compactAtAccount` (the Arena account's threshold, null when Arena did not say); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output); `arenaChats` (sessions are kept with chats in Arena here), `account` (whose chats: the key's account, null until Arena said), `chat` (this session's chat there, null: none yet) and `synced` (how many times the web chat's news came in while nothing ran: the page reads the session again when it changes; taking it in is not `busy`); `sync` (`{chat, account, waiting, trouble, behind}`: the chat, whose chats, how many messages Arena lacks, what stops them, whether the web chat has news not taken in; null without the sync) and `notices` (`[{id, text, at}]`: the last 20 said while nothing ran, the page shows each once) |
+| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting); `context` (the window), `contextUsed` (about how much of it the next request holds), `window` (what fills the next request: `system`, `tools`, `instructions`, `memory`, `summary`, `files`, `you`, `answers` and `toolResults` in characters, and `biggest`, `[{id, role, tool, chars, preview}]`; the chat's ring and the status bar's Context share `contextUsed` out by them; measured while no turn runs), `reserve` (how much of it is kept for the answer), `compactAt` and `compactTarget` (percent; `compactAt` 0: only when a request would not fit), `compactAtSource` (`flag`, `config`, `account`, `arena` or `default`) and `compactAtAccount` (the Arena account's threshold, null when Arena did not say); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output); `arenaChats` (sessions are kept with chats in Arena here), `account` (whose chats: the key's account, null until Arena said), `chat` (this session's chat there, null: none yet) and `synced` (how many times the web chat's news came in while nothing ran: the page reads the session again when it changes; taking it in is not `busy`); `sync` (`{chat, account, waiting, trouble, behind}`: the chat, whose chats, how many messages Arena lacks, what stops them, whether the web chat has news not taken in; null without the sync) and `notices` (`[{id, text, at}]`: the last 20 said while nothing ran, the page shows each once) |
 | `GET /api/folders?path=` | for Open Folder: a folder's folders by name (hidden ones last, no files, at most 2,000) as `{path, parent, folders, why, current, home, separator, drives, recent, added, files}` (`why`: what is not listed; `recent`: the folders opened lately, the one open now first; `added`: the folders added to this workspace; `files`: its files' names, with `files=1`, for @ in the chat); with no path, the open folder's parent; 404 `not_found` when it is not a folder |
 | `POST /api/folders/add` `{path}` | Add Folder to Workspace: the tools may use it, kept with this folder: `{folder, added}` (`added`: the folders added, whole); 409 `inside` for the folder open now or one in it |
 | `POST /api/folders/remove` `{path}` | takes an added folder out again: `{added}`; 404 `not_added` |
@@ -2017,12 +2024,19 @@ What fills the window is managed before anything is summarized:
   other sessions on this machine; `search_history` asks Arena for the
   person's past chats and sessions everywhere (the web chat's too), by what
   they were about (each one's digest), and `open_chat` reads one.
-- **`/context` shows what fills it**: the instructions, the memory (the
-  prompt's and what was recalled for the questions), the tools, Code Arena's
-  notes, the summary, your messages, the answers and the tools' results, each
-  as a bar with its tokens, then the five biggest messages. The IDE's
-  **Context** (the window's use in the status bar) lists the same, from
-  `GET /api/window`, measured while no turn runs.
+- **`/context` shows what fills it**, by the web chat's kinds: the system
+  prompt and tool notes (Code Arena's notes, the one the next request adds
+  included), the tool definitions, your instructions (your `ARENA.md` and the
+  project's `ARENA.md`, `AGENTS.md`, `CLAUDE.md` or `QWEN.md`), the memory
+  (the prompt's and what was recalled for the questions), the summary, files
+  (what went with your messages: @files, folders, the lines chosen in the
+  IDE's editor), your messages, the answers, and the tool calls and results;
+  then what is kept for the answer and what is free. Each has its tokens, its
+  share of the window and a bar: the next request's tokens are shared out by
+  what each kind takes, so the lines add up to the window. Then the biggest
+  messages (up to five, of 1,000 characters or more). The IDE's chat ring and
+  its **Context** (the window's use in the status bar) show the same, from
+  `window` in `GET /api/state`, measured while no turn runs.
 
 A long session never gets stuck on the window:
 

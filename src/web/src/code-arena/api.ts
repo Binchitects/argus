@@ -1,6 +1,6 @@
 import { api } from './http'
 import { blank, reduce, type LiveState } from '@/pages/chat/live'
-import type { Attachment, ChatEvent, ChatTool, Message } from '@/pages/chat/types'
+import type { Attachment, ChatEvent, ChatTool, MeasuredContext, Message } from '@/pages/chat/types'
 import type { Piece } from './bridge'
 
 /** What code-arena web says of itself: the folder, the model, the mode, the session open now. */
@@ -20,6 +20,11 @@ export interface CodeState {
   context: number
   /** About how many of them the conversation fills now (the prompt, the tools and the history). */
   contextUsed: number
+  /**
+   * What fills the next request, by the web chat's kinds in characters, and its biggest messages (by their ids here): the
+   * chat's gauge and the status bar's Context scale it to contextUsed. Measured while no turn runs.
+   */
+  window?: MeasuredContext | null
   /** The room the session keeps in the window for the answer, in tokens: a request holds its prompt and its answer together. */
   reserve?: number
   /** When the session compacts itself, in percent of the window (0: only when a request would not fit), and what the recent part may keep whole. */
@@ -191,17 +196,6 @@ export type CodeEvent =
 export const stateQuery = {
   queryKey: ['code', 'state'] as const,
   queryFn: ({ signal }: { signal: AbortSignal }) => api<CodeState>('/api/state', { signal }),
-}
-
-/** What fills the model's window, by kind in tokens, and its biggest messages (measured while no turn runs). */
-export interface CodeWindow {
-  kinds: { kind: string; tokens: number }[]
-  biggest: { role: 'user' | 'assistant' | 'tool' | 'summary'; what: string; tokens: number }[]
-}
-
-export const windowQuery = {
-  queryKey: ['code', 'window'] as const,
-  queryFn: ({ signal }: { signal: AbortSignal }) => api<CodeWindow>('/api/window', { signal }),
 }
 
 /** A memory as Arena gives it to Code Arena: whose (the person's, this project's, the company's), its kind, pinned or not. */

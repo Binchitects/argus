@@ -76,6 +76,13 @@ public static partial class ContextParts
     /// <summary>The most messages the gauge lists, and the least a message takes to be listed.</summary>
     public const int BiggestCount = 5, BiggestAbove = 1_000;
 
-    [GeneratedRegex("<attachment name=\"[^\"]*\">.*?</attachment>", RegexOptions.Singleline)]
+    /// <summary>The kinds <see cref="Measure"/> gives, in characters.</summary>
+    public static readonly string[] Kinds = ["system", "instructions", "memory", "tools", "summary", "files", "you", "answers", "toolResults"];
+
+    /// <summary>
+    /// What went with a question as the model reads it: a file attached here, or what went with one in Code Arena (its @files,
+    /// folders and the lines chosen in its editor, after the words up to the end, as Code Arena's Mentions writes them).
+    /// </summary>
+    [GeneratedRegex("<attachment name=\"[^\"]*\">.*?</attachment>|\n\n<attached>\n.*\n</attached>", RegexOptions.Singleline)]
     private static partial Regex Attachment();
 }

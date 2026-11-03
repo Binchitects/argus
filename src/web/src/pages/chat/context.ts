@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { formatValue } from '@/lib/format'
-import type { Compaction, ContextFill, ContextItem, Message } from './types'
+import type { Compaction, ContextFill, ContextItem, MeasuredContext, Message } from './types'
 
 /** What fills the context, in the order it is drawn (each keeps its colour by kind). */
 /** What fills the context, each with its hue of the categorical palette (8): the memory shares the instructions', hatched. */
@@ -30,8 +30,10 @@ export interface ContextView {
   output: number | null
   /** By kind, in tokens; null for answers from before the breakdown was kept. */
   parts: { key: keyof ContextFill; label: string; tokens: number }[] | null
-  /** Worked out, not counted: the chat was compacted since the last answer (the next one counts it). */
+  /** Worked out, not counted: the chat was compacted since the last answer, or that answer's request was not measured (the next one counts it). */
   estimated?: boolean
+  /** The chat was compacted since the last answer. */
+  compacted?: boolean
   /** The messages that took most of it, the biggest first, in tokens. */
   biggest?: { item: ContextItem; tokens: number }[]
 }
@@ -48,12 +50,44 @@ export function answerRoom(context: number | null | undefined, maxOutput: number
   return Math.max(Math.min(Math.floor(context / 8), most ?? Infinity), Math.min(1024, Math.floor(context / 4)))
 }
 
+/** Characters by kind as tokens: `tokens` shared out by what each kind takes, rounded so they add up to it. */
+function shared(fill: ContextFill, chars: number, tokens: number): { key: keyof ContextFill; label: string; tokens: number }[] {
+  let sum = 0
+  let before = 0
+  return kinds.map((k) => {
+    sum += fill[k.key] ?? 0
+    const upTo = Math.round((sum / chars) * tokens)
+    const part = { ...k, tokens: upTo - before }
+    before = upTo
+    return part
+  })
+}
+
+/**
+ * The next request as Code Arena measures it while no turn runs: by kind in characters (the note it adds, and the
+ * biggest messages, included), and the tokens it holds about (counted for what the gateway counted, worked out for
+ * what was added since).
+ */
+export interface MeasuredNow {
+  fill: MeasuredContext
+  tokens: number
+}
+
 /**
  * How full the model's context is, from the last answer: its prompt as the model
  * counted it, split by what filled it (measured in characters, scaled to that count),
- * and what it answered (the next question carries it).
+ * and what it answered (the next question carries it). With `now` (Code Arena's own
+ * measure of the next request), from that instead: the conversation as it stands.
  */
-export function contextOf(last: Message | undefined, limit: number | null | undefined, output: number | null, compacted?: string | null): ContextView | undefined {
+export function contextOf(last: Message | undefined, limit: number | null | undefined, output: number | null, compacted?: string | null, now?: MeasuredNow): ContextView | undefined {
+  if (now && limit) {
+    const chars = kinds.reduce((n, k) => n + (now.fill[k.key] ?? 0), 0)
+    const biggest = now.fill.biggest?.length && chars > 0 ? now.fill.biggest.map((item) => ({ item, tokens: Math.round((item.chars / chars) * now.tokens) })) : undefined
+    // Not what the model counted when the chat compacted since its last answer, or that answer was written elsewhere (the
+    // web chat's, with its own prompt and tools): the next answer counts it.
+    const estimated = compacted != null || !last?.context
+    return { used: now.tokens, limit, output, parts: chars > 0 ? shared(now.fill, chars, now.tokens) : null, biggest, estimated, compacted: compacted != null }
+  }
   if (!last || !limit || last.promptTokens == null) return undefined
   const prompt = last.promptTokens
   const completion = last.completionTokens ?? 0
@@ -66,11 +100,9 @@ export function contextOf(last: Message | undefined, limit: number | null | unde
     const perChar = fill && chars > 0 ? prompt / chars : 1 / 3.5
     const kept: ContextFill = { system: fill?.system ?? 0, tools: fill?.tools ?? 0, instructions: fill?.instructions ?? 0, memory: fill?.memory ?? 0, summary: compacted.length + 150, files: 0, you: 0, answers: 0, toolResults: 0 }
     const estimated = kinds.map((k) => ({ ...k, tokens: Math.round((kept[k.key] ?? 0) * perChar) }))
-    return { used: estimated.reduce((n, p) => n + p.tokens, 0), limit, output, parts: estimated, estimated: true }
+    return { used: estimated.reduce((n, p) => n + p.tokens, 0), limit, output, parts: estimated, estimated: true, compacted: true }
   }
-  const parts = fill && chars > 0
-    ? kinds.map((k) => ({ ...k, tokens: Math.round(((fill[k.key] ?? 0) / chars) * prompt) + (k.key === 'answers' ? completion : 0) }))
-    : null
+  const parts = fill && chars > 0 ? shared(fill, chars, prompt).map((p) => (p.key === 'answers' ? { ...p, tokens: p.tokens + completion } : p)) : null
   const biggest = fill?.biggest?.length && chars > 0 ? fill.biggest.map((item) => ({ item, tokens: Math.round((item.chars / chars) * prompt) })) : undefined
   return { used: prompt + completion, limit, output, parts, biggest }
 }

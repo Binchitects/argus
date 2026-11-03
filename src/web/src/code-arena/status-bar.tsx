@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowUp, ArrowUpCircle, Bot, CircleAlert, CloudUpload, ExternalLink, Gauge, GitBranch, GitCompareArrows, Info, LoaderCircle, Plug, RefreshCw, RotateCw, ShieldCheck, Sparkles, SquareTerminal, TriangleAlert, Unplug } from 'lucide-react'
 import { RadioGroup } from 'radix-ui'
-import { useState, type ComponentProps, type FormEvent } from 'react'
+import { useMemo, useState, type ComponentProps, type FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Field } from '@/components/ui/field'
@@ -10,7 +10,9 @@ import { toast } from '@/components/ui/toaster'
 import { errorMessage } from '@/lib/api'
 import { formatValue } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { changeSettings, compaction, compactWho, modeLabels, retryServers, stateQuery, windowQuery, type CodeState, type ServerStatus } from './api'
+import { ContextBreakdown, ContextUse } from '@/pages/chat/context-gauge'
+import { changeSettings, compaction, compactWho, inOrder, modeLabels, retryServers, sessionQuery, stateQuery, type CodeState, type ServerStatus } from './api'
+import { codeContext } from './context'
 import { useEditor } from './editor-state'
 import { api } from './http'
 import { useGit } from './git-actions'
@@ -230,37 +232,20 @@ function ContextSettings({ open, onOpenChange, state }: { open: boolean; onOpenC
 /** When the session compacts: at a share of the window, only when a request would not fit, or as the Arena account says. */
 type CompactWhen = 'share' | 'off' | 'account'
 
-/** What fills the window by kind, and its biggest messages; big results are kept aside, earlier ones cleared before compacting. */
-function WindowParts({ window }: { window: number }) {
-  const { data } = useQuery(windowQuery)
-  const kinds = data?.kinds.filter((k) => k.tokens > 0) ?? []
-  if (!data || kinds.length === 0) return null
-  const of = (n: number) => (window > 0 ? Math.round((n / window) * 100) : 0)
+/**
+ * What fills the window, as the chat's gauge shows it (the same view: by kind, the room kept for the answer, what is
+ * free, the biggest messages); big results are kept aside, earlier ones cleared before compacting.
+ */
+function WindowParts({ state }: { state: CodeState }) {
+  const session = useQuery(sessionQuery)
+  const path = useMemo(() => inOrder(session.data?.messages ?? []), [session.data])
+  const items = useMemo(() => ({ find: (id: string) => path.find((m) => m.id === id) }), [path])
+  const context = codeContext(path, state) ?? { used: state.contextUsed, limit: state.context, output: state.reserve ?? null, parts: null, estimated: true }
   return (
-    <div className="grid gap-3 text-xs">
-      <ul className="grid gap-1" aria-label="What fills the window">
-        {kinds.map((k) => (
-          <li key={k.kind} className="flex items-center gap-2">
-            <span className="min-w-0 flex-1 truncate first-letter:uppercase">{k.kind}</span>
-            <span className="text-muted-foreground tabular-nums">{formatValue(k.tokens)}</span>
-            <span className="w-10 text-right text-muted-foreground tabular-nums">{of(k.tokens)}%</span>
-          </li>
-        ))}
-      </ul>
-      {data.biggest.length > 0 && (
-        <div className="grid gap-1">
-          <p className="font-medium">Biggest</p>
-          <ul className="grid gap-1" aria-label="The biggest messages">
-            {data.biggest.map((b, i) => (
-              <li key={i} className="flex min-w-0 items-center gap-2">
-                <span className="min-w-0 flex-1 truncate" title={b.what}>{b.what}</span>
-                <span className="text-muted-foreground tabular-nums">{formatValue(b.tokens)}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      <p className="text-muted-foreground">A big result is kept aside (the model reads its start and end, and read_result the rest); before compacting, earlier results are cleared to a note, and often that is enough.</p>
+    <div className="grid gap-3">
+      <ContextUse context={context} />
+      <ContextBreakdown context={context} compact={{ at: state.compactAt, who: compactWho(state) }} items={items} />
+      <p className="text-xs text-muted-foreground">A big result is kept aside (the model reads its start and end, and read_result the rest); before compacting, earlier results are cleared to a note, and often that is enough.</p>
     </div>
   )
 }
@@ -292,20 +277,16 @@ function ContextForm({ state, onDone }: { state: CodeState; onDone: () => void }
       setSaving(false)
     }
   }
-  const used = share(state)
   return (
     <>
       <DialogHeader>
         <DialogTitle>Context</DialogTitle>
         <DialogDescription>
-          About {formatValue(state.contextUsed)} of {formatValue(state.context)} tokens in use ({used}%). When the conversation reaches the threshold, its older part is summarized and the recent part kept
-          whole; and always before a request would not fit. Now: {state.compactAt > 0 ? `at ${state.compactAt}%` : 'only when a request would not fit'} ({compactWho(state)}).
+          When the conversation reaches the threshold, its older part is summarized and the recent part kept whole; and always before a request would not fit. Now:{' '}
+          {state.compactAt > 0 ? `at ${state.compactAt}%` : 'only when a request would not fit'} ({compactWho(state)}).
         </DialogDescription>
       </DialogHeader>
-      <div className="h-2 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-        <div className="relative h-full rounded-full bg-primary" style={{ width: `${Math.min(100, used)}%` }} />
-      </div>
-      <WindowParts window={state.context} />
+      <WindowParts state={state} />
       <form className="grid gap-4" onSubmit={(e) => void save(e)} noValidate>
         <RadioGroup.Root value={when} onValueChange={(v) => setWhen(v as CompactWhen)} aria-label="When it compacts" className="grid gap-1.5 text-sm">
           {(

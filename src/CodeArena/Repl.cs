@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Nodes;
 
 namespace CodeArena;
 
@@ -608,27 +609,35 @@ internal sealed class Repl(Runtime rt)
         return $"context {Fmt.Tokens(used)} / {Fmt.Tokens(rt.Model.Context)} ({100.0 * used / rt.Model.Context:0}%), compacts {rt.Compaction.When()}";
     }
 
-    /// <summary>What fills the window, by kind (a bar each, of the whole window), and its biggest messages.</summary>
+    /// <summary>
+    /// What fills the window, as the IDE's and the web chat's context gauge say it: the next request by kind (its tokens
+    /// shared out by what each kind takes), the room kept for the answer and what is free, adding up to the window, each with
+    /// a bar of the whole window; then its biggest messages.
+    /// </summary>
     private void WindowCommand()
     {
-        var (kinds, biggest) = rt.Agent.Window();
-        var perToken = rt.Agent.CharsPerToken;
-        var window = (double)rt.Model.Context;
-        foreach (var (kind, chars) in kinds.Where(k => k.Chars > 0))
-        {
-            var tokens = (long)(chars / perToken);
-            var bar = new string('█', (int)Math.Clamp(Math.Round(tokens / window * 40), 1, 40));
-            Ui.Line($"  {kind,-24} {Fmt.Tokens(tokens),8}  {Ui.Blue(bar)}");
-        }
-        // The room kept for the answer, as the IDE's gauge shows it: a request holds its prompt and its answer together.
+        var window = rt.Model.Context;
+        var measured = rt.Agent.Measure();
+        var used = rt.Agent.Estimate();
         var kept = rt.Agent.Reserve;
-        Ui.Line($"  {"kept for the answer",-24} {Fmt.Tokens(kept),8}  {Ui.Dim(new string('░', (int)Math.Clamp(Math.Round(kept / window * 40), 1, 40)))}");
-        if (biggest.Count > 0)
+        void Row(string what, long tokens, string bar) =>
+            Ui.Line($"  {what,-30} {tokens,8:N0} {Math.Round(100.0 * tokens / window),3:0}%{(bar.Length > 0 ? "  " + bar : "")}");
+        string Bar(long tokens, char mark) => new(mark, (int)Math.Clamp(Math.Round(40.0 * tokens / window), 1, 40));
+        foreach (var (what, tokens) in Agent.InTokens(measured, used).Where(k => k.Tokens > 0))
         {
+            Row(what, tokens, Ui.Blue(Bar(tokens, '█')));
+        }
+        // A request holds its prompt and its answer together: the room kept for the answer is not free.
+        Row("Kept for the answer", kept, Ui.Dim(Bar(kept, '░')));
+        Row("Free", Math.Max(0, window - used - kept), "");
+        if (measured["biggest"] is JsonArray { Count: > 0 } biggest)
+        {
+            var chars = (double)Agent.Kinds.Sum(k => measured.Long(k.Key) ?? 0);
             Ui.Line(Ui.Bold("Biggest"));
-            foreach (var item in biggest)
+            foreach (var item in biggest.OfType<JsonObject>())
             {
-                Ui.Line($"  {Fmt.Tokens((long)(item.Chars / perToken)),8}  {item.What}");
+                var who = item.Str("role") switch { "user" => "Your message", "assistant" => "An answer", _ => $"{item.Str("tool") ?? "A tool"}'s result" };
+                Ui.Line($"  {(long)Math.Round((item.Long("chars") ?? 0) / chars * used),8:N0}  {who}: {item.Str("preview")}");
             }
         }
         Ui.Info("Big results are kept aside (read_result reads them); before compacting, earlier results are cleared to their note. /compact summarizes now.");

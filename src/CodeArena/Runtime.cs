@@ -560,6 +560,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             Model = Model,
             SystemPrompt = () => SystemPrompt.Build(inputs),
             MemoryChars = () => _memory.Length,
+            InstructionChars = () => SystemPrompt.InstructionsText(inputs).Length,
             Note = () => SystemPrompt.Note(inputs),
             Sees = () => Sees(Model.Info),
             Total = Total,
