@@ -45,6 +45,21 @@ for (const colorTheme of ['sakura', 'midnight', 'copper', 'forest', 'ocean', 'la
   }
 }
 
+// Chrome fails every request in flight when it reloads its certificates. A stylesheet that failed is fetched again
+// (theme-init.js): left unstyled, the avatars on /design read to axe as black text on their colours.
+test('a stylesheet the browser failed to fetch is fetched again', async ({ page }, info) => {
+  const failed: string[] = []
+  await page.route('**/assets/index-*.css', (route) => {
+    if (failed.length) return route.continue()
+    failed.push(route.request().url())
+    return route.abort('failed')
+  })
+  await page.goto('/design')
+  await page.getByRole('heading', { level: 1 }).first().waitFor()
+  expect(failed).toHaveLength(1)
+  await expectAccessible(page, info, 'design-stylesheet-again')
+})
+
 test('the command palette goes to a page', async ({ page, isMobile }) => {
   await page.goto('/')
   // The shortcut exists once the shell is up (after it knows who is signed in).

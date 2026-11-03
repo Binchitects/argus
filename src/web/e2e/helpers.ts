@@ -36,6 +36,21 @@ export function watchConsole(page: Page): string[] {
  * stage) are left out: axe cannot run in them, and waits for them.
  */
 export async function expectAccessible(page: Page, info: TestInfo, label: string, scriptless: string[] = []) {
+  // Every stylesheet loaded: one the browser failed leaves the page unstyled, which axe would report as low contrast.
+  // Chrome gives a failed one a sheet all the same, whose rules cannot be read (the app's own can).
+  const unloaded = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll<HTMLLinkElement>('link[rel=stylesheet]')]
+        .filter((l) => {
+          try {
+            return !l.sheet?.cssRules.length
+          } catch {
+            return true
+          }
+        })
+        .map((l) => l.href),
+    )
+  await expect.poll(unloaded, { message: `the stylesheets of ${label} loaded` }).toEqual([])
   // A dialog fading in has text at part opacity: axe reads its contrast once it has arrived.
   await page.evaluate(() =>
     Promise.race([
