@@ -523,7 +523,8 @@ would be with them.
   `config.json` at its top; the library lists it once it is whole, and
   **File or model** offers it.
 - **vLLM models** (`engineKind: vllm` on `POST /api/admin/models`; the form's
-  fields come with the next step): a snapshot, its GPUs (empty: the ones the
+  fields come with the next step): a snapshot or a GGUF file (see GGUF files
+  on vLLM and SGLang, below), its GPUs (empty: the ones the
   advisor proposes for this machine, kept on save), copies (`replicas`, each on
   its run of the GPUs; a conversation stays on one), its share of each GPU
   (`gpuMemoryUtilization`, 0.90), quantisation, speculative decoding (`mtp`,
@@ -547,7 +548,37 @@ would be with them.
   cache in RAM (`--hicache-size`); sampling defaults are its preferred sampling
   parameters. Its radix cache shares every prefix by itself. LMCache and a disk
   tier are vLLM's alone and refused. Inside SGLang, as inside vLLM, the chat's
-  requests go ahead of API keys'.
+  requests go ahead of API keys'; a request without a priority of its own
+  (SGLang's warm-up) counts as an API key's (`--default-priority-value 0`:
+  without it SGLang 0.5.21's radix cache overflows on it and the server dies).
+- **GGUF files on vLLM and SGLang.** A vLLM or SGLang model's file may be a
+  GGUF file of the library instead of a snapshot: the same file llama.cpp runs,
+  no snapshot needed. vLLM reads it through its GGUF plugin (vllm-gguf-plugin
+  0.0.5, in the stack's arena-vllm image), SGLang through its own loader. Its
+  launcher (`services/vllm/serve.py`, `services/sglang/serve.py`) first writes
+  the model's config and tokenizer from the file's own header (transformers
+  reads them, offline) and names that folder to the server (`--tokenizer`,
+  `--tokenizer-path`); the advisor reads the header as it does for llama.cpp:
+  its layers and heads, the cache a token takes and its trained context. It
+  runs quantised as the file is (Quantisation stays empty; one set is
+  refused), with no prediction layers (MTP) and no projector of its own. vLLM
+  reads every part of a split file (`-00001-of-0000N`, named by its first
+  part); SGLang reads one file and refuses a split one, saying to merge it
+  (`llama-gguf-split --merge FIRST-PART MERGED.gguf`, in llama.cpp's image) or
+  to run it on vLLM. A llama file holds its query and key weights reordered for
+  llama.cpp's rotary layout, which neither vLLM 0.31 nor SGLang 0.5.21 undoes by
+  itself (it would answer, wrongly): the arena-vllm image's own plugin
+  (`services/vllm-gguf-rope.py`) and SGLang's launcher
+  (`rope_is_neox_style` false) give such a model llama.cpp's layout, and its
+  answers match llama.cpp's. vLLM reads these architectures: falcon, gemma3, gpt2,
+  llama, mamba, minimax-m2, phi3, qwen2, qwen3, stablelm and starcoder2;
+  SGLang llama, qwen2 and qwen3. Any other (qwen35, qwen3vlmoe, gemma4 and MoE
+  ones such as qwen3moe among them) is refused with why: it would fail as it
+  loads. On AMD GPUs vLLM is its own ROCm image (`rocm.yml`), which has no
+  GGUF plugin: a GGUF file is refused there too. A GGUF file runs more slowly
+  on vLLM and SGLang than a snapshot's own safetensors, and llama.cpp often
+  runs a GGUF file best: the dialog says so, and recommends the library's
+  snapshot of the same model when it has one.
 - **Moving a model to another engine.** A model moves at runtime, with the stack
   running: llama.cpp to vLLM or SGLang and back, and between vLLM and SGLang (or
   another machine's engine of a kind). Each chat model's card says its engine
@@ -558,29 +589,33 @@ would be with them.
   its feature is off (`./arenactl repair --with chat-models`, `vllm` or `sglang`
   from the checkout turns it on, or
   `sh argus-arena-VERSION-offline.run repair --with chat-models` with the
-  offline installer, see [deployment.md](deployment.md#features); vLLM also
-  needs `VLLM_IMAGE`, under `arenactl config`), the stack has none (on
+  offline installer, see [deployment.md](deployment.md#features); vLLM's
+  image, arena-vllm, is built on `VLLM_IMAGE`, under `arenactl config`), the stack has none (on
   Kubernetes, `llamacpp.enabled`, `vllm.enabled` or `sglang.enabled`), or it is
   not running. The field waits for the library to be read (*Reading the
   library…*). While a model moves the field and the form are held; after a
   failed move it can be chosen again. A dialog left open while another admin
   moved the model is held too (*It moved to SGLang while this was open*): its
-  form was for the engine it left, and saved, it would move back. vLLM and
-  SGLang serve a Hugging Face snapshot (safetensors), llama.cpp a GGUF file, and
-  **File or model** lists the chosen engine's form first. Another engine of the
-  other form takes the same model in that form from the library: the snapshot
-  whose repository has the GGUF file's name (or the name in its header), its
-  architecture first, or the GGUF file of the snapshot's repository. The dialog
-  says how it matched; choose another under **File or model** if it is not the
-  same model. vLLM to SGLang and back keeps the snapshot, and back to an engine
-  of the form left brings back the file chosen there. When the library has none,
-  the dialog says so and holds **Save**: have the model's other form in the
-  library first (**Snapshots** or **Chat** under Find on Hugging Face, or, on a
-  host with no network, `hf download` on a machine that has one, as above). The
-  other way works too: a file of the other form chosen under **File or model**
-  moves the **Engine** field with it (a snapshot to vLLM or SGLang, a GGUF file
-  to llama.cpp), when that engine runs here; else the field stays and **File or
-  model** says what turns it on. The dialog says it moves whenever the engine is
+  form was for the engine it left, and saved, it would move back. llama.cpp
+  runs a GGUF file; vLLM and SGLang a Hugging Face snapshot (safetensors) or a
+  GGUF file, and **File or model** lists the chosen engine's own form first. A
+  llama.cpp model moved to vLLM or SGLang keeps its GGUF file, no snapshot
+  needed, and moved back it keeps the same file. When the library has the same
+  model as a snapshot (the one whose repository has the GGUF file's name, or
+  the name in its header, its architecture first), **File or model** says so
+  and recommends it: vLLM and SGLang run a snapshot faster. A model on a
+  snapshot moved to llama.cpp takes the GGUF file of the snapshot's repository
+  from the library. The dialog says how it matched; choose another under **File
+  or model** if it is not the same model. vLLM to SGLang and back keeps the
+  file, and back to llama.cpp from a snapshot brings back the GGUF file chosen
+  there. When the library has no file the engine runs, the dialog says so and
+  holds **Save**: have one in the library first (**Snapshots** or **Chat**
+  under Find on Hugging Face, or, on a host with no network, `hf download` on a
+  machine that has one, as above). The other way works too: a snapshot chosen
+  under **File or model** moves the **Engine** field to vLLM or SGLang when that
+  engine runs here; else the field stays and **File or model** says what turns
+  it on. A GGUF file chosen on vLLM or SGLang stays there, as they run it too.
+  The dialog says it moves whenever the engine is
   not the model's own and runs here, and shows the new engine's form for the
   same model. Whenever **Save** (or **Add model**) is held, the dialog says why.
   Saved, it keeps its name, who may use it, its prices and its sampling, and its

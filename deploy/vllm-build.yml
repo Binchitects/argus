@@ -1,17 +1,17 @@
-# The vllm engine from arena-vllm, built here (services/vllm.Dockerfile) instead of an image you have:
+# arena-vllm built from PyPI (services/vllm-pypi.Dockerfile) instead of from vLLM's own image, for a host that cannot
+# pull from Docker Hub:
 #
 #   docker compose -f docker-compose.yml -f vllm-build.yml --profile vllm build vllm
 #   docker compose -f docker-compose.yml -f vllm-build.yml --profile vllm up -d vllm
 #
-# The build downloads vLLM's wheels (PyPI; PyTorch and its CUDA libraries with them), about 6-10 GB:
-# approve it first. VLLM_VERSION and LMCACHE_VERSION (empty: none) choose what goes in.
+# The build downloads vLLM's wheels (PyPI; PyTorch and its CUDA libraries with them), about 6-10 GB: approve it first.
+# VLLM_VERSION and LMCACHE_VERSION (empty: none) choose what goes in. The image lacks FlashInfer's kernels built ahead
+# (vllm-pypi.Dockerfile says what that means on an Ampere GPU).
 
 services:
   vllm:
-    image: arena-vllm:${VLLM_VERSION:-0.31.0}
     build:
-      context: ./services
-      dockerfile: vllm.Dockerfile
+      dockerfile: vllm-pypi.Dockerfile
       args:
         VLLM_VERSION: ${VLLM_VERSION:-0.31.0}
         LMCACHE_VERSION: ${LMCACHE_VERSION:-}

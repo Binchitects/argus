@@ -424,7 +424,7 @@ public sealed partial class EngineWatcher : BackgroundService
             var library = services.GetRequiredService<ModelLibrary>();
             var files = library.List().ToDictionary(e => e.File.Path, e => e.File.Size, StringComparer.Ordinal);
             var sizes = models.Where(m => files.ContainsKey(m.File)).ToDictionary(m => m.Name, m => files[m.File], StringComparer.Ordinal);
-            // A vLLM or SGLang model's size is its snapshot's weights: the quickest to load again goes first, whatever its engine.
+            // A vLLM or SGLang model's size is its snapshot's weights (a GGUF file's is its size): the quickest to load again goes first, whatever its engine.
             foreach (var m in models.Where(m => Llm.Core.Models.EngineKinds.ServerPerModel(m.EngineKind) && library.Snapshot(m.File) is { Complete: true }))
             {
                 sizes[m.Name] = VllmAdvisor.WeightBytes(library.FullPath(m.File));

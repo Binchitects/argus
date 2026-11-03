@@ -833,11 +833,12 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     }
 
     /// <summary>
-    /// `vllm serve`'s arguments for a model on <paramref name="tp"/> GPUs: its snapshot, tensor parallel size, context,
-    /// answers at once, share of each GPU, cache type, prefix caching, and what it chose of quantisation, sleep mode,
-    /// speculative decoding, a CPU tier for its cache (the OffloadingConnector) and default sampling; and its longest
-    /// answer, which every request is held to. Never a key, a host or a port: the supervisor owns those (and refuses an
-    /// entry that sets them).
+    /// `vllm serve`'s arguments for a model on <paramref name="tp"/> GPUs: its snapshot or GGUF file (a split one's first
+    /// part), tensor parallel size, context, answers at once, share of each GPU, cache type, prefix caching, and what it chose
+    /// of quantisation, sleep mode, speculative decoding, a CPU tier for its cache (the OffloadingConnector) and default
+    /// sampling; and its longest answer, which every request is held to. A GGUF file needs nothing more here: vLLM's launcher
+    /// (services/vllm/serve.py) names its config and tokenizer, and vLLM's GGUF plugin reads it as GGUF. Never a key, a host or
+    /// a port: the supervisor owns those (and refuses an entry that sets them).
     /// </summary>
     public static IReadOnlyList<string> VllmArgs(LocalModel m, string library, int tp)
     {
@@ -895,7 +896,8 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
 
     /// <summary>
     /// SGLang's server's arguments for a model on <paramref name="tp"/> GPUs, as vLLM's are (<see cref="VllmArgs"/>): its
-    /// snapshot, tensor parallel size, context, answers at once (--max-running-requests), share of each GPU
+    /// snapshot or GGUF file (one file; its launcher names the tokenizer), tensor parallel size, context, answers at once
+    /// (--max-running-requests), share of each GPU
     /// (--mem-fraction-static), cache type, its metrics, priority with the lower first (the chat's -1 before API keys' 0, as
     /// on vLLM), and what it chose of quantisation, sleep (the memory saver), speculative decoding (EAGLE-3 with its draft,
     /// or NEXTN, the model's own MTP layers), a RAM tier for its cache (the hierarchical cache) and default sampling. Its
@@ -913,7 +915,9 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             "--mem-fraction-static", (m.GpuMemoryUtilization ?? VllmAdvisor.DefaultUtilization).ToString("0.###", inv),
             // vLLM's fp8 is E4M3; SGLang names it.
             "--kv-cache-dtype", m.KvType == "fp8" ? "fp8_e4m3" : m.KvType, "--enable-metrics",
-            "--enable-priority-scheduling", "--schedule-low-priority-values-first",
+            // A request with no priority of its own (SGLang's own warm-up) as an API key's: else SGLang gives it the largest
+            // number there is, on which its radix cache overflows as the request ends, and the server dies.
+            "--enable-priority-scheduling", "--schedule-low-priority-values-first", "--default-priority-value", "0",
         };
         if (m.Quantization is { Length: > 0 } q)
         {

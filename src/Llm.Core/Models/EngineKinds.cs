@@ -35,11 +35,11 @@ public static class EngineKinds
         PrefixCache: false, SlotPinning: true, SpillToRam: true, Replicas: false, KvTiers: [], Backends: ["cuda", "rocm", "vulkan", "sycl", "metal", "cpu"], Formats: ["gguf"]);
 
     public static readonly EngineCapabilities VllmCapabilities = new(Vllm, "vLLM", Managed: true, TensorParallel: true, Sleep: true,
-        PrefixCache: true, SlotPinning: false, SpillToRam: false, Replicas: true, KvTiers: ["cpu"], Backends: ["cuda", "rocm"], Formats: ["safetensors"]);
+        PrefixCache: true, SlotPinning: false, SpillToRam: false, Replicas: true, KvTiers: ["cpu"], Backends: ["cuda", "rocm"], Formats: ["safetensors", "gguf"]);
 
     /// <summary>SGLang: its radix cache shares every prefix, its memory saver sleeps a model, its hierarchical cache keeps tokens in RAM.</summary>
     public static readonly EngineCapabilities SglangCapabilities = new(Sglang, "SGLang", Managed: true, TensorParallel: true, Sleep: true,
-        PrefixCache: true, SlotPinning: false, SpillToRam: false, Replicas: true, KvTiers: ["cpu"], Backends: ["cuda", "rocm"], Formats: ["safetensors"]);
+        PrefixCache: true, SlotPinning: false, SpillToRam: false, Replicas: true, KvTiers: ["cpu"], Backends: ["cuda", "rocm"], Formats: ["safetensors", "gguf"]);
 
     public static readonly EngineCapabilities ExternalCapabilities = new(External, "Another server (OpenAI-compatible)", Managed: false, TensorParallel: false,
         Sleep: false, PrefixCache: false, SlotPinning: false, SpillToRam: false, Replicas: false, KvTiers: [], Backends: [], Formats: []);
@@ -53,7 +53,7 @@ public static class EngineKinds
     public static bool Managed(string? kind) => Of(kind) is { Managed: true };
 
     /// <summary>
-    /// vLLM and SGLang: one server a model (and a copy), from a Hugging Face snapshot, on its own GPUs, run by the supervisor
+    /// vLLM and SGLang: one server a model (and a copy), from a Hugging Face snapshot or a GGUF file, on its own GPUs, run by the supervisor
     /// (services/vllm/supervisor.sh) as the app's desired state says, with its answers at once in each copy and no slots.
     /// </summary>
     public static bool ServerPerModel(string? kind) => kind is Vllm or Sglang;

@@ -262,12 +262,59 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
             Assert.Contains(field, await res.Content.ReadAsStringAsync(), StringComparison.Ordinal);
         }
         await Refused(new { name = "x1", engineKind = "vllm", file = "hf/acme/Empty@abc123" }, "file");
-        await Refused(new { name = "x2", engineKind = "vllm", file = "tiny/Tiny-4B-Q4_K_M.gguf" }, "file");
+        await Refused(new { name = "x2", engineKind = "vllm", file = "tiny/Gone-Q4_K_M.gguf" }, "file");
         await Refused(new { name = "x3", engineKind = "vllm", file = "hf/acme/Flash@abc123", placement = "manual" }, "placement");
         await Refused(new { name = "x4", file = "tiny/Tiny-4B-Q4_K_M.gguf", replicas = 2 }, "replicas");
         await Refused(new { name = "x5", file = "tiny/Tiny-4B-Q4_K_M.gguf", fallback = "nothing-of-the-sort" }, "fallback");
         await Refused(new { name = "x6", engineKind = "external", file = "tiny/Tiny-4B-Q4_K_M.gguf" }, "engineKind");
         await Refused(new { name = "x7", engineKind = "vllm", file = "hf/acme/../../tiny" }, "file");
+    }
+
+    [Fact]
+    public async Task A_vllm_or_sglang_model_runs_a_gguf_file_from_the_library_named_in_its_servers_arguments()
+    {
+        // A model split in two parts (its header in the first), and an embedding model.
+        GgufFile.Language("qwen3", name: "Big").Write(Path.Combine(Library, "big", "Big-Q4_K_M-00001-of-00002.gguf"));
+        new GgufFile().Text("general.architecture", "qwen3").Tensor("blk.9.ffn_up.weight", 4096, 64, 64).Write(Path.Combine(Library, "big", "Big-Q4_K_M-00002-of-00002.gguf"));
+        new GgufFile().Text("general.architecture", "nomic-bert").U32("nomic-bert.pooling_type", 1).Write(Path.Combine(Library, "embed", "nomic-embed-text-v1.5.f16.gguf"));
+        await using var f = NewApp();
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+
+        // What the form shows for its GGUF file on vLLM: the file's own profile and limits, from its header.
+        var advice = await admin.JsonAsync(await admin.PostAsync("/api/admin/models/advice", new { engineKind = "vllm", file = "tiny/Tiny-4B-Q4_K_M.gguf", context = 32768 }));
+        Assert.Equal(("Q4_K_M", "qwen3", 40960), (advice.GetProperty("profile").GetProperty("quant").GetString(), advice.GetProperty("profile").GetProperty("architecture").GetString(),
+            advice.GetProperty("limits").GetProperty("context").GetProperty("max").GetInt32()));
+
+        // Saved on vLLM, its server is started on the file itself: no snapshot, no quantisation of its own (vLLM's launcher names its tokenizer).
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", new { name = "tiny", engineKind = "vllm", file = "tiny/Tiny-4B-Q4_K_M.gguf", context = 32768 }));
+        // Split, on vLLM: its first part, which names the others.
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", new { name = "big", engineKind = "vllm", file = "big/Big-Q4_K_M-00001-of-00002.gguf", context = 8192 }));
+        var presets = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(Config, "vllm", VllmBackend.PresetsFile)))!["models"]!.AsArray();
+        List<string> ArgsOf(string name) => [.. presets.Single(e => e!["name"]!.GetValue<string>() == name)!["args"]!.AsArray().Select(a => a!.GetValue<string>())];
+        Assert.Equal(["/library/tiny/Tiny-4B-Q4_K_M.gguf", "--tensor-parallel-size", "1", "--max-model-len", "32768"], ArgsOf("tiny").Take(5));
+        Assert.DoesNotContain("--quantization", ArgsOf("tiny"));
+        Assert.Equal("/library/big/Big-Q4_K_M-00001-of-00002.gguf", ArgsOf("big")[0]);
+        var row = (await admin.JsonAsync(await admin.GetAsync("/api/admin/models"))).GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == "tiny");
+        Assert.Equal(("vllm", "tiny/Tiny-4B-Q4_K_M.gguf", "fp8"), (row.GetProperty("engineKind").GetString(), row.GetProperty("file").GetString(), row.GetProperty("kvType").GetString()));
+        Assert.Equal("Q4_K_M", row.GetProperty("profile").GetProperty("quant").GetString());
+
+        // On SGLang, one file: its arguments name it; a split one is refused, with why and how to merge it.
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", new { name = "swift", engineKind = "sglang", file = "tiny/Tiny-4B-Q4_K_M.gguf", context = 8192 }));
+        var sglang = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(Config, "sglang", VllmBackend.PresetsFile)))!["models"]!.AsArray();
+        Assert.Equal(["--model-path", "/library/tiny/Tiny-4B-Q4_K_M.gguf"], sglang.Single()!["args"]!.AsArray().Select(a => a!.GetValue<string>()).Take(2));
+        var split = await admin.PostAsync("/api/admin/models", new { name = "big2", engineKind = "sglang", file = "big/Big-Q4_K_M-00001-of-00002.gguf", context = 8192 });
+        await StatusAssert.Is(HttpStatusCode.BadRequest, split);
+        var why = (await admin.JsonAsync(split)).GetProperty("error").GetString();
+        Assert.Contains("split in 2 parts", why, StringComparison.Ordinal);
+        Assert.Contains("llama-gguf-split --merge", why, StringComparison.Ordinal);
+
+        // A quantisation of its own, and a GGUF file that is no chat model: refused.
+        var quantised = await admin.PostAsync("/api/admin/models", new { name = "q", engineKind = "vllm", file = "tiny/Tiny-4B-Q4_K_M.gguf", quantization = "fp8" });
+        await StatusAssert.Is(HttpStatusCode.BadRequest, quantised);
+        Assert.Contains("quantised already (Q4_K_M)", (await admin.JsonAsync(quantised)).GetProperty("error").GetString(), StringComparison.Ordinal);
+        var embedding = await admin.PostAsync("/api/admin/models", new { name = "e", engineKind = "vllm", file = "embed/nomic-embed-text-v1.5.f16.gguf" });
+        await StatusAssert.Is(HttpStatusCode.BadRequest, embedding);
+        Assert.Contains("cannot run as a chat model: An embedding model", (await admin.JsonAsync(embedding)).GetProperty("error").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -289,6 +336,9 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
         Assert.Equal(("/library/hf/acme/Flash@abc123", "65536", "48", "fp8_e4m3", "16"),
             (After("--model-path"), After("--context-length"), After("--max-running-requests"), After("--kv-cache-dtype"), After("--hicache-size")));
         Assert.Contains("--schedule-low-priority-values-first", args);
+        // A request with no priority of its own (SGLang's own warm-up) as an API key's: without it SGLang gives it the largest
+        // number there is, which its radix cache then overflows on as the request ends, and the server dies.
+        Assert.Equal("0", After("--default-priority-value"));
         Assert.Equal("""{"temperature":0.7}""", After("--preferred-sampling-params"));
         Assert.False(File.Exists(Path.Combine(Config, "vllm", VllmBackend.PresetsFile)));
         var row = (await admin.JsonAsync(await admin.GetAsync("/api/admin/models"))).GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == "swift");

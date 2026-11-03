@@ -74,9 +74,10 @@ images:
   # The CPU temperature exporter's (services/cpu-temp-exporter, from the chart's files).
   python: { repository: python, tag: 3.13-slim }
   valkey: { repository: public.ecr.aws/valkey/valkey, tag: 8.1-alpine }
-  # vLLM (vllm.enabled): vLLM's own image (NGC's nvcr.io/nvidia/vllm, or arena-vllm built from
-  # deploy/services/vllm.Dockerfile and pushed to your registry, serve too); nothing is pulled while it is off.
-  vllm: { repository: vllm/vllm-openai, tag: v0.31.0 }
+  # vLLM (vllm.enabled): arena-vllm, built from deploy/services/vllm.Dockerfile (vLLM's own image with its GGUF plugin, which
+  # GGUF files from the library need) and pushed with the others; vLLM's own or NGC's image serves snapshots only. Nothing is
+  # pulled while it is off.
+  vllm: { repository: arena-vllm, tag: "" }
   # SGLang (sglang.enabled): its own image (ROCm: lmsysorg/sglang v0.5.21-rocm720-mi30x), or arena-sglang built from
   # deploy/services/sglang.Dockerfile and pushed to your registry; nothing is pulled while it is off.
   sglang: { repository: lmsysorg/sglang, tag: v0.5.21-cu130-runtime }

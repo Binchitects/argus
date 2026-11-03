@@ -358,7 +358,10 @@ vLLM serves **one model per process** and has no router mode. Keep the pattern t
 
 Docker Hub was blocked here when this was written; since 2026-10-30 it answers, and the stack's defaults are vLLM's
 own `vllm/vllm-openai:v0.31.0` and NVIDIA's own `nvidia/dcgm-exporter:4.6.1-4.8.4` from it (nvcr.io still answers 403).
-The registry probe (`/v2/`, headers only) gave at first:
+Since 2026-11-03 the stack's vLLM is `arena-vllm`, built on that image (`VLLM_IMAGE`) by `services/vllm.Dockerfile`
+with vLLM's GGUF plugin: vLLM 0.31 moved GGUF out of its tree (`vllm-gguf-plugin>=0.0.2`, its `extra-quant` extra), and
+neither vLLM's image nor its PyPI wheel has it. Where Docker Hub cannot be reached, `vllm-build.yml` builds the same from
+PyPI (option 2 below, `services/vllm-pypi.Dockerfile`). The registry probe (`/v2/`, headers only) gave at first:
 
 - ghcr.io answers.
 - public.ecr.aws and quay.io answer with an auth challenge, which is normal.
@@ -369,7 +372,9 @@ The registry probe (`/v2/`, headers only) gave at first:
 | Item | Source (Docker Hub alternatives) | Approx. size | Notes |
 |---|---|---|---|
 | vLLM base (option 1) | `nvcr.io/nvidia/vllm:26.09-py3` (NGC, built 2026-09-23) | about 10–15 GB (estimate) | NVIDIA-built, CUDA 13. Check the vLLM version inside. |
-| vLLM (option 2, recommended if nvcr fails) | Build `arena-vllm`: `nvcr.io/nvidia/cuda:13.0.x-runtime-ubuntu24.04` (or a cached base), then `pip install vllm==0.31.0` (pulls torch cu130, flashinfer, xformers) | about 8–12 GB built (about 3–5 GB of wheels) | Docker Hub `vllm/vllm-openai:v0.31.0` is blocked. vLLM's CI images on public.ecr.aws are a possible mirror (verify). |
+| vLLM (the default, since 2026-11-03) | Build `arena-vllm` on `vllm/vllm-openai:v0.31.0` (`services/vllm.Dockerfile`; `./arenactl build --with vllm`) | about 32 GB on disk (vLLM's image and 0.1 GB more) | vLLM's own image brings FlashInfer's kernels built ahead and nvcc, which an fp8 token cache on an Ampere GPU (an RTX 3090) needs as a model starts. |
+| vLLM (option 2, where Docker Hub cannot be reached) | Build `arena-vllm` from PyPI (`vllm-build.yml`, `services/vllm-pypi.Dockerfile`): `python:3.13-slim`, then `pip install vllm==0.31.0` (pulls torch cu130, flashinfer) | about 14 GB built (about 3–5 GB of wheels) | It lacks FlashInfer's prebuilt kernels and nvcc: on an Ampere GPU an fp8 token cache fails as the model starts ("Could not find nvcc"); choose the model's own cache type there. vLLM's CI images on public.ecr.aws are a possible mirror (verify). |
+| vLLM's GGUF plugin | `vllm-gguf-plugin==0.0.5` (6.4 MB wheel, CUDA 13 kernels on torch's stable ABI) and `gguf==0.19.0` (118 KB) from PyPI, pinned by hash, `--no-deps` in a layer of their own after vLLM's | 7 MB | Approved 2026-11-02. In both builds; the build checks that vLLM, torch and gguf import and that the plugin's own kernels load. A layer after it adds the stack's own general plugin (`services/vllm-gguf-rope.py`): a llama GGUF file's rotary layout, which vLLM 0.31 and the plugin no longer set. |
 | LMCache | `pip install lmcache==0.5.6` into the same image (Docker Hub `lmcache/vllm-openai` blocked) | about 0.2–0.5 GB | Must match the torch/vLLM ABI; build and smoke-test together. |
 | SGLang (optional, later) | `pip install "sglang[all]"` (Docker Hub `lmsysorg/sglang` blocked) | about 5–8 GB | Not in the first phase. |
 | DCGM exporter | `nvcr.io/nvidia/k8s/dcgm-exporter:<pinned>` | about 0.5–1 GB | Replaces or joins `nvidia_gpu_exporter`. |

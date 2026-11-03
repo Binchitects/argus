@@ -26,6 +26,10 @@ data:
 {{ .Files.Get "files/vllm-supervisor.sh" | indent 4 }}
   vllm-helper.py: |-
 {{ .Files.Get "files/vllm-helper.py" | indent 4 }}
+  vllm-serve.py: |-
+{{ .Files.Get "files/vllm-serve.py" | indent 4 }}
+  vllm-gguf-config.py: |-
+{{ .Files.Get "files/vllm-gguf-config.py" | indent 4 }}
   gpu-probe.py: |-
 {{ .Files.Get "files/gpu-probe.py" | indent 4 }}
   fake_vllm.py: |-

@@ -2,7 +2,8 @@
 # vLLM and SGLang serve one model a process and have no router: this runs one server for each
 # model the app wants, as the app's desired state says, with no Docker socket (the same way
 # llamacpp/router.sh follows models.ini and sd-serve.sh its control file). ENGINE_SERVER says
-# which: vllm (`vllm serve ARGS`) or sglang (sglang/serve.py ARGS: SGLang's launch_server).
+# which: vllm (serve.py serve ARGS: `vllm serve`, with a GGUF file's config and tokenizer read
+# from its header first) or sglang (sglang/serve.py ARGS: SGLang's launch_server).
 #
 #   /presets/vllm/models.json   written by the app (Admin -> Models):
 #     {"models": [{"name", "port", "gpus": [0, 1], "sleep": false, "args": ["/library/hf/...", "--tensor-parallel-size", "2", ...]}]}
@@ -40,7 +41,7 @@ status=${VLLM_STATUS:-/status}
 run=${VLLM_RUN:-/tmp/vllm-supervisor}
 server=${ENGINE_SERVER:-vllm}
 case $server in
-  vllm) bin=${VLLM_BIN:-vllm} ;;
+  vllm) bin=${VLLM_BIN:-python3 $here/serve.py} ;;
   sglang) bin=${VLLM_BIN:-python3 /sglang/serve.py} ;;
   *) echo "supervisor: ENGINE_SERVER is vllm or sglang, not $server" >&2; exit 2 ;;
 esac

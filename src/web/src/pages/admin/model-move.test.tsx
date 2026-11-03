@@ -64,7 +64,7 @@ async function edit(name: string) {
 }
 
 describe('admin models: moving a model to another engine', () => {
-  it('moves a vLLM model to llama.cpp: a GGUF file chosen in its own dialog opens the llama.cpp form, saved under its name as llama.cpp\'s', async () => {
+  it("keeps a vLLM model on vLLM with a GGUF file chosen in its own dialog, which vLLM runs too, then moves it to llama.cpp on that file, saved as llama.cpp's", async () => {
     const calls = fakeApi(admin, {
       'GET /api/admin/models': () => ({ json: { engine, small: null, models: [flash] } }),
       'GET /api/admin/models/library': () => ({ json: library }),
@@ -77,10 +77,20 @@ describe('admin models: moving a model to another engine', () => {
     const dialog = await edit('flash')
     await userEvent.click(within(dialog).getByRole('combobox', { name: 'File or model' }))
     await userEvent.click(await screen.findByRole('option', { name: /q\/Qwen\.gguf/ }))
+    // vLLM runs a GGUF file: it stays there, its form for that file, which says how it runs it.
+    const form = await within(dialog).findByRole('form', { name: 'The vLLM model' })
+    expect(within(form).getByText(/^A GGUF file · Q4_K_M · .+ · qwen3: vLLM reads its settings and tokenizer from its header/)).toBeInTheDocument()
+    expect(within(dialog).getByRole('combobox', { name: 'Engine' })).toHaveTextContent('vLLM')
+    expect(within(dialog).queryByText(/^Moves flash/)).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('combobox', { name: 'File or model' })).toHaveAccessibleDescription(
+      /vLLM runs this GGUF file through its GGUF support, more slowly than a snapshot's own safetensors; llama\.cpp often runs a GGUF file best/,
+    )
+    // llama.cpp from the Engine field: the same file, the llama.cpp form under its name, from what fits the file.
+    await chooseEngine(dialog, 'llama.cpp')
     expect(await within(dialog).findByText('Moves flash to llama.cpp')).toBeInTheDocument()
     expect(within(dialog).getByText(/Its answers in flight end on vLLM; new requests wait for it on llama.cpp/)).toBeInTheDocument()
-    // The llama.cpp form, under its name, from what fits the file: llama.cpp's cache type, on every GPU.
     expect(within(dialog).queryByRole('form', { name: 'The vLLM model' })).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('combobox', { name: 'File or model' })).toHaveTextContent('q/Qwen.gguf')
     expect(within(dialog).getByLabelText('Name')).toHaveValue('flash')
     await waitFor(() => expect(within(dialog).getByLabelText('Context (tokens)')).toHaveValue('65536'))
     // The advice is asked for the model as llama.cpp's.
@@ -239,39 +249,59 @@ describe('admin models: the Engine field', () => {
     expect(screen.getByRole('option', { name: 'llama.cpp' })).not.toHaveAttribute('aria-disabled', 'true')
   })
 
-  it("moves a llama.cpp model to vLLM from the field: the library's snapshots listed first, its own preselected and shown, saved as vLLM's", async () => {
+  it("moves a llama.cpp model to vLLM from the field on its own GGUF file, the library's snapshot of it recommended, listed first and saved when chosen", async () => {
     const { calls } = stack()
     renderApp('/admin/models')
     const dialog = await edit('Qwen3')
     await chooseEngine(dialog, 'vLLM')
     expect(await within(dialog).findByRole('form', { name: 'The vLLM model' })).toBeInTheDocument()
-    expect(within(dialog).getByRole('combobox', { name: 'File or model' })).toHaveTextContent(qwen3Snapshot)
-    expect(within(dialog).getByText(/Its snapshot in the library, by its name and architecture/)).toBeInTheDocument()
+    // Its GGUF file stays, no snapshot needed; the hint says its snapshot runs faster there, and llama.cpp often runs a GGUF file best.
+    const file = within(dialog).getByRole('combobox', { name: 'File or model' })
+    expect(file).toHaveTextContent(qwen3Gguf)
+    expect(file).toHaveAccessibleDescription(
+      `Its snapshot ${qwen3Snapshot} is in the library too, by its name and architecture: vLLM runs a snapshot's own safetensors faster than a GGUF file, so choose it here for speed. llama.cpp often runs a GGUF file best.`,
+    )
     expect(within(dialog).getByText('Moves Qwen3 to vLLM')).toBeInTheDocument()
-    await userEvent.click(within(dialog).getByRole('combobox', { name: 'File or model' }))
+    await userEvent.click(file)
     const groups = await screen.findAllByRole('group')
     expect(groups[0]).toHaveTextContent(/Hugging Face snapshots/)
-    expect(within(groups[0]).getByRole('option', { name: /flash@r/ })).toBeInTheDocument()
-    await userEvent.keyboard('{Escape}')
+    expect(groups[1]).toHaveTextContent(/GGUF files, for llama\.cpp, vLLM and SGLang/)
+    await userEvent.click(within(groups[0]).getByRole('option', { name: new RegExp(qwen3Snapshot) }))
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'File or model' })).toHaveTextContent(qwen3Snapshot))
+    expect(await within(dialog).findByRole('form', { name: 'The vLLM model' })).toBeInTheDocument()
     await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH' && c.path === '/api/admin/models/Qwen3')).toBe(true))
     expect(calls.find((c) => c.method === 'PATCH')!.body).toMatchObject({ engineKind: 'vllm', file: qwen3Snapshot })
   })
 
-  it('says so plainly when the library holds no snapshot of the model, how to get one, and holds Save', async () => {
-    stack({ snapshots: [] })
+  it('moves a llama.cpp model to vLLM on its GGUF file when the library holds no snapshot of it, and says how to get one when it holds no file at all', async () => {
+    const { calls } = stack({ snapshots: [] })
     renderApp('/admin/models')
     const dialog = await edit('Qwen3')
     await chooseEngine(dialog, 'vLLM')
-    expect(await within(dialog).findByText('No Hugging Face snapshot of Qwen3 in the library')).toBeInTheDocument()
+    const form = await within(dialog).findByRole('form', { name: 'The vLLM model' })
+    expect(within(dialog).queryByText(/No Hugging Face snapshot/)).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('combobox', { name: 'File or model' })).toHaveAccessibleDescription(/vLLM runs this GGUF file through its GGUF support, more slowly/)
+    await waitFor(() => expect(within(form).getByRole('button', { name: 'Save' })).toBeEnabled())
+    await userEvent.click(within(form).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH' && c.path === '/api/admin/models/Qwen3')).toBe(true))
+    expect(calls.find((c) => c.method === 'PATCH')!.body).toMatchObject({ engineKind: 'vllm', file: qwen3Gguf })
+  })
+
+  it('says so plainly when the library holds neither a snapshot nor a GGUF file for vLLM, how to get one, and holds Add model', async () => {
+    stack({ snapshots: [], library: [] })
+    renderApp('/admin/models')
+    const dialog = await add()
+    await chooseEngine(dialog, 'vLLM')
+    expect(await within(dialog).findByText('No Hugging Face snapshot or GGUF file in the library')).toBeInTheDocument()
     expect(within(dialog).getByText(/Find on Hugging Face/)).toBeInTheDocument()
     expect(within(dialog).getByText('Snapshots')).toBeInTheDocument()
     // With no network here: downloaded on a machine that has one, into the folder the library reads, and carried over.
     expect(within(dialog).getByText("hf download <owner>/<repository> --revision <revision> --local-dir <library>/hf/<owner>/<repository>@<revision> --exclude 'original/*' 'metal/*' '*.gguf'")).toBeInTheDocument()
-    expect(within(dialog).queryByRole('form', { name: 'The chat model' })).not.toBeInTheDocument()
-    const save = within(dialog).getByRole('button', { name: 'Save' })
-    expect(save).toBeDisabled()
-    expect(save).toHaveAccessibleDescription(/No Hugging Face snapshot of Qwen3 in the library/)
+    expect(within(dialog).queryByRole('form', { name: 'The vLLM model' })).not.toBeInTheDocument()
+    const held = within(dialog).getByRole('button', { name: 'Add model' })
+    expect(held).toBeDisabled()
+    expect(held).toHaveAccessibleDescription(/No Hugging Face snapshot or GGUF file in the library/)
   })
 
   it("moves a vLLM model to SGLang on the same snapshot with one engine of each, without what is vLLM's alone", async () => {
@@ -310,7 +340,7 @@ describe('admin models: the Engine field', () => {
     expect(calls.find((c) => c.method === 'PATCH')!.body).toMatchObject({ engineKind: 'llamacpp', file: qwen3Gguf })
   })
 
-  it('moves the Engine field with a file of the other form chosen under File or model, and back', async () => {
+  it('moves the Engine field to vLLM with a snapshot chosen under File or model, keeps it there with a GGUF file after it, and back to llama.cpp on that file', async () => {
     stack()
     renderApp('/admin/models')
     const dialog = await edit('Qwen3')
@@ -318,9 +348,16 @@ describe('admin models: the Engine field', () => {
     await userEvent.click(await screen.findByRole('option', { name: /flash@r/ }))
     await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'Engine' })).toHaveTextContent('vLLM'))
     expect(within(dialog).getByText('Moves Qwen3 to vLLM')).toBeInTheDocument()
+    // A GGUF file next: vLLM runs it too, so the engine stays.
     await userEvent.click(within(dialog).getByRole('combobox', { name: 'File or model' }))
     await userEvent.click(await screen.findByRole('option', { name: /Llama-3\.1-8B/ }))
-    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'Engine' })).toHaveTextContent('llama.cpp'))
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'File or model' })).toHaveTextContent(/Llama-3\.1-8B/))
+    expect(within(dialog).getByRole('combobox', { name: 'Engine' })).toHaveTextContent('vLLM')
+    expect(await within(dialog).findByRole('form', { name: 'The vLLM model' })).toBeInTheDocument()
+    // llama.cpp again: on the same file, where it was.
+    await chooseEngine(dialog, 'llama.cpp')
+    await within(dialog).findByRole('form', { name: 'The chat model' })
+    expect(within(dialog).getByRole('combobox', { name: 'File or model' })).toHaveTextContent(/Llama-3\.1-8B/)
     expect(within(dialog).queryByText(/^Moves Qwen3/)).not.toBeInTheDocument()
   })
 
@@ -415,7 +452,7 @@ describe('admin models: the Engine field as the library and the page change', ()
     expect(sent.clear).toContain('engine')
   })
 
-  it('brings back the file chosen when the engine goes to the other form and back', async () => {
+  it('keeps the GGUF file chosen when the engine goes to vLLM and back, and brings it back after a snapshot chosen on vLLM', async () => {
     const q8 = { path: qwen3Q8, size: 9e9, parts: 1, profile: { ...profile, architecture: 'qwen3', name: 'Qwen3 8B', sizeLabel: '8B', quant: 'Q8_0' }, usedBy: [] }
     stack({ library: [...both.library, q8] })
     renderApp('/admin/models')
@@ -424,56 +461,62 @@ describe('admin models: the Engine field as the library and the page change', ()
     await within(dialog).findByRole('form', { name: 'The chat model' })
     await chooseEngine(dialog, 'vLLM')
     await within(dialog).findByRole('form', { name: 'The vLLM model' })
-    expect(within(dialog).getByRole('combobox', { name: 'File or model' })).toHaveTextContent(qwen3Snapshot)
+    expect(within(dialog).getByRole('combobox', { name: 'File or model' })).toHaveTextContent(qwen3Q8)
+    expect(within(dialog).getByLabelText('Name')).toHaveValue('Qwen3-8B-Q8_0')
+    await chooseEngine(dialog, 'llama.cpp')
+    await within(dialog).findByRole('form', { name: 'The chat model' })
+    expect(within(dialog).getByRole('combobox', { name: 'File or model' })).toHaveTextContent(qwen3Q8)
+    // Its snapshot chosen on vLLM, then llama.cpp: the GGUF file chosen before comes back.
+    await chooseEngine(dialog, 'vLLM')
+    await within(dialog).findByRole('form', { name: 'The vLLM model' })
+    await chooseFile(dialog, new RegExp(qwen3Snapshot))
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'File or model' })).toHaveTextContent(qwen3Snapshot))
     await chooseEngine(dialog, 'llama.cpp')
     await within(dialog).findByRole('form', { name: 'The chat model' })
     expect(within(dialog).getByRole('combobox', { name: 'File or model' })).toHaveTextContent(qwen3Q8)
     expect(within(dialog).queryByText(/Its GGUF file in the library, by its/)).not.toBeInTheDocument()
   })
 
-  it('says why Add model is held, and shows File or model as the dialog has it when the other engine finds no match', async () => {
-    stack({ snapshots: [] })
+  it('says why Add model is held, and shows File or model as the dialog has it when llama.cpp finds no GGUF file of a snapshot', async () => {
+    stack({ snapshots: [...both.snapshots, { ...both.snapshots[1], path: 'hf/acme/Other@r', repo: 'acme/Other', architectures: ['MistralForCausalLM'] }] })
     renderApp('/admin/models')
     const dialog = await add()
     const held = await within(dialog).findByRole('button', { name: 'Add model' })
     expect(held).toBeDisabled()
     expect(held).toHaveAccessibleDescription(/Choose its GGUF file under File or model/)
-    await chooseFile(dialog, /Qwen3-8B-Q4_K_M\.gguf/)
-    await within(dialog).findByRole('form', { name: 'The chat model' })
-    // vLLM finds no snapshot of it: the dialog has no file, and File or model says so.
-    await chooseEngine(dialog, 'vLLM')
-    expect(await within(dialog).findByText('No Hugging Face snapshot of Qwen3-8B-Q4_K_M in the library')).toBeInTheDocument()
+    // A snapshot takes vLLM; llama.cpp then finds no GGUF file of it: the dialog has no file, and says so.
+    await chooseFile(dialog, /hf\/acme\/Other@r/)
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'Engine' })).toHaveTextContent('vLLM'))
+    await within(dialog).findByRole('form', { name: 'The vLLM model' })
+    await chooseEngine(dialog, 'llama.cpp')
+    expect(await within(dialog).findByText('No GGUF file of Other in the library')).toBeInTheDocument()
     const file = within(dialog).getByRole('combobox', { name: 'File or model' })
     expect(file).toHaveTextContent('Choose a file or model')
-    expect(within(dialog).getByRole('button', { name: 'Add model' })).toHaveAccessibleDescription(/No Hugging Face snapshot of Qwen3-8B-Q4_K_M in the library/)
-    // The same file chosen again takes llama.cpp back.
+    expect(within(dialog).getByRole('button', { name: 'Add model' })).toHaveAccessibleDescription(/No GGUF file of Other in the library/)
+    // A GGUF file chosen: llama.cpp's form.
     await chooseFile(dialog, /Qwen3-8B-Q4_K_M\.gguf/)
-    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'Engine' })).toHaveTextContent('llama.cpp'))
     await within(dialog).findByRole('form', { name: 'The chat model' })
-    // Away and back with the Engine field: its file comes back with llama.cpp.
-    await chooseEngine(dialog, 'vLLM')
-    await within(dialog).findByText('No Hugging Face snapshot of Qwen3-8B-Q4_K_M in the library')
-    await chooseEngine(dialog, 'llama.cpp')
-    await within(dialog).findByRole('form', { name: 'The chat model' })
-    expect(within(dialog).getByRole('combobox', { name: 'File or model' })).toHaveTextContent(qwen3Gguf)
+    expect(within(dialog).getByRole('combobox', { name: 'Engine' })).toHaveTextContent('llama.cpp')
     await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Add model' })).toBeEnabled())
   })
 
-  it('keeps a vLLM model on vLLM when a GGUF file is chosen while llama.cpp is off, saying what turns it on', async () => {
-    stack({ instances: [{ ...instances[0], on: false }, instances[1], instances[2]], models: [flash] })
+  it('keeps a vLLM model on vLLM with a GGUF file chosen while llama.cpp is off, and holds a move to llama.cpp, saying what turns it on', async () => {
+    const { calls } = stack({ instances: [{ ...instances[0], on: false }, instances[1], instances[2]], models: [flash] })
     renderApp('/admin/models')
     const dialog = await edit('flash')
     await within(dialog).findByRole('form', { name: 'The vLLM model' })
     await chooseFile(dialog, /Qwen3-8B-Q4_K_M\.gguf/)
-    await within(dialog).findByText('llama.cpp does not run here')
+    // vLLM runs it: no move, and Save takes it.
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'File or model' })).toHaveTextContent(qwen3Gguf))
+    const form = await within(dialog).findByRole('form', { name: 'The vLLM model' })
     expect(within(dialog).getByRole('combobox', { name: 'Engine' })).toHaveTextContent('vLLM')
     expect(within(dialog).queryByText(/^Moves flash/)).not.toBeInTheDocument()
-    expect(within(dialog).getByRole('combobox', { name: 'File or model' })).toHaveAccessibleDescription(
-      /A GGUF file needs llama\.cpp: choose a snapshot for vLLM\. llama\.cpp is off here: the installer turns it on with .*repair --with chat-models/,
-    )
-    const save = within(dialog).getByRole('button', { name: 'Save' })
-    expect(save).toBeDisabled()
-    expect(save).toHaveAccessibleDescription(/llama\.cpp does not run here/)
+    expect(within(dialog).queryByText('llama.cpp does not run here')).not.toBeInTheDocument()
+    // llama.cpp itself cannot be chosen: off here, with what turns it on.
+    expect(within(dialog).getByRole('combobox', { name: 'Engine' })).toHaveAccessibleDescription(/llama\.cpp is off here: the installer turns it on with .*repair --with chat-models/)
+    await userEvent.click(within(form).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH' && c.path === '/api/admin/models/flash')).toBe(true))
+    expect(calls.find((c) => c.method === 'PATCH')!.body).toMatchObject({ engineKind: 'vllm', file: qwen3Gguf })
   })
 
   it('holds an open dialog once another admin moved its model elsewhere, so Save cannot move it back unasked', async () => {
@@ -499,6 +542,8 @@ describe('admin models: the Engine field as the library and the page change', ()
     expect(
       within(dialog).getByText(/vLLM is off here: the installer turns it on with \.\/arenactl repair --with vllm from the checkout, or sh argus-arena-VERSION-offline\.run repair --with vllm with the offline installer/),
     ).toBeInTheDocument()
+    // The checkout builds arena-vllm; the offline installer carries it built.
+    expect(within(dialog).getByText(/with the offline installer \(its image, arena-vllm, is vLLM's own with its GGUF plugin: the checkout builds it on VLLM_IMAGE, the offline installer carries it\)\.$/)).toBeInTheDocument()
   })
 
   it('adds a downloaded snapshot as a vLLM or SGLang model: its folder chosen, the Engine field held until the library is read', async () => {

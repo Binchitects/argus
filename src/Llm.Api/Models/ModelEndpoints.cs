@@ -271,10 +271,10 @@ public static class ModelEndpoints
         var file = (body.File ?? model.File).Trim();
         if (EngineKinds.ServerPerModel(body.EngineKind ?? model.EngineKind))
         {
-            // A snapshot for vLLM or SGLang: its own advisor, beside what is kept on the GPUs.
-            if (library.Snapshot(file) is not { } snapshot || VllmAdvisor.Read(library.FullPath(snapshot.Path)) is not { } profile)
+            // A snapshot or a GGUF file for vLLM or SGLang: its own advisor, beside what is kept on the GPUs.
+            if (VllmAdvisor.Of(library, file) is not { } profile)
             {
-                return AuthEndpoints.Problem(400, "file", "Choose a Hugging Face snapshot from the model library.");
+                return AuthEndpoints.Problem(400, "file", "Choose a Hugging Face snapshot or a GGUF file of a language model from the model library.");
             }
             Leave(model, body.EngineKind ?? model.EngineKind);
             Merge(model, body, file);
@@ -677,7 +677,7 @@ public static class ModelEndpoints
                 continue;
             }
             residents.Add(GpuPlan.Share(m.Name, hw, gpus, m.GpuMemoryUtilization ?? VllmAdvisor.DefaultUtilization));
-            var weights = library.Snapshot(m.File) is { } snap ? VllmAdvisor.WeightBytes(library.FullPath(snap.Path)) : 0;
+            var weights = VllmAdvisor.WeightsOf(library, m.File);
             ram += ((m.Sleep ? weights : 0) + ((long)(m.KvCpuGb ?? 0) << 30)) * Math.Max(1, m.Replicas);
         }
         var perGpu = new Dictionary<int, long>();
@@ -836,17 +836,25 @@ public static class ModelEndpoints
     }
 
     /// <summary>
-    /// A vLLM model's settings: its folder a whole Hugging Face snapshot in the library, only what vLLM has, and (VllmAdvisor)
-    /// GPUs that hold it beside what is kept on them: its own, else the ones proposed for this machine, which it keeps.
+    /// A vLLM or SGLang model's settings: its file a whole Hugging Face snapshot or a GGUF file of a language model in the library,
+    /// only what its engine has, and (VllmAdvisor) GPUs that hold it beside what is kept on them: its own, else the ones proposed
+    /// for this machine, which it keeps.
     /// </summary>
     private static (IResult? Problem, string? Warning) ApplyVllm(LocalModel m, LocalModelRequest body, string file, string kind, ModelLibrary library, Hardware? hardware,
         PriceOptions prices, Placed placed)
     {
-        if (library.Snapshot(file) is not { Complete: true })
+        if (file.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase) && !file.StartsWith('/') && library.Find(file) is { } gguf)
+        {
+            if (gguf.Profile.Kind != ModelKind.Language)
+            {
+                return (AuthEndpoints.Problem(400, "file", $"{file} cannot run as a chat model: {gguf.Profile.Why ?? "its header says it is not a language model."}"), null);
+            }
+        }
+        else if (library.Snapshot(file) is not { Complete: true })
         {
             return (AuthEndpoints.Problem(400, "file", library.Snapshot(file) is { Why: { } why }
                 ? $"{file} cannot be loaded yet: {why}"
-                : "Choose a Hugging Face snapshot from the model library (hf/ORG/REPO@REVISION, with its config.json)."), null);
+                : "Choose a Hugging Face snapshot (hf/ORG/REPO@REVISION, with its config.json) or a GGUF file from the model library."), null);
         }
         var draft = Copy(m);
         Leave(draft, kind);
@@ -860,7 +868,7 @@ public static class ModelEndpoints
         {
             return (AuthEndpoints.Problem(400, error.Field, error.Message), null);
         }
-        if (VllmAdvisor.Read(library.FullPath(file)) is not { } profile)
+        if (VllmAdvisor.Of(library, file) is not { } profile)
         {
             return (AuthEndpoints.Problem(400, "file", $"{file}'s config.json cannot be read."), null);
         }

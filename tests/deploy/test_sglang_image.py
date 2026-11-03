@@ -44,7 +44,10 @@ class SglangImageTests(unittest.TestCase):
         self.assertIn('os.environ.pop("SGLANG_API_KEY"', text)
         self.assertIn('runpy.run_module("sglang.launch_server"', text)
         # Added to sys.argv inside the process: /proc/PID/cmdline keeps the arguments it was started with.
-        self.assertIn('sys.argv = ["sglang.launch_server", *sys.argv[1:], *(["--api-key", key] if key else [])]', text)
+        self.assertIn('sys.argv = ["sglang.launch_server", *run, *(["--api-key", key] if key else [])]', text)
+        self.assertIn("run = args(sys.argv[1:])", text)
+        # The GGUF files' tokenizer folder comes from vLLM's module, which the image has beside the supervisor.
+        self.assertIn("COPY vllm/supervisor.sh vllm/vllm-helper.py vllm/gguf_config.py /vllm/", self.text)
 
     def test_compose_runs_the_pinned_image_and_builds_it_only_with_the_build_file(self):
         docker = shutil.which("docker")
