@@ -221,6 +221,12 @@ public sealed class VllmAdvisorTests
             Assert.Contains("run it on llama.cpp", qwen35.Message, StringComparison.Ordinal);
             Assert.Null(VllmAdvisor.Advise(M(), p with { Architecture = "phi3" }, FakeHardware.One24).FirstError);
             Assert.Equal("file", Refused(M(EngineKinds.Sglang), p with { Architecture = "phi3" }).Field);
+            // On AMD GPUs vLLM is its own ROCm image (rocm.yml), with no GGUF plugin: refused, where a snapshot is not.
+            var amd = VllmAdvisor.Advise(M(), p, FakeHardware.Rocm2x192).FirstError!;
+            Assert.Equal("file", amd.Field);
+            Assert.Contains("vLLM's own ROCm image", amd.Message, StringComparison.Ordinal);
+            Assert.Contains("run it on llama.cpp", amd.Message, StringComparison.Ordinal);
+            Assert.Null(VllmAdvisor.Advise(Model("gpt-oss-120b"), Load("gpt-oss-120b"), FakeHardware.Rocm2x192).FirstError);
             // A snapshot is no GGUF file: none of it applies.
             Assert.Equal(0, Load("gpt-oss-120b").GgufParts);
         }

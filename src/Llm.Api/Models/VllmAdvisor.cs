@@ -385,6 +385,12 @@ public static class VllmAdvisor
         {
             problems.Add(new("devices", $"GPU {other.Index} ({other.Name}) runs on {other.Backend}, which {label} does not: it takes {string.Join(" or ", kind.Backends)} GPUs.", true));
         }
+        // On AMD GPUs vLLM is its own ROCm image (rocm.yml), not arena-vllm: its GGUF plugin is built for CUDA.
+        if (p.GgufParts > 0 && kind.Kind == EngineKinds.Vllm && group.FirstOrDefault(d => d.Backend == "rocm") is { } amd)
+        {
+            problems.Add(new("file", $"GPU {amd.Index} ({amd.Name}) runs vLLM's own ROCm image, which has no GGUF plugin (arena-vllm's is built for CUDA): "
+                + "run it on llama.cpp, or on vLLM from its Hugging Face snapshot.", true));
+        }
         if (group.Select(d => d.Vendor).Distinct().Count() > 1)
         {
             problems.Add(new("devices", "Its GPUs are of different vendors: one copy runs on one vendor's GPUs.", true));

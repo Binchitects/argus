@@ -574,9 +574,11 @@ would be with them.
   llama, mamba, minimax-m2, phi3, qwen2, qwen3, stablelm and starcoder2;
   SGLang llama, qwen2 and qwen3. Any other (qwen35, qwen3vlmoe, gemma4 and MoE
   ones such as qwen3moe among them) is refused with why: it would fail as it
-  loads. A GGUF file runs more slowly on vLLM and SGLang than a snapshot's own
-  safetensors, and llama.cpp often runs a GGUF file best: the dialog says so,
-  and recommends the library's snapshot of the same model when it has one.
+  loads. On AMD GPUs vLLM is its own ROCm image (`rocm.yml`), which has no
+  GGUF plugin: a GGUF file is refused there too. A GGUF file runs more slowly
+  on vLLM and SGLang than a snapshot's own safetensors, and llama.cpp often
+  runs a GGUF file best: the dialog says so, and recommends the library's
+  snapshot of the same model when it has one.
 - **Moving a model to another engine.** A model moves at runtime, with the stack
   running: llama.cpp to vLLM or SGLang and back, and between vLLM and SGLang (or
   another machine's engine of a kind). Each chat model's card says its engine
