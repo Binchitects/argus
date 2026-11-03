@@ -1,12 +1,14 @@
 using System.Net;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 
 namespace CodeArena.Tests;
 
 /// <summary>
 /// After a compaction the IDE still shows the whole conversation (only what the model reads is compacted, marked where it
 /// was), each message keeping its id, and the agent goes on: its next turn answers, its tools run and ask as before, after
-/// the page is read again and after code-arena starts again.
+/// the page is read again and after code-arena starts again. The terminal, started again, counts every message and shows
+/// the last turns. A /compact the model gives no summary for says so, in the terminal and in the IDE, and changes nothing.
 /// </summary>
 public sealed class CompactedHistoryTests : IDisposable
 {
@@ -136,5 +138,72 @@ public sealed class CompactedHistoryTests : IDisposable
         Assert.True(context["toolResults"]!.GetValue<long>() > 0);
         Assert.True(context["system"]!.GetValue<long>() > 0);
         Assert.All(context["biggest"]!.AsArray(), b => Assert.Contains(session, m => m["id"]!.GetValue<string>() == b!["id"]!.GetValue<string>()));
+    }
+
+    [Fact]
+    public async Task Started_again_after_a_compaction_the_terminal_counts_every_message_says_it_was_compacted_and_shows_the_last_turns()
+    {
+        _gateway.Answer = req => FakeGateway.Summarizing(req) ? Reply.Say("SUMMARY: two questions answered.") : Reply.Say($"answer to {FakeGateway.Last(req)}");
+        using var h = new Harness(_gateway, _mcp);
+        Assert.Equal(0, await h.Run("first\nsecond\n/compact\nthird\n/exit\n", "chat"));
+        var id = Regex.Match(h.Out, @"Saved as (\S+):").Groups[1].Value;
+
+        // The session has six messages; the model reads a summary of the first four, then the last two.
+        Assert.Equal(0, await h.Run("/exit\n", "chat", "--continue"));
+        Assert.Contains($"resumed {id}, 6 messages (compacted: the model reads a summary of the first 4)", h.Out, StringComparison.Ordinal);
+        // The last turns as they were said, the person's and the model's.
+        var shown = h.Out[h.Out.IndexOf("resumed", StringComparison.Ordinal)..];
+        var second = shown.IndexOf("› second", StringComparison.Ordinal);
+        Assert.True(second >= 0, h.Out);
+        Assert.True(shown.IndexOf("answer to second", StringComparison.Ordinal) > second, h.Out);
+        Assert.True(shown.IndexOf("› third", StringComparison.Ordinal) > second, h.Out);
+        Assert.Contains("answer to third", shown, StringComparison.Ordinal);
+        Assert.DoesNotContain("› first", shown, StringComparison.Ordinal);
+
+        // /resume says the same of it.
+        Assert.Equal(0, await h.Run($"/resume {id}\n/exit\n", "chat"));
+        Assert.Contains($"Resumed {id}, 6 messages (compacted: the model reads a summary of the first 4), model model-a.", h.Out, StringComparison.Ordinal);
+        Assert.Contains("answer to third", h.Out, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_compact_the_model_gives_no_summary_for_says_so_in_the_terminal_and_the_session_goes_on_as_it_was()
+    {
+        // A small model may answer the request for a summary with a tool call (it sees the tools), or with nothing.
+        _gateway.Answer = req => FakeGateway.Summarizing(req) ? Reply.Call(("read_file", """{"path":"a.txt"}""")) : Reply.Say($"answer to {FakeGateway.Last(req)}");
+        using var h = new Harness(_gateway, _mcp);
+
+        Assert.Equal(0, await h.Run("first\n/compact\nsecond\n/exit\n", "chat"));
+
+        Assert.Contains("The model gave no summary: the conversation is as it was.", h.Err, StringComparison.Ordinal);
+        Assert.Contains("answer to second", h.Out, StringComparison.Ordinal);
+        // The tools are offered as ever (the engine has them cached), but not to be called.
+        var summary = _gateway.Requests.Single(FakeGateway.Summarizing);
+        Assert.NotEmpty(FakeGateway.ToolNames(summary));
+        Assert.Equal("none", summary["tool_choice"]?.GetValue<string>());
+        // Nothing was compacted: the model reads the first question as it was.
+        Assert.Equal(["first", "answer to first", "second"], FakeGateway.History(_gateway.Requests[^1]).Select(m => m["content"]!.ToString()));
+    }
+
+    [Fact]
+    public async Task A_compact_the_model_gives_no_summary_for_says_so_in_the_ide_and_the_next_turn_answers()
+    {
+        _gateway.Answer = req => FakeGateway.Summarizing(req) ? Reply.Say("") : Reply.Say($"answer to {FakeGateway.Last(req)}");
+        using var h = new Harness(_gateway, _mcp);
+        await using var web = await WebRun.StartAsync(h);
+        await (await web.SendAsync("first")).RestAsync();
+
+        var compacted = await (await web.StreamAsync(HttpMethod.Post, "/api/compact", new JsonObject())).RestAsync();
+
+        var error = compacted.Single(e => e["type"]!.GetValue<string>() == "error");
+        Assert.Equal("The model gave no summary: the conversation is as it was.", error["message"]!.GetValue<string>());
+        Assert.DoesNotContain(compacted, e => e["type"]!.GetValue<string>() is "reset" || e["kind"]?.GetValue<string>() == "compacted");
+        Assert.Equal("done", compacted[^1]["type"]!.GetValue<string>());
+        var session = Messages(await web.GetJsonAsync("/api/session"));
+        Assert.All(session, m => Assert.Null(m["summary"]));
+
+        var next = await (await web.SendAsync("second")).RestAsync();
+        Assert.Equal("answer to second", string.Concat(next.Where(e => e["type"]!.GetValue<string>() == "content").Select(e => e["text"]!.GetValue<string>())));
+        Assert.Equal(["first", "answer to first", "second"], FakeGateway.History(_gateway.Requests[^1]).Select(m => m["content"]!.ToString()));
     }
 }

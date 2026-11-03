@@ -1656,7 +1656,12 @@ internal sealed class Agent
         }
     }
 
-    /// <summary>The model's summary of the conversation up to <paramref name="upTo"/>, or why there is none (and none is tried for a few compactions).</summary>
+    /// <summary>
+    /// The model's summary of the conversation up to <paramref name="upTo"/>, or why there is none (and none is tried for a
+    /// few compactions). Forced (/compact), why there is none is thrown. So is a request held back in the model's line for
+    /// longer than the gateway waits: the line being full is no reason to leave the older messages out, so the turn ends
+    /// with it and the conversation is as it was.
+    /// </summary>
     private async Task<(string? Summary, string? Failure)> TrySummaryAsync(int upTo, string instruction, bool force, CancellationToken ct)
     {
         if (!force && _summariesSkipped > 0)
@@ -1667,12 +1672,12 @@ internal sealed class Agent
         Ui.StartSpinner("Compacting the conversation");
         try
         {
-            var summary = await SummarizeAsync(upTo, instruction, ct);
+            var summary = await SummarizeAsync(upTo, instruction, ct) ?? throw new GatewayException(force ? NoSummary : "the model answered with no summary");
             _summaryFailures = 0;
             _summariesSkipped = 0;
             return (summary, null);
         }
-        catch (Exception e) when (!force && !(e is OperationCanceledException && ct.IsCancellationRequested))
+        catch (Exception e) when (!force && e is not GatewayException { Busy: not null } && !(e is OperationCanceledException && ct.IsCancellationRequested))
         {
             // Not again at once: after 2, then 4, then 8 compactions without one.
             _summaryFailures++;
@@ -1688,12 +1693,15 @@ internal sealed class Agent
         }
     }
 
+    /// <summary>What /compact says when the model's answer has no summary in it (nothing, or a tool call).</summary>
+    public const string NoSummary = "The model gave no summary: the conversation is as it was.";
+
     /// <summary>
     /// Asks the model for a summary as a continuation of the conversation it has read: the same system prompt, tools and
     /// messages up to <paramref name="upTo"/> (the engine has them cached), then the instruction. Past the budget, the
-    /// oldest messages are left out, from a message of the person's.
+    /// oldest messages are left out, from a message of the person's. Null: the answer had no words.
     /// </summary>
-    private async Task<string> SummarizeAsync(int upTo, string instruction, CancellationToken ct)
+    private async Task<string?> SummarizeAsync(int upTo, string instruction, CancellationToken ct)
     {
         var messages = Conversation(upTo);
         // Never more than the model's longest answer: the summary is an answer like any other.
@@ -1731,7 +1739,9 @@ internal sealed class Agent
         var request = new JsonObject { ["model"] = Model.Name, ["messages"] = messages, ["max_tokens"] = answer };
         if (tools.Count > 0)
         {
+            // Offered (the engine has them cached at the prompt's start), not to be called: a small model may answer with a call.
             request["tools"] = new JsonArray([.. tools.Select(t => (JsonNode)t.Spec())]);
+            request["tool_choice"] = "none";
         }
         if (Model.Info.Thinking)
         {
@@ -1744,7 +1754,7 @@ internal sealed class Agent
             Session?.Usage(usage);
             Learn(chars, usage.Prompt);
         }
-        return summary.Text.Trim() is { Length: > 0 } s ? s : throw new InvalidOperationException("the model answered with no summary");
+        return summary.Text.Trim() is { Length: > 0 } s ? s : null;
     }
 
     /// <summary>About how many tokens of a request of this many characters the engine has not cached: what was added since its last count.</summary>

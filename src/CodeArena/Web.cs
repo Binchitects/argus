@@ -1459,6 +1459,12 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             {
                 job.Emit(new JsonObject { ["type"] = "error", ["message"] = e.Message });
             }
+            catch (Exception e)
+            {
+                // Whatever goes wrong is said, as a turn's failure is: the page never takes a compaction that failed for one done.
+                _rt.Ui.Error($"The compaction failed: {e}");
+                job.Emit(new JsonObject { ["type"] = "error", ["message"] = $"Something went wrong in code-arena: {e.Message}" });
+            }
             finally
             {
                 End(job, new JsonObject { ["type"] = "done", ["id"] = null });

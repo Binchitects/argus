@@ -568,8 +568,11 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   conversation was compacted is marked after its turn (**Show summary** shows
   what the model reads instead), and a turn compacted while it runs goes on
   in place, with its approvals; a question a compaction covers is not asked
-  again from there. The chat's **context** ring is the web chat's: how full
-  the window is, what fills it by kind (the system prompt and notes, the
+  again from there. `/compact` says it is done once it is ("Compacted: …"),
+  or why not. A turn that fails (the gateway refused the next step, say) ends
+  with why under the thread, after the question or the last tool's card it
+  got to, until the next message. The chat's **context** ring is the web
+  chat's: how full the window is, what fills it by kind (the system prompt and notes, the
   memory, the tools' definitions, the summary, files, your messages, the
   answers, the tool calls and results), the room kept for the answer, what is
   free, and the biggest messages. A long session opens on its last 30 turns:
@@ -1389,7 +1392,7 @@ status (403 `outside` for a path outside the folder).
 
 | call | what it does |
 |---|---|
-| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting); `context` (the window), `contextUsed` (about how much of it is in use), `contextReserve` (how much of it is kept for the answer), `compactAt` and `compactTarget` (percent; `compactAt` 0: only when a request would not fit), `compactAtSource` (`flag`, `config`, `account`, `arena` or `default`) and `compactAtAccount` (the Arena account's threshold, null when Arena did not say); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output); `arenaChats` (sessions are kept with chats in Arena here), `account` (whose chats: the key's account, null until Arena said), `chat` (this session's chat there, null: none yet) and `synced` (how many times the web chat's news came in while nothing ran: the page reads the session again when it changes; taking it in is not `busy`); `sync` (`{chat, account, waiting, trouble, behind}`: the chat, whose chats, how many messages Arena lacks, what stops them, whether the web chat has news not taken in; null without the sync) and `notices` (`[{id, text, at}]`: the last 20 said while nothing ran, the page shows each once) |
+| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting); `context` (the window), `contextUsed` (about how much of it is in use), `reserve` (how much of it is kept for the answer), `compactAt` and `compactTarget` (percent; `compactAt` 0: only when a request would not fit), `compactAtSource` (`flag`, `config`, `account`, `arena` or `default`) and `compactAtAccount` (the Arena account's threshold, null when Arena did not say); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output); `arenaChats` (sessions are kept with chats in Arena here), `account` (whose chats: the key's account, null until Arena said), `chat` (this session's chat there, null: none yet) and `synced` (how many times the web chat's news came in while nothing ran: the page reads the session again when it changes; taking it in is not `busy`); `sync` (`{chat, account, waiting, trouble, behind}`: the chat, whose chats, how many messages Arena lacks, what stops them, whether the web chat has news not taken in; null without the sync) and `notices` (`[{id, text, at}]`: the last 20 said while nothing ran, the page shows each once) |
 | `GET /api/folders?path=` | for Open Folder: a folder's folders by name (hidden ones last, no files, at most 2,000) as `{path, parent, folders, why, current, home, separator, drives, recent, added, files}` (`why`: what is not listed; `recent`: the folders opened lately, the one open now first; `added`: the folders added to this workspace; `files`: its files' names, with `files=1`, for @ in the chat); with no path, the open folder's parent; 404 `not_found` when it is not a folder |
 | `POST /api/folders/add` `{path}` | Add Folder to Workspace: the tools may use it, kept with this folder: `{folder, added}` (`added`: the folders added, whole); 409 `inside` for the folder open now or one in it |
 | `POST /api/folders/remove` `{path}` | takes an added folder out again: `{added}`; 404 `not_added` |
@@ -1970,7 +1973,13 @@ gear (Manage) sets it, or takes it away to follow Arena again.
 
 Each session is a JSON Lines file in the sessions folder (0600): every message
 as it happens, the model, the plan and the tokens. `--continue`,
-`--resume` and `/resume` read it back. A compaction appends the new history
+`--resume` and `/resume` read it back, and say how many messages the session
+has (every one: a compaction changes only what the model reads) and, when it
+was compacted, how many of them the model reads as a summary: "resumed
+20261103-050250-24f07b, 25 messages (compacted: the model reads a summary of
+the first 19)". In the terminal the last two turns follow, as they were said
+(your message, the tools the turn used, the start of its last answer); the
+IDE shows the whole session. A compaction appends the new history
 (the summary and the part kept), never rewrites the file. Each file is
 scanned once while Code Arena runs and then only what was appended to it (by
 its size and time), so listing sessions and the IDE's session list stay fast
@@ -2030,14 +2039,19 @@ A long session never gets stuck on the window:
   prompt, tools and older messages the model has read (so the engine reads
   them from its cache), then a request to summarize them, within what the
   window holds (the oldest messages left out past it, an earlier summary
-  kept).
+  kept). The tools are offered but not to be called (`tool_choice: none`): a
+  small model may otherwise answer with a call.
 - **A summary that cannot be made is not fatal**: the older messages are left
   out instead, with a note of what they held (the summary before them, the
   person's messages, the files changed, the commands run, the last answer),
   long tool results and file contents the model wrote in older steps are cut
   to their start, and the turn goes on. A summary is tried again only after 2
   compactions (then 4, then 8) while it keeps failing; `/compact` always tries
-  it, and leaves the conversation as it was when it fails.
+  it, and leaves the conversation as it was when it fails ("The model gave no
+  summary: the conversation is as it was." when the answer had no words in
+  it). A summary held back while the model's line is full (below) is waited
+  for, never left out: when the line stays full past the wait, the turn ends
+  with Arena's reason and the conversation is as it was.
 - **One long turn compacts itself**: when nothing before the turn is left to
   summarize, the turn's earlier steps are (the person's message and the
   latest steps kept whole). A compaction that would change nothing writes
@@ -2225,7 +2239,8 @@ message, without starting Code Arena again.
   does **Use in the chat** on any. **New Skill** makes one for this project
   or for you, from a few lines to fill in, and opens it. In the chat, **/** at
   the start of the box lists `/compact`, `/clear`, your commands and the
-  skills; ↑ and ↓ choose, Enter or Tab puts one in the box.
+  skills; ↑ and ↓ choose, Enter or Tab puts one in the box, and Enter on a
+  name typed whole (`/compact`) sends it.
 - **Skills from Arena**: the skills made in Arena that you may use (yours,
   your groups', the company's: the Skills page) and those the plugins you may
   use bring (Admin → Plugins), kept in the config folder's `plugin-skills/` and
@@ -2507,6 +2522,16 @@ conversation"), so it compacts before a slot overflows. When
 the connection drops after part of an answer arrived (a stream that ends
 without its end counts too), that part is kept and the model is asked to carry
 on from where it stopped, up to three times a turn.
+
+While the web chat's line for a model is full (more people wait in it than
+the model has places), or vLLM's own queue or cache is, Arena holds an API
+key's request back: "Qwen3-4B-Q4_K_M is busy: 2 answers of the chat wait for
+it. Try again in 30 seconds." (a 400 through the gateway's guardrail). Code
+Arena waits in the line, as a person in the web chat does: it says so once
+("… Waiting in its line: asking again every 30 s (Ctrl+C or Stop ends the
+wait)."), asks again when Arena said, says it again every two minutes, and
+gives up after 15 minutes with Arena's words. A turn, a compaction's summary
+and `/compact` all wait so.
 
 
 - **"The certificate of … is not trusted"**: the Arena's certificate comes

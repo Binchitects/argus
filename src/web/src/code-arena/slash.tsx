@@ -22,7 +22,8 @@ const typing = (text: string, caret: number) => /^\/([\w:.-]*)$/.exec(text.slice
 /**
  * / at the start of the chat's box offers the chat's commands, the person's and the project's own and the skills (as the
  * web chat's / does): those whose name starts with what is typed first, then those that hold it; ↑ and ↓ choose, Enter or
- * Tab puts `/name ` in the box for the words after it, Esc leaves it as typed. A skill sent so goes with its instructions.
+ * Tab puts `/name ` in the box for the words after it (Enter on a name typed whole sends it), Esc leaves it as typed. A
+ * skill sent so goes with its instructions.
  */
 export function useSlashMenu({ area, text, setText }: { area: RefObject<HTMLTextAreaElement | null>; text: string; setText: (text: string) => void }) {
   const [caret, setCaret] = useState(0)
@@ -80,6 +81,8 @@ export function useSlashMenu({ area, text, setText }: { area: RefObject<HTMLText
         setChosen((at + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length)
         return true
       }
+      // Enter on a command typed whole sends it (/compact runs at once); Tab still puts it there for words after it.
+      if (e.key === 'Enter' && !e.shiftKey && text === `/${items[at]!.name}`) return false
       if (e.key === 'Enter' || e.key === 'Tab') {
         e.preventDefault()
         pick(items[at]!)

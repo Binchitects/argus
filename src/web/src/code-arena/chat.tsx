@@ -587,6 +587,9 @@ export function Thread({
       setAtBottom(true)
       let received = false
       let busy: unknown = null
+      // The turn's error, said again once it is over: it was on the answer being written, which the saved session does not
+      // keep (a turn that failed after a tool, or before a word, ends with the tool's card or the question).
+      let failed: string | null = null
       // The events of a frame folded in together: one drawing of the thread per frame, not one per streamed word.
       const events = batched<CodeEvent>((all) => setLive((s) => all.reduce((now, e) => reduceCode(now, e, localId), s ?? start)))
       try {
@@ -596,6 +599,7 @@ export function Thread({
           (e) => {
             received = true
             const event = e as CodeEvent
+            if (event.type === 'error') failed = event.message
             watch?.(event)
             onEvent?.(event)
             events.push(event)
@@ -618,6 +622,8 @@ export function Thread({
         if (runs.current === mine) {
           setStreaming(false)
           setLive(null)
+          // A compaction asked for here says its own (a toast).
+          if (failed && start.mode !== 'compact') setError(failed)
         }
         onTurnEnd?.()
       }
@@ -665,14 +671,18 @@ export function Thread({
       toast.error(streaming ? 'Compact when the answer is done.' : 'Nothing to compact yet.')
       return false
     }
-    let said: string | null = null
+    let done: string | null = null
+    let stopped: string | null = null
     let failed: string | null = null
     await run('/api/compact', {}, { ...view, notices: [], mode: 'compact' }, null, (e) => {
-      if (e.type === 'notice') said = e.text
+      // Done when it says so: what it says on the way ("Compacting…", a wait in the model's line) is not that.
+      if (e.type === 'notice' && e.kind === 'compacted') done = e.text
+      if (e.type === 'notice' && e.kind === 'stopped') stopped = e.text
       if (e.type === 'error') failed = e.message
     })
     if (failed) toast.error(failed)
-    else if (said) toast.success(said)
+    else if (done) toast.success(done)
+    else if (stopped) toast.info(stopped)
     return true
   }
 

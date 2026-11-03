@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Nodes;
 
 namespace CodeArena;
 
@@ -255,7 +256,7 @@ internal sealed class Repl(Runtime rt)
         Ui.Line($"  {Ui.Dim("tools ")}  {string.Join(" · ", groups.Prepend($"{local} local"))}");
         if (rt.Agent.Messages.Count > 0)
         {
-            Ui.Line($"  {Ui.Dim("resumed")} {rt.Session.Id}, {rt.Agent.Messages.Count} messages");
+            Ui.Line($"  {Ui.Dim("resumed")} {Resumed()}");
         }
         if (rt.Permissions.Mode == Mode.Yolo)
         {
@@ -269,6 +270,59 @@ internal sealed class Repl(Runtime rt)
         Ui.Info(_editor is null
             ? "/help for commands · Ctrl+C stops a turn · end a line with \\ to go on to the next"
             : "/help for commands · ↑ for what you sent before · Ctrl+C stops a turn · end a line with \\ to go on to the next");
+        if (rt.Agent.Messages.Count > 0)
+        {
+            LastTurns();
+        }
+    }
+
+    /// <summary>
+    /// A resumed session as the banner and /resume say it: its id, how many messages it has (all of them: a compaction
+    /// changes only what the model reads), and, compacted, how many of them the model reads as a summary.
+    /// </summary>
+    private string Resumed()
+    {
+        var (count, from) = rt.Session.Read(d => (d.Stream.Count, d.From));
+        return $"{rt.Session.Id}, {count} messages" + (from > 0 ? $" (compacted: the model reads a summary of the first {from})" : "");
+    }
+
+    /// <summary>How many of a resumed session's last turns are shown.</summary>
+    private const int TurnsShown = 2;
+
+    /// <summary>
+    /// A resumed session's last turns, as they were said: the person's message, the tools the turn used, and its last
+    /// answer's start. The conversation is seen to go on; the IDE shows the whole of it.
+    /// </summary>
+    private void LastTurns()
+    {
+        var messages = rt.Session.Read(History.Messages).OfType<JsonObject>().ToList();
+        // The person's messages, not Code Arena's own notes to the model.
+        var asked = Enumerable.Range(0, messages.Count).Where(i => messages[i].Str("role") == "user" && messages[i]["details"]?["note"] is null).ToList();
+        if (asked.Count == 0)
+        {
+            return;
+        }
+        Ui.Line();
+        if (asked.Count > TurnsShown)
+        {
+            var earlier = asked.Count - TurnsShown;
+            Ui.Info($"… {earlier} earlier {(earlier == 1 ? "turn" : "turns")} (the IDE shows them all)");
+        }
+        for (var t = Math.Max(0, asked.Count - TurnsShown); t < asked.Count; t++)
+        {
+            var turn = messages.Skip(asked[t] + 1).Take((t + 1 < asked.Count ? asked[t + 1] : messages.Count) - asked[t] - 1).ToList();
+            Ui.Line(Ui.Cyan("› ") + Fmt.OneLine(messages[asked[t]].Str("content"), 200));
+            var tools = turn.Where(m => m.Str("role") == "tool").GroupBy(m => m.Str("toolName") ?? "a tool").Select(g => g.Count() == 1 ? g.Key : $"{g.Key} ×{g.Count()}").ToList();
+            if (tools.Count > 0)
+            {
+                Ui.Info("  " + string.Join(", ", tools));
+            }
+            if (turn.LastOrDefault(m => m.Str("role") == "assistant" && m.Str("content") is { Length: > 0 }) is { } answer)
+            {
+                Ui.Line(Fmt.Indent(Fmt.Head(answer.Str("content")!, 6), "  "));
+            }
+        }
+        Ui.Line();
     }
 
     /// <summary>The commands that leave: not kept in the history.</summary>
@@ -778,9 +832,14 @@ internal sealed class Repl(Runtime rt)
                     {
                         Ui.Warn("Stopped: the conversation is as it was.");
                     }
-                    catch (Exception e) when (e is GatewayException or HttpRequestException)
+                    catch (Exception e) when (e is GatewayException or HttpRequestException or IOException)
                     {
                         Ui.Error(e.Message);
+                    }
+                    catch (Exception e) when (e is not OperationCanceledException)
+                    {
+                        // Whatever goes wrong in a compaction ends it, never the conversation.
+                        Ui.Error($"The compaction failed: {e.Message}");
                     }
                     finally
                     {
@@ -913,7 +972,8 @@ internal sealed class Repl(Runtime rt)
                 if (SessionStore.Find(rt.Env.Paths.SessionsDir, id) is { } file)
                 {
                     rt.Resume(file);
-                    Ui.Line($"Resumed {rt.Session.Id}: {rt.Agent.Messages.Count} messages, model {rt.Model.Name}.");
+                    Ui.Line($"Resumed {Resumed()}, model {rt.Model.Name}.");
+                    LastTurns();
                 }
                 else
                 {
