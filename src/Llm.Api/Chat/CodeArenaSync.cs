@@ -644,7 +644,7 @@ public static class CodeArenaSync
         (leaf?.ToString("N") ?? "empty") + (summarized is { } s ? "." + s.ToString("N") : "");
 
     /// <summary>The chat's latest message with a compaction's summary (null: none).</summary>
-    private static Task<Guid?> SummarizedAsync(AppDbContext db, Guid conversation, CancellationToken ct) =>
+    internal static Task<Guid?> SummarizedAsync(AppDbContext db, Guid conversation, CancellationToken ct) =>
         db.ChatMessages.Where(m => m.ConversationId == conversation && m.Summary != null).OrderByDescending(m => m.Sequence).Select(m => (Guid?)m.Id).FirstOrDefaultAsync(ct);
 
     /// <summary>A message as the tree knows it, without its words: what finding the branch and the places on it needs.</summary>

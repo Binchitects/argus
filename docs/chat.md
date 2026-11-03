@@ -577,7 +577,7 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   its page is open), with each answer's thinking, model and tokens; the files
   that went with a question there show as chips, and Code Arena's own notes
   to its model as notices. An open chat changed elsewhere (another tab or device:
-  its messages, branch, title, queue or settings) is read again within
+  its messages, branch, title, queue, settings or a compaction) is read again within
   seconds too, an answer started there is watched as it is written, and the
   list takes in new chats within half a minute. The first
   question becomes the title and the browser tab's name; with a model for

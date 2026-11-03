@@ -2318,7 +2318,8 @@ chat comes in a page of 200 messages at a time.
 
 A compaction here is sent too: Arena keeps its summary where the web's own
 compaction keeps one (on the last message it covers), so the web's next answer
-reads it instead of those messages. The other way, a chat compacted on the
+reads it instead of those messages, and the chat's page, open on the web,
+marks it within seconds. The other way, a chat compacted on the
 web is read here as its summary and what follows it, within seconds as any
 news of the web's (a compaction changes the chat's stamp, though it adds no
 message). On both sides the whole conversation stays shown. Every message on

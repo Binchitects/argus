@@ -475,9 +475,14 @@ public sealed class CodeArenaSyncTests(AppFixture app)
         var arena = CodeArena(f, key);
         var id = await ChatAsync(arena, "summary-1");
         var ids = await SendAsync(arena, id, null, [User("q1"), Answer("a1"), User("q2"), Answer("a2")]);
+        var page = (await web.JsonAsync(await web.GetAsync($"/api/chat/conversations/{id}/stamp"))).GetProperty("stamp").GetString();
         // Code Arena compacted: its summary of the first exchange, kept on its last message.
         var sent = await arena.PostAsJsonAsync($"/api/code-arena/chats/{id}/messages", new { parent = ids[3], messages = Array.Empty<object>(), summary = new { upTo = ids[1], text = "SUMMARY-FROM-CODE-ARENA" } });
         Assert.True((await Json(sent)).GetProperty("summarized").GetBoolean());
+        // The open web page hears of it (no message came with it) and reads the chat again: the compaction shows there.
+        Assert.NotEqual(page, (await web.JsonAsync(await web.GetAsync($"/api/chat/conversations/{id}/stamp"))).GetProperty("stamp").GetString());
+        Assert.Equal("SUMMARY-FROM-CODE-ARENA", (await web.JsonAsync(await web.GetAsync($"/api/chat/conversations/{id}"))).GetProperty("messages").EnumerateArray()
+            .Single(m => m.GetProperty("id").GetGuid() == ids[1]).GetProperty("summary").GetString());
         // The web's next answer reads it instead of what it covers.
         Assert.Contains("\"done\"", await (await web.PostAsync($"/api/chat/conversations/{id}/messages", new { content = "marker-after-summary" })).Content.ReadAsStringAsync(), StringComparison.Ordinal);
         var asked = app.Model.Requests.Last(r => r.Body.ToJsonString().Contains("marker-after-summary", StringComparison.Ordinal)).Body.ToJsonString();
