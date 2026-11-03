@@ -31,6 +31,8 @@ import urllib.request
 NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$")
 # Options that would put a secret on the command line (ps shows it to anyone in the container), or move what the supervisor owns.
 FORBIDDEN = {"--api-key", "--host", "--port", "--served-model-name", "--ssl-keyfile", "--ssl-certfile"}
+# Names with TOKEN in them that hold a count of tokens, not a token: SGLang's cap on every answer.
+COUNTS = {"SGLANG_MAX_NEW_TOKENS_LIMIT"}
 LOG_LINES = 20
 
 
@@ -74,7 +76,7 @@ def plan(models_json: str, workdir: str) -> int:
         fields["hash"] = hashlib.sha256(json.dumps([port, gpus, args, m.get("env") or {}]).encode()).hexdigest()[:16]
         env = m.get("env") or {}
         fields["env"] = "".join(f"{k}={v}\n" for k, v in sorted(env.items())
-                                if re.match(r"^[A-Z][A-Z0-9_]*$", str(k)) and "\n" not in str(v) and "KEY" not in str(k) and "TOKEN" not in str(k))
+                                if re.match(r"^[A-Z][A-Z0-9_]*$", str(k)) and "\n" not in str(v) and "KEY" not in str(k) and ("TOKEN" not in str(k) or k in COUNTS))
         for k, v in fields.items():
             with open(os.path.join(d, k + ".tmp"), "w") as f:
                 f.write(v)
