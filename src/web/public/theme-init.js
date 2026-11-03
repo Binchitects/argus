@@ -26,8 +26,9 @@
     // storage unavailable: wide
   }
   // A stylesheet the browser failed to fetch (the connection dropped, or Chrome reloaded its certificates and failed
-  // every request in flight) is fetched once more: else the page stays unstyled until a reload. Its scripts need no
-  // such help: a module is fetched again as it is imported. A load error does not bubble: it is caught on its way down.
+  // every request in flight) is fetched once more: else the page stays unstyled until a reload. A module the browser
+  // failed to preload needs no such help: it is fetched again as it is imported. A load error does not bubble: it is
+  // caught on its way down.
   document.addEventListener(
     'error',
     function (e) {
