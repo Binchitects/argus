@@ -6,8 +6,8 @@ namespace CodeArena;
 /// <summary>
 /// Arena's skills (/api/code-arena/skills): those made in Arena that the person may use (theirs, their groups', the
 /// company's) and those of the plugins they may use, kept under the config folder's plugin-skills/ and read after the
-/// person's own and the project's (which win by name). Written anew
-/// at each start when Arena answers; what was kept stays when it does not (offline, an older Arena).
+/// person's own and the project's (which win by name). Written anew at each start when Arena answers, and as Code Arena
+/// runs (Runtime.RefreshArenaSkillsAsync) when its answer changed; what was kept stays when it does not (offline).
 /// </summary>
 internal static partial class PluginSkills
 {

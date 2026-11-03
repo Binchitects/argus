@@ -11,7 +11,7 @@ import { rowKeys, useChangeView } from './change-folds'
 import { FoldGroup } from './change-tree'
 import { useEditor } from './editor-state'
 import { PartHelp } from './help'
-import { createSkill, skillsQuery, type SkillInfo } from './ide-api'
+import { createSkill, refreshSkills, skillsQuery, type SkillInfo } from './ide-api'
 
 const action =
   'grid size-6 place-items-center rounded-sm text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 [&_svg]:size-3.5'
@@ -25,9 +25,10 @@ const whose: { source: SkillInfo['source']; title: string }[] = [
 
 /**
  * The side bar's Skills: every skill the agent reads, by whose it is: this project's (.arena/skills), yours (every
- * project), Arena's (made there, or a plugin's) and Code Arena's own. The model loads one when a task needs it; /name in
- * the chat uses one. A skill of the project's or yours opens to be edited; any goes into the chat's box as /name. New
- * Skill makes one from a few lines to fill in. Each group folds.
+ * project: in Arena when signed in to it, or on this computer), Arena's others (made there, or a plugin's) and Code
+ * Arena's own. The model loads one when a task needs it; /name in the chat uses one. A skill of the project's or yours
+ * opens to be edited; any goes into the chat's box as /name. New Skill makes one from a few lines to fill in. Refresh asks
+ * Arena at once for one made on its Skills page. Each group folds.
  */
 export function SkillsPanel() {
   const queryClient = useQueryClient()
@@ -50,9 +51,18 @@ export function SkillsPanel() {
       setName('')
       await queryClient.invalidateQueries({ queryKey: skillsQuery.queryKey })
       if (s.path) await editor.open(s.path)
+      else toast.success(`Made /${s.name}: Refresh lists it with its file to open.`)
     },
     onError: (e) => toast.error(errorMessage(e)),
   })
+  // Arena asked at once: one made on its Skills page (or turned off there) since is listed now.
+  const again = useMutation({
+    mutationFn: refreshSkills,
+    onSuccess: (data) => queryClient.setQueryData(skillsQuery.queryKey, data),
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  const reading = listed.isFetching || again.isPending
+  const inArena = listed.data?.mineInArena ?? false
   const skills = listed.data?.skills ?? []
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -83,7 +93,7 @@ export function SkillsPanel() {
                   setMaking(scope)
                 }}
               >
-                {scope === 'project' ? 'For this project (.arena/skills)…' : 'For you, in every project…'}
+                {scope === 'project' ? 'For this project (.arena/skills)…' : inArena ? 'For you, in Arena (every project and the web chat)…' : 'For you, on this computer…'}
               </DropdownMenuItem>
             ))}
           </DropdownMenuContent>
@@ -94,8 +104,8 @@ export function SkillsPanel() {
           </button>
         </Tooltip>
         <Tooltip content="Read the skills again">
-          <button type="button" aria-label="Refresh skills" onClick={() => void listed.refetch()} disabled={listed.isFetching} className={action}>
-            <RotateCw className={cn(listed.isFetching && 'animate-spin')} />
+          <button type="button" aria-label="Refresh skills" onClick={() => again.mutate()} disabled={reading} className={action}>
+            <RotateCw className={cn(reading && 'animate-spin')} />
           </button>
         </Tooltip>
         <PartHelp part="skills" />
@@ -125,8 +135,12 @@ export function SkillsPanel() {
             className="h-7 rounded border bg-background px-2 font-mono text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring"
           />
           <p className="text-xs text-muted-foreground">
-            {making === 'project' ? 'In .arena/skills of the repository: commit it to share it.' : "In code-arena's config folder: yours, in every project."} Enter makes it and opens its SKILL.md;
-            Esc does not.
+            {making === 'project'
+              ? 'In .arena/skills of the repository: commit it to share it.'
+              : inArena
+                ? 'One of your skills in Arena: the web chat and Code Arena everywhere use it.'
+                : "In code-arena's config folder: yours, in every project on this computer."}{' '}
+            Enter makes it and opens its SKILL.md; Esc does not.
           </p>
         </form>
       )}

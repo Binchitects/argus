@@ -346,30 +346,9 @@ internal sealed partial class Runtime : IAsyncDisposable
             }, ct);
         }
         // The skills Arena's plugins bring, kept with the person's (the ones kept before when Arena does not answer); and
-        // Arena's own, less those its admins turned off.
-        var brought = await ChatSync.PluginSkillsAsync(Config, Http, AccountWait, ct);
-        try
-        {
-            BuiltInSkills.Keep(Env.Paths, [.. (brought?["off"] as JsonArray ?? []).Select(n => n?.GetValue<string>() ?? "")], Config.BuiltInSkills);
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        {
-            Ui.Warn($"Arena's own skills could not be kept in {BuiltInSkills.Folder(Env.Paths)}: {e.Message}");
-        }
-        if (brought is not null)
-        {
-            try
-            {
-                foreach (var problem in PluginSkills.Keep(Env.Paths, brought))
-                {
-                    Ui.Warn(problem);
-                }
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-            {
-                Ui.Warn($"The plugins' skills could not be kept in {PluginSkills.Folder(Env.Paths)}: {e.Message}");
-            }
-        }
+        // Arena's own, less those its admins turned off. Asked again as the session goes on (RefreshArenaSkillsAsync).
+        _arenaSkillsAsked = DateTime.UtcNow;
+        KeepArenaSkills(await ChatSync.PluginSkillsAsync(Config, Http, AccountWait, ct), start: true);
         ProjectRoot = project;
         Extensions = Extensions.Load(Env.Paths, project);
         foreach (var problem in Extensions.Problems)
@@ -948,6 +927,93 @@ internal sealed partial class Runtime : IAsyncDisposable
     /// name, what was typed with the skill's instructions after it.
     /// </summary>
     public string Prepare(string input) => Extensions.Expand(input) ?? input;
+
+    /// <summary>How long a turn waits at most for Arena's skills: kept as they were when Arena is slower.</summary>
+    private static readonly TimeSpan SkillsWait = TimeSpan.FromSeconds(2);
+    // When Arena was last asked for its skills, and what it answered last: the same answer is not written again.
+    private DateTime _arenaSkillsAsked;
+    private string? _arenaSkillsKept;
+    private readonly SemaphoreSlim _arenaSkillsGate = new(1, 1);
+
+    /// <summary>Whether the person's own skills are Arena's here (signed in to it): New Skill "for you" makes one there.</summary>
+    public bool MineInArena => Config.Url is { Length: > 0 } && Config.ApiKey is { Length: > 0 };
+
+    /// <summary>The names of the person's own skills among Arena's (as it said last): theirs to change from here, saved to Arena.</summary>
+    public IReadOnlySet<string> OwnArenaSkills { get; private set; } = new HashSet<string>();
+
+    /// <summary>
+    /// Arena's answer kept (/api/code-arena/skills): its skills and the plugins' in plugin-skills/, Arena's own less those
+    /// turned off in builtin-skills/. With none (no Arena, or it did not answer), what was kept stays (at the start, Arena's
+    /// own are written as they are). An answer like the last one is not written again.
+    /// </summary>
+    private void KeepArenaSkills(JsonObject? brought, bool start)
+    {
+        var said = brought?.ToJsonString();
+        if (!start && (brought is null || said == _arenaSkillsKept))
+        {
+            return;
+        }
+        try
+        {
+            BuiltInSkills.Keep(Env.Paths, [.. (brought?["off"] as JsonArray ?? []).Select(n => n?.GetValue<string>() ?? "")], Config.BuiltInSkills);
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Ui.Warn($"Arena's own skills could not be kept in {BuiltInSkills.Folder(Env.Paths)}: {e.Message}");
+        }
+        if (brought is null)
+        {
+            return;
+        }
+        try
+        {
+            foreach (var problem in PluginSkills.Keep(Env.Paths, brought))
+            {
+                Ui.Warn(problem);
+            }
+            _arenaSkillsKept = said;
+            OwnArenaSkills = (brought["skills"] as JsonArray ?? []).OfType<JsonObject>().Where(s => s.Bool("mine") == true).Select(s => s.Str("name") ?? "").ToHashSet();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Ui.Warn($"The plugins' skills could not be kept in {PluginSkills.Folder(Env.Paths)}: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Arena's skills asked for again, so one made, changed or turned off on Arena's Skills page (or a plugin's) since the
+    /// start is there without starting again: at most every CliEnv.ArenaSkillsEvery at a turn and as the IDE lists them;
+    /// at once with <paramref name="now"/> (the Skills view's Refresh, /skills, a skill of the person's made or saved here).
+    /// </summary>
+    public async Task RefreshArenaSkillsAsync(bool now, CancellationToken ct)
+    {
+        if (!MineInArena || !now && DateTime.UtcNow - _arenaSkillsAsked < Env.ArenaSkillsEvery)
+        {
+            return;
+        }
+        await _arenaSkillsGate.WaitAsync(ct);
+        try
+        {
+            if (!now && DateTime.UtcNow - _arenaSkillsAsked < Env.ArenaSkillsEvery)
+            {
+                // Asked while this one waited its turn.
+                return;
+            }
+            _arenaSkillsAsked = DateTime.UtcNow;
+            KeepArenaSkills(await ChatSync.PluginSkillsAsync(Config, Http, now ? AccountWait : SkillsWait, ct), start: false);
+        }
+        finally
+        {
+            _arenaSkillsGate.Release();
+        }
+    }
+
+    /// <summary>The commands, sub-agents and skills read again (<see cref="ReloadExtensions"/>), Arena's asked for again first.</summary>
+    public async Task<Extensions> ReloadExtensionsAsync(bool fresh, CancellationToken ct)
+    {
+        await RefreshArenaSkillsAsync(fresh, ct);
+        return ReloadExtensions();
+    }
 
     /// <summary>
     /// The commands, sub-agents and skills read again (at each turn, and as the IDE lists them), so one added, changed or

@@ -975,8 +975,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       // The settings files apply as they are saved.
       if (f.path === 'user:settings.json' || f.path === workspaceSettingsPath) void settingsRef.current.reload()
       if (f.path === 'user:keybindings.json') void queryClient.invalidateQueries({ queryKey: userFileQuery('keybindings.json').queryKey })
-      // One of the person's own skills (the config folder is not watched): the Skills view and / read it again.
-      if (f.path.startsWith('user:skills/')) void queryClient.invalidateQueries({ queryKey: skillsQuery.queryKey })
+      // One of the person's own skills, or the project's outside the folder (neither is watched): the Skills view and / read it again.
+      if (f.path.startsWith('user:skills/') || f.path.endsWith('/SKILL.md')) void queryClient.invalidateQueries({ queryKey: skillsQuery.queryKey })
       void queryClient.invalidateQueries({ queryKey: changesQuery.queryKey })
       // What git sees changed since the last commit, with it.
       void queryClient.invalidateQueries({ queryKey: ['code', 'git', 'status'] })

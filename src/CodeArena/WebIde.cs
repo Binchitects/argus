@@ -52,7 +52,8 @@ internal sealed partial class WebApp
 
     private void StartIde()
     {
-        _files = new IdeFiles(_rt.Workspace);
+        // The project's skills too, when the folder is inside the repository (they are at its root).
+        _files = new IdeFiles(_rt.Workspace) { AlsoEdits = full => IdeSkills.ProjectSkillFile(_rt, full) };
         _changes = new AgentChanges(_rt.Workspace);
         _terminals = new Terminals(_rt.Workspace, _rt.Config, _rt.Env.Env);
         _state = new WorkspaceState(_rt.Env.Paths.DataDir, _rt.Workspace.Root);
@@ -60,7 +61,7 @@ internal sealed partial class WebApp
         _git = new IdeGit(_rt.Workspace);
         _preferences = new PagePreferences(Path.Combine(_rt.Env.Paths.DataDir, PagePreferences.FileName));
         _userFiles = new UserFiles(_rt.Env.Paths.ConfigDir);
-        _backups = new Backups(_rt.Env.Paths.DataDir, _rt.Workspace.Root, _files.Resolve);
+        _backups = new Backups(_rt.Env.Paths.DataDir, _rt.Workspace.Root, path => _files.EditedEntry(path));
         _formatters = new Formatters(_files, _rt.Config, _state, () => _rt.Sandbox, _rt.Env.Env);
         _tasks = new Tasks(_rt.Workspace, _files, _terminals, _problems, _state, _rt.Env.Env);
         _runs = new RunConfigs(_rt.Workspace, _terminals, _tasks, _state, _rt.Env.Env);
@@ -415,8 +416,12 @@ internal sealed partial class WebApp
                     await res.JsonAsync(200, _preferences.Save(Body(req)), ct);
                     return true;
                 case ("GET", "/api/user-files"):
-                    await res.JsonAsync(200, _userFiles.Read(Query(req, "name")), ct);
+                {
+                    // One of the person's skills in Arena (none of that name on this computer): as Arena keeps it.
+                    var name = Query(req, "name");
+                    await res.JsonAsync(200, IdeSkills.InArena(_rt, name) is { } kept ? IdeSkills.ReadArena(name!, kept) : _userFiles.Read(name), ct);
                     return true;
+                }
                 case ("POST", "/api/user-files"):
                 {
                     var body = Body(req);
@@ -424,17 +429,20 @@ internal sealed partial class WebApp
                     {
                         throw new IdeError(400, "invalid", "Send the file's text.");
                     }
-                    await res.JsonAsync(200, _userFiles.Write(body.Str("name"), text, body.Str("version")), ct);
+                    var name = body.Str("name");
+                    await res.JsonAsync(200, IdeSkills.InArena(_rt, name) is not null
+                        ? await IdeSkills.SaveArenaAsync(_rt, name!, text, body.Str("version"), ct)
+                        : _userFiles.Write(name, text, body.Str("version")), ct);
                     return true;
                 }
                 case ("GET", "/api/user-files/vscode"):
                     await res.JsonAsync(200, _userFiles.FromVsCode(Query(req, "name"), _rt.Env.Env), ct);
                     return true;
                 case ("GET", "/api/skills"):
-                    await res.JsonAsync(200, IdeSkills.List(_rt), ct);
+                    await res.JsonAsync(200, await IdeSkills.ListAsync(_rt, Query(req, "fresh") == "1", ct), ct);
                     return true;
                 case ("POST", "/api/skills"):
-                    await res.JsonAsync(200, IdeSkills.Create(_rt, Body(req)), ct);
+                    await res.JsonAsync(200, await IdeSkills.CreateAsync(_rt, Body(req), ct), ct);
                     return true;
                 case ("GET", "/api/processes"):
                     await res.JsonAsync(200, await Task.Run(OwnProcesses.List, ct), ct);

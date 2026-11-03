@@ -21,8 +21,9 @@ const typing = (text: string, caret: number) => /^\/([\w:.-]*)$/.exec(text.slice
 
 /**
  * / at the start of the chat's box offers the chat's commands, the person's and the project's own and the skills (as the
- * web chat's / does): those whose name starts with what is typed first, then those that hold it; ↑ and ↓ choose, Enter or
- * Tab puts `/name ` in the box for the words after it, Esc leaves it as typed. A skill sent so goes with its instructions.
+ * web chat's / does): those whose name starts with what is typed first, then those that hold it, all of them (the list
+ * scrolls); ↑ and ↓ choose, Enter or Tab puts `/name ` in the box for the words after it, Esc leaves it as typed. A name
+ * typed whole and chosen, Enter sends as it is (/clear runs at once). A skill sent so goes with its instructions.
  */
 export function useSlashMenu({ area, text, setText }: { area: RefObject<HTMLTextAreaElement | null>; text: string; setText: (text: string) => void }) {
   const [caret, setCaret] = useState(0)
@@ -44,7 +45,6 @@ export function useSlashMenu({ area, text, setText }: { area: RefObject<HTMLText
       : [...all.filter((i) => i.name.toLowerCase().startsWith(q)), ...all.filter((i) => !i.name.toLowerCase().startsWith(q) && i.name.toLowerCase().includes(q))]
           // A name once: a command wins over a skill of its name, as code-arena reads them.
           .filter((i, at, list) => list.findIndex((o) => o.name === i.name) === at)
-          .slice(0, 12)
   const open = items.length > 0
   const at = Math.min(chosen, items.length - 1)
 
@@ -81,6 +81,8 @@ export function useSlashMenu({ area, text, setText }: { area: RefObject<HTMLText
         return true
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
+        // The whole name is typed already: Enter is the box's (it sends, or runs /clear and /compact); Tab still completes.
+        if (e.key === 'Enter' && items[at]!.name.toLowerCase() === q) return false
         e.preventDefault()
         pick(items[at]!)
         return true
@@ -103,6 +105,8 @@ export function useSlashMenu({ area, text, setText }: { area: RefObject<HTMLText
             // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role, jsx-a11y/no-noninteractive-element-to-interactive-role -- an option of the listbox above
             role="option"
             aria-selected={i === at}
+            // The list scrolls: ↑ and ↓ keep the chosen one in sight.
+            ref={i === at ? (el) => el?.scrollIntoView?.({ block: 'nearest' }) : undefined}
             onMouseDown={(e) => {
               // The box keeps the focus.
               e.preventDefault()

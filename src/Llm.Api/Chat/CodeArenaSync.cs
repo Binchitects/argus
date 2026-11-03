@@ -113,6 +113,8 @@ public static class CodeArenaSync
         g.MapGet("/preferences", PreferencesAsync);
         g.MapGet("/config", ConfigAsync);
         g.MapGet("/skills", SkillsAsync);
+        g.MapPost("/skills", MakeSkillAsync);
+        g.MapPut("/skills/{name}", ChangeSkillAsync);
         g.MapGet("/security", SecurityAsync);
         g.MapGet("/me", MeAsync);
         g.MapPost("/sign-out", SignOutAsync);
@@ -214,15 +216,58 @@ public static class CodeArenaSync
         var taken = made.Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
         return Results.Ok(new
         {
-            skills = made.Select(s => new
-            {
-                s.Name, s.Description, Plugin = (string?)null, Version = s.Version.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                files = new Dictionary<string, string> { ["SKILL.md"] = SkillLibrary.ToSkillMd(s) },
-            }).Cast<object>()
-                .Concat(skills.Where(s => !taken.Contains(s.Skill.Name)).Select(s => (object)new { s.Skill.Name, s.Skill.Description, s.Plugin, s.Version, files = s.Skill.Files })),
+            skills = made.Select(s => (object)Brought(s, me)).Concat(skills.Where(s => !taken.Contains(s.Skill.Name)).Select(s => (object)new { s.Skill.Name, s.Skill.Description, s.Plugin, s.Version, files = s.Skill.Files })),
             // Arena's own skills an admin turned off: Code Arena leaves them out too.
             off = await db.Skills.AsNoTracking().Where(s => s.BuiltIn && s.Off).Select(s => s.Name).ToListAsync(http.RequestAborted),
         });
+    }
+
+    /// <summary>A skill made in Arena as Code Arena keeps it: its SKILL.md, and whether it is the person's own (theirs to change from there).</summary>
+    private static object Brought(Skill s, AppUser me) => new
+    {
+        s.Name, s.Description, Plugin = (string?)null, Version = s.Version.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        files = new Dictionary<string, string> { ["SKILL.md"] = SkillLibrary.ToSkillMd(s) }, mine = s.UserId == me.Id,
+    };
+
+    /// <summary>A skill Code Arena makes or changes: its slash name, when to use it, its instructions, title and parameters.</summary>
+    public sealed record SkillMade(string? Name, string? Description, string? Instructions, string? Title = null, SkillParameter[]? Parameters = null);
+
+    /// <summary>
+    /// One of the person's own skills made from Code Arena (the IDE's New Skill for them, /skills new --mine): theirs as one
+    /// made on the Skills page is, used at once (not waiting as a learned one does), in the web chat and every Code Arena.
+    /// </summary>
+    private static async Task<IResult> MakeSkillAsync(SkillMade body, HttpContext http, McpPeople people, AccessService access, AppDbContext db, Identity.Audit audit)
+    {
+        var (me, refusal) = await CallerAsync(http, people);
+        if (me is null)
+        {
+            return refusal!;
+        }
+        if (!await access.MayAsync(me, Core.Access.Permissions.SkillsCreate, http.RequestAborted))
+        {
+            return AuthEndpoints.Problem(403, "feature", "Making skills is not among what you may do: ask an admin.");
+        }
+        var name = body.Name?.Trim().TrimStart('/') ?? "";
+        var (made, problem) = await SkillEndpoints.MakeAsync(me, new SkillRequest(name, body.Title ?? name.Replace('-', ' ').Replace('_', ' '), body.Description, body.Instructions, body.Parameters),
+            access, db, audit, http.RequestAborted);
+        return problem ?? Results.Ok(Brought(made!, me));
+    }
+
+    /// <summary>One of the person's own skills changed from Code Arena (its SKILL.md saved in the IDE): what was sent, its name kept.</summary>
+    private static async Task<IResult> ChangeSkillAsync(string name, SkillMade body, HttpContext http, McpPeople people, AccessService access, AppDbContext db, Identity.Audit audit)
+    {
+        var (me, refusal) = await CallerAsync(http, people);
+        if (me is null)
+        {
+            return refusal!;
+        }
+        if (await db.Skills.AsNoTracking().Where(s => s.UserId == me.Id && s.Name == name && !s.Proposed).Select(s => (Guid?)s.Id).FirstOrDefaultAsync(http.RequestAborted) is not { } id)
+        {
+            return AuthEndpoints.Problem(404, "not_found", $"You have no skill /{name}.");
+        }
+        var (changed, problem) = await SkillEndpoints.ChangeAsync(me, id, new SkillRequest(null, body.Title, body.Description, body.Instructions, body.Parameters), access, db, audit,
+            http.RequestAborted);
+        return problem ?? Results.Ok(Brought(changed!, me));
     }
 
     /// <summary>

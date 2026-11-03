@@ -59,9 +59,11 @@ public static class SkillEndpoints
         public bool Edits(Skill p) => p.ServerId is null && !p.BuiltIn && (p.UserId == Me.Id || (p.UserId is null && Member.IsAdmin));
     }
 
-    private static async Task<Viewer> ViewerAsync(ClaimsPrincipal p, UserManager<AppUser> users, AccessService access, AppDbContext db, CancellationToken ct)
+    private static async Task<Viewer> ViewerAsync(ClaimsPrincipal p, UserManager<AppUser> users, AccessService access, AppDbContext db, CancellationToken ct) =>
+        await ViewerAsync((await users.GetUserAsync(p))!, access, db, ct);
+
+    private static async Task<Viewer> ViewerAsync(AppUser me, AccessService access, AppDbContext db, CancellationToken ct)
     {
-        var me = (await users.GetUserAsync(p))!;
         var tools = await db.ToolSettings.AsNoTracking().Where(s => s.ToolId.StartsWith(McpServerTool.Prefix)).ToDictionaryAsync(s => s.ToolId, ct);
         return new Viewer(me, await access.MembershipAsync(me, ct), tools);
     }
@@ -69,8 +71,7 @@ public static class SkillEndpoints
     /// <summary>The skills a person may use, theirs first, then their groups', the company's and the plugins'; by slash name within each.</summary>
     internal static async Task<List<Skill>> UsableAsync(AppUser me, AccessService access, AppDbContext db, CancellationToken ct)
     {
-        var tools = await db.ToolSettings.AsNoTracking().Where(s => s.ToolId.StartsWith(McpServerTool.Prefix)).ToDictionaryAsync(s => s.ToolId, ct);
-        var who = new Viewer(me, await access.MembershipAsync(me, ct), tools);
+        var who = await ViewerAsync(me, access, db, ct);
         // One learned and not kept yet is not used (the person keeps it on the Skills page).
         return [.. (await db.Skills.AsNoTracking().Where(x => !x.Off && !x.Proposed && (x.UserId == me.Id || x.UserId == null || x.Sharing == SkillSharing.Groups)).ToListAsync(ct))
             .Where(who.Sees).OrderBy(x => Rank(x, me.Id)).ThenBy(x => x.Name, StringComparer.Ordinal)];
@@ -120,19 +121,26 @@ public static class SkillEndpoints
     private static async Task<IResult> CreateAsync(SkillRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AccessService access, AppDbContext db, Audit audit,
         CancellationToken ct)
     {
-        var who = await ViewerAsync(p, users, access, db, ct);
+        var (skill, problem) = await MakeAsync((await users.GetUserAsync(p))!, body, access, db, audit, ct);
+        return problem ?? Results.Created($"/api/skills/{skill!.Id}", new { skill.Id, skill.Name });
+    }
+
+    /// <summary>A skill the person makes (on the Skills page, or from Code Arena), checked as one changed is: the skill, or why not.</summary>
+    internal static async Task<(Skill? Made, IResult? Problem)> MakeAsync(AppUser me, SkillRequest body, AccessService access, AppDbContext db, Audit audit, CancellationToken ct)
+    {
+        var who = await ViewerAsync(me, access, db, ct);
         if (string.IsNullOrWhiteSpace(body.Name) || string.IsNullOrWhiteSpace(body.Title) || string.IsNullOrWhiteSpace(body.Instructions))
         {
-            return AuthEndpoints.Problem(400, "skill", "A skill needs a slash name, a title and its instructions.");
+            return (null, AuthEndpoints.Problem(400, "skill", "A skill needs a slash name, a title and its instructions."));
         }
         if (await db.Skills.CountAsync(x => x.UserId == who.Me.Id, ct) >= PerPerson)
         {
-            return AuthEndpoints.Problem(409, "full", $"You have {PerPerson} skills already: delete some first.");
+            return (null, AuthEndpoints.Problem(409, "full", $"You have {PerPerson} skills already: delete some first."));
         }
         var skill = new Skill { Name = "", Title = "", Instructions = "", UserId = who.Me.Id };
         if (await ApplyAsync(skill, body, who, db, ct) is { } problem)
         {
-            return problem;
+            return (null, problem);
         }
         db.Skills.Add(skill);
         await db.SaveChangesAsync(ct);
@@ -140,25 +148,30 @@ public static class SkillEndpoints
         {
             await audit.WriteAsync("skill.create", "/" + skill.Name);
         }
-        return Results.Created($"/api/skills/{skill.Id}", new { skill.Id, skill.Name });
+        return (skill, null);
     }
 
     private static async Task<IResult> UpdateAsync(Guid id, SkillRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AccessService access, AppDbContext db, Audit audit,
+        CancellationToken ct) =>
+        (await ChangeAsync((await users.GetUserAsync(p))!, id, body, access, db, audit, ct)).Problem ?? Results.NoContent();
+
+    /// <summary>A skill changed by whom may change it (its owner; the company's, an admin): what was sent, checked. The skill, or why not.</summary>
+    internal static async Task<(Skill? Changed, IResult? Problem)> ChangeAsync(AppUser me, Guid id, SkillRequest body, AccessService access, AppDbContext db, Audit audit,
         CancellationToken ct)
     {
-        var who = await ViewerAsync(p, users, access, db, ct);
+        var who = await ViewerAsync(me, access, db, ct);
         if (await db.Skills.SingleOrDefaultAsync(x => x.Id == id, ct) is not { } skill || !who.Sees(skill))
         {
-            return Results.NotFound();
+            return (null, Results.NotFound());
         }
         if (!who.Edits(skill))
         {
-            return Refused(skill);
+            return (null, Refused(skill));
         }
         var wasCompany = skill.Sharing == SkillSharing.Company;
         if (await ApplyAsync(skill, body, who, db, ct) is { } problem)
         {
-            return problem;
+            return (null, problem);
         }
         skill.UpdatedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
@@ -166,7 +179,7 @@ public static class SkillEndpoints
         {
             await audit.WriteAsync("skill.update", "/" + skill.Name);
         }
-        return Results.NoContent();
+        return (skill, null);
     }
 
     private static async Task<IResult> DeleteAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AccessService access, AppDbContext db, Audit audit, CancellationToken ct)
