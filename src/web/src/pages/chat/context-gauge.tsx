@@ -22,6 +22,8 @@ export function ContextGauge({ context, onCompact, busy, compact, items }: { con
   // The ring warns as the chat nears where it compacts (90% when it compacts only when needed).
   const at = compact && compact.at > 0 ? compact.at / 100 : 0.9
   const percent = Math.round(share * 100)
+  // What the chat holds and the room kept for its answer are more than the model reads: the next message compacts first.
+  const over = context.used + (context.output ?? 0) > context.limit
   // A ring: full circle 2πr with r = 7.
   const ring = 2 * Math.PI * 7
   return (
@@ -72,7 +74,6 @@ export function ContextUse({ context }: { context: ContextView }) {
       {context.estimated ? 'About ' : ''}
       {formatValue(context.used)} of {formatValue(context.limit)} tokens ({percent}%)
       {context.estimated ? `${context.compacted ? ' since compacting' : ''}; the next answer counts it` : ''}
-      {/* What the chat holds and the room kept for its answer are more than the model reads: the next message compacts first. */}
       {context.output && context.used + context.output > context.limit ? (
         <output className="mt-1 block font-medium text-warning-ink">
           With the {formatValue(context.output)} kept for the answer, this is more than the context: the next message compacts the chat first.
