@@ -686,8 +686,9 @@ the IDE has Arena's colour themes, each light and dark: **Sakura**,
 **Midnight**, **Copper**, **Forest**, **Ocean** and **Lavender** (`Sakura
 Light`, `Sakura Dark`… in `workbench.colorTheme`). One chosen colours the
 whole workbench (the side bar, the panels, menus and buttons), the editor
-(its own Monaco theme from the same colours) and the terminals' background,
-text and cursor. The theme button at the activity bar's foot lists them
+(its own Monaco theme from the same colours, its suggestions, lists, links,
+peek view and overview ruler too: none keeps VS Code's blue) and the
+terminals' background, text and cursor. The theme button at the activity bar's foot lists them
 under **Color theme**: choosing one makes its dark and light modes the
 preferred ones, so light, dark and the system's keep it, and **Light** or
 **Dark** goes to the same theme's other mode. In Code Arena's own window the

@@ -190,8 +190,8 @@ describe('colour themes', () => {
   it.each(every)("$id $mode: the editor's and terminal's hex are the CSS's", ({ id, mode }) => {
     const t = tokensOf(id, mode)
     const palette = colorThemes.find((c) => c.id === id)![mode]
-    for (const name of ['background', 'foreground', 'card', 'muted', 'border', 'primary'] as const) {
-      const css = color(t, `--${name}`).rgb.map((c) => Math.round(c * 255))
+    for (const name of ['background', 'foreground', 'card', 'muted', 'border', 'primary', 'primaryInk', 'primaryForeground'] as const) {
+      const css = color(t, `--${name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`).rgb.map((c) => Math.round(c * 255))
       const table = hex(palette[name]).rgb.map((c) => Math.round(c * 255))
       expect(Math.max(...css.map((c, i) => Math.abs(c - table[i]!))), `${name}: ${palette[name]}`).toBeLessThanOrEqual(2)
     }
