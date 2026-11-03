@@ -33,7 +33,7 @@ const kindName: Record<ModelDialogKind, string> = {
 }
 
 const kindDescription: Record<ModelDialogKind, string> = {
-  chat: 'Its engine, its file from the model library (a GGUF file for llama.cpp, a Hugging Face snapshot for vLLM and SGLang), and how the engine runs it. Its file says what it is; the form asks only what that kind of model has.',
+  chat: 'Its engine, its file from the model library (a GGUF file for llama.cpp, vLLM or SGLang; a Hugging Face snapshot for vLLM and SGLang), and how the engine runs it. Its file says what it is; the form asks only what that kind of model has.',
   image_generation:
     'Its files from the model library, how stable-diffusion.cpp runs it, and what it makes unless asked otherwise. Its server runs one model at a time: the one kept loaded, else the one asked for last.',
   video_generation:
@@ -46,7 +46,7 @@ const kindDescription: Record<ModelDialogKind, string> = {
 interface Choice {
   value: string
   label: string
-  /** A chat model's file by its form: a GGUF file (llama.cpp's) or a Hugging Face snapshot (vLLM's and SGLang's). */
+  /** A chat model's file by its form: a GGUF file (llama.cpp's, vLLM's and SGLang's) or a Hugging Face snapshot (vLLM's and SGLang's). */
   group: 'gguf' | 'snapshots' | 'pictures' | 'parts' | 'speech' | 'other'
   /** The kind of model it is; null: no model is added from it (an embedding model, a projector…). */
   kind: ModelDialogKind | null
@@ -58,7 +58,7 @@ interface Choice {
 }
 
 const groupLabel: Record<Choice['group'], string> = {
-  gguf: 'Chat models: GGUF files, for llama.cpp',
+  gguf: 'Chat models: GGUF files, for llama.cpp, vLLM and SGLang',
   snapshots: 'Chat models: Hugging Face snapshots, for vLLM and SGLang',
   pictures: 'Picture and video models',
   parts: "A picture or video model's other files",
@@ -124,13 +124,16 @@ function choices(library: LibraryFile[], mediaFiles: LibraryRow[], speech: Speec
   return out
 }
 
-/** A chat model's file by its form: a GGUF file for llama.cpp, a Hugging Face snapshot for vLLM and SGLang. */
+/** A chat model's file by its form: a GGUF file, which every engine runs, or a Hugging Face snapshot, which vLLM and SGLang run. */
 type FileForm = 'gguf' | 'snapshot'
 
 const formName: Record<FileForm, string> = { gguf: 'GGUF file', snapshot: 'snapshot' }
 
-/** The form of file an engine of this kind runs. */
+/** The form of file an engine of this kind runs best, listed first: a snapshot for vLLM and SGLang, a GGUF file for llama.cpp. */
 const formFor = (kind: string | undefined): FileForm => (serverPerModel(kind) ? 'snapshot' : 'gguf')
+
+/** Whether an engine of this kind runs a file of this form: llama.cpp a GGUF file only, vLLM and SGLang either. */
+const runsForm = (kind: string | undefined, form: FileForm) => form === 'gguf' || serverPerModel(kind)
 
 /** A file's model for people: its name without its folder, split part, extension or revision. */
 const fileName = (path: string) => (path.split('/').pop() ?? path).replace(/(-\d{5}-of-\d{5})?\.gguf$/i, '').replace(/@.*$/, '')
@@ -234,14 +237,14 @@ function HowToGet({ form, others }: { form: FileForm; others: boolean }) {
   return form === 'snapshot' ? (
     <div>
       <p>
-        vLLM and SGLang run a Hugging Face snapshot (safetensors), not a GGUF file. Download it with <strong>Find on Hugging Face</strong> (on this page, beside Add a
-        model): its <strong>Snapshots</strong> tab finds the repositories that have one. On a host with no network, download it on a machine that has one (the
-        revision is a commit of the repository; the library is LLAMACPP_LIBRARY_DIR):
+        vLLM and SGLang run a Hugging Face snapshot (safetensors), or a GGUF file more slowly. Download a snapshot with <strong>Find on Hugging Face</strong> (on this
+        page, beside Add a model): its <strong>Snapshots</strong> tab finds the repositories that have one. On a host with no network, download it on a machine that has
+        one (the revision is a commit of the repository; the library is LLAMACPP_LIBRARY_DIR):
       </p>
       {command("hf download <owner>/<repository> --revision <revision> --local-dir <library>/hf/<owner>/<repository>@<revision> --exclude 'original/*' 'metal/*' '*.gguf'")}
       <p>
         then carry that folder to the same place in this host's library. File or model lists it once it is whole.
-        {others ? ' The other snapshots it lists may be this model under another name.' : ''}
+        {others ? ' The other snapshots and GGUF files it lists may be this model under another name.' : ''}
       </p>
     </div>
   ) : (
@@ -283,7 +286,7 @@ export function ModelDialog({
   onClose: () => void
   /** Fields another component mounts in the chat model's section. */
   chatSlot?: ChatModelSlot
-  /** The engine instances: llama.cpp's takes a GGUF file as a chat model, vLLM's and SGLang's a snapshot. */
+  /** The engine instances: llama.cpp's takes a GGUF file as a chat model, vLLM's and SGLang's a snapshot or a GGUF file. */
   instances?: EngineInstance[]
   /**
    * The edited chat model as the page has it now: its engine, and its move to another one (the API names the new engine from the
@@ -385,9 +388,9 @@ export function ModelDialog({
         : null
   // Another engine's form is taken from the library: it is not chosen before the library and its snapshots are read.
   const reading = library.isPending || snapshots.isPending
-  // A file of the other form takes its engine with it: a GGUF file llama.cpp, a snapshot vLLM or SGLang (the model's own first),
-  // when that engine runs here; else the field stays, and File or model says why.
-  const needs = kind === 'chat' && !held && fileForm && fileForm !== engineForm ? firstFor(fileForm) : null
+  // A file the engine does not run takes an engine that does with it: a snapshot vLLM or SGLang (the model's own first), when
+  // that engine runs here; else the field stays, and File or model says why. A GGUF file stays on vLLM or SGLang, which run it too.
+  const needs = kind === 'chat' && !held && fileForm && !runsForm(chosen.kind, fileForm) ? firstFor(fileForm) : null
   if (needs && runs(needs) && needs.value !== engine) setEngine(needs.value)
   const stranded = needs && !runs(needs) ? needs : null
   // The file last chosen in each form, brought back when the engine goes to that form again; the library's matches, shown.
@@ -400,15 +403,15 @@ export function ModelDialog({
     setKept(last)
     return last
   }
-  // Another engine of the other form takes the same model in its form: the file last chosen in it, else the saved model's
-  // own file, else the library's match.
+  // Another engine that does not run the file takes the same model in its own form: the file last chosen in it, else the saved
+  // model's own file, else the library's match.
   const chooseEngine = (name: string) => {
     const next = engines.find((c) => c.value === name)
     if (!next) return
     setEngine(name)
     const form = formFor(next.kind)
-    // The same form (vLLM to SGLang on the same snapshot): its file stays.
-    if (fileForm === form) return
+    // A file it runs stays: the same snapshot from vLLM to SGLang, the same GGUF file from llama.cpp to vLLM and back.
+    if (fileForm && runsForm(next.kind, fileForm)) return
     const last = keep()
     const back = last[form] ?? (saved?.file && formFor(saved.engineKind) === form ? saved.file : undefined)
     if (back) {
@@ -442,10 +445,22 @@ export function ModelDialog({
   // Why a file chosen is not added as a chat model (it is not one, or reads as another kind): said above the form, and Save held by it.
   const whyId = useId()
 
-  // The chosen engine's form of the model: a file of that form (the saved model's own is its engine's).
-  const ready = fileForm === engineForm
+  // A file the chosen engine runs (the saved model's own is its engine's).
+  const ready = !!fileForm && runsForm(chosen.kind, fileForm)
   const moves = !!saved && kind === 'chat' && !held && !!ownChoice && chosen.value !== ownChoice.value && runs(chosen)
-  const others = all.some((c) => c.group === (engineForm === 'snapshot' ? 'snapshots' : 'gguf'))
+  const others = all.some((c) => c.group === 'gguf' || (engineForm === 'snapshot' && c.group === 'snapshots'))
+  // A GGUF file on vLLM or SGLang: how it runs there, and the library's snapshot of the same model, faster there, when it has one.
+  const server = engineLabel(chosen.kind)
+  const faster =
+    kind === 'chat' && !held && serverPerModel(chosen.kind) && fileForm === 'gguf'
+      ? matchSnapshot(file, libraryFiles.find((f) => f.path === file)?.profile, snapshotList.filter((s) => s.complete))
+      : null
+  const ggufNote =
+    kind === 'chat' && !held && serverPerModel(chosen.kind) && fileForm === 'gguf'
+      ? faster
+        ? `Its snapshot ${faster.path} is in the library too, by its ${faster.how}: ${server} runs a snapshot's own safetensors faster than a GGUF file, so choose it here for speed. llama.cpp often runs a GGUF file best.`
+        : `${server} runs this GGUF file through its GGUF support, more slowly than a snapshot's own safetensors; llama.cpp often runs a GGUF file best.`
+      : null
   // The model by its name: the saved one's, else the file chosen (in either form, last).
   const lastFile = file || kept[otherForm(engineForm)]
   const named = saved?.name ?? (lastFile ? fileName(lastFile) : null)
@@ -453,11 +468,11 @@ export function ModelDialog({
   // Nothing chosen yet, and the library has files of this form: choose one. Else none of this model is there: how to get it.
   const noFile = (form: FileForm) =>
     !saved && !lastFile && others ? (
-      <Held variant="info" title={`Choose its ${formName[form]} under File or model`} saved={false} onClose={onClose}>
-        {form === 'snapshot' ? 'vLLM and SGLang run a Hugging Face snapshot (safetensors), not a GGUF file.' : 'llama.cpp runs a GGUF file, not a Hugging Face snapshot.'}
+      <Held variant="info" title={`Choose its ${form === 'snapshot' ? 'snapshot or GGUF file' : formName[form]} under File or model`} saved={false} onClose={onClose}>
+        {form === 'snapshot' ? 'vLLM and SGLang run a Hugging Face snapshot (safetensors), or a GGUF file more slowly.' : 'llama.cpp runs a GGUF file, not a Hugging Face snapshot.'}
       </Held>
     ) : (
-      <Held title={`No ${form === 'snapshot' ? 'Hugging Face snapshot' : 'GGUF file'}${named ? ` of ${named}` : ''} in the library`} saved={!!saved} onClose={onClose}>
+      <Held title={`No ${form === 'snapshot' ? 'Hugging Face snapshot or GGUF file' : 'GGUF file'}${named ? ` of ${named}` : ''} in the library`} saved={!!saved} onClose={onClose}>
         <HowToGet form={form} others={others} />
       </Held>
     )
@@ -479,7 +494,7 @@ export function ModelDialog({
           value={chosen.value}
           onChange={chooseEngine}
           held={held ?? (reading ? 'Reading the library…' : null)}
-          hint={`llama.cpp runs a GGUF file, vLLM and SGLang a Hugging Face snapshot: File or model lists the engine's own form first.${saved ? ' Another engine moves the model there.' : ''}`}
+          hint={`llama.cpp runs a GGUF file; vLLM and SGLang a Hugging Face snapshot, or a GGUF file more slowly than a snapshot's own safetensors (llama.cpp often runs a GGUF file best). File or model lists the engine's own form first.${saved ? ' Another engine moves the model there.' : ''}`}
           focus={!!edit && 'focus' in open && open.focus === 'engine'}
         />
       )}
@@ -493,7 +508,9 @@ export function ModelDialog({
                 ? `A ${formName[fileForm!]} needs ${stranded.label}: choose ${engineForm === 'snapshot' ? 'a snapshot' : 'a GGUF file'} for ${chosen.label}. ${stranded.detail ?? ''}`.trim()
                 : note && kind === 'chat'
                   ? note
-                  : all.length
+                  : ggufNote
+                    ? ggufNote
+                    : all.length
                     ? 'The library (LLAMACPP_LIBRARY_DIR) by what each file is, and the models the speech server has downloaded.'
                     : 'Nothing in the library (LLAMACPP_LIBRARY_DIR), and the speech server lists no models.'
           }
@@ -594,11 +611,12 @@ export function ModelDialog({
         <Held title={`${stranded.label} does not run here`} saved={!!saved} onClose={onClose}>
           {stranded.detail}
         </Held>
-      ) : engineForm === 'snapshot' ? (
+      ) : serverPerModel(chosen.kind) ? (
         ready ? (
           <VllmModelSection
             saved={saved}
-            snapshot={file}
+            file={file}
+            gguf={fileForm === 'gguf' ? libraryFiles.find((f) => f.path === file) : undefined}
             // Its own engine as it names it (none: the first of its kind); another is named unless it is the first of its kind, the API's default.
             engine={{ kind: chosen.kind === 'sglang' ? 'sglang' : 'vllm', name: chosen.value === own?.name ? (saved?.engine ?? '') : chosen.value === firstOfKind ? '' : chosen.value }}
             moves={moves ? chosen.label : null}

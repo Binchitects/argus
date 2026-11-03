@@ -172,6 +172,65 @@ public sealed class VllmAdvisorTests
     }
 
     [Fact]
+    public void A_gguf_files_header_is_its_profile_and_what_its_engine_cannot_read_of_it_is_refused()
+    {
+        var dir = Directory.CreateTempSubdirectory("llm-vllm-gguf-").FullName;
+        try
+        {
+            var path = Path.Combine(dir, "Tiny-4B-Q4_K_M.gguf");
+            GgufFile.Language("qwen3", layers: 4, context: 40960, kvHeads: 2, headSize: 128, layerBytes: 1L << 28).Write(path);
+            var profile = ModelProfiler.Profile(Gguf.Read(path)!, "Tiny-4B-Q4_K_M.gguf");
+            var p = VllmAdvisor.FromGguf(profile);
+            // 4 layers of 2 KV heads × (128 + 128), a byte each (fp8); 8 heads for tensor parallelism; its weights quantised as the file has them.
+            Assert.Equal((4, 4, 0, 8, 2, 128), (p.Layers, p.FullLayers, p.LinearLayers, p.AttentionHeads, p.KvHeads, p.HeadDim));
+            Assert.Equal(4 * 2 * 256, p.KvPerToken);
+            Assert.Equal((40960, profile.WeightBytes, "Q4_K_M", 1, false, 0), (p.TrainedContext, p.WeightBytes, p.Quantization, p.GgufParts, p.Vision, p.MtpLayers));
+            Assert.True(p.WeightBytes > 1L << 30);
+
+            LocalModel M(string kind = EngineKinds.Vllm) => new()
+            {
+                Name = "tiny", File = "tiny/Tiny-4B-Q4_K_M.gguf", EngineKind = kind, KvType = "fp8", Context = 32768, Parallel = 4,
+            };
+            var advice = VllmAdvisor.Advise(M(), p, FakeHardware.One24);
+            Assert.Null(advice.FirstError);
+            Assert.Equal(40960, advice.Limits!.Context.Max);
+            Assert.Equal(("Q4_K_M", "qwen3"), (advice.Profile.Quant, advice.Profile.Architecture));
+            Assert.Equal("0", advice.Recommended!.Devices);
+            Assert.Equal(p.WeightBytes, advice.Estimate!.GpuWeights);
+            Assert.Null(VllmAdvisor.Advise(M(EngineKinds.Sglang), p, FakeHardware.One24).FirstError);
+
+            ModelProblem Refused(LocalModel m, VllmProfile of) => VllmAdvisor.Advise(m, of, FakeHardware.One24).FirstError!;
+            // Quantised already, and its own prediction layers are a snapshot's.
+            var quantised = M();
+            quantised.Quantization = "fp8";
+            Assert.Equal("quantization", Refused(quantised, p).Field);
+            var mtp = M();
+            mtp.SpecDecode = "mtp";
+            Assert.Contains("from its snapshot, not from a GGUF file", Refused(mtp, p).Message, StringComparison.Ordinal);
+            // Split in parts: vLLM's plugin reads each, SGLang one file only, and says how to merge them.
+            var split = p with { GgufParts = 3 };
+            Assert.Null(VllmAdvisor.Advise(M(), split, FakeHardware.One24).FirstError);
+            var one = Refused(M(EngineKinds.Sglang), split);
+            Assert.Equal("file", one.Field);
+            Assert.Contains("split in 3 parts", one.Message, StringComparison.Ordinal);
+            Assert.Contains("llama-gguf-split --merge", one.Message, StringComparison.Ordinal);
+            // An architecture its engine cannot read: refused, with those it can (phi3 on vLLM, not on SGLang; qwen35 on neither).
+            var qwen35 = Refused(M(), p with { Architecture = "qwen35" });
+            Assert.Equal("file", qwen35.Field);
+            Assert.Contains("This one is qwen35", qwen35.Message, StringComparison.Ordinal);
+            Assert.Contains("run it on llama.cpp", qwen35.Message, StringComparison.Ordinal);
+            Assert.Null(VllmAdvisor.Advise(M(), p with { Architecture = "phi3" }, FakeHardware.One24).FirstError);
+            Assert.Equal("file", Refused(M(EngineKinds.Sglang), p with { Architecture = "phi3" }).Field);
+            // A snapshot is no GGUF file: none of it applies.
+            Assert.Equal(0, Load("gpt-oss-120b").GgufParts);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
     public void A_vllm_models_longest_answer_leaves_its_prompt_room_in_the_whole_context()
     {
         var flash = Load("Qwen3.8-Flash-Next-FP8");

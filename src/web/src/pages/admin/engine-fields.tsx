@@ -15,7 +15,7 @@ import { api, errorMessage } from '@/lib/api'
 import { useDebounced } from '@/lib/use-debounced'
 import { cn } from '@/lib/utils'
 import { engineLabel, serverPerModel, useFallbacks, useSnapshots, type EngineGpu, type EngineInstance, type EngineModel, type ModelMove } from './engine-api'
-import { bytes, defaultMaxOutput, tokens } from './model-profile'
+import { bytes, defaultMaxOutput, tokens, type LibraryFile } from './model-profile'
 
 export function FallbackField({ self, value, onChange, error }: { self: string | undefined; value: string; onChange: (v: string) => void; error?: string }) {
   const names = useFallbacks(self)
@@ -124,14 +124,15 @@ interface VllmForm {
   fallback: string
 }
 
-const lastPart = (path: string) => (path.split('/').pop() ?? path).replace(/@.*$/, '')
+/** A file's model for its name: a snapshot's folder without its revision, a GGUF file without its split part or extension. */
+const lastPart = (path: string) => (path.split('/').pop() ?? path).replace(/@.*$/, '').replace(/(-\d{5}-of-\d{5})?\.gguf$/i, '')
 
-function start(saved: EngineModel | null, snapshot: string): VllmForm {
+function start(saved: EngineModel | null, file: string): VllmForm {
   // A llama.cpp model being moved here takes its own defaults for what llama.cpp counts otherwise: its answers at once,
   // and the GPUs proposed for this machine (its draft head is a GGUF file, not a snapshot).
   const moving = !!saved && !serverPerModel(saved.engineKind)
   return {
-    name: saved?.name ?? lastPart(snapshot),
+    name: saved?.name ?? lastPart(file),
     devices: moving ? '' : (saved?.devices ?? ''),
     replicas: String(saved?.replicas ?? 1),
     gpuMemoryUtilization: saved?.gpuMemoryUtilization ? String(saved.gpuMemoryUtilization) : '',
@@ -190,22 +191,26 @@ function request(typed: VllmForm, file: string, engine: VllmEngine) {
 }
 
 /**
- * A vLLM or SGLang model's part of the model dialog: a Hugging Face snapshot from the library on the engine the dialog's
- * Engine field chose (vLLM's or SGLang's, and which machine), the GPUs (by vendor and size; empty: those proposed for this
+ * A vLLM or SGLang model's part of the model dialog: a Hugging Face snapshot or a GGUF file from the library on the engine the
+ * dialog's Engine field chose (vLLM's or SGLang's, and which machine), the GPUs (by vendor and size; empty: those proposed for this
  * machine), its copies, its share of each GPU, quantisation, cache type, context, answers at once, speculative decoding, a
  * CPU tier for its cache, sleep, and its fallback. The advisor's fit, cache and recommendation show as it is filled in; the
  * API runs the same checks on save.
  */
 export function VllmModelSection({
   saved,
-  snapshot,
+  file,
+  gguf,
   engine,
   moves,
   gpus,
   onClose,
 }: {
   saved: EngineModel | null
-  snapshot: string
+  /** Its snapshot's folder or its GGUF file, in the library. */
+  file: string
+  /** Its GGUF file as the library reads it (none: a snapshot). */
+  gguf?: LibraryFile
   engine: VllmEngine
   /** A saved model put on another engine than its own moves there: that engine for people ("vLLM", "vLLM · name"); null: it stays. */
   moves: string | null
@@ -216,11 +221,11 @@ export function VllmModelSection({
   const snapshots = useSnapshots()
   const { kind, name } = engine
   const label = engineLabel(kind)
-  const [typed, setForm] = useState(() => start(saved, snapshot))
+  const [typed, setForm] = useState(() => start(saved, file))
   const form = allowed(typed, kind)
   const [error, setError] = useState<string | null>(null)
   const set = <K extends keyof VllmForm>(k: K, v: VllmForm[K]) => setForm((f) => ({ ...f, [k]: v }))
-  const body = useMemo(() => request(typed, snapshot, { kind, name }), [typed, snapshot, kind, name])
+  const body = useMemo(() => request(typed, file, { kind, name }), [typed, file, kind, name])
   const debounced = useDebounced(body, 350)
   const advice = useQuery({
     queryKey: ['admin', 'models', 'advice', 'vllm', debounced],
@@ -246,7 +251,7 @@ export function VllmModelSection({
     },
     onError: (e) => setError(errorMessage(e)),
   })
-  const shot = snapshots.data?.find((s) => s.path === snapshot)
+  const shot = snapshots.data?.find((s) => s.path === file)
   const e = a?.estimate
   const r = a?.recommended
   return (
@@ -265,6 +270,12 @@ export function VllmModelSection({
         <p className="text-sm text-muted-foreground">
           {shot.repo} at {shot.revision.slice(0, 12)} · {bytes(shot.size)} · {shot.architectures.join(', ') || 'architecture not said'}
           {!shot.complete && ` · ${shot.why}`}
+        </p>
+      )}
+      {gguf && (
+        <p className="text-sm text-muted-foreground">
+          A GGUF file · {[gguf.profile.quant, bytes(gguf.size) + (gguf.parts > 1 ? ` in ${gguf.parts} parts` : ''), gguf.profile.architecture].filter(Boolean).join(' · ')}: {label}{' '}
+          reads its settings and tokenizer from its header, and runs it more slowly than a snapshot's own safetensors.
         </p>
       )}
       <div className="grid gap-4 sm:grid-cols-2">
@@ -286,7 +297,7 @@ export function VllmModelSection({
         <Field label="Share of each GPU" hint={`0.10 to 0.98; empty: 0.90 (${kind === 'sglang' ? '--mem-fraction-static' : '--gpu-memory-utilization'}).`} error={errors.gpuMemoryUtilization}>
           <Input inputMode="decimal" value={form.gpuMemoryUtilization} onChange={(ev) => set('gpuMemoryUtilization', ev.target.value)} placeholder="0.90" />
         </Field>
-        <Field label="Quantisation" hint="Empty: what its config says." error={errors.quantization}>
+        <Field label="Quantisation" hint={gguf ? 'Empty: a GGUF file is quantised as it is.' : 'Empty: what its config says.'} error={errors.quantization}>
           <Input value={form.quantization} onChange={(ev) => set('quantization', ev.target.value)} placeholder="auto" />
         </Field>
         <Field
@@ -337,7 +348,7 @@ export function VllmModelSection({
               </SelectTrigger>
               <SelectContent>
                 {(snapshots.data ?? [])
-                  .filter((s) => s.path !== snapshot)
+                  .filter((s) => s.path !== file)
                   .map((s) => (
                     <SelectItem key={s.path} value={s.path}>
                       {s.path}

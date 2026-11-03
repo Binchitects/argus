@@ -5,17 +5,18 @@ using Llm.Core.Models;
 namespace Llm.Api.Models;
 
 /// <summary>
-/// What a Hugging Face snapshot is, for vLLM, from its config.json and its safetensors index: the weights' size, the layers
-/// of each attention kind (full, sliding window, linear, compressed), the heads that decide which tensor parallel sizes
-/// work, the token cache each token takes and the state each answer keeps.
+/// What a model is, for vLLM and SGLang: a Hugging Face snapshot from its config.json and its safetensors index, or a GGUF
+/// file from its header. The weights' size, the layers of each attention kind (full, sliding window, linear, compressed),
+/// the heads that decide which tensor parallel sizes work, the token cache each token takes and the state each answer keeps.
 /// </summary>
 /// <param name="KvPerToken">The token cache a token takes in every layer that keeps one, at one byte an element (fp8).</param>
 /// <param name="StatePerSequence">What each answer keeps whatever its length, in bytes: sliding windows (at fp8) and linear layers' state (float32).</param>
 /// <param name="Approximate">An attention vLLM sizes in its own way (compressed, sparse): read vLLM's reported capacity once it runs.</param>
+/// <param name="GgufParts">A GGUF file's parts (1: one file); 0: a snapshot.</param>
 public sealed record VllmProfile(
     string? Architecture, string? ModelType, int Layers, int FullLayers, int SlidingLayers, int LinearLayers, int CompressedLayers,
     int AttentionHeads, int KvHeads, int HeadDim, int? SlidingWindow, int TrainedContext, long WeightBytes, long KvPerToken, long StatePerSequence,
-    int? Experts, int MtpLayers, bool Vision, string? Quantization, bool Approximate);
+    int? Experts, int MtpLayers, bool Vision, string? Quantization, bool Approximate, int GgufParts = 0);
 
 /// <summary>
 /// The vLLM counterpart of <see cref="ModelAdvisor"/>: which GPUs and tensor parallel size a model takes on this machine
@@ -41,6 +42,19 @@ public static class VllmAdvisor
 
     /// <summary>Tensor parallel sizes: powers of two (3 cannot divide the heads of any model here).</summary>
     public static readonly int[] TpSizes = [1, 2, 4, 8, 16];
+
+    /// <summary>
+    /// The GGUF architectures (general.architecture) each engine reads, as its image has it: vLLM 0.31.0 through transformers 5.17
+    /// and vllm-gguf-plugin 0.0.5 (services/vllm.Dockerfile), SGLang 0.5.21 through its own loader. Tried on the library's files
+    /// (llama, qwen2 and qwen3 on both; llama with llama.cpp's rotary layout, which services/vllm-gguf-rope.py and SGLang's
+    /// launcher set) and, for vLLM, on each architecture's own config; the others fail as they load (qwen35, qwen3vlmoe and
+    /// gemma4 among them: transformers or the plugin cannot map them, nor MoE ones such as qwen3moe).
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, string[]> GgufArchitectures = new Dictionary<string, string[]>(StringComparer.Ordinal)
+    {
+        [EngineKinds.Vllm] = ["falcon", "gemma3", "gpt2", "llama", "mamba", "minimax-m2", "phi3", "qwen2", "qwen3", "stablelm", "starcoder2"],
+        [EngineKinds.Sglang] = ["llama", "qwen2", "qwen3"],
+    };
 
     /// <summary>The context a conversation is counted at when answers at once are recommended.</summary>
     private const int TypicalContext = 32768;
@@ -68,6 +82,43 @@ public static class VllmAdvisor
         }
         return c is null ? null : Profile(c, WeightBytes(dir));
     }
+
+    /// <summary>
+    /// A vLLM or SGLang model's file in the library: a snapshot's profile (<see cref="Read"/>), or a GGUF file's from its header
+    /// (<see cref="FromGguf"/>); null when it is neither, or a GGUF file that is not a language model (or cannot be read).
+    /// </summary>
+    public static VllmProfile? Of(ModelLibrary library, string file)
+    {
+        if (library.Snapshot(file) is { } snapshot)
+        {
+            return Read(library.FullPath(snapshot.Path));
+        }
+        return file.EndsWith(".gguf", StringComparison.OrdinalIgnoreCase) && library.Find(file) is { Profile.Kind: ModelKind.Language } entry
+            ? FromGguf(entry.Profile, entry.File.Parts)
+            : null;
+    }
+
+    /// <summary>
+    /// A GGUF file's profile for vLLM (through its GGUF plugin) and SGLang, from what its header says (<see cref="ModelProfiler"/>):
+    /// its layers and heads, the cache a token takes and the state each answer keeps, its context, and its weights, which stay
+    /// on the GPU quantised as the file has them. Its prediction layers and a projector are llama.cpp's to run: neither is read.
+    /// </summary>
+    public static VllmProfile FromGguf(ModelProfile p, int parts = 1)
+    {
+        var w = p.Weights;
+        bool Sliding(int i) => i < w.Sliding.Length && w.Sliding[i];
+        var full = w.KvHeads.Where((k, i) => k > 0 && !Sliding(i)).Count();
+        var sliding = w.KvHeads.Where((k, i) => k > 0 && Sliding(i)).Count();
+        var perToken = ModelProfiler.KvElementsPerToken(w.KvHeads, w.Sliding, w.KeyLength, w.ValueLength, w.MlaWidth, fullOnly: true);
+        var windowed = ModelProfiler.KvElementsPerToken(w.KvHeads, w.Sliding, w.KeyLength, w.ValueLength, w.MlaWidth, fullOnly: false) - perToken;
+        return new VllmProfile(p.Architecture, p.Architecture, p.Layers ?? w.KvHeads.Length, full, sliding, w.KvHeads.Count(k => k == 0), 0,
+            Math.Max(1, w.Heads), Math.Max(1, w.MaxKvHeads), w.KeyLength, p.SlidingWindow, p.TrainedContext ?? 4096, p.WeightBytes, perToken,
+            (windowed * (p.SlidingWindow ?? 0)) + p.RecurrentBytesPerSlot, p.Experts?.Count, 0, false, p.Quant, p.Approximate, Math.Max(1, parts));
+    }
+
+    /// <summary>A vLLM or SGLang model's weights in bytes: its snapshot's, or its GGUF file's; 0 when it is neither.</summary>
+    public static long WeightsOf(ModelLibrary library, string file) =>
+        library.Snapshot(file) is { } snapshot ? WeightBytes(library.FullPath(snapshot.Path)) : library.Find(file)?.Profile.WeightBytes ?? 0;
 
     /// <summary>The weights' bytes: what the safetensors index says, else the safetensors files' sizes.</summary>
     public static long WeightBytes(string dir)
@@ -278,7 +329,28 @@ public static class VllmAdvisor
         }
         if (m.SpecDecode == "mtp" && p.MtpLayers == 0)
         {
-            problems.Add(new("specDecode", "This model has no prediction layers of its own: choose eagle3 with a draft model, or none.", true));
+            problems.Add(new("specDecode", p.GgufParts > 0
+                ? $"{label} reads a model's own prediction layers from its snapshot, not from a GGUF file: choose eagle3 with a draft model, or none."
+                : "This model has no prediction layers of its own: choose eagle3 with a draft model, or none.", true));
+        }
+        if (p.GgufParts > 0)
+        {
+            // A GGUF file: quantised as it is, read by vLLM's GGUF plugin (with all its parts) or by SGLang (one file only).
+            var archs = GgufArchitectures[kind.Kind];
+            if (!archs.Contains(p.Architecture))
+            {
+                problems.Add(new("file", $"{label} reads GGUF files of these architectures: {string.Join(", ", archs)}. This one is {p.Architecture ?? "not said in its header"}, "
+                    + $"which would fail as it loads: run it on llama.cpp, or on {label} from its Hugging Face snapshot.", true));
+            }
+            if (kind.Kind == EngineKinds.Sglang && p.GgufParts > 1)
+            {
+                problems.Add(new("file", $"SGLang reads one GGUF file, and this one is split in {p.GgufParts} parts: merge them into one in the library (llama.cpp's "
+                    + "llama-gguf-split --merge FIRST-PART MERGED.gguf), or run it on vLLM, which reads every part, or on llama.cpp.", true));
+            }
+            if (m.Quantization is { Length: > 0 })
+            {
+                problems.Add(new("quantization", $"A GGUF file is quantised already ({p.Quantization ?? "as its file says"}): leave Quantisation empty.", true));
+            }
         }
         if (p.Approximate)
         {

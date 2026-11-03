@@ -196,6 +196,39 @@ public sealed class EngineMoveTests(AppFixture app) : IDisposable
     }
 
     [Fact]
+    public async Task A_llama_cpp_model_moves_to_vllm_on_its_own_gguf_file_and_back_the_file_the_same()
+    {
+        var s = await StartAsync();
+        try
+        {
+            await StatusAssert.Is(HttpStatusCode.Created, await s.Admin.PostAsync("/api/admin/models", new { name = "tiny", file = "tiny/Tiny-4B-Q4_K_M.gguf", context = 8192, outputPerMtok = 0.8 }));
+            await UntilAsync(s, () => Task.FromResult(s.State.StatusOf("tiny") == "unloaded"), "llama.cpp lists tiny");
+
+            // To vLLM with nothing but the engine: its GGUF file goes with it, no snapshot needed; vLLM's server is started on that file.
+            await StatusAssert.Is(HttpStatusCode.OK, await s.Admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny", UriKind.Relative), new { engineKind = "vllm" }));
+            await UntilAsync(s, async () => await PhaseAsync(s, "tiny") is null && s.State.StatusOf("tiny") == "loaded", "tiny ready on vLLM");
+            var row = await RowAsync(s, "tiny");
+            Assert.Equal(("vllm", "tiny/Tiny-4B-Q4_K_M.gguf", "fp8"), (row.GetProperty("engineKind").GetString(), row.GetProperty("file").GetString(), row.GetProperty("kvType").GetString()));
+            Assert.Equal("/library/tiny/Tiny-4B-Q4_K_M.gguf", s.Backend("vllm").Desired().Single(e => e.Model == "tiny").Args[0]);
+            Assert.Equal("ready", s.Vllm.Phase("tiny"));
+            Assert.DoesNotContain("[tiny]", await File.ReadAllTextAsync(Path.Combine(Config, "models.ini")), StringComparison.Ordinal);
+
+            // And back to llama.cpp the same way: the same file, in llama.cpp's presets again.
+            await StatusAssert.Is(HttpStatusCode.OK, await s.Admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny", UriKind.Relative), new { engineKind = "llamacpp" }));
+            await UntilAsync(s, async () => await PhaseAsync(s, "tiny") is null && app.Engine.StatusOf("tiny") == "loaded" && s.State.StatusOf("tiny") == "loaded", "tiny back on llama.cpp");
+            row = await RowAsync(s, "tiny");
+            Assert.Equal(("llamacpp", "tiny/Tiny-4B-Q4_K_M.gguf", "q8_0"), (row.GetProperty("engineKind").GetString(), row.GetProperty("file").GetString(), row.GetProperty("kvType").GetString()));
+            Assert.Contains("[tiny]\nmodel = /library/tiny/Tiny-4B-Q4_K_M.gguf\n", await File.ReadAllTextAsync(Path.Combine(Config, "models.ini")), StringComparison.Ordinal);
+            Assert.DoesNotContain("tiny", s.Desired("vllm"));
+            Assert.Equal(0.8m, row.GetProperty("outputPerMtok").GetDecimal());
+        }
+        finally
+        {
+            await s.Stop();
+        }
+    }
+
+    [Fact]
     public async Task A_vllm_model_moves_to_llama_cpp_a_failure_there_leaving_it_on_vllm_and_the_next_try_moving_it()
     {
         var s = await StartAsync();

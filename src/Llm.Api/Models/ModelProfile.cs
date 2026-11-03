@@ -90,11 +90,12 @@ public sealed record ModelProfile
 }
 
 /// <summary>Where a model's bytes are, layer by layer: what placing it on the GPU or in RAM moves.</summary>
+/// <param name="Heads">Its attention heads (the query's), which decide the tensor parallel sizes vLLM and SGLang split it over.</param>
 public sealed record ModelWeights(
     long[] Layer, long[] Experts, long Output, long HostOnly, long TiedCopy, long Mtp,
-    int[] KvHeads, bool[] Sliding, int KeyLength, int ValueLength, int? MlaWidth, int MaxKvHeads)
+    int[] KvHeads, bool[] Sliding, int KeyLength, int ValueLength, int? MlaWidth, int MaxKvHeads, int Heads)
 {
-    public static readonly ModelWeights None = new([], [], 0, 0, 0, 0, [], [], 0, 0, null, 0);
+    public static readonly ModelWeights None = new([], [], 0, 0, 0, 0, [], [], 0, 0, null, 0, 0);
 }
 
 /// <summary>Reads a <see cref="ModelProfile"/> from a GGUF header.</summary>
@@ -334,7 +335,7 @@ public static partial class ModelProfiler
         var trained = (int?)h.Whole(h.Arch("context_length"));
         var weights = new ModelWeights(
             byLayer[..layers], experts[..layers], output, hostOnly, tied ? h.Tensors.Where(t => t.Name == "token_embd.weight").Sum(t => t.Bytes) : 0,
-            byLayer[layers..].Sum(), kvHeads, sliding, keyLength, valueLength, mla, kvHeads.DefaultIfEmpty(0).Max());
+            byLayer[layers..].Sum(), kvHeads, sliding, keyLength, valueLength, mla, kvHeads.DefaultIfEmpty(0).Max(), heads);
 
         return basics with
         {

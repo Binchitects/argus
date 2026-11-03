@@ -350,7 +350,7 @@ function RepoView({ id, media = false, snapshots = false, onBack, onClose }: { i
         </fieldset>
       )}
       {!media && r && !r.snapshot && snapshots && (
-        <Alert>This repository has no snapshot vLLM or SGLang can load: no safetensors weights with a config.json at its root.{r.models.length > 0 ? ' Its GGUF files are for llama.cpp.' : ''}</Alert>
+        <Alert>This repository has no snapshot vLLM or SGLang can load: no safetensors weights with a config.json at its root.{r.models.length > 0 ? ' Its GGUF files run on llama.cpp, and on vLLM or SGLang more slowly.' : ''}</Alert>
       )}
       {shot && (
         <fieldset className="grid gap-1.5">
