@@ -835,8 +835,9 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     /// <summary>
     /// `vllm serve`'s arguments for a model on <paramref name="tp"/> GPUs: its snapshot, tensor parallel size, context,
     /// answers at once, share of each GPU, cache type, prefix caching, and what it chose of quantisation, sleep mode,
-    /// speculative decoding, a CPU tier for its cache (the OffloadingConnector) and default sampling. Never a key, a host
-    /// or a port: the supervisor owns those (and refuses an entry that sets them).
+    /// speculative decoding, a CPU tier for its cache (the OffloadingConnector) and default sampling; and its longest
+    /// answer, which every request is held to. Never a key, a host or a port: the supervisor owns those (and refuses an
+    /// entry that sets them).
     /// </summary>
     public static IReadOnlyList<string> VllmArgs(LocalModel m, string library, int tp)
     {
@@ -898,7 +899,8 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     /// (--mem-fraction-static), cache type, its metrics, priority with the lower first (the chat's -1 before API keys' 0, as
     /// on vLLM), and what it chose of quantisation, sleep (the memory saver), speculative decoding (EAGLE-3 with its draft,
     /// or NEXTN, the model's own MTP layers), a RAM tier for its cache (the hierarchical cache) and default sampling. Its
-    /// radix cache shares every prefix by itself. Never a key, a host or a port: the supervisor owns those.
+    /// radix cache shares every prefix by itself. Its longest answer is no flag of SGLang's: an environment variable of the
+    /// process (<see cref="VllmEntries"/>). Never a key, a host or a port: the supervisor owns those.
     /// </summary>
     public static IReadOnlyList<string> SglangArgs(LocalModel m, string library, int tp)
     {
