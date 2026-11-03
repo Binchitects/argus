@@ -179,9 +179,11 @@ public sealed class VllmAdvisorTests
         m.MaxOutput = 32768;
         var advice = VllmAdvisor.Advise(m, flash, null);
         // Each of its 16 at once may hold the whole context: the answer is bounded by it, not by a sixteenth of it.
-        Assert.Equal(new Bounds(256, 31744), advice.Limits!.MaxOutput);
+        Assert.Equal(new Bounds(256, 24576), advice.Limits!.MaxOutput);
         Assert.True(Assert.Single(advice.Problems, p => p.Field == "maxOutput").Error);
         m.MaxOutput = 31744;
+        Assert.True(Assert.Single(VllmAdvisor.Advise(m, flash, null).Problems, p => p.Field == "maxOutput").Error);
+        m.MaxOutput = 24576;
         Assert.DoesNotContain(VllmAdvisor.Advise(m, flash, null).Problems, p => p.Field == "maxOutput");
     }
 }

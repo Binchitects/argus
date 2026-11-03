@@ -150,7 +150,7 @@ public static class ModelAdvisor
 {
     public const int MaxContext = 1_048_576;
     public const int MinOutput = 256;
-    /// <summary>What a prompt needs at least beside the longest answer.</summary>
+    /// <summary>What a prompt needs at least beside the longest answer, in a small window (<see cref="PromptRoomOf"/>).</summary>
     public const int PromptRoom = 1024;
     public const int MaxParallel = 32;
     public const int StretchFactor = 4;
@@ -163,9 +163,13 @@ public static class ModelAdvisor
 
     /// <summary>
     /// The longest answer a request of <paramref name="window"/> tokens may have (<see cref="ModelCatalog.Window"/>): its
-    /// window less room for the prompt. The answer and its prompt share the window.
+    /// window less room for the prompt (<see cref="PromptRoomOf"/>). The answer and its prompt share the window, and a client
+    /// that keeps the whole longest answer free (Claude Code, opencode, Qwen Code) still sends a real prompt beside it.
     /// </summary>
-    public static Bounds OutputBounds(int window) => new(Math.Min(MinOutput, window / 2), Math.Max(MinOutput, window - PromptRoom));
+    public static Bounds OutputBounds(int window) => new(Math.Min(MinOutput, window / 2), Math.Max(MinOutput, window - PromptRoomOf(window)));
+
+    /// <summary>The room a prompt keeps beside the longest answer in a window of <paramref name="window"/> tokens: a quarter of it, 1,024 tokens at least.</summary>
+    public static int PromptRoomOf(int window) => Math.Max(PromptRoom, window / 4);
 
     private sealed record Inputs(int Context, int Parallel, double CacheBytes, int Ubatch, bool Mtp, long DraftBytes, long ProjectorBytes);
 

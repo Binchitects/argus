@@ -637,9 +637,10 @@ would be with them.
   server** takes its address (usually ending in `/v1`) and its API key,
   **finds its models** (with the window each reports: vLLM's `max_model_len`,
   llama.cpp's `n_ctx`, never what the model was trained for), and the admin chooses
-  which the gateway serves, under which names, with their context, longest
-  answer (at most the context less 1,024 tokens for a prompt; empty: half the
-  context), tools, thinking and images. The app registers them in LiteLLM with
+  which the gateway serves, under which names, with their context (what one
+  request holds, its prompt and its answer together), longest answer (at most
+  three quarters of the context, so a prompt keeps a quarter, 1,024 tokens at
+  least; empty: half the context), tools, thinking and images. The app registers them in LiteLLM with
   the server's address and key; people use them from the chat, their API keys
   and agents, with the same access rules and spend as any model.
   - A name the gateway has already (a model here, or on another server) makes
@@ -691,9 +692,11 @@ would be with them.
   incomplete. A saved model keeps its kind when edited.
 - **The form asks what that kind of model has, within its limits**, and shows
   them: the context from 4,096 to what it was trained for (up to 4× with YaRN,
-  when its file does not stretch it already); the longest answer, at most what
-  one conversation holds (the context over **Answers at once**, below) less
-  1,024 tokens for a prompt, and half of that when left empty; the cache types its attention heads
+  when its file does not stretch it already); the longest answer, at most three
+  quarters of what one conversation holds (the context over **Answers at once**,
+  below), so a client that keeps the whole longest answer free (Claude Code,
+  opencode) still has a quarter for its prompt (1,024 tokens at least), and half
+  of it when left empty; the cache types its attention heads
   can take (a quantized cache needs flash attention, which covers heads of 64,
   80, 96, 112, 128 and 256); experts in RAM only for a mixture of experts;
   drafting with multi-token prediction only for a model with its own
@@ -732,6 +735,10 @@ would be with them.
   (`max_output_tokens`, and `max_tokens`, LiteLLM's older name for it), so the
   chat and Code Arena compact before they reach it, and the card says it
   ("262,144 tokens of context, 65,536 a conversation, answers up to 32,768"). A
+  longest answer saved for a bigger conversation (before more answers at once,
+  or less context) is not cut to the most that fits: answers get half the
+  conversation, as when none is set, and the card says **Its longest answer
+  needs changing** until **Edit** sets one that fits. A
   vLLM or SGLang model has no such share: each of its answers at once may hold
   the whole context (`--max-model-len`, `--context-length`), and its card and
   the gateway say that. For longer conversations, give the model

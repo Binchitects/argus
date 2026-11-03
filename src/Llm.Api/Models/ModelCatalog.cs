@@ -711,10 +711,13 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     public static int OutputLimit(LocalModel m) => OutputLimit(Window(m), m.MaxOutput);
 
     /// <summary>
-    /// The longest answer in a window of <paramref name="window"/> tokens: <paramref name="maxOutput"/>, else half the window
-    /// (<see cref="DefaultMaxOutput"/>); never more than the window less room for a prompt (one saved before its window shrank).
+    /// The longest answer in a window of <paramref name="window"/> tokens: <paramref name="maxOutput"/> while it leaves a prompt
+    /// its room (<see cref="ModelAdvisor.OutputBounds"/>), else half the window (<see cref="DefaultMaxOutput"/>). One saved before
+    /// its window shrank is not cut to the most a window allows, which would leave a client that keeps it free a sliver for its
+    /// prompt: it is as if none were set until it is changed, and the model's card says so.
     /// </summary>
-    public static int OutputLimit(int window, int? maxOutput) => Math.Min(maxOutput ?? DefaultMaxOutput(window), ModelAdvisor.OutputBounds(window).Max);
+    public static int OutputLimit(int window, int? maxOutput) =>
+        maxOutput is > 0 and var own && own <= ModelAdvisor.OutputBounds(window).Max ? own : DefaultMaxOutput(window);
 
     /// <summary>
     /// llama.cpp's fit target for a model that fits itself to the GPU, when a picture model kept loaded runs beside it: what

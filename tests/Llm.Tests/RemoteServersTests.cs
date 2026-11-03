@@ -54,10 +54,12 @@ public sealed class RemoteServersTests(AppFixture app)
         var (f, gateway) = NewApp();
         await using var _f = f;
         var admin = await AdminAsync(f);
-        // An answer as long as the whole context leaves no room for its prompt.
-        var whole = await admin.PostAsync("/api/admin/servers", Server([new { remote = "big-remote", name = "big", context = 65536, maxOutput = 65536 }]));
+        // An answer as long as the whole context leaves no room for its prompt; one past three quarters of it too little.
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/servers", Server([new { remote = "big-remote", name = "big", context = 65536, maxOutput = 65536 }])));
+        var whole = await admin.PostAsync("/api/admin/servers", Server([new { remote = "big-remote", name = "big", context = 65536, maxOutput = 50000 }]));
         await StatusAssert.Is(HttpStatusCode.BadRequest, whole);
-        Assert.Contains("the longest answer at most the context less 1,024 tokens for a prompt", await whole.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Contains("the longest answer at most three quarters of the context (the context less 1,024 tokens for a small one), so a prompt keeps the rest",
+            await whole.Content.ReadAsStringAsync(), StringComparison.Ordinal);
         var made = await admin.PostAsync("/api/admin/servers", Server([
             new { remote = "big-remote", name = "big", context = 65536, maxOutput = 8192, thinking = true },
             // Named like the .env model: a second copy of it, and the gateway spreads requests between them.

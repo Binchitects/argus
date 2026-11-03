@@ -53,9 +53,10 @@ public sealed class GatewayRoutesTests(AppFixture app)
         Assert.Equal(8192, tiny.Info["max_input_tokens"]!.GetValue<int>());
         // Its longest answer, half the window when it sets none, under both of LiteLLM's names: max_tokens is not the window.
         Assert.Equal((4096, 4096), (tiny.Info["max_output_tokens"]!.GetValue<int>(), tiny.Info["max_tokens"]!.GetValue<int>()));
-        // A longest answer the window no longer holds leaves room for a prompt.
+        // A longest answer the window no longer holds is half the window, as when none is set: never all the window but a
+        // sliver, which a client that keeps the whole longest answer free would leave its prompt.
         var crowded = Assert.Single(routes, r => r.Name == "crowded");
-        Assert.Equal((4096, 3072), (crowded.Info["max_input_tokens"]!.GetValue<int>(), crowded.Info["max_output_tokens"]!.GetValue<int>()));
+        Assert.Equal((4096, 2048, 2048), (crowded.Info["max_input_tokens"]!.GetValue<int>(), crowded.Info["max_output_tokens"]!.GetValue<int>(), crowded.Info["max_tokens"]!.GetValue<int>()));
         // Another server's model: its own name there, its key, its certificate not checked as asked.
         var big = Assert.Single(routes, r => r.Name == "big");
         Assert.Equal((Deployment.Remote, "https://gpu2.example.test/v1", "org/big", false, "remote-secret", (bool?)false, "gpu2"),

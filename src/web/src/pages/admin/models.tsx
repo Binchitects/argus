@@ -363,6 +363,18 @@ function contextLine(context: number, window?: number | null, output?: number | 
   return output ? `${held}, answers up to ${output.toLocaleString('en-US')}` : held
 }
 
+/**
+ * A longest answer saved for a bigger window (more slots, less context since): the gateway gives half the window instead
+ * (ModelCatalog.OutputLimit), and the card says it needs changing. Null when it fits, or none is saved.
+ */
+function staleOutput(m: ModelRow): string | null {
+  if (!m.maxOutput || !m.output || m.output === m.maxOutput) return null
+  const n = (v: number) => v.toLocaleString('en-US')
+  return `Saved as ${n(m.maxOutput)} tokens, more than a conversation of ${n(m.window ?? m.context ?? 0)} holds beside its prompt: its answers go up to ${n(m.output)}, half of it, until ${
+    m.source === 'remote' ? 'its server’s Edit' : 'Edit'
+  } sets one that fits.`
+}
+
 /** The GPU shared by the chat models and the picture and video jobs: lent to a job now, and what the jobs did lately. */
 function GpuSharing({ gpu }: { gpu: NonNullable<ModelsView['gpu']> }) {
   return (
@@ -523,6 +535,11 @@ function ModelCard({
       </CardHeader>
       <CardContent className="grid gap-4">
         {m.source === 'local' && m.atGateway === false && <Alert variant="warning">Not at the gateway yet: it is added again within a minute.</Alert>}
+        {(m.source === 'local' || m.source === 'remote') && staleOutput(m) && (
+          <Alert variant="warning" title="Its longest answer needs changing">
+            {staleOutput(m)}
+          </Alert>
+        )}
         {m.move && <MoveState name={m.name} move={m.move} onDismiss={() => dismiss.mutate()} />}
         {m.status === 'missing' && (
           <Alert variant="warning" title="The engine does not list it">

@@ -93,7 +93,7 @@ export interface SavedModel {
   window?: number | null
   /** The longest answer it was given; null: half the window. */
   maxOutput?: number | null
-  /** The longest answer the gateway says: its own, else half the window, within what the window leaves for a prompt. */
+  /** The longest answer the gateway says: its own while it leaves a prompt its room in the window, else half the window. */
   output?: number | null
   placement?: 'auto' | 'manual'
   /** The GPUs it runs on ("0,1"); empty: all. */

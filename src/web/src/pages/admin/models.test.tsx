@@ -412,6 +412,19 @@ describe('admin models', () => {
     expect(screen.getByText('small/Small-Q8.gguf · 32,768 tokens of context')).toBeInTheDocument()
     // vLLM's 16 at once share its cache, not its window: each request may hold the whole context.
     expect(screen.getByText('hf/org/flash@r · 65,536 tokens of context, answers up to 32,768')).toBeInTheDocument()
+    expect(screen.queryByText('Its longest answer needs changing')).not.toBeInTheDocument()
+  })
+
+  it('a longest answer saved for a bigger window says it needs changing, and what answers get meanwhile', async () => {
+    const v = view()
+    // Two slots of 65,536 hold 32,768 each: its 32,768 would leave a prompt nothing, so its answers get half the window.
+    const crowded = { ...v.models[1], context: 65536, parallel: 2, window: 32768, maxOutput: 32768, output: 16384 }
+    fakeApi(admin, { 'GET /api/admin/models': () => ({ json: { ...v, models: [v.models[0], crowded, v.models[2]] } }) })
+    renderApp('/admin/models')
+    const card = (await screen.findByRole('heading', { name: /Small-Model/ })).closest('section')!
+    expect(within(card).getByText('small/Small-Q8.gguf · 65,536 tokens of context, 32,768 a conversation, answers up to 16,384')).toBeInTheDocument()
+    expect(within(card).getByText('Its longest answer needs changing')).toBeInTheDocument()
+    expect(within(card).getByText(/Saved as 32,768 tokens, more than a conversation of 32,768 holds beside its prompt: its answers go up to 16,384, half of it, until Edit sets one that fits\./)).toBeInTheDocument()
   })
 
   it('the GPU lent to a video says so, with the room made and given back', async () => {
