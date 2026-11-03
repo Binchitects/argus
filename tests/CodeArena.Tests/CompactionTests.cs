@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Net;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 
 namespace CodeArena.Tests;
 
@@ -162,14 +164,44 @@ public sealed class CompactionTests : IDisposable
     }
 
     [Fact]
-    public async Task The_turns_summary_says_how_full_the_window_is()
+    public async Task The_turns_summary_says_how_full_the_window_is_and_context_what_fills_it_as_the_web_chat_does()
     {
         using var h = new Harness(_gateway, _mcp);
+        File.WriteAllText(Path.Combine(h.Work, "AGENTS.md"), "Run make test before every commit.");
+        File.WriteAllText(Path.Combine(h.Work, "notes.txt"), string.Concat(Enumerable.Range(1, 60).Select(i => $"note {i}: the release waits for the docs\n")));
         Assert.Equal(0, await h.Run("hello\n/exit\n", "chat"));
         Assert.Matches(@"· context [\d.]+k? / 20k \(\d+%\), compacts at 80%", h.Out);
-        // /context shows the room kept for the answer too, as the IDE's gauge does: an eighth of the window here.
-        Assert.Equal(0, await h.Run("/context\n/exit\n", "chat"));
-        Assert.Matches(@"kept for the answer +2\.5k", h.Out);
+
+        // /context: what fills the window by the web chat's kinds (the project's AGENTS.md as your instructions, the file
+        // as a file), the room kept for the answer (an eighth of the window here) and what is free, adding up to the window.
+        Assert.Equal(0, await h.Run("read @notes.txt\n/context\n/exit\n", "chat"));
+        var context = h.Out[h.Out.LastIndexOf("context ", StringComparison.Ordinal)..];
+        var rows = Regex.Matches(context, @"^  (?<what>[A-Z][\w ]+?) +(?<tokens>[\d,]+) +\d+%", RegexOptions.Multiline)
+            .ToDictionary(m => m.Groups["what"].Value, m => long.Parse(m.Groups["tokens"].Value, NumberStyles.AllowThousands, CultureInfo.CurrentCulture));
+        Assert.Equal(["System prompt and tool notes", "Tool definitions", "Your instructions", "Files", "Your messages", "Answers", "Kept for the answer", "Free"], rows.Keys);
+        Assert.Equal(2_500, rows["Kept for the answer"]);
+        Assert.Equal(20_000, rows.Values.Sum());
+        // The kinds add up to what the header says is in use.
+        var used = rows.Where(r => r.Key is not ("Kept for the answer" or "Free")).Sum(r => r.Value);
+        Assert.Equal(20_000 - 2_500 - used, rows["Free"]);
+        Assert.True(rows["Files"] > rows["Your messages"]);
+        // The biggest messages, the web chat's way: the file went with the person's message.
+        Assert.Matches(@"Biggest\n +[\d,]+  Your message: read @notes\.txt", context);
+    }
+
+    [Fact]
+    public async Task What_fills_the_window_counts_the_note_the_next_request_carries()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        await using var rt = await StartAsync(h);
+        Conversation(rt);
+        // No request yet, so no note in the conversation: the next request adds one, and it is counted.
+        var note = rt.Agent.Note!();
+        var measured = rt.Agent.Measure();
+        long Kind(string key) => measured.Long(key) ?? 0;
+        Assert.Equal(rt.Agent.SystemPrompt().Length + note.Length + 10, Kind("system") + Kind("instructions") + Kind("memory"));
+        var chars = new[] { "system", "instructions", "memory", "tools", "summary", "files", "you", "answers", "toolResults" }.Sum(Kind);
+        Assert.Equal((long)(chars / rt.Agent.CharsPerToken), rt.Agent.Estimate());
     }
 
     [Fact]

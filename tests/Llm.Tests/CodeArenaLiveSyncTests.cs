@@ -74,6 +74,49 @@ public sealed class CodeArenaLiveSyncTests(AppFixture app) : IDisposable
     private static List<string> Contents(Ca.SessionStore store) => store.Read(d => d.Stream.Select(e => e.Message["content"]?.ToString() ?? "").ToList());
 
     [Fact]
+    public async Task Code_Arenas_answers_bring_what_filled_their_request_to_the_web_chats_gauge_its_biggest_messages_by_their_ids_here()
+    {
+        await using var f = NewApp();
+        var (web, key) = await PersonAsync(f);
+        var (config, http) = CodeArena(f, key);
+        var store = Ca.SessionStore.Create(_dir, "/home/pat/shop", "model-a");
+        var sync = Ca.ChatSync.Start(config, http, store, "/home/pat/shop", () => "model-a", (_, _) => { })!;
+
+        // A question with a file of the folder, and the answer with what filled its request (Agent.Measure): the question
+        // the biggest, by its place in the session.
+        var notes = string.Concat(Enumerable.Repeat("the release waits for the docs\n", 100));
+        store.Message(Said("user", $"Read @notes.txt{Ca.Mentions.Marker}\n<file path=\"notes.txt\">\n{notes}\n</file>{Ca.Mentions.End}"));
+        var context = new JsonObject
+        {
+            ["system"] = 4_000, ["instructions"] = 300, ["memory"] = 0, ["tools"] = 6_000, ["summary"] = 0, ["files"] = 3_150, ["you"] = 25,
+            ["answers"] = 0, ["toolResults"] = 0,
+            ["biggest"] = new JsonArray(new JsonObject { ["id"] = "m0", ["role"] = "user", ["tool"] = null, ["chars"] = 3_175, ["preview"] = "Read @notes.txt", ["pinned"] = false }),
+        };
+        store.Message(Said("assistant", "The release waits for the docs."), "model-a", new Ca.TokenUsage(3_700, 0, 20), context: context);
+        await Until(() => sync.InStep, "Arena has the turn");
+
+        // The web chat's gauge reads it as it reads its own answers', the question named by its id here.
+        var read = await web.JsonAsync(await web.GetAsync($"/api/chat/conversations/{sync.Conversation}"));
+        var messages = read.GetProperty("messages").EnumerateArray().ToList();
+        var question = messages.Single(m => m.GetProperty("role").GetString() == "user");
+        var kept = messages.Single(m => m.GetProperty("role").GetString() == "assistant").GetProperty("context");
+        Assert.Equal((4_000, 300, 6_000, 3_150, 25), (kept.GetProperty("system").GetInt64(), kept.GetProperty("instructions").GetInt64(), kept.GetProperty("tools").GetInt64(),
+            kept.GetProperty("files").GetInt64(), kept.GetProperty("you").GetInt64()));
+        var biggest = Assert.Single(kept.GetProperty("biggest").EnumerateArray());
+        Assert.Equal(question.GetProperty("id").GetGuid(), biggest.GetProperty("id").GetGuid());
+        Assert.Equal(("user", 3_175, "Read @notes.txt"), (biggest.GetProperty("role").GetString(), biggest.GetProperty("chars").GetInt64(), biggest.GetProperty("preview").GetString()));
+
+        // An answer without one (from before it was kept) has none on the web either.
+        store.Message(Said("user", "Thanks"));
+        store.Message(Said("assistant", "You are welcome."), "model-a", new Ca.TokenUsage(3_800, 0, 5));
+        await Until(() => sync.InStep, "Arena has the next turn");
+        read = await web.JsonAsync(await web.GetAsync($"/api/chat/conversations/{sync.Conversation}"));
+        var last = read.GetProperty("messages").EnumerateArray().Single(m => m.GetProperty("content").GetString() == "You are welcome.");
+        Assert.Equal(JsonValueKind.Null, last.GetProperty("context").ValueKind);
+        await sync.DisposeAsync();
+    }
+
+    [Fact]
     public async Task A_session_and_its_chat_stay_in_step_both_ways_through_edits_compactions_and_a_restart()
     {
         await using var f = NewApp();

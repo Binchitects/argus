@@ -169,6 +169,12 @@ public sealed class LiveSyncTests : IDisposable
         Assert.False(state["busy"]!.GetValue<bool>());
         var messages = (await web.GetJsonAsync("/api/session"))["messages"]!.AsArray();
         Assert.Contains(messages, m => m!["content"]?.ToString() == "asked on the web");
+        // The web's answer has no breakdown of Code Arena's request: the gauge shows what fills the next one, measured with
+        // the web's messages in, as the state gives it.
+        var window = state["window"]!;
+        Assert.True(window["system"]!.GetValue<long>() > 0 && window["tools"]!.GetValue<long>() > 0);
+        Assert.True(window["you"]!.GetValue<long>() >= "first".Length + "asked on the web".Length);
+        Assert.True(window["answers"]!.GetValue<long>() >= "answer to first".Length + "answered on the web".Length);
 
         // The session is marked as kept with its chat; Arena's other chats are listed, and one opens with its history.
         var sessions = (await web.GetJsonAsync("/api/sessions")).AsArray();
@@ -186,6 +192,30 @@ public sealed class LiveSyncTests : IDisposable
         // Not an id: refused.
         Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/sessions/web", new JsonObject { ["id"] = "../x" })).StatusCode);
     }
+    [Fact]
+    public async Task Each_answer_goes_to_Arena_with_what_filled_its_request_its_biggest_messages_by_Arenas_id_or_their_ref()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        File.WriteAllText(Path.Combine(h.Work, "notes.txt"), string.Concat(Enumerable.Range(1, 60).Select(i => $"note {i}: the release waits for the docs\n")));
+        await using var web = await WebRun.StartAsync(h);
+        await (await web.SendAsync("read @notes.txt")).RestAsync();
+        await Until(() => _mcp.Chats.All.SingleOrDefault()?.Messages.Count == 2, "the turn is in Arena");
+
+        // The web chat's gauge shows it as Code Arena's does: by kind in characters, the file apart from the words.
+        var chat = _mcp.Chats.All.Single();
+        var (question, answer) = (chat.Messages[0], chat.Messages[1]);
+        var context = answer["context"]!;
+        Assert.True(context["system"]!.GetValue<long>() > 0);
+        Assert.True(context["tools"]!.GetValue<long>() > 0);
+        Assert.True(context["files"]!.GetValue<long>() > context["you"]!.GetValue<long>());
+        // The question that took most of it, as Arena knows it: by its id there, or by its ref when it went with the answer.
+        var biggest = Assert.Single(context["biggest"]!.AsArray())!;
+        Assert.Equal("user", biggest["role"]!.GetValue<string>());
+        Assert.True(biggest["id"]?.GetValue<string>() == chat.Branch[0].Id || biggest["ref"]?.GetValue<string>() == question["ref"]!.GetValue<string>(),
+            $"Not named as Arena knows it: {biggest.ToJsonString()}");
+        Assert.False(biggest["id"]?.GetValue<string>().StartsWith('m') == true);
+    }
+
     [Fact]
     public async Task A_chat_Arena_does_not_have_or_a_number_past_the_list_shown_opens_nothing()
     {

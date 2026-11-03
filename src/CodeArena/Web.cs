@@ -378,9 +378,6 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             case ("GET", "/api/state"):
                 await res.JsonAsync(200, State(), ct);
                 return;
-            case ("GET", "/api/window"):
-                await res.JsonAsync(200, WindowJson(), ct);
-                return;
             case ("POST", "/api/update"):
                 var (done, said) = await Updates.UpdateAsync(_rt.Config, _rt.Http, _ => { }, ct, caFile: Net.CaFile(null, _rt.Config.Ca, _rt.Env.Env));
                 if (done)
@@ -605,25 +602,6 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         await res.JsonAsync(200, new JsonObject { ["added"] = added, ["where"] = where }, ct);
     }
 
-    /// <summary>
-    /// What fills the window, by kind in tokens, and its biggest messages: the IDE's Context. Measured while no turn runs
-    /// (a turn changes the messages as it goes); during one, the last measure.
-    /// </summary>
-    private JsonObject WindowJson()
-    {
-        if (Current() is not null)
-        {
-            return _lastWindow ?? new JsonObject { ["kinds"] = new JsonArray(), ["biggest"] = new JsonArray() };
-        }
-        var (kinds, biggest) = _rt.Agent.Window();
-        var perToken = _rt.Agent.CharsPerToken;
-        return _lastWindow = new JsonObject
-        {
-            ["kinds"] = new JsonArray([.. kinds.Select(k => (JsonNode)new JsonObject { ["kind"] = k.Kind, ["tokens"] = (long)(k.Chars / perToken) })]),
-            ["biggest"] = new JsonArray([.. biggest.Select(b => (JsonNode)new JsonObject { ["role"] = b.Role, ["what"] = b.What, ["tokens"] = (long)(b.Chars / perToken) })]),
-        };
-    }
-
     private JsonObject State()
     {
         var git = SystemPrompt.GitRoot(_rt.Workspace.Root);
@@ -642,9 +620,11 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             ["branch"] = git is null ? null : SystemPrompt.GitBranch(git),
             ["model"] = _rt.Model.Name,
             ["context"] = _rt.Model.Context,
-            // How full the window is (about), the room kept in it for the answer, and when the session compacts itself: the
-            // status bar, the chat's gauge and the settings show them.
+            // How full the window is (about), what fills the next request by kind in characters (the page scales them to
+            // contextUsed), the room kept in it for the answer, and when the session compacts itself: the status bar, the
+            // chat's gauge and the settings show them. Measured while no turn runs (a turn changes the messages as it goes).
             ["contextUsed"] = Current() is null ? _lastUsed = _rt.Agent.Estimate() : _lastUsed,
+            ["window"] = (Current() is null ? _lastWindow = _rt.Agent.Measure() : _lastWindow)?.DeepClone(),
             ["reserve"] = _rt.Agent.Reserve,
             // A newer Code Arena on the Arena (the status bar offers it), and whether this one was replaced already.
             ["update"] = _updated ?? _rt.UpdateNotice,

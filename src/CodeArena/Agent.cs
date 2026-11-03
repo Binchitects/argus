@@ -189,6 +189,8 @@ internal sealed class Agent
     public Func<string>? Note { get; init; }
     /// <summary>How long the memory in the system prompt is (for what fills the window); null: none.</summary>
     public Func<int>? MemoryChars { get; init; }
+    /// <summary>How long the person's and the project's instructions in the system prompt are (ARENA.md, AGENTS.md...); null: none.</summary>
+    public Func<int>? InstructionChars { get; init; }
     /// <summary>Whether the model sees pictures (a screenshot goes to it as one, else it is told it cannot see it).</summary>
     public Func<bool>? Sees { get; init; }
     public SessionStore? Session { get; set; }
@@ -949,9 +951,22 @@ internal sealed class Agent
     /// </summary>
     private void AddNote()
     {
-        if (Note?.Invoke() is not { Length: > 0 } note)
+        if (NextNote() is not { } next)
         {
             return;
+        }
+        _notes.RemoveAll(n => n.At > Messages.Count);
+        // One that nothing follows yet is replaced rather than kept beside the new one (the memories for a message stay).
+        _notes.RemoveAll(n => n.At >= next.At && !IsMemory(n));
+        _notes.Add(next);
+    }
+
+    /// <summary>The note the next request adds (<see cref="AddNote"/>) and where; null when the last one still holds.</summary>
+    private (int At, string Text)? NextNote()
+    {
+        if (Note?.Invoke() is not { Length: > 0 } note)
+        {
+            return null;
         }
         if (TurnNote is { Length: > 0 } once)
         {
@@ -961,15 +976,26 @@ internal sealed class Agent
         {
             note += $"\n- The last turn took {_lastTurnSteps} steps. " + nudge;
         }
-        _notes.RemoveAll(n => n.At > Messages.Count);
-        if (_notes.LastOrDefault(n => !IsMemory(n)) is { Text: var last } && last == note)
+        if (_notes.LastOrDefault(n => n.At <= Messages.Count && !IsMemory(n)) is { Text: var last } && last == note)
         {
-            return;
+            return null;
         }
-        var at = Messages.Count > 0 && Messages[^1].Str("role") == "user" ? Messages.Count - 1 : Messages.Count;
-        // One that nothing follows yet is replaced rather than kept beside the new one (the memories for a message stay).
-        _notes.RemoveAll(n => n.At >= at && !IsMemory(n));
-        _notes.Add((at, note));
+        return (Messages.Count > 0 && Messages[^1].Str("role") == "user" ? Messages.Count - 1 : Messages.Count, note);
+    }
+
+    /// <summary>
+    /// The notes the next request carries: those in the conversation, and the one it adds (after a compaction or a resume
+    /// there is none, and it always adds one), in place of any that nothing follows yet.
+    /// </summary>
+    private List<(int At, string Text)> NextNotes()
+    {
+        var notes = _notes.Where(n => n.At <= Messages.Count).ToList();
+        if (NextNote() is { } next)
+        {
+            notes.RemoveAll(n => n.At >= next.At && !IsMemory(n));
+            notes.Add(next);
+        }
+        return notes;
     }
 
     /// <summary>The notes a request of the first <paramref name="count"/> messages carries: those before them, and those at the end when it is the whole conversation.</summary>
@@ -1336,12 +1362,17 @@ internal sealed class Agent
     }
 
     /// <summary>
-    /// Tokens the next request will hold: the last count the gateway gave, plus what was added since; with no count since the
-    /// last compaction or resume, the whole of it. Characters become tokens at <see cref="CharsPerToken"/>.
+    /// Tokens the next request will hold: the last count the gateway gave, plus what was added since (the note it adds
+    /// too); with no count since the last compaction or resume, the whole of it. Characters become tokens at <see cref="CharsPerToken"/>.
     /// </summary>
     public long Estimate()
     {
-        var notes = _notes.Where(n => n.At <= Messages.Count).ToList();
+        var notes = NextNotes();
+        if (_knownTokens > 0 && !_notes.Any(n => !IsMemory(n)))
+        {
+            // Resumed with the last count: its request carried a note the session does not keep, and the next one takes its place.
+            notes.RemoveAll(n => !IsMemory(n));
+        }
         var added = Messages.Skip(_knownCount).Sum(Size) + notes.Where(n => n.At >= _knownCount).Sum(n => n.Text.Length + 10);
         if (_knownTokens > 0)
         {
@@ -1352,56 +1383,6 @@ internal sealed class Agent
 
     private long ToolChars() => Model.Info.Tools ? Tools.Offered().Sum(t => (long)Json.Line(t.Spec()).Length) : 0;
 
-    /// <summary>One message among the biggest in the window: its place, who said it, what it is, its size in characters.</summary>
-    public sealed record WindowItem(int Index, string Role, string What, long Chars);
-
-    /// <summary>
-    /// What fills the window, by kind (in characters, the next request's): the instructions (the memory's block and the
-    /// skills listed among them), the tools, Code Arena's notes, a summary, the person's messages, the answers and the
-    /// tools' results; and its biggest messages.
-    /// </summary>
-    public (IReadOnlyList<(string Kind, long Chars)> Kinds, IReadOnlyList<WindowItem> Biggest) Window()
-    {
-        var shown = _notes.Where(n => n.At <= Messages.Count).ToList();
-        var notes = shown.Where(n => !IsMemory(n)).Sum(n => (long)n.Text.Length + 10);
-        // The memory: what the prompt holds, and what was recalled for the questions.
-        var memory = (long)(MemoryChars?.Invoke() ?? 0);
-        var prompt = SystemPrompt().Length - memory;
-        memory += shown.Where(IsMemory).Sum(n => (long)n.Text.Length + 10);
-        long summary = 0, person = 0, answers = 0, results = 0;
-        var items = new List<WindowItem>();
-        for (var i = 0; i < Messages.Count; i++)
-        {
-            var m = Messages[i];
-            var size = Size(m);
-            var content = m.Str("content") ?? "";
-            switch (m.Str("role"))
-            {
-                case "user" when content.StartsWith(SummaryMark, StringComparison.Ordinal):
-                    summary += size;
-                    items.Add(new(i, "summary", "the summary of what came before", size));
-                    break;
-                case "user":
-                    person += size;
-                    items.Add(new(i, "user", Fmt.OneLine(content, 60), size));
-                    break;
-                case "tool":
-                    results += size;
-                    var call = m.Str("tool_call_id");
-                    var tool = Messages.Take(i).Reverse().Select(x => (x["tool_calls"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(c => c.Str("id") == call))
-                        .FirstOrDefault(c => c is not null);
-                    items.Add(new(i, "tool", $"{tool?["function"].Str("name") ?? "a tool"}'s result{(tool?["function"].Str("arguments") is { Length: > 2 } args ? " " + Fmt.OneLine(args, 50) : "")}", size));
-                    break;
-                default:
-                    answers += size;
-                    items.Add(new(i, "assistant", Fmt.OneLine(content.Length > 0 ? content : "(calls)", 60), size));
-                    break;
-            }
-        }
-        return ([("instructions", prompt), ("memory", memory), ("tools", ToolChars()), ("Code Arena's notes", notes), ("summary", summary),
-            ("your messages", person), ("answers", answers), ("tools' results", results)], [.. items.OrderByDescending(x => x.Chars).Take(5)]);
-    }
-
     /// <summary>What filled the request sent last (<see cref="Measure"/>): kept with the answer it brought, for the page's context gauge.</summary>
     public JsonObject? Measured { get; private set; }
 
@@ -1410,16 +1391,18 @@ internal sealed class Agent
 
     /// <summary>
     /// What fills a request of the conversation as it stands, in characters by kind, in the shape of the web chat's context
-    /// gauge (the page scales them to the tokens the model counted): the system prompt with Code Arena's notes, the memory,
-    /// the tools' definitions, a compaction's summary, the files that went with the person's messages, their words, the
-    /// answers, and the tool calls with their results; then the biggest messages the model reads word for word, each by the
-    /// page's id for it (its place in the session).
+    /// gauge (the page scales them to the tokens the model counted): the system prompt with Code Arena's notes (the one the
+    /// next request adds too), the person's and the project's instructions, the memory, the tools' definitions, a
+    /// compaction's summary, the files that went with the person's messages, their words, the answers, and the tool calls
+    /// with their results; then the biggest messages the model reads word for word, each by the page's id for it (its place
+    /// in the session).
     /// </summary>
     internal JsonObject Measure()
     {
-        var shown = _notes.Where(n => n.At <= Messages.Count).ToList();
+        var shown = NextNotes();
         var memory = (long)(MemoryChars?.Invoke() ?? 0);
-        var system = SystemPrompt().Length - memory + shown.Where(n => !IsMemory(n)).Sum(n => (long)n.Text.Length + 10);
+        var instructions = (long)(InstructionChars?.Invoke() ?? 0);
+        var system = SystemPrompt().Length - memory - instructions + shown.Where(n => !IsMemory(n)).Sum(n => (long)n.Text.Length + 10);
         memory += shown.Where(IsMemory).Sum(n => (long)n.Text.Length + 10);
         // The page's ids: the places in the session of what the model reads word for word (none without a session).
         var (from, prefix) = Session?.Read(d => (d.From, d.Prefix)) ?? (0, int.MaxValue);
@@ -1473,7 +1456,7 @@ internal sealed class Agent
         return new JsonObject
         {
             ["system"] = system,
-            ["instructions"] = 0,
+            ["instructions"] = instructions,
             ["memory"] = memory,
             ["tools"] = ToolChars(),
             ["summary"] = summary,
@@ -1483,6 +1466,33 @@ internal sealed class Agent
             ["toolResults"] = results,
             ["biggest"] = new JsonArray([.. items.OrderByDescending(x => x.Long("chars")).Take(BiggestCount)]),
         };
+    }
+
+    /// <summary>The kinds <see cref="Measure"/> gives, in the order and the words of the web chat's context gauge.</summary>
+    internal static readonly (string Key, string Label)[] Kinds =
+    [
+        ("system", "System prompt and tool notes"), ("tools", "Tool definitions"), ("instructions", "Your instructions"), ("memory", "Memory"),
+        ("summary", "Summary of earlier messages"), ("files", "Files"), ("you", "Your messages"), ("answers", "Answers"), ("toolResults", "Tool calls and results"),
+    ];
+
+    /// <summary>
+    /// A measure's kinds in tokens, as the web chat's gauge scales them: <paramref name="tokens"/> shared out by their
+    /// characters, rounded so they add up to it.
+    /// </summary>
+    internal static List<(string Label, long Tokens)> InTokens(JsonObject measured, long tokens)
+    {
+        var chars = Kinds.Select(k => measured.Long(k.Key) ?? 0).ToList();
+        var all = (double)chars.Sum();
+        var parts = new List<(string, long)>();
+        long sum = 0, before = 0;
+        for (var i = 0; i < Kinds.Length; i++)
+        {
+            sum += chars[i];
+            var upTo = all > 0 ? (long)Math.Round(sum / all * tokens) : 0;
+            parts.Add((Kinds[i].Label, upTo - before));
+            before = upTo;
+        }
+        return parts;
     }
 
     /// <summary>A request's size in characters: the system prompt, the tools and the first <paramref name="count"/> messages with their notes.</summary>

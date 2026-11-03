@@ -83,10 +83,7 @@ internal static class SystemPrompt
             """);
         AppendEnvironment(sb, x, root, git, now, volatileFacts: false);
 
-        foreach (var (title, text) in Instructions(x.Paths, root, git))
-        {
-            sb.Append($"\n# {title}\n\n{text.Trim()}\n");
-        }
+        sb.Append(InstructionsText(x));
         sb.Append(x.Memory());
         if (x.Agents() is { Count: > 0 } agents)
         {
@@ -180,6 +177,13 @@ internal static class SystemPrompt
         }
         sb.Append($"- Model: {x.Model()}\n");
     }
+
+    /// <summary>
+    /// The person's and the project's instructions as the prompt holds them, each under its title (<see cref="Instructions"/>):
+    /// what fills the window counts them as the person's own.
+    /// </summary>
+    public static string InstructionsText(Inputs x) =>
+        string.Concat(Instructions(x.Paths, x.Workspace.Root, GitRoot(x.Workspace.Root)).Select(i => $"\n# {i.Title}\n\n{i.Text.Trim()}\n"));
 
     /// <summary>The instruction files read in a folder, the first there of these: Code Arena's own, then those other agents read.</summary>
     public static readonly string[] InstructionFiles = ["ARENA.md", "AGENTS.md", "CLAUDE.md", "QWEN.md"];

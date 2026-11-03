@@ -205,7 +205,11 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   characters and scaled to its prompt tokens. Under **Biggest**, the five
   messages that took most of it (past 1,000 characters), each with its tokens
   and its start: a question or an answer is pinned or left out from there, a
-  tool's result left out (below).
+  tool's result left out (below). In a chat kept with a Code Arena session,
+  an answer written there brings what filled its request too (Code Arena's
+  system prompt, tools and notes, its biggest messages among the chat's), and
+  the files that went with a question there (its @files and the lines chosen
+  in its editor) count as files.
 - **Compact.** Near the limit the chat compacts itself: the model summarizes
   the older messages, and the next answers read the summary instead (the
   newest exchanges, about a quarter of the context, stay as they are). **Compact

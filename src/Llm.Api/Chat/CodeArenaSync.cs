@@ -25,6 +25,8 @@ namespace Llm.Api.Chat;
 /// dropped), shown as a notice, not as the person's words. <paramref name="Attachments"/>: what went with a question here (its
 /// text files are in <paramref name="Content"/> already, as the web's model reads them; its pictures Code Arena fetches).
 /// <paramref name="Quote"/>: the part of an earlier answer a question quotes, kept apart from its words both ways (ChatQuotes).
+/// <paramref name="Context"/>: what filled the request a Code Arena answer was written for, by kind in characters (ContextParts'
+/// shape), its biggest messages named by this end's id or by their ref; the web chat's context gauge shows it.
 /// </summary>
 public sealed record SyncMessage(
     string Role,
@@ -43,7 +45,8 @@ public sealed record SyncMessage(
     string? Status = null,
     string? Kind = null,
     IReadOnlyList<SyncAttachment>? Attachments = null,
-    string? Quote = null);
+    string? Quote = null,
+    JsonObject? Context = null);
 
 /// <summary>A file that went with a question on the web: "image" (fetched with the key from /api/code-arena/attachments/{id}), "text", "file", "audio", "video".</summary>
 public sealed record SyncAttachment(Guid Id, string Name, string Kind, string ContentType);
@@ -489,6 +492,7 @@ public static class CodeArenaSync
         var wanted = messages.Where(m => m.Role == "user").SelectMany(m => m.Attachments ?? []).Select(a => a.Id).Distinct().ToList();
         var owned = wanted.Count == 0 ? [] : (await db.ChatAttachments.Where(a => wanted.Contains(a.Id) && a.UserId == me.Id).Select(a => a.Id).ToListAsync(ct)).ToHashSet();
         var ids = new List<Guid>();
+        var known = new Named(tree);
         var rest = messages;
         // Sent before, its answer lost on the way: those already here are not added twice.
         while (rest.Count > 0 && Clip(rest[0].Ref, 160) is { } reference && tree.Children[parent].FirstOrDefault(n => n.SyncRef == reference) is { } had)
@@ -508,7 +512,7 @@ public static class CodeArenaSync
                 var results = rest.TakeWhile(m => m.Role == "tool" && m.ToolCallId is { } call && calls.Contains(call)).ToList();
                 if (results.Count > 0)
                 {
-                    var last = Add(db, id, p, results, ref sequence, ids, owned);
+                    var last = Add(db, id, p, results, ref sequence, ids, owned, known);
                     var next = await db.ChatMessages.SingleAsync(m => m.Id == tree.Path[place + 1].Id, ct);
                     next.ParentId = last;
                     c.UpdatedAt = DateTimeOffset.UtcNow;
@@ -525,7 +529,7 @@ public static class CodeArenaSync
         var count = (parent is null ? 0 : Depth(tree, parent.Value)) + rest.Count;
         if (rest.Count > 0)
         {
-            leaf = Add(db, id, parent, rest, ref sequence, ids, owned);
+            leaf = Add(db, id, parent, rest, ref sequence, ids, owned, known);
             // An archived chat stays so: only the person's continuing it from Code Arena (/continued) brings it back to the list.
             c.UpdatedAt = DateTimeOffset.UtcNow;
             if (c.Title == "New chat" && rest.FirstOrDefault(m => m.Role == "user") is { } first && TitleOf(Text(first.Content)) is { } title)
@@ -558,9 +562,11 @@ public static class CodeArenaSync
 
     /// <summary>
     /// The messages added after <paramref name="parent"/>, each the next one's parent; the last one's id. A question's
-    /// attachments are kept when they are the person's (<paramref name="owned"/>).
+    /// attachments are kept when they are the person's (<paramref name="owned"/>); an answer keeps what filled its request,
+    /// the messages it names found among the chat's (<paramref name="named"/>).
     /// </summary>
-    private static Guid? Add(AppDbContext db, Guid conversation, Guid? parent, IEnumerable<SyncMessage> messages, ref int sequence, List<Guid> ids, HashSet<Guid> owned)
+    private static Guid? Add(AppDbContext db, Guid conversation, Guid? parent, IEnumerable<SyncMessage> messages, ref int sequence, List<Guid> ids, HashSet<Guid> owned,
+        Named named)
     {
         foreach (var m in messages)
         {
@@ -588,8 +594,11 @@ public static class CodeArenaSync
                 Status = m.Role == "assistant" && m.Status == "stopped" ? MessageStatus.Stopped : MessageStatus.Complete,
                 // Code Arena's own word to its model: a notice on the web, not the person's.
                 DetailsJson = m.Role == "user" && m.Kind == "note" ? """{"note":true}""" : null,
+                // What filled the request it answered: the web chat's context gauge shows it, as for the answers written here.
+                ContextJson = m.Role == "assistant" ? ContextOf(m.Context, named) : null,
             };
             db.ChatMessages.Add(message);
+            named.Added(message);
             ids.Add(message.Id);
             parent = message.Id;
         }
@@ -691,6 +700,61 @@ public static class CodeArenaSync
     /// <summary>The chat's latest message with a compaction's summary (null: none).</summary>
     private static Task<Guid?> SummarizedAsync(AppDbContext db, Guid conversation, CancellationToken ct) =>
         db.ChatMessages.Where(m => m.ConversationId == conversation && m.Summary != null).OrderByDescending(m => m.Sequence).Select(m => (Guid?)m.Id).FirstOrDefaultAsync(ct);
+
+    /// <summary>
+    /// The chat's messages Code Arena may name in what filled an answer's request: by their ref (session:number), the newest
+    /// with it, or by their id here; those added as they are added.
+    /// </summary>
+    private sealed class Named(Tree tree)
+    {
+        private readonly Dictionary<string, Guid> _refs = tree.Nodes.Where(n => n.SyncRef is not null).OrderBy(n => n.Sequence)
+            .GroupBy(n => n.SyncRef!, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.Last().Id, StringComparer.Ordinal);
+        private readonly HashSet<Guid> _ids = [.. tree.ById.Keys];
+
+        public void Added(ChatMessage m)
+        {
+            _ids.Add(m.Id);
+            if (m.SyncRef is { } reference)
+            {
+                _refs[reference] = m.Id;
+            }
+        }
+
+        public Guid? Find(JsonObject item) =>
+            Str(item["id"]) is { } said && Guid.TryParse(said, out var id) && _ids.Contains(id) ? id
+            : Str(item["ref"]) is { } reference && _refs.TryGetValue(reference, out var found) ? found : null;
+    }
+
+    /// <summary>
+    /// What filled the request a Code Arena answer was written for, kept as this end keeps its own (ContextParts): by kind in
+    /// characters, and its biggest messages by their ids here (one this chat does not have is left out). Null without one.
+    /// </summary>
+    private static string? ContextOf(JsonObject? context, Named named)
+    {
+        if (context is null)
+        {
+            return null;
+        }
+        var kept = new JsonObject();
+        foreach (var kind in ContextParts.Kinds)
+        {
+            kept[kind] = context[kind] is JsonValue v && v.TryGetValue<long>(out var n) ? Math.Max(0, n) : 0;
+        }
+        var biggest = (context["biggest"] as JsonArray ?? []).OfType<JsonObject>()
+            .Select(b => (Item: b, Id: named.Find(b), Role: Str(b["role"])))
+            .Where(b => b.Id is not null && b.Role is "user" or "assistant" or "tool")
+            .Take(ContextParts.BiggestCount)
+            .Select(b => (JsonNode)new JsonObject
+            {
+                ["id"] = b.Id, ["role"] = b.Role, ["tool"] = Clip(Str(b.Item["tool"]), 200),
+                ["chars"] = b.Item["chars"] is JsonValue c && c.TryGetValue<long>(out var chars) ? Math.Max(0, chars) : 0,
+                ["preview"] = Clip(Str(b.Item["preview"]), 200) ?? "", ["pinned"] = false,
+            });
+        kept["biggest"] = new JsonArray([.. biggest]);
+        return kept.ToJsonString();
+    }
+
+    private static string? Str(JsonNode? node) => node is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
 
     /// <summary>A message as the tree knows it, without its words: what finding the branch and the places on it needs.</summary>
     private sealed record Node(Guid Id, Guid? ParentId, int Sequence, string Role, bool Calls, bool Summarized, string? SyncRef);

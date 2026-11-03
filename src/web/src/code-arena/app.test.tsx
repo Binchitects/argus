@@ -694,6 +694,58 @@ describe('Code Arena in the browser', () => {
     expect(within(biggest).queryByRole('button')).not.toBeInTheDocument()
   })
 
+  /** What fills the next request as code-arena measures it (/api/state's window), in characters: 52,000 of them. */
+  const measured = {
+    system: 20_000, instructions: 1_000, memory: 1_000, tools: 16_000, summary: 0, files: 8_000, you: 1_000, answers: 4_000, toolResults: 1_000,
+    biggest: [{ id: 'm0', role: 'user' as const, tool: null, chars: 9_000, preview: 'Read @notes.txt', pinned: false }],
+  }
+
+  it('shows in the context gauge what fills the next request when the last answer was written in the web chat, as the status bar counts it', async () => {
+    // Taken in from the web chat: its answer has the web's tokens, and no breakdown of Code Arena's request.
+    const session: CodeSession = {
+      id: 's2',
+      busy: false,
+      diffs: {},
+      messages: [msg('m0', 'user', { content: 'Read @notes.txt', files: ['notes.txt'] }), msg('m1', 'assistant', { model: 'model-a', content: 'The release waits for the docs.', promptTokens: 7_110, completionTokens: 40 })],
+    }
+    backend({ session, state: { reserve: 4096, contextUsed: 18_200, window: measured } })
+    renderCode()
+    expect(await screen.findByText('The release waits for the docs.')).toBeInTheDocument()
+    // 18,200 of 32,768: what the status bar says too.
+    await userEvent.click(screen.getByRole('button', { name: 'Context: 56% full. Details and compact' }))
+    expect(await screen.findByText(/^About 18\.2 K of 32\.77 K tokens \(56%\); the next answer counts it$/)).toBeInTheDocument()
+    expect(screen.queryByText('What fills it is shown from the next answer on.')).not.toBeInTheDocument()
+    const parts = screen.getByRole('list', { name: 'What fills it' })
+    // 18,200 tokens shared out by the characters of each kind: the system prompt 20,000 of 52,000.
+    expect(within(parts).getByText('System prompt and tool notes').parentElement).toHaveTextContent('System prompt and tool notes7 K21%')
+    expect(within(parts).getByText('Your instructions').parentElement).toHaveTextContent('Your instructions350')
+    expect(within(parts).getByText('Files').parentElement).toHaveTextContent('Files2.8 K9%')
+    expect(within(parts).getByText('Kept for the answer').parentElement).toHaveTextContent('Kept for the answer4.1 K13%')
+    expect(within(parts).getByText('Free').parentElement).toHaveTextContent('Free10.47 K32%')
+    const biggest = screen.getByRole('list', { name: 'The biggest messages' })
+    expect(within(biggest).getByText('Your message').closest('li')).toHaveTextContent('Read @notes.txt3.15 K')
+  })
+
+  it('after Compact now that follows an answer from the web chat, shows the next request as measured, not the summary alone', async () => {
+    const summary = 'SUMMARY: the release waits for the docs.'
+    const session: CodeSession = {
+      id: 's2',
+      busy: false,
+      diffs: {},
+      messages: [msg('m0', 'user', { content: 'Read @notes.txt' }), msg('m1', 'assistant', { model: 'model-a', content: 'The release waits for the docs.', promptTokens: 7_110, completionTokens: 40, summary })],
+    }
+    const after = { ...measured, summary: 2_000, files: 0, you: 0, answers: 0, toolResults: 0, biggest: [] }
+    backend({ session, state: { reserve: 4096, contextUsed: 14_000, window: after } })
+    renderCode()
+    expect(await screen.findByText('The release waits for the docs.')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Context: 43% full. Details and compact' }))
+    expect(await screen.findByText(/^About 14 K of 32\.77 K tokens \(43%\) since compacting; the next answer counts it$/)).toBeInTheDocument()
+    const parts = screen.getByRole('list', { name: 'What fills it' })
+    expect(within(parts).getByText('Tool definitions').parentElement).toHaveTextContent('Tool definitions5.6 K17%')
+    expect(within(parts).getByText('Summary of earlier messages').parentElement).toHaveTextContent('Summary of earlier messages7002%')
+    expect(within(parts).queryByText('Your messages')).not.toBeInTheDocument()
+  })
+
   it("draws a long session's last turns, and the earlier ones when asked for", async () => {
     const long: Message[] = Array.from({ length: 35 }, (_, i) => [
       msg(`m${2 * i}`, 'user', { content: `Question ${i + 1}` }),

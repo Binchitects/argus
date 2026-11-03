@@ -655,12 +655,6 @@ function backend(extra: Record<string, Handler> = {}, preferences: Preferences =
   const now = { changes: [{ path: 'src/app.ts', created: false, deleted: false, added: 1, removed: 1 }] as Change[], terminals: [] as TerminalInfo[], next: 1, preferences, user: { ...user }, userVersions: {} as Record<string, number> }
   const calls = fakeApi(null, {
     'GET /api/state': () => ({ json: state }),
-    'GET /api/window': () => ({
-      json: {
-        kinds: [{ kind: 'instructions', tokens: 1800 }, { kind: 'memory', tokens: 300 }, { kind: 'tools', tokens: 1500 }, { kind: 'summary', tokens: 0 }, { kind: "tools' results", tokens: 600 }],
-        biggest: [{ role: 'tool', what: "read_file's result {\"path\":\"src/app.ts\"}", tokens: 500 }],
-      },
-    }),
     'GET /api/chat/config': () => ({ json: config }),
     'GET /api/sessions': () => ({ json: [] }),
     'GET /api/session': () => ({ json: { id: 's1', messages: [], diffs: {}, busy: false } }),
@@ -1495,7 +1489,9 @@ describe('Code Arena, the IDE', () => {
       { name: 'arena', title: 'Arena', url: 'https://llm.test/mcp', state: 'connected', tools: 14, status: 'Arena: 14 tools', error: null, nextTry: null },
       { name: 'argus', title: 'Argus', url: 'https://argus.llm.test/mcp', state: 'failed', tools: 0, status: 'Argus: not connected, tried again at 10:41:07 (answered 503)', error: 'answered 503', nextTry: '2026-10-09T10:41:07Z' },
     ]
-    let now = { ...state, servers }
+    // What fills the next request, in characters (15,000 of them): the page shares the 4,200 tokens in use out by them.
+    const measured = { system: 6000, instructions: 1200, memory: 600, tools: 5000, summary: 0, files: 0, you: 400, answers: 400, toolResults: 1400 }
+    let now = { ...state, servers, reserve: 4096, window: measured }
     const { calls } = backend({
       'GET /api/state': () => ({ json: now }),
       'POST /api/settings': (body) => {
@@ -1529,12 +1525,15 @@ describe('Code Arena, the IDE', () => {
     expect(context).toHaveTextContent('4.2 K / 32.77 K')
     await userEvent.click(context)
     dialog = await screen.findByRole('dialog', { name: 'Context' })
-    expect(within(dialog).getByText(/About 4\.2 K of 32\.77 K tokens in use \(13%\)/)).toBeInTheDocument()
-    // What fills it, the memory apart, and the biggest messages.
-    const parts = await within(dialog).findByRole('list', { name: 'What fills the window' })
-    expect(within(parts).getByText('memory').parentElement).toHaveTextContent('memory3001%')
-    expect(within(parts).queryByText('summary')).not.toBeInTheDocument()
-    expect(within(dialog).getByRole('list', { name: 'The biggest messages' })).toHaveTextContent(`read_file's result {"path":"src/app.ts"}500`)
+    // Nothing asked yet: what the first request will hold.
+    expect(within(dialog).getByText(/^About 4\.2 K of 32\.77 K tokens \(13%\); the next answer counts it$/)).toBeInTheDocument()
+    // What fills it as the chat's gauge says it, the memory and your instructions apart, the room kept for the answer and what is free.
+    const parts = await within(dialog).findByRole('list', { name: 'What fills it' })
+    expect(within(parts).getByText('Memory').parentElement).toHaveTextContent('Memory1681%')
+    expect(within(parts).getByText('Your instructions').parentElement).toHaveTextContent('Your instructions3361%')
+    expect(within(parts).queryByText('Summary of earlier messages')).not.toBeInTheDocument()
+    expect(within(parts).getByText('Kept for the answer').parentElement).toHaveTextContent('Kept for the answer4.1 K13%')
+    expect(within(parts).getByText('Free').parentElement).toHaveTextContent('Free24.47 K75%')
     const at = within(dialog).getByLabelText('Compact at (% of the window)')
     const keep = within(dialog).getByLabelText('Keep the recent part within (%)')
     expect(at).toHaveValue(80)
@@ -1579,6 +1578,50 @@ describe('Code Arena, the IDE', () => {
     // On a phone the numbers give way to the icons (the model and About keep their room); the names say them.
     expect(within(status).getByText('4.2 K / 32.77 K')).toHaveClass('hidden', 'md:inline')
     expect(within(status).getByText('2/2')).toHaveClass('hidden', 'md:inline')
+  })
+
+  it("shows in the status bar's Context what the chat's ring shows, the rows adding up to the window", async () => {
+    // A small window, so every row is shown to the token: 900 of 2,000 in use, 256 kept for the answer.
+    const read = { id: 'c1', function: { name: 'read_file', arguments: '{"path":"src/app.ts"}' } }
+    const said = (id: string, role: Message['role'], parentId: string | null, over: Partial<Message> = {}): Message => ({ ...blank(id, role, parentId), ...over })
+    const session = {
+      id: 's1',
+      busy: false,
+      diffs: {},
+      messages: [
+        said('m0', 'user', null, { content: 'Read the app' }),
+        said('m1', 'assistant', 'm0', { model: 'model-a', toolCalls: [read] }),
+        said('m2', 'tool', 'm1', { content: 'const total = 1', toolCallId: 'c1', toolName: 'read_file' }),
+        said('m3', 'assistant', 'm2', { model: 'model-a', content: 'Read it.', promptTokens: 850, completionTokens: 20, context: { system: 300, instructions: 60, memory: 30, tools: 300, summary: 0, files: 0, you: 60, answers: 40, toolResults: 60 } }),
+      ],
+    }
+    const measured = {
+      system: 300, instructions: 60, memory: 30, tools: 300, summary: 0, files: 0, you: 60, answers: 90, toolResults: 60,
+      biggest: [{ id: 'm2', role: 'tool' as const, tool: 'read_file', chars: 60, preview: 'const total = 1', pinned: false }],
+    }
+    backend({ 'GET /api/state': () => ({ json: { ...state, context: 2000, contextUsed: 900, reserve: 256, window: measured } }), 'GET /api/session': () => ({ json: session }) })
+    renderIde()
+    expect(await screen.findByText('Read it.')).toBeInTheDocument()
+    const rows = (list: HTMLElement) => within(list).getAllByRole('listitem').map((li) => [li.children[1]!.textContent, Number(li.children[2]!.textContent)] as const)
+    const biggest = () => within(screen.getByRole('list', { name: 'The biggest messages' })).getAllByRole('listitem').map((li) => li.textContent)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Context: 45% full. Details and compact' }))
+    const ring = rows(await screen.findByRole('list', { name: 'What fills it' }))
+    const ringBiggest = biggest()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('list', { name: 'What fills it' })).not.toBeInTheDocument())
+
+    await userEvent.click(within(screen.getByRole('contentinfo', { name: 'Status bar' })).getByRole('button', { name: /^Context: 900 of 2 K tokens \(45%\)/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Context' })
+    expect(within(dialog).getByText(/^900 of 2 K tokens \(45%\)$/)).toBeInTheDocument()
+    expect(rows(within(dialog).getByRole('list', { name: 'What fills it' }))).toEqual(ring)
+    expect(biggest()).toEqual(ringBiggest)
+    expect(ring).toEqual([
+      ['System prompt and tool notes', 300], ['Tool definitions', 300], ['Your instructions', 60], ['Memory', 30], ['Your messages', 60], ['Answers', 90],
+      ['Tool calls and results', 60], ['Kept for the answer', 256], ['Free', 844],
+    ])
+    expect(ring.reduce((n, [, tokens]) => n + tokens, 0)).toBe(2000)
+    expect(ringBiggest).toEqual(["read_file's resultconst total = 160"])
   })
 
   it('reloads an open file the agent edits when nothing in it is unsaved, and leaves one with unsaved changes alone', async () => {

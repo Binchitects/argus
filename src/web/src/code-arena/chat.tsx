@@ -15,7 +15,6 @@ import { useTheme, type ThemePreference } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import { configQuery, streamChat } from '@/pages/chat/api'
 import { ideUrl } from './http'
-import { contextOf } from '@/pages/chat/context'
 import { useFileRefs } from '@/pages/chat/file-refs'
 import { ContextGauge } from '@/pages/chat/context-gauge'
 import { answerNews, bucket } from '@/pages/chat/format'
@@ -64,6 +63,7 @@ import {
   type AgainBody,
 } from './api'
 import { chatBridge, pieceLabel, type Piece } from './bridge'
+import { codeContext } from './context'
 import { useEditor } from './editor-state'
 import { useFileMention } from './mention'
 import { useSlashMenu } from './slash'
@@ -508,12 +508,11 @@ export function Thread({
   const sentHere = useMemo(() => path.flatMap((m) => (m.role === 'user' ? [m.content] : [])).reverse(), [path])
   const older = useFolderHistory()
   const history: RecallSource = { here: sentHere, older }
-  const lastUsage = [...path].reverse().find((m) => m.role === 'assistant' && m.promptTokens != null)
-  // The whole conversation stays: the last message a compaction covers carries its summary. Compacted since the last
-  // answer, the gauge works out what the next request carries (the summary instead), as the web chat's does.
+  // The whole conversation stays: the last message a compaction covers carries its summary.
   const compactedAt = path.findLastIndex((m) => m.summary)
-  const compacted = compactedAt >= 0 && (!lastUsage || compactedAt >= path.indexOf(lastUsage)) ? path[compactedAt]!.summary : null
-  const context = contextOf(lastUsage, state.context, state.reserve ?? null, compacted)
+  // The gauge: what fills the next request as Code Arena measures it (the status bar's Context shows the same), and while
+  // a turn runs, each step's request as the model counted it.
+  const context = codeContext(path, state, streaming)
   // The biggest messages the gauge lists, found in the thread (listed only: Code Arena has no pinning).
   const contextItems = useMemo(() => ({ find: (id: string) => path.find((m) => m.id === id) }), [path])
   // The questions a compaction covers: the model reads its summary instead, so they are not asked again from here.

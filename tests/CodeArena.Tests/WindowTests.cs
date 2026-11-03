@@ -68,7 +68,7 @@ public sealed class WindowTests : IDisposable
         Assert.Contains("line 1 of file 5", results[^1], StringComparison.Ordinal);
         Assert.Contains("Cleared ", h.Out + h.Err);
         // /context: what fills the window, and its biggest.
-        Assert.Contains("tools' results", h.Out, StringComparison.Ordinal);
+        Assert.Contains("Tool calls and results", h.Out, StringComparison.Ordinal);
         Assert.Contains("read_file's result", h.Out, StringComparison.Ordinal);
     }
 
@@ -112,14 +112,15 @@ public sealed class WindowTests : IDisposable
             await Task.Delay(20);
         }
 
-        var window = await web.GetJsonAsync("/api/window");
-        var kinds = window["kinds"]!.AsArray().ToDictionary(k => k!["kind"]!.GetValue<string>(), k => k!["tokens"]!.GetValue<long>());
-        Assert.True(kinds["instructions"] > 0);
-        Assert.True(kinds["memory"] > 0);
-        Assert.True(kinds["tools' results"] > 1_000);
+        // What fills the next request, by the web chat's kinds in characters (the page scales them to the tokens in use).
+        var window = (await web.GetJsonAsync("/api/state"))["window"]!;
+        Assert.True(window["system"]!.GetValue<long>() > 0);
+        Assert.True(window["memory"]!.GetValue<long>() > "Prefers answers in British English".Length);
+        Assert.True(window["toolResults"]!.GetValue<long>() > 4_000);
         var biggest = window["biggest"]!.AsArray()[0]!;
-        Assert.Equal("tool", biggest["role"]!.GetValue<string>());
-        Assert.StartsWith("read_file's result", biggest["what"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.Equal(("tool", "read_file"), (biggest["role"]!.GetValue<string>(), biggest["tool"]!.GetValue<string>()));
+        var session = (await web.GetJsonAsync("/api/session"))["messages"]!.AsArray();
+        Assert.Equal("tool", session.Single(m => m!["id"]!.GetValue<string>() == biggest["id"]!.GetValue<string>())!["role"]!.GetValue<string>());
     }
 
     [Fact]

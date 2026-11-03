@@ -88,6 +88,33 @@ public sealed class CompactedHistoryTests : IDisposable
     }
 
     [Fact]
+    public async Task After_Compact_now_the_IDE_measures_the_next_request_with_the_projects_instructions_as_yours_and_its_note()
+    {
+        const string Rules = "Run make test before every commit.\nKeep the public API as it is.";
+        _gateway.Answer = req => FakeGateway.Summarizing(req) ? Reply.Say("SUMMARY: one question answered.") : Reply.Say($"answer to {FakeGateway.Last(req)}");
+        using var h = new Harness(_gateway, _mcp);
+        File.WriteAllText(Path.Combine(h.Work, "AGENTS.md"), Rules);
+        await using var web = await WebRun.StartAsync(h);
+        await (await web.SendAsync("first")).RestAsync();
+        await (await web.StreamAsync(HttpMethod.Post, "/api/compact", new JsonObject())).RestAsync();
+
+        // What the page's gauge and status bar show: what fills the next request, by kind in characters. Compacted, the
+        // conversation holds no note of Code Arena's, and the next request adds one: it is counted with the system prompt.
+        var window = (await web.GetJsonAsync("/api/state"))["window"]!;
+        long Kind(string key) => window[key]!.GetValue<long>();
+        await (await web.SendAsync("second")).RestAsync();
+        var next = _gateway.Requests[^1];
+        var prompt = FakeGateway.SystemOnly(next);
+        // The project's AGENTS.md is the person's instructions, not the system prompt's.
+        var rules = $"\n# Project instructions (AGENTS.md)\n\n{Rules}\n";
+        Assert.Contains(rules, prompt, StringComparison.Ordinal);
+        Assert.Equal(rules.Length, Kind("instructions"));
+        Assert.Equal(prompt.Length + FakeGateway.Notes(next).Sum(n => n.Length + 10), Kind("system") + Kind("instructions") + Kind("memory"));
+        Assert.True(Kind("summary") > "SUMMARY: one question answered.".Length);
+        Assert.True(Kind("tools") > 0);
+    }
+
+    [Fact]
     public async Task A_long_turn_compacted_on_its_way_stays_whole_on_the_page_and_its_next_tool_still_asks_and_runs()
     {
         const int Files = 8;

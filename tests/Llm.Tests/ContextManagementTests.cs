@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Llm.Api.Chat;
 using Llm.Core.Chat;
 using Llm.Core.Data;
 using Microsoft.EntityFrameworkCore;
@@ -237,6 +238,23 @@ public sealed class ContextManagementTests(AppFixture app)
         var fresh = await NewChatAsync(b);
         await SendAsync(b, fresh, "Hello.");
         Assert.DoesNotContain("chat_search", app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email).Body.ToJsonString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Files_that_went_with_a_question_count_as_files_whether_attached_here_or_in_Code_Arena()
+    {
+        var notes = new string('n', 3_000);
+        var request = new JsonObject
+        {
+            ["messages"] = new JsonArray(
+                new JsonObject { ["role"] = "user", ["content"] = $"Read this<attachment name=\"notes.txt\">{notes}</attachment>" },
+                new JsonObject { ["role"] = "assistant", ["content"] = "Read it." },
+                // Code Arena's question as it syncs here: its @file and the lines chosen in its editor go after the words.
+                new JsonObject { ["role"] = "user", ["content"] = $"Read @notes.txt\n\n<attached>\n<file path=\"notes.txt\">\n{notes}\n</file>\n<selection path=\"src/app.ts\" lines=\"1-2\">\nconst a = 1\n</selection>\n</attached>" }),
+        };
+        var measured = ContextParts.Measure(request, new SystemParts(100, 0, 0, 0), 0);
+        Assert.Equal("Read this".Length + "Read @notes.txt".Length, measured["you"]!.GetValue<long>());
+        Assert.True(measured["files"]!.GetValue<long>() > 2 * notes.Length);
     }
 
     [Fact]

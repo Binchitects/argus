@@ -228,10 +228,11 @@ internal sealed class ChatSync : IAsyncDisposable
                     var first = d.FirstUnsent;
                     var summary = d.Summary is { } s && s.UpTo < first && d.Stream[s.UpTo].Id is { Length: > 0 } upTo ? new JsonObject { ["upTo"] = upTo, ["text"] = s.Text } : null;
                     var batch = d.Stream.Skip(first).Take(Batch).ToList();
-                    // Each tool result with its tool's name (the call it answers, maybe sent before).
+                    // Each tool result with its tool's name (the call it answers, maybe sent before), each answer with what filled its request.
                     var names = batch.Select((e, i) => e.Message.Str("role") == "tool" ? SyncEntry.ToolName(d.Stream, first + i) : null).ToList();
+                    var contexts = batch.Select(e => ContextOut(e.Context, d.Stream, _store.Id)).ToList();
                     return (d.Conversation, d.Unlinked, Parent: d.LastSent, Unknown: d.Stream.Take(first).Any(e => e.Id == ""), d.Branch, First: first,
-                        Batch: batch, Names: names, Summary: summary);
+                        Batch: batch, Names: names, Contexts: contexts, Summary: summary);
                 });
                 if (plan.Unlinked)
                 {
@@ -278,7 +279,7 @@ internal sealed class ChatSync : IAsyncDisposable
                 {
                     ["parent"] = plan.Parent,
                     ["branch"] = plan.Branch,
-                    ["messages"] = new JsonArray([.. plan.Batch.Select((e, i) => (JsonNode)Out(e, _store.Id, plan.Names[i]))]),
+                    ["messages"] = new JsonArray([.. plan.Batch.Select((e, i) => (JsonNode)Out(e, _store.Id, plan.Names[i], plan.Contexts[i]))]),
                 };
                 if (plan.Summary is not null)
                 {
@@ -1189,10 +1190,11 @@ internal sealed class ChatSync : IAsyncDisposable
 
     /// <summary>
     /// A message as Arena keeps it: the model's own shape, with its ref (session:number), when it was written, and what the
-    /// web shows of it: an answer's model, tokens and thinking, and whether the person stopped it; a tool result's tool; a
-    /// note of Code Arena's own (not the person's words).
+    /// web shows of it: an answer's model, tokens, thinking and what filled its request (<paramref name="context"/>, as
+    /// <see cref="ContextOut"/> gives it: the web chat's context gauge shows it), and whether the person stopped it; a tool
+    /// result's tool; a note of Code Arena's own (not the person's words).
     /// </summary>
-    internal static JsonObject Out(SyncEntry e, string session, string? toolName = null)
+    internal static JsonObject Out(SyncEntry e, string session, string? toolName = null, JsonObject? context = null)
     {
         var m = e.Message;
         var role = m.Str("role") ?? "user";
@@ -1224,6 +1226,10 @@ internal sealed class ChatSync : IAsyncDisposable
                 o["promptTokens"] = usage.Prompt;
                 o["cachedTokens"] = usage.Cached;
                 o["completionTokens"] = usage.Completion;
+                if (context is not null)
+                {
+                    o["context"] = context;
+                }
             }
             // Stopped by the person here: the web shows it as stopped, not the mark the model reads.
             if (m.Str("content") is { } text && text.EndsWith(Agent.StoppedMark, StringComparison.Ordinal))
@@ -1254,6 +1260,33 @@ internal sealed class ChatSync : IAsyncDisposable
         if (e.Kind is not null)
         {
             o["kind"] = e.Kind;
+        }
+        return o;
+    }
+
+    /// <summary>
+    /// What filled an answer's request (<see cref="Agent.Measure"/>) as Arena keeps it: its biggest messages named as Arena
+    /// knows them, by Arena's id once it has one, else by their ref (session:number, sent with them), not by the page's ids
+    /// (their places in the session). Null without one.
+    /// </summary>
+    internal static JsonObject? ContextOut(JsonObject? context, IReadOnlyList<SyncEntry> stream, string session)
+    {
+        if (context?.DeepClone() is not JsonObject o)
+        {
+            return null;
+        }
+        foreach (var item in (o["biggest"] as JsonArray ?? []).OfType<JsonObject>())
+        {
+            var at = item.Str("id") is ['m', .. var place] && int.TryParse(place, out var i) && i >= 0 && i < stream.Count ? stream[i] : null;
+            item.Remove("id");
+            if (at?.Id is { Length: > 0 } id)
+            {
+                item["id"] = id;
+            }
+            else if (at is not null)
+            {
+                item["ref"] = $"{session}:{at.Key}";
+            }
         }
         return o;
     }
