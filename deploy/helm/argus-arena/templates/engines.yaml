@@ -89,7 +89,7 @@ spec:
     metadata:
       labels: {{- include "arena.selector" (dict "root" $ "name" .name) | nindent 8 }}
       {{- /* The fake's files only when it runs: a change to them leaves a real vLLM's models loaded. */}}
-      {{- $scripts := list $ "vllm-supervisor.sh" "vllm-helper.py" "gpu-probe.py" }}
+      {{- $scripts := list $ "vllm-supervisor.sh" "vllm-helper.py" "vllm-serve.py" "vllm-gguf-config.py" "gpu-probe.py" }}
       {{- if $.Values.vllm.fake }}{{ $scripts = concat $scripts (list "fake_vllm.py" "fake-vllm") }}{{ end }}
       annotations: {{- include "arena.scriptsChecksum" $scripts | nindent 8 }}
     spec:
@@ -111,7 +111,8 @@ spec:
             - { name: CUDA_DEVICE_ORDER, value: PCI_BUS_ID }
             - { name: VLLM_PRESETS, value: /presets/{{ .name }} }
             - { name: VLLM_STATUS, value: /status/{{ .name }} }
-            - { name: VLLM_BIN, value: {{ ternary "/fake-vllm/vllm" "vllm" $.Values.vllm.fake }} }
+            # vLLM's launcher (a GGUF file's config and tokenizer from its header first); the fake in its place answers as vLLM.
+            - { name: VLLM_BIN, value: {{ ternary "/fake-vllm/vllm" "python3 /vllm/serve.py" $.Values.vllm.fake | quote }} }
             - { name: HF_HUB_OFFLINE, value: "1" }
           resources:
             {{- with $.Values.vllm.resources.requests }}
@@ -123,6 +124,8 @@ spec:
           volumeMounts:
             - { name: config, mountPath: /vllm/supervisor.sh, subPath: vllm-supervisor.sh }
             - { name: config, mountPath: /vllm/vllm-helper.py, subPath: vllm-helper.py }
+            - { name: config, mountPath: /vllm/serve.py, subPath: vllm-serve.py }
+            - { name: config, mountPath: /vllm/gguf_config.py, subPath: vllm-gguf-config.py }
             - { name: config, mountPath: /gpu-probe.py, subPath: gpu-probe.py }
             - { name: config, mountPath: /fake-vllm/fake_vllm.py, subPath: fake_vllm.py }
             - { name: config, mountPath: /fake-vllm/vllm, subPath: fake-vllm }
@@ -178,7 +181,7 @@ spec:
   template:
     metadata:
       labels: {{- include "arena.selector" (dict "root" $ "name" .name) | nindent 8 }}
-      {{- $scripts := list $ "vllm-supervisor.sh" "vllm-helper.py" "gpu-probe.py" "sglang-serve.py" }}
+      {{- $scripts := list $ "vllm-supervisor.sh" "vllm-helper.py" "vllm-gguf-config.py" "gpu-probe.py" "sglang-serve.py" }}
       {{- if $.Values.sglang.fake }}{{ $scripts = concat $scripts (list "fake_vllm.py" "fake-vllm" "fake-sglang-init.py" "fake-sglang-launch.py") }}{{ end }}
       annotations: {{- include "arena.scriptsChecksum" $scripts | nindent 8 }}
     spec:
@@ -216,6 +219,7 @@ spec:
             - { name: config, mountPath: /gpu-probe.py, subPath: gpu-probe.py }
             - { name: config, mountPath: /fake-vllm/fake_vllm.py, subPath: fake_vllm.py }
             - { name: config, mountPath: /fake-vllm/vllm, subPath: fake-vllm }
+            - { name: config, mountPath: /vllm/gguf_config.py, subPath: vllm-gguf-config.py }
             - { name: config, mountPath: /sglang/serve.py, subPath: sglang-serve.py }
             - { name: config, mountPath: /fake-vllm/sglang-module/sglang/__init__.py, subPath: fake-sglang-init.py }
             - { name: config, mountPath: /fake-vllm/sglang-module/sglang/launch_server.py, subPath: fake-sglang-launch.py }

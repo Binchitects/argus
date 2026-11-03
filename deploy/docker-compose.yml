@@ -214,12 +214,15 @@ services:
           memory: ${ENGINE_RAM_PROTECT:-0}
 
   # vLLM (Admin -> Models, engine vLLM): one `vllm serve` per model the app wants, each on its own
-  # GPUs (services/vllm/supervisor.sh follows the app's /presets/vllm/models.json). Off until asked
-  # for: COMPOSE_PROFILES=vllm, with VLLM_IMAGE a vLLM image you have (docs/multi-gpu-server.md §6;
-  # nothing is pulled while the profile is off). fake-gpu.yml runs it with the fake vLLM instead.
+  # GPUs (services/vllm/supervisor.sh follows the app's /presets/vllm/models.json), a Hugging Face
+  # snapshot or a GGUF file from the library. Off until asked for: COMPOSE_PROFILES=vllm. Its image,
+  # arena-vllm, is built here (services/vllm.Dockerfile): vLLM's own image, VLLM_IMAGE, with its
+  # GGUF plugin (docs/multi-gpu-server.md §6; nothing is built or pulled while the profile is off).
+  # vllm-build.yml builds it from PyPI instead; fake-gpu.yml runs the fake vLLM.
   vllm:
     <<: [*service, *gpu]
-    image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.31.0}
+    build: { context: ./services, dockerfile: vllm.Dockerfile, args: { VLLM_IMAGE: "${VLLM_IMAGE:-vllm/vllm-openai:v0.31.0}" } }
+    image: arena-vllm
     container_name: vllm
     profiles: [vllm]
     entrypoint: [/bin/sh, /vllm/supervisor.sh]
@@ -230,9 +233,10 @@ services:
       # This engine's name: its desired state and status are /presets/vllm and /status/vllm.
       VLLM_PRESETS: /presets/vllm
       VLLM_STATUS: /status/vllm
-      # The vLLM to run (fake-gpu.yml: tools/fake-vllm's).
-      VLLM_BIN: ${VLLM_BIN:-vllm}
-      # Snapshots come from the library, never fetched by vLLM itself.
+      # The vLLM to run: its launcher, which reads a GGUF file's config and tokenizer from its header first
+      # (fake-gpu.yml: tools/fake-vllm's).
+      VLLM_BIN: ${VLLM_BIN:-python3 /vllm/serve.py}
+      # Models come from the library, never fetched by vLLM itself.
       HF_HUB_OFFLINE: "1"
     volumes:
       - ./services/vllm:/vllm:ro
@@ -266,7 +270,7 @@ services:
       VLLM_STATUS: /status/sglang
       # The SGLang to run (fake-gpu.yml: tools/fake-vllm's, as SGLang).
       VLLM_BIN: ${SGLANG_BIN:-python3 /sglang/serve.py}
-      # Snapshots come from the library, never fetched by SGLang itself.
+      # Models (snapshots or one-file GGUFs) come from the library, never fetched by SGLang itself.
       HF_HUB_OFFLINE: "1"
     volumes:
       - ./services/vllm:/vllm:ro

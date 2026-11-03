@@ -11,6 +11,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 import urllib.error
@@ -144,6 +145,26 @@ class FakeVllmTests(unittest.TestCase):
         failing, _ = self.start("--fail")
         self.assertEqual(1, failing.wait(timeout=10))
         self.assertIn("out of memory", failing.stderr.read())
+
+    def test_a_gguf_file_runs_with_the_flags_vllm_takes_for_one_and_one_not_there_fails_its_load(self):
+        with tempfile.TemporaryDirectory() as d:
+            gguf = Path(d) / "Qwen3-4B-Q4_K_M.gguf"
+            gguf.write_bytes(b"GGUF" + bytes(60))
+            for model, ok in ((gguf, True), (Path(d) / "Gone-Q4_K_M.gguf", False)):
+                port = free_port()
+                proc = subprocess.Popen([sys.executable, str(FAKE), "serve", str(model), "--host", "127.0.0.1", "--port", str(port), "--served-model-name", "qwen",
+                                         "--quantization", "gguf", "--load-format", "gguf", "--tokenizer", str(Path(d) / "hf")],
+                                        env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                self.addCleanup(self.stop, proc)
+                if not ok:
+                    self.assertEqual(1, proc.wait(timeout=10))
+                    self.assertIn(f"{model} is not a GGUF file there", proc.stderr.read())
+                    continue
+                base = f"http://127.0.0.1:{port}"
+                self.ready(base)
+                listed = json.loads(self.get(base + "/v1/models")[1])["data"][0]
+                self.assertEqual(("qwen", str(gguf)), (listed["id"], listed["root"]))
+                self.assertIn(f"GGUF {gguf}, its tokenizer from {Path(d) / 'hf'}", proc.stdout.readline())
 
     def test_a_crash_exits_and_sigterm_drains_running_answers(self):
         crashing, base = self.start("--crash-after", "0.3")

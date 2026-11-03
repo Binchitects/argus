@@ -30,7 +30,7 @@ LLAMACPP_BACKEND     | Models        | choice:cuda/rocm/vulkan/sycl/metal/cpu | 
 MEDIA_GPU            | Models        | number  | -             | The GPU the picture server runs on (empty: the first)
 EMBED_GPU            | Models        | number  | -             | The GPU the embedder runs on (empty: the CPU)
 ENGINE_RAM_PROTECT   | Models        | size    | -             | RAM protected for the engine under pressure (never a limit), e.g. 40g
-VLLM_IMAGE           | Models        | text    | vllm/vllm-openai:v0.31.0 | vLLM's image (the vllm feature)
+VLLM_IMAGE           | Models        | text    | vllm/vllm-openai:v0.31.0 | The vLLM image arena-vllm is built on, with its GGUF plugin (the vllm feature)
 VLLM_SHM             | Models        | size    | 16gb          | vLLM's shared memory
 SGLANG_IMAGE         | Models        | text    | lmsysorg/sglang:v0.5.21-cu130-runtime | SGLang's image (the sglang feature)
 SGLANG_SHM           | Models        | size    | 16gb          | SGLang's shared memory

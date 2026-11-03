@@ -28,6 +28,10 @@ and /resume_memory_occupation for sleep, which take a JSON body.
     fake_vllm.py serve MODEL --port 8000 [--served-model-name NAME] [--max-model-len N]
         [--max-num-seqs N] [--load-delay S] [--ttft S] [--tps N] [--fail] [--crash-after S]
 
+A GGUF file (MODEL or --model-path ending in .gguf) takes the flags vLLM and SGLang take for one (--tokenizer or
+--tokenizer-path, the folder of its config and tokenizer; --quantization gguf; --load-format gguf), and one that is not
+there fails its load, as theirs does.
+
 --fail: exits with an error after the load delay, as vLLM does when the model does not fit.
 --crash-after: exits with code 9 that many seconds after it is ready, as a crashed engine.
 SIGTERM: stops taking requests, lets the running ones end (up to --drain seconds), then exits 0.
@@ -63,6 +67,9 @@ def parse(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--max-running-requests", type=int, default=None)
     p.add_argument("--enable-memory-saver", action="store_true")
     p.add_argument("--enable-priority-scheduling", action="store_true")
+    p.add_argument("--tokenizer", "--tokenizer-path", default=None)
+    p.add_argument("--quantization", default=None)
+    p.add_argument("--load-format", default=None)
     p.add_argument("--load-delay", type=float, default=float(os.environ.get("FAKE_VLLM_LOAD_DELAY", "0")))
     p.add_argument("--ttft", type=float, default=float(os.environ.get("FAKE_VLLM_TTFT", "0.05")))
     p.add_argument("--tps", type=float, default=float(os.environ.get("FAKE_VLLM_TPS", "200")))
@@ -310,8 +317,13 @@ def main(argv: list[str]) -> int:
     args = parse(argv)
     state = State(args)
     who = "SGLang" if args.sglang else "vLLM"
-    print(f"INFO fake {who}: loading {args.model} as {state.name} (tp {args.tensor_parallel_size}, "
+    gguf = args.model.lower().endswith(".gguf")
+    what = f"GGUF {args.model}, its tokenizer from {args.tokenizer or 'its header'}," if gguf else args.model
+    print(f"INFO fake {who}: loading {what} as {state.name} (tp {args.tensor_parallel_size}, "
           f"GPUs {os.environ.get('CUDA_VISIBLE_DEVICES', 'all')})", flush=True)
+    if gguf and not os.path.isfile(args.model):
+        print(f"ERROR fake {who}: ValueError: {args.model} is not a GGUF file there", file=sys.stderr, flush=True)
+        return 1
     time.sleep(args.load_delay)
     if args.fail:
         print(f"ERROR fake {who}: torch.OutOfMemoryError: CUDA out of memory (as asked: --fail)", file=sys.stderr, flush=True)

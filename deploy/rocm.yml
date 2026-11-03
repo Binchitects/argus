@@ -5,7 +5,7 @@
 #   podman compose -f docker-compose.yml -f podman.yml -f rocm.yml up -d
 #
 # The images are not pulled until you start them; check each exists for your ROCm before you do
-# (docs/deployment.md, "Supported configurations"): LLAMACPP_ROCM_IMAGE, VLLM_IMAGE (a ROCm vLLM),
+# (docs/deployment.md, "Supported configurations"): LLAMACPP_ROCM_IMAGE, VLLM_ROCM_IMAGE (vLLM's own ROCm image),
 # SDCPP_GPU_IMAGE (stable-diffusion.cpp on Vulkan, which runs on AMD). The app names the GPUs
 # ROCm0, ROCm1... in llama.cpp's presets and reads them from rocm-smi (services/gpu-probe.py).
 x-amd: &amd
@@ -20,8 +20,11 @@ services:
   llamacpp:
     <<: *amd
     image: ${LLAMACPP_ROCM_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-rocm}
+  # vLLM's own ROCm image, not arena-vllm (its GGUF plugin is built for CUDA): snapshots only.
   vllm:
     <<: *amd
+    image: ${VLLM_ROCM_IMAGE:-vllm/vllm-openai-rocm:v0.31.0}
+    build: !reset null
   # SGLang's own ROCm image (MI300; mi35x for MI350).
   sglang:
     <<: *amd

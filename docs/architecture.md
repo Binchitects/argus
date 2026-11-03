@@ -209,10 +209,10 @@ on later, put `GITLAB_URL` and `GITLAB_TOKEN` in `.env` and run
 | `scale.yml` | the app as `APP_REPLICAS` replicas ([section 9](#9-several-app-replicas)) |
 | `ha.yml` | Valkey on, and LiteLLM as `LITELLM_REPLICAS` replicas sharing their counts in it |
 | `podman.yml` | rootless Podman: GPUs through CDI, Promtail on the Podman socket, no power limits |
-| `rocm.yml` | AMD GPUs (`/dev/kfd`, `/dev/dri`): llama.cpp's and SGLang's ROCm images, stable-diffusion.cpp's Vulkan image for the picture and video servers, and a ROCm vLLM of yours in `VLLM_IMAGE`; the app's backend set to `rocm`; no `nvidia-smi` exporter |
+| `rocm.yml` | AMD GPUs (`/dev/kfd`, `/dev/dri`): llama.cpp's and SGLang's ROCm images, stable-diffusion.cpp's Vulkan image for the picture and video servers, and vLLM's own ROCm image in `VLLM_ROCM_IMAGE` (snapshots only); the app's backend set to `rocm`; no `nvidia-smi` exporter |
 | `fake-gpu.yml` | the real vLLM and SGLang supervisor over a fake engine, with no GPU |
 | `pitr.yml` | Postgres with pgBackRest's WAL archive, for point-in-time recovery |
-| `vllm-build.yml`, `sglang-build.yml` | vLLM's or SGLang's image built here, for a host that cannot pull theirs |
+| `vllm-build.yml`, `sglang-build.yml` | arena-vllm built from PyPI instead of on vLLM's own image, or SGLang's image built here, for a host that cannot pull theirs |
 
 ## 4. Network and volumes
 
@@ -289,7 +289,7 @@ them, else to llama.cpp's router.
 | engine | service | how the app drives it | what it is for |
 |---|---|---|---|
 | llama.cpp | `llamacpp` | its router's HTTP API (load, unload, slots), and the presets it writes into `engine`: `models.ini`, `keep`, `max`, `kvcache`. `services/llamacpp/router.sh` restarts llama-server when the list or the count changes, or an admin's Restart writes a new `gen=` in `llamacpp.restart` (one that does not stop within 15 s is killed) | GGUF files; layers or experts in RAM when the GPU is short; a few people at once; each conversation kept in its slot |
-| vLLM, SGLang | `vllm`, `sglang` | files: the app writes the models each may run (`presets.json`) and the ones it wants (`models.json`) into `engine`; `services/vllm/supervisor.sh` runs one server per model on that model's GPUs, drains one taken away, sleeps and wakes them, drains and starts every model again on an admin's Reload (`reload`) or Restart (`restart`, the supervisor too), and writes their status and a heartbeat into `vllm-status`. Load is read from each server's `/metrics` | safetensors snapshots; tensor parallel; copies of a model; a prefix cache shared by every request; many people at once |
+| vLLM, SGLang | `vllm`, `sglang` | files: the app writes the models each may run (`presets.json`) and the ones it wants (`models.json`) into `engine`; `services/vllm/supervisor.sh` runs one server per model on that model's GPUs, drains one taken away, sleeps and wakes them, drains and starts every model again on an admin's Reload (`reload`) or Restart (`restart`, the supervisor too), and writes their status and a heartbeat into `vllm-status`. Load is read from each server's `/metrics` | safetensors snapshots, or GGUF files (vLLM's GGUF plugin, SGLang's loader); tensor parallel; copies of a model; a prefix cache shared by every request; many people at once |
 | other GPU servers | none here | registered at the gateway and checked, never loaded or unloaded (Admin → Models → Other servers and providers; their keys kept encrypted) | another vLLM, SGLang, TGI, Ollama, or a cloud |
 | pictures, video | `imagegen`, `videogen` | a control file each in `engine` (on or off, the model, the GPU); `services/sd-serve.sh` follows it and writes its status into `media-status` | stable-diffusion.cpp |
 | speech | `audio` | its own API: models loaded and unloaded | speaches: Whisper, Kokoro |

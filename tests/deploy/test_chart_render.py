@@ -91,6 +91,7 @@ class ChartRender(unittest.TestCase):
         before = {(): checksums(CHART, ()), fake: checksums(CHART, fake)}
         self.assertEqual([], [e for e in ("llamacpp", "vllm", "sglang", "imagegen", "videogen") if not before[()][e]], "each engine has its checksum")
         for script, more, rolled in (("router.sh", (), {"llamacpp"}), ("vllm-supervisor.sh", (), {"vllm", "sglang"}), ("sglang-serve.py", (), {"sglang"}),
+                                     ("vllm-serve.py", (), {"vllm"}), ("vllm-gguf-config.py", (), {"vllm", "sglang"}),
                                      ("sd-serve.sh", (), {"imagegen", "videogen"}), ("fake_vllm.py", (), set()), ("fake_vllm.py", fake, {"vllm", "sglang"}),
                                      ("fake-sglang-launch.py", fake, {"sglang"}), ("litellm.yaml", (), set())):
             with self.subTest(script=script, more=more), tempfile.TemporaryDirectory() as tmp:

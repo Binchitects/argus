@@ -32,6 +32,8 @@ COPIES = {
     "files/cpu-temp-exporter.py": "services/cpu-temp-exporter/exporter.py",
     "files/vllm-supervisor.sh": "services/vllm/supervisor.sh",
     "files/vllm-helper.py": "services/vllm/vllm-helper.py",
+    "files/vllm-serve.py": "services/vllm/serve.py",
+    "files/vllm-gguf-config.py": "services/vllm/gguf_config.py",
     "files/gpu-probe.py": "services/gpu-probe.py",
     "files/fake_vllm.py": "../tools/fake-vllm/fake_vllm.py",
     "files/fake-vllm": "../tools/fake-vllm/vllm",

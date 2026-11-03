@@ -206,7 +206,7 @@ on; its API answers 404; and its background work does not run.
 | feature | on in a new installation | runs | needs, requires |
 |---|---|---|---|
 | `chat-models` | yes | `llamacpp` | a GPU |
-| `vllm` | no | `vllm` (with `VLLM_IMAGE`) | a GPU |
+| `vllm` | no | `vllm` (arena-vllm, built on `VLLM_IMAGE`) | a GPU |
 | `sglang` | no | `sglang` (with `SGLANG_IMAGE`) | a GPU |
 | `knowledge` | yes | `embed` | |
 | `argus` | yes | `argus` | a GitLab |
@@ -523,7 +523,7 @@ how). **no**: missing, with the reason.
 | `postgres` (or external) | yes | yes | yes (a StatefulSet, or `externalDatabase`) |
 | `litellm` | yes | yes | yes |
 | `llamacpp` | yes, every GPU | yes, CDI; no locked-memory limit | differs: `llamacpp.gpus` whole GPUs (`gpuResource`: `nvidia.com/gpu` or `amd.com/gpu`); no `ENGINE_RAM_PROTECT` |
-| `vllm` | off (the `vllm` feature, `VLLM_IMAGE`), every GPU; `fake-gpu.yml`: the fake vLLM, no GPU | the same, CDI; no locked-memory limit | off (`vllm.enabled`); a Deployment per `vllm.instances` entry with its GPUs and node; `vllm.fake` |
+| `vllm` | off (the `vllm` feature: arena-vllm, built on `VLLM_IMAGE`), every GPU; `fake-gpu.yml`: the fake vLLM, no GPU | the same, CDI; no locked-memory limit | off (`vllm.enabled`); a Deployment per `vllm.instances` entry with its GPUs and node; `vllm.fake` |
 | `sglang` | off (the `sglang` feature, `SGLANG_IMAGE`), every GPU; `fake-gpu.yml`: the fake SGLang, no GPU | the same, CDI; no locked-memory limit | off (`sglang.enabled`); a Deployment per `sglang.instances` entry with its GPUs and node; `sglang.fake` |
 | `embed`, `audio`, `searxng` | yes | yes | yes |
 | `argus` | yes | yes | yes |
@@ -569,17 +569,30 @@ how). **no**: missing, with the reason.
 - **llama.cpp** runs on whatever GPUs the machine has (`LLAMACPP_BACKEND`:
   `cuda`, `rocm`, `vulkan`, `sycl`, `metal`, or `cpu`); the presets name the
   GPUs for its backend (`CUDA0`, `ROCm0`...).
-- **vLLM** is off until asked for: the `vllm` feature with `VLLM_IMAGE`
-  set to a vLLM image you have (none is pulled while the profile is off; Docker
-  Hub's is blocked here, see [multi-gpu-server.md](multi-gpu-server.md) §6),
-  `podman.yml` on Podman (CDI), `vllm.enabled` on Kubernetes (one Deployment per
-  `vllm.instances` entry, each with its GPUs and node). Its supervisor
+- **vLLM** is off until asked for: the `vllm` feature, `--with vllm` on install,
+  upgrade or repair. Its image is arena-vllm, the release's own:
+  `services/vllm.Dockerfile` builds it on `VLLM_IMAGE`, vLLM's own image
+  (`vllm/vllm-openai:v0.31.0` by default), with vLLM's GGUF plugin
+  (vllm-gguf-plugin 0.0.5 and gguf 0.19.0, pinned by hash, in a layer of their
+  own) and the supervisor. `./arenactl build` builds it with the feature on, and
+  the offline bundle carries it as `arena-vllm:VERSION`; nothing is built or
+  pulled while the profile is off. Where Docker Hub cannot be reached,
+  `vllm-build.yml` builds the same from PyPI (`services/vllm-pypi.Dockerfile`,
+  see [multi-gpu-server.md](multi-gpu-server.md) §6); `rocm.yml` runs vLLM's
+  own ROCm image instead (`VLLM_ROCM_IMAGE`: snapshots only, the plugin is
+  built for CUDA). `podman.yml` on Podman (CDI), `vllm.enabled` on Kubernetes
+  (one Deployment per `vllm.instances` entry, each with its GPUs and node,
+  `images.vllm` the arena-vllm you pushed). Its supervisor
   (`services/vllm/supervisor.sh`) runs one `vllm serve` per model the app
-  wants, on that model's GPUs, from the app's desired state in the `engine`
-  volume; it says what each does in `vllm-status`. The key goes by
-  `VLLM_API_KEY`, never a command line. Models come from the library's Hugging
-  Face snapshots (Admin → Models → Find on Hugging Face → **Snapshots**, a
-  repository's **Snapshot for vLLM and SGLang**). On a host with no network,
+  wants, through vLLM's launcher (`services/vllm/serve.py`, which writes a GGUF
+  file's config and tokenizer from its header first), on that model's GPUs,
+  from the app's desired state in the `engine` volume; it says what each does
+  in `vllm-status`. The key goes by `VLLM_API_KEY`, never a command line.
+  Models come from the library: its Hugging Face snapshots (Admin → Models →
+  Find on Hugging Face → **Snapshots**, a repository's **Snapshot for vLLM and
+  SGLang**), or its GGUF files, which llama.cpp runs too
+  ([admin.md](admin.md#models): which architectures, and why a snapshot runs
+  faster). On a host with no network,
   download one on a machine that has one with
   `hf download OWNER/REPO --revision REV --local-dir LIBRARY/hf/OWNER/REPO@REV`
   and carry that folder to the same place in the host's library
@@ -595,11 +608,12 @@ how). **no**: missing, with the reason.
   status in `vllm-status`. The key goes by the environment to
   `services/sglang/serve.py`, which hands it to SGLang inside its process, never
   a command line. Kubernetes: `sglang.enabled` (one Deployment per
-  `sglang.instances` entry). Its models are Hugging Face snapshots too; choose
-  the engine as you add one (Admin → Models).
+  `sglang.instances` entry). Its models are Hugging Face snapshots too, or a
+  GGUF file of one part (its own loader reads it; a split one is refused);
+  choose the engine as you add one (Admin → Models).
 - **Which engine**: llama.cpp for GGUF files, one machine, layers or experts in
   RAM when the GPU is short, and a few people at once. vLLM or SGLang for
-  safetensors snapshots, tensor parallel over GPUs, many people at once, copies
+  safetensors snapshots (or a GGUF file, more slowly), tensor parallel over GPUs, many people at once, copies
   of a model, and a prefix cache shared by every request. SGLang's radix cache
   suits many conversations that share long prefixes (agents, the same system
   prompt); vLLM adds LMCache's tiers on disk and in a shared store. The RAM
@@ -611,7 +625,7 @@ how). **no**: missing, with the reason.
   (`tools/fake-vllm`), on the python image the stack already has, with no GPU.
 - **AMD GPUs**: `rocm.yml` after the compose files (and after `podman.yml` on
   Podman) gives the engines `/dev/kfd` and `/dev/dri` and ROCm images
-  (`LLAMACPP_ROCM_IMAGE`, `VLLM_IMAGE`, `SDCPP_GPU_IMAGE`: check each exists
+  (`LLAMACPP_ROCM_IMAGE`, `VLLM_ROCM_IMAGE`, `SDCPP_GPU_IMAGE`: check each exists
   for your ROCm first); Helm: `gpuResource: amd.com/gpu`, ROCm images,
   `engines.backend: rocm`. GPUs are read by `services/gpu-probe.py`
   (`rocm-smi`) into the hardware file the app reads.
@@ -641,9 +655,10 @@ In this order, on the new server (each step's details in
    shared memory. With nccl-tests built: `--nccl /path/to/all_reduce_perf`
    (about 40–50 GB/s bus bandwidth over PCIe Gen5 with P2P). Fix every FAIL
    before going on.
-3. **The engine image** (approve the download): NGC's vLLM image as `VLLM_IMAGE`,
-   or build arena-vllm (`vllm-build.yml`); the `vllm` feature on. Without the
-   image, `fake-gpu.yml` runs the whole path on the fake vLLM first.
+3. **The engine image** (approve the download): arena-vllm, built on vLLM's own
+   image (`./arenactl build --with vllm`, about 32 GB on disk), or from PyPI
+   (`vllm-build.yml`) where Docker Hub cannot be reached; the `vllm` feature on.
+   Without the image, `fake-gpu.yml` runs the whole path on the fake vLLM first.
 4. **The models** (approve each snapshot's size, shown before it downloads):
    Admin → Models → Hugging Face → *snapshot*. A realistic first set is about
    450–500 GB.

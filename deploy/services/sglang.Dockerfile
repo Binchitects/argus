@@ -35,7 +35,7 @@ ENV PATH=/opt/sglang/bin:${PATH} \
     ENGINE_SERVER=sglang
 
 # The supervisor, its helper, the launcher and the GPU probe, as compose and the chart mount them (the mounts win when present).
-COPY vllm/supervisor.sh vllm/vllm-helper.py /vllm/
+COPY vllm/supervisor.sh vllm/vllm-helper.py vllm/gguf_config.py /vllm/
 COPY sglang/serve.py /sglang/
 COPY gpu-probe.py /gpu-probe.py
 

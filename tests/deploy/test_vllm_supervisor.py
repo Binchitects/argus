@@ -13,6 +13,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -63,6 +64,8 @@ class SupervisorBase(unittest.TestCase):
         e = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "ENGINE_KEY": KEY, "VLLM_BIN": str(FAKE), "VLLM_PRESETS": str(self.dir / "presets"),
              "VLLM_STATUS": str(self.dir / "status"), "VLLM_RUN": str(self.dir / "run"), "VLLM_HOST": "127.0.0.1", "VLLM_TICK": "0.2",
              "VLLM_BACKOFF": "1", "VLLM_DRAIN": "5", "GPU_PROBE": str(self.dir / "no-probe")} | env
+        # None: not set at all (the supervisor's own default).
+        e = {k: v for k, v in e.items() if v is not None}
         self.proc = subprocess.Popen(["/bin/sh", str(SUPERVISOR)], env=e, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 
     def want(self, *models: dict):
@@ -294,6 +297,27 @@ class SupervisorTests(SupervisorBase):
         self.assertEqual((0, None), (self.status("m")["tries"], self.status("m")["exit"]))
         self.assertFalse((self.dir / "status" / "ghost.json").exists())
         self.assertFalse((self.dir / "run" / "state" / "ghost").exists())
+
+    def test_by_default_a_model_starts_through_vllms_launcher_which_names_a_gguf_files_config_and_tokenizer(self):
+        """No VLLM_BIN: services/vllm/serve.py, then `vllm` from the PATH (the fake here), with the folder of a GGUF file's
+        config and tokenizer (made by an earlier start: no transformers here) as --tokenizer."""
+        sys.path.insert(0, str(SUPERVISOR.parent))
+        import gguf_config
+
+        gguf = self.dir / "Model-Q4_K_M.gguf"
+        gguf.write_bytes(b"GGUF" + bytes(60))
+        folder = Path(gguf_config.folder_for(str(gguf), str(self.dir / "hf")))
+        folder.mkdir(parents=True)
+        (folder / "config.json").write_text("{}")
+        port = free_port()
+        self.want({"name": "qwen", "port": port, "gpus": [0], "sleep": False, "args": [str(gguf), "--max-model-len", "4096"]})
+        self.run_supervisor(VLLM_BIN=None, PATH=f"{FAKE.parent}:{os.environ.get('PATH', '/usr/bin:/bin')}", VLLM_GGUF_DIR=str(self.dir / "hf"))
+        self.until(lambda: self.status("qwen").get("phase") == "ready", "qwen ready")
+        cmdline = [a.decode() for a in Path(f"/proc/{self.status('qwen')['pid']}/cmdline").read_bytes().split(b"\0") if a]
+        self.assertEqual(str(FAKE.parent / "fake_vllm.py"), cmdline[1])
+        self.assertEqual(["serve", str(gguf), "--max-model-len", "4096"], cmdline[2:6])
+        self.assertEqual(["--tokenizer", str(folder)], cmdline[-2:])
+        self.assertEqual(200, self.get(port, "/v1/models")[0])
 
     def test_no_key_no_start(self):
         e = {"PATH": "/usr/bin:/bin", "VLLM_PRESETS": str(self.dir / "presets"), "VLLM_STATUS": str(self.dir / "status")}
