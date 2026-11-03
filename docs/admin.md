@@ -746,6 +746,19 @@ would be with them.
   conversation keeps its own slot ([the token cache](#the-token-cache)). They
   run with `LLAMACPP_THREADS`. Sampling left empty is the model's own
   recommendation from its file, which the engine applies.
+- **Every request is held to the model's longest answer**, the one its card
+  says. A request that sets no `max_tokens` (the chat's by default, Code
+  Arena's turns, many clients') gets it: llama.cpp's `n-predict` in the
+  model's preset, vLLM's `max_new_tokens` (`--override-generation-config`),
+  SGLang's `SGLANG_MAX_NEW_TOKENS_LIMIT`. One that asks more gets it too:
+  vLLM and SGLang cut it there themselves, and the gateway lowers a larger
+  `max_tokens` before it reaches llama.cpp (LiteLLM's `modify_params`;
+  llama.cpp takes a `max_completion_tokens` as asked, up to the end of its
+  slot). A prompt and its `max_tokens` together past the window: vLLM and
+  SGLang refuse it (the chat reads the counts they give, compacts and asks
+  again); llama.cpp answers until the slot is full and says the answer was
+  cut (`finish_reason` `length`). The chat never asks for more than its
+  prompt leaves: its own longest answer is at most half the window.
 - A model on **automatic placement** (`fit = on`) leaves room for the picture
   model kept loaded: its fit target (`fit-target`, llama.cpp's own margin of
   1,024 MiB) grows by that model's GPU budget and 1 GiB (FLUX.2-klein: 4,096

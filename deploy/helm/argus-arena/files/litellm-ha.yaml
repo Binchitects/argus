@@ -22,6 +22,12 @@ router_settings:
 
 litellm_settings:
   drop_params: true
+  # A max_tokens above a model's longest answer (its max_output_tokens, as the app registers it) is
+  # lowered to it: llama.cpp would write as long as asked, until its slot is full. vLLM and SGLang
+  # hold every request to it themselves (the app's launch settings), and so does llama.cpp's
+  # n-predict for a request that asks none. Its other changes are to messages in Anthropic's and
+  # Bedrock's own formats, which the gateway never sends: every model is reached the OpenAI way.
+  modify_params: true
   # Several replicas (this file is ha.yml's): the keys' rate and token limits and parallel counts
   # live in Valkey, so a key gets its limit once, not once per replica. A cache for those counts
   # only: no answer is cached (supported_call_types is empty).

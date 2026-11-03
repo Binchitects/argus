@@ -271,7 +271,7 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
             mtp = true, draftHead = "big/mtp-Big-Q8_0.gguf", draftMax = 2, temperature = 0.6, topK = 20,
         }));
         var presets = await File.ReadAllTextAsync(Path.Combine(Config, "models.ini"));
-        Assert.Contains("[tiny-long]\nmodel = /library/tiny/Tiny-4B-Q4_K_M.gguf\nctx-size = 65536\nparallel = 1\nkv-unified = true\ncache-type-k = q8_0\ncache-type-v = q8_0\nfit = on\nthreads = 12\n", presets, StringComparison.Ordinal);
+        Assert.Contains("[tiny-long]\nmodel = /library/tiny/Tiny-4B-Q4_K_M.gguf\nctx-size = 65536\nparallel = 1\nkv-unified = true\nn-predict = 32768\ncache-type-k = q8_0\ncache-type-v = q8_0\nfit = on\nthreads = 12\n", presets, StringComparison.Ordinal);
         Assert.Contains("rope-scaling = yarn\nrope-scale = 1.6\nyarn-orig-ctx = 40960\n", presets, StringComparison.Ordinal);
         Assert.Contains("n-gpu-layers = 99\nn-cpu-moe = 3\nthreads = 12\nubatch-size = 4096\nbatch-size = 4096\nmodel-draft = /library/big/mtp-Big-Q8_0.gguf\nspec-type = draft-mtp\nspec-draft-n-max = 2\ntemp = 0.6\ntop-k = 20\n", presets, StringComparison.Ordinal);
         Assert.DoesNotContain("fit = on\nthreads = 12\nubatch", presets, StringComparison.Ordinal);

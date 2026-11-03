@@ -49,9 +49,28 @@ public sealed class VllmBackendTests : IDisposable
         Assert.Equal("priority", After("--scheduling-policy"));
         Assert.Equal("""{"method":"mtp","num_speculative_tokens":3}""", After("--speculative-config"));
         Assert.Contains("\"cpu_bytes_to_use\":68719476736", After("--kv-transfer-config"), StringComparison.Ordinal);
-        Assert.Equal("""{"temperature":0.6}""", After("--override-generation-config"));
+        // Its longest answer (half its 65,536 when none is set): what a request without max_tokens gets, and the most any gets.
+        Assert.Equal("""{"max_new_tokens":32768,"temperature":0.6}""", After("--override-generation-config"));
         Assert.DoesNotContain(args, a => a is "--api-key" or "--host" or "--port" or "--served-model-name");
-        Assert.DoesNotContain("--enable-sleep-mode", ModelCatalog.VllmArgs(Model("x", sleep: false), "/library", 1));
+        var plain = ModelCatalog.VllmArgs(Model("x", sleep: false), "/library", 1);
+        Assert.DoesNotContain("--enable-sleep-mode", plain);
+        Assert.Equal("""{"max_new_tokens":32768}""", plain[plain.ToList().IndexOf("--override-generation-config") + 1]);
+        m.MaxOutput = 8192;
+        Assert.Contains("""{"max_new_tokens":8192,""", ModelCatalog.VllmArgs(m, "/library", 2).Single(a => a.Contains("max_new_tokens", StringComparison.Ordinal)), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Sglang_holds_every_request_to_the_models_longest_answer_by_its_own_limit()
+    {
+        var m = Model("swift");
+        m.EngineKind = EngineKinds.Sglang;
+        m.MaxOutput = 8192;
+        var entry = Assert.Single(ModelCatalog.VllmEntries(m, "/library", new Dictionary<string, int>(), new HashSet<int>(), 8001, "/presets/sglang"));
+        // SGLang's server-wide cap (SGLANG_MAX_NEW_TOKENS_LIMIT): a request without max_tokens gets it, a longer one is cut to it.
+        Assert.Equal("8192", entry.Env!["SGLANG_MAX_NEW_TOKENS_LIMIT"]);
+        Assert.Equal(entry.Env, VllmEntry.From(entry.ToJson())!.Env);
+        // vLLM's is in its arguments.
+        Assert.Null(Assert.Single(ModelCatalog.VllmEntries(Model("flash"), "/library", new Dictionary<string, int>(), new HashSet<int>(), 8001, "/presets/vllm")).Env);
     }
 
     [Fact]
@@ -59,7 +78,8 @@ public sealed class VllmBackendTests : IDisposable
     {
         var cpu = Model("flash");
         cpu.KvCpuGb = 32;
-        Assert.Contains("OffloadingConnector", ModelCatalog.VllmArgs(cpu, "/library", 1)[^1], StringComparison.Ordinal);
+        var offloaded = ModelCatalog.VllmArgs(cpu, "/library", 1);
+        Assert.Contains("OffloadingConnector", offloaded[offloaded.ToList().IndexOf("--kv-transfer-config") + 1], StringComparison.Ordinal);
 
         var lm = Model("flash", replicas: 2, devices: "0,1");
         lm.KvTier = "lmcache";

@@ -473,7 +473,8 @@ public sealed partial class GatewayChat(HttpClient http, ChatKey key, IServiceSc
         }
         if (overflow.Overflow)
         {
-            var size = overflow is { PromptTokens: { } n, ContextTokens: { } m } ? $" (about {n:N0} of {m:N0} tokens)" : "";
+            // A prompt that fits (vLLM and SGLang refuse one that leaves too little for its max_tokens) says no size.
+            var size = overflow is { PromptTokens: { } n, ContextTokens: { } m } && n > m ? $" (about {n:N0} of {m:N0} tokens)" : "";
             return $"This chat is longer than the model can read{size}. Compact it (/compact), start a new chat, or remove large attachments.";
         }
         // The engine could not load the model: memory, most often (it needs more beside the models it keeps loaded).

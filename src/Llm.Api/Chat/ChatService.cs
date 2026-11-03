@@ -719,7 +719,7 @@ public sealed partial class ChatService(
                     await emit(new
                     {
                         type = "notice", kind = "context_retry",
-                        text = "The model could not read the whole chat" + (ex.PromptTokens is { } n ? $" (about {n:N0} of {ex.ContextTokens ?? budget.Context:N0} tokens)" : "") +
+                        text = "The model could not read the whole chat" + (ex.PromptTokens is { } n && n > (ex.ContextTokens ?? budget.Context) ? $" (about {n:N0} of {ex.ContextTokens ?? budget.Context:N0} tokens)" : "") +
                             ": compacting it and asking again.",
                     });
                     await MakeRoomAsync(request, AfterOverflow);
@@ -751,11 +751,22 @@ public sealed partial class ChatService(
                 return;
             }
 
+            var own = request["max_tokens"] is JsonValue asked && asked.TryGetValue<int>(out var most) ? most : (int?)null;
             if (finish == "length" && msg.PromptTokens is { } read && msg.CompletionTokens is { } written && read + written >= budget.Context * 0.95
-                && !(request["max_tokens"] is JsonValue asked && asked.TryGetValue<int>(out var most) && written >= most))
+                && !(own is { } longest && written >= longest))
             {
                 // Not the answer's own limit: the context ran out while it wrote. The next message compacts by the usual rules.
                 await emit(new { type = "notice", kind = "cut_at_context", text = "The answer reached the end of the model's context. The chat is compacted before your next message." });
+            }
+            else if (finish == "length")
+            {
+                // Its own limit: the chat's Longest answer, else the model's (the engine's n-predict, or the gateway's cap).
+                var stopped = msg.CompletionTokens is { } n ? $"{n:N0} tokens, " : "";
+                await emit(new
+                {
+                    type = "notice", kind = "cut_at_longest",
+                    text = $"The answer stopped at its longest ({stopped}{(own is null ? "the model's longest answer" : "this chat's Longest answer")}): ask it to go on.",
+                });
             }
             // The whole answer through the answer rules, the model's checks too; withheld, it ends here, its tool calls not run.
             if (watchAnswers && content.Length > 0 && (withheld || await GuardAsync(final: true)))

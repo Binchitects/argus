@@ -187,7 +187,7 @@ class SupervisorTests(SupervisorBase):
     def test_a_kv_tier_reaches_the_server_and_no_secret_rides_in_its_environment(self):
         port = free_port()
         m = self.model("tiered", port, extra=("--kv-transfer-config", '{"kv_connector":"LMCacheConnectorV1","kv_role":"kv_both"}'))
-        m["env"] = {"LMCACHE_CONFIG_FILE": "/presets/vllm/lmcache-tiered.yaml", "SOME_TOKEN": "leak", "bad name": "x"}
+        m["env"] = {"LMCACHE_CONFIG_FILE": "/presets/vllm/lmcache-tiered.yaml", "SOME_TOKEN": "leak", "bad name": "x", "SGLANG_MAX_NEW_TOKENS_LIMIT": "8192"}
         self.want(m)
         self.run_supervisor()
         self.until(lambda: self.status("tiered").get("phase") == "ready", "tiered ready")
@@ -196,6 +196,8 @@ class SupervisorTests(SupervisorBase):
         cmdline = b"\0".join(Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0"))
         self.assertIn(b"LMCACHE_CONFIG_FILE=/presets/vllm/lmcache-tiered.yaml", environ)
         self.assertFalse(any(e.startswith(b"SOME_TOKEN") for e in environ))
+        # A count of tokens, not a token: SGLang's cap on every answer (the model's longest) gets through.
+        self.assertIn(b"SGLANG_MAX_NEW_TOKENS_LIMIT=8192", environ)
         self.assertIn(b"LMCacheConnectorV1", cmdline)
 
     def test_sigterm_drains_every_model_and_exits(self):

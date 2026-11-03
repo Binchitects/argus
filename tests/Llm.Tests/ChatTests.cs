@@ -911,6 +911,21 @@ public sealed class ChatTests(AppFixture app)
     }
 
     [Fact]
+    public async Task An_answer_that_stops_at_its_longest_says_so()
+    {
+        var (b, _) = await PersonAsync();
+        var id = await NewChatAsync(b, new { useArgus = false });
+        // The model's longest answer (8,192: the engine's n-predict, or the gateway's cap) reached: said, with what to do.
+        var notice = Assert.Single(await SendAsync(b, id, "[length 8192] write it all"), e => e.GetProperty("type").GetString() == "notice");
+        Assert.Equal(("cut_at_longest", "The answer stopped at its longest (8,192 tokens, the model's longest answer): ask it to go on."),
+            (notice.GetProperty("kind").GetString(), notice.GetProperty("text").GetString()));
+        // The chat's own.
+        await StatusAssert.Is(HttpStatusCode.NoContent, await b.Http.PatchAsJsonAsync(new Uri($"/api/chat/conversations/{id}", UriKind.Relative), new { maxTokens = 500 }));
+        notice = Assert.Single(await SendAsync(b, id, "[length 500] write it all"), e => e.GetProperty("type").GetString() == "notice");
+        Assert.Equal("The answer stopped at its longest (500 tokens, this chat's Longest answer): ask it to go on.", notice.GetProperty("text").GetString());
+    }
+
+    [Fact]
     public async Task Messages_left_out_so_a_request_fits_are_said()
     {
         var (b, email) = await PersonAsync();

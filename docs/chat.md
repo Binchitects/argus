@@ -238,7 +238,11 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     the same actions. When the engine's cache, shared by the chats it answers
     at once, is full, the request is asked again after two seconds. A summary
     the model refuses as too long is written in halves. An answer cut at the
-    end of the context says so, and the next message compacts. When the chat
+    end of the context says so, and the next message compacts. One that stops
+    at its longest (the chat's **Longest answer**, else the model's, which the
+    engine holds every answer to) says so too: ask it to go on. vLLM and SGLang
+    refuse a prompt that leaves too little for the answer asked: the chat reads
+    their count, compacts and asks again, as for any refusal. When the chat
     still does not fit (its summary failed, or what is kept is too big), its
     oldest messages are left out of what the model reads, and a notice says how
     many (the chat keeps them).

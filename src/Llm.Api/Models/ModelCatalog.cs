@@ -496,6 +496,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         "ctx-size", "n-gpu-layers", "gpu-layers", "n-cpu-moe", "cpu-moe", "cache-type-k", "cache-type-v", "parallel", "jinja", "metrics", "kv-unified", "no-kv-unified",
         "threads", "ubatch-size", "batch-size", "fit", "device", "kv-unified-per-slot", "rope-scaling", "rope-scale", "yarn-orig-ctx", "spec-type", "spec-draft-n-max", "draft-max", "draft-n",
         "temp", "temperature", "top-p", "top-k", "min-p", "presence-penalty", "embedding", "embeddings", "pooling", "rerank", "reranking",
+        "n-predict", "predict",
     };
 
     /// <summary>
@@ -581,6 +582,10 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         {
             sb.Append(inv, $"kv-unified-per-slot = {Window(m)}\n");
         }
+        // A request that asks no longest answer (the chat's own by default, Code Arena's turns, many clients') writes at most
+        // the model's, as the gateway says it (max_output_tokens), not until its slot is full. One that asks more is lowered by
+        // the gateway (litellm.yaml's modify_params): llama-server takes it as asked.
+        sb.Append(inv, $"n-predict = {OutputLimit(m)}\n");
         sb.Append(inv, $"cache-type-k = {m.KvType}\ncache-type-v = {m.KvType}\n");
         if (m.Placement == "manual")
         {
@@ -876,16 +881,14 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
                 ["kv_connector_extra_config"] = new JsonObject { ["block_size"] = 64, ["cpu_bytes_to_use"] = (long)gb << 30 },
             }.ToJsonString()]);
         }
-        var sampling = new JsonObject();
+        // Its longest answer (max_new_tokens): what a request that asks none gets, and the most any gets, whatever it asks.
+        var sampling = new JsonObject { ["max_new_tokens"] = OutputLimit(m) };
         if (m.Temperature is { } t) { sampling["temperature"] = t; }
         if (m.TopP is { } p) { sampling["top_p"] = p; }
         if (m.TopK is { } k) { sampling["top_k"] = k; }
         if (m.MinP is { } mp) { sampling["min_p"] = mp; }
         if (m.PresencePenalty is { } pp) { sampling["presence_penalty"] = pp; }
-        if (sampling.Count > 0)
-        {
-            args.AddRange(["--override-generation-config", sampling.ToJsonString()]);
-        }
+        args.AddRange(["--override-generation-config", sampling.ToJsonString()]);
         return args;
     }
 
@@ -988,10 +991,19 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
                     port++;
                 }
             }
-            // LMCache's file, as the engine sees the presets (/presets/INSTANCE).
-            var env = m.KvTier == "lmcache" && presets is not null
-                ? new Dictionary<string, string>(StringComparer.Ordinal) { ["LMCACHE_CONFIG_FILE"] = $"{presets.TrimEnd('/')}/lmcache-{name}.yaml" } : null;
-            entries.Add(new VllmEntry(m.Name, name, port, groups[i], false, ServerArgs(m, library, Math.Max(1, groups[i].Count)), Math.Max(1, m.Parallel), env));
+            // LMCache's file, as the engine sees the presets (/presets/INSTANCE). SGLang's cap on every answer, the model's
+            // longest (what one that asks none gets, and the most any gets): an environment variable of its own, not a flag.
+            var env = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (m.KvTier == "lmcache" && presets is not null)
+            {
+                env["LMCACHE_CONFIG_FILE"] = $"{presets.TrimEnd('/')}/lmcache-{name}.yaml";
+            }
+            if (m.EngineKind == EngineKinds.Sglang)
+            {
+                env["SGLANG_MAX_NEW_TOKENS_LIMIT"] = OutputLimit(m).ToString(CultureInfo.InvariantCulture);
+            }
+            entries.Add(new VllmEntry(m.Name, name, port, groups[i], false, ServerArgs(m, library, Math.Max(1, groups[i].Count)), Math.Max(1, m.Parallel),
+                env.Count > 0 ? env : null));
         }
         return entries;
     }

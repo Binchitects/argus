@@ -31,6 +31,7 @@ namespace Llm.Tests;
 ///   [context overflow]       refused as LiteLLM refuses a prompt bigger than llama.cpp's context (<see cref="Overflow"/>)
 ///   [context overflow once]  refused so until the chat was compacted (a summary in the system message)
 ///   [summary limit N]  a summary asked of more than N characters that holds it is refused as too long
+///   [length N]  stops at its longest, as an engine does at max_tokens or its n-predict: N tokens written, finish_reason length
 /// Its /v1/images/generations answers with a small PNG.
 /// </summary>
 public sealed class FakeModel : HttpMessageHandler
@@ -174,6 +175,7 @@ public sealed class FakeModel : HttpMessageHandler
         }
         IEnumerable<string> chunks;
         var delay = TimeSpan.Zero;
+        var written = 12;
         // The safeguards' judge: "[harm]" matches the weapons item, "[injection]" the injection one, "[topic:X]" the item naming X;
         // "[slow check]" takes 10 seconds to say.
         if (messages[0]!["content"]?.GetValue<string>().StartsWith("You check texts at a company's AI assistant", StringComparison.Ordinal) == true)
@@ -539,6 +541,11 @@ public sealed class FakeModel : HttpMessageHandler
         {
             chunks = [Delta(new JsonObject { ["content"] = closing }), Finish("stop")];
         }
+        else if (System.Text.RegularExpressions.Regex.Match(lastUser, @"\[length (\d+)\]") is { Success: true } longest)
+        {
+            written = int.Parse(longest.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+            chunks = [Delta(new JsonObject { ["content"] = "The start of a long answer" }), Finish("length")];
+        }
         else
         {
             chunks =
@@ -549,7 +556,7 @@ public sealed class FakeModel : HttpMessageHandler
                 Finish("stop"),
             ];
         }
-        chunks = chunks.Append(Usage(100, 40, 12, timed: lastUser.Contains("[timed]", StringComparison.Ordinal)));
+        chunks = chunks.Append(Usage(100, 40, written, timed: lastUser.Contains("[timed]", StringComparison.Ordinal)));
         // Asked for the whole answer at once (an API caller): one chat.completion, as the gateway sends it.
         if (body["stream"]?.GetValue<bool>() != true)
         {

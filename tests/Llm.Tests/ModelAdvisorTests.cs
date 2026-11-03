@@ -118,6 +118,17 @@ public sealed class ModelAdvisorTests : IDisposable
     }
 
     [Fact]
+    public void A_llama_cpp_request_without_max_tokens_is_held_to_the_models_longest_answer()
+    {
+        // llama-server's n-predict is what a request that asks no longest answer gets: the model's (half its slot's 16,384).
+        Assert.Contains("n-predict = 8192\n", ModelCatalog.Preset(new LocalModel { Name = "l", File = "l/L.gguf", Context = 65536, Parallel = 4 }, "/library"), StringComparison.Ordinal);
+        Assert.Contains("n-predict = 3000\n", ModelCatalog.Preset(new LocalModel { Name = "l", File = "l/L.gguf", Context = 65536, Parallel = 4, MaxOutput = 3000 }, "/library"), StringComparison.Ordinal);
+        // The form sets it, by its longest answer.
+        Assert.Contains("is set by the form", ModelCatalog.CheckExtra("n-predict = 100000"), StringComparison.Ordinal);
+        Assert.Contains("is set by the form", ModelCatalog.CheckExtra("predict = -1"), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void A_dense_model_too_big_for_the_gpu_runs_layers_from_ram_with_a_warning()
     {
         var (model, all) = Library("dense/Dense-Q8_0.gguf", GgufFile.Language("llama", layers: 16, layerBytes: 256 * MiB));

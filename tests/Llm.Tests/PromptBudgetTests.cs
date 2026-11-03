@@ -13,7 +13,12 @@ public sealed class PromptBudgetTests
         Assert.Equal(new ContextOverflow(true, false, 40_000, 32_768), ContextOverflow.Parse(FakeModel.Overflow(40_000)));
         Assert.Equal(new ContextOverflow(true, false, 34_803, 32_768), ContextOverflow.Parse(FakeModel.LlamaOverflow));
         Assert.Equal(new ContextOverflow(true, true, null, null), ContextOverflow.Parse(FakeModel.SharedCacheFull));
-        Assert.Equal(new ContextOverflow(true, false, null, null), ContextOverflow.Parse(FakeModel.OpenAiOverflow));
+        Assert.Equal(new ContextOverflow(true, false, 36_000, 32_768), ContextOverflow.Parse(FakeModel.OpenAiOverflow));
+        // vLLM's and SGLang's, for a prompt and a longest answer that are more than the window together: their counts too.
+        Assert.Equal(new ContextOverflow(true, false, 3_070, 32_768), ContextOverflow.Parse(
+            "This model's maximum context length is 32768 tokens. However, you requested 31744 output tokens and your prompt contains 3070 input tokens, for a total of 34814 tokens."));
+        Assert.Equal(new ContextOverflow(true, false, 3_070, 32_768), ContextOverflow.Parse(
+            "Requested token count exceeds the model's maximum context length of 32768 tokens. You requested a total of 34814 tokens: 3070 tokens from the input messages and 31744 tokens for the completion."));
         // llama.cpp's fields in either quote style.
         Assert.Equal(286_311, ContextOverflow.Parse("exceeds the available context size (n_prompt_tokens=286311, n_ctx=262144)").PromptTokens);
         Assert.Equal(262_144, ContextOverflow.Parse("""{"message":"…","n_prompt_tokens":286311,"n_ctx":262144}""").ContextTokens);
