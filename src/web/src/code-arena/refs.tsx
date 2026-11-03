@@ -2,18 +2,21 @@ import { useQuery } from '@tanstack/react-query'
 import { useMemo, type ReactNode } from 'react'
 import { FileRefs, type FileRefsApi } from '@/pages/chat/file-refs'
 import { useEditor } from './editor-state'
-import { allFilesQuery } from './ide-api'
+import { allFilesQuery, changesQuery } from './ide-api'
 
 /**
  * The files the agent cites in its answers, as links into the editor (at the lines cited): the folder's files only, by
- * the path in the folder; a path written whole (the folder's own path first) counts as the same file.
+ * the path in the folder; a path written whole (the folder's own path first) counts as the same file. A file a turn
+ * changed opens as the agent's change while there is one to review.
  */
 export function CodeRefsProvider({ folder, children }: { folder: string; children: ReactNode }) {
-  const { open } = useEditor()
+  const { open, openDiff } = useEditor()
   const all = useQuery(allFilesQuery)
+  const changes = useQuery(changesQuery)
   const value = useMemo<FileRefsApi>(() => {
     const files = new Set(all.data?.files ?? [])
     const root = folder.replace(/\\/g, '/').replace(/\/+$/, '') + '/'
+    const show: FileRefsApi['open'] = (ref) => void open(ref.path, ref.line ? { line: ref.line, column: ref.column, endLine: ref.end } : undefined)
     return {
       known: (cited) => {
         let path = cited.replace(/\\/g, '/')
@@ -24,8 +27,9 @@ export function CodeRefsProvider({ folder, children }: { folder: string; childre
         // if it is not there); a bare word with a dot (Node.js) is not.
         return files.has(path) || (all.data?.truncated && path.includes('/') && /\.\w+$/.test(path)) ? path : null
       },
-      open: (ref) => void open(ref.path, ref.line ? { line: ref.line, column: ref.column, endLine: ref.end } : undefined),
+      open: show,
+      compare: (ref) => (changes.data?.some((c) => c.path === ref.path) ? void openDiff(ref.path) : show(ref)),
     }
-  }, [all.data, folder, open])
+  }, [all.data, changes.data, folder, open, openDiff])
   return <FileRefs value={value}>{children}</FileRefs>
 }

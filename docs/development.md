@@ -168,6 +168,24 @@ The Argus image runs its xUnit suite during the build and fails with it; the
 runtime image carries the receipt at `/usr/share/argus/build-verified`.
 `docker compose build` in `deploy/` builds everything the platform runs.
 
+### What a change is in
+
+A change runs once every image that holds it is built again and its service
+started again. That is often more than one: Code Arena is in the app's image
+(the app serves its builds) and in Code Studio's workspaces (each workspace's
+engine), and its page is in the app's and the web's. `tools/images-for.py`
+reads the Dockerfiles and names them:
+
+```bash
+images=$(python3 tools/images-for.py origin/main)    # what changed since origin/main, committed or not
+[ -n "$images" ] && (cd deploy && docker compose build $images && docker compose up -d $images)
+```
+
+(None named, `docker compose build` would build them all: hence the check.)
+
+Starting `workspaces` again stops the engines of the workspaces running there;
+each runs the new engine once it is started again.
+
 ## Releasing
 
 A release is a tag, `vX.Y.Z`, on a commit of `main` whose suites all pass.

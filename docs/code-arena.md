@@ -551,8 +551,13 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   files sent again). Either goes back to before the question: the session
   goes on from there, and the chat in Arena keeps the earlier turns on a
   branch of their own, where the web's version arrows show them. Then the thread, with a card for each tool call and
-  a diff under each edit, the approval card (**Allow**, **Always for this
-  session**, **Deny**), Stop, the mode, `/compact` and `/clear`. A command
+  a diff under each edit (open while the turn runs; once it is over, its
+  caption alone, and its chevron shows the lines), under a finished answer
+  the files the turn changed (**N files changed**, folding with its chevron:
+  each with its lines added and removed opens as the agent's change to
+  review, or as the file once the change is kept), the approval card
+  (**Allow**, **Always for this session**, **Deny**), Stop, the mode,
+  `/compact` and `/clear`. A command
   the agent runs with no time limit shows above the box while it runs: the
   end of its output as it comes, how it ended, and **Stop**. **↑** in its box brings back this session's messages, then
   what this folder sent before (in the terminal too), as in Arena's chat;

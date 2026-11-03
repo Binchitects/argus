@@ -1894,6 +1894,7 @@ describe('Code Arena, the IDE', () => {
     expect(window.location.pathname).not.toContain('docs/none.md')
 
     // The edit's file opens at its first changed line, from its diff's path and its line numbers; read_file's at the line read.
+    await userEvent.click(within(answer).getByRole('button', { name: 'Changed lines of src/app.ts' }))
     await userEvent.click(within(answer).getByRole('button', { name: 'Open src/app.ts at line 2' }))
     await waitFor(() => expect(editor().selection).toEqual({ startLineNumber: 2, startColumn: 1, endLineNumber: 2, endColumn: 1 }))
     await userEvent.click(within(answer).getByRole('button', { name: 'Open src/lib/cart.ts:4 in the editor' }))
@@ -1908,6 +1909,56 @@ describe('Code Arena, the IDE', () => {
     // The edit's chip opens at the lines its result says.
     await userEvent.click(within(answer).getByRole('button', { name: 'Open src/app.ts:2-3 in the editor' }))
     await waitFor(() => expect(editor().selection).toEqual({ startLineNumber: 2, startColumn: 1, endLineNumber: 4, endColumn: 1 }))
+  })
+
+  it("folds a finished turn's edits to their captions, and lists the files it changed as VS Code's chat does", async () => {
+    const said = (id: string, role: Message['role'], parentId: string | null, over: Partial<Message> = {}): Message => ({ ...blank(id, role, parentId), ...over })
+    const call = (id: string, name: string, path: string) => ({ id, function: { name, arguments: JSON.stringify({ path }) } })
+    const session = {
+      id: 's1',
+      busy: false,
+      diffs: {
+        m2: { path: 'src/app.ts', added: 1, removed: 1, more: 0, created: false, lines: [['-', 1, 0, 'const total = 0'], ['+', 0, 1, 'const total = 1']] },
+        m3: { path: 'src/lib/cart.ts', added: 3, removed: 0, more: 0, created: true, lines: [['+', 0, 1, 'export {}']] },
+        m4: { path: 'src/app.ts', added: 1, removed: 1, more: 0, created: false, lines: [['-', 2, 0, 'log(total)'], ['+', 0, 2, 'console.log(total)']] },
+      },
+      messages: [
+        said('m0', 'user', null, { content: 'Fix the total' }),
+        said('m1', 'assistant', 'm0', { toolCalls: [call('c1', 'edit_file', 'src/app.ts'), call('c2', 'write_file', 'src/lib/cart.ts'), call('c3', 'edit_file', 'src/app.ts')], model: 'model-a' }),
+        said('m2', 'tool', 'm1', { content: 'Edited src/app.ts (line 1).', toolCallId: 'c1', toolName: 'edit_file' }),
+        said('m3', 'tool', 'm2', { content: 'Wrote src/lib/cart.ts.', toolCallId: 'c2', toolName: 'write_file' }),
+        said('m4', 'tool', 'm3', { content: 'Edited src/app.ts (line 2).', toolCallId: 'c3', toolName: 'edit_file' }),
+        said('m5', 'assistant', 'm4', { model: 'model-a', content: 'Fixed.' }),
+      ],
+    }
+    const { calls } = backend({ 'GET /api/session': () => ({ json: session }) })
+    renderIde()
+    const answer = await screen.findByRole('region', { name: 'Answer' })
+    await within(answer).findByText('Fixed.')
+
+    // Each edit shows its caption alone, folded; its chevron shows its lines.
+    const fold = within(answer).getByRole('button', { name: 'Changed lines of src/lib/cart.ts' })
+    expect(fold).toHaveAttribute('aria-expanded', 'false')
+    expect(within(answer).getAllByRole('button', { name: 'Changed lines of src/app.ts' }).map((b) => b.getAttribute('aria-expanded'))).toEqual(['false', 'false'])
+    expect(within(answer).queryByText('export {}')).not.toBeInTheDocument()
+    await userEvent.click(fold)
+    expect(fold).toHaveAttribute('aria-expanded', 'true')
+    expect(within(within(answer).getByRole('figure', { name: 'Changes to src/lib/cart.ts' })).getByText('export {}')).toBeInTheDocument()
+
+    // Under the answer: the files the turn changed, each once with its edits' lines, folding with its chevron.
+    const head = within(answer).getByRole('button', { name: /^2 files changed/ })
+    expect(head).toHaveAttribute('aria-expanded', 'true')
+    const files = within(answer).getByRole('list', { name: 'Files changed' })
+    expect(within(files).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['app.tssrc+2 −2', 'cart.tssrc/lib+3 −0'])
+    // One the agent's changes still hold opens as its compare (before the agent and now); one kept since, as the file.
+    await userEvent.click(within(files).getByRole('button', { name: /^app\.ts/ }))
+    expect(await within(tabs()).findByRole('tab', { name: /app\.ts\s*changes/, selected: true })).toBeInTheDocument()
+    expect(calls.some((c) => c.path === '/api/changes/diff?path=src%2Fapp.ts')).toBe(true)
+    await userEvent.click(within(files).getByRole('button', { name: /^cart\.ts/ }))
+    expect(await within(tabs()).findByRole('tab', { name: 'cart.ts', selected: true })).toBeInTheDocument()
+    await userEvent.click(head)
+    expect(head).toHaveAttribute('aria-expanded', 'false')
+    expect(within(answer).queryByRole('list', { name: 'Files changed' })).not.toBeInTheDocument()
   })
 
   it('sends lines from the editor with a message, and asks it to explain, fix or complete them', async () => {
@@ -2469,6 +2520,69 @@ describe('Code Arena, the IDE', () => {
     await userEvent.click(within(panel).getByRole('button', { name: 'Collapse All' }))
     expect(agents).toHaveAttribute('aria-expanded', 'false')
     await waitFor(() => expect(kept['changes.folded']).toEqual(expect.arrayContaining(['agent', 'mine', 'agent:src'])))
+  })
+
+  it('folds and keeps every folder of the trees with scm.compactFolders off, in Source Control and Agent changes', async () => {
+    let kept: Record<string, unknown> = { 'scm.viewMode': 'tree', 'changes.viewMode': 'tree' }
+    const { now } = backend(
+      {
+        'GET /api/git/status': () => ({
+          json: {
+            repository: true, branch: 'main', ahead: 0, behind: 0,
+            files: [
+              { path: 'docs/a/b/c.md', staged: null, changed: 'M', from: null },
+              { path: 'tests/unit/cart.test.ts', staged: null, changed: 'M', from: null },
+            ],
+          },
+        }),
+        'GET /api/git/log': () => ({ json: [] }),
+        'GET /api/git/branches': () => ({ json: [{ name: 'main', current: true }] }),
+        'GET /api/workspace/state': () => ({ json: kept }),
+        'POST /api/workspace/state': (body) => {
+          kept = { ...kept, ...(body as Record<string, unknown>) }
+          return { json: kept }
+        },
+      },
+      {},
+      { 'settings.json': '{ "scm.compactFolders": false }' },
+    )
+    now.changes = [...now.changes, { path: 'tests/unit/cart.test.ts', created: false, deleted: false, added: 1, removed: 0 }]
+    const { unmount } = renderIde()
+    await userEvent.keyboard('{Control>}{Shift>}g{/Shift}{/Control}')
+    const panel = await screen.findByRole('complementary', { name: 'Source control' })
+    const changed = () => within(panel).getByRole('list', { name: 'Changed files' })
+    const folder = (name: string) => within(changed()).getByRole('button', { name: new RegExp(`^${name}, `) })
+
+    // Each folder on its own row, as VS Code draws them with compactFolders off; a folded one is kept.
+    await waitFor(() => expect(folder('a')).toBeInTheDocument())
+    await userEvent.click(folder('docs'))
+    await waitFor(() => expect(kept['scm.folded']).toEqual(['changes:docs']))
+    await userEvent.click(folder('docs'))
+
+    // Collapse All folds every folder there is, docs and tests too.
+    await userEvent.click(within(panel).getByRole('button', { name: 'Collapse All' }))
+    await userEvent.click(within(panel).getByRole('button', { name: /^Changes, 2 files/ }))
+    expect(folder('docs')).toHaveAttribute('aria-expanded', 'false')
+    expect(folder('tests')).toHaveAttribute('aria-expanded', 'false')
+    await waitFor(() => expect(kept['scm.folded']).toEqual(expect.arrayContaining(['merge', 'staged', 'branch', 'commits', 'changes:docs', 'changes:docs/a', 'changes:tests'])))
+
+    // In the next run of the page, docs is folded as it was left.
+    unmount()
+    kept = { ...kept, 'scm.folded': ['changes:docs'] }
+    renderIde()
+    await userEvent.keyboard('{Control>}{Shift>}g{/Shift}{/Control}')
+    const again = await screen.findByRole('complementary', { name: 'Source control' })
+    const list = await within(again).findByRole('list', { name: 'Changed files' })
+    expect(within(list).getByRole('button', { name: /^docs, / })).toHaveAttribute('aria-expanded', 'false')
+    expect(within(list).getByRole('button', { name: /^tests, / })).toHaveAttribute('aria-expanded', 'true')
+
+    // Agent changes the same: Collapse All folds tests, not only tests/unit.
+    await userEvent.click(await screen.findByRole('button', { name: 'Agent changes (2)' }))
+    const agent = await screen.findByRole('complementary', { name: 'Agent changes' })
+    await userEvent.click(within(agent).getByRole('button', { name: 'Collapse All' }))
+    await userEvent.click(within(agent).getByRole('button', { name: /^The agent's changes, 2 files/ }))
+    expect(within(within(agent).getByRole('list', { name: 'Changed files' })).getByRole('button', { name: /^tests, / })).toHaveAttribute('aria-expanded', 'false')
+    await waitFor(() => expect(kept['changes.folded']).toEqual(expect.arrayContaining(['mine', 'agent:src', 'agent:tests', 'agent:tests/unit', 'mine:docs'])))
   })
 
   it('lists the skills in the Skills view and in the chat’s / menu: one opens to edit, one goes into the box, one is made', async () => {

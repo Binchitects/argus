@@ -145,7 +145,11 @@ describe('Code Arena in the browser', () => {
     // Over: the saved turn, with its model and tokens and the share read from the cache.
     expect(await screen.findByText(/2\.1 K in \(71% cached\) · 30 out/)).toBeInTheDocument()
     expect(within(screen.getByRole('region', { name: 'Answer' })).getByText('model-a')).toBeInTheDocument()
-    expect(screen.getByRole('figure', { name: 'Changes to src/a.txt' })).toBeInTheDocument()
+    // The edit folds to its caption, and the files the turn changed are listed under it.
+    const folded = screen.getByRole('figure', { name: 'Changes to src/a.txt' })
+    expect(within(folded).getByRole('button', { name: 'Changed lines of src/a.txt' })).toHaveAttribute('aria-expanded', 'false')
+    expect(within(folded).queryByText('Removed:')).not.toBeInTheDocument()
+    expect(within(screen.getByRole('list', { name: 'Files changed' })).getByText('a.txt')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
   })
 

@@ -16,6 +16,8 @@ export interface FileRefsApi {
   /** The path as the folder has it (`./`, `\` and the folder's own path taken off); null: not a file of the folder. */
   known: (path: string) => string | null
   open: (ref: FileRef) => void
+  /** Opens the agent's change to a file as its compare (before the agent and now); the file itself once none is held. */
+  compare?: (ref: FileRef) => void
 }
 
 export const FileRefs = createContext<FileRefsApi | null>(null)

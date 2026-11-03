@@ -52,9 +52,17 @@ export function folderTree<T>(items: readonly T[], pathOf: (item: T) => string, 
   return tidy(root)
 }
 
-/** The keys of a group's folders as its tree shows them (`group:path`). */
-export function folderKeys<T>(group: string, tree: Folder<T>): string[] {
-  return tree.folders.flatMap((f) => [`${group}:${f.path}`, ...folderKeys(group, f)])
+/**
+ * The keys of a group's folders (`group:path`): every folder a file is in, so they hold for the tree with compact folders
+ * (tests/unit) and without (tests, then unit).
+ */
+export function folderKeys<T>(group: string, items: readonly T[], pathOf: (item: T) => string): string[] {
+  const keys = new Set<string>()
+  for (const item of items) {
+    const parts = pathOf(item).split('/').slice(0, -1)
+    parts.forEach((_, i) => keys.add(`${group}:${parts.slice(0, i + 1).join('/')}`))
+  }
+  return [...keys]
 }
 
 /** How a view of changes shows them: list or tree, what is folded; kept with the folder (its workspace state). */

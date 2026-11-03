@@ -11,7 +11,7 @@ import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
 import { errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import { folderKeys, folderTree, rowKeys, treeIndent, useChangeView } from './change-folds'
+import { folderKeys, rowKeys, treeIndent, useChangeView } from './change-folds'
 import { ChangeFiles, FoldGroup, ViewTools } from './change-tree'
 import { useEditor } from './editor-state'
 import { FileIcon } from './file-icon'
@@ -127,7 +127,7 @@ export function SourceControlPanel() {
   const changed = files.filter((f) => f.changed && !f.conflict)
   const pathOf = (f: GitFile) => f.path
   const groups = [['merge', merge], ['staged', staged], ['changes', changed]] as const
-  const keys = ['merge', 'staged', 'changes', 'branch', 'commits', ...groups.flatMap(([g, list]) => folderKeys(g, folderTree(list, pathOf)))]
+  const keys = ['merge', 'staged', 'changes', 'branch', 'commits', ...groups.flatMap(([g, list]) => folderKeys(g, list, pathOf))]
   const view = useChangeView('scm', keys)
   const git = useGit()
   /** Commit (Amend: into the last commit), then, as asked, push or sync. */
