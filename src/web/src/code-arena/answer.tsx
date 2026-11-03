@@ -1,4 +1,4 @@
-import { Check, Copy, FileDiff as FileDiffIcon, FileSymlink, History, ShieldQuestion, Square, TextQuote } from 'lucide-react'
+import { Check, ChevronRight, Copy, FileDiff as FileDiffIcon, FileSymlink, History, ShieldQuestion, Square, TextQuote } from 'lucide-react'
 import { memo, useMemo, useState } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -18,24 +18,37 @@ import { QuotePartDialog } from '@/pages/chat/quote-parts'
 import { AnswerAgainMenu, type AgainChange } from '@/pages/chat/turns'
 import type { AgentWork, ChatConfig, Message } from '@/pages/chat/types'
 import type { FileDiff } from './api'
-import { rawFileUrl } from './ide-api'
+import { FileIcon } from './file-icon'
+import { nameOf, parentOf, rawFileUrl } from './ide-api'
 import { mediaNamed } from './media'
 
 /** The first line an edit changed, in the file as it is now; null: not known (an edit of a session read back). */
 const firstChanged = (diff: FileDiff) => diff.lines.find(([op, , b]) => op === '+' && b > 0)?.[2] ?? diff.lines.find(([, , b]) => b > 0)?.[2] ?? null
 
 /**
- * An edit: the file's changed lines with three around them, numbered when the file was read whole (a live edit). In the
- * IDE, its path opens the file at the first line changed, and each line's number opens it there.
+ * An edit: the file's changed lines with three around them, numbered when the file was read whole (a live edit). Its
+ * chevron folds them, as VS Code's chat does: open while the turn runs, its caption alone once it is over (unless the
+ * person chose). In the IDE, its path opens the file at the first line changed, and each line's number opens it there.
  */
-export function DiffView({ diff }: { diff: FileDiff }) {
+export function DiffView({ diff, live = false }: { diff: FileDiff; live?: boolean }) {
   const numbered = diff.lines.some(([, a, b]) => a > 0 || b > 0)
   const refs = useFileRefs()
   const path = refs?.known(diff.path) ?? null
   const first = firstChanged(diff)
+  const [chosen, setOpen] = useState<boolean | null>(null)
+  const open = chosen ?? live
   return (
     <figure className="my-2 overflow-hidden rounded-lg border bg-card text-xs" aria-label={`Changes to ${diff.path}`}>
-      <figcaption className="flex min-w-0 items-center gap-2 border-b px-3 py-1.5">
+      <figcaption className={cn('flex min-w-0 items-center gap-2 py-1.5 pr-3 pl-1.5', open && 'border-b')}>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-label={`Changed lines of ${diff.path}`}
+          onClick={() => setOpen(!open)}
+          className="grid size-5 shrink-0 place-items-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-none"
+        >
+          <ChevronRight className={cn('size-3.5 transition-transform duration-150', open && 'rotate-90')} aria-hidden="true" />
+        </button>
         <FileDiffIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         {refs && path ? (
           <button
@@ -54,6 +67,16 @@ export function DiffView({ diff }: { diff: FileDiff }) {
           <span className="text-success">+{diff.added}</span> <span className="text-destructive-ink">−{diff.removed}</span>
         </span>
       </figcaption>
+      {open && <DiffLines diff={diff} numbered={numbered} path={path} />}
+    </figure>
+  )
+}
+
+/** An edit's lines, and how many more it changed past them. */
+function DiffLines({ diff, numbered, path }: { diff: FileDiff; numbered: boolean; path: string | null }) {
+  const refs = useFileRefs()
+  return (
+    <>
       <div className="max-h-96 overflow-auto">
         <table className="w-full border-collapse font-mono leading-5">
           <tbody>
@@ -90,7 +113,90 @@ export function DiffView({ diff }: { diff: FileDiff }) {
         </table>
       </div>
       {diff.more > 0 && <p className="border-t px-3 py-1.5 text-muted-foreground">… {diff.more} more changed {diff.more === 1 ? 'line' : 'lines'}</p>}
-    </figure>
+    </>
+  )
+}
+
+/** A file a turn changed: the lines its edits added and removed, and where the first of them changed it. */
+interface TurnFile {
+  path: string
+  added: number
+  removed: number
+  line: number | null
+}
+
+/** The files a turn's edits changed, each once, in the order the turn first changed them. */
+function turnFiles(answer: Message[], diffs: Record<string, FileDiff>): TurnFile[] {
+  const files = new Map<string, TurnFile>()
+  for (const m of answer) {
+    const d = m.role === 'tool' ? diffs[m.id] : undefined
+    if (!d) continue
+    const f = files.get(d.path)
+    if (f) {
+      f.added += d.added
+      f.removed += d.removed
+    } else files.set(d.path, { path: d.path, added: d.added, removed: d.removed, line: firstChanged(d) })
+  }
+  return [...files.values()]
+}
+
+/**
+ * Under a finished answer, as VS Code's chat has it: the files the turn changed, folding with its chevron. In the IDE,
+ * one opens as the agent's change to review (before the agent and now), or the file once the change is kept.
+ */
+function TurnFiles({ files }: { files: TurnFile[] }) {
+  const refs = useFileRefs()
+  const [open, setOpen] = useState(true)
+  const lines = (f: { added: number; removed: number }) => (
+    <span className="ml-auto shrink-0 font-mono tabular-nums">
+      <span className="text-success">+{f.added}</span> <span className="text-destructive-ink">−{f.removed}</span>
+    </span>
+  )
+  return (
+    <div className="mt-2 overflow-hidden rounded-lg border bg-card text-xs">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className="flex w-full min-w-0 items-center gap-1.5 py-1.5 pr-3 pl-1.5 text-left font-medium outline-none hover:bg-accent/50 focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:ring-inset"
+      >
+        <ChevronRight className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform duration-150', open && 'rotate-90')} aria-hidden="true" />
+        <span>
+          {files.length} {files.length === 1 ? 'file' : 'files'} changed
+        </span>
+        {lines({ added: files.reduce((n, f) => n + f.added, 0), removed: files.reduce((n, f) => n + f.removed, 0) })}
+      </button>
+      {open && (
+        <ul aria-label="Files changed" className="border-t py-1">
+          {files.map((f) => {
+            const row = (
+              <>
+                <FileIcon path={f.path} className="size-3.5" />
+                <span className="truncate">{nameOf(f.path)}</span>
+                <span className="min-w-0 truncate text-muted-foreground">{parentOf(f.path)}</span>
+                {lines(f)}
+              </>
+            )
+            return (
+              <li key={f.path}>
+                {refs?.compare ? (
+                  <button
+                    type="button"
+                    onClick={() => refs.compare?.({ path: f.path, ...(f.line && { line: f.line }) })}
+                    title={`${f.path}: the agent's change to it`}
+                    className="flex w-full min-w-0 items-center gap-1.5 py-0.5 pr-3 pl-6 text-left outline-none hover:bg-accent/70 focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
+                  >
+                    {row}
+                  </button>
+                ) : (
+                  <span className="flex min-w-0 items-center gap-1.5 py-0.5 pr-3 pl-6">{row}</span>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
   )
 }
 
@@ -262,8 +368,9 @@ function sameAnswer(a: AnswerProps, b: AnswerProps): boolean {
 
 /**
  * Everything that answered a message: thinking, text, tool cards with their
- * diffs and questions, and a line with the model, time and tokens (the share
- * read from the cache with them), as Arena's chat shows an answer.
+ * diffs and questions, the files a finished turn changed, and a line with the
+ * model, time and tokens (the share read from the cache with them), as Arena's
+ * chat shows an answer.
  */
 export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince, notices, config, waiting, always, risks, calls, agents, diffs, onDecide, onQuote, question, onAgain }: AnswerProps) {
   const [quoting, setQuoting] = useState(false)
@@ -275,6 +382,7 @@ export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince
   const usage = answerUsage(answer, config)
   const cached = usage.prompt > 0 ? Math.round((usage.cached / usage.prompt) * 100) : null
   const pending = waitsForModel(answer, live)
+  const changed = live ? [] : turnFiles(answer, diffs)
   return (
     <section className={cn('min-w-0 animate-enter', live && 'pb-2')} aria-label="Answer" aria-busy={live}>
       {notices.map((n, i) => (
@@ -301,7 +409,7 @@ export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince
                   <ToolCard call={t} result={result} live={live} waiting={asking} progress={calls?.[t.id]} agents={agents?.[t.id]} />
                   {result && result.status === 'complete' && !result.error && <OpenFile name={t.function.name} args={t.function.arguments} diff={diff} said={result.content} />}
                   {result && result.status === 'complete' && <MadeMedia said={result.content} />}
-                  {diff && <DiffView diff={diff} />}
+                  {diff && <DiffView diff={diff} live={live} />}
                   {asking && <Approval name={t.function.name} always={always[t.id]} risk={risks?.[t.id]} onDecide={(answer) => onDecide(t.id, answer)} />}
                 </div>
               )
@@ -330,6 +438,7 @@ export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince
           Waiting for the model…
         </output>
       )}
+      {changed.length > 0 && <TurnFiles files={changed} />}
       {!live && last && (
         <div className="mt-1 flex flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
           {text && <CopyButton text={text} label="Copy answer" />}
@@ -351,7 +460,7 @@ export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince
               onAgain={(change) => onAgain(question, change)}
               more={
                 // The turn changed files: asked again from where they were before it.
-                answer.some((m) => m.role === 'tool' && diffs[m.id]) && (
+                changed.length > 0 && (
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onSelect={() => onAgain(question, { files: true })}>
