@@ -241,6 +241,7 @@ the web's need `npm ci` in `src/web` once. [testing.md](testing.md) says more.
 | `publish-code-arena.sh` | Code Arena's programs, in the app image's build (`src/Llm.Api/Dockerfile`); `arenactl code-arena` does the same anywhere |
 | `fetch-code-arena-packs.sh` | the .NET packs for `--offline` builds, into `tools/offline-nuget/` |
 | `dn` | the .NET SDK in its container (`tools/dn build`, `tools/dn test`) |
+| `images-for.py` | the stack's images a change is in: what to build and start again ([development.md](development.md#what-a-change-is-in)) |
 | `build-packs.sh` | Argus's knowledge packs, one at a time |
 | `fetch-security-sources.sh`, `security-texts.py` | the security pack's sources and pages |
 | `fetch-sqlite-vec.sh` | the vector extension Argus loads into SQLite |
