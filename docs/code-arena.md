@@ -628,9 +628,10 @@ VS Code settings mean the same here:
   `files.trimFinalNewlines`, steps Undo takes back, never for a save after a
   delay; `files.associations`; `files.eol`, the line ending of a new, empty
   file), compares (`diffEditor.*`), the terminals (font, size, line height,
-  cursor, scrollback, applied at once to those open; the keys they let
-  through), the colour theme (`workbench.colorTheme`, or
-  `window.autoDetectColorScheme` with the preferred light and dark ones:
+  cursor, scrollback, the least contrast of their text, applied at once to
+  those open; the keys they let through), the colour theme
+  (`workbench.colorTheme`, or `window.autoDetectColorScheme` with the
+  preferred light and dark ones:
   **Ctrl+K Ctrl+Alt+T**; see Colour themes below), the file icon theme
   (`workbench.iconTheme`) and Code Arena's code completion
   (`codeArena.inlineCompletion.enabled`, the status bar's **Complete**: the
@@ -688,7 +689,12 @@ Light`, `Sakura Dark`… in `workbench.colorTheme`). One chosen colours the
 whole workbench (the side bar, the panels, menus and buttons), the editor
 (its own Monaco theme from the same colours, its suggestions, lists, links,
 peek view and overview ruler too: none keeps VS Code's blue) and the
-terminals' background, text and cursor. The theme button at the activity bar's foot lists them
+terminals' background, text and cursor. In each, light and dark, the line
+numbers, a suggestion's text and its typed letters, and links are 4.5:1 or
+more on their ground (WCAG AA). The terminal's ANSI colours are the same in
+every theme: one under 4.5:1 on the theme's background is drawn lighter or
+darker (`terminal.integrated.minimumContrastRatio`, 4.5 as in VS Code; 1
+keeps them as they are). The theme button at the activity bar's foot lists them
 under **Color theme**: choosing one makes its dark and light modes the
 preferred ones, so light, dark and the system's keep it, and **Light** or
 **Dark** goes to the same theme's other mode. In Code Arena's own window the

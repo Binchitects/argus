@@ -230,7 +230,7 @@ function XtermView({ terminal, active, focusKey, onSize, onExit }: { terminal: T
   const events = useRef({ onSize, onExit })
   const [state, setState] = useState<'connecting' | 'open' | 'ended' | 'lost'>('connecting')
   const [attempt, setAttempt] = useState(0)
-  // "terminal.integrated.*": the font (empty: the editor's), the cursor, the lines kept.
+  // "terminal.integrated.*": the font (empty: the editor's), the cursor, the lines kept, the text's least contrast.
   const editorFont = useSetting<string>('editor.fontFamily')
   const fontFamily = useSetting<string>('terminal.integrated.fontFamily') || editorFont
   const fontSize = useSetting<number>('terminal.integrated.fontSize')
@@ -238,7 +238,12 @@ function XtermView({ terminal, active, focusKey, onSize, onExit }: { terminal: T
   const cursorStyle = useSetting<'block' | 'line' | 'underline'>('terminal.integrated.cursorStyle')
   const cursorBlink = useSetting<boolean>('terminal.integrated.cursorBlinking')
   const scrollback = useSetting<number>('terminal.integrated.scrollback')
-  const options = useMemo(() => ({ fontFamily, fontSize, lineHeight, cursorStyle: cursorStyle === 'line' ? ('bar' as const) : cursorStyle, cursorBlink, scrollback }), [fontFamily, fontSize, lineHeight, cursorStyle, cursorBlink, scrollback])
+  // The ANSI palette is the same in every colour theme: a colour under 4.5:1 on the theme's background is drawn lighter or darker.
+  const minimumContrastRatio = useSetting<number>('terminal.integrated.minimumContrastRatio')
+  const options = useMemo(
+    () => ({ fontFamily, fontSize, lineHeight, cursorStyle: cursorStyle === 'line' ? ('bar' as const) : cursorStyle, cursorBlink, scrollback, minimumContrastRatio }),
+    [fontFamily, fontSize, lineHeight, cursorStyle, cursorBlink, scrollback, minimumContrastRatio],
+  )
   const optionsNow = useRef(options)
 
   // Before the terminal is made (effects run in order): the colours and the callbacks it starts with.

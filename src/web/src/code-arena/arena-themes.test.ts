@@ -44,7 +44,7 @@ describe("Monaco's themes for the app's colour themes", () => {
     expect(themes.get('arena-light')!.colors).toMatchObject({
       'editor.background': '#fbfcfe',
       'editor.foreground': '#12161d',
-      'editorLineNumber.foreground': '#8b929c',
+      'editorLineNumber.foreground': '#666d77',
       'editorLineNumber.activeForeground': '#12161d',
       'editor.lineHighlightBackground': '#eff2f580',
       'editor.selectionBackground': '#2474cf33',
@@ -64,7 +64,7 @@ describe("Monaco's themes for the app's colour themes", () => {
 
   it("a colour theme's are its own colours", () => {
     expect(themes.get('arena-sakura-dark')!.colors).toMatchObject({ 'editor.background': '#120d0f', 'editor.foreground': '#eeeaeb', 'editorCursor.foreground': '#d76797', 'editorWidget.background': '#1a1417' })
-    expect(themes.get('arena-ocean-light')!.colors).toMatchObject({ 'editor.background': '#fbfdfd', 'editor.selectionBackground': '#007e9033', 'editorLineNumber.foreground': '#879499' })
+    expect(themes.get('arena-ocean-light')!.colors).toMatchObject({ 'editor.background': '#fbfdfd', 'editor.selectionBackground': '#007e9033', 'editorLineNumber.foreground': '#626f73' })
   })
 
   it.each(every)("$id $kind: the suggestions, lists, links, buttons and the overview ruler wear its colours, not VS Code's blue", ({ kind, palette: p, theme }) => {
@@ -93,12 +93,17 @@ describe("Monaco's themes for the app's colour themes", () => {
     expect(blue, "VS Code's blue").toEqual([])
   })
 
-  it.each(every)('$id $kind: text in the editor\'s widgets is 4.5:1', ({ theme }) => {
+  it.each(every)('$id $kind: text in the editor and its widgets is 4.5:1, the last line number too', ({ theme }) => {
     const c = theme.colors
     const low: string[] = []
     const check = (fg: string, bg: string, ground?: string) => {
       const r = contrast(c[fg]!, c[bg]!, ground && c[ground])
       if (r < 4.5) low.push(`${fg} on ${bg}${ground ? ` over ${ground}` : ''}: ${r.toFixed(2)}`)
+    }
+    for (const n of ['editorLineNumber.foreground', 'editorLineNumber.dimmedForeground']) {
+      check(n, 'editor.background')
+      check(n, 'diffEditor.insertedLineBackground', 'editor.background')
+      check(n, 'diffEditor.removedLineBackground', 'editor.background')
     }
     check('editorSuggestWidget.highlightForeground', 'editorSuggestWidget.background')
     check('editorSuggestWidget.selectedForeground', 'editorSuggestWidget.selectedBackground', 'editorSuggestWidget.background')

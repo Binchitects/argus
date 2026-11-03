@@ -195,8 +195,8 @@ describe('colour themes', () => {
       const table = hex(palette[name]).rgb.map((c) => Math.round(c * 255))
       expect(Math.max(...css.map((c, i) => Math.abs(c - table[i]!))), `${name}: ${palette[name]}`).toBeLessThanOrEqual(2)
     }
-    // The line numbers have no CSS: 3:1 on the background, and only as faintly tinted as the default's.
-    expect(contrast(hex(palette.lineNumber), hex(palette.background))).toBeGreaterThanOrEqual(3)
+    // The line numbers have no CSS: text, 4.5:1 on the background, and only as faintly tinted as the default's.
+    expect(contrast(hex(palette.lineNumber), hex(palette.background))).toBeGreaterThanOrEqual(4.5)
     const chroma = hex(palette.lineNumber).oklch[1]
     const defaultChroma = hex(colorThemes.find((c) => c.id === 'default')![mode].lineNumber).oklch[1]
     expect(Math.abs(chroma - defaultChroma), `lineNumber ${palette.lineNumber}`).toBeLessThanOrEqual(0.004)

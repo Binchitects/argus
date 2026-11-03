@@ -3965,10 +3965,11 @@ describe('Code Arena, the IDE, as its review asked', () => {
     await screen.findByRole('tree', { name: 'Files' })
     await userEvent.keyboard('{Control>}j{/Control}')
     await waitFor(() => expect(fakes.terminals).toHaveLength(1))
-    expect(fakes.terminals[0]!.options).toMatchObject({ fontSize: 16, cursorStyle: 'bar', lineHeight: 1.5, cursorBlink: true, scrollback: 10000, fontFamily: "'JetBrains Mono Variable', ui-monospace, 'SFMono-Regular', monospace" })
-    b.now.user['settings.json'] = '{ "terminal.integrated.fontSize": 18, "terminal.integrated.scrollback": 500 }'
+    // Text under 4.5:1 on its background (an ANSI colour on the theme's) is made lighter or darker, as in VS Code.
+    expect(fakes.terminals[0]!.options).toMatchObject({ fontSize: 16, cursorStyle: 'bar', lineHeight: 1.5, cursorBlink: true, scrollback: 10000, fontFamily: "'JetBrains Mono Variable', ui-monospace, 'SFMono-Regular', monospace", minimumContrastRatio: 4.5 })
+    b.now.user['settings.json'] = '{ "terminal.integrated.fontSize": 18, "terminal.integrated.scrollback": 500, "terminal.integrated.minimumContrastRatio": 1 }'
     await act(() => client.invalidateQueries())
-    await waitFor(() => expect(fakes.terminals[0]!.options).toMatchObject({ fontSize: 18, scrollback: 500, cursorStyle: 'block', lineHeight: 1 }))
+    await waitFor(() => expect(fakes.terminals[0]!.options).toMatchObject({ fontSize: 18, scrollback: 500, cursorStyle: 'block', lineHeight: 1, minimumContrastRatio: 1 }))
   })
 
   it("shows the terminal a task reuses when the panel is first drawn for it, whatever the server's order", async () => {

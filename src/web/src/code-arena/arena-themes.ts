@@ -42,6 +42,8 @@ export function arenaMonacoThemes(): [string, editor.IStandaloneThemeData][] {
             'editor.foreground': p.foreground,
             'editorLineNumber.foreground': p.lineNumber,
             'editorLineNumber.activeForeground': p.foreground,
+            // The last line's number, of a file that ends in a newline: Monaco's own is the others' at 40%, under 4.5:1.
+            'editorLineNumber.dimmedForeground': p.lineNumber,
             'editor.lineHighlightBackground': `${p.muted}80`,
             'editor.selectionBackground': `${p.primary}${light ? '33' : '40'}`,
             'editor.inactiveSelectionBackground': `${p.primary}${light ? '1f' : '26'}`,
