@@ -80,6 +80,9 @@ internal sealed class CliEnv
     public TimeSpan WindowHandOff { get; init; } = TimeSpan.FromSeconds(3);
     /// <summary>How long a browser opened for the IDE has to arrive before the person is told to open the address.</summary>
     public TimeSpan BrowserWait { get; init; } = TimeSpan.FromSeconds(20);
+    /// <summary>How often a running Code Arena asks Arena for its skills again unasked (at a turn, as the IDE lists them).</summary>
+    public TimeSpan ArenaSkillsEvery { get; init; } = ArenaSkillsAgain;
+    public static readonly TimeSpan ArenaSkillsAgain = TimeSpan.FromSeconds(30);
 }
 
 /// <summary>The command line: code-arena (the IDE), chat, [options] prompt, login, logout, models.</summary>
@@ -953,7 +956,8 @@ internal static partial class Cli
         var code = 0;
         try
         {
-            answer = await rt.Agent.RunAsync(prompt, turn, linked.Token);
+            // /name and words uses a skill (or a command of the person's) here too, as in the terminal and the IDE.
+            answer = await rt.Agent.RunAsync(rt.Prepare(prompt), turn, linked.Token);
             // Nobody types a next message here.
             answer = await rt.FinishJobsAsync(turn, linked.Token) ?? answer;
         }

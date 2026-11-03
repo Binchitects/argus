@@ -51,6 +51,12 @@ internal sealed class IdeFiles(Workspace workspace)
     public Workspace Workspace => workspace;
 
     /// <summary>
+    /// A file outside the folder that the page still reads and saves by its whole path (Read, Write and their backups,
+    /// nothing else): a skill of the project's, when the folder is inside the repository. Null: none.
+    /// </summary>
+    public Func<string, bool>? AlsoEdits { get; init; }
+
+    /// <summary>
     /// The full path of a path the page gave: relative to the working directory
     /// (empty: the folder itself), with no .. in it, and not through a link that
     /// leads outside. A whole path is taken only in a folder added to the
@@ -163,8 +169,15 @@ internal sealed class IdeFiles(Workspace workspace)
         return info.Exists ? $"{info.LastWriteTimeUtc.Ticks:x}-{info.Length:x}" : "none";
     }
 
+    /// <summary>A file the page reads, saves or backs up: one of the folder's (<see cref="ResolveEntry"/>), or one it edits besides (<see cref="AlsoEdits"/>).</summary>
+    public string EditedEntry(string? path) =>
+        AlsoEdits is { } also && path is { Length: > 0 } && !path.Contains('\0') && Path.IsPathFullyQualified(path) && !path.Split(Separators).Contains("..")
+            && Path.TrimEndingDirectorySeparator(Path.GetFullPath(path)) is var whole && also(whole)
+            ? whole
+            : ResolveEntry(path);
+
     /// <summary>A file's text, or why it cannot be edited here (binary, not UTF-8, too large).</summary>
-    public JsonObject Read(string? path) => ReadFull(ResolveEntry(path));
+    public JsonObject Read(string? path) => ReadFull(EditedEntry(path));
 
     /// <summary>A file's text by its full path, as <see cref="Read"/> answers: for one already found allowed.</summary>
     public JsonObject ReadFull(string full)
@@ -287,7 +300,7 @@ internal sealed class IdeFiles(Workspace workspace)
     /// <summary>Saves a file (its byte-order mark kept), unless it changed on disk since the page read it at <paramref name="version"/>.</summary>
     public JsonObject Write(string? path, string text, string? version)
     {
-        var full = ResolveEntry(path);
+        var full = EditedEntry(path);
         if (Directory.Exists(full))
         {
             throw new IdeError(400, "folder", $"{Show(full)} is a folder.");

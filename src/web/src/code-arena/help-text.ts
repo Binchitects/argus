@@ -80,7 +80,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   skills: {
     name: 'Skills',
-    text: "Every skill the agent reads, by whose it is: **This project**'s (.arena/skills, in the repository), **Yours** (every project), **From Arena** (made on Arena's Skills page, or a plugin's) and **Built in**. The model loads one when a task needs it; **/name** in the chat uses one (/ lists them). A click opens one of the project's or yours to edit (any other goes into the chat's box); **New Skill** makes one, for this project or for you. A skill saved is used from the next message.",
+    text: "Every skill the agent reads, by whose it is: **This project**'s (.arena/skills, in the repository), **Yours** (every project: kept in Arena when signed in to it, else on this computer), **From Arena** (your groups' and the company's, or a plugin's) and **Built in**. The model loads one when a task needs it; **/name** in the chat uses one (/ lists them). A click opens one of the project's or yours to edit (any other goes into the chat's box); **New Skill** makes one, for this project or for you. A skill saved here is used from the next message; one made or changed on Arena's Skills page comes within half a minute, or at once with **Refresh**.",
     manual: 'your-own-commands-sub-agents-and-skills',
   },
   git: {

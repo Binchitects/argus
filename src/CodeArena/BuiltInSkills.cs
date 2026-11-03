@@ -7,7 +7,7 @@ namespace CodeArena;
 /// <summary>
 /// The skills that come with Arena (the repository's skills/ folder, built into Code Arena as into the app): written to the
 /// config folder's builtin-skills/ at each start and read last, so the person's, the project's and the plugins' of the same
-/// name win. Those an Arena admin turned off (as Arena says when it answers) are left out.
+/// name win. Those an Arena admin turned off (as Arena says when it answers, at the start and as Code Arena runs) are left out.
 /// </summary>
 internal static partial class BuiltInSkills
 {

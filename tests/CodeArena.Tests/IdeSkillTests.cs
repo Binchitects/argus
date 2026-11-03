@@ -75,8 +75,16 @@ public sealed class IdeSkillTests : IDisposable
         Assert.Equal(HttpStatusCode.Conflict, (await web.PostAsync("/api/skills", new JsonObject { ["name"] = "release", ["scope"] = "project" })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/skills", new JsonObject { ["name"] = "Bad Name", ["scope"] = "project" })).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/skills", new JsonObject { ["name"] = "x", ["scope"] = "company" })).StatusCode);
+    }
 
-        // The person's: in the config folder, opened and saved as their own files are.
+    [Fact]
+    public async Task Not_signed_in_to_Arena_a_skill_made_for_you_is_kept_on_this_computer()
+    {
+        using var h = new Harness(_gateway, _mcp, c => c.Remove("url"));
+        await using var web = await WebRun.StartAsync(h);
+        Assert.False((await web.GetJsonAsync("/api/skills"))["mineInArena"]!.GetValue<bool>());
+
+        // In the config folder, opened and saved as their own files are.
         var mine = JsonNode.Parse(await (await web.PostAsync("/api/skills", new JsonObject { ["name"] = "notes", ["scope"] = "person" })).Content.ReadAsStringAsync())!;
         Assert.Equal("user:skills/notes/SKILL.md", mine["path"]!.GetValue<string>());
         Assert.True(File.Exists(Path.Combine(h.Paths.ConfigDir, "skills", "notes", "SKILL.md")));
@@ -85,6 +93,126 @@ public sealed class IdeSkillTests : IDisposable
         Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
         Assert.Equal("My notes", (await web.GetJsonAsync("/api/skills"))["skills"]!.AsArray().Single(s => s!["name"]!.GetValue<string>() == "notes")!["description"]!.GetValue<string>());
         Assert.Equal(HttpStatusCode.BadRequest, (await web.Http.GetAsync("/api/user-files?name=" + Uri.EscapeDataString("skills/../config.json"))).StatusCode);
+        Assert.Empty(_mcp.Chats.SkillsMade);
+    }
+
+    [Fact]
+    public async Task Signed_in_a_skill_made_for_you_is_one_of_yours_in_Arena_and_saved_there()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        _mcp.Chats.ArenaSkills = [];
+        await using var web = await WebRun.StartAsync(h);
+        Assert.True((await web.GetJsonAsync("/api/skills"))["mineInArena"]!.GetValue<bool>());
+
+        // Made in Arena with the person's key, as the web chat, Code Studio and Code Arena elsewhere have it; not in the config folder.
+        var made = await web.PostAsync("/api/skills", new JsonObject { ["name"] = "notes", ["scope"] = "person" });
+        Assert.Equal(HttpStatusCode.OK, made.StatusCode);
+        var mine = JsonNode.Parse(await made.Content.ReadAsStringAsync())!;
+        Assert.Equal(("person", "user:skills/notes/SKILL.md"), (mine["source"]!.GetValue<string>(), mine["path"]!.GetValue<string>()));
+        var sent = Assert.Single(_mcp.Chats.SkillsMade);
+        Assert.Equal("notes", sent["name"]!.GetValue<string>());
+        Assert.Contains("$ARGUMENTS", sent["instructions"]!.GetValue<string>(), StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(h.Paths.ConfigDir, "skills", "notes")));
+        Assert.Equal(("person", "user:skills/notes/SKILL.md"), Listed(await web.GetJsonAsync("/api/skills"))["notes"]);
+
+        // Opened as one of their files, as Arena keeps it; saved back to Arena.
+        var read = await web.GetJsonAsync("/api/user-files?name=" + Uri.EscapeDataString("skills/notes/SKILL.md"));
+        Assert.StartsWith("---\nname: notes\n", read["text"]!.GetValue<string>(), StringComparison.Ordinal);
+        var saved = await web.PostAsync("/api/user-files", new JsonObject
+        {
+            ["name"] = "skills/notes/SKILL.md", ["text"] = "---\nname: notes\ndescription: My notes\n---\nKeep them short for $ARGUMENTS.", ["version"] = read["version"]!.GetValue<string>(),
+        });
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        var changed = Assert.Single(_mcp.Chats.SkillsChanged);
+        Assert.Equal(("My notes", "Keep them short for $ARGUMENTS."), (changed["description"]!.GetValue<string>(), changed["instructions"]!.GetValue<string>()));
+        Assert.Equal("My notes", (await web.GetJsonAsync("/api/skills"))["skills"]!.AsArray().Single(s => s!["name"]!.GetValue<string>() == "notes")!["description"]!.GetValue<string>());
+        Assert.False(Directory.Exists(Path.Combine(h.Paths.ConfigDir, "skills", "notes")));
+
+        // Changed on Arena's Skills page since it was opened: not overwritten. Nor named anew here, nor emptied.
+        _mcp.Chats.ArenaSkills = [FakeChats.OwnSkill("notes", "Changed on the web", "Other steps.")];
+        var stale = await web.PostAsync("/api/user-files", new JsonObject { ["name"] = "skills/notes/SKILL.md", ["text"] = "---\nname: notes\n---\nMine.", ["version"] = read["version"]!.GetValue<string>() });
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        var now = (await web.GetJsonAsync("/api/user-files?name=" + Uri.EscapeDataString("skills/notes/SKILL.md")))["version"]!.GetValue<string>();
+        Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/user-files", new JsonObject { ["name"] = "skills/notes/SKILL.md", ["text"] = "---\nname: other\n---\nMine.", ["version"] = now })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/user-files", new JsonObject { ["name"] = "skills/notes/SKILL.md", ["text"] = "---\nname: notes\n---\n", ["version"] = now })).StatusCode);
+        Assert.Single(_mcp.Chats.SkillsChanged);
+
+        // One of that name in Arena already: said, not made twice.
+        Assert.Equal(HttpStatusCode.Conflict, (await web.PostAsync("/api/skills", new JsonObject { ["name"] = "notes", ["scope"] = "person" })).StatusCode);
+    }
+
+    [Fact]
+    public async Task A_skill_made_or_turned_off_in_Arena_while_the_IDE_runs_is_there_after_Refresh()
+    {
+        // Asked again at most this often unasked: here, not within the test.
+        using var h = new Harness(_gateway, _mcp, c => c["builtInSkills"] = true) { ArenaSkillsEvery = TimeSpan.FromHours(1) };
+        _mcp.Chats.SkillsOff = [];
+        _mcp.Chats.ArenaSkills = [new JsonObject { ["name"] = "triage", ["files"] = new JsonObject { ["SKILL.md"] = "---\nname: triage\ndescription: Sort the issues\n---\nSort them." } }];
+        await using var web = await WebRun.StartAsync(h);
+        var skills = Listed(await web.GetJsonAsync("/api/skills"));
+        Assert.Contains("triage", skills.Keys);
+        Assert.Contains("debug", skills.Keys);
+
+        // Made on Arena's Skills page, and an admin turned one of Arena's own off: Refresh (fresh) asks Arena at once.
+        _mcp.Chats.ArenaSkills = [new JsonObject { ["name"] = "websky", ["files"] = new JsonObject { ["SKILL.md"] = "---\nname: websky\ndescription: Made on the web\n---\nSay WEBSKY." } }];
+        _mcp.Chats.SkillsOff = ["debug"];
+        Assert.DoesNotContain("websky", Listed(await web.GetJsonAsync("/api/skills")).Keys);
+        skills = Listed(await web.GetJsonAsync("/api/skills?fresh=1"));
+        Assert.Equal(("arena", (string?)null), skills["websky"]);
+        Assert.DoesNotContain("triage", skills.Keys);
+        Assert.DoesNotContain("debug", skills.Keys);
+        Assert.True(File.Exists(Path.Combine(h.Paths.ConfigDir, "plugin-skills", "websky", "SKILL.md")));
+    }
+
+    [Fact]
+    public async Task A_skill_made_in_Arena_while_the_IDE_runs_is_used_at_the_next_turn()
+    {
+        using var h = new Harness(_gateway, _mcp) { ArenaSkillsEvery = TimeSpan.Zero };
+        _mcp.Chats.ArenaSkills = [];
+        await using var web = await WebRun.StartAsync(h);
+        _gateway.Answer = _ => Reply.Say("ok");
+
+        _mcp.Chats.ArenaSkills = [new JsonObject { ["name"] = "websky2", ["files"] = new JsonObject { ["SKILL.md"] = "---\nname: websky2\ndescription: Made on the web\n---\nSay WEBSKY2-USED for $ARGUMENTS." } }];
+        await (await web.SendAsync("/websky2 the team")).RestAsync();
+        var asked = _gateway.Requests[^1]["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.ToString();
+        Assert.StartsWith("/websky2 the team\n\n<attached>\n<skill name=\"websky2\">", asked, StringComparison.Ordinal);
+        Assert.Contains("Say WEBSKY2-USED for the team.", asked, StringComparison.Ordinal);
+        Assert.Contains("- websky2: Made on the web", _gateway.Requests[^1]["messages"]![0]!["content"]!.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task In_a_subfolder_of_the_repository_the_projects_skills_open_and_a_new_one_opens_too()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        Directory.CreateDirectory(Path.Combine(h.Work, ".git"));
+        h.Write(".arena/skills/ship/SKILL.md", "---\nname: ship\ndescription: How we ship\n---\nRun make ship.");
+        h.Write(".arena/skills/ship/notes.md", "notes");
+        h.Write("secret.txt", "not the IDE's");
+        h.Write("packages/web/index.ts", "export {}\n");
+        h.Cwd = Path.Combine(h.Work, "packages", "web");
+        await using var web = await WebRun.StartAsync(h);
+
+        // Outside the folder opened, by its whole path: read and saved as a file of the folder is.
+        var whole = Path.Combine(h.Work, ".arena", "skills", "ship", "SKILL.md");
+        Assert.Equal(("project", whole), Listed(await web.GetJsonAsync("/api/skills"))["ship"]);
+        var read = await web.GetJsonAsync("/api/file?path=" + Uri.EscapeDataString(whole));
+        Assert.Equal("---\nname: ship\ndescription: How we ship\n---\nRun make ship.", read["text"]!.GetValue<string>());
+        var saved = await web.PostAsync("/api/file", new JsonObject { ["path"] = whole, ["text"] = "---\nname: ship\ndescription: How we ship now\n---\nRun make ship.", ["version"] = read["version"]!.GetValue<string>() });
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        Assert.Equal("How we ship now", (await web.GetJsonAsync("/api/skills"))["skills"]!.AsArray().Single(s => s!["name"]!.GetValue<string>() == "ship")!["description"]!.GetValue<string>());
+        // What is typed and not saved yet is kept as a folder's file's is.
+        Assert.Equal(HttpStatusCode.NoContent, (await web.PostAsync("/api/backups", new JsonObject { ["path"] = whole, ["text"] = "unsaved", ["version"] = "v" })).StatusCode);
+
+        // A new one for the project: in .arena/skills at the repository's root, and given the path the editor opens.
+        var made = JsonNode.Parse(await (await web.PostAsync("/api/skills", new JsonObject { ["name"] = "release", ["scope"] = "project" })).Content.ReadAsStringAsync())!;
+        var release = Path.Combine(h.Work, ".arena", "skills", "release", "SKILL.md");
+        Assert.Equal(release, made["path"]!.GetValue<string>());
+        Assert.StartsWith("---\nname: release\n", (await web.GetJsonAsync("/api/file?path=" + Uri.EscapeDataString(release)))["text"]!.GetValue<string>(), StringComparison.Ordinal);
+
+        // Only the skills' SKILL.md: the rest of the repository stays outside the folder.
+        Assert.Equal(HttpStatusCode.Forbidden, (await web.Http.GetAsync("/api/file?path=" + Uri.EscapeDataString(Path.Combine(h.Work, "secret.txt")))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await web.Http.GetAsync("/api/file?path=" + Uri.EscapeDataString(Path.Combine(h.Work, ".arena", "skills", "ship", "notes.md")))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await web.Http.GetAsync("/api/file?path=" + Uri.EscapeDataString(Path.Combine(h.Work, ".arena", "skills", "nope", "SKILL.md")))).StatusCode);
     }
 
     [Fact]

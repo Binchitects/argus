@@ -1719,7 +1719,10 @@ model reads it to choose it), its **instructions** and its **parameters**.
   read as a lesson: what to do differently, kept as a memory.
 - **Code Arena** keeps what a session worked out with `skill_save` (the
   project's, in `.arena/skills/`, or yours, here), and after a long turn it
-  is reminded to.
+  is reminded to. A skill you make in its IDE "for you" (**New Skill**, or
+  `/skills new NAME --mine` in its terminal) is one of yours here too, used
+  at once; one made or changed here reaches a running Code Arena within half
+  a minute ([code-arena.md](code-arena.md#your-own-commands-sub-agents-and-skills)).
 
 - **In the chat**, `/` at the start of the message opens the list: type to
   find by slash name, title or description, arrows to move, **Enter** or

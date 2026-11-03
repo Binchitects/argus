@@ -2534,6 +2534,77 @@ describe('Code Arena, the IDE', () => {
     await waitFor(() => expect(calls.some((c) => c.path === '/api/file?path=.arena%2Fskills%2Frelease%2FSKILL.md')).toBe(true))
   })
 
+  it('runs /clear with one Enter, and sends a whole skill name with one Enter, while the / menu shows', async () => {
+    const skills = [{ name: 'ide-proj', description: 'The project’s', source: 'project', path: '.arena/skills/ide-proj/SKILL.md' }]
+    const { calls } = backend({
+      'GET /api/skills': () => ({ json: { skills, commands: [], mineInArena: true } }),
+      'POST /api/sessions/new': () => ({ json: { id: 's2', messages: [] } }),
+      'POST /api/messages': () => answerOnly(),
+    })
+    renderIde()
+    const box = await screen.findByRole('textbox', { name: 'Message' })
+    await userEvent.type(box, '/clear')
+    expect(await screen.findByRole('listbox', { name: 'Skills and commands' })).toBeInTheDocument()
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/sessions/new')).toBe(true))
+    expect(calls.some((c) => c.path === '/api/messages')).toBe(false)
+
+    // A skill's whole name goes as it is; Tab still completes one begun.
+    await userEvent.clear(box)
+    await userEvent.type(box, '/ide-proj')
+    expect(await screen.findByRole('listbox', { name: 'Skills and commands' })).toBeInTheDocument()
+    await userEvent.keyboard('{Enter}')
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/messages')?.body).toMatchObject({ text: '/ide-proj' }))
+    // The box under the conversation now.
+    const under = await screen.findByRole('textbox', { name: 'Message' })
+    await userEvent.type(under, '/ide{Tab}')
+    expect(under).toHaveValue('/ide-proj ')
+  })
+
+  it('offers every skill on /, not the first dozen, and ↑ from the first reaches the last', async () => {
+    const skills = Array.from({ length: 36 }, (_, i) => ({ name: `sk${String(i).padStart(2, '0')}`, description: `Skill ${i}`, source: 'builtin', path: null }))
+    backend({ 'GET /api/skills': () => ({ json: { skills, commands: [], mineInArena: false } }) })
+    renderIde()
+    const box = await screen.findByRole('textbox', { name: 'Message' })
+    await userEvent.type(box, '/')
+    const list = await screen.findByRole('listbox', { name: 'Skills and commands' })
+    // The chat's two commands and all 36 skills.
+    await waitFor(() => expect(within(list).getAllByRole('option')).toHaveLength(38))
+    await userEvent.keyboard('{ArrowUp}')
+    expect(within(list).getByRole('option', { selected: true })).toHaveTextContent('/sk35')
+    await userEvent.keyboard('{Enter}')
+    expect(box).toHaveValue('/sk35 ')
+  })
+
+  it('reads Arena’s skills again on Refresh, and says where a new skill of yours is kept', async () => {
+    let skills = [{ name: 'triage', description: 'Sort the issues', source: 'arena', path: null as string | null }]
+    const { calls } = backend({
+      // Arena is asked at once only when fresh: one made on its Skills page since is there then.
+      'GET /api/skills': (_, __, url) => {
+        if (url.searchParams.get('fresh') === '1' && !skills.some((s) => s.name === 'websky')) skills = [...skills, { name: 'websky', description: 'Made on the web', source: 'arena', path: null }]
+        return { json: { skills, commands: [], mineInArena: false } }
+      },
+      'POST /api/skills': () => {
+        const made = { name: 'notes', description: 'When to use it', source: 'person', path: null }
+        skills = [...skills, made]
+        return { json: made }
+      },
+    })
+    renderIde()
+    await userEvent.click(await screen.findByRole('button', { name: 'Skills' }))
+    const panel = await screen.findByRole('complementary', { name: 'Skills' })
+    await within(panel).findByRole('button', { name: /^\/triage/ })
+    await userEvent.click(within(panel).getByRole('button', { name: 'Refresh skills' }))
+    expect(await within(panel).findByRole('button', { name: /^\/websky/ })).toBeInTheDocument()
+    expect(calls.some((c) => c.path === '/api/skills?fresh=1')).toBe(true)
+
+    // Not signed in to Arena: yours stays on this computer, as the menu says; one made with no file to open is said so.
+    await userEvent.click(within(panel).getByRole('button', { name: 'New Skill' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'For you, on this computer…' }))
+    await userEvent.keyboard('notes{Enter}')
+    expect(await screen.findByText(/Made \/notes/)).toBeInTheDocument()
+  })
+
   it('replaces what the search finds, in one file or in all of them after asking', async () => {
     const { calls } = backend({ 'POST /api/replace': () => ({ json: { files: [{ path: 'src/app.ts', replaced: 2, version: 'v2' }], count: 2, truncated: false } }) })
     renderIde()

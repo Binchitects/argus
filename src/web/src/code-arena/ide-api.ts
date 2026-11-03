@@ -229,8 +229,8 @@ export const writeUserFile = (name: UserFileName, text: string, version: string 
 
 /**
  * A skill the agent reads (code-arena's .arena/skills, the person's, Arena's, its own): whose it is, and where the editor
- * opens its SKILL.md (the project's by its path, the person's as user:skills/NAME/SKILL.md; null: Arena's or Code Arena's
- * own, not edited here).
+ * opens its SKILL.md (the project's by its path, or its whole path when the folder is inside the repository; the person's,
+ * in Arena or on this computer, as user:skills/NAME/SKILL.md; null: Arena's others or Code Arena's own, not edited here).
  */
 export interface SkillInfo {
   name: string
@@ -246,15 +246,25 @@ export interface CommandInfo {
   argumentHint: string | null
 }
 
-/** The skills and the commands, read again by code-arena as they are asked for (one added since is there). */
+/** The skills and the commands; mineInArena: a new one of the person's is made in Arena (signed in), else on this computer. */
+export interface SkillList {
+  skills: SkillInfo[]
+  commands: CommandInfo[]
+  mineInArena: boolean
+}
+
+/** The skills and the commands, read again by code-arena as they are asked for (one added since is there; Arena's at most every 30 s). */
 export const skillsQuery = {
   queryKey: ['code', 'skills'] as const,
-  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ skills: SkillInfo[]; commands: CommandInfo[] }>('/api/skills', { signal }),
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<SkillList>('/api/skills', { signal }),
   staleTime: 5_000,
   refetchOnWindowFocus: true,
 }
 
-/** A new skill from a few lines to fill in: the project's, or the person's for every project. */
+/** The skills read again with Arena's asked for at once (Refresh): one made on Arena's Skills page since is there. */
+export const refreshSkills = () => api<SkillList>('/api/skills?fresh=1')
+
+/** A new skill from a few lines to fill in: the project's, or the person's for every project (in Arena when signed in). */
 export const createSkill = (name: string, scope: 'project' | 'person') => api<SkillInfo>('/api/skills', { body: { name, scope } })
 
 /** VS Code's own copy of the file on this computer, to bring over. */

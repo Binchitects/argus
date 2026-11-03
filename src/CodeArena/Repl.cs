@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json.Nodes;
 
 namespace CodeArena;
 
@@ -50,6 +51,8 @@ internal sealed class Repl(Runtime rt)
         ("/index [rebuild|off|on]", "the code index, when on: its files, symbols and the files skipped as secrets; rebuild; off or on for this session"),
         ("/permissions [allow|deny|remove RULE]", "kept rules, e.g. run_shell(npm test*), edit_file, read_file(.env*)"),
         ("/sandbox", "what commands in the sandbox may do"),
+        ("/skills [new NAME [--mine]]", "the skills, by whose they are; new NAME makes one for the project, with --mine one of yours (in Arena when signed in)"),
+        ("/NAME [words]", "use a skill, or a command of yours or the project's, with your words"),
         ("/commands", "your own and the project's commands, sub-agents and skills"),
         ("/sync [all]", "where this session stands with its chat in Arena; all sends this folder's sessions Arena never had"),
         ("/exit", "leave (also Ctrl+D, or Ctrl+C twice)"),
@@ -195,8 +198,8 @@ internal sealed class Repl(Runtime rt)
                 await ShellAsync(input[1..].Trim(), ct);
                 continue;
             }
-            // A skill or command added or changed since the last line works now (/commands lists it too).
-            rt.ReloadExtensions();
+            // A skill or command added or changed since the last line works now, Arena's too (/skills lists it).
+            await rt.ReloadExtensionsAsync(false, ct);
             if (input.StartsWith('/'))
             {
                 if (!await CommandAsync(input, ct))
@@ -879,6 +882,9 @@ internal sealed class Repl(Runtime rt)
             case "/commands":
                 ExtensionsCommand();
                 break;
+            case "/skills":
+                await SkillsCommandAsync(arg, ct);
+                break;
             case "/sync" when arg.Equals("all", StringComparison.OrdinalIgnoreCase):
                 Ui.StartSpinner("Sending this folder's sessions to Arena");
                 List<string> failed;
@@ -926,7 +932,7 @@ internal sealed class Repl(Runtime rt)
                     await TurnAsync(prompt, ct);
                     break;
                 }
-                Ui.Error($"There is no command {name}: /help lists them (and /commands your own).");
+                Ui.Error($"There is no command {name}: /help lists them, /skills the skills and /commands your own.");
                 break;
         }
         return true;
@@ -1145,6 +1151,62 @@ internal sealed class Repl(Runtime rt)
         Ui.Line(Ui.Bold("Allowed without asking") + (rules.Allow.Count == 0 ? Ui.Dim("  (none)") : "\n" + string.Join('\n', rules.Allow.Select(r => "  " + r))));
         Ui.Line(Ui.Bold("Never") + (rules.Deny.Count + rules.ProjectDeny.Count == 0 ? Ui.Dim("  (none)") : "\n" + string.Join('\n', rules.Deny.Select(r => "  " + r).Concat(rules.ProjectDeny.Select(r => "  " + r + Ui.Dim("  (the project's .arena/settings.json)"))))));
         Ui.Info("/permissions allow RULE, deny RULE or remove RULE: kept in config.json. A command Laya flags still asks.");
+    }
+
+    /// <summary>The groups /skills lists, as the IDE's Skills view has them.</summary>
+    private static readonly (string Source, string Title)[] SkillGroups = [("project", "This project"), ("person", "Yours"), ("arena", "From Arena"), ("builtin", "Built in")];
+
+    /// <summary>
+    /// /skills: every skill the agent reads, by whose it is, as the IDE's Skills view groups them (Arena's asked for at once);
+    /// /skills new NAME makes one for the project, /skills new NAME --mine one of yours (in Arena when signed in to it, else
+    /// in the config folder), from a few lines to fill in.
+    /// </summary>
+    private async Task SkillsCommandAsync(string arg, CancellationToken ct)
+    {
+        var words = arg.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words is ["new", ..])
+        {
+            var mine = words.Contains("--mine");
+            var name = string.Join(' ', words.Skip(1).Where(w => w != "--mine"));
+            try
+            {
+                await IdeSkills.CreateAsync(rt, new JsonObject { ["name"] = name, ["scope"] = mine ? "person" : "project" }, ct);
+            }
+            catch (IdeError e)
+            {
+                Ui.Error(e.Message);
+                return;
+            }
+            Ui.Line(!mine ? $"Made /{name}: write its steps in {rt.Workspace.Show(Path.Combine(rt.ProjectRoot, ".arena", "skills", name, "SKILL.md"))} (commit it to share it with the team)."
+                : rt.MineInArena ? $"/{name} is one of your skills in Arena now (the web chat and Code Arena everywhere use it): write its steps on Arena's Skills page ({rt.Config.Url!.TrimEnd('/')}/skills) or in the IDE's Skills view."
+                : $"Made /{name}, yours in every project on this computer: write its steps in {Path.Combine(rt.Env.Paths.ConfigDir, "skills", name, "SKILL.md")}.");
+            return;
+        }
+        if (words.Length > 0)
+        {
+            Ui.Warn("/skills lists them; /skills new NAME makes one for the project, /skills new NAME --mine one of yours.");
+            return;
+        }
+        var skills = (await rt.ReloadExtensionsAsync(true, ct)).Skills;
+        if (skills.Count == 0)
+        {
+            Ui.Info("No skills yet: /skills new NAME makes one (or .arena/skills/NAME/SKILL.md by hand); the agent keeps one it worked out with skill_save.");
+            return;
+        }
+        foreach (var (source, title) in SkillGroups)
+        {
+            var these = skills.Where(s => IdeSkills.Whose(rt, s) == source).ToList();
+            if (these.Count == 0)
+            {
+                continue;
+            }
+            Ui.Line(Ui.Bold(title));
+            foreach (var s in these)
+            {
+                Ui.Line($"  /{s.Name}  {Ui.Dim(s.Description)}");
+            }
+        }
+        Ui.Info("/NAME and your words uses one (the model also loads one when a task needs it); /skills new NAME makes one.");
     }
 
     private void ExtensionsCommand()

@@ -80,6 +80,7 @@ internal sealed partial class WebRun : IAsyncDisposable
             Window = window ?? (_ => null),
             WindowHandOff = TimeSpan.FromMilliseconds(500),
             BrowserWait = browserWait,
+            ArenaSkillsEvery = h.ArenaSkillsEvery ?? CliEnv.ArenaSkillsAgain,
         };
         var exit = Task.Run(() => Cli.RunAsync([.. bare ? Array.Empty<string>() : ["web"], .. browse is null && window is null ? ["--no-open"] : Array.Empty<string>(), .. args], env));
         var run = new WebRun(env, output, error, exit);

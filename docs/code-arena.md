@@ -265,8 +265,9 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/permissions [allow\|deny\|remove RULE]` | kept rules (below) |
 | `/sandbox` | what commands in the sandbox may do |
 | `/commands` | your own and the project's commands, sub-agents and skills |
+| `/skills [new NAME [--mine]]` | the skills, by whose they are (this project, yours, from Arena, built in; Arena's asked for at once); `new NAME` makes one for the project (`.arena/skills/NAME/SKILL.md`, its path said), `--mine` one of yours (in Arena when signed in, else in the config folder) |
 | `!command` | run a command yourself (in the sandbox); its output goes with your next message |
-| `/NAME [args]` | a command of your own or the project's (below) |
+| `/NAME [args]` | a skill, or a command of your own or the project's (below), with your words; in `-p` too |
 | `/exit` | leave (also Ctrl+D) |
 
 ## The IDE
@@ -1401,8 +1402,8 @@ status (403 `outside` for a path outside the folder).
 | `POST /api/servers/retry` `{name}` | tries that MCP server again now (every one not connected without `name`); the state |
 | `POST /api/jobs/stop` `{id}` | stops a command run with no time limit; 404 for no such job |
 | `POST /api/replace` `{q, case, word, regex, include, exclude, replacement, paths}` | replaces what that search finds (in `paths` only, when given): `{files: [{path, replaced, version}], count, truncated}` |
-| `GET /api/skills` | `{skills: [{name, description, source, path}], commands: [{name, description, argumentHint}]}`, read again first; `source`: project, person, arena or builtin; `path`: where the editor opens it (the project's in the folder, the person's as `user:skills/NAME/SKILL.md`; null: not edited here) |
-| `POST /api/skills` `{name, scope}` | a new skill's SKILL.md to fill in, the project's (`.arena/skills`) or the person's (`scope` person): the skill as listed; 409 `exists` |
+| `GET /api/skills` (`?fresh=1`: Arena asked at once) | `{skills: [{name, description, source, path}], commands: [{name, description, argumentHint}], mineInArena}`, read again first (Arena's at most every 30 s); `source`: project, person (on this computer, or theirs in Arena), arena or builtin; `path`: where the editor opens it (the project's in the folder, or by its whole path when the folder is inside the repository; the person's as `user:skills/NAME/SKILL.md`; null: not edited here); `mineInArena`: a new one of the person's is made in Arena |
+| `POST /api/skills` `{name, scope}` | a new skill's SKILL.md to fill in, the project's (`.arena/skills` at the repository's root) or the person's (`scope` person: one of theirs in Arena when signed in, else in the config folder): the skill as listed; 409 `exists` (or Arena's refusal, as it words it) |
 | `GET /api/git/status` | `{repository, branch, ahead, behind, files: [{path, staged, changed, from, conflict}]}` (`staged`, `changed`: git's letters M, A, D, R, U, `?` untracked; null: none; `conflict`: true for a file left unmerged) |
 | `POST /api/git/stage`, `/api/git/unstage`, `/api/git/discard` `{paths}` | the status after; 409 `git` with what git said |
 | `POST /api/git/commit` `{message, all}` | commits what is staged (all of it first, with `all`): `{hash, status}`; 409 `nothing` when nothing is staged |
@@ -1456,8 +1457,8 @@ status (403 `outside` for a path outside the folder).
 | `POST /api/preferences` `{key: value}` | keeps these keys, merged over the others (`null` forgets one); 413 `too_large` past 16 KB |
 | `GET /api/formatters?path=FILE&language=ID` | the file's formatters, in order: `{language, formatters: [{id, name, version, source, available, reason, hint, range, path}], default}`. `language` is Monaco's id, from the file's name or as sent. `source` is `project` (in the folder: runs only once it is trusted), `global` or `config`. A formatter that cannot run has `reason` `trust`, `missing` or `node` (Prettier without node on PATH), and `hint` (what to install, or "trust this folder"). `path` is the program, or Prettier's script, that would run. `default` is the first available one (null: none). A global formatter is listed only while the folder's own with the same `id` cannot run. 400 for a folder, 403 `outside` |
 | `POST /api/format` `{path, text, formatter, range: {start, end}, options: {tabSize, insertSpaces, prettier}, language}` | the text through the formatter `formatter` (an `id` from the list; the default without it): `{text, formatter, source}` (`formatter` the `id` that ran, `source` where it came from), always the whole text, even for a range (`start` and `end` are UTF-16 offsets). Errors: 422 `format_failed` `{error, line, column}` (the first 20 lines the tool said, colours removed; `line` and `column` when it named them); 422 `no_range` for a whole-file formatter; 504 `timeout` (10 s, 30 s for dotnet format, or a config entry's `timeout`); 413 `too_large` past 5 MB; 403 `not_trusted` for the folder's own formatter before the folder is trusted; 404 `no_formatter` (none for the language, not installed, or no such `id`); 400 for a bad range or a missing `text`. `options.prettier` takes VS Code's `prettier.*` settings (`printWidth`, `tabWidth`, `useTabs`, `semi`, `singleQuote`, `jsxSingleQuote`, `trailingComma`, `bracketSpacing`, `bracketSameLine`, `arrowParens`, `endOfLine`, `proseWrap`, `quoteProps`, `singleAttributePerLine`, `htmlWhitespaceSensitivity`, `embeddedLanguageFormatting`, `vueIndentScriptAndStyle`) as flags; a project's config file wins over them |
-| `GET /api/user-files?name=settings.json` (or `keybindings.json`, or one of their skills: `skills/NAME/SKILL.md`) | the person's own file in the config folder: `{name, text, version, exists}` (`text` empty, `version` `none` before the first save); 400 for any other name |
-| `POST /api/user-files` `{name, text, version}` | saves it as sent (comments kept; readable by the person alone); 409 `changed` when it changed since `version`, 413 `too_large` past 1 MB |
+| `GET /api/user-files?name=settings.json` (or `keybindings.json`, or one of their skills: `skills/NAME/SKILL.md`) | the person's own file in the config folder: `{name, text, version, exists}` (`text` empty, `version` `none` before the first save); one of their skills in Arena (none of that name in the config folder) as Arena keeps it; 400 for any other name |
+| `POST /api/user-files` `{name, text, version}` | saves it as sent (comments kept; readable by the person alone); one of their skills in Arena is saved to Arena (its `description`, `title`, `parameters` and steps; its `name` stays: 400 for another, or for no steps); 409 `changed` when it changed since `version` (in Arena too), 413 `too_large` past 1 MB |
 | `GET /api/user-files/vscode?name=…` | VS Code's own copy on this computer (Code, then Insiders, then VSCodium): `{name, text, from}`; 404 when there is none |
 | `GET /api/processes` | the person's own processes, newest first, Code Arena itself left out: `[{pid, name, command}]` (`command` null where the system does not say; 2,000 at most), for `${command:pickProcess}` |
 | `GET /api/extensions` | the extensions kept: `[{id, name, displayName, version, publisher, description, icon, enabled, source, contributes: {themes: [{label, uiTheme, path, id}], iconThemes: [{id, label, path}], snippets: [{language, path}], languages: [{id, extensions, filenames, filenamePatterns, aliases, mimetypes, firstLine, configuration}], grammars: [{language, scopeName, path}], keybindings, configurationDefaults}, unused}]` (`id`: `publisher.name`, lower case; `source`: `vsix` or `vscode`; `keybindings`: how many; `unused`: what it has that is not used, and why) |
@@ -2215,22 +2216,38 @@ message, without starting Code Arena again.
   it, and the files beside it one by one. **/NAME** and your words uses one
   yourself, as the web chat's / does: the model reads its instructions with
   your words (`$ARGUMENTS` in them is your words), while the chat shows what
-  you typed. A command of the same name wins over a skill.
+  you typed; in the terminal, the IDE and `code-arena -p "/NAME words"` alike.
+  A command of the same name wins over a skill. `/skills` lists them in the
+  terminal, by whose they are, and `/skills new NAME` makes one.
 - **The IDE's Skills view** (the wand in the activity bar) lists every skill
   the agent reads, by whose it is: **This project** (`.arena/skills`, and
-  `.claude/` or `.qwen/`), **Yours** (the config folder's `skills/`, for every
-  project), **From Arena** and **Built in**; each group folds. One of the
-  project's or yours opens in the editor (yours as a user file, as
-  `settings.json` is); any other goes into the chat's box as `/NAME`, and so
-  does **Use in the chat** on any. **New Skill** makes one for this project
-  or for you, from a few lines to fill in, and opens it. In the chat, **/** at
-  the start of the box lists `/compact`, `/clear`, your commands and the
-  skills; ↑ and ↓ choose, Enter or Tab puts one in the box.
+  `.claude/` or `.qwen/`), **Yours** (your skills in Arena when signed in to
+  it, and the config folder's `skills/`, for every project), **From Arena**
+  (your groups', the company's, the plugins') and **Built in**; each group
+  folds. One of the project's or yours opens in the editor (yours as a user
+  file, as `settings.json` is; one in Arena is saved to Arena, unless it
+  changed there since it was opened); any other goes into the chat's box as
+  `/NAME`, and so does **Use in the chat** on any. With the IDE opened on a
+  folder inside the repository (a package of a monorepo), the project's
+  skills are at the repository's root: they open by their whole path, and
+  only their `SKILL.md`. **New Skill** makes one for this project (at the
+  repository's root) or for you, from a few lines to fill in, and opens it:
+  yours is one of your skills in Arena when signed in to it (on its Skills
+  page, in the web chat, Code Studio and Code Arena on any machine), else in
+  the config folder, on this computer only. **Refresh** asks Arena at once
+  for its skills. In the chat, **/** at the start of the box lists
+  `/compact`, `/clear`, your commands and the skills; ↑ and ↓ choose, Tab
+  (or Enter) puts one in the box; Enter on a name typed whole sends it as it
+  is (`/clear` runs at once).
 - **Skills from Arena**: the skills made in Arena that you may use (yours,
   your groups', the company's: the Skills page) and those the plugins you may
   use bring (Admin → Plugins), kept in the config folder's `plugin-skills/` and
   written anew at each start when Arena answers (kept as they were when it
-  does not). One made in Arena wins over a plugin's of the same name; the
+  does not), then asked for again while Code Arena runs: at a turn and as the
+  IDE lists them, at most every 30 seconds, and at once with the Skills
+  view's **Refresh** or `/skills`. So one made, changed or turned off on
+  Arena's Skills page reaches a running terminal or IDE without starting it
+  again. One made in Arena wins over a plugin's of the same name; the
   project's and your own skills of the same name win over them all.
 - **Arena's own skills**: the skills people use most come built into Code
   Arena, the chat's own too (`code-review`, `write-tests`, `debug`,
@@ -2238,7 +2255,7 @@ message, without starting Code Arena again.
   rest; see [chat.md](chat.md#skills-and-slash-commands)): written to the
   config folder's `builtin-skills/` at each start and read last, so the
   project's, your own and the plugins' of the same name win. One an Arena
-  admin turned off is left out. A loaded skill names its parameters
+  admin turned off is left out (from the next time Arena is asked, as above). A loaded skill names its parameters
   (`‹what›`) and says what each is, for the model to take from the request.
 
 ## Kept rules and the sandbox

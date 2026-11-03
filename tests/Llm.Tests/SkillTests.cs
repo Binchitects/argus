@@ -92,6 +92,61 @@ public sealed class SkillTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Code_Arena_makes_and_changes_one_of_its_persons_own_skills_with_their_key()
+    {
+        await using var f = NewApp();
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        async Task<(TestBrowser Browser, HttpClient CodeArena, Guid Id)> Person()
+        {
+            var name = "q" + Guid.NewGuid().ToString("N")[..10];
+            var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
+            var arena = f.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://{AppFixture.Domain}"), HandleCookies = false });
+            arena.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", made.GetProperty("apiKey").GetString());
+            arena.DefaultRequestHeaders.Add("X-Requested-With", "code-arena");
+            return (await new TestBrowser(f).SignedInAsync(name, made.GetProperty("password").GetString()!), arena, made.GetProperty("id").GetGuid());
+        }
+        var (a, aArena, _) = await Person();
+        var (_, bArena, bId) = await Person();
+
+        // Made from the IDE's New Skill: theirs, used at once (not waiting as a learned one does), on the Skills page and in Code Arena.
+        var made = await aArena.PostAsJsonAsync(new Uri("/api/code-arena/skills", UriKind.Relative), new { name = "ide-mine", description = "Mine", instructions = "Do it for $ARGUMENTS." });
+        await StatusAssert.Is(HttpStatusCode.OK, made);
+        var answer = JsonDocument.Parse(await made.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal(("ide-mine", true), (answer.GetProperty("name").GetString(), answer.GetProperty("mine").GetBoolean()));
+        Assert.EndsWith("---\nDo it for $ARGUMENTS.\n", answer.GetProperty("files").GetProperty("SKILL.md").GetString(), StringComparison.Ordinal);
+        var mine = Assert.Single(await SkillsAsync(a));
+        Assert.Equal(("ide-mine", "ide mine", "mine", false), (mine.GetProperty("name").GetString(), mine.GetProperty("title").GetString(), mine.GetProperty("source").GetString(), mine.GetProperty("proposed").GetBoolean()));
+        async Task<JsonElement> InCodeArena(HttpClient c) =>
+            JsonDocument.Parse(await c.GetStringAsync(new Uri("/api/code-arena/skills", UriKind.Relative))).RootElement.GetProperty("skills").EnumerateArray().Single(s => s.GetProperty("name").GetString() == "ide-mine");
+        Assert.True((await InCodeArena(aArena)).GetProperty("mine").GetBoolean());
+
+        // Saved from the IDE: its description, instructions and parameters as its SKILL.md has them now.
+        var changed = await aArena.PutAsJsonAsync(new Uri("/api/code-arena/skills/ide-mine", UriKind.Relative), new
+        {
+            description = "Mine, better", instructions = "Do {{what}} for $ARGUMENTS.", parameters = new object[] { new { name = "what", description = "What to do" } },
+        });
+        await StatusAssert.Is(HttpStatusCode.OK, changed);
+        mine = Assert.Single(await SkillsAsync(a));
+        Assert.Equal(("Mine, better", "Do {{what}} for $ARGUMENTS."), (mine.GetProperty("description").GetString(), mine.GetProperty("instructions").GetString()));
+        Assert.Equal("what", Assert.Single(mine.GetProperty("parameters").EnumerateArray()).GetProperty("name").GetString());
+        Assert.Contains("  - { name: what, description: \"What to do\", required: true }\n", (await InCodeArena(aArena)).GetProperty("files").GetProperty("SKILL.md").GetString(), StringComparison.Ordinal);
+
+        // Checked as the Skills page checks it; only the person's own is changed, and not by anyone else's key.
+        await StatusAssert.Is(HttpStatusCode.Conflict, await aArena.PostAsJsonAsync(new Uri("/api/code-arena/skills", UriKind.Relative), new { name = "ide-mine", instructions = "Again." }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await aArena.PostAsJsonAsync(new Uri("/api/code-arena/skills", UriKind.Relative), new { name = "Not a name", instructions = "x" }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await aArena.PostAsJsonAsync(new Uri("/api/code-arena/skills", UriKind.Relative), new { name = "empty", instructions = "" }));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await aArena.PutAsJsonAsync(new Uri("/api/code-arena/skills/ide-mine", UriKind.Relative), new { instructions = "" }));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await bArena.PutAsJsonAsync(new Uri("/api/code-arena/skills/ide-mine", UriKind.Relative), new { instructions = "Theirs now." }));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await aArena.PutAsJsonAsync(new Uri("/api/code-arena/skills/nothing", UriKind.Relative), new { instructions = "x" }));
+        Assert.Equal("Do {{what}} for $ARGUMENTS.", Assert.Single(await SkillsAsync(a)).GetProperty("instructions").GetString());
+
+        // Without the permission to make skills (Admin → Access), none is made.
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/access/rules",
+            new { effect = "Deny", subjectKind = "Person", subjectId = bId, resourceKind = "feature", resource = "feature.skills" }));
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await bArena.PostAsJsonAsync(new Uri("/api/code-arena/skills", UriKind.Relative), new { name = "theirs", instructions = "Do it." }));
+    }
+
+    [Fact]
     public async Task A_skill_is_its_owners_shared_with_their_groups_or_the_companys_and_only_its_owner_changes_it()
     {
         await using var f = NewApp();

@@ -579,6 +579,8 @@ public sealed class Harness : IDisposable
     internal IKeyboard? Keys { get; set; }
     /// <summary>The folder it runs in; null: Work.</summary>
     public string? Cwd { get; set; }
+    /// <summary>How often a running Code Arena asks Arena for its skills again; null: as it does (CliEnv's).</summary>
+    public TimeSpan? ArenaSkillsEvery { get; set; }
 
     /// <summary>Runs code-arena with these arguments and typed input; a terminal on stdin unless said otherwise.</summary>
     public async Task<int> Run(string input, params string[] args) => await Run(input, terminal: true, args);
@@ -608,6 +610,7 @@ public sealed class Harness : IDisposable
             InTerminal = terminal,
             ReadSecret = Secret is null ? null : _ => Secret,
             Keys = Keys,
+            ArenaSkillsEvery = ArenaSkillsEvery ?? CliEnv.ArenaSkillsAgain,
         };
         var code = await Cli.RunAsync(args, env);
         Out = output.ToString();
@@ -757,6 +760,20 @@ public sealed class FakeChats
 
     /// <summary>The skills Code Arena kept as the person's (POST /api/code-arena/skills/learn).</summary>
     public List<JsonObject> SkillsLearned { get; } = [];
+
+    /// <summary>
+    /// What Code Arena sent to make one of the person's own skills (POST /api/code-arena/skills) and to change one (PUT
+    /// /api/code-arena/skills/NAME): each is in <see cref="ArenaSkills"/> from then on, theirs (mine), its SKILL.md as Arena writes it.
+    /// </summary>
+    public List<JsonObject> SkillsMade { get; } = [];
+    public List<JsonObject> SkillsChanged { get; } = [];
+
+    /// <summary>One of the person's own skills, as /api/code-arena/skills brings it.</summary>
+    public static JsonObject OwnSkill(string name, string description, string instructions) => new()
+    {
+        ["name"] = name, ["description"] = description, ["version"] = "1", ["mine"] = true,
+        ["files"] = new JsonObject { ["SKILL.md"] = $"---\nname: {name}\ntitle: \"{name.Replace('-', ' ')}\"\ndescription: \"{description}\"\n---\n{instructions}\n" },
+    };
 
     /// <summary>What Code Arena asked of Arena's past chats: search or open, and its body.</summary>
     public List<(string What, JsonObject Body)> HistoryAsked { get; } = [];
@@ -1141,6 +1158,30 @@ public sealed class FakeChats
         if (parts is ["memories", ..] && Memory)
         {
             await MemoryAsync(ctx, parts[1..], method, body);
+            return;
+        }
+        if (parts is ["skills"] && method == "POST" || parts is ["skills", not "learn"] && method == "PUT")
+        {
+            // One of the person's own, made or changed from Code Arena: theirs in Arena from then on (409: they have one of
+            // that name; 404: they have none to change).
+            var json = (JsonNode.Parse(body) as JsonObject)!;
+            var making = parts.Length == 1;
+            var name = making ? json["name"]?.GetValue<string>() ?? "" : parts[1];
+            JsonObject? skill = null;
+            lock (_gate)
+            {
+                (making ? SkillsMade : SkillsChanged).Add(json);
+                var had = (ArenaSkills ?? []).OfType<JsonObject>().FirstOrDefault(s => s["name"]?.GetValue<string>() == name && s["mine"]?.GetValue<bool>() == true);
+                if (making == (had is null))
+                {
+                    skill = OwnSkill(name, json["description"]?.GetValue<string>() ?? "", json["instructions"]?.GetValue<string>() ?? "");
+                    // A new list: GET reads the one it has.
+                    ArenaSkills = [.. (ArenaSkills ?? []).OfType<JsonObject>().Where(s => s != had).Select(s => s.DeepClone()), skill.DeepClone()];
+                }
+            }
+            ctx.Response.StatusCode = skill is not null ? 200 : making ? 409 : 404;
+            ctx.Response.ContentType = "application/json";
+            await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes((skill ?? new JsonObject { ["status"] = "name", ["error"] = making ? $"You have a skill /{name} already." : $"You have no skill /{name}." }).ToJsonString()));
             return;
         }
         if (parts is ["skills", "learn"] && method == "POST")
