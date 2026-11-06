@@ -15,6 +15,82 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v7.8.0 (2026-11-06)
+
+The full window for each person, a Code Arena that keeps up in long
+sessions, and a GitLab on the company's own CA.
+
+### :rocket: Epics and highlights
+
+- **The whole context for each person.** A model's context is now per person
+  on every engine, with **Context per person** and **People at once** in Edit
+  and Add a model: 15 people at 262,144 tokens each get 262,144 each, not a
+  share of it (llama.cpp's cache is the context times the people). The
+  advisors say how many people fit at the full window on the GPUs, at this
+  cache type and a smaller one, and refuse a cache that cannot fit. Existing
+  llama.cpp models keep what each person had.
+- **Tokens a second, right.** The dashboards show **Stack throughput** (every
+  engine added) and **Decode speed a request** on llama.cpp, vLLM and SGLang
+  alike; the old panel counted llama.cpp's decode steps, one answer's speed.
+  New panels by model and its GPUs, and each person's output tokens a second.
+- **Code Arena keeps up.** It compacts before the window is full and keeps the
+  question and the latest results, learns an engine's real window from a
+  refusal, opens a long session with its last turns (a 500-message session
+  sends a quarter as much), applies Arena's settings, models, tools and
+  skills within seconds without a restart, and **Skip thinking** (the IDE's
+  button, Tab in the terminal) makes the model answer at once.
+- **A GitLab on the company's CA.** `GITLAB_CA_FILE` at install, the chart's
+  `gitlab.caCert`, or Settings → Argus (GitLab) → GitLab's CA: the app, Argus
+  and every workspace (git, curl, Python, pip, .NET, Node.js) trust it.
+
+### :sparkles: New features & Enhancements
+
+- **The wiki finds code.** A name with its scope (`MyLib::TestFunc`,
+  `a.b.c`), in any case or by its words, then files, then the words ranked;
+  pages of 20 up to 2,000 results, with filters by kind, repository,
+  language, branch and path. Results near in meaning only beside a short
+  answer.
+- **Short rows and cards.** Admin's repository rows and model cards are one or
+  two lines, with their detail in a dialog.
+- **What a person may not use is hidden**: pages, chat buttons, New room, New
+  assistant, New skill and Publish as app go when their permission is missing.
+- **Safeguard blocks explained.** A block names the rule, the finding (its
+  line, a secret cut to two characters) and where it was: the message, a
+  quote, a file, a tool's call or result, or which message of an API request.
+- **Right to left**, block by block and line by line, in both chats.
+- **Code Arena in older Edge and Chrome** (109 on), saying so in a browser too
+  old; no console window when started on its own; `code-arena.log` beside the
+  program.
+
+- **Code Arena's tools, quick and whole.** grep on a pattern that took 300 s
+  over 300 files takes 9 ms, and reads `.gitignore` everywhere; a large file reads as its
+  outline and first lines, then a range or a `symbol`; `run_shell` keeps the
+  whole output and names the error lines it cut; the Python tool keeps its
+  interpreter between calls, in the project's venv, with plots. Argus Arena
+  gives a long attachment as its start and outline and reads a section by
+  name.
+- **Compliance from the first day.** A new install meets 14 checks, leaves
+  none unmet, and each check still in part says the company's step, with one
+  click where one does it; the installer sets the daily backup; policy
+  templates, the personal-data rules and a year's chat retention are on by
+  default. Network access lists have their control (NET-02).
+- **Code Arena's commits are yours**, with Code Arena as co-author
+  (`Co-Authored-By: Code Arena <code-arena@your-arena>`), as Claude Code signs
+  its own: a turn's commit and a commit the model runs.
+
+### :bug: Bugs fixed
+
+- Compare is never forced on a person: it exists only with the compare
+  permission and while two models can answer.
+- Esc lets a chosen skill go, in the web chat and Code Arena.
+- Names in code (`db_password`, `API_KEY`, `Faker::Internet.password`) are no
+  longer found as passwords.
+- Argus counts repositories, not branches (127, not 479).
+- The wiki's code search no longer fails on `::` or dots.
+- Workspace terminals have a user name; an engine that stops at start is said
+  at once.
+- No empty space under Code Arena's turns after open diffs.
+
 ## v7.7.2 (2026-11-06)
 
 A hotfix: the load spreads over every GPU, and a chat goes back to any of
