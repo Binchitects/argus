@@ -100,7 +100,7 @@ People enrol an authenticator app and get recovery codes; an admin can reset a l
 
 ### IAM-04: Joiners and leavers follow the company's directory
 
-People come from the company's directory (LDAP or Active Directory), OIDC or SAML with their groups and role; SCIM creates, changes and deactivates them, and a person who leaves is disabled with their keys stopped at once.
+People come from the company's directory (LDAP or Active Directory), OIDC or SAML with their groups and role; SCIM creates, changes and deactivates them, and a person who leaves is disabled with their keys stopped at once. A joiner starts in the default groups an admin chose (Admin → Access → Groups), whichever way they first sign in, and only then; each join is in the audit log and each change of the defaults in the access history.
 
 **Serves**
 
@@ -114,7 +114,7 @@ People come from the company's directory (LDAP or Active Directory), OIDC or SAM
 - [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): AC-2 Account Management; AC-2(1) Automated System Account Management; PS-4 Personnel Termination; PS-5 Personnel Transfer
 - [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.01.01 Account Management; 03.09.02 Personnel Termination and Transfer
 
-**Documented in** [authentication.md#the-company-directory-ldap--active-directory](../authentication.md#the-company-directory-ldap--active-directory), [authentication.md#scim-provisioning](../authentication.md#scim-provisioning), [authentication.md#company-sign-in-by-saml-20](../authentication.md#company-sign-in-by-saml-20)
+**Documented in** [authentication.md#the-company-directory-ldap--active-directory](../authentication.md#the-company-directory-ldap--active-directory), [authentication.md#scim-provisioning](../authentication.md#scim-provisioning), [authentication.md#default-groups-for-new-people](../authentication.md#default-groups-for-new-people), [authentication.md#company-sign-in-by-saml-20](../authentication.md#company-sign-in-by-saml-20)
 
 **Proved by**
 
@@ -123,6 +123,7 @@ People come from the company's directory (LDAP or Active Directory), OIDC or SAM
 - `Llm.Tests/SamlSignInTests.Saml_sign_in_creates_the_person_with_their_groups_their_role_and_a_key`
 - `Llm.Tests/CompanySignInTests.Company_sign_in_creates_the_person_with_their_groups_their_role_and_a_key`
 - `Llm.Tests/LdapTests.The_sync_disables_people_who_leave_and_restores_them_when_they_return`
+- `Llm.Tests/DefaultGroupsTests.New_people_join_the_default_groups_however_they_first_sign_in_and_only_then`
 
 **The company's part** The joiner, mover and leaver process in the directory; local accounts kept to the few who need them.
 

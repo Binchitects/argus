@@ -120,6 +120,22 @@ The username must equal the person's GitLab username: Argus uses it to answer
 with their own repository access, in the chat and for coding agents with their
 API key.
 
+### Default groups for new people
+
+**Admin → Access → Groups** marks the app groups new people join: tick
+**New people join** on one or several and **Save**. A person joins them once,
+when their account is first made, whichever way it is made: an admin adds
+them, they first sign in from the directory (LDAP or Active Directory) or
+with company sign-in (OIDC or SAML), or SCIM creates them. They join before
+their API key is made, so the key carries the models their groups may use.
+Someone taken out of a default group stays out: signing in again does not
+put them back. A directory or SCIM group cannot be one (the directory or the
+identity provider decides its members); give its people a role through the
+group instead. Each join is in the audit log (`group.add_member`, "a default
+group for new people"), and each change of the defaults in Access →
+**History** (`defaults`). It needs `access.defaults`, a part of
+`access.manage`.
+
 ---
 
 ## The company directory (LDAP / Active Directory)

@@ -137,7 +137,10 @@ controls:
       People come from the company's directory (LDAP or Active Directory),
       OIDC or SAML with their groups and role; SCIM creates, changes and
       deactivates them, and a person who leaves is disabled with their keys
-      stopped at once.
+      stopped at once. A joiner starts in the default groups an admin chose
+      (Admin → Access → Groups), whichever way they first sign in, and only
+      then; each join is in the audit log and each change of the defaults in
+      the access history.
     frameworks:
       iso27001: [A.5.16, A.5.18]
       soc2: [CC6.2, CC6.3]
@@ -151,6 +154,7 @@ controls:
     docs:
       - authentication.md#the-company-directory-ldap--active-directory
       - authentication.md#scim-provisioning
+      - authentication.md#default-groups-for-new-people
       - authentication.md#company-sign-in-by-saml-20
     tests:
       - Llm.Tests/ScimTests.Scim_needs_its_token_which_is_shown_once_stored_as_a_hash_and_replaced_at_once
@@ -158,6 +162,7 @@ controls:
       - Llm.Tests/SamlSignInTests.Saml_sign_in_creates_the_person_with_their_groups_their_role_and_a_key
       - Llm.Tests/CompanySignInTests.Company_sign_in_creates_the_person_with_their_groups_their_role_and_a_key
       - Llm.Tests/LdapTests.The_sync_disables_people_who_leave_and_restores_them_when_they_return
+      - Llm.Tests/DefaultGroupsTests.New_people_join_the_default_groups_however_they_first_sign_in_and_only_then
     operator: >-
       The joiner, mover and leaver process in the directory; local accounts
       kept to the few who need them.

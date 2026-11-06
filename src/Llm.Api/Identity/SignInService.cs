@@ -318,6 +318,7 @@ public sealed partial class SignInService(
             {
                 return (null, string.Join(" ", created.Errors.Select(e => e.Description)));
             }
+            await people.JoinDefaultGroupsAsync(user);
             if (admin)
             {
                 await access.SetOwnerAsync(PeopleService.DirectorySync, user, true);
