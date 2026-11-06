@@ -83,22 +83,25 @@ public sealed class OnDemandTools
     }
 
     /// <summary>The system prompt's part for the tools: the notes of the tools in use (and of what has no tools), and the list of those to load.</summary>
-    public string Notes()
+    public string Notes() => string.Join("\n\n", NoteParts().Select(n => n.Text));
+
+    /// <summary>The notes by tool (its id; null: the list of tools to load), in the order <see cref="Notes"/> joins them.</summary>
+    public List<(string? Tool, string Text)> NoteParts()
     {
         var used = _all.Where(f => IsLoaded(f.Name)).Select(f => f.Tool.Id).ToHashSet(StringComparer.Ordinal);
-        var parts = _instructions.Where(i => used.Contains(i.Tool) || _all.All(f => f.Tool.Id != i.Tool)).Select(i => i.Text).ToList();
+        var parts = _instructions.Where(i => used.Contains(i.Tool) || _all.All(f => f.Tool.Id != i.Tool)).Select(i => ((string?)i.Tool, i.Text)).ToList();
         var waiting = _all.Where(f => !IsLoaded(f.Name)).GroupBy(f => f.Tool.Id).ToList();
         if (waiting.Count > 0)
         {
-            parts.Add("Tools to load: call load_tools with a tool's name (in brackets) or its functions' names, then call them. Load only what the question needs.\n" +
+            parts.Add((null, "Tools to load: call load_tools with a tool's name (in brackets) or its functions' names, then call them. Load only what the question needs.\n" +
                 string.Join("\n", waiting.Select(g =>
                 {
                     var tool = g.First().Tool;
                     var about = tool.Description.Length <= 200 ? tool.Description : tool.Description[..200] + "…";
                     return $"- {tool.Title} [{tool.Id}]: {about} Functions: {string.Join(", ", g.Select(f => f.Name))}.";
-                })));
+                }))));
         }
-        return string.Join("\n\n", parts);
+        return parts;
     }
 
     private static JsonObject LoadFunction() => Schema.Function(Function,

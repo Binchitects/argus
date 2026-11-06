@@ -74,6 +74,9 @@ public sealed class FakeModel : HttpMessageHandler
     /// <summary>A real 1x1 PNG.</summary>
     public static readonly byte[] Png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==");
 
+    /// <summary>What a chat answer's usage says the request held (the engine's count, as FakeEngine's tokenizer counts it); null: 100.</summary>
+    public Func<JsonObject, int>? PromptTokens { get; set; }
+
     /// <summary>While set, every request times out as HttpClient's own timeout does (a TaskCanceledException that is no one's cancelling).</summary>
     public bool TimesOut { get; set; }
 
@@ -568,7 +571,7 @@ public sealed class FakeModel : HttpMessageHandler
                 Finish("stop"),
             ];
         }
-        chunks = chunks.Append(Usage(100, 40, written, timed: lastUser.Contains("[timed]", StringComparison.Ordinal)));
+        chunks = chunks.Append(Usage(PromptTokens?.Invoke(body) ?? 100, 40, written, timed: lastUser.Contains("[timed]", StringComparison.Ordinal)));
         // Asked for the whole answer at once (an API caller): one chat.completion, as the gateway sends it.
         if (body["stream"]?.GetValue<bool>() != true)
         {

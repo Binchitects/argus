@@ -119,6 +119,8 @@ public sealed class ChatMessage
     public string? ToolName { get; set; }
     /// <summary>Attachment ids (JSON array) whose text went with this user turn.</summary>
     public string? AttachmentsJson { get; set; }
+    /// <summary>A user turn's files the person left out (JSON array of attachment ids, among <see cref="AttachmentsJson"/>): not read by the model, still shown.</summary>
+    public string? LeftOutFilesJson { get; set; }
     /// <summary>
     /// What a message shows the person beyond what the model read, as JSON: a tool call's sub-agents' work (their thinking,
     /// tool calls and words); an answer on Auto, on its first message, who answered and why ("route").
@@ -126,6 +128,11 @@ public sealed class ChatMessage
     public string? DetailsJson { get; set; }
     /// <summary>Assistant: what filled the request it answered, in characters by kind (system, tools, files, your messages...), as JSON; scaled to its prompt tokens for the context gauge.</summary>
     public string? ContextJson { get; set; }
+    /// <summary>
+    /// Assistant, an answer's last round: what filled the request it answered, piece by piece in the model's tokens (each tool's
+    /// definition, each skill, file and message), with what could be freed, as JSON (ContextWindow); the context view reads it.
+    /// </summary>
+    public string? WindowJson { get; set; }
     /// <summary>Assistant: its thinking was cut short ("Answer now"), and it answered without more.</summary>
     public bool CutShort { get; set; }
     /// <summary>Pinned by the person: kept word for word through compactions (said after the summary that covers it).</summary>

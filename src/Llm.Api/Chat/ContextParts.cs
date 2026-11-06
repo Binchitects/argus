@@ -8,7 +8,10 @@ namespace Llm.Api.Chat;
 /// <param name="Memory">The memory note in the system message.</param>
 /// <param name="Recalled">The memories recalled for the question, said with it.</param>
 /// <param name="Biggest">The messages that take the most of the window, the biggest first.</param>
-public sealed record SystemParts(int Base, int ToolNotes, int Person, int Summary, int Files = 0, int Memory = 0, int Recalled = 0, IReadOnlyList<WindowItem>? Biggest = null);
+/// <param name="Sections">The system message's sections in order, by name: the context view's pieces of it (ContextWindow).</param>
+/// <param name="Turns">The message each of the request's messages after the system one is, in order.</param>
+public sealed record SystemParts(int Base, int ToolNotes, int Person, int Summary, int Files = 0, int Memory = 0, int Recalled = 0, IReadOnlyList<WindowItem>? Biggest = null,
+    IReadOnlyList<Llm.Core.Chat.WindowSection>? Sections = null, IReadOnlyList<Guid>? Turns = null);
 
 /// <summary>A message of the chat as the model reads it: its role, its tool (for a result), its length and its start.</summary>
 public sealed record WindowItem(Guid Id, string Role, string? Tool, long Chars, string Preview, bool Pinned);

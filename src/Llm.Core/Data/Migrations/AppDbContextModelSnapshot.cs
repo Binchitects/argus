@@ -983,6 +983,9 @@ namespace Llm.Core.Data.Migrations
                     b.Property<bool>("LeftOut")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("LeftOutFilesJson")
+                        .HasColumnType("text");
+
                     b.PrimitiveCollection<List<Guid>>("Mentions")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -1047,6 +1050,9 @@ namespace Llm.Core.Data.Migrations
                         .HasColumnType("character varying(200)");
 
                     b.Property<string>("TraceJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("WindowJson")
                         .HasColumnType("text");
 
                     b.HasKey("Id");

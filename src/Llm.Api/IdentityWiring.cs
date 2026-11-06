@@ -512,6 +512,8 @@ public static class IdentityWiring
         services.AddSingleton<Models.ExternalBackend>();
         services.AddSingleton<Models.EngineClient>();
         services.AddSingleton<Models.EngineState>();
+        // A model's own tokens, where its engine counts them: what fills the window (ContextWindow).
+        services.AddSingleton<Chat.ModelTokens>();
         services.AddSingleton<Models.ModelLibrary>();
         services.AddSingleton<Models.ModelDisk>();
         services.AddSingleton<Models.HardwareProbe>();
