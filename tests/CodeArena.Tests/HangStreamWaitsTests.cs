@@ -131,7 +131,7 @@ public sealed class HangStreamWaitsTests(ITestOutputHelper log) : IDisposable
         var queued = await web.PostAsync("/api/queue", new JsonObject { ["text"] = "second" });
         Assert.Equal(HttpStatusCode.Accepted, queued.StatusCode);
         var state = await web.GetJsonAsync("/api/state");
-        Assert.Equal(["second"], state["queued"]!.AsArray().Select(q => q!.GetValue<string>()));
+        Assert.Equal(["second"], state["queued"]!.AsArray().Select(q => q!["text"]!.GetValue<string>()));
 
         // Stop ends the wait, and the queued message runs.
         var stop = Stopwatch.StartNew();

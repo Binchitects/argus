@@ -492,7 +492,9 @@ controls:
       a secret cut to its first characters; words and prompt
       injection are read through their disguises and in eleven languages,
       commands that do damage are kept from agents' tools, and data sent out
-      through images and links is stopped.
+      through images and links is stopped. A message sent while an answer
+      runs is checked when it is queued and again when it is edited, before
+      the answer takes it in.
     frameworks:
       iso27001: [A.8.11, A.8.12]
       soc2: [C1.1, CC6.7]
@@ -515,6 +517,7 @@ controls:
       - Llm.Tests/SecretScanningTests.A_pasted_private_key_is_refused_in_the_chat_and_through_the_API_and_audited_by_its_kind_only
       - Llm.Tests/SecretScanningTests.A_name_in_code_is_not_a_password
       - Llm.Tests/SafeguardRulesTests.Every_block_names_its_rule_what_it_found_and_where_without_the_secret_itself
+      - Llm.Tests/QueuedMessagesTests.A_queued_message_is_edited_until_it_is_taken_in_and_one_with_files_waits_for_the_answer_to_end
     operator: Decide which data may reach which model, and which models are outside the company.
 
   - id: DAT-05

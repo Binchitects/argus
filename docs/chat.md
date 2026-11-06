@@ -66,17 +66,28 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     also use another model or thinking level, for that answer only.
   - **Shorter** and **Longer** (in the same menu) answer again at about half
     or twice the words of the answer on screen.
-  - **Queue.** A message sent while an answer runs waits its turn on the
-    server, shown above the box as queued. It survives a reload, another tab
-    and closing the page, and becomes the next question when the answer before
-    it ends (however it ended), on the branch on screen. **Cancel** takes one
-    out of line; **Send now** stops the answer (keeping what it has) and sends
-    it at once. Up to 10 wait per chat. Each is checked as a sent message is
-    (the safeguards), when it is queued. Messages still waiting when the app
-    restarts go once it is back. While [Code Arena](code-arena.md#chats-in-arena)
-    is answering in the chat, the page says so and every message is queued:
-    they go when its turn ends. Nothing on the page stops that turn, so there
-    is no **Send now**: **Put first** moves one to the front of the line.
+  - **Send while it works.** The box stays open while an answer runs
+    (thinking, tool calls), as in Claude Code: a message sent then does not
+    stop the answer. It waits on the server, shown pending at the end of the
+    thread, and the answer reads the first one in line at its next step
+    (after the tool calls it is running), as your message there, and goes on
+    with it. The thread shows it in that place, marked *Sent while it worked*.
+    One with files or a skill, or for deep research, waits for the answer to
+    end and becomes the next question (the model reads files with the
+    history); so does one sent while the model writes its last words. Until it
+    goes, a pending message can be edited (**Edit**: Enter saves, Esc leaves
+    it as it was), moved ahead (**Put first**) or taken out (**Cancel**).
+    **Stop** is apart: only it stops the answer, and the messages still
+    waiting then go in turn. They survive a reload, another tab and closing
+    the page, on the branch on screen. Up to 10 wait per chat. Each is checked
+    as a sent message is (the safeguards), when it is queued and when it is
+    edited. Messages still waiting when the app restarts go once it is back.
+    In a room, the answer takes in only the words for the model of the person
+    it answers; the others' wait for it to end. While
+    [Code Arena](code-arena.md#chats-in-arena) is answering in the chat, the
+    page says so and every message is queued: Code Arena's turn reads them at
+    its next step in the same way (one with files or a skill goes when its
+    turn ends).
 - **Reply to part of an answer.** Select words in a finished answer and a
   small toolbar comes beside them (above them; below them on a touch screen):
   - **Reply** (`Ctrl+Shift+'`, `⌘⇧'` on macOS) puts the part above the box as
@@ -2223,6 +2234,16 @@ archived ones. A chat's canvases are under
 with `/versions`, `/versions/{n}`, `POST /versions/{n}/restore` and
 `/export?format=md|docx|pdf|file`; they are kept in `canvases` and
 `canvas_versions`. Chats from before branches were each migrated to one branch.
+
+Messages sent while a chat answers go to `POST /api/chat/conversations/{id}/queue`
+(`queued_messages`); `PATCH .../queue/{queuedId}` `{content}` changes one's words
+(the sender's own, checked again; 404 `not_queued` once it went), `POST
+.../queue/{queuedId}/now` puts one first and `DELETE .../queue/{queuedId}`
+cancels it. Each returns `{queued, answering}`. The answer running takes the
+first in line in after its tool calls: its stream says `took_in` (`id`,
+`parentId`: the tool result it follows, `queuedId`, `content`, `quote`,
+`author`), the message is saved there with `details.takenIn`, and the next
+step's `assistant` follows it.
 
 A question can quote part of an earlier answer: `POST .../messages`,
 `.../compare` and `.../queue` take `quote` beside `content`, and every message

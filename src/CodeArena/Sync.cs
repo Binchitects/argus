@@ -518,6 +518,35 @@ internal sealed class ChatSync : IAsyncDisposable
         (await SendAsync(HttpMethod.Get, $"/api/code-arena/chats/{conversation}?limit=0", null, ct, TakeInLimit)) is { Status: HttpStatusCode.Conflict } read
         && read.Body?.Str("status") == "answering";
 
+    /// <summary>
+    /// What the person queued in the web chat while this turn works, taken out of its line for the turn's next step (Arena gives
+    /// the first ones that may go into an answer: no files or skill), in order. None while no turn holds the chat, or when Arena
+    /// is out of reach: they wait there for the turn to end.
+    /// </summary>
+    public async Task<IReadOnlyList<Meanwhile>> TakeQueuedAsync(CancellationToken ct)
+    {
+        string? conversation;
+        lock (_gate)
+        {
+            conversation = _turn ? _store.Read(d => d.Unlinked ? null : d.Conversation) : null;
+        }
+        if (conversation is null)
+        {
+            return [];
+        }
+        try
+        {
+            var (status, body) = await SendAsync(HttpMethod.Post, $"/api/code-arena/chats/{conversation}/queue/take", null, ct, TakeInLimit);
+            return status == HttpStatusCode.OK && body?["messages"] is JsonArray taken
+                ? [.. taken.OfType<JsonObject>().Where(m => m.Str("content") is { Length: > 0 }).Select(m => new Meanwhile($"web:{m.Str("id")}", m.Str("content")!, Quote: m.Str("quote")))]
+                : [];
+        }
+        catch (Exception e) when (e is HttpRequestException or TaskCanceledException or IOException or System.Text.Json.JsonException && !ct.IsCancellationRequested)
+        {
+            return [];
+        }
+    }
+
     /// <summary>The turn ended here: the chat is let go once Arena has its messages.</summary>
     public void EndTurn()
     {

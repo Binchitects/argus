@@ -116,10 +116,10 @@ export interface Message {
   /** "context": the answer failed because the chat (or the message) is too long for the model, even compacted. */
   errorKind?: string | null
   /**
-   * What a message shows beyond what the model read: a tool call's sub-agents' work ({ agents: [...] }), the canvas a call made or changed, an Auto answer's
+   * What a message shows beyond what the model read: a question sent while the answer worked and taken in at its next step ({ takenIn: true }); a tool call's sub-agents' work ({ agents: [...] }), the canvas a call made or changed, an Auto answer's
    * route, a memory to keep ({ memory }), the science lab's figures and a circuit's diagram ({ lab: { figures, diagram } }); { note: true }: Code Arena's own word to its model (the connection dropped), shown as a notice, not as the person's.
    */
-  details?: { agents?: AgentWork[]; canvas?: { id: string; title: string; version: number }; route?: AutoRoute; memory?: MemoryOffer; memories?: MemoryRead[]; note?: boolean; plan?: string; lab?: LabShow }  | null
+  details?: { takenIn?: boolean; agents?: AgentWork[]; canvas?: { id: string; title: string; version: number }; route?: AutoRoute; memory?: MemoryOffer; memories?: MemoryRead[]; note?: boolean; plan?: string; lab?: LabShow }  | null
   /** An answer: what filled the request it answered, in characters by kind (the context gauge scales it to its prompt tokens). */
   context?: MeasuredContext | null
   /** An answer whose thinking was cut short ("Answer now"). */
@@ -396,7 +396,7 @@ export interface Conversation extends ConversationSummary {
   labField?: string | null
 }
 
-/** A message waiting for the answer before it to end (kept on the server: a reload still shows it). */
+/** A message sent while the chat answers (kept on the server: a reload still shows it): the answer reads it at its next step, or it goes when the answer ends. */
 export interface QueuedMessage {
   id: string
   content: string
@@ -434,6 +434,8 @@ export interface InLine {
 
 export type ChatEvent =
   | { type: 'question'; id: string; parentId: string | null }
+  /** A queued message the answer took in at its next step (after its tool calls): the person's message there, and the answer goes on. */
+  | { type: 'took_in'; id: string; parentId: string | null; queuedId: string; content: string; quote?: string | null; author?: { id: string; name: string } | null }
   /** The chat's title: the first line, then (with a model for small steps) the one it wrote. */
   | { type: 'title'; title: string; model?: string }
   /** `side`: which answer of a comparison (its model is then "Model A" or "Model B"). */

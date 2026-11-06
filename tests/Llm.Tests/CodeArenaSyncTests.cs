@@ -574,6 +574,57 @@ public sealed class CodeArenaSyncTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Code_Arena_s_turn_takes_in_what_the_person_queued_on_the_web_at_its_next_step_and_sends_it_back_in_its_place()
+    {
+        await using var f = NewApp();
+        var (web, key) = await PersonAsync(f);
+        var arena = CodeArena(f, key);
+        var (_, otherKey) = await PersonAsync(f);
+        var id = await ChatAsync(arena, "take-1");
+        var ids = await SendAsync(arena, id, null, [User("q1"), Answer("a1")]);
+        // Code Arena's turn holds the chat: what the person sends on the web waits in line.
+        await StatusAssert.Is(HttpStatusCode.OK, await arena.PostAsync($"/api/code-arena/chats/{id}/turn", null));
+        await web.PostAsync($"/api/chat/conversations/{id}/queue", new { content = "Use the staging server", quote = "the server" });
+        await web.PostAsync($"/api/chat/conversations/{id}/queue", new { content = "And keep the logs" });
+        var file = (await web.JsonAsync(await web.Http.PostAsync(new Uri("/api/chat/attachments", UriKind.Relative), Text("notes.txt", "notes")))).GetProperty("id").GetGuid();
+        await web.PostAsync($"/api/chat/conversations/{id}/queue", new { content = "Read this", attachments = new[] { file } });
+        // Someone else's key: not their chat.
+        await StatusAssert.Is(HttpStatusCode.NotFound, await CodeArena(f, otherKey).PostAsync($"/api/code-arena/chats/{id}/queue/take", null));
+
+        var taken = await Json(await arena.PostAsync($"/api/code-arena/chats/{id}/queue/take", null));
+        // In order, the one with a file left for the turn's end.
+        Assert.Equal(["Use the staging server", "And keep the logs"], taken.GetProperty("messages").EnumerateArray().Select(m => m.GetProperty("content").GetString()));
+        Assert.Equal("the server", taken.GetProperty("messages")[0].GetProperty("quote").GetString());
+        Assert.Equal(["Read this"], (await web.JsonAsync(await web.GetAsync($"/api/chat/conversations/{id}"))).GetProperty("queued").EnumerateArray().Select(q => q.GetProperty("content").GetString()));
+        Assert.Empty((await Json(await arena.PostAsync($"/api/code-arena/chats/{id}/queue/take", null))).GetProperty("messages").EnumerateArray());
+
+        // Code Arena sends them back with its turn, in their place: the web shows them as taken in, after the step.
+        await SendAsync(arena, id, ids[1],
+        [
+            new { role = "assistant", content = "", toolCalls = new[] { new { id = "c1", type = "function", function = new { name = "list_dir", arguments = "{}" } } } },
+            new { role = "tool", content = "src/", toolCallId = "c1", name = "list_dir" },
+            new { role = "user", content = "Use the staging server", quote = "the server", kind = "meanwhile" },
+            Answer("On staging"),
+        ]);
+        var messages = (await web.JsonAsync(await web.GetAsync($"/api/chat/conversations/{id}"))).GetProperty("messages").EnumerateArray().ToList();
+        Assert.Equal(["user", "assistant", "assistant", "tool", "user", "assistant"], messages.Select(m => m.GetProperty("role").GetString()));
+        Assert.True(messages[4].GetProperty("details").GetProperty("takenIn").GetBoolean());
+
+        // Its turn over, nothing is taken any more: the one with a file goes as the next question.
+        await StatusAssert.Is(HttpStatusCode.NoContent, await arena.DeleteAsync($"/api/code-arena/chats/{id}/turn"));
+        Assert.Empty((await Json(await arena.PostAsync($"/api/code-arena/chats/{id}/queue/take", null))).GetProperty("messages").EnumerateArray());
+    }
+
+    private static MultipartFormDataContent Text(string name, string text)
+    {
+        var form = new MultipartFormDataContent();
+        var part = new ByteArrayContent(System.Text.Encoding.UTF8.GetBytes(text));
+        part.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
+        form.Add(part, "file", name);
+        return form;
+    }
+
+    [Fact]
     public async Task While_Code_Arena_answers_the_web_queues_the_person_s_message_and_it_goes_when_the_turn_ends()
     {
         await using var f = NewApp();
@@ -637,6 +688,8 @@ public sealed class CodeArenaSyncTests(AppFixture app)
             User("Write it"),
             new { role = "assistant", content = "Half of it", status = "stopped", model = "Model-Two", reasoning = "thinking first", promptTokens = 120, cachedTokens = 60, completionTokens = 9 },
             new { role = "user", content = "(The connection dropped while you were answering: carry on.)", kind = "note" },
+            // Sent while Code Arena's turn worked, and taken in at its next step.
+            new { role = "user", content = "Also the tests", kind = "meanwhile" },
         ]);
         var chat = await web.JsonAsync(await web.GetAsync($"/api/chat/conversations/{id}"));
         var messages = chat.GetProperty("messages").EnumerateArray().ToList();
@@ -644,12 +697,14 @@ public sealed class CodeArenaSyncTests(AppFixture app)
         Assert.Equal("thinking first", messages[1].GetProperty("reasoning").GetString());
         Assert.Equal(60, messages[1].GetProperty("cachedTokens").GetInt32());
         Assert.True(messages[2].GetProperty("details").GetProperty("note").GetBoolean());
+        Assert.True(messages[3].GetProperty("details").GetProperty("takenIn").GetBoolean());
         // Continued on the web, it answers with the model Code Arena answered with last.
         Assert.Equal("Model-Two", chat.GetProperty("model").GetString());
         // And Code Arena reads them back as they were.
         var read = await Json(await arena.GetAsync($"/api/code-arena/chats/{id}"));
         Assert.Equal("stopped", read.GetProperty("messages")[1].GetProperty("status").GetString());
         Assert.Equal("note", read.GetProperty("messages")[2].GetProperty("kind").GetString());
+        Assert.Equal("meanwhile", read.GetProperty("messages")[3].GetProperty("kind").GetString());
 
         // Archived on the web: Code Arena's sends leave it so; the person's continuing it from Code Arena brings it back, once.
         await StatusAssert.Is(HttpStatusCode.NoContent, await web.Http.PatchAsJsonAsync(new Uri($"/api/chat/conversations/{id}", UriKind.Relative), new { archived = true }));

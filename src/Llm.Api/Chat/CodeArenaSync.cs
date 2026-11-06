@@ -23,7 +23,8 @@ namespace Llm.Api.Chat;
 /// is this end's id for it (in what this end gives); <paramref name="Ref"/> is Code Arena's place for it (session:number), so a
 /// message sent twice is known as one. <paramref name="Status"/>: how an answer ended when not as it should ("stopped" by the
 /// person, "failed", "declined"); <paramref name="Kind"/> "note": a message of Code Arena's own to the model (the connection
-/// dropped), shown as a notice, not as the person's words. <paramref name="Attachments"/>: what went with a question here (its
+/// dropped), shown as a notice, not as the person's words; "meanwhile": the person's message sent while a turn worked and taken in
+/// at its next step, shown so. <paramref name="Attachments"/>: what went with a question here (its
 /// text files are in <paramref name="Content"/> already, as the web's model reads them; its pictures Code Arena fetches).
 /// <paramref name="Quote"/>: the part of an earlier answer a question quotes, kept apart from its words both ways (ChatQuotes).
 /// <paramref name="Context"/>: what filled the request a Code Arena answer was written for, by kind in characters (ContextParts'
@@ -112,6 +113,7 @@ public static class CodeArenaSync
         g.MapPost("/chats/{id:guid}/messages", AppendAsync);
         g.MapPost("/chats/{id:guid}/turn", TurnAsync);
         g.MapDelete("/chats/{id:guid}/turn", TurnEndAsync);
+        g.MapPost("/chats/{id:guid}/queue/take", TakeQueuedAsync);
         g.MapPost("/chats/{id:guid}/continued", ContinuedAsync);
         g.MapGet("/attachments/{id:guid}", AttachmentAsync);
         g.MapGet("/preferences", PreferencesAsync);
@@ -630,7 +632,8 @@ public static class CodeArenaSync
                 // Stopped by the person in Code Arena: shown as stopped, as an answer stopped here is.
                 Status = m.Role == "assistant" && m.Status == "stopped" ? MessageStatus.Stopped : MessageStatus.Complete,
                 // Code Arena's own word to its model: a notice on the web, not the person's.
-                DetailsJson = m.Role == "user" && m.Kind == "note" ? """{"note":true}""" : null,
+                // Sent while Code Arena's turn worked, and taken in at its next step: shown so, as one taken in here.
+                DetailsJson = m.Role == "user" && m.Kind == "note" ? """{"note":true}""" : m.Role == "user" && m.Kind == MeanwhileKind ? ChatService.TakenInDetails : null,
                 // What filled the request it answered: the web chat's context gauge shows it, as for the answers written here.
                 ContextJson = m.Role == "assistant" ? ContextOf(m.Context, named) : null,
             };
@@ -661,6 +664,40 @@ public static class CodeArenaSync
         c.CodeArenaTurnUntil = DateTimeOffset.UtcNow + TurnLease;
         await db.SaveChangesAsync(http.RequestAborted);
         return Results.Ok(new { until = c.CodeArenaTurnUntil });
+    }
+
+    /// <summary>
+    /// Code Arena's turn takes in, at its next step, what the person queued on the web while it works: the first ones in line that
+    /// may go into an answer (QueuedMessages.TakesIn: no files, skill or deep research, no model a safeguard chose), out of line, in
+    /// order. Code Arena adds each to its session as the person's, and sends it back with the turn's messages, in its place. Only
+    /// while its turn holds the chat; the rest wait for the turn to end.
+    /// </summary>
+    private static async Task<IResult> TakeQueuedAsync(Guid id, HttpContext http, McpPeople people, AppDbContext db)
+    {
+        var (me, refusal) = await CallerAsync(http, people);
+        if (me is null)
+        {
+            return refusal!;
+        }
+        if (await db.Conversations.AsNoTracking().SingleOrDefaultAsync(c => c.Id == id && c.UserId == me.Id, http.RequestAborted) is not { } c)
+        {
+            return Gone();
+        }
+        var taken = new List<object>();
+        while (Answering(c) && taken.Count < QueuedMessages.Max)
+        {
+            var next = await db.QueuedMessages.AsNoTracking().Where(q => q.ConversationId == id).OrderBy(q => q.Position).ThenBy(q => q.CreatedAt).FirstOrDefaultAsync(http.RequestAborted);
+            if (next is null || !QueuedMessages.TakesIn(next, me.Id, ""))
+            {
+                break;
+            }
+            // Edited or cancelled meanwhile: read again.
+            if (await db.QueuedMessages.Where(q => q.Id == next.Id && q.Content == next.Content).ExecuteDeleteAsync(http.RequestAborted) == 1)
+            {
+                taken.Add(new { next.Id, next.Content, next.Quote });
+            }
+        }
+        return Results.Ok(new { messages = taken });
     }
 
     /// <summary>Code Arena's turn ended: the chat is free, and the messages the person queued on the web meanwhile go now.</summary>
@@ -949,13 +986,21 @@ public static class CodeArenaSync
             m.SyncRef,
             m.Id,
             m.Status == MessageStatus.Complete ? null : m.Status.ToString().ToLowerInvariant(),
-            Note(m) ? "note" : null,
+            Note(m) ? "note" : TakenIn(m) ? MeanwhileKind : null,
             attached,
             m.Role == "user" ? m.Quote : null);
     }
 
+    /// <summary>The kind Code Arena gives a message the person sent while a turn worked, taken in at its next step (either end's).</summary>
+    public const string MeanwhileKind = "meanwhile";
+
     /// <summary>A message of Code Arena's own to its model (the connection dropped), kept as a notice: not the person's words.</summary>
-    private static bool Note(ChatMessage m)
+    private static bool Note(ChatMessage m) => Marked(m, "note");
+
+    /// <summary>A question sent while an answer worked, taken in at its next step (ChatService.TakeInQueuedAsync, or Code Arena's).</summary>
+    private static bool TakenIn(ChatMessage m) => Marked(m, "takenIn");
+
+    private static bool Marked(ChatMessage m, string flag)
     {
         if (m.Role != "user" || m.DetailsJson is null)
         {
@@ -963,7 +1008,7 @@ public static class CodeArenaSync
         }
         try
         {
-            return JsonNode.Parse(m.DetailsJson)?["note"]?.GetValue<bool>() == true;
+            return JsonNode.Parse(m.DetailsJson)?[flag]?.GetValue<bool>() == true;
         }
         catch (Exception e) when (e is JsonException or InvalidOperationException)
         {

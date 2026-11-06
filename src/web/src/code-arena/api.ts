@@ -53,8 +53,8 @@ export interface CodeState {
   session: string
   /** A turn is running (the page watches it from its start). */
   busy: boolean
-  /** Messages sent while an answer was written: each runs, in order, when the one before it ends. */
-  queued: string[]
+  /** Messages sent while an answer was written: the answer reads them at its next step; one sent as it ends runs after it. */
+  queued: QueuedCode[]
   /** The number of the answer (or compaction) running or last run: a new one is attached to when it differs. */
   turn?: number
   /** How many times the web chat's news came in while nothing ran: the session is read again when it changes. */
@@ -186,8 +186,18 @@ export interface CodeSession {
  * conversation afresh after a compaction (each message in its place, the last one it covers marked with its summary), and the
  * commands run with no time limit (their start, their output as it comes, their end).
  */
+/** A message waiting for the answer being written: q1, q2… name it for Edit and Cancel. */
+export interface QueuedCode {
+  id: string
+  text: string
+  quote?: string | null
+  attachments?: Attachment[] | null
+}
+
 export type CodeEvent =
-  | Exclude<ChatEvent, { type: 'tool_result' } | { type: 'approval' }>
+  | Exclude<ChatEvent, { type: 'tool_result' } | { type: 'approval' } | { type: 'took_in' }>
+  /** A queued message the answer took in at its next step, with what went with it (path, or path:first-last) and its files. */
+  | (Extract<ChatEvent, { type: 'took_in' }> & { files?: string[] | null; attachments?: Attachment[] | null })
   | (Extract<ChatEvent, { type: 'tool_result' }> & { diff?: FileDiff })
   | (Extract<ChatEvent, { type: 'approval' }> & { always?: string; risk?: string })
   | { type: 'reset'; messages: Message[]; diffs: Record<string, FileDiff> }
@@ -361,11 +371,15 @@ export const rewindPreviewQuery = (message: string) => ({
 })
 /** Back to before a question, as /rewind: the conversation and the code, only the conversation, or only the code; what it says. */
 export const rewindSession = (body: { message: string; chat: boolean; code: boolean }) => api<{ said: string }>('/api/rewind', { body })
-/** A message for after the answer being written (at once when none is), with the lines chosen in the editor and the part of an answer it quotes. */
+/** A message for the answer being written, read at its next step (at once when none is), with the lines chosen in the editor and the part of an answer it quotes. */
 export const queueMessage = (text: string, context?: Piece[], quote?: string, attachments?: Attachment[]) =>
-  api<{ queued: number }>('/api/queue', { body: { text, ...(context?.length && { context }), ...(quote && { quote }), ...(attachments?.length && { attachments }) } })
+  api<{ queued: number; id: string }>('/api/queue', { body: { text, ...(context?.length && { context }), ...(quote && { quote }), ...(attachments?.length && { attachments }) } })
 // A body, so it goes as JSON: code-arena web refuses any other call that changes something.
 export const clearQueue = () => api('/api/queue', { method: 'DELETE', body: {} })
+/** A waiting message's words changed; 404 once it went. */
+export const editQueued = (id: string, text: string) => api(`/api/queue/${id}`, { method: 'PATCH', body: { text } })
+/** One waiting message taken out of line. */
+export const cancelQueued = (id: string) => api(`/api/queue/${id}`, { method: 'DELETE', body: {} })
 export const answerApproval = (id: string, answer: 'allow' | 'always' | 'deny') => api('/api/approvals', { body: { id, answer } })
 
 /** A command with no time limit as the page watches it: the end of its output, and how it ended. */
@@ -418,6 +432,11 @@ export function reduceCode(state: CodeLive, e: CodeEvent, localId: string | null
       if (localId === null && q.text != null && !state.messages.some((m) => m.id === q.id))
         return reduce({ ...state, messages: [...state.messages, { ...blank(q.id, 'user', q.parentId), content: q.text, quote: q.quote ?? null }] }, e, localId) as CodeLive
       return reduce(state, e, localId) as CodeLive
+    }
+    case 'took_in': {
+      // Read at the answer's next step: the person's message there, with what went with it.
+      const next = reduce(state, e, localId) as CodeLive
+      return { ...next, messages: next.messages.map((m) => (m.id === e.id ? { ...m, files: e.files ?? null, attachments: e.attachments ?? [] } : m)) }
     }
     case 'attached': {
       // The question, as the page shows it: the one it sent (its own id until the server's comes), or the server's.

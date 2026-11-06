@@ -232,7 +232,7 @@ describe('Code Arena in the browser', () => {
     expect(await screen.findByRole('button', { name: 'Send' })).toBeInTheDocument()
   })
 
-  it('queues a message typed while an answer is written, shows it above the box, and clears the queue', async () => {
+  it('a message typed while an answer is written waits pending in the thread, to edit, cancel or clear, and the answer is not stopped', async () => {
     let end!: () => void
     const over = new Promise<void>((r) => (end = r))
     const { calls, now } = backend({
@@ -242,8 +242,17 @@ describe('Code Arena in the browser', () => {
           return { events: turn.slice(0, 4), until: over }
         },
         'POST /api/queue': (body) => {
-          now.state = { ...now.state, queued: [...now.state.queued, (body as { text: string }).text] }
-          return { status: 202, json: { queued: now.state.queued.length } }
+          const id = `q${now.state.queued.length + 1}`
+          now.state = { ...now.state, queued: [...now.state.queued, { id, text: (body as { text: string }).text }] }
+          return { status: 202, json: { queued: now.state.queued.length, id } }
+        },
+        'PATCH /api/queue/q1': (body) => {
+          now.state = { ...now.state, queued: now.state.queued.map((q) => (q.id === 'q1' ? { ...q, text: (body as { text: string }).text } : q)) }
+          return { status: 204 }
+        },
+        'DELETE /api/queue/q2': () => {
+          now.state = { ...now.state, queued: now.state.queued.filter((q) => q.id !== 'q2') }
+          return { status: 204 }
         },
         'DELETE /api/queue': () => {
           now.state = { ...now.state, queued: [] }
@@ -255,17 +264,60 @@ describe('Code Arena in the browser', () => {
     await ask('Change two to 2')
     expect(await screen.findByRole('button', { name: 'Stop' })).toBeInTheDocument()
 
-    // The box still takes the next message while the answer is written: it is queued, not refused.
+    // The box still takes the next message while the answer is written: it is queued, not refused, and nothing stops.
     await ask('Then run the tests')
     expect(calls.find((c) => c.method === 'POST' && c.path === '/api/queue')?.body).toEqual({ text: 'Then run the tests' })
-    const queued = await screen.findByRole('region', { name: 'Queued messages' })
-    expect(within(queued).getByText('Then run the tests')).toBeInTheDocument()
+    const pending = await screen.findByRole('region', { name: 'Pending messages' })
+    const list = within(pending).getByRole('list', { name: 'Queued messages' })
+    expect(within(list).getByText('Then run the tests')).toBeInTheDocument()
+    expect(pending).toHaveTextContent('Read at the next step')
     expect(calls.filter((c) => c.method === 'POST' && c.path === '/api/messages')).toHaveLength(1)
+    expect(calls.some((c) => c.path === '/api/stop')).toBe(false)
 
-    await userEvent.click(within(queued).getByRole('button', { name: 'Clear' }))
+    await userEvent.click(within(list).getByRole('button', { name: 'Edit queued message: Then run the tests' }))
+    await userEvent.clear(screen.getByRole('textbox', { name: 'Edit the queued message' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Edit the queued message' }), 'Then run the unit tests{Enter}')
+    await waitFor(() => expect(calls.find((c) => c.method === 'PATCH' && c.path === '/api/queue/q1')?.body).toEqual({ text: 'Then run the unit tests' }))
+    expect(await within(list).findByText('Then run the unit tests')).toBeInTheDocument()
+
+    await ask('and lint')
+    await userEvent.click(await within(list).findByRole('button', { name: 'Cancel queued message: and lint' }))
+    expect(calls.find((c) => c.method === 'DELETE' && c.path === '/api/queue/q2')?.body).toEqual({})
+    await waitFor(() => expect(within(list).queryByText('and lint')).not.toBeInTheDocument())
+
+    await userEvent.click(within(pending).getByRole('button', { name: 'Clear all' }))
     // Sent as JSON (code-arena web refuses any other call that changes something).
     expect(calls.find((c) => c.method === 'DELETE' && c.path === '/api/queue')?.body).toEqual({})
-    await waitFor(() => expect(screen.queryByRole('region', { name: 'Queued messages' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Pending messages' })).not.toBeInTheDocument())
+    now.state = { ...now.state, busy: false }
+    end()
+  })
+
+  it('a message the answer takes in at its next step shows in its place in the thread, with what went with it', async () => {
+    let end!: () => void
+    const over = new Promise<void>((r) => (end = r))
+    const { now } = backend({
+      extra: {
+        'POST /api/messages': () => {
+          now.state = { ...now.state, busy: true }
+          return {
+            events: [
+              ...turn.slice(0, 4),
+              { type: 'took_in', id: 'm9', parentId: 'm1', queuedId: 'q1', content: 'Also check @src/util.ts', files: ['src/util.ts'] },
+              { type: 'assistant', id: 'm10', parentId: 'm9', model: 'model-a' },
+              { type: 'content', text: 'Checked util too' },
+            ],
+            until: over,
+          }
+        },
+      },
+    })
+    renderCode()
+    await ask('Change two to 2')
+    expect(await screen.findByText('Checked util too')).toBeInTheDocument()
+    const said = screen.getAllByRole('region', { name: 'You' }).at(-1)!
+    expect(said).toHaveTextContent('Sent while it worked: read at its next step')
+    expect(said).toHaveTextContent('src/util.ts')
     now.state = { ...now.state, busy: false }
     end()
   })

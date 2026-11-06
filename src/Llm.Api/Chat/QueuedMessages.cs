@@ -18,14 +18,20 @@ namespace Llm.Api.Chat;
 /// <param name="Mentions">The room's members it names.</param>
 /// <param name="ReplyTo">A room's message it replies to: a reply to one of the model's answers is a question to it.</param>
 /// <param name="Skill">A skill it uses (/name and its parameters): a question to the model, in a room too.</param>
+/// <summary>A queued message's words changed before it goes; checked again as a sent one is.</summary>
+public sealed record QueueEdit(string? Content, Guid[]? Acknowledged = null, string? Justification = null);
+
 public sealed record QueueRequest(string? Content, Guid[]? Attachments = null, bool Research = false, string? Quote = null, Guid[]? Mentions = null, Guid? ReplyTo = null,
     Guid[]? Acknowledged = null, string? Justification = null, SkillUse? Skill = null);
 
 /// <summary>
 /// Messages sent while a chat answers wait here, on the server: a reload or another
-/// tab still shows them, and each becomes the chat's next question when the answer
-/// before it ends, however it ended (AnswerJobs asks for the next one). A message that
-/// waits after a restart goes once the app is back.
+/// tab still shows them. The first in line is taken into the answer running at its next
+/// step (after its tool calls: ChatService), as Claude Code takes in what is typed while it
+/// works, and the answer goes on with it; one that may not go into it (files, a skill, deep
+/// research, a room's message for its people) becomes the chat's next question when the
+/// answer ends, however it ended (AnswerJobs asks for the next one). Until then each may be
+/// edited, put first or cancelled. A message that waits after a restart goes once the app is back.
 /// </summary>
 public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJobs jobs, RoomHub rooms, Studio.StudioRuns studio, ILogger<QueuedMessages> logger)
 {
@@ -35,6 +41,14 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
     /// <summary>How many may wait in a room, and of one member's.</summary>
     public const int MaxInRoom = 20;
     public const int MaxEachInRoom = 3;
+
+    /// <summary>
+    /// Whether a queued message may go into an answer running for <paramref name="answering"/> on <paramref name="model"/>, at its next
+    /// step: the same person's words for the model, with no files (the model reads those with the history), no skill and no deep
+    /// research (both set up a turn of their own), and no other model a safeguard sent it to.
+    /// </summary>
+    public static bool TakesIn(QueuedMessage q, Guid answering, string model) =>
+        q.UserId == answering && !q.ForPeople && q.Skill is null && !q.Research && q.AttachmentsJson is null && (q.Model is null || q.Model == model);
 
     /// <summary>
     /// The chat's first queued message becomes its next question, on the branch on screen, and is
@@ -174,6 +188,7 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
         var g = app.MapGroup("/api/chat/conversations/{id:guid}/queue").PersonOnly();
         g.MapPost("", AddAsync).RequirePermission(Llm.Core.Access.Permissions.Chat);
         g.MapDelete("/{queuedId:guid}", CancelAsync);
+        g.MapPatch("/{queuedId:guid}", EditAsync).RequirePermission(Llm.Core.Access.Permissions.Chat);
         g.MapPost("/{queuedId:guid}/now", NowAsync);
     }
 
@@ -302,14 +317,51 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
     }
 
     /// <summary>
-    /// Send now: the message goes first in line, and the answer running stops (keeping what it has) so it goes at once.
-    /// While Code Arena answers there is nothing here to stop: it only goes first (the page calls it Put first).
+    /// Changes the words of one's own message while it waits, checked as a sent one is; 404 when it is not waiting any more (it
+    /// was taken in, or sent). A skill's message is queued again instead: its parameters were filled in from its words.
+    /// </summary>
+    private static async Task<IResult> EditAsync(Guid id, Guid queuedId, QueueEdit body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db,
+        Safeguards.Safeguards safeguards, ModelPolicy policy, ChatModels models, AnswerJobs jobs, CancellationToken ct)
+    {
+        var (me, c) = await OwnedAsync(id, p, users, db, ct);
+        if (c is null || await db.QueuedMessages.AsNoTracking().SingleOrDefaultAsync(q => q.Id == queuedId && q.ConversationId == id && q.UserId == me.Id, ct) is not { } q)
+        {
+            return c is null ? Results.NotFound() : AuthEndpoints.Problem(404, "not_queued", "That message is not waiting any more: it was sent.");
+        }
+        if (q.Skill is not null)
+        {
+            return AuthEndpoints.Problem(400, "skill", "A message that uses a skill cannot be edited: cancel it and send it again.");
+        }
+        var text = (body.Content ?? "").Trim();
+        if (text.Length == 0 && q.AttachmentsJson is null)
+        {
+            return AuthEndpoints.Problem(400, "empty", "Write a message first, or cancel it.");
+        }
+        var model = c.Model ?? (await policy.ForAsync(me, await models.ListAsync(ct), ct)).Default?.Name;
+        var verdict = await safeguards.CheckMessageAsync(me, text, ChatService.ParseIds(q.AttachmentsJson).Count(), q.Research, model, ct, q.Quote,
+            new SendContext(body.Acknowledged, body.Justification, c.Id));
+        if (!verdict.Allowed)
+        {
+            return Safeguards.Safeguards.Problem(verdict);
+        }
+        var masked = verdict.Text ?? text;
+        // Taken in or sent while it was checked: there is nothing to change.
+        if (await db.QueuedMessages.Where(x => x.Id == queuedId).ExecuteUpdateAsync(s => s.SetProperty(x => x.Content, masked).SetProperty(x => x.Model, verdict.Model), ct) == 0)
+        {
+            return AuthEndpoints.Problem(404, "not_queued", "That message is not waiting any more: it was sent.");
+        }
+        return Results.Ok(new { queued = await ListAsync(db, id, ct), answering = jobs.IsAnswering(id) });
+    }
+
+    /// <summary>
+    /// Put first: the message goes first in line. The answer running goes on (only Stop stops it): the message goes into it at its
+    /// next step, or goes next when it ends. A chat not answering takes it at once.
     /// </summary>
     private static async Task<IResult> NowAsync(Guid id, Guid queuedId, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db,
         QueuedMessages queue, AnswerJobs jobs, CancellationToken ct)
     {
         var (me, c) = await OwnedAsync(id, p, users, db, ct);
-        // In a room only its owner puts one first (it stops the answer running, someone else's maybe).
+        // In a room only its owner puts one first (it goes ahead of the others' messages).
         if (c is null || c.UserId != me.Id)
         {
             return Results.NotFound();
@@ -320,10 +372,7 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
         }
         q.Position = (await db.QueuedMessages.Where(x => x.ConversationId == id).MinAsync(x => x.Position, ct)) - 1;
         await db.SaveChangesAsync(ct);
-        if (!jobs.Stop(id))
-        {
-            await queue.StartNextAsync(id);
-        }
+        await queue.StartNextAsync(id);
         return Results.Ok(new { queued = await ListAsync(db, id, ct), answering = jobs.IsAnswering(id) });
     }
 

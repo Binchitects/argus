@@ -206,9 +206,15 @@ long answer would be cut. An answer cut anyway at the output limit is kept and t
 carries on where it stopped (compacting first when the window was why); a tool call cut
 half-way is done again in smaller parts. **Ctrl+C** stops the turn and
 keeps what was said; at the prompt it clears what is typed, and on an empty
-prompt twice leaves. What is typed while a turn runs is kept: a line ended with
-Enter is sent as the next message when the turn ends, and a line begun waits in
-the prompt. A question (`Allow edit_file?`) reads only what is typed after it is
+prompt twice leaves. What is typed while a turn runs does not stop it, as in
+Claude Code: a line ended with Enter is read by the model at the turn's next
+step (after the tool calls it is running), as your message there (`› …  (sent
+while it worked)`), and the turn goes on with it; a line typed while the model
+writes its last words is the next message when the turn ends. **↑** on an empty
+line takes the last line typed back before the model reads it: it waits in the
+prompt when the turn ends, to change, send or clear. A command (`/name`, `!cmd`)
+typed then runs when the turn ends, and the lines after it with it. A line begun
+waits in the prompt. A question (`Allow edit_file?`) reads only what is typed after it is
 asked; a message typed there instead of `y`, `n` or `a` is a no, and is kept as
 the next message. Ctrl+C at a question stops the turn, and what was typed
 meanwhile comes back in the prompt, to send, change or clear. **Ctrl+Z** at the prompt stops code-arena, as in a shell:
@@ -625,9 +631,15 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   end of its output as it comes, how it ended, and **Stop**. **↑** in its box brings back this session's messages, then
   what this folder sent before (in the terminal too), as in Arena's chat;
   **↓** and **Esc** go back to what you were typing. A message sent while an
-  answer is written is **queued** (Enter, or **Queue**): it shows above the box
-  and runs once the answer ends, each in its turn: **Stop** stops the answer
-  and the next queued message runs, and **Clear** drops the queue. A command with no time limit
+  answer is written does not stop it, as in Claude Code (Enter, or **Queue**):
+  it shows pending at the end of the thread, with **Edit** (Enter saves, Esc
+  leaves it as it was) and **Cancel**, and the model reads it at the answer's
+  next step (after the tool calls it is running), as your message there,
+  marked *Sent while it worked*, with its lines, its quote and its files; the
+  answer goes on with it. One sent while the model writes its last words runs
+  once the answer ends. **Stop** is apart: it stops the answer, and what still
+  waits then runs in turn; **Clear** drops the queue. The web chat in Arena
+  gets the message in its place, marked the same. A command with no time limit
   that ends while nothing runs starts a turn of its own, which the page shows as
   any other. A picture, a sound or a video one of Arena's tools made (kept in
   the folder under `.code-arena/media/`, the tool's result naming it) shows
@@ -1485,7 +1497,7 @@ status (403 `outside` for a path outside the folder).
 
 | call | what it does |
 |---|---|
-| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting); `context` (the window), `contextUsed` (about how much of it the next request holds), `window` (what fills the next request: `system`, `tools`, `instructions`, `memory`, `summary`, `files`, `you`, `answers` and `toolResults` in characters, and `biggest`, `[{id, role, tool, chars, preview}]`; the chat's ring and the status bar's Context share `contextUsed` out by them; measured while no turn runs), `reserve` (how much of it is kept for the answer), `compactAt` and `compactTarget` (percent; `compactAt` 0: only when a request would not fit), `compactAtSource` (`flag`, `config`, `account`, `arena` or `default`) and `compactAtAccount` (the Arena account's threshold, null when Arena did not say); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output); `arenaChats` (sessions are kept with chats in Arena here), `account` (whose chats: the key's account, null until Arena said), `chat` (this session's chat there, null: none yet) and `synced` (how many times the web chat's news came in while nothing ran: the page reads the session again when it changes; taking it in is not `busy`); `sync` (`{chat, account, waiting, trouble, behind}`: the chat, whose chats, how many messages Arena lacks, what stops them, whether the web chat has news not taken in; null without the sync) and `notices` (`[{id, text, at}]`: the last 20 said while nothing ran, the page shows each once) |
+| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting: `[{id, text, quote, attachments}]`); `context` (the window), `contextUsed` (about how much of it the next request holds), `window` (what fills the next request: `system`, `tools`, `instructions`, `memory`, `summary`, `files`, `you`, `answers` and `toolResults` in characters, and `biggest`, `[{id, role, tool, chars, preview}]`; the chat's ring and the status bar's Context share `contextUsed` out by them; measured while no turn runs), `reserve` (how much of it is kept for the answer), `compactAt` and `compactTarget` (percent; `compactAt` 0: only when a request would not fit), `compactAtSource` (`flag`, `config`, `account`, `arena` or `default`) and `compactAtAccount` (the Arena account's threshold, null when Arena did not say); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output); `arenaChats` (sessions are kept with chats in Arena here), `account` (whose chats: the key's account, null until Arena said), `chat` (this session's chat there, null: none yet) and `synced` (how many times the web chat's news came in while nothing ran: the page reads the session again when it changes; taking it in is not `busy`); `sync` (`{chat, account, waiting, trouble, behind}`: the chat, whose chats, how many messages Arena lacks, what stops them, whether the web chat has news not taken in; null without the sync) and `notices` (`[{id, text, at}]`: the last 20 said while nothing ran, the page shows each once) |
 | `GET /api/folders?path=` | for Open Folder: a folder's folders by name (hidden ones last, no files, at most 2,000) as `{path, parent, folders, why, current, home, separator, drives, recent, added, files}` (`why`: what is not listed; `recent`: the folders opened lately, the one open now first; `added`: the folders added to this workspace; `files`: its files' names, with `files=1`, for @ in the chat); with no path, the open folder's parent; 404 `not_found` when it is not a folder |
 | `POST /api/folders/add` `{path}` | Add Folder to Workspace: the tools may use it, kept with this folder: `{folder, added}` (`added`: the folders added, whole); 409 `inside` for the folder open now or one in it |
 | `POST /api/folders/remove` `{path}` | takes an added folder out again: `{added}`; 404 `not_added` |
@@ -1526,7 +1538,9 @@ status (403 `outside` for a path outside the folder).
 | `POST /api/problems/run` | runs the check (waits for the one running) and answers as above; 404 `no_check` when none is found |
 | `POST /api/complete` `{path, prefix, suffix}` | code completion at the editor's cursor: `{text}`; 404 `off` when the config turns it off, 409 `busy` while an answer is written, 429 `limited` at the key's limit |
 | `POST /api/messages` `{text, context, quote}` | a message, answered as a stream of events; `context`: lines chosen in the editor, `[{path, startLine, endLine, text}]` (`text`: the editor's, when unsaved; eight at most); `quote`: the part of an earlier answer it replies to (4,000 characters at most, else 400 `invalid`), which the model reads before the message, as Arena's own model does ([Chat](chat.md#how-a-conversation-is-stored)). The stream's `{"type":"question", id, text, quote}` starts it, and `{"type":"attached", id, files}` lists what went with the question. The session as the page reads it gives each question's `quote`, `content` (what was typed) and `files` apart |
-| `POST /api/queue` `{text, context, quote}` | a message for after the answer being written (runs at once when none is), with its lines and its quote; 202 `{queued}` (its place). `/api/messages` while an answer is written is 409 `busy` |
+| `POST /api/queue` `{text, context, quote, attachments}` | a message for the answer being written, read at its next step (runs at once when none is), with its lines, its quote and its files; 202 `{queued, id}` (its place, and `q1`, `q2`… to name it). The turn's stream says `took_in` (`id`, `parentId`, `queuedId`, `content`, `quote`, `files`, `attachments`) when the model takes it in. `/api/messages` while an answer is written is 409 `busy` |
+| `PATCH /api/queue/{id}` `{text}` | changes a waiting message's words; 204, 404 `not_queued` once it went |
+| `DELETE /api/queue/{id}` | takes one out of line; 204, 404 `not_queued` once it went |
 | `DELETE /api/queue` | drops the queued messages; 204 |
 | `GET /api/files?path=DIR` | a folder's entries, folders first: `{path, entries: [{name, path, kind, size, link}]}` |
 | `GET /api/files/all` | every file, for quick open: `{files, truncated}` (50,000 at most) |
@@ -2528,8 +2542,10 @@ While a turn runs here, the chat is the session's: Arena holds it for the turn
 (renewed every 30 seconds, and let go once Arena has the turn's messages, or
 after 90 seconds without a word, when Code Arena stopped). Meanwhile the web
 page says **Code Arena is answering in this chat**, and what the person sends
-there waits in the chat's queue, then goes (and is answered on the web) when
-the turn ends. A turn that starts while the web chat is answering waits for
+there waits in the chat's queue: the turn takes it in at its next step (after
+its tool calls), as the person's message, and sends it back with its own in its
+place (`POST /api/code-arena/chats/{id}/queue/take`). One with files or a skill,
+or sent as the turn ends, goes (and is answered on the web) when the turn ends. A turn that starts while the web chat is answering waits for
 that answer first (two minutes at most; Stop goes on without it). `/sync` says where the session stands
 and whose chats they are: the sessions go to the chats of the account whose
 key `code-arena login` was given (login says which; the IDE shows it over
