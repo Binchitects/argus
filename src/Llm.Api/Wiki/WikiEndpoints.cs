@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -24,6 +25,12 @@ namespace Llm.Api.Wiki;
 public static partial class WikiEndpoints
 {
     public const int Most = 30;
+
+    /// <summary>The code matches a page holds.</summary>
+    public const int CodePerPage = 20;
+
+    /// <summary>How near in meaning a symbol must be to be shown at all (1 is the same).</summary>
+    public const double MeaningFloor = 0.5;
 
     public static void MapWiki(this IEndpointRouteBuilder app)
     {
@@ -57,10 +64,13 @@ public static partial class WikiEndpoints
 
     /// <summary>
     /// One search: in=all (default), knowledge, code or data. Knowledge: the passages that hold the words, then those nearest in
-    /// meaning; code: Argus's symbols, then its full-text and meaning searches; data: the tables and columns whose names or
-    /// comments hold the words. Each part says why it could not answer rather than failing the rest.
+    /// meaning; code: Argus's ranked search (the symbol a name means, the file, then the files that hold the words), a page
+    /// at a time and narrowed by repo, lang, path, kind (symbol, code, doc) and branch, with what is near in meaning beside
+    /// it only when the words find less than a page; data: the tables and columns whose names or comments hold the words.
+    /// Each part says why it could not answer rather than failing the rest.
     /// </summary>
-    private static async Task<IResult> SearchAsync(string? q, string? @in, ClaimsPrincipal p, UserManager<AppUser> users, KnowledgeSearch search, KnowledgeStore store,
+    private static async Task<IResult> SearchAsync(string? q, string? @in, string? repo, string? lang, string? path, string? kind, string? branch, int? page,
+        ClaimsPrincipal p, UserManager<AppUser> users, KnowledgeSearch search, KnowledgeStore store,
         Embedder embedder, ArgusMcp argus, DataQuestions data, AccessService access, Operations.Features features, CancellationToken ct)
     {
         var words = q?.Trim() ?? "";
@@ -72,6 +82,8 @@ public static partial class WikiEndpoints
         var me = await Me(p, users);
         var knowledge = new List<object>();
         var code = new List<object>();
+        var meaning = new List<object>();
+        JsonObject? codePage = null;
         var tables = new List<object>();
         var problems = new List<string>();
 
@@ -100,15 +112,42 @@ public static partial class WikiEndpoints
         {
             try
             {
-                var session = await argus.ConnectAsync(me.Id, me.Email ?? "", ct);
-                if (Identifier().IsMatch(words))
+                var (found, problem) = await argus.SearchAsync(me.Email ?? "", new Dictionary<string, string?>
                 {
-                    code.AddRange(Rows(await session.CallAsync("find_symbol", new JsonObject { ["name"] = words }, null, ct)).Take(10).Select(r => Code("symbol", r)));
+                    ["q"] = words, ["repo"] = repo, ["lang"] = lang, ["path"] = path, ["kind"] = kind, ["branch"] = branch,
+                    ["page"] = Math.Max(1, page ?? 1).ToString(CultureInfo.InvariantCulture), ["per_page"] = CodePerPage.ToString(CultureInfo.InvariantCulture),
+                }, ct);
+                if (found is null)
+                {
+                    problems.Add($"The code could not be searched: {problem}");
                 }
-                code.AddRange(Rows(await session.CallAsync("search_code", new JsonObject { ["query"] = words }, null, ct)).Take(15).Select(r => Code("text", r)));
-                code.AddRange(Rows(await session.CallAsync("semantic_search", new JsonObject { ["query"] = words, ["limit"] = 10 }, null, ct)).Take(10).Select(r => Code("meaning", r)));
+                else
+                {
+                    code.AddRange((found["rows"] as JsonArray ?? []).OfType<JsonObject>().Select(Code));
+                    codePage = new JsonObject
+                    {
+                        ["total"] = found["total"]?.DeepClone(), ["page"] = found["page"]?.DeepClone(), ["perPage"] = found["per_page"]?.DeepClone(),
+                        ["reach"] = found["reach"]?.DeepClone(), ["facets"] = found["facets"]?.DeepClone(), ["branches"] = found["branches"]?.DeepClone(),
+                        ["branch"] = found["branch"]?.DeepClone(),
+                    };
+                    // Near in meaning only beside a short answer, never ahead of what holds the words: nearest is not always near.
+                    if ((page ?? 1) <= 1 && (found["total"]?.GetValue<long>() ?? 0) < CodePerPage && kind is null or "" or "symbol"
+                        && repo is null or "" && lang is null or "" && path is null or "")
+                    {
+                        try
+                        {
+                            var session = await argus.ConnectAsync(me.Id, me.Email ?? "", ct);
+                            meaning.AddRange(Rows(await session.CallAsync("semantic_search", new JsonObject { ["query"] = words, ["branch"] = branch, ["limit"] = 10 }, null, ct))
+                                .Where(r => r["score"]?.GetValue<double>() is not { } score || score >= MeaningFloor).Take(10).Select(Meaning));
+                        }
+                        catch (McpException ex)
+                        {
+                            problems.Add($"Search by meaning is not running: {ex.Message}");
+                        }
+                    }
+                }
             }
-            catch (Exception ex) when (ex is McpException or HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+            catch (Exception ex) when (ex is McpException or HttpRequestException or JsonException or TaskCanceledException && !ct.IsCancellationRequested)
             {
                 problems.Add($"The code could not be searched: {ex.Message}");
             }
@@ -130,7 +169,7 @@ public static partial class WikiEndpoints
                 }
             }
         }
-        return Results.Ok(new { query = words, knowledge, code = code.Take(Most), data = tables.Take(Most), problems });
+        return Results.Ok(new { query = words, knowledge, code, codePage, meaning, data = tables.Take(Most), problems });
     }
 
     /// <summary>Argus's answer to a tool call: its result rows.</summary>
@@ -155,16 +194,36 @@ public static partial class WikiEndpoints
         }
     }
 
-    private static object Code(string how, JsonObject r) => new
+    /// <summary>One of Argus's ranked matches: a symbol, a file of code or a document, and how it matched.</summary>
+    private static object Code(JsonObject r) => new
     {
-        how,
+        kind = r["kind"]?.ToString(),
+        how = r["how"]?.ToString(),
+        repoId = r["repo_id"]?.GetValue<long>(),
+        repo = r["repo"]?.ToString(),
+        branch = r["branch"]?.ToString(),
+        path = r["path"]?.ToString(),
+        lang = r["lang"]?.ToString(),
+        line = r["line"]?.GetValue<long>(),
+        name = r["name"]?.ToString(),
+        symbolKind = r["symbol_kind"]?.ToString(),
+        scope = r["scope"]?.ToString(),
+        doc = r["doc"]?.ToString(),
+        snippet = r["snippet"]?.ToString(),
+    };
+
+    /// <summary>A symbol near the words in meaning (Argus's semantic_search), with how near.</summary>
+    private static object Meaning(JsonObject r) => new
+    {
         repoId = r["repo_id"]?.GetValue<long>(),
         repo = r["path_with_namespace"]?.ToString() ?? r["repo"]?.ToString(),
         path = r["path"]?.ToString() ?? r["file"]?.ToString(),
-        line = r["line"]?.GetValue<int>() ?? r["start_line"]?.GetValue<int>(),
+        line = r["line"]?.GetValue<long>(),
         name = r["name"]?.ToString(),
-        kind = r["kind"]?.ToString(),
-        snippet = (r["snippet"] ?? r["signature"] ?? r["text"])?.ToString(),
+        symbolKind = r["kind"]?.ToString(),
+        doc = r["doc"]?.ToString(),
+        snippet = (r["signature"] ?? r["snippet"])?.ToString(),
+        score = r["score"]?.GetValue<double>() is { } score ? Math.Round(score, 3) : (double?)null,
     };
 
     /// <summary>About 300 characters of a passage around the first of the words, whole words at its ends.</summary>
@@ -221,11 +280,20 @@ public static partial class WikiEndpoints
         try
         {
             var session = await argus.ConnectAsync(me.Id, me.Email ?? "", ct);
-            return Results.Ok(Rows(await session.CallAsync("index_status", [], null, ct)).Select(r => new
-            {
-                repoId = r["repo_id"]?.GetValue<long>(), repo = r["path_with_namespace"]?.ToString(), files = r["files"]?.GetValue<long>(), symbols = r["symbols"]?.GetValue<long>(),
-                indexedAt = r["last_indexed_at"]?.ToString() ?? r["indexed_at"]?.ToString(),
-            }));
+            // index_status has a row per repository and branch: a repository is one row, its default branch first.
+            return Results.Ok(Rows(await session.CallAsync("index_status", [], null, ct))
+                .GroupBy(r => r["path_with_namespace"]?.ToString() ?? "")
+                .Select(g =>
+                {
+                    var rows = g.OrderByDescending(r => r["branch"]?.ToString() == r["default_branch"]?.ToString()).ThenBy(r => r["branch"]?.ToString(), StringComparer.Ordinal).ToList();
+                    var main = rows[0];
+                    return new
+                    {
+                        repoId = main["repo_id"]?.GetValue<long>(), repo = g.Key, files = main["files"]?.GetValue<long>(), symbols = main["symbols"]?.GetValue<long>(),
+                        indexedAt = main["last_indexed_at"]?.ToString() ?? main["indexed_at"]?.ToString(),
+                        branches = rows.Select(r => new { repoId = r["repo_id"]?.GetValue<long>(), branch = r["branch"]?.ToString(), files = r["files"]?.GetValue<long>() }),
+                    };
+                }));
         }
         catch (Exception ex) when (ex is McpException or HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
         {
@@ -251,7 +319,7 @@ public static partial class WikiEndpoints
             }
             return Results.Ok(new
             {
-                repo, path, language = file["language"]?.ToString(), content = file["content"]?.ToString() ?? "", truncated = file["truncated"]?.GetValue<bool>() ?? false,
+                repo, path, language = file["lang"]?.ToString(), content = file["content"]?.ToString() ?? "", truncated = file["truncated"]?.GetValue<bool>() ?? false,
             });
         }
         catch (Exception ex) when (ex is McpException or HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
@@ -263,9 +331,6 @@ public static partial class WikiEndpoints
             return Results.NotFound();
         }
     }
-
-    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_.:]{2,}$")]
-    private static partial Regex Identifier();
 
     [GeneratedRegex(@"\s+")]
     private static partial Regex Spaces();

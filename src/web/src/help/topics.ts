@@ -217,9 +217,13 @@ export const topics = {
       { name: 'Search', text: 'Words, a name in the code, a table: **Everything**, or only **Documents**, **Code** or **Data**. Documents are found by their words, then by meaning.' },
       { name: 'Sources', text: 'The knowledge sources you may read, with how many of their documents you may read; open one to browse its documents by title.' },
       { name: 'A document', text: 'Read whole, as it was last read from its source, with **Open the original** where it lives.' },
-      { name: 'Code', text: 'Files and symbols in the repositories you may read in GitLab, as Argus indexed them; **Repositories** lists them.' },
+      { name: 'Code', text: 'Files and symbols in the repositories you may read in GitLab, as Argus indexed them, ranked: the symbol a name means first (`MyLib::TestFunc`, `a.b.c`, any case, its start or its words such as `test func`), then the file it names, then the files that hold the words. Each match says how it matched; **Repositories** lists them, each once.' },
+      { name: 'Filters and pages', text: 'Narrow the code by kind (**Symbols**, **Code**, **Docs**, each with its count), repository, language, branch and path (`src/` or `*.h`). **Next** and **Previous** reach every match, 20 a page.' },
     ],
-    tasks: [{ title: 'Find the leave policy', steps: ['Type "paid leave" and press **Search**.', 'Open the document under **Documents**.', 'Press **Open the original** to see it where it lives.'] }],
+    tasks: [
+      { title: 'Find the leave policy', steps: ['Type "paid leave" and press **Search**.', 'Open the document under **Documents**.', 'Press **Open the original** to see it where it lives.'] },
+      { title: 'Find where a function is defined', steps: ['Type its name with its scope, such as `MyLib::TestFunc`, and press **Search**.', 'Choose **Code**, then **Symbols** to see only definitions.', 'Open the first match: the file opens at its line.'] },
+    ],
   },
   data: {
     title: 'Data',

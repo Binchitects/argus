@@ -285,15 +285,35 @@ model in between, each person only what they may read:
   passages of the knowledge sources that hold every word (a title holding them
   first), then, when the embedder runs, those nearest in meaning; each with its
   source, heading and the words around what matched. **Code** is Argus's, asked
-  as the person (the repositories they may read in GitLab): the symbol of that
-  name, the files that hold the words, and the code nearest in meaning.
+  as the person (the repositories they may read in GitLab), ranked:
+  1. the symbol a name means, with what qualifies it matched against its
+     scope: `MyLib::TestFunc`, `a.b.c` and `obj->field` find the definition of
+     `TestFunc` in `MyLib`, `c` in `a.b`, `field` in `obj`, then the same name
+     in another scope; any case (`testfunc`), the start of a name (`TestF`),
+     and its words (`test func` finds `TestFunc`, `test_func` and
+     `testFunction`);
+  2. the file a name means (`util.h`, `src/net/socket.c`);
+  3. the files that hold every word, best first (BM25; a word in the path
+     counts four times one in the text), each at its first line that holds
+     them, with a line either side. Punctuation and words such as `AND` or
+     `NEAR` are words to find, never search syntax.
+
+  Each match says how it matched. **Filters** narrow the code: the kind
+  (**Symbols**, **Code**, **Docs**, each with how many it would show), the
+  repository, the language, the branch (the default branches unless one is
+  picked) and the path (a part of it, such as `src/`, or a glob, such as
+  `*.h`). **Pages** of 20 reach every match, up to the first 2,000; past that
+  the filters narrow it. What is near in meaning is shown beside the code, in
+  **Near in meaning**, only when the words find less than a page, and only
+  what is at least half as near as the same text.
   **Data** is the tables and columns of the databases the person may ask
   (Ask your data) whose names or comments hold the words.
 - **Sources**: the knowledge sources the person may read a document of, with
   how many; open one to list its documents by title.
 - **A document**: read whole, from its passages in order, with **Open the
   original** where it lives (a wiki page, an issue, a SharePoint file).
-- **Repositories** and a code file: what Argus indexed, the file's first 64 KB.
+- **Repositories** and a code file: what Argus indexed, each repository once
+  with how many branches of it are indexed, and the file's first 64 KB.
 
 Every list and search applies the same readers as the chat's search: a
 document someone may not read is not there for them, even by its address.

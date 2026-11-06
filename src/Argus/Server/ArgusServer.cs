@@ -527,6 +527,25 @@ public static partial class ArgusServer
             catch (CodeHostError exc) { return Json(new JsonObject { ["error"] = exc.Message }, 502); }
         });
 
+        // The wiki's search, as the person: q, and optionally repo, lang, path, kind (symbol, code, doc), branch, page, per_page.
+        app.MapGet(ReviewPrefix + "search", async (HttpContext ctx) =>
+        {
+            var caller = (Caller)ctx.Items[CallerItem]!;
+            var q = ctx.Request.Query;
+            string? Opt(string name) => PyStr.Strip(q[name].ToString()) is { Length: > 0 } v ? v : null;
+            int Num(string name, int fallback) => int.TryParse(q[name].ToString(), out var n) ? n : fallback;
+            var query = PyStr.Strip(q["q"].ToString());
+            if (query.Length is 0 or > 300) return Json(new JsonObject { ["error"] = "Search for something, up to 300 characters." }, 400);
+            try
+            {
+                var filter = new CodeSearch.Filter(Opt("repo"), Opt("lang"), Opt("path"), Opt("kind"));
+                var result = await Task.Run(() => tools.WikiSearch(caller.Identity, query, Opt("branch"), filter,
+                    Num("page", 1), Num("per_page", CodeSearch.DefaultPerPage)), ctx.RequestAborted);
+                return Json(result);
+            }
+            catch (Exception exc) { return Failed(exc); }
+        });
+
         app.MapGet(ReviewPrefix + "{tool}", async (HttpContext ctx, string tool) =>
         {
             if (!Tools.ReviewTools.Contains(tool)) return Json(new JsonObject { ["error"] = $"no route {ReviewPrefix}{tool}" }, 404);

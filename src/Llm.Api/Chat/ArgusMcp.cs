@@ -549,6 +549,25 @@ public sealed class ArgusMcp(HttpClient http, IOptions<ArgusOptions> argus, IOpt
         }
     }
 
+    /// <summary>
+    /// The wiki's code search, as the person (Argus's /review/search): a page of names, files and words with the whole
+    /// count and the facets. Argus's own words when it refuses the search; an exception when it cannot be reached.
+    /// </summary>
+    public async Task<(JsonObject? Found, string? Problem)> SearchAsync(string email, IReadOnlyDictionary<string, string?> query, CancellationToken ct)
+    {
+        var args = string.Join("&", query.Where(q => !string.IsNullOrWhiteSpace(q.Value)).Select(q => $"{q.Key}={Uri.EscapeDataString(q.Value!)}"));
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{argus.Value.Url.TrimEnd('/')}/review/search?{args}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Token);
+        request.Headers.Add(EmailHeader, email);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(TimeSpan.FromSeconds(30));
+        using var response = await http.SendAsync(request, timeout.Token);
+        var answer = JsonNode.Parse(await response.Content.ReadAsStringAsync(timeout.Token)) as JsonObject;
+        return response.IsSuccessStatusCode && answer is not null
+            ? (answer, null)
+            : (null, answer?["error"]?.GetValue<string>() ?? $"Argus answered {(int)response.StatusCode}.");
+    }
+
     /// <summary>Argus's words when something exists but the person cannot read it (src/Argus/Access/Acl.cs).</summary>
     public const string NoAccessMarker = "Nothing you have access to matches this";
 
