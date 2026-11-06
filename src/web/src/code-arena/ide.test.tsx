@@ -996,6 +996,28 @@ describe('Code Arena, the IDE', () => {
     expect(document.querySelector('aside[aria-label="Agent"]')).not.toHaveAttribute('hidden')
   })
 
+  it('keeps the editor groups for the next load, and puts them back as they were', async () => {
+    const { calls } = backend({
+      'GET /api/workspace/state': () => ({
+        json: { editors: { tabs: [{ kind: 'file', path: 'README.md' }], active: 'README.md', groups: [{ tabs: [{ kind: 'file', path: 'src/app.ts' }, { kind: 'file', path: 'README.md' }], active: 'src/app.ts' }], orientation: 'column' } },
+      }),
+    })
+    renderIde()
+    const second = await screen.findByRole('tablist', { name: 'Open files in group 2' })
+    await waitFor(() => expect(within(second).getAllByRole('tab').map((t) => t.querySelector('.truncate')?.textContent)).toEqual(['app.ts', 'README.md']))
+    await waitFor(() => expect(within(second).getByRole('tab', { name: 'app.ts' })).toHaveAttribute('aria-selected', 'true'))
+    expect(screen.getByRole('separator', { name: 'Resize the editor groups' })).toHaveAttribute('aria-orientation', 'horizontal')
+    expect(within(tabs()).getAllByRole('tab').map((t) => t.querySelector('.truncate')?.textContent)).toEqual(['README.md'])
+    // Kept as they are: the groups with the first's tabs; a group closed is gone from what is kept.
+    const kept = () => (calls.filter((c) => c.method === 'POST' && c.path === '/api/workspace/state').at(-1)?.body as { editors?: Record<string, unknown> } | undefined)?.editors
+    await waitFor(() => expect(kept()).toMatchObject({ groups: [{ tabs: [{ kind: 'file', path: 'src/app.ts' }, { kind: 'file', path: 'README.md' }], active: 'src/app.ts' }], orientation: 'column' }), { timeout: 3000 })
+    fireEvent.contextMenu(within(second).getByRole('tab', { name: 'app.ts' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /^Close All/ }))
+    await waitFor(() => expect(screen.queryByRole('tablist', { name: 'Open files in group 2' })).not.toBeInTheDocument())
+    await waitFor(() => expect(kept()).not.toHaveProperty('groups'), { timeout: 3000 })
+    expect(kept()).toMatchObject({ tabs: [{ kind: 'file', path: 'README.md' }], active: 'README.md' })
+  })
+
   it('moves a tab into a window of its own with its unsaved text, and takes it back when that window says so', async () => {
     backend()
     const opened = vi.spyOn(window, 'open').mockReturnValue({} as Window)

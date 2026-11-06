@@ -551,6 +551,8 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   back in the first; **Close Editor Group** closes the one with the focus.
   Save, Close and the other commands work on the group with the focus; Save
   All and a file changed on disk reach every group. Eight groups at most.
+  The groups, their tabs, the one each shows and their sizes are kept with
+  the tabs: a reload (or the next run) puts them back as they were.
   **Open to the Side** (the Explorer's menu, **Ctrl+Enter** in quick open,
   Markdown's **Open Preview to the Side**) opens a file in the group beside
   the one with the focus, made when there is none. **Show All Editors By

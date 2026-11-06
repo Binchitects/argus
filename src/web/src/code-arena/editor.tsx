@@ -44,10 +44,19 @@ const diffId = (path: string, source: DiffSource = 'agent') => `${source === 'gi
 
 /** The tabs as workspace state keeps them for the next load: what each is, and the one shown with its cursor. */
 interface SavedEditors {
-  tabs: { kind: Tab['kind']; path: string; pinned?: boolean; preview?: boolean }[]
+  tabs: SavedTab[]
   active: string | null
   cursor?: { line: number; column: number } | null
+  /** The other editor groups, in order: each one's tabs and the one shown, and its share of the space. */
+  groups?: { tabs: SavedTab[]; active: string | null; size?: number }[]
+  orientation?: 'row' | 'column'
+  size?: number
 }
+type SavedTab = { kind: Tab['kind']; path: string; pinned?: boolean; preview?: boolean }
+
+/** What a tab is kept as for the next load (a compare is not kept). */
+const savedTabs = (tabs: Tab[]): SavedTab[] =>
+  tabs.filter((t) => t.kind !== 'diff').map((t) => ({ kind: t.kind, path: t.path, ...(t.pinned ? { pinned: true } : {}), ...(t.preview ? { preview: true } : {}) }))
 
 /** The files a tab holds in the editor: a file tab's own, a compare's live sides. */
 /** How many files with no tab a peek keeps loaded. */
@@ -856,6 +865,22 @@ export function EditorProvider({ children, group = 1, detached = false }: { chil
         if (tab.kind === 'file' && saved?.cursor) await open(tab.path, { line: saved.cursor.line, column: saved.cursor.column })
         else activate(shownBefore)
       } else if (!activeRef.current && tabsRef.current.length > 0) activate(tabsRef.current[0]!.id)
+      // The other groups as they were: each made with its first tab, the others behind it, the one shown shown.
+      let last = 1
+      for (const g of (saved?.groups ?? []).filter((x) => x.tabs.length > 0)) {
+        const [first, ...rest] = g.tabs
+        const id: number = store.split(last, saved?.orientation === 'column' ? 'down' : 'right', first, () => {
+          const api = store.apis.get(id)
+          if (!api) return
+          void Promise.all(rest.map((t) => openIn(api, t, true))).then(() => {
+            if (g.active && store.apis.get(id)?.tabs.some((t) => t.id === g.active)) store.apis.get(id)!.activate(g.active)
+          })
+        })
+        if (g.size) store.resize(id, g.size)
+        last = id
+      }
+      if (saved?.size && last !== 1) store.resize(1, saved.size)
+      if (last !== 1) store.focus(1)
     }
 
     /** The Settings or the Keyboard Shortcuts editor: one tab each, shown again when open. */
@@ -1502,6 +1527,8 @@ export function EditorProvider({ children, group = 1, detached = false }: { chil
   // The tabs as they were before a reload; then the tabs kept as they change (a second after), for the next load.
   const restoring = useRef(false)
   const [restored, setRestored] = useState(false)
+  // The other groups' tabs are kept with the first's: kept again as any of them changes.
+  const groupsVersion = useSyncExternalStore(store.subscribe, () => (root ? store.version : 0))
   useEffect(() => {
     if (restoring.current) return
     restoring.current = true
@@ -1512,15 +1539,27 @@ export function EditorProvider({ children, group = 1, detached = false }: { chil
   useEffect(() => {
     if (!restored) return
     const wait = setTimeout(() => {
+      const l = store.layout
+      const others = l.groups.slice(1).map((g) => store.apis.get(g)).filter((a) => !!a)
       const editors: SavedEditors = {
-        tabs: tabs.filter((t) => t.kind !== 'diff').map((t) => ({ kind: t.kind, path: t.path, ...(t.pinned ? { pinned: true } : {}), ...(t.preview ? { preview: true } : {}) })),
+        tabs: savedTabs(tabs),
         active: activeId,
         cursor,
+        ...(others.length > 0
+          ? {
+              groups: l.groups.slice(1).flatMap((g) => {
+                const api = store.apis.get(g)
+                return api ? [{ tabs: savedTabs(api.tabs), active: api.active?.id ?? null, ...(l.sizes[g] ? { size: l.sizes[g] } : {}) }] : []
+              }),
+              orientation: l.orientation,
+              ...(l.sizes[1] ? { size: l.sizes[1] } : {}),
+            }
+          : {}),
       }
       void saveWorkspaceState({ editors }).catch(() => undefined)
     }, 1000)
     return () => clearTimeout(wait)
-  }, [restored, tabs, activeId, cursor])
+  }, [restored, tabs, activeId, cursor, store, groupsVersion])
 
   useEffect(() => {
     const models = files.current
