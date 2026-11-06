@@ -26,7 +26,7 @@ vi.mock('@/pages/chat/tool-args', async (real) => {
 })
 
 const state = (over: Partial<CodeState> = {}): CodeState => ({
-  name: 'Code Arena', version: '5.0.0', license: 'AGPL-3.0-only', source: 'https://github.com/Binchitects/argus', manual: 'https://llm.test/help/code-arena', folder: '/home/ada/shop', project: 'shop', branch: 'main', model: 'model-a', context: 32768, contextUsed: 4200, compactAt: 80, compactTarget: 25, servers: [], jobs: [], queued: [], thinking: null, mode: 'ask',
+  name: 'Code Arena', version: '5.0.0', license: 'AGPL-3.0-only', source: 'https://github.com/Binchitects/argus', log: '/opt/code-arena/code-arena.log', manual: 'https://llm.test/help/code-arena', folder: '/home/ada/shop', project: 'shop', branch: 'main', model: 'model-a', context: 32768, contextUsed: 4200, compactAt: 80, compactTarget: 25, servers: [], jobs: [], queued: [], thinking: null, mode: 'ask',
   modes: [
     { name: 'ask', description: 'edits and commands ask first' },
     { name: 'auto-edit', description: 'file edits run without asking; commands ask' },

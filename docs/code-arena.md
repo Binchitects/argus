@@ -295,11 +295,48 @@ browser. Closing the window stops code-arena; a second code-arena's window
 goes to the browser the first one started, so that one runs until Ctrl+C.
 Without such a browser (Firefox has no app mode; a snap's browser cannot read
 the data folder), with `--browser`, or with `"window": false` in
-`config.json`, it opens in a tab of the default browser instead.
+`config.json`, it opens in a tab of the default browser instead. Without
+one, or with one older than the page is built for, it says so first: "No
+Chrome, Edge, Chromium or Brave here for the IDE's own window: it opens in
+your default browser instead", or "msedge 95 is older than the IDE needs
+(Chrome or Edge 109 or newer): …". It reads the version from the program's
+file on Windows, its `Info.plist` on macOS, and `--version` on Linux.
 **Ctrl+C** in the terminal stops it, and the turn if one runs;
 the terminal shows what the agent does (`● edit_file …`) while the page drives
 it. On another machine over SSH: `code-arena --port 8765 --no-open` there,
 `ssh -L 8765:127.0.0.1:8765 that-machine` here, and open the address printed.
+
+**The browsers it runs in.** The page is built for browsers about three years
+old: Chrome and Edge 109 or newer (109 is the last Edge on Windows 7, 8.1 and
+Server 2012), Firefox 115 or newer and Safari 16 or newer. For them its
+JavaScript is lowered, its OKLCH colours come with sRGB ones before them, and
+a colour mixed with transparent (a tint such as a hover's) has an alpha of its
+own where `color-mix()` is missing (Chrome and Edge before 111). An older
+browser says "This browser is too old for Code Arena", with the versions that
+are new enough, instead of a blank page; `code-arena chat` runs the agent in a
+terminal meanwhile.
+
+**Started on its own on Windows.** A double-click on `code-arena.exe` (or a
+shortcut, or the Start menu) leaves the IDE no console window: it starts
+itself again at once with a console that has no window, and the first one
+ends (Windows shows its console for a moment, as it makes one before any
+program runs). The programs the IDE runs (git, the terminals' shells, language
+servers) share that hidden console, so none of them opens a window either.
+When the IDE gets no window of its own and runs in a tab, a console comes
+back: closing it, or Ctrl+C, stops the IDE. When it cannot start (not signed
+in yet, say), a message box says why and where its log is. From a terminal it
+is a console program as before: the terminal waits for it and shows what it
+says.
+
+**Its log.** What the IDE says (the address with its key left out as `…`,
+what it opened, warnings, and the error that stopped it, if one did) goes to
+`code-arena.log` beside the program too, each line with its time (on Linux and
+macOS readable by its user only). Where that folder cannot be written (`/usr/local/bin`,
+`C:\Program Files`), it is `logs/code-arena.log` in the data folder. It
+rotates at 5 MB and keeps three older files (`code-arena.1.log` is the newest
+of them). `code-arena --help` ends with its path, and **Help → About Code
+Arena** shows it. The conversation in a terminal (`code-arena chat`, `-p`)
+keeps no log: what it says is in the terminal and its session.
 
 **In Code Studio** (`code-arena web --connect`, signed in with `code-arena
 login`): the folder shows in Arena's **Code Studio** too, as *the folder on
@@ -2624,6 +2661,18 @@ built the web image has its `npm ci` cached. `CODE_ARENA=none` skips it too.
 systems). Trimming is off: it would need a package the offline folder does not
 hold.
 
+**Each program carries everything it needs.** After publishing,
+`./arenactl code-arena` and `tools/publish-code-arena.sh` read each program
+with `tools/code-arena-check.py` and stop when one falls short: a .NET
+single-file bundle, self-contained (the runtime inside: nothing is installed
+first), with no native library to unpack at start (that needs a writable
+temporary folder, which locked-down machines forbid), the IDE's page embedded,
+and on Windows a console program. The app's image has no Python in its .NET
+stage: there it says it skipped the check, and `python3
+tools/code-arena-check.py dist/code-arena/*/code-arena*` runs it on the files.
+On Linux the program needs glibc (any distribution of the last ten years; not
+Alpine's musl), and OpenSSL for the Arena's HTTPS, as .NET does.
+
 ## When something is wrong
 
 Code Arena carries on by itself where it can. A gateway that does not answer
@@ -2709,6 +2758,13 @@ it or rewind past it.
 - **A terminal does not open**: the shell named by `"terminalShell"` is not
   there (give its full path), or, on Windows, the system is older than
   Windows 10 1809 (no ConPTY).
+- **"… is older than the IDE needs (Chrome or Edge 109 or newer)"**, or the
+  page says the browser is too old: update Edge or Chrome (in a closed network,
+  the company's offline installer), or point `CODE_ARENA_BROWSER` at a newer
+  one. Meanwhile `code-arena chat` runs the agent in a terminal.
+- **The IDE started from the desktop shows nothing**: it stopped before its
+  window opened, and a message box said why; `code-arena.log` beside the
+  program (or in the data folder's `logs/`) has every line it said.
 - **The IDE's address says the key is wrong**: it is an old run's. Each run
   prints a new address; open that one.
 - **The browser says it cannot read `code-arena-PORT.html`**: it runs in a

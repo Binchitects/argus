@@ -638,6 +638,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             ["version"] = Cli.Version,
             ["license"] = Cli.License,
             ["source"] = Cli.Source,
+            // Where what code-arena says is kept (beside the program): the about box shows it.
+            ["log"] = _rt.Env.Log?.Path,
             // The help's "Read more": the manual of the Arena signed in to.
             ["manual"] = _rt.Config.ManualUrl,
             ["folder"] = _rt.Workspace.Root,

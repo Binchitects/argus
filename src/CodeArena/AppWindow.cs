@@ -5,21 +5,38 @@ namespace CodeArena;
 /// <summary>
 /// Code Arena's own desktop window: a Chromium-family browser (Chrome, Edge, Chromium, Brave) in app mode, a window
 /// with no tabs and no address bar, on a profile of Code Arena's own in its data folder. The browser keys VS Code
-/// uses (Ctrl+W, Ctrl+T, Ctrl+N) are the page's there. CODE_ARENA_BROWSER names the browser to use.
+/// uses (Ctrl+W, Ctrl+T, Ctrl+N) are the page's there. CODE_ARENA_BROWSER names the browser to use. One older than the
+/// page is built for (<see cref="MinBrowser"/>) gets no window: the IDE opens in the default browser, which may be newer.
 /// </summary>
-internal static class AppWindow
+internal static partial class AppWindow
 {
+    /// <summary>The oldest Chrome or Edge the IDE's page is built for: src/web/src/lib/browsers.ts says the same.</summary>
+    public const int MinBrowser = 109;
+
     /// <summary>
     /// Opens the window on the address (the launcher file's: never the key, which a command line shows every user);
-    /// null when there is no such browser or no desktop. The task ends when the browser it started does.
+    /// null when there is no such browser, one too old, or no desktop, and <paramref name="said"/> is told why (not for
+    /// no desktop: there is no browser to open then either). The task ends when the browser it started does.
     /// </summary>
-    public static Task? Open(string url, string profile, Func<string, string?> env)
+    public static Task? Open(string url, string profile, Func<string, string?> env, Action<string>? said = null)
     {
         if (!OperatingSystem.IsWindows() && !OperatingSystem.IsMacOS() && string.IsNullOrEmpty(env("DISPLAY")) && string.IsNullOrEmpty(env("WAYLAND_DISPLAY")))
         {
             return null;
         }
-        if (Find(env) is not { } browser || !Profile(profile))
+        if (Find(env) is not { } browser)
+        {
+            said?.Invoke(env("CODE_ARENA_BROWSER") is { Length: > 0 } chosen
+                ? $"CODE_ARENA_BROWSER names no file ({chosen}): the IDE opens in your default browser instead."
+                : "No Chrome, Edge, Chromium or Brave here for the IDE's own window: it opens in your default browser instead.");
+            return null;
+        }
+        if (Version(browser) is { } version && version < MinBrowser)
+        {
+            said?.Invoke($"{Path.GetFileNameWithoutExtension(browser)} {version} is older than the IDE needs (Chrome or Edge {MinBrowser} or newer): it opens in your default browser instead.");
+            return null;
+        }
+        if (!Profile(profile))
         {
             return null;
         }
@@ -58,6 +75,56 @@ internal static class AppWindow
             await process.WaitForExitAsync();
         }
     }
+
+    /// <summary>
+    /// The browser's major version; null when it cannot be read. Windows: the program's file version. macOS: the app's
+    /// Info.plist. Elsewhere: what --version prints (Chrome and its kin print it without opening a window).
+    /// </summary>
+    public static int? Version(string browser)
+    {
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                return FileVersionInfo.GetVersionInfo(browser).FileMajorPart is > 0 and var major ? major : null;
+            }
+            if (OperatingSystem.IsMacOS())
+            {
+                var plist = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(browser)!)!, "Info.plist");
+                return File.Exists(plist) && PlistVersion().Match(File.ReadAllText(plist)) is { Success: true } m ? int.Parse(m.Groups[1].Value) : null;
+            }
+            var start = new ProcessStartInfo(browser) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
+            start.ArgumentList.Add("--version");
+            start.Environment.Remove("ARENA_API_KEY");
+            using var process = Process.Start(start);
+            if (process is null)
+            {
+                return null;
+            }
+            var said = process.StandardOutput.ReadToEndAsync();
+            _ = process.StandardError.ReadToEndAsync();
+            if (!process.WaitForExit(5_000))
+            {
+                process.Kill(entireProcessTree: true);
+                return null;
+            }
+            return Major(said.Result);
+        }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The major version in what a browser says of itself ("Chromium 108.0.5359.94", "109.0.1518.140").</summary>
+    internal static int? Major(string text) =>
+        MajorVersion().Match(text) is { Success: true } m && int.TryParse(m.Groups[1].Value, out var major) ? major : null;
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"\b(\d{2,4})\.\d+\.\d+")]
+    private static partial System.Text.RegularExpressions.Regex MajorVersion();
+
+    [System.Text.RegularExpressions.GeneratedRegex(@"<key>CFBundleShortVersionString</key>\s*<string>(\d+)")]
+    private static partial System.Text.RegularExpressions.Regex PlistVersion();
 
     /// <summary>The browser: CODE_ARENA_BROWSER, else the first of Chrome, Edge, Chromium and Brave installed.</summary>
     public static string? Find(Func<string, string?> env)

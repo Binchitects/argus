@@ -67,8 +67,9 @@ internal sealed partial class WebRun : IAsyncDisposable
         var env = new CliEnv
         {
             In = new StringReader(""),
-            Out = TextWriter.Synchronized(output),
-            Err = TextWriter.Synchronized(error),
+            // With a log, as the program has it: every line to it too.
+            Out = TextWriter.Synchronized(h.Log is null ? output : new Tee(output, h.Log)),
+            Err = TextWriter.Synchronized(h.Log is null ? error : new Tee(error, h.Log)),
             Env = k => h.Env.GetValueOrDefault(k),
             Cwd = h.Cwd ?? h.Work,
             Paths = h.Paths,
@@ -82,6 +83,8 @@ internal sealed partial class WebRun : IAsyncDisposable
             BrowserWait = browserWait,
             ArenaSkillsEvery = h.ArenaSkillsEvery ?? CliEnv.ArenaSkillsAgain,
             SettingsEvery = h.SettingsEvery ?? TimeSpan.FromSeconds(3),
+            Log = h.Log,
+            Windowed = h.Windowed,
         };
         var exit = Task.Run(() => Cli.RunAsync([.. bare ? Array.Empty<string>() : ["web"], .. browse is null && window is null ? ["--no-open"] : Array.Empty<string>(), .. args], env));
         var run = new WebRun(env, output, error, exit);

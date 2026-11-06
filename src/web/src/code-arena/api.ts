@@ -10,6 +10,8 @@ export interface CodeState {
   /** The licence and where this version's source is, for the about box (LICENSING.md, section 7(b)). */
   license: string
   source: string
+  /** The IDE's log, code-arena.log beside the program (else in its data folder); null: none could be written. */
+  log: string | null
   /** Code Arena's page of the manual, in the Arena signed in to (https://DOMAIN/help/code-arena); null without its address. */
   manual: string | null
   folder: string

@@ -18,10 +18,14 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 
-# dotnet as arenactl uses it: an SDK 10 listed, and publish, which writes the program where -o says (with a .pdb beside it).
+# dotnet as arenactl uses it: an SDK 10 listed, and publish, which writes the program where -o says (with a .pdb beside it):
+# the smallest one tools/code-arena-check.py reads as published (FAKE_PROGRAM=framework: one that needs .NET installed).
 FAKE_DOTNET = r"""#!/usr/bin/env python3
-import os, pathlib, sys
+import importlib.util, os, pathlib, sys
 args = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("check", "tools/code-arena-check.py")
+check = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(check)
 if args == ["--list-sdks"]:
     print("10.0.100 [/usr/share/dotnet/sdk]")
     sys.exit(0)
@@ -32,11 +36,18 @@ if args[:1] == ["publish"]:
     rid = args[args.index("-r") + 1]
     out.mkdir(parents=True, exist_ok=True)
     exe = out / ("code-arena.exe" if rid.startswith("win-") else "code-arena")
-    exe.write_bytes(b"program for " + rid.encode())
+    exe.write_bytes(check.sample(rid.startswith("win-"), self_contained=os.environ.get("FAKE_PROGRAM") != "framework"))
     (out / "code-arena.pdb").write_bytes(b"symbols")
     sys.exit(0)
 sys.exit(1)
 """
+
+
+def load_check():
+    spec = importlib.util.spec_from_file_location("code_arena_check", REPO / "tools" / "code-arena-check.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def load_arenactl():
@@ -53,6 +64,8 @@ class CodeArenaPackageTests(unittest.TestCase):
         self.root = self.dir / "repo"
         (self.root / "src" / "CodeArena" / "web").mkdir(parents=True)
         shutil.copy(REPO / "arenactl", self.root / "arenactl")
+        (self.root / "tools").mkdir()
+        shutil.copy(REPO / "tools" / "code-arena-check.py", self.root / "tools" / "code-arena-check.py")
         (self.root / "VERSION").write_text("9.9.9\n")
         (self.root / "LICENSE.md").write_text("AGPL\n")
         (self.root / "LICENSING.md").write_text("terms\n")
@@ -71,8 +84,8 @@ class CodeArenaPackageTests(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.dir, ignore_errors=True)
 
-    def run_it(self, *args: str) -> subprocess.CompletedProcess:
-        env = {"PATH": str(self.bin), "HOME": str(self.dir), "SOURCE_DATE_EPOCH": "1790000000"}
+    def run_it(self, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+        env = {"PATH": str(self.bin), "HOME": str(self.dir), "SOURCE_DATE_EPOCH": "1790000000", **(env or {})}
         return subprocess.run([sys.executable, str(self.root / "arenactl"), *args], cwd=self.root, env=env, capture_output=True, text=True, timeout=120)
 
     def test_Each_system_gets_its_package_with_the_program_alone_a_readme_and_the_licences(self):
@@ -86,7 +99,7 @@ class CodeArenaPackageTests(unittest.TestCase):
                                              "code-arena-9.9.9-linux-x64/README.txt", "code-arena-9.9.9-linux-x64/code-arena"])
             exe = t.getmember("code-arena-9.9.9-linux-x64/code-arena")
             self.assertEqual((exe.mode & 0o777, exe.uid, exe.gid, exe.mtime), (0o755, 0, 0, 1790000000))
-            self.assertEqual(t.extractfile(exe).read(), b"program for linux-x64")
+            self.assertEqual(t.extractfile(exe).read(), load_check().sample(False))
             readme = t.extractfile("code-arena-9.9.9-linux-x64/README.txt").read().decode()
         self.assertIn("Code Arena 9.9.9 for Linux (x64)", readme)
         self.assertIn("code-arena login --url https://DOMAIN", readme)
@@ -101,6 +114,12 @@ class CodeArenaPackageTests(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in (dist / "code-arena" / "linux-x64").iterdir()), ["code-arena"])
         sums = (dist / "SHA256SUMS").read_text().splitlines()
         self.assertEqual([line.split()[1] for line in sums], ["code-arena-9.9.9-linux-x64.tar.gz", "code-arena-9.9.9-win-arm64.zip", "code-arena-9.9.9-win-x64.zip"])
+
+    def test_A_program_that_needs_dotnet_installed_is_not_packaged(self):
+        r = self.run_it("code-arena", "linux-x64", env={"FAKE_PROGRAM": "framework"})
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("linux-x64: not self-contained: it asks for a .NET runtime installed on the machine", r.stdout)
+        self.assertFalse((self.root / "dist" / "code-arena-9.9.9-linux-x64.tar.gz").exists())
 
     def test_The_same_files_give_the_same_package(self):
         self.assertEqual(self.run_it("code-arena", "linux-x64").returncode, 0)

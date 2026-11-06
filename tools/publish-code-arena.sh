@@ -120,6 +120,15 @@ for i in "${!rids[@]}"; do
 done
 [ "$failed" -eq 0 ] || exit 1
 
+# Each carries everything it needs (self-contained, nothing to unpack, its page, a console program on Windows):
+# checked in the files themselves. The SDK's image has no Python: there the check is left to the release.
+if command -v python3 >/dev/null 2>&1; then
+  echo "== check"
+  python3 "$here/code-arena-check.py" $([ -n "$web" ] || echo --no-web) $(for rid in "${rids[@]}"; do ls "$out/$rid"/code-arena*; done)
+else
+  echo "== check: skipped (no python3 here; tools/code-arena-check.py dist/code-arena/*/code-arena* runs it)"
+fi
+
 (cd "$out" && find . -type f \( -name code-arena -o -name code-arena.exe \) | sed 's|^\./||' | sort | xargs sha256sum > SHA256SUMS)
 echo
 cat "$out/SHA256SUMS"

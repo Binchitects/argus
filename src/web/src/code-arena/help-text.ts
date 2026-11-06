@@ -110,7 +110,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   status: {
     name: 'Status bar',
-    text: 'Along the bottom: the git branch, the agent\'s changes, the terminal and the commands running with no time limit on the left; the cursor\'s line and column, the file\'s formatter, its language server (starting, ready, failed, or off until the folder is trusted: click it to restart it or see its log; one that is not running, and a formatter that cannot run, in italics) and its language, the MCP servers (**Try again** for one not connected), how full the model\'s window is (**Context**: what fills it, as the chat\'s ring shows it, and when the session compacts), the mode, the model and the version (About: the licence and the source) on the right.',
+    text: 'Along the bottom: the git branch, the agent\'s changes, the terminal and the commands running with no time limit on the left; the cursor\'s line and column, the file\'s formatter, its language server (starting, ready, failed, or off until the folder is trusted: click it to restart it or see its log; one that is not running, and a formatter that cannot run, in italics) and its language, the MCP servers (**Try again** for one not connected), how full the model\'s window is (**Context**: what fills it, as the chat\'s ring shows it, and when the session compacts), the mode, the model and the version (About: the licence, the source and where its log is, code-arena.log beside the program) on the right.',
     manual: 'the-ide',
   },
 }
@@ -154,6 +154,14 @@ export const tasks: HelpTask[] = [
   {
     title: 'Stop a long command the agent runs',
     steps: ['While it runs, its output shows above the chat\'s box.', 'Press **Stop** beside it: the agent is told it ended.'],
+  },
+  {
+    title: 'Find what Code Arena said (its log)',
+    steps: [
+      'Press **About Code Arena** at the activity bar\'s foot, or the version at the status bar\'s right.',
+      '**Log** is where it is: code-arena.log beside the program (in the data folder\'s logs when that folder cannot be written). `code-arena --help` ends with it too.',
+      'Each line has its time; the IDE\'s key is left out. It keeps three older files as it grows.',
+    ],
   },
   {
     title: 'Change a setting, as in VS Code',
