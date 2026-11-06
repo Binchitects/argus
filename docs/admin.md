@@ -51,12 +51,31 @@ that it is not set up, and how to turn it on.
 
 ### Access: roles and rules
 
-**Admin → Access** has its tabs. **Roles**: the built-in ones and your own,
+**Admin → Access** has its tabs (the address keeps the tab:
+`/admin/access?tab=groups`). **Roles**: the built-in ones and your own,
 who holds each (**Give it** to a person, a group, a directory group linked on
-the Groups page, or everyone, maybe until a date), and **New role** from the
-permission list; built-in roles cannot be changed. **Rules**: allows and
-denies on models, tools, knowledge sources, repositories and features.
-**Checker**: may this person do this, and why. **History**: every change.
+the Groups page, or everyone, maybe until a date), **New role** from the
+permission list (with a search), and **From a template**: Help desk, Team
+lead, Knowledge curator, Integrations admin, Security reviewer, Data steward,
+Content moderator and Access admin, each opened as a new role to rename and
+change before it is made; built-in roles cannot be changed. **Matrix**: every
+role against every permission, grouped by area, with a search and **Custom
+roles** only; a tick is what a role names, a grey tick what it gives through
+a broader permission or by acting in the area. A custom role's cells, or a
+whole area's at once, change there and **Save changes** changes each role
+(one entry each in the history). **People**: one person's effective
+permissions, every one held or not with the role or rule that decides it
+(open a line for the rest), **Held** or **Not held**, their roles and how
+they hold them, their groups and the rules that reach them; below it the
+checker asks about one model, tool, knowledge source, repository or shared
+thing. **Groups**: each group with its members (50 by name, then a count),
+the roles it holds and the rules on it, and **New people join** on the app
+groups new people join
+([authentication.md](authentication.md#default-groups-for-new-people)).
+**Rules**: allows and denies on models, tools, knowledge sources,
+repositories, features and shared assistants, skills and apps. **History**:
+every change, before beside after; **Show** keeps one kind (roles, who holds
+a role, rules, default groups, requests answered).
 Someone who holds an administrative permission through a role (and is not an
 Owner) sees the admin pages of what they hold, and only those: a Supervisor
 role with `monitoring.read` and `logs.read` sees Monitoring, Dashboards,

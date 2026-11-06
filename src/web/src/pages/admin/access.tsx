@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Plus, ShieldCheck, Trash2, X } from 'lucide-react'
+import { Check, LayoutTemplate, Plus, ShieldCheck, Trash2, X } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
+import { useSearchParams } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { QueryError } from '@/components/app/query-state'
 import { Segmented } from '@/components/app/segmented'
@@ -20,6 +21,9 @@ import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { accessQuery, type AccessCheck, type AccessOverview, type Subject, type SubjectKind } from './access-api'
 import { ManyPeople } from './access-bulk'
+import { AccessGroupsPanel } from './access-groups'
+import { Matrix } from './access-matrix'
+import { EffectivePermissions } from './access-people'
 import { groupsQuery } from './groups-api'
 import { peopleQuery } from './people-api'
 
@@ -27,34 +31,47 @@ const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString() : 
 
 export function AccessPage() {
   const access = useQuery(accessQuery)
+  // The tab is in the address, so a link (a request's bell, the help) opens it and a reload keeps it.
+  const [params, setParams] = useSearchParams()
   return (
     <>
       <PageHeader
         title="Access"
-        description="Roles say what people may run; rules give or take a model, a tool, a knowledge source, a repository or a feature. The most specific wins: a person's own over their groups', a group's over everyone's."
+        description="Roles say what people may do; rules give or take a model, a tool, a knowledge source, a repository, a feature, or a shared assistant, skill or app. The most specific wins: a person's own over their groups', a group's over everyone's."
       />
       {access.error ? (
         <QueryError error={access.error} retry={() => access.refetch()} />
       ) : !access.data ? (
         <Skeleton className="h-64" />
       ) : (
-        <Tabs defaultValue={new URLSearchParams(window.location.search).get('tab') ?? 'roles'}>
-          <TabsList>
-            <TabsTrigger value="roles">Roles</TabsTrigger>
-            <TabsTrigger value="rules">Rules</TabsTrigger>
-            <TabsTrigger value="check">Checker</TabsTrigger>
-            <TabsTrigger value="many">Many people</TabsTrigger>
-            <TabsTrigger value="requests">Requests</TabsTrigger>
-            <TabsTrigger value="history">History</TabsTrigger>
-          </TabsList>
+        <Tabs value={params.get('tab') ?? 'roles'} onValueChange={(tab) => setParams({ tab }, { replace: true })}>
+          <div className="overflow-x-auto">
+            <TabsList>
+              <TabsTrigger value="roles">Roles</TabsTrigger>
+              <TabsTrigger value="matrix">Matrix</TabsTrigger>
+              <TabsTrigger value="people">People</TabsTrigger>
+              <TabsTrigger value="groups">Groups</TabsTrigger>
+              <TabsTrigger value="rules">Rules</TabsTrigger>
+              <TabsTrigger value="many">Many people</TabsTrigger>
+              <TabsTrigger value="requests">Requests</TabsTrigger>
+              <TabsTrigger value="history">History</TabsTrigger>
+            </TabsList>
+          </div>
           <TabsContent value="roles" className="mt-4">
             <Roles data={access.data} />
           </TabsContent>
+          <TabsContent value="matrix" className="mt-4">
+            <Matrix data={access.data} />
+          </TabsContent>
+          <TabsContent value="people" className="mt-4 grid gap-4">
+            <EffectivePermissions data={access.data} />
+            <Checker data={access.data} />
+          </TabsContent>
+          <TabsContent value="groups" className="mt-4">
+            <AccessGroupsPanel />
+          </TabsContent>
           <TabsContent value="rules" className="mt-4">
             <Rules data={access.data} />
-          </TabsContent>
-          <TabsContent value="check" className="mt-4">
-            <Checker data={access.data} />
           </TabsContent>
           <TabsContent value="many" className="mt-4">
             <ManyPeople data={access.data} />
@@ -92,11 +109,23 @@ function Roles({ data }: { data: AccessOverview }) {
   const change = useChange()
   const confirm = useConfirm()
   const [editing, setEditing] = useState<AccessOverview['roles'][number] | 'new' | null>(null)
+  const [template, setTemplate] = useState<NonNullable<AccessOverview['templates']>[number] | null>(null)
+  const [choosing, setChoosing] = useState(false)
   const [giving, setGiving] = useState<string | null>(null)
   return (
     <div className="grid gap-4">
-      <div className="flex justify-end">
-        <Button onClick={() => setEditing('new')}>
+      <div className="flex flex-wrap justify-end gap-2">
+        {!!data.templates?.length && (
+          <Button variant="outline" onClick={() => setChoosing(true)}>
+            <LayoutTemplate /> From a template
+          </Button>
+        )}
+        <Button
+          onClick={() => {
+            setTemplate(null)
+            setEditing('new')
+          }}
+        >
           <Plus /> New role
         </Button>
       </div>
@@ -158,18 +187,62 @@ function Roles({ data }: { data: AccessOverview }) {
           </CardContent>
         </Card>
       ))}
-      {editing && <RoleDialog data={data} role={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}
+      {editing && <RoleDialog data={data} role={editing === 'new' ? null : editing} template={template} onClose={() => setEditing(null)} />}
+      {choosing && (
+        <TemplateDialog
+          data={data}
+          onClose={() => setChoosing(false)}
+          onChoose={(t) => {
+            setChoosing(false)
+            setTemplate(t)
+            setEditing('new')
+          }}
+        />
+      )}
       {giving && <GiveDialog role={data.roles.find((r) => r.id === giving)!} onClose={() => setGiving(null)} />}
     </div>
   )
 }
 
-function RoleDialog({ data, role, onClose }: { data: AccessOverview; role: AccessOverview['roles'][number] | null; onClose: () => void }) {
+type Template = NonNullable<AccessOverview['templates']>[number]
+
+/** The common roles a company makes: one chosen opens a new role with its name and permissions, to change before it is made. */
+function TemplateDialog({ data, onClose, onChoose }: { data: AccessOverview; onClose: () => void; onChoose: (t: Template) => void }) {
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>A role from a template</DialogTitle>
+          <DialogDescription>Each opens as a new role, to rename and change before it is made.</DialogDescription>
+        </DialogHeader>
+        <ul className="grid gap-2" aria-label="Templates">
+          {(data.templates ?? []).map((t) => (
+            <li key={t.key}>
+              <button type="button" className="grid w-full gap-1 rounded-lg border p-3 text-left text-sm hover:bg-muted focus-visible:ring-[3px] focus-visible:ring-ring focus-visible:outline-none" onClick={() => onChoose(t)}>
+                <span className="font-medium">{t.name}</span>
+                <span className="text-muted-foreground">{t.description}</span>
+                <span className="font-mono text-xs text-muted-foreground">{t.permissions.join(' · ')}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function RoleDialog({ data, role, template, onClose }: { data: AccessOverview; role: AccessOverview['roles'][number] | null; template?: Template | null; onClose: () => void }) {
   const queryClient = useQueryClient()
   const readOnly = role?.builtIn ?? false
-  const [name, setName] = useState(role?.name ?? '')
-  const [description, setDescription] = useState(role?.description ?? '')
-  const [held, setHeld] = useState(new Set(role?.permissions ?? []))
+  const [name, setName] = useState(role?.name ?? template?.name ?? '')
+  const [description, setDescription] = useState(role?.description ?? template?.description ?? '')
+  const [held, setHeld] = useState(new Set(role?.permissions ?? template?.permissions ?? []))
+  const [filter, setFilter] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const areas = [...new Set(data.permissions.map((p) => p.area))]
@@ -208,13 +281,18 @@ function RoleDialog({ data, role, onClose }: { data: AccessOverview; role: Acces
               </Field>
             </>
           )}
-          {areas.map((area) => (
+          <Input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search permissions" aria-label="Search the permissions" />
+          {areas.map((area) => {
+            const q = filter.trim().toLowerCase()
+            const rows = data.permissions
+              .filter((p) => p.area === area && !p.parent)
+              .flatMap((p) => [p, ...data.permissions.filter((c) => c.parent === p.key)])
+              .filter((p) => !q || p.key.includes(q) || p.description.toLowerCase().includes(q))
+            if (rows.length === 0) return null
+            return (
             <fieldset key={area} className="grid gap-1.5">
               <legend className="mb-1 text-sm font-medium">{area}</legend>
-              {data.permissions
-                .filter((p) => p.area === area && !p.parent)
-                .flatMap((p) => [p, ...data.permissions.filter((c) => c.parent === p.key)])
-                .map((p) => (
+              {rows.map((p) => (
                   <div key={p.key} className={`flex items-start gap-2 text-sm ${p.parent ? 'ml-6' : ''}`}>
                     <Checkbox
                       id={`perm-${p.key}`}
@@ -234,7 +312,8 @@ function RoleDialog({ data, role, onClose }: { data: AccessOverview; role: Acces
                   </div>
                 ))}
             </fieldset>
-          ))}
+            )
+          })}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
@@ -519,7 +598,10 @@ function RuleDialog({ data, onClose }: { data: AccessOverview; onClose: () => vo
               </Select>
             </Field>
           ) : (
-            <Field label="Name" hint="Its name or id; * matches any part (team-a/**, qwen*).">
+            <Field
+              label={['assistant', 'skill', 'app'].includes(resourceKind) ? 'Its id' : 'Name'}
+              hint={['assistant', 'skill', 'app'].includes(resourceKind) ? `The ${resourceKind}'s id, from its link. A deny keeps it from those its sharing reaches; its owner keeps it.` : 'Its name or id; * matches any part (team-a/**, qwen*).'}
+            >
               <Input value={resource} onChange={(e) => setResource(e.target.value)} />
             </Field>
           )}
@@ -681,16 +763,46 @@ function Line({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
+const historyKinds = [
+  { value: 'all', label: 'Every change' },
+  { value: 'role', label: 'Roles' },
+  { value: 'assignment', label: 'Who holds a role' },
+  { value: 'rule', label: 'Rules' },
+  { value: 'defaults', label: 'Default groups' },
+  { value: 'request', label: 'Requests answered' },
+]
+
 function History() {
+  const [kind, setKind] = useState('all')
   const history = useQuery({
-    queryKey: ['admin', 'access', 'history'],
-    queryFn: ({ signal }) => api<{ id: number; at: string; kind: string; actor: string | null; before: string | null; after: string | null }[]>('/api/admin/access/history?take=200', { signal }),
+    queryKey: ['admin', 'access', 'history', kind],
+    queryFn: ({ signal }) =>
+      api<{ id: number; at: string; kind: string; actor: string | null; before: string | null; after: string | null }[]>(`/api/admin/access/history?take=200${kind === 'all' ? '' : `&kind=${kind}`}`, { signal }),
   })
-  if (history.error) return <QueryError error={history.error} retry={() => history.refetch()} />
-  if (!history.data) return <Skeleton className="h-40" />
-  if (history.data.length === 0) return <p className="text-sm text-muted-foreground">No changes yet.</p>
   return (
-    <ul className="grid gap-2">
+    <div className="grid gap-3">
+      <Field label="Show" className="sm:max-w-xs">
+        <Select value={kind} onValueChange={setKind}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {historyKinds.map((k) => (
+              <SelectItem key={k.value} value={k.value}>
+                {k.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      {history.error ? (
+        <QueryError error={history.error} retry={() => history.refetch()} />
+      ) : !history.data ? (
+        <Skeleton className="h-40" />
+      ) : history.data.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No changes yet.</p>
+      ) : (
+    <ul className="grid gap-2" aria-label="Access history">
       {history.data.map((h) => (
         <li key={h.id} className="rounded-md border p-3 text-sm">
           <p className="flex flex-wrap items-center gap-2">
@@ -701,11 +813,35 @@ function History() {
               {new Date(h.at).toLocaleString()} · {h.actor ?? 'the app'}
             </span>
           </p>
-          <pre className="mt-2 overflow-x-auto font-mono text-xs whitespace-pre-wrap text-muted-foreground">{h.after ?? h.before}</pre>
+          {h.before && h.after ? (
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              <div>
+                <p className="text-xs font-medium">Before</p>
+                <pre className="overflow-x-auto font-mono text-xs whitespace-pre-wrap text-muted-foreground">{pretty(h.before)}</pre>
+              </div>
+              <div>
+                <p className="text-xs font-medium">After</p>
+                <pre className="overflow-x-auto font-mono text-xs whitespace-pre-wrap text-muted-foreground">{pretty(h.after)}</pre>
+              </div>
+            </div>
+          ) : (
+            <pre className="mt-2 overflow-x-auto font-mono text-xs whitespace-pre-wrap text-muted-foreground">{pretty(h.after ?? h.before ?? '')}</pre>
+          )}
         </li>
       ))}
     </ul>
+      )}
+    </div>
   )
+}
+
+/** A history row's JSON, indented; as it is when it is not JSON. */
+function pretty(json: string) {
+  try {
+    return JSON.stringify(JSON.parse(json), null, 2)
+  } catch {
+    return json
+  }
 }
 
 interface AccessRequestRow {

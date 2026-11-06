@@ -539,18 +539,22 @@ export const topics = {
 
   access: {
     title: 'Access',
-    about: 'Roles say what people may run here; rules give or take a model, a tool, a knowledge source, a repository or a feature. The most specific wins: a person\'s own over their groups\', a group\'s over everyone\'s; at one level a deny wins.',
+    about: 'Roles say what people may do here; rules give or take a model, a tool, a knowledge source, a repository, a feature, or one shared assistant, skill or app. The most specific wins: a person\'s own over their groups\', a group\'s over everyone\'s; at one level a deny wins.',
     admin: true,
     parts: [
-      { name: 'Roles', text: 'The built-in roles (Owner, People admin, Model admin, Billing, Auditor and the rest) and your own. Each shows who holds it: **Give it** to a person, a group (a directory group linked on the Groups page too) or everyone, maybe until a date. **New role** picks permissions from the list; a built-in role cannot be changed, only copied.' },
-      { name: 'Rules', text: 'Allows and denies of a model, a tool, a knowledge source, a repository or a feature, for a person, a group, a role or everyone. A name may be a pattern with *.' },
-      { name: 'Checker', text: 'May this person do this? Yes or no, with the rules and roles that decide it, in order.' },
+      { name: 'Roles', text: 'The built-in roles (Owner, People admin, Model admin, Billing, Auditor and the rest) and your own. Each shows who holds it: **Give it** to a person, a group (a directory group linked on the Groups page too) or everyone, maybe until a date. **New role** picks permissions from the list (search it); **From a template** starts from a common one (Help desk, Team lead, Data steward…); a built-in role cannot be changed, only copied.' },
+      { name: 'Matrix', text: 'Every role against every permission, grouped by area, with search. A tick is what a role names; a grey tick what it gives through a broader permission or by acting in the area. Tick a custom role\'s cells, or a whole area at once, then **Save changes**.' },
+      { name: 'People', text: 'Choose a person: every permission, held or not, with the role or rule that decides it, their roles and how they hold them, their groups, and the rules that reach them. Below, the checker asks about one model, tool, repository or shared thing.' },
+      { name: 'Groups', text: 'Each group with its members, the roles it holds and the rules on it. **New people join** marks the app groups a new person joins when their account is first made (by an admin, the directory, company sign-in or SCIM); **Save default groups**.' },
+      { name: 'Rules', text: 'Allows and denies of a model, a tool, a knowledge source, a repository, a feature, or a shared assistant, skill or app by its id, for a person, a group, a role or everyone. A name may be a pattern with *.' },
       { name: 'Many people', text: 'People and groups, and what changes for each (roles, groups, features, accounts): **Dry run** says person by person what would change; **Make the changes** does it, as one change.' },
-      { name: 'History', text: 'Every change to roles, who holds them and rules: when, by whom, and what.' },
+      { name: 'History', text: 'Every change to roles, who holds them, rules, the default groups and requests answered: when, by whom, before and after. **Show** keeps one kind.' },
     ],
     tasks: [
       { title: 'Let a team lead watch the dashboards', steps: ['Press **New role**, name it (Supervisor), and tick `monitoring.read` and `logs.read`.', 'Press **Give it** on the new role and choose the person or their group.'] },
       { title: 'Give a directory group a role', steps: ['On Groups, make a directory group with its name or DN.', 'Here, **Give it** on the role to that group: whoever the directory puts in it holds the role.'] },
+      { title: 'Put every new person in a group', steps: ['Open **Groups** here.', 'Turn on **New people join** on the group (an app group), and on others if they should join those too.', 'Press **Save default groups**: from the next new person on.'] },
+      { title: 'See why someone cannot do something', steps: ['Open **People** and choose them.', 'Search the permission, or show **Not held**: the line says which rule or role decides it; open it for the rest.'] },
     ],
     manual: { doc: 'admin', section: 'access-roles-and-rules' },
   },
