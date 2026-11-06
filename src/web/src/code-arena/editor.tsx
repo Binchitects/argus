@@ -2022,7 +2022,7 @@ function GroupArea({ group, index, count }: { group: number; index: number; coun
                   {t.dirty && <span className="sr-only">, not saved</span>}
                 </button>
                 {t.pinned && !t.dirty ? (
-                  <button type="button" aria-label={`Unpin ${name}`} title="Pinned: unpin" onClick={() => ed.pin(t.id, false)} className="mr-1 grid size-5 place-items-center rounded-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring">
+                  <button type="button" aria-label={`Unpin ${name}`} title="Pinned: unpin" onClick={() => ed.pin(t.id, false)} className="mr-1 grid size-6 place-items-center rounded-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring">
                     <Pin className="size-3.5" aria-hidden="true" />
                   </button>
                 ) : (
@@ -2031,7 +2031,8 @@ function GroupArea({ group, index, count }: { group: number; index: number; coun
                   aria-label={`Close ${name}${t.kind === 'diff' && t.source !== 'compare' ? ' changes' : ''}`}
                   title={t.dirty ? 'Not saved: close' : 'Close'}
                   onClick={() => void ed.close(t.id)}
-                  className="mr-1 grid size-5 place-items-center rounded-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+                  // 24 px: WCAG 2.2's smallest target.
+                  className="mr-1 grid size-6 place-items-center rounded-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   {t.dirty ? (
                     <>
