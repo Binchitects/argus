@@ -24,6 +24,10 @@ public sealed class FakeGateway : IAsyncDisposable
     public ConcurrentDictionary<string, JsonObject> Users { get; } = new();
     public ConcurrentDictionary<string, string> Keys { get; } = new();      // key -> user_id
     public ConcurrentQueue<(string? Auth, JsonObject Body)> ChatRequests { get; } = new();
+    /// <summary>The spend log, as /spend/logs with dates sums it: each day's spend by user.</summary>
+    public ConcurrentDictionary<DateOnly, Dictionary<string, double>> Spent { get; } = new();
+    /// <summary>The dates /spend/logs was last asked for.</summary>
+    public (string? Start, string? End) SpentAsked { get; private set; }
     public const string Master = "sk-master";
 
     public FakeGateway()
@@ -58,6 +62,18 @@ public sealed class FakeGateway : IAsyncDisposable
             var keys = new JsonArray(Keys.Where(k => k.Value == user_id)
                 .Select(k => (JsonNode?)new JsonObject { ["token"] = "tok-" + k.Key, ["key_alias"] = AliasOf(k.Key), ["key_name"] = "sk-..." + k.Key[^4..] }).ToArray());
             return Results.Text(new JsonObject { ["user_info"] = Users.TryGetValue(user_id, out var u) ? u.DeepClone() : null, ["keys"] = keys }.ToJsonString(), "application/json");
+        });
+        // LiteLLM's summary by day: the days from start_date up to end_date's start.
+        _app.MapGet("/spend/logs", (string start_date, string end_date) =>
+        {
+            SpentAsked = (start_date, end_date);
+            var (first, end) = (DateOnly.Parse(start_date), DateOnly.Parse(end_date));
+            var days = new JsonArray(Spent.Where(d => d.Key >= first && d.Key < end).OrderBy(d => d.Key).Select(d => (JsonNode?)new JsonObject
+            {
+                ["startTime"] = d.Key.ToString("yyyy-MM-dd"), ["spend"] = d.Value.Values.Sum(),
+                ["users"] = new JsonObject(d.Value.Select(u => KeyValuePair.Create(u.Key, (JsonNode?)u.Value))), ["models"] = new JsonObject(),
+            }).ToArray());
+            return Results.Text(days.ToJsonString(), "application/json");
         });
         _app.MapGet("/user/list", () => Results.Text(new JsonObject { ["users"] = new JsonArray(Users.Values.Select(u => (JsonNode?)u.DeepClone()).ToArray()) }.ToJsonString(), "application/json"));
         _app.MapPost("/key/generate", async (HttpContext c) =>
@@ -312,6 +328,33 @@ public sealed class PlatformHttpTests : IAsyncLifetime
         Assert.NotNull(t.RetryAfter("erin", "10.0.0.1"));      // five failures from one address, across names
         clock += TimeSpan.FromMinutes(11);
         Assert.Null(t.RetryAfter("erin", "10.0.0.1"));
+    }
+
+    [Fact]
+    public async Task Spend_is_read_for_the_window_asked_for_and_for_the_budget_period_without_one()
+    {
+        var admin = NewBrowser();
+        await admin.Login("root", "root-long-password");
+        await admin.Json(HttpMethod.Post, "/api/admin/users", new { username = "dana", email = "dana@example.invalid" }, HttpStatusCode.Created);
+        _gateway.Users["dana@example.invalid"]["spend"] = 9.0;
+        _gateway.Spent[new DateOnly(2026, 10, 1)] = new() { ["dana@example.invalid"] = 1.25, ["someone-else@example.invalid"] = 100 };
+        _gateway.Spent[new DateOnly(2026, 10, 31)] = new() { ["dana@example.invalid"] = 0.75 };
+        _gateway.Spent[new DateOnly(2026, 11, 1)] = new() { ["dana@example.invalid"] = 5 };
+
+        var october = await admin.Json(HttpMethod.Get, "/api/admin/users?from=2026-10-01&to=2026-10-31");
+        Assert.Equal(2.0, october["users"]!.AsArray().Single(u => u!["username"]!.GetValue<string>() == "dana")!["spend"]!.GetValue<double>());
+        // Both days are in: the gateway is asked up to the day after the last.
+        Assert.Equal(("2026-10-01", "2026-11-01"), _gateway.SpentAsked);
+        Assert.Equal("2026-10-31", october["window"]!["to"]!.GetValue<string>());
+        var overview = await admin.Json(HttpMethod.Get, "/api/admin/overview?from=2026-10-01&to=2026-10-31");
+        // Only Argus's own people count.
+        Assert.Equal(2.0, overview["spend"]!.GetValue<double>());
+
+        var period = await admin.Json(HttpMethod.Get, "/api/admin/users");
+        Assert.Equal(9.0, period["users"]!.AsArray().Single(u => u!["username"]!.GetValue<string>() == "dana")!["spend"]!.GetValue<double>());
+        Assert.Null(period["window"]);
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.Send(HttpMethod.Get, "/api/admin/users?from=2026-10-31&to=2026-10-01")).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.Send(HttpMethod.Get, "/api/admin/overview?from=2024-01-01&to=2026-10-01")).StatusCode);
     }
 
     [Fact]

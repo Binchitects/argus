@@ -1,9 +1,11 @@
 import { Link } from "react-router";
 import { api, money, type IndexStatus, type Overview as OverviewData, type PacksStatus } from "../../api";
+import { TimeWindowPicker, useTimeWindow } from "../../components/TimeWindowPicker";
 import { useAsync } from "../../components/useAsync";
 
 export default function Overview() {
-  const overview = useAsync(() => api.get<OverviewData>("/api/admin/overview"), []);
+  const time = useTimeWindow();
+  const overview = useAsync(() => api.get<OverviewData>("/api/admin/overview" + time.query), [time.query]);
   const index = useAsync(() => api.get<IndexStatus>("/admin/index/status"), []);
   const packs = useAsync(() => api.get<PacksStatus>("/admin/packs"), []);
   const o = overview.value;
@@ -22,11 +24,12 @@ export default function Overview() {
     <div className="page">
       <h1>Overview</h1>
       <p className="lede">Everything the service is made of, at a glance.</p>
+      <TimeWindowPicker value={time.window} onChange={time.set} />
       {overview.error && <div className="msg bad">{overview.error}</div>}
       <div className="tiles">
         <div className="tile" data-testid="tile-services"><div className="tile-label">Services up</div><div className="tile-value">{o ? `${up}/${o.services.length}` : "—"}</div><div className="dim">model, gateway, embeddings</div></div>
         <div className="tile"><div className="tile-label">People</div><div className="tile-value">{o?.users.total ?? "—"}</div><div className="dim">{o ? `${o.users.admins} admin${o.users.admins === 1 ? "" : "s"}${o.users.disabled ? `, ${o.users.disabled} disabled` : ""}` : ""}</div></div>
-        <div className="tile"><div className="tile-label">Spend</div><div className="tile-value">{o?.spend !== undefined ? money(o.spend) : "—"}</div><div className="dim">{o?.spend_error ?? "this budget period"}</div></div>
+        <div className="tile"><div className="tile-label">Spend</div><div className="tile-value">{o?.spend !== undefined ? money(o.spend) : "—"}</div><div className="dim">{o?.spend_error ?? time.said}</div></div>
         <div className="tile" data-testid="tile-index"><div className="tile-label">Code index</div><div className="tile-value">{indexTile.value}</div><div className="dim">{indexTile.sub}</div></div>
         <div className="tile"><div className="tile-label">Knowledge packs</div><div className="tile-value">{packs.value?.packs.length ?? "—"}</div><div className="dim">installed</div></div>
       </div>
