@@ -1,0 +1,42 @@
+"""Every image that builds Code Arena copies in the files its project links from elsewhere (Llm.Core's shared ones):
+a file linked in CodeArena.csproj and missing from an image's COPY lines fails that image's build."""
+from __future__ import annotations
+
+import re
+import unittest
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[2]
+PROJECT = REPO / "src" / "CodeArena" / "CodeArena.csproj"
+IMAGES = [REPO / "deploy" / "services" / "workspaces" / "Dockerfile", REPO / "src" / "Llm.Api" / "Dockerfile"]
+
+
+def linked() -> list[str]:
+    """The files the project compiles from outside its folder, as paths from the repository's root."""
+    found = re.findall(r'<Compile Include="\.\./([^"]+)"', PROJECT.read_text())
+    return [f"src/{path}" for path in found]
+
+
+def copied(dockerfile: Path) -> set[str]:
+    """What the Dockerfile's COPY lines bring in: each file named, and each folder copied whole (with a trailing /)."""
+    sources: set[str] = set()
+    for line in dockerfile.read_text().splitlines():
+        if line.startswith("COPY ") and "--from=" not in line:
+            sources.update(line.split()[1:-1])
+    return sources
+
+
+class CodeArenaImagesTests(unittest.TestCase):
+    def test_Each_image_that_builds_Code_Arena_copies_the_files_it_links(self):
+        files = linked()
+        self.assertTrue(files, "CodeArena.csproj links no file from elsewhere: the check reads it wrong")
+        for image in IMAGES:
+            text = image.read_text()
+            self.assertIn("COPY src/CodeArena/ src/CodeArena/", text, f"{image} no longer builds Code Arena: take it out of IMAGES")
+            sources = copied(image)
+            missing = [f for f in files if f not in sources and not any(f.startswith(s) for s in sources if s.endswith("/"))]
+            self.assertEqual([], missing, f"{image.relative_to(REPO)} does not copy what Code Arena links")
+
+
+if __name__ == "__main__":
+    unittest.main()
