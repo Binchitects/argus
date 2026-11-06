@@ -592,6 +592,10 @@ public sealed class Harness : IDisposable
     public string? Cwd { get; set; }
     /// <summary>How often a running Code Arena asks Arena for its skills again; null: as it does (CliEnv's).</summary>
     public TimeSpan? ArenaSkillsEvery { get; set; }
+    /// <summary>The IDE's log (WebRun); null: none.</summary>
+    internal LogFile? Log { get; set; }
+    /// <summary>Told whether the IDE got a window of its own (WebRun); null: nobody is.</summary>
+    internal Action<bool>? Windowed { get; set; }
 
     /// <summary>Runs code-arena with these arguments and typed input; a terminal on stdin unless said otherwise.</summary>
     public async Task<int> Run(string input, params string[] args) => await Run(input, terminal: true, args);

@@ -194,7 +194,8 @@ controls:
     meets: >-
       Each key belongs to one person and works only as them; an unknown,
       blocked or expired key is refused; rotating a key revokes the old one
-      first, and disabling a person stops their keys.
+      first, and disabling a person stops their keys. Code Arena's log on the
+      person's machine never holds its IDE's key, and only its user reads it.
     frameworks:
       iso27001: [A.5.17, A.8.5]
       soc2: [CC6.1]
@@ -206,10 +207,11 @@ controls:
       nist80053: [AC-2, IA-5]
       nist800171: [03.05.12]
       commoncriteria: [FIA_UAU]
-    docs: [authentication.md#as-a-machine-client-of-the-engine-api]
+    docs: [authentication.md#as-a-machine-client-of-the-engine-api, code-arena.md#the-ide]
     tests:
       - Llm.Tests/KeyCheckTests.An_unknown_blocked_or_expired_key_is_refused
       - Llm.Tests/IdentityTests.Rotating_a_key_revokes_the_old_one_first
+      - Llm.Tests/CodeArenaLogTests.Code_Arenas_log_never_holds_the_IDEs_key_and_only_its_user_reads_it
     operator: People keep their keys out of shared files and repositories.
 
   - id: IAM-07

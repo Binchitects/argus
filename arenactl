@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import platform
@@ -405,6 +406,11 @@ The IDE
   On another machine over SSH: {exe} --port 8765 --no-open there, then
   ssh -L 8765:127.0.0.1:8765 that-machine here, and open the address printed.
 
+  Its window is Chrome's or Edge's (109 or newer); without one, or with an
+  older one, it says so and opens in your default browser. Started on its
+  own (a double-click on Windows), it shows no console window. What it says
+  goes to code-arena.log beside the program too ({exe} --help says where).
+
   In the IDE: the Explorer (the folder's files), editor tabs, the agent's
   changes with a diff to accept or revert, search across the files,
   terminals (your own shell, in the project folder, as powerful as any) and
@@ -542,6 +548,16 @@ def cmd_code_arena(a) -> int:
                 f.unlink()
     if failed:
         raise Stop(f"Code Arena did not publish for {', '.join(failed)} (above)")
+    # Each carries everything it needs: self-contained, nothing to unpack at start, its page, a console program on Windows.
+    step("Code Arena: checked in the files themselves (tools/code-arena-check.py)")
+    spec = importlib.util.spec_from_file_location("code_arena_check", TOOLS / "code-arena-check.py")
+    checks = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checks)
+    short = {rid: checks.check(built / rid / ("code-arena.exe" if rid.startswith("win-") else "code-arena"), web=not a.no_web) for rid in rids}
+    for rid, problems in short.items():
+        say(f"  {rid}: {'; '.join(problems) or 'carries everything it needs'}")
+    if any(short.values()):
+        raise Stop("Code Arena's programs fall short (above)")
     step("the packages")
     out.mkdir(parents=True, exist_ok=True)
     epoch = int(os.environ.get("SOURCE_DATE_EPOCH") or (output(["git", "-C", str(ROOT), "log", "-1", "--format=%ct"]) or str(int(time.time()))).strip())

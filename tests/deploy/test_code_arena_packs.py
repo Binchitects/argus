@@ -20,7 +20,7 @@ RIDS = ["linux-x64", "linux-arm64", "win-x64", "win-arm64", "osx-x64", "osx-arm6
 # runtimes installed (that one and FAKE_OTHER_RUNTIMES), and publish, which writes the program where -o
 # says, or fails like a compile error (FAKE_PUBLISH_FAILS). Each call is logged as a JSON line.
 FAKE_DOTNET = r"""#!/usr/bin/env python3
-import json, os, pathlib, sys
+import importlib.util, json, os, pathlib, sys
 args = sys.argv[1:]
 with open(os.environ["FAKE_LOG"], "a") as log:
     log.write(json.dumps(args) + "\n")
@@ -51,7 +51,11 @@ if args[:1] == ["publish"]:
     out = pathlib.Path(args[args.index("-o") + 1])
     rid = args[args.index("-r") + 1]
     out.mkdir(parents=True, exist_ok=True)
-    (out / ("code-arena.exe" if rid.startswith("win") else "code-arena")).write_text(f"program for {rid}\n")
+    # The smallest program tools/code-arena-check.py reads as published.
+    spec = importlib.util.spec_from_file_location("check", "tools/code-arena-check.py")
+    check = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(check)
+    (out / ("code-arena.exe" if rid.startswith("win") else "code-arena")).write_bytes(check.sample(rid.startswith("win")))
     (out / "code-arena.pdb").write_text("symbols\n")
     sys.exit(0)
 sys.exit(f"fake dotnet: no {args}")
@@ -77,6 +81,7 @@ class CodeArenaPacksTests(unittest.TestCase):
         self.repo = self.dir / "repo"
         (self.repo / "tools" / "offline-nuget").mkdir(parents=True)
         shutil.copy2(REPO / "tools" / "publish-code-arena.sh", self.repo / "tools" / "publish-code-arena.sh")
+        shutil.copy2(REPO / "tools" / "code-arena-check.py", self.repo / "tools" / "code-arena-check.py")
         # The page, built already (as the image's own stage builds it): no Node needed.
         (self.repo / "src" / "CodeArena" / "web").mkdir(parents=True)
         (self.repo / "src" / "CodeArena" / "web" / "code-arena.html").write_text("<!doctype html>\n")

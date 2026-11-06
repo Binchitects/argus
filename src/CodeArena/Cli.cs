@@ -76,6 +76,13 @@ internal sealed class CliEnv
     public Func<string, bool>? Browse { get; init; }
     /// <summary>Opens the IDE's own window on an address: a task that ends when it closes, null when it cannot (no browser for it); null: AppWindow.Open.</summary>
     public Func<string, Task?>? Window { get; init; }
+    /// <summary>
+    /// Told, once the IDE has started, whether it has a window of its own (true) or runs in a tab or nowhere (false): a
+    /// Windows IDE started on its own has no console window, and shows one in a tab's case, to be stopped with (DesktopStart).
+    /// </summary>
+    public Action<bool>? Windowed { get; init; }
+    /// <summary>The IDE's log (code-arena.log beside the program); null: none. The IDE's key is blanked in it.</summary>
+    public LogFile? Log { get; init; }
     /// <summary>A window's browser that ends this soon handed it to one already running on the profile: its end is not the window's.</summary>
     public TimeSpan WindowHandOff { get; init; } = TimeSpan.FromSeconds(3);
     /// <summary>How long a browser opened for the IDE has to arrive before the person is told to open the address.</summary>
@@ -185,6 +192,8 @@ internal static partial class Cli
         {
             case "help":
                 env.Out.WriteLine(Help);
+                // Beside the program, unless its folder cannot be written: where this one's is.
+                env.Out.WriteLine($"The IDE's log (what it says, its key left out): {env.Log?.Path ?? LogFile.Where(env.Exe ?? Environment.ProcessPath, env.Paths.DataDir)}");
                 return 0;
             case "version":
                 env.Out.WriteLine(About);
@@ -204,6 +213,27 @@ internal static partial class Cli
             default:
                 // Without a prompt, the IDE; a prompt (or -p) starts the conversation in this terminal.
                 return o.Prompt is null && !o.Print ? await WebAsync(o, env, ct) : await AgentAsync(o, env, ct);
+        }
+    }
+
+    /// <summary>
+    /// Whether these arguments run the IDE (code-arena alone, code-arena web) of a program with its page built in: the
+    /// runs that keep a log, and that need no console when started on their own.
+    /// </summary>
+    public static bool Ide(string[] args, bool built)
+    {
+        if (args is ["sandbox" or "index" or "search", ..])
+        {
+            return false;
+        }
+        try
+        {
+            var o = Parse(args);
+            return o.Command == "web" || o.Command is null && o.Prompt is null && !o.Print && built;
+        }
+        catch (ArgumentException)
+        {
+            return false;
         }
     }
 
@@ -682,6 +712,8 @@ internal static partial class Cli
                         }
                         await using (app)
                         {
+                            // The address printed below carries the key: the log has it blanked.
+                            env.Log?.Hide(app.Token);
                             app.FoldersOpen = !o.Serve && !o.Connect;
                             var git = SystemPrompt.GitRoot(rt.Workspace.Root) is { } root && SystemPrompt.GitBranch(root) is { } branch ? $" ({branch})" : "";
                             env.Out.WriteLine($"Code Arena {Version}, the IDE for {rt.Workspace.Root}{git}: {rt.Model.Name}, mode {rt.Permissions.Mode.Name()}");
@@ -705,9 +737,10 @@ internal static partial class Cli
                                     }
                                 }
                                 launcher = o.NoOpen ? null : Launcher.Write(env.Paths.DataDir, app.Port, app.Address);
-                                // Its own window first (config.json "window": false, or --browser, a tab instead), else a tab.
+                                // Its own window first (config.json "window": false, or --browser, a tab instead), else a tab:
+                                // without a browser for the window, or with one too old for the page, it says so.
                                 var window = launcher is null || o.Browser || !rt.Config.Window ? null
-                                    : (env.Window ?? (url => AppWindow.Open(url, Path.Combine(env.Paths.DataDir, "window"), env.Env)))(launcher.Url);
+                                    : (env.Window ?? (url => AppWindow.Open(url, Path.Combine(env.Paths.DataDir, "window"), env.Env, ui.Warn)))(launcher.Url);
                                 closed = Task.Delay(Timeout.Infinite, linked.Token);
                                 if (window is not null)
                                 {
@@ -723,6 +756,7 @@ internal static partial class Cli
                                 {
                                     env.Out.WriteLine("Open the address in your browser.");
                                 }
+                                env.Windowed?.Invoke(window is not null);
                             }
                             env.Out.Flush();
                             try

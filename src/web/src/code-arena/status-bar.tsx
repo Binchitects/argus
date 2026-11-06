@@ -406,6 +406,14 @@ export function About({ open, onOpenChange, state }: { open: boolean; onOpenChan
           <dd className="min-w-0 truncate font-mono text-xs leading-5" title={state.folder}>
             {state.folder}
           </dd>
+          {state.log && (
+            <>
+              <dt className="text-muted-foreground">Log</dt>
+              <dd className="min-w-0 truncate font-mono text-xs leading-5" title={state.log}>
+                {state.log}
+              </dd>
+            </>
+          )}
         </dl>
         <p className="text-xs text-muted-foreground">
           Free software under the GNU Affero General Public License: its complete source is offered to everyone who uses it, and comes with no warranty.

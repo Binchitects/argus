@@ -239,6 +239,7 @@ the web's need `npm ci` in `src/web` once. [testing.md](testing.md) says more.
 | script | what |
 |---|---|
 | `publish-code-arena.sh` | Code Arena's programs, in the app image's build (`src/Llm.Api/Dockerfile`); `arenactl code-arena` does the same anywhere |
+| `code-arena-check.py` | that each Code Arena program carries everything it needs (self-contained, nothing unpacked at start, its page, a console program on Windows); `arenactl code-arena` and `publish-code-arena.sh` run it after publishing |
 | `fetch-code-arena-packs.sh` | the .NET packs for `--offline` builds, into `tools/offline-nuget/` |
 | `dn` | the .NET SDK in its container (`tools/dn build`, `tools/dn test`) |
 | `images-for.py` | the stack's images a change is in: what to build and start again ([development.md](development.md#what-a-change-is-in)) |

@@ -9,17 +9,64 @@ if (args is [PtyHelper.Flag, ..])
     return PtyHelper.Run(args[1..]);
 }
 
+// The IDE started on its own on Windows (a double-click): it starts itself again with a console that has no window, and
+// this one ends at once (DesktopStart). From a terminal, and for every other command, nothing changes.
+var ide = Cli.Ide(args, WebAssets.Embedded().Built);
+var detached = Environment.GetEnvironmentVariable(DesktopStart.Detached) == "1";
+Environment.SetEnvironmentVariable(DesktopStart.Detached, null);
+if (DesktopStart.Again(DesktopStart.Find(), ide, detached) && Environment.ProcessPath is { } self)
+{
+    try
+    {
+        using var again = System.Diagnostics.Process.Start(DesktopStart.Child(self, args, Environment.CurrentDirectory));
+        return 0;
+    }
+    catch (System.ComponentModel.Win32Exception)
+    {
+        // Not started again: this one runs, its console in sight.
+    }
+}
+var quiet = ide && detached;
+
 // The real console: UTF-8, colours on Windows terminals too, the key read
 // without echo, and Ctrl+C stopping the turn rather than the program.
 var colours = ConsoleSetup.Prepare();
+var paths = AppPaths.From(Environment.GetEnvironmentVariable);
+// The IDE's lines go to its log too (beside the program): the only place they are when there is no console to see.
+var log = ide ? LogFile.Open(Environment.ProcessPath, paths.DataDir) : null;
+var output = new Tee(Console.Out, log ?? TextWriter.Null);
+var error = new Tee(Console.Error, log ?? TextWriter.Null);
+if (log is not null)
+{
+    log.WriteLine($"code-arena {Cli.Version} started: {string.Join(' ', args)}");
+    AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+    {
+        log.WriteLine($"Stopped by an error: {e.ExceptionObject}");
+        log.Flush();
+    };
+}
+var shown = false;
 var env = new CliEnv
 {
     In = Console.In,
-    Out = Console.Out,
-    Err = Console.Error,
+    Out = ide ? output : Console.Out,
+    Err = ide ? error : Console.Error,
     Env = Environment.GetEnvironmentVariable,
     Cwd = Environment.CurrentDirectory,
-    Paths = AppPaths.From(Environment.GetEnvironmentVariable),
+    Paths = paths,
+    Log = log,
+    // Without a window of its own (a tab), the IDE started again shows a console: closing it, or Ctrl+C, stops the IDE.
+    Windowed = !quiet ? null : own =>
+    {
+        if (own || !DesktopStart.Show())
+        {
+            return;
+        }
+        shown = true;
+        ConsoleSetup.Prepare();
+        (output.Screen, error.Screen) = (new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true }, new StreamWriter(Console.OpenStandardError()) { AutoFlush = true });
+        output.WriteLine($"Code Arena runs in your browser: Ctrl+C here, or closing this window, stops it. Its log: {log?.Path}");
+    },
     InTerminal = !Console.IsInputRedirected,
     OutTerminal = !Console.IsOutputRedirected && colours,
     ErrTerminal = !Console.IsErrorRedirected && colours,
@@ -28,7 +75,15 @@ var env = new CliEnv
     Keys = Console.IsInputRedirected || Console.IsOutputRedirected || !colours ? null : new ConsoleSetup.Keyboard(),
 };
 Console.CancelKeyPress += (_, e) => e.Cancel = env.Cancel.Press();
-return await Cli.RunAsync(args, env);
+var code = await Cli.RunAsync(args, env);
+// What stopped an IDE that had no console to say it in (not signed in yet, say): a message box says it.
+if (quiet && !shown && code is not (0 or 130))
+{
+    DesktopStart.Alert($"{error.LastError ?? "Code Arena stopped."}{(log is null ? "" : $"\n\nIts log: {log.Path}")}");
+}
+log?.WriteLine($"code-arena stopped ({code}).");
+log?.Dispose();
+return code;
 
 /// <summary>Console set-up that differs by system.</summary>
 internal static class ConsoleSetup

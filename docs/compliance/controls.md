@@ -156,7 +156,7 @@ What a person may do comes from roles (built in, or made by the company) held di
 
 ### IAM-06: API keys are personal, revocable and checked
 
-Each key belongs to one person and works only as them; an unknown, blocked or expired key is refused; rotating a key revokes the old one first, and disabling a person stops their keys.
+Each key belongs to one person and works only as them; an unknown, blocked or expired key is refused; rotating a key revokes the old one first, and disabling a person stops their keys. Code Arena's log on the person's machine never holds its IDE's key, and only its user reads it.
 
 **Serves**
 
@@ -171,12 +171,13 @@ Each key belongs to one person and works only as them; an unknown, blocked or ex
 - [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.05.12 Authenticator Management
 - [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): FIA_UAU User authentication
 
-**Documented in** [authentication.md#as-a-machine-client-of-the-engine-api](../authentication.md#as-a-machine-client-of-the-engine-api)
+**Documented in** [authentication.md#as-a-machine-client-of-the-engine-api](../authentication.md#as-a-machine-client-of-the-engine-api), [code-arena.md#the-ide](../code-arena.md#the-ide)
 
 **Proved by**
 
 - `Llm.Tests/KeyCheckTests.An_unknown_blocked_or_expired_key_is_refused`
 - `Llm.Tests/IdentityTests.Rotating_a_key_revokes_the_old_one_first`
+- `Llm.Tests/CodeArenaLogTests.Code_Arenas_log_never_holds_the_IDEs_key_and_only_its_user_reads_it`
 
 **The company's part** People keep their keys out of shared files and repositories.
 

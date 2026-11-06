@@ -2,6 +2,8 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
+import { codeArenaBrowsers } from './src/lib/browsers.ts'
+import { legacyColorsPlugin } from './src/lib/legacy-colors.ts'
 
 // Code Arena's web interface (code-arena web, /code-arena.html): the IDE
 // (Monaco, xterm.js) and the chat's components and styles around Code Arena's
@@ -12,10 +14,14 @@ import { defineConfig } from 'vite'
 // then the preview runner's build into the same folder (diagrams in answers):
 //   node_modules/.bin/vite build --config vite.code-arena.config.ts
 //   node_modules/.bin/vite build --config vite.preview.config.ts --outDir ../CodeArena/web
+// Built for browsers about three years old (src/lib/browsers.ts): its syntax lowered to them, OKLCH colours with sRGB
+// ones before them, and colours mixed with transparent with an alpha of their own for those without color-mix()
+// (legacy-colors.ts).
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), legacyColorsPlugin()],
   resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
   build: {
+    target: codeArenaBrowsers,
     outDir: '../CodeArena/web',
     emptyOutDir: true,
     minify: process.env.NO_MINIFY ? false : 'oxc',
