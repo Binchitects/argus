@@ -34,7 +34,7 @@ const bluesTaken = [
 ]
 
 /** The token colours of Monaco's 'vs' or 'vs-dark', as its themes.js has them: what a theme that sets none takes. */
-function baseRules(base: 'vs' | 'vs_dark') {
+function baseRules(base: 'vs' | 'vs_dark' | 'hc_black' | 'hc_light') {
   const js = readFileSync(join(process.cwd(), 'node_modules/monaco-editor/esm/vs/editor/standalone/common/themes.js'), 'utf8')
   const block = js.slice(js.indexOf(`const ${base} = {`), js.indexOf('colors:', js.indexOf(`const ${base} = {`)))
   return new Map([...block.matchAll(/token: '([^']+)', foreground: '([0-9A-Fa-f]{6})'/g)].map((m) => [m[1]!, `#${m[2]!.toLowerCase()}`]))
@@ -49,7 +49,8 @@ describe("Monaco's themes for the app's colour themes", () => {
 
   it('has one for each colour theme Code Arena offers, light and dark', () => {
     expect(themes.size).toBe(colorThemeIds.length * 2)
-    for (const t of colorThemes.filter((c) => c.family)) expect(themes.get(t.monaco)?.base, t.name).toBe(t.kind === 'light' ? 'vs' : 'vs-dark')
+    // High Contrast on Monaco's own high contrast (its outlines round widgets and the cursor's line), the others on vs.
+    for (const t of colorThemes.filter((c) => c.family)) expect(themes.get(t.monaco)?.base, t.name).toBe(t.family === 'contrast' ? (t.kind === 'light' ? 'hc-light' : 'hc-black') : t.kind === 'light' ? 'vs' : 'vs-dark')
   })
 
   it("Arena's own are as they were drawn by hand: the page's background, text, cards, border and blue", () => {
@@ -127,10 +128,10 @@ describe("Monaco's themes for the app's colour themes", () => {
     expect(low).toEqual([])
   })
 
-  it.each(every)("$id $kind: code's colours, VS Code's where the theme sets none, are 4.5:1 on the editor and on the cursor's line", ({ kind, theme }) => {
+  it.each(every)("$id $kind: code's colours, VS Code's where the theme sets none, are 4.5:1 on the editor and on the cursor's line", ({ id, kind, theme }) => {
     const c = theme.colors
     const own = new Map(theme.rules.filter((r) => r.foreground).map((r) => [r.token, `#${r.foreground!.toLowerCase()}`]))
-    const colours = new Map([...baseRules(kind === 'light' ? 'vs' : 'vs_dark')].filter(([token]) => token !== '').map(([token, fg]) => [token, own.get(token) ?? fg]))
+    const colours = new Map([...baseRules(id === 'contrast' ? (kind === 'light' ? 'hc_light' : 'hc_black') : kind === 'light' ? 'vs' : 'vs_dark')].filter(([token]) => token !== '').map(([token, fg]) => [token, own.get(token) ?? fg]))
     for (const [token, fg] of own) colours.set(token, fg)
     vsCodeBrackets[kind].forEach((fg, i) => colours.set(`bracket ${i + 1}`, c[`editorBracketHighlight.foreground${i + 1}`] ?? fg))
     const low: string[] = []
@@ -139,5 +140,18 @@ describe("Monaco's themes for the app's colour themes", () => {
       if (r < 4.5) low.push(`${token} ${fg}: ${r.toFixed(2)}`)
     }
     expect(low).toEqual([])
+  })
+
+  it("a VS Code theme's code has its own colours there (Monokai's pink keywords, Dracula's green functions), made to read", () => {
+    const rule = (name: string, token: string) => themes.get(name)!.rules.find((r) => r.token === token)?.foreground
+    // Monokai's pink (f92672) is 3.9:1 on its own ground: a little lighter, as 4.5:1 asks.
+    expect(rule('arena-monokai-dark', 'keyword')).toBe('fb679c')
+    expect(rule('arena-monokai-dark', 'string')).toBe('e6db74')
+    expect(rule('arena-dracula-dark', 'function')).toBe('50fa7b')
+    // Too dim on its ground as VS Code has it (Solarized's comments): only as much lighter as 4.5:1 asks.
+    expect(rule('arena-solarized-dark', 'comment')).not.toBe('586e75')
+    expect(rule('arena-github-light', 'keyword')).toBe('cf222e')
+    // Arena's own keep VS Code's default code colours.
+    expect(rule('arena-sakura-dark', 'keyword')).toBeUndefined()
   })
 })

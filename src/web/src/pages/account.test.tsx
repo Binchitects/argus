@@ -319,6 +319,15 @@ describe('account', () => {
     expect(document.documentElement).toHaveClass('dark')
     expect(document.documentElement.dataset.colorTheme).toBe('sakura')
 
+    // VS Code's, by their names in the mode shown, beside them: one of them, as the others.
+    const vscode = screen.getByRole('radiogroup', { name: "VS Code's colour themes" })
+    expect(within(vscode).getAllByRole('radio').map((r) => r.textContent)).toEqual(['Default Dark+', 'Default Dark Modern', 'Monokai', 'Solarized Dark', 'One Dark Pro', 'Dracula', 'GitHub Dark', 'Nord', 'Default High Contrast'])
+    await userEvent.click(within(vscode).getByRole('radio', { name: 'Solarized Dark' }))
+    expect(document.documentElement.dataset.colorTheme).toBe('solarized')
+    expect(within(vscode).getByRole('radio', { name: 'Solarized Dark' })).toBeChecked()
+    expect(within(group).getByRole('radio', { name: 'Sakura' })).not.toBeChecked()
+    await waitFor(() => expect(colorTheme).toBe('solarized'))
+
     await userEvent.click(within(group).getByRole('radio', { name: 'Arena' }))
     expect(document.documentElement.dataset.colorTheme).toBeUndefined()
     await waitFor(() => expect(colorTheme).toBe('default'))

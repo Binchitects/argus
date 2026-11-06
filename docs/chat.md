@@ -673,6 +673,18 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   choice of each device. Every theme keeps text at 4.5:1 or more on its
   backgrounds (WCAG AA); the status colours (good, warning, critical) and the
   charts' series colours are the same in all of them.
+- **VS Code's colour themes.** Below Arena's own, under **VS Code's**, the
+  themes people know from VS Code, as sharp as VS Code has them: **VS Code**
+  (Default Dark+ and Light+), **VS Code Modern** (Dark Modern and Light
+  Modern), **Monokai** (and Monokai Light), **Solarized** (Dark and Light),
+  **One Dark Pro** (and One Light), **Dracula** (and Alucard), **GitHub**
+  (Dark and Light), **Nord** (and Nord Light) and **High Contrast** (Dark and
+  Light: black or white, bright borders, text 15:1 or more). Their surfaces,
+  text and accent are VS Code's own colours, and code in the answers takes
+  their code colours (Monokai's pink keywords, Dracula's green functions).
+  Where one of their colours falls under 4.5:1 on its ground (Monokai's pink,
+  Solarized's grey), it is made just as much lighter or darker as WCAG asks.
+  Light and dark pick the theme's other half, as with Arena's.
 - **Phones.** The chat list, the Files panel and the canvas open over the
   thread; the header fits a narrow screen.
 

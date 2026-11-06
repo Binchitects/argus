@@ -796,8 +796,23 @@ browser keeps it, so the next page opens in its colours at once (one only
 previewed in the picker is not kept). In Code Studio the IDE shows
 its theme's colours while it is open; going back, Arena's pages wear the
 person's own colour theme again (Your account → Appearance). Visual Studio's
-themes, High Contrast and an extension's themes keep Arena's own colours
-under what they set.
+themes and an extension's themes keep Arena's own colours under what they set.
+
+**VS Code's colour themes.** The **Color Theme** picker (Ctrl+K Ctrl+Alt+T)
+and the theme button also have VS Code's most used themes, by VS Code's own
+names in `workbench.colorTheme`: `Default Dark+`, `Default Light+`, `Default
+Dark Modern`, `Default Light Modern`, `Monokai` and `Monokai Light`,
+`Solarized Dark` and `Solarized Light`, `One Dark Pro` and `One Light`,
+`Dracula` and `Alucard`, `GitHub Dark` and `GitHub Light`, `Nord` and `Nord
+Light`, and `Default High Contrast` and `Default High Contrast Light`. A
+settings.json copied from VS Code keeps its theme. Each colours the whole
+workbench with the theme's own colours, as sharp as VS Code has them (not
+calm, as Arena's are), and the editor with the theme's code colours (its
+keywords, strings, numbers, functions, types and comments); High Contrast is
+Monaco's high contrast, with its outlines. Any of their colours under 4.5:1
+on its ground is made only as much lighter or darker as that asks. Older
+names and the extensions' names for them (`Dark+ (default dark)`, `GitHub
+Dark Default`, `Atom One Light`) read as these.
 
 In a terminal the keys go to the shell, but those of the commands that skip
 it (the palette, quick open, the panels and views, the debugger's), and the

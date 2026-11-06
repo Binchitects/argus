@@ -344,14 +344,23 @@ function Appearance() {
       </CardHeader>
       <CardContent>
         <p className="mb-2 text-sm font-medium">Colour theme</p>
-        <RadioGroup.Root value={colorTheme} onValueChange={(v) => chooseColorTheme(v as ColorThemeId)} aria-label="Colour theme" className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {colorThemes.map((t) => (
-            <RadioGroup.Item key={t.id} value={t.id} className={choice} title={t.description}>
-              <Swatch palette={t[resolved]} />
-              {t.label}
-            </RadioGroup.Item>
-          ))}
-        </RadioGroup.Root>
+        {/* Arena's own, calm; then VS Code's most used, as sharp as VS Code has them (each light and dark too). */}
+        {([
+          ['Colour theme', colorThemes.filter((t) => !t.vscode)],
+          ['VS Code\'s colour themes', colorThemes.filter((t) => t.vscode)],
+        ] as const).map(([label, list], i) => (
+          <div key={label}>
+            {i > 0 && <p className="mb-2 text-xs text-muted-foreground">As VS Code has them</p>}
+            <RadioGroup.Root value={colorTheme} onValueChange={(v) => chooseColorTheme(v as ColorThemeId)} aria-label={label} className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {list.map((t) => (
+                <RadioGroup.Item key={t.id} value={t.id} className={choice} title={t.description}>
+                  <Swatch palette={t[resolved]} />
+                  {t.vscode ? t.vscode.names[resolved] : t.label}
+                </RadioGroup.Item>
+              ))}
+            </RadioGroup.Root>
+          </div>
+        ))}
         <p className="mb-2 text-sm font-medium">Theme</p>
         <RadioGroup.Root value={preference} onValueChange={(v) => setPreference(v as ThemePreference)} aria-label="Theme" className="grid grid-cols-3 gap-2">
           {themes.map((t) => (

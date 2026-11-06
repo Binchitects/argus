@@ -1,5 +1,5 @@
 import type { editor } from 'monaco-editor'
-import { colorThemes } from '@/lib/color-themes'
+import { colorThemes, type Syntax } from '@/lib/color-themes'
 import { arenaMonacoTheme } from './settings-schema'
 
 // What an added or removed line looks like in a compare, in either mode: the status colours, the same in every colour theme.
@@ -26,10 +26,28 @@ const vsCodeTokens = {
     'number': '#098658', 'attribute.value.number': '#098658', 'attribute.value.unit': '#098658', 'type': '#008080',
     'attribute.name': '#ff0000', 'metatag.content.html': '#ff0000', 'string.sql': '#ff0000', 'annotation': '#808080',
     'metatag.html': '#808080', 'metatag.xml': '#808080', 'operator.sql': '#778899', 'tag.id.pug': '#4f76ac', 'tag.class.pug': '#4f76ac',
+    'invalid': '#cd3131',
   },
-  dark: { 'variable.predefined': '#4864aa', 'tag.id.pug': '#4f76ac', 'tag.class.pug': '#4f76ac', 'regexp': '#b46695', 'string.sql': '#ff0000' },
+  dark: {
+    'variable.predefined': '#4864aa', 'tag.id.pug': '#4f76ac', 'tag.class.pug': '#4f76ac', 'regexp': '#b46695', 'string.sql': '#ff0000',
+    // Under 4.5:1 only on the lighter grounds of VS Code's themes (Dark+'s #1e1e1e, Solarized's, Nord's).
+    'invalid': '#f44747', 'annotation': '#cc6666', 'delimiter.html': '#808080', 'delimiter.xml': '#808080', 'operator.swift': '#909090', 'operator.scss': '#909090',
+    'metatag.html': '#569cd6', 'metatag.xml': '#569cd6', 'keyword.flow.scss': '#569cd6', 'meta.tag': '#ce9178', 'meta.scss': '#a79873',
+  },
 }
 const vsCodeBrackets = { light: ['#0431fa', '#319331', '#7b3814'], dark: ['#ffd700', '#da70d6', '#179fff'] }
+
+/** Monaco's tokens (its grammars' and the language servers' semantic ones) each of a VS Code theme's code colours paints. */
+const syntaxTokens: Record<keyof Syntax, string[]> = {
+  comment: ['comment', 'comment.doc', 'comment.content'],
+  keyword: ['keyword', 'keyword.json', 'storage', 'tag', 'metatag', 'operator.sql', 'predefined.sql'],
+  control: ['keyword.flow', 'keyword.control', 'keyword.return'],
+  string: ['string', 'string.key.json', 'string.value.json', 'attribute.value', 'attribute.value.html', 'regexp', 'string.escape'],
+  number: ['number', 'number.hex', 'number.float', 'number.binary', 'number.octal', 'constant', 'enumMember', 'attribute.value.number', 'attribute.value.unit'],
+  function: ['function', 'method', 'macro', 'attribute.name', 'attribute.name.html'],
+  type: ['type', 'type.identifier', 'class', 'interface', 'enum', 'struct', 'typeParameter', 'namespace', 'tag.id.pug', 'tag.class.pug'],
+  variable: ['variable', 'variable.predefined', 'parameter', 'property'],
+}
 
 const rgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
 const hexOf = (c: number[]) => `#${c.map((x) => Math.round(x).toString(16).padStart(2, '0')).join('')}`
@@ -69,12 +87,15 @@ export function arenaMonacoThemes(): [string, editor.IStandaloneThemeData][] {
       const back = rgb(p.background)
       const grounds = [back, rgb(p.muted).map((x, i) => back[i]! + ((x - back[i]!) * 0x80) / 255)]
       const code = (hex: string) => readable(hex, grounds, light)
+      // A VS Code theme's own code colours (High Contrast on Monaco's high contrast, with its outlines); Arena's take VS Code's defaults.
+      const syntax = theme.vscode?.syntax[kind]
+      const own = syntax ? Object.entries(syntaxTokens).flatMap(([part, tokens]) => tokens.map((token) => [token, syntax[part as keyof Syntax]] as const)) : []
       return [
         arenaMonacoTheme(theme.id, kind),
         {
-          base: light ? 'vs' : 'vs-dark',
+          base: theme.id === 'contrast' ? (light ? 'hc-light' : 'hc-black') : light ? 'vs' : 'vs-dark',
           inherit: true,
-          rules: Object.entries(vsCodeTokens[kind]).map(([token, fg]) => ({ token, foreground: code(fg).slice(1) })),
+          rules: [...Object.entries(vsCodeTokens[kind]).filter(([token]) => !own.some(([t]) => t === token)), ...own].map(([token, fg]) => ({ token, foreground: code(fg).slice(1) })),
           colors: {
             ...Object.fromEntries(vsCodeBrackets[kind].map((fg, i) => [`editorBracketHighlight.foreground${i + 1}`, code(fg)])),
             'editor.background': p.background,

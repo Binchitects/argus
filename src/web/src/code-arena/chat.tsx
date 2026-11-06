@@ -328,13 +328,21 @@ export function ThemeMenu({ side = 'bottom', align = 'end' }: { side?: 'right' |
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Color theme</DropdownMenuLabel>
-        <DropdownMenuRadioGroup value={family ?? ''} onValueChange={(v) => setFamily(v as ColorThemeId)}>
-          {appColorThemes.map((t) => (
-            <DropdownMenuRadioItem key={t.id} value={t.id}>
-              <span className="size-3.5 shrink-0 rounded-full border border-foreground/20" style={{ background: t[resolved].primary }} aria-hidden="true" /> {t.id === 'default' ? 'Code Arena' : t.label}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
+        {[appColorThemes.filter((t) => !t.vscode), appColorThemes.filter((t) => t.vscode)].map((list, i) => (
+          <DropdownMenuRadioGroup key={i} value={family ?? ''} onValueChange={(v) => setFamily(v as ColorThemeId)}>
+            {i > 0 && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>VS Code's</DropdownMenuLabel>
+              </>
+            )}
+            {list.map((t) => (
+              <DropdownMenuRadioItem key={t.id} value={t.id}>
+                <span className="size-3.5 shrink-0 rounded-full border border-foreground/20" style={{ background: t[resolved].primary }} aria-hidden="true" /> {t.id === 'default' ? 'Code Arena' : t.label}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   )

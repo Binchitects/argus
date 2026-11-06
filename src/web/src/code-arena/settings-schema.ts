@@ -57,17 +57,37 @@ export interface ColorTheme {
 /** Monaco's theme for one of the app's colour themes, light or dark (monaco.ts defines them). */
 export const arenaMonacoTheme = (family: ColorThemeId, kind: 'light' | 'dark') => (family === 'default' ? `arena-${kind}` : `arena-${family}-${kind}`)
 
-/** The name of one of the app's colour themes, light or dark, in settings.json: "Code Arena Dark", "Sakura Light"... */
+/** The name of one of the app's colour themes, light or dark, in settings.json: "Code Arena Dark", "Sakura Light"...; VS Code's by their names there ("Default Dark+", "Solarized Light"). */
 export const familyThemeName = (family: ColorThemeId, kind: 'light' | 'dark') =>
-  `${family === 'default' ? 'Code Arena' : colorThemeOf(family).label} ${kind === 'light' ? 'Light' : 'Dark'}`
+  colorThemeOf(family).vscode?.names[kind] ?? `${family === 'default' ? 'Code Arena' : colorThemeOf(family).label} ${kind === 'light' ? 'Light' : 'Dark'}`
 
 /** The themes Code Arena has, by VS Code's names for their kind: the app's colour themes, each dark and light, then VS Code's own. */
 export const colorThemes: ColorTheme[] = [
   ...appColorThemes.flatMap((t) => (['dark', 'light'] as const).map((kind) => ({ name: familyThemeName(t.id, kind), kind, monaco: arenaMonacoTheme(t.id, kind), family: t.id }))),
   { name: 'Dark (Visual Studio)', kind: 'dark', monaco: 'vs-dark' },
   { name: 'Light (Visual Studio)', kind: 'light', monaco: 'vs' },
-  { name: 'High Contrast', kind: 'dark', monaco: 'hc-black' },
-  { name: 'High Contrast Light', kind: 'light', monaco: 'hc-light' },
+]
+
+/** VS Code's other names for its themes (older ones, and those extensions give), as the ones here. */
+const otherNames: [RegExp, string][] = [
+  [/high contrast.*light|light.*high contrast/, 'Default High Contrast Light'],
+  [/high contrast/, 'Default High Contrast'],
+  [/light\+|light \(visual studio code\)/, 'Default Light+'],
+  [/dark\+|dark \(visual studio code\)/, 'Default Dark+'],
+  [/light modern/, 'Default Light Modern'],
+  [/dark modern/, 'Default Dark Modern'],
+  [/monokai.*light/, 'Monokai Light'],
+  [/monokai/, 'Monokai'],
+  [/solarized.*light/, 'Solarized Light'],
+  [/solarized/, 'Solarized Dark'],
+  [/one light|atom one light/, 'One Light'],
+  [/one dark/, 'One Dark Pro'],
+  [/alucard|dracula.*light/, 'Alucard'],
+  [/dracula/, 'Dracula'],
+  [/github.*light/, 'GitHub Light'],
+  [/github/, 'GitHub Dark'],
+  [/nord.*light|snow ?storm/, 'Nord Light'],
+  [/nord/, 'Nord'],
 ]
 
 let extensionThemes: ColorTheme[] = []
@@ -80,12 +100,13 @@ export function setExtensionThemes(list: ColorTheme[]) {
 /** Every theme offered: Code Arena's, then the extensions'. */
 export const allColorThemes = (): ColorTheme[] => [...colorThemes, ...extensionThemes]
 
-/** A theme by its name; one Code Arena does not have (VS Code's Default Dark Modern, Light+…) as the nearest of its own. */
+/** A theme by its name; one Code Arena does not have by that name (an older VS Code name, "Solarized Dark (Bright)") as the nearest of its own. */
 export function themeNamed(name: string | undefined): ColorTheme {
   const exact = colorThemes.find((t) => t.name === name) ?? extensionThemes.find((t) => t.name === name)
   if (exact) return exact
   const n = (name ?? '').toLowerCase()
-  if (n.includes('high contrast')) return colorThemes.find((t) => t.name === (n.includes('light') ? 'High Contrast Light' : 'High Contrast'))!
+  const other = otherNames.find(([match]) => match.test(n))
+  if (other) return colorThemes.find((t) => t.name === other[1])!
   return colorThemes.find((t) => t.name === (n.includes('light') ? 'Code Arena Light' : 'Code Arena Dark'))!
 }
 
