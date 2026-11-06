@@ -153,6 +153,31 @@ describe('Code Arena in the browser', () => {
     expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
   })
 
+  it('skips the thinking of the answer running: asked of code-arena, and the button says the answer comes now', async () => {
+    let end!: () => void
+    const over = new Promise<void>((r) => (end = r))
+    const { calls } = backend({
+      extra: {
+        'POST /api/messages': () => ({
+          events: [
+            { type: 'question', id: 'm0', parentId: null },
+            { type: 'assistant', id: 'm1', parentId: 'm0', model: 'model-a' },
+            { type: 'reasoning', text: 'Weighing it once more.' },
+          ],
+          until: over,
+        }),
+        'POST /api/skip-thinking': () => ({ status: 204 }),
+      },
+    })
+    renderCode()
+    await ask('Think it through')
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Skip thinking' }))
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/api/skip-thinking')).toBe(true)
+    expect(screen.getByRole('button', { name: 'Answering now…' })).toBeDisabled()
+    end()
+  })
+
   it('asks before a tool runs, as Arena does: Allow, Always for this session or Deny; and Stop stops the turn', async () => {
     let end!: () => void
     const over = new Promise<void>((r) => (end = r))

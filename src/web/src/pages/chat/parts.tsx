@@ -33,9 +33,10 @@ const isModel = (fileName: string) => /\.glb$/i.test(fileName)
 
 /**
  * The model's thinking: open and ticking while it thinks, folded to "Thought for 12 s"
- * after. `onHurry`: "Answer now", to stop the thinking and have the answer at once.
+ * after. `onHurry`: "Answer now", to stop the thinking and have the answer at once
+ * (`hurryLabel`: its words, Code Arena's "Skip thinking").
  */
-export function Thinking({ text, live, ms, since, onHurry, hurried }: { text: string; live: boolean; ms: number | null; since: number | null; onHurry?: () => void; hurried?: boolean }) {
+export function Thinking({ text, live, ms, since, onHurry, hurried, hurryLabel = 'Answer now' }: { text: string; live: boolean; ms: number | null; since: number | null; onHurry?: () => void; hurried?: boolean; hurryLabel?: string }) {
   // Open while it thinks and folded after, unless the person chose otherwise.
   const [chosen, setOpen] = useState<boolean | null>(null)
   const open = chosen ?? live
@@ -66,7 +67,7 @@ export function Thinking({ text, live, ms, since, onHurry, hurried }: { text: st
               onHurry()
             }}
           >
-            <Zap className="size-3.5" aria-hidden="true" /> {asked ? 'Answering now…' : 'Answer now'}
+            <Zap className="size-3.5" aria-hidden="true" /> {asked ? 'Answering now…' : hurryLabel}
           </Button>
         )}
       </div>

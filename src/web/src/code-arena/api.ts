@@ -315,6 +315,8 @@ export const openWebChat = (id: string) => api<CodeSession>('/api/sessions/web',
 /** Sends Arena each session of this folder it never had: how many went, and what kept the others back. */
 export const sendAllSessions = () => api<{ sent: number; failed: string[] }>('/api/sessions/send-all', { body: {} })
 export const stopTurn = () => api('/api/stop', { body: {} })
+/** Skip thinking: the answer running stops thinking and answers, and the rest of its turn does not think. */
+export const skipThinking = () => api('/api/skip-thinking', { body: {} })
 /** What a question is asked again with: its new words and quote (edited), shorter or longer, another model or thinking, the files put back first. */
 export interface AgainBody {
   question: string

@@ -352,6 +352,8 @@ interface AnswerProps {
   /** The question this answers (its id), and how to ask it again: as it was, shorter, longer, another model or thinking, the files as they were. */
   question?: string
   onAgain?: (question: string, change?: AgainChange & { files?: boolean }) => void
+  /** Skip thinking, while the live answer thinks: it stops and the model answers. */
+  onSkipThinking?: () => void
 }
 
 /**
@@ -361,7 +363,7 @@ interface AnswerProps {
  */
 function sameAnswer(a: AnswerProps, b: AnswerProps): boolean {
   if (a.live !== b.live || a.thinkingSince !== b.thinkingSince || a.notices !== b.notices || a.config !== b.config || a.onDecide !== b.onDecide || a.onQuote !== b.onQuote) return false
-  if (a.question !== b.question || a.onAgain !== b.onAgain) return false
+  if (a.question !== b.question || a.onAgain !== b.onAgain || a.onSkipThinking !== b.onSkipThinking) return false
   if (a.answer.length !== b.answer.length || a.answer.some((m, i) => m !== b.answer[i])) return false
   if (b.live && (a.waiting !== b.waiting || a.always !== b.always || a.risks !== b.risks || a.calls !== b.calls || a.agents !== b.agents)) return false
   return b.answer.every((m) => m.role !== 'tool' || a.diffs[m.id] === b.diffs[m.id])
@@ -373,7 +375,7 @@ function sameAnswer(a: AnswerProps, b: AnswerProps): boolean {
  * model, time and tokens (the share read from the cache with them), as Arena's
  * chat shows an answer.
  */
-export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince, notices, config, waiting, always, risks, calls, agents, diffs, onDecide, onQuote, question, onAgain }: AnswerProps) {
+export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince, notices, config, waiting, always, risks, calls, agents, diffs, onDecide, onQuote, question, onAgain, onSkipThinking }: AnswerProps) {
   const [quoting, setQuoting] = useState(false)
   const results = new Map(answer.filter((m) => m.role === 'tool').map((m) => [m.toolCallId, m]))
   const assistants = answer.filter((m) => m.role === 'assistant')
@@ -393,7 +395,17 @@ export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince
         const isLast = i === assistants.length - 1
         return (
           <div key={a.id} data-message={a.id} className="scroll-mt-4 rounded-lg">
-            {a.reasoning && <Thinking text={a.reasoning} live={live && isLast && !a.content && !a.toolCalls?.length} ms={a.thinkingMs} since={isLast ? thinkingSince : null} />}
+            {a.reasoning && (
+              <Thinking
+                text={a.reasoning}
+                live={live && isLast && !a.content && !a.toolCalls?.length}
+                ms={a.thinkingMs}
+                since={isLast ? thinkingSince : null}
+                onHurry={live && isLast ? onSkipThinking : undefined}
+                hurried={a.cutShort}
+                hurryLabel="Skip thinking"
+              />
+            )}
             {a.content && (
               // A finished answer's words can be selected and quoted in a reply (the same element as it was written: nothing is drawn again).
               <div data-quote-source={live ? undefined : a.id}>

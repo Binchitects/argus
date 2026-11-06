@@ -52,6 +52,7 @@ import {
   sessionsQuery,
   stateQuery,
   stopJob,
+  skipThinking,
   stopTurn,
   type CodeEvent,
   type CodeLive,
@@ -830,6 +831,8 @@ export function Thread({
   }
 
   const stop = () => void stopTurn().catch((e) => !(e instanceof ApiError && e.http === 409) && toast.error(errorMessage(e)))
+  // The same function at each drawing: the answer is not drawn again for it.
+  const skip = useCallback(() => void skipThinking().catch((e) => !(e instanceof ApiError && e.http === 409) && toast.error(errorMessage(e))), [])
 
   const empty = turns.length === 0
   const lastTurn = turns.length - 1
@@ -988,6 +991,7 @@ export function Thread({
                           onQuote={replyQuote}
                           question={!isLive && asked && !asked.startsWith('local-') && !t.question?.details?.note ? asked : undefined}
                           onAgain={askAgain}
+                          onSkipThinking={isLive ? skip : undefined}
                         />
                       )}
                       {summary && <CompactedMark summary={summary} onOpenFile={openNamed} />}

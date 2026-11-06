@@ -29,7 +29,7 @@ internal sealed class Repl(Runtime rt)
         ("/help", "these commands"),
         ("/model [name]", "show or switch the model"),
         ("/mode [mode]", "show or switch the mode: ask, auto-edit, plan, yolo"),
-        ("/thinking [level]", "show or set thinking: default, off, low, medium, high, xhigh"),
+        ("/thinking [level]", "show or set thinking: default, off, low, medium, high, xhigh (Tab while it thinks skips it for that turn)"),
         ("/tools [on|off NAME]", "the tools this session has; turn a group of Arena's or a server's tools on or off in it"),
         ("/plan", "the plan, as it stands; a proposed one: approve [ask], change N what, another why, reject why; undo N; resume"),
         ("/checklist", "the checklist on, and yours (kept in Arena); N or NAME turns one on; off; tick N, untick N"),
@@ -116,13 +116,28 @@ internal sealed class Repl(Runtime rt)
             // typed while the model worked stays for the next message, and Ctrl+C at the question stops the turn.
             Ui.AnswerReader = prompt =>
             {
-                KeepTypedAhead();
-                return _editor.Read(prompt, Ui.Dim("… "), wake: () => _turnStop?.IsCancellationRequested == true, answer: true);
+                // The turn's watch of the keys leaves them to the question meanwhile.
+                lock (_keysGate)
+                {
+                    _asking = true;
+                    KeepTypedAhead();
+                }
+                try
+                {
+                    return _editor.Read(prompt, Ui.Dim("… "), wake: () => _turnStop?.IsCancellationRequested == true, answer: true);
+                }
+                finally
+                {
+                    _asking = false;
+                }
             };
         }
         Ui.NotAnAnswer = text =>
         {
-            _typed.Enqueue(text);
+            lock (_keysGate)
+            {
+                _typed.Enqueue(text);
+            }
             Ui.Info($"Not an answer, so a no: \"{Fmt.OneLine(text, 60)}\" is kept as your next message.");
         };
         // What the person adds in the web chat while the prompt waits comes in at once, said above it.
@@ -271,7 +286,7 @@ internal sealed class Repl(Runtime rt)
         }
         Ui.Info(_editor is null
             ? "/help for commands · Ctrl+C stops a turn · end a line with \\ to go on to the next"
-            : "/help for commands · ↑ for what you sent before · Ctrl+C stops a turn · end a line with \\ to go on to the next");
+            : "/help for commands · ↑ for what you sent before · Ctrl+C stops a turn · Tab skips the thinking · end a line with \\ to go on to the next");
         if (rt.Agent.Messages.Count > 0)
         {
             LastTurns();
@@ -415,38 +430,91 @@ internal sealed class Repl(Runtime rt)
         {
             return;
         }
-        var line = new StringBuilder(_ahead);
-        while (keys.KeyAvailable && keys.ReadKey() is { } key)
+        lock (_keysGate)
         {
-            if (key.Key == ConsoleKey.Enter || key.KeyChar is '\r' or '\n')
+            while (keys.KeyAvailable && keys.ReadKey() is { } key)
             {
-                if (line.Length > 0 && line[^1] == '\\')
-                {
-                    // A line ended with \ goes on to the next, as at the prompt.
-                    line.Length--;
-                    line.Append('\n');
-                    continue;
-                }
-                if (line.ToString().Trim() is { Length: > 0 } text)
-                {
-                    _typed.Enqueue(text);
-                    Ui.Info($"Taken when this turn ends: {Fmt.OneLine(text, 60)}");
-                }
-                line.Clear();
-            }
-            else if (key.Key == ConsoleKey.Backspace)
-            {
-                if (line.Length > 0)
-                {
-                    line.Length--;
-                }
-            }
-            else if (!char.IsControl(key.KeyChar))
-            {
-                line.Append(key.KeyChar);
+                Typed(key);
             }
         }
-        _ahead = line.ToString();
+    }
+
+    /// <summary>A key typed while the model worked: a line's end keeps it as a next message, the rest goes on the line begun.</summary>
+    private void Typed(ConsoleKeyInfo key)
+    {
+        if (key.Key == ConsoleKey.Enter || key.KeyChar is '\r' or '\n')
+        {
+            if (_ahead.EndsWith('\\'))
+            {
+                // A line ended with \ goes on to the next, as at the prompt.
+                _ahead = _ahead[..^1] + "\n";
+                return;
+            }
+            if (_ahead.Trim() is { Length: > 0 } text)
+            {
+                _typed.Enqueue(text);
+                Ui.Info($"Taken when this turn ends: {Fmt.OneLine(text, 60)}");
+            }
+            _ahead = "";
+        }
+        else if (key.Key == ConsoleKey.Backspace)
+        {
+            if (_ahead.Length > 0)
+            {
+                _ahead = _ahead[..^1];
+            }
+        }
+        else if (!char.IsControl(key.KeyChar))
+        {
+            _ahead += key.KeyChar;
+        }
+    }
+
+    /// <summary>Held while keys typed during a turn are read: the turn's watch, a question's start, what is kept for after it.</summary>
+    private readonly object _keysGate = new();
+
+    /// <summary>A question of the turn reads the keys now: the watch leaves them to it.</summary>
+    private volatile bool _asking;
+
+    /// <summary>How often the keys are looked at while a turn runs.</summary>
+    private static readonly TimeSpan KeysEvery = TimeSpan.FromMilliseconds(100);
+
+    /// <summary>
+    /// While a turn runs: Tab skips the model's thinking (it answers at once, and thinks no more in this turn), and the
+    /// other keys are kept as they would be after the turn. Only with the prompt's line editor (the keys one by one).
+    /// </summary>
+    private async Task WatchKeysAsync(CancellationToken ct)
+    {
+        if (_editor is null || rt.Env.Keys is not { } keys)
+        {
+            return;
+        }
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(KeysEvery, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            lock (_keysGate)
+            {
+                while (!_asking && !ct.IsCancellationRequested && keys.KeyAvailable && keys.ReadKey() is { } key)
+                {
+                    if (key.Key == ConsoleKey.Tab || key.KeyChar == '\t')
+                    {
+                        if (!rt.Agent.SkipThinking())
+                        {
+                            Ui.Info(rt.Agent.ThinkingSkipped ? "The thinking is skipped already in this turn." : "Nothing is thinking now.");
+                        }
+                        continue;
+                    }
+                    Typed(key);
+                }
+            }
+        }
     }
 
     /// <summary>The commands with no time limit waited for at the end of input, as a turn (Ctrl+C stops them and it).</summary>
@@ -503,9 +571,19 @@ internal sealed class Repl(Runtime rt)
         using var key = rt.Env.Cancel.BeginTurn();
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, key.Token);
         _turnStop = linked.Token;
+        using var watching = CancellationTokenSource.CreateLinkedTokenSource(linked.Token);
+        var watch = WatchKeysAsync(watching.Token);
         try
         {
-            await rt.Agent.RunAsync(input, turn, linked.Token);
+            try
+            {
+                await rt.Agent.RunAsync(input, turn, linked.Token);
+            }
+            finally
+            {
+                await watching.CancelAsync();
+                await watch;
+            }
         }
         catch (OperationCanceledException) when (linked.IsCancellationRequested)
         {

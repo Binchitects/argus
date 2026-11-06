@@ -496,6 +496,17 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                     await res.ErrorAsync(409, "idle", "Nothing is running.", ct);
                 }
                 return;
+            case ("POST", "/api/skip-thinking"):
+                // Skip thinking: the model stops thinking and answers, and the rest of the turn does not think.
+                if (Current() is null || !_rt.Agent.SkipThinking())
+                {
+                    await res.ErrorAsync(409, "idle", Current() is null ? "Nothing is running." : "The thinking is skipped already.", ct);
+                }
+                else
+                {
+                    await res.NoContentAsync(ct);
+                }
+                return;
             case ("POST", "/api/again"):
                 await AgainAsync(req, res, ct);
                 return;
@@ -1789,14 +1800,16 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         Emit(new JsonObject { ["type"] = "content", ["text"] = text });
     }
 
-    private void EndThinking()
+    private void EndThinking(bool cutShort = false)
     {
         if (_thinkingStarted != 0 && _thinkingMs is null)
         {
             _thinkingMs = (int)Stopwatch.GetElapsedTime(_thinkingStarted).TotalMilliseconds;
-            Emit(new JsonObject { ["type"] = "thought", ["ms"] = _thinkingMs });
+            Emit(new JsonObject { ["type"] = "thought", ["ms"] = _thinkingMs, ["cutShort"] = cutShort ? true : null });
         }
     }
+
+    void IAgentEvents.ThinkingSkipped() => EndThinking(cutShort: true);
 
     void IAgentEvents.StepDone(TokenUsage? usage)
     {

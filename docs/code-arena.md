@@ -192,7 +192,10 @@ terminal. A build without the IDE's page (below) says so and runs the
 conversation in the terminal.
 
 In the terminal, the answer streams as it is written; the model's thinking is shown dimmed
-before it. Each tool call is a line (`● edit_file src/app.py`), with its result
+before it. **Tab** while the model thinks skips the thinking: the stream stops, the model is
+asked the same again without thinking and answers at once, and the rest of that turn does not
+think (the next turn thinks again; `/thinking off` stops it for the session). What else is typed
+meanwhile is kept for after the turn. Each tool call is a line (`● edit_file src/app.py`), with its result
 under it: a diff for an edit, the last lines of a command's output, a count for
 a search. Each turn ends with its tokens and the share read from the cache
 (`12.4k in (81% cached) · 310 out · 3 requests`) and how full the model's
@@ -529,7 +532,10 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   ones still running, with their screens (below). The panel's other tabs are
   the **Debug Console** and the **Output** (the language servers', below).
 - **chat**: the agent's chat on the right: the model and thinking pickers,
-  Sessions and Hide at its top. The pickers say what Arena's web chat says
+  Sessions and Hide at its top. **Skip thinking** beside a thinking that is
+  still going stops it and the model answers at once, as the web chat's
+  **Answer now** does (Tab in the terminal); the rest of the turn does not
+  think, and the thinking so far stays with the answer, marked cut short. The pickers say what Arena's web chat says
   (read with the key from `GET /api/code-arena/config` at the start): which
   models are loaded, load when asked or are not loaded now, which see
   pictures, the deployment's thinking levels with their names, and which one

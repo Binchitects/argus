@@ -164,6 +164,11 @@ internal interface IAgentEvents
     void SubAgent(JsonObject e)
     {
     }
+
+    /// <summary>The person skipped the thinking: it stopped, and the model is asked to answer without it.</summary>
+    void ThinkingSkipped()
+    {
+    }
 }
 
 /// <summary>
@@ -454,6 +459,9 @@ internal sealed class Agent
         }
         var before = await SnapshotAsync(ct);
         var done = false;
+        // A skip of the thinking is this turn's: the next one thinks again.
+        Volatile.Write(ref _skipThinking, 0);
+        _turning = true;
         try
         {
             var answer = await TurnAsync(input, turn, ct, Depth == 0 ? uploaded?.Pictures : null);
@@ -475,6 +483,7 @@ internal sealed class Agent
         }
         finally
         {
+            _turning = false;
             if (!done)
             {
                 await KeepUncommittedAsync(before);
@@ -934,7 +943,7 @@ internal sealed class Agent
                 request["parallel_tool_calls"] = true;
             }
         }
-        if (Model.TemplateKwargs() is { } kwargs)
+        if ((ThinkingSkipped && Model.Info.Thinking ? NoThinking() : Model.TemplateKwargs()) is { } kwargs)
         {
             request["chat_template_kwargs"] = kwargs;
         }
@@ -943,14 +952,114 @@ internal sealed class Agent
         var uncached = Uncached(_sentChars);
         try
         {
-            return await Gateway.CompleteAsync(request, sink, ct, uncached);
+            return await AskOnceAsync(request, sink, uncached, ct);
         }
         catch (GatewayException e) when (e.Status == 400 && _parallelCalls && e.Message.Contains("parallel_tool_calls", StringComparison.OrdinalIgnoreCase))
         {
             // A backend that does not take the option: one call at a time, then.
             _parallelCalls = false;
             request.Remove("parallel_tool_calls");
-            return await Gateway.CompleteAsync(request, sink, ct, uncached);
+            return await AskOnceAsync(request, sink, uncached, ct);
+        }
+    }
+
+    private static JsonObject NoThinking() => new() { ["enable_thinking"] = false };
+
+    /// <summary>
+    /// The request, streamed. When the person skips the thinking while the model still thinks (no word yet), the stream
+    /// stops there and the same request is asked again without thinking: the model answers at once. Its thinking so far
+    /// is kept with the answer.
+    /// </summary>
+    private async Task<Completion> AskOnceAsync(JsonObject request, IStreamSink sink, long uncached, CancellationToken ct)
+    {
+        using var cut = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var watch = new SkipWatch(this, sink, cut);
+        _skipWatch = watch;
+        try
+        {
+            return await Gateway.CompleteAsync(request, watch, cut.Token, uncached);
+        }
+        catch (Exception e) when (watch.Cut && !ct.IsCancellationRequested && e is OperationCanceledException or IOException or HttpRequestException)
+        {
+            Events?.ThinkingSkipped();
+            Info("Thinking skipped: the model answers now.");
+            request["chat_template_kwargs"] = NoThinking();
+            var answer = await Gateway.CompleteAsync(request, sink, ct, uncached);
+            if (watch.Thought.Length > 0 && answer.Message.Str("reasoning_content") is null)
+            {
+                answer.Message["reasoning_content"] = watch.Thought.ToString();
+            }
+            return answer;
+        }
+        finally
+        {
+            _skipWatch = null;
+        }
+    }
+
+    /// <summary>1 once the person asked to skip the thinking in this turn: its later steps think no more either.</summary>
+    private int _skipThinking;
+
+    /// <summary>The stream of the request running now, which a skip cuts while it thinks.</summary>
+    private volatile SkipWatch? _skipWatch;
+
+    public bool ThinkingSkipped => Volatile.Read(ref _skipThinking) == 1;
+
+    /// <summary>
+    /// "Skip thinking" for the turn running (the IDE's button, Tab in the terminal; the web chat's "Answer now"): the
+    /// thinking stops and the model answers, and the rest of the turn does not think. False when there is no turn or it
+    /// was asked already.
+    /// </summary>
+    public bool SkipThinking()
+    {
+        if (!_turning || Interlocked.Exchange(ref _skipThinking, 1) == 1)
+        {
+            return false;
+        }
+        _skipWatch?.Skip();
+        return true;
+    }
+
+    /// <summary>A turn runs (a skip applies to it).</summary>
+    private volatile bool _turning;
+
+    /// <summary>Passes the stream on, and stops it at the person's skip while the model has said nothing but its thinking.</summary>
+    private sealed class SkipWatch(Agent agent, IStreamSink inner, CancellationTokenSource cut) : IStreamSink
+    {
+        private int _said;
+
+        public StringBuilder Thought { get; } = new();
+
+        public bool Cut { get; private set; }
+
+        public void Text(string text)
+        {
+            Volatile.Write(ref _said, 1);
+            inner.Text(text);
+        }
+
+        public void Reasoning(string text)
+        {
+            if (Cut)
+            {
+                return;
+            }
+            Thought.Append(text);
+            inner.Reasoning(text);
+            if (agent.ThinkingSkipped)
+            {
+                Skip();
+            }
+        }
+
+        /// <summary>Stops the stream, unless the answer's words have begun (then it ends as it is).</summary>
+        public void Skip()
+        {
+            if (Volatile.Read(ref _said) == 0 && !Cut)
+            {
+                Cut = true;
+                cut.Cancel();
+            }
         }
     }
 

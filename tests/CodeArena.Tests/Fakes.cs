@@ -14,6 +14,8 @@ public sealed record Reply(string Text, (string Name, string Args)[] Calls, stri
     public int Completion { get; init; } = 7;
     /// <summary>The text said again and again until the client goes away: a small model gone round in a loop.</summary>
     public bool Endless { get; init; }
+    /// <summary>The reasoning said again and again until the client goes away: a model that thinks and thinks.</summary>
+    public bool ThinksOn { get; init; }
 
     public static Reply Say(string text, string? reasoning = null) => new(text, [], reasoning);
     public static Reply Call(params (string Name, string Args)[] calls) => new("", calls);
@@ -262,6 +264,15 @@ public sealed class FakeGateway : FakeServer
         if (reply.Reasoning is { } reasoning)
         {
             await WriteEvent(ctx, Chunk(new JsonObject { ["reasoning_content"] = reasoning }));
+        }
+        if (reply.ThinksOn)
+        {
+            await WriteEvent(ctx, Chunk(new JsonObject { ["role"] = "assistant", ["content"] = "" }));
+            while (true)
+            {
+                await WriteEvent(ctx, Chunk(new JsonObject { ["reasoning_content"] = reply.Reasoning ?? "Let me think again. " }));
+                await Task.Delay(5, ct);
+            }
         }
         if (reply.Endless)
         {
