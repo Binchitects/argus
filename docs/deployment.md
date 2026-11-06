@@ -829,7 +829,9 @@ volume and the configuration into `backups/`; `sudo ./arenactl backup
 --install-timer` runs it daily. It runs the installation's own
 `scripts/backup.sh` (`--dir DIR` picks the installation); on a host with the
 installation and no checkout, run `scripts/backup.sh` in its `deploy/` with the
-same options.
+same options. A new installation the installer made as root, on a host with
+systemd, has the daily timer already; without root, the installer says the
+command to run.
 Models are not backed up: they are in `MODELS_DIR` and can be fetched again.
 `BACKUP_DIR`, `BACKUP_COPY_DIR` (a verified second copy on another disk),
 `BACKUP_KEEP`, `BACKUP_INCLUDE_LOGS` and `BACKUP_TIME` in `.env` change where,
