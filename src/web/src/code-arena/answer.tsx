@@ -77,7 +77,8 @@ function DiffLines({ diff, numbered, path }: { diff: FileDiff; numbered: boolean
   const refs = useFileRefs()
   return (
     <>
-      <div className="max-h-96 overflow-auto">
+      {/* Relative: the lines' screen-reader words (absolute) stay in this box, not laid out past its end in the thread. */}
+      <div className="relative max-h-96 overflow-auto">
         <table className="w-full border-collapse font-mono leading-5">
           <tbody>
             {diff.lines.map(([op, a, b, text], i) =>

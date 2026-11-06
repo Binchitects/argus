@@ -267,7 +267,8 @@ export const ToolCard = memo(function ToolCard({
             {result && !(delegate && work?.length) && (
               <div>
                 <p className="mb-1 text-xs font-medium text-muted-foreground">{failed ? 'The tool said' : 'Result'}</p>
-                <div className="max-h-[32rem] overflow-y-auto text-sm [&_.md]:text-sm">
+                {/* Relative: what is absolute in it (a link's screen-reader words) stays in the box, not past its end. */}
+                <div className="relative max-h-[32rem] overflow-y-auto text-sm [&_.md]:text-sm">
                   <ToolOutput text={result.content} value={value} args={argsOf(call.function.arguments)} failed={failed} />
                 </div>
               </div>

@@ -947,6 +947,7 @@ export function Thread({
             <output className="sr-only">{answerNews(answering, path)}</output>
             <div
               ref={scroller}
+              data-thread
               onScroll={() => {
                 const el = scroller.current
                 if (el) setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 80)

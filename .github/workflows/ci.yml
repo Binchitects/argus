@@ -83,6 +83,8 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      - name: Code Arena's page laid out in Chromium (its API answered by the tests)
+        run: npx playwright install --with-deps chromium && npx playwright test --config playwright.ide.config.ts
 
   argus-web:
     runs-on: ubuntu-24.04
