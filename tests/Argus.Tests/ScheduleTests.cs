@@ -164,6 +164,32 @@ public class ScheduleTests
     }
 
     [Fact]
+    public void A_repository_with_several_branches_counts_once_in_the_snapshot_the_metrics_and_the_kpis()
+    {
+        using var ix = new TestIndex();
+        using var env = new EnvScope(("ARGUS_INDEX_STALE_AFTER", "3600"));
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        Choices.Record(ix.Conn, [P(1, "g/app"), P(2, "g/lib")], now);
+        foreach (var branch in new[] { "main", "v1", "v2", "v3" })
+            Writes.RecordRunState(ix.Conn, ix.Repo(1, "g/app", branch), false, false, branch == "v2" ? now - 5 * 3600 : now,
+                branch == "v3" ? "clone failed" : null);
+        Writes.RecordRunState(ix.Conn, ix.Repo(2, "g/lib"), false, false, now);
+
+        var snap = Metrics.Take(ix.DbPath);
+        Assert.Equal(2, snap.Repositories);
+        Assert.Equal(5, snap.Branches);
+        Assert.Equal(1, snap.StaleRepos);
+        Assert.Equal(1, snap.ErroredRepos);
+        var text = Metrics.Render(ix.DbPath);
+        Assert.Contains("argus_index_repos 2\n", text);
+        Assert.Contains("argus_index_branches 5\n", text);
+        var k = Kpi.Collect(ix.Conn);
+        Assert.Equal(2, k["repos"]!.GetValue<long>());
+        Assert.Equal(5, k["branches"]!.GetValue<long>());
+        Assert.Equal(1, k["repos_unhealthy"]!.GetValue<long>());
+    }
+
+    [Fact]
     public void A_scheduled_pass_leaves_repositories_on_their_own_schedule_to_it_and_the_scheduler_never_asks_twice()
     {
         using var ix = new TestIndex();

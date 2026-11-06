@@ -884,9 +884,9 @@ public static partial class ArgusServer
                 var snap = Metrics.Take(cfg.Index.DbPath);
                 summary = new JsonObject
                 {
-                    ["repos"] = snap.Repos.Count, ["stale"] = snap.StaleRepos, ["errored"] = snap.ErroredRepos,
+                    ["repos"] = snap.Repositories, ["branches"] = snap.Branches, ["stale"] = snap.StaleRepos, ["errored"] = snap.ErroredRepos,
                     ["stale_after"] = snap.StaleAfterSeconds, ["version"] = snap.Version,
-                    ["never_run"] = snap.Repos.Count(r => r.LastRunAt is null or 0),
+                    ["never_run"] = snap.Repos.Where(r => r.LastRunAt is null or 0).Select(r => r.GitlabId).Distinct().Count(),
                     ["files"] = snap.Repos.Sum(r => r.Files), ["symbols"] = snap.Repos.Sum(r => r.Symbols),
                     ["stale_names"] = new JsonArray(snap.Repos.Where(r => r.Stale).Select(r => (JsonNode?)$"{r.Repo}@{r.Branch}").Take(8).ToArray()),
                 };

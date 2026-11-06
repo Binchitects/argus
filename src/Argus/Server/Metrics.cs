@@ -64,7 +64,17 @@ public static class Metrics
         return (byId, fallback);
     }
 
-    public sealed record Snapshot(double Now, int StaleAfterSeconds, List<RepoState> Repos, int StaleRepos, int ErroredRepos, string Version);
+    /// <summary>
+    /// The index at one moment. <c>Repos</c> holds a row per repository and branch; the counts are of
+    /// repositories, each counted once with all its branches: stale or failing when any branch is.
+    /// </summary>
+    public sealed record Snapshot(double Now, int StaleAfterSeconds, List<RepoState> Repos, int StaleRepos, int ErroredRepos, string Version)
+    {
+        public int Repositories => Repos.Select(r => r.GitlabId).Distinct().Count();
+        public int Branches => Repos.Count;
+    }
+
+    static int Distinct(IEnumerable<RepoState> rows) => rows.Select(r => r.GitlabId).Distinct().Count();
 
     public static Snapshot Take(string dbPath, double? now = null)
     {
@@ -104,7 +114,7 @@ public static class Metrics
                 row.StrOrNull("last_run_error"),
                 byTable.GetValueOrDefault("files", 0), byTable.GetValueOrDefault("symbols", 0), row.Long("gitlab_id")));
         }
-        return new Snapshot(t, limit, repos, repos.Count(r => r.Stale), repos.Count(r => !string.IsNullOrEmpty(r.Error)), Version);
+        return new Snapshot(t, limit, repos, Distinct(repos.Where(r => r.Stale)), Distinct(repos.Where(r => !string.IsNullOrEmpty(r.Error))), Version);
     }
 
     sealed class Exposition
@@ -152,9 +162,10 @@ public static class Metrics
         var x = new Exposition();
         x.Line($"{Prefix}_index_build_info", 1, [("version", snap.Version)], "Argus build, always 1");
         x.Line($"{Prefix}_index_scrape_ok", 1, help: "1 when this scrape read the index successfully");
-        x.Line($"{Prefix}_index_repos", snap.Repos.Count, help: "Repositories (at one branch each) in the index");
+        x.Line($"{Prefix}_index_repos", snap.Repositories, help: "Repositories in the index, each once with all its branches");
+        x.Line($"{Prefix}_index_branches", snap.Branches, help: "Branches in the index, of every repository");
         x.Line($"{Prefix}_index_stale_repos", snap.StaleRepos, help: $"No check within {snap.StaleAfterSeconds}s (plus the time a repository's own schedule leaves between runs), or never indexed");
-        x.Line($"{Prefix}_index_errored_repos", snap.ErroredRepos, help: "Repositories whose last pass recorded an error");
+        x.Line($"{Prefix}_index_errored_repos", snap.ErroredRepos, help: "Repositories whose last pass recorded an error on any branch");
         x.Line($"{Prefix}_index_stale_after_seconds", snap.StaleAfterSeconds, help: "Threshold this build applies to the stale gauges");
         // Family-major, not repo-major: the text format requires every sample of a
         // family to be contiguous, which the Python exposition (one block per

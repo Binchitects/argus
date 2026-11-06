@@ -18,12 +18,14 @@ public static class Kpi
         long t = now ?? DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         long Scalar(string sql) => Sql.Scalar(conn, sql) is { } v ? Convert.ToInt64(v) : 0;
 
-        var repos = Scalar("SELECT COUNT(*) FROM repos");
+        // A repository is counted once, with all its branches: a row per branch is what is indexed.
+        var repos = Scalar("SELECT COUNT(DISTINCT gitlab_id) FROM repos");
+        var branches = Scalar("SELECT COUNT(*) FROM repos");
         var files = Scalar("SELECT COUNT(*) FROM files");
         var symbols = Scalar("SELECT COUNT(*) FROM symbols");
         var includes = Scalar("SELECT COUNT(*) FROM includes");
-        var indexed = Scalar("SELECT COUNT(*) FROM repos WHERE last_indexed_at IS NOT NULL");
-        var unhealthy = Scalar("SELECT COUNT(*) FROM repos WHERE last_run_error IS NOT NULL    OR last_run_timed_out = 1 OR last_run_symbols_failed = 1");
+        var indexed = Scalar("SELECT COUNT(DISTINCT gitlab_id) FROM repos WHERE last_indexed_at IS NOT NULL");
+        var unhealthy = Scalar("SELECT COUNT(DISTINCT gitlab_id) FROM repos WHERE last_run_error IS NOT NULL    OR last_run_timed_out = 1 OR last_run_symbols_failed = 1");
         var ages = Sql.Query(conn, "SELECT last_indexed_at FROM repos WHERE last_indexed_at IS NOT NULL")
             .Select(r => (t - Convert.ToInt64(r[0])) / 3600.0).Order().ToList();
         var resolution = Sql.Query(conn, "SELECT resolution, COUNT(*) AS n FROM includes GROUP BY resolution")
@@ -37,6 +39,7 @@ public static class Kpi
         return new JsonObject
         {
             ["repos"] = repos,
+            ["branches"] = branches,
             ["repos_indexed"] = indexed,
             ["repos_never_indexed"] = repos - indexed,
             ["files"] = files,

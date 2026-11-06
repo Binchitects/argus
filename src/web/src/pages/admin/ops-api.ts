@@ -15,7 +15,10 @@ export interface Probe {
 }
 
 export interface IndexSummary {
+  /** Repositories, each once with all its branches. */
   repos?: number
+  /** Branches indexed, of every repository. */
+  branches?: number
   stale?: number
   errored?: number
   never_run?: number
