@@ -196,6 +196,9 @@ export type CodeEvent =
   | { type: 'job_end'; job: number; running: false; status: string; exitCode: number | null; stopped: boolean }
   /** What went with the question (@files, the lines chosen in the editor): path, or path:first-last. */
   | { type: 'attached'; id: string; files: string[] }
+  /** A VM's sign-in the VM tools ask for (a dialog: vm-login.ts), and its end. */
+  | { type: 'vm_login'; id: string; vm: string; hypervisor: string; user: string | null; refused: boolean; canSave: boolean; keyring: string }
+  | { type: 'vm_login_done'; id: string }
 
 export const stateQuery = {
   queryKey: ['code', 'state'] as const,
@@ -441,6 +444,9 @@ export function reduceCode(state: CodeLive, e: CodeEvent, localId: string | null
       }
     case 'job_output':
       return { ...state, jobs: withJob(state.jobs, e.job, (j) => ({ ...j, output: (j.output + e.text).slice(-keptOutput) })) }
+    case 'vm_login':
+    case 'vm_login_done':
+      return state
     case 'job_end':
       return { ...state, jobs: withJob(state.jobs, e.job, (j) => ({ ...j, running: false, status: e.status, failed: e.stopped || e.exitCode !== 0 })) }
     default:
