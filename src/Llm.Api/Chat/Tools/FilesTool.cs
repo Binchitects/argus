@@ -29,18 +29,21 @@ public sealed class FilesTool(AppDbContext db) : IChatTool
     public Task<IToolRun> StartAsync(ToolContext context, CancellationToken ct) => Task.FromResult<IToolRun>(new LocalRun(
         [
             Schema.Function("list_files", "Lists the files in this chat: the person's attachments and files tools made, with their length in lines.", new JsonObject()),
-            Schema.Function("read_file", $"Reads lines of a file in this chat, numbered. Up to {MaxLines} lines a call; read on from next_from_line.",
+            Schema.Function("read_file", $"Reads lines of a file in this chat, numbered: from a line, or one section of its outline (a heading, a page, a function) by name. Up to {MaxLines} lines a call; read on from next_from_line.",
                 new JsonObject
                 {
                     ["file"] = Schema.Text("The file's name, as list_files shows it"),
                     ["from_line"] = new JsonObject { ["type"] = "integer", ["description"] = "First line to read, from 1 (default 1)" },
                     ["lines"] = new JsonObject { ["type"] = "integer", ["description"] = $"How many lines (default 200, at most {MaxLines})" },
+                    ["section"] = Schema.Text("Instead of from_line: a section's name as the file's outline shows it (a heading, page 3, a function's name)"),
                 }, "file"),
+            Schema.Function("outline_file", "The outline of a file in this chat: its sections (headings, pages, functions and classes) with their lines, to read only the part needed.",
+                new JsonObject { ["file"] = Schema.Text("The file's name") }, "file"),
             Schema.Function("search_file", "Finds the lines of a file that contain some text (case does not matter), with their numbers, to read around them with read_file.",
                 new JsonObject { ["file"] = Schema.Text("The file's name"), ["text"] = Schema.Text("The text to find") }, "file", "text"),
         ],
-        "The person's files may be longer than what you were shown: a note under a file says so. Then read on with read_file, " +
-        "or find what you need with search_file, before answering from the part you saw. Say which lines you used.",
+        "The person's files may be longer than what you were shown: a note under a file says so, with its outline. Then read the " +
+        "section you need with read_file, or find what you need with search_file, before answering from the part you saw. Say which lines you used.",
         async (function, args, token) =>
         {
             var files = await FilesAsync(context.Conversation.Id, token);
@@ -63,7 +66,9 @@ public sealed class FilesTool(AppDbContext db) : IChatTool
             }
             return function switch
             {
+                "read_file" when Schema.Str(args, "section") is { Length: > 0 } section => ReadSection(file, section),
                 "read_file" => Read(file, Int(args, "from_line") ?? 1, Int(args, "lines") ?? 200),
+                "outline_file" => Outline(file),
                 "search_file" => Search(file, Schema.Str(args, "text") ?? ""),
                 _ => new ToolResult($"There is no function {function}.", IsError: true),
             };
@@ -129,6 +134,29 @@ public sealed class FilesTool(AppDbContext db) : IChatTool
             ["cut_when_attached"] = file.Truncated && last == total ? true : null,
             ["text"] = text.ToString(),
         }.ToJsonString(Mcp.Plain));
+    }
+
+    private static ToolResult Outline(ChatFile file)
+    {
+        var outline = FileOutline.Render(FileOutline.Sections(file.Name, file.Text), MaxChars);
+        return new ToolResult(new JsonObject
+        {
+            ["file"] = file.Name, ["total_lines"] = file.Lines.Length,
+            ["outline"] = outline.Length > 0 ? outline : "No sections found in it (no headings, pages or functions): read it by lines, or find words with search_file.",
+        }.ToJsonString(Mcp.Plain));
+    }
+
+    /// <summary>One section of the file's outline by its name: its lines (the first <see cref="MaxLines"/> of a longer one, and where to read on).</summary>
+    private static ToolResult ReadSection(ChatFile file, string name)
+    {
+        var sections = FileOutline.Sections(file.Name, file.Text);
+        if (FileOutline.Find(sections, name, out var candidates) is not { } section)
+        {
+            return new ToolResult(candidates.Count == 0
+                ? $"{file.Name} has no section '{name}'" + (sections.Count > 0 ? $"; its sections: {string.Join("; ", sections.Take(30).Select(s => s.Name))}." : ": it has no outline; read it by lines.")
+                : $"'{name}' is {candidates.Count} sections of {file.Name}: {string.Join("; ", candidates.Take(20).Select(s => $"{s.Name} [lines {s.Start}-{s.End}]"))}. Name one, or read by from_line.", IsError: true);
+        }
+        return Read(file, section.Start, section.End - section.Start + 1);
     }
 
     private static ToolResult Search(ChatFile file, string needle)

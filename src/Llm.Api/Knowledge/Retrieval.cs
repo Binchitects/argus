@@ -93,6 +93,9 @@ public sealed class Retrieval(AppDbContext db, Embedder embedder, KnowledgeStore
     /// <summary>Of a long file, what goes where it was attached: its start, so the model knows what it is.</summary>
     public const int HeadChars = 2_000;
 
+    /// <summary>The most a long file's outline takes beside its head.</summary>
+    public const int OutlineChars = 3_000;
+
     /// <summary>The files that go by their passages in one answer, with their names.</summary>
     public sealed record Plan(IReadOnlyDictionary<Guid, string> Files)
     {
@@ -155,8 +158,10 @@ public sealed class Retrieval(AppDbContext db, Embedder embedder, KnowledgeStore
         var end = f.Text.LastIndexOf('\n', Math.Min(HeadChars, f.Text.Length) - 1);
         var shown = f.Text[..(end > HeadChars / 2 ? end : Math.Min(HeadChars, f.Text.Length))];
         var lines = f.Text.Count(c => c == '\n') + 1;
-        var how = canReadFiles ? $" Read any part with read_file (file \"{f.FileName}\"), or find words with search_file." : "";
-        return shown + $"\n[This file is long ({f.Text.Length:N0} characters, {lines:N0} lines): its start is above, and the passages that match each question come with the question.{how}]";
+        var outline = canReadFiles ? Chat.FileOutline.Render(Chat.FileOutline.Sections(f.FileName, f.Text), OutlineChars) : "";
+        var how = canReadFiles ? $" Read any part with read_file (file \"{f.FileName}\"{(outline.Length > 0 ? ", by lines or a section's name" : "")}), or find words with search_file." : "";
+        return shown + $"\n[This file is long ({f.Text.Length:N0} characters, {lines:N0} lines): its start is above, and the passages that match each question come with the question.{how}]" +
+            (outline.Length > 0 ? $"\n[Its outline (the sections and their lines):\n{outline.TrimEnd('\n')}]" : "");
     }
 
     /// <summary>
