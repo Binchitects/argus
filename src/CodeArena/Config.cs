@@ -226,9 +226,9 @@ internal sealed class Config
     public List<FormatterConfig> Formatters { get; set; } = [];
     public string? CompletionModel { get; set; }
     public string CompletionTemplate { get; set; } = "qwen";
-    /// <summary>The author name of Code Arena's commits (default: Code Arena).</summary>
+    /// <summary>The co-author name in Code Arena's commits' Co-Authored-By line (default: Code Arena).</summary>
     public string? CommitName { get; set; }
-    /// <summary>The author email of Code Arena's commits (default: code-arena@ the Arena's host).</summary>
+    /// <summary>The co-author email in that line (default: code-arena@ the Arena's host).</summary>
     public string? CommitEmail { get; set; }
     /// <summary>The IDE's debug adapters the person installed themselves, by id ("gdb", "lldb-dap", …): found before any other.</summary>
     public Dictionary<string, DebugAdapterConfig> DebugAdapters { get; set; } = [];

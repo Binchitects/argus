@@ -490,6 +490,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             Model = () => Model.Name,
             Shell = Config.Shell,
             ArenaUrl = Config.Url,
+            CoAuthor = CommitIdentity.From(Config).Trailer,
             Ide = o.Ide,
             ServerInstructions = () => Volatile.Read(ref _instructions),
             HasArenaTools = () => ArenaConnected,
@@ -526,9 +527,8 @@ internal sealed partial class Runtime : IAsyncDisposable
                 SetPlan(plan);
             }
         };
-        // Whatever the agent commits is by Code Arena (its author), the person staying the committer.
+        // Whatever the agent commits is the person's, with Code Arena as its co-author.
         var harness = CommitIdentity.From(Config);
-        Proc.Author = harness;
         Agent = new Agent
         {
             CommitAs = Config.AutoCommit ? harness : null,

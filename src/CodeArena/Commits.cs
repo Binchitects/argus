@@ -5,7 +5,10 @@ using System.Text;
 
 namespace CodeArena;
 
-/// <summary>Who a commit Code Arena makes is by: git's author. The committer stays the person (their own git settings).</summary>
+/// <summary>
+/// Code Arena as the co-author of the commits it makes, as Claude Code signs its own: the author and the committer stay
+/// the person (their own git settings), and the message ends with a Co-Authored-By trailer naming Code Arena.
+/// </summary>
 internal sealed record CommitIdentity(string Name, string Email)
 {
     public static readonly CommitIdentity Default = new("Code Arena", "code-arena@localhost");
@@ -17,15 +20,8 @@ internal sealed record CommitIdentity(string Name, string Email)
         return new(config.CommitName is { Length: > 0 } name ? name : Default.Name, config.CommitEmail is { Length: > 0 } email ? email : $"code-arena@{host}");
     }
 
-    /// <summary>
-    /// Every command the agent runs commits as Code Arena: a `git commit` the model makes is told apart from the
-    /// person's own by its author, as is each turn's own commit.
-    /// </summary>
-    public void Apply(IDictionary<string, string?> env)
-    {
-        env["GIT_AUTHOR_NAME"] = Name;
-        env["GIT_AUTHOR_EMAIL"] = Email;
-    }
+    /// <summary>The line that ends each commit Code Arena makes, and that the model is told to end its own with.</summary>
+    public string Trailer => $"Co-Authored-By: {Name} <{Email}>";
 }
 
 /// <summary>What a turn's commit did: its commit, the files in it, and the files left for the person (with why).</summary>
@@ -36,7 +32,7 @@ internal sealed record TurnCommit(string? Hash, string Subject, IReadOnlyList<st
         var sb = new StringBuilder();
         if (Hash is not null)
         {
-            sb.Append(CultureInfo.InvariantCulture, $"Committed {Files.Count} file{(Files.Count == 1 ? "" : "s")} as Code Arena: {Hash} {Subject}");
+            sb.Append(CultureInfo.InvariantCulture, $"Committed {Files.Count} file{(Files.Count == 1 ? "" : "s")}, co-authored by Code Arena: {Hash} {Subject}");
         }
         else if (Problem is not null)
         {
@@ -52,8 +48,8 @@ internal sealed record TurnCommit(string? Hash, string Subject, IReadOnlyList<st
 }
 
 /// <summary>
-/// Each turn's changes committed under Code Arena's name, so the history tells what the harness wrote from what the
-/// person did. Only files the turn changed go in: a file that already held the person's own uncommitted changes when
+/// Each turn's changes committed as the person's, with Code Arena as their co-author (a Co-Authored-By trailer), so the
+/// history tells what the harness wrote from what the person did by hand. Only files the turn changed go in: a file that already held the person's own uncommitted changes when
 /// the turn began is left for them, and so is everything else they have staged or changed.
 /// </summary>
 internal static class TurnCommits
@@ -127,6 +123,7 @@ internal static class TurnCommits
         }
         var paths = string.Join('\0', files) + "\0";
         var trailers = new List<string>();
+        // The person's commit, Code Arena its co-author: the model and the session first, the Co-Authored-By line last, as git's trailers go.
         if (model is { Length: > 0 })
         {
             trailers.Add($"Code-Arena-Model: {model}");
@@ -135,6 +132,7 @@ internal static class TurnCommits
         {
             trailers.Add($"Code-Arena-Session: {session}");
         }
+        trailers.Add(who.Trailer);
         var message = $"{subject}\n\n{Body(request)}{(trailers.Count > 0 ? "\n\n" + string.Join('\n', trailers) : "")}\n";
         // The message from a file, the paths on stdin: no argument list too long, however many files.
         var messageFile = Path.GetTempFileName();
@@ -142,11 +140,11 @@ internal static class TurnCommits
         try
         {
             await File.WriteAllTextAsync(messageFile, message, ct);
-            commit = await GitAsync(before.Root, ["--literal-pathspecs", "commit", "-q", "-F", messageFile, "--pathspec-from-file=-", "--pathspec-file-nul"], ct, paths, who);
+            commit = await GitAsync(before.Root, ["--literal-pathspecs", "commit", "-q", "-F", messageFile, "--pathspec-from-file=-", "--pathspec-file-nul"], ct, paths);
             if (commit.Code != 0 && Unknown(commit.Output))
             {
                 // git before 2.25: the paths as arguments.
-                commit = await GitAsync(before.Root, ["--literal-pathspecs", "commit", "-q", "-F", messageFile, "--", .. files], ct, null, who);
+                commit = await GitAsync(before.Root, ["--literal-pathspecs", "commit", "-q", "-F", messageFile, "--", .. files], ct);
             }
         }
         finally
@@ -265,7 +263,7 @@ internal static class TurnCommits
         }
     }
 
-    internal static async Task<(int Code, string Output)> GitAsync(string dir, IReadOnlyList<string> args, CancellationToken ct, string? input = null, CommitIdentity? author = null,
+    internal static async Task<(int Code, string Output)> GitAsync(string dir, IReadOnlyList<string> args, CancellationToken ct, string? input = null,
         TimeSpan? timeout = null)
     {
         var psi = new ProcessStartInfo("git")
@@ -290,7 +288,6 @@ internal static class TurnCommits
             psi.Environment["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes";
         }
         psi.Environment.Remove("ARENA_API_KEY");
-        author?.Apply(psi.Environment);
         Process process;
         try
         {

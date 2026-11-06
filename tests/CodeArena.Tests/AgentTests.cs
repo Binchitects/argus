@@ -143,7 +143,7 @@ public sealed class AgentTests : IDisposable
     }
 
     [Fact]
-    public async Task Each_turn_commits_what_it_changed_as_Code_Arena_and_leaves_the_persons_own_changes()
+    public async Task Each_turn_commits_what_it_changed_as_the_person_with_Code_Arena_as_co_author_and_leaves_the_persons_own_changes()
     {
         using var h = new Harness(_gateway, _mcp);
         Git(h.Work, "init", "-q", "-b", "main");
@@ -169,20 +169,28 @@ public sealed class AgentTests : IDisposable
         };
         Assert.Equal(0, await h.Run("", "-p", "Rename old to new\nand add a file", "--mode", "auto-edit"));
 
-        Assert.Equal("Code Arena <code-arena@localhost>|Pat Person <pat@example.test>|Rename old to new", Git(h.Work, "log", "-1", "--format=%an <%ae>|%cn <%ce>|%s").Trim());
+        // The person's commit, Code Arena its co-author (as Claude Code signs its own).
+        Assert.Equal("Pat Person <pat@example.test>|Pat Person <pat@example.test>|Rename old to new", Git(h.Work, "log", "-1", "--format=%an <%ae>|%cn <%ce>|%s").Trim());
         Assert.Equal(["a.txt", "src/added.txt"], Git(h.Work, "show", "--name-only", "--format=", "HEAD").Split('\n', StringSplitOptions.RemoveEmptyEntries));
         var body = Git(h.Work, "log", "-1", "--format=%b");
         Assert.Contains("> Rename old to new\n> and add a file", body);
         Assert.Contains("Code-Arena-Session: ", body);
+        Assert.Equal("Code Arena <code-arena@localhost>", Git(h.Work, "log", "-1", "--format=%(trailers:key=Co-Authored-By,valueonly)").Trim());
         // The person's own changes stay theirs: the file they had changed, and what they had staged.
         Assert.Contains(" M mine.txt", Git(h.Work, "status", "--porcelain"));
         Assert.Contains("A  staged.txt", Git(h.Work, "status", "--porcelain"));
         Assert.Contains("Not committed, as they held your own changes before this turn: mine.txt.", h.Out + h.Err);
 
-        // A commit the model makes itself is Code Arena's too.
-        _gateway.Answer = req => FakeGateway.HasToolResults(req) ? Reply.Say("ok") : Reply.Call(("run_shell", """{"command":"git commit -q --allow-empty -m by-the-model"}"""));
+        // A commit the model makes itself is the person's too, and the model is told to end it with the same line.
+        var trailer = "";
+        _gateway.Answer = req =>
+        {
+            trailer = req["messages"]?[0]?["content"]?.GetValue<string>().Contains("Co-Authored-By: Code Arena <code-arena@localhost>", StringComparison.Ordinal) == true ? "told" : trailer;
+            return FakeGateway.HasToolResults(req) ? Reply.Say("ok") : Reply.Call(("run_shell", """{"command":"git commit -q --allow-empty -m by-the-model"}"""));
+        };
         Assert.Equal(0, await h.Run("", "-p", "commit", "--mode", "yolo"));
-        Assert.Equal("Code Arena|Pat Person|by-the-model", Git(h.Work, "log", "-1", "--format=%an|%cn|%s").Trim());
+        Assert.Equal("Pat Person|Pat Person|by-the-model", Git(h.Work, "log", "-1", "--format=%an|%cn|%s").Trim());
+        Assert.Equal("told", trailer);
     }
 
     [Fact]

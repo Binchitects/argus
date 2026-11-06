@@ -2572,13 +2572,15 @@ started it.
 
 ## Its commits
 
-In a git repository, each turn that ends commits the files it changed, with
-Code Arena as the commit's **author** and the person (their own git settings)
-as the **committer**, so `git log --format='%an | %cn %s'` tells what the
-harness wrote from what the person did. The commit's first line is the
+In a git repository, each turn that ends commits the files it changed as the
+person's own commit (their git settings are its author and committer), with
+Code Arena as its **co-author**, as Claude Code signs its commits: the message
+ends with `Co-Authored-By: Code Arena <code-arena@arena.example.com>`, so
+`git log --format='%an %s%n%(trailers:key=Co-Authored-By)'` tells what the
+harness wrote from what the person did by hand. The commit's first line is the
 request's first line; its body quotes the request and names the model and the
-session (`Code-Arena-Model:`, `Code-Arena-Session:`). A `git commit` the model
-runs itself has Code Arena as its author too.
+session (`Code-Arena-Model:`, `Code-Arena-Session:`). The model is told to end
+a `git commit` it runs itself with the same line.
 
 Only what the turn changed goes in. A file that already held the person's own
 uncommitted changes when the turn began is left for them (the turn says
@@ -2593,8 +2595,8 @@ whose commands with no time limit still run leaves its changes uncommitted
 until they end: the turn that carries on then commits them.
 
 `"autoCommit": false` in `config.json` turns the turn's commits off;
-`"commitName"` and `"commitEmail"` change the author (Code Arena,
-`code-arena@` the Arena's host, as installed).
+`"commitName"` and `"commitEmail"` change the co-author's name and address
+(Code Arena, `code-arena@` the Arena's host, as installed).
 
 ## The person's own MCP servers
 
