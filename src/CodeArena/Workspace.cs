@@ -312,12 +312,13 @@ internal static class Files
 
     private static IEnumerable<string> Walk(string dir, CancellationToken ct)
     {
-        var pending = new Stack<string>();
-        pending.Push(dir);
+        var pending = new Stack<(string Dir, Ignores Rules)>();
+        pending.Push((dir, Ignores.None));
         while (pending.Count > 0)
         {
             ct.ThrowIfCancellationRequested();
-            var current = pending.Pop();
+            var (current, rules) = pending.Pop();
+            rules = rules.With(current);
             IEnumerable<string> files, dirs;
             try
             {
@@ -330,16 +331,99 @@ internal static class Files
             }
             foreach (var file in files)
             {
-                yield return file;
+                if (!rules.Ignored(file, folder: false))
+                {
+                    yield return file;
+                }
             }
             foreach (var sub in dirs.OrderDescending(StringComparer.Ordinal))
             {
                 var info = new DirectoryInfo(sub);
-                if (!Skipped.Contains(info.Name) && info.LinkTarget is null)
+                if (!Skipped.Contains(info.Name) && info.LinkTarget is null && !rules.Ignored(sub, folder: true))
                 {
-                    pending.Push(sub);
+                    pending.Push((sub, rules));
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// The .gitignore files a walk outside a repository keeps to: each folder's on the way down, from where it starts. The
+    /// last rule that matches decides, a ! rule takes a path back, and a rule ending in / is for folders only, as in git.
+    /// </summary>
+    internal sealed class Ignores
+    {
+        private sealed record Rule(string Base, Regex Pattern, bool Back, bool FolderOnly);
+
+        private readonly List<Rule> _rules;
+
+        private Ignores(List<Rule> rules) => _rules = rules;
+
+        /// <summary>No rules yet: the walk's own folder adds its .gitignore first (one above it, as the home folder's, is not the project's).</summary>
+        public static readonly Ignores None = new([]);
+
+        /// <summary>These rules, and those of <paramref name="dir"/>'s .gitignore after them when it has one.</summary>
+        public Ignores With(string dir)
+        {
+            string[] lines;
+            try
+            {
+                var file = Path.Combine(dir, ".gitignore");
+                if (!File.Exists(file))
+                {
+                    return this;
+                }
+                lines = File.ReadAllLines(file);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                return this;
+            }
+            var rules = new List<Rule>(_rules);
+            foreach (var raw in lines)
+            {
+                var line = raw.TrimEnd();
+                if (line.Length == 0 || line.StartsWith('#'))
+                {
+                    continue;
+                }
+                var back = line.StartsWith('!');
+                line = back || line.StartsWith("\\#", StringComparison.Ordinal) || line.StartsWith("\\!", StringComparison.Ordinal) ? line[1..] : line;
+                var folderOnly = line.EndsWith('/');
+                line = line.TrimEnd('/');
+                if (line.Length == 0)
+                {
+                    continue;
+                }
+                try
+                {
+                    // With a / before its end it is a path from this folder; without, a name at any depth under it.
+                    rules.Add(new Rule(dir, Glob(line, anyDepth: !line.Contains('/')), back, folderOnly));
+                }
+                catch (ToolError)
+                {
+                    // A rule that is not a valid pattern is passed over.
+                }
+            }
+            return new Ignores(rules);
+        }
+
+        public bool Ignored(string full, bool folder)
+        {
+            for (var i = _rules.Count - 1; i >= 0; i--)
+            {
+                var rule = _rules[i];
+                if (rule.FolderOnly && !folder)
+                {
+                    continue;
+                }
+                var relative = Path.GetRelativePath(rule.Base, full).Replace('\\', '/');
+                if (!relative.StartsWith("../", StringComparison.Ordinal) && rule.Pattern.IsMatch(relative))
+                {
+                    return !rule.Back;
+                }
+            }
+            return false;
         }
     }
 
@@ -413,16 +497,17 @@ internal static class Files
     /// <summary>
     /// A glob as a regex over paths with /: ** crosses folders, * and ? stay
     /// within one, {a,b} and [abc] as usual. A pattern without / matches file
-    /// names at any depth.
+    /// names at any depth (unless <paramref name="anyDepth"/> is false: a
+    /// .gitignore's /name is only at its top).
     /// </summary>
-    public static Regex Glob(string pattern)
+    public static Regex Glob(string pattern, bool anyDepth = true)
     {
         var p = pattern.Replace('\\', '/').TrimStart('/');
         if (p.StartsWith("./", StringComparison.Ordinal))
         {
             p = p[2..];
         }
-        if (!p.Contains('/'))
+        if (anyDepth && !p.Contains('/'))
         {
             p = "**/" + p;
         }

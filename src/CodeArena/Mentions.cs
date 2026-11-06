@@ -4,8 +4,8 @@ using System.Text.RegularExpressions;
 namespace CodeArena;
 
 /// <summary>
-/// @path in what the person types: the file goes with the message (a folder, its list), so the model need not look
-/// for it; @path:12-30 (or #L12-L30) its lines, with a few around them. From the IDE, the lines chosen in its editor go
+/// @path in what the person types: the file goes with the message (a folder, its list; a large file, its outline), so
+/// the model need not look for it; @path:12-30 (or #L12-L30) its lines, with a few around them. From the IDE, the lines chosen in its editor go
 /// too (<see cref="Piece"/>). Only paths the tools may read, or a path outside named whole (or from ~) that exists, which
 /// the tools may then use too; anything else (an email address, @decorator) stays as typed. What goes with a message comes after what was typed, between <see cref="Marker"/> and
 /// <see cref="End"/>: the page shows what was typed (<see cref="Typed"/>) and what went with it (<see cref="Attached"/>).
@@ -210,6 +210,12 @@ internal static partial class Mentions
                 {
                     continue;
                 }
+            }
+            else if (FileOutline.Large(text, all.Length))
+            {
+                // A large file goes as its outline: the model reads the part it needs.
+                text = FileOutline.Summary(path, text, all, "read_file reads a part of it, by offset and limit or a symbol's name.").TrimEnd('\n');
+                attr = " outline=\"true\"";
             }
             else
             {

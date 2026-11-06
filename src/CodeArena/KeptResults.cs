@@ -43,6 +43,55 @@ internal static class KeptResults
         }
     }
 
+    /// <summary>A kept result's file made before its text is known (a command's whole output, written as it comes), and dropped when not needed.</summary>
+    public sealed record Reserved(string Id, string Path)
+    {
+        public void Drop()
+        {
+            try
+            {
+                File.Delete(Path);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+            }
+        }
+    }
+
+    /// <summary>A new kept result's id and empty file; null when this session keeps none.</summary>
+    public static Reserved? Reserve(ToolContext c)
+    {
+        if (Folder(c) is not { } folder)
+        {
+            return null;
+        }
+        try
+        {
+            PrivateFiles.EnsureDirectory(folder);
+            var n = Directory.EnumerateFiles(folder, "r*.txt").Count() + 1;
+            while (true)
+            {
+                var path = Path.Combine(folder, $"r{n}.txt");
+                try
+                {
+                    // Made new, so two at once never take the same id.
+                    using (new FileStream(path, FileMode.CreateNew, FileAccess.Write))
+                    {
+                    }
+                    return new Reserved($"r{n}", path);
+                }
+                catch (IOException) when (File.Exists(path))
+                {
+                    n++;
+                }
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>A kept result's text; null when there is none of that id.</summary>
     public static string? Read(ToolContext c, string id)
     {
