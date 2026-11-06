@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { colorThemeIds, colorThemes as appColorThemes } from '@/lib/color-themes'
 import { arenaMonacoThemes } from './arena-themes'
@@ -30,6 +32,16 @@ const bluesTaken = [
   'inputOption.activeBorder', 'editorOverviewRuler.rangeHighlightForeground', 'editor.wordHighlightStrongBackground', 'editorInfo.foreground',
   'editorLightBulbAutoFix.foreground', 'peekView.border', 'peekViewEditor.background', 'peekViewResult.selectionBackground',
 ]
+
+/** The token colours of Monaco's 'vs' or 'vs-dark', as its themes.js has them: what a theme that sets none takes. */
+function baseRules(base: 'vs' | 'vs_dark') {
+  const js = readFileSync(join(process.cwd(), 'node_modules/monaco-editor/esm/vs/editor/standalone/common/themes.js'), 'utf8')
+  const block = js.slice(js.indexOf(`const ${base} = {`), js.indexOf('colors:', js.indexOf(`const ${base} = {`)))
+  return new Map([...block.matchAll(/token: '([^']+)', foreground: '([0-9A-Fa-f]{6})'/g)].map((m) => [m[1]!, `#${m[2]!.toLowerCase()}`]))
+}
+
+// VS Code's bracket pair colours, Monaco's when a theme sets none (the 4th to 6th are transparent: not used).
+const vsCodeBrackets = { light: ['#0431fa', '#319331', '#7b3814'], dark: ['#ffd700', '#da70d6', '#179fff'] }
 
 describe("Monaco's themes for the app's colour themes", () => {
   const themes = new Map(arenaMonacoThemes())
@@ -112,6 +124,20 @@ describe("Monaco's themes for the app's colour themes", () => {
     check('textLink.foreground', 'editorWidget.background')
     check('pickerGroup.foreground', 'editorWidget.background')
     check('button.foreground', 'button.background')
+    expect(low).toEqual([])
+  })
+
+  it.each(every)("$id $kind: code's colours, VS Code's where the theme sets none, are 4.5:1 on the editor and on the cursor's line", ({ kind, theme }) => {
+    const c = theme.colors
+    const own = new Map(theme.rules.filter((r) => r.foreground).map((r) => [r.token, `#${r.foreground!.toLowerCase()}`]))
+    const colours = new Map([...baseRules(kind === 'light' ? 'vs' : 'vs_dark')].filter(([token]) => token !== '').map(([token, fg]) => [token, own.get(token) ?? fg]))
+    for (const [token, fg] of own) colours.set(token, fg)
+    vsCodeBrackets[kind].forEach((fg, i) => colours.set(`bracket ${i + 1}`, c[`editorBracketHighlight.foreground${i + 1}`] ?? fg))
+    const low: string[] = []
+    for (const [token, fg] of colours) {
+      const r = Math.min(contrast(fg, c['editor.background']!), contrast(fg, c['editor.lineHighlightBackground']!, c['editor.background']))
+      if (r < 4.5) low.push(`${token} ${fg}: ${r.toFixed(2)}`)
+    }
     expect(low).toEqual([])
   })
 })

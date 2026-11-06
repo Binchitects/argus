@@ -378,6 +378,69 @@ describe('Code Arena in the browser', () => {
     await waitFor(() => expect(calls.filter((c) => c.path === '/api/again').map((c) => c.body)).toContainEqual({ question: 'm0', text: 'Change two to II', quote: null }))
   })
 
+  it('rewinds to a question as /rewind does: the files that would change first, then the code, the conversation, or both', async () => {
+    const { calls, now } = backend({
+      session: { id: 's2', messages: saved, diffs: { m2: diff }, busy: false },
+      extra: {
+        'GET /api/rewind': (_b, _i, url) => ({
+          json: { message: url.searchParams.get('message'), messages: 4, code: true, files: [{ path: 'src/a.txt', removed: false }, { path: 'src/new.txt', removed: true }], lost: ['data/big.bin'] },
+        }),
+        'POST /api/rewind': (body) => {
+          if ((body as { chat: boolean }).chat) now.session = { id: 's2', messages: [], diffs: {}, busy: false }
+          return { json: { said: 'Back to before "Change two to 2".' } }
+        },
+      },
+    })
+    renderCode()
+    expect(await screen.findByText('Change two to 2')).toBeInTheDocument()
+    ;(await screen.findByRole('button', { name: 'Rewind to here' })).focus()
+    await userEvent.keyboard('{Enter}')
+    let dialog = await screen.findByRole('dialog', { name: 'Rewind to here?' })
+    expect(calls.find((c) => c.path.startsWith('/api/rewind?'))?.path).toBe('/api/rewind?message=m0')
+    // Both by default: how many messages go, and each file as it would change.
+    expect(await within(dialog).findByText('4 messages')).toBeInTheDocument()
+    const files = within(dialog).getByRole('list', { name: 'Files that would change' })
+    expect(within(files).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['src/a.txtput back', 'src/new.txtremoved'])
+    expect(within(dialog).getByText(/Too big to keep, so they stay as they are: data\/big.bin/)).toBeInTheDocument()
+
+    // Only the code: the conversation stays.
+    await userEvent.click(within(dialog).getByRole('radio', { name: /Only the code/ }))
+    expect(within(dialog).queryByText('4 messages')).toBeNull()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Rewind' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/rewind')?.body).toEqual({ message: 'm0', chat: false, code: true }))
+    expect(await screen.findByText('Back to before "Change two to 2".')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('')
+
+    // Only the conversation: its words go back in the box, the thread is empty.
+    await userEvent.click(await screen.findByRole('button', { name: 'Rewind to here' }))
+    dialog = await screen.findByRole('dialog', { name: 'Rewind to here?' })
+    await userEvent.click(await within(dialog).findByRole('radio', { name: /Only the conversation/ }))
+    expect(within(dialog).queryByRole('list', { name: 'Files that would change' })).toBeNull()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Rewind' }))
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST' && c.path === '/api/rewind').at(-1)?.body).toEqual({ message: 'm0', chat: true, code: false }))
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('Change two to 2'))
+    expect(screen.queryByRole('region', { name: 'You' })).toBeNull()
+  })
+
+  it('rewinds only the conversation of a turn from before this run: its code was not kept', async () => {
+    const { calls } = backend({
+      session: { id: 's2', messages: saved, diffs: {}, busy: false },
+      extra: {
+        'GET /api/rewind': () => ({ json: { message: 'm0', messages: 4, code: false, files: [], lost: [] } }),
+        'POST /api/rewind': () => ({ json: { said: 'Back to before message 1: the conversation has 0 messages.' } }),
+      },
+    })
+    renderCode()
+    await userEvent.click(await screen.findByRole('button', { name: 'Rewind to here' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Rewind to here?' })
+    expect(await within(dialog).findByText(/Code Arena kept no checkpoint of that turn/)).toBeInTheDocument()
+    expect(within(dialog).getByRole('radio', { name: /The conversation and the code/ })).toBeDisabled()
+    expect(within(dialog).getByRole('radio', { name: /Only the code/ })).toBeDisabled()
+    expect(within(dialog).getByRole('radio', { name: /Only the conversation/ })).toBeChecked()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Rewind' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/rewind')?.body).toEqual({ message: 'm0', chat: true, code: false }))
+  })
+
   it('offers no files without Arena to take them', async () => {
     backend()
     renderCode()

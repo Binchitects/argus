@@ -695,7 +695,7 @@ function GpuPicker({ gpus, value, onChange, error }: { gpus: { index: number; na
         ))}
       </div>
       <p className={cn('text-xs', error ? 'text-destructive-ink' : 'text-muted-foreground')}>
-        {error ?? (all ? 'All of them: the layers are split across the GPUs.' : 'Only these. Models kept loaded side by side run best on different GPUs.')}
+        {error ?? (all ? 'All of them: the layers are split across the GPUs, each doing its own layers\' work.' : 'Only these. Models kept loaded side by side run best on different GPUs.')}
       </p>
     </fieldset>
   )

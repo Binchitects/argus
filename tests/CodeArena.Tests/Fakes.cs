@@ -779,11 +779,11 @@ public sealed class FakeChats
     public List<JsonObject> SkillsMade { get; } = [];
     public List<JsonObject> SkillsChanged { get; } = [];
 
-    /// <summary>One of the person's own skills, as /api/code-arena/skills brings it.</summary>
+    /// <summary>One of the person's own skills, as /api/code-arena/skills brings it (its SKILL.md's quotes made single, as Arena writes them).</summary>
     public static JsonObject OwnSkill(string name, string description, string instructions) => new()
     {
         ["name"] = name, ["description"] = description, ["version"] = "1", ["mine"] = true,
-        ["files"] = new JsonObject { ["SKILL.md"] = $"---\nname: {name}\ntitle: \"{name.Replace('-', ' ')}\"\ndescription: \"{description}\"\n---\n{instructions}\n" },
+        ["files"] = new JsonObject { ["SKILL.md"] = $"---\nname: {name}\ntitle: \"{name.Replace('-', ' ')}\"\ndescription: \"{description.Replace('"', '\'')}\"\n---\n{instructions}\n" },
     };
 
     /// <summary>What Code Arena asked of Arena's past chats: search or open, and its body.</summary>
@@ -1185,7 +1185,8 @@ public sealed class FakeChats
                 var had = (ArenaSkills ?? []).OfType<JsonObject>().FirstOrDefault(s => s["name"]?.GetValue<string>() == name && s["mine"]?.GetValue<bool>() == true);
                 if (making == (had is null))
                 {
-                    skill = OwnSkill(name, json["description"]?.GetValue<string>() ?? "", json["instructions"]?.GetValue<string>() ?? "");
+                    // A description not sent stays as it was.
+                    skill = OwnSkill(name, json["description"]?.GetValue<string>() ?? had?["description"]?.GetValue<string>() ?? "", json["instructions"]?.GetValue<string>() ?? "");
                     // A new list: GET reads the one it has.
                     ArenaSkills = [.. (ArenaSkills ?? []).OfType<JsonObject>().Where(s => s != had).Select(s => s.DeepClone()), skill.DeepClone()];
                 }

@@ -2066,7 +2066,8 @@ public sealed partial class ChatService(
 
         static string Preview(ChatMessage m)
         {
-            var text = m.Content.ReplaceLineEndings(" ").Trim();
+            // By its words: what went with it (Code Arena's @files, kept inline) is not.
+            var text = ContextParts.WithoutAttachments(m.Content).ReplaceLineEndings(" ").Trim();
             if (text.Length == 0 && m.ToolCallsJson is { } calls)
             {
                 text = string.Join(", ", (JsonNode.Parse(calls) as JsonArray ?? []).Select(c => c?["function"]?["name"]?.GetValue<string>()).OfType<string>());

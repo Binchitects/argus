@@ -85,6 +85,12 @@ def _free_mb() -> int | None:
     return free // (1024 * 1024)
 
 
+def _least_busy() -> None:
+    """The GPU the next model loads on: the one with the most free memory, not CUDA's first (where it would sit on every machine)."""
+    if DEVICE == "cuda":
+        torch.cuda.set_device(max(range(torch.cuda.device_count()), key=lambda i: torch.cuda.mem_get_info(i)[0]))
+
+
 def _unload(kind: str) -> None:
     _loaded.pop(kind, None)
     gc.collect()
@@ -101,6 +107,7 @@ def _load(kind: str):
     for other in list(_loaded):
         _unload(other)
     need = MODELS[kind][2]
+    _least_busy()
     free = _free_mb()
     if free is not None and free < need:
         raise Refused(503, f"The GPU has {free:,} MB free; this needs about {need:,} MB. Try again when the chat models have made room.")

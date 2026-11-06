@@ -570,7 +570,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         if (resumed is not null && resumedFile is not null)
         {
             Session = SessionStore.Open(resumedFile);
-            Agent.Load(resumed.Messages, resumed.Known);
+            Agent.Load(resumed.Messages, resumed.Known, resumed.CharsPerToken);
             Context.Plan = resumed.Plan;
             Demand.Restore(resumed.ToolsOff, resumed.ToolsLoaded);
             Total.Prompt = resumed.Prompt;
@@ -927,7 +927,17 @@ internal sealed partial class Runtime : IAsyncDisposable
     /// What is sent for what was typed: a command of the person's or the project's own (/name args) is its prompt; a skill's
     /// name, what was typed with the skill's instructions after it.
     /// </summary>
-    public string Prepare(string input) => Extensions.Expand(input) ?? input;
+    public async Task<string> PrepareAsync(string input, CancellationToken ct) => await ExpandAsync(input, ct) ?? input;
+
+    /// <summary>
+    /// The message a typed /name args stands for (<see cref="Extensions.Expand"/>). A name that is no command or skill asks
+    /// Arena for its skills at once first: one made on its Skills page a moment ago is used, not refused or sent as words.
+    /// </summary>
+    public async Task<string?> ExpandAsync(string input, CancellationToken ct)
+    {
+        var prompt = Extensions.Expand(input);
+        return prompt is not null || !input.StartsWith('/') ? prompt : (await ReloadExtensionsAsync(true, ct)).Expand(input);
+    }
 
     /// <summary>How long a turn waits at most for Arena's skills: kept as they were when Arena is slower.</summary>
     private static readonly TimeSpan SkillsWait = TimeSpan.FromSeconds(2);
@@ -1051,11 +1061,11 @@ internal sealed partial class Runtime : IAsyncDisposable
         }
         var subject = turns[number - 1].Input;
         var before = files && Agent.CommitAs is not null ? await TurnCommits.TakeAsync(Workspace.Root, ct) : null;
-        var (messages, restored, lost) = Checkpoints.Rewind(number, files);
+        var (place, restored, lost) = Checkpoints.Rewind(number, files);
         if (chat)
         {
-            // The session file reads back as it is now; the chat in Arena keeps what was said, and goes on from there on a branch of its own.
-            Agent.Load(Sync is { } sync ? await sync.RewindAsync(messages, ct) : Session.Rewind(messages));
+            // The session file reads back as it is now; the chat in Arena keeps what was said, on a branch of its own.
+            Agent.Load(Sync is { } sync ? await sync.RewindAsync(place, ct) : Session.Rewind(place));
         }
         var said = new List<string>
         {
@@ -1079,20 +1089,31 @@ internal sealed partial class Runtime : IAsyncDisposable
     }
 
     /// <summary>
-    /// The conversation back to its first <paramref name="messages"/> (before a question asked again), and with
-    /// <paramref name="files"/> the files the turns from there wrote put back, when this run kept that turn's checkpoint
-    /// (/rewind's). The chat in Arena keeps what was said, on a branch of its own from there. What it says (null: nothing).
+    /// The turn of the checkpoints (from 1) that began at <paramref name="place"/> of the whole conversation, the latest when
+    /// the conversation was cut back before it since (going back to it puts back what every turn since wrote); 0: this run
+    /// kept none.
     /// </summary>
-    public async Task<string?> BackToAsync(int messages, bool files, CancellationToken ct)
+    public int TurnAt(int place) => Checkpoints.Turns.ToList().FindLastIndex(t => t.Place == place) + 1;
+
+    /// <summary>
+    /// Back to before the question at <paramref name="place"/> of the whole conversation (asked again, or the IDE's Rewind to
+    /// here): with <paramref name="chat"/> the conversation cut there, with <paramref name="files"/> the files the turns from
+    /// there wrote put back, when this run kept that turn's checkpoint (/rewind's). The chat in Arena keeps what was said, on
+    /// a branch of its own. What it says.
+    /// </summary>
+    public async Task<string> BackToAsync(int place, bool files, bool chat, CancellationToken ct)
     {
-        var number = Checkpoints.Turns.ToList().FindLastIndex(t => t.Messages == messages) + 1;
+        var number = TurnAt(place);
         if (number > 0)
         {
-            var said = await RewindAsync(number, files, chat: true, ct);
-            return files ? said : null;
+            return await RewindAsync(number, files, chat, ct);
         }
-        Agent.Load(Sync is { } sync ? await sync.RewindAsync(messages, ct) : Session.Rewind(messages));
-        return files ? "The files stay as they are: Code Arena kept no checkpoint of that turn (it was before this run, or too long ago)." : null;
+        if (chat)
+        {
+            Agent.Load(Sync is { } sync ? await sync.RewindAsync(place, ct) : Session.Rewind(place));
+        }
+        return (chat ? $"Back to before message {place + 1}: the conversation has {Agent.Messages.Count} messages." : "The conversation stays.")
+            + (files ? " The files stay as they are: Code Arena kept no checkpoint of that turn (it was before this run, or too long ago)." : "");
     }
 
     /// <summary>
@@ -1433,7 +1454,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         _memory = Memory.Again() + LongMemory();
         Session = SessionStore.Open(file);
         Agent.Session = Session;
-        Agent.Load(data.Messages, data.Known);
+        Agent.Load(data.Messages, data.Known, data.CharsPerToken);
         Context.Plan = data.Plan;
         Demand.Restore(data.ToolsOff, data.ToolsLoaded);
         Context.PlanChanged = plan => Session.Plan(plan);

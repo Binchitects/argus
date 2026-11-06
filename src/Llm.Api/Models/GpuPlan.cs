@@ -94,4 +94,23 @@ public sealed record GpuPlan(IReadOnlyList<GpuUse> Gpus, IReadOnlyList<ModelProb
 
     /// <summary>What is left on a GPU once its residents have theirs (0 for a GPU it does not know).</summary>
     public long FreeOn(int gpu) => Gpus.FirstOrDefault(g => g.Index == gpu) is { } g ? Math.Max(0, g.Budget - g.Need) : 0;
+
+    /// <summary>What these residents keep on each GPU, all of them together.</summary>
+    public static Dictionary<int, long> Sum(IEnumerable<Resident> residents)
+    {
+        var sum = new Dictionary<int, long>();
+        foreach (var (gpu, bytes) in residents.SelectMany(r => r.PerGpu))
+        {
+            sum[gpu] = sum.GetValueOrDefault(gpu) + bytes;
+        }
+        return sum;
+    }
+
+    /// <summary>
+    /// The GPUs the least placed first: by the share of each GPU's room what is placed there takes (<paramref name="placed"/>,
+    /// bytes by GPU), then by number. Where something new goes (a model, its copies, a media server), so they spread over every
+    /// GPU instead of each starting from the first.
+    /// </summary>
+    public static IReadOnlyList<GpuDevice> Least(IEnumerable<GpuDevice> devices, IReadOnlyDictionary<int, long>? placed) =>
+        [.. devices.OrderBy(d => (placed?.GetValueOrDefault(d.Index) ?? 0) / (double)Math.Max(1, BudgetOf(d))).ThenBy(d => d.Index)];
 }

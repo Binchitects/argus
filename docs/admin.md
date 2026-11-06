@@ -310,8 +310,11 @@ Safeguards.
 llama.cpp runs in **router mode**: one server that knows several models and
 holds up to **Models loaded at once** (under Settings, default 2) of them.
 Loading and unloading is an API call, not a restart. The page opens with **the
-engine**: how many it holds, which are kept loaded, and how full each GPU
-would be with them.
+engine**: how many it holds, which are kept loaded, and for each GPU what it
+holds (every engine model placed there, loaded or not, with its share of the
+GPU; the picture and video servers; the embedder), how busy it is and the
+memory in use now (from the NVIDIA exporter, else the hardware file), and how
+full the models kept loaded would make it.
 
 - **Keep loaded** (a switch on each engine model) pins a model: it loads now,
   loads again when the engine starts, and comes back whenever it is not loaded.
@@ -525,8 +528,13 @@ would be with them.
 - **vLLM models** (`engineKind: vllm` on `POST /api/admin/models`; the form's
   fields come with the next step): a snapshot or a GGUF file (see GGUF files
   on vLLM and SGLang, below), its GPUs (empty: the ones the
-  advisor proposes for this machine, kept on save), copies (`replicas`, each on
-  its run of the GPUs; a conversation stays on one), its share of each GPU
+  advisor proposes for this machine, kept on save: the least placed first, by
+  what the other models that name their GPUs, kept loaded or not, the picture
+  and video servers and the embedder take there, so models added one after
+  another spread over the GPUs instead of all going on the first with room),
+  copies (`replicas`, each on its run of the GPUs; a conversation goes to the
+  least busy copy, by the app's own requests and what each copy's metrics say,
+  and stays there while that copy has room, its prefix being cached there), its share of each GPU
   (`gpuMemoryUtilization`, 0.01 to 0.98, empty 0.90; the advice's
   `recommended.shareMin` is the smallest that holds a whole context and
   `shareMax` the largest that fits beside what is kept there, and the form's
@@ -670,12 +678,19 @@ would be with them.
   wait while a model loads: seconds when its weights are in the page cache,
   minutes from disk.
 - **GPUs.** With two or more GPUs, a model's form asks which it runs on: all of
-  them (llama.cpp splits it by layer), or some (`device = CUDA0,...` in its
-  preset). The engine numbers GPUs as `nvidia-smi` does
-  (`CUDA_DEVICE_ORDER=PCI_BUS_ID`). The memory estimate uses only the GPUs
-  chosen, and the image server's share only on the first. Two models kept side
-  by side run best on different GPUs. The `.env` model runs on all of them
-  unless `LLAMACPP_EXTRA_ARGS` has `--device CUDA1`.
+  them, or some (`device = CUDA0,...` in its preset). On several, llama.cpp
+  splits it by layer: each GPU holds its layers and their cache and does their
+  work, by the memory each has free as it loads (alike when the GPUs hold the
+  same, which the placement below keeps them close to; `fit` moves layers where
+  there is room when they would not fit). The row split is not used: it keeps
+  the whole cache and the attention on one GPU. A vision model's projector (it
+  reads the images) goes on one of its GPUs, the one with the fewest projectors
+  (`mmproj-device`), not always on the first. An admin's own `split-mode`,
+  `tensor-split`, `main-gpu` or `mmproj-device` in the extra lines is kept. The
+  engine numbers GPUs as `nvidia-smi` does (`CUDA_DEVICE_ORDER=PCI_BUS_ID`). The
+  memory estimate uses only the GPUs chosen, and the picture server's share only
+  on its GPU. Two models kept side by side run best on different GPUs. The
+  `.env` model runs on all of them unless `LLAMACPP_EXTRA_ARGS` has `--device CUDA1`.
 - **Other servers and providers.** Another machine's OpenAI-compatible engine
   (llama.cpp, vLLM, SGLang, another gateway), or a cloud provider's API with
   the company's key (OpenAI, Anthropic, Google Gemini, OpenRouter, DeepSeek,
@@ -760,7 +775,7 @@ would be with them.
   the models have no GPU and run from RAM. Each GPU's room is its memory less
   what the servers beside the chat models keep **on that GPU** (the picture
   server, `IMAGEGEN_MAX_VRAM`, on its model's GPU, else `MEDIA_GPU`, else the
-  first; the embedder on `EMBED_GPU` when it has one) and the 1 GiB llama.cpp
+  one the app placed it on; the embedder on `EMBED_GPU` when it has one) and the 1 GiB llama.cpp
   keeps free. The GPUs a model runs on are named for llama.cpp's backend
   (`CUDA0`, `ROCm0`, `Vulkan0`, `SYCL0`, `MTL0`). The form estimates
   weights, cache and buffers as it is filled in (within 1% of llama.cpp's own
@@ -994,7 +1009,10 @@ and removed there.
   text encoders (an LLM, T5, CLIP) and its decoder (VAE). Its settings are
   what it makes unless a request says otherwise: steps, CFG scale, guidance,
   flow shift, sampler, scheduler, size, negative prompt, and for video the
-  frames a second and the longest clip. Its GPU: which one, a budget its
+  frames a second and the longest clip. Its GPU: which one (none: `MEDIA_GPU`,
+  else the least placed GPU when its server starts, by what the models that
+  name their GPUs, the other media server and the embedder take there; it
+  stays there until its server stops), a budget its
   weights stay within (the rest waits in RAM), and where it decodes: on the
   GPU, on the CPU (slower, less GPU memory), or on the GPU when it has room as
   the model loads (Wan's 13 GB, else the CPU). **More options** takes

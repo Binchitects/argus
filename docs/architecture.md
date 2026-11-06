@@ -447,8 +447,14 @@ and keeps every message.
   watcher's own loads get room the same way, so llama.cpp never chooses for
   itself which model goes.
 - **vLLM and SGLang**: the chat's requests carry a higher priority than API
-  keys'. A conversation on a model with copies stays on one copy (`NAME@i`,
-  the same on every replica), where its prefix is cached. The model's own
+  keys'. A conversation on a model with copies goes to the least busy copy
+  (`NAME@i`: this replica's requests on each, and what each copy's metrics said
+  within the last second, so API keys and the other replicas count), and stays
+  there while that copy is not busier than the least busy by more than its
+  answers at once, its prefix being cached there. Copies alike busy: its own
+  copy, by all of its id's bits (a conversation's id begins with when it was
+  made, so its first bytes alone sent every conversation begun in the same
+  minute to one copy). The model's own
   fallback, when it has one, answers if that copy cannot. Side requests go to
   the model's name, and LiteLLM picks the least busy copy.
 - **When it goes wrong**: a refused chat key is made again; a model still

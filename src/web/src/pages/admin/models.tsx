@@ -118,6 +118,16 @@ interface Plan {
   gpus: { index: number; name: string; budget: number; need: number; models: string[]; vendor?: string; total?: number }[]
 }
 
+/** A GPU and what it holds: each engine model placed on it (loaded or not, its share of it), the picture and video servers, the embedder; how busy it is now (0 to 1) and the memory in use. */
+interface Holding {
+  index: number
+  name: string
+  total: number
+  holds: { name: string; kind: string; bytes: number; loaded: boolean }[]
+  busy: number | null
+  used: number | null
+}
+
 interface ModelsView {
   engine: {
     enabled: boolean
@@ -138,6 +148,7 @@ interface ModelsView {
     /** Each engine instance, and why one's models could not be listed (a vLLM engine not running). */
     instances?: EngineInstance[]
     plan: Plan | null
+    holdings?: Holding[]
   }
   /** The model for sub-agents and small steps (Settings → Model), and what keeps it from doing them well. */
   small: { name: string; warning: string | null } | null
@@ -237,9 +248,12 @@ export function ModelsPage() {
   )
 }
 
-/** How many models the engine holds, which are kept, and how full each GPU is with them. */
+/** How many models the engine holds, which are kept, and for each GPU what it holds, how busy it is, and how full the kept ones make it. */
 function EngineSummary({ engine }: { engine: ModelsView['engine'] }) {
   const plan = engine.plan
+  const holdings = engine.holdings ?? []
+  // Every GPU the machine has, else those the kept plan names.
+  const rows = holdings.length > 0 ? holdings.map((h) => ({ index: h.index, name: h.name })) : (plan?.gpus ?? [])
   return (
     <Card className="mb-4">
       <CardHeader>
@@ -254,27 +268,41 @@ function EngineSummary({ engine }: { engine: ModelsView['engine'] }) {
         </CardDescription>
         <EngineActions instances={engine.instances ?? []} />
       </CardHeader>
-      {plan && (plan.gpus.length > 0 || plan.problems.length > 0) && (
+      {(rows.length > 0 || (plan?.problems.length ?? 0) > 0) && (
         <CardContent className="grid gap-3">
-          {plan.gpus.map((g) => (
-            <div key={g.index} className="grid gap-1.5">
-              <div className="flex flex-wrap justify-between gap-2 text-sm">
-                <span className="font-medium">
-                  GPU {g.index} · {g.name}
-                  {g.vendor && g.vendor !== 'nvidia' ? ` · ${g.vendor}` : ''}
-                </span>
-                <span className="text-muted-foreground">
-                  {bytes(g.need)} of {bytes(g.budget)} for models{g.models.length ? ` · ${g.models.join(', ')}` : ''}
-                </span>
+          {rows.map(({ index, name }) => {
+            const g = plan?.gpus.find((x) => x.index === index)
+            const h = holdings.find((x) => x.index === index)
+            const vendor = g?.vendor && g.vendor !== 'nvidia' ? ` · ${g.vendor}` : ''
+            return (
+              <div key={index} className="grid gap-1.5">
+                <div className="flex flex-wrap justify-between gap-2 text-sm">
+                  <span className="font-medium">
+                    GPU {index} · {name}
+                    {vendor}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {[h?.busy != null ? `${Math.round(100 * h.busy)}% busy` : null, h?.used != null ? `${bytes(h.used)} of ${bytes(h.total)} in use` : null, g ? `${bytes(g.need)} of ${bytes(g.budget)} for the models kept loaded` : null]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
+                </div>
+                {g && (
+                  // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a styled bar; <meter> cannot be styled consistently
+                  <div role="meter" aria-label={`GPU ${index}: the models kept loaded`} aria-valuemin={0} aria-valuemax={g.budget} aria-valuenow={Math.min(g.need, g.budget)} className="h-2 overflow-hidden rounded-full bg-muted">
+                    <div className={cn('h-full rounded-full', g.need > g.budget ? 'bg-warning' : 'bg-primary')} style={{ width: `${Math.min(100, (100 * g.need) / Math.max(g.budget, 1))}%` }} />
+                  </div>
+                )}
+                {h && (
+                  <p className="text-xs text-muted-foreground">
+                    {h.holds.length > 0 ? `Holds ${h.holds.map((x) => `${x.name} (${x.loaded ? 'loaded, ' : ''}${bytes(x.bytes)})`).join(', ')}` : 'Holds nothing placed here by the app'}
+                  </p>
+                )}
               </div>
-              {/* oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a styled bar; <meter> cannot be styled consistently */}
-              <div role="meter" aria-label={`GPU ${g.index}: the models kept loaded`} aria-valuemin={0} aria-valuemax={g.budget} aria-valuenow={Math.min(g.need, g.budget)} className="h-2 overflow-hidden rounded-full bg-muted">
-                <div className={cn('h-full rounded-full', g.need > g.budget ? 'bg-warning' : 'bg-primary')} style={{ width: `${Math.min(100, (100 * g.need) / Math.max(g.budget, 1))}%` }} />
-              </div>
-            </div>
-          ))}
+            )
+          })}
           <EngineProblems instances={engine.instances} />
-          {plan.problems.map((p) => (
+          {plan?.problems.map((p) => (
             <Alert key={p.message} variant={p.error ? 'destructive' : 'warning'}>
               {p.message}
             </Alert>

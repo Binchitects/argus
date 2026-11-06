@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { errorMessage } from '@/lib/api'
 import { formatValue } from '@/lib/format'
-import { uploadFile } from './api'
+import { attachmentUrl, uploadFile } from './api'
 import type { Attachment } from './types'
 
 export interface Upload {
@@ -46,18 +46,26 @@ export function useUploads(maxBytes: number) {
     [maxBytes],
   )
 
+  /** Files already uploaded (a question rewound to): attached again as they are. */
+  const attach = useCallback((attachments: Attachment[]) => {
+    setUploads((us) => [
+      ...us,
+      ...attachments.map((a) => ({ key: `u${++next}`, name: a.fileName, size: a.size, isImage: a.kind === 'image', progress: 1, preview: a.kind === 'image' ? attachmentUrl(a.id) : undefined, attachment: a })),
+    ])
+  }, [])
+
   const remove = useCallback((key: string) => {
     aborts.current.get(key)?.abort()
     setUploads((us) => {
       const u = us.find((x) => x.key === key)
-      if (u?.preview) URL.revokeObjectURL(u.preview)
+      if (u?.preview?.startsWith('blob:')) URL.revokeObjectURL(u.preview)
       return us.filter((x) => x.key !== key)
     })
   }, [])
 
   const clear = useCallback(() => {
     setUploads((us) => {
-      for (const u of us) if (u.preview) URL.revokeObjectURL(u.preview)
+      for (const u of us) if (u.preview?.startsWith('blob:')) URL.revokeObjectURL(u.preview)
       return []
     })
   }, [])
@@ -67,6 +75,7 @@ export function useUploads(maxBytes: number) {
   return {
     uploads,
     add,
+    attach,
     remove,
     clear,
     busy: uploads.some((u) => !u.attachment && !u.error),

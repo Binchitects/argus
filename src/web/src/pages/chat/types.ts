@@ -333,6 +333,21 @@ export interface ChatShare {
   createdAt: string
 }
 
+/** What Rewind to here would do: how many messages of the branch go, where it would end (null: nothing left), and the memories written from them. */
+export interface RewindPreview {
+  gone: number
+  currentLeafId: string | null
+  memories: { id: string; text: string; proposed: boolean }[]
+}
+
+/** A chat rewound: where its branch ends now and ended before (for Undo), how many messages went, and the memories forgotten. */
+export interface Rewound {
+  currentLeafId: string | null
+  previousLeafId: string | null
+  gone: number
+  forgotten: number
+}
+
 /** A chat shared with the person, read-only. */
 export interface SharedChat {
   id: string

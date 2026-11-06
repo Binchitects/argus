@@ -1,6 +1,6 @@
 import { api, ApiError } from '@/lib/api'
 import type { CallEvent } from './room-call'
-import type { Assistant, AssistantSummary, Attachment, ChatConfig, ChatEvent, ChatShare, Conversation, ConversationSummary, Named, QueuedMessage, SharedChat } from './types'
+import type { Assistant, AssistantSummary, Attachment, ChatConfig, ChatEvent, ChatShare, Conversation, ConversationSummary, Named, QueuedMessage, RewindPreview, Rewound, SharedChat } from './types'
 
 export const configQuery = {
   queryKey: ['chat', 'config'] as const,
@@ -37,6 +37,18 @@ export const listQuery = (search: string, archived = false) => ({
 /** Forks a chat up to a message (default: the end of the branch on screen); the new chat's id and title. */
 export const forkChat = (id: string, messageId?: string) =>
   api<{ id: string; title: string }>(`/api/chat/conversations/${id}/fork`, { body: messageId ? { messageId } : {} })
+
+/** What Rewind to here would do from a question: to before it, or kept with its answer (`keep`). */
+export const rewindPreviewQuery = (id: string, messageId: string, keep: boolean) => ({
+  queryKey: ['chat', 'rewind', id, messageId, keep] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<RewindPreview>(`/api/chat/conversations/${id}/rewind?messageId=${messageId}${keep ? '&keep=true' : ''}`, { signal }),
+})
+
+/** Rewinds the chat to a question (`forget`: the memories written from what goes, too). */
+export const rewindChat = (id: string, body: { messageId: string; keep: boolean; forget: boolean }) => api<Rewound>(`/api/chat/conversations/${id}/rewind`, { body })
+
+/** The branch on screen ends at this very message (Undo of a rewind). */
+export const endBranchAt = (id: string, messageId: string) => api(`/api/chat/conversations/${id}/leaf`, { method: 'PUT', body: { messageId, exact: true } })
 
 /** Stops the chat's answer on the server; it keeps what it has. */
 export const stopChat = (id: string) => api(`/api/chat/conversations/${id}/stop`, { body: {} })
@@ -214,6 +226,8 @@ export type RoomEvent =
   | { type: 'presence'; here: string[] }
   | { type: 'members' }
   | { type: 'settings' }
+  /** The branch on screen changed (another shown, or the chat rewound): everyone's page reads it again. */
+  | { type: 'branch' | 'rewound' }
   | CallEvent
 
 /** A room's events for this page (`page`: its own id, by which the room's call reaches it). */

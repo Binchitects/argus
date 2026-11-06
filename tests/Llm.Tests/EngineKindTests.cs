@@ -200,6 +200,120 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
         await StatusAssert.Is(HttpStatusCode.BadRequest, refused);
     }
 
+    /// <summary>
+    /// An app on <paramref name="gpus"/> 96 GB GPUs as their probe writes them (GPU i with i + 1 GiB in use), with gpt-oss-120b's
+    /// real config, a small GGUF and its projector in its library.
+    /// </summary>
+    private WebApplicationFactory<Program> OnGpus(int gpus)
+    {
+        var hardware = Path.Combine(_dir, "hardware.json");
+        File.WriteAllText(hardware, $$"""{"ram_bytes": {{1L << 41}}, "source": "nvidia-smi", "gpus": [{{string.Join(',', Enumerable.Range(0, gpus).Select(i =>
+            $$"""{"index": {{i}}, "name": "NVIDIA RTX PRO 6000 Blackwell Server Edition", "vendor": "nvidia", "backend": "cuda", "total_bytes": {{97887L << 20}}, "free_bytes": {{(97887L << 20) - ((i + 1L) << 30)}}}"""))}}]}""");
+        var oss = Path.Combine(Library, "hf", "openai", "gpt-oss-120b@main");
+        Directory.CreateDirectory(oss);
+        foreach (var f in new[] { "config.json", "model.safetensors.index.json" })
+        {
+            File.Copy(Path.Combine(AppContext.BaseDirectory, "Resources", "vllm", "gpt-oss-120b", f), Path.Combine(oss, f), overwrite: true);
+        }
+        File.WriteAllText(Path.Combine(oss, "model-00000-of-00014.safetensors"), "weights");
+        GgufFile.Language("qwen3", name: "Tiny", context: 40960).Write(Path.Combine(Library, "tiny", "Tiny-4B-Q4_K_M.gguf"));
+        new GgufFile().Text("general.architecture", "clip").Bool("clip.has_vision_encoder", true).U32("clip.vision.projection_dim", 64)
+            .Tensor("v.blk.0.attn_q.weight", 2048).Write(Path.Combine(Library, "tiny", "mmproj-Tiny-F16.gguf"));
+        Directory.CreateDirectory(Config);
+        app.Engine.Reset(Path.Combine(Config, "models.ini"));
+        return app.Create(app.ConnectionStringFor("kinds_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), new Dictionary<string, string?>
+        {
+            ["Engine:Enabled"] = "true", ["Engine:ApiKey"] = FakeEngine.Key, ["Engine:ConfigDir"] = Config, ["Engine:LibraryDir"] = Library, ["Engine:HardwareFile"] = hardware,
+        });
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public async Task Models_saved_without_gpus_go_on_the_least_placed_gpus_one_after_another_not_all_on_one(int gpus)
+    {
+        await using var f = OnGpus(gpus);
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        async Task<string> AddAsync(string name, string? devices = null)
+        {
+            var saved = await admin.PostAsync("/api/admin/models", new { name, engineKind = "vllm", file = "hf/openai/gpt-oss-120b@main", context = 131072, devices });
+            await StatusAssert.Is(HttpStatusCode.Created, saved);
+            var row = (await admin.JsonAsync(await admin.GetAsync("/api/admin/models"))).GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == name);
+            return row.GetProperty("devices").GetString()!;
+        }
+        // None kept loaded, one GPU each: GPU 0 has the picture server, so the first goes on GPU 1, the next on GPU 2... and
+        // once every GPU has one, GPU 0 (the picture server's 2 GiB is less than a model's share), then round again.
+        var placed = new List<string>();
+        for (var i = 0; i <= gpus; i++)
+        {
+            placed.Add(await AddAsync($"oss{i}"));
+        }
+        Assert.Equal([.. Enumerable.Range(1, gpus - 1).Select(g => g.ToString(System.Globalization.CultureInfo.InvariantCulture)), "0", "1"], placed);
+        // An admin's own choice is kept, however placed that GPU is.
+        Assert.Equal("1", await AddAsync("mine", "1"));
+        // Admin → Models shows what each GPU holds (none loaded) and the memory in use there.
+        var holdings = (await admin.JsonAsync(await admin.GetAsync("/api/admin/models"))).GetProperty("engine").GetProperty("holdings").EnumerateArray().ToList();
+        Assert.Equal(gpus, holdings.Count);
+        string[] Holds(int gpu) => [.. holdings[gpu].GetProperty("holds").EnumerateArray().Select(h => h.GetProperty("name").GetString()!)];
+        string N(int i) => i.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        Assert.Equal(["oss" + N(gpus - 1), "the picture server"], Holds(0));
+        Assert.Equal(["mine", "oss0", "oss" + N(gpus)], Holds(1));
+        Assert.All(Enumerable.Range(2, gpus - 2), g => Assert.Equal(["oss" + N(g - 1)], Holds(g)));
+        Assert.All(holdings, h => Assert.All(h.GetProperty("holds").EnumerateArray(), x => Assert.False(x.GetProperty("loaded").GetBoolean())));
+        Assert.Equal([.. Enumerable.Range(1, gpus).Select(g => (long)g << 30)], holdings.Select(h => h.GetProperty("used").GetInt64()));
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public async Task Vision_models_on_several_gpus_read_their_images_on_different_gpus_not_all_on_the_first(int gpus)
+    {
+        await using var f = OnGpus(gpus);
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        async Task AddAsync(string name, string? devices = null, string? extra = null) => await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models",
+            new { name, file = "tiny/Tiny-4B-Q4_K_M.gguf", projector = "tiny/mmproj-Tiny-F16.gguf", context = 8192, devices, extraPreset = extra }));
+        // One more than there are GPUs, on all of them; one on the last two; one whose extra lines name its own; one on a single GPU.
+        var names = Enumerable.Range(0, gpus + 1).Select(i => $"see{i}").ToList();
+        foreach (var name in names)
+        {
+            await AddAsync(name);
+        }
+        await AddAsync("two", $"{gpus - 2},{gpus - 1}");
+        await AddAsync("own", extra: "mmproj-device = CUDA0");
+        await AddAsync("one", "0");
+        var ini = await File.ReadAllTextAsync(Path.Combine(Config, "models.ini"));
+        string? ProjectorOf(string model) => ini.Split("\n[").Single(x => x.TrimStart('[').StartsWith(model + "]", StringComparison.Ordinal)).Split('\n')
+            .Where(l => l.StartsWith("mmproj-device = ", StringComparison.Ordinal)).Select(l => l["mmproj-device = ".Length..]).SingleOrDefault();
+        // By name, own and one aside: see0 on GPU 0, see1 on GPU 1... and once each GPU has one, GPU 0 again; two on its GPU with the fewest.
+        var expected = new Dictionary<string, string>(StringComparer.Ordinal);
+        var count = new int[gpus];
+        foreach (var (name, mine) in names.Append("two").Order(StringComparer.Ordinal)
+            .Select(n => (n, n == "two" ? new[] { gpus - 2, gpus - 1 } : [.. Enumerable.Range(0, gpus)])))
+        {
+            var gpu = mine.OrderBy(g => count[g]).ThenBy(g => g).First();
+            count[gpu]++;
+            expected[name] = $"CUDA{gpu.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+        }
+        Assert.All(expected, e => Assert.Equal(e.Value, ProjectorOf(e.Key)));
+        Assert.True(count.Max() - count.Min() <= 1, $"projectors on each GPU: {string.Join(", ", count)}");
+        // An admin's own line is kept as it is (once), and a model on one GPU has its projector there already.
+        Assert.Equal("CUDA0", ProjectorOf("own"));
+        Assert.Null(ProjectorOf("one"));
+    }
+
+    [Fact]
+    public async Task A_llama_cpp_model_on_its_own_gpu_is_counted_where_a_vllm_model_goes()
+    {
+        await using var f = OnGpus(4);
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", new { name = "tiny", file = "tiny/Tiny-4B-Q4_K_M.gguf", context = 8192, devices = "1" }));
+        var advice = await admin.JsonAsync(await admin.PostAsync("/api/admin/models/advice", new { engineKind = "vllm", file = "hf/openai/gpt-oss-120b@main", context = 131072 }));
+        // GPU 0 has the picture server, GPU 1 the llama.cpp model: GPU 2.
+        Assert.Equal("2", advice.GetProperty("recommended").GetProperty("devices").GetString());
+    }
+
     [Fact]
     public async Task A_llama_cpp_model_moves_to_vllm_once_it_runs_keeping_its_name_access_and_prices_and_leaves_llama_cpp()
     {

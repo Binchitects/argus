@@ -224,6 +224,8 @@ public static class ModelEndpoints
                 unloading = now.Models.Where(m => m.Status == "unloading").Select(m => m.Name),
                 gpus = hw?.Devices?.Select(g => new { g.Index, g.Name, g.Total, g.Vendor, g.Backend }) ?? [],
                 plan = e.Enabled ? Plan(kept, local, e, library, hw) : null,
+                // What each GPU holds, loaded or not, and how busy it is now.
+                holdings = hw is null ? [] : Holdings(hw, local, library, state, media.Servers(), await hardware.LoadAsync(ct)),
                 // The kinds of engine and what each can do: the form offers a model only its kind's settings.
                 kinds = EngineKinds.All,
                 // Each engine instance (llama.cpp, each vLLM and SGLang, the servers the app does not run), and why one's models could not be
@@ -272,7 +274,7 @@ public static class ModelEndpoints
 
     /// <summary>What the form shows as it is filled in: the file's profile, the limits of its kind, recommended settings and a memory estimate.</summary>
     private static async Task<IResult> AdviceAsync(LocalModelRequest body, ModelLibrary library, HardwareProbe hardware, AppDbContext db, ModelCatalog catalog,
-        CancellationToken ct)
+        MediaControl media, CancellationToken ct)
     {
         var saved = body.Name is { Length: > 0 } name ? await db.LocalModels.AsNoTracking().SingleOrDefaultAsync(m => m.Name == name, ct) : null;
         var model = saved ?? new LocalModel { Name = "draft", File = "", EngineKind = body.EngineKind ?? EngineKinds.LlamaCpp };
@@ -290,10 +292,12 @@ public static class ModelEndpoints
             Merge(model, body, file);
             VllmDefaults(model, body);
             var hw = await hardware.GetAsync(ct);
-            var others = hw is null ? null : Others(hw, catalog.Kept(), await db.LocalModels.AsNoTracking().ToListAsync(ct), library, model.Name).PerGpu;
-            var vllmAdvice = VllmAdvisor.Advise(model, profile, hw, others);
+            var local = await db.LocalModels.AsNoTracking().ToListAsync(ct);
+            var others = hw is null ? null : Others(hw, catalog.Kept(), local, library, model.Name).PerGpu;
+            var placedOn = hw is null ? null : PlacedOn(hw, local, library, media.Placed(), model.Name);
+            var vllmAdvice = VllmAdvisor.Advise(model, profile, hw, others, placedOn);
             return Results.Ok(moving && FitOutput(model, vllmAdvice.Limits) is { } cutVllm
-                ? Said(VllmAdvisor.Advise(model, profile, hw, others), cutVllm)
+                ? Said(VllmAdvisor.Advise(model, profile, hw, others, placedOn), cutVllm)
                 : vllmAdvice);
         }
         if (library.Find(file) is not { } entry)
@@ -312,7 +316,7 @@ public static class ModelEndpoints
     private static ModelAdvice Said(ModelAdvice advice, ModelProblem said) => advice with { Problems = [.. advice.Problems.Where(p => p.Field != said.Field || p.Error), said] };
 
     private static async Task<IResult> AddAsync(LocalModelRequest body, AppDbContext db, ModelCatalog catalog, ModelLibrary library, HardwareProbe hardware,
-        ChatModels gatewayModels, IOptions<EngineOptions> engine, EngineWatcher watcher, PriceBook prices, Audit audit, CancellationToken ct)
+        ChatModels gatewayModels, IOptions<EngineOptions> engine, EngineWatcher watcher, PriceBook prices, MediaControl media, Audit audit, CancellationToken ct)
     {
         if (!engine.Value.Enabled)
         {
@@ -332,7 +336,7 @@ public static class ModelEndpoints
         // Of the kind it is added on: it leaves no other.
         var model = new LocalModel { Name = name, File = "", EngineKind = body.EngineKind is { Length: > 0 } k ? k.Trim() : EngineKinds.LlamaCpp };
         var (problem, warning) = Apply(model, body, library, await hardware.GetAsync(ct), prices.Defaults, [.. taken],
-            new Placed(catalog.Kept(), await db.LocalModels.AsNoTracking().ToListAsync(ct)));
+            new Placed(catalog.Kept(), await db.LocalModels.AsNoTracking().ToListAsync(ct), media.Placed()));
         if (problem is not null)
         {
             return problem;
@@ -350,7 +354,7 @@ public static class ModelEndpoints
     /// </summary>
     private static async Task<IResult> UpdateAsync(string name, LocalModelRequest body, HttpContext http, AppDbContext db, ModelCatalog catalog, ModelLibrary library,
         HardwareProbe hardware, EngineWatcher watcher, PriceBook prices, ChatModels gatewayModels, Audit audit, EngineClient engines, EngineState state, VllmBackends vllm,
-        IOptions<EngineOptions> engine, Operations.Features features, TimeProvider clock, CancellationToken ct)
+        IOptions<EngineOptions> engine, Operations.Features features, TimeProvider clock, MediaControl media, CancellationToken ct)
     {
         if (await db.LocalModels.SingleOrDefaultAsync(m => m.Name == name, ct) is not { } model)
         {
@@ -364,7 +368,7 @@ public static class ModelEndpoints
         var hw = await hardware.GetAsync(ct);
         var (problem, warning) = Apply(model, body, library, hw, prices.Defaults,
             [.. (await gatewayModels.AllAsync(ct)).Select(x => x.Name), .. await db.LocalModels.Select(x => x.Name).ToListAsync(ct)],
-            new Placed(catalog.Kept(), await db.LocalModels.AsNoTracking().ToListAsync(ct)));
+            new Placed(catalog.Kept(), await db.LocalModels.AsNoTracking().ToListAsync(ct), media.Placed()));
         if (problem is not null)
         {
             return problem;
@@ -677,8 +681,53 @@ public static class ModelEndpoints
         $"Every place in the engine ({max}) keeps a model loaded, so no other can load beside them. Stop keeping one, or raise \"Models loaded at once\" under Settings.";
 
     /// <summary>Whether these models, kept loaded together, fit the machine.</summary>
-    /// <summary>What else is kept on the GPUs, for a model saved or advised: the models kept loaded on them and the servers' reserves.</summary>
-    internal sealed record Placed(IReadOnlyList<string> Kept, IReadOnlyList<LocalModel> Local);
+    /// <summary>
+    /// What else is on the GPUs, for a model saved or advised: the models kept loaded on them and the servers' reserves, every
+    /// model (<paramref name="Local"/>), and the picture and video servers where they were placed (<paramref name="Media"/>).
+    /// </summary>
+    internal sealed record Placed(IReadOnlyList<string> Kept, IReadOnlyList<LocalModel> Local, IReadOnlyList<Resident>? Media = null);
+
+    /// <summary>Something a GPU holds, for Admin → Models: its name, its kind (llamacpp, vllm, sglang, media, reserve), its share of the GPU, and whether it is loaded now.</summary>
+    internal sealed record Held(string Name, string Kind, long Bytes, bool Loaded);
+
+    /// <summary>A GPU as Admin → Models shows it: what it holds, how busy it is now (0 to 1) and the memory in use (null: not known).</summary>
+    internal sealed record Holding(int Index, string Name, long Total, IReadOnlyList<Held> Holds, double? Busy, long? Used);
+
+    /// <summary>
+    /// Each GPU, what is placed on it and its load now: every engine model on it (one on every GPU on each, its share there),
+    /// loaded or not, the picture and video servers where they run (<paramref name="media"/>), the servers' reserves (the
+    /// picture server's while its server is not placed); how busy it is and the memory in use (<paramref name="load"/>). The
+    /// loaded first, then the largest.
+    /// </summary>
+    internal static IReadOnlyList<Holding> Holdings(Hardware hw, IReadOnlyList<LocalModel> local, ModelLibrary library, EngineState state,
+        IReadOnlyList<MediaControl.OnGpu> media, IReadOnlyDictionary<int, HardwareProbe.GpuLoad> load)
+    {
+        var places = EngineWatcher.PlacesOf(local, hw, library);
+        var picture = media.Any(x => x.Name.StartsWith(HardwareProbe.Picture, StringComparison.Ordinal));
+        var reserves = GpuPlan.Reserved(hw).Where(r => r.Name == HardwareProbe.Embedder || (r.Name == HardwareProbe.Picture && !picture)).ToList();
+        return [.. GpuPlan.DevicesOf(hw).Select(d => new Holding(d.Index, d.Name, d.Total,
+            [.. places.Where(p => p.Value.PerGpu.ContainsKey(d.Index)).Select(p => new Held(p.Key, p.Value.Kind, p.Value.PerGpu[d.Index], state.StatusOf(p.Key) == "loaded"))
+                .Concat(media.Where(x => x.Gpu == d.Index).Select(x => new Held(x.Name, "media", x.Bytes, x.Loaded)))
+                .Concat(reserves.Where(r => r.PerGpu.ContainsKey(d.Index)).Select(r => new Held(r.Name, "reserve", r.PerGpu[d.Index], false)))
+                .OrderByDescending(h => h.Loaded).ThenByDescending(h => h.Bytes).ThenBy(h => h.Name, StringComparer.Ordinal)],
+            load.GetValueOrDefault(d.Index)?.Busy, load.GetValueOrDefault(d.Index)?.Used))];
+    }
+
+    /// <summary>
+    /// What is placed on each GPU, for where a new model goes (VllmAdvisor.Propose): every model that names its GPUs, kept
+    /// loaded or not (a vLLM or SGLang model its share of each, a llama.cpp model its estimate), but <paramref name="except"/>;
+    /// the picture and video servers on theirs (<paramref name="media"/>), the embedder, and the picture server's reserve
+    /// while its server is not placed yet. A model on every GPU weighs on each alike: it decides nothing, so it is left out.
+    /// </summary>
+    internal static Dictionary<int, long> PlacedOn(Hardware hw, IReadOnlyList<LocalModel> local, ModelLibrary library, IReadOnlyList<Resident>? media, string? except = null)
+    {
+        var devices = GpuPlan.DevicesOf(hw).Count;
+        var named = local.Where(m => m.Name != except && Hardware.ParseDevices(m.Devices) is { Count: > 0 } g && g.Count < devices).ToList();
+        var places = EngineWatcher.PlacesOf(named, hw, library).Select(p => new Resident(p.Key, p.Value.Kind, p.Value.PerGpu));
+        var picture = (media ?? []).Any(r => r.Name.StartsWith(HardwareProbe.Picture, StringComparison.Ordinal));
+        var reserves = GpuPlan.Reserved(hw).Where(r => r.Name == HardwareProbe.Embedder || (r.Name == HardwareProbe.Picture && !picture));
+        return GpuPlan.Sum([.. places, .. media ?? [], .. reserves]);
+    }
 
     /// <summary>
     /// The kept vLLM and SGLang models (but <paramref name="except"/>) as GpuPlan's residents, the RAM they keep (asleep, a CPU
@@ -898,12 +947,14 @@ public static class ModelEndpoints
             return (AuthEndpoints.Problem(400, "file", $"{file}'s config.json cannot be read."), null);
         }
         var others = hardware is null ? null : Others(hardware, placed.Kept, placed.Local, library, m.Name).PerGpu;
-        // Kept loaded, it must fit beside the others kept; else only on its own GPUs, beside the servers' reserves.
+        // Kept loaded, it must fit beside the others kept; else only on its own GPUs, beside the servers' reserves. Its GPUs, when
+        // it names none, are the least placed: where the other models and the media servers are not.
         var beside = placed.Kept.Contains(m.Name) ? others : hardware is null ? null : Others(hardware, [], placed.Local, library).PerGpu;
-        var advice = VllmAdvisor.Advise(draft, profile, hardware, beside);
+        var placedOn = hardware is null ? null : PlacedOn(hardware, placed.Local, library, placed.Media, m.Name);
+        var advice = VllmAdvisor.Advise(draft, profile, hardware, beside, placedOn);
         if (m.EngineKind != kind && FitOutput(draft, advice.Limits) is { } cut)
         {
-            advice = Said(VllmAdvisor.Advise(draft, profile, hardware, beside), cut);
+            advice = Said(VllmAdvisor.Advise(draft, profile, hardware, beside, placedOn), cut);
         }
         if (advice.FirstError is { } problem)
         {

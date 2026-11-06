@@ -551,7 +551,16 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   question asks it again with new words (its quote kept or taken away, its
   files sent again). Either goes back to before the question: the session
   goes on from there, and the chat in Arena keeps the earlier turns on a
-  branch of their own, where the web's version arrows show them. Then the thread, with a card for each tool call and
+  branch of their own, where the web's version arrows show them. **Rewind to
+  here** beside a question goes back to before it as `/rewind` does, with the
+  same checkpoints: **The conversation and the code**, **Only the
+  conversation** or **Only the code**. It shows first how many messages go
+  and each file that would change (put back, or removed when a turn made it),
+  and its words go back in the box when the conversation goes back. A
+  question from before this run, or too long ago, has no checkpoint: only its
+  conversation goes back. It works before a compaction too (the model then
+  reads the messages left, not the summary), and the chat in Arena shows the
+  session rewound at once. Then the thread, with a card for each tool call and
   a diff under each edit (open while the turn runs; once it is over, its
   caption alone, and its chevron shows the lines), under a finished answer
   the files the turn changed (**N files changed**, folding with its chevron:
@@ -2142,7 +2151,10 @@ and the target from 5% to 10 points under the threshold (85% when off; a lower
 threshold brings the target down with it), so a compaction does not start the
 next one. The use of the window shows after each turn in the terminal
 (`/context` at any time) and in the IDE's status bar and chat gauge, which marks
-the threshold and says whose it is.
+the threshold and says whose it is. With no count since compacting or resuming,
+the figure is an estimate and says so (`context about 16.4k / 32.8k (50%, the
+next answer counts it)`), made with the characters a token held when the
+session compacted, as the IDE makes it.
 
 ## What it remembers, and what came before
 
@@ -2231,13 +2243,18 @@ comes after what was typed: the IDE shows the question as typed, with a chip
 for each file or lines that went with it (a click opens them).
 
 **Checkpoints.** Each turn leaves a checkpoint while Code Arena runs (the last
-50): how long the conversation was, and what each file the turn's tools wrote
-held before. `/rewind` lists them; `/rewind N` goes back to before turn N: the
-files put back (a file a turn made is removed) and the conversation cut there;
-`/rewind N code` puts back only the files, `/rewind N chat` only cuts the
-conversation. What commands changed is not put back (git has it). With the
-turn's commits on, the files put back are committed as Code Arena's
-("Rewind: back to before ..."). The chat in Arena keeps what was said.
+50): where in the whole conversation it began (a compaction does not change
+that), and what each file the turn's tools wrote held before. `/rewind` lists
+them; `/rewind N` goes back to before turn N: the files put back (a file a
+turn made is removed) and the conversation cut there; `/rewind N code` puts
+back only the files, `/rewind N chat` only cuts the conversation. Back to
+before a compaction, the model reads the messages left word for word again:
+the summary covered some that are gone. What commands changed is not put back
+(git has it). With the turn's commits on, the files put back are committed as
+Code Arena's ("Rewind: back to before ..."). The chat in Arena keeps what was
+said, and shows the session rewound at once. The IDE's **Rewind to here** does
+the same from a question (`GET /api/rewind?message=m3` for what it would do,
+`POST /api/rewind` with `message`, `chat` and `code`).
 
 ## Your own commands, sub-agents and skills
 
@@ -2372,9 +2389,11 @@ So what the web changes is followed here: a question edited there, an answer
 written again, or another branch shown makes the session's conversation the
 web's from where the two part (said in the thread: "The web chat's
 conversation changed"), and what the session sends next goes on after it.
-`/rewind` here works the other way: the turns gone back from stay on the web as
-a branch, and what the session adds goes on a branch of its own there, shown
-from then on. When the web moved to another branch while the session's
+`/rewind` here (and the IDE's **Rewind to here**) works the other way: the
+turns gone back from stay on the web as a branch, the web shows the session's
+branch at once (it ends where the session's does), and what the session adds
+goes on after it. A chat rewound on the web is read here as the web's other
+branches are. When the web moved to another branch while the session's
 messages were still on their way, those go on a branch of their own too; when
 the web only added messages meanwhile, they come before the session's in
 both places (a tool's result always stays straight after its call). A long

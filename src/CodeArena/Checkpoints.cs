@@ -1,9 +1,9 @@
 namespace CodeArena;
 
 /// <summary>
-/// A checkpoint before each turn: how long the conversation was, and what each file the turn's tools wrote held before
-/// (kept the first time the turn writes it). /rewind goes back to before a turn: the conversation as it was, and those
-/// files as they were (one the turn made is removed). What commands changed is not kept: git has it, or the person.
+/// A checkpoint before each turn: where in the whole conversation it began, and what each file the turn's tools wrote held
+/// before (kept the first time the turn writes it). /rewind goes back to before a turn: the conversation as it was, and
+/// those files as they were (one the turn made is removed). What commands changed is not kept: git has it, or the person.
 /// Kept while Code Arena runs (memory only, at most the last 50 turns).
 /// </summary>
 internal sealed class Checkpoints
@@ -12,9 +12,13 @@ internal sealed class Checkpoints
     /// <summary>A file bigger than this is not kept (and a turn that wrote it cannot give it back).</summary>
     public const long MostBytes = 20_000_000;
 
-    internal sealed class Turn(int messages, string input)
+    internal sealed class Turn(int place, string input)
     {
-        public int Messages { get; } = messages;
+        /// <summary>
+        /// How many messages the whole conversation had as the turn began: its question's place (the IDE's m{place}). A
+        /// compaction does not change it, as it changes how many the model reads.
+        /// </summary>
+        public int Place { get; } = place;
         public string Input { get; } = input;
         public DateTime At { get; } = DateTime.Now;
         /// <summary>Each file written, as it was before the turn (null: it did not exist); too big to keep: not here, in Lost.</summary>
@@ -125,12 +129,12 @@ internal sealed class Checkpoints
         }
     }
 
-    /// <summary>A turn begins with this many messages before it.</summary>
-    public void Begin(int messages, string input)
+    /// <summary>A turn begins with this many messages of the whole conversation before it.</summary>
+    public void Begin(int place, string input)
     {
         lock (_gate)
         {
-            _turns.Add(new Turn(messages, input));
+            _turns.Add(new Turn(place, input));
             if (_turns.Count > Most)
             {
                 _turns.RemoveAt(0);
@@ -170,10 +174,47 @@ internal sealed class Checkpoints
     }
 
     /// <summary>
-    /// Back to before turn <paramref name="number"/> (from 1, the oldest kept): its files and every later turn's put back,
-    /// latest first. The conversation's length then, the files put back, and those that could not be.
+    /// What going back to before turn <paramref name="number"/> would do to the files as they are now: each one its tools or
+    /// a later turn's wrote that differs from what it is put back to, and whether it is removed (a turn made it); and those
+    /// too big to keep, which are not put back.
     /// </summary>
-    public (int Messages, List<string> Restored, List<string> Lost) Rewind(int number, bool files)
+    public (List<(string Path, bool Removed)> Files, List<string> Lost) Changes(int number)
+    {
+        lock (_gate)
+        {
+            if (number < 1 || number > _turns.Count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(number));
+            }
+            // Each file as the earliest of those turns found it: what it is put back to.
+            var before = new Dictionary<string, byte[]?>(StringComparer.Ordinal);
+            var lost = new List<string>();
+            foreach (var turn in _turns.Skip(number - 1))
+            {
+                foreach (var (path, was) in turn.Before)
+                {
+                    before.TryAdd(path, was);
+                }
+                lost.AddRange(turn.Lost.Where(p => !lost.Contains(p)));
+            }
+            var files = new List<(string Path, bool Removed)>();
+            foreach (var (path, was) in before)
+            {
+                var now = File.Exists(path) ? File.ReadAllBytes(path) : null;
+                if (was is null ? now is not null : now is null || !was.AsSpan().SequenceEqual(now))
+                {
+                    files.Add((path, was is null));
+                }
+            }
+            return (files, lost);
+        }
+    }
+
+    /// <summary>
+    /// Back to before turn <paramref name="number"/> (from 1, the oldest kept): its files and every later turn's put back,
+    /// latest first. Where in the conversation that turn began, the files put back, and those that could not be.
+    /// </summary>
+    public (int Place, List<string> Restored, List<string> Lost) Rewind(int number, bool files)
     {
         lock (_gate)
         {
@@ -214,9 +255,9 @@ internal sealed class Checkpoints
                     lost.AddRange(turn.Lost.Select(p => $"{p} (too big to keep)"));
                 }
             }
-            var messages = undone[0].Messages;
+            var place = undone[0].Place;
             _turns.RemoveRange(number - 1, _turns.Count - number + 1);
-            return (messages, restored, lost);
+            return (place, restored, lost);
         }
     }
 }
