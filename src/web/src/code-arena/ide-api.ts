@@ -1,4 +1,5 @@
 import { api, ApiError, ideSocketUrl, ideUrl } from './http'
+import type { SkillImportChoice, SkillImportPreview, SkillImportResult } from '@/lib/skills'
 import type { ServerInfo } from './lsp/client'
 
 /** A file or folder in a folder's listing; paths are relative to the working directory, with "/". */
@@ -236,7 +237,41 @@ export interface SkillInfo {
   name: string
   description: string
   source: 'project' | 'person' | 'arena' | 'builtin'
+  /** The folder it was read from: .code-arena/skills, .arena/skills, .claude/skills, ~/.claude/skills, config, arena, builtin. */
+  origin?: string | null
   path: string | null
+}
+
+/** A file chosen to import, as code-arena takes it: its path in the folder chosen, its bytes in base64. */
+async function uploadOf(f: File): Promise<{ path: string; data: string }> {
+  const bytes = new Uint8Array(await f.arrayBuffer())
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  return { path: f.webkitRelativePath || f.name, data: btoa(binary) }
+}
+
+/** Where skills are imported: the project's (.arena/skills), or the person's (theirs in Arena when signed in, else on this computer). */
+export type SkillScope = 'project' | 'person'
+
+/** What an import would do, for its preview (the same fields as Arena's Skills page has). */
+export const previewSkillImport = async (files: File[], scope: SkillScope) =>
+  api<SkillImportPreview & { inArena?: boolean; where?: string }>('/api/skills/import/preview', { body: { uploads: await Promise.all(files.map(uploadOf)), scope } })
+
+/** The import as chosen: each skill imported, replaced, renamed or skipped. */
+export const importSkills = async (files: File[], scope: SkillScope, choices: SkillImportChoice[]) =>
+  api<SkillImportResult>('/api/skills/import', { body: { uploads: await Promise.all(files.map(uploadOf)), scope, choices } })
+
+/** Skills as files: a .zip of their folders, or one alone as its SKILL.md (md). */
+export async function exportIdeSkills(names: string[], format: 'zip' | 'md' = 'zip'): Promise<{ blob: Blob; fileName: string }> {
+  const res = await fetch(ideUrl(`/api/skills/export?names=${names.map(encodeURIComponent).join(',')}${format === 'md' ? '&format=md' : ''}`), {
+    credentials: 'same-origin',
+    headers: { 'X-Requested-With': 'fetch' },
+  })
+  if (!res.ok) {
+    const said = (await res.json().catch(() => ({}))) as { status?: string; error?: string }
+    throw new ApiError(res.status, said.status ?? String(res.status), said.error ?? `The export failed (HTTP ${res.status}).`, said)
+  }
+  return { blob: await res.blob(), fileName: format === 'md' ? 'SKILL.md' : names.length === 1 ? `${names[0]}.zip` : 'skills.zip' }
 }
 
 /** A command of the person's or the project's own (.arena/commands): /name in the chat. */

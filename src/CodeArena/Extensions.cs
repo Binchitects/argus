@@ -86,9 +86,10 @@ internal sealed record CustomAgent(string Name, string Description, string Promp
 
 /// <summary>
 /// A skill (agentskills.io's SKILL.md): instructions loaded when the task needs them, with the files beside them. Whose it
-/// is: the project's, the person's (their config folder), Arena's (made there, or a plugin's) or Code Arena's own (builtin).
+/// is: the project's, the person's (their config folder, ~/.code-arena/skills, ~/.claude/skills), Arena's (made there, or a
+/// plugin's) or Code Arena's own (builtin); <see cref="Origin"/>, the folder it was read from (.claude/skills, ~/.claude/skills…).
 /// </summary>
-internal sealed record Skill(string Name, string Description, string Instructions, string Folder, string Source = "project")
+internal sealed record Skill(string Name, string Description, string Instructions, string Folder, string Source = "project", string? Origin = null)
 {
     /// <summary>The instructions as the model is given them: parameters named for it to take from the request (BuiltInSkills.Filled).</summary>
     public string Filled(string? arguments = null)
@@ -107,9 +108,10 @@ internal sealed record Skill(string Name, string Description, string Instruction
 }
 
 /// <summary>
-/// The person's and the project's own commands, sub-agents and skills: Markdown files under .arena/ in the project and in
-/// the config folder; those written for Claude Code (.claude/) and Qwen Code (.qwen/) are read too. The project's win over
-/// the person's of the same name, and both over the skills Arena's plugins bring (PluginSkills).
+/// The person's and the project's own commands, sub-agents and skills: Markdown files under .arena/ (and .code-arena/) in the
+/// project and in the config folder; those written for Claude Code (.claude/) and Qwen Code (.qwen/) are read too, and the
+/// skills in the person's home (~/.code-arena/skills, ~/.claude/skills). The project's win over the person's of the same
+/// name, and both over the skills Arena's plugins bring (PluginSkills).
 /// </summary>
 internal sealed class Extensions
 {
@@ -119,19 +121,23 @@ internal sealed class Extensions
     /// <summary>Files that could not be read, with why.</summary>
     public IReadOnlyList<string> Problems { get; private init; } = [];
 
-    private static readonly string[] ProjectFolders = [".arena", ".claude", ".qwen"];
+    private static readonly string[] ProjectFolders = [".code-arena", ".arena", ".claude", ".qwen"];
 
-    /// <summary>The folders read, the project's first (they win), and whose each is.</summary>
-    private static IEnumerable<(string Dir, string Source)> Folders(AppPaths paths, string projectRoot, string kind) =>
-        ProjectFolders.Select(f => (Path.Combine(projectRoot, f, kind), "project")).Append((Path.Combine(paths.ConfigDir, kind), "person"))
+    /// <summary>The person's own skills' folders in their home, after the config folder's: Code Arena's and Claude Code's.</summary>
+    private static readonly string[] HomeFolders = [".code-arena", ".claude"];
+
+    /// <summary>The folders read, the project's first (they win), whose each is, and how it is shown.</summary>
+    private static IEnumerable<(string Dir, string Source, string Origin)> Folders(AppPaths paths, string projectRoot, string kind) =>
+        ProjectFolders.Select(f => (Path.Combine(projectRoot, f, kind), "project", $"{f}/{kind}")).Append((Path.Combine(paths.ConfigDir, kind), "person", "config"))
+            .Concat(kind == "skills" && paths.Home is { Length: > 0 } home ? HomeFolders.Select(f => (Path.Combine(home, f, kind), "person", $"~/{f}/{kind}")) : [])
             // The skills Arena's plugins bring come after the project's and the person's own, and Arena's own last: those of the same name win.
-            .Concat(kind == "skills" ? [(PluginSkills.Folder(paths), "arena"), (BuiltInSkills.Folder(paths), "builtin")] : []);
+            .Concat(kind == "skills" ? [(PluginSkills.Folder(paths), "arena", "arena"), (BuiltInSkills.Folder(paths), "builtin", "builtin")] : []);
 
     public static Extensions Load(AppPaths paths, string projectRoot)
     {
         var problems = new List<string>();
         var commands = new Dictionary<string, CustomCommand>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (dir, _) in Folders(paths, projectRoot, "commands").Where(f => Directory.Exists(f.Dir)))
+        foreach (var (dir, _, _) in Folders(paths, projectRoot, "commands").Where(f => Directory.Exists(f.Dir)))
         {
             foreach (var file in Directory.EnumerateFiles(dir, "*.md", SearchOption.AllDirectories).Order(StringComparer.Ordinal))
             {
@@ -148,7 +154,7 @@ internal sealed class Extensions
             }
         }
         var agents = new Dictionary<string, CustomAgent>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (dir, _) in Folders(paths, projectRoot, "agents").Where(f => Directory.Exists(f.Dir)))
+        foreach (var (dir, _, _) in Folders(paths, projectRoot, "agents").Where(f => Directory.Exists(f.Dir)))
         {
             foreach (var file in Directory.EnumerateFiles(dir, "*.md").Order(StringComparer.Ordinal))
             {
@@ -164,7 +170,7 @@ internal sealed class Extensions
             }
         }
         var skills = new Dictionary<string, Skill>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (dir, source) in Folders(paths, projectRoot, "skills").Where(f => Directory.Exists(f.Dir)))
+        foreach (var (dir, source, origin) in Folders(paths, projectRoot, "skills").Where(f => Directory.Exists(f.Dir)))
         {
             foreach (var folder in Directory.EnumerateDirectories(dir).Order(StringComparer.Ordinal))
             {
@@ -176,7 +182,7 @@ internal sealed class Extensions
                 var name = (fm.Field("name") ?? Path.GetFileName(folder)).ToLowerInvariant();
                 if (Valid(name) && !skills.ContainsKey(name))
                 {
-                    skills[name] = new Skill(name, fm.Field("description") ?? FirstLine(fm.Body), fm.Body, folder, source);
+                    skills[name] = new Skill(name, fm.Field("description") ?? FirstLine(fm.Body), fm.Body, folder, source, origin);
                 }
             }
         }

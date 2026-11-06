@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { FileArchive, FolderOpen, ShieldAlert, Upload } from 'lucide-react'
-import { useRef, useState } from 'react'
+import { useRef, useState, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -8,7 +8,7 @@ import { DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/co
 import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
 import { errorMessage } from '@/lib/api'
-import { defaultAction, previewImport, runImport, sizeLabel, skillsQuery, type SkillImportAction, type SkillImportPreview, type SkillPreview } from '@/lib/skills'
+import { defaultAction, previewImport, runImport, sizeLabel, skillsQuery, type SkillImportAction, type SkillImportChoice, type SkillImportPreview, type SkillImportResult, type SkillPreview } from '@/lib/skills'
 import { cn } from '@/lib/utils'
 
 const shadowed: Record<string, string> = {
@@ -27,22 +27,38 @@ function actionsFor(s: SkillPreview): { value: SkillImportAction; label: string 
 }
 
 /**
- * Import skills (Skills → Import): a .zip of skill folders, a SKILL.md, or a folder, as Claude Code keeps them. A preview
- * lists each skill with what it brings and what is in its way: one of the person's own of its name (Replace, Rename or
- * Skip), a name that is no slash name (Rename), or why it cannot come in (the safeguards, the limits). Nothing is
- * overwritten unless Replace was chosen for it.
+ * Import skills (Skills → Import; Code Arena's Skills view, with its own look and bring):
+ * a .zip of skill folders, a SKILL.md, or a folder, as Claude Code keeps them. A preview lists each skill with what it
+ * brings and what is in its way: one of the person's own of its name (Replace, Rename or Skip), a name that is no slash
+ * name (Rename), or why it cannot come in (the safeguards, the limits). Nothing is overwritten unless Replace was chosen.
  */
-export function SkillImport({ onClose }: { onClose: () => void }) {
+export function SkillImport({
+  onClose,
+  look: preview = previewImport,
+  bring = runImport,
+  done,
+  intro,
+  about = 'They become yours; every file goes through the safeguards first.',
+}: {
+  onClose: () => void
+  look?: (files: File[]) => Promise<SkillImportPreview>
+  bring?: (files: File[], choices: SkillImportChoice[]) => Promise<SkillImportResult>
+  /** Told once they are imported (the list to read again); the Skills page's by default. */
+  done?: () => Promise<void>
+  /** Above the files' choice: Code Arena's choice of where they go. */
+  intro?: ReactNode
+  about?: string
+}) {
   const queryClient = useQueryClient()
   const [files, setFiles] = useState<File[]>([])
-  const [preview, setPreview] = useState<SkillImportPreview | null>(null)
+  const [previewed, setPreview] = useState<SkillImportPreview | null>(null)
   const [actions, setActions] = useState<Record<string, SkillImportAction>>({})
   const [names, setNames] = useState<Record<string, string>>({})
   const [dragging, setDragging] = useState(false)
   const filePicker = useRef<HTMLInputElement>(null)
   const folderPicker = useRef<HTMLInputElement>(null)
   const look = useMutation({
-    mutationFn: previewImport,
+    mutationFn: preview,
     onSuccess: (p) => {
       setPreview(p)
       setActions(Object.fromEntries(p.skills.map((s) => [s.folder, defaultAction(s)])))
@@ -51,13 +67,13 @@ export function SkillImport({ onClose }: { onClose: () => void }) {
     onError: (e) => toast.error(errorMessage(e)),
   })
   const run = useMutation({
-    mutationFn: () => runImport(files, (preview?.skills ?? []).map((s) => ({ folder: s.folder, action: actions[s.folder] ?? 'skip', ...(actions[s.folder] === 'rename' ? { name: names[s.folder]?.trim() } : {}) }))),
-    onSuccess: async (done) => {
-      await queryClient.invalidateQueries({ queryKey: skillsQuery.queryKey })
-      const n = done.imported.length
-      if (n > 0) toast.success(`Imported ${n} skill${n === 1 ? '' : 's'}: ${done.imported.map((i) => '/' + i.name).join(', ')}.`)
-      for (const s of done.skipped.filter((x) => actions[x.folder] !== 'skip')) toast.error(`/${s.name}: ${s.reason}`)
-      if (n === 0 && done.skipped.every((x) => actions[x.folder] === 'skip')) toast.info('Nothing was imported.')
+    mutationFn: () => bring(files, (previewed?.skills ?? []).map((s) => ({ folder: s.folder, action: actions[s.folder] ?? 'skip', ...(actions[s.folder] === 'rename' ? { name: names[s.folder]?.trim() } : {}) }))),
+    onSuccess: async (result) => {
+      await (done ? done() : queryClient.invalidateQueries({ queryKey: skillsQuery.queryKey }))
+      const n = result.imported.length
+      if (n > 0) toast.success(`Imported ${n} skill${n === 1 ? '' : 's'}: ${result.imported.map((i) => '/' + i.name).join(', ')}.`)
+      for (const s of result.skipped.filter((x) => actions[x.folder] !== 'skip')) toast.error(`/${s.name}: ${s.reason}`)
+      if (n === 0 && result.skipped.every((x) => actions[x.folder] === 'skip')) toast.info('Nothing was imported.')
       onClose()
     },
     onError: (e) => toast.error(errorMessage(e)),
@@ -68,19 +84,17 @@ export function SkillImport({ onClose }: { onClose: () => void }) {
     setPreview(null)
     look.mutate(chosen)
   }
-  const bringing = (preview?.skills ?? []).filter((s) => actions[s.folder] && actions[s.folder] !== 'skip')
-  const renamedBadly = bringing.some((s) => actions[s.folder] === 'rename' && !/^[a-z0-9][a-z0-9_-]{0,39}$/.test(names[s.folder]?.trim() ?? ''))
+  const bringing = (previewed?.skills ?? []).filter((s) => actions[s.folder] && actions[s.folder] !== 'skip')
+  const renamedBadly = bringing.some((s) => actions[s.folder] === 'rename' && !slashName.test(names[s.folder]?.trim() ?? ''))
   const newOnes = bringing.filter((s) => actions[s.folder] !== 'replace').length
-  const overRoom = preview !== null && newOnes > preview.room
+  const overRoom = previewed?.room !== undefined && newOnes > previewed.room
   return (
     <>
       <DialogHeader>
         <DialogTitle>Import skills</DialogTitle>
-        <DialogDescription>
-          Skills as Claude Code keeps them: a .zip of skill folders, a SKILL.md, or a folder with a SKILL.md and the files beside it. They become yours; every file goes through the
-          safeguards first.
-        </DialogDescription>
+        <DialogDescription>Skills as Claude Code keeps them: a .zip of skill folders, a SKILL.md, or a folder with a SKILL.md and the files beside it. {about}</DialogDescription>
       </DialogHeader>
+      {intro}
       <input
         ref={filePicker}
         type="file"
@@ -133,10 +147,11 @@ export function SkillImport({ onClose }: { onClose: () => void }) {
         <p className="text-xs">Up to 5 MB and 50 skills; text files only, 200 KB each.</p>
       </div>
       {look.isPending && <output className="text-sm text-muted-foreground">Reading the skills…</output>}
-      {preview && (
+      {previewed && (
         <div className="grid max-h-[50vh] gap-3 overflow-y-auto pe-1">
+          {previewed.note && <p className="text-xs text-muted-foreground">{previewed.note}</p>}
           <ul className="grid gap-3" aria-label="Skills to import">
-            {preview.skills.map((s) => (
+            {previewed.skills.map((s) => (
               <PreviewRow
                 key={s.folder}
                 skill={s}
@@ -147,24 +162,24 @@ export function SkillImport({ onClose }: { onClose: () => void }) {
               />
             ))}
           </ul>
-          {preview.leftOut.length > 0 && (
+          {previewed.leftOut.length > 0 && (
             <details className="text-xs text-muted-foreground">
-              <summary className="cursor-pointer">Left out of the upload ({preview.leftOut.length})</summary>
+              <summary className="cursor-pointer">Left out of the upload ({previewed.leftOut.length})</summary>
               <ul className="mt-1 grid gap-0.5 font-mono [overflow-wrap:anywhere]">
-                {preview.leftOut.map((l) => (
+                {previewed.leftOut.map((l) => (
                   <li key={l}>{l}</li>
                 ))}
               </ul>
             </details>
           )}
-          {overRoom && <Alert variant="destructive">You may have {preview.room} more skills: skip some, or delete some of yours first.</Alert>}
+          {overRoom && <Alert variant="destructive">You may have {previewed.room} more skills: skip some, or delete some of yours first.</Alert>}
         </div>
       )}
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onClose}>
           Cancel
         </Button>
-        <Button type="button" disabled={!preview || bringing.length === 0 || renamedBadly || overRoom} loading={run.isPending} onClick={() => run.mutate()}>
+        <Button type="button" disabled={!previewed || bringing.length === 0 || renamedBadly || overRoom} loading={run.isPending} onClick={() => run.mutate()}>
           {bringing.length > 0 ? `Import ${bringing.length} skill${bringing.length === 1 ? '' : 's'}` : 'Import'}
         </Button>
       </DialogFooter>
@@ -172,10 +187,13 @@ export function SkillImport({ onClose }: { onClose: () => void }) {
   )
 }
 
+/** A skill's name as both Arena and Code Arena take it: lowercase letters, digits, - and _ (Arena's up to 40, checked there). */
+const slashName = /^[a-z0-9][a-z0-9_-]{0,63}$/
+
 function PreviewRow({ skill: s, action, name, onAction, onName }: { skill: SkillPreview; action: SkillImportAction; name: string; onAction: (a: SkillImportAction) => void; onName: (n: string) => void }) {
   const choices = actionsFor(s)
   const label = `/${s.name}`
-  const nameOk = /^[a-z0-9][a-z0-9_-]{0,39}$/.test(name.trim())
+  const nameOk = slashName.test(name.trim())
   return (
     <li className="grid gap-2 rounded-lg border p-3 text-sm" aria-label={label}>
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
@@ -200,7 +218,11 @@ function PreviewRow({ skill: s, action, name, onAction, onName }: { skill: Skill
         </p>
       ) : (
         <>
-          {s.clash && <p className="[overflow-wrap:anywhere]">You have /{s.name} already (“{s.clash.title}”): replace it, import this one under another name, or skip it.</p>}
+          {s.clash && (
+            <p className="[overflow-wrap:anywhere]">
+              {s.clash.origin ? `There is a /${s.name} in ${s.clash.origin} already` : `You have /${s.name} already (“${s.clash.title}”)`}: replace it, import this one under another name, or skip it.
+            </p>
+          )}
           {s.nameProblem && <p className="[overflow-wrap:anywhere]">{s.nameProblem} It comes in renamed.</p>}
           {!s.clash && s.shadows && <p className="text-muted-foreground">There is {shadowed[s.shadows] ?? 'another'} /{s.name}: yours will come first.</p>}
           {s.masked && <p className="text-muted-foreground">The safeguards masked part of it: it comes in masked.</p>}

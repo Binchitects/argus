@@ -52,6 +52,8 @@ internal sealed class Repl(Runtime rt)
         ("/permissions [allow|deny|remove RULE]", "kept rules, e.g. run_shell(npm test*), edit_file, read_file(.env*)"),
         ("/sandbox", "what commands in the sandbox may do"),
         ("/skills [new NAME [--mine]]", "the skills, by whose they are; new NAME makes one for the project, with --mine one of yours (in Arena when signed in)"),
+        ("/skills export NAME… [--to FILE]", "the skills as a .zip of their folders (SKILL.md and their files), as Claude Code keeps them"),
+        ("/skills import PATH [--mine]", "skills from a .zip, a SKILL.md or a folder, for the project (or yours); a name taken: --replace, --rename or --skip, else asked"),
         ("/NAME [words]", "use a skill, or a command of yours or the project's, with your words"),
         ("/commands", "your own and the project's commands, sub-agents and skills"),
         ("/sync [all]", "where this session stands with its chat in Arena; all sends this folder's sessions Arena never had"),
@@ -1322,11 +1324,23 @@ internal sealed class Repl(Runtime rt)
     /// <summary>
     /// /skills: every skill the agent reads, by whose it is, as the IDE's Skills view groups them (Arena's asked for at once);
     /// /skills new NAME makes one for the project, /skills new NAME --mine one of yours (in Arena when signed in to it, else
-    /// in the config folder), from a few lines to fill in.
+    /// in the config folder), from a few lines to fill in; /skills export and /skills import move them as files.
     /// </summary>
     private async Task SkillsCommandAsync(string arg, CancellationToken ct)
     {
         var words = arg.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words is ["export", ..] or ["import", ..])
+        {
+            try
+            {
+                await (words[0] == "export" ? ExportSkillsAsync(words[1..], ct) : ImportSkillsAsync(words[1..], ct));
+            }
+            catch (IdeError e)
+            {
+                Ui.Error(e.Message);
+            }
+            return;
+        }
         if (words is ["new", ..])
         {
             var mine = words.Contains("--mine");
@@ -1347,7 +1361,8 @@ internal sealed class Repl(Runtime rt)
         }
         if (words.Length > 0)
         {
-            Ui.Warn("/skills lists them; /skills new NAME makes one for the project, /skills new NAME --mine one of yours.");
+            Ui.Warn("/skills lists them; /skills new NAME makes one for the project, /skills new NAME --mine one of yours; " +
+                "/skills export NAME… [--to FILE] and /skills import PATH [--mine] [--replace|--rename|--skip] move them as files.");
             return;
         }
         var skills = (await rt.ReloadExtensionsAsync(true, ct)).Skills;
@@ -1366,10 +1381,90 @@ internal sealed class Repl(Runtime rt)
             Ui.Line(Ui.Bold(title));
             foreach (var s in these)
             {
-                Ui.Line($"  /{s.Name}  {Ui.Dim(s.Description)}");
+                var from = s.Origin is { } o && o is not ("arena" or "builtin" or "config") ? Ui.Dim($" ({o})") : "";
+                Ui.Line($"  /{s.Name}{from}  {Ui.Dim(s.Description)}");
             }
         }
-        Ui.Info("/NAME and your words uses one (the model also loads one when a task needs it); /skills new NAME makes one.");
+        Ui.Info("/NAME and your words uses one (the model also loads one when a task needs it); /skills new NAME makes one; /skills export and /skills import move them as files.");
+    }
+
+    /// <summary>A path the person typed: ~ their home, relative to the working directory.</summary>
+    private string Typed(string path) =>
+        Path.GetFullPath(path.StartsWith('~') && rt.Env.Env("HOME") is { Length: > 0 } home ? home + path[1..] : path, rt.Workspace.Root);
+
+    /// <summary>/skills export NAME… [--to FILE]: the skills as a .zip of their folders (NAME.zip or skills.zip in the working directory).</summary>
+    private async Task ExportSkillsAsync(string[] words, CancellationToken ct)
+    {
+        var at = Array.IndexOf(words, "--to");
+        var to = at >= 0 && at + 1 < words.Length ? words[at + 1] : null;
+        var names = words.Where((w, i) => w != "--to" && (at < 0 || i != at + 1)).ToList();
+        var skills = await SkillTransfer.NamedAsync(rt, names, ct);
+        var file = Typed(to ?? (skills is [var one] ? one.Name : "skills") + ".zip");
+        if (Directory.Exists(file))
+        {
+            file = Path.Combine(file, (skills is [var only] ? only.Name : "skills") + ".zip");
+        }
+        await File.WriteAllBytesAsync(file, SkillTransfer.Zip(skills), ct);
+        Ui.Line($"Exported {string.Join(", ", skills.Select(s => "/" + s.Name))} to {rt.Workspace.Show(file)}: each a folder with its SKILL.md, as Claude Code keeps them.");
+    }
+
+    /// <summary>
+    /// /skills import PATH [--mine] [--replace|--rename|--skip]: a .zip, a SKILL.md or a folder, for the project (or for you),
+    /// each skill shown first; one whose name is taken is asked about (or done as the flag says; skipped when it cannot ask).
+    /// </summary>
+    private async Task ImportSkillsAsync(string[] words, CancellationToken ct)
+    {
+        var flags = words.Where(w => w.StartsWith("--", StringComparison.Ordinal)).ToHashSet(StringComparer.Ordinal);
+        var path = string.Join(' ', words.Where(w => !w.StartsWith("--", StringComparison.Ordinal)));
+        if (path.Length == 0)
+        {
+            Ui.Error("/skills import PATH: a .zip of skills, a SKILL.md, or a folder with skills in it.");
+            return;
+        }
+        var scope = flags.Contains("--mine") ? "person" : "project";
+        var (folders, leftOut) = SkillTransfer.Read(SkillTransfer.FromDisk(Typed(path)));
+        var preview = await SkillTransfer.PreviewAsync(rt, folders, leftOut, scope, ct);
+        var choices = new JsonArray();
+        foreach (var s in (preview["skills"] as JsonArray ?? []).OfType<JsonObject>())
+        {
+            var (name, folder) = (s.Str("name") ?? "", s.Str("folder") ?? "");
+            var files = (s["files"] as JsonArray)?.Count ?? 0;
+            Ui.Line($"  /{name}{(files > 0 ? Ui.Dim($" (with {files} file{(files == 1 ? "" : "s")})") : "")}  {Ui.Dim(s.Str("description") ?? "")}");
+            if (s.Str("problem") is { } problem)
+            {
+                Ui.Warn($"    left out: {problem}");
+                continue;
+            }
+            if (s["clash"] is null && s.Str("nameProblem") is null)
+            {
+                continue;
+            }
+            var why = s.Str("nameProblem") ?? $"There is a /{name} already.";
+            var action = flags.Contains("--replace") && s["clash"] is not null ? "replace" : flags.Contains("--rename") ? "rename" : flags.Contains("--skip") ? "skip" : null;
+            if (action is null && Ui.CanAsk)
+            {
+                var said = Ui.ReadLine($"    {why} {(s["clash"] is not null ? "[r]eplace, re[n]ame or [s]kip" : "re[n]ame or [s]kip")}? ")?.Trim().ToLowerInvariant();
+                action = said is "r" or "replace" && s["clash"] is not null ? "replace" : said is "n" or "rename" ? "rename" : "skip";
+            }
+            choices.Add(new JsonObject { ["folder"] = folder, ["action"] = action ?? "skip", ["name"] = action == "rename" ? s.Str("suggested") : null });
+        }
+        if (preview.Str("note") is { } note)
+        {
+            Ui.Info(note);
+        }
+        var done = await SkillTransfer.ImportAsync(rt, folders, scope, choices, ct);
+        var imported = (done["imported"] as JsonArray ?? []).OfType<JsonObject>().ToList();
+        foreach (var s in (done["skipped"] as JsonArray ?? []).OfType<JsonObject>())
+        {
+            Ui.Info($"/{s.Str("name")} not imported: {s.Str("reason")}");
+        }
+        if (imported.Count == 0)
+        {
+            Ui.Info("Nothing was imported.");
+            return;
+        }
+        var where = scope == "project" ? "for this project (.arena/skills: commit them to share them)" : rt.MineInArena ? "as yours in Arena (the web chat and every Code Arena)" : "as yours on this computer";
+        Ui.Line($"Imported {string.Join(", ", imported.Select(i => "/" + i.Str("name") + (i.Bool("replaced") == true ? " (replaced)" : "")))} {where}.");
     }
 
     private void ExtensionsCommand()

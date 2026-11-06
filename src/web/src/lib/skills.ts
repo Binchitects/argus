@@ -184,9 +184,9 @@ export interface SkillPreview {
   problem: string | null
   /** Why its name is no slash name: it comes in only renamed. */
   nameProblem: string | null
-  /** The person's own skill of its name: replace it, rename the new one, or skip it. */
-  clash: { id: string; title: string; version: number } | null
-  /** Where another skill of its name comes from (group, company, builtin, plugin): the new one, theirs, comes first. */
+  /** The person's own skill of its name (in Code Arena, the folder it is in): replace it, rename the new one, or skip it. */
+  clash: { id?: string; title: string; version?: number; origin?: string | null } | null
+  /** Where another skill of its name comes from (group, company, builtin, plugin; Code Arena's sources): the new one comes first. */
   shadows: string | null
   /** A free name to rename it to. */
   suggested: string
@@ -198,8 +198,10 @@ export interface SkillImportPreview {
   skills: SkillPreview[]
   /** What was in the upload but in no skill (or not a path inside its folder). */
   leftOut: string[]
-  /** How many more skills the person may have. */
-  room: number
+  /** How many more skills the person may have (Arena's limit; none on this computer). */
+  room?: number
+  /** What the preview could not do (Code Arena not signed in: secrets looked for there only). */
+  note?: string | null
 }
 
 export type SkillImportAction = 'import' | 'replace' | 'rename' | 'skip'

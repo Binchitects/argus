@@ -13,6 +13,11 @@ internal sealed class AppPaths(string configDir, string dataDir)
     public string HistoryDir => Path.Combine(DataDir, "history");
     /// <summary>The person's own instructions for every project.</summary>
     public string UserInstructions => Path.Combine(ConfigDir, "ARENA.md");
+    /// <summary>
+    /// The person's home, where their skills for Code Arena and Claude Code are read too (~/.code-arena/skills,
+    /// ~/.claude/skills); null with CODE_ARENA_HOME, which keeps everything in its own folder.
+    /// </summary>
+    public string? Home { get; init; }
 
     /// <summary>
     /// CODE_ARENA_HOME holds both when set. Otherwise: %APPDATA% and %LOCALAPPDATA%
@@ -29,11 +34,11 @@ internal sealed class AppPaths(string configDir, string dataDir)
         {
             var roaming = env("APPDATA") is { Length: > 0 } a ? a : Path.Combine(user, "AppData", "Roaming");
             var local = env("LOCALAPPDATA") is { Length: > 0 } l ? l : Path.Combine(user, "AppData", "Local");
-            return new(Path.Combine(roaming, "code-arena"), Path.Combine(local, "code-arena"));
+            return new(Path.Combine(roaming, "code-arena"), Path.Combine(local, "code-arena")) { Home = user };
         }
         var config = env("XDG_CONFIG_HOME") is { Length: > 0 } c ? c : Path.Combine(user, ".config");
         var data = env("XDG_DATA_HOME") is { Length: > 0 } d ? d : Path.Combine(user, ".local", "share");
-        return new(Path.Combine(config, "code-arena"), Path.Combine(data, "code-arena"));
+        return new(Path.Combine(config, "code-arena"), Path.Combine(data, "code-arena")) { Home = user };
     }
 }
 

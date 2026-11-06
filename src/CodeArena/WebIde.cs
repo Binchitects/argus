@@ -444,6 +444,39 @@ internal sealed partial class WebApp
                 case ("POST", "/api/skills"):
                     await res.JsonAsync(200, await IdeSkills.CreateAsync(_rt, Body(req), ct), ct);
                     return true;
+                case ("GET", "/api/skills/export"):
+                {
+                    // Any skill the agent reads, as files: a .zip of their folders, or one alone as its SKILL.md.
+                    var skills = await SkillTransfer.NamedAsync(_rt, (Query(req, "names") ?? "").Split(','), ct);
+                    res.Headers["Cache-Control"] = "no-store";
+                    if (Query(req, "format") == "md")
+                    {
+                        if (skills is not [var one] || SkillTransfer.FolderOf(one).Count > 1)
+                        {
+                            throw new IdeError(400, "invalid", "Only one skill with no other files goes out as its SKILL.md: export it as a .zip.");
+                        }
+                        res.Headers["Content-Disposition"] = "attachment; filename=\"SKILL.md\"";
+                        await res.SendAsync(200, Encoding.UTF8.GetBytes(SkillTransfer.FolderOf(one)[SkillTransfer.SkillMd]), "text/markdown; charset=utf-8", ct);
+                        return true;
+                    }
+                    res.Headers["Content-Disposition"] = $"attachment; filename=\"{(skills is [var only] ? only.Name : "skills")}.zip\"";
+                    await res.SendAsync(200, SkillTransfer.Zip(skills), "application/zip", ct);
+                    return true;
+                }
+                case ("POST", "/api/skills/import/preview"):
+                {
+                    var body = Body(req);
+                    var (folders, leftOut) = SkillTransfer.Read(ImportUploads(body));
+                    await res.JsonAsync(200, await SkillTransfer.PreviewAsync(_rt, folders, leftOut, body.Str("scope") ?? "project", ct), ct);
+                    return true;
+                }
+                case ("POST", "/api/skills/import"):
+                {
+                    var body = Body(req);
+                    var (folders, _) = SkillTransfer.Read(ImportUploads(body));
+                    await res.JsonAsync(200, await SkillTransfer.ImportAsync(_rt, folders, body.Str("scope") ?? "project", body["choices"] as JsonArray ?? [], ct), ct);
+                    return true;
+                }
                 case ("GET", "/api/processes"):
                     await res.JsonAsync(200, await Task.Run(OwnProcesses.List, ct), ct);
                     return true;
@@ -627,6 +660,28 @@ internal sealed partial class WebApp
     private string? GitFile(HttpRequest req) => Query(req, "path") is { Length: > 0 } path ? _files.Resolve(path) : null;
 
     private static JsonObject Body(HttpRequest req) => req.Json() ?? throw new IdeError(400, "invalid", "Send a JSON object.");
+
+    /// <summary>The files an import sends: each its path (in the folder chosen) and its bytes in base64.</summary>
+    private static List<(string Path, byte[] Bytes)> ImportUploads(JsonObject body)
+    {
+        var list = new List<(string, byte[])>();
+        foreach (var u in body["uploads"] as JsonArray ?? [])
+        {
+            if (u.Str("path") is not { Length: > 0 } path || u.Str("data") is not { } data)
+            {
+                throw new IdeError(400, "invalid", "Each file of an import is { path, data } (its bytes in base64).");
+            }
+            try
+            {
+                list.Add((path, Convert.FromBase64String(data)));
+            }
+            catch (FormatException)
+            {
+                throw new IdeError(400, "invalid", $"{path}: its data is not base64.");
+            }
+        }
+        return list;
+    }
 
     /// <summary>
     /// A page attached to a terminal: first the output kept so far, then each

@@ -1,17 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronsDownUp, MessageSquarePlus, Plus, RotateCw, WandSparkles } from 'lucide-react'
+import { ChevronsDownUp, Download, MessageSquarePlus, MoreHorizontal, Plus, RotateCw, WandSparkles } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
 import { errorMessage } from '@/lib/api'
+import { saveBlob } from '@/lib/zip'
 import { cn } from '@/lib/utils'
+import { SkillImport } from '@/pages/skills-import'
 import { chatBridge } from './bridge'
 import { rowKeys, useChangeView } from './change-folds'
 import { FoldGroup } from './change-tree'
 import { useEditor } from './editor-state'
 import { PartHelp } from './help'
-import { createSkill, refreshSkills, skillsQuery, type SkillInfo } from './ide-api'
+import { createSkill, exportIdeSkills, importSkills, previewSkillImport, refreshSkills, skillsQuery, type SkillInfo, type SkillScope } from './ide-api'
 
 const action =
   'grid size-6 place-items-center rounded-sm text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 [&_svg]:size-3.5'
@@ -28,7 +31,8 @@ const whose: { source: SkillInfo['source']; title: string }[] = [
  * project: in Arena when signed in to it, or on this computer), Arena's others (made there, or a plugin's) and Code
  * Arena's own. The model loads one when a task needs it; /name in the chat uses one. A skill of the project's or yours
  * opens to be edited; any goes into the chat's box as /name. New Skill makes one from a few lines to fill in. Refresh asks
- * Arena at once for one made on its Skills page. Each group folds.
+ * Arena at once for one made on its Skills page. Each group folds. Each skill says the folder it was read from
+ * (.code-arena/skills, .claude/skills, ~/.claude/skills…); … exports them as a .zip of their folders and imports one.
  */
 export function SkillsPanel() {
   const queryClient = useQueryClient()
@@ -61,9 +65,17 @@ export function SkillsPanel() {
     onSuccess: (data) => queryClient.setQueryData(skillsQuery.queryKey, data),
     onError: (e) => toast.error(errorMessage(e)),
   })
+  const [importing, setImporting] = useState(false)
+  const [scope, setScope] = useState<SkillScope>('project')
+  const download = useMutation({
+    mutationFn: ({ names, format }: { names: string[]; format?: 'zip' | 'md' }) => exportIdeSkills(names, format),
+    onSuccess: ({ blob, fileName }) => saveBlob(blob, fileName),
+    onError: (e) => toast.error(errorMessage(e)),
+  })
   const reading = listed.isFetching || again.isPending
   const inArena = listed.data?.mineInArena ?? false
   const skills = listed.data?.skills ?? []
+  const mine = skills.filter((s) => s.source === 'project' || s.source === 'person')
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-9 shrink-0 items-center gap-1 pr-1.5 pl-3">
@@ -108,8 +120,60 @@ export function SkillsPanel() {
             <RotateCw className={cn(reading && 'animate-spin')} />
           </button>
         </Tooltip>
+        <DropdownMenu>
+          <Tooltip content="More Actions…">
+            <DropdownMenuTrigger asChild>
+              <button type="button" aria-label="More skill actions" className={action}>
+                <MoreHorizontal />
+              </button>
+            </DropdownMenuTrigger>
+          </Tooltip>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={() => setImporting(true)}>Import Skills…</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem disabled={mine.length === 0} onSelect={() => download.mutate({ names: mine.map((s) => s.name) })}>
+              Export the project’s and yours (.zip)
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled={skills.length === 0} onSelect={() => download.mutate({ names: skills.map((s) => s.name) })}>
+              Export all (.zip)
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <PartHelp part="skills" />
       </div>
+      <Dialog open={importing} onOpenChange={setImporting}>
+        <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-2xl">
+          {importing && (
+            <SkillImport
+              key={scope}
+              onClose={() => setImporting(false)}
+              look={(files) => previewSkillImport(files, scope)}
+              bring={(files, choices) => importSkills(files, scope, choices)}
+              done={() => queryClient.invalidateQueries({ queryKey: skillsQuery.queryKey })}
+              about="Every file is looked at for secrets first (by Arena's safeguards too, when signed in)."
+              intro={
+                <div role="radiogroup" aria-label="Where they go" className="grid gap-1.5 text-sm">
+                  {(['project', 'person'] as const).map((s) => (
+                    <label key={s} className="flex items-start gap-2">
+                      <input type="radio" name="skill-scope" className="mt-1 accent-primary" checked={scope === s} onChange={() => setScope(s)} />
+                      <span>
+                        {s === 'project' ? 'For this project' : inArena ? 'For you, in Arena' : 'For you, on this computer'}
+                        <span className="block text-xs text-muted-foreground">
+                          {s === 'project'
+                            ? 'In .arena/skills of the repository: commit them to share them.'
+                            : inArena
+                              ? 'Yours in Arena: the web chat and Code Arena everywhere use them.'
+                              : "In code-arena's config folder: yours, in every project on this computer."}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              }
+            />
+          )}
+        </DialogContent>
+      </Dialog>
       {making && (
         <form
           className="grid gap-1 px-3 pb-2"
@@ -165,13 +229,19 @@ export function SkillsPanel() {
                       data-row
                       onKeyDown={rowKeys}
                       onClick={() => (s.path ? void editor.open(s.path) : chatBridge.current?.use(s.name))}
-                      title={`/${s.name}: ${s.description}${s.path ? ` (${s.path.replace(/^user:/, '')})` : ''}`}
+                      title={`/${s.name}: ${s.description}${s.path ? ` (${s.path.replace(/^user:/, '')})` : s.origin && !['arena', 'builtin', 'config'].includes(s.origin) ? ` (${s.origin})` : ''}`}
                       className="flex h-full min-w-0 flex-1 items-center gap-1.5 pl-3 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset"
                     >
                       <span className="shrink-0 font-mono">/{s.name}</span>
                       <span className="min-w-0 truncate text-xs text-muted-foreground">{s.description}</span>
+                      {s.origin && !['arena', 'builtin', 'config', '.arena/skills'].includes(s.origin) && <span className="ms-auto shrink-0 pe-1 text-[0.6875rem] text-muted-foreground/80">{s.origin}</span>}
                     </button>
                     <span className="hidden shrink-0 items-center group-focus-within:flex group-hover:flex">
+                      <Tooltip content="Export (.zip of its folder)">
+                        <button type="button" aria-label={`Export /${s.name}`} onClick={() => download.mutate({ names: [s.name] })} className={action}>
+                          <Download />
+                        </button>
+                      </Tooltip>
                       <Tooltip content="Use in the chat (/name in its box)">
                         <button type="button" aria-label={`Use /${s.name} in the chat`} onClick={() => chatBridge.current?.use(s.name)} className={action}>
                           <MessageSquarePlus />

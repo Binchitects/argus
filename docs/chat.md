@@ -1867,7 +1867,7 @@ instructions) and the files beside it (references, templates, scripts).
 - The files come with the skill to the chat's model (`use_skill` lists them
   and reads one when the instructions point to it) and to Code Arena, which
   keeps them beside its `SKILL.md`. Code Arena exports and imports too
-  ([code-arena.md](code-arena.md#your-own-commands-sub-agents-and-skills)).
+  ([code-arena.md](code-arena.md#import-and-export-skills)).
 
 ## Scheduled tasks
 
