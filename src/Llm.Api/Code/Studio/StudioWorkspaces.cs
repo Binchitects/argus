@@ -53,7 +53,8 @@ public sealed class StudioException(int status, string message) : Exception(mess
 /// user, its agent with a key of its own at the gateway), put to sleep, and deleted with their files and their key.
 /// </summary>
 public sealed class StudioWorkspaces(AppDbContext db, IHttpClientFactory http, IOptionsMonitor<WorkspacesOptions> options, IOptions<AuthOptions> auth,
-    GitLabAsPerson gitlab, Gateway.ApiKeys keys, Models.KeyAccess keyAccess, Gateway.RateLimits rateLimits, Operations.Modules modules, TimeProvider clock)
+    GitLabAsPerson gitlab, Gateway.ApiKeys keys, Models.KeyAccess keyAccess, Gateway.RateLimits rateLimits, Operations.Modules modules, Operations.CompanyCa companyCa,
+    TimeProvider clock)
 {
     public const string Client = "workspaces";
 
@@ -141,6 +142,8 @@ public sealed class StudioWorkspaces(AppDbContext db, IHttpClientFactory http, I
             ["repo"] = $"{gitlab.BaseUrl}/{workspace.Project}.git", ["branch"] = workspace.Branch, ["git_user"] = login is { Length: > 0 } ? login : "oauth2", ["git_token"] = token,
             ["arena_url"] = o.ArenaUrl, ["api_key"] = SettingsCrypto.Decrypt(workspace.KeyCipher!, DataKey), ["gateway_url"] = o.ArenaUrl,
             ["mcp_url"] = o.ArenaUrl.TrimEnd('/') + "/mcp", ["argus_url"] = o.ArgusUrl,
+            // A GitLab on the company's own CA: the workspace's git, engine and terminals trust it too.
+            ["ca"] = companyCa.Pem(),
         };
         using var res = await Service().PutAsJsonAsync($"v1/workspaces/{workspace.Id:N}", spec, ct);
         var answer = await res.Content.ReadFromJsonAsync<JsonObject>(ct);

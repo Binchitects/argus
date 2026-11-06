@@ -750,15 +750,36 @@ An account GitLab checks against LDAP works too: Argus uses GitLab's LDAP
 sign-in when its own refuses the account (`GITLAB_LDAP` names one server, or
 `off`).
 
-A GitLab on a private CA: the CA must be trusted inside the Argus container
-(mount it and set `ARGUS_GITLAB_CA_CERT` in `docker-compose.override.yml`):
+### GitLab on a company CA
 
-```yaml
-services:
-  argus:
-    volumes: ["./config/argus/tls:/tls:ro"]
-    environment: { ARGUS_GITLAB_CA_CERT: /tls/company-ca.pem }
-```
+A GitLab whose certificate comes from the company's own CA (or is
+self-signed) is trusted once the stack is given that CA, in either of two
+ways, both kept:
+
+- **At install:** `GITLAB_CA_FILE` in `.env` (the installer asks for it under
+  GitLab, `./arenactl config` changes it): a PEM file with the CA's
+  certificate, or the issuing CA with its root. It is mounted read only into
+  the app. On Kubernetes, `gitlab.caCert` in the chart's values (the PEM).
+- **In Settings:** **Settings → Argus (GitLab) → GitLab's CA**, pasted. It
+  applies at once, without a restart; something that is not a certificate,
+  or holds a private key, is refused.
+
+Everything that reaches GitLab then trusts it besides the public CAs: a
+person signing in with GitLab or the company's provider, linking their
+GitLab token and apps (Fix it, Code Studio, scheduled tasks, knowledge
+sources), every other HTTP client the app makes without a check of its own,
+Argus's API client and its git clones (the app writes the CA to
+`company-ca.pem` beside the directory file, which Argus reads again whenever
+it changes: `ARGUS_GITLAB_CA_EXTRA`), and Code Studio's workspaces (their
+clone, `git push` in their terminals, curl, Python, pip, .NET and Node.js).
+A certificate must still be for GitLab's name and within its dates; one of
+another CA is still refused. Before the CA is given, linking a token says
+that GitLab's certificate is not trusted and where to add the CA, instead of
+a closed connection.
+
+`GITLAB_VERIFY_TLS=false` (accept any certificate) stays for testing only.
+Argus's own `ARGUS_GITLAB_CA_CERT` (a file mounted into Argus in
+`docker-compose.override.yml`) still works and is trusted too.
 
 ## Code Arena
 

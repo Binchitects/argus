@@ -76,7 +76,7 @@ public static class Mirror
             env["GIT_ASKPASS"] = AskpassProgram(Path.Combine(index.DataDir, ".askpass"), env);
             env[TokenEnv] = token;
         }
-        if (gitlab is not null) Tls.GitEnv(gitlab, env);
+        if (gitlab is not null) Tls.GitEnv(gitlab, env, Path.Combine(index.DataDir, ".tls"));
         return env;
     }
 

@@ -57,6 +57,10 @@ spec:
             - { name: Workspaces__Url, value: "http://workspaces:4000" }
             {{- include "arena.secretEnv" (list $ "Workspaces__Key" "WORKSPACES_KEY") | nindent 12 }}
             - { name: Argus__GitlabUrl, value: {{ .Values.gitlab.url | quote }} }
+            {{- if .Values.gitlab.caCert }}
+            # GitLab's CA when it is the company's own (gitlab.caCert), trusted by every client the app makes.
+            - { name: Tls__CompanyCaFile, value: /etc/arena/company-ca.pem }
+            {{- end }}
             # The browser agent's browser: none in the chart yet (compose's browser profile); the Browser tool says so.
             - { name: Browser__Url, value: {{ .Values.browser.url | quote }} }
             # Strict-Transport-Security's max-age on the app's answers (the Ingress controller sets its own on the rest).
@@ -88,6 +92,9 @@ spec:
             - { name: sandbox, mountPath: /sandbox }
             - { name: blender, mountPath: /blender }
             - { name: lean, mountPath: /lean }
+            {{- if .Values.gitlab.caCert }}
+            - { name: company-ca, mountPath: /etc/arena/company-ca.pem, subPath: company-ca.pem, readOnly: true }
+            {{- end }}
             {{- if and (not .Values.postgresql.enabled) .Values.externalDatabase.caSecret }}
             - { name: db-ca, mountPath: /db-ca, readOnly: true }
             {{- end }}
@@ -99,6 +106,9 @@ spec:
         {{- include "arena.claim" (list "vllm-status" "arena-vllm-status") | nindent 8 }}
         {{- include "arena.claim" (list "directory" "arena-directory") | nindent 8 }}
         {{- include "arena.claim" (list "audit" "arena-audit") | nindent 8 }}
+        {{- if .Values.gitlab.caCert }}
+        - { name: company-ca, configMap: { name: arena-company-ca } }
+        {{- end }}
         {{- include "arena.claim" (list "sandbox" "arena-sandbox") | nindent 8 }}
         {{- include "arena.claim" (list "blender" "arena-blender") | nindent 8 }}
         {{- include "arena.claim" (list "lean" "arena-lean") | nindent 8 }}

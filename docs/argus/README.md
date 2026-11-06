@@ -272,6 +272,7 @@ Three `.env` values point Argus at your GitLab:
 |---|---|
 | `ARGUS_GITLAB_URL` | which GitLab. **Overrides** `url:` in `config/argus/config.yaml`, which is a committed default naming a throwaway test instance |
 | `ARGUS_GITLAB_CA_CERT` | path to the CA that signed GitLab's certificate, **as the container sees it** |
+| `ARGUS_GITLAB_CA_EXTRA` | path to more CAs to trust for GitLab, read again whenever the file changes: in the stack, the company CA the app writes from `GITLAB_CA_FILE` and Settings. Missing or empty: none |
 | `ARGUS_GITLAB_VERIFY` | `false` to skip verification entirely. Last resort |
 
 `ARGUS_GITLAB_CA_CERT` and `ARGUS_GITLAB_VERIFY` both apply to the API **and** to

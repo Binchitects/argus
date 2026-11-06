@@ -19,11 +19,55 @@ public sealed record HttpResult(int Status, string Text)
 /// TLS policy for reaching GitLab: one setting drives both the
 /// API client and the git subprocess, because a call site that forgets is a
 /// call site that fails in the field.
+///
+/// The CAs trusted besides the public roots are gitlab.ca_cert (ARGUS_GITLAB_CA_CERT,
+/// read at start) and the stack's company CA (ARGUS_GITLAB_CA_EXTRA: the file the app
+/// writes from its install file and Settings), read again whenever that file changes,
+/// so a CA an admin adds reaches every client and clone without a restart.
 /// </summary>
 public static class Tls
 {
     /// <summary>Tests replace this to serve GitLab from memory.</summary>
     public static Func<GitLabConfig, HttpMessageHandler>? HandlerOverride { get; set; }
+
+    public const string ExtraCaEnv = "ARGUS_GITLAB_CA_EXTRA";
+
+    static readonly object Gate = new();
+    static (string Key, X509Certificate2Collection Cas) _read = ("", []);
+
+    /// <summary>The CAs trusted for GitLab besides the public roots: none when nothing is given or nothing reads.</summary>
+    public static X509Certificate2Collection Cas(GitLabConfig cfg)
+    {
+        var files = new[] { cfg.CaCert, Environment.GetEnvironmentVariable(ExtraCaEnv) ?? "" }.Where(f => f.Length > 0 && File.Exists(f)).ToList();
+        var key = string.Join("|", files.Select(f => $"{f}:{File.GetLastWriteTimeUtc(f).Ticks}:{new FileInfo(f).Length}"));
+        lock (Gate)
+        {
+            if (key == _read.Key) return _read.Cas;
+            var cas = new X509Certificate2Collection();
+            foreach (var file in files)
+            {
+                try { cas.ImportFromPem(File.ReadAllText(file)); }
+                catch (System.Security.Cryptography.CryptographicException exc)
+                {
+                    Console.Error.WriteLine($"argus: the CA file {file} does not read as PEM ({exc.Message}); it is not trusted.");
+                }
+            }
+            _read = (key, cas);
+            return cas;
+        }
+    }
+
+    /// <summary>Whether a certificate the system did not trust leads to one of the CAs given (its name and dates must still be right).</summary>
+    public static bool TrustedBy(X509Certificate2Collection cas, X509Certificate? cert, SslPolicyErrors errors)
+    {
+        if (errors == SslPolicyErrors.None) return true;
+        if (cas.Count == 0 || cert is null || (errors & ~SslPolicyErrors.RemoteCertificateChainErrors) != 0) return false;
+        using var chain = new X509Chain();
+        chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+        chain.ChainPolicy.CustomTrustStore.AddRange(cas);
+        chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+        return chain.Build(cert as X509Certificate2 ?? X509CertificateLoader.LoadCertificate(cert.GetRawCertData()));
+    }
 
     public static HttpMessageHandler HandlerFor(GitLabConfig cfg, CookieContainer? cookies = null)
     {
@@ -35,22 +79,12 @@ public static class Tls
         {
             handler.ServerCertificateCustomValidationCallback = static (_, _, _, _) => true;
         }
-        else if (!string.IsNullOrEmpty(cfg.CaCert))
+        else
         {
-            // Public roots stay trusted and the private CA is added on top, so a
-            // certificate that verified before still does.
-            var extra = new X509Certificate2Collection();
-            extra.ImportFromPemFile(cfg.CaCert);
-            handler.ServerCertificateCustomValidationCallback = (_, cert, _, errors) =>
-            {
-                if (errors == SslPolicyErrors.None) return true;
-                if (cert is null || (errors & ~SslPolicyErrors.RemoteCertificateChainErrors) != 0) return false;
-                using var chain = new X509Chain();
-                chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
-                chain.ChainPolicy.CustomTrustStore.AddRange(extra);
-                chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-                return chain.Build(cert);
-            };
+            // Public roots stay trusted and the private CAs are added on top, so a
+            // certificate that verified before still does. Read at each check: a long-lived
+            // client sees a CA added since it was made.
+            handler.ServerCertificateCustomValidationCallback = (_, cert, _, errors) => TrustedBy(Cas(cfg), cert, errors);
         }
         return handler;
     }
@@ -58,11 +92,27 @@ public static class Tls
     public static HttpClient ClientFor(GitLabConfig cfg, double timeoutSeconds, CookieContainer? cookies = null) =>
         new(HandlerFor(cfg, cookies), disposeHandler: true) { Timeout = TimeSpan.FromSeconds(timeoutSeconds) };
 
+    /// <summary>The bundle git checks GitLab against: the system's CAs and those given, in one file (git takes one).</summary>
+    public static string BundleFor(GitLabConfig cfg, string dir)
+    {
+        var cas = Cas(cfg);
+        var text = new System.Text.StringBuilder();
+        foreach (var system in new[] { "/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt", "/etc/ssl/cert.pem" })
+            if (File.Exists(system)) { text.Append(File.ReadAllText(system).TrimEnd()).Append('\n'); break; }
+        foreach (var ca in cas) text.Append(ca.ExportCertificatePem()).Append('\n');
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "gitlab-ca-bundle.pem");
+        var tmp = path + ".tmp";
+        File.WriteAllText(tmp, text.ToString());
+        File.Move(tmp, path, overwrite: true);
+        return path;
+    }
+
     /// <summary>Apply the same policy to a git subprocess's environment.</summary>
-    public static IDictionary<string, string?> GitEnv(GitLabConfig cfg, IDictionary<string, string?> env)
+    public static IDictionary<string, string?> GitEnv(GitLabConfig cfg, IDictionary<string, string?> env, string? bundleDir = null)
     {
         if (!cfg.Verify) env["GIT_SSL_NO_VERIFY"] = "true";
-        else if (!string.IsNullOrEmpty(cfg.CaCert)) env["GIT_SSL_CAINFO"] = cfg.CaCert;
+        else if (Cas(cfg).Count > 0) env["GIT_SSL_CAINFO"] = BundleFor(cfg, bundleDir ?? Path.Combine(Path.GetTempPath(), "argus-tls"));
         return env;
     }
 

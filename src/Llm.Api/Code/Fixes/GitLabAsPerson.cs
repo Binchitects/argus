@@ -48,6 +48,11 @@ public sealed class GitLabAsPerson(IHttpClientFactory http, AppDbContext db, IOp
         {
             return await http.CreateClient(Schedules.GitLabBot.Client).SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
         }
+        catch (HttpRequestException ex) when (ex.InnerException is System.Security.Authentication.AuthenticationException)
+        {
+            // A company CA the stack is not given yet: said as what to do, not as a closed connection.
+            throw new GitLabException($"GitLab's certificate is not trusted here ({baseUrl}). If it comes from your company's own CA, an admin adds that CA under Settings → Argus (GitLab) → GitLab's CA, or GITLAB_CA_FILE at install.");
+        }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
         {
             throw new GitLabException($"GitLab could not be reached: {ex.Message}");

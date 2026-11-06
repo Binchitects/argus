@@ -601,7 +601,7 @@ The safeguards find e-mail addresses, phone, card, IBAN and social security numb
 
 ### NET-01: Encrypted in transit, one way in
 
-Only Traefik's ports 80 and 443 are published, 80 only to redirect; TLS 1.2 and 1.3 only, and for 1.2 only ciphers with forward secrecy and authenticated encryption; HSTS for a year with a trusted certificate (HSTS_SECONDS); the services talk on Docker's network; every page carries a strict content security policy and the security headers; a state change needs a header another site cannot send; hosts without a rule are refused; the API host goes by the app alone, which passes on only the model API's own paths, so the model gateway's management and pages are not reachable from outside.
+Only Traefik's ports 80 and 443 are published, 80 only to redirect; TLS 1.2 and 1.3 only, and for 1.2 only ciphers with forward secrecy and authenticated encryption; HSTS for a year with a trusted certificate (HSTS_SECONDS); the services talk on Docker's network; every page carries a strict content security policy and the security headers; a state change needs a header another site cannot send; hosts without a rule are refused; the API host goes by the app alone, which passes on only the model API's own paths, so the model gateway's management and pages are not reachable from outside. Outbound, GitLab's certificate is checked against the public CAs and the company CA the stack is given (at install or in Settings), by the app, Argus and the workspaces alike: never turned off to reach a GitLab on a company CA.
 
 **Serves**
 
@@ -616,7 +616,7 @@ Only Traefik's ports 80 and 443 are published, 80 only to redirect; TLS 1.2 and 
 - [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.13.01 Boundary Protection; 03.13.08 Transmission and Storage Confidentiality
 - [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): FTP_ITC Inter-TSF trusted channel; FTP_TRP Trusted path; FCS_COP Cryptographic operation
 
-**Documented in** [authentication.md#what-is-deliberately-not-behind-sign-in](../authentication.md#what-is-deliberately-not-behind-sign-in), [deployment.md#certificates](../deployment.md#certificates)
+**Documented in** [authentication.md#what-is-deliberately-not-behind-sign-in](../authentication.md#what-is-deliberately-not-behind-sign-in), [deployment.md#certificates](../deployment.md#certificates), [deployment.md#gitlab-on-a-company-ca](../deployment.md#gitlab-on-a-company-ca)
 
 **Proved by**
 
@@ -626,6 +626,8 @@ Only Traefik's ports 80 and 443 are published, 80 only to redirect; TLS 1.2 and 
 - `Llm.Tests/FileSealingTests.With_HSTS_set_the_app_sends_it_as_Traefik_does_and_without_it_clears_any_kept_before`
 - `Llm.Tests/ApiPassageTests.The_model_list_and_embeddings_are_passed_on_with_the_callers_own_key`
 - `Llm.Tests/ApiPassageTests.The_gateways_own_management_is_not_found_from_outside`
+- `Llm.Tests/CompanyCaTests.A_person_links_their_GitLab_token_once_the_company_CA_is_given_in_Settings_and_Argus_gets_it_too`
+- `Argus.Tests/CompanyCaTests.GitLab_on_a_company_CA_is_reached_once_the_stack_is_given_the_CA_and_without_a_restart`
 
 **Watched by** `live:tls`, `live:headers`, `live:csrf` (Admin → Compliance, and `./arenactl check compliance`)
 

@@ -39,6 +39,7 @@ GITLAB_URL           | GitLab        | url     | -             | The GitLab Argu
 GITLAB_TOKEN         | GitLab        | secret  | -             | Its read-only token (read_api and read_repository)
 GITLAB_LDAP          | GitLab        | text    | -             | An LDAP account for Argus's own sign-in: a provider's name, or off
 GITLAB_VERIFY_TLS    | GitLab        | choice:true/false | true | Check GitLab's certificate (false: testing only)
+GITLAB_CA_FILE       | GitLab        | path    | -             | GitLab's CA when it is your company's own (or GitLab's self-signed certificate): a PEM file, trusted by the app, Argus and the workspaces
 GITHUB_API_URL       | GitLab        | text    | -             | Reviews of GitHub pull requests: empty is github.com, an Enterprise API, or off
 GITEA_URL            | GitLab        | url     | -             | Reviews of Gitea pull requests: your Gitea
 BACKUP_DIR           | Backups       | path    | ./backups     | Where backups go

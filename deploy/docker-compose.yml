@@ -101,6 +101,8 @@ services:
       Workspaces__Url: http://workspaces:4000
       Workspaces__Key: ${WORKSPACES_KEY:-}
       Argus__GitlabUrl: ${GITLAB_URL:-}
+      # GitLab's CA when it is the company's own (GITLAB_CA_FILE), trusted by every client the app makes; Settings can add one.
+      Tls__CompanyCaFile: ${GITLAB_CA_FILE:+/etc/arena/company-ca.pem}
       # The browser agent's browser (COMPOSE_PROFILES=browser); without it the Browser tool says it is not running.
       Browser__Url: ${BROWSER_URL:-http://browser:9222}
       HuggingFace__Token: ${HF_TOKEN:-}
@@ -124,6 +126,8 @@ services:
       - lean:/lean
       # The audit log's daily anchors, kept apart from the database (docs/compliance).
       - audit:/audit
+      # GitLab's CA (GITLAB_CA_FILE), read only; none given: an empty file.
+      - ${GITLAB_CA_FILE:-/dev/null}:/etc/arena/company-ca.pem:ro
       # The Code Arena builds' signature, made on the host with the CA's key (scripts/sign-code-arena.sh).
       - code-arena-signature:/downloads-signature:ro
       # scripts/backup.sh's backups, for Admin -> Storage: their sizes and how each ended.
@@ -326,6 +330,8 @@ services:
       ARGUS_GITLAB_PASSWORD: ${GITLAB_PASSWORD:-}
       ARGUS_GITLAB_LDAP: ${GITLAB_LDAP:-}
       ARGUS_GITLAB_VERIFY: ${GITLAB_VERIFY_TLS:-true}
+      # The company CA the app trusts (GITLAB_CA_FILE and Settings), written for Argus beside the directory, read again as it changes.
+      ARGUS_GITLAB_CA_EXTRA: /directory/company-ca.pem
       # Pull requests on GitHub (or GitHub Enterprise's API, or off) and Gitea, read with each person's own token.
       ARGUS_GITHUB_API: ${GITHUB_API_URL:-}
       ARGUS_GITEA_URL: ${GITEA_URL:-}

@@ -57,3 +57,15 @@ data:
   rules-{{ base $path }}: |-
 {{ $.Files.Get $path | indent 4 }}
 {{- end }}
+{{- if .Values.gitlab.caCert }}
+---
+# GitLab's CA when it is the company's own (gitlab.caCert): the app reads it, and writes it for Argus.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: arena-company-ca
+  labels: {{- include "arena.labels" . | nindent 4 }}
+data:
+  company-ca.pem: |-
+{{ .Values.gitlab.caCert | indent 4 }}
+{{- end }}
