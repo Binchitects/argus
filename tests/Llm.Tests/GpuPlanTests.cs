@@ -65,6 +65,19 @@ public sealed class GpuPlanTests : IDisposable
         Assert.All(Enumerable.Range(0, gpus), i => Assert.Equal(new HardwareProbe.GpuLoad(i / 10.0, i == 0 ? null : i * GiB), loads[i]));
     }
 
+    [Fact]
+    public void Without_the_nvidia_smi_exporter_each_gpus_load_is_read_from_dcgm_by_its_gpu_label()
+    {
+        // DCGM (a cluster's exporter, or the dcgm profile): busy in percent, memory in MiB, each GPU by its gpu label.
+        static Dictionary<string, string> Gpu(int i) => new(StringComparer.Ordinal) { ["gpu"] = $"{i}", ["UUID"] = $"GPU-{i}", ["Hostname"] = "node-a" };
+        var loads = HardwareProbe.DcgmLoads([(Gpu(1), 75), (Gpu(0), 5), (Gpu(2), 140)], [(Gpu(0), 2048), (Gpu(1), 0)]);
+        Assert.Equal(new Dictionary<int, HardwareProbe.GpuLoad>
+        {
+            [0] = new(0.05, 2048L << 20), [1] = new(0.75, 0), [2] = new(1, null),
+        }, loads);
+        Assert.Empty(HardwareProbe.DcgmLoads([(new Dictionary<string, string>(StringComparer.Ordinal), 50)], []));
+    }
+
     /// <summary>A vLLM group on these GPUs at this share of each.</summary>
     private static Resident Vllm(string name, Hardware hw, double share, params int[] gpus) => GpuPlan.Share(name, hw, gpus, share);
 

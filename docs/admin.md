@@ -313,7 +313,8 @@ Loading and unloading is an API call, not a restart. The page opens with **the
 engine**: how many it holds, which are kept loaded, and for each GPU what it
 holds (every engine model placed there, loaded or not, with its share of the
 GPU; the picture and video servers; the embedder), how busy it is and the
-memory in use now (from the NVIDIA exporter, else the hardware file), and how
+memory in use now (from the NVIDIA exporter, else NVIDIA's DCGM exporter, as on
+Kubernetes, else the hardware file), and how
 full the models kept loaded would make it.
 
 - **Keep loaded** (a switch on each engine model) pins a model: it loads now,

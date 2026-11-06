@@ -36,8 +36,8 @@ public sealed class HardwareProbe(IHttpClientFactory http, IOptions<StackOptions
     public void Dispose() => _gate.Dispose();
 
     /// <summary>
-    /// What each GPU is doing now, by its index: how busy it is and the memory in use, from the NVIDIA exporter (read again
-    /// after 5 seconds); else the memory in use the hardware file says (any vendor). Empty when neither says.
+    /// What each GPU is doing now, by its index: how busy it is and the memory in use, from the NVIDIA exporter, else from
+    /// DCGM's (read again after 5 seconds); else the memory in use the hardware file says (any vendor). Empty when none says.
     /// </summary>
     public async Task<IReadOnlyDictionary<int, GpuLoad>> LoadAsync(CancellationToken ct = default)
     {
@@ -49,6 +49,11 @@ public sealed class HardwareProbe(IHttpClientFactory http, IOptions<StackOptions
         try
         {
             value = Loads(await QueryAsync("nvidia_smi_index", ct), await QueryAsync("nvidia_smi_utilization_gpu_ratio", ct), await QueryAsync("nvidia_smi_memory_used_bytes", ct));
+            if (value.Count == 0)
+            {
+                // No nvidia_smi exporter (Kubernetes uses the cluster's DCGM exporter): DCGM's.
+                value = DcgmLoads(await QueryAsync("DCGM_FI_DEV_GPU_UTIL", ct), await QueryAsync("DCGM_FI_DEV_FB_USED", ct));
+            }
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or KeyNotFoundException or InvalidOperationException)
         {
@@ -74,6 +79,21 @@ public sealed class HardwareProbe(IHttpClientFactory http, IOptions<StackOptions
         return ByUuid(index).GroupBy(x => (int)x.Value).ToDictionary(g => g.Key, g => g.First().Key is var uuid
             ? new GpuLoad(busyOf.TryGetValue(uuid, out var b) ? Math.Clamp(b, 0, 1) : null, usedOf.TryGetValue(uuid, out var u) ? (long)u : null)
             : new GpuLoad(null, null));
+    }
+
+    /// <summary>
+    /// NVIDIA's DCGM exporter's rows as each GPU's load, by its index (the gpu label; a row without one is left out): how
+    /// busy in percent (DCGM_FI_DEV_GPU_UTIL), the memory in use in MiB (DCGM_FI_DEV_FB_USED).
+    /// </summary>
+    public static Dictionary<int, GpuLoad> DcgmLoads(IReadOnlyList<(Dictionary<string, string> Labels, double Value)> busy, IReadOnlyList<(Dictionary<string, string> Labels, double Value)> used)
+    {
+        static Dictionary<int, double> ByGpu(IReadOnlyList<(Dictionary<string, string> Labels, double Value)> rows) =>
+            rows.Select(r => (Gpu: int.TryParse(r.Labels.GetValueOrDefault("gpu"), NumberStyles.None, CultureInfo.InvariantCulture, out var g) ? g : -1, r.Value))
+                .Where(r => r.Gpu >= 0).GroupBy(r => r.Gpu).ToDictionary(g => g.Key, g => g.First().Value);
+        var busyOf = ByGpu(busy);
+        var usedOf = ByGpu(used);
+        return busyOf.Keys.Union(usedOf.Keys).ToDictionary(g => g, g => new GpuLoad(
+            busyOf.TryGetValue(g, out var b) ? Math.Clamp(b / 100, 0, 1) : null, usedOf.TryGetValue(g, out var u) ? (long)u << 20 : null));
     }
 
     public async Task<Hardware?> GetAsync(CancellationToken ct = default) => WithReserves(await ReadCachedAsync(ct), engine.Value, PictureGpu());
