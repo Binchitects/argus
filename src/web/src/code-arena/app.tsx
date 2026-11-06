@@ -65,7 +65,7 @@ import { ExtensionsView } from './extensions-view'
 import { appendElement } from './jsonc'
 import { Splitter } from './splitter'
 import { bounds, inPanel, layoutOf, panelParts, reorderPanel, reorderSide, resetLocations, sideViews, toPanel, toSide, type Layout, type PanelTab, type View } from './workbench-layout'
-import { useNotices } from './sync'
+import { useArenaSettings, useNotices } from './sync'
 import { About, StatusBar } from './status-bar'
 import { languageServers } from './lsp/servers'
 import { OutputPanel } from './lsp/output'
@@ -112,6 +112,8 @@ export function App() {
   }, [state.data])
   // What code-arena said while nothing ran (the sync's trouble, the web's news taken in): shown as it comes.
   useNotices(state.data)
+  // A change made in Arena (a model, the thinking default, the tools, the skills) shows without a reload.
+  useArenaSettings()
 
   // Gone only before anything loaded: once the workbench is there, it stays (with what is not saved in it) and says what is wrong.
   if ((state.error && !state.data) || (config.error && !config.data)) return <Gone error={state.error ?? config.error} />

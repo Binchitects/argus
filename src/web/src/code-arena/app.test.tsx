@@ -153,6 +153,48 @@ describe('Code Arena in the browser', () => {
     expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
   })
 
+  it('reads its config again as soon as code-arena says settings from Arena changed, with no reload', async () => {
+    let change!: () => void
+    const changed = new Promise<void>((r) => (change = r))
+    let asked = 0
+    const { calls } = backend({
+      extra: {
+        'GET /api/settings/changed': (_body, _init, url) => (url.searchParams.get('after') === '-1' ? { json: { version: 0 } } : asked++ === 0 ? { json: { version: 1 }, until: changed } : { hang: true, events: [] }),
+      },
+    })
+    renderCode()
+    expect(await screen.findByRole('heading', { name: 'What should we work on?' })).toBeInTheDocument()
+    const reads = () => calls.filter((c) => c.method === 'GET' && c.path === '/api/chat/config').length
+    const before = reads()
+    change()
+    await waitFor(() => expect(reads()).toBeGreaterThan(before))
+  })
+
+  it('skips the thinking of the answer running: asked of code-arena, and the button says the answer comes now', async () => {
+    let end!: () => void
+    const over = new Promise<void>((r) => (end = r))
+    const { calls } = backend({
+      extra: {
+        'POST /api/messages': () => ({
+          events: [
+            { type: 'question', id: 'm0', parentId: null },
+            { type: 'assistant', id: 'm1', parentId: 'm0', model: 'model-a' },
+            { type: 'reasoning', text: 'Weighing it once more.' },
+          ],
+          until: over,
+        }),
+        'POST /api/skip-thinking': () => ({ status: 204 }),
+      },
+    })
+    renderCode()
+    await ask('Think it through')
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Skip thinking' }))
+    expect(calls.some((c) => c.method === 'POST' && c.path === '/api/skip-thinking')).toBe(true)
+    expect(screen.getByRole('button', { name: 'Answering now…' })).toBeDisabled()
+    end()
+  })
+
   it('asks before a tool runs, as Arena does: Allow, Always for this session or Deny; and Stop stops the turn', async () => {
     let end!: () => void
     const over = new Promise<void>((r) => (end = r))
@@ -526,7 +568,7 @@ describe('Code Arena in the browser', () => {
     now.session = { ...opened, messages: [...opened.messages, msg('m2', 'user', { content: 'asked on the web' }), msg('m3', 'assistant', { content: 'answered on the web', model: 'model-a' })] }
     now.state = { ...now.state, synced: 1 }
     expect(await screen.findByText('answered on the web', {}, { timeout: 8000 })).toBeInTheDocument()
-    expect(calls.filter((c) => c.path === '/api/session').length).toBeGreaterThan(1)
+    expect(calls.filter((c) => c.path.startsWith('/api/session?')).length).toBeGreaterThan(1)
   }, 15_000)
 
   it('shows where the sync with Arena stands, what was said while nothing ran, and the sessions Arena lacks', async () => {
@@ -909,21 +951,31 @@ describe('Code Arena in the browser', () => {
     expect(within(parts).queryByText('Your messages')).not.toBeInTheDocument()
   })
 
-  it("draws a long session's last turns, and the earlier ones when asked for", async () => {
+  it("reads a long session's last turns, and the earlier ones when asked for", async () => {
     const long: Message[] = Array.from({ length: 35 }, (_, i) => [
       msg(`m${2 * i}`, 'user', { content: `Question ${i + 1}` }),
       msg(`m${2 * i + 1}`, 'assistant', { content: `Answer ${i + 1}.`, model: 'model-a' }),
     ]).flat()
-    backend({ session: { id: 's2', messages: long, diffs: {}, busy: false } })
+    // code-arena gives the last turns asked for, and how many came before them.
+    const { calls } = backend({
+      extra: {
+        'GET /api/session': (_body, _init, url) => {
+          const turns = Number(url.searchParams.get('turns'))
+          return { json: { id: 's2', messages: long.slice(Math.max(0, long.length - 2 * turns)), earlier: Math.max(0, 35 - turns), diffs: {}, busy: false } }
+        },
+      },
+    })
     renderCode()
     expect(await screen.findByText('Answer 35.')).toBeInTheDocument()
+    expect(calls.find((c) => c.path.startsWith('/api/session?'))?.path).toBe('/api/session?turns=30')
     expect(screen.getAllByRole('region', { name: 'You' })).toHaveLength(30)
     expect(screen.queryByText('Answer 5.')).not.toBeInTheDocument()
     expect(screen.getByText('Answer 6.')).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: 'Show earlier (5 more turns)' }))
+    expect(await screen.findByText('Answer 1.')).toBeInTheDocument()
     expect(screen.getAllByRole('region', { name: 'You' })).toHaveLength(35)
-    expect(screen.getByText('Answer 1.')).toBeInTheDocument()
+    expect(calls.filter((c) => c.path.startsWith('/api/session?')).at(-1)?.path).toBe('/api/session?turns=60')
     expect(screen.queryByRole('button', { name: /Show earlier/ })).not.toBeInTheDocument()
   })
 
@@ -969,7 +1021,7 @@ describe('Code Arena in the browser', () => {
     end()
     // Over, and the session read back: its answer is the saved one, with the model under it.
     await waitFor(() => expect(within(screen.getAllByRole('region', { name: 'Answer' }).at(-1)!).getByText('model-a')).toBeInTheDocument())
-    expect(calls.filter((c) => c.path === '/api/session').length).toBeGreaterThan(1)
+    expect(calls.filter((c) => c.path.startsWith('/api/session?')).length).toBeGreaterThan(1)
     expect(earlierCards()).toBe(atFirst)
   })
 
@@ -985,7 +1037,7 @@ describe('Code Arena in the browser', () => {
     const listed = () => calls.filter((c) => c.method === 'GET' && c.path === '/api/sessions').length
     const before = listed()
     await ask('And the tests?')
-    await waitFor(() => expect(calls.filter((c) => c.path === '/api/session').length).toBeGreaterThan(1))
+    await waitFor(() => expect(calls.filter((c) => c.path.startsWith('/api/session?')).length).toBeGreaterThan(1))
     await screen.findByRole('button', { name: 'Send' })
     expect(listed()).toBe(before)
     // Only moved to the top, as changed now.

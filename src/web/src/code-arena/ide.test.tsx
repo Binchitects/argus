@@ -2792,7 +2792,7 @@ describe('Code Arena, the IDE', () => {
 
     await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), 'Hello{Enter}')
     // Over: the saved session is read again, and the changes; the search is not.
-    await waitFor(() => expect(calls.filter((c) => c.path === '/api/session').length).toBeGreaterThan(1))
+    await waitFor(() => expect(calls.filter((c) => c.path.startsWith('/api/session?')).length).toBeGreaterThan(1))
     await waitFor(() => expect(calls.filter((c) => c.path === '/api/changes').length).toBeGreaterThan(1))
     await screen.findByRole('button', { name: 'Send' })
     expect(searches()).toBe(before)

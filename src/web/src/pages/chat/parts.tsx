@@ -33,9 +33,10 @@ const isModel = (fileName: string) => /\.glb$/i.test(fileName)
 
 /**
  * The model's thinking: open and ticking while it thinks, folded to "Thought for 12 s"
- * after. `onHurry`: "Answer now", to stop the thinking and have the answer at once.
+ * after. `onHurry`: "Answer now", to stop the thinking and have the answer at once
+ * (`hurryLabel`: its words, Code Arena's "Skip thinking").
  */
-export function Thinking({ text, live, ms, since, onHurry, hurried }: { text: string; live: boolean; ms: number | null; since: number | null; onHurry?: () => void; hurried?: boolean }) {
+export function Thinking({ text, live, ms, since, onHurry, hurried, hurryLabel = 'Answer now' }: { text: string; live: boolean; ms: number | null; since: number | null; onHurry?: () => void; hurried?: boolean; hurryLabel?: string }) {
   // Open while it thinks and folded after, unless the person chose otherwise.
   const [chosen, setOpen] = useState<boolean | null>(null)
   const open = chosen ?? live
@@ -66,7 +67,7 @@ export function Thinking({ text, live, ms, since, onHurry, hurried }: { text: st
               onHurry()
             }}
           >
-            <Zap className="size-3.5" aria-hidden="true" /> {asked ? 'Answering now…' : 'Answer now'}
+            <Zap className="size-3.5" aria-hidden="true" /> {asked ? 'Answering now…' : hurryLabel}
           </Button>
         )}
       </div>
@@ -267,7 +268,8 @@ export const ToolCard = memo(function ToolCard({
             {result && !(delegate && work?.length) && (
               <div>
                 <p className="mb-1 text-xs font-medium text-muted-foreground">{failed ? 'The tool said' : 'Result'}</p>
-                <div className="max-h-[32rem] overflow-y-auto text-sm [&_.md]:text-sm">
+                {/* Relative: what is absolute in it (a link's screen-reader words) stays in the box, not past its end. */}
+                <div className="relative max-h-[32rem] overflow-y-auto text-sm [&_.md]:text-sm">
                   <ToolOutput text={result.content} value={value} args={argsOf(call.function.arguments)} failed={failed} />
                 </div>
               </div>

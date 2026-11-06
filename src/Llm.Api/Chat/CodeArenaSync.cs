@@ -12,6 +12,7 @@ using Llm.Core.Chat;
 using Llm.Core.Data;
 using Llm.Core.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using Npgsql;
 
@@ -116,6 +117,7 @@ public static class CodeArenaSync
         g.MapGet("/preferences", PreferencesAsync);
         g.MapGet("/config", ConfigAsync);
         g.MapGet("/skills", SkillsAsync);
+        g.MapGet("/settings", SettingsAsync);
         g.MapPost("/skills", MakeSkillAsync);
         g.MapPut("/skills/{name}", ChangeSkillAsync);
         g.MapGet("/security", SecurityAsync);
@@ -210,20 +212,55 @@ public static class CodeArenaSync
         {
             return refusal!;
         }
-        var usable = (await registry.ForAsync(await access.MembershipAsync(me, http.RequestAborted), http.RequestAborted)).Select(t => t.Tool.Id).ToHashSet();
-        var skills = await Plugins.PluginContent.SkillsAsync(db, usable, http.RequestAborted);
+        return Results.Ok(await SkillsForAsync(me, registry, access, db, http.RequestAborted));
+    }
+
+    private static async Task<object> SkillsForAsync(AppUser me, ToolRegistry registry, AccessService access, AppDbContext db, CancellationToken ct)
+    {
+        var usable = (await registry.ForAsync(await access.MembershipAsync(me, ct), ct)).Select(t => t.Tool.Id).ToHashSet();
+        var skills = await Plugins.PluginContent.SkillsAsync(db, usable, ct);
         // The skills made in Arena that the person may use (theirs, their groups', the company's), before the plugins' of the
         // same name: Code Arena has them as the web chat does.
-        var made = (await SkillEndpoints.UsableAsync(me, access, db, http.RequestAborted)).Where(s => !s.BuiltIn && s.ServerId is null)
+        var made = (await SkillEndpoints.UsableAsync(me, access, db, ct)).Where(s => !s.BuiltIn && s.ServerId is null)
             .GroupBy(s => s.Name, StringComparer.Ordinal).Select(g => g.First()).ToList();
         var taken = made.Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
-        return Results.Ok(new
+        return new
         {
             skills = made.Select(s => (object)Brought(s, me)).Concat(skills.Where(s => !taken.Contains(s.Skill.Name)).Select(s => (object)new { s.Skill.Name, s.Skill.Description, s.Plugin, s.Version, files = s.Skill.Files })),
             // Arena's own skills an admin turned off: Code Arena leaves them out too.
-            off = await db.Skills.AsNoTracking().Where(s => s.BuiltIn && s.Off).Select(s => s.Name).ToListAsync(http.RequestAborted),
-        });
+            off = await db.Skills.AsNoTracking().Where(s => s.BuiltIn && s.Off).Select(s => s.Name).ToListAsync(ct),
+        };
     }
+
+    /// <summary>
+    /// One word for all Code Arena takes from Arena's settings for the person: their chat config (the models and what each
+    /// can do, the tools, the thinking levels, when chats compact) and their skills. A running Code Arena asks for it every
+    /// few seconds and reads the rest again when it changed, so a change made in Arena applies there without a restart.
+    /// Worked out at most once in <see cref="SettingsFor"/> per person, however many of their Code Arenas ask.
+    /// </summary>
+    private static async Task<IResult> SettingsAsync(HttpContext http, McpPeople people, ToolRegistry registry, AccessService access, ModelPolicy policy,
+        IOptions<ArgusOptions> argusOptions, ArgusMcp argus, ChatModels models, SmallModel small, IOptionsMonitor<ChatOptions> chat, Models.ToolModeBook toolModes,
+        AppDbContext db, IMemoryCache cache)
+    {
+        var (me, refusal) = await CallerAsync(http, people);
+        if (me is null)
+        {
+            return refusal!;
+        }
+        var ct = http.RequestAborted;
+        var stamp = await cache.GetOrCreateAsync(("code-arena-settings", me.Id), async entry =>
+        {
+            entry.AbsoluteExpirationRelativeToNow = SettingsFor;
+            var config = await ChatEndpoints.ConfigForAsync(me, registry, access, policy, argusOptions, argus, models, small, chat, toolModes, ct);
+            var skills = await SkillsForAsync(me, registry, access, db, ct);
+            var said = JsonSerializer.SerializeToUtf8Bytes(new { config, skills }, JsonSerializerOptions.Web);
+            return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(said))[..16];
+        });
+        return Results.Ok(new { stamp });
+    }
+
+    /// <summary>How long one person's settings stamp is kept before it is worked out again.</summary>
+    public static TimeSpan SettingsFor { get; set; } = TimeSpan.FromSeconds(2);
 
     /// <summary>A skill made in Arena as Code Arena keeps it: its SKILL.md, and whether it is the person's own (theirs to change from there).</summary>
     private static object Brought(Skill s, AppUser me) => new

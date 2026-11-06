@@ -979,6 +979,13 @@ internal sealed class ChatSync : IAsyncDisposable
     public static Task<JsonObject?> ChatConfigAsync(Config config, HttpClient http, TimeSpan limit, CancellationToken ct) =>
         AccountReadAsync(config, http, "/api/code-arena/config", limit, ct);
 
+    /// <summary>
+    /// One word for what Code Arena takes from Arena's settings for the person (their chat config and skills): it changes
+    /// when any of them does. Null when Arena does not say or cannot be reached within <paramref name="limit"/>.
+    /// </summary>
+    public static async Task<string?> SettingsStampAsync(Config config, HttpClient http, TimeSpan limit, CancellationToken ct) =>
+        (await AccountReadAsync(config, http, "/api/code-arena/settings", limit, ct))?.Str("stamp");
+
     /// <summary>The skills the person's plugins bring, from Arena (read with the key); null when it does not say or cannot be reached within <paramref name="limit"/>.</summary>
     public static Task<JsonObject?> PluginSkillsAsync(Config config, HttpClient http, TimeSpan limit, CancellationToken ct) =>
         AccountReadAsync(config, http, "/api/code-arena/skills", limit, ct);

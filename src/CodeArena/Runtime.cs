@@ -296,6 +296,8 @@ internal sealed partial class Runtime : IAsyncDisposable
         }
         // When it compacts: the flag, else config.json, else what the Arena account says (the web chat's own choice), else 80%.
         // Asked at every start (/compact-at account and the IDE say it); waited for only when it decides.
+        // Arena's word for its settings as they are now, before they are read: a change made after it is applied (WatchSettingsAsync).
+        var stamped = ChatSync.SettingsStampAsync(Config, Http, AccountWait, ct);
         var asking = ChatSync.CompactAtAsync(Config, Http, AccountWait, ct);
         var offered = ChatSync.ChatConfigAsync(Config, Http, AccountWait, ct);
         if (o.CompactAt is null && Config.CompactAt is null)
@@ -602,6 +604,11 @@ internal sealed partial class Runtime : IAsyncDisposable
         Agent.BeforeTurn = TakeInForTurnAsync;
         Agent.AfterTurn = () => Sync?.EndTurn();
         StartSync();
+        if (!o.Print && Config.Url is { Length: > 0 } && Config.ApiKey is { Length: > 0 })
+        {
+            _settingsStamp = await stamped;
+            _watchingSettings = Task.Run(() => WatchSettingsAsync(_settingsStop.Token), CancellationToken.None);
+        }
         if (o.WebChat is { } web && await ContinueWebChatAsync(web, ct) is { } said)
         {
             Ui.Info(said);
@@ -648,6 +655,89 @@ internal sealed partial class Runtime : IAsyncDisposable
         {
             _ = previous.DisposeAsync().AsTask();
         }
+    }
+
+    /// <summary>Arena's word for its settings as Code Arena has applied them (null: Arena did not say).</summary>
+    private string? _settingsStamp;
+    private readonly CancellationTokenSource _settingsStop = new();
+    private Task? _watchingSettings;
+    private int _settingsVersion;
+
+    /// <summary>How many times settings from Arena were applied while this ran: the IDE's page reads its config again when it grows.</summary>
+    public int SettingsVersion => Volatile.Read(ref _settingsVersion);
+
+    /// <summary>Told when settings from Arena were applied (on a background thread).</summary>
+    public event Action? SettingsChanged;
+
+    /// <summary>Every <see cref="CliEnv.SettingsEvery"/>: Arena asked whether its settings changed, and a change applied at once.</summary>
+    private async Task WatchSettingsAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(Env.SettingsEvery, ct);
+                await CheckSettingsAsync(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception e) when (e is HttpRequestException or IOException or GatewayException or OperationCanceledException)
+            {
+                // Arena or the gateway out of reach a moment: asked again next time.
+            }
+        }
+    }
+
+    /// <summary>
+    /// Arena's settings for the person read again when its word for them changed: the web chat's config (the models and
+    /// what each can do, the thinking default, the tools and how each model is given them, when chats compact), the
+    /// skills, and the gateway's models with their windows. Arena's tools are listed again when its tools changed. True
+    /// when something was applied.
+    /// </summary>
+    public async Task<bool> CheckSettingsAsync(CancellationToken ct)
+    {
+        if (await ChatSync.SettingsStampAsync(Config, Http, AccountWait, ct) is not { } stamp || stamp == _settingsStamp)
+        {
+            return false;
+        }
+        if (await ChatSync.ChatConfigAsync(Config, Http, AccountWait, ct) is not { } chat)
+        {
+            return false;
+        }
+        static string Tools(JsonObject? config) => string.Join(",", (config?["tools"] as JsonArray ?? []).OfType<JsonObject>().Select(t => t.Str("id")).Order(StringComparer.Ordinal));
+        var toolsChanged = ArenaChat is { } before && Tools(before) != Tools(chat);
+        Model.DefaultLevel = chat.Str("defaultThinking") is { } level && ModelState.Levels.Contains(level) ? level : null;
+        ArenaChat = chat;
+        if (chat.Int("compactAt") is { } at)
+        {
+            AccountCompactAt = new AccountCompaction(at, chat.Str("compactSource") == "account");
+            if (CompactAtSource is "account" or "arena" or "default" && Compaction.Set(at, null) is null)
+            {
+                // Followed as at the start: a flag's or config.json's choice stays.
+                CompactAtSource = AccountCompactAt.Own ? "account" : "arena";
+            }
+        }
+        await RefreshArenaSkillsAsync(now: true, ct);
+        var models = await Gateway.ModelsAsync(ct);
+        if (models.Count > 0)
+        {
+            Models = models;
+            if (models.FirstOrDefault(m => m.Id == Model.Info.Id) is { } same)
+            {
+                // The same model with what the gateway says of it now (its window, its longest answer).
+                Model.Info = same;
+            }
+        }
+        if (toolsChanged)
+        {
+            _links.FirstOrDefault(l => l.Name == ArenaName)?.Retry();
+        }
+        _settingsStamp = stamp;
+        Interlocked.Increment(ref _settingsVersion);
+        SettingsChanged?.Invoke();
+        return true;
     }
 
     /// <summary>The chats last listed (/web): /web N continues the Nth of them.</summary>
@@ -1777,6 +1867,11 @@ internal sealed partial class Runtime : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        await _settingsStop.CancelAsync();
+        if (_watchingSettings is not null)
+        {
+            await _watchingSettings;
+        }
         Jobs.StopAll("code-arena stopped");
         CodeIndex?.Dispose();
         Sandbox.Clean();

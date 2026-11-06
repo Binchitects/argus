@@ -53,6 +53,9 @@ internal sealed class GatewayException(string message, int? status = null, bool 
     /// <summary>The prompt's size in tokens as the refusal counted it (llama.cpp's n_prompt_tokens), when it said.</summary>
     public long? PromptTokens { get; init; }
 
+    /// <summary>The window the engine said it holds, when it refused a request as too big for it.</summary>
+    public long? ContextTokens { get; init; }
+
     /// <summary>
     /// The engine's cache, shared by the requests it runs at once, was full (llama.cpp's "Context size has been exceeded."):
     /// other requests filled it, so asking again in a moment may do, with no compaction.
@@ -401,7 +404,7 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
                 var overflow = ContextOverflow.Parse(whole);
                 throw new GatewayException("The gateway stopped the answer: " + (error.Str("message") ?? whole))
                 {
-                    ContextExceeded = overflow.Overflow, PromptTokens = overflow.PromptTokens, SharedCache = overflow.SharedCache,
+                    ContextExceeded = overflow.Overflow, PromptTokens = overflow.PromptTokens, ContextTokens = overflow.ContextTokens, SharedCache = overflow.SharedCache,
                 };
             }
             if (chunk["usage"] is JsonObject u)
@@ -612,7 +615,7 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
         {
             return new GatewayException($"The gateway answered {(int)status}: {detail}", (int)status)
             {
-                ContextExceeded = true, PromptTokens = overflow.PromptTokens, SharedCache = overflow.SharedCache,
+                ContextExceeded = true, PromptTokens = overflow.PromptTokens, ContextTokens = overflow.ContextTokens, SharedCache = overflow.SharedCache,
             };
         }
         return status switch

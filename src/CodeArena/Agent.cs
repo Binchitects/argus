@@ -6,13 +6,31 @@ namespace CodeArena;
 /// <summary>The model in use, what the gateway says of it, and the thinking level asked for.</summary>
 internal sealed class ModelState
 {
-    public required ModelInfo Info { get; set; }
+    /// <summary>What the gateway says of the model; another model (or the same said anew with another window) forgets the engine's window.</summary>
+    public required ModelInfo Info
+    {
+        get => _info;
+        set
+        {
+            if (_info is null || _info.Id != value.Id || _info.Context != value.Context)
+            {
+                EngineWindow = null;
+            }
+            _info = value;
+        }
+    }
+
+    private ModelInfo _info = null!;
+
     public string Name => Info.Id;
     /// <summary>off, low, medium, high, xhigh, or null for the model's own default.</summary>
     public string? Thinking { get; set; }
-    /// <summary>The window in tokens: the config's, else the gateway's, else 32,768.</summary>
+    /// <summary>The window in tokens: the config's, else the gateway's, else 32,768; at most what the engine said it holds.</summary>
     public int? ContextOverride { get; set; }
-    public int Context => ContextOverride ?? Info.Context ?? 32_768;
+    public int Context => Math.Min(ContextOverride ?? Info.Context ?? 32_768, EngineWindow ?? int.MaxValue);
+
+    /// <summary>The window the engine said it holds when it refused a request (less than the gateway says); null: it did not.</summary>
+    public int? EngineWindow { get; set; }
 
     public static readonly string[] Levels = ["off", "low", "medium", "high", "xhigh"];
 
@@ -164,6 +182,11 @@ internal interface IAgentEvents
     void SubAgent(JsonObject e)
     {
     }
+
+    /// <summary>The person skipped the thinking: it stopped, and the model is asked to answer without it.</summary>
+    void ThinkingSkipped()
+    {
+    }
 }
 
 /// <summary>
@@ -235,6 +258,12 @@ internal sealed class Agent
     /// <summary>The size of the last request sent, in characters (what its tokens are learned against).</summary>
     private long _sentChars;
 
+    /// <summary>The messages of Code Arena's own to the model in the conversation (a cut answer's "carry on"): none is the person's question.</summary>
+    private readonly HashSet<JsonObject> _ownNotes = new(ReferenceEqualityComparer.Instance);
+
+    /// <summary>A message of the person's: a question a turn starts with (not one of Code Arena's own notes).</summary>
+    private bool Asked(JsonObject m) => m.Str("role") == "user" && !_ownNotes.Contains(m);
+
     /// <summary>The notes added (<see cref="Note"/>), each before the message at its place (at the end: after the last), in order.</summary>
     private readonly List<(int At, string Text)> _notes = [];
 
@@ -246,6 +275,7 @@ internal sealed class Agent
     public void Load(IEnumerable<JsonObject> messages, (TokenUsage Usage, int Count)? known = null, double? charsPerToken = null)
     {
         Messages = [.. messages];
+        _ownNotes.Clear();
         _notes.Clear();
         _given.Clear();
         Context.Shown?.Clear();
@@ -253,6 +283,8 @@ internal sealed class Agent
         _knownCount = 0;
         _compactedAt = 0;
         _followUps = 0;
+        _askedAt = 0;
+        _growth.Clear();
         if (charsPerToken is { } chars)
         {
             CharsPerToken = Math.Clamp(chars, 1.0, 8.0);
@@ -260,7 +292,7 @@ internal sealed class Agent
         if (known is { } k && k.Count > 0 && k.Count <= Messages.Count && k.Usage.Prompt > 0)
         {
             Learn(Chars(k.Count - 1), k.Usage.Prompt);
-            _knownTokens = k.Usage.Prompt + k.Usage.Completion;
+            _knownTokens = k.Usage.Prompt + Sent(Messages[k.Count - 1]);
             _knownCount = k.Count;
             _knownBy = Model.Name;
         }
@@ -318,6 +350,10 @@ internal sealed class Agent
     private void Add(JsonObject message, TokenUsage? usage = null, string? kind = null, JsonArray? agents = null)
     {
         Messages.Add(message);
+        if (kind == "note")
+        {
+            _ownNotes.Add(message);
+        }
         // An answer the gateway counted keeps what filled its request (the page's context gauge).
         var answer = message.Str("role") == "assistant";
         Session?.Message(message, answer ? Model.Name : null, usage, kind, agents, answer && usage is not null ? Measured : null);
@@ -454,6 +490,9 @@ internal sealed class Agent
         }
         var before = await SnapshotAsync(ct);
         var done = false;
+        // A skip of the thinking is this turn's: the next one thinks again.
+        Volatile.Write(ref _skipThinking, 0);
+        _turning = true;
         try
         {
             var answer = await TurnAsync(input, turn, ct, Depth == 0 ? uploaded?.Pictures : null);
@@ -475,6 +514,7 @@ internal sealed class Agent
         }
         finally
         {
+            _turning = false;
             if (!done)
             {
                 await KeepUncommittedAsync(before);
@@ -604,6 +644,7 @@ internal sealed class Agent
             _stepsInTurn++;
             await MaybeCompactAsync(ct);
             ReportJobs();
+            _askedAt = Estimate();
             var printer = new Printer(Ui, Stream && Depth == 0, Events);
             Completion answer;
             Events?.Step();
@@ -664,11 +705,22 @@ internal sealed class Agent
                     Total.Add(usage, Model.Info);
                 }
                 Session?.Usage(usage);
-                _knownTokens = usage.Prompt + usage.Completion;
-                _knownBy = Model.Name;
                 Learn(_sentChars, usage.Prompt);
+                // The answer as the next request sends it back: its words and calls, not its thinking (counted in its
+                // completion, never sent again).
+                _knownTokens = usage.Prompt + Sent(answer.Message);
+                _knownBy = Model.Name;
                 // The room the next answers get grows to the longest one yet: compaction comes before a long answer is cut.
                 _longestAnswer = Math.Max(_longestAnswer, usage.Completion);
+            }
+            if (answer.FinishReason == "length" && answer.Usage is { } ended && Model.Info.MaxOutput is > 0 and var longest
+                && ended.Completion < longest * 0.95 && ended.Prompt + ended.Completion < Model.Context)
+            {
+                // Cut short of the model's longest answer, before the window the gateway says was full (no request asks for
+                // less): the engine's window ended there. Its window from now on, so the session compacts in time for it.
+                var held = ended.Prompt + ended.Completion;
+                Warn($"The engine holds {Fmt.Tokens(held)} tokens, not the {Fmt.Tokens(Model.Context)} the gateway says: Code Arena compacts for {Fmt.Tokens(held)} from now on.");
+                Model.EngineWindow = (int)held;
             }
             if (answer.FinishReason == "length" && cut < MaxCuts && (answer.Text.Length > 0 || answer.ToolCalls.Count > 0))
             {
@@ -820,6 +872,13 @@ internal sealed class Agent
     /// </summary>
     private async Task<bool> OverflowAsync(GatewayException e, CancellationToken ct)
     {
+        if (e.ContextTokens is { } held && held < Model.Context)
+        {
+            // The engine holds less than the gateway says (its slots share its context): its window from now on, so the
+            // session compacts in time for it.
+            Warn($"The engine holds {Fmt.Tokens(held)} tokens, not the {Fmt.Tokens(Model.Context)} the gateway says: Code Arena compacts for {Fmt.Tokens(held)} from now on.");
+            Model.EngineWindow = (int)held;
+        }
         var tokens = e.PromptTokens ?? Model.Context + 1;
         if (_sentChars > 0)
         {
@@ -934,7 +993,7 @@ internal sealed class Agent
                 request["parallel_tool_calls"] = true;
             }
         }
-        if (Model.TemplateKwargs() is { } kwargs)
+        if ((ThinkingSkipped && Model.Info.Thinking ? NoThinking() : Model.TemplateKwargs()) is { } kwargs)
         {
             request["chat_template_kwargs"] = kwargs;
         }
@@ -943,14 +1002,114 @@ internal sealed class Agent
         var uncached = Uncached(_sentChars);
         try
         {
-            return await Gateway.CompleteAsync(request, sink, ct, uncached);
+            return await AskOnceAsync(request, sink, uncached, ct);
         }
         catch (GatewayException e) when (e.Status == 400 && _parallelCalls && e.Message.Contains("parallel_tool_calls", StringComparison.OrdinalIgnoreCase))
         {
             // A backend that does not take the option: one call at a time, then.
             _parallelCalls = false;
             request.Remove("parallel_tool_calls");
-            return await Gateway.CompleteAsync(request, sink, ct, uncached);
+            return await AskOnceAsync(request, sink, uncached, ct);
+        }
+    }
+
+    private static JsonObject NoThinking() => new() { ["enable_thinking"] = false };
+
+    /// <summary>
+    /// The request, streamed. When the person skips the thinking while the model still thinks (no word yet), the stream
+    /// stops there and the same request is asked again without thinking: the model answers at once. Its thinking so far
+    /// is kept with the answer.
+    /// </summary>
+    private async Task<Completion> AskOnceAsync(JsonObject request, IStreamSink sink, long uncached, CancellationToken ct)
+    {
+        using var cut = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var watch = new SkipWatch(this, sink, cut);
+        _skipWatch = watch;
+        try
+        {
+            return await Gateway.CompleteAsync(request, watch, cut.Token, uncached);
+        }
+        catch (Exception e) when (watch.Cut && !ct.IsCancellationRequested && e is OperationCanceledException or IOException or HttpRequestException)
+        {
+            Events?.ThinkingSkipped();
+            Info("Thinking skipped: the model answers now.");
+            request["chat_template_kwargs"] = NoThinking();
+            var answer = await Gateway.CompleteAsync(request, sink, ct, uncached);
+            if (watch.Thought.Length > 0 && answer.Message.Str("reasoning_content") is null)
+            {
+                answer.Message["reasoning_content"] = watch.Thought.ToString();
+            }
+            return answer;
+        }
+        finally
+        {
+            _skipWatch = null;
+        }
+    }
+
+    /// <summary>1 once the person asked to skip the thinking in this turn: its later steps think no more either.</summary>
+    private int _skipThinking;
+
+    /// <summary>The stream of the request running now, which a skip cuts while it thinks.</summary>
+    private volatile SkipWatch? _skipWatch;
+
+    public bool ThinkingSkipped => Volatile.Read(ref _skipThinking) == 1;
+
+    /// <summary>
+    /// "Skip thinking" for the turn running (the IDE's button, Tab in the terminal; the web chat's "Answer now"): the
+    /// thinking stops and the model answers, and the rest of the turn does not think. False when there is no turn or it
+    /// was asked already.
+    /// </summary>
+    public bool SkipThinking()
+    {
+        if (!_turning || Interlocked.Exchange(ref _skipThinking, 1) == 1)
+        {
+            return false;
+        }
+        _skipWatch?.Skip();
+        return true;
+    }
+
+    /// <summary>A turn runs (a skip applies to it).</summary>
+    private volatile bool _turning;
+
+    /// <summary>Passes the stream on, and stops it at the person's skip while the model has said nothing but its thinking.</summary>
+    private sealed class SkipWatch(Agent agent, IStreamSink inner, CancellationTokenSource cut) : IStreamSink
+    {
+        private int _said;
+
+        public StringBuilder Thought { get; } = new();
+
+        public bool Cut { get; private set; }
+
+        public void Text(string text)
+        {
+            Volatile.Write(ref _said, 1);
+            inner.Text(text);
+        }
+
+        public void Reasoning(string text)
+        {
+            if (Cut)
+            {
+                return;
+            }
+            Thought.Append(text);
+            inner.Reasoning(text);
+            if (agent.ThinkingSkipped)
+            {
+                Skip();
+            }
+        }
+
+        /// <summary>Stops the stream, unless the answer's words have begun (then it ends as it is).</summary>
+        public void Skip()
+        {
+            if (Volatile.Read(ref _said) == 0 && !Cut)
+            {
+                Cut = true;
+                cut.Cancel();
+            }
         }
     }
 
@@ -1236,8 +1395,16 @@ internal sealed class Agent
     {
         var at = Threshold;
         var estimate = Estimate();
+        if (_askedAt > 0 && estimate > _askedAt)
+        {
+            Grew(estimate - _askedAt);
+        }
+        _askedAt = 0;
+        // What the request after this one adds, as the latest steps did: compacted now when that would pass the threshold.
+        // Only to summarize earlier turns in time: the turn being answered is never cut for what it may add.
+        var ahead = EarlierTurns() ? Ahead : 0;
         // Never later than 95% of the window (nor past the answer's room), whatever a compaction before could not bring it under.
-        if (Messages.Count < 3 || estimate < Math.Min(Math.Max(at, _compactedAt + Model.Context / 10.0), Math.Min(Model.Context * 0.95, Limit)))
+        if (Messages.Count < 3 || estimate + ahead < Math.Min(Math.Max(at, _compactedAt + Model.Context / 10.0), Math.Min(Model.Context * 0.95, Limit)))
         {
             return false;
         }
@@ -1245,7 +1412,7 @@ internal sealed class Agent
         if (ClearEarlier() is { Count: > 0 } cleared)
         {
             var said = $"Cleared {cleared.Count} earlier tool {(cleared.Count == 1 ? "result" : "results")} (~{Fmt.Tokens((long)(cleared.Chars / CharsPerToken))} tokens) to make room: they are kept, read_result reads them again.";
-            if (Estimate() < at)
+            if (Estimate() + ahead < at)
             {
                 // Cleared, not compacted: every message keeps its place, and so do the notes beside them.
                 Session?.Compacted(Messages, charsPerToken: CharsPerToken);
@@ -1256,16 +1423,44 @@ internal sealed class Agent
             }
             Ui.Info(said);
         }
-        if (Compaction.At == Compaction.Off || estimate < Model.Context * Compaction.At / 100.0)
+        if (Compaction.At == Compaction.Off || estimate + ahead < Model.Context * Compaction.At / 100.0)
         {
             // Not the person's threshold: the request would not fit otherwise.
-            Warn($"Compacting: the next request (~{Fmt.Tokens(estimate)} tokens) would not fit the window ({Fmt.Tokens(Model.Context)}) with room for the answer.");
+            Warn($"Compacting: the next request (~{Fmt.Tokens(estimate)} tokens) and what it adds would not fit the window ({Fmt.Tokens(Model.Context)}) with room for the answer.");
         }
         var changed = await CompactAsync(force: false, ct);
         var now = Estimate();
-        _compactedAt = now >= at ? now : 0;
+        _compactedAt = now + ahead >= at ? now : 0;
         return changed;
     }
+
+    /// <summary>The size of the conversation when the request now being asked was sent (0: not since a compaction or a load).</summary>
+    private long _askedAt;
+
+    /// <summary>What the latest steps added to the conversation, each from its request to the next (its answer, its tools' results).</summary>
+    private readonly Queue<long> _growth = new();
+
+    /// <summary>How many steps' growth is remembered.</summary>
+    private const int GrowthKept = 8;
+
+    private void Grew(long tokens)
+    {
+        _growth.Enqueue(tokens);
+        while (_growth.Count > GrowthKept)
+        {
+            _growth.Dequeue();
+        }
+    }
+
+    /// <summary>A turn of the person's before the one being answered, word for word (not a compaction's summary).</summary>
+    private bool EarlierTurns() =>
+        Messages.Count(m => Asked(m) && m.Str("content")?.StartsWith(SummaryMark, StringComparison.Ordinal) != true) >= 2;
+
+    /// <summary>The room kept for what the next step adds: the most one of the latest steps added, at most a quarter of the window.</summary>
+    internal long Ahead => _growth.Count == 0 ? 0 : Math.Min(_growth.Max(), Model.Context / 4);
+
+    /// <summary>An answer's tokens as the next request sends it back: its words and calls (<see cref="Size"/>), not its thinking.</summary>
+    private long Sent(JsonObject answer) => (long)(Size(answer) / CharsPerToken);
 
     /// <summary>The size a compaction left the conversation at when it stayed over the threshold (0: it got under).</summary>
     private long _compactedAt;
@@ -1343,6 +1538,9 @@ internal sealed class Agent
 
     /// <summary>The longest summary asked for, in tokens.</summary>
     private const int SummaryTokens = 2_048;
+
+    /// <summary>The room a thinking model's summary has beside it for thinking, in tokens (at most an eighth of the window).</summary>
+    private const int SummaryThinking = 8_192;
 
     /// <summary>
     /// The most a request for a summary sends, in tokens; null: what the window holds beside the summary. Past it, its
@@ -1516,7 +1714,15 @@ internal sealed class Agent
     private long Chars(int count) =>
         SystemPrompt().Length + ToolChars() + Messages.Take(count).Sum(Size) + NotesUpTo(count).Sum(n => n.Text.Length + 10);
 
-    private static int Size(JsonObject m) => (m.Str("content")?.Length ?? 0) + (m["tool_calls"] is JsonArray calls ? Json.Line(calls).Length : 0) + 10;
+    private static int Size(JsonObject m) => Content(m) + (m["tool_calls"] is JsonArray calls ? Json.Line(calls).Length : 0) + 10;
+
+    /// <summary>The characters a picture is counted as (the web chat's weight): an engine reads one as about a thousand tokens.</summary>
+    internal const int PictureChars = 3_500;
+
+    /// <summary>A message's words, and its pictures at <see cref="PictureChars"/> each (a screenshot, a file attached).</summary>
+    private static int Content(JsonObject m) => m["content"] is JsonArray parts
+        ? parts.OfType<JsonObject>().Sum(p => p.Str("type") == "text" ? p.Str("text")?.Length ?? 0 : PictureChars)
+        : m.Str("content")?.Length ?? 0;
 
     /// <summary>
     /// Makes room in the window. The older part of the history is replaced with a summary the model writes, and the recent
@@ -1541,7 +1747,7 @@ internal sealed class Agent
                 {
                     break;
                 }
-                if (Messages[i].Str("role") == "user")
+                if (Asked(Messages[i]))
                 {
                     keepFrom = i;
                 }
@@ -1549,7 +1755,7 @@ internal sealed class Agent
             if (keepFrom == Messages.Count)
             {
                 // The recent part alone is too big: from the last message of the person's, then.
-                keepFrom = Messages.FindLastIndex(m => m.Str("role") == "user");
+                keepFrom = Messages.FindLastIndex(Asked) is >= 0 and var asked ? asked : Messages.FindLastIndex(m => m.Str("role") == "user");
             }
         }
         keepFrom = Math.Max(keepFrom, 0);
@@ -1626,7 +1832,7 @@ internal sealed class Agent
     /// </summary>
     private async Task<bool> CompactTurnAsync(double budget, CancellationToken ct)
     {
-        var q = Messages.FindLastIndex(m => m.Str("role") == "user");
+        var q = Messages.FindLastIndex(Asked) is >= 0 and var asked ? asked : Messages.FindLastIndex(m => m.Str("role") == "user");
         if (q < 0)
         {
             return false;
@@ -1778,8 +1984,10 @@ internal sealed class Agent
     private async Task<string?> SummarizeAsync(int upTo, string instruction, CancellationToken ct)
     {
         var messages = Conversation(upTo);
-        // Never more than the model's longest answer: the summary is an answer like any other.
-        var answer = Math.Min(Math.Min(SummaryTokens, Model.Context / 4), Model.Info.MaxOutput is > 0 and var most ? most : int.MaxValue);
+        // Never more than the model's longest answer: the summary is an answer like any other. A model that thinks has room
+        // to: some think although asked not to, and the thinking would take the summary's whole answer.
+        var room = Model.Info.Thinking ? Math.Min(SummaryThinking, Model.Context / 8) : 0;
+        var answer = Math.Min(Math.Min(SummaryTokens, Model.Context / 4) + room, Model.Info.MaxOutput is > 0 and var most ? most : int.MaxValue);
         var budget = (long)(Math.Min(SummaryBudget ?? Model.Context - answer, Model.Context - answer) * CharsPerToken);
         var chars = Chars(upTo) + instruction.Length;
         // A window so small that the tools fill most of the budget: the summary is asked without them (the tools' start
@@ -1861,6 +2069,7 @@ internal sealed class Agent
         Session?.Compacted(Messages, raw, charsPerToken: CharsPerToken);
         _knownTokens = 0;
         _knownCount = 0;
+        _askedAt = 0;
         _notes.Clear();
         _given.Clear();
         Ui.Info(said);
@@ -1874,8 +2083,11 @@ internal sealed class Agent
     private static bool Shrink(List<JsonObject> messages)
     {
         var changed = false;
-        var results = messages.Select((m, i) => (m, i)).Where(x => x.m.Str("role") == "tool").Select(x => x.i).ToList();
-        foreach (var i in results.Take(Math.Max(0, results.Count - 2)))
+        // The last two steps' results stay whole, however many calls each made at once.
+        var steps = messages.Select((m, i) => (m, i)).Where(x => x.m["tool_calls"] is JsonArray { Count: > 0 }).Select(x => x.i).ToList();
+        var whole = steps.Count >= 2 ? steps[^2] : 0;
+        var results = messages.Select((m, i) => (m, i)).Where(x => x.m.Str("role") == "tool" && x.i < whole).Select(x => x.i).ToList();
+        foreach (var i in results)
         {
             if (messages[i].Str("content") is { Length: > 2000 } text)
             {
