@@ -95,7 +95,9 @@ spec:
             {{- end }}
           readinessProbe: { httpGet: { path: /health/readiness, port: http }, periodSeconds: 15, timeoutSeconds: 5 }
           resources: {{- toYaml .Values.litellm.resources | nindent 12 }}
-          volumeMounts: [{ name: config, mountPath: /app/arena.yaml, subPath: litellm.yaml }]
+          volumeMounts:
+            - { name: config, mountPath: /app/arena.yaml, subPath: litellm.yaml }
+            - { name: config, mountPath: /app/arena_limits.py, subPath: arena_limits.py }
       volumes: [{ name: config, configMap: { name: arena-config } }]
 ---
 apiVersion: v1
