@@ -144,8 +144,8 @@ internal static partial class IdeSkills
     }
 
     /// <summary>
-    /// Saves one of the person's skills to Arena: its description, title, parameters and instructions as its SKILL.md has
-    /// them (its name stays), unless it changed in Arena since the editor read it at <paramref name="version"/> (null: overwrite).
+    /// Saves one of the person's skills to Arena: its instructions, and its description, title and parameters changed here,
+    /// as its SKILL.md has them (its name stays), unless it changed in Arena since the editor read it at <paramref name="version"/> (null: overwrite).
     /// </summary>
     public static async Task<JsonObject> SaveArenaAsync(Runtime rt, string name, string text, string? version, CancellationToken ct)
     {
@@ -181,10 +181,21 @@ internal static partial class IdeSkills
         {
             throw new IdeError(409, "changed", $"/{skill} changed in Arena since it was opened. Reload it, or save again to overwrite it.");
         }
-        var change = new JsonObject { ["description"] = fm.Field("description") ?? "", ["instructions"] = fm.Body, ["parameters"] = parameters };
-        if (fm.Field("title") is { } title)
+        // Only the fields changed here: Arena's SKILL.md has their quotes made single, so one sent back as it was read
+        // would change text the person never touched.
+        var was = FrontMatter.Parse(File.ReadAllText(kept));
+        var change = new JsonObject { ["instructions"] = fm.Body };
+        if (fm.Field("description") != was.Field("description"))
+        {
+            change["description"] = fm.Field("description") ?? "";
+        }
+        if (fm.Field("title") is { } title && title != was.Field("title"))
         {
             change["title"] = title;
+        }
+        if (!fm.List("parameters").SequenceEqual(was.List("parameters")))
+        {
+            change["parameters"] = parameters;
         }
         await ArenaAsync(rt, HttpMethod.Put, "/api/code-arena/skills/" + skill, change, ct);
         await rt.ReloadExtensionsAsync(true, ct);

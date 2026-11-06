@@ -142,6 +142,29 @@ public sealed class IdeSkillTests : IDisposable
     }
 
     [Fact]
+    public async Task Saving_a_web_made_skill_leaves_what_was_not_touched_as_Arena_has_it()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        _mcp.Chats.ArenaSkills = [FakeChats.OwnSkill("websk6", "Says \"hello\" in a language.", "Say hello.")];
+        await using var web = await WebRun.StartAsync(h);
+
+        // Only the instructions changed: the description (its quotes single in the SKILL.md) and the title are not sent.
+        var read = await web.GetJsonAsync("/api/user-files?name=" + Uri.EscapeDataString("skills/websk6/SKILL.md"));
+        var text = read["text"]!.GetValue<string>();
+        var saved = await web.PostAsync("/api/user-files", new JsonObject
+        {
+            ["name"] = "skills/websk6/SKILL.md", ["text"] = text.Replace("Say hello.", "Say hello in French.", StringComparison.Ordinal), ["version"] = read["version"]!.GetValue<string>(),
+        });
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        var changed = Assert.Single(_mcp.Chats.SkillsChanged);
+        Assert.Equal("Say hello in French.", changed["instructions"]!.GetValue<string>());
+        Assert.Null(changed["description"]);
+        Assert.Null(changed["title"]);
+        Assert.Null(changed["parameters"]);
+        Assert.Equal("Says \"hello\" in a language.", _mcp.Chats.ArenaSkills!.OfType<JsonObject>().Single()["description"]!.GetValue<string>());
+    }
+
+    [Fact]
     public async Task A_skill_made_or_turned_off_in_Arena_while_the_IDE_runs_is_there_after_Refresh()
     {
         // Asked again at most this often unasked: here, not within the test.
