@@ -66,7 +66,8 @@ import {
   type AgainBody,
 } from './api'
 import { chatBridge, pieceLabel, type Piece } from './bridge'
-import { codeContext } from './context'
+import { codeContext, contextEvent } from './context'
+import { CodeContextSheet } from './context-view'
 import { useEditor } from './editor-state'
 import { useFileMention } from './mention'
 import { useSlashMenu } from './slash'
@@ -510,6 +511,8 @@ export function Thread({
   const keptFromEnd = useRef<number | null>(null)
   const model = config.models.find((m) => m.name === state.model)
   const answering = streaming && view.mode !== 'compact'
+  // The Context panel: what fills the window, piece by piece (the gauge's What fills it, or /context).
+  const [contextOpen, setContextOpen] = useState(false)
   // ↑ in the box: this session's messages, newest first, then what this folder sent before (the terminal's too).
   const sentHere = useMemo(() => path.flatMap((m) => (m.role === 'user' ? [m.content] : [])).reverse(), [path])
   const older = useFolderHistory()
@@ -691,6 +694,12 @@ export function Thread({
     else if (stopped) toast.info(stopped)
     return true
   }
+  // The status bar's Context opens the chat's Context panel.
+  useEffect(() => {
+    const on = () => setContextOpen(true)
+    window.addEventListener(contextEvent, on)
+    return () => window.removeEventListener(contextEvent, on)
+  }, [])
 
   /**
    * Sends a message, with the lines chosen in the editor (those above the box, or `context` when given: a question from the
@@ -698,6 +707,10 @@ export function Thread({
    */
   const send = async (text: string, context?: Piece[], quoted?: Quote, attachments: Attachment[] = [], accepted?: () => void): Promise<boolean> => {
     if (text === '/compact') return compact()
+    if (text === '/context') {
+      setContextOpen(true)
+      return true
+    }
     if (text === '/clear' || text === '/new') {
       await newSession().catch((e) => toast.error(errorMessage(e)))
       await refresh()
@@ -883,6 +896,7 @@ export function Thread({
             busy={streaming}
             compact={{ at: state.compactAt, who: compactWho(state), change: 'Change it with Context in the status bar, or /compact-at in the terminal.' }}
             items={contextItems}
+            onDetails={() => setContextOpen(true)}
           />
         ) : null
       }
@@ -894,6 +908,7 @@ export function Thread({
 
   return (
     <section aria-label="Chat" className="@container flex h-full min-h-0 min-w-0 flex-col bg-background">
+      <CodeContextSheet open={contextOpen} onOpenChange={setContextOpen} state={state} onCompact={!streaming && path.length >= 2 ? () => void compact() : undefined} />
       <header className="flex h-11 shrink-0 items-center gap-1 border-b px-2">
         <ModelPicker config={config} value={state.model} onChange={(m) => m && m !== state.model && void settings({ model: m })} />
         {model?.thinking && <ThinkingPicker config={config} value={state.thinking} onChange={(level) => void settings({ thinking: level })} />}

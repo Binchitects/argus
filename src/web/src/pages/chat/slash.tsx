@@ -1,4 +1,4 @@
-import { FoldVertical, SquareSlash, X } from 'lucide-react'
+import { FoldVertical, ListTree, SquareSlash, X } from 'lucide-react'
 import { useEffect, useId, useRef, type KeyboardEvent, type RefObject } from 'react'
 import { Link } from 'react-router'
 import { Kbd } from '@/components/ui/kbd'
@@ -31,7 +31,7 @@ export function SlashMenu({ id, items, active, onPick, onActive }: { id: string;
             onMouseEnter={() => onActive(i)}
             className={cn('flex cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm', i === active && 'bg-accent')}
           >
-            {item.command ? <FoldVertical className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" /> : <SquareSlash className="size-4 shrink-0 text-primary-ink" aria-hidden="true" />}
+            {item.command === 'context' ? <ListTree className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" /> : item.command ? <FoldVertical className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" /> : <SquareSlash className="size-4 shrink-0 text-primary-ink" aria-hidden="true" />}
             <span className="shrink-0 font-mono text-[0.8125rem] font-medium">/{item.name}</span>
             <span dir="auto" className="min-w-0 truncate">
               {item.title}

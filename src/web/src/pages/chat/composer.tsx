@@ -50,6 +50,7 @@ export function Composer({
   contextItems,
   compact,
   onCompact,
+  onContextView,
   queued,
   onQueue,
   onSendNow,
@@ -84,6 +85,8 @@ export function Composer({
   compact?: CompactSetting
   /** Summarize the chat's older messages (also: send /compact). */
   onCompact?: () => void
+  /** Open the Context panel: what fills the window, piece by piece (also: send /context). */
+  onContextView?: () => void
   /** While an answer runs: messages waiting to be sent, and how to add (false: it was not taken), hurry or drop one. */
   queued?: Queued[]
   onQueue?: (text: string, skill?: SkillUse) => Promise<boolean>
@@ -132,7 +135,7 @@ export function Composer({
   const library = useQuery({ ...skillsQuery, enabled: query !== null, staleTime: 60_000 })
   const [active, setActive] = useState(0)
   const [closedAt, setClosedAt] = useState<string | null>(null)
-  const items = query === null ? [] : slashItems(query, library.data?.skills ?? [], !!onCompact)
+  const items = query === null ? [] : slashItems(query, library.data?.skills ?? [], !!onCompact, !!onContextView)
   const menuOpen = items.length > 0 && closedAt !== text
   // The skill chosen for the message, and its parameters' values.
   const [chosen, setChosen] = useState<SkillItem | null>(null)
@@ -159,6 +162,11 @@ export function Composer({
     if (item.command === 'compact') {
       setText('')
       onCompact?.()
+      return
+    }
+    if (item.command === 'context') {
+      setText('')
+      onContextView?.()
       return
     }
     const skill = item.skill!
@@ -360,7 +368,7 @@ export function Composer({
         <div className="flex shrink-0 items-center gap-2">
         {/* Said only when the box is wide enough for it beside the tools (its own width, not the window's). */}
         <span className="hidden text-xs whitespace-nowrap text-muted-foreground @5xl:inline">Enter to send · Shift+Enter for a new line</span>
-        {context && <ContextGauge context={context} onCompact={onCompact} busy={streaming} compact={compact} items={contextItems} />}
+        {context && <ContextGauge context={context} onCompact={onCompact} busy={streaming} compact={compact} items={contextItems} onDetails={onContextView} />}
         {streaming && onQueue && hasContent && (
           <Tooltip content="Queue: sent when the answer ends (Enter)">
             <Button type="submit" size="icon-sm" variant="outline" className="animate-pop rounded-full" disabled={!canSend} aria-label="Queue">

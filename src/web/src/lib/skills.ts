@@ -144,7 +144,7 @@ export interface SlashItem {
   /** Where it comes from (a skill), or what it does (a command). */
   hint: string
   skill?: SkillItem
-  command?: 'compact'
+  command?: 'compact' | 'context'
 }
 
 /** What follows a "/" that starts the message, while it is one word; null otherwise. */
@@ -154,7 +154,10 @@ export function slashQuery(text: string): string | null {
 }
 
 /** The / menu's lines for what was typed: the chat's commands first, then the skills that match. */
-export function slashItems(query: string, skills: SkillItem[], canCompact: boolean): SlashItem[] {
-  const commands: SlashItem[] = canCompact && 'compact'.startsWith(query) ? [{ key: 'cmd:compact', name: 'compact', title: 'Compact this chat', hint: 'Summarizes the older messages', command: 'compact' }] : []
+export function slashItems(query: string, skills: SkillItem[], canCompact: boolean, canShowContext = false): SlashItem[] {
+  const commands: SlashItem[] = [
+    ...(canCompact && 'compact'.startsWith(query) ? [{ key: 'cmd:compact', name: 'compact', title: 'Compact this chat', hint: 'Summarizes the older messages', command: 'compact' as const }] : []),
+    ...(canShowContext && 'context'.startsWith(query) ? [{ key: 'cmd:context', name: 'context', title: 'What fills the context', hint: 'Each tool, skill, file and message, in tokens', command: 'context' as const }] : []),
+  ]
   return [...commands, ...matchSkills(skills, query).map((s) => ({ key: s.id, name: s.name, title: s.title, hint: sourceLabel(s), skill: s }))]
 }

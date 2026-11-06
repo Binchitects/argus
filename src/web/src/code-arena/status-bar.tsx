@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, ArrowUpCircle, Bot, CircleAlert, CloudUpload, ExternalLink, Gauge, GitBranch, GitCompareArrows, Info, LoaderCircle, Plug, RefreshCw, RotateCw, ShieldCheck, Sparkles, SquareTerminal, TriangleAlert, Unplug } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpCircle, Bot, CircleAlert, CloudUpload, ExternalLink, Gauge, GitBranch, GitCompareArrows, Info, ListTree, LoaderCircle, Plug, RefreshCw, RotateCw, ShieldCheck, Sparkles, SquareTerminal, TriangleAlert, Unplug } from 'lucide-react'
 import { RadioGroup } from 'radix-ui'
 import { useMemo, useState, type ComponentProps, type FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
@@ -12,7 +12,7 @@ import { formatValue } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { ContextBreakdown, ContextUse } from '@/pages/chat/context-gauge'
 import { changeSettings, compaction, compactWho, inOrder, modeLabels, retryServers, sessionQuery, stateQuery, type CodeState, type ServerStatus } from './api'
-import { codeContext } from './context'
+import { codeContext, contextEvent } from './context'
 import { useEditor } from './editor-state'
 import { api } from './http'
 import { useGit } from './git-actions'
@@ -234,9 +234,10 @@ type CompactWhen = 'share' | 'off' | 'account'
 
 /**
  * What fills the window, as the chat's gauge shows it (the same view: by kind, the room kept for the answer, what is
- * free, the biggest messages); big results are kept aside, earlier ones cleared before compacting.
+ * free, the biggest messages); big results are kept aside, earlier ones cleared before compacting. `onDetails`: the
+ * chat's Context panel, each piece with its tokens.
  */
-function WindowParts({ state }: { state: CodeState }) {
+function WindowParts({ state, onDetails }: { state: CodeState; onDetails: () => void }) {
   const session = useQuery(sessionQuery)
   const path = useMemo(() => inOrder(session.data?.messages ?? []), [session.data])
   const items = useMemo(() => ({ find: (id: string) => path.find((m) => m.id === id) }), [path])
@@ -246,6 +247,9 @@ function WindowParts({ state }: { state: CodeState }) {
       <ContextUse context={context} />
       <ContextBreakdown context={context} compact={{ at: state.compactAt, who: compactWho(state) }} items={items} />
       <p className="text-xs text-muted-foreground">A big result is kept aside (the model reads its start and end, and read_result the rest); before compacting, earlier results are cleared to a note, and often that is enough.</p>
+      <Button type="button" size="sm" variant="outline" className="justify-self-start" onClick={onDetails}>
+        <ListTree /> What fills it, piece by piece
+      </Button>
     </div>
   )
 }
@@ -286,7 +290,13 @@ function ContextForm({ state, onDone }: { state: CodeState; onDone: () => void }
           {state.compactAt > 0 ? `at ${state.compactAt}%` : 'only when a request would not fit'} ({compactWho(state)}).
         </DialogDescription>
       </DialogHeader>
-      <WindowParts state={state} />
+      <WindowParts
+        state={state}
+        onDetails={() => {
+          onDone()
+          window.dispatchEvent(new CustomEvent(contextEvent))
+        }}
+      />
       <form className="grid gap-4" onSubmit={(e) => void save(e)} noValidate>
         <RadioGroup.Root value={when} onValueChange={(v) => setWhen(v as CompactWhen)} aria-label="When it compacts" className="grid gap-1.5 text-sm">
           {(

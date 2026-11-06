@@ -38,7 +38,7 @@ internal sealed class Repl(Runtime rt)
         ("/review [BASE]", "review the changes not yet committed, or this branch's over BASE (main...): findings by file and line, and a verdict"),
         ("/compact", "summarize the conversation to free the model's window"),
         ("/compact-at [% [%]]", "show or set when it compacts itself (80% of the window, off, or your Arena account's) and what it keeps (25%)"),
-        ("/context", "how full the model's window is"),
+        ("/context", "what fills the model's window, piece by piece"),
         ("/cost", "tokens spent, and how full the window is"),
         ("/mcp [retry]", "Arena's, Argus's and your MCP servers: connected or not; retry tries now"),
         ("/jobs [stop N]", "the commands run with no time limit or in the background; stop N stops job N"),

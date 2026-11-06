@@ -214,6 +214,30 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   system prompt, tools and notes, its biggest messages among the chat's), and
   the files that went with a question there (its @files and the lines chosen
   in its editor) count as files.
+- **What fills it, piece by piece.** **What fills it** in the gauge, or
+  sending `/context`, opens the **Context** panel, as Claude Code's `/context`
+  shows it. It is the last answer's request, split into its pieces: Arena's
+  own words and each tool's notes, the assistant's and the chat's
+  instructions, the memory, each tool's definition by name (the biggest
+  first, the tool set's total on its line), the skills listed and each skill
+  used or loaded, each file, each of your messages, answers, tool calls and
+  results, the summary of a compaction, and the **Chat format** (the roles and
+  markers the model's chat template adds). Each part shows its tokens and its
+  share of the context; open it to see its pieces. Then what is **Kept for
+  the answer** and what is **Free**. The pieces are counted with the model's
+  own tokenizer where its engine has one (llama.cpp, vLLM, SGLang: the panel
+  says which), while the model answers, so it costs no wait; else they are
+  estimated from characters, and the panel says why (a server Arena does not
+  run, a model not loaded). Either way they add up to the tokens the engine
+  counted for the request. **Could be freed** lists what weighs for little:
+  a tool none of whose functions this chat called (**Turn off** takes it off
+  for this chat), a big tool result (**Leave out**), a file that went with an
+  earlier message (**Leave file out**: the model reads its name only, and the
+  file stays in the chat), and older messages (**Compact now**). What you do
+  there shows from the next answer on; what you left out since is struck
+  through. In a room the panel is not offered. `GET
+  /api/chat/conversations/{id}/context` gives the same figures, to the chat's
+  people only.
 - **Compact.** Near the limit the chat compacts itself: the model summarizes
   the older messages, and the next answers read the summary instead (the
   newest exchanges, about a quarter of the context, stay as they are). **Compact
