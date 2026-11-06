@@ -58,7 +58,9 @@ skills; Source Control folds as VS Code's does; the colour themes are calm.
   under the older release's name; an upgrade re-owned the model library.
   Proven on offline test hosts with every feature on, a model and people's
   data: interrupted at several points, a failure rolling back by itself, and
-  `upgrade --rollback`.
+  `upgrade --rollback`. An upgrade also makes again a container compose keeps on
+  an image whose tag moved to the same content under a new id (found upgrading
+  7.7.0 on an offline host: seven services stayed and the upgrade rolled back).
 - **A model's window and its longest answer.** On llama.cpp the window is one
   slot's share, on vLLM and SGLang the whole context; the longest answer
   leaves a prompt room and every request is held to it, through every API;
