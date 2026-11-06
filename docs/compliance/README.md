@@ -140,6 +140,53 @@ who holds an administrative permission (how they sign in, whether they have a
 second factor, when they last signed in), and the audit log's last 90 days
 counted by action. Each download is audited (`compliance.evidence`).
 
+## A new installation and its first steps
+
+A new installation starts from compliance's defaults, once, at its first
+start (the audit log says `compliance.starter`):
+
+- the safeguard rules **Personal data to cloud models** and **Health and
+  identity data to cloud models**, enforced: questions to models on other
+  providers have personal data masked and health and identity numbers
+  refused (the company's own models are not affected);
+- every policy template (acceptable use, data protection and retention, AI,
+  access control, ...) as a draft under **Policies**, for a person to fill in
+  and approve: a draft is not in force;
+- chats kept a year (**Settings → Data retention → Keep chats for**, 365
+  days);
+- the services Arena connects to (Hugging Face, the GitLab Argus indexes) in
+  the supplier register, for the company to say what data each gets and its
+  agreements.
+
+The first access review starts at once, and the audit log's first anchor is
+kept with its first entries. The installer sets the daily backup when it runs
+as root (`backup.sh --install-timer`); within its first day an installation
+with no backup yet is due, not missed, and after it, red.
+
+What is left is the company's to do or decide. **Checks now** says how many
+hold, and each other check says what to do and why, with a button where one
+click does it (each audited as `compliance.fix`, and refused without the
+permission of what it changes):
+
+| Check | The step |
+|---|---|
+| Admins sign in with two factors | **Require it of admins** (Settings → Sign-in) |
+| Everyone accepted the sign-in notice | **Use the default notice**: a short acceptable use and privacy notice to edit |
+| Chats are kept for a set time | **Keep chats a year** (on an installation from before the starter) |
+| Personal and health data kept from cloud models | **Add the two rules** |
+| Policies are approved, reviewed in time and read | **Adopt the templates as drafts**; approving each stays a person's |
+| Suppliers are registered | **Add them to the register** |
+| Risks are assessed | **Start from the common risks**: seven, each with the controls that treat it, to assess |
+| The management system is reviewed | **Set the default objectives**; the management review is the company's to hold |
+| Privileged access was reviewed | **Start a review** |
+
+The rest has no button because only the company can do it: send the audit
+log to its SIEM, approve the Statement of Applicability, hold the internal
+audit and the management review, review its repositories for security, and
+approve its policies. Two-factor sign-in and the notice are not on by default:
+each holds back every admin's next step (and every script that signs in with
+a password) until it is set up or accepted.
+
 ## Risks
 
 Admin → Compliance → Risks is the risk register ISO 27001 (6.1.2, 6.1.3,
@@ -370,7 +417,9 @@ A review starts by itself every **Review access every** days (90 unless set;
 0: only by hand), due two weeks later, and the admins are told. **Disable
 unused accounts** disables accounts unused that long every day, never the
 first admin. The check **Privileged access was reviewed** is green while the
-last review was closed within the period.
+last review was closed within the period, or while one is under way and not
+late that started within the period of the one before it (for the first, of
+the installation).
 
 ## People's data requests
 
@@ -519,7 +568,8 @@ under one database lock, so the entries make one chain in the order of their
 ids. Changing an entry, removing one or slipping one in breaks the chain from
 there, and walking it finds the first entry that no longer follows.
 
-Every day the app walks the whole chain. When it holds, the newest entry's id
+Every day the app walks the whole chain (and the check walks it whenever it
+runs; while no anchor is kept yet, it keeps the first). When it holds, the newest entry's id
 and hash are kept as an anchor, apart from the database: a line of
 `anchors.jsonl` in the `audit` volume (`DATA_DIR/audit`) and a line in the
 app's log, which Loki keeps. An anchor that no longer matches shows a chain

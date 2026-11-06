@@ -2,11 +2,19 @@ import { api } from '@/lib/api'
 
 export type State = 'ok' | 'warn' | 'fail' | 'unknown'
 
+/** A step that puts a check right in one click (POST /api/admin/compliance/fixes/{key}): its button's words, and what it changes. */
+export interface ComplianceFix {
+  key: string
+  label: string
+  does: string
+}
+
 export interface CheckResult {
   id: string
   title: string
   state: State
   detail: string
+  fix?: ComplianceFix | null
 }
 
 export interface Attestation {

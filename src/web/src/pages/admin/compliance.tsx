@@ -17,7 +17,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, errorMessage, type Me } from '@/lib/api'
 import { ago, when } from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { attestedNow, complianceQuery, FRAMEWORK_GROUPS, FRAMEWORKS, manualLink, readinessQuery, type FrameworkReadiness, reviewsQuery, reviewState, tally, type Attestation, type CheckResult, type Control, type Framework, type State } from './compliance-api'
+import { attestedNow, complianceQuery, FRAMEWORK_GROUPS, FRAMEWORKS, manualLink, readinessQuery, type ComplianceFix, type FrameworkReadiness, reviewsQuery, reviewState, tally, type Attestation, type CheckResult, type Control, type Framework, type State } from './compliance-api'
 import { DataRequestsSection } from './data-requests'
 import { IncidentsSection } from './incidents'
 import { ManagementSection } from './management'
@@ -152,6 +152,29 @@ function AttestDialog({ control, onClose }: { control: Control; onClose: () => v
         </form>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/** A check's one step: what it changes said beside it, done in one click and audited. */
+function FixButton({ fix }: { fix: ComplianceFix }) {
+  const queryClient = useQueryClient()
+  const take = useMutation({
+    mutationFn: () => api<{ done: string }>(`/api/admin/compliance/fixes/${fix.key}`, { method: 'POST', body: {} }),
+    onSuccess: ({ done }) => {
+      toast.success(`Done: ${done}`)
+      void queryClient.invalidateQueries({ queryKey: ['admin', 'compliance'] })
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  return (
+    <div className="mt-2 grid gap-1.5">
+      <p className="text-xs text-muted-foreground">{fix.does}</p>
+      <div>
+        <Button size="sm" variant="outline" onClick={() => take.mutate()} loading={take.isPending}>
+          {fix.label}
+        </Button>
+      </div>
+    </div>
   )
 }
 
@@ -417,6 +440,10 @@ export function CompliancePage() {
               <h2 id="checks" className="text-lg font-semibold">
                 Checks now
               </h2>
+              <span className="text-sm text-muted-foreground">
+                {data.checks.filter((c) => c.state === 'ok').length} of {data.checks.length} hold
+                {data.checks.some((c) => c.state !== 'ok') ? '; the others say what to do, with a button where one click does it.' : '.'}
+              </span>
               <span className="text-xs text-muted-foreground">
                 Checked {ago(data.checkedAt)}. From outside, <code className="font-mono">./arenactl check compliance</code> (in an installation, <code className="font-mono">deploy/scripts/compliance-check.py</code>) checks TLS, the headers, the session cookie and the cross-site guard.
               </span>
@@ -430,6 +457,7 @@ export function CompliancePage() {
                     <div className="min-w-0">
                       <div className="font-medium">{c.title}</div>
                       <div className="text-muted-foreground">{c.detail}</div>
+                      {c.fix && mayAttest && <FixButton fix={c.fix} />}
                     </div>
                   </li>
                 )

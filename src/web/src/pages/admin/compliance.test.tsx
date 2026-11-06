@@ -82,6 +82,27 @@ describe('Admin → Compliance', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: 'Attest' }))
     await waitFor(() => expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ note: 'Policy v2 in the ISMS folder' }))
   })
+
+  it('takes a check’s step in one click, saying first what it changes', async () => {
+    const fix = { key: 'two-factor', label: 'Require it of admins', does: 'Settings → Sign-in → Require two-factor sign-in becomes admins.' }
+    let fixed = false
+    const calls = fakeApi(admin, {
+      'GET /api/admin/compliance': () => ({
+        json: { ...view, checks: [view.checks[0]!, fixed ? { ...view.checks[1]!, state: 'ok', detail: 'Required of admins.' } : { ...view.checks[1]!, fix }] },
+      }),
+      'POST /api/admin/compliance/fixes/two-factor': () => {
+        fixed = true
+        return { json: { done: 'two-factor sign-in required of admins' } }
+      },
+    })
+    renderApp('/admin/compliance')
+    expect(await screen.findByText('Settings → Sign-in → Require two-factor sign-in becomes admins.')).toBeInTheDocument()
+    expect(screen.getByText(/1 of 2 hold; the others say what to do/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Require it of admins' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path.endsWith('/fixes/two-factor'))).toBe(true))
+    expect(await screen.findByText('Required of admins.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Require it of admins' })).not.toBeInTheDocument()
+  })
 })
 
 describe('compliance helpers', () => {

@@ -17,24 +17,26 @@ public sealed partial class IdentityBootstrap(
     IOptions<AuthOptions> options,
     ILogger<IdentityBootstrap> logger)
 {
-    public async Task RunAsync(CancellationToken ct = default)
+    /// <summary>Returns whether this was a new installation's first start: the first admin was made now.</summary>
+    public async Task<bool> RunAsync(CancellationToken ct = default)
     {
         await Access.AccessService.SyncBuiltInRolesAsync(db, ct);
-        await SeedAdminAsync();
+        var made = await SeedAdminAsync();
         await directory.WriteAsync(ct);
+        return made;
     }
 
-    private async Task SeedAdminAsync()
+    private async Task<bool> SeedAdminAsync()
     {
         if (await db.Users.AnyAsync())
         {
-            return;
+            return false;
         }
         var o = options.Value;
         if (string.IsNullOrEmpty(o.AdminPassword))
         {
             LogNoAdminPassword(logger);
-            return;
+            return false;
         }
         var admin = new AppUser
         {
@@ -47,10 +49,11 @@ public sealed partial class IdentityBootstrap(
         if (!result.Succeeded)
         {
             LogAdminFailed(logger, string.Join(" ", result.Errors.Select(e => e.Description)));
-            return;
+            return false;
         }
         // Owner as the first admin (AccessService), whatever the access data says.
         LogAdminCreated(logger, o.AdminUserName, o.AdminEmail);
+        return true;
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Created the first admin {UserName} <{Email}>")]

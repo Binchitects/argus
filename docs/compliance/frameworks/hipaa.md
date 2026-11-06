@@ -47,7 +47,7 @@ Arena's controls serve 38 of the 68 clauses here. Every clause is met by the com
 | 164.310(d)(2)(ii) | Media re-use (required) |  | [Physical security policy](../policies/physical-security.md) |
 | 164.310(d)(2)(iii) | Accountability (addressable) |  | [Physical security policy](../policies/physical-security.md) |
 | 164.310(d)(2)(iv) | Data backup and storage (addressable) |  | [Backup and business continuity policy](../policies/business-continuity.md) |
-| 164.312(a)(1) | Access control | [IAM-05](../controls.md#iam-05-least-privilege-by-roles-and-rules) | [Access control policy](../policies/access-control.md) |
+| 164.312(a)(1) | Access control | [IAM-05](../controls.md#iam-05-least-privilege-by-roles-and-rules), [NET-02](../controls.md#net-02-only-the-companys-addresses-come-in) | [Access control policy](../policies/access-control.md) |
 | 164.312(a)(2)(i) | Unique user identification (required) | [IAM-01](../controls.md#iam-01-each-person-signs-in-as-themselves-with-a-strong-password) | [Access control policy](../policies/access-control.md) |
 | 164.312(a)(2)(ii) | Emergency access procedure (required) |  | [Access control policy](../policies/access-control.md) |
 | 164.312(a)(2)(iii) | Automatic logoff (addressable) | [IAM-02](../controls.md#iam-02-sessions-end-on-their-own) | [Access control policy](../policies/access-control.md) |

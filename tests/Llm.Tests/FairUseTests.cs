@@ -208,6 +208,8 @@ public sealed class FairUseTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "LOG-01")]
+    [Trait("Control", "IAM-05")]
     public async Task An_admin_takes_a_waiting_answer_out_and_stops_a_running_one_and_the_person_is_told_why()
     {
         await using var f = app.Create(app.ConnectionStringFor("kick_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),

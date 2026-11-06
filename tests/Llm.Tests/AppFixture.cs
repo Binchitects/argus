@@ -248,6 +248,8 @@ public sealed class AppFixture : IAsyncLifetime
             b.UseSetting("Audit:AnchorDir", "");
             // Access reviews only when a test starts one.
             b.UseSetting("Compliance:ReviewEveryDays", "0");
+            // Compliance's starter only where a test asks for it: the others count their rules, policies and suppliers from none.
+            b.UseSetting("Compliance:Starter", "false");
             // Security alerts only when a test looks.
             b.UseSetting("Security:Watch", "false");
             // No Laya unless a test brings it (LayaTests).

@@ -137,6 +137,7 @@ public sealed class ChatRewindTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "IAM-05")]
     public async Task Only_the_owner_rewinds_a_room_for_everyone_and_nobody_while_an_answer_is_written()
     {
         var (owner, _, _) = await PersonAsync(app.Factory, "Olivia");

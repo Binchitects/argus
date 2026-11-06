@@ -137,8 +137,17 @@ public sealed class AccessReviewTests(AppFixture app)
         var news = (await admin.JsonAsync(await admin.GetAsync("/api/notifications"))).GetProperty("items").EnumerateArray();
         Assert.Contains(news, n => n.GetProperty("title").GetString() == "An access review is due"
             && n.GetProperty("link").GetString() == $"/admin/compliance/reviews/{review.GetProperty("id").GetGuid()}");
-        var check = (await admin.JsonAsync(await admin.GetAsync("/api/admin/compliance"))).GetProperty("checks").EnumerateArray().Single(c => c.GetProperty("id").GetString() == "access-review");
-        Assert.Equal("warn", check.GetProperty("state").GetString());
+        async Task<JsonElement> CheckAsync() => (await admin.JsonAsync(await admin.GetAsync("/api/admin/compliance"))).GetProperty("checks").EnumerateArray()
+            .Single(c => c.GetProperty("id").GetString() == "access-review");
+        // The first, started as the installation began and not late: on time.
+        var check = await CheckAsync();
+        Assert.Equal("ok", check.GetProperty("state").GetString());
         Assert.Contains("is under way", check.GetProperty("detail").GetString(), StringComparison.Ordinal);
+        Assert.Contains("the first", check.GetProperty("detail").GetString(), StringComparison.Ordinal);
+        // The first only half a year after the installation began: access went unreviewed meanwhile.
+        await SqlAsync(f, $"UPDATE \"AspNetUsers\" SET \"CreatedAt\" = now() - interval '200 days' WHERE \"UserName\" = 'admin'");
+        check = await CheckAsync();
+        Assert.Equal("warn", check.GetProperty("state").GetString());
+        Assert.Contains("none was closed in the last 90 days", check.GetProperty("detail").GetString(), StringComparison.Ordinal);
     }
 }

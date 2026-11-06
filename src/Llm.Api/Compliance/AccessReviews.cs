@@ -10,7 +10,7 @@ using Microsoft.Extensions.Options;
 
 namespace Llm.Api.Compliance;
 
-/// <summary>Configuration section "Compliance": how often access is reviewed, and when an unused account counts as one.</summary>
+/// <summary>Configuration section "Compliance": how often access is reviewed, when an unused account counts as one, and the starter.</summary>
 public sealed class ComplianceOptions
 {
     /// <summary>A review is started by itself when none was started for this many days; 0: only by hand.</summary>
@@ -24,6 +24,9 @@ public sealed class ComplianceOptions
 
     /// <summary>Disable unused accounts by themselves, every day (the first admin never).</summary>
     public bool DisableUnused { get; set; }
+
+    /// <summary>A new installation starts from compliance's defaults at its first start (<see cref="ComplianceDefaults.StarterAsync"/>).</summary>
+    public bool Starter { get; set; } = true;
 }
 
 public sealed class AccessReviewException(string message) : Exception(message);
