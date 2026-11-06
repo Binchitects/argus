@@ -71,9 +71,42 @@ class Cloned(Base):
         self.assertNotIn("glpat-SECRET-123", " ".join(cmd))
         self.assertEqual(cmd[-3:], ["--", GOOD["repo"], os.path.join(self.dir.name, WID, "repo")])
         home = Path(self.dir.name, WID, "home")
-        self.assertEqual((home / ".git-token").read_text(), "glpat-SECRET-123")
-        self.assertEqual(oct((home / ".git-token").stat().st_mode & 0o777), "0o600")
+        # In the engine's own config folder, which the agent's sandbox hides (as it hides the engine's sessions): the
+        # commands the model runs cannot read the person's token. Before: $HOME/.git-token, readable by them.
+        token = home / ".config" / "code-arena" / "git-token"
+        self.assertEqual(token.read_text(), "glpat-SECRET-123")
+        self.assertEqual(oct(token.stat().st_mode & 0o777), "0o600")
+        self.assertFalse((home / ".git-token").exists())
+        self.assertIn(".config/code-arena/git-token", sup.ASKPASS)
         self.assertEqual(run.call_args.kwargs["env"]["GIT_ASKPASS"], str(home / ".git-askpass"))
+
+    def test_a_token_left_where_the_sandbox_reads_is_taken_away(self):
+        home = Path(self.dir.name, WID, "home")
+        home.mkdir(parents=True)
+        (home / ".git-token").write_text("glpat-OLD")
+        with mock.patch.object(sup.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "", "")):
+            sup._clone(WID, 30000, GOOD)
+        self.assertFalse((home / ".git-token").exists())
+
+
+class Sandboxed(Base):
+    def test_health_says_whether_the_agents_commands_have_a_sandbox(self):
+        # bubblewrap made a sandbox as a user of no workspace: on; it could not (the container's security options): why.
+        works = subprocess.CompletedProcess([], 0, "", "")
+        with mock.patch.object(sup.subprocess, "run", return_value=works) as run, mock.patch.object(sup.shutil, "which", return_value="/usr/bin/bwrap"):
+            self.assertEqual(sup._sandbox(), {"sandbox": "bubblewrap"})
+        cmd = run.call_args.args[0]
+        self.assertEqual(cmd[0], "/usr/bin/bwrap")
+        # As a command of the agent's is sandboxed: its own /proc, its own processes.
+        self.assertIn("--proc", cmd)
+        self.assertIn("--unshare-pid", cmd)
+        failed = subprocess.CompletedProcess([], 1, "", "bwrap: Can't mount proc on /newroot/proc: Operation not permitted\n")
+        with mock.patch.object(sup.subprocess, "run", return_value=failed), mock.patch.object(sup.shutil, "which", return_value="/usr/bin/bwrap"):
+            off = sup._sandbox()
+        self.assertEqual(off["sandbox"], "off")
+        self.assertIn("Can't mount proc", off["why"])
+        with mock.patch.object(sup.shutil, "which", return_value=None):
+            self.assertIn("not installed", sup._sandbox()["why"])
 
 
 class Started(Base):
@@ -164,6 +197,107 @@ class Trusted(Base):
         with mock.patch.object(sup.subprocess, "run", return_value=cloned) as run:
             sup._clone(WID, 30000, {**GOOD, "ca": self.CA})
         self.assertEqual(run.call_args.kwargs["env"]["GIT_SSL_CAINFO"], os.path.join(self.dir.name, WID, "home", ".ca-bundle.pem"))
+
+
+TCP = """  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 0100007F:1435 00000000:0000 0A 00000000:00000000 00:00000000 00000000 30000        0 111 1 0000000000000000 100 0 0 10 0
+   1: 00000000:1004 00000000:0000 0A 00000000:00000000 00:00000000 00000000 30000        0 222 1 0000000000000000 100 0 0 10 0
+   2: 00000000:1F90 00000000:0000 0A 00000000:00000000 00:00000000 00000000 30001        0 333 1 0000000000000000 100 0 0 10 0
+   3: 0100007F:1435 0100007F:D431 01 00000000:00000000 00:00000000 00000000 30000        0 444 1 0000000000000000 100 0 0 10 0
+"""
+TCP6 = """  sl  local_address                         remote_address                        st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 00000000000000000000000001000000:0BB8 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000 30000        0 555 1 0000000000000000 100 0 0 10 0
+   1: 00000000000000000000000000000000:1F40 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000 30000        0 666 1 0000000000000000 100 0 0 10 0
+"""
+
+
+class Ports(Base):
+    """What a workspace's own programs listen on (a dev server), from the container's /proc/net, and reached through the relay."""
+
+    def setUp(self):
+        super().setUp()
+        net = Path(self.dir.name, "net")
+        net.mkdir()
+        (net / "tcp").write_text(TCP)
+        (net / "tcp6").write_text(TCP6)
+        patch = mock.patch.object(sup, "PROC_NET", str(net))
+        patch.start()
+        self.addCleanup(patch.stop)
+        engine = mock.Mock()
+        engine.poll.return_value = None
+        engine.pid = 10
+        sup._running[WID] = {"process": engine, "port": 4100, "key": "k", "since": 1, "uid": 30000}
+
+    def test_the_ports_its_user_listens_on_with_their_addresses_and_not_another_workspaces(self):
+        self.assertEqual(sup._listeners(30000), {5173: "127.0.0.1", 4100: "0.0.0.0", 3000: "::1", 8000: "::"})
+        self.assertEqual(sup._listeners(30001), {8080: "0.0.0.0"})
+
+    def test_a_workspaces_ports_are_its_programs_not_its_engines_with_what_runs_them(self):
+        found = {111: (42, "node /workspaces/x/repo/node_modules/.bin/vite"), 555: (43, "python3 -m http.server 3000 --bind ::1"), 666: (10, "dotnet code-arena.dll")}
+        with mock.patch.object(sup, "_sockets", return_value=found) as sockets:
+            ports = sup.ports(WID)
+        sockets.assert_called_once_with(30000)
+        # The engine's own port (4100) and what the engine itself listens on (8000) are not the person's to forward.
+        self.assertEqual(ports, [
+            {"port": 3000, "address": "::1", "pid": 43, "process": "python3 -m http.server 3000 --bind ::1"},
+            {"port": 5173, "address": "127.0.0.1", "pid": 42, "process": "node /workspaces/x/repo/node_modules/.bin/vite"},
+        ])
+        with self.assertRaises(sup.Refused) as asleep:
+            sup.ports("f" * 32)
+        self.assertEqual(asleep.exception.status, 404)
+
+    def test_the_relay_reaches_only_a_port_the_workspace_listens_on(self):
+        self.assertEqual(sup._target(WID, 5173), ("127.0.0.1", 5173))
+        # Any address: the loopback of its family.
+        self.assertEqual(sup._target(WID, 3000), ("::1", 3000))
+        with mock.patch.object(sup, "_sockets", return_value={}):
+            self.assertEqual(sup._target(WID, 8000), ("::1", 8000))
+        for port, status in ((4100, 403), (8080, 404), (9, 404)):
+            with self.assertRaises(sup.Refused) as refused:
+                sup._target(WID, port)
+            self.assertEqual(refused.exception.status, status, port)
+
+    def test_a_connect_with_arenas_key_is_joined_to_the_dev_server_end_to_end(self):
+        import socket
+        import threading
+        server = socket.socket()
+        server.bind(("127.0.0.1", 0))
+        server.listen()
+        port = server.getsockname()[1]
+
+        def echo():
+            conn, _ = server.accept()
+            with conn:
+                while data := conn.recv(1024):
+                    conn.sendall(b"echo:" + data)
+        threading.Thread(target=echo, daemon=True).start()
+        relay = sup.ThreadingHTTPServer(("127.0.0.1", 0), sup.Handler)
+        threading.Thread(target=relay.serve_forever, daemon=True).start()
+        self.addCleanup(relay.server_close)
+        self.addCleanup(relay.shutdown)
+        self.addCleanup(server.close)
+
+        def connect(key: str, target: str) -> tuple[socket.socket, bytes]:
+            s = socket.create_connection(relay.server_address, timeout=5)
+            s.sendall(f"CONNECT {target} HTTP/1.1\r\nHost: {target}\r\nAuthorization: Bearer {key}\r\n\r\n".encode())
+            head = b""
+            while b"\r\n\r\n" not in head:
+                head += s.recv(1)
+            return s, head
+
+        with mock.patch.object(sup, "KEY", "k" * 40), mock.patch.object(sup, "_target", return_value=("127.0.0.1", port)) as target:
+            refused, head = connect("wrong", f"{WID}:5173")
+            refused.close()
+            self.assertIn(b" 401 ", head.split(b"\r\n")[0])
+            joined, head = connect("k" * 40, f"{WID}:5173")
+            self.assertIn(b" 200 ", head.split(b"\r\n")[0])
+            target.assert_called_with(WID, 5173)
+            joined.sendall(b"GET / HTTP/1.1\r\n\r\n")
+            self.assertEqual(joined.recv(1024), b"echo:GET / HTTP/1.1\r\n\r\n")
+            joined.close()
+            bad, head = connect("k" * 40, "not-a-workspace:80")
+            bad.close()
+            self.assertIn(b" 404 ", head.split(b"\r\n")[0])
 
 
 class Named(Base):

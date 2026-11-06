@@ -430,6 +430,10 @@ spec:
       automountServiceAccountToken: false
       # Reaps what a workspace leaves behind, as compose's init: true.
       shareProcessNamespace: true
+      {{- if .Values.workspaces.sandbox }}
+      # The agent's sandbox (bubblewrap): its own user namespace, which an unmasked /proc needs.
+      hostUsers: false
+      {{- end }}
       containers:
         - name: workspaces
           image: {{ include "arena.image" (dict "root" $ "image" .Values.images.workspaces) }}
@@ -442,6 +446,11 @@ spec:
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: { drop: [ALL], add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER, KILL] }
+            {{- if .Values.workspaces.sandbox }}
+            seccompProfile: { type: Unconfined }
+            appArmorProfile: { type: Unconfined }
+            procMount: Unmasked
+            {{- end }}
           readinessProbe: { httpGet: { path: /health, port: http }, periodSeconds: 30 }
           volumeMounts:
             - { name: workspaces, mountPath: /workspaces }

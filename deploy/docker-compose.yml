@@ -514,7 +514,11 @@ services:
     init: true
     cap_drop: [ALL]
     cap_add: [SETUID, SETGID, CHOWN, DAC_OVERRIDE, FOWNER, KILL]
-    security_opt: [no-new-privileges:true]
+    # The agent's commands run in bubblewrap, which makes user, PID and mount namespaces without any capability: the
+    # seccomp profile allows the calls for them (Podman's default, config/workspaces-seccomp.json; Docker's refuses them
+    # without CAP_SYS_ADMIN), AppArmor's docker-default refuses its mounts, and a masked /proc refuses its own /proc.
+    # The container keeps no capability to use them for itself.
+    security_opt: [no-new-privileges:true, seccomp=./config/workspaces-seccomp.json, apparmor=unconfined, systempaths=unconfined]
     pids_limit: 4096
     mem_limit: ${WORKSPACES_MEMORY:-16g}
     cpus: ${WORKSPACES_CPUS:-4}
