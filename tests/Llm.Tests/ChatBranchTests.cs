@@ -234,6 +234,61 @@ public sealed class ChatBranchTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_chat_on_a_small_window_compacts_again_and_again_and_keeps_its_history()
+    {
+        // As the live SmolLM2-135M is: 2,048 tokens a request, answers up to 1,024, and summaries as long as they may be.
+        var gateway = new FakeGateway();
+        gateway.Models.Add(new GatewayModel("Small-Window", 2048, 1024, Vision: false, Tools: true, Thinking: false, null, null, null));
+        app.Model.Windows["Small-Window"] = 2048;
+        await using var f = app.Create(app.ConnectionStringFor("small_" + Guid.NewGuid().ToString("N")[..8]), gateway);
+        var (b, email) = await PersonAsync(f);
+        var id = await NewChatAsync(b, new { useArgus = false, tools = Array.Empty<string>(), model = "Small-Window" });
+        var events = new List<JsonElement>();
+        foreach (var question in new[] { "first", "second", "third", "fourth", "fifth" })
+        {
+            events.AddRange(await PostStreamAsync(b, $"/api/chat/conversations/{id}/messages", new { content = question + " " + new string('q', 900) }));
+        }
+        // Each summary is a quarter of the window at most, so the next fold holds it, its part and its answer: the chat
+        // compacts each time it must, and leaves nothing out.
+        var notices = events.Where(e => e.GetProperty("type").GetString() == "notice").Select(e => e.GetProperty("kind").GetString()).ToList();
+        Assert.DoesNotContain("compact_failed", notices);
+        Assert.DoesNotContain("left_out", notices);
+        Assert.True(events.Count(e => e.GetProperty("type").GetString() == "compacted") >= 2, string.Join(",", events.Select(e => e.GetProperty("type").GetString())));
+        var summaries = app.Model.Requests.Where(r => r.Body["user"]?.GetValue<string>() == email)
+            .Where(r => r.Body["messages"]![0]!["content"]!.GetValue<string>().StartsWith("You compact", StringComparison.Ordinal)).ToList();
+        Assert.All(summaries, r => Assert.InRange(r.Body["max_tokens"]!.GetValue<int>(), 1, 512));
+        Assert.Equal("Answer to: fifth", (await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{id}"))).GetProperty("messages").EnumerateArray().Last().GetProperty("content").GetString()![..16]);
+    }
+
+    [Fact]
+    public async Task A_summary_too_long_for_a_small_window_is_summarized_again_before_the_next_fold()
+    {
+        var gateway = new FakeGateway();
+        gateway.Models.Add(new GatewayModel("Small-Window", 2048, 1024, Vision: false, Tools: true, Thinking: false, null, null, null));
+        app.Model.Windows["Small-Window"] = 2048;
+        await using var f = app.Create(app.ConnectionStringFor("small_" + Guid.NewGuid().ToString("N")[..8]), gateway);
+        var (b, email) = await PersonAsync(f);
+        var id = await NewChatAsync(b, new { useArgus = false, tools = Array.Empty<string>(), model = "Small-Window" });
+        await PostStreamAsync(b, $"/api/chat/conversations/{id}/messages", new { content = "first " + new string('q', 900) });
+        // A summary written when summaries could be half the window: 1,024 tokens, too long to fold anything into.
+        using (var scope = f.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<AppDbContext>().ChatMessages.Where(m => m.ConversationId == id && m.Role == "assistant")
+                .ExecuteUpdateAsync(s => s.SetProperty(m => m.Summary, "Old summary. " + new string('o', 3_072)));
+        }
+        var events = new List<JsonElement>();
+        foreach (var question in new[] { "second", "third", "fourth" })
+        {
+            events.AddRange(await PostStreamAsync(b, $"/api/chat/conversations/{id}/messages", new { content = question + " " + new string('q', 900) }));
+        }
+        var notices = events.Where(e => e.GetProperty("type").GetString() == "notice").Select(e => e.GetProperty("kind").GetString()).ToList();
+        Assert.DoesNotContain("compact_failed", notices);
+        Assert.DoesNotContain("left_out", notices);
+        var compacted = events.First(e => e.GetProperty("type").GetString() == "compacted").GetProperty("summary").GetString()!;
+        Assert.True(compacted.Length < 3_072, compacted.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
     public async Task Answering_again_with_another_model_and_thinking_uses_them_once()
     {
         var gateway = new FakeGateway();

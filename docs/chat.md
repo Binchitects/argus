@@ -242,7 +242,12 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     is compacted and asked once more; a second refusal ends the answer with
     the same actions. When the engine's cache, shared by the chats it answers
     at once, is full, the request is asked again after two seconds. A summary
-    the model refuses as too long is written in halves. An answer cut at the
+    the model refuses as too long is written in halves. A summary is at most a
+    quarter of the context (and 2,048 tokens), so the next one reads it again
+    with room for what came after it: a 2,048-token model's chat compacts as
+    often as it must. An earlier summary that leaves no room (one written
+    before, when summaries could be half the context) is summarized again
+    first. An answer cut at the
     end of the context says so, and the next message compacts. One that stops
     at its longest (the chat's **Longest answer**, else the model's, which the
     engine holds every answer to) says so too: ask it to go on. vLLM and SGLang

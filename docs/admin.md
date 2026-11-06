@@ -801,9 +801,15 @@ would be with them.
   model's preset, vLLM's `max_new_tokens` (`--override-generation-config`),
   SGLang's `SGLANG_MAX_NEW_TOKENS_LIMIT`. One that asks more gets it too:
   vLLM and SGLang cut it there themselves, and the gateway lowers a larger
-  `max_tokens` before it reaches llama.cpp (LiteLLM's `modify_params`;
-  llama.cpp takes a `max_completion_tokens` as asked, up to the end of its
-  slot). A prompt and its `max_tokens` together past the window: vLLM and
+  one before it reaches llama.cpp, however a request asks it: `max_tokens`
+  (chat and text completions, Anthropic's `/v1/messages`),
+  `max_completion_tokens`, or the Responses API's `max_output_tokens`
+  (`deploy/config/arena_limits.py`, which `litellm.yaml` names; llama.cpp
+  would write as long as asked, up to the end of its slot). Anthropic's
+  `/v1/messages` (Claude Code) is answered through chat completions, so an
+  answer cut at its longest says `stop_reason` `max_tokens`, not `end_turn`.
+  The Responses API (Codex) is llama.cpp's own: it says such an answer is
+  `completed`. A prompt and its `max_tokens` together past the window: vLLM and
   SGLang refuse it (the chat reads the counts they give, compacts and asks
   again); llama.cpp answers until the slot is full and says the answer was
   cut (`finish_reason` `length`). The chat never asks for more than its

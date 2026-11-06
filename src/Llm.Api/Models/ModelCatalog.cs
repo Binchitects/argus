@@ -584,7 +584,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         }
         // A request that asks no longest answer (the chat's own by default, Code Arena's turns, many clients') writes at most
         // the model's, as the gateway says it (max_output_tokens), not until its slot is full. One that asks more is lowered by
-        // the gateway (litellm.yaml's modify_params): llama-server takes it as asked.
+        // the gateway (arena_limits.py, which litellm.yaml names): llama-server takes it as asked.
         sb.Append(inv, $"n-predict = {OutputLimit(m)}\n");
         sb.Append(inv, $"cache-type-k = {m.KvType}\ncache-type-v = {m.KvType}\n");
         if (m.Placement == "manual")

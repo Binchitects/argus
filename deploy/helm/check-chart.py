@@ -22,6 +22,7 @@ DEPLOY = HERE.parent
 COPIES = {
     "files/litellm.yaml": "config/litellm.yaml",
     "files/litellm-ha.yaml": "config/litellm-ha.yaml",
+    "files/arena_limits.py": "config/arena_limits.py",
     "files/argus.yaml": "config/argus.yaml",
     "files/searxng.yml": "config/searxng.yml",
     "files/alertmanager.yml": "config/alertmanager.yml",

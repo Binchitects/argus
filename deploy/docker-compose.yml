@@ -168,7 +168,8 @@ services:
       ENGINE_API_KEY: ${ENGINE_KEY}
       STORE_MODEL_IN_DB: "True"
       LITELLM_LOCAL_MODEL_COST_MAP: "True"
-    volumes: [./config/litellm.yaml:/app/arena.yaml:ro]
+    # Its config, and the hold on each request's longest answer that the config names (arena_limits.py).
+    volumes: [./config/litellm.yaml:/app/arena.yaml:ro, ./config/arena_limits.py:/app/arena_limits.py:ro]
     depends_on: { postgres: { condition: service_healthy, required: false } }
 
   # Valkey: the gateway's shared counts when it runs as several replicas (ha.yml), and LMCache's

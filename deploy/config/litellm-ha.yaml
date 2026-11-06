@@ -22,12 +22,20 @@ router_settings:
 
 litellm_settings:
   drop_params: true
-  # A max_tokens above a model's longest answer (its max_output_tokens, as the app registers it) is
-  # lowered to it: llama.cpp would write as long as asked, until its slot is full. vLLM and SGLang
-  # hold every request to it themselves (the app's launch settings), and so does llama.cpp's
-  # n-predict for a request that asks none. Its other changes are to messages in Anthropic's and
-  # Bedrock's own formats, which the gateway never sends: every model is reached the OpenAI way.
+  # A longest answer asked above a model's own (its max_output_tokens, as the app registers it) is
+  # lowered to it, however a request asks (arena_limits.py, beside this file: max_tokens,
+  # max_completion_tokens, the Responses API's max_output_tokens; modify_params lowers only
+  # max_tokens on chat completions): llama.cpp would write as long as asked, until its slot is full.
+  # vLLM and SGLang hold every request to it themselves (the app's launch settings), and so does
+  # llama.cpp's n-predict for a request that asks none. modify_params' other changes are to messages
+  # in Anthropic's and Bedrock's own formats, which the gateway never sends: every model is reached
+  # the OpenAI way.
   modify_params: true
+  callbacks: [arena_limits.longest_answer]
+  # Anthropic's /v1/messages (Claude Code) is answered through chat completions, not the Responses
+  # API: llama.cpp's says an answer cut at its longest is complete, so stop_reason would be end_turn
+  # where its chat completions say length, which LiteLLM gives as max_tokens.
+  use_chat_completions_url_for_anthropic_messages: true
   # Several replicas (this file is ha.yml's): the keys' rate and token limits and parallel counts
   # live in Valkey, so a key gets its limit once, not once per replica. A cache for those counts
   # only: no answer is cached (supported_call_types is empty).
