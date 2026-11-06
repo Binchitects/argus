@@ -60,6 +60,7 @@ public sealed class WikiTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "IAM-05")]
     public async Task The_code_is_searched_as_the_person_a_page_at_a_time_with_their_filters_and_meaning_only_beside_a_short_answer()
     {
         var name = "wikicode" + Guid.NewGuid().ToString("N")[..4];

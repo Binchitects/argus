@@ -152,7 +152,7 @@ What a person may do comes from roles (built in, or made by the company) held di
 - `Llm.Tests/AccessEndpointsTests.A_rule_takes_a_feature_from_a_group_and_the_checker_says_why`
 - `Llm.Tests/AccessBulkTests.Me_and_the_chats_config_name_the_feature_permissions_a_person_does_not_hold`
 - `Llm.Tests/WikiTests.People_find_and_read_the_documents_they_may_read_and_nothing_else`
-- `Argus.Tests/ReviewToolsTests.The_wiki_search_answers_as_the_person_with_pages_and_filters`
+- `Llm.Tests/WikiTests.The_code_is_searched_as_the_person_a_page_at_a_time_with_their_filters_and_meaning_only_beside_a_short_answer`
 - `Llm.Tests/FairUseTests.An_admin_takes_a_waiting_answer_out_and_stops_a_running_one_and_the_person_is_told_why`
 - `Llm.Tests/ChatRewindTests.Only_the_owner_rewinds_a_room_for_everyone_and_nobody_while_an_answer_is_written`
 - `Llm.Tests/CodeArenaSyncTests.Only_the_owner_s_key_reads_or_adds_to_a_chat`
@@ -640,7 +640,6 @@ Only Traefik's ports 80 and 443 are published, 80 only to redirect; TLS 1.2 and 
 - `Llm.Tests/ApiPassageTests.The_model_list_and_embeddings_are_passed_on_with_the_callers_own_key`
 - `Llm.Tests/ApiPassageTests.The_gateways_own_management_is_not_found_from_outside`
 - `Llm.Tests/CompanyCaTests.A_person_links_their_GitLab_token_once_the_company_CA_is_given_in_Settings_and_Argus_gets_it_too`
-- `Argus.Tests/CompanyCaTests.GitLab_on_a_company_CA_is_reached_once_the_stack_is_given_the_CA_and_without_a_restart`
 
 **Watched by** `live:tls`, `live:headers`, `live:csrf` (Admin → Compliance, and `./arenactl check compliance`)
 
