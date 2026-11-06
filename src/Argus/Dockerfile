@@ -30,6 +30,13 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/* \
  && ctags --version | grep -q "Universal Ctags"
 WORKDIR /src
+COPY tools/fetch-sqlite-vec.sh tools/
+# The sqlite-vec release, from its PyPI wheel, checked against a pinned SHA-256: before
+# VERSION and the sources, so a release does not fetch it again.
+RUN case "$(dpkg --print-architecture)" in \
+      amd64) rid=linux-x64 ;; arm64) rid=linux-arm64 ;; *) echo "unsupported arch" >&2; exit 1 ;; \
+    esac \
+ && tools/fetch-sqlite-vec.sh "$rid"
 COPY global.json Directory.Build.props VERSION ./
 COPY src/Argus/Argus.csproj src/Argus/
 COPY tests/Argus.Tests/Argus.Tests.csproj tests/Argus.Tests/
@@ -37,12 +44,6 @@ RUN dotnet restore tests/Argus.Tests/Argus.Tests.csproj
 COPY src/Argus/ src/Argus/
 COPY tests/Argus.Tests/ tests/Argus.Tests/
 COPY tests/fixtures/argus/ tests/fixtures/argus/
-COPY tools/fetch-sqlite-vec.sh tools/
-# The sqlite-vec release, from its PyPI wheel, checked against a pinned SHA-256.
-RUN case "$(dpkg --print-architecture)" in \
-      amd64) rid=linux-x64 ;; arm64) rid=linux-arm64 ;; *) echo "unsupported arch" >&2; exit 1 ;; \
-    esac \
- && tools/fetch-sqlite-vec.sh "$rid"
 
 # ----------------------------------------------------------------- test -----
 FROM build AS test
