@@ -16,6 +16,8 @@ public sealed record Reply(string Text, (string Name, string Args)[] Calls, stri
     public bool Endless { get; init; }
     /// <summary>The reasoning said again and again until the client goes away: a model that thinks and thinks.</summary>
     public bool ThinksOn { get; init; }
+    /// <summary>Of <see cref="Completion"/>, the tokens of thinking before the words: a max_tokens no larger is spent on it alone.</summary>
+    public int Thought { get; init; }
 
     public static Reply Say(string text, string? reasoning = null) => new(text, [], reasoning);
     public static Reply Call(params (string Name, string Args)[] calls) => new("", calls);
@@ -149,6 +151,13 @@ public sealed class FakeGateway : FakeServer
     /// <summary>The requests answered with a stream that never says anything.</summary>
     public Func<JsonObject, bool> Silent { get; set; } = _ => false;
     public TaskCompletionSource FirstRequest { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    /// <summary>The prompt's tokens as the engine counts them; null: a quarter of the request's characters.</summary>
+    public Func<JsonObject, long>? Tokens { get; set; }
+    /// <summary>
+    /// The engine's window, as llama.cpp holds it: a prompt past it is refused (n_prompt_tokens, n_ctx), and an answer that
+    /// would run past it is cut there ("length"). Null: no window.
+    /// </summary>
+    public int? Window { get; set; }
     /// <summary>Text completions (/v1/completions): what each asked, how they are answered, and a status to refuse them with (0: none).</summary>
     public List<JsonObject> TextRequests { get; } = [];
     public Func<JsonObject, string> TextAnswer { get; set; } = _ => "a + b;";
@@ -231,6 +240,19 @@ public sealed class FakeGateway : FakeServer
             _requests.Add(request);
         }
         FirstRequest.TrySetResult();
+        var counted = Tokens?.Invoke(request) ?? body.Length / 4;
+        if (Window is { } window && counted > window)
+        {
+            await WriteJson(ctx, new JsonObject
+            {
+                ["error"] = new JsonObject
+                {
+                    ["message"] = $"litellm.ContextWindowExceededError: litellm.BadRequestError: OpenAIException - request ({counted} tokens) exceeds the available context size ({window} tokens), try increasing it",
+                    ["type"] = "exceed_context_size_error", ["n_prompt_tokens"] = counted, ["n_ctx"] = window,
+                },
+            }, 400);
+            return;
+        }
         if (Failure(request) is > 0 and var status)
         {
             await WriteJson(ctx, FailureBody(request) ?? new JsonObject { ["error"] = new JsonObject { ["message"] = "The model's backend is restarting." } }, status);
@@ -251,6 +273,16 @@ public sealed class FakeGateway : FakeServer
             await Task.Delay(Timeout.Infinite, ct);
         }
         var reply = Answer(request);
+        if (Window is { } room && counted + reply.Completion > room)
+        {
+            // The answer ran out of the window: cut where it ran out.
+            reply = reply with { Finish = "length", Completion = (int)(room - counted) };
+        }
+        if (request["max_tokens"]?.GetValue<int>() is { } most && reply.Completion > most)
+        {
+            // Its longest answer reached: cut there, with no words when the thinking took it all.
+            reply = reply with { Finish = "length", Completion = most, Text = reply.Thought >= most ? "" : reply.Text };
+        }
         ctx.Response.ContentType = "text/event-stream";
         ctx.Response.SendChunked = true;
         if (Drop(request))
@@ -310,7 +342,7 @@ public sealed class FakeGateway : FakeServer
         {
             ["choices"] = new JsonArray(new JsonObject { ["index"] = 0, ["delta"] = new JsonObject(), ["finish_reason"] = reply.Finish ?? (reply.Calls.Length > 0 ? "tool_calls" : "stop") }),
         }.ToJsonString());
-        var prompt = body.Length / 4;
+        var prompt = counted;
         await WriteEvent(ctx, new JsonObject
         {
             ["choices"] = new JsonArray(),

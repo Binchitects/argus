@@ -2117,9 +2117,13 @@ A long session never gets stuck on the window:
 - **One long turn compacts itself**: when nothing before the turn is left to
   summarize, the turn's earlier steps are (the person's message and the
   latest steps kept whole). A compaction that would change nothing writes
-  nothing and does not reset the IDE's page. After an answer cut at the
-  output limit, what is kept starts at the note that asks the model to carry
-  on, so it always has something to answer.
+  nothing and does not reset the IDE's page. What is kept starts at a
+  question of the person's, never at one of Code Arena's own notes in a turn
+  (after an answer cut at the output limit, the note that asks the model to
+  carry on), so the question is never summarized away from the steps that
+  answer it; the note is still last, so the model has something to answer.
+  The results of the last two steps stay whole, however many calls each
+  made at once.
 - **The session keeps every message**: a compaction changes only what the
   model reads. The IDE shows the whole conversation, marked where it was
   compacted, and the chat in Arena has all of it too.
@@ -2141,7 +2145,26 @@ A long session never gets stuck on the window:
   longest answer as the gateway says, 4,096 tokens otherwise, at most an
   eighth of the window) stays free below the window, whatever the threshold;
   the IDE's context gauge shows it as **Kept for the answer**, as the web
-  chat's does. A summary asks for no more than the model's longest answer.
+  chat's does. A summary asks for no more than the model's longest answer;
+  a model that thinks gets up to 8,192 tokens (an eighth of the window at
+  most) beside it to think, as some think although asked not to.
+- **It compacts before the next step needs the room**: each step's growth
+  (its answer and its tools' results, from one request to the next) is
+  remembered for the last 8 steps, and when the next request plus the most
+  one of them added would pass the threshold, the earlier turns are
+  summarized now, not one step too late. The turn being answered is never
+  cut for what it may add. An answer counts as the next request sends it
+  back: its words and calls, not its thinking (the completion's tokens count
+  it, and it is never sent again), so a thinking model does not compact
+  early and cut what it just read. A picture (a screenshot, a file attached)
+  counts as 3,500 characters, about a thousand tokens, as the web chat
+  counts one.
+- **The engine's own window is learned**: when it refuses a request and
+  says how much it holds (llama.cpp's `n_ctx`), or cuts an answer short of
+  the model's longest one before the window the gateway says was full, that
+  is the window from then on ("The engine holds 20k tokens, not the 32.8k
+  the gateway says: Code Arena compacts for 20k from now on."). Another
+  model, or the gateway saying another window for it, forgets it.
 - **The start of every request stays the same**, so the engine does not read
   the whole conversation again after a change: the same tools in every mode,
   MCP servers' tools in the order they came (a new server's at the end), and

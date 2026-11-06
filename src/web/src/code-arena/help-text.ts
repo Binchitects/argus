@@ -147,7 +147,7 @@ export const tasks: HelpTask[] = [
     title: 'Change when the conversation is compacted',
     steps: [
       'Click how full the window is, in the status bar (tokens used / the model\'s; the gauge on a phone).',
-      'Choose **At a share of the window** (and set **Compact at**), **Only when a request would not fit**, or **As my Arena account says** (Your account → Answers in Arena), and what the recent part keeps, in percent of the window. It always compacts before a request would not fit.',
+      'Choose **At a share of the window** (and set **Compact at**), **Only when a request would not fit**, or **As my Arena account says** (Your account → Answers in Arena), and what the recent part keeps, in percent of the window. It always compacts before a request would not fit, and one step early when the next step\'s answer and results would pass the threshold.',
       'Press **Save**: the next sessions use it too.',
     ],
   },

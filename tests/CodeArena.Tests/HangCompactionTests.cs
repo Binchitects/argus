@@ -165,10 +165,12 @@ public sealed class HangCompactionTests(ITestOutputHelper log) : IDisposable
         Assert.Equal(0, await h.Run("", "-p", "hello " + new string('h', 4000)));
         var usage = File.ReadAllLines(Directory.GetFiles(h.Paths.SessionsDir).Single()).Select(l => JsonNode.Parse(l)!.AsObject())
             .Last(e => e["type"]!.GetValue<string>() == "usage");
-        var counted = usage["prompt"]!.GetValue<long>() + usage["completion"]!.GetValue<long>();
-
         await using var rt = await StartAsync(h, new Options { Continue = true });
         Assert.Equal(2, rt.Agent.Messages.Count);
+        // The prompt as counted, and the answer as the next request sends it back (its words: not its completion, which
+        // counts the thinking that is never sent again).
+        var answer = rt.Agent.Messages[1]["content"]!.GetValue<string>();
+        var counted = usage["prompt"]!.GetValue<long>() + (long)((answer.Length + 10) / rt.Agent.CharsPerToken);
         Assert.Equal(counted, rt.Agent.Estimate());
         log.WriteLine($"characters a token, learned on resuming: {rt.Agent.CharsPerToken:0.00}");
         Assert.NotEqual(3.5, rt.Agent.CharsPerToken);
