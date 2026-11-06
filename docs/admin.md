@@ -112,6 +112,16 @@ What each person may do is decided in one place, from three things:
   and `feature.assistants.share` stop new memories, tasks, share links and
   sharing assistants; `code.read` takes the Argus tool. What they already
   have stays theirs to read and delete.
+- **What a person may not use is hidden**, not only refused. Their pages
+  leave the sidebar, the command palette and Home (Chat, Memory, Meetings,
+  Plans, Data, Decks, Media studio, Agent Studio, Code Studio without any
+  of `code.studio`, `code.read` and `review.run`, Scheduled tasks, Connect
+  your tools); a link to one says it is not among what they may use, and
+  where to ask. The chat leaves out Compare, Attach and the voice message,
+  Sketch and screen sharing (they are files), Talk, the model picker,
+  Memory, Share, Make it a room and Export when the permission behind each
+  is taken; Code Arena offers no Attach without `feature.uploads`. The app
+  says it in `/api/auth/me` and the chat's config as `denied`.
 - **Parts of permissions.** Each broad administrative permission has parts a
   role can hold alone: `people.manage` holds `people.create`, `people.edit`,
   `people.delete`, `people.passwords` (passwords, two-factor, signing out),

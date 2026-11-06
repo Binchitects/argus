@@ -64,6 +64,22 @@ describe('shell', () => {
     expect(screen.getByText(/Ask an admin/)).toBeInTheDocument()
   })
 
+  it('leaves out the pages a member may not use, from the sidebar, the palette and Home, and says so on the page', async () => {
+    fakeApi({ ...member, denied: ['feature.decks', 'feature.studio', 'feature.api_keys', 'code.studio', 'code.read', 'review.run'] })
+    renderApp('/decks')
+    expect(await screen.findByText('Decks is not among what you may use')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Your account' })).toHaveAttribute('href', '/account')
+    const nav = screen.getByRole('navigation', { name: 'Main' })
+    for (const name of ['Decks', 'Agent Studio', 'Code Studio', 'Connect your tools']) expect(within(nav).queryByRole('link', { name })).not.toBeInTheDocument()
+    expect(within(nav).getByRole('link', { name: 'Meetings' })).toBeInTheDocument()
+    await userEvent.click(within(nav).getByRole('link', { name: 'Home' }))
+    expect(await screen.findByText('Your usage')).toBeInTheDocument()
+    expect(screen.queryByText('Connect your tools')).not.toBeInTheDocument()
+    await userEvent.keyboard('{Control>}k{/Control}')
+    await userEvent.type(await screen.findByPlaceholderText('Go to a page or run a command…'), 'agent studio')
+    expect(screen.queryByRole('option', { name: /^Agent Studio/ })).not.toBeInTheDocument()
+  })
+
   it('shows admins the administration sections', async () => {
     fakeApi(admin)
     renderApp('/')

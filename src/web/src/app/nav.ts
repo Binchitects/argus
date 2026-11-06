@@ -12,6 +12,8 @@ export interface NavItem {
   anyOf?: string[]
   /** The feature it is part of (deploy/features): left out while that feature is off. */
   feature?: string
+  /** The feature permissions it needs, any of them (Admin → Access): left out for a person who holds none. */
+  may?: string[]
 }
 
 export interface NavSection {
@@ -25,25 +27,25 @@ export const navigation: NavSection[] = [
     title: 'Workspace',
     items: [
       { title: 'Home', path: '/', icon: Home },
-      { title: 'Chat', path: '/chat', icon: MessageSquare, keywords: ['conversation', 'ask', 'model', 'argus'] },
+      { title: 'Chat', path: '/chat', icon: MessageSquare, keywords: ['conversation', 'ask', 'model', 'argus'], may: ['feature.chat'] },
       { title: 'Assistants', path: '/assistants', icon: Bot, keywords: ['gpts', 'gems', 'projects', 'instructions', 'knowledge', 'shared', 'team'] },
       { title: 'Skills', path: '/skills', icon: SquareSlash, keywords: ['slash commands', 'prompts', 'prompt library', 'templates', 'snippets', 'instructions', 'parameters'] },
-      { title: 'Memory', path: '/memory', icon: Brain, keywords: ['remember', 'memories', 'recall', 'preferences', 'facts', 'decisions', 'lessons', 'pinned', 'context', 'what it knows about me'] },
-      { title: 'Meetings', path: '/meetings', icon: AudioLines, keywords: ['meeting', 'record', 'recording', 'transcript', 'minutes', 'notes', 'action items', 'decisions', 'who said', 'speakers', 'otter', 'fireflies', 'call'], feature: 'meetings' },
+      { title: 'Memory', path: '/memory', icon: Brain, keywords: ['remember', 'memories', 'recall', 'preferences', 'facts', 'decisions', 'lessons', 'pinned', 'context', 'what it knows about me'], may: ['feature.memory'] },
+      { title: 'Meetings', path: '/meetings', icon: AudioLines, keywords: ['meeting', 'record', 'recording', 'transcript', 'minutes', 'notes', 'action items', 'decisions', 'who said', 'speakers', 'otter', 'fireflies', 'call'], feature: 'meetings', may: ['feature.meetings'] },
       { title: 'Checklists', path: '/checklists', icon: ListTodo, keywords: ['checklist', 'definition of done', 'steps', 'review', 'before merge', 'tick', 'todo'] },
-      { title: 'Plans', path: '/plans', icon: ListChecks, keywords: ['plan', 'board', 'timeline', 'gantt', 'steps', 'project', 'kanban'] },
+      { title: 'Plans', path: '/plans', icon: ListChecks, keywords: ['plan', 'board', 'timeline', 'gantt', 'steps', 'project', 'kanban'], may: ['feature.plans'] },
       { title: 'Science lab', path: '/lab', icon: FlaskConical, keywords: ['science', 'lab', 'mathematics', 'math', 'physics', 'chemistry', 'statistics', 'proof', 'sympy', 'units', 'notebook', 'wolfram'], feature: 'lab' },
       { title: 'Apps', path: '/apps', icon: AppWindow, keywords: ['app', 'apps', 'tool', 'publish', 'page', 'component', 'gallery', 'remix'], feature: 'apps' },
       { title: 'Wiki', path: '/wiki', icon: BookOpenText, keywords: ['search', 'knowledge', 'documents', 'docs', 'handbook', 'code', 'files', 'tables', 'find', 'browse'] },
-      { title: 'Data', path: '/data', icon: BarChart, keywords: ['ask your data', 'sql', 'database', 'query', 'chart', 'dashboard', 'board', 'report', 'analytics', 'bi'], feature: 'data' },
-      { title: 'Decks', path: '/decks', icon: Presentation, keywords: ['slides', 'presentation', 'powerpoint', 'pptx', 'pdf', 'deck', 'keynote', 'template'], feature: 'decks' },
-      { title: 'Media studio', path: '/media', icon: Palette, keywords: ['pictures', 'images', 'photo', 'edit', 'inpaint', 'paint', 'variations', 'upscale', 'enlarge', 'animate', 'video', 'clip', 'midjourney', 'photoshop'], feature: 'media' },
-      { title: 'Agent Studio', path: '/studio', icon: Workflow, keywords: ['workflow', 'automation', 'agent', 'zapier', 'n8n', 'flow', 'trigger', 'approval', 'webhook', 'form'], feature: 'agents' },
-      { title: 'Code Studio', path: '/code', icon: GitPullRequest, keywords: ['ide', 'vs code', 'workspace', 'editor', 'terminal', 'debug', 'review', 'merge request', 'mr', 'gitlab', 'diff', 'code assistant', 'branch', 'argus', 'security', 'vulnerability', 'cwe', 'owasp'], feature: 'code-studio' },
-      { title: 'Scheduled tasks', path: '/tasks', icon: CalendarClock, keywords: ['schedule', 'cron', 'daily', 'weekly', 'report', 'digest', 'webhook', 'email', 'notification'] },
+      { title: 'Data', path: '/data', icon: BarChart, keywords: ['ask your data', 'sql', 'database', 'query', 'chart', 'dashboard', 'board', 'report', 'analytics', 'bi'], feature: 'data', may: ['feature.data'] },
+      { title: 'Decks', path: '/decks', icon: Presentation, keywords: ['slides', 'presentation', 'powerpoint', 'pptx', 'pdf', 'deck', 'keynote', 'template'], feature: 'decks', may: ['feature.decks'] },
+      { title: 'Media studio', path: '/media', icon: Palette, keywords: ['pictures', 'images', 'photo', 'edit', 'inpaint', 'paint', 'variations', 'upscale', 'enlarge', 'animate', 'video', 'clip', 'midjourney', 'photoshop'], feature: 'media', may: ['feature.pictures'] },
+      { title: 'Agent Studio', path: '/studio', icon: Workflow, keywords: ['workflow', 'automation', 'agent', 'zapier', 'n8n', 'flow', 'trigger', 'approval', 'webhook', 'form'], feature: 'agents', may: ['feature.studio'] },
+      { title: 'Code Studio', path: '/code', icon: GitPullRequest, keywords: ['ide', 'vs code', 'workspace', 'editor', 'terminal', 'debug', 'review', 'merge request', 'mr', 'gitlab', 'diff', 'code assistant', 'branch', 'argus', 'security', 'vulnerability', 'cwe', 'owasp'], feature: 'code-studio', may: ['code.studio', 'code.read', 'review.run'] },
+      { title: 'Scheduled tasks', path: '/tasks', icon: CalendarClock, keywords: ['schedule', 'cron', 'daily', 'weekly', 'report', 'digest', 'webhook', 'email', 'notification'], may: ['feature.tasks'] },
       { title: 'Usage & cost', path: '/usage', icon: BarChart3, keywords: ['tokens', 'spend', 'credit', 'budget'] },
       { title: 'Leaderboard', path: '/leaderboard', icon: Trophy, keywords: ['arena', 'compare', 'models', 'elo', 'vote', 'ranking'] },
-      { title: 'Connect your tools', path: '/setup', icon: Plug, keywords: ['api key', 'token', 'claude code', 'qwen code', 'opencode', 'continue', 'mcp', 'harness', 'sdk', 'certificate'] },
+      { title: 'Connect your tools', path: '/setup', icon: Plug, keywords: ['api key', 'token', 'claude code', 'qwen code', 'opencode', 'continue', 'mcp', 'harness', 'sdk', 'certificate'], may: ['feature.api_keys'] },
     ],
   },
   {
@@ -95,15 +97,18 @@ export const navigation: NavSection[] = [
   },
 ]
 
-/** What a person sees: an admin section's pages by the permissions they hold (all of them for an Owner), without the features that are off. */
-export function visibleNavigation(me: { isAdmin: boolean; permissions?: string[]; featuresOff?: string[] }): NavSection[] {
+/** What a person sees: an admin section's pages by the permissions they hold (all of them for an Owner), without the features that are off or that they may not use. */
+export function visibleNavigation(me: { isAdmin: boolean; permissions?: string[]; featuresOff?: string[]; denied?: string[] }): NavSection[] {
   const held = new Set(me.permissions ?? [])
   const off = new Set(me.featuresOff ?? [])
   return navigation
     .map((s) => (!s.adminOnly || me.isAdmin ? s : { ...s, items: s.items.filter((i) => (i.permission && held.has(i.permission)) || i.anyOf?.some((k) => held.has(k))) }))
-    .map((s) => ({ ...s, items: s.items.filter((i) => !i.feature || !off.has(i.feature)) }))
+    .map((s) => ({ ...s, items: s.items.filter((i) => (!i.feature || !off.has(i.feature)) && mayOpen(me, i)) }))
     .filter((s) => s.items.length > 0)
 }
+
+/** Whether the person holds a feature permission the page needs (or it needs none). */
+export const mayOpen = (me: { denied?: string[] }, item: NavItem) => !item.may || item.may.some((k) => !me.denied?.includes(k))
 
 /** The nav item a path belongs to: the longest matching prefix. */
 export function findNavItem(pathname: string): NavItem | undefined {

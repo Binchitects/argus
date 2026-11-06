@@ -123,7 +123,8 @@ public static partial class ChatEndpoints
         var modeOf = await toolModes.ResolverAsync(ct);
         // The models this person may use; a model of the engine that is not loaded is listed, marked so.
         var (list, first, onEngine) = await policy.ForAsync(me, await models.ListAsync(ct), ct);
-        var tools = await registry.ForAsync(await access.MembershipAsync(me, ct), ct);
+        var membership = await access.MembershipAsync(me, ct);
+        var tools = await registry.ForAsync(membership, ct);
         // Auto, while a model for small steps is set that this person may use.
         var helper = await small.OfferedAsync(me, ct);
         return new
@@ -152,6 +153,8 @@ public static partial class ChatEndpoints
             // When this person's chats compact (percent of the context; 0: only when a message would not fit), and whose choice it is.
             compactAt = me.CompactAt ?? chat.CurrentValue.CompactAt,
             compactSource = me.CompactAt is null ? "company" : "account",
+            // The feature permissions this person does not hold (Compare, attachments...): the chat leaves them out.
+            denied = Llm.Core.Access.Permissions.FeatureKeys.Where(k => !membership.Has(k)),
         };
     }
 

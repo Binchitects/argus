@@ -74,4 +74,28 @@ public sealed class AccessBulkTests(AppFixture app)
         Assert.True((await admin.JsonAsync(await admin.GetAsync($"/api/admin/access/check?person={ana}&permission=feature.chat"))).GetProperty("isDisabled").GetBoolean());
         await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.PostAsync("/api/admin/access/bulk", new { people = new[] { ana }, steps = new[] { new { kind = "role.paint" } } }));
     }
+
+    [Fact]
+    [Trait("Control", "IAM-05")]
+    public async Task Me_and_the_chats_config_name_the_feature_permissions_a_person_does_not_hold()
+    {
+        await using var f = NewApp();
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var user = "dn" + Guid.NewGuid().ToString("N")[..8];
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = user, email = $"{user}@example.test" }));
+        var person = await new TestBrowser(f).SignedInAsync(user, made.GetProperty("password").GetString()!);
+        static string?[] Denied(JsonElement e) => [.. e.GetProperty("denied").EnumerateArray().Select(x => x.GetString())];
+        Assert.Empty(Denied(await person.JsonAsync(await person.GetAsync("/api/auth/me"))));
+
+        await admin.PostAsync("/api/admin/access/bulk", new
+        {
+            people = new[] { made.GetProperty("id").GetGuid() },
+            steps = new[] { new { kind = "feature.deny", feature = "feature.compare" }, new { kind = "feature.deny", feature = "code.studio" } },
+            dryRun = false,
+        });
+        Assert.Equal(["code.studio", "feature.compare"], Denied(await person.JsonAsync(await person.GetAsync("/api/auth/me"))).Order());
+        Assert.Contains("feature.compare", Denied(await person.JsonAsync(await person.GetAsync("/api/chat/config"))));
+        // An Owner holds every one.
+        Assert.Empty(Denied(await admin.JsonAsync(await admin.GetAsync("/api/auth/me"))));
+    }
 }

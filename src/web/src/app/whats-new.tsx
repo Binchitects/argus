@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { api, infoQuery, meQuery } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import { findNavItem } from './nav'
+import { findNavItem, mayOpen } from './nav'
 
 /** One page of a release's tour: what changed for people, in a few words, and where to try it. */
 interface Slide {
@@ -116,8 +116,11 @@ export function WhatsNew({ open, onOpenChange }: { open: boolean; onOpenChange: 
   const info = useQuery(infoQuery).data
   const me = useQuery(meQuery).data
   const off = new Set(me?.featuresOff ?? [])
-  // A page about a feature that is off here (deploy/features) is skipped too.
-  const slides = latestTour.slides.filter((s) => (!s.permission || me?.isAdmin || me?.permissions?.includes(s.permission)) && !off.has(findNavItem(s.to)?.feature ?? ''))
+  // A page about a feature that is off here (deploy/features), or that the person may not use, is skipped too.
+  const slides = latestTour.slides.filter((s) => {
+    const item = findNavItem(s.to)
+    return (!s.permission || me?.isAdmin || me?.permissions?.includes(s.permission)) && !off.has(item?.feature ?? '') && (!item || !me || mayOpen(me, item))
+  })
   const [page, setPage] = useState(0)
   const opened = useRef(false)
   const markSeen = useMutation({

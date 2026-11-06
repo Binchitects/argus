@@ -7,7 +7,7 @@ import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet'
 import { toast } from '@/components/ui/toaster'
-import { api, ApiError, errorMessage, infoQuery, type Me } from '@/lib/api'
+import { api, ApiError, errorMessage, infoQuery, mayUse, type Me } from '@/lib/api'
 import { refusalEvent, safeguardQuestion, type SafeguardAnswer, type SafeguardQuestion } from './safeguard'
 import { AskReview, SafeguardAsk } from './safeguard-dialogs'
 import { takeShared } from '@/lib/shared'
@@ -41,7 +41,7 @@ import { useListFolds } from './list-folds'
 import { ChatTree, toTurns } from './tree'
 import { AnswerTurn, CompactedMark, QuestionTurn } from './turns'
 import { ArenaTurn, ComparePicker } from './arena'
-import { arenaView, type CompareChoice } from './quality'
+import { arenaView, comparable, type CompareChoice } from './quality'
 import type { Attachment, ChatConfig, ChatEvent, ChatSettings, Conversation, Message, QueuedMessage, Rewound } from './types'
 import { useUploads } from './uploads'
 import { AssistantView } from './assistant-view'
@@ -640,7 +640,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   const send = async (text: string, files?: Attachment[], talkTurn?: TalkTurn, quoted?: Quote, onEvent?: (e: ChatEvent) => void, skill?: SkillUse): Promise<boolean> => {
     const fromBox = files === undefined
     // Compare too: two models answer this message, side by side.
-    const versus = fromBox ? compare : null
+    const versus = fromBox ? comparing : null
     if (versus) setCompare(null)
     // "/compact": a command, not a question.
     if (text === '/compact' && !skill && (files ?? uploads.attachments).length === 0) {
@@ -762,7 +762,10 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   }
 
   const [compare, setCompare] = useState<CompareChoice | null>(null)
-  const comparePicker = <ComparePicker models={config.models} value={compare} onChange={setCompare} />
+  // Compare is offered to a person who may compare, while two models can answer: none is left on that they cannot see or turn off.
+  const canCompare = mayUse(config, 'feature.compare') && comparable(config.models).length >= 2
+  const comparing = canCompare ? compare : null
+  const comparePicker = canCompare ? <ComparePicker models={config.models} value={comparing} onChange={setCompare} /> : null
 
   // Written while an answer runs: each waits on the server (a reload, or another tab, still shows it)
   // and becomes the next question once the answer before is over, or at once with Send now (which
@@ -874,18 +877,23 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     onInterrupt: () => void stop(),
     readAloud: aloudToo,
   })
+  // What the person may not use is not offered: a sketch and the shared screen go as files, Talk is speech.
+  const mayAttach = mayUse(config, 'feature.uploads')
+  const maySpeak = mayUse(config, 'feature.speech')
   const talkButton = (
     <>
-      <SketchButton
-        chatKey={id ?? 'new'}
-        busy={streaming}
-        onAsk={(f, a) => void askSketch(f, a)}
-        onAttach={(f) => uploads.add([f])}
-        screenFrame={share.sharing ? share.frame : undefined}
-      />
-      <ScreenButton share={share} />
+      {mayAttach && (
+        <SketchButton
+          chatKey={id ?? 'new'}
+          busy={streaming}
+          onAsk={(f, a) => void askSketch(f, a)}
+          onAttach={(f) => uploads.add([f])}
+          screenFrame={share.sharing ? share.frame : undefined}
+        />
+      )}
+      {mayAttach && <ScreenButton share={share} />}
       <PanelButton chatId={id} ensureChat={ensureChat} />
-      <TalkButton state={talk.state} onStart={() => void talk.start()} onEnd={talk.end} />
+      {maySpeak && <TalkButton state={talk.state} onStart={() => void talk.start()} onEnd={talk.end} />}
     </>
   )
 
@@ -1181,17 +1189,17 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
           sideOpen && wide && (sideWide ? 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)]' : 'grid-cols-[minmax(0,1fr)_26rem] 2xl:grid-cols-[minmax(0,1fr)_34rem]'),
         )}
         onDragEnter={(e) => {
-          if (e.dataTransfer.types.includes('Files')) {
+          if (mayAttach && e.dataTransfer.types.includes('Files')) {
             e.preventDefault()
             setDragging(true)
           }
         }}
-        onDragOver={(e) => e.dataTransfer.types.includes('Files') && e.preventDefault()}
+        onDragOver={(e) => mayAttach && e.dataTransfer.types.includes('Files') && e.preventDefault()}
         onDragLeave={(e) => !e.currentTarget.contains(e.relatedTarget as Node) && setDragging(false)}
         onDrop={(e) => {
           e.preventDefault()
           setDragging(false)
-          if (e.dataTransfer.files.length) uploads.add(e.dataTransfer.files)
+          if (mayAttach && e.dataTransfer.files.length) uploads.add(e.dataTransfer.files)
         }}
       >
         <div className="flex min-h-0 min-w-0 flex-col">
@@ -1208,13 +1216,13 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
             canvas={id ? { count: canvas.count, open: canvasOpen, onToggle: () => (canvasOpen ? canvas.setOpen(false) : canvas.reveal(canvas.selected)) } : undefined}
             onOpenList={onOpenList}
             chat={id && data ? { id, title: title ?? data.title, archived: !!data.archivedAt } : undefined}
-            onExport={id && path.length ? exportChat : undefined}
+            onExport={id && path.length && mayUse(config, 'feature.export') ? exportChat : undefined}
             assistant={assistant}
             onMove={id ? (assistantId) => void move(assistantId) : undefined}
-            onShare={id && path.length ? () => setSharing(true) : undefined}
+            onShare={id && path.length && mayUse(config, 'feature.share_links') ? () => setSharing(true) : undefined}
             onCompact={canCompact ? () => void compact() : undefined}
             room={room ? { people: room.members.length, here: roomLive.here.length, onOpen: () => setPeopleOpen(true), readIn: { value: readIn, onChange: setReadIn }, call: <CallButton call={call} canSpeak={room.role !== 'viewer'} /> } : undefined}
-            onMakeRoom={id && data && !room && !data.origin ? () => setMakingRoom(true) : undefined}
+            onMakeRoom={id && data && !room && !data.origin && mayUse(config, 'feature.rooms.create') ? () => setMakingRoom(true) : undefined}
             checklist={id && data && !room ? { chat: id, answering: streaming } : undefined}
           />
           {empty ? (
@@ -1267,6 +1275,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   tools={toolsPicker}
                   compare={comparePicker}
                   talk={talkButton}
+                  attach={mayAttach}
+                  voice={maySpeak}
                   history={history}
                   autoFocus
                   big
@@ -1506,12 +1516,14 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                       : (text, skill) => send(text, undefined, undefined, undefined, undefined, skill)
                   }
                   talk={talkButton}
+                  attach={mayAttach}
+                  voice={maySpeak}
                   queued={queue}
                   onQueue={(text, skill) => enqueue(text, undefined, undefined, skill)}
                   onSendNow={(key) => void sendNow(key)}
                   onUnqueue={(key) => void unqueue(key)}
-                 
-                  compare={comparePicker}
+                  // A room's messages go to its queue, never compared.
+                  compare={room ? null : comparePicker}
                   onStop={() => void stop()}
                   uploads={uploads}
                   model={model}

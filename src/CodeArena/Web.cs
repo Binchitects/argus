@@ -717,7 +717,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     private JsonObject ChatConfig()
     {
         var arena = _rt.ArenaChat;
-        var offered = (arena?["models"] as JsonArray)?.OfType<JsonObject>().Where(m => m.Str("name") is not null)
+        var denied = (arena?["denied"] as JsonArray)?.Select(d => d?.GetValue<string>()).OfType<string>().ToList() ?? [];
+        var offered =(arena?["models"] as JsonArray)?.OfType<JsonObject>().Where(m => m.Str("name") is not null)
             .GroupBy(m => m.Str("name")!).ToDictionary(g => g.Key, g => g.First()) ?? [];
         // The deployment's levels that Code Arena can send; its own when Arena names none of them.
         var presets = (arena?["presets"] as JsonArray)?.OfType<JsonObject>().Where(p => p.Str("level") is { } l && ModelState.Levels.Contains(l))
@@ -753,9 +754,11 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             ["argus"] = false,
             ["tools"] = new JsonArray(),
             ["gitlabUrl"] = arena?.Str("gitlabUrl"),
-            // Files go to Arena (relayed with the key): as large as it takes; none without it.
-            ["maxUploadBytes"] = arena?.Long("maxUploadBytes") ?? 0,
+            // Files go to Arena (relayed with the key): as large as it takes; none without it, or for a person it lets attach none.
+            ["maxUploadBytes"] = denied.Contains("feature.uploads") ? 0 : arena?.Long("maxUploadBytes") ?? 0,
             ["imageTypes"] = arena?["imageTypes"]?.DeepClone() ?? new JsonArray(),
+            // The feature permissions Arena says the person does not hold: the page leaves them out.
+            ["denied"] = new JsonArray([.. denied.Select(d => (JsonNode)d)]),
         };
     }
 

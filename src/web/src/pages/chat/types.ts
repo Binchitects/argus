@@ -41,6 +41,8 @@ export interface ChatConfig {
   /** When the person's chats compact, in percent of the model's context (0: only when a message would not fit), and whose choice it is. */
   compactAt?: number
   compactSource?: 'account' | 'company'
+  /** The feature permissions the person does not hold (feature.compare, feature.uploads...): the chat leaves them out. */
+  denied?: string[]
 }
 
 /** Why a chat compacted on its own: at the person's share of the context, so the message fits, or because the model refused it as too long; asked: /compact. */

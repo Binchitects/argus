@@ -195,7 +195,10 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   make the **Leaderboard** (in the sidebar): the company's models on its own
   questions, by Elo rating, with their wins, losses, ties and win rate.
   Admins can keep it to themselves (Settings → Chat → **Arena leaderboard for
-  everyone**).
+  everyone**). Compare is there only for whoever holds `feature.compare`,
+  while two models can answer now and not in a room: when it goes (a model
+  unloaded), a Compare left on goes with it, and the next question is an
+  ordinary message.
 - **Context.** The gauge beside Send shows how full the model's context is,
   from the last answer's prompt as the model counted it (and what it
   answered). Opened, it shows what fills it: the system prompt and the tools'
