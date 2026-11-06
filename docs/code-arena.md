@@ -573,7 +573,8 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   play in place. A compaction leaves the thread whole: only what the model
   reads is compacted. Every message stays where it was, the place where the
   conversation was compacted is marked after its turn (**Show summary** shows
-  what the model reads instead), and a turn compacted while it runs goes on
+  what the model reads instead: a turn compacted more than once shows its
+  last summary), and a turn compacted while it runs goes on
   in place, with its approvals; a question a compaction covers is not asked
   again from there. `/compact` says it is done once it is ("Compacted: …"),
   or why not. A turn that fails (the gateway refused the next step, say) ends
@@ -2079,7 +2080,10 @@ A long session never gets stuck on the window:
   compactions (then 4, then 8) while it keeps failing; `/compact` always tries
   it, and leaves the conversation as it was when it fails ("The model gave no
   summary: the conversation is as it was." when the answer had no words in
-  it). A summary held back while the model's line is full (below) is waited
+  it). A summary cut off at its length limit, or one that goes round in a
+  loop (the same few words again and again: fewer than 20 different ones in
+  its last 200), is no summary either: a loop is stopped as soon as it is
+  seen, not let run to the limit. A summary held back while the model's line is full (below) is waited
   for, never left out: when the line stays full past the wait, the turn ends
   with Arena's reason and the conversation is as it was.
 - **One long turn compacts itself**: when nothing before the turn is left to

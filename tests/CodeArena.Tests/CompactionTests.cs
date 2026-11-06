@@ -394,6 +394,55 @@ public sealed class CompactionTests : IDisposable
     }
 
     [Fact]
+    public async Task A_summary_cut_at_the_output_limit_is_no_summary_and_a_compact_says_so_and_changes_nothing()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        _gateway.Answer = req => Summarizing(req) ? Reply.Say("SUMMARY: the person asked about read.txt read.txt read.txt") with { Finish = "length" } : Reply.Say("ok");
+        await using var rt = await StartAsync(h);
+        var turns = Conversation(rt);
+        Assert.Null(rt.Compaction.Set(20, 5));
+
+        // On its own: the older messages are left out in brief, as for any summary that failed, not the cut one read.
+        Assert.True(await rt.Agent.MaybeCompactAsync(CancellationToken.None));
+        var head = rt.Agent.Messages[0]["content"]!.GetValue<string>();
+        Assert.StartsWith("[The conversation so far, summarized mechanically", head, StringComparison.Ordinal);
+        Assert.DoesNotContain("read.txt", head, StringComparison.Ordinal);
+
+        // /compact: says why, and the conversation is as it was.
+        rt.Agent.Messages.Clear();
+        rt.Agent.Messages.AddRange(turns.Select(t => t.Clone()));
+        var e = await Assert.ThrowsAsync<GatewayException>(() => rt.Agent.CompactAsync(force: true, CancellationToken.None));
+        Assert.Equal("The model's summary was cut off at its length limit: the conversation is as it was.", e.Message);
+        Assert.Equal(turns.Select(t => t.ToJsonString()), rt.Agent.Messages.Select(m => m.ToJsonString()));
+    }
+
+    [Fact]
+    public async Task A_summary_going_round_in_a_loop_is_stopped_at_once_and_is_no_summary()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        // A small model saying the same words again and again, for as long as it is let.
+        _gateway.Answer = req => Summarizing(req) ? Reply.Say("the file big.txt holds the words ") with { Endless = true } : Reply.Say("ok");
+        await using var rt = await StartAsync(h);
+        var turns = Conversation(rt);
+        Assert.Null(rt.Compaction.Set(20, 5));
+
+        Assert.True(await rt.Agent.MaybeCompactAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30)));
+        var head = rt.Agent.Messages[0]["content"]!.GetValue<string>();
+        Assert.StartsWith("[The conversation so far, summarized mechanically", head, StringComparison.Ordinal);
+        Assert.DoesNotContain("big.txt", head, StringComparison.Ordinal);
+
+        rt.Agent.Messages.Clear();
+        rt.Agent.Messages.AddRange(turns.Select(t => t.Clone()));
+        var e = await Assert.ThrowsAsync<GatewayException>(() => rt.Agent.CompactAsync(force: true, CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(30)));
+        Assert.Equal("The model's summary went round in a loop, saying the same words again: the conversation is as it was.", e.Message);
+        Assert.Equal(turns.Count, rt.Agent.Messages.Count);
+
+        // A long summary of a real conversation, its sections and lists saying some words often, is no loop.
+        var summary = "## Goal\nFix the build.\n## Steps\n" + string.Concat(Enumerable.Range(0, 80).Select(i => $"- read src/part{i}.cs and changed the method Load{i} to check its path\n"));
+        Assert.False(Agent.Loops(summary));
+    }
+
+    [Fact]
     public async Task A_tool_call_cut_at_the_output_limit_compacts_and_the_model_is_still_asked_to_do_it_again()
     {
         using var h = new Harness(_gateway, _mcp);

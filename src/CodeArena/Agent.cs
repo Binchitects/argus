@@ -1697,11 +1697,58 @@ internal sealed class Agent
                  $"A summary is tried again after {_summariesSkipped} compactions.");
             return (null, why);
         }
+        catch (UnfitSummary e) when (force)
+        {
+            throw new GatewayException($"{char.ToUpperInvariant(e.Message[0])}{e.Message[1..]}: the conversation is as it was.");
+        }
         finally
         {
             Ui.StopSpinner();
         }
     }
+
+    /// <summary>The model answered, but its answer is no summary to read from then on (cut off, or gone round in a loop).</summary>
+    private sealed class UnfitSummary(string why) : Exception(why);
+
+    /// <summary>
+    /// The same few words said again and again: in the last 200 words, fewer than 20 different ones (a summary of a real
+    /// conversation has many more). A small model gone round in a loop says them until its output limit.
+    /// </summary>
+    internal static bool Loops(string text)
+    {
+        var words = text[Math.Max(0, text.Length - 4000)..].Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        return words.Length >= 200 && words.TakeLast(200).Distinct(StringComparer.Ordinal).Count() < 20;
+    }
+
+    /// <summary>Watches a summary as it streams: one gone round in a loop is stopped at once, not let run to its output limit.</summary>
+    private sealed class LoopWatch(CancellationTokenSource stop) : IStreamSink
+    {
+        private readonly StringBuilder _text = new();
+        private int _checked;
+
+        public bool Looped { get; private set; }
+
+        public void Text(string text)
+        {
+            _text.Append(text);
+            if (_text.Length - _checked < 400)
+            {
+                return;
+            }
+            _checked = _text.Length;
+            if (Loops(_text.ToString()))
+            {
+                Looped = true;
+                stop.Cancel();
+            }
+        }
+
+        public void Reasoning(string text)
+        {
+        }
+    }
+
+    private const string LoopedSummary = "the model's summary went round in a loop, saying the same words again";
 
     /// <summary>What /compact says when the model's answer has no summary in it (nothing, or a tool call).</summary>
     public const string NoSummary = "The model gave no summary: the conversation is as it was.";
@@ -1757,12 +1804,32 @@ internal sealed class Agent
         {
             request["chat_template_kwargs"] = new JsonObject { ["enable_thinking"] = false };
         }
-        var summary = await Gateway.CompleteAsync(request, null, ct, Uncached(chars));
+        using var looping = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var watch = new LoopWatch(looping);
+        Completion summary;
+        try
+        {
+            summary = await Gateway.CompleteAsync(request, watch, looping.Token, Uncached(chars));
+        }
+        // Stopped for its loop: however the stream ended on it (cancelled, or the connection dropped while it was read).
+        catch (Exception e) when (e is OperationCanceledException or IOException or HttpRequestException && watch.Looped && !ct.IsCancellationRequested)
+        {
+            throw new UnfitSummary(LoopedSummary);
+        }
         if (summary.Usage is { } usage)
         {
             Total.Add(usage, Model.Info);
             Session?.Usage(usage);
             Learn(chars, usage.Prompt);
+        }
+        // Cut off, it lacks its end; it is most often a loop besides, which the model would read from then on.
+        if (summary.FinishReason == "length")
+        {
+            throw new UnfitSummary(Loops(summary.Text) ? LoopedSummary : "the model's summary was cut off at its length limit");
+        }
+        if (Loops(summary.Text))
+        {
+            throw new UnfitSummary(LoopedSummary);
         }
         return summary.Text.Trim() is { Length: > 0 } s ? s : null;
     }
