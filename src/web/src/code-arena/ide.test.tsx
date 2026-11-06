@@ -2559,6 +2559,8 @@ describe('Code Arena, the IDE', () => {
     act(() => void runCommand('git.fetch'))
     const pick = await screen.findByRole('dialog', { name: 'Repository' })
     expect(within(pick).getAllByRole('option').map((o) => o.textContent)).toEqual([expect.stringContaining('shop'), expect.stringContaining('ui')])
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Repository' })).not.toBeInTheDocument())
   })
 
   it("folds Source Control's groups and folders as VS Code does: chevrons, arrows, Collapse All, kept with the folder", async () => {
