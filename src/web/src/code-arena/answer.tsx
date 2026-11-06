@@ -1,7 +1,8 @@
-import { Check, ChevronRight, Copy, FileDiff as FileDiffIcon, FileSymlink, History, ShieldQuestion, Square, TextQuote } from 'lucide-react'
-import { memo, useMemo, useState } from 'react'
+import { Check, ChevronRight, CircleSlash, CircleX, Copy, FileDiff as FileDiffIcon, FileSymlink, History, Network, ShieldQuestion, Square, TextQuote } from 'lucide-react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Spinner } from '@/components/ui/spinner'
 import { DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { Tooltip } from '@/components/ui/tooltip'
 import { formatValue, money } from '@/lib/format'
@@ -21,6 +22,85 @@ import type { FileDiff } from './api'
 import { FileIcon } from './file-icon'
 import { nameOf, parentOf, rawFileUrl } from './ide-api'
 import { mediaNamed } from './media'
+import { tokens } from './tasks-api'
+
+/** A sub-agent's work, from what the chat heard of it (live) or what the session kept with its result. */
+function workOf(result: Message | undefined, live: AgentWork | undefined): AgentWork | undefined {
+  return live ?? result?.details?.agents?.[0]
+}
+
+/**
+ * A sub-agent the agent started (a task call), as one line: what it is for, where it stands, its time and tokens, and the
+ * start of its report once done. Its steps are its own: Open shows them in the Tasks panel beside the chat.
+ */
+export function SubAgentLine({ callId, args, result, live, work, onOpen }: {
+  callId: string
+  args: string
+  result?: Message
+  live: boolean
+  work?: AgentWork
+  onOpen?: (callId: string) => void
+}) {
+  const title = useMemo(() => {
+    try {
+      const a = JSON.parse(args) as { description?: string }
+      return a.description?.trim() || 'Sub-agent'
+    } catch {
+      return 'Sub-agent'
+    }
+  }, [args])
+  // Stopped: by the person (from the Tasks panel, or with the turn), as code-arena says it.
+  const stopped = (work?.status as string) === 'stopped' || (work?.error ?? '').startsWith('Stopped') || !!result?.content.startsWith('The person stopped')
+  const status: 'running' | 'done' | 'failed' | 'stopped' = !result
+    ? live ? 'running' : 'stopped'
+    : stopped ? 'stopped' : work?.status === 'failed' || result.error || result.status === 'failed' ? 'failed' : 'done'
+  // While it works: its time counted here, from when the line first showed.
+  const [since] = useState(() => Date.now())
+  const [now, setNow] = useState(since)
+  useEffect(() => {
+    if (status !== 'running') return
+    const tick = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(tick)
+  }, [status])
+  const spent = work?.usage ? work.usage.prompt + work.usage.completion : 0
+  const facts = [
+    status === 'running' ? seconds(now - since) : work?.ms != null && seconds(work.ms),
+    spent > 0 && `${tokens(spent)} tokens`,
+    work?.model,
+  ].filter(Boolean).join(' · ')
+  const words = { running: 'Working', done: 'Done', failed: 'Failed', stopped: 'Stopped' }[status]
+  const report = status === 'done' ? result?.content.split('\n').find((l) => l.trim()) : undefined
+  return (
+    <div className="my-1.5 min-w-0">
+      <button
+        type="button"
+        onClick={() => onOpen?.(callId)}
+        disabled={!onOpen}
+        aria-label={`Sub-agent ${title}: ${words}. Open it in Tasks`}
+        className={cn(
+          'flex w-full min-w-0 items-center gap-2 rounded-lg border bg-card px-3 py-1.5 text-left text-sm transition-colors outline-none hover:bg-accent/50 focus-visible:ring-[3px] focus-visible:ring-ring disabled:cursor-default',
+          status === 'running' && 'border-primary/40',
+        )}
+      >
+        {status === 'running' ? (
+          <Spinner className="shrink-0 text-primary-ink" />
+        ) : status === 'done' ? (
+          <Check className="size-4 shrink-0 text-success" aria-hidden="true" />
+        ) : status === 'failed' ? (
+          <CircleX className="size-4 shrink-0 text-destructive-ink" aria-hidden="true" />
+        ) : (
+          <CircleSlash className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        )}
+        <Network className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <bdi className="min-w-0 shrink truncate font-medium">{title}</bdi>
+        <span className={cn('min-w-0 flex-1 truncate text-xs text-muted-foreground tabular-nums', status === 'running' && 'text-shimmer')}>
+          {[status === 'running' ? 'Working…' : report ?? words, facts].filter(Boolean).join(' · ')}
+        </span>
+        {onOpen && <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
+      </button>
+    </div>
+  )
+}
 
 /** The first line an edit changed, in the file as it is now; null: not known (an edit of a session read back). */
 const firstChanged = (diff: FileDiff) => diff.lines.find(([op, , b]) => op === '+' && b > 0)?.[2] ?? diff.lines.find(([, , b]) => b > 0)?.[2] ?? null
@@ -354,6 +434,8 @@ interface AnswerProps {
   onAgain?: (question: string, change?: AgainChange & { files?: boolean }) => void
   /** Skip thinking, while the live answer thinks: it stops and the model answers. */
   onSkipThinking?: () => void
+  /** Opens a sub-agent (by its task call's id) in the Tasks panel. */
+  onOpenTask?: (callId: string) => void
 }
 
 /**
@@ -363,7 +445,7 @@ interface AnswerProps {
  */
 function sameAnswer(a: AnswerProps, b: AnswerProps): boolean {
   if (a.live !== b.live || a.thinkingSince !== b.thinkingSince || a.notices !== b.notices || a.config !== b.config || a.onDecide !== b.onDecide || a.onQuote !== b.onQuote) return false
-  if (a.question !== b.question || a.onAgain !== b.onAgain || a.onSkipThinking !== b.onSkipThinking) return false
+  if (a.question !== b.question || a.onAgain !== b.onAgain || a.onSkipThinking !== b.onSkipThinking || a.onOpenTask !== b.onOpenTask) return false
   if (a.answer.length !== b.answer.length || a.answer.some((m, i) => m !== b.answer[i])) return false
   if (b.live && (a.waiting !== b.waiting || a.always !== b.always || a.risks !== b.risks || a.calls !== b.calls || a.agents !== b.agents)) return false
   return b.answer.every((m) => m.role !== 'tool' || a.diffs[m.id] === b.diffs[m.id])
@@ -375,7 +457,7 @@ function sameAnswer(a: AnswerProps, b: AnswerProps): boolean {
  * model, time and tokens (the share read from the cache with them), as Arena's
  * chat shows an answer.
  */
-export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince, notices, config, waiting, always, risks, calls, agents, diffs, onDecide, onQuote, question, onAgain, onSkipThinking }: AnswerProps) {
+export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince, notices, config, waiting, always, risks, calls, agents, diffs, onDecide, onQuote, question, onAgain, onSkipThinking, onOpenTask }: AnswerProps) {
   const [quoting, setQuoting] = useState(false)
   const results = new Map(answer.filter((m) => m.role === 'tool').map((m) => [m.toolCallId, m]))
   const assistants = answer.filter((m) => m.role === 'assistant')
@@ -419,7 +501,12 @@ export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince
               const diff = result ? diffs[result.id] : undefined
               return (
                 <div key={t.id}>
-                  <ToolCard call={t} result={result} live={live} waiting={asking} progress={calls?.[t.id]} agents={agents?.[t.id]} />
+                  {t.function.name === 'task' ? (
+                    // A sub-agent: one line here, its steps in the Tasks panel.
+                    <SubAgentLine callId={t.id} args={t.function.arguments} result={result} live={live} work={workOf(result, agents?.[t.id]?.[0])} onOpen={onOpenTask} />
+                  ) : (
+                    <ToolCard call={t} result={result} live={live} waiting={asking} progress={calls?.[t.id]} agents={agents?.[t.id]} />
+                  )}
                   {result && result.status === 'complete' && !result.error && <OpenFile name={t.function.name} args={t.function.arguments} diff={diff} said={result.content} />}
                   {result && result.status === 'complete' && <MadeMedia said={result.content} />}
                   {diff && <DiffView diff={diff} live={live} />}

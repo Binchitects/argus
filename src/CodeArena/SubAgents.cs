@@ -160,7 +160,8 @@ internal sealed partial class Runtime
     }
 
     /// <summary>The sub-agents a session kept (with their calls' results, and with the notes of the person's tasks), in their order.</summary>
-    private static IEnumerable<JsonObject> KeptTasks(SessionData data) => data.Agents.OrderBy(p => p.Key).SelectMany(p => p.Value.OfType<JsonObject>());
+    private static IEnumerable<(JsonObject Work, string? Call)> KeptTasks(SessionData data) => data.Agents.OrderBy(p => p.Key)
+        .SelectMany(p => p.Value.OfType<JsonObject>().Select(w => (w, p.Key < data.Messages.Count ? data.Messages[p.Key].Str("tool_call_id") : null)));
 
     private SystemPrompt.Inputs Inputs => _inputs ?? throw new InvalidOperationException("Code Arena has not started yet.");
 

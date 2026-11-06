@@ -222,20 +222,20 @@ internal sealed class TaskBoard
     }
 
     /// <summary>A new session: the board is cleared, what still runs stopped, and the session's own sub-agents put back as they were kept.</summary>
-    public void Reset(IEnumerable<JsonObject> kept)
+    public void Reset(IEnumerable<(JsonObject Work, string? Call)> kept)
     {
         StopAll();
         lock (_gate)
         {
             _tasks.Clear();
             _next = 0;
-            foreach (var work in kept)
+            foreach (var (work, call) in kept)
             {
                 var status = work.Str("status") is { } s && s is AgentTask.Done or AgentTask.Failed or AgentTask.Stopped ? s : AgentTask.Stopped;
                 _tasks.Add(new AgentTask
                 {
                     Id = $"t{++_next}", Kind = work.Str("kind") == AgentTask.Background ? AgentTask.Background : AgentTask.SubAgent, Title = work.Str("title") ?? "task", Prompt = work.Str("instructions") ?? "", Kept = true,
-                    Model = work.Str("model") ?? "", Status = status, Error = work.Str("error"), Report = work.Str("text"), KeptWork = work, Told = true,
+                    CallId = call, Model = work.Str("model") ?? "", Status = status, Error = work.Str("error"), Report = work.Str("text"), KeptWork = work, Told = true,
                 });
             }
         }

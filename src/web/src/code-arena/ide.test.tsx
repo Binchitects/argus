@@ -4255,6 +4255,11 @@ describe('Code Arena, the help', () => {
     await userEvent.click(within(bar).getByRole('button', { name: 'Terminal' }))
     await screen.findByRole('region', { name: 'Terminal' })
     for (const r of regionsShown()) seen.add(r)
+    // The Tasks panel beside the chat, with its form for a task of one's own.
+    await userEvent.click(within(screen.getByRole('region', { name: 'Chat' })).getByRole('button', { name: 'Tasks' }))
+    await userEvent.click(within(await screen.findByRole('complementary', { name: 'Tasks' })).getByRole('button', { name: 'New task' }))
+    await screen.findByRole('form', { name: 'New task' })
+    for (const r of regionsShown()) seen.add(r)
     await userEvent.click(screen.getByRole('tab', { name: 'Debug Console' }))
     await screen.findByRole('region', { name: 'Debug Console' })
     for (const r of regionsShown()) seen.add(r)

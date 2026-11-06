@@ -189,6 +189,14 @@ public sealed class SubAgentTaskTests : IDisposable
         var ended = await web.GetJsonAsync($"/api/agent-tasks/{id}");
         Assert.Equal("stopped", ended["status"]!.ToString());
         Assert.Equal(HttpStatusCode.Conflict, (await web.PostAsync($"/api/agent-tasks/{id}/stop", new JsonObject())).StatusCode);
+
+        // Kept with the session: opened again, the board has it, found by its call's id as the chat's line asks for it.
+        var session = (await web.GetJsonAsync("/api/state"))["session"]!.ToString();
+        await web.PostAsync("/api/sessions/new", new JsonObject());
+        await web.PostAsync("/api/sessions/resume", new JsonObject { ["id"] = session });
+        var kept = await web.GetJsonAsync($"/api/agent-tasks/{agents[0].Str("id")}");
+        Assert.Equal(("find the parser", "stopped", true), (kept["title"]!.ToString(), kept["status"]!.ToString(), kept["kept"]!.GetValue<bool>()));
+        Assert.Equal("read_file", kept["work"]!["steps"]![0]!["name"]!.ToString());
     }
 
     [Fact]
