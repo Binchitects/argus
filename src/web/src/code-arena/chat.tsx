@@ -26,6 +26,7 @@ import { useRecall, type Older, type RecallSource } from '@/pages/chat/recall'
 import { typedOf } from '@/pages/chat/attached'
 import { toTurns } from '@/pages/chat/tree'
 import { CompactedMark, QuestionTurn, type AgainChange } from '@/pages/chat/turns'
+import { QueuedList } from '@/pages/chat/queued-list'
 import { useQuotableSelection } from '@/pages/chat/quotable'
 import { findQuoted, type Quote } from '@/pages/chat/quote'
 import { QuoteChip } from '@/pages/chat/quote-parts'
@@ -35,7 +36,9 @@ import { UploadChips } from '@/pages/chat/upload-chips'
 import { useUploads } from '@/pages/chat/uploads'
 import {
   answerApproval,
+  cancelQueued,
   clearQueue,
+  editQueued,
   queueMessage,
   changeSettings,
   compactWho,
@@ -655,7 +658,7 @@ export function Thread({
     for (const queryKey of [sessionQuery.queryKey, sessionsQuery.queryKey]) void queryClient.invalidateQueries({ queryKey })
   }, [state.synced, queryClient])
 
-  /** While an answer is written: the message waits in the queue and runs when the answer ends (with the part of an answer it quotes). */
+  /** While an answer is written: the message waits in the queue, and the answer reads it at its next step (with the part of an answer it quotes). */
   const queue = async (text: string, context?: Piece[], quoted?: Quote | null, attachments: Attachment[] = []): Promise<boolean> => {
     if (text === '/compact' || text === '/clear' || text === '/new') {
       toast.error(`Wait for the answer, or stop it, to run ${text}.`)
@@ -663,7 +666,6 @@ export function Thread({
     }
     try {
       await queueMessage(text, context, quoted?.text, attachments)
-      toast.success('Queued: it is sent when this answer ends.')
       await queryClient.invalidateQueries({ queryKey: stateQuery.queryKey })
       return true
     } catch (e) {
@@ -870,8 +872,6 @@ export function Thread({
       focusSignal={focusBox}
       text={draft}
       setText={setDraft}
-      queued={state.queued ?? []}
-      onClearQueue={() => void clearQueue().then(() => queryClient.invalidateQueries({ queryKey: stateQuery.queryKey }))}
       onStop={stop}
       big={big}
       mode={<ModePicker state={state} onChange={(mode) => void settings({ mode })} />}
@@ -1001,6 +1001,23 @@ export function Thread({
                     </div>
                   )
                 })}
+                <QueuedList
+                  queued={(state.queued ?? []).map((q) => ({ key: q.id, text: q.text, quote: q.quote, attachments: q.attachments ?? [] }))}
+                  filesGoIn
+                  onEdit={async (id, text) => {
+                    try {
+                      await editQueued(id, text)
+                      return true
+                    } catch (e) {
+                      toast.error(errorMessage(e, 'The message could not be changed.'))
+                      return false
+                    } finally {
+                      await queryClient.invalidateQueries({ queryKey: stateQuery.queryKey })
+                    }
+                  }}
+                  onCancel={(id) => void cancelQueued(id).catch((e) => toast.error(errorMessage(e))).then(() => queryClient.invalidateQueries({ queryKey: stateQuery.queryKey }))}
+                  onClear={() => void clearQueue().then(() => queryClient.invalidateQueries({ queryKey: stateQuery.queryKey }))}
+                />
                 {streaming && view.mode === 'compact' && (
                   <output className="flex items-center gap-2 text-sm text-muted-foreground">Compacting: the model summarizes the conversation so the next answers read the summary…</output>
                 )}
@@ -1137,8 +1154,6 @@ function Composer({
   focusSignal,
   text,
   setText,
-  queued,
-  onClearQueue,
   onStop,
   big,
   mode,
@@ -1163,8 +1178,6 @@ function Composer({
   /** What is typed: the thread's, so it stays when the box moves. */
   text: string
   setText: (text: string | ((now: string) => string)) => void
-  queued: string[]
-  onClearQueue: () => void
   onStop: () => void
   big: boolean
   mode: ReactNode
@@ -1201,7 +1214,7 @@ function Composer({
     // Empty: its rows say how tall (the placeholder is not measured, which a page still laying out can make tall).
     if (text) el.style.height = `${Math.min(el.scrollHeight, 280)}px`
   }, [text])
-  // While an answer is written the box still takes the next message: it is queued, and sent when the answer ends.
+  // While an answer is written the box still takes the next message: it is queued, and the answer reads it at its next step.
   const canSend = (text.trim().length > 0 || pieces.length > 0 || uploads.attachments.length > 0) && !uploads.busy
   const submit = async () => {
     if (!canSend) return
@@ -1231,19 +1244,6 @@ function Composer({
   }
   return (
     <>
-    {queued.length > 0 && (
-      <section aria-label="Queued messages" className="mb-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-        <span>Sent when the answer ends:</span>
-        {queued.map((q, i) => (
-          <span key={i} dir="auto" className="max-w-60 truncate rounded-full border bg-muted/50 px-2 py-0.5 text-foreground" title={q}>
-            {q}
-          </span>
-        ))}
-        <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-xs" onClick={onClearQueue}>
-          Clear
-        </Button>
-      </section>
-    )}
     {/* Files dropped on the box go with the message (a file dragged from the Explorer is a path, not a file: it is left to the editor). */}
     <div
       onDragOver={(e) => canAttach && e.dataTransfer.types.includes('Files') && e.preventDefault()}

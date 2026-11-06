@@ -17,8 +17,8 @@ export interface Queued {
   skill?: SkillCall | null
 }
 
-/** Whether a queued message waits for the answer to end: the model reads files with the history, and a skill sets up a turn of its own. */
-const waitsForEnd = (q: Queued) => q.attachments.length > 0 || !!q.skill
+/** Whether a queued message waits for the answer to end in Arena's chat: the model reads files with the history, and a skill sets up a turn of its own. */
+const waitsForEnd = (q: Queued, filesGoIn: boolean) => (!filesGoIn && q.attachments.length > 0) || !!q.skill
 
 const label = (q: Queued) => q.text || (q.skill ? `/${q.skill.name}` : 'files')
 
@@ -31,17 +31,24 @@ const label = (q: Queued) => q.text || (q.skill ? `/${q.skill.name}` : 'files')
 export function QueuedList({
   queued,
   elsewhere,
+  filesGoIn = false,
   onEdit,
   onPutFirst,
   onCancel,
+  onClear,
 }: {
   queued: Queued[]
   /** Answering elsewhere ("Code Arena is answering"): each goes when that turn ends. */
   elsewhere?: string
+  /** Code Arena: one with files goes into the answer too (it reads them itself). */
+  filesGoIn?: boolean
   /** Saves new words (false: they were not taken, and the box stays open). */
   onEdit?: (key: string, text: string) => Promise<boolean>
-  onPutFirst: (key: string) => void
+  /** Moves one ahead of the others; none: the line keeps its order. */
+  onPutFirst?: (key: string) => void
   onCancel: (key: string) => void
+  /** Takes every one out of line. */
+  onClear?: () => void
 }) {
   const [editing, setEditing] = useState<{ key: string; text: string } | null>(null)
   const [saving, setSaving] = useState(false)
@@ -113,7 +120,7 @@ export function QueuedList({
             )}
             {editing?.key !== q.key && (
               <div className="flex items-center gap-0.5 text-xs text-muted-foreground">
-                <span className="px-1">{elsewhere ? 'Waiting' : waitsForEnd(q) ? 'Waits for the answer to end' : i === 0 ? 'Read at the next step' : 'Waiting'}</span>
+                <span className="px-1">{elsewhere ? 'Waiting' : waitsForEnd(q, filesGoIn) ? 'Waits for the answer to end' : filesGoIn || i === 0 ? 'Read at the next step' : 'Waiting'}</span>
                 {onEdit && !q.skill && (
                   <Tooltip content="Edit">
                     <Button type="button" variant="ghost" size="icon-sm" className="size-7" onClick={() => setEditing({ key: q.key, text: q.text })} aria-label={`Edit queued message: ${label(q)}`}>
@@ -121,7 +128,7 @@ export function QueuedList({
                     </Button>
                   </Tooltip>
                 )}
-                {i > 0 && (
+                {i > 0 && onPutFirst && (
                   <Tooltip content="Put first">
                     <Button type="button" variant="ghost" size="icon-sm" className="size-7" onClick={() => onPutFirst(q.key)} aria-label={`Put first: ${label(q)}`}>
                       <ListStart />
@@ -141,7 +148,14 @@ export function QueuedList({
       <p className="max-w-[85%] text-end text-xs text-muted-foreground">
         {elsewhere
           ? `${elsewhere}, and nothing here stops it: these are sent in turn when its turn ends, even if you close the page.`
-          : 'The answer reads the first at its next step (after its tool calls) and goes on with it; one with files or a skill goes when the answer ends. They wait even if you close the page. Stop stops the answer.'}
+          : filesGoIn
+            ? 'The answer reads them at its next step (after its tool calls) and goes on; Stop stops the answer.'
+            : 'The answer reads the first at its next step (after its tool calls) and goes on with it; one with files or a skill goes when the answer ends. They wait even if you close the page. Stop stops the answer.'}
+        {onClear && (
+          <Button type="button" variant="ghost" size="sm" className="ms-1 h-6 px-2 text-xs" onClick={onClear}>
+            Clear all
+          </Button>
+        )}
       </p>
     </section>
   )
