@@ -602,6 +602,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             }
         }
         Agent.BeforeTurn = TakeInForTurnAsync;
+        Agent.SentOnWeb = ct => Sync?.TakeQueuedAsync(ct) ?? Task.FromResult<IReadOnlyList<Meanwhile>>([]);
         Agent.AfterTurn = () => Sync?.EndTurn();
         StartSync();
         if (!o.Print && Config.Url is { Length: > 0 } && Config.ApiKey is { Length: > 0 })

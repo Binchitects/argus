@@ -1501,7 +1501,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                 {data?.codeArena && !streaming && (
                   <output className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground">
                     <SquareTerminal className="size-3.5 shrink-0 animate-pulse" aria-hidden="true" />
-                    Code Arena is answering in this chat: what you send waits in the queue until it is done.
+                    Code Arena is answering in this chat: what you send waits here, and it reads it at its next step.
                   </output>
                 )}
                 {room && (

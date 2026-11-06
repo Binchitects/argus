@@ -111,6 +111,35 @@ public sealed class MeanwhileTests : IDisposable
     }
 
     [Fact]
+    public async Task What_the_person_queues_in_the_web_chat_while_the_turn_works_is_read_at_its_next_step_and_synced_back_in_its_place()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        var web = _mcp.Chats.Add("Fix the cart", new JsonObject { ["role"] = "user", ["content"] = "Fix the cart" }, new JsonObject { ["role"] = "assistant", ["content"] = "Which part?" });
+        _gateway.Answer = req =>
+        {
+            if (FakeGateway.HasToolResults(req))
+            {
+                return Reply.Say("Done: " + FakeGateway.History(req).Last()!["content"]);
+            }
+            // Written on the web while this step runs (the turn holds the chat there).
+            web.Queued.Add("and keep the old total");
+            return Reply.Call(("list_dir", """{"path":"."}"""));
+        };
+        Assert.Equal(0, await h.Run("", "-p", "the total", "--web", web.Id));
+
+        Assert.Equal(2, _gateway.Requests.Count);
+        var read = FakeGateway.History(_gateway.Requests[1]);
+        Assert.Equal(["user", "assistant", "user", "assistant", "tool", "user"], read.Select(Role));
+        Assert.Equal("and keep the old total", read[^1]!["content"]!.GetValue<string>());
+        Assert.Contains("Done: and keep the old total", h.Out);
+        Assert.Empty(web.Queued);
+        // Back on the web in its place: after the step's result, before the answer, as sent meanwhile.
+        var synced = web.Messages;
+        Assert.Equal(["user", "assistant", "user", "assistant", "tool", "user", "assistant"], synced.Select(Role));
+        Assert.Equal(Agent.MeanwhileKind, synced[5]["kind"]!.GetValue<string>());
+    }
+
+    [Fact]
     public async Task A_line_typed_at_the_terminal_while_a_step_runs_is_read_at_the_next_step_and_up_takes_one_back()
     {
         WorksOneStep();

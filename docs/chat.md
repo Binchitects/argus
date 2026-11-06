@@ -85,7 +85,9 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     In a room, the answer takes in only the words for the model of the person
     it answers; the others' wait for it to end. While
     [Code Arena](code-arena.md#chats-in-arena) is answering in the chat, the
-    page says so and every message is queued: they go when its turn ends.
+    page says so and every message is queued: Code Arena's turn reads them at
+    its next step in the same way (one with files or a skill goes when its
+    turn ends).
 - **Reply to part of an answer.** Select words in a finished answer and a
   small toolbar comes beside them (above them; below them on a touch screen):
   - **Reply** (`Ctrl+Shift+'`, `⌘⇧'` on macOS) puts the part above the box as

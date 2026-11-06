@@ -38,7 +38,7 @@ export function QueuedList({
   onClear,
 }: {
   queued: Queued[]
-  /** Answering elsewhere ("Code Arena is answering"): each goes when that turn ends. */
+  /** Answering elsewhere ("Code Arena is answering"): it reads them at its next steps too, and nothing here stops it. */
   elsewhere?: string
   /** Code Arena: one with files goes into the answer too (it reads them itself). */
   filesGoIn?: boolean
@@ -120,7 +120,7 @@ export function QueuedList({
             )}
             {editing?.key !== q.key && (
               <div className="flex items-center gap-0.5 text-xs text-muted-foreground">
-                <span className="px-1">{elsewhere ? 'Waiting' : waitsForEnd(q, filesGoIn) ? 'Waits for the answer to end' : filesGoIn || i === 0 ? 'Read at the next step' : 'Waiting'}</span>
+                <span className="px-1">{waitsForEnd(q, filesGoIn) ? 'Waits for the answer to end' : filesGoIn || elsewhere || i === 0 ? 'Read at the next step' : 'Waiting'}</span>
                 {onEdit && !q.skill && (
                   <Tooltip content="Edit">
                     <Button type="button" variant="ghost" size="icon-sm" className="size-7" onClick={() => setEditing({ key: q.key, text: q.text })} aria-label={`Edit queued message: ${label(q)}`}>
@@ -147,7 +147,7 @@ export function QueuedList({
       </ul>
       <p className="max-w-[85%] text-end text-xs text-muted-foreground">
         {elsewhere
-          ? `${elsewhere}, and nothing here stops it: these are sent in turn when its turn ends, even if you close the page.`
+          ? `${elsewhere}, and nothing here stops it: it reads these at its next step (after its tool calls), and one with files or a skill goes when its turn ends.`
           : filesGoIn
             ? 'The answer reads them at its next step (after its tool calls) and goes on; Stop stops the answer.'
             : 'The answer reads the first at its next step (after its tool calls) and goes on with it; one with files or a skill goes when the answer ends. They wait even if you close the page. Stop stops the answer.'}

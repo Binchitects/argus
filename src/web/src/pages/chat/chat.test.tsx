@@ -641,7 +641,7 @@ describe('chat', () => {
     renderApp('/chat/c1')
     const list = await screen.findByRole('list', { name: 'Queued messages' })
     expect(within(list).queryByRole('button', { name: 'Send now' })).not.toBeInTheDocument()
-    expect(screen.getByText(/Code Arena is answering, and nothing here stops it: these are sent in turn when its turn ends/)).toBeInTheDocument()
+    expect(screen.getByText(/Code Arena is answering, and nothing here stops it: it reads these at its next step/)).toBeInTheDocument()
     expect(screen.queryByText(/Send now stops the answer/)).not.toBeInTheDocument()
     // The first in line has nothing to move; the second goes before it.
     const [first, second] = within(list).getAllByRole('listitem')

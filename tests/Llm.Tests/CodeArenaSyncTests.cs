@@ -573,6 +573,57 @@ public sealed class CodeArenaSyncTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Code_Arena_s_turn_takes_in_what_the_person_queued_on_the_web_at_its_next_step_and_sends_it_back_in_its_place()
+    {
+        await using var f = NewApp();
+        var (web, key) = await PersonAsync(f);
+        var arena = CodeArena(f, key);
+        var (_, otherKey) = await PersonAsync(f);
+        var id = await ChatAsync(arena, "take-1");
+        var ids = await SendAsync(arena, id, null, [User("q1"), Answer("a1")]);
+        // Code Arena's turn holds the chat: what the person sends on the web waits in line.
+        await StatusAssert.Is(HttpStatusCode.OK, await arena.PostAsync($"/api/code-arena/chats/{id}/turn", null));
+        await web.PostAsync($"/api/chat/conversations/{id}/queue", new { content = "Use the staging server", quote = "the server" });
+        await web.PostAsync($"/api/chat/conversations/{id}/queue", new { content = "And keep the logs" });
+        var file = (await web.JsonAsync(await web.Http.PostAsync(new Uri("/api/chat/attachments", UriKind.Relative), Text("notes.txt", "notes")))).GetProperty("id").GetGuid();
+        await web.PostAsync($"/api/chat/conversations/{id}/queue", new { content = "Read this", attachments = new[] { file } });
+        // Someone else's key: not their chat.
+        await StatusAssert.Is(HttpStatusCode.NotFound, await CodeArena(f, otherKey).PostAsync($"/api/code-arena/chats/{id}/queue/take", null));
+
+        var taken = await Json(await arena.PostAsync($"/api/code-arena/chats/{id}/queue/take", null));
+        // In order, the one with a file left for the turn's end.
+        Assert.Equal(["Use the staging server", "And keep the logs"], taken.GetProperty("messages").EnumerateArray().Select(m => m.GetProperty("content").GetString()));
+        Assert.Equal("the server", taken.GetProperty("messages")[0].GetProperty("quote").GetString());
+        Assert.Equal(["Read this"], (await web.JsonAsync(await web.GetAsync($"/api/chat/conversations/{id}"))).GetProperty("queued").EnumerateArray().Select(q => q.GetProperty("content").GetString()));
+        Assert.Empty((await Json(await arena.PostAsync($"/api/code-arena/chats/{id}/queue/take", null))).GetProperty("messages").EnumerateArray());
+
+        // Code Arena sends them back with its turn, in their place: the web shows them as taken in, after the step.
+        await SendAsync(arena, id, ids[1],
+        [
+            new { role = "assistant", content = "", toolCalls = new[] { new { id = "c1", type = "function", function = new { name = "list_dir", arguments = "{}" } } } },
+            new { role = "tool", content = "src/", toolCallId = "c1", name = "list_dir" },
+            new { role = "user", content = "Use the staging server", quote = "the server", kind = "meanwhile" },
+            Answer("On staging"),
+        ]);
+        var messages = (await web.JsonAsync(await web.GetAsync($"/api/chat/conversations/{id}"))).GetProperty("messages").EnumerateArray().ToList();
+        Assert.Equal(["user", "assistant", "assistant", "tool", "user", "assistant"], messages.Select(m => m.GetProperty("role").GetString()));
+        Assert.True(messages[4].GetProperty("details").GetProperty("takenIn").GetBoolean());
+
+        // Its turn over, nothing is taken any more: the one with a file goes as the next question.
+        await StatusAssert.Is(HttpStatusCode.NoContent, await arena.DeleteAsync($"/api/code-arena/chats/{id}/turn"));
+        Assert.Empty((await Json(await arena.PostAsync($"/api/code-arena/chats/{id}/queue/take", null))).GetProperty("messages").EnumerateArray());
+    }
+
+    private static MultipartFormDataContent Text(string name, string text)
+    {
+        var form = new MultipartFormDataContent();
+        var part = new ByteArrayContent(System.Text.Encoding.UTF8.GetBytes(text));
+        part.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
+        form.Add(part, "file", name);
+        return form;
+    }
+
+    [Fact]
     public async Task While_Code_Arena_answers_the_web_queues_the_person_s_message_and_it_goes_when_the_turn_ends()
     {
         await using var f = NewApp();

@@ -767,6 +767,8 @@ public sealed class FakeChats
         public DateTimeOffset Updated { get; set; } = DateTimeOffset.UtcNow;
         /// <summary>Code Arena's turn holds it until then.</summary>
         public DateTimeOffset? Turn { get; set; }
+        /// <summary>What the person queued on the web while Code Arena's turn holds it: taken in at the turn's next step.</summary>
+        public List<string> Queued { get; } = [];
 
         /// <summary>The branch on screen, first to last.</summary>
         public List<Node> Branch
@@ -1393,6 +1395,14 @@ public sealed class FakeChats
                 All.First(x => x.Id == id6).Turn = null;
                 Turns.Add("end");
                 (reply, status) = (null, 204);
+            }
+            else if (parts is ["chats", var id8, "queue", "take"] && method == "POST")
+            {
+                // What the person queued on the web while the turn holds the chat, out of its line.
+                var c = All.First(x => x.Id == id8);
+                var taken = c.Turn is not null ? c.Queued.ToList() : [];
+                c.Queued.Clear();
+                reply = new JsonObject { ["messages"] = new JsonArray([.. taken.Select((q, i) => (JsonNode)new JsonObject { ["id"] = $"w{i}", ["content"] = q, ["quote"] = null })]) };
             }
             else if (parts is ["chats", var id7, "continued"] && method == "POST")
             {

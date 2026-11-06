@@ -113,6 +113,7 @@ public static class CodeArenaSync
         g.MapPost("/chats/{id:guid}/messages", AppendAsync);
         g.MapPost("/chats/{id:guid}/turn", TurnAsync);
         g.MapDelete("/chats/{id:guid}/turn", TurnEndAsync);
+        g.MapPost("/chats/{id:guid}/queue/take", TakeQueuedAsync);
         g.MapPost("/chats/{id:guid}/continued", ContinuedAsync);
         g.MapGet("/attachments/{id:guid}", AttachmentAsync);
         g.MapGet("/preferences", PreferencesAsync);
@@ -663,6 +664,40 @@ public static class CodeArenaSync
         c.CodeArenaTurnUntil = DateTimeOffset.UtcNow + TurnLease;
         await db.SaveChangesAsync(http.RequestAborted);
         return Results.Ok(new { until = c.CodeArenaTurnUntil });
+    }
+
+    /// <summary>
+    /// Code Arena's turn takes in, at its next step, what the person queued on the web while it works: the first ones in line that
+    /// may go into an answer (QueuedMessages.TakesIn: no files, skill or deep research, no model a safeguard chose), out of line, in
+    /// order. Code Arena adds each to its session as the person's, and sends it back with the turn's messages, in its place. Only
+    /// while its turn holds the chat; the rest wait for the turn to end.
+    /// </summary>
+    private static async Task<IResult> TakeQueuedAsync(Guid id, HttpContext http, McpPeople people, AppDbContext db)
+    {
+        var (me, refusal) = await CallerAsync(http, people);
+        if (me is null)
+        {
+            return refusal!;
+        }
+        if (await db.Conversations.AsNoTracking().SingleOrDefaultAsync(c => c.Id == id && c.UserId == me.Id, http.RequestAborted) is not { } c)
+        {
+            return Gone();
+        }
+        var taken = new List<object>();
+        while (Answering(c) && taken.Count < QueuedMessages.Max)
+        {
+            var next = await db.QueuedMessages.AsNoTracking().Where(q => q.ConversationId == id).OrderBy(q => q.Position).ThenBy(q => q.CreatedAt).FirstOrDefaultAsync(http.RequestAborted);
+            if (next is null || !QueuedMessages.TakesIn(next, me.Id, ""))
+            {
+                break;
+            }
+            // Edited or cancelled meanwhile: read again.
+            if (await db.QueuedMessages.Where(q => q.Id == next.Id && q.Content == next.Content).ExecuteDeleteAsync(http.RequestAborted) == 1)
+            {
+                taken.Add(new { next.Id, next.Content, next.Quote });
+            }
+        }
+        return Results.Ok(new { messages = taken });
     }
 
     /// <summary>Code Arena's turn ended: the chat is free, and the messages the person queued on the web meanwhile go now.</summary>

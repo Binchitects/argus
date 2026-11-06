@@ -2520,8 +2520,10 @@ While a turn runs here, the chat is the session's: Arena holds it for the turn
 (renewed every 30 seconds, and let go once Arena has the turn's messages, or
 after 90 seconds without a word, when Code Arena stopped). Meanwhile the web
 page says **Code Arena is answering in this chat**, and what the person sends
-there waits in the chat's queue, then goes (and is answered on the web) when
-the turn ends. A turn that starts while the web chat is answering waits for
+there waits in the chat's queue: the turn takes it in at its next step (after
+its tool calls), as the person's message, and sends it back with its own in its
+place (`POST /api/code-arena/chats/{id}/queue/take`). One with files or a skill,
+or sent as the turn ends, goes (and is answered on the web) when the turn ends. A turn that starts while the web chat is answering waits for
 that answer first (two minutes at most; Stop goes on without it). `/sync` says where the session stands
 and whose chats they are: the sessions go to the chats of the account whose
 key `code-arena login` was given (login says which; the IDE shows it over

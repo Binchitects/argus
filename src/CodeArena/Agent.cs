@@ -267,6 +267,9 @@ internal sealed class Agent
     /// </summary>
     public Func<CancellationToken, Task<IReadOnlyList<Meanwhile>>>? SentMeanwhile { get; set; }
 
+    /// <summary>What the person queued in the web chat in Arena while the turn works, taken in after <see cref="SentMeanwhile"/>'s; null: none.</summary>
+    public Func<CancellationToken, Task<IReadOnlyList<Meanwhile>>>? SentOnWeb { get; set; }
+
     /// <summary>The session's kind of a message the person sent while a turn worked, taken in at its next step.</summary>
     public const string MeanwhileKind = "meanwhile";
     /// <summary>A checkpoint before each turn (/rewind); null: none kept (a sub-agent).</summary>
@@ -842,17 +845,18 @@ internal sealed class Agent
     }
 
     /// <summary>
-    /// What the person sent while the step ran (<see cref="SentMeanwhile"/>) goes in now, between the step's results and the next
+    /// What the person sent while the step ran (<see cref="SentMeanwhile"/>, then the web chat's: <see cref="SentOnWeb"/>) goes in now, between the step's results and the next
     /// request: composed as a turn's message is (its @files and lines, its files, its quote first), saved in the session as theirs
     /// ("meanwhile": the web chat shows it was sent while it worked), and the model reads it before its next step.
     /// </summary>
     private async Task TakeInMeanwhileAsync(CancellationToken ct)
     {
-        if (Depth > 0 || SentMeanwhile is not { } waiting)
+        if (Depth > 0)
         {
             return;
         }
-        foreach (var sent in await waiting(ct))
+        List<Meanwhile> all = [.. SentMeanwhile is { } here ? await here(ct) : [], .. SentOnWeb is { } web ? await web(ct) : []];
+        foreach (var sent in all)
         {
             var (words, files) = Mentions.Expand(sent.Text, Context.Workspace, sent.Pieces);
             if (sent.Uploaded is { } attached)
@@ -860,7 +864,7 @@ internal sealed class Agent
                 words += attached.Section;
             }
             words = Quotes.Compose(sent.Quote, words);
-            Ui.Line(Ui.Cyan("› ") + sent.Text + Ui.Dim("  (sent while it worked)"));
+            Ui.Line(Ui.Cyan("› ") + sent.Text + Ui.Dim(sent.Id.StartsWith("web:", StringComparison.Ordinal) ? "  (sent in the web chat while it worked)" : "  (sent while it worked)"));
             if (files.Count > 0)
             {
                 Ui.Info($"With the message: {string.Join(", ", files)}.");
