@@ -165,9 +165,12 @@ public sealed partial class ChatService
     private async Task<string> SummarizeAsync(string? earlier, IReadOnlyList<ChatMessage> messages, GatewayModel? model, string modelName, string email, CancellationToken ct,
         string prompt = CompactPrompt, int? number = null)
     {
-        var output = Math.Min(SummaryTokens, model?.MaxOutput ?? SummaryTokens);
+        // A summary is a quarter of the window at most: the next fold reads it again, with its part and room for its own answer.
+        var context = model?.Context ?? 32768;
+        var output = Math.Min(Math.Min(SummaryTokens, model?.MaxOutput ?? SummaryTokens), Math.Max(1, context / 4));
         // At 3 characters a token: what is summarized is often denser than prose (code, tool output), and too much is halved anyway.
-        var room = (long)(Math.Max(4096, (model?.Context ?? 32768) - output - 1024) * PromptBudget.DefaultCharsPerToken) - prompt.Length - 400;
+        // The margin (the template's tokens, the estimate's error) is an eighth of a small window.
+        var room = (long)(Math.Max(0, context - output - Math.Min(1024, context / 8)) * PromptBudget.DefaultCharsPerToken) - prompt.Length - 400;
         var ids = messages.Where(m => m.Role == "user").SelectMany(m => ParseIds(m.AttachmentsJson)).ToHashSet();
         var names = await db.ChatAttachments.AsNoTracking().Where(a => ids.Contains(a.Id)).ToDictionaryAsync(a => a.Id, a => a.FileName, ct);
 
@@ -175,12 +178,12 @@ public sealed partial class ChatService
         var part = new StringBuilder();
         foreach (var line in Transcript(messages, names, number))
         {
-            var free = Math.Max(2_000, room - (summary?.Length ?? 0));
+            var free = Math.Max(MinPart, room - (summary?.Length ?? 0));
             if (part.Length > 0 && part.Length + line.Length > free)
             {
                 summary = await SummaryPartAsync(summary, part.ToString(), model, modelName, email, output, ct, prompt);
                 part.Clear();
-                free = Math.Max(2_000, room - summary.Length);
+                free = Math.Max(MinPart, room - summary.Length);
             }
             part.Append(line.Length > free ? line[..(int)free] + " […]" : line).Append("\n\n");
         }
@@ -193,7 +196,8 @@ public sealed partial class ChatService
 
     /// <summary>
     /// The summary so far and one part folded together. A part the model refuses as too long for its context (it reads
-    /// denser than the estimate) is halved, at a message's end where it can, and each half folded in turn.
+    /// denser than the estimate) is halved, at a message's end where it can, and each half folded in turn; one too short to
+    /// halve is folded into a shorter summary so far.
     /// </summary>
     private async Task<string> SummaryPartAsync(string? earlier, string part, GatewayModel? model, string modelName, string email, int output, CancellationToken ct,
         string prompt = CompactPrompt)
@@ -208,6 +212,17 @@ public sealed partial class ChatService
             middle = middle >= MinPart ? middle + 2 : part.Length / 2;
             var first = await SummaryPartAsync(earlier, part[..middle], model, modelName, email, output, ct, prompt);
             return await SummaryPartAsync(first, part[middle..], model, modelName, email, output, ct, prompt);
+        }
+        catch (ChatGatewayException ex) when (ex is { ContextOverflow: true, SharedCache: false } && earlier is not null)
+        {
+            // The earlier summary leaves the part no room (one written for a longer answer, before): it is summarized again
+            // first, as long as a summary may be now (in parts, if it must), and the part folded into that.
+            var shorter = await SummaryPartAsync(null, earlier, model, modelName, email, output, ct, prompt);
+            if (shorter.Length >= earlier.Length)
+            {
+                throw;
+            }
+            return await SummaryPartAsync(shorter, part, model, modelName, email, output, ct, prompt);
         }
     }
 

@@ -32,6 +32,8 @@ namespace Llm.Tests;
 ///   [context overflow once]  refused so until the chat was compacted (a summary in the system message)
 ///   [summary limit N]  a summary asked of more than N characters that holds it is refused as too long
 ///   [length N]  stops at its longest, as an engine does at max_tokens or its n-predict: N tokens written, finish_reason length
+/// A model with a window of its own (<see cref="Windows"/>) refuses a prompt (3 characters a token) and its max_tokens together
+/// longer than it, as vLLM does, and its summaries are as long as asked (max_tokens), up to half what they read, as a small model writes them.
 /// Its /v1/images/generations answers with a small PNG.
 /// </summary>
 public sealed class FakeModel : HttpMessageHandler
@@ -74,6 +76,9 @@ public sealed class FakeModel : HttpMessageHandler
 
     /// <summary>While set, every request times out as HttpClient's own timeout does (a TaskCanceledException that is no one's cancelling).</summary>
     public bool TimesOut { get; set; }
+
+    /// <summary>Models' windows, in tokens, by name: a request that holds more than its model's is refused.</summary>
+    public ConcurrentDictionary<string, int> Windows { get; } = new();
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
@@ -172,6 +177,11 @@ public sealed class FakeModel : HttpMessageHandler
             {
                 Content = new StringContent("""{"error":{"message":"Budget has been exceeded! Current cost: 5.1, Max budget: 5.0","type":"budget_exceeded"}}"""),
             };
+        }
+        var window = body["model"]?.GetValue<string>() is { } windowed && Windows.TryGetValue(windowed, out var w) ? w : (int?)null;
+        if (window is { } most && messages.Sum(m => m!["content"]?.ToString().Length ?? 0) / 3 + (body["max_tokens"]?.GetValue<int>() ?? 0) is var holds && holds > most)
+        {
+            return OverflowResponse(holds, most);
         }
         IEnumerable<string> chunks;
         var delay = TimeSpan.Zero;
@@ -464,7 +474,9 @@ public sealed class FakeModel : HttpMessageHandler
             {
                 return OverflowResponse(lastUser.Length / 2);
             }
-            chunks = [Delta(new JsonObject { ["content"] = $"Summary of {lastUser.Length} characters." }), Finish("stop"), Usage(lastUser.Length / 4, 0, 8)];
+            var summaryTokens = window is null ? 8 : Math.Min(body["max_tokens"]!.GetValue<int>(), lastUser.Length / 6);
+            var summary = $"Summary of {lastUser.Length} characters." + (window is null ? "" : " " + new string('s', summaryTokens * 3));
+            chunks = [Delta(new JsonObject { ["content"] = summary }), Finish("stop"), Usage(lastUser.Length / 4, 0, summaryTokens)];
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
         }
         if (lastUser.Contains("[context overflow]", StringComparison.Ordinal)
@@ -572,8 +584,8 @@ public sealed class FakeModel : HttpMessageHandler
     /// LiteLLM's refusal of a prompt bigger than llama.cpp's context (32,768 tokens), as the gateway sends it: a 400 whose
     /// message is ContextWindowExceededError around llama.cpp's own words.
     /// </summary>
-    public static string Overflow(long tokens) =>
-        $$$"""{"error":{"message":"litellm.ContextWindowExceededError: litellm.BadRequestError: ContextWindowExceededError: OpenAIException - request ({{{tokens}}} tokens) exceeds the available context size (32768 tokens), try increasing it","type":null,"param":null,"code":"400"}}""";
+    public static string Overflow(long tokens, int context = 32768) =>
+        $$$"""{"error":{"message":"litellm.ContextWindowExceededError: litellm.BadRequestError: ContextWindowExceededError: OpenAIException - request ({{{tokens}}} tokens) exceeds the available context size ({{{context}}} tokens), try increasing it","type":null,"param":null,"code":"400"}}""";
 
     /// <summary>llama.cpp's own refusal, straight from the engine (no gateway between).</summary>
     public const string LlamaOverflow =
@@ -586,8 +598,8 @@ public sealed class FakeModel : HttpMessageHandler
     public const string OpenAiOverflow =
         """{"error":{"message":"This model's maximum context length is 32768 tokens. However, you requested 40000 tokens (36000 in the messages, 4000 in the completion). Please reduce the length of the messages or completion.","type":"invalid_request_error","param":"messages","code":"context_length_exceeded"}}""";
 
-    private static HttpResponseMessage OverflowResponse(long tokens) =>
-        new(HttpStatusCode.BadRequest) { Content = new StringContent(Overflow(tokens), Encoding.UTF8, "application/json") };
+    private static HttpResponseMessage OverflowResponse(long tokens, int context = 32768) =>
+        new(HttpStatusCode.BadRequest) { Content = new StringContent(Overflow(tokens, context), Encoding.UTF8, "application/json") };
 
     /// <summary>The chunks as one chat.completion: the words, the finish and the usage.</summary>
     private static JsonObject Whole(IEnumerable<string> chunks)
