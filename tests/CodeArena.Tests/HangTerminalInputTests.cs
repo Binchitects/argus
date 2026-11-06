@@ -31,6 +31,11 @@ internal sealed class SharedTerminal : TextReader, IKeyboard
         }
     }
 
+    /// <summary>The ↑ key.</summary>
+    public void Up() => Type(UpKey.ToString());
+
+    private const char UpKey = '↑';
+
     /// <summary>The end of input: every read waiting returns.</summary>
     public void End()
     {
@@ -80,6 +85,7 @@ internal sealed class SharedTerminal : TextReader, IKeyboard
     {
         null => null,
         '\n' => new ConsoleKeyInfo('\r', ConsoleKey.Enter, false, false, false),
+        UpKey => new ConsoleKeyInfo('\0', ConsoleKey.UpArrow, false, false, false),
         var c => new ConsoleKeyInfo(c.Value, char.IsAsciiLetter(c.Value) ? ConsoleKey.A + (char.ToUpperInvariant(c.Value) - 'A') : 0, char.IsAsciiLetterUpper(c.Value), false, false),
     };
 

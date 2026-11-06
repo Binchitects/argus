@@ -14,9 +14,11 @@ internal sealed class Repl(Runtime rt)
         ? new LineEditor(keys, rt.Ui.Out, () => rt.History.Entries()) { Interrupted = rt.Env.Cancel.Press }
         : null;
 
-    // What the person typed while a turn ran (whole lines, and a line begun): taken when it ends.
+    // What the person typed while a turn ran (whole lines, and a line begun): a line is taken in at the turn's next step (a
+    // command, when the turn ends); the line begun waits for the prompt.
     private readonly Queue<string> _typed = new();
     private string _ahead = "";
+    private int _typedIds;
     // The running turn's token: a question waiting for its answer ends when the turn is stopped.
     private CancellationToken? _turnStop;
     // Free only while the prompt waits for the person: the web chat's news is taken in then, and never into a turn or a command.
@@ -142,6 +144,11 @@ internal sealed class Repl(Runtime rt)
         };
         // What the person adds in the web chat while the prompt waits comes in at once, said above it.
         rt.WebNews = () => _ = TakeInWhileWaitingAsync(ct);
+        // A line typed while the model works goes into the turn at its next step, as in Claude Code.
+        if (_editor is not null)
+        {
+            rt.Agent.SentMeanwhile = _ => Task.FromResult<IReadOnlyList<Meanwhile>>(TakeTyped());
+        }
         // What Arena lacks of the earlier sessions (every folder's) goes in the background.
         rt.SendLaterInBackground();
         var pending = first;
@@ -453,9 +460,23 @@ internal sealed class Repl(Runtime rt)
             if (_ahead.Trim() is { Length: > 0 } text)
             {
                 _typed.Enqueue(text);
-                Ui.Info($"Taken when this turn ends: {Fmt.OneLine(text, 60)}");
+                Ui.Info(Command(text)
+                    ? $"Run when this turn ends: {Fmt.OneLine(text, 60)}"
+                    : $"Read at the model's next step: {Fmt.OneLine(text, 60)} (↑ takes it back)");
             }
             _ahead = "";
+        }
+        else if (key.Key == ConsoleKey.UpArrow && _ahead.Length == 0 && _typed.Count > 0)
+        {
+            // Taken back before the model read it: on the prompt when the turn ends, to change, send or clear.
+            var all = _typed.ToList();
+            _typed.Clear();
+            foreach (var line in all[..^1])
+            {
+                _typed.Enqueue(line);
+            }
+            _ahead = all[^1];
+            Ui.Info($"Taken back: {Fmt.OneLine(_ahead, 60)} waits on the prompt when this turn ends.");
         }
         else if (key.Key == ConsoleKey.Backspace)
         {
@@ -467,6 +488,28 @@ internal sealed class Repl(Runtime rt)
         else if (!char.IsControl(key.KeyChar))
         {
             _ahead += key.KeyChar;
+        }
+    }
+
+    /// <summary>A command (/name) or a shell line (!command): run by the session, never read by the model in the turn.</summary>
+    private static bool Command(string line) => line.StartsWith('/') || (line.StartsWith('!') && line.Length > 1);
+
+    /// <summary>
+    /// The lines typed while the turn worked, in order, for its next step (<see cref="Agent.SentMeanwhile"/>): out of the queue and
+    /// into the history, as a message sent at the prompt. A command waits for the turn to end, and the lines after it with it.
+    /// </summary>
+    private List<Meanwhile> TakeTyped()
+    {
+        lock (_keysGate)
+        {
+            var taken = new List<Meanwhile>();
+            while (_typed.TryPeek(out var line) && !Command(line))
+            {
+                _typed.Dequeue();
+                rt.History.Add(line);
+                taken.Add(new Meanwhile($"t{++_typedIds}", line));
+            }
+            return taken;
         }
     }
 

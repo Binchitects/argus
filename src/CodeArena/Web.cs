@@ -143,6 +143,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     {
         var app = new WebApp(rt, assets, new HttpServer(port, served is null ? null : IPAddress.Any), served, token);
         rt.Agent.Events = app;
+        rt.Agent.SentMeanwhile = app.SentMeanwhileAsync;
         rt.Permissions.Asker = app.AskAsync;
         rt.Jobs.Started += app.JobStarted;
         rt.Jobs.Output += app.JobOutput;
@@ -489,6 +490,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                     _queued.Clear();
                 }
                 await res.NoContentAsync(ct);
+                return;
+            case ("PATCH" or "DELETE", var one) when one.StartsWith("/api/queue/", StringComparison.Ordinal):
+                await QueuedOneAsync(req, res, one["/api/queue/".Length..], ct);
                 return;
             case ("POST", "/api/approvals"):
                 await ApproveAsync(req, res, ct);
@@ -1387,7 +1391,12 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     /// Messages sent while an answer is written (with the lines chosen in the editor, and the part of an answer each quotes): each
     /// runs, in order, once the one before it ends.
     /// </summary>
-    private readonly List<(string Text, IReadOnlyList<Mentions.Piece>? Pieces, string? Quote, IReadOnlyList<Upload>? Uploads)> _queued = [];
+    private readonly List<Waiting> _queued = [];
+
+    /// <summary>A message waiting: <paramref name="Id"/> names it to the page (q1, q2…), for Edit and Cancel.</summary>
+    private sealed record Waiting(string Id, string Text, IReadOnlyList<Mentions.Piece>? Pieces, string? Quote, IReadOnlyList<Upload>? Uploads);
+
+    private int _queuedIds;
 
     /// <summary>
     /// The lines chosen in the editor that go with a message: <c>context</c>, each <c>{path, startLine, endLine, text?}</c>
@@ -1399,7 +1408,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 .Select(p => new Mentions.Piece(p.Str("path")!, p.Int("startLine") ?? 1, p.Int("endLine") ?? p.Int("startLine") ?? 1, p.Str("text")))]
             : null;
 
-    /// <summary>POST /api/queue: a message for after the answer being written (now, when none is).</summary>
+    /// <summary>POST /api/queue: a message for the answer being written, read at its next step (now, when none is).</summary>
     private async Task QueueAsync(HttpRequest req, HttpResponse res, CancellationToken ct)
     {
         var body = req.Json();
@@ -1422,14 +1431,80 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         }
         _rt.History.Add(text);
         int place;
+        string id;
         lock (_gate)
         {
             // The lines as they are now: when it runs, the file may have changed.
-            _queued.Add((text, Pieces(body)?.Select(p => p.Taken(_rt.Workspace)).ToList(), quote, uploads));
+            id = $"q{++_queuedIds}";
+            _queued.Add(new Waiting(id, text, Pieces(body)?.Select(p => p.Taken(_rt.Workspace)).ToList(), quote, uploads));
             place = _queued.Count;
         }
         StartNext();
-        await res.JsonAsync(202, new JsonObject { ["queued"] = place }, ct);
+        await res.JsonAsync(202, new JsonObject { ["queued"] = place, ["id"] = id }, ct);
+    }
+
+    /// <summary>
+    /// PATCH /api/queue/q3 <c>{text}</c>: a waiting message's words changed; DELETE: it is taken out of line. 404 once it went (the
+    /// answer took it in, or it runs).
+    /// </summary>
+    private async Task QueuedOneAsync(HttpRequest req, HttpResponse res, string id, CancellationToken ct)
+    {
+        var text = req.Method == "PATCH" ? req.Json()?.Str("text")?.Trim() : null;
+        if (req.Method == "PATCH" && string.IsNullOrEmpty(text))
+        {
+            await res.ErrorAsync(400, "invalid", "Write a message first, or cancel it.", ct);
+            return;
+        }
+        bool found;
+        lock (_gate)
+        {
+            var at = _queued.FindIndex(q => q.Id == id);
+            found = at >= 0;
+            if (found && text is not null)
+            {
+                _queued[at] = _queued[at] with { Text = text };
+            }
+            else if (found)
+            {
+                _queued.RemoveAt(at);
+            }
+        }
+        if (!found)
+        {
+            await res.ErrorAsync(404, "not_queued", "That message is not waiting any more: it was sent.", ct);
+            return;
+        }
+        if (text is not null)
+        {
+            _rt.History.Add(text);
+        }
+        await res.NoContentAsync(ct);
+    }
+
+    /// <summary>
+    /// The messages waiting, taken out of line for the answer's next step (Agent.SentMeanwhile), in order, their files read: the
+    /// answer reads each as the person's, and goes on. A compaction running takes none: they go when it ends.
+    /// </summary>
+    private async Task<IReadOnlyList<Meanwhile>> SentMeanwhileAsync(CancellationToken ct)
+    {
+        List<Waiting> taken;
+        lock (_gate)
+        {
+            if (_job is not { Kind: "answer" } || _queued.Count == 0)
+            {
+                return [];
+            }
+            taken = [.. _queued];
+            _queued.Clear();
+        }
+        var sent = new List<Meanwhile>();
+        foreach (var q in taken)
+        {
+            var uploaded = q.Uploads is { Count: > 0 } ? await Uploads.ReadAsync(q.Uploads, _rt.Config, _rt.Http, _rt.Sees(_rt.Model.Info), ct) : ((string, JsonArray)?)null;
+            var text = await _rt.PrepareAsync(q.Text, ct);
+            sent.Add(new Meanwhile(q.Id, text, q.Pieces, q.Quote, uploaded) { Uploads = q.Uploads });
+        }
+        return sent;
     }
 
     /// <summary>
@@ -1451,7 +1526,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             }
             if (_queued.Count > 0)
             {
-                (text, pieces, quote, uploads) = _queued[0];
+                (_, text, pieces, quote, uploads) = _queued[0];
                 _queued.RemoveAt(0);
             }
             else if (_rt.Jobs.Follow().Count == 0)
@@ -1934,6 +2009,14 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
 
     void IAgentEvents.SubAgent(JsonObject e) => Emit(e);
 
+    void IAgentEvents.TookIn(Meanwhile sent, IReadOnlyList<string> files) =>
+        Emit(new JsonObject
+        {
+            ["type"] = "took_in", ["id"] = NextId(), ["parentId"] = LastId(), ["queuedId"] = sent.Id, ["content"] = sent.Text, ["quote"] = sent.Quote,
+            ["files"] = files.Count > 0 ? new JsonArray([.. files.Select(f => (JsonNode)f)]) : null,
+            ["attachments"] = sent.Uploads is { Count: > 0 } uploads ? Uploads.Shown(uploads) : null,
+        });
+
     void IAgentEvents.Attached(IReadOnlyList<string> files) =>
         Emit(new JsonObject { ["type"] = "attached", ["id"] = NextId(), ["files"] = new JsonArray([.. files.Select(f => (JsonNode)f)]) });
 
@@ -2002,11 +2085,16 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         }
     }
 
-    private List<string> Queued()
+    /// <summary>The messages waiting, as the page lists them: id, words, the quote, the files.</summary>
+    private List<JsonObject> Queued()
     {
         lock (_gate)
         {
-            return [.. _queued.Select(q => q.Text)];
+            return [.. _queued.Select(q => new JsonObject
+            {
+                ["id"] = q.Id, ["text"] = q.Text, ["quote"] = q.Quote,
+                ["attachments"] = q.Uploads is { Count: > 0 } ? Uploads.Shown(q.Uploads) : null,
+            })];
         }
     }
 
@@ -2027,6 +2115,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         _watch?.Dispose();
         await _server.DisposeAsync();
         _rt.Agent.Events = null;
+        _rt.Agent.SentMeanwhile = null;
         _rt.WebNews = null;
         _rt.Permissions.Asker = null;
         _rt.Jobs.Started -= JobStarted;
@@ -2267,6 +2356,7 @@ internal static partial class History
                 // Code Arena's own word to the model (the connection dropped), shown as a notice, not as the person's; a task
                 // call's sub-agents, with what each did.
                 ["details"] = entry.Kind == "note" ? new JsonObject { ["note"] = true }
+                    : entry.Kind == Agent.MeanwhileKind ? new JsonObject { ["takenIn"] = true }
                     : entry.Agents is { } agents ? new JsonObject { ["agents"] = agents.DeepClone() } : null,
             });
         }

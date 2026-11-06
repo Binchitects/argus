@@ -112,7 +112,7 @@ public sealed class SkipThinkingTests : IDisposable
             terminal.Type("next one\n\t");
             await Within(() => output.ToString().Contains("The answer, at once."));
             Assert.Contains("Thinking skipped: the model answers now.", output.ToString());
-            Assert.Contains("Taken when this turn ends: next one", output.ToString());
+            Assert.Contains("Read at the model's next step: next one", output.ToString());
             // The line typed while it thought is the next message, and that turn thinks again (and is skipped again).
             await Within(() => _gateway.Requests.Count(r => !ThinkingOff(r)) == 2);
             terminal.Type("\t");

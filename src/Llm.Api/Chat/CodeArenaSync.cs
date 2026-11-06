@@ -23,7 +23,8 @@ namespace Llm.Api.Chat;
 /// is this end's id for it (in what this end gives); <paramref name="Ref"/> is Code Arena's place for it (session:number), so a
 /// message sent twice is known as one. <paramref name="Status"/>: how an answer ended when not as it should ("stopped" by the
 /// person, "failed", "declined"); <paramref name="Kind"/> "note": a message of Code Arena's own to the model (the connection
-/// dropped), shown as a notice, not as the person's words. <paramref name="Attachments"/>: what went with a question here (its
+/// dropped), shown as a notice, not as the person's words; "meanwhile": the person's message sent while a turn worked and taken in
+/// at its next step, shown so. <paramref name="Attachments"/>: what went with a question here (its
 /// text files are in <paramref name="Content"/> already, as the web's model reads them; its pictures Code Arena fetches).
 /// <paramref name="Quote"/>: the part of an earlier answer a question quotes, kept apart from its words both ways (ChatQuotes).
 /// <paramref name="Context"/>: what filled the request a Code Arena answer was written for, by kind in characters (ContextParts'
@@ -630,7 +631,8 @@ public static class CodeArenaSync
                 // Stopped by the person in Code Arena: shown as stopped, as an answer stopped here is.
                 Status = m.Role == "assistant" && m.Status == "stopped" ? MessageStatus.Stopped : MessageStatus.Complete,
                 // Code Arena's own word to its model: a notice on the web, not the person's.
-                DetailsJson = m.Role == "user" && m.Kind == "note" ? """{"note":true}""" : null,
+                // Sent while Code Arena's turn worked, and taken in at its next step: shown so, as one taken in here.
+                DetailsJson = m.Role == "user" && m.Kind == "note" ? """{"note":true}""" : m.Role == "user" && m.Kind == MeanwhileKind ? ChatService.TakenInDetails : null,
                 // What filled the request it answered: the web chat's context gauge shows it, as for the answers written here.
                 ContextJson = m.Role == "assistant" ? ContextOf(m.Context, named) : null,
             };
@@ -949,13 +951,21 @@ public static class CodeArenaSync
             m.SyncRef,
             m.Id,
             m.Status == MessageStatus.Complete ? null : m.Status.ToString().ToLowerInvariant(),
-            Note(m) ? "note" : null,
+            Note(m) ? "note" : TakenIn(m) ? MeanwhileKind : null,
             attached,
             m.Role == "user" ? m.Quote : null);
     }
 
+    /// <summary>The kind Code Arena gives a message the person sent while a turn worked, taken in at its next step (either end's).</summary>
+    public const string MeanwhileKind = "meanwhile";
+
     /// <summary>A message of Code Arena's own to its model (the connection dropped), kept as a notice: not the person's words.</summary>
-    private static bool Note(ChatMessage m)
+    private static bool Note(ChatMessage m) => Marked(m, "note");
+
+    /// <summary>A question sent while an answer worked, taken in at its next step (ChatService.TakeInQueuedAsync, or Code Arena's).</summary>
+    private static bool TakenIn(ChatMessage m) => Marked(m, "takenIn");
+
+    private static bool Marked(ChatMessage m, string flag)
     {
         if (m.Role != "user" || m.DetailsJson is null)
         {
@@ -963,7 +973,7 @@ public static class CodeArenaSync
         }
         try
         {
-            return JsonNode.Parse(m.DetailsJson)?["note"]?.GetValue<bool>() == true;
+            return JsonNode.Parse(m.DetailsJson)?[flag]?.GetValue<bool>() == true;
         }
         catch (Exception e) when (e is JsonException or InvalidOperationException)
         {

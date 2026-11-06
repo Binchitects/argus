@@ -187,6 +187,24 @@ internal interface IAgentEvents
     void ThinkingSkipped()
     {
     }
+
+    /// <summary>
+    /// A message the person sent while the turn worked, taken in at its next step (<see cref="Agent.Meanwhile"/>): as typed, what went
+    /// with it, and the part of an answer it quotes. Said before it is added (its place is the next).
+    /// </summary>
+    void TookIn(Meanwhile sent, IReadOnlyList<string> files)
+    {
+    }
+}
+
+/// <summary>
+/// A message the person sent while a turn worked (the IDE's queue, a line typed at the terminal): <paramref name="Id"/> its place in
+/// the queue, what was typed, the lines chosen in the IDE's editor, the part of an answer it quotes and the files attached (read).
+/// </summary>
+internal sealed record Meanwhile(string Id, string Text, IReadOnlyList<Mentions.Piece>? Pieces = null, string? Quote = null, (string Section, JsonArray Pictures)? Uploaded = null)
+{
+    /// <summary>The files attached, as the page shows them.</summary>
+    public IReadOnlyList<Upload>? Uploads { get; init; }
 }
 
 /// <summary>
@@ -242,6 +260,15 @@ internal sealed class Agent
     public Func<CancellationToken, Task<Taken>>? BeforeTurn { get; set; }
     /// <summary>Told when a turn of the main conversation ends, however it ended (the web chat is let go).</summary>
     public Action? AfterTurn { get; set; }
+    /// <summary>
+    /// The messages the person sent while the turn worked, taken from where they wait at the turn's next step (after its tool
+    /// calls), as Claude Code takes what is typed while it works: each is the person's message the model reads then, and the
+    /// turn goes on (the main conversation only). Null: none are taken in; they wait for the turn to end.
+    /// </summary>
+    public Func<CancellationToken, Task<IReadOnlyList<Meanwhile>>>? SentMeanwhile { get; set; }
+
+    /// <summary>The session's kind of a message the person sent while a turn worked, taken in at its next step.</summary>
+    public const string MeanwhileKind = "meanwhile";
     /// <summary>A checkpoint before each turn (/rewind); null: none kept (a sub-agent).</summary>
     public Checkpoints? Checkpoints { get; set; }
     /// <summary>Commits each turn's changes under this name (the main conversation only); null: no commits.</summary>
@@ -808,9 +835,46 @@ internal sealed class Agent
                 return last;
             }
             await RunToolsAsync(answer.ToolCalls, ct);
+            await TakeInMeanwhileAsync(ct);
         }
         Warn($"Stopped after {MaxSteps} steps.");
         return last;
+    }
+
+    /// <summary>
+    /// What the person sent while the step ran (<see cref="SentMeanwhile"/>) goes in now, between the step's results and the next
+    /// request: composed as a turn's message is (its @files and lines, its files, its quote first), saved in the session as theirs
+    /// ("meanwhile": the web chat shows it was sent while it worked), and the model reads it before its next step.
+    /// </summary>
+    private async Task TakeInMeanwhileAsync(CancellationToken ct)
+    {
+        if (Depth > 0 || SentMeanwhile is not { } waiting)
+        {
+            return;
+        }
+        foreach (var sent in await waiting(ct))
+        {
+            var (words, files) = Mentions.Expand(sent.Text, Context.Workspace, sent.Pieces);
+            if (sent.Uploaded is { } attached)
+            {
+                words += attached.Section;
+            }
+            words = Quotes.Compose(sent.Quote, words);
+            Ui.Line(Ui.Cyan("› ") + sent.Text + Ui.Dim("  (sent while it worked)"));
+            if (files.Count > 0)
+            {
+                Ui.Info($"With the message: {string.Join(", ", files)}.");
+            }
+            Events?.TookIn(sent, files);
+            var pictures = sent.Uploaded?.Pictures;
+            Add(new JsonObject
+            {
+                ["role"] = "user",
+                ["content"] = pictures is { Count: > 0 }
+                    ? new JsonArray([new JsonObject { ["type"] = "text", ["text"] = words }, .. pictures.Select(p => p!.DeepClone())])
+                    : words,
+            }, kind: MeanwhileKind);
+        }
     }
 
     /// <summary>

@@ -636,6 +636,8 @@ public sealed class CodeArenaSyncTests(AppFixture app)
             User("Write it"),
             new { role = "assistant", content = "Half of it", status = "stopped", model = "Model-Two", reasoning = "thinking first", promptTokens = 120, cachedTokens = 60, completionTokens = 9 },
             new { role = "user", content = "(The connection dropped while you were answering: carry on.)", kind = "note" },
+            // Sent while Code Arena's turn worked, and taken in at its next step.
+            new { role = "user", content = "Also the tests", kind = "meanwhile" },
         ]);
         var chat = await web.JsonAsync(await web.GetAsync($"/api/chat/conversations/{id}"));
         var messages = chat.GetProperty("messages").EnumerateArray().ToList();
@@ -643,12 +645,14 @@ public sealed class CodeArenaSyncTests(AppFixture app)
         Assert.Equal("thinking first", messages[1].GetProperty("reasoning").GetString());
         Assert.Equal(60, messages[1].GetProperty("cachedTokens").GetInt32());
         Assert.True(messages[2].GetProperty("details").GetProperty("note").GetBoolean());
+        Assert.True(messages[3].GetProperty("details").GetProperty("takenIn").GetBoolean());
         // Continued on the web, it answers with the model Code Arena answered with last.
         Assert.Equal("Model-Two", chat.GetProperty("model").GetString());
         // And Code Arena reads them back as they were.
         var read = await Json(await arena.GetAsync($"/api/code-arena/chats/{id}"));
         Assert.Equal("stopped", read.GetProperty("messages")[1].GetProperty("status").GetString());
         Assert.Equal("note", read.GetProperty("messages")[2].GetProperty("kind").GetString());
+        Assert.Equal("meanwhile", read.GetProperty("messages")[3].GetProperty("kind").GetString());
 
         // Archived on the web: Code Arena's sends leave it so; the person's continuing it from Code Arena brings it back, once.
         await StatusAssert.Is(HttpStatusCode.NoContent, await web.Http.PatchAsJsonAsync(new Uri($"/api/chat/conversations/{id}", UriKind.Relative), new { archived = true }));
