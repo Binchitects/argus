@@ -267,6 +267,23 @@ public sealed class IdeSkillTests : IDisposable
     }
 
     [Fact]
+    public async Task A_skill_changed_on_the_web_just_after_a_turn_is_used_as_it_is_now()
+    {
+        // Asked again at most this often unasked: here, not within the test.
+        using var h = new Harness(_gateway, _mcp) { ArenaSkillsEvery = TimeSpan.FromHours(1) };
+        _mcp.Chats.ArenaSkills = [FakeChats.OwnSkill("websk9", "Made on the web", "Say SKILL-OLD.")];
+        await using var web = await WebRun.StartAsync(h);
+        _gateway.Answer = _ => Reply.Say("ok");
+        await (await web.SendAsync("first")).RestAsync();
+
+        _mcp.Chats.ArenaSkills = [FakeChats.OwnSkill("websk9", "Made on the web", "Say SKILL-EDITED-NOW.")];
+        await (await web.SendAsync("/websk9 now")).RestAsync();
+        var asked = _gateway.Requests[^1]["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.ToString();
+        Assert.Contains("Say SKILL-EDITED-NOW.", asked, StringComparison.Ordinal);
+        Assert.DoesNotContain("SKILL-OLD", asked, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task In_a_subfolder_of_the_repository_the_projects_skills_open_and_a_new_one_opens_too()
     {
         using var h = new Harness(_gateway, _mcp);

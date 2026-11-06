@@ -2309,7 +2309,9 @@ message, without starting Code Arena again.
   written anew at each start when Arena answers (kept as they were when it
   does not), then asked for again while Code Arena runs: at a turn and as the
   IDE lists them, at most every 30 seconds, and at once with the Skills
-  view's **Refresh** or `/skills`. So one made, changed or turned off on
+  view's **Refresh** or `/skills`, and when one of them (or a name Code Arena
+  does not know) is typed as `/name`, so it runs with its steps as they are
+  now. So one made, changed or turned off on
   Arena's Skills page reaches a running terminal or IDE without starting it
   again. One made in Arena wins over a plugin's of the same name; the
   project's and your own skills of the same name win over them all.

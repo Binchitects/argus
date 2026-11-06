@@ -222,7 +222,20 @@ internal sealed class Extensions
         {
             return command.Fill(words);
         }
-        return Skills.FirstOrDefault(s => string.Equals(s.Name, parts[0], StringComparison.OrdinalIgnoreCase)) is { } skill ? skill.Use(input, words) : null;
+        return SkillTyped(input) is { } skill ? skill.Use(input, words) : null;
+    }
+
+    /// <summary>The skill a typed /name args uses, or null (none of that name, or a command of that name goes first).</summary>
+    public Skill? SkillTyped(string input)
+    {
+        if (!input.StartsWith('/'))
+        {
+            return null;
+        }
+        var name = input[1..].Split([' ', '\n'], 2)[0];
+        return Commands.Any(c => string.Equals(c.Name, name, StringComparison.OrdinalIgnoreCase))
+            ? null
+            : Skills.FirstOrDefault(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>The skill tool: a skill's instructions, or one of the files beside them.</summary>

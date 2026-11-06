@@ -930,13 +930,16 @@ internal sealed partial class Runtime : IAsyncDisposable
     public async Task<string> PrepareAsync(string input, CancellationToken ct) => await ExpandAsync(input, ct) ?? input;
 
     /// <summary>
-    /// The message a typed /name args stands for (<see cref="Extensions.Expand"/>). A name that is no command or skill asks
-    /// Arena for its skills at once first: one made on its Skills page a moment ago is used, not refused or sent as words.
+    /// The message a typed /name args stands for (<see cref="Extensions.Expand"/>). A name that is no command or skill, or
+    /// one of Arena's skills (the person's own or a plugin's), asks Arena for its skills at once first: one made or changed
+    /// on its Skills page a moment ago is used as it is now, not refused, sent as words, or used with its old steps.
     /// </summary>
     public async Task<string?> ExpandAsync(string input, CancellationToken ct)
     {
         var prompt = Extensions.Expand(input);
-        return prompt is not null || !input.StartsWith('/') ? prompt : (await ReloadExtensionsAsync(true, ct)).Expand(input);
+        return !input.StartsWith('/') || prompt is not null && Extensions.SkillTyped(input) is not { Source: "arena" }
+            ? prompt
+            : (await ReloadExtensionsAsync(true, ct)).Expand(input);
     }
 
     /// <summary>How long a turn waits at most for Arena's skills: kept as they were when Arena is slower.</summary>

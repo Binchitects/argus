@@ -92,6 +92,26 @@ public sealed class TerminalSkillTests : IDisposable
     }
 
     [Fact]
+    public async Task A_skill_changed_on_the_web_just_now_is_used_as_it_is_now()
+    {
+        // Asked again at most this often unasked: here, not within the test.
+        using var h = new Harness(_gateway, _mcp) { ArenaSkillsEvery = TimeSpan.FromHours(1) };
+        _mcp.Chats.ArenaSkills = [FakeChats.OwnSkill("websk5", "Made on the web", "Say SKILL-OLD.")];
+        // Its steps fixed on Arena's Skills page while the first message is answered, and typed at once.
+        _gateway.Answer = req =>
+        {
+            if (FakeGateway.Last(req) == "first")
+            {
+                _mcp.Chats.ArenaSkills = [FakeChats.OwnSkill("websk5", "Made on the web", "Say SKILL-EDITED-NOW.")];
+            }
+            return Reply.Say("ok");
+        };
+        Assert.Equal(0, await h.Run("first\n/websk5 now\n/exit\n", "chat"));
+        Assert.Contains("Say SKILL-EDITED-NOW.", LastUser(), StringComparison.Ordinal);
+        Assert.DoesNotContain("SKILL-OLD", LastUser(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Skills_new_makes_one_for_the_project_or_one_of_yours_in_Arena()
     {
         using var h = new Harness(_gateway, _mcp);
