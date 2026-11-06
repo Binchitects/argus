@@ -59,7 +59,7 @@ import { compareSelection, type Side } from './compare'
 import { SearchPanel } from './search'
 import { SettingsProvider, useSettings, workspaceSettingsPath } from './settings'
 import { allColorThemes, allIconThemes, themeNamed } from './settings-schema'
-import { previewTheme, useShownTheme, useThemeSync } from './theme'
+import { previewTheme, useSeeingSync, useShownTheme, useThemeSync } from './theme'
 import { ensureTheme } from './extensions'
 import { ExtensionsView } from './extensions-view'
 import { appendElement } from './jsonc'
@@ -502,6 +502,7 @@ function Workbench({
   const [palette, setPalette] = useState(false)
   const [recent, setRecent] = useState<string[]>(() => (Array.isArray(recentSaved) ? recentSaved.filter((x): x is string => typeof x === 'string') : []))
   useThemeSync()
+  useSeeingSync()
   // The theme shown now (with "window.autoDetectColorScheme", the preferred one of the page's light or dark): the picker starts at it.
   const shownTheme = useShownTheme()
   useKeyboard()
@@ -1255,6 +1256,19 @@ function Workbench({
     { id: 'workbench.action.openGlobalKeybindingsFile', category: 'Preferences', title: 'Open Keyboard Shortcuts (JSON)', run: () => void ed.open(userFile('keybindings.json')) },
     { id: 'workbench.action.selectTheme', category: 'Preferences', title: 'Color Theme', run: () => void pickTheme() },
     { id: 'workbench.action.selectIconTheme', category: 'Preferences', title: 'File Icon Theme', run: () => void pickIconTheme() },
+    // VS Code's zoom: the whole workbench a step (20%) larger or smaller, kept in "window.zoomLevel".
+    { id: 'workbench.action.zoomIn', category: 'View', title: 'Zoom In', run: () => void settings.update('window.zoomLevel', Math.min(9, (settings.get<number>('window.zoomLevel') ?? 0) + 1)) },
+    { id: 'workbench.action.zoomOut', category: 'View', title: 'Zoom Out', run: () => void settings.update('window.zoomLevel', Math.max(-5, (settings.get<number>('window.zoomLevel') ?? 0) - 1)) },
+    { id: 'workbench.action.zoomReset', category: 'View', title: 'Reset Zoom', run: () => void settings.update('window.zoomLevel', 0) },
+    { id: 'codeArena.accessibility.toggleHighContrast', category: 'Preferences', title: 'Toggle High Contrast Theme', run: async () => {
+      const now = themeNamed(shownTheme)
+      const next = now.family === 'contrast' ? (now.kind === 'light' ? settings.get<string>('workbench.preferredLightColorTheme') : settings.get<string>('workbench.preferredDarkColorTheme')) : now.kind === 'light' ? 'Default High Contrast Light' : 'Default High Contrast'
+      await settings.update('workbench.colorTheme', next).catch((e: unknown) => toast.error(errorMessage(e)))
+      if (settings.get('window.autoDetectColorScheme')) await settings.update('window.autoDetectColorScheme', false).catch(() => undefined)
+    } },
+    { id: 'codeArena.accessibility.toggleMoreContrast', category: 'Preferences', title: 'Toggle More Contrast', run: () => void settings.update('codeArena.accessibility.contrast', settings.get('codeArena.accessibility.contrast') === 'more' ? 'standard' : 'more') },
+    { id: 'codeArena.accessibility.toggleColorBlindColors', category: 'Preferences', title: 'Toggle Colour-Blind Safe Colours', run: () => void settings.update('codeArena.accessibility.colorBlindColors', !settings.get('codeArena.accessibility.colorBlindColors')) },
+    { id: 'codeArena.accessibility.toggleReduceMotion', category: 'Preferences', title: 'Toggle Reduce Motion', run: () => void settings.update('workbench.reduceMotion', settings.get('workbench.reduceMotion') === 'on' ? 'auto' : 'on') },
     { id: 'workbench.files.action.compareWithSaved', category: 'File', title: 'Compare Active File with Saved', enabled: () => file, run: () => active && void ed.compare({ kind: 'disk', path: active.path }, { kind: 'file', path: active.path }) },
     { id: 'workbench.files.action.compareWithClipboard', category: 'File', title: 'Compare Active File with Clipboard', enabled: () => file, run: () => void compareWithClipboard() },
     { id: 'workbench.files.action.compareFileWith', category: 'File', title: 'Compare Active File With…', enabled: () => file, run: () => void compareFileWith() },

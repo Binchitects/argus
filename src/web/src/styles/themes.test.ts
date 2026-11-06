@@ -228,4 +228,31 @@ describe('colour themes', () => {
       expect(contrast(color(t, '--border'), color(t, '--background'))).toBeGreaterThanOrEqual(3)
     }
   })
+
+  // Colour-blind safe colours (lib/seeing.ts): good blue, bad orange-red, over every theme, their text still 4.5:1.
+  const safe = (mode: 'light' | 'dark') =>
+    Object.fromEntries(Object.entries(all.get(mode === 'light' ? ":root[data-colors='safe']" : ":root.dark[data-colors='safe']")!).map(([k, v]) => [k, v.replace(/\s*!important$/, '')]))
+  it.each(every)('$id $mode: the colour-blind safe colours read as the status colours do', ({ id, mode }) => {
+    const t = { ...tokensOf(id, mode), ...safe(mode) }
+    expect(color(t, '--success').oklch[2]).toBeGreaterThan(200)
+    expect(color(t, '--destructive').oklch[2]).toBeLessThan(60)
+    const low: string[] = []
+    for (const name of ['success', 'destructive']) {
+      const ink = color(t, `--${name}-ink`)
+      for (const ground of ['--card', '--background'])
+        for (const share of [0, 0.05, 0.1, 0.15]) {
+          const r = contrast(ink, over(color(t, `--${name}`), color(t, ground), share))
+          if (r < 4.5) low.push(`--${name}-ink on ${name}/${share * 100} over ${ground}: ${r.toFixed(2)}`)
+        }
+    }
+    for (const bg of ['--destructive', '--destructive-hover']) if (contrast(color(t, '--destructive-foreground'), color(t, bg)) < 4.5) low.push(`--destructive-foreground on ${bg}`)
+    expect(low).toEqual([])
+  })
+
+  it('more contrast makes secondary text the text, and the focus ring as strong', () => {
+    const more = all.get(":root[data-contrast='more']")!
+    expect(more['--muted-foreground']).toBe('var(--foreground) !important')
+    expect(more['--ring']).toBe('var(--foreground) !important')
+    expect(all.get(":root[data-focus='strong']")!['--ring']).toBe('var(--foreground) !important')
+  })
 })

@@ -40,7 +40,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   settings: {
     name: 'Settings',
-    text: `The settings Code Arena reads, as VS Code's (${modKey}+,). Search by words, or **@modified**, **@lang:python** (a language's own), **@id:editor.tabSize**. **User** is your settings.json, for every project; **Workspace** the project's .vscode/settings.json. A change is written at once, the file's comments kept; the menu beside a setting resets it.`,
+    text: `The settings Code Arena reads, as VS Code's (${modKey}+,). Search by words, or **@modified**, **@lang:python** (a language's own), **@id:editor.tabSize**. **User** is your settings.json, for every project; **Workspace** the project's .vscode/settings.json. A change is written at once, the file's comments kept; the menu beside a setting resets it. **Accessibility** has the zoom (${modKey}+= and ${modKey}+-), High Contrast as the system asks, less motion, more contrast, a larger text, strong focus rings and colour-blind safe colours.`,
     manual: 'settings-and-keyboard-shortcuts',
   },
   keybindings: {

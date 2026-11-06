@@ -2968,6 +2968,38 @@ describe('Code Arena, the IDE', () => {
     await waitFor(() => expect(fakes.themes.at(-1)).toBe('arena-dark'))
   })
 
+  it("wears VS Code's own themes by their names, and the accessibility settings over any theme: zoom, contrast, text, focus, motion, colours", async () => {
+    const { now } = backend({}, {}, {
+      'settings.json': '{\n  "window.autoDetectColorScheme": false,\n  "workbench.colorTheme": "Monokai",\n  "codeArena.accessibility.contrast": "more",\n  "codeArena.accessibility.textSize": "125%",\n  "codeArena.accessibility.focusRings": "strong",\n  "workbench.reduceMotion": "on",\n  "codeArena.accessibility.colorBlindColors": true\n}\n',
+    })
+    renderIde()
+    const root = document.documentElement
+    await waitFor(() => expect(root.dataset.colorTheme).toBe('monokai'))
+    expect(root).toHaveClass('dark')
+    expect({ contrast: root.dataset.contrast, text: root.dataset.text, focus: root.dataset.focus, motion: root.dataset.motion, colors: root.dataset.colors }).toEqual({ contrast: 'more', text: '125', focus: 'strong', motion: 'reduce', colors: 'safe' })
+    await openApp()
+    expect(editor().options.theme).toBe('arena-monokai-dark')
+
+    // Zoomed as VS Code zooms: Ctrl+= a step (20%) larger, kept in settings.json; Ctrl+Numpad0 back.
+    await userEvent.keyboard('{Control>}={/Control}')
+    await waitFor(() => expect(now.user['settings.json']).toContain('"window.zoomLevel": 1'))
+    await waitFor(() => expect(root.style.fontSize).toBe('120%'))
+    await act(async () => runCommand('workbench.action.zoomReset'))
+    await waitFor(() => expect(root.style.fontSize).toBe(''))
+
+    // High Contrast, by its command: VS Code's own, on Monaco's high contrast.
+    await act(async () => runCommand('codeArena.accessibility.toggleHighContrast'))
+    await waitFor(() => expect(now.user['settings.json']).toContain('"workbench.colorTheme": "Default High Contrast"'))
+    await waitFor(() => expect(root.dataset.colorTheme).toBe('contrast'))
+    await waitFor(() => expect(fakes.themes.at(-1)).toBe('arena-contrast-dark'))
+    // The palette's Color Theme lists VS Code's under their names.
+    await act(async () => runCommand('workbench.action.selectTheme'))
+    const picker = await screen.findByRole('dialog', { name: 'Color theme' })
+    for (const name of ['Default Dark+', 'Default Light Modern', 'Solarized Light', 'One Dark Pro', 'GitHub Dark', 'Nord Light', 'Default High Contrast Light']) expect(within(picker).getByRole('option', { name: new RegExp(`^${name.replace('+', '\\+')}`) })).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Color theme' })).not.toBeInTheDocument())
+  })
+
   it("wears one of the app's colour themes: the page's colours, Monaco's and the terminal's; light or dark keeps it", async () => {
     const { now } = backend({}, {}, { 'settings.json': '{\n  "window.autoDetectColorScheme": false,\n  "workbench.colorTheme": "Sakura Dark"\n}\n' })
     // Another colour theme in this browser from before: Forest.

@@ -814,6 +814,24 @@ on its ground is made only as much lighter or darker as that asks. Older
 names and the extensions' names for them (`Dark+ (default dark)`, `GitHub
 Dark Default`, `Atom One Light`) read as these.
 
+**Accessibility.** The Settings editor's **Accessibility** has VS Code's own
+and what Code Arena adds over any theme:
+
+| Setting | What it does |
+|---|---|
+| `window.zoomLevel` | the whole workbench larger or smaller, each step 20% (1 is 120%), as VS Code's; **Ctrl+=** and **Ctrl+-** (or Zoom In, Zoom Out) change it, **Ctrl+Numpad0** (Reset Zoom) puts it back. The editor keeps `editor.fontSize` |
+| `window.autoDetectHighContrast` | `true` (the default): when the system asks for more contrast, or forces its colours, the workbench shows Default High Contrast (or High Contrast Light) |
+| `workbench.reduceMotion` | `on`: no animation in the workbench and its menus, whatever the system says; `auto`: as the system asks |
+| `codeArena.accessibility.contrast` | `more`: secondary text as the text, borders and fields that stand out, the focus ring at full strength |
+| `codeArena.accessibility.textSize` | `112%`, `125%` or `150%`: the workbench's text larger, the rest as it is |
+| `codeArena.accessibility.focusRings` | `strong`: a solid ring in the text's colour round what the keyboard is on |
+| `codeArena.accessibility.colorBlindColors` | blue and orange where green and red say added and removed, passed and failed: a compare's lines, the gutter's changes, git's letters, the tests |
+
+The palette has **Toggle High Contrast Theme**, **Toggle More Contrast**,
+**Toggle Colour-Blind Safe Colours** and **Toggle Reduce Motion**. In Code
+Studio, closing the IDE puts the page back as Your account → Easier to see has
+it.
+
 In a terminal the keys go to the shell, but those of the commands that skip
 it (the palette, quick open, the panels and views, the debugger's), and the
 first key of a chord (Ctrl+K: `terminal.integrated.allowChords` false gives it

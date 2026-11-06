@@ -23,6 +23,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage, type Me } from '@/lib/api'
 import { colorThemes, type ColorThemeId, type Palette } from '@/lib/color-themes'
@@ -30,6 +31,7 @@ import { ago } from '@/lib/format'
 import { useTheme, type ThemePreference } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import { setWidth, useWidth, type WidthPreference } from '@/lib/width'
+import { setSeeing, sizes, useSeeing, type Seeing } from '@/lib/seeing'
 import { DataRights, YourData } from './account-data'
 import { AskForAccess } from './account-access'
 import { CodeHosts } from './account-code-hosts'
@@ -51,6 +53,7 @@ export function AccountPage() {
           <VoiceSection />
           <Memory />
           <Appearance />
+          <EasierToSee />
           <YourData />
           <DataRights />
         </div>
@@ -329,6 +332,67 @@ function Swatch({ palette }: { palette: Palette }) {
         <span className="h-1.5 w-1/2 rounded-full" style={{ background: palette.lineNumber }} />
       </span>
     </span>
+  )
+}
+
+const sizeChoice =
+  'grid place-items-center rounded-md border px-2 py-1.5 text-sm font-medium tabular-nums transition-colors outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring data-[state=checked]:border-primary data-[state=checked]:bg-primary/5 data-[state=checked]:text-primary-ink'
+
+/** A choice of the text's or the page's size, in percent. */
+function SizeChoice({ label, help, value, onChange }: { label: string; help: string; value: number; onChange: (v: Seeing['text']) => void }) {
+  return (
+    <div className="grid gap-1.5">
+      <p className="text-sm font-medium">{label}</p>
+      <p className="text-xs text-muted-foreground">{help}</p>
+      <RadioGroup.Root value={String(value)} onValueChange={(v) => onChange(Number(v) as Seeing['text'])} aria-label={label} className="grid grid-cols-4 gap-2">
+        {sizes.map((n) => (
+          <RadioGroup.Item key={n} value={String(n)} className={sizeChoice}>
+            {n}%
+          </RadioGroup.Item>
+        ))}
+      </RadioGroup.Root>
+    </div>
+  )
+}
+
+/** One of the on-or-off choices, with what it does under its name. */
+function SeeingSwitch({ id, label, help, on, onChange }: { id: string; label: string; help: string; on: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div className="grid gap-0.5">
+        <label htmlFor={id} className="text-sm font-medium">
+          {label}
+        </label>
+        <p id={`${id}-help`} className="text-xs text-muted-foreground">
+          {help}
+        </p>
+      </div>
+      <Switch id={id} checked={on} onCheckedChange={onChange} aria-describedby={`${id}-help`} className="mt-0.5" />
+    </div>
+  )
+}
+
+/**
+ * For people who see less well or tell colours apart less well: more contrast, larger text or a larger page, stronger
+ * focus rings, no motion, colours without red and green. Remembered on this device, as light or dark is.
+ */
+function EasierToSee() {
+  const s = useSeeing()
+  return (
+    <Card id="easier-to-see">
+      <CardHeader>
+        <CardTitle>Easier to see</CardTitle>
+        <CardDescription>For low vision and colour blindness, over any colour theme. Remembered on this device; Code Arena has the same in its settings.</CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-5">
+        <SeeingSwitch id="seeing-contrast" label="More contrast" help="Secondary text as dark (or light) as the text, borders and fields that stand out. VS Code's High Contrast colour theme goes further." on={s.contrast === 'more'} onChange={(on) => setSeeing({ contrast: on ? 'more' : 'standard' })} />
+        <SizeChoice label="Text size" help="The text larger, the rest of the page as it is." value={s.text} onChange={(text) => setSeeing({ text })} />
+        <SizeChoice label="Page size" help="Everything larger: the text, the buttons, the spacing, as the browser's zoom." value={s.scale} onChange={(scale) => setSeeing({ scale })} />
+        <SeeingSwitch id="seeing-focus" label="Strong focus rings" help="A solid ring in the text's colour round what the keyboard is on." on={s.focus === 'strong'} onChange={(on) => setSeeing({ focus: on ? 'strong' : 'standard' })} />
+        <SeeingSwitch id="seeing-motion" label="Reduce motion" help="No animation or moving effects, whatever the system says (it is off already when the system asks for less motion)." on={s.motion === 'reduce'} onChange={(on) => setSeeing({ motion: on ? 'reduce' : 'system' })} />
+        <SeeingSwitch id="seeing-colors" label="Colour-blind safe colours" help="Blue and orange where red and green say good and bad: a change added or removed, a check passed or failed." on={s.colors === 'safe'} onChange={(on) => setSeeing({ colors: on ? 'safe' : 'standard' })} />
+      </CardContent>
+    </Card>
   )
 }
 
