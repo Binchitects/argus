@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Eye, FileCode2, FileDiff, FileImage, FileText, FolderOpen, GitCompareArrows, Keyboard, Pin, Settings2, X } from 'lucide-react'
 import type * as Monaco from 'monaco-editor'
-import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, lazy, Suspense, use, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type PointerEvent, type ReactNode } from 'react'
 import { ContextMenu } from 'radix-ui'
 import { Button } from '@/components/ui/button'
 import { CommandDialog, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
@@ -21,6 +21,7 @@ import { installCompletions } from './completion'
 import { compareId, renamed, revertChanges, sideLabel, sidePath, takeChanges, touched, type LineChange, type Side } from './compare'
 import { CompareToolbar } from './compare-toolbar'
 import { EditorContext, loadMonaco, mediaKind, rankFiles, useEditor, type DiffModels, type DiffSource, type EditorApi, type FileModel, type MonacoModule, type Reveal, type SaveReason, type Tab, type Unsaved } from './editor-state'
+import { GroupStoreContext, newGroupStore, openIn, OwnEditorContext, type GroupStore } from './editor-groups'
 import { acceptChange, allFilesQuery, changesQuery, changeTexts, gitShow, gitStageText, gitStatusQuery, keepBackup, listBackups, nameOf, rawFileUrl, readFile, revertChange, saveWorkspaceState, skillsQuery, symbolsQuery, userFileQuery, within, workspaceStateQuery, writeFile, writeUserFile, type Change, type CheckProblem, type OpenedFile, type Saved, type UserFileName } from './ide-api'
 import { addDebugActions, installDebugEditor } from './debug/editor-debug'
 import { installExtensions } from './extensions'
@@ -254,8 +255,12 @@ function newFileEol(m: MonacoModule, v: Record<string, unknown>) {
   return eol === '\r\n' ? m.monaco.editor.EndOfLineSequence.CRLF : m.monaco.editor.EndOfLineSequence.LF
 }
 
-export function EditorProvider({ children }: { children: ReactNode }) {
+export function EditorProvider({ children, group = 1 }: { children: ReactNode; group?: number }) {
   const queryClient = useQueryClient()
+  // The groups' shared part (one model per file, whichever group shows it): the first group makes it, the others take it.
+  const parent = use(GroupStoreContext)
+  const [store] = useState<GroupStore>(() => parent ?? newGroupStore())
+  const root = group === 1
   const confirm = useConfirm()
   const monacoTheme = useMonacoTheme()
   const settings = useSettings()
@@ -291,9 +296,9 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   const autoSavePaused = useRef(new Set<string>())
   const mon = useRef<MonacoModule | null>(null)
   const problemsOf = useRef<CheckProblem[]>([])
-  const files = useRef(new Map<string, FileModel>())
+  const files = useRef(store.files)
   /** Files a language server's answer named (a peek, references) that no tab holds, the one used last at the end. */
-  const peeked = useRef(new Map<string, true>())
+  const peeked = useRef(store.peeked)
   const diffs = useRef(new Map<string, DiffModels>())
   const codeHost = useRef<HTMLDivElement | null>(null)
   const diffHost = useRef<HTMLDivElement | null>(null)
@@ -340,7 +345,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       const f = files.current.get(path)
       return !!f && !f.model.isDisposed() && f.model.getAlternativeVersionId() !== f.savedAlt
     }
-    const markDirty = (f: FileModel) => {
+    /** This group's tabs that hold the file, unsaved or not as it is now. */
+    const markTabs = (f: FileModel) => {
       const dirty = f.model.getAlternativeVersionId() !== f.savedAlt
       // Every tab that holds the file: its own, and the compares it is a side of. An edit keeps a preview tab.
       const next = tabsRef.current.map((t) => {
@@ -351,6 +357,11 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         return t.dirty === d && !('preview' in kept) ? t : { ...t, dirty: d, ...kept }
       })
       if (next.some((t, i) => t !== tabsRef.current[i])) commit(next)
+    }
+    const markDirty = (f: FileModel) => {
+      const dirty = f.model.getAlternativeVersionId() !== f.savedAlt
+      // The tabs of every group; the backup and the automatic save once, here.
+      for (const mark of store.markers.values()) mark(f)
       backup(f, dirty)
       // "files.autoSave": "afterDelay" saves a while after the last change.
       const timer = autoSaves.current.get(f.path)
@@ -379,9 +390,12 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     /** The diff editor lets go of a model about to be disposed of. */
     const unshow = (model: Monaco.editor.ITextModel | null) => {
       if (!model) return
-      if (editor.current?.getModel() === model) editor.current.setModel(null)
-      const shown = diffEditor.current?.getModel()
-      if (shown && (shown.original === model || shown.modified === model)) diffEditor.current!.setModel(null)
+      // Every group's editors: a model goes from all of them at once.
+      for (const ed of store.codeEditors) if (ed.getModel() === model) ed.setModel(null)
+      for (const de of store.diffEditors) {
+        const shown = de.getModel()
+        if (shown && (shown.original === model || shown.modified === model)) de.setModel(null)
+      }
     }
 
     /** Forgets a compare's own models. */
@@ -401,7 +415,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
      * open in a tab of its own, but those the person chose not to save.
      */
     const collect = (discarded: string[] = []) => {
-      const held = new Set(tabsRef.current.flatMap(fileSidesOf))
+      // Held by a tab of this group or of another (each group shows the same files' models).
+      const held = new Set([...tabsRef.current, ...store.others(group)].flatMap(fileSidesOf))
       const kept: Tab[] = []
       for (const [path, f] of [...files.current]) {
         if (held.has(path) || peeked.current.has(path)) continue
@@ -427,7 +442,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
      * a file closed unsaved does).
      */
     const preload = async (paths: string[]) => {
-      const held = new Set(tabsRef.current.flatMap(fileSidesOf))
+      const held = new Set([...tabsRef.current, ...store.others(group)].flatMap(fileSidesOf))
       await Promise.all(
         paths
           .filter((p) => !held.has(p))
@@ -442,7 +457,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       for (const oldest of [...peeked.current.keys()].slice(0, Math.max(0, peeked.current.size - peekKept))) {
         peeked.current.delete(oldest)
         const f = files.current.get(oldest)
-        if (f && !tabsRef.current.some((t) => fileSidesOf(t).includes(oldest)) && !fileDirty(oldest)) letGo(oldest, f)
+        if (f && ![...tabsRef.current, ...store.others(group)].some((t) => fileSidesOf(t).includes(oldest)) && !fileDirty(oldest)) letGo(oldest, f)
       }
       collect()
     }
@@ -578,13 +593,18 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       return l?.aliases?.[0] ?? id ?? 'Plain Text'
     }
 
-    const loading = new Map<string, Promise<FileModel | 'binary' | 'tooLarge'>>()
+    const loading = store.loading
     /** A file's model, read once however many tabs ask for it at once (the editor holds one model per file). */
     const loadFile = (path: string): Promise<FileModel | 'binary' | 'tooLarge'> => {
       const there = files.current.get(path)
-      if (there && !there.model.isDisposed()) return Promise.resolve(there)
+      // Another group read it (or is reading it): this group takes Monaco too, the first time.
+      const withMonaco = async <T,>(p: Promise<T>) => {
+        if (!mon.current) mon.current = await loadMonaco()
+        return p
+      }
+      if (there && !there.model.isDisposed()) return withMonaco(Promise.resolve(there))
       const going = loading.get(path)
-      if (going) return going
+      if (going) return withMonaco(going)
       const read = (async () => {
         const [file, m] = await Promise.all([readAny(path), loadMonaco()])
         mon.current = m
@@ -987,7 +1007,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       const tab = tabsRef.current.find((t) => t.id === id)
       if (!tab) return true
       // The files with unsaved changes no other tab holds (another keeps what is unsaved in them): both sides of a compare may be.
-      const unsavedFiles = fileSidesOf(tab).filter((p) => fileDirty(p) && !tabsRef.current.some((t) => t.id !== id && fileSidesOf(t).includes(p)))
+      const unsavedFiles = fileSidesOf(tab).filter((p) => fileDirty(p) && ![...tabsRef.current.filter((t) => t.id !== id), ...store.others(group)].some((t) => fileSidesOf(t).includes(p)))
       if (unsavedFiles.length === 0) {
         drop([id])
         return true
@@ -1113,8 +1133,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       f.model = model
       f.savedAlt = unsaved ? -1 : model.getAlternativeVersionId()
       model.onDidChangeContent(() => markDirty(f))
-      const ed = editor.current
-      if (ed?.getModel() === old) {
+      for (const ed of store.codeEditors) {
+        if (ed.getModel() !== old) continue
         const view = ed.saveViewState()
         ed.setModel(model)
         if (view) ed.restoreViewState(view)
@@ -1321,8 +1341,10 @@ export function EditorProvider({ children }: { children: ReactNode }) {
       diffEditor: () => diffEditor.current,
       modelsOf,
       present,
+      collectNow: () => collect(),
+      markTabs,
     }
-  }, [confirm, queryClient])
+  }, [confirm, queryClient, store, group])
 
   const active = tabs.find((t) => t.id === activeId) ?? null
   const shown = active && active.status === 'ready' ? active.id : null
@@ -1399,6 +1421,9 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         keymap.setEditorDefaults(monacoDefaults(ed))
         installCompletions(m)
         editor.current = ed
+        store.codeEditors.add(ed)
+        // A group with the focus is the one the workbench's commands work on.
+        ed.onDidFocusEditorWidget?.(() => store.focus(group))
       }
       const ed = editor.current
       const before = ed.getModel()
@@ -1445,13 +1470,14 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         // The compare's "now" side asks the agent as the editor does: Add to chat, Explain, Fix, Complete (its right-click menu).
         const now = diffEditor.current.getModifiedEditor?.()
         if (now) askAboutCode(m, now, actions.selection)
+        store.diffEditors.add(diffEditor.current)
         // The compare's toolbar reads the diff editor: it renders again now that there is one.
         setDiffMade(true)
       }
       actions.present(tab)
       setCursor(null)
     }
-  }, [shown, revealed, actions, queryClient, hosts])
+  }, [shown, revealed, actions, queryClient, hosts, store, group])
 
   // Leaving with unsaved changes asks first, unless hot exit kept every unsaved text (the next load puts it back).
   const anyDirty = tabs.some((t) => t.dirty)
@@ -1470,8 +1496,10 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (restoring.current) return
     restoring.current = true
+    // The first group's tabs as they were; another group starts with what it was split or dragged with.
+    if (!root) return
     void actions.restore().finally(() => setRestored(true))
-  }, [actions])
+  }, [actions, root])
   useEffect(() => {
     if (!restored) return
     const wait = setTimeout(() => {
@@ -1489,27 +1517,54 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     const models = files.current
     const pairs = diffs.current
     return () => {
+      for (const ed of [editor.current, diffEditor.current]) if (ed) store.forget(ed)
       editor.current?.dispose()
       diffEditor.current?.dispose()
-      for (const f of models.values()) f.model.dispose()
       for (const d of pairs.values()) {
         d.left?.dispose()
         d.right?.dispose()
       }
+      store.leave(group)
+      // The first group goes with the page: every model. Another closed: what only it held (the first keeps what is unsaved).
+      if (root) for (const f of models.values()) f.model.dispose()
+      else store.collect()
     }
-  }, [])
+  }, [store, group, root])
 
   const value = useMemo<EditorApi>(
     () => ({ ...actions, tabs, active, cursor, quickOpen, setQuickOpen, quickText, setQuickText, pageQuery, diffMade }),
     [actions, tabs, active, cursor, quickOpen, setQuickOpen, quickText, pageQuery, diffMade],
   )
-  return (
-    <EditorContext value={value}>
-      {children}
-      <UnsavedDialog paths={unsaved?.paths ?? null} onAnswer={(a) => unsaved?.answer(a)} />
-      <QuickOpen />
-    </EditorContext>
+  // This group in the store: its api (the workbench's commands reach the focused group's), its tabs (which hold models).
+  useLayoutEffect(() => {
+    store.markers.set(group, actions.markTabs)
+    store.join(group, value, () => tabsRef.current, actions.collectNow)
+  }, [store, group, value, actions])
+  // A group made by a split or a drag opens what it was made with, once it is there.
+  useEffect(() => {
+    const first = store.takePending(group)
+    if (first) void openIn(value, first.opening).then(first.then)
+  }, [store, group, value])
+  // Another group, empty again (its last tab closed or dragged away), closes, as VS Code's "workbench.editor.closeEmptyGroups".
+  const had = useRef(false)
+  useEffect(() => {
+    if (tabs.length > 0) had.current = true
+    else if (had.current && !root) store.closeGroup(group)
+  }, [tabs.length, store, group, root])
+  // The workbench (outside the editor groups) works on the group with the focus; the first group's own parts on it.
+  // The store makes it as groups join, leave and take the focus; alone, the first group is its own.
+  const routed = useSyncExternalStore(store.subscribe, () => store.routed)
+  const shownApi = !root || store.layout.groups.length <= 1 || !routed ? value : routed
+  const own = (
+    <OwnEditorContext value={value}>
+      <EditorContext value={shownApi}>
+        {children}
+        <UnsavedDialog paths={unsaved?.paths ?? null} onAnswer={(a) => unsaved?.answer(a)} />
+        <QuickOpen />
+      </EditorContext>
+    </OwnEditorContext>
   )
+  return root ? <GroupStoreContext value={store}>{own}</GroupStoreContext> : own
 }
 
 /** Closing a file (or a compare of files) with unsaved changes: Save, Don't save, or Cancel. */
@@ -1683,9 +1738,110 @@ function QuickOpen() {
   )
 }
 
-/** The tabs, the editor or the diff of the active one, and a few words when nothing is open. */
+/**
+ * The editor groups, as VS Code's: side by side or one above another, each with its tabs and its editor; a divider
+ * between two resizes them. The first group is the editor's own provider; each other is one of its own (editor-groups.ts).
+ */
 export function EditorArea() {
+  const store = use(GroupStoreContext)!
+  const own = use(OwnEditorContext)!
+  const layout = useSyncExternalStore(store.subscribe, () => store.layout)
+  const row = layout.orientation === 'row'
+  const box = useRef<HTMLDivElement>(null)
+  return (
+    <div ref={box} className={cn('flex min-h-0 min-w-0 flex-1', row ? 'flex-row' : 'flex-col')}>
+      {layout.groups.map((g, i) => (
+        <Fragment key={g}>
+          {i > 0 && <GroupDivider store={store} before={layout.groups[i - 1]!} after={g} row={row} box={box} />}
+          <div data-group={g} style={{ flex: `${layout.sizes[g] ?? 1} 1 0` }} className={cn('flex min-h-0 min-w-0', row ? 'min-w-[8rem]' : 'min-h-[6rem]')}>
+            {g === 1 ? (
+              <EditorContext value={own}>
+                <GroupArea group={1} index={0} count={layout.groups.length} />
+              </EditorContext>
+            ) : (
+              <EditorProvider group={g}>
+                <GroupArea group={g} index={i} count={layout.groups.length} />
+              </EditorProvider>
+            )}
+          </div>
+        </Fragment>
+      ))}
+    </div>
+  )
+}
+
+/** The divider between two groups: dragged (or ← → ↑ ↓ when focused), it moves the space between them. */
+function GroupDivider({ store, before, after, row, box }: { store: GroupStore; before: number; after: number; row: boolean; box: { current: HTMLDivElement | null } }) {
+  const sizes = useSyncExternalStore(store.subscribe, () => store.layout.sizes)
+  const a = sizes[before] ?? 1
+  const b = sizes[after] ?? 1
+  /** Moves `by` of the two's shares from one to the other, each keeping a tenth of them at least. */
+  const shift = (by: number) => {
+    const total = a + b
+    const next = Math.min(total * 0.9, Math.max(total * 0.1, a + by))
+    store.resize(before, next)
+    store.resize(after, total - next)
+  }
+  const drag = (e: PointerEvent<HTMLDivElement>) => {
+    const el = box.current?.querySelector<HTMLElement>(`[data-group="${before}"]`)
+    const other = box.current?.querySelector<HTMLElement>(`[data-group="${after}"]`)
+    if (!el || !other) return
+    e.preventDefault()
+    const start = row ? e.clientX : e.clientY
+    const px = (row ? el.offsetWidth : el.offsetHeight) + (row ? other.offsetWidth : other.offsetHeight)
+    const startA = a
+    const total = a + b
+    const move = (m: MouseEvent) => {
+      const moved = ((row ? m.clientX : m.clientY) - start) / Math.max(1, px)
+      const next = Math.min(total * 0.9, Math.max(total * 0.1, startA + moved * total))
+      store.resize(before, next)
+      store.resize(after, total - next)
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+  return (
+    // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- a window splitter (a focusable separator that moves) is not an <hr>
+    <div role="separator"
+      tabIndex={0}
+      aria-label="Resize the editor groups"
+      aria-orientation={row ? 'vertical' : 'horizontal'}
+      aria-valuemin={10}
+      aria-valuemax={90}
+      aria-valuenow={Math.round((a / (a + b)) * 100)}
+      onPointerDown={drag}
+      onKeyDown={(e) => {
+        const step = (a + b) * 0.05
+        const by = { ArrowLeft: -step, ArrowUp: -step, ArrowRight: step, ArrowDown: step }[e.key]
+        if (by === undefined) return
+        e.preventDefault()
+        shift(by)
+      }}
+      className={cn('relative z-10 shrink-0 bg-border outline-none focus-visible:bg-primary hover:bg-primary/60', row ? 'w-px cursor-col-resize after:absolute after:inset-y-0 after:-inset-x-1' : 'h-px cursor-row-resize after:absolute after:inset-x-0 after:-inset-y-1')}
+    />
+  )
+}
+
+/** A tab dragged: its id and its group, for a drop in its own strip (another place) or in another group (moved there). */
+const tabType = 'application/x-code-arena-tab'
+const groupType = 'application/x-code-arena-group'
+
+/** Where a tab dragged over a group's editor goes: into the group, or a new group beside it or below. */
+type DropAt = 'into' | 'right' | 'down'
+
+/**
+ * A group's tabs, the editor or the diff of its active one, and a few words when nothing is open. A tab dragged here from
+ * another group moves here; dropped at the editor's right or bottom edge, into a new group there.
+ */
+function GroupArea({ group, index, count }: { group: number; index: number; count: number }) {
   const ed = useEditor()
+  const store = use(GroupStoreContext)!
+  const focused = useSyncExternalStore(store.subscribe, () => store.focused) === group
+  const several = count > 1
   const tabStrip = useId()
   const crumbsOn = useSetting<boolean>('breadcrumbs.enabled') !== false
   const { tabs, active, bindEditor, bindDiff } = ed
@@ -1693,10 +1849,49 @@ export function EditorArea() {
   const change = active?.kind === 'diff' && active.source === 'agent' ? changes.data?.find((c) => c.path === active.path) : undefined
   const showsFile = active?.kind === 'file' && active.status === 'ready'
   const showsDiff = active?.kind === 'diff' && active.status === 'ready'
+  const [dropAt, setDropAt] = useState<DropAt | null>(null)
+  const panelId = `editor-panel-${group}`
+  /** A tab of another group dropped here: opened here, closed there; at an edge, into a new group there. */
+  const moveHere = async (e: DragEvent, at: DropAt, before?: string) => {
+    const id = e.dataTransfer.getData(tabType)
+    const from = Number(e.dataTransfer.getData(groupType) || group)
+    if (!id) return
+    e.preventDefault()
+    e.stopPropagation()
+    setDropAt(null)
+    const source = from === group ? ed : store.apis.get(from)
+    const tab = source?.tabs.find((t) => t.id === id)
+    if (!source || !tab) return
+    if (at !== 'into') {
+      // Moved: closed where it was once the new group has it (so nothing unsaved is asked about).
+      store.split(group, at, tab, () => void source.close(id))
+      return
+    }
+    if (from === group) {
+      if (before) ed.moveTab(id, tabs.findIndex((x) => x.id === before))
+      return
+    }
+    await openIn(ed, tab)
+    void source.close(id)
+  }
+  const dragging = (e: DragEvent) => e.dataTransfer.types.includes(tabType)
   return (
-    <section aria-label="Editor" className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
+    <section
+      aria-label={several ? `Editor group ${index + 1}` : 'Editor'}
+      data-focused={several && focused ? '' : undefined}
+      onFocusCapture={() => store.focus(group)}
+      onPointerDownCapture={() => store.focus(group)}
+      className="flex min-h-0 min-w-0 flex-1 flex-col bg-background"
+    >
       {tabs.length > 0 && (
-        <div role="tablist" aria-label="Open files" className="flex h-9 shrink-0 overflow-x-auto overflow-y-hidden border-b bg-sidebar [scrollbar-width:thin]">
+        // oxlint-disable-next-line jsx-a11y/interactive-supports-focus -- its tabs take the focus; the strip only takes a tab dropped on it
+        <div
+          role="tablist"
+          aria-label={group === 1 ? 'Open files' : `Open files in group ${index + 1}`}
+          onDragOver={(e) => dragging(e) && e.preventDefault()}
+          onDrop={(e) => void moveHere(e, 'into')}
+          className={cn('flex h-9 shrink-0 overflow-x-auto overflow-y-hidden border-b bg-sidebar [scrollbar-width:thin]', several && !focused && 'opacity-90')}
+        >
           {tabs.map((t, i) => {
             const selected = t.id === active?.id
             const name = isUserFile(t.path) ? t.path.slice(5) : t.source === 'compare' && t.left && t.right ? `${sideLabel(t.left)} ↔ ${sideLabel(t.right)}` : nameOf(t.path)
@@ -1707,27 +1902,26 @@ export function EditorArea() {
                 role="presentation"
                 draggable
                 onDragStart={(e) => {
-                  e.dataTransfer.setData('application/x-code-arena-tab', t.id)
+                  e.dataTransfer.setData(tabType, t.id)
+                  e.dataTransfer.setData(groupType, String(group))
                   e.dataTransfer.effectAllowed = 'move'
                 }}
-                onDragOver={(e) => e.dataTransfer.types.includes('application/x-code-arena-tab') && e.preventDefault()}
+                onDragOver={(e) => dragging(e) && e.preventDefault()}
                 onDrop={(e) => {
-                  const id = e.dataTransfer.getData('application/x-code-arena-tab')
-                  if (!id || id === t.id) return
-                  e.preventDefault()
-                  const to = tabs.findIndex((x) => x.id === t.id)
-                  ed.moveTab(id, tabs.findIndex((x) => x.id === id) < to ? to : to)
+                  if (e.dataTransfer.getData(tabType) === t.id) return
+                  void moveHere(e, 'into', t.id)
                 }}
                 className={cn(
                   'group relative flex shrink-0 items-center border-r text-[0.8125rem] transition-colors',
-                  selected ? 'bg-background text-foreground after:absolute after:inset-x-0 after:top-0 after:h-0.5 after:bg-primary' : 'text-muted-foreground hover:bg-accent/60',
+                  // The group with the focus marks its tab in the accent; another group's, in grey.
+                  selected ? cn('bg-background text-foreground after:absolute after:inset-x-0 after:top-0 after:h-0.5', several && !focused ? 'after:bg-muted-foreground/50' : 'after:bg-primary') : 'text-muted-foreground hover:bg-accent/60',
                 )}
               >
                 <button
                   type="button"
                   role="tab"
                   aria-selected={selected}
-                  aria-controls="editor-panel"
+                  aria-controls={panelId}
                   title={t.kind === 'diff' ? (t.source === 'compare' ? name : `${t.path}: ${t.source === 'git' ? 'its changes, not staged' : t.source === 'staged' ? 'its staged changes' : "the agent's changes"}`) : isUserFile(t.path) ? `Your ${t.path.slice(5)} (every project)` : t.path}
                   onClick={() => ed.activate(t.id)}
                   onDoubleClick={() => ed.keepTab(t.id)}
@@ -1785,7 +1979,7 @@ export function EditorArea() {
               </div>
                 </ContextMenu.Trigger>
                 <ContextMenu.Portal>
-                  <TabMenu tab={t} />
+                  <TabMenu tab={t} group={group} />
                 </ContextMenu.Portal>
               </ContextMenu.Root>
             )
@@ -1813,7 +2007,29 @@ export function EditorArea() {
         </div>
       )}
       {active?.kind === 'diff' && <CompareToolbar tab={active} change={change} />}
-      <div id="editor-panel" role={active ? 'tabpanel' : undefined} aria-label={active ? nameOf(active.path) : undefined} className="relative min-h-0 flex-1">
+      <div
+        id={panelId}
+        role={active ? 'tabpanel' : undefined}
+        aria-label={active ? nameOf(active.path) : undefined}
+        onDragOver={(e) => {
+          if (!dragging(e)) return
+          e.preventDefault()
+          // The outer quarter of the right or bottom edge: a new group there, as VS Code's drop targets.
+          const r = e.currentTarget.getBoundingClientRect()
+          const x = (e.clientX - r.left) / Math.max(1, r.width)
+          const y = (e.clientY - r.top) / Math.max(1, r.height)
+          setDropAt(x > 0.75 ? 'right' : y > 0.75 ? 'down' : 'into')
+        }}
+        onDragLeave={(e) => !e.currentTarget.contains(e.relatedTarget as Node | null) && setDropAt(null)}
+        onDrop={(e) => void moveHere(e, dropAt ?? 'into')}
+        className="relative min-h-0 flex-1"
+      >
+        {dropAt && (
+          <div
+            aria-hidden="true"
+            className={cn('pointer-events-none absolute z-20 rounded-sm bg-primary/15 ring-2 ring-primary/60 ring-inset', dropAt === 'right' ? 'inset-y-0 right-0 w-1/2' : dropAt === 'down' ? 'inset-x-0 bottom-0 h-1/2' : 'inset-0')}
+          />
+        )}
         {/* Not shown: display none (Monaco's parts set their own visibility); shown again, it lays itself out anew. */}
         {/* monaco-component: Monaco's colours (--vscode-*) for what it shows beside the editor, not in it: its right-click
             menu (fixedOverflowWidgets) sits in this box, and without them it had no background. */}
@@ -1831,7 +2047,7 @@ export function EditorArea() {
         )}
         {active?.kind === 'media' && <MediaPreview key={active.id} tab={active} />}
         {active?.kind === 'preview' && <MarkdownPreview key={active.id} path={active.path} />}
-        {!active && <Welcome />}
+        {!active && (group === 1 ? <Welcome /> : <p className="absolute inset-0 grid place-items-center text-sm text-muted-foreground">Drag a tab here, or open a file.</p>)}
         {active?.status === 'loading' && (
           <div className="absolute inset-0 grid place-items-center bg-background">
             <Spinner label={`Opening ${nameOf(active.path)}`} />
@@ -1985,9 +2201,22 @@ function MediaPreview({ tab }: { tab: Tab }) {
   )
 }
 
-/** A tab's right-click menu, as VS Code's: closing it and others, its path, compares. */
-function TabMenu({ tab }: { tab: Tab }) {
+/** A tab's right-click menu, as VS Code's: closing it and others, splitting, its path, compares. */
+function TabMenu({ tab, group }: { tab: Tab; group: number }) {
   const ed = useEditor()
+  const store = use(GroupStoreContext)!
+  const groups = store.layout.groups
+  const at_ = groups.indexOf(group)
+  /** The tab into another group: one there already (closed here), or a new one made with it (kept here, as Split does). */
+  const toGroup = async (target: number | 'right' | 'down', move: boolean) => {
+    if (typeof target === 'number') {
+      const api = store.apis.get(target)
+      if (!api) return
+      await openIn(api, tab)
+      store.focus(target)
+    } else store.split(group, target, tab)
+    if (move) void ed.close(tab.id)
+  }
   const run = (command: string) => {
     ed.activate(tab.id)
     requestAnimationFrame(() => void runCommand(command))
@@ -1999,6 +2228,7 @@ function TabMenu({ tab }: { tab: Tab }) {
     all: useKeyFor('workbench.action.closeAllEditors'),
     withSaved: useKeyFor('workbench.files.action.compareWithSaved'),
     withClipboard: useKeyFor('workbench.files.action.compareWithClipboard'),
+    split: useKeyFor('workbench.action.splitEditor'),
   }
   const item = (label: string, onSelect: () => void, keys?: string) => (
     <ContextMenu.Item className={menuItem} onSelect={onSelect}>
@@ -2014,6 +2244,11 @@ function TabMenu({ tab }: { tab: Tab }) {
       {item('Close to the Right', () => void ed.closeMany(ed.tabs.slice(at + 1).filter((t) => !t.pinned).map((t) => t.id)))}
       {item('Close Saved', () => void ed.closeMany(ed.tabs.filter((t) => !t.dirty && !t.pinned).map((t) => t.id)), keys.saved)}
       {item('Close All', () => void ed.closeMany(ed.tabs.map((t) => t.id)), keys.all)}
+      {separator}
+      {item('Split Right', () => void toGroup('right', false), keys.split)}
+      {item('Split Down', () => void toGroup('down', false))}
+      {at_ < groups.length - 1 && item('Move to Next Group', () => void toGroup(groups[at_ + 1]!, true))}
+      {at_ > 0 && item('Move to Previous Group', () => void toGroup(groups[at_ - 1]!, true))}
       {separator}
       {tab.pinned ? item('Unpin', () => ed.pin(tab.id, false)) : item('Pin', () => ed.pin(tab.id, true))}
       {tab.preview && item('Keep Open', () => ed.keepTab(tab.id))}

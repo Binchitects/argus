@@ -533,6 +533,24 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   **Complete this**, as the editor's does. A tab's right-click menu closes it,
   the others, those to its right, the saved ones or all, copies its path and
   compares it.
+- **editor groups** (split editors), as VS Code's: **Split Right** and
+  **Split Down** in a tab's menu, **Split Editor** (**Ctrl+\\**) and **Split
+  Editor in Orthogonal Direction** (**Ctrl+K Ctrl+\\**) open the tab shown in
+  a new group beside it or below it. Each group has its own tabs and the
+  file shown in it; a file open in two groups is one file (typing in one shows
+  in the other at once, and it is saved once). Drag a tab onto another group's
+  tabs or editor to move it there, or onto the right or bottom edge of an
+  editor to make a new group there; **Move to Next Group** and **Move to
+  Previous Group** in a tab's menu (**Ctrl+Alt+Right**, **Ctrl+Alt+Left**) do
+  the same. A group closes when its last tab goes. **Ctrl+1** to **Ctrl+8**
+  focus a group by its place (one past the last splits to the right),
+  **Ctrl+K Ctrl+Left** and **Right** the one beside; the divider between two
+  groups is dragged, or moved with the arrow keys when focused. **Toggle
+  Vertical/Horizontal Editor Layout** (**Alt+Shift+0**) turns the groups from
+  side by side to one above another; **Join All Editor Groups** puts every tab
+  back in the first; **Close Editor Group** closes the one with the focus.
+  Save, Close and the other commands work on the group with the focus; Save
+  All and a file changed on disk reach every group. Eight groups at most.
 - **changes on disk**: what changes in the folder by anyone (your own editor,
   a command, git) shows at once: a file open and not edited here reloads, one
   deleted closes, the Explorer, Source Control and Changes are read again, and

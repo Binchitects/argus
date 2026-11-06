@@ -910,6 +910,42 @@ describe('Code Arena, the IDE', () => {
     await waitFor(() => expect(within(tabs()).queryByRole('tab', { name: 'README.md' })).not.toBeInTheDocument())
   })
 
+  it('splits the editor into groups that show the same file, moves a tab between them, and joins them again', async () => {
+    backend()
+    renderIde()
+    await userEvent.dblClick(await screen.findByRole('treeitem', { name: 'README.md' }))
+    await within(tabs()).findByRole('tab', { name: 'README.md' })
+    // Split Right from the tab's menu: a second group with the same file, the same model (an edit in one is in the other).
+    fireEvent.contextMenu(within(tabs()).getByRole('tab', { name: 'README.md' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /^Split Right/ }))
+    const second = await screen.findByRole('tablist', { name: 'Open files in group 2' })
+    expect(await within(second).findByRole('tab', { name: 'README.md' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Editor group 1' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Editor group 2' })).toBeInTheDocument()
+    await waitFor(() => expect(fakes.editors.length).toBe(2))
+    await waitFor(() => expect(fakes.editors[1]!.model).toBe(editor().model))
+    // The divider between them is a separator that moves with the arrow keys.
+    const divider = screen.getByRole('separator', { name: 'Resize the editor groups' })
+    expect(divider).toHaveAttribute('aria-valuenow', '50')
+    fireEvent.keyDown(divider, { key: 'ArrowRight' })
+    expect(divider).toHaveAttribute('aria-valuenow', '55')
+
+    // Move into the first group: closed in the second, which closes once empty, as VS Code's.
+    fireEvent.contextMenu(within(second).getByRole('tab', { name: 'README.md' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Move to Previous Group' }))
+    await waitFor(() => expect(screen.queryByRole('tablist', { name: 'Open files in group 2' })).not.toBeInTheDocument())
+    expect(within(tabs()).getByRole('tab', { name: 'README.md' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Editor' })).toBeInTheDocument()
+
+    // The commands: split down, then join every group into the first.
+    await act(async () => runCommand('workbench.action.splitEditorDown'))
+    expect(await screen.findByRole('tablist', { name: 'Open files in group 2' })).toBeInTheDocument()
+    expect(screen.getByRole('separator', { name: 'Resize the editor groups' })).toHaveAttribute('aria-orientation', 'horizontal')
+    await act(async () => runCommand('workbench.action.joinAllGroups'))
+    await waitFor(() => expect(screen.queryByRole('tablist', { name: 'Open files in group 2' })).not.toBeInTheDocument())
+    expect(within(tabs()).getAllByRole('tab', { name: 'README.md' })).toHaveLength(1)
+  })
+
   it('after a reload, the tabs are back as they were, unsaved text too, and typing keeps the unsaved text until it is saved', async () => {
     const { calls } = backend({
       'GET /api/workspace/state': () => ({

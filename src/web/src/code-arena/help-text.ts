@@ -95,7 +95,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   editor: {
     name: 'Editor',
-    text: `Your open files, in tabs. A dot marks changes not saved yet, and ${modKey}+S saves; the middle mouse button closes a tab. A file the agent edits reloads in its tab when nothing in it is unsaved; saving a file that changed on disk since you opened it asks first.`,
+    text: `Your open files, in tabs. A dot marks changes not saved yet, and ${modKey}+S saves; the middle mouse button closes a tab. Split Right in a tab's menu (or ${modKey}+\\) opens it in a second group beside it; drag a tab onto another group to move it there. A file the agent edits reloads in its tab when nothing in it is unsaved; saving a file that changed on disk since you opened it asks first.`,
     manual: 'the-ide',
   },
   terminal: {
@@ -214,6 +214,7 @@ export const keys: [keys: string, what: string][] = [
   [`${modKey}+K ${modKey}+S`, 'Keyboard shortcuts (keybindings.json, as VS Code\'s)'],
   [`${modKey}+K ${modKey}+T`, 'The colour theme'],
   [`${modKey}+Shift+X`, 'Extensions (VS Code\'s themes, icons, snippets, languages)'],
+  [`${modKey}+\\, ${modKey}+1…8`, 'Split the editor, focus an editor group'],
   [`${modKey}+L`, 'In the editor: the lines chosen go with the next message'],
   ['↑ / ↓', 'In the chat\'s box: what you sent before in this folder (the terminal\'s too); Esc goes back to what you were typing'],
 ]

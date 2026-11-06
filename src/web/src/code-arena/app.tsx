@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Blocks, Brain, Bug, Check, Circle, CircleAlert, CircleHelp, Files, GitBranch, GitCompareArrows, Info, ListChecks, MessagesSquare, ScanSearch, Search, SquareTerminal, WandSparkles, type LucideIcon } from 'lucide-react'
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { lazy, Suspense, use, useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { confetti, useKonami } from '@/components/app/games-kit'
 import { toast } from '@/components/ui/toaster'
 import { Alert } from '@/components/ui/alert'
@@ -32,6 +32,7 @@ import { countProblems, useProblems } from './problems-store'
 import { ReviewPanel } from './review'
 import { SourceControlPanel } from './scm'
 import { EditorArea, EditorProvider } from './editor'
+import { groupCommands, GroupStoreContext } from './editor-groups'
 import { userFile } from './editor-options'
 import { CodeRefsProvider } from './refs'
 import { rankFiles, useEditor } from './editor-state'
@@ -1188,7 +1189,6 @@ function Workbench({
     { id: 'copyRelativeFilePath', category: 'File', title: 'Copy Relative Path of Active File', enabled: () => !!active, run: () => active && copy(active.path) },
     { id: 'workbench.action.editor.changeLanguageMode', category: 'Change Language Mode', title: 'Change Language Mode', enabled: () => file, run: () => void pickLanguage() },
     { id: 'editor.action.toggleWordWrap', category: 'View', title: 'Toggle Word Wrap', enabled: () => file, run: () => ed.toggleWordWrap() },
-    { id: 'workbench.action.focusFirstEditorGroup', category: 'View', title: 'Focus First Editor Group', run: () => ed.focusEditor() },
     { id: 'workbench.action.focusSideBar', category: 'View', title: 'Focus into Primary Side Bar', run: () => {
       change({ sideOpen: true })
       // The view shown: the others are in the side bar too, hidden.
@@ -1297,6 +1297,9 @@ function Workbench({
     { id: 'codeArena.about', category: 'Help', title: 'About Code Arena', run: () => setAbout(true) },
   ]
   useCommands(workbenchCommands)
+  // The editor groups' own: split, join, move to a group, focus one by its place.
+  const groups = use(GroupStoreContext)!
+  useCommands(groupCommands(groups))
 
 
   // The editor's own commands for the palette, while a file is shown: Code Arena's first.
