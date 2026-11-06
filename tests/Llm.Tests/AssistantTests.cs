@@ -291,4 +291,26 @@ public sealed class AssistantTests(AppFixture app)
         var listed = (await b.JsonAsync(await b.GetAsync("/api/assistants"))).EnumerateArray().Single(x => x.GetProperty("id").GetGuid() == id);
         Assert.Equal(2, listed.GetProperty("chats").GetInt32());
     }
+
+    [Fact]
+    public async Task An_assistants_skills_are_named_for_its_chats_to_load_first_and_only_usable_ones_are_taken()
+    {
+        var admin = await AdminAsync();
+        var (_, b) = await PersonAsync(admin);
+        var (_, other) = await PersonAsync(admin);
+        await StatusAssert.Is(HttpStatusCode.Created, await b.PostAsync("/api/skills", new { name = "triage", title = "Triage a bug", instructions = "Reproduce it first." }));
+        await StatusAssert.Is(HttpStatusCode.Created, await other.PostAsync("/api/skills", new { name = "secret", title = "Theirs", instructions = "Not yours." }));
+        // Another person's own skill is not one this person may use.
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await b.PostAsync("/api/assistants", new { name = "Bugs", skills = new[] { "secret" } }));
+        var id = await CreateAsync(b, new { name = "Bugs", instructions = "Fix bugs.", skills = new[] { "triage", "triage" } });
+        Assert.Equal(["triage"], (await b.JsonAsync(await b.GetAsync($"/api/assistants/{id}"))).GetProperty("skills").EnumerateArray().Select(s => s.GetString()));
+
+        var chat = await ChatAsync(b, new { assistantId = id });
+        await SentAsync(b, chat, "The upload fails.");
+        Assert.Contains("The assistant's skills: load one with use_skill first when the task is what it is for: triage.", SystemPrompt(), StringComparison.Ordinal);
+
+        await StatusAssert.Is(HttpStatusCode.NoContent, await PatchAsync(b, $"/api/assistants/{id}", new { skills = Array.Empty<string>() }));
+        await SentAsync(b, chat, "Still failing.");
+        Assert.DoesNotContain("The assistant's skills", SystemPrompt(), StringComparison.Ordinal);
+    }
 }

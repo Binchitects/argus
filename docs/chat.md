@@ -726,6 +726,11 @@ The chat list shows yours, those you edit and those you chat with.
   chat's own) and its files (text inline up to a budget, the rest by
   `read_file`; Python opens them too). A change applies to the next answer
   of every chat with it.
+- **Its skills.** The skills it uses (**Skills** on its page: those you may
+  use, at most 20) are named in every answer's prompt, so the model loads one
+  first when the task is what it is for. Code Arena works as an assistant too
+  (`/assistant`, or **Assistant** in its chat), with its instructions, model,
+  thinking, tools and skills.
 - **Moving a chat.** A chat's menu → **Move to assistant**, or **Without …** to
   go on without it.
 - **Who may use it.** It is yours alone until you share it (its page →

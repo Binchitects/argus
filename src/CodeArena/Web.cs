@@ -580,7 +580,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 await SwitchAsync(res, file, ct);
                 return;
         }
-        if (await IdeAsync(req, res, ct))
+        if (await TasksAsync(req, res, ct) || await IdeAsync(req, res, ct))
         {
             return;
         }
@@ -706,6 +706,11 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             // Code completion in the editor: its model; null when the config turns it off.
             ["completion"] = _rt.Config.Completion ? new JsonObject { ["model"] = _rt.Config.CompletionModel ?? _rt.Model.Name } : null,
             ["queued"] = new JsonArray([.. Queued().Select(q => (JsonNode)q)]),
+            // The Tasks panel: how many sub-agents and background tasks are at work (it reads them while any is); the goal
+            // as it stands (null: none); the Arena assistant the session works as.
+            ["tasksRunning"] = _rt.Tasks.RunningCount,
+            ["goal"] = _rt.Goal?.ToJson(),
+            ["assistant"] = _rt.Assistant is { } assistant ? new JsonObject { ["id"] = assistant.Id, ["name"] = assistant.Name, ["icon"] = assistant.Icon, ["color"] = assistant.Color } : null,
             ["arenaTools"] = _rt.ArenaConnected,
             // The Tools menu: the remote tools by group (Arena's by its chat's tools, each other server as one), on or off in
             // this session, and loaded (on demand: only those loaded are in the requests whole).
@@ -1509,7 +1514,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
 
     /// <summary>
     /// When nothing runs: the next queued message, else a turn that carries on from commands that ended while nobody
-    /// asked. Its events go to whoever watches (the page attaches through /api/turn when the state says busy).
+    /// asked, else the goal's next turn while one is being worked on. Its events go to whoever watches (the page attaches
+    /// through /api/turn when the state says busy).
     /// </summary>
     private void StartNext()
     {
@@ -1517,6 +1523,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         IReadOnlyList<Mentions.Piece>? pieces = null;
         string? quote = null;
         IReadOnlyList<Upload>? uploads = null;
+        var goal = false;
         Job? job;
         lock (_gate)
         {
@@ -1529,6 +1536,11 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 (_, text, pieces, quote, uploads) = _queued[0];
                 _queued.RemoveAt(0);
             }
+            else if (!_rt.Jobs.HasNews && _rt.GoalPrompt() is { } next)
+            {
+                // The goal is not met yet: the agent carries on toward it (the person's messages go first).
+                (text, goal) = (next, true);
+            }
             else if (_rt.Jobs.Follow().Count == 0)
             {
                 return;
@@ -1536,7 +1548,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             job = _job = new Job("answer");
             _turns++;
         }
-        job.Running = Task.Run(() => RunTurnAsync(job, text, pieces, quote, uploads));
+        job.Running = Task.Run(() => RunTurnAsync(job, text, pieces, quote, uploads, goal: goal));
     }
 
     /// <summary>A new job when none runs; null when one does.</summary>
@@ -1553,23 +1565,30 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         }
     }
 
-    /// <summary>A turn as a job: the person's message, or (null) the model carrying on after commands that ended.</summary>
+    /// <summary>
+    /// A turn as a job: the person's message, or (null) the model carrying on after commands that ended. A goal's turn
+    /// (<paramref name="goal"/>) also stops when the goal's budget runs out, and is followed by the goal's check.
+    /// </summary>
     private async Task RunTurnAsync(Job job, string? text, IReadOnlyList<Mentions.Piece>? pieces = null, string? quote = null, IReadOnlyList<Upload>? uploads = null,
-        Again? again = null)
+        Again? again = null, bool goal = false)
     {
         var turn = new Spend();
         _rt.Turn = turn;
         _answerId = null;
+        using var limit = goal ? _rt.GoalLimit(turn) : null;
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(job.Stop.Token, limit?.Token ?? CancellationToken.None);
+        var stop = linked.Token;
+        var clock = Stopwatch.StartNew();
         try
         {
             // A skill or command added or changed since the last turn works in this one (Arena's too).
-            await _rt.ReloadExtensionsAsync(false, job.Stop.Token);
+            await _rt.ReloadExtensionsAsync(false, stop);
             // What the web chat added comes in first (inside the job, so Stop ends it and nothing it does leaves the IDE busy),
             // then the question takes its place after it.
             if (_rt.Sync is not null)
             {
                 // The web chat is this session's while the turn runs (the web queues the person's messages meanwhile).
-                var takeIn = _rt.TakeInForTurnAsync(job.Stop.Token);
+                var takeIn = _rt.TakeInForTurnAsync(stop);
                 if (await Task.WhenAny(takeIn, Task.Delay(TimeSpan.FromSeconds(1))) != takeIn)
                 {
                     // Said only when it is slow (Arena busy or far away): Stop ends the wait.
@@ -1591,23 +1610,23 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             }
             else if (text is not null)
             {
-                text = await _rt.PrepareAsync(text, job.Stop.Token);
+                text = await _rt.PrepareAsync(text, stop);
                 job.Emit(new JsonObject
                 {
                     ["type"] = "question", ["id"] = NextId(), ["parentId"] = LastId(), ["text"] = text, ["quote"] = quote,
                     ["attachments"] = uploads is { Count: > 0 } ? Uploads.Shown(uploads) : null,
                 });
                 // The files attached: their text read from Arena, their pictures for a model that sees them.
-                var uploaded = uploads is { Count: > 0 } ? await Uploads.ReadAsync(uploads, _rt.Config, _rt.Http, _rt.Sees(_rt.Model.Info), job.Stop.Token) : ((string, JsonArray)?)null;
-                await _rt.Agent.RunAsync(text, turn, job.Stop.Token, takeIn: false, pieces, quote, uploaded);
+                var uploaded = uploads is { Count: > 0 } ? await Uploads.ReadAsync(uploads, _rt.Config, _rt.Http, _rt.Sees(_rt.Model.Info), stop) : ((string, JsonArray)?)null;
+                await _rt.Agent.RunAsync(text, turn, stop, takeIn: false, pieces, quote, uploaded);
             }
             else
             {
                 job.Emit(new JsonObject { ["type"] = "notice", ["text"] = "A command ended: the model carries on from it." });
-                await _rt.Agent.ContinueAsync(turn, job.Stop.Token, takeIn: false);
+                await _rt.Agent.ContinueAsync(turn, stop, takeIn: false);
             }
         }
-        catch (OperationCanceledException) when (job.Stop.IsCancellationRequested)
+        catch (OperationCanceledException) when (stop.IsCancellationRequested)
         {
             job.Emit(new JsonObject { ["type"] = "stopped", ["id"] = _answerId });
         }
@@ -1622,6 +1641,10 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         }
         finally
         {
+            if (goal)
+            {
+                await AfterGoalTurnAsync(job, turn, clock.Elapsed);
+            }
             _rt.Turn = null;
             // The turn ended however it did (stopped before the model was asked, too): the web chat is let go.
             _rt.Sync?.EndTurn();
@@ -1634,6 +1657,35 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             // The next queued message runs, after a stopped turn too (a turn stuck on a slow model is stopped to get on with
             // it); the page's Clear drops the queue first.
             StartNext();
+        }
+    }
+
+    /// <summary>A goal's turn ended: its check runs (Stop ends it too, and pauses the goal), and the person is told where the goal stands.</summary>
+    private async Task AfterGoalTurnAsync(Job job, Spend turn, TimeSpan took)
+    {
+        if (_rt.Goal is { Status: GoalRun.Working, Check: { } check } && !job.Stop.IsCancellationRequested)
+        {
+            job.Emit(new JsonObject { ["type"] = "notice", ["text"] = check.Kind == GoalCheck.Command ? $"Checking the goal: running {check.Text}…" : "Checking the goal: a fresh reader looks at it…" });
+        }
+        string said;
+        try
+        {
+            said = await _rt.AfterGoalTurnAsync(turn, took, job.Stop.IsCancellationRequested, job.Stop.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            _rt.PauseGoal();
+            said = "Stopped while the goal was checked: it is paused. Resume carries it on.";
+        }
+        catch (Exception e) when (e is GatewayException or HttpRequestException or IOException or McpException)
+        {
+            _rt.PauseGoal();
+            said = $"The goal's check could not be made ({e.Message}): it is paused. Resume carries it on.";
+        }
+        if (said.Length > 0)
+        {
+            job.Emit(new JsonObject { ["type"] = "notice", ["kind"] = "goal", ["text"] = said });
+            _rt.Ui.Info(said);
         }
     }
 

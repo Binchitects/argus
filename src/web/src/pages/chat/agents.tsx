@@ -157,7 +157,7 @@ function AgentPanel({ index, part, work, status, open, onOpenChange, onOpenFile,
 }
 
 /** A sub-agent's tool call, as the chat shows its own: the same card, its pictures and files under it. */
-function StepCard({ step, live, onOpenFile }: { step: Step; live: boolean; onOpenFile?: (name: string) => void }) {
+export function StepCard({ step, live, onOpenFile }: { step: Step; live: boolean; onOpenFile?: (name: string) => void }) {
   const call = useMemo<ToolCall>(() => ({ id: step.id, function: { name: step.name, arguments: step.arguments } }), [step.id, step.name, step.arguments])
   const result = useMemo<Message | undefined>(
     () =>

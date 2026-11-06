@@ -34,6 +34,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Safeguards.SafeguardRule> SafeguardRules => Set<Safeguards.SafeguardRule>();
     public DbSet<Safeguards.SafeguardEvent> SafeguardEvents => Set<Safeguards.SafeguardEvent>();
     public DbSet<AssistantFile> AssistantFiles => Set<AssistantFile>();
+    public DbSet<ChatGoal> ChatGoals => Set<ChatGoal>();
     public DbSet<ChatShare> ChatShares => Set<ChatShare>();
     public DbSet<RoomMember> RoomMembers => Set<RoomMember>();
     public DbSet<RoomGroup> RoomGroups => Set<RoomGroup>();
@@ -269,6 +270,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Model).HasMaxLength(200);
             e.Property(x => x.Thinking).HasMaxLength(20);
             e.Property(x => x.Starters).HasDefaultValueSql("'{}'::text[]");
+            e.Property(x => x.Skills).HasDefaultValueSql("'{}'::text[]");
             e.Property(x => x.Icon).HasMaxLength(20).HasDefaultValue("bot");
             e.Property(x => x.Color).HasMaxLength(20).HasDefaultValue("blue");
             e.Property(x => x.Groups).HasDefaultValueSql("'{}'::uuid[]");
@@ -276,6 +278,21 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.EditorGroups).HasDefaultValueSql("'{}'::uuid[]");
             e.HasIndex(x => new { x.UserId, x.UpdatedAt });
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<ChatGoal>(e =>
+        {
+            e.ToTable("chat_goals");
+            e.HasKey(g => g.ConversationId);
+            e.Property(g => g.Text).HasMaxLength(ChatGoal.MaxText);
+            e.Property(g => g.CheckKind).HasMaxLength(16);
+            e.Property(g => g.CheckText).HasMaxLength(ChatGoal.MaxCheck);
+            e.Property(g => g.CheckBy).HasMaxLength(16);
+            e.Property(g => g.Status).HasMaxLength(16);
+            e.Property(g => g.Said).HasMaxLength(ChatGoal.MaxText);
+            e.Property(g => g.Outcome).HasMaxLength(ChatGoal.MaxCheck);
+            e.HasIndex(g => g.UserId);
+            e.HasOne<Conversation>().WithMany().HasForeignKey(g => g.ConversationId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(g => g.UserId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<AssistantFile>(e =>
         {

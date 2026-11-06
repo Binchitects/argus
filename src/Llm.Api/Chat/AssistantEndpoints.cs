@@ -16,7 +16,7 @@ namespace Llm.Api.Chat;
 
 /// <summary>Only what is sent changes. Model and Thinking: "" goes back to the deployment's default.</summary>
 public sealed record AssistantRequest(string? Name = null, string? Description = null, string? Instructions = null, string? Model = null, string? Thinking = null,
-    string[]? Tools = null, string[]? Starters = null, string? Icon = null, string? Color = null);
+    string[]? Tools = null, string[]? Starters = null, string? Icon = null, string? Color = null, string[]? Skills = null);
 
 /// <summary>Who may use an assistant besides its owner and editors (the groups, for Groups), and who may edit it.</summary>
 public sealed record AssistantSharing(Reach Reach, Guid[]? Groups = null, Guid[]? EditorPeople = null, Guid[]? EditorGroups = null);
@@ -34,6 +34,8 @@ public static class AssistantEndpoints
     /// <summary>With the embedder, answers read a big assistant's files by their passages (Knowledge/Retrieval.cs).</summary>
     public const int MaxFiles = 200;
     public const int MaxStarters = 4;
+    /// <summary>The skills an assistant uses at most: each is named in its chats' prompt.</summary>
+    public const int MaxSkills = 20;
 
     public static void MapAssistants(this IEndpointRouteBuilder app)
     {
@@ -94,7 +96,7 @@ public static class AssistantEndpoints
     }
 
     private static async Task<IResult?> CheckAsync(AssistantRequest body, bool creating, AppUser me, Membership m, ChatModels models, ModelPolicy policy, ToolRegistry registry,
-        ChatOptions chat, CancellationToken ct)
+        ChatOptions chat, AccessService access, AppDbContext db, CancellationToken ct)
     {
         if (creating && string.IsNullOrWhiteSpace(body.Name))
         {
@@ -146,6 +148,18 @@ public static class AssistantEndpoints
                 return AuthEndpoints.Problem(403, "model", $"You may not use {model}.");
             }
         }
+        if (body.Skills is { } skills)
+        {
+            if (skills.Length > MaxSkills)
+            {
+                return AuthEndpoints.Problem(400, "skills", $"At most {MaxSkills} skills.");
+            }
+            var usable = (await SkillEndpoints.UsableAsync(me, access, db, ct)).Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
+            if (skills.FirstOrDefault(s => !usable.Contains(s)) is { } unknown)
+            {
+                return AuthEndpoints.Problem(400, "skills", $"The skill /{unknown} is not one you may use.");
+            }
+        }
         if (body.Tools is { } tools)
         {
             var known = (await registry.ForAsync(m, ct)).Select(t => t.Tool.Id).ToHashSet();
@@ -187,6 +201,10 @@ public static class AssistantEndpoints
         {
             a.Starters = [.. body.Starters.Select(s => s.Trim())];
         }
+        if (body.Skills is not null)
+        {
+            a.Skills = [.. body.Skills.Distinct(StringComparer.Ordinal)];
+        }
         if (body.Icon is not null)
         {
             a.Icon = body.Icon;
@@ -205,7 +223,7 @@ public static class AssistantEndpoints
     {
         var me = await Me(p, users);
         var m = await access.MembershipAsync(me, ct);
-        if (await CheckAsync(body, true, me, m, models, policy, registry, chat.CurrentValue, ct) is { } problem)
+        if (await CheckAsync(body, true, me, m, models, policy, registry, chat.CurrentValue, access, db, ct) is { } problem)
         {
             return problem;
         }
@@ -243,7 +261,7 @@ public static class AssistantEndpoints
         var canEdit = Assistants.MayEdit(a, me.Id, m);
         return Results.Ok(new
         {
-            a.Id, a.Name, a.Description, a.Instructions, a.Model, a.Thinking, a.Tools, a.Starters, a.Icon, a.Color, a.Reach, owner,
+            a.Id, a.Name, a.Description, a.Instructions, a.Model, a.Thinking, a.Tools, a.Starters, a.Skills, a.Icon, a.Color, a.Reach, owner,
             mine = a.UserId == me.Id, canEdit, canShare = Assistants.MayShare(a, me.Id, m), a.CreatedAt, a.UpdatedAt, files, chats,
             usage = new { chats = a.ChatsStarted, people },
             // Who it is shared with, for those who may change it.
@@ -276,7 +294,7 @@ public static class AssistantEndpoints
         {
             return refused!;
         }
-        if (await CheckAsync(body, false, me, m, models, policy, registry, chat.CurrentValue, ct) is { } problem)
+        if (await CheckAsync(body, false, me, m, models, policy, registry, chat.CurrentValue, access, db, ct) is { } problem)
         {
             return problem;
         }

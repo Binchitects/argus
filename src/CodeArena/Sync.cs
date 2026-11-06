@@ -259,8 +259,13 @@ internal sealed class ChatSync : IAsyncDisposable
                         }
                         continue;
                     }
-                    // Every message is there: the plan, when it changed since Arena last had it.
-                    return plan.Conversation is null ? TimeSpan.Zero : await PushPlanAsync(plan.Conversation, ct);
+                    // Every message is there: the plan and the goal, when they changed since Arena last had them.
+                    if (plan.Conversation is null)
+                    {
+                        return TimeSpan.Zero;
+                    }
+                    var later = await PushPlanAsync(plan.Conversation, ct);
+                    return later != TimeSpan.Zero ? later : await PushGoalAsync(plan.Conversation, ct);
                 }
                 lock (_gate)
                 {
@@ -372,6 +377,50 @@ internal sealed class ChatSync : IAsyncDisposable
         }
         return Refused(answer);
     }
+
+    /// <summary>The goal as it stands, to the chat's (dropped there when the session has none), when Arena does not have its latest change.</summary>
+    private async Task<TimeSpan> PushGoalAsync(string conversation, CancellationToken ct)
+    {
+        var (goal, version, sent) = _store.Read(d => (d.Goal, d.GoalVersion, d.GoalSent));
+        if (version <= sent)
+        {
+            return TimeSpan.Zero;
+        }
+        var answer = goal is null
+            ? await SendAsync(HttpMethod.Delete, $"/api/code-arena/chats/{conversation}/goal", null, ct)
+            : await SendAsync(HttpMethod.Put, $"/api/code-arena/chats/{conversation}/goal", (JsonObject)goal.DeepClone(), ct);
+        if (answer.Status is HttpStatusCode.OK or HttpStatusCode.NoContent or HttpStatusCode.BadRequest
+            || (answer.Status == HttpStatusCode.NotFound && answer.Body?.Str("status") != "gone"))
+        {
+            // Taken, refused (it is not sent again until it changes), or an Arena that does not keep goals.
+            _store.GoalSent(version);
+            return TimeSpan.Zero;
+        }
+        return Refused(answer);
+    }
+
+    /// <summary>
+    /// What Arena keeps of a task call's sub-agents: each one's summary (what it was asked, how it ended, its time, model,
+    /// tokens and report), never its steps: the web chat shows a line of each, as the IDE does.
+    /// </summary>
+    internal static JsonObject Agents(JsonArray agents) => new()
+    {
+        ["agents"] = new JsonArray([.. agents.OfType<JsonObject>().Select(a => (JsonNode)new JsonObject
+        {
+            ["title"] = Fmt.OneLine(a.Str("title"), 200),
+            ["instructions"] = Cut(a.Str("instructions"), 4000),
+            ["status"] = a.Str("status") is "done" or "failed" ? a.Str("status") : "failed",
+            ["error"] = a.Str("error"),
+            ["ms"] = a.Long("ms"),
+            ["model"] = a.Str("model"),
+            ["usage"] = a["usage"]?.DeepClone(),
+            ["text"] = Cut(a.Str("text"), 8000),
+            ["reasoning"] = "",
+            ["steps"] = new JsonArray(),
+        })]),
+    };
+
+    private static string Cut(string? text, int most) => text is null ? "" : text.Length <= most ? text : text[..most] + "…";
 
     /// <summary>The plan as Arena takes it: its steps, and where the session works.</summary>
     internal static JsonObject Out(WorkPlan plan, string place)
@@ -1316,6 +1365,11 @@ internal sealed class ChatSync : IAsyncDisposable
         if (e.Kind is not null)
         {
             o["kind"] = e.Kind;
+        }
+        // A task call's sub-agents (or a note of the person's background tasks): their summaries, for the web's line of each.
+        if (e.Agents is { Count: > 0 } agents)
+        {
+            o["details"] = Agents(agents);
         }
         return o;
     }

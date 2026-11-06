@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronUp, Cloud, CloudUpload, FileCode2, FolderGit2, GitBranch, History, ListChecks, LoaderCircle, MessageSquarePlus, Monitor, Moon, PanelRightClose, Paperclip, ScrollText, ShieldCheck, Square, SquareTerminal, Sun, TestTubeDiagonal, Plus, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronUp, Cloud, CloudUpload, FileCode2, FolderGit2, GitBranch, History, ListChecks, LoaderCircle, MessageSquarePlus, Monitor, Moon, Network, PanelRightClose, Paperclip, ScrollText, ShieldCheck, Square, SquareTerminal, Sun, Target, TestTubeDiagonal, Plus, X } from 'lucide-react'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -84,6 +84,10 @@ import { changesQuery } from './ide-api'
 import { useSettings } from './settings'
 import { familyThemeName, themeNamed } from './settings-schema'
 import { useShownTheme } from './theme'
+import { AssistantPicker } from './assistant-picker'
+import { GoalBar, GoalDialog } from './goal'
+import { TasksPanel } from './tasks-panel'
+import { cancelGoal, goalActive, pauseGoal, resumeGoal } from './tasks-api'
 
 // The agent's chat, in the IDE's side panel: the folder's sessions (the side
 // bar's Chat view), the thread, the composer, the model and the mode.
@@ -478,6 +482,46 @@ export function Thread({
     },
   ])
 
+  // The Tasks panel beside the chat (a task chosen in it, by its id or its call's), and the goal's dialog and bar.
+  const [tasksOpen, setTasksOpen] = useState(false)
+  const [taskShown, setTaskShown] = useState<string | null>(null)
+  const [goalOpen, setGoalOpen] = useState(false)
+  const [goalText, setGoalText] = useState('')
+  const [goalKey, setGoalKey] = useState(0)
+  // The goal that ended and was put away (by when it started): the bar shows the next one.
+  const [goalAway, setGoalAway] = useState<string | null>(null)
+  const openTask = useCallback((call: string) => {
+    setTaskShown(call)
+    setTasksOpen(true)
+  }, [])
+  const askGoal = (text = '') => {
+    setGoalText(text)
+    setGoalKey((k) => k + 1)
+    setGoalOpen(true)
+  }
+  const goalChanged = () => void queryClient.invalidateQueries({ queryKey: stateQuery.queryKey })
+  useCommands([
+    { id: 'codeArena.chat.showTasks', title: 'Show Tasks and Sub-agents', category: 'Chat', run: () => setTasksOpen(true) },
+    { id: 'codeArena.chat.goal', title: 'Work Toward a Goal…', category: 'Chat', run: () => askGoal(), enabled: () => !goalActive(state.goal) },
+  ])
+  /** The chat's own /tasks and /goal: done here, not sent; true when the text was one of them. */
+  const chatCommand = (text: string): boolean => {
+    const [name, ...rest] = text.trim().split(/\s+/)
+    const arg = rest.join(' ')
+    if (name === '/tasks') {
+      setTaskShown(null)
+      setTasksOpen(true)
+      return true
+    }
+    if (name !== '/goal') return false
+    const act = (what: () => Promise<unknown>) => void what().then(goalChanged, (e: unknown) => toast.error(errorMessage(e)))
+    if (arg === 'pause') act(pauseGoal)
+    else if (arg === 'resume') act(resumeGoal)
+    else if (arg === 'cancel') act(cancelGoal)
+    else askGoal(arg)
+    return true
+  }
+
   // The session as read, each message that did not change kept as the object the thread drew (the turn that just
   // streamed included): read again after each turn, the finished turns are not drawn again.
   const [shared, setShared] = useState({ from: session.data, messages: session.data?.messages ?? [] })
@@ -660,6 +704,7 @@ export function Thread({
 
   /** While an answer is written: the message waits in the queue, and the answer reads it at its next step (with the part of an answer it quotes). */
   const queue = async (text: string, context?: Piece[], quoted?: Quote | null, attachments: Attachment[] = []): Promise<boolean> => {
+    if (chatCommand(text)) return true
     if (text === '/compact' || text === '/clear' || text === '/new') {
       toast.error(`Wait for the answer, or stop it, to run ${text}.`)
       return false
@@ -699,6 +744,7 @@ export function Thread({
    * editor) and the quote above the box (`quoted`: a question about a selection instead).
    */
   const send = async (text: string, context?: Piece[], quoted?: Quote, attachments: Attachment[] = [], accepted?: () => void): Promise<boolean> => {
+    if (chatCommand(text)) return true
     if (text === '/compact') return compact()
     if (text === '/clear' || text === '/new') {
       await newSession().catch((e) => toast.error(errorMessage(e)))
@@ -842,7 +888,13 @@ export function Thread({
 
   const empty = turns.length === 0
   const lastTurn = turns.length - 1
-  const jobBoxes = jobs.length > 0 && <Jobs jobs={jobs} onStopped={() => void queryClient.invalidateQueries({ queryKey: stateQuery.queryKey })} />
+  const goal = state.goal && state.goal.started !== goalAway ? state.goal : null
+  const jobBoxes = (
+    <>
+      {goal && <GoalBar goal={goal} onChanged={goalChanged} onDismiss={() => setGoalAway(goal.started)} />}
+      {jobs.length > 0 && <Jobs jobs={jobs} onStopped={() => void queryClient.invalidateQueries({ queryKey: stateQuery.queryKey })} />}
+    </>
+  )
   const composer = (big: boolean) => (
     <Composer
       streaming={streaming}
@@ -895,6 +947,7 @@ export function Thread({
   return (
     <section aria-label="Chat" className="@container flex h-full min-h-0 min-w-0 flex-col bg-background">
       <header className="flex h-11 shrink-0 items-center gap-1 border-b px-2">
+        <AssistantPicker state={state} />
         <ModelPicker config={config} value={state.model} onChange={(m) => m && m !== state.model && void settings({ model: m })} />
         {model?.thinking && <ThinkingPicker config={config} value={state.thinking} onChange={(level) => void settings({ thinking: level })} />}
         {model?.tools !== false && state.toolGroups && (
@@ -902,6 +955,21 @@ export function Thread({
         )}
         <span className="ml-auto" />
         <SyncStatus sync={state.sync} />
+        <Tooltip content={goalActive(state.goal) ? 'A goal is set: its bar is above the box' : 'Work toward a goal: the agent carries on until its check passes'}>
+          <Button variant="ghost" size="icon-sm" onClick={() => (goalActive(state.goal) ? setGoalAway(null) : askGoal())} aria-label="Goal" aria-pressed={goalActive(state.goal)}>
+            <Target className={cn(state.goal?.status === 'working' && 'text-primary-ink')} />
+          </Button>
+        </Tooltip>
+        <Tooltip content="Tasks and sub-agents">
+          <Button variant="ghost" size="icon-sm" className="relative" onClick={() => setTasksOpen(!tasksOpen)} aria-label={state.tasksRunning ? `Tasks, ${state.tasksRunning} at work` : 'Tasks'} aria-pressed={tasksOpen}>
+            <Network />
+            {(state.tasksRunning ?? 0) > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-primary px-1 text-[0.625rem] font-semibold text-primary-foreground tabular-nums" aria-hidden="true">
+                {state.tasksRunning}
+              </span>
+            )}
+          </Button>
+        </Tooltip>
         {state.mode === 'yolo' && <span className="hidden text-xs text-destructive-ink @md:inline">Yolo: nothing asks</span>}
         <PartHelp part="chat" className="size-8 rounded-md [&_svg]:size-4" />
         <Tooltip content="This folder's sessions">
@@ -917,6 +985,8 @@ export function Thread({
           </Tooltip>
         )}
       </header>
+      <div className="relative flex min-h-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       {empty ? (
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-4 py-6">
           <div className="w-full max-w-2xl animate-enter">
@@ -995,6 +1065,7 @@ export function Thread({
                           question={!isLive && asked && !asked.startsWith('local-') && !t.question?.details?.note ? asked : undefined}
                           onAgain={askAgain}
                           onSkipThinking={isLive ? skip : undefined}
+                          onOpenTask={openTask}
                         />
                       )}
                       {summary && <CompactedMark summary={summary} onOpenFile={openNamed} />}
@@ -1046,6 +1117,14 @@ export function Thread({
           </div>
         </>
       )}
+      </div>
+      {tasksOpen && (
+        <div className="absolute inset-0 z-20 flex animate-enter shadow-lg @3xl:static @3xl:w-80 @3xl:shrink-0 @3xl:border-l @3xl:shadow-none">
+          <TasksPanel selected={taskShown} onSelect={setTaskShown} onClose={() => setTasksOpen(false)} plan={state.mode === 'plan'} />
+        </div>
+      )}
+      </div>
+      <GoalDialog key={goalKey} open={goalOpen} onOpenChange={setGoalOpen} onSet={goalChanged} initial={goalText} />
       <RewindDialog question={rewinding} onClose={() => setRewinding(null)} onRewound={(said, chat) => rewinding && void rewound(rewinding, said, chat)} />
     </section>
   )

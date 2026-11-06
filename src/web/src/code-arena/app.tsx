@@ -93,11 +93,11 @@ export function App() {
     ...stateQuery,
     // Every second while a command with no time limit runs (its output comes from here once the turn that started it has
     // ended); every 2 while a server runs in the background, messages wait in the queue, or a turn runs that the page did
-    // not start (a command ended: the model carries on).
+    // not start (a command ended: the model carries on), a goal is worked on, or sub-agents are at work.
     refetchInterval: (q) =>
       q.state.data?.jobs.some((j) => j.running && !j.background)
         ? 1_000
-        : (q.state.data?.queued?.length ?? 0) > 0 || q.state.data?.busy || q.state.data?.jobs.some((j) => j.running)
+        : (q.state.data?.queued?.length ?? 0) > 0 || q.state.data?.busy || q.state.data?.jobs.some((j) => j.running) || q.state.data?.goal?.status === 'working' || (q.state.data?.tasksRunning ?? 0) > 0
           ? 2_000
           : q.state.data?.chat || q.state.data?.servers.some((s) => s.state === 'connecting' || s.state === 'failed')
             ? 5_000

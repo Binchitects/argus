@@ -291,6 +291,8 @@ public sealed class Assistant
     public List<string>? Tools { get; set; }
     /// <summary>Short prompts shown on a new chat with it, to start from.</summary>
     public List<string> Starters { get; set; } = [];
+    /// <summary>The skills it uses (their names): its chats, here and in Code Arena, are told to load them first when the task is theirs.</summary>
+    public List<string> Skills { get; set; } = [];
     /// <summary>Its icon and colour in lists (names the page knows: "bot", "code"…; "blue", "green"…).</summary>
     public string Icon { get; set; } = "bot";
     public string Color { get; set; } = "blue";
@@ -307,6 +309,44 @@ public sealed class Assistant
     /// <summary>The plugin that brought it (its name); it goes when the plugin does.</summary>
     public string? Plugin { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+/// <summary>
+/// Code Arena's goal for the chat its session syncs to (goal mode): what it works toward, how it is checked, the budget the
+/// person set, what it spent and where it stands. Code Arena owns it: it sends it whole each time it changes, and the web chat
+/// shows it above the conversation. One per chat; dropped when the session's goal is cleared.
+/// </summary>
+public sealed class ChatGoal
+{
+    public const int MaxText = 4000;
+    public const int MaxCheck = 2000;
+    public static readonly string[] Statuses = ["working", "paused", "met", "budget", "stuck", "cancelled"];
+
+    public Guid ConversationId { get; set; }
+    public Guid UserId { get; set; }
+    public required string Text { get; set; }
+    /// <summary>"command" or "condition"; null: not written down yet.</summary>
+    public string? CheckKind { get; set; }
+    public string? CheckText { get; set; }
+    /// <summary>"person" (set with the goal) or "agent" (written down by the agent first).</summary>
+    public string? CheckBy { get; set; }
+    public int BudgetSteps { get; set; }
+    public int BudgetMinutes { get; set; }
+    public long BudgetTokens { get; set; }
+    public string Status { get; set; } = "working";
+    public int Turns { get; set; }
+    public int Steps { get; set; }
+    public long Tokens { get; set; }
+    /// <summary>The time spent working on it, in milliseconds (paused time not counted).</summary>
+    public long WorkedMs { get; set; }
+    /// <summary>The last check: whether it passed, what it said, when.</summary>
+    public bool? Passed { get; set; }
+    public string? Said { get; set; }
+    public DateTimeOffset? CheckedAt { get; set; }
+    /// <summary>How it ended, in Code Arena's words: how it was checked, or why it stopped.</summary>
+    public string? Outcome { get; set; }
+    public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 

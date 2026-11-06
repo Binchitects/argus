@@ -744,6 +744,20 @@ public sealed class FakeChats
         }
     }
 
+    /// <summary>Each goal Code Arena sent, in order: the chat, and the goal (null: dropped).</summary>
+    public List<(string Chat, JsonObject? Goal)> Goals { get; } = [];
+
+    public List<(string Chat, JsonObject? Goal)> GoalsSent()
+    {
+        lock (_gate)
+        {
+            return [.. Goals];
+        }
+    }
+
+    /// <summary>The person's assistants, as /api/code-arena/assistants gives them; null: Arena does not answer it.</summary>
+    public JsonArray? Assistants { get; set; }
+
     /// <summary>A message in a chat's tree: Arena's shape (id, role, content, toolCalls, ref...), and the one before it.</summary>
     public sealed class Node
     {
@@ -1206,6 +1220,30 @@ public sealed class FakeChats
             {
                 ctx.Response.ContentType = "application/json";
                 await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes("""{"id":"plan-1","link":"/plans/plan-1"}"""));
+            }
+            return;
+        }
+        if (parts is ["chats", var goalChat, "goal"] && method is "PUT" or "DELETE")
+        {
+            lock (_gate)
+            {
+                Goals.Add((goalChat, method == "PUT" ? Json.ParseObject(body) : null));
+            }
+            ctx.Response.StatusCode = method == "PUT" ? 200 : 204;
+            if (method == "PUT")
+            {
+                ctx.Response.ContentType = "application/json";
+                await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes("""{"saved":true}"""));
+            }
+            return;
+        }
+        if (parts is ["assistants"] && method == "GET")
+        {
+            ctx.Response.StatusCode = Assistants is null ? 404 : 200;
+            if (Assistants is { } assistants)
+            {
+                ctx.Response.ContentType = "application/json";
+                await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes(assistants.ToJsonString()));
             }
             return;
         }

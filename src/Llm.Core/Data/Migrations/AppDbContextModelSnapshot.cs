@@ -684,6 +684,12 @@ namespace Llm.Core.Data.Migrations
                     b.Property<int>("Reach")
                         .HasColumnType("integer");
 
+                    b.PrimitiveCollection<List<string>>("Skills")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text[]")
+                        .HasDefaultValueSql("'{}'::text[]");
+
                     b.PrimitiveCollection<List<string>>("Starters")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -923,6 +929,84 @@ namespace Llm.Core.Data.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("chat_attachments", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.ChatGoal", b =>
+                {
+                    b.Property<Guid>("ConversationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("BudgetMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("BudgetSteps")
+                        .HasColumnType("integer");
+
+                    b.Property<long>("BudgetTokens")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("CheckBy")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("CheckKind")
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("CheckText")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTimeOffset?>("CheckedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Outcome")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<bool?>("Passed")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Said")
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int>("Steps")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Text")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)");
+
+                    b.Property<long>("Tokens")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("Turns")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<long>("WorkedMs")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("ConversationId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("chat_goals", (string)null);
                 });
 
             modelBuilder.Entity("Llm.Core.Chat.ChatMessage", b =>
@@ -7938,6 +8022,21 @@ namespace Llm.Core.Data.Migrations
 
             modelBuilder.Entity("Llm.Core.Chat.ChatAttachment", b =>
                 {
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Chat.ChatGoal", b =>
+                {
+                    b.HasOne("Llm.Core.Chat.Conversation", null)
+                        .WithMany()
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.HasOne("Llm.Core.Identity.AppUser", null)
                         .WithMany()
                         .HasForeignKey("UserId")

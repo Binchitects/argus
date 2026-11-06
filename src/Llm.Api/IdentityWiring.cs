@@ -682,6 +682,7 @@ public static class IdentityWiring
         Chat.ChatEndpoints.MapChat(app);
         Chat.CodeArenaSync.MapCodeArenaSync(app);
         Plans.CodeArenaPlans.MapCodeArenaPlans(app);
+        Chat.CodeArenaGoals.MapCodeArenaGoals(app);
         Chat.CodeArenaMemory.MapCodeArenaMemory(app);
         Chat.AssistantEndpoints.MapAssistants(app);
         Chat.ShareEndpoints.MapShares(app);

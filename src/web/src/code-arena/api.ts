@@ -2,6 +2,7 @@ import { api } from './http'
 import { blank, reduce, type LiveState } from '@/pages/chat/live'
 import type { Attachment, ChatEvent, ChatTool, MeasuredContext, Message } from '@/pages/chat/types'
 import type { Piece } from './bridge'
+import type { CodeGoal } from './tasks-api'
 
 /** What code-arena web says of itself: the folder, the model, the mode, the session open now. */
 export interface CodeState {
@@ -55,6 +56,12 @@ export interface CodeState {
   busy: boolean
   /** Messages sent while an answer was written: the answer reads them at its next step; one sent as it ends runs after it. */
   queued: QueuedCode[]
+  /** The sub-agents and background tasks at work now (the Tasks panel reads them while any is). */
+  tasksRunning?: number
+  /** The goal the agent works toward (goal mode), as it stands; null: none. */
+  goal?: CodeGoal | null
+  /** The Arena assistant the session works as; null: none. */
+  assistant?: { id: string; name: string; icon: string; color: string } | null
   /** The number of the answer (or compaction) running or last run: a new one is attached to when it differs. */
   turn?: number
   /** How many times the web chat's news came in while nothing ran: the session is read again when it changes. */

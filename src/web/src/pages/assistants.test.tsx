@@ -142,6 +142,28 @@ describe('assistants', () => {
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ reach: 'Groups', groups: ['g1'], editorPeople: ['p2'], editorGroups: [] }))
   })
 
+  it('its owner chooses the skills it uses among those they may use', async () => {
+    const skill = (id: string, name: string, off = false) => ({ id, name, title: name, description: `The ${name} skill`, instructions: '', parameters: [], autoUse: false, sharing: 'Private', groups: [], source: 'mine', from: null, off })
+    const calls = fakeApi(member, {
+      'GET /api/assistants/a1': () => ({ json: assistant({ mine: true, canEdit: true, canShare: true, reach: 'Private', skills: ['triage'], sharing: { groups: [], editorPeople: [], editorGroups: [] } }) }),
+      'GET /api/assistants': () => ({ json: [] }),
+      'GET /api/chat/config': () => ({ json: config }),
+      'GET /api/chat/conversations': () => ({ json: [] }),
+      'GET /api/sharing/groups': () => ({ json: [] }),
+      'GET /api/skills': () => ({ json: { isAdmin: false, groups: [], skills: [skill('s1', 'triage'), skill('s2', 'review'), skill('s3', 'gone', true)] } }),
+      'PATCH /api/assistants/a1': () => ({ status: 204 }),
+    })
+    renderApp('/chat/assistants/a1')
+    const settings = await screen.findByRole('region', { name: 'Settings' })
+    const skills = await within(settings).findByRole('group', { name: 'Skills' })
+    expect(within(skills).getByRole('checkbox', { name: '/triage' })).toBeChecked()
+    // One an admin turned off is not offered.
+    expect(within(skills).queryByRole('checkbox', { name: '/gone' })).toBeNull()
+    await userEvent.click(within(skills).getByRole('checkbox', { name: '/review' }))
+    await userEvent.click(within(settings).getByRole('button', { name: 'Save settings' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')?.body).toMatchObject({ skills: ['triage', 'review'] }))
+  })
+
   it('a chat with an assistant the person lost access to says so, and goes on without it', async () => {
     const calls = fakeApi(member, {
       'GET /api/chat/config': () => ({ json: config }),

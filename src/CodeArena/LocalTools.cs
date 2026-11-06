@@ -218,17 +218,23 @@ internal static partial class LocalTools
         },
     };
 
-    /// <summary>The sub-agent tool: a fresh context with read-only tools, for research that would crowd the main one.</summary>
+    /// <summary>The sub-agent tool: a fresh context of its own, with the reading tools or those named, for work that would crowd the main one.</summary>
     public static ToolDef SubAgentTool() => new()
     {
         Name = "task",
         Kind = ToolKind.Agent,
-        Description = "Hand a self-contained piece of research to a sub-agent with a fresh context and read-only tools (read, search, git, Arena's tools). It cannot edit or run commands. It returns one report: say exactly what to find and what to report. Several task calls at once run in parallel.",
+        Description = "Hand a self-contained piece of work to a sub-agent with a fresh context of its own. By default it has the read-only tools (read, search, git, Arena's tools) " +
+            "and cannot edit or run commands; name tools (globs of yours, e.g. [\"read_file\", \"edit_file\", \"run_shell\"]) to let it change things: it then never asks the person, " +
+            "so what the mode would ask is refused to it, and such sub-agents run one at a time. It returns one report: say exactly what to do and what to report. " +
+            "Several task calls at once run in parallel (reading ones side by side). The person sees each in their Tasks panel and can stop it.",
         Parameters = Schema("""
             {"type":"object","properties":{
               "description":{"type":"string","description":"Three to five words for the person."},
               "prompt":{"type":"string","description":"The full task: the sub-agent knows nothing of this conversation."},
-              "agent":{"type":"string","description":"One of the person's or the project's own sub-agents (listed in your instructions), for its kind of task; leave out for the general one."}},
+              "agent":{"type":"string","description":"One of the person's or the project's own sub-agents (listed in your instructions), for its kind of task; leave out for the general one."},
+              "assistant":{"type":"string","description":"One of the person's Arena assistants (listed in your instructions), to work with its instructions, model, tools and skills."},
+              "model":{"type":"string","description":"Another of the gateway's models for it; leave out for yours."},
+              "tools":{"type":"array","items":{"type":"string"},"description":"The only tools it gets, by name or glob; leave out for the read-only ones."}},
              "required":["description","prompt"]}
             """),
         Summary = a => a.Str("description") ?? "",
@@ -239,7 +245,9 @@ internal static partial class LocalTools
             {
                 throw new ToolError("Sub-agents cannot start sub-agents.");
             }
-            var (report, work) = await c.SubAgent(a.Str("description") ?? "task", prompt, a.Str("agent"), ct);
+            var tools = (a["tools"] as JsonArray)?.Select(n => n is JsonValue v && v.TryGetValue<string>(out var name) ? name : null).OfType<string>().Where(n => n.Length > 0).ToList();
+            var ask = new SubAgentAsk(a.Str("description") ?? "task", prompt, a.Str("agent"), a.Str("assistant"), a.Str("model"), tools is { Count: > 0 } ? tools : null);
+            var (report, work) = await c.SubAgent(ask, ct);
             return new ToolResult(report) { Display = Fmt.OneLine(report, 160), Agents = work is null ? null : [work] };
         },
     };
