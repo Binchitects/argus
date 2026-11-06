@@ -733,6 +733,18 @@ public sealed class FakeChats
 {
     private readonly object _gate = new();
 
+    /// <summary>Whether Arena counts tokens (/api/code-arena/tokenize: its engine has a tokenizer); else it says nothing (404).</summary>
+    public bool Tokenizer { get; set; }
+
+    /// <summary>How many texts each count was asked for.</summary>
+    public System.Collections.Concurrent.ConcurrentBag<int> Tokenized { get; } = [];
+
+    /// <summary>The tokens the fake chat format adds for each message (its role's marks).</summary>
+    public const int FormatPerMessage = 4;
+
+    /// <summary>The fake tokenizer: each word and each other sign is a token.</summary>
+    public static int CountTokens(string text) => System.Text.RegularExpressions.Regex.Count(text, @"\w+|[^\w\s]");
+
     /// <summary>Each plan Code Arena sent, in order: the chat, and the plan (null: dropped).</summary>
     public List<(string Chat, JsonObject? Plan)> Plans { get; } = [];
 
@@ -1177,6 +1189,23 @@ public sealed class FakeChats
         var method = ctx.Request.HttpMethod;
         JsonNode? reply;
         var status = 200;
+        if (parts is ["tokenize"] && method == "POST" && Tokenizer)
+        {
+            // The engine's tokenizer, as Arena counts with it: each text, and the whole request with its chat format.
+            var counting = Json.ParseObject(body)!;
+            var texts = (counting["texts"] as JsonArray ?? []).Select(t => t?.GetValue<string>() ?? "").ToList();
+            Tokenized.Add(texts.Count);
+            var messages = (counting["request"]?["messages"] as JsonArray)?.Count ?? 0;
+            var answer = new JsonObject
+            {
+                ["counts"] = new JsonArray([.. texts.Select(t => (JsonNode)CountTokens(t))]),
+                ["total"] = texts.Sum(CountTokens) + FormatPerMessage * messages,
+                ["by"] = "llama.cpp",
+            };
+            ctx.Response.ContentType = "application/json";
+            await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes(answer.ToJsonString()));
+            return;
+        }
         if (parts is ["attachments", var file] && method == "GET")
         {
             (byte[] Data, string ContentType) found;

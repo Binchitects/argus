@@ -56,23 +56,23 @@ public static partial class ContextWindow
     /// <summary>The parts, in the order they are drawn, with their words.</summary>
     public static readonly (string Key, string Label)[] Parts =
     [
-        ("system", "System prompt and tool notes"), ("instructions", "Instructions"), ("memory", "Memory"), ("tools", "Tool definitions"),
-        ("skills", "Skills"), ("summary", "Summary of earlier messages"), ("files", "Files and attachments"), ("you", "Your messages"),
+        ("system", "System prompt and tool notes"), ("tools", "Tool definitions"), ("instructions", "Your instructions"), ("memory", "Memory"),
+        ("skills", "Skills"), ("summary", "Summary of earlier messages"), ("files", "Files"), ("you", "Your messages"),
         ("answers", "Answers"), ("toolResults", "Tool calls and results"), ("format", "Chat format"),
     ];
 
     /// <summary>The most items a part lists; the rest are summed as more.</summary>
     public const int MostItems = 40;
 
-    /// <summary>The function that loads a skill, whose result is the skill's body.</summary>
-    public const string SkillFunction = "use_skill";
+    /// <summary>The functions that load a skill, whose result is the skill's body: the web chat's, Code Arena's.</summary>
+    public static readonly string[] SkillFunctions = ["use_skill", "skill"];
 
     /// <summary>The request in pieces, in its order: the system message by its sections, each message, each tool's definition.</summary>
     public static List<WindowPiece> Pieces(WindowRequest window)
     {
         ArgumentNullException.ThrowIfNull(window);
         var pieces = new List<WindowPiece>();
-        var calls = new Dictionary<string, string>(StringComparer.Ordinal);
+        var calls = new Dictionary<string, (string Name, string? Skill)>(StringComparer.Ordinal);
         var messages = window.Request["messages"] as JsonArray ?? [];
         for (var i = 0; i < messages.Count; i++)
         {
@@ -127,17 +127,18 @@ public static partial class ContextWindow
                         var name = Str(call["function"] as JsonObject, "name") ?? "a tool";
                         if (Str(call, "id") is { } id)
                         {
-                            calls[id] = name;
+                            calls[id] = (name, SkillFunctions.Contains(name) ? SkillOf(Str(call["function"] as JsonObject, "arguments")) : null);
                         }
                         pieces.Add(new WindowPiece("toolResults", name + " (call)", call.ToJsonString(), reference, window.ToolOf?.Invoke(name), At: i,
                             Preview: Preview(Str(call["function"] as JsonObject, "arguments") ?? "")));
                     }
                     break;
                 case "tool":
-                    var function = calls.GetValueOrDefault(Str(m, "tool_call_id") ?? "") ?? "a tool";
-                    if (function == SkillFunction && SkillBody().Match(text) is { Success: true } skill)
+                    var (function, loaded) = calls.TryGetValue(Str(m, "tool_call_id") ?? "", out var made) ? made : ("a tool", null);
+                    if (SkillFunctions.Contains(function))
                     {
-                        pieces.Add(new WindowPiece("skills", skill.Groups[1].Value + " (loaded)", text, reference, At: i));
+                        var skill = SkillBody().Match(text) is { Success: true } body ? body.Groups[1].Value : loaded ?? "A skill";
+                        pieces.Add(new WindowPiece("skills", skill + " (loaded)", text, reference, At: i));
                         break;
                     }
                     pieces.Add(new WindowPiece("toolResults", function, text, reference, window.ToolOf?.Invoke(function), At: i, Preview: Preview(text)));
@@ -166,10 +167,13 @@ public static partial class ContextWindow
         }
         foreach (Match file in Attachment().Matches(words))
         {
-            var name = file.Groups[1].Success ? file.Groups[1].Value : "Files mentioned";
-            yield return new WindowPiece("files", name, file.Value, reference, At: at);
+            // What went with a skill used in Code Arena and nothing else is the skill's.
+            if (file.Groups[1].Success || file.Value.Length > EmptyAttached)
+            {
+                yield return new WindowPiece("files", file.Groups[1].Success ? file.Groups[1].Value : "Files mentioned", file.Value, reference, At: at);
+            }
         }
-        words = Attachment().Replace(words, "");
+        words = Attachment().Replace(words, m => m.Groups[1].Success || m.Value.Length > EmptyAttached ? "" : m.Value);
         if (words.Length > 0)
         {
             yield return new WindowPiece("you", "Your message", words, reference, At: at, Preview: Preview(words));
@@ -272,7 +276,7 @@ public static partial class ContextWindow
         used.UnionWith(called ?? []);
         if (pieces.Any(p => p.Part == "skills" && p.At >= 0))
         {
-            used.Add(SkillFunction);
+            used.UnionWith(SkillFunctions);
         }
         // A tool none of whose functions was called: its definitions go in every request for nothing.
         var unused = pieces.Select((p, i) => (p, t: tokens[i])).Where(x => x.p.Part == "tools" && x.p.Tool is not null).GroupBy(x => x.p.Tool!, StringComparer.Ordinal)
@@ -405,7 +409,7 @@ public static partial class ContextWindow
         }
     }
 
-    private static string Tokens(long n) => n >= 1_000 ? (n / 1000.0).ToString(n >= 100_000 ? "0" : "0.0", CultureInfo.InvariantCulture) + "K" : n.ToString(CultureInfo.InvariantCulture);
+    private static string Tokens(long n) => n.ToString("N0", CultureInfo.InvariantCulture);
 
     private static string Percent(long n, long of) => (100.0 * n / Math.Max(1, of)).ToString("0", CultureInfo.InvariantCulture) + "%";
 
@@ -416,6 +420,22 @@ public static partial class ContextWindow
     {
         var line = string.Join(' ', text.Split((char[])['\n', '\r', '\t'], StringSplitOptions.RemoveEmptyEntries)).Trim();
         return line.Length <= 80 ? line : line[..80] + "…";
+    }
+
+    /// <summary>The length of Code Arena's block of what went with a message when it holds nothing.</summary>
+    private const int EmptyAttached = 30;
+
+    /// <summary>The skill a call loads, by its arguments' name.</summary>
+    private static string? SkillOf(string? arguments)
+    {
+        try
+        {
+            return arguments is null ? null : Str(JsonNode.Parse(arguments) as JsonObject, "name");
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
     }
 
     private static string? Str(JsonObject? o, string key) => o?[key] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;

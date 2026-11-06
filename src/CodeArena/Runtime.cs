@@ -541,6 +541,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             Model = Model,
             SystemPrompt = () => SystemPrompt.Build(inputs),
             MemoryChars = () => _memory.Length,
+            Sections = () => SystemPrompt.Sections(inputs),
             InstructionChars = () => SystemPrompt.InstructionsText(inputs).Length,
             Note = () => SystemPrompt.Note(inputs),
             Sees = () => Sees(Model.Info),

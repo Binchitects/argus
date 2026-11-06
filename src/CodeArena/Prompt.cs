@@ -46,7 +46,7 @@ internal static class SystemPrompt
         """;
 
     /// <summary>The main agent's prompt; a sub-agent's (subAgent) says it reports back and only reads.</summary>
-    public static string Build(Inputs x, bool subAgent = false, DateTime? now = null)
+    public static string Build(Inputs x, bool subAgent = false, DateTime? now = null, List<Llm.Core.Chat.WindowSection>? sections = null)
     {
         var root = x.Workspace.Root;
         var git = GitRoot(root);
@@ -82,9 +82,21 @@ internal static class SystemPrompt
 
             """);
         AppendEnvironment(sb, x, root, git, now, volatileFacts: false);
-
-        sb.Append(InstructionsText(x));
+        // Its sections, for what fills the window (ContextWindow): Code Arena's words, each instruction file, the memory, the lists.
+        var at = 0;
+        void Section(string part, string name)
+        {
+            sections?.Add(new Llm.Core.Chat.WindowSection(part, name, sb.Length - at));
+            at = sb.Length;
+        }
+        Section("system", "Code Arena's own words");
+        foreach (var (title, text) in Instructions(x.Paths, x.Workspace.Root, GitRoot(x.Workspace.Root)))
+        {
+            sb.Append($"\n# {title}\n\n{text.Trim()}\n");
+            Section("instructions", title);
+        }
         sb.Append(x.Memory());
+        Section("memory", "Memory");
         if (x.Agents() is { Count: > 0 } agents)
         {
             sb.Append("\n# Sub-agents of the person's and the project's own\n\nGive task their name (agent) for their kind of task:\n");
@@ -92,6 +104,7 @@ internal static class SystemPrompt
             {
                 sb.Append($"- {name}: {Fmt.OneLine(description, 300)}\n");
             }
+            Section("system", "Sub-agents listed");
         }
         if (x.Skills() is { Count: > 0 } skills)
         {
@@ -100,8 +113,17 @@ internal static class SystemPrompt
             {
                 sb.Append($"- {name}: {Fmt.OneLine(description, 300)}\n");
             }
+            Section("skills", "Skills listed");
         }
         return sb.ToString();
+    }
+
+    /// <summary>The main agent's prompt in its sections, in order (<see cref="Build"/>'s), for what fills the window.</summary>
+    public static List<Llm.Core.Chat.WindowSection> Sections(Inputs x)
+    {
+        var sections = new List<Llm.Core.Chat.WindowSection>();
+        Build(x, sections: sections);
+        return [.. sections.Where(s => s.Length > 0)];
     }
 
     /// <summary>How Code Arena's note starts: the model and the page tell it from the person's words by it.</summary>
