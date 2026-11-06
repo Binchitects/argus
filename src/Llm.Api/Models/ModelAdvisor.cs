@@ -107,6 +107,13 @@ public sealed record ModelRecommendation(
 {
     /// <summary>The GPUs proposed for it on this machine ("0,1"); null: llama.cpp's own choice (all of them).</summary>
     public string? Devices { get; init; }
+
+    /// <summary>
+    /// vLLM and SGLang: the shares of each GPU that hold it there, from the smallest that leaves room for a whole context to the
+    /// largest that fits beside what is kept on them (hundredths); null: llama.cpp's, or none fits.
+    /// </summary>
+    public double? ShareMin { get; init; }
+    public double? ShareMax { get; init; }
 }
 
 /// <summary>
@@ -278,9 +285,9 @@ public static class ModelAdvisor
             {
                 problems.Add(new("kvType", $"{kind.Label}'s token cache is {string.Join(", ", VllmCacheTypes)}.", true));
             }
-            if (m.GpuMemoryUtilization is < 0.1 or > 0.98)
+            if (m.GpuMemoryUtilization is < VllmAdvisor.MinUtilization or > VllmAdvisor.MaxUtilization)
             {
-                problems.Add(new("gpuMemoryUtilization", "The share of each GPU is 0.10 to 0.98.", true));
+                problems.Add(new("gpuMemoryUtilization", "The share of each GPU is 0.01 to 0.98.", true));
             }
             if (m.SpecDecode is not (null or "mtp" or "eagle3"))
             {

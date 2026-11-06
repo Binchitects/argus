@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Security.Claims;
+using System.Text.Json;
 using Llm.Api.Access;
 using Llm.Api.Chat;
 using Llm.Api.Endpoints;
@@ -158,6 +159,14 @@ public static class ModelEndpoints
                 move = m.Move is { } mv
                     ? new { mv.Phase, from = mv.FromKind, to = mv.ToKind, mv.FromEngine, mv.ToEngine, mv.Old, mv.Since, mv.At, mv.By, mv.Error }
                     : null,
+                // Its settings on the kind it last left, which a move back there takes up again (the dialog starts from them).
+                left = m.Left is { } json && JsonSerializer.Deserialize<LocalModel>(json) is { } l
+                    ? new
+                    {
+                        engineKind = l.EngineKind, file = l.File, l.Projector, l.Context, l.MaxOutput, l.Placement, l.Devices, l.GpuLayers, l.CpuMoe, l.KvType, l.Parallel, l.Ubatch,
+                        l.Mtp, l.DraftHead, l.DraftMax, l.Yarn, l.ExtraPreset, l.Replicas, l.GpuMemoryUtilization, l.Quantization, l.SpecDecode, l.KvCpuGb, l.KvTier, l.KvDiskGb, l.Sleep,
+                    }
+                    : null,
             });
         }
         foreach (var s in servers)
@@ -265,10 +274,11 @@ public static class ModelEndpoints
     private static async Task<IResult> AdviceAsync(LocalModelRequest body, ModelLibrary library, HardwareProbe hardware, AppDbContext db, ModelCatalog catalog,
         CancellationToken ct)
     {
-        var model = body.Name is { Length: > 0 } name && await db.LocalModels.AsNoTracking().SingleOrDefaultAsync(m => m.Name == name, ct) is { } saved
-            ? saved
-            : new LocalModel { Name = "draft", File = "" };
+        var saved = body.Name is { Length: > 0 } name ? await db.LocalModels.AsNoTracking().SingleOrDefaultAsync(m => m.Name == name, ct) : null;
+        var model = saved ?? new LocalModel { Name = "draft", File = "", EngineKind = body.EngineKind ?? EngineKinds.LlamaCpp };
         var file = (body.File ?? model.File).Trim();
+        // A saved model put on another kind of engine moves there: a longest answer its window there does not hold is cut to fit.
+        var moving = saved is not null && (body.EngineKind ?? saved.EngineKind) != saved.EngineKind;
         if (EngineKinds.ServerPerModel(body.EngineKind ?? model.EngineKind))
         {
             // A snapshot or a GGUF file for vLLM or SGLang: its own advisor, beside what is kept on the GPUs.
@@ -280,8 +290,11 @@ public static class ModelEndpoints
             Merge(model, body, file);
             VllmDefaults(model, body);
             var hw = await hardware.GetAsync(ct);
-            return Results.Ok(VllmAdvisor.Advise(model, profile, hw,
-                hw is null ? null : Others(hw, catalog.Kept(), await db.LocalModels.AsNoTracking().ToListAsync(ct), library, model.Name).PerGpu));
+            var others = hw is null ? null : Others(hw, catalog.Kept(), await db.LocalModels.AsNoTracking().ToListAsync(ct), library, model.Name).PerGpu;
+            var vllmAdvice = VllmAdvisor.Advise(model, profile, hw, others);
+            return Results.Ok(moving && FitOutput(model, vllmAdvice.Limits) is { } cutVllm
+                ? Said(VllmAdvisor.Advise(model, profile, hw, others), cutVllm)
+                : vllmAdvice);
         }
         if (library.Find(file) is not { } entry)
         {
@@ -290,8 +303,13 @@ public static class ModelEndpoints
         Leave(model, body.EngineKind ?? model.EngineKind);
         Merge(model, body, file);
         LlamaDefaults(model, body);
-        return Results.Ok(ModelAdvisor.Advise(model, entry, library.List(), await hardware.GetAsync(ct)));
+        var machine = await hardware.GetAsync(ct);
+        var advice = ModelAdvisor.Advise(model, entry, library.List(), machine);
+        return Results.Ok(moving && FitOutput(model, advice.Limits) is { } cut ? Said(ModelAdvisor.Advise(model, entry, library.List(), machine), cut) : advice);
     }
+
+    /// <summary>Advice with a word more beside its own problems.</summary>
+    private static ModelAdvice Said(ModelAdvice advice, ModelProblem said) => advice with { Problems = [.. advice.Problems.Where(p => p.Field != said.Field || p.Error), said] };
 
     private static async Task<IResult> AddAsync(LocalModelRequest body, AppDbContext db, ModelCatalog catalog, ModelLibrary library, HardwareProbe hardware,
         ChatModels gatewayModels, IOptions<EngineOptions> engine, EngineWatcher watcher, PriceBook prices, Audit audit, CancellationToken ct)
@@ -311,7 +329,8 @@ public static class ModelEndpoints
         {
             return AuthEndpoints.Problem(409, "exists", $"There is already a model named {name}.");
         }
-        var model = new LocalModel { Name = name, File = "" };
+        // Of the kind it is added on: it leaves no other.
+        var model = new LocalModel { Name = name, File = "", EngineKind = body.EngineKind is { Length: > 0 } k ? k.Trim() : EngineKinds.LlamaCpp };
         var (problem, warning) = Apply(model, body, library, await hardware.GetAsync(ct), prices.Defaults, [.. taken],
             new Placed(catalog.Kept(), await db.LocalModels.AsNoTracking().ToListAsync(ct)));
         if (problem is not null)
@@ -824,6 +843,11 @@ public static class ModelEndpoints
             return (AuthEndpoints.Problem(400, "price", price), null);
         }
         var advice = ModelAdvisor.Advise(draft, entry, library.List(), hardware);
+        var cut = m.EngineKind != kind.Kind ? FitOutput(draft, advice.Limits) : null;
+        if (cut is not null)
+        {
+            advice = Said(ModelAdvisor.Advise(draft, entry, library.List(), hardware), cut);
+        }
         if (ModelAdvisor.KindProblems(draft).Concat(advice.Problems).FirstOrDefault(p => p.Error) is { } error)
         {
             return (AuthEndpoints.Problem(400, error.Field, error.Message), null);
@@ -831,6 +855,7 @@ public static class ModelEndpoints
         Leave(m, kind.Kind);
         Merge(m, body, file);
         LlamaDefaults(m, body);
+        m.MaxOutput = draft.MaxOutput;
         var warnings = advice.Problems.Where(p => !p.Error).Select(p => p.Message).ToList();
         return (null, warnings.Count > 0 ? "Saved. " + string.Join(" ", warnings) : null);
     }
@@ -874,7 +899,12 @@ public static class ModelEndpoints
         }
         var others = hardware is null ? null : Others(hardware, placed.Kept, placed.Local, library, m.Name).PerGpu;
         // Kept loaded, it must fit beside the others kept; else only on its own GPUs, beside the servers' reserves.
-        var advice = VllmAdvisor.Advise(draft, profile, hardware, placed.Kept.Contains(m.Name) ? others : hardware is null ? null : Others(hardware, [], placed.Local, library).PerGpu);
+        var beside = placed.Kept.Contains(m.Name) ? others : hardware is null ? null : Others(hardware, [], placed.Local, library).PerGpu;
+        var advice = VllmAdvisor.Advise(draft, profile, hardware, beside);
+        if (m.EngineKind != kind && FitOutput(draft, advice.Limits) is { } cut)
+        {
+            advice = Said(VllmAdvisor.Advise(draft, profile, hardware, beside), cut);
+        }
         if (advice.FirstError is { } problem)
         {
             return (AuthEndpoints.Problem(400, problem.Field, problem.Message), null);
@@ -882,6 +912,7 @@ public static class ModelEndpoints
         Leave(m, kind);
         Merge(m, body, file);
         VllmDefaults(m, body);
+        m.MaxOutput = draft.MaxOutput;
         var warnings = advice.Problems.Where(p => !p.Error).Select(p => p.Message).ToList();
         if (m.Devices is null && advice.Recommended?.Devices is { } proposed)
         {
@@ -895,7 +926,10 @@ public static class ModelEndpoints
     /// <summary>
     /// A model moving to another kind of engine (<paramref name="to"/>) keeps its name, who may use it, its prices, sampling and
     /// context; what only its old kind has goes, unless the request sets it again (and is then refused for it), and it runs on
-    /// the new kind's first engine unless the request names another.
+    /// the new kind's first engine unless the request names another. Its settings there are kept (<see cref="LocalModel.Left"/>):
+    /// moving back to a kind it left takes up again what only that kind has and, between llama.cpp and vLLM or SGLang, what each
+    /// counts its own way (slots or answers at once, its longest answer, cache type, GPUs), so a round trip leaves it as it was.
+    /// Moving to llama.cpp or from it for the first time, its answers at once start from the new kind's own (1 slot, 16 at once).
     /// </summary>
     private static void Leave(LocalModel m, string to)
     {
@@ -903,6 +937,10 @@ public static class ModelEndpoints
         {
             return;
         }
+        var here = Copy(m);
+        here.Left = null;
+        var back = m.Left is { } left ? JsonSerializer.Deserialize<LocalModel>(left) : null;
+        var across = m.EngineKind == EngineKinds.LlamaCpp || to == EngineKinds.LlamaCpp;
         if (m.EngineKind == EngineKinds.LlamaCpp)
         {
             // llama.cpp's own: its projector, layers by hand, experts in RAM, prompt step, YaRN, preset lines, MTP and draft.
@@ -920,7 +958,50 @@ public static class ModelEndpoints
             // LMCache is vLLM's alone: SGLang keeps its own tier in RAM.
             (m.KvTier, m.KvDiskGb) = (null, null);
         }
+        if (back is not null && back.EngineKind == to)
+        {
+            if (to == EngineKinds.LlamaCpp)
+            {
+                // Its projector goes with its file.
+                (m.Projector, m.Placement, m.GpuLayers, m.CpuMoe, m.Ubatch, m.Yarn, m.ExtraPreset, m.Mtp, m.DraftHead, m.DraftMax) =
+                    (back.File == m.File ? back.Projector : null, back.Placement, back.GpuLayers, back.CpuMoe, back.Ubatch, back.Yarn, back.ExtraPreset, back.Mtp, back.DraftHead,
+                        back.DraftMax);
+            }
+            else
+            {
+                (m.Replicas, m.GpuMemoryUtilization, m.Quantization, m.SpecDecode, m.DraftHead, m.DraftMax, m.KvCpuGb, m.KvTier, m.KvDiskGb, m.Sleep) =
+                    (back.Replicas, back.GpuMemoryUtilization, back.Quantization, back.SpecDecode, back.DraftHead, back.DraftMax, back.KvCpuGb, back.KvTier, back.KvDiskGb, back.Sleep);
+            }
+            if (across)
+            {
+                // What both kinds have but each counts its own way (vLLM and SGLang alike): slots or answers at once, the window
+                // its longest answer sits in, the cache's type, every GPU or those proposed.
+                (m.Parallel, m.MaxOutput, m.KvType, m.Devices) = (back.Parallel, back.MaxOutput, back.KvType, back.Devices);
+            }
+        }
+        else if (across)
+        {
+            // llama.cpp's slots share its context; vLLM's answers at once each hold all of it: neither is the other's.
+            m.Parallel = to == EngineKinds.LlamaCpp ? 1 : VllmAdvisor.DefaultParallel;
+        }
         m.Engine = null;
+        m.Left = JsonSerializer.Serialize(here);
+    }
+
+    /// <summary>
+    /// A longest answer a move carries that its new engine's window does not hold (vLLM's whole context on llama.cpp's slots, or
+    /// one saved before its window shrank): cut to the nearest that does, and said why; null when it fits. A save on its own
+    /// engine refuses one instead.
+    /// </summary>
+    private static ModelProblem? FitOutput(LocalModel m, ModelLimits? limits)
+    {
+        if (limits is null || m.MaxOutput is not { } asked || (asked >= limits.MaxOutput.Min && asked <= limits.MaxOutput.Max))
+        {
+            return null;
+        }
+        m.MaxOutput = Math.Clamp(asked, limits.MaxOutput.Min, limits.MaxOutput.Max);
+        return new("maxOutput", string.Create(CultureInfo.InvariantCulture,
+            $"Its longest answer of {asked:N0} tokens does not fit what a conversation holds on {ModelMoves.Label(m.EngineKind)} ({ModelCatalog.Window(m):N0} tokens) with room for its prompt: it becomes {m.MaxOutput:N0}."), false);
     }
 
     /// <summary>A vLLM or SGLang model keeps none of llama.cpp's own values it did not set again: its cache type becomes fp8.</summary>
@@ -948,7 +1029,7 @@ public static class ModelEndpoints
         return copy;
     }
 
-    /// <summary>Every setting of <paramref name="from"/> onto <paramref name="m"/> (its name, its move and when it was added stay).</summary>
+    /// <summary>Every setting of <paramref name="from"/> onto <paramref name="m"/>, and those it left on another kind (its name, its move and when it was added stay).</summary>
     internal static void Assign(LocalModel m, LocalModel from)
     {
         (m.File, m.Projector, m.Context, m.MaxOutput, m.Placement, m.GpuLayers, m.CpuMoe, m.KvType, m.Parallel, m.Ubatch, m.Mtp, m.DraftHead, m.DraftMax, m.Yarn) =
@@ -957,9 +1038,9 @@ public static class ModelEndpoints
         (m.Temperature, m.TopP, m.TopK, m.MinP, m.PresencePenalty, m.ExtraPreset, m.Thinking, m.Tools, m.InputPerMtok, m.CachedInputPerMtok, m.OutputPerMtok, m.Devices) =
             (from.Temperature, from.TopP, from.TopK, from.MinP, from.PresencePenalty, from.ExtraPreset, from.Thinking, from.Tools, from.InputPerMtok, from.CachedInputPerMtok,
                 from.OutputPerMtok, from.Devices);
-        (m.EngineKind, m.Engine, m.Replicas, m.GpuMemoryUtilization, m.Quantization, m.SpecDecode, m.KvCpuGb, m.Sleep, m.Fallback, m.KvTier, m.KvDiskGb) =
+        (m.EngineKind, m.Engine, m.Replicas, m.GpuMemoryUtilization, m.Quantization, m.SpecDecode, m.KvCpuGb, m.Sleep, m.Fallback, m.KvTier, m.KvDiskGb, m.Left) =
             (from.EngineKind, from.Engine, from.Replicas, from.GpuMemoryUtilization, from.Quantization, from.SpecDecode, from.KvCpuGb, from.Sleep, from.Fallback, from.KvTier,
-                from.KvDiskGb);
+                from.KvDiskGb, from.Left);
     }
 
     /// <summary>The request's values over the model's: a missing value is kept, one named in "clear" emptied.</summary>

@@ -27,18 +27,32 @@ public sealed record VllmProfile(
 /// </summary>
 public static class VllmAdvisor
 {
-    /// <summary>What vLLM keeps on each GPU beside weights and cache: activations, CUDA graphs, the framework.</summary>
-    public const long Overhead = 3L << 30;
+    /// <summary>The most vLLM keeps on a GPU beside weights and cache (<see cref="OverheadOf"/>): a large model's activations, CUDA graphs, the framework.</summary>
+    public const long MaxOverhead = 3L << 30;
 
     /// <summary>
-    /// The least token cache worth starting a copy with: an eighth of its share of its GPUs, and 2 GiB at least. With less,
-    /// long prompts and answers at once preempt each other; a proposal takes more GPUs instead (DeepSeek-V4-Flash's 160 GB
-    /// fit two 96 GB GPUs by their weights, with too little left: it is proposed four).
+    /// What vLLM keeps on each GPU of a copy on <paramref name="tp"/> GPUs beside weights and cache: CUDA and the framework
+    /// (half a GiB), and activations and CUDA graphs that grow with the model (a quarter of its weights' slice), 3 GiB at most.
+    /// A 135M model takes about 0.5 GiB (vLLM ran SmolLM2's 88 MB at 0.03 of a 24 GB card), a 27B one the whole 3 GiB.
     /// </summary>
-    public static long MinCache(long share) => Math.Max(2L << 30, share / 8);
+    public static long OverheadOf(VllmProfile p, int tp = 1) => Math.Min(MaxOverhead, (512L << 20) + (p.WeightBytes / Math.Max(1, tp) / 4));
+
+    /// <summary>
+    /// The least token cache worth starting a copy with: an eighth of its share of its GPUs. With less, long prompts and
+    /// answers at once preempt each other; a proposal takes more GPUs instead (DeepSeek-V4-Flash's 160 GB fit two 96 GB
+    /// GPUs by their weights, with too little left: it is proposed four).
+    /// </summary>
+    public static long MinCache(long share) => share / 8;
 
     /// <summary>The share of each GPU when none is set (vLLM's own default).</summary>
     public const double DefaultUtilization = 0.90;
+
+    /// <summary>Answers at once a model starts from on vLLM or SGLang (--max-num-seqs, --max-running-requests), as the dialog does.</summary>
+    public const int DefaultParallel = 16;
+
+    /// <summary>The shares of each GPU a model may take (--gpu-memory-utilization, --mem-fraction-static), in hundredths.</summary>
+    public const double MinUtilization = 0.01;
+    public const double MaxUtilization = 0.98;
 
     /// <summary>Tensor parallel sizes: powers of two (3 cannot divide the heads of any model here).</summary>
     public static readonly int[] TpSizes = [1, 2, 4, 8, 16];
@@ -247,8 +261,36 @@ public static class VllmAdvisor
             return 0;
         }
         var each = group.Min(d => Math.Min((long)(d.Total * utilization), d.Total - d.Reserved - Hardware.FitMargin - (others?.GetValueOrDefault(d.Index) ?? 0)));
-        return Math.Max(0, (each - (p.WeightBytes / group.Count) - Overhead) * group.Count);
+        return Math.Max(0, (each - (p.WeightBytes / group.Count) - OverheadOf(p, group.Count)) * group.Count);
     }
+
+    /// <summary>
+    /// The shares of each GPU that hold a copy on each of these groups, in hundredths: from the smallest that leaves room for
+    /// a whole context and <see cref="MinCache"/> to the largest that fits beside what is kept there (<paramref name="others"/>);
+    /// null when none does.
+    /// </summary>
+    public static (double Min, double Max)? Shares(VllmProfile p, IReadOnlyList<IReadOnlyList<GpuDevice>> copies, int context, string kvType,
+        IReadOnlyDictionary<int, long>? others = null)
+    {
+        if (copies.Count == 0 || copies.Any(c => c.Count == 0))
+        {
+            return null;
+        }
+        var most = (int)Math.Min(Math.Round(MaxUtilization * 100), copies.SelectMany(c => c)
+            .Min(d => (d.Total - d.Reserved - Hardware.FitMargin - (others?.GetValueOrDefault(d.Index) ?? 0)) * 100 / Math.Max(1, d.Total)));
+        for (var h = (int)Math.Round(MinUtilization * 100); h <= most; h++)
+        {
+            if (copies.All(c => Fits(p, c, h / 100.0, context, kvType, others)))
+            {
+                return (h / 100.0, most / 100.0);
+            }
+        }
+        return null;
+    }
+
+    /// <summary>Which shares fit, said for an admin ("A share of 0.03 to 0.87 fits here."); empty when none does.</summary>
+    private static string SharesFit((double Min, double Max)? shares) =>
+        shares is var (min, max) ? string.Create(CultureInfo.InvariantCulture, $" A share of {min:0.00} to {max:0.00} fits here.") : "";
 
     /// <summary>
     /// GPUs for <paramref name="replicas"/> copies of this model on this machine, for whatever it has: the smallest tensor
@@ -366,13 +408,17 @@ public static class VllmAdvisor
             problems.Add(new("devices", $"{label} needs GPUs, and this machine's engines have none: run this model's GGUF on llama.cpp instead, or on an engine with GPUs.", true));
             return new ModelAdvice(profile, limits, null, null, problems, hw);
         }
-        var proposed = Propose(p, hw, replicas, utilization, context, m.KvType, others);
+        // GPUs that hold it at its share, else at the most that is free on them (its share is then refused, saying which fits).
+        var proposed = Propose(p, hw, replicas, utilization, context, m.KvType, others) ?? Propose(p, hw, replicas, MaxUtilization, context, m.KvType, others);
         var gpus = Hardware.ParseDevices(m.Devices) ?? proposed;
-        var recommended = Recommend(p, hw, replicas, utilization, others, proposed, m.KvType);
+        var shares = gpus is { Count: > 0 } && gpus.Count % replicas == 0 && gpus.All(i => devices.Any(d => d.Index == i))
+            ? Shares(p, [.. Groups(gpus, replicas).Select(g => (IReadOnlyList<GpuDevice>)[.. devices.Where(d => g.Contains(d.Index))])], context, m.KvType, others)
+            : null;
+        var recommended = Recommend(p, hw, replicas, utilization, others, proposed, m.KvType, shares);
         if (gpus is null)
         {
-            problems.Add(new("devices", $"Its weights ({G(p.WeightBytes)}) with room for a context do not fit {replicas} cop{(replicas == 1 ? "y" : "ies")} on this machine's GPUs at {utilization:0.00} of each"
-                + (others is { Count: > 0 } ? ", beside what is kept there" : "") + ". Choose a smaller quantisation, fewer copies, or a larger share.", true));
+            problems.Add(new("devices", $"Its weights ({G(p.WeightBytes)}) with room for a context do not fit {replicas} cop{(replicas == 1 ? "y" : "ies")} on this machine's GPUs at any share of each"
+                + (others is { Count: > 0 } ? ", beside what is kept there" : "") + ". Choose a smaller quantisation or fewer copies.", true));
             return new ModelAdvice(profile, limits, recommended, null, problems, hw);
         }
         var group = devices.Where(d => gpus.Contains(d.Index)).ToList();
@@ -421,12 +467,12 @@ public static class VllmAdvisor
             problems.Add(new("kvDiskGb", $"Its disk tier takes up to {disk * replicas} GB of the engine's /kvcache (KVCACHE_DIR): keep it on an NVMe drive with that room.", false));
         }
         var fit = room <= 0 ? "none" : "gpu";
-        var estimate = new MemoryEstimate(p.WeightBytes * replicas, room * replicas, Overhead * gpus.Count, share, budget,
+        var estimate = new MemoryEstimate(p.WeightBytes * replicas, room * replicas, OverheadOf(p, tp) * gpus.Count, share, budget,
             0, 0, ram, hw.RamForModels, p.Layers + 1, p.Layers, 0, p.Experts is > 0 ? p.Layers : 0, fit, p.Approximate);
         if (room <= 0)
         {
-            problems.Add(new("memory", $"Its weights take {G(p.WeightBytes / tp)} of each of its {tp} GPU{(tp == 1 ? "" : "s")}, more than the {utilization:0.00} share of each less {G(Overhead)} for {label} itself: it would not start. "
-                + "Give it more GPUs, a larger share, or a smaller quantisation.", true));
+            problems.Add(new("memory", $"Its weights take {G(p.WeightBytes / tp)} of each of its {tp} GPU{(tp == 1 ? "" : "s")}, more than the {utilization:0.00} share of each less {G(OverheadOf(p, tp))} for {label} itself: it would not start. "
+                + "Give it more GPUs, a larger share, or a smaller quantisation." + SharesFit(shares), true));
         }
         else
         {
@@ -437,7 +483,7 @@ public static class VllmAdvisor
             var need = ((long)context * perToken) + state;
             if (need > room)
             {
-                problems.Add(new("context", string.Create(inv, $"One answer at {context:N0} tokens needs {G(need)} of cache, and a copy has {G(room)}: at most {Math.Max(0, (room - state) / perToken):N0} tokens fit."), true));
+                problems.Add(new("context", string.Create(inv, $"One answer at {context:N0} tokens needs {G(need)} of cache, and a copy has {G(room)}: at most {Math.Max(0, (room - state) / perToken):N0} tokens fit.") + SharesFit(shares), true));
             }
             else if (((long)Math.Min(context, TypicalContext) * perToken + state) * m.Parallel > room)
             {
@@ -446,7 +492,7 @@ public static class VllmAdvisor
         }
         if (others is { Count: > 0 } && group.Any(d => (long)(d.Total * utilization) > d.Total - d.Reserved - Hardware.FitMargin - others.GetValueOrDefault(d.Index)))
         {
-            problems.Add(new("gpuMemoryUtilization", $"At {utilization:0.00} of each GPU it would take memory that is kept for others there: lower its share, or choose other GPUs.", true));
+            problems.Add(new("gpuMemoryUtilization", $"At {utilization:0.00} of each GPU it would take memory that is kept for others there: lower its share, or choose other GPUs." + SharesFit(shares), true));
         }
         if (ram > hw.RamForModels)
         {
@@ -459,17 +505,19 @@ public static class VllmAdvisor
 
     /// <summary>
     /// Settings to start from on this machine: the proposed GPUs, the longest context the config allows that fits, and answers
-    /// at once from the cache at a typical conversation (32K tokens), at least one and at most 256.
+    /// at once from the cache at a typical conversation (32K tokens), at least one and at most 256, at its share (at the smallest
+    /// that fits when its own does not); and the shares that fit its GPUs.
     /// </summary>
     private static ModelRecommendation? Recommend(VllmProfile p, Hardware hw, int replicas, double utilization, IReadOnlyDictionary<int, long>? others,
-        IReadOnlyList<int>? proposed, string kvType)
+        IReadOnlyList<int>? proposed, string kvType, (double Min, double Max)? shares)
     {
         if (proposed is null)
         {
             return null;
         }
         var devices = GpuPlan.DevicesOf(hw);
-        var room = Groups(proposed, replicas).Min(g => CacheRoom(p, [.. devices.Where(d => g.Contains(d.Index))], utilization, others));
+        var at = shares is var (min, max) && (utilization < min || utilization > max) ? min : utilization;
+        var room = Groups(proposed, replicas).Min(g => CacheRoom(p, [.. devices.Where(d => g.Contains(d.Index))], at, others));
         var perToken = PerToken(p, kvType);
         var state = p.StatePerSequence;
         var context = (int)Math.Min(p.TrainedContext, Math.Max(0, (room - state) / perToken));
@@ -477,7 +525,7 @@ public static class VllmAdvisor
         var maxOutput = ModelCatalog.DefaultMaxOutput(context);
         return new ModelRecommendation(context, maxOutput, parallel, kvType.StartsWith("fp8", StringComparison.Ordinal) ? kvType : "fp8", null, p.MtpLayers > 0, null, 3, null, true, true)
         {
-            Devices = string.Join(',', proposed),
+            Devices = string.Join(',', proposed), ShareMin = shares?.Min, ShareMax = shares?.Max,
         };
     }
 }

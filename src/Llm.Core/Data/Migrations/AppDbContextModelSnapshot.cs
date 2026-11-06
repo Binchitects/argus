@@ -6462,6 +6462,9 @@ namespace Llm.Core.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
+                    b.Property<string>("Left")
+                        .HasColumnType("jsonb");
+
                     b.Property<int?>("MaxOutput")
                         .HasColumnType("integer");
 

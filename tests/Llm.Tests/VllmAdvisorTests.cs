@@ -251,4 +251,39 @@ public sealed class VllmAdvisorTests
         m.MaxOutput = 24576;
         Assert.DoesNotContain(VllmAdvisor.Advise(m, flash, null).Problems, p => p.Field == "maxOutput");
     }
+
+    /// <summary>SmolLM2-135M-Instruct-Q2_K's GGUF file as vLLM reads it: 30 layers of 3 KV heads × 64, 88 MB of weights, 8,192 tokens.</summary>
+    private static readonly VllmProfile Smol = new("llama", "llama", 30, 30, 0, 0, 0, 9, 3, 64, null, 8192, 88L << 20, 30 * 3 * 128, 0, null, 0, false, "Q2_K", false, 1);
+
+    [Fact]
+    public void A_tiny_model_on_a_mostly_full_gpu_takes_a_small_share_and_is_told_which_shares_fit()
+    {
+        var hw = FakeHardware.One24;
+        LocalModel M(double? share) => new()
+        {
+            Name = "smol", File = "smol/SmolLM2-135M-Instruct-Q2_K.gguf", EngineKind = EngineKinds.Vllm, KvType = "fp8", Context = 8192, Parallel = 16, GpuMemoryUtilization = share,
+        };
+        var reserves = GpuPlan.Reserved(hw).SelectMany(r => r.PerGpu).ToDictionary(x => x.Key, x => x.Value);
+        // Its 88 MB and a whole context fit 0.03 of the card (737 MB), as vLLM ran it: not refused for the 3 GiB a large model needs beside its weights.
+        Assert.Null(VllmAdvisor.Advise(M(0.03), Smol, hw, reserves).FirstError);
+        Assert.DoesNotContain(ModelAdvisor.KindProblems(M(0.03)), p => p.Error);
+        Assert.NotNull(VllmAdvisor.Advise(M(0.02), Smol, hw, reserves).FirstError);
+        // The default 0.90 takes what the picture server keeps: refused, saying which shares fit here.
+        var held = VllmAdvisor.Advise(M(null), Smol, hw, reserves);
+        Assert.Equal("gpuMemoryUtilization", held.FirstError!.Field);
+        Assert.Contains("0.03 to 0.87 fits here", held.FirstError.Message, StringComparison.Ordinal);
+        Assert.Equal((0.03, 0.87), (held.Recommended!.ShareMin, held.Recommended.ShareMax));
+        // Beside a model kept on 0.75 of the card, 3 GiB is left: from 0.03 to 0.12, and nothing larger is offered.
+        var others = GpuPlan.Share("big", hw, [0], 0.75).PerGpu.Concat(reserves).GroupBy(x => x.Key).ToDictionary(g => g.Key, g => g.Sum(x => x.Value));
+        var beside = VllmAdvisor.Advise(M(0.22), Smol, hw, others);
+        Assert.Contains("0.03 to 0.12 fits here", beside.FirstError!.Message, StringComparison.Ordinal);
+        Assert.Equal((0.03, 0.12), (beside.Recommended!.ShareMin, beside.Recommended.ShareMax));
+        Assert.Equal("0", beside.Recommended.Devices);
+        Assert.Null(VllmAdvisor.Advise(M(0.12), Smol, hw, others).FirstError);
+        // Too little left for even a whole context: no share is offered.
+        var full = GpuPlan.Share("big", hw, [0], 0.86).PerGpu.Concat(reserves).GroupBy(x => x.Key).ToDictionary(g => g.Key, g => g.Sum(x => x.Value));
+        var none = VllmAdvisor.Advise(M(0.03), Smol, hw, full);
+        Assert.NotNull(none.FirstError);
+        Assert.Null(none.Recommended?.ShareMin);
+    }
 }

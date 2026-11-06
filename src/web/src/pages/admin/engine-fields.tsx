@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Moon } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -99,7 +99,16 @@ export function GpuChooser({ gpus, value, onChange, error, hint }: { gpus: Engin
 
 interface VllmAdvice {
   limits: { context: { min: number; max: number }; maxOutput: { min: number; max: number }; parallel: { min: number; max: number } } | null
-  recommended: { context: number; maxOutput: number; parallel: number; kvType: string; devices: string | null } | null
+  recommended: {
+    context: number
+    maxOutput: number
+    parallel: number
+    kvType: string
+    devices: string | null
+    /** The shares of each GPU that hold it there: the smallest leaves room for a whole context, the largest fits beside what is kept. */
+    shareMin?: number | null
+    shareMax?: number | null
+  } | null
   estimate: { gpuWeights: number; gpuCache: number; gpuTotal: number; gpuBudget: number | null; ramTotal: number; fit: string; approximate: boolean } | null
   problems: { field: string; message: string; error: boolean }[]
 }
@@ -127,22 +136,26 @@ interface VllmForm {
 /** A file's model for its name: a snapshot's folder without its revision, a GGUF file without its split part or extension. */
 const lastPart = (path: string) => (path.split('/').pop() ?? path).replace(/@.*$/, '').replace(/(-\d{5}-of-\d{5})?\.gguf$/i, '')
 
-function start(saved: EngineModel | null, file: string): VllmForm {
-  // A llama.cpp model being moved here takes its own defaults for what llama.cpp counts otherwise: its answers at once,
-  // and the GPUs proposed for this machine (its draft head is a GGUF file, not a snapshot).
+function start(saved: EngineModel | null, file: string, kind: VllmEngine['kind']): VllmForm {
+  // A llama.cpp model moved back here takes up its own settings of this kind again (its answers at once, its GPUs, share,
+  // longest answer...); one that never ran here takes this kind's defaults for what llama.cpp counts otherwise: 16 answers at
+  // once, and the GPUs proposed for this machine (its draft head is a GGUF file, not a snapshot).
   const moving = !!saved && !serverPerModel(saved.engineKind)
+  const back = moving && saved?.left?.engineKind === kind ? saved.left : null
+  if (back) saved = { ...saved!, ...back, name: saved!.name, file: saved!.file, context: saved!.context, engineKind: kind }
+  const fresh = moving && !back
   return {
     name: saved?.name ?? lastPart(file),
-    devices: moving ? '' : (saved?.devices ?? ''),
+    devices: fresh ? '' : (saved?.devices ?? ''),
     replicas: String(saved?.replicas ?? 1),
     gpuMemoryUtilization: saved?.gpuMemoryUtilization ? String(saved.gpuMemoryUtilization) : '',
     quantization: saved?.quantization ?? '',
     kvType: saved?.kvType && ['fp8', 'auto', 'fp8_e4m3', 'fp8_e5m2'].includes(saved.kvType) ? saved.kvType : 'fp8',
     context: String(saved?.context ?? 32768),
     maxOutput: saved?.maxOutput ? String(saved.maxOutput) : '',
-    parallel: String(moving ? 16 : (saved?.parallel ?? 16)),
-    specDecode: moving ? '' : (saved?.specDecode ?? ''),
-    draftHead: moving ? '' : (saved?.draftHead ?? ''),
+    parallel: String(fresh ? 16 : (saved?.parallel ?? 16)),
+    specDecode: fresh ? '' : (saved?.specDecode ?? ''),
+    draftHead: fresh ? '' : (saved?.draftHead ?? ''),
     kvCpuGb: saved?.kvCpuGb ? String(saved.kvCpuGb) : '',
     kvTier: saved?.kvTier ?? '',
     kvDiskGb: saved?.kvDiskGb ? String(saved.kvDiskGb) : '',
@@ -221,7 +234,7 @@ export function VllmModelSection({
   const snapshots = useSnapshots()
   const { kind, name } = engine
   const label = engineLabel(kind)
-  const [typed, setForm] = useState(() => start(saved, file))
+  const [typed, setForm] = useState(() => start(saved, file, kind))
   const form = allowed(typed, kind)
   const [error, setError] = useState<string | null>(null)
   const set = <K extends keyof VllmForm>(k: K, v: VllmForm[K]) => setForm((f) => ({ ...f, [k]: v }))
@@ -254,6 +267,15 @@ export function VllmModelSection({
   const shot = snapshots.data?.find((s) => s.path === file)
   const e = a?.estimate
   const r = a?.recommended
+  const shares = r?.shareMin != null && r.shareMax != null ? `${r.shareMin.toFixed(2)} to ${r.shareMax.toFixed(2)}` : null
+  // A llama.cpp model moved here with no share of its own, where the default 0.90 does not fit: the smallest share that does.
+  const shareFromAdvice = useRef(!!saved && !serverPerModel(saved.engineKind) && !typed.gpuMemoryUtilization)
+  const smallest = (errors.gpuMemoryUtilization || errors.devices) && typed.gpuMemoryUtilization === '' ? r?.shareMin : undefined
+  useEffect(() => {
+    if (!shareFromAdvice.current || !smallest) return
+    shareFromAdvice.current = false
+    setForm((f) => ({ ...f, gpuMemoryUtilization: smallest.toFixed(2) }))
+  }, [smallest])
   return (
     <form
       className="grid min-w-0 gap-5"
@@ -294,7 +316,11 @@ export function VllmModelSection({
         <Field label="Copies" hint="Each on its share of the GPUs; a conversation stays on one." error={errors.replicas}>
           <Input inputMode="numeric" value={form.replicas} onChange={(ev) => set('replicas', ev.target.value)} />
         </Field>
-        <Field label="Share of each GPU" hint={`0.10 to 0.98; empty: 0.90 (${kind === 'sglang' ? '--mem-fraction-static' : '--gpu-memory-utilization'}).`} error={errors.gpuMemoryUtilization}>
+        <Field
+          label="Share of each GPU"
+          hint={`${shares ? `From ${shares} here: the smallest holds a whole context, a larger one more answers at once.` : '0.01 to 0.98.'} Empty: 0.90 (${kind === 'sglang' ? '--mem-fraction-static' : '--gpu-memory-utilization'}).`}
+          error={errors.gpuMemoryUtilization}
+        >
           <Input inputMode="decimal" value={form.gpuMemoryUtilization} onChange={(ev) => set('gpuMemoryUtilization', ev.target.value)} placeholder="0.90" />
         </Field>
         <Field label="Quantisation" hint={gguf ? 'Empty: a GGUF file is quantised as it is.' : 'Empty: what its config says.'} error={errors.quantization}>
@@ -309,7 +335,11 @@ export function VllmModelSection({
         </Field>
         <Field
           label="Longest answer"
-          hint={`${a?.limits ? `${tokens(a.limits.maxOutput.min)} to ${tokens(a.limits.maxOutput.max)}: the context less room for a prompt. ` : ''}Empty: ${tokens(defaultMaxOutput(Number(form.context) || 32768))}.`}
+          hint={
+            // A move cuts one its window here does not hold, and says so.
+            a?.problems.find((p) => !p.error && p.field === 'maxOutput')?.message ??
+            `${a?.limits ? `${tokens(a.limits.maxOutput.min)} to ${tokens(a.limits.maxOutput.max)}: the context less room for a prompt. ` : ''}Empty: ${tokens(defaultMaxOutput(Number(form.context) || 32768))}.`
+          }
           error={errors.maxOutput}
         >
           <Input inputMode="numeric" value={form.maxOutput} placeholder={String(defaultMaxOutput(Number(form.context) || 32768))} onChange={(ev) => set('maxOutput', ev.target.value)} />
@@ -400,7 +430,7 @@ export function VllmModelSection({
         </Alert>
       )}
       {(a?.problems ?? [])
-        .filter((p) => !p.error)
+        .filter((p) => !p.error && p.field !== 'maxOutput')
         .map((p) => (
           <Alert key={p.message} variant="warning">
             {p.message}
@@ -438,7 +468,7 @@ export function MovesAlert({ name, from: old, to: next }: { name: string; from: 
     <Alert title={`Moves ${name} to ${next}`}>
       It keeps its name, who may use it, its prices and sampling. Its answers in flight end on {old}; new requests wait for it on {next}, where it loads
       at once on other GPUs, or once {old} has let it go on the same ones. Should it not start there, it stays on {old} and says why. What only {old} has is
-      not carried over.
+      not carried over: it is kept, and a move back to {old} takes it up again.
     </Alert>
   )
 }
