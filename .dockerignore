@@ -38,6 +38,8 @@ tests/deploy/
 **/obj/
 dist/
 native/
+# sqlite-vec as tools/fetch-sqlite-vec.sh fetched and checked it (Argus takes it in; the script checks it again).
+!native/runtimes/
 **/node_modules/
 src/argus-web/dist/
 src/argus-web/test-results/

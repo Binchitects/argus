@@ -338,6 +338,10 @@ def build_images(engine: Engine, profiles: list[str], pull: bool = True, service
         built = [s for s in names if s in svcs and svcs[s].get("build")]
         others = [s for s in names if s in svcs and not svcs[s].get("build")]
         step(f"the release's own images: {len(built)} built ({engine.name} compose build)")
+        if "argus" in built:
+            # Argus's sqlite-vec, fetched here and checked against its pinned SHA-256: the image takes this copy, so its
+            # build reads nothing from PyPI (a build container over a slow link failed it, curl 56).
+            run([str(ROOT / "tools" / "fetch-sqlite-vec.sh"), "linux-arm64" if platform.machine() in ("aarch64", "arm64") else "linux-x64"])
         if built:
             try:
                 compose.run("build", *built)

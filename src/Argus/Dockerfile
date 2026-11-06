@@ -32,7 +32,9 @@ RUN apt-get update \
 WORKDIR /src
 COPY tools/fetch-sqlite-vec.sh tools/
 # The sqlite-vec release, from its PyPI wheel, checked against a pinned SHA-256: before
-# VERSION and the sources, so a release does not fetch it again.
+# VERSION and the sources, so a release does not fetch it again. arenactl build fetches it on the
+# host first (native/runtimes): the script finds it there and reads nothing from PyPI.
+COPY native/runtimes/ native/runtimes/
 RUN case "$(dpkg --print-architecture)" in \
       amd64) rid=linux-x64 ;; arm64) rid=linux-arm64 ;; *) echo "unsupported arch" >&2; exit 1 ;; \
     esac \
