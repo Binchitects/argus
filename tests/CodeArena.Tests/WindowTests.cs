@@ -27,7 +27,8 @@ public sealed class WindowTests : IDisposable
         var step = 0;
         _gateway.Answer = _ => ++step switch
         {
-            1 => Reply.Call(("read_file", """{"path":"big.txt"}""")),
+            // Read whole from its first line (without a range, a large file gives its outline).
+            1 => Reply.Call(("read_file", """{"path":"big.txt","offset":1}""")),
             2 => Reply.Call(("read_result", """{"id":"r1","find":"line 1200 of"}""")),
             3 => Reply.Call(("read_result", """{"id":"r1","from":700,"lines":2}""")),
             _ => Reply.Say("read it"),

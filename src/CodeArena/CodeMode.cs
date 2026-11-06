@@ -16,23 +16,41 @@ internal sealed class ToolBridge : IAsyncDisposable
     private readonly Task _loop;
     private readonly Func<string, JsonObject, CancellationToken, Task<JsonObject>> _answer;
 
+    /// <summary>Where a program connects (ARENA_SOCKET): the socket's path, or tcp:127.0.0.1:port.</summary>
     public string Path { get; }
+
+    /// <summary>On TCP, what a program says first (ARENA_TOKEN), so no other program on the machine calls the tools; null on a Unix socket.</summary>
+    public string? Token { get; }
 
     /// <summary>The calls answered, by name, in order.</summary>
     public List<string> Calls { get; } = [];
 
-    public ToolBridge(string path, Func<string, JsonObject, CancellationToken, Task<JsonObject>> answer)
+    /// <summary>
+    /// A bridge at <paramref name="path"/>, a Unix socket only its owner may open; or, with <paramref name="path"/> null,
+    /// on TCP at 127.0.0.1 with a token (Python on Windows has no Unix sockets, and a socket's path has about 100 characters).
+    /// </summary>
+    public ToolBridge(string? path, Func<string, JsonObject, CancellationToken, Task<JsonObject>> answer)
     {
-        Path = path;
         _answer = answer;
-        File.Delete(path);
-        _listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
-        _listener.Bind(new UnixDomainSocketEndPoint(path));
-        _listener.Listen(4);
-        if (!OperatingSystem.IsWindows())
+        if (path is null)
         {
-            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            _listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            _listener.Bind(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 0));
+            Path = $"tcp:127.0.0.1:{((System.Net.IPEndPoint)_listener.LocalEndPoint!).Port}";
+            Token = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24));
         }
+        else
+        {
+            Path = path;
+            File.Delete(path);
+            _listener = new Socket(AddressFamily.Unix, SocketType.Stream, ProtocolType.Unspecified);
+            _listener.Bind(new UnixDomainSocketEndPoint(path));
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+        }
+        _listener.Listen(4);
         _loop = Task.Run(LoopAsync);
     }
 
@@ -62,6 +80,11 @@ internal sealed class ToolBridge : IAsyncDisposable
         {
             try
             {
+                // On TCP the token comes first: a connection without it is not the program's.
+                if (Token is not null && await reader.ReadLineAsync(_stop.Token) != Token)
+                {
+                    return;
+                }
                 while (await reader.ReadLineAsync(_stop.Token) is { } line)
                 {
                     JsonObject answer;
@@ -91,7 +114,10 @@ internal sealed class ToolBridge : IAsyncDisposable
         await _stop.CancelAsync();
         _listener.Dispose();
         await _loop;
-        File.Delete(Path);
+        if (Token is null)
+        {
+            File.Delete(Path);
+        }
         _stop.Dispose();
     }
 }
@@ -167,97 +193,167 @@ internal sealed partial class Runtime
     {
         Name = "run_code",
         Kind = ToolKind.Shell,
-        Description = "Run a Python program that calls this session's tools as functions, and get what it prints. In it, `import arena`: " +
-            "arena.tools.search(\"words\") lists the functions that match (arena.local.read_file, arena.argus.find_symbol, arena.<server>.<tool>), " +
-            "help(...) tells one's parameters, and each call (keyword arguments) returns the tool's result, a dict or a list when it is JSON; a refused " +
-            $"call raises arena.ToolError. Each call is checked as a direct one is (the mode, the rules). At most {MostCodeCalls} calls; it runs in the " +
-            "working directory, in the session's sandbox. Use it for many calls whose results you only need to filter or join; print only what you need.",
+        Description = "Run Python in this chat's own interpreter, as a notebook does: variables, imports and data stay from one call to the next " +
+            "(fresh: true starts anew). It is the project's virtual environment when it has one (.venv, venv), in the working directory and the " +
+            "session's sandbox. What it prints comes back, and the value of a last line that is an expression, an error with its line, and the " +
+            "plots it makes (matplotlib: they are shown to you and kept in .code-arena/plots). In it, `import arena` calls this session's tools as " +
+            "functions: arena.tools.search(\"words\") lists them (arena.local.read_file, arena.argus.find_symbol, arena.<server>.<tool>), help(...) " +
+            "tells one's parameters, and each call (keyword arguments) returns the tool's result, a dict or a list when it is JSON; a refused call " +
+            $"raises arena.ToolError. Each call is checked as a direct one is (the mode, the rules); at most {MostCodeCalls} in one run. Use it to " +
+            "compute, to explore data, and for many tool calls whose results you only filter or join; print only what you need.",
         Parameters = LocalTools.Schema("""
             {"type":"object","properties":{
-              "code":{"type":"string","description":"The whole program; print() what you need to read."},
-              "timeout_seconds":{"type":"integer","description":"Stop it after this long (default 120, at most 600)."}},
+              "code":{"type":"string","description":"The code to run; print() what you need, or end with the expression to show."},
+              "fresh":{"type":"boolean","description":"Start a new interpreter first: what the earlier calls made is gone."},
+              "timeout_seconds":{"type":"integer","description":"Stop it after this long (default 120, at most 600): the interpreter is stopped, and its variables with it."}},
              "required":["code"]}
             """),
-        Summary = a => Fmt.OneLine(a.Str("code"), 80),
+        Summary = a => (a.Bool("fresh") == true ? "(fresh) " : "") + Fmt.OneLine(a.Str("code"), 80),
         Run = rt.RunCodeAsync,
     };
+
+    /// <summary>This chat's interpreter, and the bridge its programs call the tools through; started at the first run_code.</summary>
+    private PythonSession? _python;
+    private ToolBridge? _pythonBridge;
+
+    /// <summary>The call running in the interpreter now: its context answers the tools its program calls, and its count of them.</summary>
+    private (ToolContext Context, List<ToolDef> Tools, int Calls)? _pythonCall;
+
+    private async Task StopPythonAsync()
+    {
+        // The bridge first: its socket is in the interpreter's folder, which goes with it.
+        if (_pythonBridge is { } bridge)
+        {
+            await bridge.DisposeAsync();
+        }
+        if (_python is { } python)
+        {
+            await python.DisposeAsync();
+        }
+        (_python, _pythonBridge) = (null, null);
+    }
 
     private async Task<ToolResult> RunCodeAsync(JsonObject a, ToolContext c, CancellationToken ct)
     {
         var code = a.Str("code") is { Length: > 0 } given ? given : throw new ToolError("code is required.");
-        var id = Guid.NewGuid().ToString("N")[..8];
-        var dir = Path.Combine(Workspace.Root, ".code-arena", "r", id);
-        Directory.CreateDirectory(Path.Combine(dir, "arena"));
-        var socket = Path.Combine(dir, "s");
-        if (socket.Length > 100)
+        var chat = Session?.Id ?? "";
+        string? anew = null;
+        if (_python is { } running && (a.Bool("fresh") == true || !running.Alive || running.Chat != chat))
         {
-            throw new ToolError("This folder's path is too long for code mode's socket (Unix sockets take about 100 characters): use run_shell, or tools one by one.");
+            anew = a.Bool("fresh") == true || running.Chat != chat ? "" : $"(The earlier interpreter had ended{(running.ExitCode is { } was ? $" with exit code {was}" : "")}: this is a new one, and what the earlier calls made is gone.)\n";
+            await StopPythonAsync();
         }
-        try
+        var callable = CodeTools().ToList();
+        if (_python is null)
         {
-            await File.WriteAllTextAsync(Path.Combine(dir, "main.py"), code, ct);
+            var dir = Path.Combine(Workspace.Root, ".code-arena", "py-" + Guid.NewGuid().ToString("N")[..8]);
+            Directory.CreateDirectory(Path.Combine(dir, "arena"));
             using (var module = typeof(Runtime).Assembly.GetManifestResourceStream("arena/__init__.py")!)
             await using (var file = File.Create(Path.Combine(dir, "arena", "__init__.py")))
             {
                 await module.CopyToAsync(file, ct);
             }
-            var callable = CodeTools().ToList();
             var definitions = new JsonArray([.. callable.Select(t => (JsonNode)new JsonObject
             {
                 ["name"] = t.Name, ["group"] = t.Server ?? "local", ["description"] = t.Description, ["parameters"] = t.Parameters.DeepClone(),
             })]);
             await File.WriteAllTextAsync(Path.Combine(dir, "tools.json"), definitions.ToJsonString(), ct);
-            var calls = 0;
-            await using var bridge = new ToolBridge(socket, async (name, args, token) =>
+            var socket = Path.Combine(dir, "s");
+            // Python has no Unix sockets on Windows, and a socket's path takes about 100 characters: TCP with a token then.
+            _pythonBridge = new ToolBridge(OperatingSystem.IsWindows() || socket.Length > 100 ? null : socket, AnswerFromCode);
+            var env = new Dictionary<string, string>
             {
-                if (++calls > MostCodeCalls)
-                {
-                    return new JsonObject { ["ok"] = false, ["error"] = $"A program makes at most {MostCodeCalls} calls." };
-                }
-                if (callable.FirstOrDefault(t => t.Name == name) is not { } tool)
-                {
-                    return new JsonObject { ["ok"] = false, ["error"] = $"There is no tool {name} to call from code (arena.tools.search finds them)." };
-                }
-                if (await Permissions.CheckAsync(tool, args, token) is { } refused)
-                {
-                    return new JsonObject { ["ok"] = false, ["error"] = refused };
-                }
-                c.Ui.Line(c.Ui.Dim($"  ↳ {tool.Name} {Fmt.OneLine(tool.Summary?.Invoke(args), 70)}"));
-                try
-                {
-                    var result = await tool.Run(args, c, token);
-                    return result.Error ? new JsonObject { ["ok"] = false, ["error"] = result.Text } : new JsonObject { ["ok"] = true, ["result"] = result.Text };
-                }
-                catch (ToolError e)
-                {
-                    return new JsonObject { ["ok"] = false, ["error"] = e.Message };
-                }
-            });
-            var relative = Path.GetRelativePath(Workspace.Root, dir).Replace('\\', '/');
-            var python = Config.Python ?? (OperatingSystem.IsWindows() ? "python" : "python3");
-            var psi = LocalTools.ShellCommand($"{python} {relative}/main.py", c);
-            psi.Environment["ARENA_SOCKET"] = socket;
-            psi.Environment["ARENA_TOOLS"] = Path.Combine(dir, "tools.json");
-            psi.Environment["PYTHONPATH"] = dir + (Environment.GetEnvironmentVariable("PYTHONPATH") is { Length: > 0 } more ? Path.PathSeparator + more : "");
-            var timeout = TimeSpan.FromSeconds(Math.Clamp(a.Int("timeout_seconds") ?? 120, 1, 600));
-            var run = await Proc.RunAsync(psi, timeout, ct);
-            var status = run.TimedOut ? $"timed out after {timeout.TotalSeconds:0} s (stopped)" : $"exit code {run.ExitCode}";
-            var made = bridge.Calls.GroupBy(n => n).Select(g => g.Count() == 1 ? g.Key : $"{g.Key} ×{g.Count()}").ToList();
-            var text = (run.Output.Length > 0 ? run.Output.TrimEnd() + "\n" : "(no output)\n") + $"[{status}" + (made.Count > 0 ? $"; calls: {string.Join(", ", made)}" : "") + "]";
-            return new ToolResult(text, run.ExitCode != 0 || run.TimedOut)
-            {
-                Display = c.Ui.Dim($"{bridge.Calls.Count} call{(bridge.Calls.Count == 1 ? "" : "s")} · {status}"),
+                ["ARENA_SOCKET"] = _pythonBridge.Path,
+                ["ARENA_TOOLS"] = Path.Combine(dir, "tools.json"),
+                ["PYTHONPATH"] = dir + (Environment.GetEnvironmentVariable("PYTHONPATH") is { Length: > 0 } more ? Path.PathSeparator + more : ""),
             };
+            if (_pythonBridge.Token is { } token)
+            {
+                env["ARENA_TOKEN"] = token;
+            }
+            try
+            {
+                _python = PythonSession.Start(PythonSession.Find(Config.Python, Workspace.Root, Env.Env), dir, Workspace.Root, chat,
+                    Path.Combine(Workspace.Root, ".code-arena", "plots"), env, c.Sandbox.Wrap);
+            }
+            catch
+            {
+                await StopPythonAsync();
+                throw;
+            }
+        }
+        var timeout = TimeSpan.FromSeconds(Math.Clamp(a.Int("timeout_seconds") ?? 120, 1, 600));
+        var made = _pythonBridge!.Calls.Count;
+        _pythonCall = (c, callable, 0);
+        PythonSession.Ran run;
+        try
+        {
+            run = await _python.RunAsync(code, timeout, Math.Max(4_000, (c.ResultChars?.Invoke() ?? 30_000) - 1_000), ct);
+        }
+        catch (OperationCanceledException)
+        {
+            await StopPythonAsync();
+            throw;
         }
         finally
         {
-            try
-            {
-                Directory.Delete(dir, recursive: true);
-            }
-            catch (IOException)
-            {
-            }
+            _pythonCall = null;
+        }
+        var called = _pythonBridge.Calls.Skip(made).ToList();
+        var calls = called.GroupBy(n => n).Select(g => g.Count() == 1 ? g.Key : $"{g.Key} ×{g.Count()}").ToList();
+        var status = run.TimedOut ? $"timed out after {timeout.TotalSeconds:0} s: the interpreter was stopped, and its variables with it"
+            : run.Ended ? $"the interpreter ended{(_python.ExitCode is { } x ? $" with exit code {x}" : "")}: the next call starts a new one"
+            : run.Exit is { } exit ? $"exit code {exit} (sys.exit: the interpreter goes on, its variables kept)" : run.Ok ? "ok" : "error";
+        var plots = run.Plots.Where(File.Exists).ToList();
+        var shown = plots.Select(p => c.Workspace.Show(p)).ToList();
+        var text = (anew ?? "") + (run.Output.Length > 0 ? run.Output.TrimEnd() + "\n" : "(no output)\n") +
+            (shown.Count > 0 ? $"[{(shown.Count == 1 ? "plot" : "plots")} kept as {string.Join(", ", shown)}: shown to you below]\n" : "") +
+            $"[{status}" + (calls.Count > 0 ? $"; calls: {string.Join(", ", calls)}" : "") + "]";
+        if (run.Ended)
+        {
+            await StopPythonAsync();
+        }
+        JsonArray? pictures = plots.Count == 0 ? null : [.. plots.Take(4).Select(p => (JsonNode)new JsonObject
+        {
+            ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = "data:image/png;base64," + Convert.ToBase64String(File.ReadAllBytes(p)) },
+        })];
+        return new ToolResult(text, !run.Ok)
+        {
+            Display = c.Ui.Dim($"{called.Count} tool call{(called.Count == 1 ? "" : "s")}{(shown.Count > 0 ? $" · {shown.Count} plot{(shown.Count == 1 ? "" : "s")}" : "")} · {status}"),
+            Pictures = pictures,
+        };
+    }
+
+    /// <summary>A tool a program in the interpreter called: checked as a direct call is, run with the context of the call running.</summary>
+    private async Task<JsonObject> AnswerFromCode(string name, JsonObject args, CancellationToken token)
+    {
+        if (_pythonCall is not { } call)
+        {
+            return new JsonObject { ["ok"] = false, ["error"] = "The tools are called only while run_code runs (not from a thread left running after it)." };
+        }
+        if (call.Calls >= MostCodeCalls)
+        {
+            return new JsonObject { ["ok"] = false, ["error"] = $"A run makes at most {MostCodeCalls} calls." };
+        }
+        _pythonCall = call with { Calls = call.Calls + 1 };
+        if (call.Tools.FirstOrDefault(t => t.Name == name) is not { } tool)
+        {
+            return new JsonObject { ["ok"] = false, ["error"] = $"There is no tool {name} to call from code (arena.tools.search finds them)." };
+        }
+        if (await Permissions.CheckAsync(tool, args, token) is { } refused)
+        {
+            return new JsonObject { ["ok"] = false, ["error"] = refused };
+        }
+        var c = call.Context;
+        c.Ui.Line(c.Ui.Dim($"  ↳ {tool.Name} {Fmt.OneLine(tool.Summary?.Invoke(args), 70)}"));
+        try
+        {
+            var result = await tool.Run(args, c, token);
+            return result.Error ? new JsonObject { ["ok"] = false, ["error"] = result.Text } : new JsonObject { ["ok"] = true, ["result"] = result.Text };
+        }
+        catch (ToolError e)
+        {
+            return new JsonObject { ["ok"] = false, ["error"] = e.Message };
         }
     }
 }

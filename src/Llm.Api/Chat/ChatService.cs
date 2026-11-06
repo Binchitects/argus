@@ -1637,6 +1637,9 @@ public sealed partial class ChatService(
             ? $"\n\n[file attached: {f.FileName} (not text{(here ? "; run_python can open it" : "")})]"
             : $"\n\n<attachment name=\"{f.FileName.Replace("\"", "'", StringComparison.Ordinal)}\">\n{passages ?? Inline(f, budget, canReadFiles)}\n</attachment>";
 
+    /// <summary>The most of a long file the question carries when the model can read the rest: its start and its outline.</summary>
+    public const int LongFileChars = 8_000;
+
     public static string Inline(ChatAttachment f, int budget, bool canReadFiles)
     {
         var cutWhenAttached = f.Truncated ? " (the file itself was longer: it was cut when it was attached)" : "";
@@ -1644,14 +1647,19 @@ public sealed partial class ChatService(
         {
             return f.Truncated ? f.Text + $"\n[end of what was kept{cutWhenAttached}]" : f.Text;
         }
-        var end = f.Text.LastIndexOf('\n', Math.Max(0, budget - 1));
-        var shown = f.Text[..(end > budget / 2 ? end : budget)];
+        // A file the model can read in parts goes as its outline and its start, at most LongFileChars: it reads the part it
+        // needs. One it cannot read on goes as much as the budget holds.
+        var outline = canReadFiles ? FileOutline.Render(FileOutline.Sections(f.FileName, f.Text), Math.Min(budget, LongFileChars) / 2) : "";
+        var room = canReadFiles ? Math.Min(budget, LongFileChars) - outline.Length : budget;
+        var end = f.Text.LastIndexOf('\n', Math.Max(0, room - 1));
+        var shown = f.Text[..(end > room / 2 ? end : room)];
         var shownLines = shown.Count(c => c == '\n') + 1;
         var totalLines = f.Text.Count(c => c == '\n') + 1;
         var how = canReadFiles
-            ? $"Read on with read_file (file \"{f.FileName}\", from_line {shownLines + 1}), or find parts with search_file."
+            ? $"Read on with read_file (file \"{f.FileName}\", from_line {shownLines + 1}{(outline.Length > 0 ? ", or a section of the outline by its name" : "")}), or find parts with search_file."
             : "The rest is not included here.";
-        return shown + $"\n[This file goes on: lines 1 to {shownLines} of {totalLines} are above ({shown.Length:N0} of {f.Text.Length:N0} characters){cutWhenAttached}. {how}]";
+        return shown + $"\n[This file goes on: lines 1 to {shownLines} of {totalLines} are above ({shown.Length:N0} of {f.Text.Length:N0} characters){cutWhenAttached}. {how}]" +
+            (outline.Length > 0 ? $"\n[Its outline (the sections and their lines):\n{outline.TrimEnd('\n')}]" : "");
     }
 
     /// <summary>

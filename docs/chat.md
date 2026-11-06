@@ -460,10 +460,13 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     first letter acts on qubit 0.
   - **Canvas**: documents and code beside the chat, which you and the model
     both edit (see **Canvas** below).
-  - **Reading files**: a long attachment goes into the question only up to a
-    budget (30,000 characters), with a note saying how long it really is; the
-    model reads on by lines, or searches it, when it needs more. Files a tool
-    made are read the same way. With the embedder, a long attachment goes in
+  - **Reading files**: an attachment longer than a budget (30,000
+    characters) goes into the question as its start and its outline (its
+    headings, a PDF's pages, code's functions and classes, each with its
+    lines), at most 8,000 characters, with a note saying how long it really
+    is; the model reads the section it needs by name (`read_file` with
+    `section`), reads on by lines, or searches it. `outline_file` gives a
+    file's whole outline. Files a tool made are read the same way. With the embedder, a long attachment goes in
     as its start, and the passages that match each question come with the
     question, with the file's name and lines (below).
   - **Web** (off until an admin turns it on): search (the stack's SearXNG)
@@ -682,7 +685,7 @@ With the embedder (the `embed` module), files are read by their passages
 instead of their first part ([knowledge.md](knowledge.md#long-files-and-assistants)):
 
 - An attachment longer than **Text of an attachment in the question** goes in
-  as its first 2,000 characters and a note; with each question come the
+  as its first 2,000 characters, its outline and a note; with each question come the
   passages of the chat's long files that match it, best first, each with the
   file's name, its lines and its section, up to **Passages of long files per
   question** (12,000 characters).

@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 namespace CodeArena;
 
 /// <summary>The tools on the person's own machine: files, search, the shell, git, the to-do list and sub-agents.</summary>
-internal static class LocalTools
+internal static partial class LocalTools
 {
     public const int MaxLines = 2000;
     private const int MaxLineChars = 2000;
@@ -18,15 +18,17 @@ internal static class LocalTools
         {
             Name = "read_file",
             Kind = ToolKind.Read,
-            Description = "Read a text file, with line numbers. Up to 2000 lines at a time: give offset (the first line, from 1) and limit for the rest of a long file.",
+            Description = $"Read a text file, with line numbers. A large file (over {FileOutline.LargeLines} lines or {FileOutline.LargeChars / 1000}K characters) read without a range gives its outline " +
+                          "(its symbols with their lines) and first lines: then read the part you need, by offset and limit (up to 2000 lines at a time) or by a symbol's name.",
             Parameters = Schema("""
                 {"type":"object","properties":{
                   "path":{"type":"string","description":"The file, relative to the working directory or absolute."},
                   "offset":{"type":"integer","description":"The first line to read, from 1."},
-                  "limit":{"type":"integer","description":"How many lines to read (at most 2000)."}},
+                  "limit":{"type":"integer","description":"How many lines to read (at most 2000)."},
+                  "symbol":{"type":"string","description":"Instead of a range: a function, class or method by name (Type.Member, or as the outline has it): its lines."}},
                  "required":["path"]}
                 """),
-            Summary = a => a.Str("path") + (a.Int("offset") is { } o ? $":{o}" : ""),
+            Summary = a => a.Str("path") + (a.Str("symbol") is { Length: > 0 } s ? $" {s}" : a.Int("offset") is { } o ? $":{o}" : ""),
             Run = ReadFile,
         },
         new()
@@ -269,9 +271,40 @@ internal static class LocalTools
         {
             return new ToolResult($"{show} is a binary file ({Files.Size(new FileInfo(path).Length)}): not shown.");
         }
-        var offset = Math.Max(1, a.Int("offset") ?? 1);
-        var limit = Math.Clamp(a.Int("limit") ?? MaxLines, 1, MaxLines);
-        var sb = new StringBuilder();
+        var (from, count, sb) = (a.Int("offset"), a.Int("limit"), new StringBuilder());
+        var size = new FileInfo(path).Length;
+        if (a.Str("symbol") is { Length: > 0 } symbol)
+        {
+            var text = Files.ReadText(path).Text;
+            var found = FileOutline.Find(FileOutline.Symbols(show, text), symbol);
+            if (found.Count != 1)
+            {
+                throw new ToolError(found.Count == 0
+                    ? $"{show} has no symbol {symbol}: read_file without a range gives its outline, or grep finds it by text."
+                    : $"{symbol} is {found.Count} symbols in {show}: name one, or read its lines with offset and limit.\n" +
+                      string.Join('\n', found.Take(20).Select(s => $"- {s.Qualified} ({s.Kind}) [{s.Start}-{s.End}]")));
+            }
+            var s = found[0];
+            (from, count) = (s.Start, Math.Min(MaxLines, s.End - s.Start + 1));
+            sb.Append($"{s.Qualified} ({s.Kind}), lines {s.Start}-{s.End}:\n");
+        }
+        else if (from is null && count is null && size > FileOutline.LargeChars / 2)
+        {
+            // Large: its outline, and the model reads the part it needs.
+            var readOn = $"Read a part with offset and limit (at most {MaxLines} lines at a time), or a symbol by its name with symbol; grep finds lines by text.";
+            if (size > FileOutline.HugeBytes)
+            {
+                return new ToolResult(await FileOutline.HugeAsync(path, show, size, readOn, ct)) { Display = "too big to read whole: its first lines" };
+            }
+            var text = Files.ReadText(path).Text;
+            var lines = Mentions.Lines(text);
+            if (FileOutline.Large(text, lines.Length))
+            {
+                return new ToolResult(FileOutline.Summary(show, text, lines, readOn)) { Display = $"outline ({lines.Length:N0} lines)" };
+            }
+        }
+        var offset = Math.Max(1, from ?? 1);
+        var limit = Math.Clamp(count ?? MaxLines, 1, MaxLines);
         var number = 0;
         var shown = 0;
         using (var reader = new StreamReader(Files.OpenShared(path), Encoding.UTF8, detectEncodingFromByteOrderMarks: true))
@@ -461,111 +494,186 @@ internal static class LocalTools
         return Task.FromResult(new ToolResult(text) { Display = Plural(found.Count, "file") });
     }
 
-    private static Task<ToolResult> Grep(JsonObject a, ToolContext c, CancellationToken ct)
+    /// <summary>A file in a folder searched is skipped past this size (a log or a dump); one named as path is read whatever its size.</summary>
+    internal const long GrepFileBytes = 5_000_000;
+
+    /// <summary>The longest one grep runs: past it, what was found so far, and how many files were left.</summary>
+    internal static TimeSpan GrepTime { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>What a search found in one file: how many lines matched, and its lines as shown.</summary>
+    private sealed record FileHits(int Matches, List<string> Lines);
+
+    /// <summary>
+    /// The pattern as a regex: without backtracking (linear in the line, so no pattern stalls the search) unless it uses
+    /// what only backtracking does (a lookaround, a backreference); then with a time limit on each line.
+    /// </summary>
+    internal static Regex GrepRegex(string pattern, bool ignoreCase)
     {
-        var pattern = Required(a, "pattern");
-        Regex regex;
+        var options = RegexOptions.CultureInvariant | (ignoreCase ? RegexOptions.IgnoreCase : RegexOptions.None);
         try
         {
-            regex = new Regex(pattern, RegexOptions.CultureInvariant | (a.Bool("ignore_case") == true ? RegexOptions.IgnoreCase : RegexOptions.None), TimeSpan.FromSeconds(1));
+            return new Regex(pattern, options | RegexOptions.NonBacktracking);
+        }
+        catch (NotSupportedException)
+        {
+            return new Regex(pattern, options, TimeSpan.FromSeconds(1));
         }
         catch (ArgumentException e)
         {
             throw new ToolError($"The pattern is not a valid regular expression: {e.Message}");
         }
+    }
+
+    private static Task<ToolResult> Grep(JsonObject a, ToolContext c, CancellationToken ct)
+    {
+        var pattern = Required(a, "pattern");
+        var regex = GrepRegex(pattern, a.Bool("ignore_case") == true);
         var root = c.Workspace.Resolve(a.Str("path"));
         var filter = a.Str("glob") is { Length: > 0 } g ? Files.Glob(g) : null;
         var context = Math.Clamp(a.Int("context") ?? 0, 0, 10);
         var mode = a.Str("output") ?? "content";
-        IEnumerable<string> files = File.Exists(root) ? [root]
-            : Directory.Exists(root) ? c.Workspace.FilesUnder(root, ct).Where(f => filter is null || filter.IsMatch(Path.GetRelativePath(root, f).Replace('\\', '/')))
+        var named = File.Exists(root);
+        List<string> files = named ? [root]
+            : Directory.Exists(root) ? [.. c.Workspace.FilesUnder(root, ct).Where(f => filter is null || filter.IsMatch(Path.GetRelativePath(root, f).Replace('\\', '/')))]
             : throw new ToolError($"{c.Workspace.Show(root)} does not exist.");
-        var output = new List<string>();
-        var matches = 0;
-        var matchedFiles = 0;
-        var cut = false;
-        foreach (var file in files)
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        limit.CancelAfter(GrepTime);
+        var found = new FileHits?[files.Count];
+        var big = new List<string>();
+        string? slow = null;
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            var info = new FileInfo(file);
-            if (info.Length > 5_000_000 || Files.LooksBinary(file))
+            // The files at once, each on its own; their results put back in the list's order.
+            Parallel.For(0, files.Count, new ParallelOptions { CancellationToken = limit.Token, MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount, 1, 8) }, (i, loop) =>
             {
-                continue;
-            }
-            string[] lines;
-            try
-            {
-                lines = Files.ReadLines(file);
-            }
-            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-            {
-                continue;
-            }
-            var hits = new List<int>();
-            for (var i = 0; i < lines.Length; i++)
-            {
+                var file = files[i];
                 try
                 {
-                    if (regex.IsMatch(lines[i]))
+                    if (!named && new FileInfo(file).Length > GrepFileBytes)
                     {
-                        hits.Add(i);
+                        lock (big)
+                        {
+                            big.Add(c.Workspace.Show(file));
+                        }
+                        return;
                     }
+                    found[i] = Files.LooksBinary(file) ? new FileHits(0, []) : SearchFile(file, c.Workspace.Show(file), regex, mode, context, limit.Token);
+                }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                {
+                    found[i] = new FileHits(0, []);
                 }
                 catch (RegexMatchTimeoutException)
                 {
-                    break;
+                    slow ??= c.Workspace.Show(file);
+                    loop.Stop();
                 }
-            }
-            if (hits.Count == 0)
+            });
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            // Out of time: what was found so far.
+        }
+        if (slow is not null)
+        {
+            throw new ToolError($"The pattern takes too long to match (in {slow}): a lookaround or a backreference with repeats inside repeats backtracks. Use a simpler pattern.");
+        }
+        var output = new List<string>();
+        var (matches, matchedFiles, cut) = (0, 0, false);
+        foreach (var hits in found)
+        {
+            if (hits is not { Matches: > 0 })
             {
                 continue;
             }
             matchedFiles++;
-            matches += hits.Count;
-            var show = c.Workspace.Show(file);
-            if (output.Count >= MaxResults)
-            {
-                cut = true;
-                continue;
-            }
-            switch (mode)
-            {
-                case "files":
-                    output.Add(show);
-                    break;
-                case "count":
-                    output.Add($"{show}: {hits.Count}");
-                    break;
-                default:
-                    var printed = -1;
-                    foreach (var hit in hits)
-                    {
-                        if (output.Count >= MaxResults)
-                        {
-                            cut = true;
-                            break;
-                        }
-                        var from = Math.Max(hit - context, printed + 1);
-                        if (context > 0 && printed >= 0 && from > printed + 1)
-                        {
-                            output.Add("--");
-                        }
-                        for (var i = from; i <= Math.Min(lines.Length - 1, hit + context); i++)
-                        {
-                            var line = lines[i].Length > 500 ? lines[i][..500] + "…" : lines[i];
-                            output.Add($"{show}:{i + 1}{(i == hit ? ':' : '-')} {line}");
-                            printed = i;
-                        }
-                    }
-                    break;
-            }
+            matches += hits.Matches;
+            var room = Math.Max(0, MaxResults - output.Count);
+            cut |= hits.Lines.Count > room;
+            output.AddRange(hits.Lines.Take(room));
         }
+        var notes = new List<string>();
+        if (limit.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            notes.Add($"stopped after {GrepTime.TotalSeconds:0} s with {Plural(found.Count(f => f is null) - big.Count, "file")} not searched: give a path or a glob to search less");
+        }
+        if (big.Count > 0)
+        {
+            notes.Add($"{Plural(big.Count, "file")} over {GrepFileBytes / 1_000_000} MB not searched ({string.Join(", ", big.Order(StringComparer.Ordinal).Take(5))}{(big.Count > 5 ? ", …" : "")}): give one as path to search it");
+        }
+        var said = notes.Count > 0 ? "\n(" + string.Join("; ", notes) + ")" : "";
         if (matches == 0)
         {
-            return Task.FromResult(new ToolResult("No matches.") { Display = "no matches" });
+            return Task.FromResult(new ToolResult("No matches." + said) { Display = "no matches" });
         }
-        var text = string.Join('\n', output) + (cut ? $"\n… cut at {MaxResults} lines: {matches} matches in {matchedFiles} files; narrow the search" : "");
-        return Task.FromResult(new ToolResult(text) { Display = $"{Plural(matches, "match", "matches")} in {Plural(matchedFiles, "file")}" });
+        var text = string.Join('\n', output) + (cut ? $"\n… cut at {MaxResults} lines: {matches} matches in {matchedFiles} files; narrow the search" : "") + said;
+        return Task.FromResult(new ToolResult(text) { Display = mode == "files" ? Plural(matchedFiles, "file") : $"{Plural(matches, "match", "matches")} in {Plural(matchedFiles, "file")}" });
+    }
+
+    /// <summary>
+    /// One file's matches, read a line at a time (a big log is never held whole): for "files" whether one matches, for
+    /// "count" how many, else the lines with the context asked, at most <see cref="MaxResults"/> of them.
+    /// </summary>
+    private static FileHits SearchFile(string file, string show, Regex regex, string mode, int context, CancellationToken ct)
+    {
+        using var reader = new StreamReader(Files.OpenShared(file), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        var lines = new List<string>();
+        var before = new Queue<(int Number, string Text)>();
+        var (matches, number, printed, after) = (0, 0, 0, 0);
+        void Show(int n, string text, bool hit)
+        {
+            if (context > 0 && printed > 0 && n > printed + 1)
+            {
+                lines.Add("--");
+            }
+            lines.Add($"{show}:{n}{(hit ? ':' : '-')} {(text.Length > 500 ? text[..500] + "…" : text)}");
+            printed = n;
+        }
+        while (reader.ReadLine() is { } line)
+        {
+            if ((++number & 1023) == 0)
+            {
+                ct.ThrowIfCancellationRequested();
+            }
+            if (!regex.IsMatch(line))
+            {
+                if (after > 0 && lines.Count < MaxResults)
+                {
+                    Show(number, line, hit: false);
+                    after--;
+                }
+                else if (context > 0)
+                {
+                    before.Enqueue((number, line));
+                    if (before.Count > context)
+                    {
+                        before.Dequeue();
+                    }
+                }
+                continue;
+            }
+            matches++;
+            if (mode == "files")
+            {
+                break;
+            }
+            if (mode == "count" || lines.Count >= MaxResults)
+            {
+                continue;
+            }
+            while (before.TryDequeue(out var b))
+            {
+                Show(b.Number, b.Text, hit: false);
+            }
+            Show(number, line, hit: true);
+            after = context;
+        }
+        return new FileHits(matches, mode switch
+        {
+            "files" => matches > 0 ? [show] : [],
+            "count" => matches > 0 ? [$"{show}: {matches}"] : [],
+            _ => lines,
+        });
     }
 
     /// <summary>
@@ -662,13 +770,84 @@ internal static class LocalTools
             };
         }
         var timeout = TimeSpan.FromSeconds(Math.Clamp(a.Int("timeout_seconds") ?? 120, 1, 600));
-        var run = await Proc.RunAsync(ShellCommand(command, c), timeout, ct);
-        var status = run.TimedOut ? $"timed out after {timeout.TotalSeconds:0} s (stopped)" : $"exit code {run.ExitCode}";
+        // What fits whole in the window is shown (its start and its end); all of it is kept, for read_result.
+        var kept = KeptResults.Reserve(c);
+        Proc.Result run;
+        try
+        {
+            run = await Proc.RunAsync(ShellCommand(command, c), timeout, ct, Math.Max(4_000, (c.ResultChars?.Invoke() ?? 30_000) - 1_000), kept?.Path);
+        }
+        catch
+        {
+            kept?.Drop();
+            throw;
+        }
+        var status = run.TimedOut ? $"timed out after {timeout.TotalSeconds:0} s (stopped): a longer run goes with no_time_limit" : $"exit code {ExitMeaning(run.ExitCode)}";
         c.CommandRan?.Invoke(command, run.ExitCode == 0 && !run.TimedOut, (run.Output.TrimEnd() + $"\n[{status}]").Trim());
-        var text = (run.Output.Length > 0 ? run.Output.TrimEnd() + "\n" : "(no output)\n") + $"[{status}]";
+        var whole = "";
+        if (kept is not null && run.Cut)
+        {
+            whole = Flagged(kept.Path, run.Output) +
+                $"\n[The whole output ({run.Chars:N0} characters) went to {kept.Id}: read_result {{\"id\":\"{kept.Id}\",\"find\":\"error\"}} finds lines in it, {{\"id\":\"{kept.Id}\",\"from\":1}} reads it.]";
+        }
+        else
+        {
+            kept?.Drop();
+        }
+        var text = (run.Output.Length > 0 ? run.Output.TrimEnd() + "\n" : "(no output)\n") + $"[{status}]" + whole;
         var display = (run.Output.Length > 0 ? Fmt.Tail(run.Output.TrimEnd(), 8) + "\n" : "") + (run.ExitCode == 0 && !run.TimedOut ? c.Ui.Dim(status) : c.Ui.Red(status));
         return new ToolResult(text, run.ExitCode != 0 || run.TimedOut) { Display = display };
     }
+
+    /// <summary>
+    /// The lines of a command's whole output, in the part cut out of what the model sees, that look like an error or a
+    /// failure: the model is told them with their numbers (a test run's one failure in the middle of a long log).
+    /// </summary>
+    internal static string Flagged(string whole, string shown)
+    {
+        var found = new List<string>();
+        var more = 0;
+        try
+        {
+            using var reader = new StreamReader(Files.OpenShared(whole), Encoding.UTF8);
+            var number = 0;
+            while (reader.ReadLine() is { } line)
+            {
+                number++;
+                if (!Failing().IsMatch(line) || shown.Contains(line, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                if (found.Count < 20)
+                {
+                    found.Add($"{number,6}\t{Fmt.OneLine(line, 300)}");
+                }
+                else
+                {
+                    more++;
+                }
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return "";
+        }
+        return found.Count == 0 ? "" : "\n[In the part not shown, lines that look like errors:\n" + string.Join('\n', found) + (more > 0 ? $"\n… and {more} more]" : "]");
+    }
+
+    [GeneratedRegex(@"(?<!\b0 )\b(?:error|errors|fail|failed|failure|failing|fatal|exception|traceback|panic|assert(?:ion)?(?:error)?|denied|segmentation fault|not found)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex Failing();
+
+    /// <summary>An exit code, and on Unix past 128 the signal that ended it (128 + its number), as a shell reports it.</summary>
+    internal static string ExitMeaning(int code) => OperatingSystem.IsWindows() || code is <= 128 or >= 160 ? code.ToString() : (code - 128) switch
+    {
+        9 => $"{code} (killed by signal 9, SIGKILL: often out of memory)",
+        2 => $"{code} (stopped by signal 2, SIGINT)",
+        6 => $"{code} (aborted, signal 6)",
+        11 => $"{code} (crashed: signal 11, SIGSEGV)",
+        15 => $"{code} (stopped by signal 15, SIGTERM)",
+        var n => $"{code} (ended by signal {n})",
+    };
 
     private static CommandJob Job(JsonObject a, ToolContext c) =>
         c.Jobs?.Find(a.Int("job") ?? 0) ?? throw new ToolError($"There is no job {a.Int("job")}: the jobs are {(c.Jobs?.All.Count > 0 ? string.Join(", ", c.Jobs.All.Select(j => j.Id)) : "none")}.");
@@ -884,7 +1063,11 @@ internal static class LocalTools
 /// <summary>Running a process with a timeout: its output kept within bounds (the start and the end), its whole tree stopped when time is up.</summary>
 internal static class Proc
 {
-    public sealed record Result(int ExitCode, string Output, bool TimedOut);
+    /// <summary>How it ended and what it printed (cut in the middle when <paramref name="Cut"/>; <paramref name="Chars"/> in all).</summary>
+    public sealed record Result(int ExitCode, string Output, bool TimedOut, bool Cut = false, long Chars = 0);
+
+    /// <summary>The most of a command's output written whole to a file beside the session.</summary>
+    public const long MostKept = 64 * 1024 * 1024;
 
     /// <summary>The name the agent's commands commit under (set as Code Arena starts): its commits are told apart from the person's.</summary>
     public static CommitIdentity? Author { get; set; }
@@ -901,7 +1084,11 @@ internal static class Proc
         psi.Environment.Remove("ARENA_API_KEY");
     }
 
-    public static async Task<Result> RunAsync(ProcessStartInfo psi, TimeSpan timeout, CancellationToken ct, int maxChars = 30_000)
+    /// <summary>
+    /// Runs it to its end or its timeout. Its output (stdout and stderr together) is kept within <paramref name="maxChars"/>,
+    /// and all of it, up to <see cref="MostKept"/>, is written to <paramref name="whole"/> when given.
+    /// </summary>
+    public static async Task<Result> RunAsync(ProcessStartInfo psi, TimeSpan timeout, CancellationToken ct, int maxChars = 30_000, string? whole = null)
     {
         psi.RedirectStandardOutput = true;
         psi.RedirectStandardError = true;
@@ -912,7 +1099,7 @@ internal static class Proc
         Prepare(psi);
         using var process = Process.Start(psi) ?? throw new ToolError($"Could not start {psi.FileName}.");
         process.StandardInput.Close();
-        var output = new Bounded(maxChars);
+        using var output = new Bounded(maxChars, whole);
         var readers = new[] { Pump(process.StandardOutput, output), Pump(process.StandardError, output) };
         using var limit = CancellationTokenSource.CreateLinkedTokenSource(ct);
         limit.CancelAfter(timeout);
@@ -924,14 +1111,7 @@ internal static class Proc
         catch (OperationCanceledException)
         {
             timedOut = !ct.IsCancellationRequested;
-            try
-            {
-                process.Kill(entireProcessTree: true);
-            }
-            catch (InvalidOperationException)
-            {
-                // It ended meanwhile.
-            }
+            Stop(process);
             if (!timedOut)
             {
                 throw;
@@ -939,7 +1119,7 @@ internal static class Proc
         }
         // A child left in the background can hold the pipes open: do not wait for it.
         await Task.WhenAny(Task.WhenAll(readers), Task.Delay(TimeSpan.FromSeconds(2), CancellationToken.None));
-        return new Result(process.HasExited ? process.ExitCode : -1, output.ToString(), timedOut);
+        return new Result(process.HasExited ? process.ExitCode : -1, output.ToString(), timedOut, output.Cut, output.Chars);
     }
 
     /// <summary>
@@ -1083,18 +1263,42 @@ internal static class Proc
         }
     }
 
-    /// <summary>The first and the last part of a long output, with how much was left out between them.</summary>
-    private sealed class Bounded(int max)
+    /// <summary>
+    /// The first and the last part of a long output, with how much was left out between them; and all of it (up to
+    /// <see cref="MostKept"/>) in a file when one is given.
+    /// </summary>
+    internal sealed class Bounded(int max, string? whole = null) : IDisposable
     {
         private readonly object _gate = new();
         private readonly StringBuilder _head = new();
         private readonly StringBuilder _tail = new();
+        private StreamWriter? _whole = whole is null ? null : new StreamWriter(whole, append: false, new UTF8Encoding(false));
         private long _dropped;
+
+        /// <summary>All it was given, in characters.</summary>
+        public long Chars { get; private set; }
+
+        /// <summary>Whether its middle was left out.</summary>
+        public bool Cut
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _dropped + Math.Max(0, _tail.Length - (max - max / 3)) > 0;
+                }
+            }
+        }
 
         public void Append(ReadOnlySpan<char> text)
         {
             lock (_gate)
             {
+                Chars += text.Length;
+                if (_whole is not null && Chars <= MostKept)
+                {
+                    _whole.Write(text);
+                }
                 var room = max / 3 - _head.Length;
                 if (room > 0)
                 {
@@ -1116,10 +1320,21 @@ internal static class Proc
         {
             lock (_gate)
             {
+                _whole?.Flush();
                 var keep = max - max / 3;
                 var dropped = _dropped + Math.Max(0, _tail.Length - keep);
                 var tail = _tail.Length > keep ? _tail.ToString(_tail.Length - keep, keep) : _tail.ToString();
                 return dropped > 0 ? $"{_head}\n… ({dropped:N0} characters cut) …\n{tail}" : _head.ToString() + tail;
+            }
+        }
+
+        /// <summary>The file closed: what a child left running prints later goes only to the parts kept here.</summary>
+        public void Dispose()
+        {
+            lock (_gate)
+            {
+                _whole?.Dispose();
+                _whole = null;
             }
         }
     }

@@ -39,9 +39,16 @@ def _line(request):
     if not path:
         raise ToolError("This program cannot call the chat's tools: it was not run by run_code.")
     if _conn is None:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        sock.connect(path)
-        _conn = sock.makefile("rwb")
+        if path.startswith("tcp:"):
+            # On TCP (Python on Windows has no Unix sockets): the token first, so the bridge knows the program.
+            host, port = path[4:].rsplit(":", 1)
+            sock = socket.create_connection((host, int(port)))
+            _conn = sock.makefile("rwb")
+            _conn.write((os.environ.get("ARENA_TOKEN", "") + "\n").encode("utf-8"))
+        else:
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.connect(path)
+            _conn = sock.makefile("rwb")
     _conn.write((json.dumps(request) + "\n").encode("utf-8"))
     _conn.flush()
     answer = _conn.readline()

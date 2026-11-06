@@ -1873,6 +1873,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             await _watchingSettings;
         }
         Jobs.StopAll("code-arena stopped");
+        await StopPythonAsync();
         CodeIndex?.Dispose();
         Sandbox.Clean();
         // The earlier sessions not sent yet go at the next start.

@@ -195,7 +195,12 @@ public sealed class LocalToolTests : IDisposable
     public async Task Read_file_numbers_the_lines_and_says_how_to_read_on()
     {
         Write("long.txt", string.Join('\n', Enumerable.Range(1, 2500).Select(i => $"line {i}")));
-        var first = await Run("read_file", Args(new { path = "long.txt" }), Context());
+        // Large and read without a range: how long it is and its first lines, not all of it.
+        var outline = await Run("read_file", Args(new { path = "long.txt" }), Context());
+        Assert.StartsWith("long.txt: 2,500 lines", outline.Text);
+        Assert.Contains("    30\tline 30\n", outline.Text);
+        Assert.DoesNotContain("line 31\n", outline.Text);
+        var first = await Run("read_file", Args(new { path = "long.txt", offset = 1 }), Context());
         Assert.StartsWith("     1\tline 1\n", first.Text);
         Assert.Contains("(lines 1-2000 of 2500; read on with offset=2001)", first.Text);
         var rest = await Run("read_file", Args(new { path = "long.txt", offset = 2499, limit = 5 }), Context());

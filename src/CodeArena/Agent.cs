@@ -1235,8 +1235,23 @@ internal sealed class Agent
         {
             Ui.StartSpinner("Running");
         }
-        var running = planned.Select(async (p, i) =>
+        // A call that changes something (an edit, a command, code) runs after the calls before it, in its order; one that
+        // reads runs at once, after the changes before it. Two commands given together, the second using what the first
+        // makes, so find it made.
+        var running = new List<Task>();
+        var changed = Task.CompletedTask;
+        for (var n = 0; n < planned.Count; n++)
         {
+            var changes = planned[n].Refusal is null && planned[n].Tool?.Kind is ToolKind.Edit or ToolKind.Shell;
+            var call = RunCall(planned[n], n, changes ? Task.WhenAll(running) : changed);
+            running.Add(call);
+            changed = changes ? call : changed;
+        }
+        await Task.WhenAll(running);
+
+        async Task RunCall((string Id, string Name, ToolDef? Tool, JsonObject Args, string? Refusal, bool Declined) p, int i, Task after)
+        {
+            await after;
             ToolResult result;
             var clock = System.Diagnostics.Stopwatch.StartNew();
             CurrentCall.Value = p.Id;
@@ -1270,8 +1285,7 @@ internal sealed class Agent
             results[i] = result;
             ShowResult(p.Name, result, planned.Count > 1);
             Events?.ToolResult(p.Id, p.Name, i, result, clock.Elapsed, p.Declined);
-        }).ToList();
-        await Task.WhenAll(running);
+        }
         var limit = MaxToolChars;
         for (var i = 0; i < planned.Count; i++)
         {
