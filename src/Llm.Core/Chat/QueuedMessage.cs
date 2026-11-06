@@ -27,7 +27,7 @@ public sealed class QueuedMessage
     public Guid? ReplyToId { get; set; }
     /// <summary>The model a safeguard rule sent it to instead of the chat's; null: the chat's.</summary>
     public string? Model { get; set; }
-    /// <summary>Its place in line: the lowest goes next (Send now puts one first).</summary>
+    /// <summary>Its place in line: the lowest goes next (Put first puts one first).</summary>
     public int Position { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

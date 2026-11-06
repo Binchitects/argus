@@ -468,13 +468,15 @@ public sealed partial class ChatService(
 
         // Earlier tool results of this answer were cut to their start to fit (said once).
         var resultsCut = false;
+        // Where this answer's question is in the request: messages the person sent while it worked come after it.
+        var askedAt = LastUser(messages);
 
         // Room for a request that would not fit the model's context, or that the model refused as too long (force). First this
         // answer's earlier tool results are cut to their start, in the request only (the chat keeps them whole); then, still
         // too big (or forced), everything before the question is compacted, and the request starts from the new summary.
         async Task MakeRoomAsync(JsonObject request, string? force)
         {
-            var asked = LastUser(messages);
+            var asked = askedAt;
             if (CutToolResults(messages, asked) && !resultsCut)
             {
                 resultsCut = true;
@@ -493,7 +495,8 @@ public sealed partial class ChatService(
             var (rebuilt, _, parts, _) = await BuildHistoryAsync(conversation, question, model, modelName, helper, email, demand.Notes(), runs.ContainsKey("read_file"),
                 lengthNote, memory, new HistoryFit(0, request["tools"]?.ToJsonString().Length ?? 0, budget, answer.Sum(m => m.ToJsonString().Length), answer.Count, force ?? ToFit), emit, ct);
             // The question as this answer asked it (deep research's steps, answer again) and the answer so far stay as they were.
-            messages = [.. rebuilt.Take(LastUser(rebuilt)).Select(m => m!.DeepClone()), .. messages.Skip(asked).Select(m => m!.DeepClone())];
+            askedAt = LastUser(rebuilt);
+            messages = [.. rebuilt.Take(askedAt).Select(m => m!.DeepClone()), .. messages.Skip(asked).Select(m => m!.DeepClone())];
             systemParts = parts with { Recalled = recalledChars };
             request["messages"] = messages.DeepClone();
         }
@@ -990,7 +993,61 @@ public sealed partial class ChatService(
                 await emit(new { type = "done", id = msg.Id });
                 return;
             }
+            // A message the person sent while it worked is taken in between its steps, as Claude Code does: the model reads
+            // it before its next step, and the answer goes on.
+            if (await TakeInQueuedAsync(conversation, user, modelName, parent, next + 1, ct) is { } said)
+            {
+                next++;
+                messages.Add(new JsonObject { ["role"] = "user", ["content"] = said.Words });
+                parent = said.Message.Id;
+                await emit(new
+                {
+                    type = "took_in", id = said.Message.Id, parentId = said.Message.ParentId, queuedId = said.QueuedId, content = said.Message.Content, quote = said.Message.Quote,
+                    author = new { id = user.Id, name = PersonName(user) },
+                });
+            }
         }
+    }
+
+    /// <summary>What a question taken in mid-answer is marked with: the page shows it was sent while the answer worked.</summary>
+    public const string TakenInDetails = """{"takenIn":true}""";
+
+    private static string PersonName(AppUser u) => string.IsNullOrWhiteSpace(u.DisplayName) ? u.UserName! : u.DisplayName;
+
+    /// <summary>
+    /// The chat's first queued message, when it may go into the answer running (<see cref="QueuedMessages.TakesIn"/>): out of
+    /// line and saved as the person's message after <paramref name="parent"/>, with the words the model reads. Null: none
+    /// waits, or the first in line waits for the answer to end (its files, its skill, deep research, a room's people).
+    /// </summary>
+    private async Task<(ChatMessage Message, string Words, Guid QueuedId)?> TakeInQueuedAsync(Conversation conversation, AppUser user, string modelName, Guid parent, int sequence,
+        CancellationToken ct)
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var waiting = await db.QueuedMessages.AsNoTracking().Where(q => q.ConversationId == conversation.Id)
+                .OrderBy(q => q.Position).ThenBy(q => q.CreatedAt).FirstOrDefaultAsync(ct);
+            if (waiting is null || !QueuedMessages.TakesIn(waiting, user.Id, modelName))
+            {
+                return null;
+            }
+            // Edited or cancelled just now: read again.
+            if (await db.QueuedMessages.Where(q => q.Id == waiting.Id && q.Content == waiting.Content).ExecuteDeleteAsync(ct) == 0)
+            {
+                continue;
+            }
+            var said = new ChatMessage
+            {
+                ConversationId = conversation.Id, ParentId = parent, Role = "user", Sequence = sequence, Content = waiting.Content, Quote = waiting.Quote,
+                AuthorId = waiting.UserId, Mentions = waiting.Mentions, ReplyToId = waiting.ReplyToId, DetailsJson = TakenInDetails,
+            };
+            db.ChatMessages.Add(said);
+            conversation.CurrentLeafId = said.Id;
+            await db.SaveChangesAsync(ct);
+            var words = ChatQuotes.ForModel(said.Quote, said.Content);
+            // A room's turns say who wrote them.
+            return (said, conversation.IsRoom ? $"[{PersonName(user)}]: {words}" : words, waiting.Id);
+        }
+        return null;
     }
 
     /// <summary>
