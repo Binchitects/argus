@@ -69,6 +69,7 @@ import type { ContextChange } from './message-context'
 import { isOffline, useOnline, useOutbox } from './outbox'
 import { useRoomCall } from './room-call'
 import { CallBar, CallButton } from './call-bar'
+import { CodeGoalLine } from './code-goal'
 
 /** The id a question is shown under until the server gives it its own. */
 let localCount = 0
@@ -1333,6 +1334,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                         </span>
                       </p>
                     )}
+                    {data?.origin === 'code-arena' && id && <CodeGoalLine chat={id} />}
                     {data?.forkedFrom && (
                       <p className="-mb-2 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
                         <GitFork className="size-3.5 shrink-0" aria-hidden="true" /> Forked from

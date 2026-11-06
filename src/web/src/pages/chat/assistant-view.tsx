@@ -15,6 +15,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
 import { api, ApiError, errorMessage } from '@/lib/api'
 import { formatValue } from '@/lib/format'
+import { skillsQuery } from '@/lib/skills'
 import { assistantQuery, configQuery, uploadFile } from './api'
 import { AssistantIcon, AssistantLook, ReachLabel } from './assistant-icon'
 import { AssistantSharing } from './assistant-sharing'
@@ -23,7 +24,10 @@ import type { Assistant, ChatConfig } from './types'
 const DEFAULT = '__default__'
 const maxStarters = 4
 
-type Change = Partial<Pick<Assistant, 'name' | 'description' | 'instructions' | 'icon' | 'color' | 'tools' | 'starters'>> & { model?: string; thinking?: string }
+type Change = Partial<Pick<Assistant, 'name' | 'description' | 'instructions' | 'icon' | 'color' | 'tools' | 'starters' | 'skills'>> & { model?: string; thinking?: string }
+
+/** The skills an assistant uses at most (Arena's AssistantEndpoints.MaxSkills). */
+const maxSkills = 20
 
 /**
  * An assistant: what it is for and who made it, how much it is used, the instructions
@@ -257,8 +261,11 @@ const toolsOf = (a: Pick<Assistant, 'tools'>, config?: ChatConfig) => a.tools ??
 
 /** What people see, and what a new chat with it starts with: for its editors. */
 function Settings({ a, config, saving, onSave }: { a: Assistant; config?: ChatConfig; saving: boolean; onSave: (body: Change) => void }) {
-  const start = { name: a.name, description: a.description ?? '', icon: a.icon, color: a.color, model: a.model ?? '', thinking: a.thinking ?? '', tools: a.tools, starters: a.starters }
+  const start = { name: a.name, description: a.description ?? '', icon: a.icon, color: a.color, model: a.model ?? '', thinking: a.thinking ?? '', tools: a.tools, starters: a.starters, skills: a.skills ?? [] }
   const [form, setForm] = useState(start)
+  // The skills the person may use (theirs, their groups', the company's, Arena's own and the plugins'), not one turned off.
+  const library = useQuery(skillsQuery)
+  const skills = (library.data?.skills ?? []).filter((x) => !x.off)
   const dirty = JSON.stringify(form) !== JSON.stringify(start)
   const tools = toolsOf(form, config)
   return (
@@ -332,6 +339,27 @@ function Settings({ a, config, saving, onSave }: { a: Assistant; config?: ChatCo
             </ul>
           </fieldset>
         )}
+        {skills.length > 0 && (
+          <fieldset className="grid gap-2">
+            <legend className="mb-1 text-sm font-medium">Skills</legend>
+            <p className="text-xs text-muted-foreground">Up to {maxSkills}: its chats load them first when the task is what they are for, here and in Code Arena.</p>
+            <ul className="grid max-h-56 gap-1.5 overflow-y-auto sm:grid-cols-2">
+              {skills.map((x) => (
+                <li key={x.id} className="flex items-center gap-2">
+                  <Checkbox
+                    id={`assistant-skill-${x.id}`}
+                    checked={form.skills.includes(x.name)}
+                    disabled={!form.skills.includes(x.name) && form.skills.length >= maxSkills}
+                    onCheckedChange={(v) => setForm({ ...form, skills: v === true ? [...form.skills, x.name] : form.skills.filter((n) => n !== x.name) })}
+                  />
+                  <label htmlFor={`assistant-skill-${x.id}`} className="cursor-pointer truncate text-sm" title={x.description}>
+                    /{x.name}
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </fieldset>
+        )}
         <div className="grid gap-2">
           <Label>Conversation starters</Label>
           <p className="text-xs text-muted-foreground">Up to {maxStarters} short prompts shown on a new chat with it.</p>
@@ -389,6 +417,7 @@ function About({ a, config }: { a: Assistant; config?: ChatConfig }) {
       <CardContent className="grid gap-3 text-sm">
         <p>
           Model: {a.model ?? 'the default'} · Thinking: {thinking} · Tools: {tools.length ? tools.join(', ') : 'none'}
+          {(a.skills?.length ?? 0) > 0 && ` · Skills: ${a.skills!.map((n) => `/${n}`).join(', ')}`}
         </p>
         {a.starters.length > 0 && (
           <ul className="grid gap-1" aria-label="Conversation starters">

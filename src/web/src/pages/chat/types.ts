@@ -295,6 +295,8 @@ export interface Assistant extends Omit<AssistantSummary, 'owner' | 'chats' | 'p
   /** The tools a new chat with it has on; null: those on in new chats. */
   tools: string[] | null
   starters: string[]
+  /** The skills it uses: its chats are told to load them first when the task is theirs (Code Arena's too). */
+  skills?: string[]
   owner: { id: string; name: string } | null
   canShare: boolean
   createdAt: string
