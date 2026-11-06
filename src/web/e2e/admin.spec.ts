@@ -27,7 +27,7 @@ const pages: [string, string][] = [
 /** The page has its heading and nothing is still loading. */
 async function settled(page: Page, heading: string) {
   await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible()
-  await expect(page.locator('main [aria-busy="true"], main .animate-pulse')).toHaveCount(0, { timeout: 30_000 })
+  await expect(page.locator('main [aria-busy="true"], main .animate-pulse:not([data-live])')).toHaveCount(0, { timeout: 30_000 })
 }
 
 for (const theme of ['light', 'dark'] as const) {
@@ -52,7 +52,7 @@ test('the usage dashboard draws every panel without an error', async ({ page }) 
   await page.goto('/usage')
   await expect(page.getByRole('tab', { name: 'Everyone', exact: true })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('region', { name: 'Cost by person' })).toBeVisible()
-  await expect(page.locator('main .animate-pulse')).toHaveCount(0, { timeout: 30_000 })
+  await expect(page.locator('main .animate-pulse:not([data-live])')).toHaveCount(0, { timeout: 30_000 })
   const panels = page.locator('main [data-panel]')
   expect(await panels.count()).toBeGreaterThanOrEqual(20)
   await expect(panels.locator('[role=alert]')).toHaveCount(0)
@@ -72,7 +72,7 @@ test('every dashboard draws every panel without an error', async ({ page }) => {
   for (const href of hrefs) {
     await page.goto(href)
     await expect(page.locator('main [data-panel]').first()).toBeVisible()
-    await expect(page.locator('main .animate-pulse')).toHaveCount(0, { timeout: 30_000 })
+    await expect(page.locator('main .animate-pulse:not([data-live])')).toHaveCount(0, { timeout: 30_000 })
     await expect(page.locator('main [data-panel] [role=alert]'), href).toHaveCount(0)
   }
   expect(errors).toEqual([])
@@ -127,7 +127,7 @@ test('a chart has a table view, and the time range changes what is asked', async
   await page.goto('/usage')
   const panel = page.getByRole('region', { name: 'Tokens by kind' }).first()
   await expect(panel).toBeVisible()
-  await expect(page.locator('main .animate-pulse')).toHaveCount(0, { timeout: 30_000 })
+  await expect(page.locator('main .animate-pulse:not([data-live])')).toHaveCount(0, { timeout: 30_000 })
   const toggle = panel.getByRole('button', { name: 'Show as table' })
   if (await toggle.count()) {
     await toggle.click()

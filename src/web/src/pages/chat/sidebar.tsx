@@ -140,7 +140,7 @@ function FoldHeading({ title, folded, controls, count, noun, answering = 0, onTo
       <span className="min-w-0 flex-1 truncate text-left">{title}</span>
       {folded && count !== undefined && (
         <span className="flex shrink-0 items-center gap-1.5 font-normal tracking-normal tabular-nums normal-case">
-          {answering > 0 && <span className="inline-block size-1.5 animate-pulse rounded-full bg-primary" aria-hidden="true" />}
+          {answering > 0 && <span data-live className="inline-block size-1.5 animate-pulse rounded-full bg-primary" aria-hidden="true" />}
           <span aria-hidden="true">{count}</span>
           <span className="sr-only">{`, ${count} ${count === 1 ? noun[0] : noun[1]}${answering > 0 ? `, ${answering} answering` : ''}`}</span>
         </span>
@@ -198,7 +198,7 @@ function ChatItem({ chat, active, archived, onNavigate }: { chat: ConversationSu
       >
         {chat.answering && (
           <>
-            <span className="mr-1.5 inline-block size-1.5 animate-pulse rounded-full bg-primary align-middle" aria-hidden="true" />
+            <span data-live className="mr-1.5 inline-block size-1.5 animate-pulse rounded-full bg-primary align-middle" aria-hidden="true" />
             <span className="sr-only">Answering: </span>
           </>
         )}

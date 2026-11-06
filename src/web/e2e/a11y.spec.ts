@@ -21,7 +21,7 @@ for (const [path, name] of opens) {
   test(`${path}: "${name}" opens accessible, takes focus, and gives it back to its button`, async ({ page }, info) => {
     await page.goto(path)
     await page.getByRole('heading', { level: 1 }).first().waitFor()
-    await expect(page.locator('main [aria-busy="true"], main .animate-pulse')).toHaveCount(0, { timeout: 30_000 })
+    await expect(page.locator('main [aria-busy="true"], main .animate-pulse:not([data-live])')).toHaveCount(0, { timeout: 30_000 })
     // Knowledge packs are Argus's: a stack without it (CI's) says so, with no pack to add.
     test.skip(await page.getByText('Argus is not set up in this deployment').isVisible(), 'no Argus in this stack')
     const button = page.getByRole('button', { name, exact: typeof name === 'string' }).first()
@@ -65,7 +65,7 @@ test('every page fits 320 px without scrolling sideways', async ({ page, isMobil
   for (const path of pages) {
     await page.goto(path)
     await page.getByRole('heading', { level: 1 }).first().waitFor()
-    await expect(page.locator('main [aria-busy="true"], main .animate-pulse')).toHaveCount(0, { timeout: 30_000 })
+    await expect(page.locator('main [aria-busy="true"], main .animate-pulse:not([data-live])')).toHaveCount(0, { timeout: 30_000 })
     const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
     if (over > 0) wide.push(`${path} (${over}px)`)
   }
