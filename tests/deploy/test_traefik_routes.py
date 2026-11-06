@@ -147,6 +147,16 @@ class TraefikRoutesTests(unittest.TestCase):
         # The caller's own address, as Traefik saw it: what the app decides by.
         self.assertTrue(all(re.fullmatch(r"\d+\.\d+\.\d+\.\d+", a["for"]) for a in asked), asked)
 
+    def test_a_forwarded_ports_host_goes_to_the_app_and_no_other_name_does(self):
+        self.start_traefik()
+        port = "ws-0123456789abcdef0123456789abcdef-5173.arena.test"
+        got = self.get([(port, "/@vite/client"), ("ws-nothex-5173.arena.test", "/"), ("ws-0123456789abcdef0123456789abcdef-5173.arena.test.evil", "/"),
+                        (f"x.{port}", "/"), (port, "/refused/x")])
+        # The app, with the host as the browser asked it (it finds the workspace and port there); asked about the caller first.
+        self.assertEqual(got[0], [200, f"8080 {port} /@vite/client"])
+        self.assertEqual([g[0] for g in got[1:4]], [404, 404, 404], got)
+        self.assertEqual(got[4], [403, "refused by the test"])
+
     def test_ip_allow_is_kept_by_traefik_itself_before_the_app_is_asked(self):
         self.start_traefik(allow="10.255.255.0/24")
         before = len(self.asked())

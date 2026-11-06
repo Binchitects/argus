@@ -14,6 +14,9 @@ namespace Llm.Api.Code.Studio;
 
 public sealed record WorkspaceRequest(string? Project, string? Branch, string? Name);
 
+/// <summary>A port's setting in the Ports view: its label, who reaches it (private or signed-in), forwarding stopped or not.</summary>
+public sealed record PortRequest(string? Label, string? Visibility, bool? Stopped);
+
 /// <summary>
 /// Code Studio: the person's workspaces (made from a GitLab project and branch, started, put to sleep, deleted), and the
 /// IDE's way to a workspace's engine: every request of the IDE's page under /api/studio/w/{id}/… goes on to the engine's
@@ -36,6 +39,10 @@ public static class StudioEndpoints
         g.MapPost("/workspaces/{id:guid}/start", StartAsync);
         g.MapPost("/workspaces/{id:guid}/stop", StopAsync);
         g.MapDelete("/workspaces/{id:guid}", DeleteAsync);
+        // Its Ports view: what its programs listen on, each at its own address (PortForwards), and the ports it forwards by hand.
+        g.MapGet("/workspaces/{id:guid}/ports", PortsAsync);
+        g.MapPut("/workspaces/{id:guid}/ports/{port:int}", SetPortAsync);
+        g.MapDelete("/workspaces/{id:guid}/ports/{port:int}", RemovePortAsync);
         g.Map("/w/{id:guid}/{**rest}", ProxyAsync);
         // A machine's tunnel: dialled by its Code Arena with the person's API key, and reached by the app's replicas with its own key.
         app.MapGet("/api/code-arena/connect", ConnectAsync).AllowAnonymous("Code Arena: the person's API key is checked here.");
@@ -121,6 +128,70 @@ public static class StudioEndpoints
         await tunnels.CloseAsync(w.Id, "Deleted from Code Studio.");
         await workspaces.DeleteAsync(w, ct);
         await audit.WriteAsync("studio.workspace.delete", $"{w.Project}@{w.Branch}", actor: me);
+        return Results.NoContent();
+    }
+
+    private static async Task<IResult> PortsAsync(Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, StudioPorts ports, CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        if (await MineAsync(db, id, me, ct) is not { } w)
+        {
+            return Results.NotFound();
+        }
+        if (w.Kind == StudioWorkspace.Machine)
+        {
+            return Results.Ok(new { available = false, reason = "It runs on your own machine: what it listens on is at localhost there.", ports = Array.Empty<PortView>() });
+        }
+        return Results.Ok(new { available = true, running = w.EnginePort is not null, ports = await ports.ListAsync(w, ct) });
+    }
+
+    private static async Task<IResult> SetPortAsync(Guid id, int port, PortRequest body, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, StudioPorts ports,
+        Audit audit, CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        if (await MineAsync(db, id, me, ct) is not { Kind: StudioWorkspace.Server } w)
+        {
+            return Results.NotFound();
+        }
+        if (port is < 1 or > 65535)
+        {
+            return AuthEndpoints.Problem(400, "port", "A port from 1 to 65535.");
+        }
+        var before = await db.StudioPorts.AsNoTracking().Where(x => x.WorkspaceId == id && x.Port == port).Select(x => x.Visibility).SingleOrDefaultAsync(ct);
+        try
+        {
+            // A port no setting is kept for and nothing set but its forwarding: one forwarded by hand.
+            var added = before is null && body.Stopped is not true && !(await ports.ListAsync(w, ct)).Any(x => x.Port == port && x.Listening);
+            var row = await ports.SetAsync(w, port, body.Label, body.Visibility, body.Stopped, added, ct);
+            if (row.Visibility != (before ?? StudioPort.Private))
+            {
+                await audit.WriteAsync("studio.port.share", $"{w.Project}@{w.Branch}:{port}", detail: row.Visibility == StudioPort.SignedIn ? "shared with everyone signed in" : "private again", actor: me);
+            }
+            return Results.Ok((await ports.ListAsync(w, ct)).Single(x => x.Port == port));
+        }
+        catch (StudioException ex)
+        {
+            return AuthEndpoints.Problem(ex.Status, "port", ex.Message);
+        }
+    }
+
+    private static async Task<IResult> RemovePortAsync(Guid id, int port, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, StudioPorts ports, Audit audit,
+        CancellationToken ct)
+    {
+        var me = await Me(p, users);
+        if (await MineAsync(db, id, me, ct) is not { Kind: StudioWorkspace.Server } w)
+        {
+            return Results.NotFound();
+        }
+        var shared = await db.StudioPorts.AnyAsync(x => x.WorkspaceId == id && x.Port == port && x.Visibility == StudioPort.SignedIn, ct);
+        if (!await ports.RemoveAsync(w, port, ct))
+        {
+            return Results.NotFound();
+        }
+        if (shared)
+        {
+            await audit.WriteAsync("studio.port.share", $"{w.Project}@{w.Branch}:{port}", detail: "private again", actor: me);
+        }
         return Results.NoContent();
     }
 
@@ -338,7 +409,7 @@ public static class StudioEndpoints
         await Task.WhenAll(PumpAsync(socket, upstream, ct), PumpAsync(upstream, socket, ct));
     }
 
-    private static async Task PumpAsync(WebSocket from, WebSocket to, CancellationToken ct)
+    internal static async Task PumpAsync(WebSocket from, WebSocket to, CancellationToken ct)
     {
         var buffer = new byte[32 * 1024];
         try

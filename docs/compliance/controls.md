@@ -128,7 +128,7 @@ People come from the company's directory (LDAP or Active Directory), OIDC or SAM
 
 ### IAM-05: Least privilege, by roles and rules
 
-What a person may do comes from roles (built in, or made by the company) held directly, through a group or by everyone, and from rules that give or take a feature; admin roles can be scoped to some groups. The checker says why a person may or may not do something. The wiki finds and shows each person only the documents they may read, and searches only the code they may read in GitLab, as them. A feature taken from a person is hidden from their menus and pages, not only refused. Taking a request out of the line needs usage.line, restarting an engine runtimes.restart; only a chat's owner rewinds it, and Code Arena's key reads and adds to its own person's chats alone. Code Arena reaches only the person's own chats' goals and the assistants they may use, and an assistant uses only skills its maker may use. Its sub-agents get only the tools they are given, never more than the session's mode allows, and one that changes files never asks: what its mode would ask is refused. What fills a chat's window is shown to its people only, and Code Arena counts tokens with the person's key, only with the models they may use. Code Arena's agent changes a VM only when the person allows it, for that VM.
+What a person may do comes from roles (built in, or made by the company) held directly, through a group or by everyone, and from rules that give or take a feature; admin roles can be scoped to some groups. The checker says why a person may or may not do something. The wiki finds and shows each person only the documents they may read, and searches only the code they may read in GitLab, as them. A feature taken from a person is hidden from their menus and pages, not only refused. Taking a request out of the line needs usage.line, restarting an engine runtimes.restart; only a chat's owner rewinds it, and Code Arena's key reads and adds to its own person's chats alone. Code Arena reaches only the person's own chats' goals and the assistants they may use, and an assistant uses only skills its maker may use. Its sub-agents get only the tools they are given, never more than the session's mode allows, and one that changes files never asks: what its mode would ask is refused. What fills a chat's window is shown to its people only, and Code Arena counts tokens with the person's key, only with the models they may use. Code Arena's agent changes a VM only when the person allows it, for that VM. A Code Studio workspace's forwarded port is reached only by its owner, signed in, at an origin of its own, or by everyone signed in who may use Code Studio once its owner shares it (audited); Arena's session cookies never reach the program, which cannot set one for Arena's domain.
 
 **Serves**
 
@@ -143,7 +143,7 @@ What a person may do comes from roles (built in, or made by the company) held di
 - [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.01.02 Access Enforcement; 03.01.04 Separation of Duties; 03.01.05 Least Privilege
 - [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): FDP_ACC Access control policy; FDP_ACF Access control functions; FMT_SMR Security management roles
 
-**Documented in** [admin.md#access-roles-and-rules](../admin.md#access-roles-and-rules), [code-arena.md#sub-agents-and-tasks](../code-arena.md#sub-agents-and-tasks), [code-arena.md#virtual-machines](../code-arena.md#virtual-machines)
+**Documented in** [admin.md#access-roles-and-rules](../admin.md#access-roles-and-rules), [code-arena.md#sub-agents-and-tasks](../code-arena.md#sub-agents-and-tasks), [code-arena.md#virtual-machines](../code-arena.md#virtual-machines), [chat.md#forwarded-ports](../chat.md#forwarded-ports)
 
 **Proved by**
 
@@ -161,6 +161,8 @@ What a person may do comes from roles (built in, or made by the company) held di
 - `Llm.Tests/SkillTransferTests.Only_who_may_make_skills_imports_them_from_the_page_or_Code_Arena`
 - `Llm.Tests/ContextWindowTests.Code_Arena_counts_with_the_persons_key_and_only_for_the_models_they_may_use`
 - `Llm.Tests/CodeArenaVmTests.Changing_a_VM_asks_the_person_and_always_covers_that_tool_on_that_VM_only`
+- `Llm.Tests/StudioPortsTests.A_dev_server_is_listed_and_reached_by_its_owner_alone_at_its_own_address_without_arenas_session`
+- `Llm.Tests/StudioPortsTests.A_port_is_named_shared_with_everyone_signed_in_stopped_and_forwarded_by_hand`
 
 **The company's part** Decide who holds which role, and review it.
 
@@ -718,7 +720,7 @@ scripts/backup.sh backs up the databases, the settings and the files, with a sec
 
 ### OPS-02: Code the model writes runs apart
 
-Python, documents and a plugin's own server run in the sandbox: no network, a read-only root, its own limits, nothing that outlives a run.
+Python, documents and a plugin's own server run in the sandbox: no network, a read-only root, its own limits, nothing that outlives a run. In a Code Studio workspace the agent's commands run in bubblewrap: they write only in the clone, the build caches and a /tmp of their own, and the engine's settings, sessions and the person's GitLab token are hidden from them; the workspaces service says when it cannot make one.
 
 **Serves**
 
@@ -732,11 +734,13 @@ Python, documents and a plugin's own server run in the sandbox: no network, a re
 - [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md): MEASURE 2.7 AI system security and resilience – as identified in the MAP function – are evaluated and documented.
 - [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md): Art.15 Accuracy, robustness and cybersecurity
 
-**Documented in** [plugins.md#a-server-of-its-own-in-the-sandbox](../plugins.md#a-server-of-its-own-in-the-sandbox)
+**Documented in** [plugins.md#a-server-of-its-own-in-the-sandbox](../plugins.md#a-server-of-its-own-in-the-sandbox), [chat.md#code-studio-workspaces](../chat.md#code-studio-workspaces)
 
 **Proved by**
 
 - `Llm.Tests/ChatToolsTests.Python_runs_in_the_sandbox_with_the_chats_files_and_what_it_writes_comes_back`
+- `deploy/test_workspaces_supervisor.py::test_health_says_whether_the_agents_commands_have_a_sandbox`
+- `deploy/test_workspaces_supervisor.py::test_a_clone_that_fails_says_why_without_the_token`
 - `Llm.Tests/ChatToolsTests.A_program_calls_the_chats_tools_as_the_person_through_the_sandbox_and_only_what_it_prints_comes_back`
 - `Llm.Tests/PluginTests.A_plugins_own_server_runs_in_the_sandbox_with_its_settings_one_job_a_call`
 

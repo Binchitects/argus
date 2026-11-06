@@ -65,6 +65,8 @@ app.UseCsrfGuard();
 // Code Studio's terminals, language servers and debugger reach their workspace over WebSockets.
 app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
 app.UseAuthentication();
+// Code Studio's forwarded ports (their own hosts under the domain): answered here, before anything of Arena's API.
+Llm.Api.Code.Studio.PortForwards.UsePortForwards(app);
 app.UseTwoFactorEnrolment();
 Llm.Api.Compliance.NoticeGate.UseNoticeGate(app);
 app.UseAuthorization();

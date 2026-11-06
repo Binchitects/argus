@@ -185,6 +185,10 @@ controls:
       key, only with the models they may use.
       Code Arena's agent changes a VM only when the
       person allows it, for that VM.
+      A Code Studio workspace's forwarded port is reached only by its owner,
+      signed in, at an origin of its own, or by everyone signed in who may use
+      Code Studio once its owner shares it (audited); Arena's session cookies
+      never reach the program, which cannot set one for Arena's domain.
     frameworks:
       iso27001: [A.5.15, A.5.18, A.8.2, A.8.3]
       soc2: [CC6.1, CC6.3]
@@ -196,7 +200,7 @@ controls:
       nist80053: [AC-3, AC-5, AC-6]
       nist800171: [03.01.02, 03.01.04, 03.01.05]
       commoncriteria: [FDP_ACC, FDP_ACF, FMT_SMR]
-    docs: [admin.md#access-roles-and-rules, code-arena.md#sub-agents-and-tasks, code-arena.md#virtual-machines]
+    docs: [admin.md#access-roles-and-rules, code-arena.md#sub-agents-and-tasks, code-arena.md#virtual-machines, chat.md#forwarded-ports]
     tests:
       - Llm.Tests/EndpointAccessTests.A_role_reaches_the_reads_of_its_permissions_and_no_others
       - Llm.Tests/EndpointAccessTests.Each_built_in_role_holds_exactly_its_permissions
@@ -212,6 +216,8 @@ controls:
       - Llm.Tests/SkillTransferTests.Only_who_may_make_skills_imports_them_from_the_page_or_Code_Arena
       - Llm.Tests/ContextWindowTests.Code_Arena_counts_with_the_persons_key_and_only_for_the_models_they_may_use
       - Llm.Tests/CodeArenaVmTests.Changing_a_VM_asks_the_person_and_always_covers_that_tool_on_that_VM_only
+      - Llm.Tests/StudioPortsTests.A_dev_server_is_listed_and_reached_by_its_owner_alone_at_its_own_address_without_arenas_session
+      - Llm.Tests/StudioPortsTests.A_port_is_named_shared_with_everyone_signed_in_stopped_and_forwarded_by_hand
     operator: Decide who holds which role, and review it.
 
   - id: IAM-06
@@ -782,6 +788,10 @@ controls:
     meets: >-
       Python, documents and a plugin's own server run in the sandbox: no
       network, a read-only root, its own limits, nothing that outlives a run.
+      In a Code Studio workspace the agent's commands run in bubblewrap: they
+      write only in the clone, the build caches and a /tmp of their own, and
+      the engine's settings, sessions and the person's GitLab token are hidden
+      from them; the workspaces service says when it cannot make one.
     frameworks:
       iso27001: [A.8.22, A.8.7]
       soc2: [CC6.8]
@@ -792,9 +802,11 @@ controls:
       nist80053: [SC-39, SC-44]
       airmf: [MEASURE 2.7]
       euaiact: [Art.15]
-    docs: [plugins.md#a-server-of-its-own-in-the-sandbox]
+    docs: [plugins.md#a-server-of-its-own-in-the-sandbox, chat.md#code-studio-workspaces]
     tests:
       - Llm.Tests/ChatToolsTests.Python_runs_in_the_sandbox_with_the_chats_files_and_what_it_writes_comes_back
+      - deploy/test_workspaces_supervisor.py::test_health_says_whether_the_agents_commands_have_a_sandbox
+      - deploy/test_workspaces_supervisor.py::test_a_clone_that_fails_says_why_without_the_token
       - Llm.Tests/ChatToolsTests.A_program_calls_the_chats_tools_as_the_person_through_the_sandbox_and_only_what_it_prints_comes_back
       - Llm.Tests/PluginTests.A_plugins_own_server_runs_in_the_sandbox_with_its_settings_one_job_a_call
     operator: Keep the sandbox's host patched.

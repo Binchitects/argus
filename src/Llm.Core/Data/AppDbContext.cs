@@ -91,6 +91,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Checklist> Checklists => Set<Checklist>();
     public DbSet<ChecklistRun> ChecklistRuns => Set<ChecklistRun>();
     public DbSet<Code.StudioWorkspace> StudioWorkspaces => Set<Code.StudioWorkspace>();
+    public DbSet<Code.StudioPort> StudioPorts => Set<Code.StudioPort>();
     public DbSet<Code.BusinessSystem> BusinessSystems => Set<Code.BusinessSystem>();
     public DbSet<Meetings.Meeting> Meetings => Set<Meetings.Meeting>();
     public DbSet<Meetings.MeetingAction> MeetingActions => Set<Meetings.MeetingAction>();
@@ -980,6 +981,14 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(x => x.Error).HasMaxLength(2000);
             e.HasIndex(x => new { x.UserId, x.UsedAt });
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Code.StudioPort>(e =>
+        {
+            e.ToTable("studio_ports");
+            e.Property(x => x.Label).HasMaxLength(100);
+            e.Property(x => x.Visibility).HasMaxLength(16);
+            e.HasIndex(x => new { x.WorkspaceId, x.Port }).IsUnique();
+            e.HasOne<Code.StudioWorkspace>().WithMany().HasForeignKey(x => x.WorkspaceId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<Panels.Panel>(e =>
         {

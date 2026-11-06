@@ -99,9 +99,14 @@ The addresses, all on port 443:
 | `https://DOMAIN` | the app |
 | `https://gateway.DOMAIN/v1` | the API (OpenAI and Anthropic protocols), with a person's key |
 | `https://argus.DOMAIN/mcp` | Argus for coding agents, with a person's API key (not a GitLab token) |
+| `https://ws-<workspace>-<port>.DOMAIN` | with Code Studio's workspaces: a dev server in a workspace, for its owner ([chat.md](chat.md#forwarded-ports)) |
 
 `*.localhost` resolves to this machine in browsers; for other tools,
-`./arenactl hosts` adds the names to `/etc/hosts`.
+`./arenactl hosts` adds the names to `/etc/hosts`. With Code Studio's
+workspaces, a forwarded port has a name of its own under `DOMAIN`: the
+company's DNS needs a wildcard record (`*.DOMAIN`) for this machine, and
+the certificate must cover `*.DOMAIN` (the one `./arenactl cert` makes does;
+Let's Encrypt's, made per name, does not).
 
 People connect their tools from **Connect your tools** in the app. A team's
 GitLab pipeline uses the gateway too: a review of each merge request and an
@@ -446,7 +451,8 @@ the power limits run with compose only.
    them to a registry the cluster pulls from; name them under `images` (the tag
    defaults to the app's version).
 2. Make a TLS Secret for `DOMAIN`, `gateway.DOMAIN` and `argus.DOMAIN` (a
-   wildcard, or the files `./arenactl cert` makes): `kubectl create secret tls
+   wildcard, or the files `./arenactl cert` makes; with `workspaces.enabled`,
+   `*.DOMAIN` too, for Code Studio's forwarded ports): `kubectl create secret tls
    arena-tls --cert=... --key=...`.
 3. Install:
 

@@ -1246,6 +1246,18 @@ debugger and its agent), on a project of yours that the server keeps.
   company's own CA ([deployment.md](deployment.md#gitlab-on-a-company-ca))
   is trusted there too: the clone, `git push` in its terminals, curl,
   Python, pip, .NET and Node.js.
+- **The agent's commands are sandboxed** there as on your own machine
+  ([code-arena.md](code-arena.md)): bubblewrap lets them write only in the
+  clone, the build tools' caches and a `/tmp` of their own, and hides the
+  engine's settings, sessions and your GitLab token, so a command the model
+  runs cannot read them (pushing is the IDE's, as you). Your terminals are
+  yours, unsandboxed, as in VS Code. `/sandbox` in the IDE's chat says which
+  it is; the workspaces service says so as it starts, and why when it cannot
+  make one (compose gives it what it needs; on Kubernetes it is
+  `workspaces.sandbox`).
+- **Ports.** A dev server you start in a workspace (`npm run dev`,
+  `dotnet run`, `python -m http.server`) is forwarded to you, as VS Code
+  does: see [Forwarded ports](#forwarded-ports).
 - **Asleep.** A workspace unused for 30 minutes stops; its files stay, and
   **Open** wakes it. **Delete** takes its files and its key away.
 - **Your own machine.** In a folder on your computer, `code-arena web
@@ -1261,6 +1273,34 @@ debugger and its agent), on a project of yours that the server keeps.
   ([deployment.md](deployment.md)); without it, Code Studio lists no
   server workspaces. It needs the `code.studio` permission, which everyone
   holds unless an admin denies it. At most 8 workspaces each.
+
+#### Forwarded ports
+
+The IDE's **Ports** panel (beside Terminal, in a server workspace) lists what
+the workspace's programs listen on, found as they start, with the process
+that holds each port, and the ports you forwarded by hand.
+
+- **Each port has its own address**: `https://ws-<workspace>-<port>.DOMAIN/`,
+  **Open in Browser** or **Copy Address**. It is its own origin, so the
+  program's pages never run on Arena's, and its paths are its own (`/`,
+  `/@vite/client`): no base path to set. When a new one starts, the IDE says
+  so and offers to open it.
+- **Only you reach it**, signed in to Arena (your session covers the
+  domain's names; signed out, a page asks you to sign in first). **Share**
+  makes it reachable by everyone signed in who may use Code Studio, until
+  you make it private again (audited as `studio.port.share`). **Stop
+  Forwarding** closes it to everyone, you too, until you forward it again.
+- **What it is sent.** Every request and WebSocket (a dev server's live
+  reload) goes on to the port in the workspace, as `Host: localhost:<port>`,
+  which dev servers allow, with `X-Forwarded-Host` and `-Proto` naming the
+  address you used. Arena's own cookies are taken out first, and the
+  program cannot set a cookie for Arena's domain or one of Arena's names.
+- **Forward a Port** adds one before its server starts, with a label; one
+  that is not listening says so when opened. A sleeping workspace's ports
+  are closed until it is opened again.
+- **Where.** The addresses need a DNS name for `*.DOMAIN` and a certificate
+  that covers it, as `./arenactl cert` makes
+  ([deployment.md](deployment.md#certificates)).
 
 ### The business map
 
