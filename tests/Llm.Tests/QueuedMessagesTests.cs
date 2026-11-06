@@ -100,6 +100,41 @@ public sealed class QueuedMessagesTests(AppFixture app)
     }
 
     [Fact]
+    public async Task In_a_room_the_answer_takes_in_only_the_words_for_the_model_of_the_person_it_answers()
+    {
+        await using var f = await AskingAppAsync();
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        async Task<(Guid Id, string Email, TestBrowser Browser)> NamedAsync(string name)
+        {
+            var user = "qr" + Guid.NewGuid().ToString("N")[..8];
+            var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = user, email = $"{user}@example.test", displayName = name }));
+            return (made.GetProperty("id").GetGuid(), $"{user}@example.test", await new TestBrowser(f).SignedInAsync(user, made.GetProperty("password").GetString()!));
+        }
+        var (_, _, owner) = await NamedAsync("Olivia");
+        var (benId, benEmail, ben) = await NamedAsync("Ben");
+        var made = await owner.PostAsync("/api/rooms", new { title = "Pricing", userIds = new[] { benId } });
+        await StatusAssert.Is(HttpStatusCode.Created, made);
+        var room = (await owner.JsonAsync(made)).GetProperty("id").GetGuid();
+
+        var (res, _) = await StartAsync(ben, room, """@Arena Sum: [call calculate {"expression":"6*7"}]""", "\"approval\"");
+        using (res)
+        {
+            // Ben's next words for the model go into his answer; Olivia's question, and words for the people, wait for it to end.
+            await StatusAssert.Is(HttpStatusCode.OK, await QueueAsync(ben, room, new { content = "@Arena and in French" }));
+            await StatusAssert.Is(HttpStatusCode.OK, await QueueAsync(owner, room, new { content = "@Arena what about tax?" }));
+            await StatusAssert.Is(HttpStatusCode.NoContent, await AllowAsync(ben, room));
+            Assert.Single(Events(await res.Content.ReadAsStringAsync()), e => e.GetProperty("type").GetString() == "took_in");
+        }
+        var asked = app.Model.Requests.Where(r => r.Body["user"]?.GetValue<string>() == benEmail).ToList();
+        Assert.Equal("[Ben]: @Arena and in French", asked[1].Body["messages"]!.AsArray()[^1]!["content"]!.GetValue<string>());
+        var chat = await SettledAsync(owner, room, 3);
+        var questions = chat.GetProperty("messages").EnumerateArray().Where(m => m.GetProperty("role").GetString() == "user").ToList();
+        Assert.Equal(["Ben", "Ben", "Olivia"], questions.Select(q => q.GetProperty("author").GetProperty("name").GetString()));
+        Assert.True(questions[1].GetProperty("details").GetProperty("takenIn").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, questions[2].GetProperty("details").ValueKind);
+    }
+
+    [Fact]
     public async Task A_queued_message_is_edited_until_it_is_taken_in_and_one_with_files_waits_for_the_answer_to_end()
     {
         await using var f = await AskingAppAsync();
