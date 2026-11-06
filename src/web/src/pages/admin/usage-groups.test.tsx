@@ -20,7 +20,7 @@ describe('usage by group', () => {
         },
       }),
     })
-    renderApp('/admin/usage-groups')
+    const { router } = renderApp('/admin/usage-groups')
     const table = await screen.findByRole('table', { name: 'Usage by group' })
     const names = within(table).getAllByRole('button').map((b) => b.textContent)
     expect(names).toEqual(['Data science', 'Research', '(in no group)'])
@@ -31,9 +31,17 @@ describe('usage by group', () => {
     expect(within(table).getByRole('link', { name: 'Ben' })).toHaveAttribute('href', '/admin/people/p2')
     expect(within(table).getByText('$6.00')).toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole('radio', { name: '30 days' }))
+    await userEvent.click(screen.getByRole('combobox', { name: 'Time range' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Last 30 days' }))
     await waitFor(() => expect(calls.filter((c) => c.path.startsWith('/api/admin/usage/groups')).length).toBe(2))
     const last = new URL(calls.at(-1)!.path, 'https://x').searchParams
     expect(Math.round((Date.parse(last.get('to')!) - Date.parse(last.get('from')!)) / 86_400_000)).toBe(30)
+    // The window is the page's address; the export is for it.
+    expect(new URLSearchParams(router.state.location.search).get('from')).toBe('now-30d')
+    await userEvent.click(screen.getByRole('button', { name: 'Export' }))
+    const pdf = new URL((await screen.findByRole('menuitem', { name: 'PDF report' })).getAttribute('href')!, 'https://x')
+    expect(pdf.pathname).toBe('/api/admin/usage/groups/export')
+    expect(pdf.searchParams.get('format')).toBe('pdf')
+    expect(Math.round((Date.parse(pdf.searchParams.get('to')!) - Date.parse(pdf.searchParams.get('from')!)) / 86_400_000)).toBe(30)
   })
 })

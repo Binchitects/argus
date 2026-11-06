@@ -1,4 +1,4 @@
-import { Activity, AppWindow, BookOpenText, ListOrdered, MessageSquareHeart, BadgeCheck, AudioLines, Brain, GitPullRequest, ListChecks, ListTodo, BarChart, BarChart3, Blocks, Bot, Boxes, CalendarClock, Database, FlaskConical, HardDrive, Home, KeyRound, LayoutDashboard, Library, LineChart, Logs, MessageSquare, Package, Palette, PieChart, Plug, Presentation, ScanSearch, ScrollText, Settings, ShieldAlert, ShieldCheck, Siren, SquareSlash, Telescope, ThumbsUp, Timer, Trophy, Users, UsersRound, Workflow, Wrench, type LucideIcon } from 'lucide-react'
+import { Activity, AppWindow, BookOpenText, FolderKanban, ListOrdered, MessageSquareHeart, BadgeCheck, AudioLines, Brain, GitPullRequest, ListChecks, ListTodo, BarChart, BarChart3, Blocks, Bot, Boxes, CalendarClock, Database, FlaskConical, HardDrive, Home, KeyRound, LayoutDashboard, Library, LineChart, Logs, MessageSquare, Package, Palette, PieChart, Plug, Presentation, ScanSearch, ScrollText, Settings, ShieldAlert, ShieldCheck, Siren, SquareSlash, Telescope, ThumbsUp, Timer, Trophy, Users, UsersRound, Workflow, Wrench, type LucideIcon } from 'lucide-react'
 
 export interface NavItem {
   title: string
@@ -28,6 +28,7 @@ export const navigation: NavSection[] = [
     items: [
       { title: 'Home', path: '/', icon: Home },
       { title: 'Chat', path: '/chat', icon: MessageSquare, keywords: ['conversation', 'ask', 'model', 'argus'], may: ['feature.chat'] },
+      { title: 'Projects', path: '/projects', icon: FolderKanban, keywords: ['project', 'team', 'accounting', 'budget', 'progress', 'goals', 'milestones', 'tasks', 'report', 'export', 'pdf', 'excel', 'global'] },
       { title: 'Assistants', path: '/assistants', icon: Bot, keywords: ['gpts', 'gems', 'projects', 'instructions', 'knowledge', 'shared', 'team'] },
       { title: 'Skills', path: '/skills', icon: SquareSlash, keywords: ['slash commands', 'prompts', 'prompt library', 'templates', 'snippets', 'instructions', 'parameters'] },
       { title: 'Memory', path: '/memory', icon: Brain, keywords: ['remember', 'memories', 'recall', 'preferences', 'facts', 'decisions', 'lessons', 'pinned', 'context', 'what it knows about me'], may: ['feature.memory'] },

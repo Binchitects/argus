@@ -11,7 +11,7 @@ import { ScrollRegion } from '@/components/app/scroll-region'
 import { TimeChart } from '@/components/charts/time-chart'
 import { api, errorMessage } from '@/lib/api'
 import { formatValue } from '@/lib/format'
-import { intervalFor, resolve, type TimeRange } from '@/lib/time'
+import { intervalFor, resolve, resolveEnd, type TimeRange } from '@/lib/time'
 import { cn } from '@/lib/utils'
 import { LogsPanel } from './logs-panel'
 import { reduceEach } from './reduce'
@@ -95,7 +95,7 @@ function QueryPanel({ uid, panel, range, tick, vars, level, onEmpty }: {
     placeholderData: keepPreviousData,
     queryFn: ({ signal }) => {
       const from = resolve(range.from)
-      const to = resolve(range.to)
+      const to = resolveEnd(range.to)
       // As Grafana: roughly one bucket per 3 px of a full-width panel.
       const points = Math.round(((panel.gridPos?.w ?? 24) / 24) * 400)
       return api<PanelData>(`/api/dashboards/${uid}/panels/${panel.key}/query`, {
@@ -251,7 +251,7 @@ function QueryPanel({ uid, panel, range, tick, vars, level, onEmpty }: {
           bars={custom?.drawStyle === 'bars'}
           label={panel.title ?? 'chart'}
           from={resolve(range.from).getTime()}
-          to={resolve(range.to).getTime()}
+          to={resolveEnd(range.to).getTime()}
         />
       )
     } else {

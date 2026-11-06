@@ -187,7 +187,10 @@ describe('dashboards', () => {
     expect(router.state.location.search).toBe('')
 
     await userEvent.click(range)
-    expect((await screen.findAllByRole('option')).map((o) => o.textContent)).toEqual(['Last 5 minutes', 'Last 15 minutes', 'Last hour', 'Last 6 hours', 'Last 24 hours', 'Last 7 days', 'Last 30 days', 'Last 90 days'])
+    expect((await screen.findAllByRole('option')).map((o) => o.textContent)).toEqual([
+      'Last 5 minutes', 'Last 15 minutes', 'Last hour', 'Last 6 hours', 'Last 24 hours', 'Last 7 days', 'Last 30 days', 'Last 90 days',
+      'Last year', 'Today', 'This week', 'This month', 'Last month', 'Custom range…',
+    ])
     await userEvent.click(screen.getByRole('option', { name: 'Last 6 hours' }))
     await waitFor(() => expect(asked('plain')).toBe(360))
     expect(new URLSearchParams(router.state.location.search).get('from')).toBe('now-6h')

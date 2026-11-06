@@ -248,6 +248,8 @@ export interface ConversationSummary {
   isRoom?: boolean
   /** The person's own (false: a room they are in). */
   mine?: boolean
+  /** The project it is in, if any. */
+  projectId?: string | null
 }
 
 export type RoomRole = 'owner' | 'member' | 'viewer'

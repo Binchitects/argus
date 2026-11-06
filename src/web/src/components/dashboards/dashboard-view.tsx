@@ -1,13 +1,13 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Pause, Play, RefreshCw } from 'lucide-react'
-import { useCallback, useEffect, useState, type CSSProperties } from 'react'
-import { useSearchParams } from 'react-router'
+import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react'
 import { QueryError } from '@/components/app/query-state'
-import { RangeSelect } from '@/components/app/range-select'
+import { TimeWindow } from '@/components/app/time-window'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/lib/api'
-import { dashboardRange, dashboardRangeOptions, fromRangeKey, rangeKey, refreshMs } from '@/lib/time'
+import { dashboardWindowPresets, defaultRange, refreshMs, type TimeRange } from '@/lib/time'
+import { useTimeWindow } from '@/lib/use-time-window'
 import { PanelView } from './panel'
 import type { DashboardDef, PanelDef } from './types'
 import { Variables, type Chosen } from './variables'
@@ -16,16 +16,17 @@ import { Variables, type Chosen } from './variables'
  * A provisioned dashboard, drawn by the app: Grafana's 24-column grid on wide
  * screens, one panel per row on a phone; Grafana rows become section headings.
  * Live dashboards (a refresh in their file) refresh themselves, and can pause.
- * The time range is the last hour unless the file says another; one chosen goes
- * in the address (Grafana's from and to), so a link opens the same view. Its
- * menu is as wide as its label, but no wider than the page: a long one is cut
- * short. A panel marked hideWhenEmpty is left out while it has no data (a sensor
+ * The time window is the last hour unless the file says another; one chosen (a
+ * preset or a custom range of days) goes in the address (Grafana's from and to),
+ * so a link opens the same view. Its menu is as wide as its label, but no wider
+ * than the page: a long one is cut short. <paramref name="actions"/>: what goes
+ * beside it for the window shown (an export). A panel marked hideWhenEmpty is left out while it has no data (a sensor
  * this machine lacks); a row with emptyText says it instead of its panels while
  * none of them has data (the GPU section of a machine without one).
  */
-export function DashboardView({ uid }: { uid: string }) {
+export function DashboardView({ uid, actions }: { uid: string; actions?: (query: () => URLSearchParams) => ReactNode }) {
   const def = useQuery({ queryKey: ['dashboard', uid], queryFn: ({ signal }) => api<DashboardDef>(`/api/dashboards/${uid}`, { signal }) })
-  const [params, setParams] = useSearchParams()
+  const time = useTimeWindow(fileRange(def.data?.time))
   const [vars, setVars] = useState<Chosen>({})
   const [tick, setTick] = useState(0)
   const [paused, setPaused] = useState(false)
@@ -41,24 +42,13 @@ export function DashboardView({ uid }: { uid: string }) {
   if (def.isPending) return <Skeleton className="h-96" />
   if (def.error) return <QueryError error={def.error} retry={() => def.refetch()} />
   const d = def.data
-  const current = dashboardRange(params, d.time)
+  const current = time.range
   const sections = split(d.panels)
-  const choose = (key: string) =>
-    setParams(
-      (p) => {
-        const next = new URLSearchParams(p)
-        const r = fromRangeKey(key)
-        next.set('from', r.from)
-        next.set('to', r.to)
-        return next
-      },
-      { replace: true },
-    )
 
   return (
     <div className="grid gap-6">
       <div className="flex min-w-0 flex-wrap items-end gap-2">
-        <RangeSelect value={rangeKey(current)} onChange={choose} options={dashboardRangeOptions(current)} className="h-9 w-auto max-w-full min-w-44" />
+        <TimeWindow value={current} onChange={time.set} presets={dashboardWindowPresets} />
         <Button
           variant="outline"
           size="sm"
@@ -75,6 +65,7 @@ export function DashboardView({ uid }: { uid: string }) {
             {paused ? <Play /> : <Pause />} {paused ? `Refresh every ${d.refresh}` : `Refreshing every ${d.refresh}`}
           </Button>
         )}
+        {actions?.(time.query)}
         {d.variables && d.variables.length > 0 && (
           <div className="basis-full">
             <Variables uid={uid} variables={d.variables} from={current.from} to={current.to} value={vars} onChange={setVars} />
@@ -88,13 +79,18 @@ export function DashboardView({ uid }: { uid: string }) {
   )
 }
 
+/** The dashboard file's own range, when it has one, else the last hour. */
+function fileRange(own: TimeRange | null | undefined): TimeRange {
+  return own?.from ? { from: own.from, to: own.to || 'now' } : defaultRange
+}
+
 interface SectionDef {
   title?: string
   emptyText?: string
   panels: PanelDef[]
 }
 
-function Section({ uid, section: s, range, tick, vars }: { uid: string; section: SectionDef; range: ReturnType<typeof dashboardRange>; tick: number; vars: Chosen }) {
+function Section({ uid, section: s, range, tick, vars }: { uid: string; section: SectionDef; range: TimeRange; tick: number; vars: Chosen }) {
   // Which panels came back with nothing; the panels stay mounted while hidden, so data that comes back shows them again.
   const [empty, setEmpty] = useState<Record<number, boolean>>({})
   const report = useCallback((key: number, is: boolean) => setEmpty((e) => (e[key] === is ? e : { ...e, [key]: is })), [])
