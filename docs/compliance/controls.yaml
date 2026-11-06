@@ -174,7 +174,8 @@ controls:
       from their menus and pages, not only refused. Taking a request out of
       the line needs usage.line, restarting an engine runtimes.restart; only
       a chat's owner rewinds it, and Code Arena's key reads and adds to its
-      own person's chats alone.
+      own person's chats alone. Code Arena's agent changes a VM only when the
+      person allows it, for that VM.
     frameworks:
       iso27001: [A.5.15, A.5.18, A.8.2, A.8.3]
       soc2: [CC6.1, CC6.3]
@@ -186,7 +187,7 @@ controls:
       nist80053: [AC-3, AC-5, AC-6]
       nist800171: [03.01.02, 03.01.04, 03.01.05]
       commoncriteria: [FDP_ACC, FDP_ACF, FMT_SMR]
-    docs: [admin.md#access-roles-and-rules]
+    docs: [admin.md#access-roles-and-rules, code-arena.md#virtual-machines]
     tests:
       - Llm.Tests/EndpointAccessTests.A_role_reaches_the_reads_of_its_permissions_and_no_others
       - Llm.Tests/EndpointAccessTests.Each_built_in_role_holds_exactly_its_permissions
@@ -197,6 +198,7 @@ controls:
       - Llm.Tests/FairUseTests.An_admin_takes_a_waiting_answer_out_and_stops_a_running_one_and_the_person_is_told_why
       - Llm.Tests/ChatRewindTests.Only_the_owner_rewinds_a_room_for_everyone_and_nobody_while_an_answer_is_written
       - Llm.Tests/CodeArenaSyncTests.Only_the_owner_s_key_reads_or_adds_to_a_chat
+      - Llm.Tests/CodeArenaVmTests.Changing_a_VM_asks_the_person_and_always_covers_that_tool_on_that_VM_only
     operator: Decide who holds which role, and review it.
 
   - id: IAM-06
@@ -492,7 +494,9 @@ controls:
       a secret cut to its first characters; words and prompt
       injection are read through their disguises and in eleven languages,
       commands that do damage are kept from agents' tools, and data sent out
-      through images and links is stopped.
+      through images and links is stopped. A VM's guest password, which Code
+      Arena's VM tools sign in with, never reaches the model, the session, the
+      log or a command line of Code Arena's own.
     frameworks:
       iso27001: [A.8.11, A.8.12]
       soc2: [C1.1, CC6.7]
@@ -504,7 +508,7 @@ controls:
       nist80053: [AC-4, SI-15]
       nist800171: [03.01.03]
       commoncriteria: [FDP_IFC, FDP_IFF]
-    docs: [admin.md#safeguards, chat.md#safeguards]
+    docs: [admin.md#safeguards, chat.md#safeguards, code-arena.md#virtual-machines]
     tests:
       - Llm.Tests/SafeguardsTests.Personal_data_reaches_the_model_masked_and_the_chat_keeps_it_as_written
       - Llm.Tests/SafeguardRulesTests.Answers_are_masked_or_withheld_and_what_tools_send_and_bring_back_is_held_by_their_rules
@@ -515,6 +519,7 @@ controls:
       - Llm.Tests/SecretScanningTests.A_pasted_private_key_is_refused_in_the_chat_and_through_the_API_and_audited_by_its_kind_only
       - Llm.Tests/SecretScanningTests.A_name_in_code_is_not_a_password
       - Llm.Tests/SafeguardRulesTests.Every_block_names_its_rule_what_it_found_and_where_without_the_secret_itself
+      - Llm.Tests/CodeArenaVmTests.A_VMs_guest_password_never_reaches_the_model_or_a_command_line
     operator: Decide which data may reach which model, and which models are outside the company.
 
   - id: DAT-05
