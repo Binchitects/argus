@@ -171,7 +171,11 @@ controls:
       says why a person may or may not do something. The wiki finds and shows
       each person only the documents they may read, and searches only the code
       they may read in GitLab, as them. A feature taken from a person is hidden
-      from their menus and pages, not only refused.
+      from their menus and pages, not only refused. Code Arena reaches only the
+      person's own chats' goals and the assistants they may use, and an
+      assistant uses only skills its maker may use. Its sub-agents get only the
+      tools they are given, never more than the session's mode allows, and one
+      that changes files never asks: what its mode would ask is refused.
     frameworks:
       iso27001: [A.5.15, A.5.18, A.8.2, A.8.3]
       soc2: [CC6.1, CC6.3]
@@ -183,7 +187,7 @@ controls:
       nist80053: [AC-3, AC-5, AC-6]
       nist800171: [03.01.02, 03.01.04, 03.01.05]
       commoncriteria: [FDP_ACC, FDP_ACF, FMT_SMR]
-    docs: [admin.md#access-roles-and-rules]
+    docs: [admin.md#access-roles-and-rules, code-arena.md#sub-agents-and-tasks]
     tests:
       - Llm.Tests/EndpointAccessTests.A_role_reaches_the_reads_of_its_permissions_and_no_others
       - Llm.Tests/EndpointAccessTests.Each_built_in_role_holds_exactly_its_permissions
@@ -191,6 +195,8 @@ controls:
       - Llm.Tests/AccessBulkTests.Me_and_the_chats_config_name_the_feature_permissions_a_person_does_not_hold
       - Llm.Tests/WikiTests.People_find_and_read_the_documents_they_may_read_and_nothing_else
       - Argus.Tests/ReviewToolsTests.The_wiki_search_answers_as_the_person_with_pages_and_filters
+      - Llm.Tests/CodeArenaGoalTests.Code_Arenas_goal_is_kept_with_its_chat_shown_on_the_web_and_only_Code_Arena_changes_it
+      - Llm.Tests/CodeArenaGoalTests.Code_Arena_lists_the_assistants_the_person_may_use_with_their_skills
     operator: Decide who holds which role, and review it.
 
   - id: IAM-06

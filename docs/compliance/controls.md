@@ -128,7 +128,7 @@ People come from the company's directory (LDAP or Active Directory), OIDC or SAM
 
 ### IAM-05: Least privilege, by roles and rules
 
-What a person may do comes from roles (built in, or made by the company) held directly, through a group or by everyone, and from rules that give or take a feature; admin roles can be scoped to some groups. The checker says why a person may or may not do something. The wiki finds and shows each person only the documents they may read, and searches only the code they may read in GitLab, as them. A feature taken from a person is hidden from their menus and pages, not only refused.
+What a person may do comes from roles (built in, or made by the company) held directly, through a group or by everyone, and from rules that give or take a feature; admin roles can be scoped to some groups. The checker says why a person may or may not do something. The wiki finds and shows each person only the documents they may read, and searches only the code they may read in GitLab, as them. A feature taken from a person is hidden from their menus and pages, not only refused. Code Arena reaches only the person's own chats' goals and the assistants they may use, and an assistant uses only skills its maker may use. Its sub-agents get only the tools they are given, never more than the session's mode allows, and one that changes files never asks: what its mode would ask is refused.
 
 **Serves**
 
@@ -143,7 +143,7 @@ What a person may do comes from roles (built in, or made by the company) held di
 - [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.01.02 Access Enforcement; 03.01.04 Separation of Duties; 03.01.05 Least Privilege
 - [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): FDP_ACC Access control policy; FDP_ACF Access control functions; FMT_SMR Security management roles
 
-**Documented in** [admin.md#access-roles-and-rules](../admin.md#access-roles-and-rules)
+**Documented in** [admin.md#access-roles-and-rules](../admin.md#access-roles-and-rules), [code-arena.md#sub-agents-and-tasks](../code-arena.md#sub-agents-and-tasks)
 
 **Proved by**
 
@@ -153,6 +153,8 @@ What a person may do comes from roles (built in, or made by the company) held di
 - `Llm.Tests/AccessBulkTests.Me_and_the_chats_config_name_the_feature_permissions_a_person_does_not_hold`
 - `Llm.Tests/WikiTests.People_find_and_read_the_documents_they_may_read_and_nothing_else`
 - `Argus.Tests/ReviewToolsTests.The_wiki_search_answers_as_the_person_with_pages_and_filters`
+- `Llm.Tests/CodeArenaGoalTests.Code_Arenas_goal_is_kept_with_its_chat_shown_on_the_web_and_only_Code_Arena_changes_it`
+- `Llm.Tests/CodeArenaGoalTests.Code_Arena_lists_the_assistants_the_person_may_use_with_their_skills`
 
 **The company's part** Decide who holds which role, and review it.
 

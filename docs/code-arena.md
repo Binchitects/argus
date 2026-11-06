@@ -251,6 +251,9 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/checklist [N\|NAME\|off\|tick N\|untick N]` | the checklist on in this session and yours (kept in Arena); a number or a name turns one on, `off` turns it off, `tick` and `untick` by hand ([below](#checklists)) |
 | `/review [BASE]` | reviews the changes not yet committed, or this branch's over BASE (`/review main`): the model reads them with git, tries to refute each finding before it reports it, and ends with a verdict; it changes nothing. A `/review` command of the project's or your own goes first |
 | `/agent [NAME TASK]` | your own coding agents (below); with a name and a task, run one on it: its output shows as it comes, and what it said goes into the conversation |
+| `/assistant [N\|NAME\|off]` | your assistants in Arena; a number or a name works as one, `off` as none ([below](#assistants)) |
+| `/tasks [N\|stop N\|new TASK]` | the session's sub-agents and background tasks; `N` shows one's transcript, `stop N` stops it, `new [--edits] [--assistant NAME] TASK` starts one of yours in the background ([below](#sub-agents-and-tasks)) |
+| `/goal [TEXT\|pause\|resume\|cancel]` | work until a goal is met: `TEXT [--check COMMAND \| --until CONDITION] [--steps N] [--minutes N] [--tokens N]`; alone, the goal as it stands ([below](#goal-mode)) |
 | `/compact` | summarize the conversation now |
 | `/compact-at [% [%]]` | show or set when the session compacts itself and what it keeps (below); `off` for only when a request would not fit, `account` for your Arena account's, `default` for that and 25 |
 | `/context` | how full the model's window is, what fills it and its biggest parts |
@@ -1486,6 +1489,15 @@ status (403 `outside` for a path outside the folder).
 | call | what it does |
 |---|---|
 | `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting); `context` (the window), `contextUsed` (about how much of it the next request holds), `window` (what fills the next request: `system`, `tools`, `instructions`, `memory`, `summary`, `files`, `you`, `answers` and `toolResults` in characters, and `biggest`, `[{id, role, tool, chars, preview}]`; the chat's ring and the status bar's Context share `contextUsed` out by them; measured while no turn runs), `reserve` (how much of it is kept for the answer), `compactAt` and `compactTarget` (percent; `compactAt` 0: only when a request would not fit), `compactAtSource` (`flag`, `config`, `account`, `arena` or `default`) and `compactAtAccount` (the Arena account's threshold, null when Arena did not say); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output); `arenaChats` (sessions are kept with chats in Arena here), `account` (whose chats: the key's account, null until Arena said), `chat` (this session's chat there, null: none yet) and `synced` (how many times the web chat's news came in while nothing ran: the page reads the session again when it changes; taking it in is not `busy`); `sync` (`{chat, account, waiting, trouble, behind}`: the chat, whose chats, how many messages Arena lacks, what stops them, whether the web chat has news not taken in; null without the sync) and `notices` (`[{id, text, at}]`: the last 20 said while nothing ran, the page shows each once) |
+| `GET /api/agent-tasks` | the Tasks panel: `{tasks, running, mostAtOnce}`, each task `{id, kind, title, status, call, as, model, writes, created, started, ended, ms, tokens, calls, doing, error, kept}` (`kind` `subagent` or `background`; `status` `queued`, `running`, `done`, `failed` or `stopped`; `call`: the task call it answers; `kept`: from an earlier run of the session) |
+| `GET /api/agent-tasks/{id}` | one task by its id or its call's, with `prompt`, `tools`, `report` and `work` (its thinking, tool calls with their results and words, as the chat's sub-agents have them); 404 `not_found` |
+| `POST /api/agent-tasks` `{prompt, title, assistant, model, edits}` | starts a task of the person's in the background: 201 with the task; 400 `invalid` (no words, an assistant or model not there), 409 `plan` for `edits` in plan mode |
+| `POST /api/agent-tasks/{id}/stop` | stops a task waiting or at work: 204; 409 `over` once it ended |
+| `GET /api/goal` | `{goal}`: `{text, check: {kind, text, by}, budget: {steps, minutes, tokens}, status, turns, steps, tokens, ms, started, updated, passed, said, checkedAt, outcome}` (`status` `working`, `paused`, `met`, `budget`, `stuck` or `cancelled`), null without one |
+| `POST /api/goal` `{text, check, budget}` | sets the goal (`check`: `{kind: "command" \| "condition", text}`, null for the agent's own): its first turn starts once nothing runs; 400 `invalid` (a goal set already, plan mode, a budget out of bounds) |
+| `POST /api/goal/pause`, `POST /api/goal/resume`, `DELETE /api/goal` | pause (after the turn running), resume, cancel (the turn working on it stops): `{goal}`; 409 `goal` when there is none such |
+| `GET /api/assistants` | `{assistants, current}`: the person's assistants in Arena (null when it cannot say) and the one the session works as |
+| `POST /api/assistant` `{id}` | works as that assistant (no `id`: none): `{said, state}`; 404 `not_found`, 409 `busy` while an answer is written |
 | `GET /api/folders?path=` | for Open Folder: a folder's folders by name (hidden ones last, no files, at most 2,000) as `{path, parent, folders, why, current, home, separator, drives, recent, added, files}` (`why`: what is not listed; `recent`: the folders opened lately, the one open now first; `added`: the folders added to this workspace; `files`: its files' names, with `files=1`, for @ in the chat); with no path, the open folder's parent; 404 `not_found` when it is not a folder |
 | `POST /api/folders/add` `{path}` | Add Folder to Workspace: the tools may use it, kept with this folder: `{folder, added}` (`added`: the folders added, whole); 409 `inside` for the folder open now or one in it |
 | `POST /api/folders/remove` `{path}` | takes an added folder out again: `{added}`; 404 `not_added` |
@@ -1907,14 +1919,9 @@ Ctrl+C or Stop, so nothing runs out of the person's sight. Laya still looks at
 the command first (above). `-p` cannot ask, so outside `yolo` it is refused
 with a reason the model passes on. Sub-agents cannot start one.
 
-**Sub-agents** (`task`): the model hands a self-contained piece of research to
-a fresh conversation with only the reading tools (local and Arena's), which
-returns one report. Several run at once. Their tokens count in the turn. In
-the IDE (`code-arena web`) each `task` card shows its sub-agent as it works, as
-Arena's chat shows its own: what it was asked, its thinking, each tool call
-with its result, and its report, with its time, model and tokens; the session
-keeps it beside the result (never sent to the model), so it is there after a
-reload too.
+**Sub-agents** (`task`): the model hands a self-contained piece of work to a
+fresh conversation, which returns one report: [Sub-agents and
+tasks](#sub-agents-and-tasks) says how they run and where you see them.
 
 Calls that do not wait on each other run at once (the model asks for them
 together); questions are asked one at a time first.
@@ -2034,6 +2041,103 @@ to the agent as your next message:
 Saying anything else keeps the conversation going in plan mode. On the
 Plans board in the web, a proposed plan says it waits for its review in
 Code Arena.
+
+## Sub-agents and tasks
+
+The agent hands self-contained work to a **sub-agent** with `task`: a
+conversation of its own that sees nothing of the main one, and returns one
+report. It keeps research out of the main context.
+
+- **Its tools.** By default the reading tools (local and Arena's, those on in
+  the session): it cannot edit files or run commands. The agent may name tools
+  instead (`tools`, names or globs of its own, such as `edit_file` or
+  `run_shell`). A sub-agent never gets the main conversation's own tools (the
+  plan, its jobs, more sub-agents), and plan mode keeps every sub-agent to the
+  reading tools.
+- **It never asks you.** Nobody watches its steps, so what the mode would ask
+  you about is refused to it, with a reason it passes on in its report: in
+  `ask` it cannot edit, in `auto-edit` it edits but runs no command your rules
+  do not allow, in `yolo` it does what the mode allows. Your kept rules and
+  Laya apply as they do to the agent.
+- **At once, where it is safe.** Several task calls at once run side by side,
+  four at a time; those that may change files run one at a time, so two
+  never edit the same files together.
+- **As whom.** `agent` names one of your or the project's own sub-agents
+  ([below](#your-own-commands-sub-agents-and-skills)); `assistant` one of your
+  Arena assistants ([below](#assistants)), with its instructions, model,
+  thinking, tools and skills; `model` another of the gateway's models.
+- **Its tokens** count in the turn that started it.
+
+**The chat shows one line per sub-agent**, never its steps: what it is for,
+where it stands, its time and tokens, and the start of its report. Its steps
+are in the **Tasks** panel beside the chat (the network icon in the chat's
+header, with the number at work; the line itself opens it, and so does **Show
+Tasks and Sub-agents** in the palette). Each task there says where it stands
+(waiting for a free place, working, done, failed, stopped), what it does now,
+its time, tokens and tool calls; one opened shows what it was asked, its tools,
+its thinking, each tool call with its result, and its report. **Stop** stops
+one: the agent hears it was stopped and carries on without it. A narrow chat
+shows the panel over the thread; a wide one beside it. The session keeps each
+sub-agent's work with its result (never sent to the model), so the panel has
+them after a reload or a resume too.
+
+**Tasks of your own.** **+** in the panel (or `/tasks new` in the terminal)
+starts a task in the background: what to do, a name for the list, an assistant
+to work as, and whether it may change files and run commands (as the mode
+allows, never asking; not in plan mode). You go on with the chat meanwhile;
+when it ends, the panel says so, and its report reaches the agent with your
+next message, once. `/tasks` lists them in the terminal, `/tasks N` shows one's
+transcript, `/tasks stop N` stops one; a background task that ends is said
+above the prompt.
+
+In Arena, the chat of a session keeps each sub-agent's summary (what it was
+asked, how it ended, its time, model, tokens and report, not its steps), so the
+web chat shows the same line.
+
+## Goal mode
+
+`/goal TEXT` (or **Goal**, the target in the chat's header, and `/goal` in the
+IDE's box) sets a goal: the agent works toward it turn after turn, without you
+sending each, until it is met, and then says how it checked.
+
+- **How it is checked.** A command that succeeds only once the goal is met
+  (`--check "dotnet test"`: exit code 0), or a condition (`--until "every
+  public method of Parser has a test"`) that a fresh sub-agent with the reading
+  tools looks at and answers met or not, with why. Without one, the agent
+  writes its check down first with `goal_check`, before it changes anything (a
+  command asks as commands do in your mode). The check runs at the end of each
+  turn; its output goes to the next turn when it fails.
+- **Its budget.** Steps (requests to the model; 200 by default), minutes of
+  work (60) and tokens (5 million): `--steps`, `--minutes`, `--tokens`, or the
+  dialog's fields. A turn running when one is spent is stopped. The goal also
+  stops when the agent ends three turns in a row without doing anything while
+  the check fails, or has not written a check down in three turns.
+- **Pause, resume, cancel.** `/goal pause` (or the bar's pause) lets the turn
+  running end, then waits; `/goal resume` carries on; `/goal cancel` stops the
+  turn working on it and gives the goal up. Ctrl+C or **Stop** stops the turn
+  and pauses the goal. Messages you send meanwhile go first; the goal goes on
+  after them.
+- **Where it stands.** The bar above the chat's box says the goal, its state,
+  the turn, the steps, time and tokens used of the budget, and its check; when
+  it ends, how: met (and how it was checked), its budget spent, no progress, or
+  cancelled. `/goal` says the same in the terminal.
+
+The session keeps the goal: a resumed session shows it, a goal that was being
+worked on waits paused for **Resume**. Arena keeps it with the session's chat,
+and the web chat shows it above the conversation. Plan mode sets no goal.
+
+## Assistants
+
+`/assistant` lists your assistants in Arena (yours, those shared with you and
+the company's); `/assistant N` or `/assistant NAME` works as one, `/assistant
+off` as none. In the IDE, **Assistant** at the left of the chat's header does
+the same. Working as one, the session's prompt has its instructions and names
+its skills for the model to load first, it switches to its model and thinking
+(when the gateway serves the model), and Arena's tool groups it does not have
+go off for the session (your own MCP servers and the local tools stay); putting
+it away turns them back on. The session keeps it, so a resumed one works as it
+did, without Arena. A sub-agent can work as one too: the prompt lists your
+assistants (the first 20) for `task`'s `assistant`.
 
 ## Code mode
 
@@ -2360,9 +2464,9 @@ message, without starting Code Arena again.
   typed after it. Front matter (`---` lines) may give a `description` and an
   `argument-hint`. In the IDE's chat too.
 - **Sub-agents**: `agents/NAME.md`, its front matter's `name`, `description`,
-  `tools` (which of the reading tools it may use) and `model`; the file is its
-  instructions. The model hands it a task by name (`task` with `agent`). Like
-  every sub-agent it reads only: it cannot edit files or run commands.
+  `tools` (which of the tools it may use, of those the task gives it) and
+  `model`; the file is its instructions. The model hands it a task by name
+  (`task` with `agent`). Its list narrows the tools: it never adds one.
 - **Skills**: `skills/NAME/SKILL.md` (agentskills.io's format: `name` and
   `description` in its front matter). The prompt lists each skill's name and
   what it is for; the model loads one with its `skill` tool when the task needs
@@ -2457,6 +2561,10 @@ and the IDE ask Arena every 5 seconds with the chat's stamp (its last message):
 a chat that did not change is not read again. What a session adds
 shows on the web page of its chat within seconds too, and new chats come into
 the web's list within half a minute.
+
+Its chat also keeps the session's goal ([above](#goal-mode)) and each
+sub-agent's summary ([above](#sub-agents-and-tasks)): the web chat shows the
+goal above the conversation and a line for each sub-agent.
 
 `/web` lists your 30 newest chats in Arena, `/web all` the 5,000 newest (read
 200 at a time) and `/web WORDS` those of them with the words in their title or
