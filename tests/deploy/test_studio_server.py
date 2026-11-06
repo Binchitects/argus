@@ -88,6 +88,20 @@ class Models(unittest.TestCase):
             self.assertIn("1,000 MB free", str(refused.exception))
             self.assertEqual(server._loaded, {})
 
+    def test_a_model_loads_on_the_gpu_with_the_most_free_memory_not_the_first(self):
+        for free in ([3000, 9000], [1000, 2000, 8000, 4000], [5000, 1000, 1000, 1000, 1000, 1000, 6000, 1000]):
+            chosen = []
+            cuda = types.SimpleNamespace(is_available=lambda: True, empty_cache=lambda: None, device_count=lambda f=free: len(f),
+                                         set_device=chosen.append, mem_get_info=lambda i=None, f=free, c=chosen: (f[(c[-1] if c else 0) if i is None else i] << 20, 0))
+            with self.subTest(gpus=len(free)), mock.patch.object(server, "DEVICE", "cuda"), mock.patch.object(server.torch, "cuda", cuda), \
+                    mock.patch.dict(server._loaded, {}, clear=True), mock.patch.object(server, "_present", return_value=True), \
+                    mock.patch.dict(server.MODELS, {"voice": ("chatterbox", [], 99999)}):
+                # Too big for any of them: refused, but told the free memory of the GPU it chose (CUDA's own is the first).
+                with self.assertRaises(server.Refused) as refused:
+                    server._load("voice")
+                self.assertEqual(chosen, [free.index(max(free))])
+                self.assertIn(f"{max(free):,} MB free", str(refused.exception))
+
 
 if __name__ == "__main__":
     unittest.main()

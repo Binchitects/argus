@@ -59,11 +59,13 @@ public sealed partial class MediaControl : BackgroundService
     private readonly Replicas replicas;
     private readonly ILogger<MediaControl> logger;
     private readonly IOptionsMonitor<MediaOptions> choices;
+    private readonly EngineState state;
 
     public MediaControl(IServiceScopeFactory scopes, Modules modules, IHttpClientFactory http, IOptions<EngineOptions> engine, TimeProvider clock, Replicas replicas,
-        ILogger<MediaControl> logger, IOptionsMonitor<MediaOptions> choices)
+        ILogger<MediaControl> logger, IOptionsMonitor<MediaOptions> choices, EngineState state)
     {
-        (this.scopes, this.modules, this.http, this.engine, this.clock, this.replicas, this.logger, this.choices) = (scopes, modules, http, engine, clock, replicas, logger, choices);
+        (this.scopes, this.modules, this.http, this.engine, this.clock, this.replicas, this.logger, this.choices, this.state) =
+            (scopes, modules, http, engine, clock, replicas, logger, choices, state);
         replicas.On(AskedTopic, name =>
         {
             if (Find(name) is not null)
@@ -614,6 +616,7 @@ public sealed partial class MediaControl : BackgroundService
             {
                 _now[x.Name] = "off";
             }
+            _placed.TryRemove(server, out _);
             return;
         }
         // The one a job holds (it never switches under a running job), else the one kept loaded, else the one asked for last;
@@ -628,14 +631,17 @@ public sealed partial class MediaControl : BackgroundService
             {
                 Write(server, $"gen={Gen(server).ToString(CultureInfo.InvariantCulture)}\nwant=off\n");
             }
+            _placed.TryRemove(server, out _);
             return;
         }
         _target[server] = target.Name;
         var want = wanted is not null;
         var m = target;
         var sd = SdArgs.Of(m.Row, UpscalersFor(m));
-        // Another model, or its settings changed: a new generation, which its script starts.
-        var body = SdArgs.Conf(sd, 0, true).Split('\n', 3)[2];
+        var gpu = PlaceOf(server, m);
+        _placed[server] = gpu is { } on ? (on, (long)(GpuShare.NeedMb(m.Row) ?? DefaultMb) << 20) : null;
+        // Another model, its settings changed, or another GPU: a new generation, which its script starts.
+        var body = SdArgs.Conf(sd, 0, true, gpu).Split('\n', 3)[2];
         var was = _body.GetOrAdd(server, s => Body(s) ?? body);
         if (was != body)
         {
@@ -672,7 +678,7 @@ public sealed partial class MediaControl : BackgroundService
         var holding = _failures.GetValueOrDefault(m.Name)?.Gen == gen;
         if (lead)
         {
-            Write(server, SdArgs.Conf(sd, Gen(server), want && !holding));
+            Write(server, SdArgs.Conf(sd, Gen(server), want && !holding, gpu));
         }
         if (want && !holding)
         {
@@ -703,6 +709,81 @@ public sealed partial class MediaControl : BackgroundService
             _now[other.Name] = SdArgs.Of(other.Row).Files.All(f => File.Exists(Path.Combine(engine.Value.LibraryDir, f.Path))) ? "unloaded" : "waiting";
             _loadingSince.TryRemove(other.Name, out _);
         }
+    }
+
+    /// <summary>What a media server is counted at on its GPU when its model says no budget of its own.</summary>
+    private const int DefaultMb = 2048;
+
+    /// <summary>Each picture and video server's GPU and what it is counted at there, as last placed (null: every GPU it sees).</summary>
+    private readonly ConcurrentDictionary<string, (int Gpu, long Bytes)?> _placed = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The GPU a picture or video server runs on, as its control file names it (gpu=): the replica that leads placed it and
+    /// wrote it there, and every replica reads it from there. Null: none named (every GPU it sees).
+    /// </summary>
+    public int? GpuOf(string server)
+    {
+        try
+        {
+            var path = Path.Combine(engine.Value.ConfigDir, server + ".conf");
+            var line = File.Exists(path) ? File.ReadLines(path).FirstOrDefault(l => l.StartsWith("gpu=", StringComparison.Ordinal)) : null;
+            return line is not null && int.TryParse(line[4..], NumberStyles.None, CultureInfo.InvariantCulture, out var g) ? g : null;
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>A picture or video server where it was placed: it and its model, its GPU and its model's budget there, and whether that model is loaded now.</summary>
+    public sealed record OnGpu(string Name, int Gpu, long Bytes, bool Loaded);
+
+    /// <summary>The picture and video servers where they were placed, for Admin → Models.</summary>
+    public IReadOnlyList<OnGpu> Servers() =>
+        [.. _placed.Where(p => p.Value is not null).OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => _target.GetValueOrDefault(p.Key) is { } model
+            ? new OnGpu($"{Label(p.Key)} ({model})", p.Value!.Value.Gpu, p.Value.Value.Bytes, _now.GetValueOrDefault(model) == "loaded")
+            : new OnGpu(Label(p.Key), p.Value!.Value.Gpu, p.Value.Value.Bytes, false))];
+
+    /// <summary>The picture and video servers on their GPUs, each at its model's budget there: placed, for where the next thing goes.</summary>
+    public IReadOnlyList<Resident> Placed() => [.. Servers().Select(s => new Resident(s.Name, "media", new Dictionary<int, long> { [s.Gpu] = s.Bytes }))];
+
+    /// <summary>A picture or video server as Admin → Models names it.</summary>
+    public static string Label(string server) => server == "videogen" ? "the video server" : HardwareProbe.Picture;
+
+    /// <summary>
+    /// The GPU a picture or video server runs <paramref name="m"/> on: the model's own (an admin's choice), else
+    /// Engine:MediaGpu, else the one the server runs on already (its control file's: it is not moved for what was placed
+    /// since), else the least placed GPU (GpuPlan.Least) by what the chat models that name their GPUs, the embedder and the
+    /// other media server keep there, so the picture and the video server do not both sit on the first GPU, nor where the
+    /// chat models are. Null while the machine's GPUs are not known and the control file names none: every GPU it sees.
+    /// </summary>
+    private int? PlaceOf(string server, Model m)
+    {
+        if (m.Row.Gpu is { } own)
+        {
+            return own;
+        }
+        if (engine.Value.MediaGpu is { } set)
+        {
+            return set;
+        }
+        var devices = state.Hardware is { } hw ? GpuPlan.DevicesOf(hw) : [];
+        if (GpuOf(server) is { } written && (devices.Count == 0 || devices.Any(d => d.Index == written)))
+        {
+            return written;
+        }
+        if (devices.Count == 0)
+        {
+            return null;
+        }
+        // A model on every GPU weighs on each alike: it decides nothing here.
+        var named = state.Places.Values.Where(p => p.PerGpu.Count > 0 && p.PerGpu.Count < devices.Count).Select(p => new Resident("", p.Kind, p.PerGpu));
+        var embedder = (state.Hardware!.Reserves ?? []).Where(r => r.Name == HardwareProbe.Embedder).Select(r => new Resident(r.Name, "reserve", new Dictionary<int, long> { [r.Gpu] = r.Bytes }));
+        var others = _placed.Where(p => p.Key != server && p.Value is not null)
+            .Select(p => new Resident(p.Key, "media", new Dictionary<int, long> { [p.Value!.Value.Gpu] = p.Value.Value.Bytes }));
+        var gpu = GpuPlan.Least(devices, GpuPlan.Sum([.. named, .. embedder, .. others]))[0].Index;
+        LogPlaced(logger, server, gpu);
+        return gpu;
     }
 
     /// <summary>The model each picture and video server runs (or ran last), and its control file without its generation and want.</summary>
@@ -908,4 +989,7 @@ public sealed partial class MediaControl : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "Media models: cannot write {Path}: {Error}")]
     private static partial void LogControl(ILogger logger, string path, string error);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Media models: the {Server} server goes on GPU {Gpu}, the least placed")]
+    private static partial void LogPlaced(ILogger logger, string server, int gpu);
 }

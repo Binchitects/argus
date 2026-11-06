@@ -103,10 +103,10 @@ public sealed class EngineState(TimeProvider clock)
 
     /// <summary>
     /// Where a model sits, for room-making per GPU: its engine's kind, what it keeps on each of its GPUs (a vLLM model its
-    /// share, a llama.cpp model its estimate spread over its GPUs), its fallback, its copies, and what it keeps in RAM (a
-    /// llama.cpp model's estimate: all of it on a machine without GPUs; 0 when not known).
+    /// share, a llama.cpp model its estimate spread over its GPUs), its fallback, its copies, what it keeps in RAM (a
+    /// llama.cpp model's estimate: all of it on a machine without GPUs; 0 when not known), and its answers at once (a copy's).
     /// </summary>
-    public sealed record ModelPlace(string Kind, IReadOnlyDictionary<int, long> PerGpu, string? Fallback = null, int Replicas = 1, long Ram = 0);
+    public sealed record ModelPlace(string Kind, IReadOnlyDictionary<int, long> PerGpu, string? Fallback = null, int Replicas = 1, long Ram = 0, int Parallel = 1);
 
     /// <summary>Each engine model's place (the watcher keeps it, with <see cref="Hardware"/>).</summary>
     public IReadOnlyDictionary<string, ModelPlace> Places { get; set; } = new Dictionary<string, ModelPlace>(StringComparer.Ordinal);
@@ -473,7 +473,7 @@ public sealed class EngineState(TimeProvider clock)
 /// (config/engine/targets.json), and keeps the gateway's list in step.
 /// </summary>
 public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOptions<EngineOptions> options, ModelLibrary library, ChatModels chatModels,
-    ModelHoursState hours, Modules modules, VllmBackends vllm, GatewayRoutes routes, ILogger<ModelCatalog> logger)
+    ModelHoursState hours, Modules modules, VllmBackends vllm, GatewayRoutes routes, MediaControl media, HardwareProbe hardware, ILogger<ModelCatalog> logger)
 {
     public const string PresetsFile = "models.ini";
     public const string KeepFile = "keep";
@@ -562,8 +562,9 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     /// fits itself to the GPU leaves it free there.
     /// </param>
     /// <param name="backend">The backend llama.cpp drives the GPUs with (Engine:Backend): it names them (CUDA0, ROCm0, Vulkan0...).</param>
+    /// <param name="projectorGpu">The GPU a vision model on several GPUs reads its images on (<see cref="ProjectorGpus"/>); null: llama.cpp's own, the first of its GPUs.</param>
     public static string Preset(LocalModel m, string library, int? threads = null, ModelProfile? profile = null, int? sessionCacheGb = null,
-        (int? Gpu, int Mb)? pictureRoom = null, bool kvDisk = false, string? backend = null)
+        (int? Gpu, int Mb)? pictureRoom = null, bool kvDisk = false, string? backend = null, int? projectorGpu = null)
     {
         var own = ExtraValues(m.ExtraPreset);
         var sb = new StringBuilder();
@@ -608,6 +609,10 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         {
             // CUDA numbers GPUs as nvidia-smi does (the engine runs with CUDA_DEVICE_ORDER=PCI_BUS_ID), ROCm as rocm-smi does.
             sb.Append("device = ").Append(string.Join(',', devices.Select(d => prefix + d.ToString(inv)))).Append('\n');
+        }
+        if (m.Projector is { Length: > 0 } && projectorGpu is { } pg && Hardware.DevicePrefix(backend) is { } named && !own.ContainsKey("mmproj-device"))
+        {
+            sb.Append("mmproj-device = ").Append(named).Append(pg.ToString(inv)).Append('\n');
         }
         if (threads is > 0)
         {
@@ -747,6 +752,49 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             : null;
     }
 
+    /// <summary>
+    /// The GPU each vision model on two GPUs or more reads its images on (its projector, mmproj-device): llama.cpp's own is
+    /// the first of its GPUs, so every vision model's images were read on GPU 0. One after another by name, each on its GPU
+    /// with the fewest projectors so far (ties: the lowest number). <paramref name="gpus"/>: the machine's, for a model that
+    /// names none. One whose extra lines set its own is left as it is.
+    /// </summary>
+    public static Dictionary<string, int> ProjectorGpus(IEnumerable<LocalModel> models, IReadOnlyList<int> gpus)
+    {
+        var count = new Dictionary<int, int>();
+        var on = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var m in models.Where(m => m.Projector is { Length: > 0 } && !ExtraValues(m.ExtraPreset).ContainsKey("mmproj-device")).OrderBy(m => m.Name, StringComparer.Ordinal))
+        {
+            if ((Hardware.ParseDevices(m.Devices) is { Count: > 0 } named ? named : gpus) is not { Count: > 1 } mine)
+            {
+                continue;
+            }
+            var gpu = mine.OrderBy(g => count.GetValueOrDefault(g)).ThenBy(g => g).First();
+            count[gpu] = count.GetValueOrDefault(gpu) + 1;
+            on[m.Name] = gpu;
+        }
+        return on;
+    }
+
+    /// <summary>Each model's projector GPU as the presets have it now (mmproj-device = CUDA1): kept while the machine's GPUs cannot be read, so the engine does not restart for it.</summary>
+    private Dictionary<string, int> WrittenProjectors()
+    {
+        var on = new Dictionary<string, int>(StringComparer.Ordinal);
+        string? section = null;
+        foreach (var line in (Read(PresetsFile) ?? "").Split('\n').Select(l => l.Trim()))
+        {
+            if (line.StartsWith('[') && line.EndsWith(']'))
+            {
+                section = line[1..^1];
+            }
+            else if (section is not null && line.StartsWith("mmproj-device = ", StringComparison.Ordinal)
+                && int.TryParse(new string([.. line.Reverse().TakeWhile(char.IsAsciiDigit).Reverse()]), NumberStyles.None, CultureInfo.InvariantCulture, out var gpu))
+            {
+                on[section] = gpu;
+            }
+        }
+        return on;
+    }
+
     /// <summary>What a model's extra preset lines set: each key and its value.</summary>
     public static Dictionary<string, string> ExtraValues(string? extra) =>
         (extra ?? "").Split('\n').Select(l => PresetLine().Match(l.Trim())).Where(k => k.Success)
@@ -773,11 +821,15 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             && await db.MediaModels.AsNoTracking().Where(x => x.Kept && x.Mode == MediaModes.Image).OrderBy(x => x.Name).FirstOrDefaultAsync(ct) is { } picture
             && GpuShare.NeedMb(picture) is { } need)
         {
-            pictureRoom = (picture.Gpu ?? options.Value.MediaGpu, need);
+            // On its own GPU, else the one its server was placed on.
+            pictureRoom = (picture.Gpu ?? media.GpuOf("imagegen") ?? options.Value.MediaGpu, need);
         }
+        // The vision models' projectors spread over their GPUs; while the machine's GPUs cannot be read, where they were written.
+        var gpus = await hardware.GetAsync(ct) is { } hw ? GpuPlan.DevicesOf(hw).Select(d => d.Index).ToList() : null;
+        var projectors = gpus is null ? WrittenProjectors() : ProjectorGpus(models, gpus);
         var text = "# Written by the app (Admin -> Models). The engine restarts when this changes.\n\n" +
             string.Join("\n", models.Select(m => Preset(m, options.Value.EngineLibraryDir, options.Value.Threads, profiles.GetValueOrDefault(m.File), options.Value.SessionCacheGb,
-                pictureRoom, options.Value.KvCacheGb > 0, options.Value.Backend)));
+                pictureRoom, options.Value.KvCacheGb > 0, options.Value.Backend, projectors.TryGetValue(m.Name, out var pg) ? pg : null)));
         Write(PresetsFile, text);
         // How much of the disk the conversations' caches may take, and for how long: the engine's script keeps to it.
         Write(KvCache.ControlFile, $"gb={Math.Max(0, options.Value.KvCacheGb)}\ndays={Math.Max(0, options.Value.KvCacheDays)}\n");

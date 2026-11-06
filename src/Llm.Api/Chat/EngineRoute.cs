@@ -143,6 +143,10 @@ public sealed partial class EngineRoute
     public sealed class Sending(Action? done) : IDisposable
     {
         private int _ended;
+        private Action? _done = done;
+
+        /// <summary>Something more to do when the request ends (its copy's count).</summary>
+        internal void Then(Action more) => _done += more;
 
         internal SlotTable.Lease? Lease { get; set; }
 
@@ -160,7 +164,7 @@ public sealed partial class EngineRoute
             if (Interlocked.Exchange(ref _ended, 1) == 0)
             {
                 Lease?.Dispose();
-                done?.Invoke();
+                _done?.Invoke();
             }
         }
     }
@@ -189,10 +193,13 @@ public sealed partial class EngineRoute
             Tell(model);
             sending.Lease = await LeaseAsync(model, conversation, ct);
             await KeepOnDiskAsync(model, sending.Lease, conversation, ct);
-            // A model of several copies: a conversation stays on one, where its prefix is cached.
+            // A model of several copies: a conversation goes to the least busy, and stays there while it has room (its prefix is cached there).
             if (engine.Places.TryGetValue(model, out var place) && place.Replicas > 1 && conversation is { } c)
             {
-                sending.Model = $"{model}@{Copy(c, place.Replicas).ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+                var copy = $"{model}@{(await CopyForAsync(model, c, place.Replicas, place.Parallel, ct)).ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+                _onCopy.AddOrUpdate(copy, 1, (_, n) => n + 1);
+                sending.Then(() => _onCopy.AddOrUpdate(copy, 0, (_, n) => n - 1));
+                sending.Model = copy;
             }
             return sending;
         }
@@ -251,8 +258,84 @@ public sealed partial class EngineRoute
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Keeping slot {Slot} of {Model} on disk failed: {Why}")]
     private static partial void LogKeepFailed(ILogger logger, string model, int slot, string why);
-    /// <summary>The copy a conversation stays on: by its id, the same on every replica of the app.</summary>
-    public static int Copy(Guid conversation, int copies) => (int)(BitConverter.ToUInt32(conversation.ToByteArray(), 0) % (uint)Math.Max(1, copies));
+    /// <summary>
+    /// A conversation's own copy when the copies are alike busy: by its id, the same on every replica of the app. All of its
+    /// bits count: a conversation's id begins with when it was made (version 7), so its first bytes alone sent every
+    /// conversation begun within the same minute to the same copy.
+    /// </summary>
+    public static int Copy(Guid conversation, int copies)
+    {
+        var b = conversation.ToByteArray();
+        return (int)((BitConverter.ToUInt64(b, 0) ^ BitConverter.ToUInt64(b, 8)) % (ulong)Math.Max(1, copies));
+    }
+
+    /// <summary>
+    /// Which copy, by how busy each is (<paramref name="busy"/>: requests running and waiting on each): the one a conversation
+    /// was on (<paramref name="was"/>) while it is not busier than the least busy by a copy's answers at once
+    /// (<paramref name="parallel"/>); else the least busy, ties going to the conversation's own (<paramref name="own"/>) and
+    /// the ones after it.
+    /// </summary>
+    public static int Choose(IReadOnlyList<int> busy, int own, int? was, int parallel)
+    {
+        var copies = busy.Count;
+        var least = Enumerable.Range(0, copies).OrderBy(i => busy[i]).ThenBy(i => (i - own + copies) % copies).First();
+        return was is { } w && w >= 0 && w < copies && busy[w] <= busy[least] + Math.Max(1, parallel) ? w : least;
+    }
+
+    /// <summary>This replica's requests on each copy of a model of several (NAME@i), on their way or answering.</summary>
+    private readonly ConcurrentDictionary<string, int> _onCopy = new(StringComparer.Ordinal);
+
+    /// <summary>The copy each conversation went to last, and when: it stays there while that copy has room (its prefix is cached there).</summary>
+    private readonly ConcurrentDictionary<Guid, (int Copy, DateTimeOffset At)> _copyOf = new();
+
+    /// <summary>What each copy of a model said it runs and holds waiting (its metrics), and when it was asked (a <see cref="TimeProvider.GetTimestamp"/>).</summary>
+    private readonly ConcurrentDictionary<string, (IReadOnlyList<int> Load, long At)> _copyLoad = new(StringComparer.Ordinal);
+
+    /// <summary>How many conversations' copies are remembered before the oldest are let go.</summary>
+    private const int CopiesKept = 50_000;
+
+    /// <summary>
+    /// The copy a conversation goes to: the one it was on, where its prefix is cached, while that one is not busier than the
+    /// least busy by a whole copy's answers at once; else, and on its first turn, the least busy, by this replica's requests
+    /// on each and what each copy's metrics said within the last second (asked again, half a second at most, when older),
+    /// ties going by the conversation's own <see cref="Copy"/>. Conversations begun together spread over the copies, and a
+    /// copy that is full is left for one with room.
+    /// </summary>
+    internal async Task<int> CopyForAsync(string model, Guid conversation, int copies, int parallel, CancellationToken ct)
+    {
+        var said = _copyLoad.TryGetValue(model, out var seen) && clock.GetElapsedTime(seen.At) < Fresh ? seen.Load : null;
+        if (said is null)
+        {
+            var asked = clock.GetTimestamp();
+            try
+            {
+                if (await client.CapacityAsync(model, Quick, ct) is { CopyLoad: { } load })
+                {
+                    _copyLoad[model] = (load, asked);
+                    said = load;
+                }
+            }
+            catch (Models.EngineException)
+            {
+                // Its metrics cannot be read now: this replica's own count goes alone.
+            }
+        }
+        var busy = Enumerable.Range(0, copies)
+            .Select(i => Math.Max(_onCopy.GetValueOrDefault($"{model}@{i.ToString(System.Globalization.CultureInfo.InvariantCulture)}"), said is not null && i < said.Count ? said[i] : 0))
+            .ToArray();
+        var now = clock.GetUtcNow();
+        var copy = Choose(busy, Copy(conversation, copies), _copyOf.TryGetValue(conversation, out var was) ? was.Copy : null, parallel);
+        _copyOf[conversation] = (copy, now);
+        if (_copyOf.Count > CopiesKept)
+        {
+            // The older half is let go (sorted once in that many turns): such a conversation goes to the least busy copy on its next turn.
+            foreach (var old in _copyOf.OrderBy(x => x.Value.At).Take(CopiesKept / 2).Select(x => x.Key).ToList())
+            {
+                _copyOf.TryRemove(old, out _);
+            }
+        }
+        return copy;
+    }
 
     /// <summary>The model that answers for <paramref name="model"/> while it cannot (Admin → Models), or null.</summary>
     public string? FallbackOf(string? model) =>

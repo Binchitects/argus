@@ -222,6 +222,30 @@ describe('admin models', () => {
     expect(within(dialog).getByLabelText('Name')).toHaveValue('mine')
   })
 
+  it('each GPU says what it holds, loaded or not, and how busy it is', async () => {
+    const GiB = 2 ** 30
+    const gpu = (index: number) => ({ index, name: 'NVIDIA RTX PRO 6000', total: 96 * GiB })
+    fakeApi(admin, {
+      'GET /api/admin/models': () => ({
+        json: view({
+          gpus: [gpu(0), gpu(1)],
+          plan: { problems: [], gpus: [{ ...gpu(0), budget: 94 * GiB, need: 18 * GiB, models: ['Big-Model'] }] },
+          holdings: [
+            { ...gpu(0), busy: 0.62, used: 40 * GiB, holds: [{ name: 'Big-Model', kind: 'llamacpp', bytes: 18 * GiB, loaded: true }, { name: 'the picture server (flux)', kind: 'media', bytes: 2 * GiB, loaded: false }] },
+            { ...gpu(1), busy: 0.58, used: 38 * GiB, holds: [{ name: 'oss', kind: 'vllm', bytes: 86 * GiB, loaded: false }] },
+          ],
+        }),
+      }),
+    })
+    renderApp('/admin/models')
+    expect(await screen.findByText('62% busy · 40.0 GiB of 96.0 GiB in use · 18.0 GiB of 94.0 GiB for the models kept loaded')).toBeInTheDocument()
+    expect(screen.getByText('Holds Big-Model (loaded, 18.0 GiB), the picture server (flux) (2.0 GiB)')).toBeInTheDocument()
+    // A GPU with no model kept loaded still says what it holds and how busy it is, with no bar.
+    expect(screen.getByText('58% busy · 38.0 GiB of 96.0 GiB in use')).toBeInTheDocument()
+    expect(screen.getByText('Holds oss (86.0 GiB)')).toBeInTheDocument()
+    expect(screen.getAllByRole('meter', { name: /the models kept loaded/ })).toHaveLength(1)
+  })
+
   it('a model is kept loaded; with every place kept, no other loads', async () => {
     const calls = fakeApi(admin, {
       'GET /api/admin/models': () => ({ json: view() }),

@@ -8,7 +8,7 @@ namespace Llm.Api.Models;
 
 /// <summary>
 /// A GPU shared by the chat engines and the picture and video servers: the one the media server runs on (its model's GPU,
-/// else Engine:MediaGpu, else the first), never the others. Picture and video jobs take turns (one at a time, the
+/// else the one MediaControl placed its server on), never the others. Picture and video jobs take turns (one at a time, the
 /// gateway's pictures too), and each holds its model on its server, which does not switch to another under it. Before a
 /// job whose model is short of GPU memory (a video model that would decode on the CPU, a picture model whose budget is
 /// not free), the GPU is lent to it: the idle chat models not kept loaded unload (the engine call an admin's Unload
@@ -276,13 +276,13 @@ public sealed partial class GpuShare : IDisposable
     }
 
     /// <summary>
-    /// The GPUs a media model's job is lent: its server's (the model's GPU, else Engine:MediaGpu, else the machine's first);
-    /// null when the machine's GPUs are not known (then every GPU is lent, as before).
+    /// The GPUs a media model's job is lent: its server's (the model's GPU, else the one its server was placed on, else
+    /// Engine:MediaGpu, else the machine's first); null when the machine's GPUs are not known (then every GPU is lent, as before).
     /// </summary>
     public IReadOnlyCollection<int>? GpusOf(MediaControl.Model model)
     {
         var devices = state.Hardware is { } hw ? GpuPlan.DevicesOf(hw) : [];
-        var gpu = model.Row.Gpu ?? options.Value.MediaGpu ?? (devices.Count > 0 ? devices[0].Index : null);
+        var gpu = model.Row.Gpu ?? media.GpuOf(model.Server) ?? options.Value.MediaGpu ?? (devices.Count > 0 ? devices[0].Index : null);
         return gpu is { } g && devices.Any(d => d.Index == g) ? [g] : null;
     }
 

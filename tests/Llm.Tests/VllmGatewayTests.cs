@@ -145,7 +145,17 @@ public sealed class VllmGatewayTests(AppFixture app) : IDisposable
             Assert.True(quick.Elapsed < TimeSpan.FromSeconds(10), "the key's request waited for the model");
             Assert.Contains(backend.Desired(), e => e.Model == "solo");
             await f.Services.GetRequiredService<EngineClient>().UnloadAsync("solo");
-            var conversation = Guid.NewGuid();
+            // Copy 0 busier than its 16 answers at once (its metrics say 20, copy 1's none): a new conversation goes to copy 1,
+            // though its own is copy 0.
+            var flashPorts = backend.Presets().Where(e => e.Model == "flash").Select(e => e.Port).ToList();
+            vllm.Busy[flashPorts[0]] = (16, 4);
+            var onZero = Ids(64).First(c => EngineRoute.Copy(c, 2) == 0);
+            using (var sending = await route.TakeAsync("flash", onZero, CancellationToken.None))
+            {
+                Assert.Equal("flash@1", sending.Model);
+            }
+            vllm.Busy.Clear();
+            var conversation = Ids(64).First(c => EngineRoute.Copy(c, 2) == 1);
             using (var sending = await route.TakeAsync("flash", conversation, CancellationToken.None))
             {
                 Assert.Equal($"flash@{EngineRoute.Copy(conversation, 2)}", sending.Model);
@@ -155,7 +165,6 @@ public sealed class VllmGatewayTests(AppFixture app) : IDisposable
                 Assert.Equal($"flash@{EngineRoute.Copy(conversation, 2)}", again.Model);
             }
             // Busy inside vLLM (requests waiting past a quarter of its places): an API key is told to come back; the chat is not held.
-            var flashPorts = backend.Presets().Where(e => e.Model == "flash").Select(e => e.Port).ToList();
             vllm.Busy[flashPorts[0]] = (16, 12);
             Assert.Contains("flash is busy: 12 requests wait inside it", await route.RoomForKeyAsync("flash", CancellationToken.None), StringComparison.Ordinal);
             vllm.Busy.Clear();
@@ -173,5 +182,53 @@ public sealed class VllmGatewayTests(AppFixture app) : IDisposable
             await running.CancelAsync();
             await ticking;
         }
+    }
+
+    /// <summary>Conversations' ids as they are made (version 7: each begins with the time it was made), <paramref name="n"/> within a moment.</summary>
+    private static List<Guid> Ids(int n) => [.. Enumerable.Range(0, n).Select(_ => Guid.CreateVersion7())];
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void Conversations_begun_together_spread_over_the_copies(int copies)
+    {
+        // 400 conversations begun within the same moment: each copy gets its share of them, not one copy all.
+        var counts = Ids(400).GroupBy(c => EngineRoute.Copy(c, copies)).ToDictionary(g => g.Key, g => g.Count());
+        Assert.Equal(copies, counts.Count);
+        Assert.All(counts.Values, n => Assert.True(n >= 400 / copies / 5, $"a copy of {copies} got {n} of 400"));
+    }
+
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void A_conversation_goes_to_the_least_busy_copy_and_stays_while_its_copy_has_room(int copies)
+    {
+        var idle = new int[copies];
+        // All idle: its own copy.
+        Assert.Equal(copies - 1, EngineRoute.Choose(idle, copies - 1, null, 16));
+        // The least busy, whatever its own; ties go to its own and the ones after it.
+        var busy = Enumerable.Range(0, copies).Select(i => 10 + i).ToArray();
+        busy[copies / 2] = 3;
+        Assert.Equal(copies / 2, EngineRoute.Choose(busy, 0, null, 16));
+        var two = Enumerable.Repeat(9, copies).ToArray();
+        two[0] = two[copies - 1] = 1;
+        Assert.Equal(0, EngineRoute.Choose(two, 0, null, 16));
+        Assert.Equal(copies - 1, EngineRoute.Choose(two, 1, null, 16));
+        // On a copy with room, it stays there (its prefix is cached), though another is less busy: up to its answers at once more.
+        var full = Enumerable.Repeat(2, copies).ToArray();
+        full[1] = 2 + 16;
+        Assert.Equal(1, EngineRoute.Choose(full, 0, 1, 16));
+        // Busier than that: it goes to the least busy.
+        full[1] = 2 + 17;
+        Assert.Equal(0, EngineRoute.Choose(full, 0, 1, 16));
+        // Many conversations at once, each sent where the fewest are: every copy takes its turn.
+        var sent = new int[copies];
+        foreach (var c in Ids(copies * 10))
+        {
+            sent[EngineRoute.Choose(sent, EngineRoute.Copy(c, copies), null, 16)]++;
+        }
+        Assert.All(sent, n => Assert.Equal(10, n));
     }
 }

@@ -112,9 +112,11 @@ public sealed class EngineException(string message) : Exception(message);
 /// <summary>
 /// What a loaded model is doing, as its engine says: its places (llama.cpp's slots, vLLM's --max-num-seqs), which are busy
 /// (llama.cpp's own slots; for vLLM the first <see cref="Running"/>, as it has no slots), requests running and waiting
-/// inside the engine, and for vLLM its cache's use and the share of prompt tokens read from it.
+/// inside the engine, and for vLLM its cache's use and the share of prompt tokens read from it; for a model of several
+/// copies, what each copy runs and holds waiting (<see cref="CopyLoad"/>, by its number: NAME@0, NAME@1...).
 /// </summary>
-public sealed record EngineCapacity(int Count, IReadOnlySet<int> Busy, int Running = 0, int Waiting = 0, double? KvUsage = null, double? PrefixHitRate = null);
+public sealed record EngineCapacity(int Count, IReadOnlySet<int> Busy, int Running = 0, int Waiting = 0, double? KvUsage = null, double? PrefixHitRate = null,
+    IReadOnlyList<int>? CopyLoad = null);
 
 /// <summary>Whether an engine answers now, and if not why (for Admin → Models).</summary>
 public sealed record EngineHealth(bool Up, string? Error, DateTimeOffset At);

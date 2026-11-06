@@ -463,7 +463,7 @@ public sealed partial class EngineWatcher : BackgroundService
                 // Its size not known: at least where it sits.
                 perGpu = named.ToDictionary(g => g, _ => 0L);
             }
-            places[m.Name] = new EngineState.ModelPlace(m.EngineKind, perGpu, m.Fallback, Math.Max(1, m.Replicas), ram);
+            places[m.Name] = new EngineState.ModelPlace(m.EngineKind, perGpu, m.Fallback, Math.Max(1, m.Replicas), ram, Math.Max(1, m.Parallel));
         }
         return places;
     }

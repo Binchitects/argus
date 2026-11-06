@@ -50,6 +50,21 @@ public sealed class GpuPlanTests : IDisposable
         Assert.Equal(hw.On([0]).GpuForModels, hw.On([3]).GpuForModels + FakeHardware.Picture);
     }
 
+    [Theory]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void Each_gpus_load_is_read_from_the_exporter_by_its_index_not_its_place_in_the_list(int gpus)
+    {
+        // The exporter's rows come in any order; each GPU is known by its uuid, and numbered by nvidia_smi_index.
+        static Dictionary<string, string> Uuid(int i) => new(StringComparer.Ordinal) { ["uuid"] = $"GPU-{i}" };
+        var order = Enumerable.Range(0, gpus).Reverse().ToList();
+        var loads = HardwareProbe.Loads([.. order.Select(i => (Uuid(i), (double)i))], [.. order.Select(i => (Uuid(i), i / 10.0))],
+            [.. order.Where(i => i > 0).Select(i => (Uuid(i), (double)(i * GiB)))]);
+        Assert.Equal(Enumerable.Range(0, gpus), loads.Keys.Order());
+        Assert.All(Enumerable.Range(0, gpus), i => Assert.Equal(new HardwareProbe.GpuLoad(i / 10.0, i == 0 ? null : i * GiB), loads[i]));
+    }
+
     /// <summary>A vLLM group on these GPUs at this share of each.</summary>
     private static Resident Vllm(string name, Hardware hw, double share, params int[] gpus) => GpuPlan.Share(name, hw, gpus, share);
 
