@@ -216,8 +216,9 @@ public sealed class CodeArenaLiveSyncTests(AppFixture app) : IDisposable
 
         // Code Arena goes back to before that question (/rewind) and goes on otherwise: the web shows its new branch, the
         // edited one kept beside it.
-        var model = again.Read(d => d.Messages.Count);
-        await sync.RewindAsync(model - 2, CancellationToken.None);
+        // Where in the whole conversation (the IDE's m8): the model's history is shorter, a compaction's summary standing for its start.
+        var place = again.Read(d => d.Stream.Count);
+        await sync.RewindAsync(place - 2, CancellationToken.None);
         again.Message(Said("user", "Ship it"));
         again.Message(Said("assistant", "Shipped."), "model-a");
         await Until(() => sync.InStep, "Arena has the session's own branch");

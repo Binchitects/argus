@@ -121,9 +121,10 @@ public sealed partial class MemoryReflection(IServiceScopeFactory scopes, Operat
 
     private static async Task ReflectAsync(IServiceProvider services, AppDbContext db, Memories memories, Conversation chat, AppUser person, CancellationToken ct)
     {
-        var said = await db.ChatMessages.AsNoTracking()
-            .Where(m => m.ConversationId == chat.Id && m.Sequence > chat.ReflectedSequence && (m.Role == "user" || m.Role == "assistant") && (m.Content != "" || m.ToolCallsJson != null))
-            .OrderBy(m => m.Sequence).Select(m => new { m.Id, m.Role, m.Content, m.Sequence, m.Skill, m.ToolCallsJson }).ToListAsync(ct);
+        // What is new on the branch on screen: what a rewind went back from is not read (nor another version of a question).
+        var said = (await Tools.ChatHistoryTool.BranchAsync(db, chat, ct))
+            .Where(m => m.Sequence > chat.ReflectedSequence && (m.Role == "user" || m.Role == "assistant") && (m.Content != "" || m.ToolCallsJson != null))
+            .Select(m => new { m.Id, m.Role, m.Content, m.Sequence, m.Skill, m.ToolCallsJson }).ToList();
         // The answers the person marked bad, with why: lessons.
         var answerIds = said.Where(m => m.Role == "assistant").Select(m => m.Id).ToList();
         var bad = await db.AnswerFeedback.AsNoTracking().Where(f => f.ConversationId == chat.Id && !f.Up && answerIds.Contains(f.MessageId))

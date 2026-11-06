@@ -112,12 +112,15 @@ public sealed partial class ChatDigests(IServiceScopeFactory scopes, Operations.
     /// <summary>What a chat is found by: its title and its digest.</summary>
     public static string Searched(Conversation chat) => $"{chat.Title}\n{chat.Digest}";
 
-    /// <summary>The digest anew, from the one before and the messages after it; null when there is nothing to say (or it was refused).</summary>
+    /// <summary>
+    /// The digest anew, from the one before and the messages after it on the branch on screen (another version of a question,
+    /// or what a rewind went back from, is not what the chat is about); null when there is nothing to say (or it was refused).
+    /// </summary>
     private static async Task<string?> DigestAsync(IServiceProvider services, AppDbContext db, Memories memories, Conversation chat, AppUser person, CancellationToken ct)
     {
-        var said = await db.ChatMessages.AsNoTracking()
-            .Where(m => m.ConversationId == chat.Id && m.Sequence > chat.DigestedSequence && (m.Role == "user" || m.Role == "assistant") && m.Content != "")
-            .OrderBy(m => m.Sequence).Select(m => new { m.Role, m.Content }).ToListAsync(ct);
+        var said = (await ChatHistoryTool.BranchAsync(db, chat, ct))
+            .Where(m => m.Sequence > chat.DigestedSequence && (m.Role == "user" || m.Role == "assistant") && m.Content != "")
+            .Select(m => new { m.Role, m.Content }).ToList();
         if (said.Where(m => m.Role == "user").Sum(m => m.Content.Length) < 20)
         {
             return null;

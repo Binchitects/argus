@@ -72,6 +72,43 @@ describe('rooms', () => {
     expect(within(panel).queryByRole('region', { name: 'Invite' })).toBeNull()
   })
 
+  it("only the room's owner rewinds it, for everyone, and a question of another's goes without its words in the owner's box", async () => {
+    let leaf = 'q2'
+    const calls = fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config }),
+      'GET /api/chat/conversations': () => ({ json: [] }),
+      'GET /api/chat/conversations/r1': () => ({ json: room({ currentLeafId: leaf, room: brief({ role: 'owner' }) }) }),
+      'GET /api/chat/conversations/r1/stamp': () => ({ json: { stamp: 'x', answering: false } }),
+      'GET /api/rooms/r1/events': () => ({ hang: true }),
+      'GET /api/chat/conversations/r1/rewind': () => ({ json: { gone: 2, currentLeafId: null, memories: [] } }),
+      'POST /api/chat/conversations/r1/rewind': () => {
+        leaf = ''
+        return { json: { currentLeafId: null, previousLeafId: 'q2', gone: 2, forgotten: 0 } }
+      },
+    })
+    renderApp('/chat/r1')
+    expect(await screen.findByText('What could go wrong?')).toBeInTheDocument()
+    await userEvent.click(within(screen.getByRole('region', { name: 'Olivia' })).getByRole('button', { name: 'Rewind to here' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Rewind to here?' })
+    await userEvent.click(await within(dialog).findByRole('button', { name: 'Rewind' }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ messageId: 'q1', keep: false, forget: false }))
+    await waitFor(() => expect(screen.queryByText('What could go wrong?')).toBeNull())
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('')
+  })
+
+  it('a member of a room has no Rewind to here', async () => {
+    fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config }),
+      'GET /api/chat/conversations': () => ({ json: [] }),
+      'GET /api/chat/conversations/r1': () => ({ json: room() }),
+      'GET /api/chat/conversations/r1/stamp': () => ({ json: { stamp: 'x', answering: false } }),
+      'GET /api/rooms/r1/events': () => ({ hang: true }),
+    })
+    renderApp('/chat/r1')
+    expect(await screen.findByText('What could go wrong?')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Rewind to here' })).toBeNull()
+  })
+
   it('a viewer reads without a box to write in', async () => {
     fakeApi(member, {
       'GET /api/chat/config': () => ({ json: config }),

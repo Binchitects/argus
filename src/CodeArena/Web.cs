@@ -499,6 +499,12 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             case ("POST", "/api/again"):
                 await AgainAsync(req, res, ct);
                 return;
+            case ("GET", "/api/rewind"):
+                await RewindPreviewAsync(req, res, ct);
+                return;
+            case ("POST", "/api/rewind"):
+                await RewindAsync(req, res, ct);
+                return;
             case ("POST", "/api/compact"):
                 await CompactAsync(res, ct);
                 return;
@@ -1165,7 +1171,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             words = Quotes.Compose(quote, Mentions.Expand(edited, _rt.Workspace).Text + rest[withoutFiles.Length..]);
             typed = edited;
         }
-        if (await _rt.BackToAsync(at, again.Files, job.Stop.Token) is { } said)
+        var said = await _rt.BackToAsync(again.At, again.Files, chat: true, job.Stop.Token);
+        if (again.Files)
         {
             job.Emit(new JsonObject { ["type"] = "notice", ["text"] = said });
         }
@@ -1200,6 +1207,97 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 _rt.Model.Thinking = thinking;
             }
         }
+    }
+
+    /// <summary>The place in the session of the person's question <paramref name="id"/> names (m3); null when it names none (or Code Arena's own note).</summary>
+    private int? QuestionAt(string? id) =>
+        id is { Length: > 1 } && id[0] == 'm' && int.TryParse(id.AsSpan(1), out var place) && place >= 0
+        && _rt.Session.Read(d => place < d.Stream.Count && d.Stream[place].Message.Str("role") == "user" && d.Stream[place].Kind is null)
+            ? place
+            : null;
+
+    /// <summary>A path of the folder as the page names it.</summary>
+    private string Relative(string full) => Path.GetRelativePath(_rt.Workspace.Root, full).Replace('\\', '/');
+
+    /// <summary>
+    /// GET /api/rewind?message=m3: what Rewind to here would do from that question: how many of the session's messages go,
+    /// whether the code can go back too (this run kept that turn's checkpoint), and the files that would change then, each
+    /// as it differs from now (removed: a turn made it), with those too big to keep.
+    /// </summary>
+    private async Task RewindPreviewAsync(HttpRequest req, HttpResponse res, CancellationToken ct)
+    {
+        if (QuestionAt(req.Query.GetValueOrDefault("message")) is not { } place)
+        {
+            await res.ErrorAsync(400, "invalid", "Say which of your questions to rewind to: its id (m3).", ct);
+            return;
+        }
+        var number = _rt.TurnAt(place);
+        var (files, lost) = number > 0 ? _rt.Checkpoints.Changes(number) : ([], []);
+        await res.JsonAsync(200, new JsonObject
+        {
+            ["message"] = $"m{place}",
+            ["messages"] = _rt.Session.Read(d => d.Stream.Count) - place,
+            ["code"] = number > 0,
+            ["files"] = new JsonArray([.. files.Select(f => (JsonNode)new JsonObject { ["path"] = Relative(f.Path), ["removed"] = f.Removed })]),
+            ["lost"] = new JsonArray([.. lost.Select(p => (JsonNode)Relative(p))]),
+        }, ct);
+    }
+
+    /// <summary>
+    /// POST /api/rewind: back to before one of the person's questions, as /rewind goes back to before a turn: the conversation
+    /// and the code (both, unless <c>chat</c> or <c>code</c> is false), only the conversation, or only the code (when this run
+    /// kept that turn's checkpoint). The agent's next turn works from there; the chat in Arena shows it at once, the turns gone
+    /// back from on a branch of their own. What it says.
+    /// </summary>
+    private async Task RewindAsync(HttpRequest req, HttpResponse res, CancellationToken ct)
+    {
+        var body = req.Json();
+        var (chat, code) = (body?.Bool("chat") != false, body?.Bool("code") != false);
+        if (!chat && !code)
+        {
+            await res.ErrorAsync(400, "invalid", "Rewind the conversation, the code, or both.", ct);
+            return;
+        }
+        await SettleAsync(ct);
+        if (Begin("rewind") is not { } job)
+        {
+            await res.ErrorAsync(409, "busy", "An answer is being written: stop it, or wait for it, to rewind.", ct);
+            return;
+        }
+        string? said = null;
+        string? refused = null;
+        job.Running = Task.Run(async () =>
+        {
+            try
+            {
+                // Read once nothing runs: the session stays as it is meanwhile.
+                if (QuestionAt(body?.Str("message")) is not { } place)
+                {
+                    refused = "Say which of your questions to rewind to: its id (m3).";
+                }
+                else if (!chat && _rt.TurnAt(place) == 0)
+                {
+                    refused = "Code Arena kept no checkpoint of that turn (it was before this run, or too long ago): its code cannot go back from here.";
+                }
+                else
+                {
+                    // Not stopped half way: the files and the conversation go back together.
+                    said = await _rt.BackToAsync(place, code, chat, CancellationToken.None);
+                }
+            }
+            finally
+            {
+                End(job, new JsonObject { ["type"] = "done", ["id"] = null });
+                StartNext();
+            }
+        });
+        await job.Running;
+        if (refused is not null)
+        {
+            await res.ErrorAsync(400, "invalid", refused, ct);
+            return;
+        }
+        await res.JsonAsync(200, new JsonObject { ["said"] = said }, ct);
     }
 
     /// <summary>The part of an answer a message quotes (<c>quote</c>; null: none); false when it is longer than <see cref="Quotes.MaxChars"/>.</summary>
