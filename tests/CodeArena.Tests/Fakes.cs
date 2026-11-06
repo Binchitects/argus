@@ -767,6 +767,8 @@ public sealed class FakeChats
         public DateTimeOffset Updated { get; set; } = DateTimeOffset.UtcNow;
         /// <summary>Code Arena's turn holds it until then.</summary>
         public DateTimeOffset? Turn { get; set; }
+        /// <summary>The project it is in (Arena's Projects); null: none.</summary>
+        public string? ProjectId { get; set; }
 
         /// <summary>The branch on screen, first to last.</summary>
         public List<Node> Branch
@@ -796,6 +798,12 @@ public sealed class FakeChats
     public List<string> Turns { get; } = [];
     /// <summary>The most messages one read gives (Arena: 200 unless asked for fewer).</summary>
     public int Page { get; set; } = 200;
+    /// <summary>The projects the person may add to (/api/code-arena/projects), and the one a new chat of no project chosen goes in (its repository's).</summary>
+    public List<(string Id, string Name)> Projects { get; } = [];
+    public string? RepositoryProject { get; set; }
+    /// <summary>Each chat put in a project or taken out (PUT /chats/{id}/project): the chat and the project (null: none).</summary>
+    public List<(string Chat, string? Project)> Moves { get; } = [];
+
     /// <summary>Files attached on the web, by id: what /api/code-arena/attachments/{id} gives.</summary>
     public Dictionary<string, (byte[] Data, string ContentType)> Files { get; } = [];
     /// <summary>The chats the person continued from Code Arena (/continued), in order.</summary>
@@ -1339,17 +1347,42 @@ public sealed class FakeChats
                     ["me"] = new JsonObject { ["email"] = "pat@example.test", ["name"] = "Pat" },
                 };
             }
+            else if (parts is ["projects"] && method == "GET")
+            {
+                reply = new JsonObject
+                {
+                    ["projects"] = new JsonArray([.. Projects.Select(p => (JsonNode)new JsonObject { ["id"] = p.Id, ["name"] = p.Name, ["global"] = false })]),
+                    ["suggested"] = ctx.Request.QueryString["repo"] is { Length: > 0 } ? RepositoryProject : null,
+                };
+            }
+            else if (parts is ["chats", var moved, "project"] && method == "PUT" && All.FirstOrDefault(c => c.Id == moved) is { } movedChat)
+            {
+                var to = JsonNode.Parse(body)?["projectId"]?.GetValue<string>();
+                movedChat.ProjectId = to;
+                Moves.Add((moved, to));
+                reply = new JsonObject { ["projectId"] = to };
+            }
             else if (parts is ["chats"] && method == "POST")
             {
                 var b = JsonNode.Parse(body)!.AsObject();
                 var reference = b["ref"]?.GetValue<string>();
                 var known = All.FirstOrDefault(c => c.Ref is not null && c.Ref == reference);
-                var chat = known ?? new Chat { Id = Guid.NewGuid().ToString(), Ref = reference, Place = b["place"]?.GetValue<string>(), Updated = DateTimeOffset.UtcNow.AddTicks(++_made * 10) };
+                var chosen = b["projectId"]?.GetValue<string>();
+                var chat = known ?? new Chat
+                {
+                    Id = Guid.NewGuid().ToString(), Ref = reference, Place = b["place"]?.GetValue<string>(), Updated = DateTimeOffset.UtcNow.AddTicks(++_made * 10),
+                    // As Arena: the project chosen when the person may add to it, else the repository's.
+                    ProjectId = Projects.Any(p => p.Id == chosen) ? chosen : RepositoryProject,
+                };
                 if (known is null)
                 {
                     All.Add(chat);
                 }
-                reply = new JsonObject { ["id"] = chat.Id, ["created"] = known is null };
+                reply = new JsonObject
+                {
+                    ["id"] = chat.Id, ["created"] = known is null, ["projectId"] = chat.ProjectId,
+                    ["projectName"] = Projects.FirstOrDefault(p => p.Id == chat.ProjectId).Name,
+                };
             }
             else if (parts is ["chats", var id, ..] && All.FirstOrDefault(c => c.Id == id) is not { } chat)
             {

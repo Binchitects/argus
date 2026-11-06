@@ -440,7 +440,7 @@ public static class CodeArenaSync
         var reference = Clip(body.Ref, 128);
         if (reference is not null && await db.Conversations.FirstOrDefaultAsync(c => c.UserId == me.Id && c.Origin == Origin && c.OriginRef == reference, http.RequestAborted) is { } known)
         {
-            return Results.Ok(new { id = known.Id, created = false, projectId = known.WorkProjectId });
+            return Results.Ok(new { id = known.Id, created = false, projectId = known.WorkProjectId, projectName = await ProjectNameAsync(db, known.WorkProjectId, http.RequestAborted) });
         }
         var c = new Conversation
         {
@@ -455,8 +455,12 @@ public static class CodeArenaSync
         };
         db.Conversations.Add(c);
         await db.SaveChangesAsync(http.RequestAborted);
-        return Results.Ok(new { id = c.Id, created = true, projectId = c.WorkProjectId });
+        return Results.Ok(new { id = c.Id, created = true, projectId = c.WorkProjectId, projectName = await ProjectNameAsync(db, c.WorkProjectId, http.RequestAborted) });
     }
+
+    /// <summary>The project's name, for Code Arena to say which project its session went in.</summary>
+    private static async Task<string?> ProjectNameAsync(AppDbContext db, Guid? id, CancellationToken ct) =>
+        id is { } p ? await db.Projects.AsNoTracking().Where(x => x.Id == p).Select(x => x.Name).SingleOrDefaultAsync(ct) : null;
 
     /// <summary>
     /// The branch on screen after what Code Arena has (<paramref name="since"/>: the last message it has from here; none: from

@@ -261,6 +261,7 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/resume [id]` | switch to a saved session |
 | `/web [N\|all\|WORDS]` | your chats in Arena, newest first (the 30 newest; `all`: the 5,000 newest; `WORDS`: those of them with the words in their title or folder); `/web N` (a number in the list last shown, or a chat's id) continues one here |
 | `/sync [all]` | where this session stands with its chat in Arena; `all` sends what Arena lacks of this folder's sessions |
+| `/project [N\|NAME\|none]` | the project in Arena the session counts to, and those you may add to; a number, a name (or the start of one) or an id puts this session and the folder's next ones in it, `none` in none ([below](#projects)) |
 | `/memory [add\|forget]` | what it remembers (below; Arena's when signed in); `add TEXT` for this project, `add --all TEXT` for every project, `forget N` |
 | `/remember` | the project's long memory, `.remember/MEMORY.md` in the repository: its sections and topic files (below) |
 | `/rewind [N] [code\|chat]` | your questions; `/rewind N` goes back to before question N (below) |
@@ -1485,11 +1486,13 @@ status (403 `outside` for a path outside the folder).
 
 | call | what it does |
 |---|---|
-| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting); `context` (the window), `contextUsed` (about how much of it the next request holds), `window` (what fills the next request: `system`, `tools`, `instructions`, `memory`, `summary`, `files`, `you`, `answers` and `toolResults` in characters, and `biggest`, `[{id, role, tool, chars, preview}]`; the chat's ring and the status bar's Context share `contextUsed` out by them; measured while no turn runs), `reserve` (how much of it is kept for the answer), `compactAt` and `compactTarget` (percent; `compactAt` 0: only when a request would not fit), `compactAtSource` (`flag`, `config`, `account`, `arena` or `default`) and `compactAtAccount` (the Arena account's threshold, null when Arena did not say); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output); `arenaChats` (sessions are kept with chats in Arena here), `account` (whose chats: the key's account, null until Arena said), `chat` (this session's chat there, null: none yet) and `synced` (how many times the web chat's news came in while nothing ran: the page reads the session again when it changes; taking it in is not `busy`); `sync` (`{chat, account, waiting, trouble, behind}`: the chat, whose chats, how many messages Arena lacks, what stops them, whether the web chat has news not taken in; null without the sync) and `notices` (`[{id, text, at}]`: the last 20 said while nothing ran, the page shows each once) |
+| `GET /api/state` | `name`, `version`, `license`, `source` (the about box), `manual` (the help's link: the Arena's `/help/code-arena`, null without its address), the folder, project, branch, model, mode, session, busy; `turn` (the number of the answer running or run last); `queued` (the messages waiting); `context` (the window), `contextUsed` (about how much of it the next request holds), `window` (what fills the next request: `system`, `tools`, `instructions`, `memory`, `summary`, `files`, `you`, `answers` and `toolResults` in characters, and `biggest`, `[{id, role, tool, chars, preview}]`; the chat's ring and the status bar's Context share `contextUsed` out by them; measured while no turn runs), `reserve` (how much of it is kept for the answer), `compactAt` and `compactTarget` (percent; `compactAt` 0: only when a request would not fit), `compactAtSource` (`flag`, `config`, `account`, `arena` or `default`) and `compactAtAccount` (the Arena account's threshold, null when Arena did not say); `servers` (`[{name, title, url, state, tools, status, error, nextTry}]`, `state` one of `connecting`, `connected`, `unavailable`, `failed`); `jobs` (`[{id, command, running, status, background, output}]`, `output` the end of a running one's output); `arenaChats` (sessions are kept with chats in Arena here), `account` (whose chats: the key's account, null until Arena said), `chat` (this session's chat there, null: none yet), `workProject` (`{id, name}`: the project in Arena it counts to, null: none) and `synced` (how many times the web chat's news came in while nothing ran: the page reads the session again when it changes; taking it in is not `busy`); `sync` (`{chat, account, waiting, trouble, behind}`: the chat, whose chats, how many messages Arena lacks, what stops them, whether the web chat has news not taken in; null without the sync) and `notices` (`[{id, text, at}]`: the last 20 said while nothing ran, the page shows each once) |
 | `GET /api/folders?path=` | for Open Folder: a folder's folders by name (hidden ones last, no files, at most 2,000) as `{path, parent, folders, why, current, home, separator, drives, recent, added, files}` (`why`: what is not listed; `recent`: the folders opened lately, the one open now first; `added`: the folders added to this workspace; `files`: its files' names, with `files=1`, for @ in the chat); with no path, the open folder's parent; 404 `not_found` when it is not a folder |
 | `POST /api/folders/add` `{path}` | Add Folder to Workspace: the tools may use it, kept with this folder: `{folder, added}` (`added`: the folders added, whole); 409 `inside` for the folder open now or one in it |
 | `POST /api/folders/remove` `{path}` | takes an added folder out again: `{added}`; 404 `not_added` |
 | `POST /api/folders/open` `{path}` | opens that folder (`~` is the home folder; relative to the one open now): answers `{folder}` with its full path, then code-arena starts again on it at the same address with the same key; 404 `not_found` when it is not a folder, 409 `not_here` in Code Studio |
+| `GET /api/projects` | the projects in Arena the person may add to: `{projects: [{id, name}], suggested, problem}` (`suggested`: the repository's; `projects` null with `problem` when Arena cannot say) |
+| `POST /api/project` | `{project}`: the session (and the folder's next ones) in it, by its id, name or number, or `none`; `{said}`, 400 `project` with why when it is not one the person may add to |
 | `GET /api/sessions` | this folder's sessions, newest first: `[{id, title, updatedAt, messages, chat, unsent, waiting}]` (`chat`: the chat in Arena it is kept with; `unsent`: Arena lacks `waiting` of its messages) |
 | `GET /api/sessions/web` | the person's chats in Arena (the 5,000 newest): `[{id, title, origin, place, updatedAt, messages, session}]` (`session`: this folder's session kept with it); 409 `off` without the sync, 503 `arena` when Arena cannot say |
 | `POST /api/sessions/web` `{id}` | continues that chat here (in the session kept with it, else a new one with its messages); the session; 404 `gone` when Arena has no such chat of the person's, 409 `busy` while an answer is written, 503 `arena` when Arena cannot say |
@@ -2569,6 +2572,34 @@ messages are still to send, the web's news waiting, or what stops it: its
 words on hover), and what was said while nothing ran (Arena out of reach, the
 web's messages taken in) comes as a notice there, not only in the terminal that
 started it.
+
+### Projects
+
+A session can count to a **project** in Arena (Projects, in Arena's sidebar):
+what it uses (tokens, cost, the model's time) goes to the project's
+accounting, and its chat in Arena is in the project. Each request to the
+gateway names its chat and its project in its metadata
+(`metadata.tags: ["chat:<id>", "project:<id>"]`), which is how Arena's usage
+log knows them; a request counts where its chat is, so a chat moved to another
+project takes what it used along.
+
+Which project:
+
+- `code-arena --project NAME` (its name, the start of only one name, or its
+  id; `none` for none) at the start;
+- `/project` lists the projects you may add to (yours and the global ones, the
+  repository's marked), and `/project N` or `/project NAME` chooses one;
+  `/project none` takes the session out. The chat in Arena goes with it;
+- in the IDE, the project in the chat's header (a folder mark with its name),
+  or `/project NAME` in the chat's box;
+- else, when none was chosen, the project the repository is in (its address in
+  the project's **Repositories**): Arena puts the chat in it as it makes it,
+  and the session says so.
+
+The project chosen is kept for the folder: the next sessions there start in
+it. A project you may not add to (archived, or you are only its viewer) is not
+offered, and one Arena refuses is said. A project's budget does not stop Code
+Arena's requests.
 
 ## Its commits
 

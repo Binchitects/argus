@@ -669,7 +669,7 @@ controls:
       csaccm: [IAM, DSP]
       nist80053: [AC-3, AC-6, AU-2]
       nist800171: [03.01.01, 03.01.05]
-    docs: [chat.md#projects]
+    docs: [chat.md#projects, code-arena.md#projects]
     tests:
       - Llm.Tests/ProjectTests.A_project_s_people_hold_their_roles_and_it_is_not_there_for_anyone_else
       - Llm.Tests/ProjectTests.A_global_project_is_everyones_to_add_to_and_making_one_is_a_permission

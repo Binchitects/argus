@@ -344,6 +344,8 @@ public sealed class ProjectTests(AppFixture app)
         var made = JsonDocument.Parse(await (await arena.PostAsJsonAsync("/api/code-arena/chats", new { @ref = "s-" + Guid.NewGuid().ToString("N")[..6], place = "/w/api", project = "gitlab.corp/payments/api" }))
             .Content.ReadAsStringAsync()).RootElement;
         Assert.Equal(id, made.GetProperty("projectId").GetGuid());
+        // Named, so Code Arena says which project the session went in.
+        Assert.Equal("API", made.GetProperty("projectName").GetString());
         var picked = JsonDocument.Parse(await (await arena.PostAsJsonAsync("/api/code-arena/chats", new { @ref = "s-" + Guid.NewGuid().ToString("N")[..6], place = "/w/api", project = "gitlab.corp/payments/api", projectId = chosen }))
             .Content.ReadAsStringAsync()).RootElement;
         Assert.Equal(chosen, picked.GetProperty("projectId").GetGuid());
@@ -351,6 +353,7 @@ public sealed class ProjectTests(AppFixture app)
         var refused = JsonDocument.Parse(await (await arena.PostAsJsonAsync("/api/code-arena/chats", new { @ref = "s-" + Guid.NewGuid().ToString("N")[..6], place = "/w/x", project = "local/abc", projectId = bens }))
             .Content.ReadAsStringAsync()).RootElement;
         Assert.Equal(JsonValueKind.Null, refused.GetProperty("projectId").ValueKind);
+        Assert.Equal(JsonValueKind.Null, refused.GetProperty("projectName").ValueKind);
 
         // /project in Code Arena: moved, and out.
         var session = made.GetProperty("id").GetGuid();

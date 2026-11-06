@@ -623,7 +623,7 @@ A project is seen only by its maker, the people and groups in it (each as owner,
 - [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): AC-3 Access Enforcement; AC-6 Least Privilege; AU-2 Event Logging
 - [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.01.01 Account Management; 03.01.05 Least Privilege
 
-**Documented in** [chat.md#projects](../chat.md#projects)
+**Documented in** [chat.md#projects](../chat.md#projects), [code-arena.md#projects](../code-arena.md#projects)
 
 **Proved by**
 

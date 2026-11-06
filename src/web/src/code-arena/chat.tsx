@@ -47,6 +47,7 @@ import {
   openWebChat,
   reduceCode,
   resumeSession,
+  chooseProject,
   sendAllSessions,
   sessionQuery,
   widenSession,
@@ -77,6 +78,7 @@ import { useCommands } from './commands'
 import { useKeyFor } from './keyboard'
 import { PartHelp } from './help'
 import { SyncStatus } from './sync-status'
+import { ProjectPicker } from './project-picker'
 import { changesQuery } from './ide-api'
 import { useSettings } from './settings'
 import { familyThemeName, themeNamed } from './settings-schema'
@@ -698,6 +700,22 @@ export function Thread({
    */
   const send = async (text: string, context?: Piece[], quoted?: Quote, attachments: Attachment[] = [], accepted?: () => void): Promise<boolean> => {
     if (text === '/compact') return compact()
+    if (/^\/project(\s|$)/.test(text)) {
+      // As in the terminal: /project NAME (or N, or none) puts the session in it; alone, says which it is in.
+      const which = text.slice('/project'.length).trim()
+      if (!which) {
+        toast.info(state.workProject ? `Project: ${state.workProject.name}.` : 'Project: none.', { description: 'Choose one with the project in the chat’s header, or /project NAME.' })
+        return true
+      }
+      try {
+        toast.success((await chooseProject(which)).said)
+        await queryClient.invalidateQueries({ queryKey: stateQuery.queryKey })
+        return true
+      } catch (e) {
+        toast.error(errorMessage(e))
+        return false
+      }
+    }
     if (text === '/clear' || text === '/new') {
       await newSession().catch((e) => toast.error(errorMessage(e)))
       await refresh()
@@ -901,6 +919,7 @@ export function Thread({
           <ToolsPicker tools={state.toolGroups} value={state.toolGroups.filter((g) => g.on).map((g) => g.id)} onChange={(tools) => void settings({ tools })} />
         )}
         <span className="ml-auto" />
+        {state.arenaChats && <ProjectPicker project={state.workProject} />}
         <SyncStatus sync={state.sync} />
         {state.mode === 'yolo' && <span className="hidden text-xs text-destructive-ink @md:inline">Yolo: nothing asks</span>}
         <PartHelp part="chat" className="size-8 rounded-md [&_svg]:size-4" />
