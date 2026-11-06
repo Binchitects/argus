@@ -255,7 +255,11 @@ function newFileEol(m: MonacoModule, v: Record<string, unknown>) {
   return eol === '\r\n' ? m.monaco.editor.EndOfLineSequence.CRLF : m.monaco.editor.EndOfLineSequence.LF
 }
 
-export function EditorProvider({ children, group = 1 }: { children: ReactNode; group?: number }) {
+/**
+ * The editor: its tabs and Monaco. `detached`: a window of its own (a tab or the chat moved out of the IDE's), which
+ * neither puts back nor keeps the IDE's tabs, and gives what is unsaved back to the IDE's window as it closes.
+ */
+export function EditorProvider({ children, group = 1, detached = false }: { children: ReactNode; group?: number; detached?: boolean }) {
   const queryClient = useQueryClient()
   // The groups' shared part (one model per file, whichever group shows it): the first group makes it, the others take it.
   const parent = use(GroupStoreContext)
@@ -1343,6 +1347,11 @@ export function EditorProvider({ children, group = 1 }: { children: ReactNode; g
       present,
       collectNow: () => collect(),
       markTabs,
+      release: (ids: string[]) => {
+        const held = tabsRef.current.filter((t) => ids.includes(t.id)).flatMap(fileSidesOf)
+        drop(ids, held.filter((p) => ![...tabsRef.current.filter((t) => !ids.includes(t.id)), ...store.others(group)].some((t) => fileSidesOf(t).includes(p))))
+      },
+      unsavedText: (path: string) => (fileDirty(path) ? files.current.get(path)?.model.getValue() : undefined),
     }
   }, [confirm, queryClient, store, group])
 
@@ -1482,13 +1491,13 @@ export function EditorProvider({ children, group = 1 }: { children: ReactNode; g
   // Leaving with unsaved changes asks first, unless hot exit kept every unsaved text (the next load puts it back).
   const anyDirty = tabs.some((t) => t.dirty)
   useEffect(() => {
-    if (!anyDirty) return
+    if (!anyDirty || detached) return
     const warn = (e: BeforeUnloadEvent) => {
       if (!actions.allBackedUp()) e.preventDefault()
     }
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
-  }, [anyDirty, actions])
+  }, [anyDirty, actions, detached])
 
   // The tabs as they were before a reload; then the tabs kept as they change (a second after), for the next load.
   const restoring = useRef(false)
@@ -1497,9 +1506,9 @@ export function EditorProvider({ children, group = 1 }: { children: ReactNode; g
     if (restoring.current) return
     restoring.current = true
     // The first group's tabs as they were; another group starts with what it was split or dragged with.
-    if (!root) return
+    if (!root || detached) return
     void actions.restore().finally(() => setRestored(true))
-  }, [actions, root])
+  }, [actions, root, detached])
   useEffect(() => {
     if (!restored) return
     const wait = setTimeout(() => {
@@ -2249,6 +2258,7 @@ function TabMenu({ tab, group }: { tab: Tab; group: number }) {
       {item('Split Down', () => void toGroup('down', false))}
       {at_ < groups.length - 1 && item('Move to Next Group', () => void toGroup(groups[at_ + 1]!, true))}
       {at_ > 0 && item('Move to Previous Group', () => void toGroup(groups[at_ - 1]!, true))}
+      {(tab.kind === 'file' || tab.kind === 'media') && !isUserFile(tab.path) && item('Move into New Window', () => run('workbench.action.moveEditorToNewWindow'))}
       {separator}
       {tab.pinned ? item('Unpin', () => ed.pin(tab.id, false)) : item('Pin', () => ed.pin(tab.id, true))}
       {tab.preview && item('Keep Open', () => ed.keepTab(tab.id))}

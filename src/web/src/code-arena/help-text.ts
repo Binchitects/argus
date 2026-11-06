@@ -95,7 +95,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   editor: {
     name: 'Editor',
-    text: `Your open files, in tabs. A dot marks changes not saved yet, and ${modKey}+S saves; the middle mouse button closes a tab. Split Right in a tab's menu (or ${modKey}+\\) opens it in a second group beside it; drag a tab onto another group to move it there. A file the agent edits reloads in its tab when nothing in it is unsaved; saving a file that changed on disk since you opened it asks first.`,
+    text: `Your open files, in tabs. A dot marks changes not saved yet, and ${modKey}+S saves; the middle mouse button closes a tab. Split Right in a tab's menu (or ${modKey}+\\) opens it in a second group beside it; drag a tab onto another group to move it there. Move into New Window in its menu opens it in a browser window of its own. A file the agent edits reloads in its tab when nothing in it is unsaved; saving a file that changed on disk since you opened it asks first.`,
     manual: 'the-ide',
   },
   terminal: {

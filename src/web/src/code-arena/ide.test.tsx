@@ -946,6 +946,65 @@ describe('Code Arena, the IDE', () => {
     expect(within(tabs()).getAllByRole('tab', { name: 'README.md' })).toHaveLength(1)
   })
 
+  it('moves a tab into a window of its own with its unsaved text, and takes it back when that window says so', async () => {
+    backend()
+    const opened = vi.spyOn(window, 'open').mockReturnValue({} as Window)
+    // The other window, as the page there would talk.
+    const other = new BroadcastChannel('code-arena-windows')
+    const heard: unknown[] = []
+    other.onmessage = (m: MessageEvent) => heard.push(m.data)
+    try {
+      renderIde()
+      await userEvent.dblClick(await screen.findByRole('treeitem', { name: 'README.md' }))
+      await within(tabs()).findByRole('tab', { name: 'README.md' })
+      await waitFor(() => expect(editor().model).toBeTruthy())
+      act(() => editor().model!.setValue('# Shop, not saved\n'))
+      fireEvent.contextMenu(await within(tabs()).findByRole('tab', { name: /README\.md/ }))
+      await userEvent.click(await screen.findByRole('menuitem', { name: 'Move into New Window' }))
+      await waitFor(() => expect(opened).toHaveBeenCalledTimes(1))
+      const url = new URL(String(opened.mock.calls[0]![0]))
+      expect(url.searchParams.get('window')).toBe('editor')
+      expect(url.searchParams.get('path')).toBe('README.md')
+      const id = url.searchParams.get('id')!
+      // The new window says it is there: it is given the unsaved text, and the tab closes here without asking.
+      other.postMessage({ type: 'hello', id, path: 'README.md' })
+      await waitFor(() => expect(heard).toContainEqual({ type: 'take', id, text: '# Shop, not saved\n' }))
+      await waitFor(() => expect(screen.queryByRole('tablist', { name: 'Open files' })).not.toBeInTheDocument())
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      // Back, with what was typed there.
+      other.postMessage({ type: 'back', kind: 'editor', files: [{ path: 'README.md', text: '# Shop, typed elsewhere\n' }] })
+      expect(await within(await screen.findByRole('tablist', { name: 'Open files' })).findByRole('tab', { name: 'README.md, not saved' })).toBeInTheDocument()
+      await waitFor(() => expect(editor().model?.value).toBe('# Shop, typed elsewhere\n'))
+
+      // The chat moves out too: hidden here, and shown again when it comes back.
+      await userEvent.click(screen.getByRole('button', { name: 'Open the chat in a new window' }))
+      expect(new URL(String(opened.mock.calls[1]![0])).searchParams.get('window')).toBe('chat')
+      await waitFor(() => expect(document.querySelector('aside[aria-label="Agent"]')).toHaveAttribute('hidden'))
+      other.postMessage({ type: 'back', kind: 'chat' })
+      await waitFor(() => expect(document.querySelector('aside[aria-label="Agent"]')).not.toHaveAttribute('hidden'))
+      expect(screen.getByRole('region', { name: 'Chat' })).toBeVisible()
+    } finally {
+      other.close()
+      opened.mockRestore()
+    }
+  })
+
+  it('opens as a window of its own with one file, or the chat, and says how to go back', async () => {
+    backend({ 'GET /api/workspace/state': () => ({ json: { editors: { tabs: [{ kind: 'file', path: 'src/app.ts' }], active: 'src/app.ts' } } }) })
+    window.history.replaceState(null, '', '/?window=editor&path=README.md&id=w1')
+    try {
+      renderIde()
+      // No IDE window answers here: the file from disk.
+      expect(await within(await screen.findByRole('tablist', { name: 'Open files' })).findByRole('tab', { name: 'README.md' }, { timeout: 4000 })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Move back into the IDE' })).toBeInTheDocument()
+      expect(screen.queryByRole('navigation', { name: 'Activity bar' })).not.toBeInTheDocument()
+      // The IDE's tabs stay the IDE's: none of them opens here.
+      expect(within(tabs()).getAllByRole('tab').map((t) => t.querySelector('.truncate')?.textContent)).toEqual(['README.md'])
+    } finally {
+      window.history.replaceState(null, '', '/')
+    }
+  })
+
   it('after a reload, the tabs are back as they were, unsaved text too, and typing keeps the unsaved text until it is saved', async () => {
     const { calls } = backend({
       'GET /api/workspace/state': () => ({

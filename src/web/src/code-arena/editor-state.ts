@@ -153,6 +153,10 @@ export interface EditorApi {
   activate: (id: string) => void
   /** Asks first when the file has unsaved changes; false when the person kept it open. */
   close: (id: string) => Promise<boolean>
+  /** Closes tabs without asking, letting go of what is unsaved in their files: it went with them (to another window). */
+  release: (ids: string[]) => void
+  /** A file's text while it has unsaved changes here; undefined when it has none (or is not open). */
+  unsavedText: (path: string) => string | undefined
   save: (id?: string) => Promise<boolean>
   /** Files changed on disk (by the agent, a command): open tabs without unsaved changes show them. All tabs without a path. */
   refresh: (path?: string) => Promise<void>

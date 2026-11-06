@@ -551,6 +551,18 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   back in the first; **Close Editor Group** closes the one with the focus.
   Save, Close and the other commands work on the group with the focus; Save
   All and a file changed on disk reach every group. Eight groups at most.
+- **a tab or the chat in a window of its own**, as VS Code's Move into New
+  Window: **Move into New Window** in a tab's menu (the palette's **Move
+  Editor into New Window**) opens the file in a new browser window, with what
+  is unsaved in it, and closes its tab in the IDE; the chat's header button
+  **Open the chat in a new window** (the palette's **Open Chat in New
+  Window**) moves the chat there, hidden in the IDE meanwhile. Both windows
+  are the same Code Arena: the session, the files and the settings are one.
+  What the agent changes from the chat's window reloads in the IDE's editor,
+  and a file saved in either reloads in the other. **Move back into the IDE**
+  at the window's top (or closing the window) puts its tabs back in the IDE,
+  unsaved text too, or shows the chat there again. The browser must allow
+  pop-ups for the page.
 - **changes on disk**: what changes in the folder by anyone (your own editor,
   a command, git) shows at once: a file open and not edited here reloads, one
   deleted closes, the Explorer, Source Control and Changes are read again, and

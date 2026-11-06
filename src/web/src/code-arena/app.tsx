@@ -31,6 +31,7 @@ import { ProblemsPanel } from './problems'
 import { countProblems, useProblems } from './problems-store'
 import { ReviewPanel } from './review'
 import { SourceControlPanel } from './scm'
+import { DetachedChat, DetachedEditor } from './detach'
 import { EditorArea, EditorProvider } from './editor'
 import { groupCommands, GroupStoreContext } from './editor-groups'
 import { userFile } from './editor-options'
@@ -71,6 +72,7 @@ import { About, StatusBar } from './status-bar'
 import { languageServers } from './lsp/servers'
 import { OutputPanel } from './lsp/output'
 import { wholePath } from './whole-path'
+import { detachedView, useWindows } from './windows'
 
 // xterm.js loads with the panel, the first time it opens.
 const TerminalPanel = lazy(() => import('./terminals'))
@@ -107,6 +109,8 @@ export function App() {
   const config = useQuery(configQuery)
   // The layout as it was left, in any run: waited for, so the workbench opens as it was.
   const preferences = useQuery(preferencesQuery)
+  // A window of the IDE's own: its chat or an editor tab, moved out (detach.tsx).
+  const [detached] = useState(detachedView)
 
   useEffect(() => {
     if (state.data) document.title = `${state.data.project} · Code Arena`
@@ -140,11 +144,17 @@ export function App() {
 
   return (
     <SettingsProvider>
-      <EditorProvider>
+      <EditorProvider detached={!!detached}>
         <HelpProvider manual={state.data.manual}>
           <CodeRefsProvider folder={state.data.folder}>
             <SettingsRead>
-              <Workbench state={state.data} config={config.data} lost={state.error ?? config.error} saved={preferences.data?.layout} recentSaved={preferences.data?.paletteRecent} />
+              {detached?.kind === 'chat' ? (
+                <DetachedChat state={state.data} config={config.data} />
+              ) : detached?.kind === 'editor' ? (
+                <DetachedEditor path={detached.path} id={detached.id} project={state.data.project} />
+              ) : (
+                <Workbench state={state.data} config={config.data} lost={state.error ?? config.error} saved={preferences.data?.layout} recentSaved={preferences.data?.paletteRecent} />
+              )}
             </SettingsRead>
             <QuickPickHost />
             <PasteDialog />
@@ -621,6 +631,8 @@ function Workbench({
   )
   // A turn over: its commands may have changed files too.
   const onTurnEnd = useCallback(() => void refresh(), [refresh])
+  // A tab or the chat moved into a window of its own, and back.
+  const windows = useWindows({ ed, onChatOut: useCallback(() => change({ chatOpen: false }), [change]), onChatBack: showChat, onEvent, onTurnEnd })
 
   // Files changed on disk by hand (another editor, a command, git) show as they are: a file open here and not edited here
   // reloads, one deleted closes, the Explorer's folders, Source Control and Changes are read again, and the language
@@ -1179,6 +1191,8 @@ function Workbench({
     { id: 'workbench.action.unpinEditor', category: 'View', title: 'Unpin Editor', enabled: () => !!active?.pinned, run: () => active && ed.pin(active.id, false) },
     { id: 'workbench.action.moveEditorLeftInGroup', category: 'View', title: 'Move Editor Left', enabled: () => !!active, run: () => active && ed.moveTab(active.id, ed.tabs.findIndex((t) => t.id === active.id) - 1) },
     { id: 'workbench.action.moveEditorRightInGroup', category: 'View', title: 'Move Editor Right', enabled: () => !!active, run: () => active && ed.moveTab(active.id, ed.tabs.findIndex((t) => t.id === active.id) + 1) },
+    { id: 'workbench.action.moveEditorToNewWindow', category: 'View', title: 'Move Editor into New Window', enabled: () => active?.kind === 'file' || active?.kind === 'media', run: windows.moveTab },
+    { id: 'workbench.action.chat.openInNewWindow', category: 'Chat', title: 'Open Chat in New Window', run: windows.moveChat },
     { id: 'workbench.action.reopenClosedEditor', category: 'View', title: 'Reopen Closed Editor', run: () => void ed.reopenClosed() },
     { id: 'workbench.action.nextEditor', category: 'View', title: 'Open Next Editor', run: () => ed.cycle(1) },
     { id: 'workbench.action.previousEditor', category: 'View', title: 'Open Previous Editor', run: () => ed.cycle(-1) },
@@ -1532,6 +1546,7 @@ function Workbench({
         config={config}
         onOpenList={() => show('chat')}
         onHide={() => change({ chatOpen: false })}
+        onDetach={windows.moveChat}
         onShow={showChat}
         onEvent={onEvent}
         onTurnEnd={onTurnEnd}
