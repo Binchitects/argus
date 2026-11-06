@@ -550,10 +550,14 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   - The model is told to quote labels with punctuation and to give each
     diagram an `accTitle`, which names it for screen readers.
 - **Right-to-left text.** Persian, Arabic and Hebrew read right to left, as in
-  ChatGPT: each paragraph, heading, list, quote and table of an answer takes
-  the direction of its first words, so Persian and English sit side by side.
-  Questions, the message box, the edit box, thinking and a chat's instructions
-  follow what is typed. Code, code blocks and formulas stay left to right.
+  ChatGPT: each paragraph, heading, list item, table cell and line of a quote
+  takes the direction of its own first words, so Persian and English sit side
+  by side. A list, a quote or a table goes the way its first words read (where
+  its bullets, its border and its first column are), code left out of that.
+  Questions, a quoted part, thinking, the message box and the edit box go line
+  by line: a Persian line under an English one reads right to left. Code, code
+  blocks and formulas stay left to right. Code Arena's chat shows them the same
+  way.
 - **Files panel.** Like Claude's: every attachment, every file Argus read (with
   **Open in GitLab**), and every file the model wrote in the branch on screen.
   It keeps the newest version of each and has a viewer. Files made by a

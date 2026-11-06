@@ -1179,6 +1179,10 @@ Lines of a file go to the agent from the editor itself:
 The model gets them numbered, after the message, as `<selection path lines>`
 (with `unsaved="true"` for the editor's text); at most eight a message.
 
+Persian, Arabic and Hebrew read right to left in the chat as in the web chat
+([Chat](chat.md#what-it-does)): each paragraph, list item, table cell and line
+of a question or of the box by its own words, code left to right.
+
 ### Reply to part of an answer
 
 Words selected in a finished answer of the chat get the web chat's toolbar

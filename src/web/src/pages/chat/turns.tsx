@@ -257,7 +257,7 @@ export function QuestionTurn({
         <>
           <MessageContextNote m={m} />
           {typed && (
-            <div dir="auto" className={cn('max-w-[85%] rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-[0.9375rem] leading-relaxed whitespace-pre-wrap text-secondary-foreground', m.leftOut && 'opacity-60')}>
+            <div dir="auto" className={cn('bidi-lines max-w-[85%] rounded-2xl rounded-br-md bg-secondary px-4 py-2.5 text-[0.9375rem] leading-relaxed whitespace-pre-wrap text-secondary-foreground', m.leftOut && 'opacity-60')}>
               {translated?.text && !original ? translated.text : typed}
             </div>
           )}

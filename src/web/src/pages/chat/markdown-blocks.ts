@@ -4,6 +4,7 @@ import markedKatex from 'marked-katex-extension'
 import type { PreviewKind } from '@/preview/kind'
 import { parseFence } from './files'
 import { highlight } from './highlight'
+import { textDirection } from '@/lib/direction'
 
 const marked = new Marked({ gfm: true, breaks: false })
 marked.use(markedKatex({ throwOnError: false, nonStandard: true }))
@@ -40,13 +41,26 @@ purify.addHook('uponSanitizeAttribute', (node, data) => {
 })
 /**
  * Right-to-left text (Persian, Arabic, Hebrew) reads right to left, each block by its own
- * first letters, as ChatGPT does: a Persian paragraph beside an English one. A list, a
- * quote or a table takes the direction of its first words, and what is inside follows
- * (an inner dir="auto" would hide those words from it). Code stays left to right.
+ * first letters, as ChatGPT does: a Persian paragraph beside an English one, a Persian item
+ * in an English list. A list, a quote or a table is set to the direction of its first words
+ * (where its bullets and its border go), named outright: its items' own dir="auto" would hide
+ * their words from a dir="auto" of its own. Code stays left to right.
  */
-const directional = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'UL', 'OL', 'TABLE', 'DL'])
+const blocks = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'TD', 'TH', 'DT', 'DD'])
+/** The direction of an element's first words, its code and formulas left out (they are left to right whatever they hold). */
+function firstWords(el: Element): 'rtl' | 'ltr' | null {
+  const walk = el.ownerDocument.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+  for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+    if (n.parentElement?.closest('code, pre, .katex')) continue
+    const dir = textDirection(n.textContent ?? '')
+    if (dir) return dir
+  }
+  return null
+}
+const containers = new Set(['BLOCKQUOTE', 'UL', 'OL', 'TABLE', 'DL'])
 purify.addHook('afterSanitizeAttributes', (node) => {
-  if (directional.has(node.tagName) && !node.parentElement?.closest('li, td, th, blockquote')) node.setAttribute('dir', 'auto')
+  if (blocks.has(node.tagName)) node.setAttribute('dir', 'auto')
+  if (containers.has(node.tagName)) node.setAttribute('dir', firstWords(node) ?? 'auto')
   if (node.tagName === 'PRE' || node.tagName === 'CODE' || node.classList?.contains('katex')) node.setAttribute('dir', 'ltr')
   if (node.tagName === 'A' && /^https?:/i.test(node.getAttribute('href') ?? '')) {
     node.setAttribute('target', '_blank')
