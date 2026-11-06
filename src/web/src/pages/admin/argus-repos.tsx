@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CalendarClock, CircleCheck, CircleX, Eraser, FileText, GitBranch, Loader2, MoreHorizontal, RefreshCw, RotateCw, ScrollText, Trash2 } from 'lucide-react'
+import { CalendarClock, CircleCheck, CircleX, Eraser, FileText, GitBranch, Info, Loader2, MoreHorizontal, RefreshCw, RotateCw, ScrollText, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -150,6 +150,8 @@ export function RepositoriesCard({ gitlabUrl, running = false }: { gitlabUrl: st
   const [branchesOf, setBranchesOf] = useState<RepoRow | null>(null)
   const [purposeOf, setPurposeOf] = useState<RepoRow | null>(null)
   const [logOf, setLogOf] = useState<RepoRow | null>(null)
+  // By its id, so the dialog follows the repository as the list refreshes.
+  const [detailsOf, setDetailsOf] = useState<number | null>(null)
   const [scheduleOf, setScheduleOf] = useState<RepoRow[] | 'all' | null>(null)
   const [addBranchesTo, setAddBranchesTo] = useState<RepoRow[] | null>(null)
   const [outcome, setOutcome] = useState<{ title: string; result: BatchResult } | null>(null)
@@ -302,33 +304,15 @@ export function RepositoriesCard({ gitlabUrl, running = false }: { gitlabUrl: st
       sortingFn: (a, b) => a.original.repo.localeCompare(b.original.repo),
       header: ({ column }) => <SortHeader column={column} title="Repository" />,
       cell: ({ row: { original: r } }) => (
-        <div className="grid min-w-0 gap-1">
-          <span className="min-w-0">
-            <span className="font-medium [overflow-wrap:anywhere]">{r.name}</span>
-            {/* Its whole path, group and all: what GitLab and people call it. */}
-            <span className="block text-xs text-muted-foreground [overflow-wrap:anywhere]">
-              {r.repo}
-              {r.language && ' · '}
-              {r.language && <span title={r.languages.map((l) => `${l.name}: ${l.files.toLocaleString()} files`).join('\n')}>{r.language}</span>}
-            </span>
-            {r.purpose && (
-              <span className="block text-xs [overflow-wrap:anywhere]" title={r.purpose_source === 'owner' ? 'As an admin put it' : `From its ${r.purpose_source}`}>
-                {r.purpose}
-              </span>
-            )}
-          </span>
-          <span className="flex flex-wrap items-center gap-1">
-            <Badge variant="secondary" className="font-mono">
-              {r.default_branch}
-            </Badge>
-            {r.branches.map((b) => (
-              <Badge key={b} variant="outline" className="font-mono">
-                {b}
-              </Badge>
-            ))}
-            <Button variant="ghost" size="sm" className="h-6 gap-1 px-1.5 text-xs" onClick={() => setBranchesOf(r)} aria-label={`Branches of ${r.repo}`}>
-              <GitBranch className="size-3.5" /> Branches
-            </Button>
+        // Two short lines: its name (opening its details) and its path; its branches, purpose and languages are in Details.
+        <div className="grid min-w-40 max-w-80 gap-0.5">
+          <button type="button" onClick={() => setDetailsOf(r.gitlab_id)} className="min-w-0 truncate text-left font-medium underline-offset-2 hover:underline" title={`Details of ${r.repo}`}>
+            {r.name}
+          </button>
+          <span className="truncate text-xs text-muted-foreground" title={[r.repo, r.purpose].filter(Boolean).join('\n')}>
+            {r.repo}
+            {r.language && ` · ${r.language}`}
+            {r.branches.length > 0 && ` · +${r.branches.length} ${r.branches.length === 1 ? 'branch' : 'branches'}`}
           </span>
         </div>
       ),
@@ -349,7 +333,7 @@ export function RepositoriesCard({ gitlabUrl, running = false }: { gitlabUrl: st
       id: 'index',
       header: 'Index',
       accessorFn: (r) => r.indexed.map((b) => `${b.branch} ${b.sha ?? ''} ${b.message ?? ''}`).join(' '),
-      cell: ({ row: { original: r } }) => <IndexState repo={r} gitlabUrl={gitlabUrl} />,
+      cell: ({ row: { original: r } }) => <IndexSummary repo={r} gitlabUrl={gitlabUrl} />,
     },
     {
       id: 'actions',
@@ -359,6 +343,9 @@ export function RepositoriesCard({ gitlabUrl, running = false }: { gitlabUrl: st
         <span className="flex items-center justify-end gap-1">
           <Button variant="outline" size="sm" disabled={!r.included || !r.listed || update.isPending} onClick={() => update.mutate(r)} aria-label={`Update the index of ${r.repo}`}>
             <RotateCw /> Update
+          </Button>
+          <Button variant="ghost" size="icon-sm" onClick={() => setDetailsOf(r.gitlab_id)} aria-label={`Details of ${r.repo}`}>
+            <Info />
           </Button>
           <Button variant="ghost" size="icon-sm" onClick={() => setLogOf(r)} aria-label={`Log of ${r.repo}`}>
             <ScrollText />
@@ -394,6 +381,7 @@ export function RepositoriesCard({ gitlabUrl, running = false }: { gitlabUrl: st
   ]
 
   const scheduleRows = scheduleOf === 'all' ? null : scheduleOf
+  const detailed = detailsOf === null ? undefined : view?.repos.find((r) => r.gitlab_id === detailsOf)
   return (
     <Card aria-label="Repositories">
       <CardHeader className="flex flex-row flex-wrap items-start gap-3">
@@ -578,6 +566,23 @@ export function RepositoriesCard({ gitlabUrl, running = false }: { gitlabUrl: st
           }}
         />
       </CardContent>
+      <Dialog open={detailed !== undefined} onOpenChange={(o) => !o && setDetailsOf(null)}>
+        <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-3xl">
+          {detailed && (
+            <RepoDetails
+              repo={detailed}
+              gitlabUrl={gitlabUrl}
+              passNext={passNext}
+              updating={update.isPending}
+              onUpdate={() => update.mutate(detailed)}
+              onLog={() => setLogOf(detailed)}
+              onBranches={() => setBranchesOf(detailed)}
+              onSchedule={() => setScheduleOf([detailed])}
+              onPurpose={() => setPurposeOf(detailed)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
       <Dialog open={branchesOf !== null} onOpenChange={(o) => !o && setBranchesOf(null)}>
         <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-2xl">
           {branchesOf && <BranchesForm key={branchesOf.gitlab_id} repo={branchesOf} onClose={() => setBranchesOf(null)} onSaved={changed} />}
@@ -735,6 +740,125 @@ function ScheduleCell({ r, passNext }: { r: RepoRow; passNext: number | null }) 
   )
 }
 
+/** The commit link of a branch at GitLab, or its short hash. */
+function Commit({ repo, sha, gitlabUrl }: { repo: string; sha: string; gitlabUrl: string | null }) {
+  return gitlabUrl ? (
+    <a href={`${gitlabUrl.replace(/\/$/, '')}/${repo}/-/commit/${sha}`} target="_blank" rel="noreferrer" className="font-mono text-primary-ink underline underline-offset-2">
+      {short(sha)}
+    </a>
+  ) : (
+    <span className="font-mono">{short(sha)}</span>
+  )
+}
+
+/** In a row: the default branch (else the first) at its commit and how it is, and how many other branches there are. */
+function IndexSummary({ repo, gitlabUrl }: { repo: RepoRow; gitlabUrl: string | null }) {
+  if (repo.indexed.length === 0) return <span className="text-xs text-muted-foreground">{repo.included ? 'Not indexed yet' : 'Not indexed'}</span>
+  const main = repo.indexed.find((b) => b.default) ?? repo.indexed[0]!
+  const others = repo.indexed.filter((b) => b !== main)
+  const failing = others.filter((b) => b.error || b.timed_out || b.symbols_failed).length
+  return (
+    <div className="grid min-w-44 gap-0.5 text-xs">
+      <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+        <span className="font-mono text-foreground">{main.branch}</span>
+        {main.sha && <Commit repo={repo.repo} sha={main.sha} gitlabUrl={gitlabUrl} />}
+        <BranchState b={main} />
+      </span>
+      <span className="text-muted-foreground">
+        {main.files.toLocaleString()} files
+        {others.length > 0 && ` · +${others.length} ${others.length === 1 ? 'branch' : 'branches'}`}
+        {failing > 0 && <span className="text-destructive-ink">{` (${failing} failing)`}</span>}
+      </span>
+    </div>
+  )
+}
+
+/** A repository whole: what it is for, its languages, branches, schedule, state and each indexed branch, with what can be done to it. */
+function RepoDetails({
+  repo: r,
+  gitlabUrl,
+  passNext,
+  updating,
+  onUpdate,
+  onLog,
+  onBranches,
+  onSchedule,
+  onPurpose,
+}: {
+  repo: RepoRow
+  gitlabUrl: string | null
+  passNext: number | null
+  updating: boolean
+  onUpdate: () => void
+  onLog: () => void
+  onBranches: () => void
+  onSchedule: () => void
+  onPurpose: () => void
+}) {
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle className="[overflow-wrap:anywhere]">{r.repo}</DialogTitle>
+        <DialogDescription className="[overflow-wrap:anywhere]">
+          {r.purpose ? (
+            <span title={r.purpose_source === 'owner' ? 'As an admin put it' : `From its ${r.purpose_source}`}>{r.purpose}</span>
+          ) : (
+            'Nothing says yet what it is for.'
+          )}
+        </DialogDescription>
+      </DialogHeader>
+      <dl className="grid gap-3 text-sm sm:grid-cols-[9rem_minmax(0,1fr)]">
+        <dt className="text-muted-foreground">Status</dt>
+        <dd>
+          <StatusCell r={r} />
+        </dd>
+        {r.languages.length > 0 && (
+          <>
+            <dt className="text-muted-foreground">Languages</dt>
+            <dd>{r.languages.map((l) => `${l.name} (${l.files.toLocaleString()} files)`).join(', ')}</dd>
+          </>
+        )}
+        <dt className="text-muted-foreground">Branches</dt>
+        <dd className="flex flex-wrap items-center gap-1">
+          <Badge variant="secondary" className="font-mono">
+            {r.default_branch}
+          </Badge>
+          {r.branches.map((b) => (
+            <Badge key={b} variant="outline" className="font-mono">
+              {b}
+            </Badge>
+          ))}
+        </dd>
+        <dt className="text-muted-foreground">Schedule</dt>
+        <dd>
+          <ScheduleCell r={r} passNext={passNext} />
+        </dd>
+        <dt className="text-muted-foreground">Index</dt>
+        <dd>
+          <IndexState repo={r} gitlabUrl={gitlabUrl} />
+        </dd>
+      </dl>
+      <DialogFooter className="flex-wrap">
+        <Button variant="outline" size="sm" onClick={onPurpose}>
+          <FileText /> What it is for…
+        </Button>
+        <Button variant="outline" size="sm" onClick={onBranches}>
+          <GitBranch /> Branches…
+        </Button>
+        <Button variant="outline" size="sm" onClick={onSchedule}>
+          <CalendarClock /> Schedule…
+        </Button>
+        <Button variant="outline" size="sm" onClick={onLog}>
+          <ScrollText /> Log
+        </Button>
+        <Button size="sm" disabled={!r.included || !r.listed || updating} onClick={onUpdate}>
+          <RotateCw /> Update
+        </Button>
+      </DialogFooter>
+    </>
+  )
+}
+
 /** Each indexed branch of a repository: its commit (hash and message), when, how its last run went. */
 function IndexState({ repo, gitlabUrl }: { repo: RepoRow; gitlabUrl: string | null }) {
   return (
@@ -744,14 +868,7 @@ function IndexState({ repo, gitlabUrl }: { repo: RepoRow; gitlabUrl: string | nu
         <div key={b.branch} className="grid min-w-0 gap-0.5">
           <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
             <span className="font-mono text-foreground">{b.branch}</span>
-            {b.sha &&
-              (gitlabUrl ? (
-                <a href={`${gitlabUrl.replace(/\/$/, '')}/${repo.repo}/-/commit/${b.sha}`} target="_blank" rel="noreferrer" className="font-mono text-primary-ink underline underline-offset-2">
-                  {short(b.sha)}
-                </a>
-              ) : (
-                <span className="font-mono">{short(b.sha)}</span>
-              ))}
+            {b.sha && <Commit repo={repo.repo} sha={b.sha} gitlabUrl={gitlabUrl} />}
             <BranchState b={b} />
           </span>
           {b.message && (

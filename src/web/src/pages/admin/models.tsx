@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowRightLeft, AudioLines, Boxes, CircleDot, Clapperboard, Clock, Eye, Search, HelpCircle, Image as ImageIcon, Loader2, Mic, Moon, Pencil, Pin, Plus, Power, PowerOff, Sparkles, Trash2, XCircle } from 'lucide-react'
-import { useState } from 'react'
+import { ArrowRightLeft, AudioLines, Boxes, CircleDot, Clapperboard, Clock, Eye, Info, Search, HelpCircle, Image as ImageIcon, Loader2, Mic, Moon, Pencil, Pin, Plus, Power, PowerOff, Sparkles, Trash2, TriangleAlert, XCircle } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useConfirm } from '@/components/ui/confirm'
-import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
@@ -438,6 +438,7 @@ function ModelCard({
   onChanged: () => void
 }) {
   const confirm = useConfirm()
+  const [detailsOpen, setDetails] = useState(false)
   const keep = useMutation({
     mutationFn: (on: boolean) => api<{ warning: string | null }>(`/api/admin/models/${encodeURIComponent(m.name)}/keep`, { method: 'PUT', body: { keep: on } }),
     onSuccess: (r, on) => {
@@ -509,6 +510,77 @@ function ModelCard({
   const Icon = kind?.icon ?? Boxes
   // Loading one more needs a place beside the kept models, unless this is one of them. A media model has its own server.
   const canLoad = media ? m.status !== 'waiting' : m.keptNow === true || engine.kept.length < engine.max
+  // What needs a look: a line each on the card, the whole of it in Details.
+  const problems: { title: string; variant: 'warning' | 'destructive'; body: ReactNode }[] = []
+  if (m.source === 'local' && m.atGateway === false) problems.push({ title: 'Not at the gateway yet', variant: 'warning', body: 'It is added again within a minute.' })
+  if ((m.source === 'local' || m.source === 'remote') && staleOutput(m)) problems.push({ title: 'Its longest answer needs changing', variant: 'warning', body: staleOutput(m) })
+  if (m.status === 'missing')
+    problems.push({
+      title: 'The engine does not list it',
+      variant: 'warning',
+      body: (
+        <>
+          It restarts to read a new or changed model, which takes seconds. If this stays, the engine refused the model list and serves the .env model alone:{' '}
+          <Link to="/admin/logs?container=llamacpp&level=warn" className="font-medium underline underline-offset-2">
+            its warnings and errors
+          </Link>{' '}
+          say why.
+        </>
+      ),
+    })
+  if ((m.evicted ?? 0) >= 2)
+    problems.push({
+      title: 'The engine keeps unloading it',
+      variant: 'warning',
+      body: `The engine unloaded it ${m.evicted} times lately, by its own choice, to load another: it holds fewer models at once than Models loaded at once (${engine.max}) says (its --models-max, or too little GPU memory for them together). It is loaded again after a wait, not at once, so two models do not push each other out for ever. Lower Models loaded at once under Settings, or keep fewer models loaded.`,
+    })
+  if (m.status === 'failed' && media)
+    problems.push({
+      title: failureTitle(m.failure?.kind),
+      variant: 'destructive',
+      body: (
+        <>
+          {m.failure?.detail && <code className="mb-1 block text-xs [overflow-wrap:anywhere]">{m.failure.detail}</code>}
+          {m.failure && m.failure.tries > 1 ? `${m.failure.tries} times in a row. ` : ''}
+          {m.failure?.kind === 'bad-options'
+            ? 'It is not tried again until it is changed or loaded by hand. '
+            : `It is tried again by itself after a minute, then after 2, 4, 8, 16 and at most 30 minutes${
+                m.retryAt ? `: next from ${new Date(m.retryAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''
+              }. Loading it tries at once. `}
+          Its server's log says more:{' '}
+          <Link to={`/admin/logs?container=${m.server}&level=warn`} className="font-medium underline underline-offset-2">
+            its warnings and errors
+          </Link>
+          .
+        </>
+      ),
+    })
+  if (m.status === 'failed' && !media)
+    problems.push({
+      title: 'The engine could not load it',
+      variant: 'destructive',
+      body: (
+        <>
+          Its log says why:{' '}
+          <Link to="/admin/logs?container=llamacpp&level=warn" className="font-medium underline underline-offset-2">
+            the engine's warnings and errors
+          </Link>
+          , or <code className="text-xs">docker compose logs llamacpp</code> on the host. An incomplete download, a file this llama.cpp cannot read, or too little GPU
+          memory are the usual causes. It is tried again by itself after a minute, then after 2, 4, 8, 16 and at most 30 minutes (kept loaded, by the app; else at the
+          next question for it){m.retryAt ? `: next from ${new Date(m.retryAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}. Loading it tries at
+          once.
+        </>
+      ),
+    })
+  const description = media
+    ? `On the ${m.server} server`
+    : [m.source === 'remote' ? `${m.remote} on ${m.server}` : m.file, m.context ? contextLine(m.context, m.window, m.output) : null].filter(Boolean).join(' · ') ||
+      (image ? 'An image model' : 'Served by the gateway')
+  const details = [
+    { label: 'How it runs', text: m.profile ? summary(m.profile) : null },
+    { label: 'Price', text: priceLine(m) },
+    { label: 'Token cache', text: m.cache ? cacheLine(m.cache) : null },
+  ].filter((d): d is { label: string; text: string } => !!d.text)
   return (
     <Card className={cn(m.status === 'loaded' && 'border-success/40')}>
       <CardHeader className="flex flex-row flex-wrap items-start gap-3">
@@ -548,70 +620,28 @@ function ModelCard({
               </Badge>
             )}
           </CardTitle>
-          <CardDescription className="[overflow-wrap:anywhere]">
-            {media
-              ? `On the ${m.server} server`
-              : [m.source === 'remote' ? `${m.remote} on ${m.server}` : m.file, m.context ? contextLine(m.context, m.window, m.output) : null].filter(Boolean).join(' · ') ||
-                (image ? 'An image model' : 'Served by the gateway')}
+          {/* One line: the whole of it, and how it is set up, are under Details. */}
+          <CardDescription className="truncate" title={description}>
+            {description}
           </CardDescription>
-          {m.source === 'local' && <p className="mt-1 text-xs text-muted-foreground">{`Engine: ${engineName(m, engine.instances ?? [])}`}</p>}
-          {m.profile && <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{summary(m.profile)}</p>}
-          {priceLine(m) && <p className="mt-1 text-xs text-muted-foreground tabular-nums">{priceLine(m)}</p>}
-          {m.cache && <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">{cacheLine(m.cache)}</p>}
+          {m.source === 'local' && <p className="mt-1 truncate text-xs text-muted-foreground">{`Engine: ${engineName(m, engine.instances ?? [])}`}</p>}
         </div>
         <Status status={m.status} why={m.why} since={m.since} draining={serverPerModel(m.engineKind)} />
       </CardHeader>
-      <CardContent className="grid gap-4">
-        {m.source === 'local' && m.atGateway === false && <Alert variant="warning">Not at the gateway yet: it is added again within a minute.</Alert>}
-        {(m.source === 'local' || m.source === 'remote') && staleOutput(m) && (
-          <Alert variant="warning" title="Its longest answer needs changing">
-            {staleOutput(m)}
-          </Alert>
-        )}
+      <CardContent className="grid gap-3">
         {m.move && <MoveState name={m.name} move={m.move} onDismiss={() => dismiss.mutate()} />}
-        {m.status === 'missing' && (
-          <Alert variant="warning" title="The engine does not list it">
-            It restarts to read a new or changed model, which takes seconds. If this stays, the engine refused the model list and serves the .env model alone:{' '}
-            <Link to="/admin/logs?container=llamacpp&level=warn" className="font-medium underline underline-offset-2">
-              its warnings and errors
-            </Link>{' '}
-            say why.
-          </Alert>
-        )}
-        {(m.evicted ?? 0) >= 2 && (
-          <Alert variant="warning" title="The engine keeps unloading it">
-            The engine unloaded it {m.evicted} times lately, by its own choice, to load another: it holds fewer models at once than Models loaded at once ({engine.max})
-            says (its --models-max, or too little GPU memory for them together). It is loaded again after a wait, not at once, so two models do not push each
-            other out for ever. Lower Models loaded at once under Settings, or keep fewer models loaded.
-          </Alert>
-        )}
-        {m.status === 'failed' && media && (
-          <Alert variant="destructive" title={failureTitle(m.failure?.kind)}>
-            {m.failure?.detail && <code className="mb-1 block text-xs [overflow-wrap:anywhere]">{m.failure.detail}</code>}
-            {m.failure && m.failure.tries > 1 ? `${m.failure.tries} times in a row. ` : ''}
-            {m.failure?.kind === 'bad-options'
-              ? 'It is not tried again until it is changed or loaded by hand. '
-              : `It is tried again by itself after a minute, then after 2, 4, 8, 16 and at most 30 minutes${
-                  m.retryAt ? `: next from ${new Date(m.retryAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''
-                }. Loading it tries at once. `}
-            Its server's log says more:{' '}
-            <Link to={`/admin/logs?container=${m.server}&level=warn`} className="font-medium underline underline-offset-2">
-              its warnings and errors
-            </Link>
-            .
-          </Alert>
-        )}
-        {m.status === 'failed' && !media && (
-          <Alert variant="destructive" title="The engine could not load it">
-            Its log says why:{' '}
-            <Link to="/admin/logs?container=llamacpp&level=warn" className="font-medium underline underline-offset-2">
-              the engine's warnings and errors
-            </Link>
-            , or <code className="text-xs">docker compose logs llamacpp</code> on the host. An incomplete download, a file this llama.cpp cannot read, or too
-            little GPU memory are the usual causes.
-            It is tried again by itself after a minute, then after 2, 4, 8, 16 and at most 30 minutes (kept loaded, by the app; else at the next question for
-            it){m.retryAt ? `: next from ${new Date(m.retryAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}. Loading it tries at once.
-          </Alert>
+        {problems.length > 0 && (
+          <ul aria-label={`What needs a look at ${m.name}`} className="grid gap-1">
+            {problems.map((p) => (
+              <li key={p.title} className={cn('flex min-w-0 items-center gap-1.5 text-sm', p.variant === 'destructive' ? 'text-destructive-ink' : 'text-warning-ink')}>
+                <TriangleAlert className="size-4 shrink-0" aria-hidden="true" />
+                <span className="min-w-0 truncate">{p.title}</span>
+                <Button variant="link" size="sm" className="h-auto shrink-0 p-0" onClick={() => setDetails(true)}>
+                  Why
+                </Button>
+              </li>
+            ))}
+          </ul>
         )}
         {onEngine && (
           <Label className="flex items-start gap-3 font-normal">
@@ -630,8 +660,10 @@ function ModelCard({
             </span>
           </Label>
         )}
-        <AccessPicker value={m.access} onChange={(audience, groups) => access.mutate({ audience, groups })} />
-        {m.toolMode && <ToolModePicker model={m.name} tools={m.toolMode} onChanged={onChanged} />}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <AccessPicker value={m.access} onChange={(audience, groups) => access.mutate({ audience, groups })} />
+          {m.toolMode && <ToolModePicker model={m.name} tools={m.toolMode} onChanged={onChanged} />}
+        </div>
         <div className="flex flex-wrap gap-2">
           {onEngine && m.status !== 'loaded' && (
             <Button
@@ -724,9 +756,49 @@ function ModelCard({
               </Button>
             </>
           )}
+          <Button size="sm" variant="ghost" onClick={() => setDetails(true)} aria-label={`Details of ${m.name}`}>
+            <Info /> Details
+          </Button>
         </div>
       </CardContent>
+      <Dialog open={detailsOpen} onOpenChange={setDetails}>
+        <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="[overflow-wrap:anywhere]">{m.name}</DialogTitle>
+            <DialogDescription className="[overflow-wrap:anywhere]">{description}</DialogDescription>
+          </DialogHeader>
+          <dl className="grid gap-2 text-sm sm:grid-cols-[10rem_minmax(0,1fr)]">
+            {m.source === 'local' && (
+              <>
+                <dt className="text-muted-foreground">Engine</dt>
+                <dd>{engineName(m, engine.instances ?? [])}</dd>
+              </>
+            )}
+            <dt className="text-muted-foreground">Status</dt>
+            <dd>
+              <Status status={m.status} why={m.why} since={m.since} draining={serverPerModel(m.engineKind)} />
+            </dd>
+            {details.map((d) => (
+              <ModelDetail key={d.label} label={d.label} text={d.text} />
+            ))}
+          </dl>
+          {problems.map((p) => (
+            <Alert key={p.title} variant={p.variant} title={p.title}>
+              {p.body}
+            </Alert>
+          ))}
+        </DialogContent>
+      </Dialog>
     </Card>
+  )
+}
+
+function ModelDetail({ label, text }: { label: string; text: string }) {
+  return (
+    <>
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="[overflow-wrap:anywhere]">{text}</dd>
+    </>
   )
 }
 

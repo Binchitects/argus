@@ -117,12 +117,18 @@ describe('admin models', () => {
     fakeApi(admin, { 'GET /api/admin/models': () => ({ json: view() }) })
     renderApp('/admin/models')
     const big = (await screen.findByRole('heading', { name: /Big-Model/ })).closest('section')!
+    // The card stays short: how it is set up is under Details.
+    expect(within(big).queryByText(/Token cache/)).not.toBeInTheDocument()
+    await userEvent.click(within(big).getByRole('button', { name: 'Details of Big-Model' }))
+    const details = await screen.findByRole('dialog', { name: 'Big-Model' })
     expect(
-      within(big).getByText('Token cache: 4 slots, each keeping a conversation; small steps (titles, checks, summaries) go to the last first · 4 checkpoints a slot of 112.2 MiB: up to 1.8 GiB of RAM'),
+      within(details).getByText('Token cache: 4 slots, each keeping a conversation; small steps (titles, checks, summaries) go to the last first · 4 checkpoints a slot of 112.2 MiB: up to 1.8 GiB of RAM'),
     ).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
     // A model without a cache line (a gateway one) shows none.
     const image = screen.getByRole('heading', { name: /flux-image/ }).closest('section')!
-    expect(within(image).queryByText(/Token cache/)).not.toBeInTheDocument()
+    await userEvent.click(within(image).getByRole('button', { name: 'Details of flux-image' }))
+    expect(within(await screen.findByRole('dialog', { name: 'flux-image' })).queryByText(/Token cache/)).not.toBeInTheDocument()
   })
 
   it('the token cache line covers one slot, copies elsewhere and idle slots emptied', () => {
@@ -387,13 +393,15 @@ describe('admin models', () => {
     renderApp('/admin/models')
     const small = (await screen.findByRole('heading', { name: /Small-Model/ })).closest('section')!
     expect(within(small).getByText('Could not load')).toBeInTheDocument()
-    const alert = within(small).getByRole('alert')
+    expect(within(small).getByText('The engine could not load it')).toBeInTheDocument()
+    expect(within(small).getByRole('button', { name: /Load/ })).toBeEnabled()
+    await userEvent.click(within(small).getByRole('button', { name: 'Why' }))
+    const alert = within(await screen.findByRole('dialog', { name: 'Small-Model' })).getByRole('alert')
     expect(alert).toHaveTextContent(/docker compose logs llamacpp/)
     // Not for good: tried again by itself, less and less often, and the card says from when.
     expect(alert).toHaveTextContent(/tried again by itself after a minute, then after 2, 4, 8, 16 and at most 30 minutes/)
     expect(alert).toHaveTextContent(`next from ${new Date(retryAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`)
     expect(alert).not.toHaveTextContent(/not tried again/)
-    expect(within(small).getByRole('button', { name: /Load/ })).toBeEnabled()
   })
 
   it('a model the engine does not list says so, and cannot be loaded', async () => {
@@ -402,8 +410,10 @@ describe('admin models', () => {
     renderApp('/admin/models')
     const small = (await screen.findByRole('heading', { name: /Small-Model/ })).closest('section')!
     expect(within(small).getByText('Not in the engine')).toBeInTheDocument()
-    expect(within(small).getByText(/serves the \.env model alone/)).toBeInTheDocument()
     expect(within(small).queryByRole('button', { name: /Load/ })).not.toBeInTheDocument()
+    expect(within(small).getByText('The engine does not list it')).toBeInTheDocument()
+    await userEvent.click(within(small).getByRole('button', { name: 'Why' }))
+    expect(within(await screen.findByRole('dialog', { name: 'Small-Model' })).getByText(/serves the \.env model alone/)).toBeInTheDocument()
   })
 
   it('without the llama.cpp engine, only who may use each model is set', async () => {
@@ -456,7 +466,10 @@ describe('admin models', () => {
     const card = (await screen.findByRole('heading', { name: /Small-Model/ })).closest('section')!
     expect(within(card).getByText('small/Small-Q8.gguf · 65,536 tokens of context, 32,768 a conversation, answers up to 16,384')).toBeInTheDocument()
     expect(within(card).getByText('Its longest answer needs changing')).toBeInTheDocument()
-    expect(within(card).getByText(/Saved as 32,768 tokens, more than a conversation of 32,768 holds beside its prompt: its answers go up to 16,384, half of it, until Edit sets one that fits\./)).toBeInTheDocument()
+    await userEvent.click(within(card).getByRole('button', { name: 'Why' }))
+    expect(
+      within(await screen.findByRole('dialog', { name: 'Small-Model' })).getByText(/Saved as 32,768 tokens, more than a conversation of 32,768 holds beside its prompt: its answers go up to 16,384, half of it, until Edit sets one that fits\./),
+    ).toBeInTheDocument()
   })
 
   it('the GPU lent to a video says so, with the room made and given back', async () => {

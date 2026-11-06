@@ -885,7 +885,8 @@ export const topics = {
     admin: true,
     parts: [
       { name: 'The engine', text: 'How many models it holds, which are kept loaded, and how full each GPU would be. **Reload** and **Restart** for each engine the app runs, as under Monitoring.' },
-      { name: 'Each model', text: 'Its state (loaded, loading, not loaded, could not load), its engine, **Keep loaded**, **Load**, **Unload**, **Edit**, **Change engine…**, and who may use it.' },
+      { name: 'Each model', text: 'Its state (loaded, loading, not loaded, could not load), its engine, **Keep loaded**, **Load**, **Unload**, **Edit**, **Change engine…**, and who may use it. What needs a look is a line on the card; **Why** says the whole of it.' },
+      { name: 'Details', text: 'On each card: its file and context, how it runs (its own settings), its price and token cache, and each problem in full. The card stays short however it is set up.' },
       { name: 'Working hours', text: 'Other models kept loaded at some hours: a small fast one by day, the big one at night.' },
       { name: 'Other servers and providers', text: 'Another machine\'s OpenAI-compatible engine, or a provider\'s API (OpenAI, Anthropic, Gemini, OpenRouter...) with the company\'s key: their models the gateway serves beside these, to the chat, API keys and Code Arena.' },
       { name: 'Find on Hugging Face', text: 'Search GGUF models for llama.cpp (**Chat**) or snapshots for vLLM and SGLang (**Snapshots**), see whether they fit this machine, and download them into the library. **Downloads** shows the progress.' },
@@ -1103,9 +1104,9 @@ export const topics = {
     about: 'Argus\'s index of your GitLab: what it holds, how current it is, and runs on demand.',
     admin: true,
     parts: [
-      { name: 'The numbers', text: 'Repositories, failing ones, files and symbols.' },
+      { name: 'The numbers', text: 'Repositories (each once, however many of its branches are indexed, with the branches beside it), failing ones, files and symbols.' },
       { name: 'Index now', text: 'Starts a run: its progress, overall and per repository, and its log. Extra branches can be indexed for this run only.' },
-      { name: 'Repositories', text: 'What GitLab lists, and which are indexed: each at its default branch and the branches you add. **Update** brings one up to date now; **Refresh from GitLab** lists new ones.' },
+      { name: 'Repositories', text: 'What GitLab lists, and which are indexed: each at its default branch and the branches you add, one short row each (its default branch at its commit, and how many more). Its name or **Details** opens the rest: what it is for, its languages, branches, schedule and each indexed branch. **Update** brings one up to date now; **Refresh from GitLab** lists new ones.' },
       { name: 'Schedule', text: 'When Argus reindexes by itself, in words or cron, in a time zone.' },
       { name: 'Push and merge webhook', text: 'GitLab tells Argus when a branch changes, so it updates at once. The secret is shown once; the steps for GitLab are on the card.' },
     ],
