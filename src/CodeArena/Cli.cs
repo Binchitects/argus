@@ -962,7 +962,7 @@ internal static partial class Cli
         try
         {
             // /name and words uses a skill (or a command of the person's) here too, as in the terminal and the IDE.
-            answer = await rt.Agent.RunAsync(rt.Prepare(prompt), turn, linked.Token);
+            answer = await rt.Agent.RunAsync(await rt.PrepareAsync(prompt, linked.Token), turn, linked.Token);
             // Nobody types a next message here.
             answer = await rt.FinishJobsAsync(turn, linked.Token) ?? answer;
         }

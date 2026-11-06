@@ -927,7 +927,17 @@ internal sealed partial class Runtime : IAsyncDisposable
     /// What is sent for what was typed: a command of the person's or the project's own (/name args) is its prompt; a skill's
     /// name, what was typed with the skill's instructions after it.
     /// </summary>
-    public string Prepare(string input) => Extensions.Expand(input) ?? input;
+    public async Task<string> PrepareAsync(string input, CancellationToken ct) => await ExpandAsync(input, ct) ?? input;
+
+    /// <summary>
+    /// The message a typed /name args stands for (<see cref="Extensions.Expand"/>). A name that is no command or skill asks
+    /// Arena for its skills at once first: one made on its Skills page a moment ago is used, not refused or sent as words.
+    /// </summary>
+    public async Task<string?> ExpandAsync(string input, CancellationToken ct)
+    {
+        var prompt = Extensions.Expand(input);
+        return prompt is not null || !input.StartsWith('/') ? prompt : (await ReloadExtensionsAsync(true, ct)).Expand(input);
+    }
 
     /// <summary>How long a turn waits at most for Arena's skills: kept as they were when Arena is slower.</summary>
     private static readonly TimeSpan SkillsWait = TimeSpan.FromSeconds(2);

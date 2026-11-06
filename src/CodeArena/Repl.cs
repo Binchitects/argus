@@ -994,7 +994,7 @@ internal sealed class Repl(Runtime rt)
                 }
                 break;
             default:
-                if (rt.Extensions.Expand(input) is { } prompt)
+                if (await rt.ExpandAsync(input, ct) is { } prompt)
                 {
                     await TurnAsync(prompt, ct);
                     break;

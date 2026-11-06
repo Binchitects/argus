@@ -181,6 +181,22 @@ public sealed class IdeSkillTests : IDisposable
     }
 
     [Fact]
+    public async Task A_skill_made_on_the_web_just_after_a_turn_is_used_at_once()
+    {
+        // Asked again at most this often unasked: here, not within the test.
+        using var h = new Harness(_gateway, _mcp) { ArenaSkillsEvery = TimeSpan.FromHours(1) };
+        _mcp.Chats.ArenaSkills = [];
+        await using var web = await WebRun.StartAsync(h);
+        _gateway.Answer = _ => Reply.Say("ok");
+        await (await web.SendAsync("first")).RestAsync();
+
+        _mcp.Chats.ArenaSkills = [new JsonObject { ["name"] = "websk3", ["files"] = new JsonObject { ["SKILL.md"] = "---\nname: websk3\ndescription: Made on the web\n---\nSay WEBSK3-USED." } }];
+        await (await web.SendAsync("/websk3 now")).RestAsync();
+        var asked = _gateway.Requests[^1]["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.ToString();
+        Assert.StartsWith("/websk3 now\n\n<attached>\n<skill name=\"websk3\">", asked, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task In_a_subfolder_of_the_repository_the_projects_skills_open_and_a_new_one_opens_too()
     {
         using var h = new Harness(_gateway, _mcp);
