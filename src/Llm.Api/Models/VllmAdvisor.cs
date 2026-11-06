@@ -70,9 +70,6 @@ public static class VllmAdvisor
         [EngineKinds.Sglang] = ["llama", "qwen2", "qwen3"],
     };
 
-    /// <summary>The context a conversation is counted at when answers at once are recommended.</summary>
-    private const int TypicalContext = 32768;
-
     private static string G(long b) => (b / (double)(1L << 30)).ToString("0.0", CultureInfo.InvariantCulture) + " GiB";
 
     private static int Int(JsonNode? n, int fallback = 0) => n is JsonValue v && v.TryGetValue<long>(out var l) ? (int)l : n is JsonValue d && d.TryGetValue<double>(out var x) ? (int)x : fallback;
@@ -270,7 +267,7 @@ public static class VllmAdvisor
     /// null when none does.
     /// </summary>
     public static (double Min, double Max)? Shares(VllmProfile p, IReadOnlyList<IReadOnlyList<GpuDevice>> copies, int context, string kvType,
-        IReadOnlyDictionary<int, long>? others = null)
+        IReadOnlyDictionary<int, long>? others = null, int people = 1)
     {
         if (copies.Count == 0 || copies.Any(c => c.Count == 0))
         {
@@ -280,7 +277,7 @@ public static class VllmAdvisor
             .Min(d => (d.Total - d.Reserved - Hardware.FitMargin - (others?.GetValueOrDefault(d.Index) ?? 0)) * 100 / Math.Max(1, d.Total)));
         for (var h = (int)Math.Round(MinUtilization * 100); h <= most; h++)
         {
-            if (copies.All(c => Fits(p, c, h / 100.0, context, kvType, others)))
+            if (copies.All(c => Fits(p, c, h / 100.0, context, kvType, others, people)))
             {
                 return (h / 100.0, most / 100.0);
             }
@@ -322,12 +319,18 @@ public static class VllmAdvisor
         return null;
     }
 
-    private static bool Fits(VllmProfile p, IReadOnlyList<GpuDevice> group, double utilization, int context, string kvType, IReadOnlyDictionary<int, long>? others)
+    private static bool Fits(VllmProfile p, IReadOnlyList<GpuDevice> group, double utilization, int context, string kvType, IReadOnlyDictionary<int, long>? others,
+        int people = 1)
     {
         var room = CacheRoom(p, group, utilization, others);
-        var cache = PerToken(p, kvType);
-        return room >= MinCache(group.Sum(d => (long)(d.Total * utilization))) && room >= ((long)Math.Min(context, p.TrainedContext) * cache) + p.StatePerSequence;
+        return room >= MinCache(group.Sum(d => (long)(d.Total * utilization))) && room >= PersonCache(p, context, kvType) * people;
     }
+
+    /// <summary>The token cache one person's whole context takes, and the state their answer keeps.</summary>
+    public static long PersonCache(VllmProfile p, int context, string kvType) => ((long)Math.Min(context, p.TrainedContext) * PerToken(p, kvType)) + p.StatePerSequence;
+
+    /// <summary>How many people at once a copy's cache of <paramref name="room"/> bytes holds, each with the whole context.</summary>
+    public static int PeopleThatFit(VllmProfile p, long room, int context, string kvType) => (int)Math.Clamp(room / Math.Max(1, PersonCache(p, context, kvType)), 0, 1024);
 
     private static long PerToken(VllmProfile p, string kvType) => Math.Max(1, p.KvPerToken * CacheBytes(kvType));
 
@@ -492,9 +495,17 @@ public static class VllmAdvisor
             {
                 problems.Add(new("context", string.Create(inv, $"One answer at {context:N0} tokens needs {G(need)} of cache, and a copy has {G(room)}: at most {Math.Max(0, (room - state) / perToken):N0} tokens fit.") + SharesFit(shares), true));
             }
-            else if (((long)Math.Min(context, TypicalContext) * perToken + state) * m.Parallel > room)
+            else if (need * m.Parallel > room)
             {
-                problems.Add(new("parallel", string.Create(inv, $"{m.Parallel} answers at once of {Math.Min(context, TypicalContext):N0} tokens need more than the {G(room)} of cache: {label} queues or preempts the rest."), false));
+                // Each person at once may hold the whole context: the cache is sized for all of them, or the rest wait.
+                var held = PeopleThatFit(p, room, context, m.KvType);
+                var also = m.KvType.StartsWith("fp8", StringComparison.Ordinal) ? "" : string.Create(inv, $", {PeopleThatFit(p, room, context, "fp8")} at fp8");
+                var fitting = gpus.Count % replicas == 0
+                    ? Shares(p, [.. copies.Select(c => (IReadOnlyList<GpuDevice>)c)], context, m.KvType, others, m.Parallel)
+                    : null;
+                problems.Add(new("parallel", string.Create(inv,
+                    $"{m.Parallel} people at once at {context:N0} tokens each need {G(need * m.Parallel)} of token cache, and a copy has {G(room)}. It holds {held} at the full window at {m.KvType}{also}: {label} queues or preempts the rest. ")
+                    + (fitting is var (least, _) ? string.Create(inv, $"A share of {least:0.00} of each GPU holds all {m.Parallel}.") : string.Create(inv, $"Choose at most {held} people at once a copy, a shorter context per person, more GPUs or copies.")), false));
             }
         }
         if (others is { Count: > 0 } && group.Any(d => (long)(d.Total * utilization) > d.Total - d.Reserved - Hardware.FitMargin - others.GetValueOrDefault(d.Index)))
@@ -511,8 +522,8 @@ public static class VllmAdvisor
     }
 
     /// <summary>
-    /// Settings to start from on this machine: the proposed GPUs, the longest context the config allows that fits, and answers
-    /// at once from the cache at a typical conversation (32K tokens), at least one and at most 256, at its share (at the smallest
+    /// Settings to start from on this machine: the proposed GPUs, the longest context per person the config allows that fits,
+    /// and the people at once the cache holds with all of it each, at least one and at most 256, at its share (at the smallest
     /// that fits when its own does not); and the shares that fit its GPUs.
     /// </summary>
     private static ModelRecommendation? Recommend(VllmProfile p, Hardware hw, int replicas, double utilization, IReadOnlyDictionary<int, long>? others,
@@ -525,12 +536,14 @@ public static class VllmAdvisor
         var devices = GpuPlan.DevicesOf(hw);
         var at = shares is var (min, max) && (utilization < min || utilization > max) ? min : utilization;
         var room = Groups(proposed, replicas).Min(g => CacheRoom(p, [.. devices.Where(d => g.Contains(d.Index))], at, others));
-        var perToken = PerToken(p, kvType);
+        var kv = kvType.StartsWith("fp8", StringComparison.Ordinal) ? kvType : "fp8";
+        var perToken = PerToken(p, kv);
         var state = p.StatePerSequence;
         var context = (int)Math.Min(p.TrainedContext, Math.Max(0, (room - state) / perToken));
-        var parallel = (int)Math.Clamp(room / Math.Max(1, ((long)Math.Min(context, TypicalContext) * perToken) + state), 1, 256);
+        // As many people at once as the cache holds with the whole context each.
+        var parallel = Math.Clamp(PeopleThatFit(p, room, context, kv), 1, 256);
         var maxOutput = ModelCatalog.DefaultMaxOutput(context);
-        return new ModelRecommendation(context, maxOutput, parallel, kvType.StartsWith("fp8", StringComparison.Ordinal) ? kvType : "fp8", null, p.MtpLayers > 0, null, 3, null, true, true)
+        return new ModelRecommendation(context, maxOutput, parallel, kv, null, p.MtpLayers > 0, null, 3, null, true, true)
         {
             Devices = string.Join(',', proposed), ShareMin = shares?.Min, ShareMax = shares?.Max,
         };

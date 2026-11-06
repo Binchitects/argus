@@ -164,6 +164,8 @@ public static class ModelAdvisor
     public static readonly int[] UbatchSizes = [256, 512, 1024, 2048, 4096];
     private static readonly int[] ContextSteps = [8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576];
     private static readonly string[] CacheOrder = ["q8_0", "f16", "bf16", "q5_1", "q5_0", "q4_1", "q4_0", "iq4_nl"];
+    /// <summary>The smaller caches a warning about people at once also counts them at.</summary>
+    private static readonly string[] SmallerCaches = ["q8_0", "q4_0"];
     /// <summary>CUDA's context and libraries, measured beside llama.cpp's own estimate.</summary>
     private const long GpuOverhead = 256L << 20;
     private const long ProjectorCompute = 256L << 20;
@@ -208,8 +210,9 @@ public static class ModelAdvisor
                 && f.Profile.EmbeddingLength == p.EmbeddingLength && (f.Profile.VocabSize is null || f.Profile.VocabSize == p.VocabSize))
             .OrderBy(f => Path.GetDirectoryName(f.File.Path) == dir ? 0 : 1).ThenBy(f => f.File.Path, StringComparer.Ordinal).Select(f => f.File.Path).ToList();
         var moe = p.Structure == "moe";
-        // The answers at once share the context, each held to its share: an answer and its prompt fit in that share.
-        var window = ctx / Math.Clamp(m.Parallel, 1, MaxParallel);
+        // Each person at once has the whole context: an answer and its prompt fit in it.
+        var window = ctx;
+        var people = Math.Clamp(m.Parallel, 1, MaxParallel);
         var limits = new ModelLimits(
             new Bounds(ctxMin, ctxMax), OutputBounds(window), new Bounds(1, MaxParallel),
             new Bounds(0, layers + 1), moe ? new Bounds(0, layers) : null, new Bounds(1, 8), cacheTypes, UbatchSizes,
@@ -220,12 +223,17 @@ public static class ModelAdvisor
         var draft = m.Mtp && m.DraftHead is { } head ? library.FirstOrDefault(f => f.File.Path == head) : null;
         var projector = m.Projector is { } pp ? library.FirstOrDefault(f => f.File.Path == pp) : null;
         var cacheBytes = ModelProfiler.CacheTypeBytes.GetValueOrDefault(m.KvType, ModelProfiler.CacheTypeBytes["q8_0"]);
-        var x = new Inputs(ctx, Math.Clamp(m.Parallel, 1, MaxParallel), cacheBytes, m.Ubatch ?? 512, m.Mtp && (p.MtpLayers > 0 || draft is not null),
+        // The engine's cache holds every person's whole context (ctx-size: the context times the people at once).
+        var x = new Inputs(ctx * people, people, cacheBytes, m.Ubatch ?? 512, m.Mtp && (p.MtpLayers > 0 || draft is not null),
             draft?.File.Size ?? 0, projector?.File.Size ?? 0);
         var estimate = m.Placement == "manual"
             ? Manual(p, x, Math.Clamp(m.GpuLayers, 0, layers + 1), moe ? Math.Clamp(m.CpuMoe, 0, layers) : 0, hw)
             : Auto(p, x, hw);
         MemoryProblems(estimate, m.Placement == "manual", problems);
+        if (estimate.Fit is "layers" or "cpu" or "none" && m.Placement != "manual" && people > 1 && m.Context >= ctxMin && m.Context <= ctxMax)
+        {
+            problems.Add(new("parallel", PeopleMessage(p, x, estimate, m.KvType, cacheTypes, hw), estimate.Fit == "none"));
+        }
         // All on the GPU, the cores do the work: a cap far below the card's own starves them (measured on a 3090 at
         // 150 W: 240 MHz of 2130, a 27B at 7 tokens/s). With experts in RAM the cap costs nothing (docs/deployment.md).
         if (estimate.Fit == "gpu" && hw is { PowerLimit: { } cap, PowerDefault: { } own } && cap < own * 0.6)
@@ -344,13 +352,12 @@ public static class ModelAdvisor
         }
         if (m.MaxOutput is { } o && (o < limits.MaxOutput.Min || o > limits.MaxOutput.Max))
         {
-            problems.Add(new("maxOutput", m.Parallel > 1
-                ? string.Create(inv, $"The longest answer is {limits.MaxOutput.Min:N0} to {limits.MaxOutput.Max:N0} tokens: what a conversation holds ({window:N0}, the context shared by {m.Parallel} answers at once) less room for its prompt.")
-                : string.Create(inv, $"The longest answer is {limits.MaxOutput.Min:N0} to {limits.MaxOutput.Max:N0} tokens: the context less room for the prompt."), true));
+            problems.Add(new("maxOutput", string.Create(inv,
+                $"The longest answer is {limits.MaxOutput.Min:N0} to {limits.MaxOutput.Max:N0} tokens: what a person's conversation holds ({window:N0}) less room for its prompt."), true));
         }
         if (m.Parallel < 1 || m.Parallel > MaxParallel)
         {
-            problems.Add(new("parallel", $"Answers at once are 1 to {MaxParallel}.", true));
+            problems.Add(new("parallel", $"People at once are 1 to {MaxParallel}.", true));
         }
         if (!limits.CacheTypes.Contains(m.KvType))
         {
@@ -468,6 +475,45 @@ public static class ModelAdvisor
         return new KeptPlan(problems, plan.Gpus);
     }
 
+    /// <summary>
+    /// How many people at once hold the whole context per person (<paramref name="x"/>'s, each its window) all on the GPUs
+    /// at this cache type: the most whose cache still leaves every layer there (and, for a mixture of experts, its experts
+    /// as llama.cpp's fit would place them); 0 when not one does.
+    /// </summary>
+    public static int PeopleThatFit(ModelProfile p, int window, double cacheBytes, int ubatch, bool mtp, long draftBytes, long projectorBytes, Hardware hw)
+    {
+        bool Fits(int n)
+        {
+            var fit = Auto(p, new Inputs(window * n, n, cacheBytes, ubatch, mtp, draftBytes, projectorBytes), hw).Fit;
+            return fit == "gpu" || (p.Structure == "moe" && fit == "experts");
+        }
+        var (lo, hi) = (0, MaxParallel);
+        while (lo < hi)
+        {
+            var mid = (lo + hi + 1) / 2;
+            (lo, hi) = Fits(mid) ? (mid, hi) : (lo, mid - 1);
+        }
+        return lo;
+    }
+
+    /// <summary>
+    /// What the GPUs hold of these people at once, said with numbers: the cache they need, how many fit at the full window at
+    /// this cache type and at the next smaller one, and what to change.
+    /// </summary>
+    private static string PeopleMessage(ModelProfile p, Inputs x, MemoryEstimate e, string kvType, List<string> cacheTypes, Hardware? hw)
+    {
+        var inv = CultureInfo.InvariantCulture;
+        var window = x.Context / x.Parallel;
+        var fit = hw is null ? 0 : PeopleThatFit(p, window, x.CacheBytes, x.Ubatch, x.Mtp, x.DraftBytes, x.ProjectorBytes, hw);
+        var smaller = SmallerCaches.FirstOrDefault(t => cacheTypes.Contains(t) && ModelProfiler.CacheTypeBytes[t] < x.CacheBytes);
+        var also = smaller is not null && hw is not null
+            ? string.Create(inv, $", {PeopleThatFit(p, window, ModelProfiler.CacheTypeBytes[smaller], x.Ubatch, x.Mtp, x.DraftBytes, x.ProjectorBytes, hw)} at {smaller}")
+            : "";
+        var after = e.Fit == "none" ? "it would not load" : "the rest of the model runs from RAM and answers slow down";
+        return string.Create(inv, $"{x.Parallel} people at once at {window:N0} tokens each need {G(e.GpuCache + e.RamCache)} of token cache. The GPUs hold {fit} at the full window at {kvType}{also}: {after}. ")
+            + (fit > 0 ? string.Create(inv, $"Choose at most {fit} people at once, a shorter context per person, or a smaller cache type.") : "Choose a shorter context per person or a smaller cache type.");
+    }
+
     private static void MemoryProblems(MemoryEstimate e, bool manual, List<ModelProblem> problems)
     {
 
@@ -516,9 +562,10 @@ public static class ModelAdvisor
         if (hw is not null)
         {
             context = candidates.Count > 0 ? candidates[^1] : ctxMin;
+            // Each of two people with the whole context, then four when that fits too.
             foreach (var c in candidates)
             {
-                var e = Auto(p, new Inputs(c, 2, bytes, moe ? 1024 : 512, false, 0, projectorBytes), hw);
+                var e = Auto(p, new Inputs(c * 2, 2, bytes, moe ? 1024 : 512, false, 0, projectorBytes), hw);
                 if (e.Fit == "gpu" || (moe && e.Fit == "experts"))
                 {
                     (context, fit) = (c, e.Fit);
@@ -526,17 +573,17 @@ public static class ModelAdvisor
                 }
             }
             // Four at once for a small model all on the GPU; with experts in RAM the CPU is what answers, and two share it best.
-            if (small && fit == "gpu" && Auto(p, new Inputs(context, 4, bytes, 512, false, 0, projectorBytes), hw).Fit == "gpu")
+            if (small && fit == "gpu" && Auto(p, new Inputs(context * 4, 4, bytes, 512, false, 0, projectorBytes), hw).Fit == "gpu")
             {
                 parallel = 4;
             }
             ubatch = moe && fit == "experts" ? 1024 : null;
         }
-        // Half of what one of the answers at once holds.
-        var maxOutput = ModelCatalog.DefaultMaxOutput(context / parallel);
+        // Half of what one person's conversation holds.
+        var maxOutput = ModelCatalog.DefaultMaxOutput(context);
         // Drafting is a win for a dense model on the GPU (measured +50% on a 27B), not with experts in RAM; and only if its draft context fits too.
         var mtp = p.MtpLayers > 0 && p.Structure == "dense" && fit == "gpu"
-            && Auto(p, new Inputs(context, parallel, bytes, 512, true, 0, projectorBytes), hw).Fit == "gpu";
+            && Auto(p, new Inputs(context * parallel, parallel, bytes, 512, true, 0, projectorBytes), hw).Fit == "gpu";
         return new ModelRecommendation(context, maxOutput, parallel, kv, ubatch, mtp, null, 3, projector, p.Thinking ?? true, p.Tools ?? true);
     }
 

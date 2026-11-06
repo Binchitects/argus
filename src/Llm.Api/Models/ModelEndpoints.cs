@@ -140,8 +140,8 @@ public static class ModelEndpoints
                 instead = state.LoadedInstead.Contains(m.Name),
                 // The engine unloaded it by its own choice this often lately (it holds fewer models than the app thinks).
                 evicted = state.Evicted(m.Name),
-                // What one conversation may hold (a slot's share of the context on llama.cpp, the whole on vLLM and SGLang) and the
-                // longest answer within it, as the gateway says them.
+                // What one person's conversation may hold (its context per person, on every engine) and the longest answer within
+                // it, as the gateway says them; its people at once (Parallel).
                 file = m.File, m.Projector, context = m.Context, window = ModelCatalog.Window(m), output = ModelCatalog.OutputLimit(m), m.MaxOutput, m.Placement, m.GpuLayers,
                 m.CpuMoe, m.KvType, m.Parallel, m.Ubatch,
                 m.Mtp, m.DraftHead, m.DraftMax, m.Yarn, m.Temperature, m.TopP, m.TopK, m.MinP, m.PresencePenalty,
@@ -1025,14 +1025,15 @@ public static class ModelEndpoints
             }
             if (across)
             {
-                // What both kinds have but each counts its own way (vLLM and SGLang alike): slots or answers at once, the window
-                // its longest answer sits in, the cache's type, every GPU or those proposed.
+                // What both kinds have but each sets its own way (vLLM and SGLang alike): the people at once its cache holds, its
+                // longest answer, the cache's type, every GPU or those proposed.
                 (m.Parallel, m.MaxOutput, m.KvType, m.Devices) = (back.Parallel, back.MaxOutput, back.KvType, back.Devices);
             }
         }
         else if (across)
         {
-            // llama.cpp's slots share its context; vLLM's answers at once each hold all of it: neither is the other's.
+            // Its context per person goes with it. llama.cpp keeps the whole cache of its people at once from the start, vLLM and
+            // SGLang fill their share as they go: a move starts from one person on llama.cpp, from their 16 on vLLM and SGLang.
             m.Parallel = to == EngineKinds.LlamaCpp ? 1 : VllmAdvisor.DefaultParallel;
         }
         m.Engine = null;

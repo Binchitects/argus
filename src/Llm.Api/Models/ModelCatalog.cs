@@ -576,9 +576,9 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         {
             sb.Append("mmproj = ").Append(root).Append('/').Append(p).Append('\n');
         }
-        // One cache for the answers in parallel, each slot held to its share of it: a long conversation in one slot never
-        // pushes the others' out of the cache, nor is pushed out by them (the window the gateway says is that share).
-        sb.Append(inv, $"ctx-size = {m.Context}\nparallel = {m.Parallel}\nkv-unified = true\n");
+        // One cache for the people at once, each slot held to one person's context: a long conversation in one slot never
+        // pushes the others' out of the cache, nor is pushed out by them. The cache is that context times the people.
+        sb.Append(inv, $"ctx-size = {CacheCells(m)}\nparallel = {m.Parallel}\nkv-unified = true\n");
         if (m.Parallel > 1)
         {
             sb.Append(inv, $"kv-unified-per-slot = {Window(m)}\n");
@@ -710,12 +710,14 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     }
 
     /// <summary>
-    /// What one request to a model may hold, its prompt and its answer together, as the gateway says (max_input_tokens): on
-    /// llama.cpp its context shared by its slots (Answers at once), each its share, as the engine holds them
-    /// (kv-unified-per-slot), so fewer slots give a longer window; on vLLM and SGLang the whole context (--max-model-len,
-    /// --context-length), as their answers at once share the cache, not the window.
+    /// What one request to a model may hold, its prompt and its answer together, as the gateway says (max_input_tokens): its
+    /// context per person, on every engine. llama.cpp holds each slot to it (kv-unified-per-slot) in a cache of it times the
+    /// people at once (<see cref="CacheCells"/>); vLLM and SGLang take it as --max-model-len and --context-length.
     /// </summary>
-    public static int Window(LocalModel m) => EngineKinds.ServerPerModel(m.EngineKind) ? m.Context : m.Context / Math.Max(1, m.Parallel);
+    public static int Window(LocalModel m) => m.Context;
+
+    /// <summary>llama.cpp's whole cache (ctx-size): the context per person times the people at once, so each has all of it.</summary>
+    public static long CacheCells(LocalModel m) => (long)m.Context * Math.Max(1, m.Parallel);
 
     /// <summary>The longest answer of a model's requests, as the gateway says (max_output_tokens): its own, else half its window, within what the window leaves.</summary>
     public static int OutputLimit(LocalModel m) => OutputLimit(Window(m), m.MaxOutput);

@@ -25,10 +25,10 @@ public sealed class GatewayRoutesTests(AppFixture app)
         {
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var protect = scope.ServiceProvider.GetRequiredService<RemoteServerClient>();
-            db.LocalModels.Add(new LocalModel { Name = "tiny", File = "tiny.gguf", Context = 32768, Parallel = 4 });
+            db.LocalModels.Add(new LocalModel { Name = "tiny", File = "tiny.gguf", Context = 8192, Parallel = 4 });
             db.LocalModels.Add(new LocalModel { Name = "shared", File = "shared.gguf", Context = 16384, Parallel = 2 });
             // Its longest answer saved for one slot of 16,384; four slots now hold 4,096 each.
-            db.LocalModels.Add(new LocalModel { Name = "crowded", File = "crowded.gguf", Context = 16384, Parallel = 4, MaxOutput = 8192 });
+            db.LocalModels.Add(new LocalModel { Name = "crowded", File = "crowded.gguf", Context = 4096, Parallel = 4, MaxOutput = 8192 });
             db.RemoteServers.Add(new RemoteServer
             {
                 Name = "gpu2", BaseUrl = "https://gpu2.example.test/v1", ApiKeyProtected = protect.Protect("remote-" + "secret"), VerifyTls = false,
@@ -47,7 +47,7 @@ public sealed class GatewayRoutesTests(AppFixture app)
             routes = await scope.ServiceProvider.GetRequiredService<GatewayRoutes>().BuildAsync(CancellationToken.None, others: false);
         }
 
-        // llama.cpp's router, by the model's name, with the engines' key; a slot's share of the context as its window.
+        // llama.cpp's router, by the model's name, with the engines' key; its context per person as its window.
         var tiny = Assert.Single(routes, r => r.Name == "tiny");
         Assert.Equal((Deployment.LlamaCpp, "http://llamacpp:8080/v1", "tiny", true, (string?)null, 1), (tiny.Kind, tiny.BaseUrl, tiny.Model, tiny.EngineKey, tiny.Key, tiny.Copies));
         Assert.Equal(8192, tiny.Info["max_input_tokens"]!.GetValue<int>());

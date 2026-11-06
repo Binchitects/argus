@@ -318,7 +318,7 @@ export function VllmModelSection({
         </Field>
         <Field
           label="Share of each GPU"
-          hint={`${shares ? `From ${shares} here: the smallest holds a whole context, a larger one more answers at once.` : '0.01 to 0.98.'} Empty: 0.90 (${kind === 'sglang' ? '--mem-fraction-static' : '--gpu-memory-utilization'}).`}
+          hint={`${shares ? `From ${shares} here: the smallest holds one person's whole context, a larger one more people at once.` : '0.01 to 0.98.'} Empty: 0.90 (${kind === 'sglang' ? '--mem-fraction-static' : '--gpu-memory-utilization'}).`}
           error={errors.gpuMemoryUtilization}
         >
           <Input inputMode="decimal" value={form.gpuMemoryUtilization} onChange={(ev) => set('gpuMemoryUtilization', ev.target.value)} placeholder="0.90" />
@@ -327,8 +327,8 @@ export function VllmModelSection({
           <Input value={form.quantization} onChange={(ev) => set('quantization', ev.target.value)} placeholder="auto" />
         </Field>
         <Field
-          label="Context"
-          hint={`${a?.limits ? `${tokens(a.limits.context.min)} to ${tokens(a.limits.context.max)} tokens` : 'Tokens'}: what each request holds, its prompt and its answer together.`}
+          label="Context per person"
+          hint={`${a?.limits ? `${tokens(a.limits.context.min)} to ${tokens(a.limits.context.max)} tokens` : 'Tokens'}: what each person's conversation holds, its prompt and its answer together, however many are at once.`}
           error={errors.context}
         >
           <Input inputMode="numeric" value={form.context} onChange={(ev) => set('context', ev.target.value)} />
@@ -344,7 +344,7 @@ export function VllmModelSection({
         >
           <Input inputMode="numeric" value={form.maxOutput} placeholder={String(defaultMaxOutput(Number(form.context) || 32768))} onChange={(ev) => set('maxOutput', ev.target.value)} />
         </Field>
-        <Field label="Answers at once" hint={`Per copy (${kind === 'sglang' ? '--max-running-requests' : '--max-num-seqs'}).`} error={errors.parallel}>
+        <Field label="People at once" hint={`Per copy, each with the whole context per person (${kind === 'sglang' ? '--max-running-requests' : '--max-num-seqs'}). More than its cache holds wait or are preempted: the advisor says how many fit.`} error={errors.parallel}>
           <Input inputMode="numeric" value={form.parallel} onChange={(ev) => set('parallel', ev.target.value)} />
         </Field>
         <Field label="Token cache" error={errors.kvType}>
@@ -439,7 +439,7 @@ export function VllmModelSection({
       {r && (
         <p className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
           Fits this machine: {r.devices ? `GPUs ${r.devices}, ` : ''}
-          {r.context.toLocaleString()} tokens of context, {r.parallel} answers at once.
+          {r.context.toLocaleString()} tokens a person, {r.parallel} at once.
           <Button
             type="button"
             size="sm"

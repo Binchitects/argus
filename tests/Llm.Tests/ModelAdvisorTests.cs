@@ -1,3 +1,4 @@
+using System.Globalization;
 using Llm.Api.Models;
 using Llm.Core.Models;
 using Microsoft.Extensions.Options;
@@ -120,9 +121,9 @@ public sealed class ModelAdvisorTests : IDisposable
     [Fact]
     public void A_llama_cpp_request_without_max_tokens_is_held_to_the_models_longest_answer()
     {
-        // llama-server's n-predict is what a request that asks no longest answer gets: the model's (half its slot's 16,384).
-        Assert.Contains("n-predict = 8192\n", ModelCatalog.Preset(new LocalModel { Name = "l", File = "l/L.gguf", Context = 65536, Parallel = 4 }, "/library"), StringComparison.Ordinal);
-        Assert.Contains("n-predict = 3000\n", ModelCatalog.Preset(new LocalModel { Name = "l", File = "l/L.gguf", Context = 65536, Parallel = 4, MaxOutput = 3000 }, "/library"), StringComparison.Ordinal);
+        // llama-server's n-predict is what a request that asks no longest answer gets: the model's (half a person's 16,384).
+        Assert.Contains("n-predict = 8192\n", ModelCatalog.Preset(new LocalModel { Name = "l", File = "l/L.gguf", Context = 16384, Parallel = 4 }, "/library"), StringComparison.Ordinal);
+        Assert.Contains("n-predict = 3000\n", ModelCatalog.Preset(new LocalModel { Name = "l", File = "l/L.gguf", Context = 16384, Parallel = 4, MaxOutput = 3000 }, "/library"), StringComparison.Ordinal);
         // The form sets it, by its longest answer.
         Assert.Contains("is set by the form", ModelCatalog.CheckExtra("n-predict = 100000"), StringComparison.Ordinal);
         Assert.Contains("is set by the form", ModelCatalog.CheckExtra("predict = -1"), StringComparison.Ordinal);
@@ -201,40 +202,69 @@ public sealed class ModelAdvisorTests : IDisposable
     public void The_longest_answer_fits_what_one_conversation_holds_beside_its_prompt()
     {
         var (model, all) = Library("dense/Slots-Q8_0.gguf", GgufFile.Language("llama", layers: 4, layerBytes: 64 * MiB, context: 131072));
-        // 65,536 shared by 4 answers at once: 16,384 a conversation, its prompt and its answer together.
-        var shared = new LocalModel { Name = "s", File = model.File.Path, Context = 65536, Parallel = 4, MaxOutput = 32768 };
-        var advice = ModelAdvisor.Advise(shared, model, all, Machine(8 * GiB));
+        // 16,384 tokens a person, 4 at once: each conversation holds all 16,384, its prompt and its answer together.
+        var four = new LocalModel { Name = "s", File = model.File.Path, Context = 16384, Parallel = 4, MaxOutput = 32768 };
+        var advice = ModelAdvisor.Advise(four, model, all, Machine(8 * GiB));
         // At most three quarters of it: a client that keeps the whole longest answer free still has a quarter for its prompt.
         Assert.Equal(new Bounds(256, 12288), advice.Limits!.MaxOutput);
         var problem = Assert.Single(advice.Problems, p => p.Field == "maxOutput");
         Assert.True(problem.Error);
-        Assert.Contains("what a conversation holds (16,384, the context shared by 4 answers at once) less room for its prompt", problem.Message, StringComparison.Ordinal);
-        // One at a time, a conversation holds the whole context.
-        Assert.Equal(new Bounds(256, 49152), ModelAdvisor.Advise(new LocalModel { Name = "s", File = model.File.Path, Context = 65536, Parallel = 1 }, model, all, Machine(8 * GiB)).Limits!.MaxOutput);
-        // What it recommends fits too: half of what one of its answers at once holds.
+        Assert.Contains("what a person's conversation holds (16,384) less room for its prompt", problem.Message, StringComparison.Ordinal);
+        // However many people at once, each holds the whole context.
+        Assert.Equal(new Bounds(256, 12288), ModelAdvisor.Advise(new LocalModel { Name = "s", File = model.File.Path, Context = 16384, Parallel = 1 }, model, all, Machine(8 * GiB)).Limits!.MaxOutput);
+        // The cache holds every person's whole context: four people's is four times one person's.
+        var one = ModelAdvisor.Advise(new LocalModel { Name = "s", File = model.File.Path, Context = 16384, Parallel = 1 }, model, all, Machine(8 * GiB)).Estimate!;
+        Assert.InRange(advice.Estimate!.GpuCache, (one.GpuCache * 4) - MiB, (one.GpuCache * 4) + MiB);
+        // What it recommends fits too: half of what one person's conversation holds.
         var r = advice.Recommended!;
         Assert.True(r.Parallel > 1);
-        Assert.Equal(ModelCatalog.DefaultMaxOutput(r.Context / r.Parallel), r.MaxOutput);
-        Assert.InRange(r.MaxOutput, 256, ModelAdvisor.OutputBounds(r.Context / r.Parallel).Max);
+        Assert.Equal(ModelCatalog.DefaultMaxOutput(r.Context), r.MaxOutput);
+        Assert.InRange(r.MaxOutput, 256, ModelAdvisor.OutputBounds(r.Context).Max);
     }
 
     [Fact]
-    public void A_request_holds_a_slots_share_on_llama_cpp_and_the_whole_context_on_vllm_and_sglang()
+    public void The_advisor_says_how_many_people_the_gpus_hold_at_the_full_window()
     {
-        Assert.Equal(16384, ModelCatalog.Window(new LocalModel { Name = "l", File = "l.gguf", Context = 65536, Parallel = 4 }));
+        var (model, all) = Library("dense/People-Q8_0.gguf", GgufFile.Language("llama", layers: 4, layerBytes: 64 * MiB, context: 262144));
+        var hw = Machine(8 * GiB);
+        var p = model.Profile;
+        var fit = ModelAdvisor.PeopleThatFit(p, 262144, ModelProfiler.CacheTypeBytes["q8_0"], 512, false, 0, 0, hw);
+        Assert.InRange(fit, 1, ModelAdvisor.MaxParallel - 1);
+        // As many as fit: no word about it.
+        LocalModel With(int people, string kv = "q8_0") => new() { Name = "p", File = model.File.Path, Context = 262144, Parallel = people, KvType = kv };
+        Assert.DoesNotContain(ModelAdvisor.Advise(With(fit), model, all, hw).Problems, x => x.Field == "parallel");
+        // One more: the rest of it would go to RAM, and the advisor says how many fit, at q8_0 and at q4_0.
+        var over = Assert.Single(ModelAdvisor.Advise(With(fit + 1), model, all, hw).Problems, x => x.Field == "parallel");
+        Assert.False(over.Error);
+        var q4 = ModelAdvisor.PeopleThatFit(p, 262144, ModelProfiler.CacheTypeBytes["q4_0"], 512, false, 0, 0, hw);
+        Assert.True(q4 > fit);
+        Assert.Contains(string.Create(CultureInfo.InvariantCulture, $"{fit + 1} people at once at 262,144 tokens each need "), over.Message, StringComparison.Ordinal);
+        Assert.Contains($"The GPUs hold {fit} at the full window at q8_0, {q4} at q4_0: the rest of the model runs from RAM and answers slow down. Choose at most {fit} people at once",
+            over.Message, StringComparison.Ordinal);
+        // At q4_0 the same people fit.
+        Assert.DoesNotContain(ModelAdvisor.Advise(With(fit + 1, "q4_0"), model, all, hw).Problems, x => x.Field == "parallel");
+    }
+
+    [Fact]
+    public void Each_person_at_once_holds_the_whole_context_on_every_engine()
+    {
+        Assert.Equal(65536, ModelCatalog.Window(new LocalModel { Name = "l", File = "l.gguf", Context = 65536, Parallel = 4 }));
         Assert.Equal(65536, ModelCatalog.Window(new LocalModel { Name = "l", File = "l.gguf", Context = 65536, Parallel = 1 }));
+        // llama.cpp's cache is the context times the people at once.
+        Assert.Equal(262144, ModelCatalog.CacheCells(new LocalModel { Name = "l", File = "l.gguf", Context = 65536, Parallel = 4 }));
+        Assert.Equal(3_932_160, ModelCatalog.CacheCells(new LocalModel { Name = "l", File = "l.gguf", Context = 262144, Parallel = 15 }));
         // vLLM's --max-model-len and SGLang's --context-length are each request's, however many run at once.
         Assert.Equal(65536, ModelCatalog.Window(new LocalModel { Name = "v", File = "hf/v@r", EngineKind = EngineKinds.Vllm, Context = 65536, Parallel = 16 }));
         Assert.Equal(65536, ModelCatalog.Window(new LocalModel { Name = "g", File = "hf/g@r", EngineKind = EngineKinds.Sglang, Context = 65536, Parallel = 16 }));
         // The longest answer: its own, else half the window (at most 32,768), always leaving a prompt room.
-        Assert.Equal(8192, ModelCatalog.OutputLimit(new LocalModel { Name = "l", File = "l.gguf", Context = 65536, Parallel = 4 }));
+        Assert.Equal(8192, ModelCatalog.OutputLimit(new LocalModel { Name = "l", File = "l.gguf", Context = 16384, Parallel = 4 }));
         Assert.Equal(32768, ModelCatalog.OutputLimit(new LocalModel { Name = "v", File = "hf/v@r", EngineKind = EngineKinds.Vllm, Context = 131072, Parallel = 16 }));
         Assert.Equal(1000, ModelCatalog.OutputLimit(16384, 1000));
         Assert.Equal(12288, ModelCatalog.OutputLimit(16384, 12288));
-        // One saved before its window shrank (2 slots of 32,768 that once held 32,768): half the window, not what leaves its
-        // prompt almost nothing.
-        Assert.Equal(16384, ModelCatalog.OutputLimit(new LocalModel { Name = "l", File = "l.gguf", Context = 65536, Parallel = 2, MaxOutput = 32768 }));
-        Assert.Equal(8192, ModelCatalog.OutputLimit(new LocalModel { Name = "l", File = "l.gguf", Context = 65536, Parallel = 4, MaxOutput = 32768 }));
+        // One saved before its window shrank (32,768 that once held 65,536): half the window, not what leaves its prompt
+        // almost nothing.
+        Assert.Equal(16384, ModelCatalog.OutputLimit(new LocalModel { Name = "l", File = "l.gguf", Context = 32768, Parallel = 2, MaxOutput = 32768 }));
+        Assert.Equal(8192, ModelCatalog.OutputLimit(new LocalModel { Name = "l", File = "l.gguf", Context = 16384, Parallel = 4, MaxOutput = 32768 }));
         Assert.Equal(1024, ModelCatalog.OutputLimit(2048, 4096));
     }
 }

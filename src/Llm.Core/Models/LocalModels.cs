@@ -26,8 +26,9 @@ public sealed class LocalModel
     /// <summary>A vision projector (mmproj) in the library, for a model that can see.</summary>
     public string? Projector { get; set; }
     /// <summary>
-    /// The context (llama.cpp's ctx-size, vLLM's --max-model-len, SGLang's --context-length). On llama.cpp the answers in
-    /// parallel share it, each slot held to its share; on vLLM and SGLang each request may hold all of it (ModelCatalog.Window).
+    /// The context per person: what each of <see cref="Parallel"/> people at once may hold, their prompt and answer together
+    /// (vLLM's --max-model-len, SGLang's --context-length, llama.cpp's kv-unified-per-slot). llama.cpp's whole cache (ctx-size)
+    /// is it times the people at once (ModelCatalog.CacheCells).
     /// </summary>
     public int Context { get; set; } = 32768;
     /// <summary>The longest answer, in tokens, within what one request holds (its prompt needs room too); null: half of that.</summary>
@@ -66,7 +67,7 @@ public sealed class LocalModel
     public int CpuMoe { get; set; }
     /// <summary>The token cache's type: llama.cpp's (q8_0, f16...), or vLLM's --kv-cache-dtype (fp8, auto).</summary>
     public string KvType { get; set; } = "q8_0";
-    /// <summary>Answers at once: llama.cpp's slots, vLLM's --max-num-seqs (per copy).</summary>
+    /// <summary>People at once, each with the whole <see cref="Context"/>: llama.cpp's slots, vLLM's --max-num-seqs (per copy).</summary>
     public int Parallel { get; set; } = 1;
     /// <summary>Tokens of a prompt read in one step (llama.cpp --ubatch-size); null: the engine's 512.</summary>
     public int? Ubatch { get; set; }

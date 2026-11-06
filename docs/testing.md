@@ -235,7 +235,7 @@ and TLS:
 
 The app's own work stays under a tenth of a second at 300 people. What grows
 is the line for the model, as fast as the questions outrun its slots: more
-slots for the chat's model (Admin → Models → *Answers at once*), or a second
+slots for the chat's model (Admin → Models → *People at once*), or a second
 copy, shorten it. Run it with `--no-chat` for the app alone; the people it
 makes (`loadtest-…`) are taken away at the end unless `--keep`.
 

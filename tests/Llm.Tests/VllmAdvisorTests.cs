@@ -89,17 +89,24 @@ public sealed class VllmAdvisorTests
         Assert.InRange(Tokens(nvfp4, 0, 1), 2_500_000, 4_000_000);
         Assert.Equal([0, 1], VllmAdvisor.Propose(nvfp4, hw, 1, 0.90, 262144, "fp8"));
         Assert.Equal([0, 1, 2, 3], VllmAdvisor.Propose(nvfp4, hw, 2, 0.90, 262144, "fp8"));
-        // Qwen3.5-397B NVFP4 at TP=4: about 6M tokens, about 190 answers of 32K at once.
+        // Qwen3.5-397B NVFP4 at TP=4: about 6M tokens, about 25 people at once with 262K each.
         var big = Load("Qwen3.5-397B-A17B-NVFP4-V2");
         Assert.InRange(Tokens(big, 0, 1, 2, 3), 5_500_000, 8_000_000);
         var bigAdvice = VllmAdvisor.Advise(Model("big", 262144, "0,1,2,3"), big, hw);
         Assert.Null(bigAdvice.FirstError);
-        Assert.InRange(bigAdvice.Recommended!.Parallel, 140, 220);
+        Assert.InRange(bigAdvice.Recommended!.Parallel, 20, 31);
         Assert.Equal(262144, bigAdvice.Recommended.Context);
-        // Qwen3-235B FP8 at TP=4: about 1M tokens, about 30 answers of 32K.
+        // More people than that: a warning that says how many the cache holds at the full window.
+        var held = bigAdvice.Recommended.Parallel;
+        Assert.DoesNotContain(VllmAdvisor.Advise(Model("big", 262144, "0,1,2,3", parallel: held), big, hw).Problems, p => p.Field == "parallel");
+        var crowded = Assert.Single(VllmAdvisor.Advise(Model("big", 262144, "0,1,2,3", parallel: 40), big, hw).Problems, p => p.Field == "parallel");
+        Assert.False(crowded.Error);
+        Assert.Contains($"40 people at once at 262,144 tokens each need ", crowded.Message, StringComparison.Ordinal);
+        Assert.Contains($"It holds {held} at the full window at fp8: vLLM queues or preempts the rest.", crowded.Message, StringComparison.Ordinal);
+        // Qwen3-235B FP8 at TP=4: about 1M tokens, about 4 people at once with 262K each.
         var qwen3 = Load("Qwen3-235B-A22B-Instruct-2507-FP8");
         Assert.InRange(Tokens(qwen3, 0, 1, 2, 3), 1_000_000, 1_400_000);
-        Assert.InRange(VllmAdvisor.Advise(Model("q3", devices: "0,1,2,3"), qwen3, hw).Recommended!.Parallel, 28, 45);
+        Assert.InRange(VllmAdvisor.Advise(Model("q3", devices: "0,1,2,3"), qwen3, hw).Recommended!.Parallel, 3, 6);
         // gpt-oss-120b on one GPU, about 18 GB of cache.
         var oss = Load("gpt-oss-120b");
         Assert.Equal([0], VllmAdvisor.Propose(oss, hw, 1, 0.90, 131072, "fp8"));

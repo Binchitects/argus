@@ -541,19 +541,19 @@ full the models kept loaded would make it.
   `shareMax` the largest that fits beside what is kept there, and the form's
   hint and a refused share say them), quantisation, speculative decoding (`mtp`,
   or `eagle3` with a draft snapshot), a CPU tier for its cache (`kvCpuGb`),
-  whether it may sleep, and a `fallback` model. **Answers at once** is its
+  whether it may sleep, and a `fallback` model. **People at once** is its
   `--max-num-seqs` and the cache type its `--kv-cache-dtype` (fp8). A setting
   its kind does not have is refused, as are GPUs that cannot hold it, a context
   that does not fit, or a share kept for another model kept loaded there.
   `POST /api/admin/models/advice` with `engineKind: vllm` shows its fit,
-  cache and recommended context and answers at once. It loads when asked for
+  cache and recommended context per person and people at once. It loads when asked for
   (a large one takes minutes, and the chat says why it waits), making room only
   among idle models on its GPUs; it takes none of llama.cpp's places (Models
   loaded at once). The models list shows each engine (`engine.instances`, each
   `on` when this stack runs it) and why one is not running.
 - **SGLang models** (`engineKind: sglang`, the `sglang` feature): the same form
   and settings, the dialog's **Engine** field choosing vLLM or SGLang (and the
-  machine). The app writes SGLang's own flags: answers at once is its
+  machine). The app writes SGLang's own flags: people at once is its
   `--max-running-requests`, the share of each GPU its `--mem-fraction-static`,
   fp8 its `fp8_e4m3`; *May sleep* is its memory saver; MTP is its NEXTN and
   EAGLE-3 its EAGLE3 with the draft snapshot; the CPU tier is its hierarchical
@@ -645,16 +645,16 @@ full the models kept loaded would make it.
     puts that away, and **Edit** tries again.
   What only its old engine has is not carried over: from llama.cpp, layers by hand,
   experts in RAM, its prompt step, YaRN, preset lines, its MTP and draft (the cache
-  type becomes fp8 and answers at once 16, on the GPUs proposed for this machine,
+  type becomes fp8 and people at once 16, on the GPUs proposed for this machine,
   unless set in the form); from vLLM or SGLang, copies, the share of each GPU,
   quantisation, speculative decoding and the cache's tiers (the cache type becomes
   q8_0, and the form puts it on every GPU, its slots from what fits there); from
   vLLM to SGLang, LMCache. What it had on the kind it leaves is kept (the row's
   `left`): moved back there, it takes those up again, so a round trip llama.cpp →
   vLLM → llama.cpp leaves it as it was (its slots, its longest answer, its cache
-  type, its GPUs, its prompt step and the like; on vLLM again its answers at once,
+  type, its GPUs, its prompt step and the like; on vLLM again its people at once,
   share, GPUs and copies). A longest answer a move carries that the new engine's
-  window does not hold (vLLM's whole context on llama.cpp's slots, or one saved
+  window does not hold (a shorter context per person there, or one saved
   before its window shrank) is cut to the longest that leaves the prompt its room
   there, and the dialog and the save say so: it is not refused. On a save that
   stays on its engine it is refused, as before. Moved to vLLM where the default
@@ -713,7 +713,7 @@ full the models kept loaded would make it.
     it **a second copy** of that model, and the copies are a pool: LiteLLM sends
     each request to the least busy copy, and the chat can use the model while
     this machine's copy is not loaded. **At once** (a server model's parallel
-    slots; this machine's are its model's **Answers at once**) caps what one copy is
+    slots; this machine's are its model's **People at once**) caps what one copy is
     sent at a time and weighs the copies: a server with 8 slots takes twice the
     requests of one with 4.
   - The key is kept encrypted with the app's key ring (`APP_KEY`) and never
@@ -759,8 +759,7 @@ full the models kept loaded would make it.
 - **The form asks what that kind of model has, within its limits**, and shows
   them: the context from 4,096 to what it was trained for (up to 4× with YaRN,
   when its file does not stretch it already); the longest answer, at most three
-  quarters of what one conversation holds (the context over **Answers at once**,
-  below), so a client that keeps the whole longest answer free (Claude Code,
+  quarters of what one conversation holds (the context per person, below), so a client that keeps the whole longest answer free (Claude Code,
   opencode) still has a quarter for its prompt (1,024 tokens at least), and half
   of it when left empty; the cache types its attention heads can take (a
   quantized cache needs flash attention, which covers heads of 64, 80, 96, 112,
@@ -789,29 +788,39 @@ full the models kept loaded would make it.
   model loads; by hand, a setting that would not fit is refused. A GPU power cap
   far below the card's own (`GPU_POWER_LIMIT_W`) is named for a model that runs
   all on the GPU: it is what limits one.
-- The added models share one cache between the answers in parallel
-  (`kv-unified`, as the `.env` model), **each slot held to its share of it**
-  (`kv-unified-per-slot`: the context divided by **Answers at once**). A long
-  conversation therefore never pushes the others' out of the cache, nor is
-  pushed out by them (before, a 209,000-token session in a 262,144-token cache
-  left 4 slots 53,000 tokens between them, and each turn of anyone's evicted
-  someone's prefix: 20 to 35 minutes to read it again). The gateway advertises
-  that share as the model's window (`max_input_tokens`: what one request holds,
-  its prompt and its answer together), and the longest answer in it
-  (`max_output_tokens`, and `max_tokens`, LiteLLM's older name for it), so the
-  chat and Code Arena compact before they reach it, and the card says it
-  ("262,144 tokens of context, 65,536 a conversation, answers up to 32,768"). A
-  longest answer saved for a bigger conversation (before more answers at once,
-  or less context) is not cut to the most that fits: answers get half the
-  conversation, as when none is set, and the card says **Its longest answer
-  needs changing** until **Edit** sets one that fits. A
-  vLLM or SGLang model has no such share: each of its answers at once may hold
-  the whole context (`--max-model-len`, `--context-length`), and its card and
-  the gateway say that. For longer conversations, give the model
-  fewer answers at once (2 slots: 131,072 each) or more context. Each
-  conversation keeps its own slot ([the token cache](#the-token-cache)). They
-  run with `LLAMACPP_THREADS`. Sampling left empty is the model's own
-  recommendation from its file, which the engine applies.
+- **The context is per person.** A model's **Context per person** is what each
+  of its **People at once** may hold, their prompt and their answer together, on
+  every engine: 262,144 tokens a person and 15 at once give each of 15 people the
+  whole 262,144. On llama.cpp the added models share one cache between the
+  people at once (`kv-unified`, as the `.env` model), **each slot held to one
+  person's context** (`kv-unified-per-slot`), and that cache is the context per
+  person times the people at once (`ctx-size`: 3,932,160 tokens for 15 people of
+  262,144). A long conversation therefore never pushes the others' out of the
+  cache, nor is pushed out by them. On vLLM and SGLang the context per person is
+  `--max-model-len` and `--context-length`, and the people at once
+  `--max-num-seqs` and `--max-running-requests` (per copy); their cache is what
+  their share of the GPUs leaves. The advisor says what the GPUs' memory holds:
+  more people at once than fit at the full window is a warning that says how
+  many fit at this cache type and at a smaller one (q8_0 or q4_0 on llama.cpp,
+  fp8 on vLLM and SGLang), and the share of each GPU that would hold them all;
+  on llama.cpp the rest of the model would run from RAM, and a cache that does
+  not fit at all is refused. Its recommendation is the longest context that fits
+  and, on vLLM and SGLang, the people its cache holds with all of it each. The
+  gateway advertises the context per person as the model's window
+  (`max_input_tokens`), and the longest answer in it (`max_output_tokens`, and
+  `max_tokens`, LiteLLM's older name for it), so the chat and Code Arena compact
+  before they reach it, and the card says it ("262,144 tokens a person, 15 at
+  once, answers up to 32,768"). A longest answer saved for a bigger conversation
+  (before the context per person was lowered) is not cut to the most that fits:
+  answers get half the conversation, as when none is set, and the card says
+  **Its longest answer needs changing** until **Edit** sets one that fits. An
+  upgrade from 7.7 keeps what each person held: a llama.cpp model's old context
+  was its whole cache, shared by its slots, so it becomes that cache over its
+  slots (262,144 with 4 slots becomes 65,536 a person, the same cache); raise it
+  to give each person more. Each conversation keeps its own slot
+  ([the token cache](#the-token-cache)). They run with `LLAMACPP_THREADS`.
+  Sampling left empty is the model's own recommendation from its file, which the
+  engine applies.
 - **Every request is held to the model's longest answer**, the one its card
   says. A request that sets no `max_tokens` (the chat's by default, Code
   Arena's turns, many clients') gets it: llama.cpp's `n-predict` in the
@@ -872,7 +881,7 @@ Prometheus read them; nothing else does.
 #### The token cache
 
 The engine keeps each conversation's prompt in a slot, so its next turn reads
-only what is new. A model has as many slots as its **Answers at once**.
+only what is new. A model has as many slots as its **People at once**.
 
 - **Each conversation keeps its slot.** The app sends each turn back to the
   slot that holds its conversation (llama.cpp's `id_slot`, which the gateway

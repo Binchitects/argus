@@ -155,12 +155,12 @@ describe('admin models', () => {
     expect(within(dialog).getByRole('region', { name: 'What the file is' })).toHaveTextContent(/Dense.*Hybrid attention/)
     expect(within(dialog).getByRole('region', { name: 'What the file is' })).toHaveTextContent('Trained for 262,144 tokens of context')
     expect(within(dialog).getByLabelText('Name')).toHaveValue('Qwen-27B-Q4_K_M')
-    await waitFor(() => expect(within(dialog).getByLabelText('Context (tokens)')).toHaveValue('131072'))
+    await waitFor(() => expect(within(dialog).getByLabelText('Context per person (tokens)')).toHaveValue('131072'))
     expect(within(dialog).getByLabelText('Longest answer (tokens)')).toHaveValue('32768')
     expect(await within(dialog).findByText(/4,096 to 262,144 \(trained for 262,144\)/)).toBeInTheDocument()
-    // Its 2 answers at once share the context: what one conversation holds bounds its answer, and half of it is the default.
-    expect(within(dialog).getByText(/The 2 answers at once share it: 65,536 a conversation, its prompt and its answer together\./)).toBeInTheDocument()
-    expect(within(dialog).getByText(/: what a conversation holds \(65,536\) less room for its prompt\. Empty: 32,768\./)).toBeInTheDocument()
+    // Each of its 2 people at once holds the whole context: that bounds an answer, half of it is the default, and the cache is twice it.
+    expect(within(dialog).getByText(/What each person's conversation holds, its prompt and its answer together: 131,072 a person, 2 at once, a cache of 262,144\./)).toBeInTheDocument()
+    expect(within(dialog).getByText(/: what a person's conversation holds \(131,072\) less room for its prompt\. Empty: 32,768\./)).toBeInTheDocument()
     // A dense model is not asked about experts, even placed by hand.
     await userEvent.click(within(dialog).getByRole('combobox', { name: 'Placement' }))
     await userEvent.click(await screen.findByRole('option', { name: 'By hand' }))
@@ -180,12 +180,12 @@ describe('admin models', () => {
     expect(within(dialog).queryByText('Enter a number.')).not.toBeInTheDocument()
 
     // Past its training: the field says why, and it cannot be added.
-    await userEvent.clear(within(dialog).getByLabelText('Context (tokens)'))
-    await userEvent.type(within(dialog).getByLabelText('Context (tokens)'), '500000')
+    await userEvent.clear(within(dialog).getByLabelText('Context per person (tokens)'))
+    await userEvent.type(within(dialog).getByLabelText('Context per person (tokens)'), '500000')
     expect(await within(dialog).findByText(/trained for 262,144 tokens of context/)).toBeInTheDocument()
     await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Add model' })).toBeDisabled())
-    await userEvent.clear(within(dialog).getByLabelText('Context (tokens)'))
-    await userEvent.type(within(dialog).getByLabelText('Context (tokens)'), '65536')
+    await userEvent.clear(within(dialog).getByLabelText('Context per person (tokens)'))
+    await userEvent.type(within(dialog).getByLabelText('Context per person (tokens)'), '65536')
     await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Add model' })).toBeEnabled())
 
     await userEvent.click(within(dialog).getByRole('button', { name: 'Add model' }))
@@ -435,26 +435,28 @@ describe('admin models', () => {
     expect(screen.getByText(/each small step waits for it to load/)).toBeInTheDocument()
   })
 
-  it("a model with several slots says each conversation's share of its context, and each model its longest answer", async () => {
+  it('each model says what a person holds and how many people at once, and its longest answer', async () => {
     const v = view()
-    const vllm = { ...v.models[1], name: 'Flash', engineKind: 'vllm', file: 'hf/org/flash@r', context: 65536, window: 65536, output: 32768, parallel: 16 }
-    fakeApi(admin, { 'GET /api/admin/models': () => ({ json: { ...v, models: [{ ...v.models[0], window: 32768, output: 16384 }, ...v.models.slice(1), vllm] } }) })
+    const vllm = { ...v.models[1], name: 'Flash', engineKind: 'vllm', file: 'hf/org/flash@r', context: 262144, window: 262144, output: 32768, parallel: 15 }
+    fakeApi(admin, {
+      'GET /api/admin/models': () => ({ json: { ...v, models: [{ ...v.models[0], window: 131072, output: 32768, parallel: 4 }, ...v.models.slice(1), vllm] } }),
+    })
     renderApp('/admin/models')
-    expect(await screen.findByText('big/Big-Q4.gguf · 131,072 tokens of context, 32,768 a conversation, answers up to 16,384')).toBeInTheDocument()
-    expect(screen.getByText('small/Small-Q8.gguf · 32,768 tokens of context')).toBeInTheDocument()
-    // vLLM's 16 at once share its cache, not its window: each request may hold the whole context.
-    expect(screen.getByText('hf/org/flash@r · 65,536 tokens of context, answers up to 32,768')).toBeInTheDocument()
+    expect(await screen.findByText('big/Big-Q4.gguf · 131,072 tokens a person, 4 at once, answers up to 32,768')).toBeInTheDocument()
+    expect(screen.getByText('small/Small-Q8.gguf · 32,768 tokens a person, 1 at once')).toBeInTheDocument()
+    // The same on vLLM and SGLang: each of its people at once may hold the whole context.
+    expect(screen.getByText('hf/org/flash@r · 262,144 tokens a person, 15 at once, answers up to 32,768')).toBeInTheDocument()
     expect(screen.queryByText('Its longest answer needs changing')).not.toBeInTheDocument()
   })
 
   it('a longest answer saved for a bigger window says it needs changing, and what answers get meanwhile', async () => {
     const v = view()
-    // Two slots of 65,536 hold 32,768 each: its 32,768 would leave a prompt nothing, so its answers get half the window.
-    const crowded = { ...v.models[1], context: 65536, parallel: 2, window: 32768, maxOutput: 32768, output: 16384 }
+    // 32,768 a person: its 32,768 would leave a prompt nothing, so its answers get half the window.
+    const crowded = { ...v.models[1], context: 32768, parallel: 2, window: 32768, maxOutput: 32768, output: 16384 }
     fakeApi(admin, { 'GET /api/admin/models': () => ({ json: { ...v, models: [v.models[0], crowded, v.models[2]] } }) })
     renderApp('/admin/models')
     const card = (await screen.findByRole('heading', { name: /Small-Model/ })).closest('section')!
-    expect(within(card).getByText('small/Small-Q8.gguf · 65,536 tokens of context, 32,768 a conversation, answers up to 16,384')).toBeInTheDocument()
+    expect(within(card).getByText('small/Small-Q8.gguf · 32,768 tokens a person, 2 at once, answers up to 16,384')).toBeInTheDocument()
     expect(within(card).getByText('Its longest answer needs changing')).toBeInTheDocument()
     expect(within(card).getByText(/Saved as 32,768 tokens, more than a conversation of 32,768 holds beside its prompt: its answers go up to 16,384, half of it, until Edit sets one that fits\./)).toBeInTheDocument()
   })
@@ -536,7 +538,7 @@ describe('admin models', () => {
     expect(within(dialog).getByRole('combobox', { name: 'Add it as' })).toHaveTextContent('A chat model')
     await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'File or model' })).toHaveTextContent('small/Small-Q8.gguf'))
     expect(within(dialog).getByLabelText('Name')).toBeDisabled()
-    const context = await within(dialog).findByLabelText('Context (tokens)')
+    const context = await within(dialog).findByLabelText('Context per person (tokens)')
     expect(context).toHaveValue('32768')
     await userEvent.clear(context)
     await userEvent.type(context, '65536')

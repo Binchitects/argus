@@ -52,9 +52,9 @@ describe('admin models: vLLM', () => {
     await waitFor(() => expect(within(form).getByLabelText('Name')).toHaveValue('gpt-oss-120b'))
     // The advisor's fit and proposal show as it is filled in.
     expect(await within(form).findByText(/GPUs 1, proposed for this machine/)).toBeInTheDocument()
-    expect(within(form).getByText(/Fits this machine: GPUs 1, 131,072 tokens of context, 41 answers at once/)).toBeInTheDocument()
-    // Each request holds the whole context, its answer included: the longest answer leaves its prompt room in it, and is half of it when empty.
-    expect(within(form).getByText('4,096 to 131,072 tokens: what each request holds, its prompt and its answer together.')).toBeInTheDocument()
+    expect(within(form).getByText(/Fits this machine: GPUs 1, 131,072 tokens a person, 41 at once/)).toBeInTheDocument()
+    // Each person holds the whole context, its answer included: the longest answer leaves its prompt room in it, and is half of it when empty.
+    expect(within(form).getByText("4,096 to 131,072 tokens: what each person's conversation holds, its prompt and its answer together, however many are at once.")).toBeInTheDocument()
     expect(within(form).getByText('256 to 31,744: the context less room for a prompt. Empty: 16,384.')).toBeInTheDocument()
     await userEvent.type(within(form).getByLabelText('Longest answer'), '8192')
     // The GPUs by vendor and size: a group can be ticked whole.
@@ -96,7 +96,7 @@ describe('admin models: vLLM', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH' && c.path === '/api/admin/models/Qwen')).toBe(true))
     const sent = calls.find((c) => c.method === 'PATCH' && c.path === '/api/admin/models/Qwen')!.body as Record<string, unknown>
     expect(sent).toMatchObject({ engineKind: 'vllm', file: 'hf/openai/gpt-oss-120b@main', kvType: 'fp8', parallel: 16 })
-    // It set no longest answer: half of what each request holds.
+    // It set no longest answer: half of what each person's conversation holds.
     expect(sent.clear).toContain('maxOutput')
   })
 

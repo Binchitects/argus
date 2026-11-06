@@ -101,7 +101,7 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
 
     private static readonly object Tiny = new
     {
-        name = "tiny-b", file = "tiny/Tiny-4B-Q4_K_M.gguf", projector = "tiny/mmproj-Tiny-F16.gguf", context = 16384, maxOutput = 4096,
+        name = "tiny-b", file = "tiny/Tiny-4B-Q4_K_M.gguf", projector = "tiny/mmproj-Tiny-F16.gguf", context = 8192, maxOutput = 4096,
         kvType = "q8_0", parallel = 2, extraPreset = "flash-attn = on\n# a note\ncache-reuse = 256", inputPerMtok = 0.1m,
     };
 
@@ -312,7 +312,7 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         Assert.Equal("tiny-b", added.Name);
         Assert.Equal("openai/tiny-b", added.Params["model"]!.GetValue<string>());
         Assert.Equal("os.environ/ENGINE_API_KEY", added.Params["api_key"]!.GetValue<string>());
-        // Its window at the gateway is what one of its 2 slots holds.
+        // Its window at the gateway is what each of its 2 people at once holds.
         Assert.Equal(8192, added.Info["max_input_tokens"]!.GetValue<int>());
         Assert.True(added.Info["supports_vision"]!.GetValue<bool>());
         Assert.Equal(1e-7m, added.Params["input_cost_per_token"]!.GetValue<decimal>());
@@ -321,29 +321,32 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         Assert.Equal("local", Row(await ModelsAsync(admin), "tiny-b").GetProperty("source").GetString());
         await EventuallyAsync(async () => Row(await ModelsAsync(admin), "tiny-b").GetProperty("status").GetString() == "unloaded", "the engine lists tiny-b");
 
-        // A change the gateway must know of (the context, the slots that share it) registers it again; one it need not (the temperature) does not.
+        // A change the gateway must know of (the context per person, the people at once) registers it again; one it need not (the temperature) does not.
         var first = gateway.Managed.Keys.Single();
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative), new { temperature = 0.7 }));
         Assert.Equal(first, gateway.Managed.Keys.Single());
-        // Four slots of 4,096 tokens: its longest answer of 4,096 would leave no room for a prompt in one.
-        var crowded = await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative), new { parallel = 4 });
+        // 4,096 tokens a person: its longest answer of 4,096 would leave no room for a prompt.
+        var crowded = await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative), new { context = 4096 });
         await StatusAssert.Is(HttpStatusCode.BadRequest, crowded);
-        Assert.Contains("The longest answer is 256 to 3,072 tokens: what a conversation holds (4,096, the context shared by 4 answers at once) less room for its prompt.",
+        Assert.Contains("The longest answer is 256 to 3,072 tokens: what a person's conversation holds (4,096) less room for its prompt.",
             await crowded.Content.ReadAsStringAsync(), StringComparison.Ordinal);
-        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative), new { parallel = 4, maxOutput = 2048 }));
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative), new { context = 4096, parallel = 4, maxOutput = 2048 }));
         Assert.NotEqual(first, gateway.Managed.Keys.Single());
         Assert.Equal((4096, 2048), (gateway.Managed.Values.Single().Info["max_input_tokens"]!.GetValue<int>(), gateway.Managed.Values.Single().Info["max_output_tokens"]!.GetValue<int>()));
+        Assert.Contains("ctx-size = 16384\nparallel = 4\nkv-unified = true\nkv-unified-per-slot = 4096\n", await File.ReadAllTextAsync(Path.Combine(Config, "models.ini")), StringComparison.Ordinal);
         var second = gateway.Managed.Keys.Single();
-        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative), new { context = 32768 }));
+        // Each of the 4 people at once has the whole 16,384: the engine's cache is four times that.
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative), new { context = 16384 }));
         Assert.NotEqual(second, gateway.Managed.Keys.Single());
-        Assert.Contains("ctx-size = 32768", await File.ReadAllTextAsync(Path.Combine(Config, "models.ini")), StringComparison.Ordinal);
+        Assert.Contains("ctx-size = 65536\nparallel = 4\nkv-unified = true\nkv-unified-per-slot = 16384\n", await File.ReadAllTextAsync(Path.Combine(Config, "models.ini")), StringComparison.Ordinal);
+        Assert.Equal(16384, gateway.Managed.Values.Single().Info["max_input_tokens"]!.GetValue<int>());
         // Cached input is never priced above input: above its own (0.1) is refused.
         var above = await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative), new { cachedInputPerMtok = 0.5m });
         await StatusAssert.Is(HttpStatusCode.BadRequest, above);
         Assert.Contains("Cached input cannot cost more than input (0.1).", await above.Content.ReadAsStringAsync(), StringComparison.Ordinal);
         // A value left out is kept; one named in "clear" is emptied. The page shows what one conversation holds and its longest answer.
         var row = Row(await ModelsAsync(admin), "tiny-b");
-        Assert.Equal((32768, 8192, 2048, 2048), (row.GetProperty("context").GetInt32(), row.GetProperty("window").GetInt32(), row.GetProperty("maxOutput").GetInt32(), row.GetProperty("output").GetInt32()));
+        Assert.Equal((16384, 16384, 2048, 2048), (row.GetProperty("context").GetInt32(), row.GetProperty("window").GetInt32(), row.GetProperty("maxOutput").GetInt32(), row.GetProperty("output").GetInt32()));
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative), new { clear = new[] { "maxOutput", "inputPerMtok" } }));
         var cleared = Row(await ModelsAsync(admin), "tiny-b");
         Assert.Equal(JsonValueKind.Null, cleared.GetProperty("maxOutput").ValueKind);
@@ -352,9 +355,9 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         var aboveDefault = await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative), new { cachedInputPerMtok = 0.3m });
         await StatusAssert.Is(HttpStatusCode.BadRequest, aboveDefault);
         Assert.Contains("(0.2, the default)", await aboveDefault.Content.ReadAsStringAsync(), StringComparison.Ordinal);
-        // Without a longest answer: half of what one conversation holds (32,768 over 4 slots), on the page too.
-        Assert.Equal(4096, gateway.Managed.Values.Single().Info["max_output_tokens"]!.GetValue<int>());
-        Assert.Equal(4096, Row(await ModelsAsync(admin), "tiny-b").GetProperty("output").GetInt32());
+        // Without a longest answer: half of what a person's conversation holds, on the page too.
+        Assert.Equal(8192, gateway.Managed.Values.Single().Info["max_output_tokens"]!.GetValue<int>());
+        Assert.Equal(8192, Row(await ModelsAsync(admin), "tiny-b").GetProperty("output").GetInt32());
 
         await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.DeleteAsync(new Uri("/api/admin/models/tiny-b", UriKind.Relative)));
         Assert.DoesNotContain("[tiny-b]", await File.ReadAllTextAsync(Path.Combine(Config, "models.ini")), StringComparison.Ordinal);

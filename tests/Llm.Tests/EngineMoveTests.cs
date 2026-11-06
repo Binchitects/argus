@@ -279,8 +279,8 @@ public sealed class EngineMoveTests(AppFixture app) : IDisposable
         var s = await StartAsync();
         try
         {
-            await StatusAssert.Is(HttpStatusCode.Created, await s.Admin.PostAsync("/api/admin/models", new { name = "tiny", file = "tiny/Tiny-4B-Q4_K_M.gguf", context = 8192, parallel = 4 }));
-            // Saved before the window rules: 4,096 tokens, more than its 4 slots of 2,048 leave (as SmolLM2's on the live stack).
+            await StatusAssert.Is(HttpStatusCode.Created, await s.Admin.PostAsync("/api/admin/models", new { name = "tiny", file = "tiny/Tiny-4B-Q4_K_M.gguf", context = 4096, parallel = 4 }));
+            // Saved before the window rules: an answer of 4,096 tokens, all of its 4,096 a person (as SmolLM2's on the live stack).
             using (var scope = s.App.Services.CreateScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
@@ -288,22 +288,22 @@ public sealed class EngineMoveTests(AppFixture app) : IDisposable
                 await db.SaveChangesAsync();
             }
             await UntilAsync(s, () => Task.FromResult(s.State.StatusOf("tiny") == "unloaded"), "llama.cpp lists tiny");
-            await StatusAssert.Is(HttpStatusCode.OK, await s.Admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny", UriKind.Relative), new { engineKind = "vllm", parallel = 16, maxOutput = 4096 }));
+            await StatusAssert.Is(HttpStatusCode.OK, await s.Admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny", UriKind.Relative), new { engineKind = "vllm", context = 8192, parallel = 16, maxOutput = 4096 }));
             await UntilAsync(s, async () => await PhaseAsync(s, "tiny") is null && s.State.StatusOf("tiny") == "loaded", "tiny ready on vLLM");
 
             // The dialog's advice for the move back says what it becomes, as a warning, not a refusal.
-            var advice = await s.Admin.JsonAsync(await s.Admin.PostAsync("/api/admin/models/advice", new { name = "tiny", engineKind = "llamacpp", file = "tiny/Tiny-4B-Q4_K_M.gguf", maxOutput = 4096, parallel = 4 }));
+            var advice = await s.Admin.JsonAsync(await s.Admin.PostAsync("/api/admin/models/advice", new { name = "tiny", engineKind = "llamacpp", file = "tiny/Tiny-4B-Q4_K_M.gguf", context = 4096, maxOutput = 4096, parallel = 4 }));
             var said = advice.GetProperty("problems").EnumerateArray().Single(p => p.GetProperty("field").GetString() == "maxOutput");
             Assert.False(said.GetProperty("error").GetBoolean());
             Assert.Contains("4,096", said.GetProperty("message").GetString(), StringComparison.Ordinal);
-            Assert.Contains("1,024", said.GetProperty("message").GetString(), StringComparison.Ordinal);
+            Assert.Contains("3,072", said.GetProperty("message").GetString(), StringComparison.Ordinal);
 
             // Moved back as the dialog sends it: saved with the longest answer that fits, and the save says why.
-            using var back = await s.Admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny", UriKind.Relative), new { engineKind = "llamacpp", maxOutput = 4096, parallel = 4 });
+            using var back = await s.Admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny", UriKind.Relative), new { engineKind = "llamacpp", context = 4096, maxOutput = 4096, parallel = 4 });
             await StatusAssert.Is(HttpStatusCode.OK, back);
-            Assert.Contains("1,024", (await s.Admin.JsonAsync(back)).GetProperty("warning").GetString(), StringComparison.Ordinal);
+            Assert.Contains("3,072", (await s.Admin.JsonAsync(back)).GetProperty("warning").GetString(), StringComparison.Ordinal);
             await UntilAsync(s, async () => await PhaseAsync(s, "tiny") is null && app.Engine.StatusOf("tiny") == "loaded", "tiny back on llama.cpp");
-            Assert.Equal(("llamacpp", 4, 1024), (await SettingsAsync(s, "tiny")) is var (kind, parallel, output, _, _) ? (kind, parallel, output) : default);
+            Assert.Equal(("llamacpp", 4, 3072), (await SettingsAsync(s, "tiny")) is var (kind, parallel, output, _, _) ? (kind, parallel, output) : default);
             // Not on a save that stays on its engine: there a longest answer that does not fit is refused, as before.
             await StatusAssert.Is(HttpStatusCode.BadRequest, await s.Admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny", UriKind.Relative), new { maxOutput = 4096 }));
         }

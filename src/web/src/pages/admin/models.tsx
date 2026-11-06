@@ -382,12 +382,13 @@ function Status({ status, why, since, draining }: { status: ModelRow['status']; 
 const filesCheck = (onChange: (on: boolean) => void) => ({ label: 'Also delete its files from disk (those no other model uses)', onChange })
 
 /**
- * "262,144 tokens of context, 65,536 a conversation, answers up to 32,768": the context; what one conversation holds, its prompt
- * and its answer together, when that is less (a llama.cpp slot's share); and the longest answer in it, as the gateway says them.
+ * "262,144 tokens a person, 15 at once, answers up to 32,768": what each person's conversation holds, its prompt and its answer
+ * together (its context per person); how many people at once each have it, when the model says; and the longest answer in it, as
+ * the gateway says them.
  */
-function contextLine(context: number, window?: number | null, output?: number | null): string {
-  const all = `${context.toLocaleString('en-US')} tokens of context`
-  const held = window && window < context ? `${all}, ${window.toLocaleString('en-US')} a conversation` : all
+function contextLine(context: number, window?: number | null, output?: number | null, people?: number | null): string {
+  const each = `${(window ?? context).toLocaleString('en-US')} tokens a person`
+  const held = people ? `${each}, ${people.toLocaleString('en-US')} at once` : each
   return output ? `${held}, answers up to ${output.toLocaleString('en-US')}` : held
 }
 
@@ -551,7 +552,7 @@ function ModelCard({
           <CardDescription className="[overflow-wrap:anywhere]">
             {media
               ? `On the ${m.server} server`
-              : [m.source === 'remote' ? `${m.remote} on ${m.server}` : m.file, m.context ? contextLine(m.context, m.window, m.output) : null].filter(Boolean).join(' · ') ||
+              : [m.source === 'remote' ? `${m.remote} on ${m.server}` : m.file, m.context ? contextLine(m.context, m.window, m.output, m.source === 'local' ? m.parallel : null) : null].filter(Boolean).join(' · ') ||
                 (image ? 'An image model' : 'Served by the gateway')}
           </CardDescription>
           {m.source === 'local' && <p className="mt-1 text-xs text-muted-foreground">{`Engine: ${engineName(m, engine.instances ?? [])}`}</p>}

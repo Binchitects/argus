@@ -1995,7 +1995,7 @@ limits (requests and tokens a minute), and the chat is held to none of those.
 
 ## Fair use
 
-A model serves few people at once: its slots (**Answers at once** on its card
+A model serves few people at once: its slots (**People at once** on its card,
 in Admin → Models, and its copies on other GPU servers). So that everyone gets
 their turn:
 
