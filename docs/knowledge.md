@@ -212,7 +212,8 @@ Uploaded files, a folder's files and SharePoint's files are read alike:
 
 OCR and conversion run in the **sandbox** (the `sandbox` feature: Tesseract,
 LibreOffice and poppler there, with no network), in the languages of
-`Knowledge:OcrLanguages` (`eng+fas+ara` by default: English, Persian and
+**Settings → Company knowledge → Languages read in scans**
+(`Knowledge:OcrLanguages`, `eng+fas+ara` by default: English, Persian and
 Arabic; Chinese is there too, `chi_sim` and `chi_tra`). A scanned PDF's pages
 are drawn at 200 dpi and read twelve at a time, up to 300 pages. Without the
 sandbox such a file is named in the source's problems and read at the next

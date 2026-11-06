@@ -14,8 +14,9 @@ deploy/
 !deploy/services/workspaces/supervisor.py
 # Code Arena embeds the sandbox's arena module (code mode).
 !deploy/services/sandbox/arena/__init__.py
-# The app embeds the list of the stack's features, and the 3D tool's scripts (scripts/blender-check.py runs them too).
+# The app embeds the list of the stack's features and of the installation's settings, and the 3D tool's scripts (scripts/blender-check.py runs them too).
 !deploy/features
+!deploy/settings
 !deploy/services/blender/tool/
 docs/measurements/
 evals/

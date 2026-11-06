@@ -26,7 +26,7 @@ COPY docs/compliance/catalogs/ docs/compliance/catalogs/
 COPY docs/compliance/policies/ docs/compliance/policies/
 COPY docs/compliance/isms.md docs/compliance/
 COPY docs/compliance/templates/sign-in-notice.md docs/compliance/templates/
-COPY deploy/features deploy/
+COPY deploy/features deploy/settings deploy/
 COPY deploy/services/blender/tool/ deploy/services/blender/tool/
 RUN dotnet publish src/Llm.Api/Llm.Api.csproj -c Release --no-restore -o /out ${APP_VERSION:+-p:AppVersion=$APP_VERSION} \
  && rm -f /out/*.pdb \

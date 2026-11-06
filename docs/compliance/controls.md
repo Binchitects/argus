@@ -523,6 +523,7 @@ The signing keys, settings' secrets (directory, SSO, connectors) and tokens are 
 - `Llm.Tests/KeyRingTests.With_a_data_key_the_key_ring_is_encrypted_and_survives_a_restart`
 - `Llm.Tests/KeyRingTests.A_changed_data_key_fails_loudly_instead_of_silently_resetting_keys`
 - `Llm.Tests/SettingsTests.A_secret_is_stored_encrypted_used_in_plain_and_never_sent_back`
+- `Llm.Tests/SettingsCoverageTests.Settings_lists_what_the_installation_sets_with_the_command_that_changes_it_and_no_secret`
 - `Llm.Tests/KnowledgeConnectorTests.Test_connection_says_what_it_reached_and_secrets_are_stored_encrypted_and_never_sent_back`
 - `Llm.Tests/FileSealingTests.A_file_is_stored_encrypted_read_as_it_was_and_those_stored_before_are_sealed_by_the_job`
 - `Llm.Tests/FileSealingTests.Without_APP_KEY_files_are_stored_as_they_are_and_the_check_says_so`

@@ -293,4 +293,23 @@ describe('settings', () => {
     expect(screen.getByText(/Small-Model is not kept loaded/)).toBeInTheDocument()
     expect(screen.getAllByText(/is not kept loaded/)).toHaveLength(1)
   })
+
+  it('lists what the installation sets, with its value, a secret only as set, and the command that changes it; a search finds them too', async () => {
+    const installation = [
+      { env: 'DOMAIN', group: 'Address', kind: 'host', default: 'llm.localhost', what: 'The address people open', command: 'arenactl config --set DOMAIN=VALUE', value: 'arena.corp.test', isSet: true, secret: false },
+      { env: 'HF_TOKEN', group: 'Models', kind: 'secret', default: null, what: 'A Hugging Face token, for gated models', command: 'arenactl config --set HF_TOKEN=@FILE', value: null, isSet: false, secret: true },
+    ]
+    fakeApi(admin, { 'GET /api/admin/config': () => ({ json: data({ installation }) }) })
+    renderApp('/admin/settings#set-by-the-installation')
+    const card = await screen.findByRole('region', { name: 'Set by the installation' })
+    expect(within(card).getByText('arena.corp.test')).toBeInTheDocument()
+    expect(within(card).getByText('not set')).toBeInTheDocument()
+    expect(within(card).getByText('arenactl config --set HF_TOKEN=@FILE')).toBeInTheDocument()
+    expect(within(card).getByRole('button', { name: 'Copy the command for DOMAIN' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('Tool calls per answer')).toBeNull()
+
+    renderApp('/admin/settings')
+    await userEvent.type((await screen.findAllByRole('searchbox', { name: 'Search settings' })).at(-1)!, 'hugging')
+    expect((await screen.findAllByText('arenactl config --set HF_TOKEN=@FILE')).length).toBeGreaterThan(0)
+  })
 })

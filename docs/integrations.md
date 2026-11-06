@@ -153,11 +153,12 @@ them on, with the app closed (see [chat.md](chat.md#notifications)):
   encrypted under `APP_KEY` (the settings table, row `webpush:vapid`); each
   push is encrypted for the device (RFC 8291) so the push service carries it
   unread.
-- The app posts only to the browsers' push services: `Push:Hosts` in the app's
-  configuration, by default `fcm.googleapis.com, *.push.services.mozilla.com,
-  *.push.apple.com, *.notify.windows.com`. The app needs to reach them.
-- A device the push service no longer knows is removed. `Push:PerPerson`
-  devices per person (20).
+- The app posts only to the browsers' push services: **Settings →
+  Notifications → Push services** (`Push:Hosts`), by default
+  `fcm.googleapis.com, *.push.services.mozilla.com, *.push.apple.com,
+  *.notify.windows.com`. The app needs to reach them.
+- A device the push service no longer knows is removed. **Devices one person
+  gets news on** (`Push:PerPerson`, 20) on the same page.
 - Browsers allow service workers and pushes only on a trusted certificate:
   with the stack's own CA, each device must trust it first.
 

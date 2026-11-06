@@ -23,7 +23,8 @@ import { DirectoryChecks, DirectoryGuide } from './directory-panel'
 import { SpeechLanguage, SpeechVoices } from './speech-voices'
 import { BotAddresses } from './bot-addresses'
 import { RecalculatePanel } from './recalculate'
-import { bytesHint, initialValue, isShown, limits, shownValue, slug, wireValue, type SettingsData, type SettingView } from './settings-model'
+import { InstallationPanel } from './settings-installation'
+import { bytesHint, initialValue, installationTitle, installMatches, isShown, limits, shownValue, slug, wireValue, type SettingsData, type SettingView } from './settings-model'
 
 const settingsQuery = {
   queryKey: ['admin', 'config'] as const,
@@ -62,7 +63,9 @@ export function SettingsPage() {
   const { hash } = useLocation()
   const navigate = useNavigate()
   const allGroups = settings.data?.groups ?? []
-  const active = allGroups.find((g) => slug(g.title) === hash.slice(1)) ?? allGroups[0]
+  const installing = hash.slice(1) === slug(installationTitle)
+  const active = installing ? undefined : (allGroups.find((g) => slug(g.title) === hash.slice(1)) ?? allGroups[0])
+  const installation = settings.data?.installation ?? []
   const q = search.trim().toLowerCase()
   // A setting of one protocol (SAML's metadata) only while that protocol is chosen, saved or not.
   const valueOf = (key: string) => draft[key] ?? (byKey.has(key) ? initialValue(byKey.get(key)!) : '')
@@ -73,6 +76,7 @@ export function SettingsPage() {
     : active
       ? [{ ...active, settings: active.settings.filter((s) => isShown(s, valueOf)) }]
       : []
+  const installShown = q ? installation.filter((s) => installMatches(s, q)) : installing ? installation : []
   const unsavedIn = (title: string) => dirty.filter(([k]) => byKey.get(k)!.group === title).length
 
   const submit = async () => {
@@ -153,6 +157,19 @@ export function SettingsPage() {
                 </Link>
               )
             })}
+            {installation.length > 0 && (
+              <Link
+                to={{ hash: slug(installationTitle) }}
+                replace
+                aria-current={!q && installing ? 'page' : undefined}
+                className={cn(
+                  'mt-2 flex items-center justify-between gap-2 rounded-md border-t px-2 py-1.5 pt-2.5 text-sm hover:bg-accent hover:text-foreground',
+                  !q && installing ? 'bg-accent font-medium text-foreground' : 'text-muted-foreground',
+                )}
+              >
+                <span className="truncate">{installationTitle}</span>
+              </Link>
+            )}
           </div>
         </nav>
         <div className="grid min-w-0 content-start gap-6">
@@ -161,9 +178,9 @@ export function SettingsPage() {
               <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
               <Input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search all settings" aria-label="Search settings" className="pl-8" />
             </div>
-            {!q && active && (
+            {!q && (active || installing) && (
               <div className="w-full lg:hidden">
-                <Select value={slug(active.title)} onValueChange={(v) => navigate({ hash: v }, { replace: true })}>
+                <Select value={active ? slug(active.title) : slug(installationTitle)} onValueChange={(v) => navigate({ hash: v }, { replace: true })}>
                   <SelectTrigger aria-label="Setting group">
                     <SelectValue />
                   </SelectTrigger>
@@ -173,12 +190,13 @@ export function SettingsPage() {
                         {g.title}
                       </SelectItem>
                     ))}
+                    {installation.length > 0 && <SelectItem value={slug(installationTitle)}>{installationTitle}</SelectItem>}
                   </SelectContent>
                 </Select>
               </div>
             )}
           </div>
-          {groups.length === 0 && <EmptyState icon={Search} title="No setting matches" />}
+          {groups.length === 0 && installShown.length === 0 && <EmptyState icon={Search} title="No setting matches" />}
           {groups.map((g) => (
             <Card key={g.title} id={slug(g.title)} className="scroll-mt-20" aria-labelledby={`${slug(g.title)}-title`}>
               <CardHeader>
@@ -211,6 +229,7 @@ export function SettingsPage() {
               </CardContent>
             </Card>
           ))}
+          {installShown.length > 0 && <InstallationPanel rows={installShown} searching={!!q} />}
         </div>
       </div>
       {dirty.length > 0 && (
