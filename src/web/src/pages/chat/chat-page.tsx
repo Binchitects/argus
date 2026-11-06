@@ -1301,7 +1301,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                       </Button>
                     ) : null}
                     {turns.map((t, i) => {
-                      const compacted = [t.question, ...t.answer].find((m) => m?.summary)
+                      // A turn compacted more than once shows its last summary: the one the model reads now.
+                      const compacted = [t.question, ...t.answer].findLast((m) => m?.summary)
                       const summary = compacted?.summary
                       // A question compared (arena mode): both answers side by side.
                       const arena = t.question ? arenaView(t.question, data?.arenas, view.arena, answering && i === lastTurn) : null

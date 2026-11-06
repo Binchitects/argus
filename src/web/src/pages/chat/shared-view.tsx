@@ -150,7 +150,7 @@ export function SharedChatPage() {
             )}
             {turns.length === 0 && <p className="text-sm text-muted-foreground">This chat has no messages yet.</p>}
             {turns.map((t, i) => {
-              const summary = [t.question, ...t.answer].find((m) => m?.summary)?.summary
+              const summary = [t.question, ...t.answer].findLast((m) => m?.summary)?.summary
               return (
                 <div key={t.question?.id ?? t.answer[0]?.id ?? i} className="grid gap-4">
                   {t.question && <QuestionTurn m={t.question} siblings={tree.siblings(t.question)} busy={false} onSwitch={(id) => setLeaf(tree.leafBelow(id))} />}
