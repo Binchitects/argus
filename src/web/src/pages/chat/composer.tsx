@@ -241,7 +241,7 @@ export function Composer({
       {queued && queued.length > 0 && (
         <div className="grid gap-1 px-3 pt-3">
           <ul className="grid gap-1" aria-label="Queued messages">
-            {queued.map((q) => (
+            {queued.map((q, i) => (
               <li key={q.key} className="flex min-w-0 items-center gap-2 rounded-lg border border-dashed bg-muted/40 py-1 ps-2.5 pe-1 text-sm">
                 <Clock3 className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                 <span className="sr-only">Queued:</span>
@@ -256,16 +256,27 @@ export function Composer({
                   {q.text || (q.skill ? '' : `${q.attachments.length} file${q.attachments.length === 1 ? '' : 's'}`)}
                   {q.text && q.attachments.length > 0 && <span className="text-muted-foreground"> · {q.attachments.length} file{q.attachments.length === 1 ? '' : 's'}</span>}
                 </span>
-                <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => onSendNow?.(q.key)}>
-                  Send now
-                </Button>
+                {/* Answered elsewhere: nothing here stops that turn, so one only goes first in line. */}
+                {!elsewhere ? (
+                  <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => onSendNow?.(q.key)}>
+                    Send now
+                  </Button>
+                ) : i > 0 && (
+                  <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => onSendNow?.(q.key)} aria-label={`Put first: ${q.text || 'files'}`}>
+                    Put first
+                  </Button>
+                )}
                 <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => onUnqueue?.(q.key)} aria-label={`Cancel queued message: ${q.text || 'files'}`}>
                   Cancel
                 </Button>
               </li>
             ))}
           </ul>
-          <p className="text-xs text-muted-foreground">Sent in turn when the answer ends, even if you close the page; Send now stops the answer and sends it at once.</p>
+          <p className="text-xs text-muted-foreground">
+            {elsewhere
+              ? `${elsewhere}, and nothing here stops it: these are sent in turn when its turn ends, even if you close the page.`
+              : 'Sent in turn when the answer ends, even if you close the page; Send now stops the answer and sends it at once.'}
+          </p>
         </div>
       )}
       {quote && onClearQuote && (

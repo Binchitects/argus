@@ -619,6 +619,38 @@ describe('chat', () => {
     expect(calls.some((c) => c.path === '/api/chat/conversations/c1/messages')).toBe(false)
   })
 
+  it("while Code Arena answers, a queued message has no Send now (nothing here stops its turn): one can go first in line", async () => {
+    let queued = [
+      { id: 'w1', content: 'first wait', attachments: [], createdAt: '' },
+      { id: 'w2', content: 'second wait', attachments: [], createdAt: '' },
+    ]
+    const calls = backend({
+      extra: {
+        'GET /api/chat/conversations/c1': () => ({
+          json: conversation({
+            origin: 'code-arena', codeArena: true, queued, currentLeafId: 'q1', messages: [msg('q1', null, 'user', { content: 'Fix the parser' })],
+          }),
+        }),
+        'GET /api/chat/conversations/c1/stamp': () => ({ json: { stamp: 'one', answering: false, codeArena: true } }),
+        'POST /api/chat/conversations/c1/queue/w2/now': () => {
+          queued = [queued[1]!, queued[0]!]
+          return { json: { queued, answering: false } }
+        },
+      },
+    })
+    renderApp('/chat/c1')
+    const list = await screen.findByRole('list', { name: 'Queued messages' })
+    expect(within(list).queryByRole('button', { name: 'Send now' })).not.toBeInTheDocument()
+    expect(screen.getByText(/Code Arena is answering, and nothing here stops it: these are sent in turn when its turn ends/)).toBeInTheDocument()
+    expect(screen.queryByText(/Send now stops the answer/)).not.toBeInTheDocument()
+    // The first in line has nothing to move; the second goes before it.
+    const [first, second] = within(list).getAllByRole('listitem')
+    expect(within(first!).queryByRole('button', { name: /Put first/ })).not.toBeInTheDocument()
+    await userEvent.click(within(second!).getByRole('button', { name: 'Put first: second wait' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c1/queue/w2/now')).toBe(true))
+    await waitFor(() => expect(within(list).getAllByRole('listitem')[0]).toHaveTextContent('second wait'))
+  })
+
   it("a question from Code Arena shows what was typed with its files apart, and Code Arena's own note as a notice", async () => {
     const asked = 'Why does this fail?\n\n<attached>\n<file path="src/app.ts">\nconst a = 1\n</file>\n<selection path="src/util.ts" lines="10-20">\nexport const b = 2\n</selection>\n</attached>'
     backend({

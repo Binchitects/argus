@@ -75,7 +75,8 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     (the safeguards), when it is queued. Messages still waiting when the app
     restarts go once it is back. While [Code Arena](code-arena.md#chats-in-arena)
     is answering in the chat, the page says so and every message is queued:
-    they go when its turn ends.
+    they go when its turn ends. Nothing on the page stops that turn, so there
+    is no **Send now**: **Put first** moves one to the front of the line.
 - **Reply to part of an answer.** Select words in a finished answer and a
   small toolbar comes beside them (above them; below them on a touch screen):
   - **Reply** (`Ctrl+Shift+'`, `⌘⇧'` on macOS) puts the part above the box as
