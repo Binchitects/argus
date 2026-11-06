@@ -128,7 +128,9 @@ def _load(kind: str):
 
         # ACE-Step saves its music with torchaudio, which now writes through TorchCodec (it needs FFmpeg's libraries): soundfile instead.
         torchaudio.save = lambda path, src, sample_rate, **_: sf.write(path, src.float().cpu().numpy().T, sample_rate)
-        model = ACEStepPipeline(checkpoint_dir=path, dtype="bfloat16" if DEVICE == "cuda" else "float32", torch_compile=False, cpu_offload=False)
+        # It goes on cuda:{device_id} (0 unless told), not on the current device: told the one _least_busy chose.
+        model = ACEStepPipeline(checkpoint_dir=path, dtype="bfloat16" if DEVICE == "cuda" else "float32", torch_compile=False, cpu_offload=False,
+                                device_id=torch.cuda.current_device() if DEVICE == "cuda" else 0)
     _loaded[kind] = model
     return model
 

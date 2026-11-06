@@ -102,6 +102,22 @@ class Models(unittest.TestCase):
                 self.assertEqual(chosen, [free.index(max(free))])
                 self.assertIn(f"{max(free):,} MB free", str(refused.exception))
 
+    def test_the_music_model_loads_on_the_gpu_chosen_not_on_gpu_0(self):
+        # ACE-Step does not follow the current device: it puts itself on cuda:{device_id}, 0 unless told.
+        given = []
+        acestep = types.ModuleType("acestep")
+        acestep.pipeline_ace_step = types.ModuleType("acestep.pipeline_ace_step")
+        acestep.pipeline_ace_step.ACEStepPipeline = lambda **kw: given.append(kw) or object()
+        free, chosen = [1000, 9000], []
+        cuda = types.SimpleNamespace(is_available=lambda: True, empty_cache=lambda: None, device_count=lambda: len(free), set_device=chosen.append,
+                                     current_device=lambda: chosen[-1], mem_get_info=lambda i=None: (free[chosen[-1] if i is None else i] << 20, 0))
+        with mock.patch.dict(sys.modules, {"acestep": acestep, "acestep.pipeline_ace_step": acestep.pipeline_ace_step, "torchaudio": types.ModuleType("torchaudio")}), \
+                mock.patch.object(server, "DEVICE", "cuda"), mock.patch.object(server.torch, "cuda", cuda), mock.patch.dict(server._loaded, {}, clear=True), \
+                mock.patch.object(server, "_present", return_value=True), mock.patch.dict(server.MODELS, {"music": ("ace-step", [], 100)}):
+            server._load("music")
+        self.assertEqual(chosen, [1])
+        self.assertEqual(given[0]["device_id"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()
