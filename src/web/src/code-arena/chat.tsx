@@ -49,6 +49,7 @@ import {
   resumeSession,
   sendAllSessions,
   sessionQuery,
+  widenSession,
   sessionsQuery,
   stateQuery,
   stopJob,
@@ -366,9 +367,6 @@ function ModePicker({ state, onChange }: { state: CodeState; onChange: (mode: Mo
   )
 }
 
-/** How many turns the thread draws at first, and how many more each "Show earlier" adds: a long session's older turns wait until asked for. */
-const turnsAtOnce = 30
-
 /** What the thread passes a turn that has none: the same each time, so the turn is not drawn again for it. */
 const noNotices: Notice[] = []
 const noneWaiting: string[] = []
@@ -499,10 +497,15 @@ export function Thread({
     setTimeout(() => target.classList.remove('found'), 2400)
     return true
   }, [])
-  // The last turns, and more of the older ones as asked for ("Show earlier"); another session starts from its last ones again.
-  const [shown, setShown] = useState({ session: session.data?.id, count: turnsAtOnce })
-  const shownCount = shown.session === session.data?.id ? shown.count : turnsAtOnce
-  const firstShown = Math.max(0, turns.length - shownCount)
+  // The last turns, as code-arena gives them, and more of the older ones as asked for ("Show earlier"): a long session's
+  // earlier turns are not read until then. Another session starts from its last ones again.
+  const earlier = session.data?.earlier ?? 0
+  const sessionId = session.data?.id
+  const firstSession = useRef(sessionId)
+  useEffect(() => {
+    if (firstSession.current !== sessionId) widenSession(true)
+    firstSession.current = sessionId
+  }, [sessionId])
   // The distance from the end when earlier turns were asked for: the turns read stay where they were on the screen.
   const keptFromEnd = useRef<number | null>(null)
   const model = config.models.find((m) => m.name === state.model)
@@ -554,11 +557,12 @@ export function Thread({
     if (keptFromEnd.current === null || !el) return
     el.scrollTop = el.scrollHeight - keptFromEnd.current
     keptFromEnd.current = null
-  }, [shownCount])
+  }, [turns.length])
   const showEarlier = () => {
     const el = scroller.current
     if (el) keptFromEnd.current = el.scrollHeight - el.scrollTop
-    setShown({ session: session.data?.id, count: shownCount + turnsAtOnce })
+    widenSession()
+    void queryClient.invalidateQueries({ queryKey: sessionQuery.queryKey })
   }
 
   /**
@@ -958,13 +962,12 @@ export function Thread({
               className="relative min-h-0 flex-1 overflow-y-auto"
             >
               <div ref={content} className="mx-auto grid w-full max-w-(--thread-max) gap-6 px-4 py-6 @lg:px-6">
-                {firstShown > 0 && (
+                {earlier > 0 && (
                   <Button variant="ghost" size="sm" className="justify-self-center text-muted-foreground" onClick={showEarlier}>
-                    <ChevronUp /> Show earlier ({firstShown} more {firstShown === 1 ? 'turn' : 'turns'})
+                    <ChevronUp /> Show earlier ({earlier} more {earlier === 1 ? 'turn' : 'turns'})
                   </Button>
                 )}
-                {turns.slice(firstShown).map((t, at) => {
-                  const i = firstShown + at
+                {turns.map((t, i) => {
                   const isLive = answering && i === lastTurn
                   // Where the conversation was compacted to fit the model's window: marked after the turn, its summary folded,
                   // as the web chat marks it. The turn itself stays as it was (a live one with its answer and its questions).

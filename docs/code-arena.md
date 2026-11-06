@@ -614,9 +614,12 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   it adds included, so it agrees with the status bar after an answer written
   in the web chat and right after **Compact now** ("About …; the next answer
   counts it"); while a turn runs, each step's request as the model counted
-  it. A long session opens on its last 30 turns:
-  **Show earlier** at the top adds 30 more each time, the turns being read staying where they
-  were. The thread draws what streams in once per frame, and only the turn
+  it. A long session opens on its last 30 turns, and only those are read
+  (`GET /api/session?turns=30`, with the diffs of their edits and how many
+  turns came before): **Show earlier** at the top reads 30 more each time, the
+  turns being read staying where they were. After a turn, and when a
+  compaction marks the thread, the page reads as many turns again, not the
+  whole session (measured on 500 messages: 366 KB in place of 1.5 MB). The thread draws what streams in once per frame, and only the turn
   being written: a session of thousands of messages streams as smoothly as a
   short one. The Chat activity lists this folder's sessions; the list is read
   again when a session's first turn adds it, a turn of a session listed

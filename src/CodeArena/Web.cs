@@ -412,6 +412,11 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 await res.JsonAsync(200, Sessions(), ct);
                 return;
             case ("GET", "/api/session"):
+                // The last turns the page shows (more as it asks for its earlier ones): a long session is not read whole.
+                if (int.TryParse(req.Query.GetValueOrDefault("turns"), out var turns))
+                {
+                    Volatile.Write(ref _turnsShown, Math.Max(1, turns));
+                }
                 await res.JsonAsync(200, SessionJson(), ct);
                 return;
             case ("GET", "/api/plan"):
@@ -1028,16 +1033,29 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         await res.JsonAsync(200, new JsonObject { ["version"] = _rt.SettingsVersion }, ct);
     }
 
-    /// <summary>The session open now, as the page shows it.</summary>
+    /// <summary>How many of the last turns the page shows at first, and the most it asked for since (Show earlier).</summary>
+    internal const int TurnsAtOnce = 30;
+    private int _turnsShown = TurnsAtOnce;
+
+    /// <summary>
+    /// The session open now, as the page shows it: its last turns (as many as the page asked for last), with how many
+    /// turns came before them. A long session's earlier messages, and the diffs of their edits, are not built nor sent.
+    /// </summary>
     private JsonObject SessionJson()
     {
-        // The session as it stands in memory: every message of it (the file's earlier lines are not read again).
-        var (messages, diffs, prompt, cached, completion) = _rt.Session.Read(d => (History.Messages(d), History.Diffs(d), d.Prompt, d.Cached, d.Completion));
+        // The session as it stands in memory (the file's earlier lines are not read again).
+        var shown = Volatile.Read(ref _turnsShown);
+        var (messages, diffs, earlier, prompt, cached, completion) = _rt.Session.Read(d =>
+        {
+            var (from, before) = History.LastTurns(d, shown);
+            return (History.Messages(d, from), History.Diffs(d, from), before, d.Prompt, d.Cached, d.Completion);
+        });
         lock (_diffs)
         {
             if (_diffsOf == _rt.Session.Id)
             {
-                foreach (var (message, diff) in _diffs)
+                var first = messages.Count > 0 ? int.Parse(messages[0]!["id"]!.GetValue<string>()[1..], System.Globalization.CultureInfo.InvariantCulture) : int.MaxValue;
+                foreach (var (message, diff) in _diffs.Where(kv => int.Parse(kv.Key[1..], System.Globalization.CultureInfo.InvariantCulture) >= first))
                 {
                     diffs[message] = diff.DeepClone();
                 }
@@ -1047,6 +1065,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         {
             ["id"] = _rt.Session.Id,
             ["messages"] = messages,
+            // How many turns came before those (the page's Show earlier reads them).
+            ["earlier"] = earlier,
             ["diffs"] = diffs,
             ["busy"] = Busy(),
             // Which answer runs, or ran last: the page attaches to each new one.
@@ -2151,7 +2171,7 @@ internal static partial class History
     /// compaction leaves it whole. Only what the model reads is compacted: the last message each compaction covers carries
     /// its summary, and the page marks it there, as the web chat does.
     /// </summary>
-    public static JsonArray Messages(SessionData data)
+    public static JsonArray Messages(SessionData data, int from = 0)
     {
         var list = new JsonArray();
         var names = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -2160,6 +2180,15 @@ internal static partial class History
             var entry = data.Stream[i];
             var m = entry.Message;
             var role = m.Str("role") ?? "user";
+            if (i < from)
+            {
+                // Not shown: only the names of its calls, for the results shown after it.
+                foreach (var call in (m["tool_calls"] as JsonArray ?? []).OfType<JsonObject>())
+                {
+                    names[call.Str("id") ?? ""] = call["function"].Str("name") ?? "";
+                }
+                continue;
+            }
             // A picture from the web goes with its words as parts: the words are shown.
             var content = m["content"] is JsonArray parts
                 ? string.Join("\n", parts.OfType<JsonObject>().Where(p => p.Str("type") == "text").Select(p => p.Str("text")))
@@ -2256,7 +2285,7 @@ internal static partial class History
     /// text (the file around them is not kept, so without line numbers). A live
     /// edit's diff has the whole file's.
     /// </summary>
-    public static JsonObject Diffs(SessionData data)
+    public static JsonObject Diffs(SessionData data, int from = 0)
     {
         var diffs = new JsonObject();
         var calls = new Dictionary<string, JsonObject>(StringComparer.Ordinal);
@@ -2267,7 +2296,7 @@ internal static partial class History
             {
                 calls[call.Str("id") ?? ""] = call;
             }
-            if (m.Str("role") != "tool" || !calls.TryGetValue(m.Str("tool_call_id") ?? "", out var made) || made["function"].Str("name") != "edit_file"
+            if (i < from || m.Str("role") != "tool" || !calls.TryGetValue(m.Str("tool_call_id") ?? "", out var made) || made["function"].Str("name") != "edit_file"
                 || ToolStatus(m.Str("content") ?? "") != "complete" || Json.ParseObject(made["function"].Str("arguments")) is not { } args)
             {
                 continue;
@@ -2276,6 +2305,23 @@ internal static partial class History
             diffs[$"m{i}"] = DiffJson(args.Str("path") ?? "", before.Length == 0 ? null : before, args.Str("new_string") ?? "", numbered: false);
         }
         return diffs;
+    }
+
+    /// <summary>
+    /// Where the last <paramref name="turns"/> turns start in the conversation (a turn starts at a message of the person's,
+    /// or at the first message), and how many turns come before them.
+    /// </summary>
+    public static (int From, int Earlier) LastTurns(SessionData data, int turns)
+    {
+        var starts = new List<int>();
+        for (var i = 0; i < data.Stream.Count; i++)
+        {
+            if (i == 0 || data.Stream[i].Message.Str("role") == "user")
+            {
+                starts.Add(i);
+            }
+        }
+        return starts.Count <= turns ? (0, 0) : (starts[^turns], starts.Count - turns);
     }
 
     /// <summary>{path, added, removed, more, created, lines: [[op, old, new, text], …]}: an edit as the page draws it.</summary>

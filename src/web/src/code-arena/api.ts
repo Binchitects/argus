@@ -172,7 +172,9 @@ export interface FileDiff {
 /** The session open now: its messages in the shape of Arena's chat, and its edits' diffs by the result's message. */
 export interface CodeSession {
   id: string
+  /** Its last turns (as many as asked for: sessionTurns), and how many turns came before them. */
   messages: Message[]
+  earlier?: number
   diffs: Record<string, FileDiff>
   busy: boolean
 }
@@ -265,9 +267,21 @@ export const webChatsQuery = {
   staleTime: 15_000,
 }
 
+/**
+ * A long session is read from its end: its last turns (this many at first, more with each "Show earlier"). The number is
+ * kept beside the query, not in its key: what reads the session again after a turn reads as many.
+ */
+export const sessionTurns = { first: 30, step: 30 }
+let turnsWanted = sessionTurns.first
+
+/** Reads more of the session's earlier turns, the next time it is read; `reset`: a session opened afresh reads its last ones. */
+export function widenSession(reset = false) {
+  turnsWanted = reset ? sessionTurns.first : turnsWanted + sessionTurns.step
+}
+
 export const sessionQuery = {
   queryKey: ['code', 'session'] as const,
-  queryFn: ({ signal }: { signal: AbortSignal }) => api<CodeSession>('/api/session', { signal }),
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<CodeSession>(`/api/session?turns=${turnsWanted}`, { signal }),
 }
 
 /** What this folder sent before, newest first: the terminal's and the page's, without the terminal's own commands. */

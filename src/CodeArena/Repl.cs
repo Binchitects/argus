@@ -312,7 +312,7 @@ internal sealed class Repl(Runtime rt)
     /// </summary>
     private void LastTurns()
     {
-        var messages = rt.Session.Read(History.Messages).OfType<JsonObject>().ToList();
+        var messages = rt.Session.Read(d => History.Messages(d)).OfType<JsonObject>().ToList();
         // The person's messages, not Code Arena's own notes to the model.
         var asked = Enumerable.Range(0, messages.Count).Where(i => messages[i].Str("role") == "user" && messages[i]["details"]?["note"] is null).ToList();
         if (asked.Count == 0)
