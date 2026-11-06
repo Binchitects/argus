@@ -57,6 +57,8 @@ export interface Snapshot {
   complete: boolean
   why: string | null
   architectures: string[]
+  /** The precision its weights are stored at, as its config says: "NVFP4", "MXFP4", "FP8", "BF16"... */
+  precision?: string | null
   usedBy: string[]
 }
 

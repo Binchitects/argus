@@ -111,6 +111,29 @@ interface VllmAdvice {
   } | null
   estimate: { gpuWeights: number; gpuCache: number; gpuTotal: number; gpuBudget: number | null; ramTotal: number; fit: string; approximate: boolean } | null
   problems: { field: string; message: string; error: boolean }[]
+  /** How its weights run on its GPUs and engine: stored at FP4, FP8 or BF16, done natively or widened as they are read. */
+  precision?: PrecisionRun | null
+}
+
+/** How a snapshot's weights run on its GPUs (Precision.On): as stored, the math (W4A16...), its kernels and its memory. */
+export interface PrecisionRun {
+  weights: string
+  runs: string
+  kernel: string
+  native: boolean
+  gpu: string
+  summary: string
+  refused: boolean
+  weightBytes: number
+  bf16Bytes: number
+}
+
+/** What Admin → Models says of a snapshot's precision on its GPUs: "NVFP4 · W4A16 on H200 NVL (Hopper, sm_90) · 15.2 GB, about 52 GB at BF16". */
+function precisionLine(p: PrecisionRun): string {
+  if (p.refused) return `${p.weights} · does not run on ${p.gpu}`
+  const how = p.native ? `${p.runs}, natively` : `${p.runs}, weight-only`
+  const memory = p.weightBytes ? ` · weights ${bytes(p.weightBytes)}${p.bf16Bytes > p.weightBytes ? `, about ${bytes(p.bf16Bytes)} at BF16` : ''}` : ''
+  return `${p.weights} · ${how} on ${p.gpu}${memory}`
 }
 
 interface VllmForm {
@@ -290,7 +313,8 @@ export function VllmModelSection({
       {errors.file && <Alert variant="destructive">{errors.file}</Alert>}
       {shot && (
         <p className="text-sm text-muted-foreground">
-          {shot.repo} at {shot.revision.slice(0, 12)} · {bytes(shot.size)} · {shot.architectures.join(', ') || 'architecture not said'}
+          {shot.repo} at {shot.revision.slice(0, 12)} · {bytes(shot.size)}
+          {shot.precision ? ` · ${shot.precision}` : ''} · {shot.architectures.join(', ') || 'architecture not said'}
           {!shot.complete && ` · ${shot.why}`}
         </p>
       )}
@@ -427,6 +451,12 @@ export function VllmModelSection({
           Weights {bytes(e.gpuWeights)}, token cache {bytes(e.gpuCache)} ({e.approximate ? `rough: ${label} says its own as it starts` : 'all copies'}), {bytes(e.gpuTotal)} of the GPUs
           {e.gpuBudget ? ` (${bytes(e.gpuBudget)} there for models)` : ''}
           {e.ramTotal ? `; ${bytes(e.ramTotal)} of RAM asleep and in its CPU tier` : ''}.
+        </Alert>
+      )}
+      {a?.precision && !a.precision.refused && (
+        <Alert variant="info" title="Precision">
+          <span className="block">{precisionLine(a.precision)}.</span>
+          <span className="block text-muted-foreground">{a.precision.summary}</span>
         </Alert>
       )}
       {(a?.problems ?? [])

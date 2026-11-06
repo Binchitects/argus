@@ -89,9 +89,11 @@ public sealed record GpuReserve(int Gpu, string Name, long Bytes);
 /// <summary>
 /// One GPU: its index as its vendor's tool numbers it (nvidia-smi, rocm-smi), its name, its memory, who made it
 /// ("nvidia", "amd", "intel", "apple", or another), the backend engines drive it with ("cuda", "rocm", "vulkan",
-/// "sycl", "metal"), and its free memory when the source says it.
+/// "sycl", "metal"), its free memory when the source says it, and an NVIDIA GPU's compute capability ("9.0") when its probe
+/// says it (<see cref="Precision.ComputeOf"/> knows the common ones by name otherwise).
 /// </summary>
-public sealed record GpuDevice(int Index, string Name, long Total, long Reserved, string Vendor = "nvidia", string Backend = "cuda", long? Free = null);
+public sealed record GpuDevice(int Index, string Name, long Total, long Reserved, string Vendor = "nvidia", string Backend = "cuda", long? Free = null,
+    string? Compute = null);
 
 public sealed record Bounds(int Min, int Max);
 
@@ -141,8 +143,10 @@ public sealed record KeptPlan(IReadOnlyList<ModelProblem> Problems, IReadOnlyLis
 /// <summary>A setting that cannot be used (an error), or one to know about (a warning).</summary>
 public sealed record ModelProblem(string Field, string Message, bool Error);
 
+/// <param name="Precision">How a snapshot's weights run on its GPUs and engine (FP4, FP8, BF16...); null for llama.cpp's GGUF files.</param>
 public sealed record ModelAdvice(
-    ModelProfile Profile, ModelLimits? Limits, ModelRecommendation? Recommended, MemoryEstimate? Estimate, IReadOnlyList<ModelProblem> Problems, Hardware? Hardware)
+    ModelProfile Profile, ModelLimits? Limits, ModelRecommendation? Recommended, MemoryEstimate? Estimate, IReadOnlyList<ModelProblem> Problems, Hardware? Hardware,
+    PrecisionRun? Precision = null)
 {
     public ModelProblem? FirstError => Problems.FirstOrDefault(p => p.Error);
 }

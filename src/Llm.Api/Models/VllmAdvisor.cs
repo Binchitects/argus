@@ -13,10 +13,11 @@ namespace Llm.Api.Models;
 /// <param name="StatePerSequence">What each answer keeps whatever its length, in bytes: sliding windows (at fp8) and linear layers' state (float32).</param>
 /// <param name="Approximate">An attention vLLM sizes in its own way (compressed, sparse): read vLLM's reported capacity once it runs.</param>
 /// <param name="GgufParts">A GGUF file's parts (1: one file); 0: a snapshot.</param>
+/// <param name="Checkpoint">The precision a snapshot's weights are stored at (NVFP4, MXFP4, FP8, BF16...); null for a GGUF file.</param>
 public sealed record VllmProfile(
     string? Architecture, string? ModelType, int Layers, int FullLayers, int SlidingLayers, int LinearLayers, int CompressedLayers,
     int AttentionHeads, int KvHeads, int HeadDim, int? SlidingWindow, int TrainedContext, long WeightBytes, long KvPerToken, long StatePerSequence,
-    int? Experts, int MtpLayers, bool Vision, string? Quantization, bool Approximate, int GgufParts = 0);
+    int? Experts, int MtpLayers, bool Vision, string? Quantization, bool Approximate, int GgufParts = 0, CheckpointPrecision? Checkpoint = null);
 
 /// <summary>
 /// The vLLM counterpart of <see cref="ModelAdvisor"/>: which GPUs and tensor parallel size a model takes on this machine
@@ -91,7 +92,7 @@ public static class VllmAdvisor
         {
             return null;
         }
-        return c is null ? null : Profile(c, WeightBytes(dir));
+        return c is null ? null : Profile(c, WeightBytes(dir)) with { Checkpoint = Precision.Of(c, dir) };
     }
 
     /// <summary>
@@ -222,7 +223,7 @@ public static class VllmAdvisor
         var q = (config["quantization_config"] ?? t["quantization_config"])?["quant_method"]?.GetValue<string>();
         return new VllmProfile((config["architectures"] as JsonArray)?.FirstOrDefault()?.GetValue<string>(), (t["model_type"] ?? config["model_type"])?.GetValue<string>(),
             layers, full, sliding, linear, compressed, heads, kvHeads, headDim, window > 0 ? window : null, Get("max_position_embeddings", 32768),
-            weightBytes, perToken, state, experts > 0 ? experts : null, mtp, config["vision_config"] is JsonObject, q, approximate);
+            weightBytes, perToken, state, experts > 0 ? experts : null, mtp, config["vision_config"] is JsonObject, q, approximate, Checkpoint: Precision.Of(config));
     }
 
     /// <summary>Bytes an element of the cache takes for vLLM's --kv-cache-dtype.</summary>
@@ -349,6 +350,36 @@ public static class VllmAdvisor
     /// </summary>
     public static ModelAdvice Advise(LocalModel m, VllmProfile p, Hardware? hw, IReadOnlyDictionary<int, long>? others = null,
         IReadOnlyDictionary<int, long>? placed = null)
+    {
+        var advice = AdviseFit(m, p, hw, others, placed);
+        if (hw is null || p.GgufParts > 0)
+        {
+            return advice;
+        }
+        // How its weights run on its GPUs (those it names, else every one its engine runs on: a proposal is some of them).
+        var usable = GpuPlan.DevicesOf(hw).Where(d => EngineKinds.Of(m.EngineKind)?.Backends.Contains(d.Backend) ?? false).ToList();
+        var named = Hardware.ParseDevices(m.Devices) is { Count: > 0 } ids ? usable.Where(d => ids.Contains(d.Index)).ToList() : [];
+        var checkpoint = p.Checkpoint ?? Precision.None;
+        if (Precision.On(checkpoint, m.EngineKind, named.Count > 0 ? named : usable) is not { } run)
+        {
+            return advice;
+        }
+        run = run with { WeightBytes = p.WeightBytes, Bf16Bytes = checkpoint.Bits < 16 ? (long)(p.WeightBytes * 16 / checkpoint.Bits) : p.WeightBytes };
+        var problems = advice.Problems.ToList();
+        if (run.Refused)
+        {
+            problems.Add(new("file", run.Summary, true));
+        }
+        // A checkpoint stored quantised runs as it is stored: another method on top of it fails as it loads.
+        if (checkpoint.Method is { } method && m.Quantization is { Length: > 0 } q && !string.Equals(q, method, StringComparison.OrdinalIgnoreCase)
+            && !(checkpoint.Fp4 && q is "modelopt_fp4" or "mxfp4" or "compressed-tensors"))
+        {
+            problems.Add(new("quantization", $"This snapshot is stored as {checkpoint.Label} ({method}): leave Quantisation empty, and the engine reads it as it is.", true));
+        }
+        return advice with { Problems = problems, Precision = run };
+    }
+
+    private static ModelAdvice AdviseFit(LocalModel m, VllmProfile p, Hardware? hw, IReadOnlyDictionary<int, long>? others, IReadOnlyDictionary<int, long>? placed)
     {
         var problems = new List<ModelProblem>();
         var inv = CultureInfo.InvariantCulture;

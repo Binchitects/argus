@@ -73,6 +73,31 @@ describe('admin models: vLLM', () => {
     expect(sent).toMatchObject({ name: 'gpt-oss-120b', engineKind: 'vllm', file: 'hf/openai/gpt-oss-120b@main', devices: '2,3', replicas: 2, sleep: false, fallback: 'Qwen', kvType: 'fp8', maxOutput: 8192 })
   })
 
+  it("says how an FP4 snapshot's weights run on its GPUs and what memory they take", async () => {
+    const fp4 = [{ ...snapshots[0], path: 'hf/nvidia/flash-nvfp4@r', repo: 'nvidia/Qwen3.8-Flash-Next-NVFP4', precision: 'NVFP4 + FP8' }]
+    const precision = {
+      weights: 'NVFP4 + FP8', runs: 'W4A16', kernel: 'FP4 Marlin', native: false, gpu: 'NVIDIA H200 NVL (Hopper, sm_90)',
+      summary: 'NVFP4 + FP8 weights on NVIDIA H200 NVL (Hopper, sm_90), which has no FP4 tensor cores: vLLM keeps them 4-bit in memory and widens them as it reads them.',
+      refused: false, weightBytes: 116e9, bf16Bytes: 412e9,
+    }
+    fakeApi(admin, {
+      'GET /api/admin/models': () => ({ json: { engine: engine(), small: null, models } }),
+      'GET /api/admin/models/library': () => ({ json: [] }),
+      'GET /api/admin/models/library/snapshots': () => ({ json: fp4 }),
+      'GET /api/admin/models/media/files': () => ({ json: [] }),
+      'POST /api/admin/models/advice': () => ({ json: { ...advice, precision } }),
+    })
+    renderApp('/admin/models')
+    await userEvent.click(await screen.findByRole('button', { name: 'Add a model' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add a model' })
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'File or model' }))
+    await userEvent.click(await screen.findByRole('option', { name: /flash-nvfp4@r · .* · vLLM/ }))
+    const form = await within(dialog).findByRole('form', { name: 'The vLLM model' })
+    expect(await within(form).findByText(/^NVFP4 \+ FP8 · W4A16, weight-only on NVIDIA H200 NVL \(Hopper, sm_90\) · weights 108\.0 GiB, about 383\.7 GiB at BF16\.$/)).toBeInTheDocument()
+    expect(within(form).getByText(/which has no FP4 tensor cores/)).toBeInTheDocument()
+    expect(within(form).getByText(/· NVFP4 \+ FP8 ·/)).toBeInTheDocument()
+  })
+
   it("moves a llama.cpp model to vLLM: its snapshot chosen in its own dialog, saved under its name with vLLM's defaults", async () => {
     const calls = fakeApi(admin, {
       'GET /api/admin/models': () => ({ json: { engine: engine(), small: null, models } }),

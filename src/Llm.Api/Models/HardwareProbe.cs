@@ -238,7 +238,7 @@ public sealed class HardwareProbe(IHttpClientFactory http, IOptions<StackOptions
 
     /// <summary>
     /// The machine as services/gpu-probe.py writes it: {"ram_bytes", "gpus": [{"index", "name", "vendor", "backend",
-    /// "total_bytes", "free_bytes", "reserved_bytes"}]}. No GPU listed: a machine with none. Null when it is not that.
+    /// "total_bytes", "free_bytes", "reserved_bytes", "compute"}]}. No GPU listed: a machine with none. Null when it is not that.
     /// </summary>
     public static Hardware? FromFile(string json, EngineOptions o)
     {
@@ -256,7 +256,7 @@ public sealed class HardwareProbe(IHttpClientFactory http, IOptions<StackOptions
             var devices = listed
                 .Select((g, i) => new GpuDevice(g.TryGetProperty("index", out var x) && x.ValueKind == JsonValueKind.Number ? x.GetInt32() : i,
                     Str(g, "name") ?? "GPU", Num(g, "total_bytes"), Num(g, "reserved_bytes"), Str(g, "vendor") ?? "other", Str(g, "backend") ?? "vulkan",
-                    g.TryGetProperty("free_bytes", out var f) && f.ValueKind == JsonValueKind.Number ? f.GetInt64() : null))
+                    g.TryGetProperty("free_bytes", out var f) && f.ValueKind == JsonValueKind.Number ? f.GetInt64() : null, Str(g, "compute")))
                 .Where(d => d.Total > 0).OrderBy(d => d.Index).ToList();
             var ram = Num(root, "ram_bytes");
             return devices.Count == 0

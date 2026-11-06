@@ -261,13 +261,17 @@ public static class ModelEndpoints
         }));
     }
 
-    /// <summary>The Hugging Face snapshots in the library, for vLLM and SGLang models: each with its size, whether it is whole, and the models using it.</summary>
+    /// <summary>
+    /// The Hugging Face snapshots in the library, for vLLM and SGLang models: each with its size, whether it is whole, the
+    /// precision its weights are stored at (NVFP4, MXFP4, FP8, BF16...), and the models using it.
+    /// </summary>
     private static async Task<IResult> SnapshotsAsync(ModelLibrary library, AppDbContext db, CancellationToken ct)
     {
         var used = await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.Vllm || m.EngineKind == EngineKinds.Sglang).Select(m => new { m.Name, m.File, m.DraftHead }).ToListAsync(ct);
         return Results.Ok(library.Snapshots().Select(s => new
         {
             s.Path, s.Repo, s.Revision, s.Size, s.Complete, s.Why, s.Architectures,
+            precision = s.Complete ? VllmAdvisor.Read(library.FullPath(s.Path))?.Checkpoint?.Label : null,
             usedBy = used.Where(u => u.File == s.Path || u.DraftHead == s.Path).Select(u => u.Name),
         }));
     }
