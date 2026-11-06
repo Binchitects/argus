@@ -24,8 +24,8 @@ public sealed class CompactionTests : IDisposable
     private static List<JsonObject> Conversation(Runtime rt)
     {
         var turns = new List<JsonObject>();
-        var empty = rt.Agent.Estimate();
-        for (var i = 0; rt.Agent.Estimate() - empty < rt.Model.Context * 2 / 5; i++)
+        // To 60% of the window in all: the system prompt and the tools' share grows as they do, the test's middle stays.
+        for (var i = 0; rt.Agent.Estimate() < rt.Model.Context * 3 / 5; i++)
         {
             var pair = new[]
             {
