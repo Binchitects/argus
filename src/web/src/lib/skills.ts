@@ -1,4 +1,4 @@
-import { api } from './api'
+import { api, ApiError } from './api'
 
 export type SkillSharing = 'Personal' | 'Groups' | 'Company'
 
@@ -38,6 +38,8 @@ export interface SkillItem {
   version?: number
   /** Learned from a chat or a Code Arena session, rather than written. */
   learned?: boolean
+  /** The files beside its SKILL.md (an imported skill's references, templates, scripts), by their paths. */
+  files?: string[]
 }
 
 /** How one of the person's skills was learned or got better: waiting for them, applied (with Undo), or undone. */
@@ -157,4 +159,88 @@ export function slashQuery(text: string): string | null {
 export function slashItems(query: string, skills: SkillItem[], canCompact: boolean): SlashItem[] {
   const commands: SlashItem[] = canCompact && 'compact'.startsWith(query) ? [{ key: 'cmd:compact', name: 'compact', title: 'Compact this chat', hint: 'Summarizes the older messages', command: 'compact' }] : []
   return [...commands, ...matchSkills(skills, query).map((s) => ({ key: s.id, name: s.name, title: s.title, hint: sourceLabel(s), skill: s }))]
+}
+
+/** The files of skills chosen to import: a .zip or a SKILL.md as they are, a folder's files by their paths in it. */
+export function importForm(files: File[], choices?: SkillImportChoice[]): FormData {
+  const form = new FormData()
+  for (const f of files) form.append('files', f, f.webkitRelativePath || f.name)
+  if (choices) form.append('choices', JSON.stringify(choices))
+  return form
+}
+
+/** One skill of an import, as the preview shows it: what it brings, and what is in the way. */
+export interface SkillPreview {
+  folder: string
+  name: string
+  title: string
+  description: string
+  parameters: number
+  files: { path: string; bytes: number }[]
+  bytes: number
+  /** Its files left out (not text, too large), each with why. */
+  leftOut: string[]
+  /** Why it cannot come in at all (no instructions, too large, a safeguard). */
+  problem: string | null
+  /** Why its name is no slash name: it comes in only renamed. */
+  nameProblem: string | null
+  /** The person's own skill of its name (in Code Arena, the folder it is in): replace it, rename the new one, or skip it. */
+  clash: { id?: string; title: string; version?: number; origin?: string | null } | null
+  /** Where another skill of its name comes from (group, company, builtin, plugin; Code Arena's sources): the new one comes first. */
+  shadows: string | null
+  /** A free name to rename it to. */
+  suggested: string
+  /** The safeguards masked part of it. */
+  masked: boolean
+}
+
+export interface SkillImportPreview {
+  skills: SkillPreview[]
+  /** What was in the upload but in no skill (or not a path inside its folder). */
+  leftOut: string[]
+  /** How many more skills the person may have (Arena's limit; none on this computer). */
+  room?: number
+  /** What the preview could not do (Code Arena not signed in: secrets looked for there only). */
+  note?: string | null
+}
+
+export type SkillImportAction = 'import' | 'replace' | 'rename' | 'skip'
+
+export interface SkillImportChoice {
+  folder: string
+  action: SkillImportAction
+  name?: string
+}
+
+export interface SkillImportResult {
+  imported: { folder: string; id: string; name: string; replaced: boolean }[]
+  skipped: { folder: string; name: string; reason: string }[]
+}
+
+export const previewImport = (files: File[]) => api<SkillImportPreview>('/api/skills/import/preview', { body: importForm(files) })
+export const runImport = (files: File[], choices: SkillImportChoice[]) => api<SkillImportResult>('/api/skills/import', { body: importForm(files, choices) })
+
+/** What an import does with a skill unless the person chooses otherwise: brings it in when nothing is in the way, else leaves it. */
+export function defaultAction(s: SkillPreview): SkillImportAction {
+  if (s.problem) return 'skip'
+  return s.clash || s.nameProblem ? 'skip' : 'import'
+}
+
+/** Skills exported as files: a .zip of their folders, or one alone as its SKILL.md (md); named as the server names it. */
+export async function exportSkills(ids: string[], format: 'zip' | 'md' = 'zip'): Promise<{ blob: Blob; fileName: string }> {
+  const res = await fetch(`/api/skills/export?ids=${ids.map(encodeURIComponent).join(',')}${format === 'md' ? '&format=md' : ''}`, {
+    credentials: 'same-origin',
+    headers: { 'X-Requested-With': 'fetch' },
+  })
+  if (!res.ok) {
+    const said = (await res.json().catch(() => ({}))) as { status?: string; error?: string }
+    throw new ApiError(res.status, said.status ?? String(res.status), said.error ?? `The export failed (HTTP ${res.status}).`, said)
+  }
+  const named = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(res.headers.get('Content-Disposition') ?? '')?.[1]
+  return { blob: await res.blob(), fileName: named ? decodeURIComponent(named) : format === 'md' ? 'SKILL.md' : 'skills.zip' }
+}
+
+/** "12 KB": a size in a few characters. */
+export function sizeLabel(bytes: number): string {
+  return bytes < 1000 ? `${bytes} B` : bytes < 1_000_000 ? `${Math.round(bytes / 100) / 10} KB` : `${Math.round(bytes / 100_000) / 10} MB`
 }

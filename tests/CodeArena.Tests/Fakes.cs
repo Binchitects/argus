@@ -605,7 +605,8 @@ public sealed class Harness : IDisposable
     {
         Root = Directory.CreateTempSubdirectory("code-arena-").FullName;
         Work = Directory.CreateDirectory(Path.Combine(Root, "work")).FullName;
-        Paths = new AppPaths(Path.Combine(Root, "config"), Path.Combine(Root, "data"));
+        // The person's home of its own: ~/.code-arena/skills and ~/.claude/skills are read from it.
+        Paths = new AppPaths(Path.Combine(Root, "config"), Path.Combine(Root, "data")) { Home = Path.Combine(Root, "home") };
         Directory.CreateDirectory(Paths.ConfigDir);
         var json = new JsonObject
         {
@@ -843,6 +844,13 @@ public sealed class FakeChats
     /// </summary>
     public List<JsonObject> SkillsMade { get; } = [];
     public List<JsonObject> SkillsChanged { get; } = [];
+
+    /// <summary>
+    /// What Code Arena sent to import skills (POST /api/code-arena/skills/import), previews too; a folder named in
+    /// <see cref="SkillsRefused"/> is refused as Arena's safeguards refuse one. Those imported are the person's from then on.
+    /// </summary>
+    public List<JsonObject> SkillsImported { get; } = [];
+    public Dictionary<string, string> SkillsRefused { get; } = [];
 
     /// <summary>
     /// One of the person's own skills, as /api/code-arena/skills brings it: its SKILL.md as Arena writes it (in double
@@ -1320,6 +1328,48 @@ public sealed class FakeChats
             ctx.Response.StatusCode = skill is not null ? 200 : making ? 409 : 404;
             ctx.Response.ContentType = "application/json";
             await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes((skill ?? new JsonObject { ["status"] = "name", ["error"] = making ? $"You have a skill /{name} already." : $"You have no skill /{name}." }).ToJsonString()));
+            return;
+        }
+        if (parts is ["skills", "import"] && method == "POST")
+        {
+            // Arena's import: a preview says what it would do (its safeguards' refusals), an import makes them the person's own.
+            var json = (JsonNode.Parse(body) as JsonObject)!;
+            var preview = json["preview"]?.GetValue<bool>() == true;
+            var answer = new JsonObject();
+            lock (_gate)
+            {
+                SkillsImported.Add(json);
+                var mine = (ArenaSkills ?? []).OfType<JsonObject>().Where(s => s["mine"]?.GetValue<bool>() == true).Select(s => s["name"]!.GetValue<string>()).ToHashSet();
+                var looked = new JsonArray();
+                var imported = new JsonArray();
+                var skipped = new JsonArray();
+                foreach (var s in (json["skills"] as JsonArray ?? []).OfType<JsonObject>())
+                {
+                    var folder = s["folder"]!.GetValue<string>();
+                    var md = s["files"]!["SKILL.md"]!.GetValue<string>();
+                    var name = System.Text.RegularExpressions.Regex.Match(md, "name: *([^\n]+)") is { Success: true } m ? m.Groups[1].Value.Trim() : folder;
+                    var problem = SkillsRefused.TryGetValue(folder, out var why) ? "The safeguards refused " + why : null;
+                    looked.Add(new JsonObject { ["folder"] = folder, ["name"] = name, ["problem"] = problem, ["clash"] = mine.Contains(name) ? new JsonObject { ["title"] = name } : null, ["suggested"] = name + "-2" });
+                    var choice = (json["choices"] as JsonArray ?? []).OfType<JsonObject>().FirstOrDefault(c => c["folder"]?.GetValue<string>() == folder);
+                    var action = choice?["action"]?.GetValue<string>() ?? (mine.Contains(name) ? "skip" : "import");
+                    if (problem is not null || action == "skip")
+                    {
+                        skipped.Add(new JsonObject { ["folder"] = folder, ["name"] = name, ["reason"] = problem ?? "Skipped." });
+                        continue;
+                    }
+                    var made = action == "rename" ? choice!["name"]!.GetValue<string>() : name;
+                    imported.Add(new JsonObject { ["folder"] = folder, ["name"] = made, ["replaced"] = action == "replace" });
+                    if (!preview)
+                    {
+                        ArenaSkills = [.. (ArenaSkills ?? []).OfType<JsonObject>().Where(x => !(x["mine"]?.GetValue<bool>() == true && x["name"]!.GetValue<string>() == made)).Select(x => x.DeepClone()),
+                            OwnSkill(made, "Imported", "Imported instructions.")];
+                    }
+                }
+                answer = preview ? new JsonObject { ["skills"] = looked, ["leftOut"] = new JsonArray(), ["room"] = 100 } : new JsonObject { ["imported"] = imported, ["skipped"] = skipped };
+            }
+            ctx.Response.StatusCode = 200;
+            ctx.Response.ContentType = "application/json";
+            await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes(answer.ToJsonString()));
             return;
         }
         if (parts is ["skills", "learn"] && method == "POST")

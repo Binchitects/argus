@@ -123,6 +123,7 @@ public static class CodeArenaSync
         g.MapGet("/settings", SettingsAsync);
         g.MapPost("/skills", MakeSkillAsync);
         g.MapPut("/skills/{name}", ChangeSkillAsync);
+        g.MapPost("/skills/import", ImportSkillsAsync);
         g.MapGet("/security", SecurityAsync);
         g.MapGet("/me", MeAsync);
         g.MapPost("/sign-out", SignOutAsync);
@@ -269,8 +270,43 @@ public static class CodeArenaSync
     private static object Brought(Skill s, AppUser me) => new
     {
         s.Name, s.Description, Plugin = (string?)null, Version = s.Version.ToString(System.Globalization.CultureInfo.InvariantCulture),
-        files = new Dictionary<string, string> { ["SKILL.md"] = SkillLibrary.ToSkillMd(s) }, mine = s.UserId == me.Id,
+        files = SkillTransfer.FolderOf(s), mine = s.UserId == me.Id,
     };
+
+    /// <summary>Skills Code Arena imports for the person (the IDE's Import, /skills import --mine): each folder's files, and what to do with each.</summary>
+    public sealed record SkillsImported(SkillFolder[]? Skills, SkillImportChoice[]? Choices, bool Preview = false);
+
+    /// <summary>
+    /// Skills imported from Code Arena as the person's own in Arena, as the Skills page imports them (the same checks, the
+    /// safeguards, the choices for a name they have): with preview, only what the import would do.
+    /// </summary>
+    private static async Task<IResult> ImportSkillsAsync(SkillsImported body, HttpContext http, McpPeople people, AccessService access, AppDbContext db,
+        Safeguards.Safeguards safeguards, Identity.Audit audit)
+    {
+        var (me, refusal) = await CallerAsync(http, people);
+        if (me is null)
+        {
+            return refusal!;
+        }
+        var ct = http.RequestAborted;
+        if (!await access.MayAsync(me, Core.Access.Permissions.SkillsCreate, ct))
+        {
+            return AuthEndpoints.Problem(403, "feature", "Making skills is not among what you may do: ask an admin.");
+        }
+        var folders = (body.Skills ?? []).Where(f => f.Files is not null).ToList();
+        if (folders.Count is 0 or > SkillTransfer.MaxSkills || folders.Any(f => !f.Files.ContainsKey(SkillTransfer.SkillMd)))
+        {
+            return AuthEndpoints.Problem(400, "skills", $"Send 1 to {SkillTransfer.MaxSkills} skills, each a folder with its SKILL.md.");
+        }
+        if (folders.Sum(f => f.Files.Sum(x => (long)System.Text.Encoding.UTF8.GetByteCount(x.Value))) > SkillTransfer.MaxUpload
+            || folders.Any(f => f.Files.Any(x => SkillTransfer.Clean(x.Key) != x.Key && x.Key != SkillTransfer.SkillMd)))
+        {
+            return AuthEndpoints.Problem(400, "skills", $"An import is at most {SkillTransfer.MaxUpload / 1024 / 1024} MB, each file inside its skill's folder.");
+        }
+        return body.Preview
+            ? Results.Ok(await SkillEndpoints.PreviewAsync(me, folders, [], access, db, safeguards, ct))
+            : Results.Ok(await SkillEndpoints.ImportAsync(me, folders, body.Choices ?? [], access, db, safeguards, audit, ct));
+    }
 
     /// <summary>A skill Code Arena makes or changes: its slash name, when to use it, its instructions, title and parameters.</summary>
     public sealed record SkillMade(string? Name, string? Description, string? Instructions, string? Title = null, SkillParameter[]? Parameters = null);

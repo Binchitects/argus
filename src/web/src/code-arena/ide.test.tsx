@@ -2697,6 +2697,45 @@ describe('Code Arena, the IDE', () => {
     await waitFor(() => expect(calls.some((c) => c.path === '/api/file?path=.arena%2Fskills%2Frelease%2FSKILL.md')).toBe(true))
   })
 
+  it('says where each skill was read from, exports one, and imports skills for the project after a preview', async () => {
+    Object.defineProperty(URL, 'createObjectURL', { value: () => 'blob:skills', configurable: true })
+    Object.defineProperty(URL, 'revokeObjectURL', { value: () => {}, configurable: true })
+    const skills = [
+      { name: 'ship', description: 'How we ship', source: 'project', origin: '.claude/skills', path: '.claude/skills/ship/SKILL.md' },
+      { name: 'tidy', description: 'Tidy my notes', source: 'person', origin: '~/.claude/skills', path: null },
+    ]
+    const { calls } = backend({
+      'GET /api/skills': () => ({ json: { skills, commands: [], mineInArena: false } }),
+      'GET /api/skills/export': () => ({ json: {} }),
+      'POST /api/skills/import/preview': () => ({
+        json: {
+          skills: [{ folder: 'ship', name: 'ship', title: 'ship', description: 'Theirs', parameters: 0, files: [], bytes: 40, leftOut: [], problem: null, nameProblem: null, clash: { title: 'ship', origin: '.claude/skills' }, shadows: null, suggested: 'ship-2', masked: false }],
+          leftOut: [], note: 'Not signed in to Arena: only looked for secrets here, not through Arena\'s safeguards.',
+        },
+      }),
+      'POST /api/skills/import': () => ({ json: { imported: [{ folder: 'ship', name: 'ship', replaced: true }], skipped: [] } }),
+    })
+    renderIde()
+    await userEvent.click(await screen.findByRole('button', { name: 'Skills' }))
+    const panel = await screen.findByRole('complementary', { name: 'Skills' })
+    expect(await within(panel).findByText('~/.claude/skills')).toBeInTheDocument()
+    expect(within(panel).getByText('.claude/skills')).toBeInTheDocument()
+    await userEvent.click(within(panel).getByRole('button', { name: 'Export /tidy' }))
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/skills/export?names=tidy')).toBe(true))
+
+    await userEvent.click(within(panel).getByRole('button', { name: 'More skill actions' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Import Skills…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Import skills' })
+    expect(within(dialog).getByRole('radio', { name: /For this project/ })).toBeChecked()
+    await userEvent.upload(within(dialog).getByLabelText('A .zip of skills or a SKILL.md'), new File(['zip'], 'skills.zip', { type: 'application/zip' }))
+    const row = await within(dialog).findByRole('listitem', { name: '/ship' })
+    expect(within(row).getByText(/There is a \/ship in .claude\/skills already/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/only looked for secrets here/)).toBeInTheDocument()
+    await userEvent.click(within(row).getByRole('radio', { name: 'Replace' }))
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Import 1 skill' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/skills/import')?.body).toEqual({ uploads: [{ path: 'skills.zip', data: 'emlw' }], scope: 'project', choices: [{ folder: 'ship', action: 'replace' }] }))
+  })
+
   it('runs /clear with one Enter, and sends a whole skill name with one Enter, while the / menu shows', async () => {
     const skills = [{ name: 'ide-proj', description: 'The project’s', source: 'project', path: '.arena/skills/ide-proj/SKILL.md' }]
     const { calls } = backend({

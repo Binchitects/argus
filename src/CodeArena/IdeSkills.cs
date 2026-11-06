@@ -52,6 +52,8 @@ internal static partial class IdeSkills
         ["name"] = s.Name,
         ["description"] = s.Description,
         ["source"] = Whose(rt, s),
+        // The folder it was read from, as the Skills view says it: .claude/skills, ~/.claude/skills, config, arena…
+        ["origin"] = Whose(rt, s) == "person" && s.Source == "arena" ? "arena" : s.Origin,
         ["path"] = PathOf(rt, s),
     };
 
@@ -63,7 +65,8 @@ internal static partial class IdeSkills
     private static string? PathOf(Runtime rt, Skill s) => Whose(rt, s) switch
     {
         "project" => rt.Workspace.Show(Path.Combine(s.Folder, "SKILL.md")),
-        "person" when Name().IsMatch(Path.GetFileName(s.Folder)) => $"user:skills/{Path.GetFileName(s.Folder)}/SKILL.md",
+        // Of the config folder, or theirs in Arena: those in ~/.code-arena and ~/.claude are not the editor's user files.
+        "person" when (s.Source == "arena" || s.Origin == "config") && Name().IsMatch(Path.GetFileName(s.Folder)) => $"user:skills/{Path.GetFileName(s.Folder)}/SKILL.md",
         _ => null,
     };
 
@@ -115,7 +118,7 @@ internal static partial class IdeSkills
         Directory.CreateDirectory(folder);
         File.WriteAllText(Path.Combine(folder, "SKILL.md"), $"---\nname: {name}\ndescription: {description}\n---\n{Steps(name)}\n");
         rt.ReloadExtensions();
-        return Listed(rt, new Skill(name, description, "", folder, scope!));
+        return Listed(rt, new Skill(name, description, "", folder, scope!, scope == "project" ? ".arena/skills" : "config"));
     }
 
     /// <summary>
@@ -204,22 +207,23 @@ internal static partial class IdeSkills
         return new JsonObject { ["name"] = name, ["version"] = Version(File.ReadAllText(InArena(rt, name) ?? kept)) };
     }
 
-    /// <summary>Asks Arena with the person's key; its refusal is said as it words it.</summary>
-    private static async Task ArenaAsync(Runtime rt, HttpMethod method, string path, JsonObject body, CancellationToken ct)
+    /// <summary>Asks Arena with the person's key: its answer; its refusal is said as it words it.</summary>
+    internal static async Task<JsonObject?> ArenaAsync(Runtime rt, HttpMethod method, string path, JsonObject body, CancellationToken ct, int seconds = 15)
     {
         using var req = ChatSync.Request(method, rt.Config.Url!.TrimEnd('/') + path, rt.Config.ApiKey!, body);
         using var within = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        within.CancelAfter(TimeSpan.FromSeconds(15));
+        within.CancelAfter(TimeSpan.FromSeconds(seconds));
         try
         {
             using var res = await rt.Http.SendAsync(req, within.Token);
+            var answer = Json.ParseObject(await res.Content.ReadAsStringAsync(within.Token));
             if (!res.IsSuccessStatusCode)
             {
-                var answer = Json.ParseObject(await res.Content.ReadAsStringAsync(within.Token));
                 var status = (int)res.StatusCode;
                 // Arena's 401 is about the key: the IDE's own token is fine.
                 throw new IdeError(status is 401 ? 403 : status >= 500 ? 502 : status, answer?.Str("status") ?? "arena", $"Arena: {answer?.Str("error") ?? $"HTTP {status}"}");
             }
+            return answer;
         }
         catch (Exception e) when (e is HttpRequestException || e is OperationCanceledException && !ct.IsCancellationRequested)
         {

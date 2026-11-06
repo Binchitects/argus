@@ -2553,6 +2553,52 @@ message, without starting Code Arena again.
   project's, your own and the plugins' of the same name win. One an Arena
   admin turned off is left out (from the next time Arena is asked, as above). A loaded skill names its parameters
   (`‹what›`) and says what each is, for the model to take from the request.
+- **Local skills.** Besides `.arena/skills`, the project's
+  `.code-arena/skills` (read first), Claude Code's `.claude/skills` and Qwen
+  Code's `.qwen/skills` are read; and yours in your home:
+  `~/.code-arena/skills` and Claude Code's `~/.claude/skills`, after the
+  config folder's `skills/`. A skill folder written for Claude Code works as
+  it is. The Skills view and `/skills` say where each was read from
+  (`.claude/skills`, `~/.claude/skills`…). With `CODE_ARENA_HOME` set, your
+  home's folders are not read: everything is in that folder.
+
+### Import and export skills
+
+Skills move as files in the folder format Claude Code uses: each skill a
+folder named after it, with its `SKILL.md` and the files beside it. It is the
+same format Arena's Skills page exports and imports
+([chat.md](chat.md#export-and-import-skills)).
+
+- **Export.** In the IDE's Skills view, **Export** on a skill's row saves it
+  as a `.zip` of its folder; **…** → **Export the project's and yours** or
+  **Export all** saves one `.zip` with a folder for each. In the terminal:
+  `/skills export NAME… [--to FILE]` (`NAME.zip`, or `skills.zip` for several,
+  in the working directory). Any skill the agent reads goes out, Arena's and
+  the built-in ones too.
+- **Import.** **…** → **Import Skills…** in the Skills view takes a `.zip`, a
+  `SKILL.md` or a folder (**Choose a folder**), **For this project** (into
+  `.arena/skills`: commit them to share them) or **For you** (your skills in
+  Arena when signed in to it, as the Skills page imports them, so the web
+  chat and every Code Arena have them; else the config folder's `skills/`).
+  A preview lists each skill with its files and what is in its way: a skill
+  of that name already (**Replace** it where it is, **Rename** the new one,
+  a free name filled in, or **Skip**), a name that will not do (only
+  **Rename**), or why it cannot come in. Nothing is overwritten that you did
+  not choose to replace. In the terminal: `/skills import PATH [--mine]`,
+  PATH a `.zip`, a `SKILL.md` or a folder (one skill's, or a skills folder
+  such as `~/.claude/skills`); a name taken is asked about (`r`eplace,
+  re`n`ame, `s`kip), or done as `--replace`, `--rename` or `--skip` says, and
+  skipped when the terminal cannot ask.
+- **Safeguards.** A file that holds a secret (a private key, a token of a
+  known shape) or is named as one that keeps them (`key.pem`, `.env`) never
+  comes in. Signed in to Arena, every import (for the project too) goes
+  through Arena's safeguards first, which keep nothing: what their rules
+  refuse stays out, with the rule's words. Not signed in, the preview says
+  only the secrets were looked for here.
+- **Limits**, as Arena's: 5 MB an import, 50 skills, 50 files beside each
+  `SKILL.md`, 200 KB a file, 1 MB a skill; text files only. Paths that lead
+  out of the folder and links are never followed. Importing into Arena needs
+  **Make skills** there, as making one does.
 
 ## Kept rules and the sandbox
 
@@ -2751,9 +2797,89 @@ The rest of the file: `"model"`, `"thinking"`, `"mode"`, `"context"`,
 `"allowedPaths"`, `"arenaTools": false` (no Arena MCP), `"argusTools": false`
 (no Argus MCP), `"toolChars"` (tools on demand, above), `"argusUrl"`, `"compactAt"`, `"compactTarget"`, `"gateway"`,
 `"mcpUrl"`, `"ca"`, `"autoCommit"`, `"planCritique"`, `"python"`, `"toolMode"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"window"`, `"completion"`, `"completionModel"`, `"completionTemplate"`, `"checkCommand"`, `"sandbox"`,
-`"sandboxNetwork"`, `"sandboxWritable"`, `"permissions"`, `"formatters"`, `"debugAdapters"` and
-`"languageServers"` (the IDE's: above). `ARENA_ARGUS_URL` in the environment gives Argus's address
+`"sandboxNetwork"`, `"sandboxWritable"`, `"permissions"`, `"formatters"`, `"debugAdapters"`,
+`"languageServers"` (the IDE's: above) and `"toolSettings"` (below). `ARENA_ARGUS_URL` in the environment gives Argus's address
 for one run.
+
+## Your own tools and the project's
+
+**Command tools.** A tool of your own is a JSON file: a command, and the JSON
+schema of what the model gives it. Yours are in the config folder's `tools/`
+and `~/.code-arena/tools/` (every project); the project's in
+`.code-arena/tools/` or `.arena/tools/` at its root (committed, for the team).
+
+```json
+{
+  "name": "deploy_preview",
+  "description": "Deploys this branch to a preview environment and says its address.",
+  "command": ["./scripts/deploy-preview.sh"],
+  "kind": "shell",
+  "timeout": 300,
+  "parameters": {
+    "type": "object",
+    "properties": { "env": { "type": "string", "enum": ["dev", "qa"] } },
+    "required": ["env"]
+  }
+}
+```
+
+- `command` is the program and its arguments, or a line for the shell
+  (`"make preview"`). The call's arguments go to it as JSON on its input, and
+  each as `ARENA_ARG_NAME` in its environment (`ARENA_ARG_ENV`); never on its
+  command line, so nothing the model writes becomes a command. It runs in the
+  project's root (yours: in the working directory), in the sandbox as
+  `run_shell` does; what it prints (30,000 characters at most) and its exit
+  code are the result. `timeout`: 1 to 600 seconds (120).
+- `kind` says how its calls ask, as the built-in tools of that kind do:
+  `read` never asks (and is offered in plan mode and to sub-agents), `edit`
+  asks as file edits do, `shell` (the default) as commands do. A name of a
+  built-in tool is not taken; the project's win over yours by name.
+- They are read again at each turn: one added or changed works from the
+  next message.
+
+**The project's MCP servers.** Claude Code's `.mcp.json` at the project's
+root (or `.arena/mcp.json`), in the shape of `"mcpServers"` above. The person's
+own of the same name wins. Their tools are `mcp__<server>__<tool>` and each
+call asks (what such a server says changes nothing is not taken for it).
+
+**Enabled per project.** A repository someone cloned must not run its own
+commands unasked: the project's tools and servers run only once you enable
+them for this project, in **Configure Tools** (the chat's header) or with
+`/tools enable NAME` in the terminal, and the session says which wait. The
+choice is kept on this computer, never in the project, with the tool's
+definition: a change to its command (or a server's) waits for you again.
+A server enabled connects from the next session. `/tools` lists those that
+wait, with their commands.
+
+## Tool settings
+
+As Arena's own tool customisation (Admin → Tools) does for the web chat,
+**Configure Tools** (the gear beside the chat's Tools) sets each tool of the
+session up: the built-in ones, Arena's and Argus's, the MCP servers' and your
+own and the project's.
+
+- **On or off.** A tool turned off is not offered to the model, and a call of
+  it is refused.
+- **How it asks you**: as its kind and the mode say (the default), **Ask
+  before each call** (in every mode, yolo too, with no "always"), or **Never
+  ask** (but plan mode still refuses what changes things, and a command
+  Laya flags still asks). One of Arena's tools that Arena's admins set to ask
+  first, and `stop_command`, cannot be set to never ask.
+- **What the model is told of it**: your words in place of its description.
+- **Its arguments**: **Always this** fixes one (the model is not offered it,
+  and every call gets your value); **A default** fills one the model leaves
+  out (its description says so).
+- **Kept for**: **Every project** (your `config.json`, `"toolSettings"`) or
+  **This project** (on this computer only, over your settings for every
+  project). In the terminal: `/tools set NAME on|off|ask|allow|default
+  [--here]`.
+- **The project's own** (`.arena/settings.json`, `"tools": {"NAME":
+  {"enabled": false}}` or `{"approval": "ask"}`) may only turn a tool off or
+  make it ask, for everyone who opens it; whatever else it says is not read.
+  Your settings do not undo it.
+- **Arena's tools** are as Arena's admins set them: one turned off there is
+  not served, one set to ask first asks here too, and its title and
+  description are Arena's unless you give your own words here.
 
 ## Building it (admins)
 

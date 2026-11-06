@@ -37,6 +37,88 @@ internal sealed partial class Runtime : IAsyncDisposable
     public SessionStore Session { get; private set; } = null!;
     /// <summary>The person's and the project's own commands, sub-agents and skills.</summary>
     public Extensions Extensions { get; private set; } = new();
+
+    /// <summary>The settings of the tools: the person's, the person's in this project, the project's (Configure Tools, /tools set).</summary>
+    public ToolSettings ToolSettings { get; private set; } = new();
+    /// <summary>What the person keeps for this project on this computer: the project's tools they enabled, their settings here.</summary>
+    public ProjectToolState? ProjectTools { get; private set; }
+    /// <summary>The command tools of the person's and the project's own, as read last (the project's enabled or not).</summary>
+    public IReadOnlyList<OwnToolFile> OwnToolFiles { get; private set; } = [];
+    /// <summary>The project's MCP servers (.mcp.json, .arena/mcp.json), enabled here or not.</summary>
+    public IReadOnlyList<ProjectServer> ProjectServers { get; private set; } = [];
+    /// <summary>The built-in tools' names: an own tool of one of them is not taken.</summary>
+    private HashSet<string> _builtIn = [];
+
+    /// <summary>Whether the person enabled the project's tool (as it is defined now) for this project; theirs are always on.</summary>
+    public bool IsEnabled(OwnToolFile t) => t.Source == "person" || ProjectTools?.Enabled("tool:" + t.Name, t.Stamp) == true;
+
+    public bool IsEnabled(ProjectServer s) => ProjectTools?.Enabled("mcp:" + s.Server.Name, s.Stamp) == true;
+
+    /// <summary>The own command tools that are on, read again: the person's, and the project's enabled here; one of a built-in's name is left out.</summary>
+    private List<ToolDef> OwnToolsOn(bool warn = false)
+    {
+        var (files, problems) = OwnTools.Load(Env.Paths, ProjectRoot.Length > 0 ? ProjectRoot : Workspace.Root);
+        OwnToolFiles = files;
+        if (warn)
+        {
+            foreach (var problem in problems)
+            {
+                Ui.Warn(problem);
+            }
+            foreach (var clash in files.Where(f => _builtIn.Contains(f.Name)))
+            {
+                Ui.Warn($"{clash.File}: {clash.Name} is a built-in tool's name: left out.");
+            }
+        }
+        return [.. files.Where(f => !_builtIn.Contains(f.Name) && IsEnabled(f)).Select(f => OwnTools.Def(f, ProjectRoot.Length > 0 ? ProjectRoot : Workspace.Root))];
+    }
+
+    /// <summary>The own command tools read again (a file added, changed or taken away since): the tool box changes only when they did.</summary>
+    public void RefreshOwnTools()
+    {
+        if (Tools is null)
+        {
+            return;
+        }
+        var before = string.Join('\n', OwnToolFiles.Select(f => f.Stamp + (IsEnabled(f) ? "+" : "-") + f.Description));
+        var on = OwnToolsOn();
+        if (string.Join('\n', OwnToolFiles.Select(f => f.Stamp + (IsEnabled(f) ? "+" : "-") + f.Description)) != before
+            || on.Count != Tools.Every.Count(t => t.Server is null && t.Origin is not null))
+        {
+            Tools.Update(all => all.Where(t => !(t.Server is null && t.Origin is not null)).Concat(on));
+        }
+    }
+
+    /// <summary>
+    /// Enables the project's tool or MCP server (tool:NAME, mcp:NAME) for this project as it is defined now, or disables it.
+    /// A tool is offered from the next step; a server connects from the next session. What was done, or why not.
+    /// </summary>
+    public (bool Done, string Said) EnableOwn(string key, bool on)
+    {
+        if (ProjectTools is not { } state)
+        {
+            return (false, "There is no project here.");
+        }
+        if (key.StartsWith("tool:", StringComparison.Ordinal) && OwnToolFiles.FirstOrDefault(t => "tool:" + t.Name == key) is { } tool)
+        {
+            if (tool.Source != "project")
+            {
+                return (false, $"{tool.Name} is yours ({tool.Origin}): it is always on; turn it off in its settings.");
+            }
+            state.Enable(key, on ? tool.Stamp : null);
+            RefreshOwnTools();
+            return (true, on ? $"{tool.Name} is enabled for this project: the model may call it from now on, asking as {KindWords(tool.Kind)} do." : $"{tool.Name} is no longer enabled here.");
+        }
+        if (key.StartsWith("mcp:", StringComparison.Ordinal) && ProjectServers.FirstOrDefault(s => "mcp:" + s.Server.Name == key) is { } server)
+        {
+            state.Enable(key, on ? server.Stamp : null);
+            return (true, on ? $"The MCP server {server.Server.Name} is enabled for this project: it connects from the next session, and each of its calls asks."
+                : $"The MCP server {server.Server.Name} is no longer enabled here (from the next session).");
+        }
+        return (false, $"This project has no tool or MCP server {key[(key.IndexOf(':') + 1)..]} to enable: /tools lists them.");
+    }
+
+    private static string KindWords(ToolKind kind) => kind switch { ToolKind.Read => "reading tools", ToolKind.Edit => "file edits", _ => "commands" };
     /// <summary>Where the project's own commands, sub-agents and skills are: its repository's root (else the working directory).</summary>
     public string ProjectRoot { get; private set; } = "";
     /// <summary>What the agent remembers; the prompt has it as the session started.</summary>
@@ -399,10 +481,27 @@ internal sealed partial class Runtime : IAsyncDisposable
         {
             tools.Add(Extensions.SkillTool());
         }
+        // The person's and the project's own tools (the project's once enabled here), and the settings of them all.
+        ProjectTools = new ProjectToolState(Env.Paths.DataDir, project);
+        ToolSettings = new ToolSettings { ConfigFile = Env.Paths.ConfigFile, Here = ProjectTools, ProjectRoot = project };
+        ToolSettings.Reload(Config.ToolSettings);
+        var (servers, serverProblems) = OwnTools.ProjectServers(project);
+        ProjectServers = servers;
+        foreach (var problem in serverProblems)
+        {
+            Ui.Warn(problem);
+        }
+        _builtIn = [.. tools.Select(t => t.Name)];
+        tools.AddRange(OwnToolsOn(warn: true));
+        if (OwnToolFiles.Where(t => t.Source == "project" && !IsEnabled(t)).Select(t => t.Name)
+            .Concat(ProjectServers.Where(s => !IsEnabled(s)).Select(s => s.Server.Name + " (MCP)")).ToList() is { Count: > 0 } waiting)
+        {
+            Ui.Info($"This project defines tools not enabled here yet: {string.Join(", ", waiting)}. /tools enable NAME enables one (or Configure Tools in the IDE).");
+        }
         Demand.Budget = Config.ToolChars ?? ToolDemand.DefaultBudget;
         Demand.Loader = LoadTools;
         Demand.Changed = (off, loaded) => Session?.Tools(off, loaded);
-        Tools = new ToolBox(tools) { Demand = Demand, Mode = () => ToolMode };
+        Tools = new ToolBox(tools) { Demand = Demand, Mode = () => ToolMode, Settings = ToolSettings };
 
         // The servers connect in the background; the session starts when the gateway has said which models there are.
         var models = Gateway.ModelsAsync(ct);
@@ -1139,6 +1238,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         {
             return Extensions;
         }
+        RefreshOwnTools();
         var fresh = Extensions.Load(Env.Paths, ProjectRoot);
         var before = Extensions;
         Extensions = fresh;
@@ -1245,7 +1345,9 @@ internal sealed partial class Runtime : IAsyncDisposable
                 }
             }));
         }
-        foreach (var server in Config.McpServers.Where(s => !s.Disabled))
+        // The person's own servers, then the project's they enabled here (one of the person's of the same name wins).
+        var mine = Config.McpServers.Select(s => s.Name).ToHashSet(StringComparer.Ordinal);
+        foreach (var server in Config.McpServers.Concat(ProjectServers.Where(p => !mine.Contains(p.Server.Name) && IsEnabled(p)).Select(p => p.Server)).Where(s => !s.Disabled))
         {
             if (server.Url is not { Length: > 0 } && server.Command is not { Length: > 0 })
             {
@@ -1314,14 +1416,17 @@ internal sealed partial class Runtime : IAsyncDisposable
             {
                 continue;
             }
-            var own = link.Name is ArenaName or ArgusName ? null : Config.McpServers.FirstOrDefault(s => s.Name == link.Name);
+            var own = link.Name is ArenaName or ArgusName ? null
+                : Config.McpServers.FirstOrDefault(s => s.Name == link.Name) ?? ProjectServers.FirstOrDefault(p => p.Server.Name == link.Name)?.Server;
+            // A project's server is the repository's word: what it says changes nothing is not taken for it, each call asks.
+            var theProjects = own is not null && Config.McpServers.All(s => s.Name != link.Name);
             var added = 0;
             foreach (var t in client.Tools)
             {
                 var name = t.Str("name")!;
                 if (own is not null)
                 {
-                    tools.Add(Remote(client, t, OwnToolName(client.Name, name), own.Trust, t["annotations"].Bool("readOnlyHint") == true, link, "mcp:" + link.Name));
+                    tools.Add(Remote(client, t, OwnToolName(client.Name, name), own.Trust, !theProjects && t["annotations"].Bool("readOnlyHint") == true, link, "mcp:" + link.Name));
                 }
                 else if (link.Name == ArgusName && tools.Any(x => x.Server == ArenaName && x.RemoteName == name))
                 {

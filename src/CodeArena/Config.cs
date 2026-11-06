@@ -13,6 +13,11 @@ internal sealed class AppPaths(string configDir, string dataDir)
     public string HistoryDir => Path.Combine(DataDir, "history");
     /// <summary>The person's own instructions for every project.</summary>
     public string UserInstructions => Path.Combine(ConfigDir, "ARENA.md");
+    /// <summary>
+    /// The person's home, where their skills for Code Arena and Claude Code are read too (~/.code-arena/skills,
+    /// ~/.claude/skills); null with CODE_ARENA_HOME, which keeps everything in its own folder.
+    /// </summary>
+    public string? Home { get; init; }
 
     /// <summary>
     /// CODE_ARENA_HOME holds both when set. Otherwise: %APPDATA% and %LOCALAPPDATA%
@@ -29,11 +34,11 @@ internal sealed class AppPaths(string configDir, string dataDir)
         {
             var roaming = env("APPDATA") is { Length: > 0 } a ? a : Path.Combine(user, "AppData", "Roaming");
             var local = env("LOCALAPPDATA") is { Length: > 0 } l ? l : Path.Combine(user, "AppData", "Local");
-            return new(Path.Combine(roaming, "code-arena"), Path.Combine(local, "code-arena"));
+            return new(Path.Combine(roaming, "code-arena"), Path.Combine(local, "code-arena")) { Home = user };
         }
         var config = env("XDG_CONFIG_HOME") is { Length: > 0 } c ? c : Path.Combine(user, ".config");
         var data = env("XDG_DATA_HOME") is { Length: > 0 } d ? d : Path.Combine(user, ".local", "share");
-        return new(Path.Combine(config, "code-arena"), Path.Combine(data, "code-arena"));
+        return new(Path.Combine(config, "code-arena"), Path.Combine(data, "code-arena")) { Home = user };
     }
 }
 
@@ -181,6 +186,8 @@ internal sealed class Config
     /// <summary>Directories the tools may use besides the working directory.</summary>
     public List<string> AllowedPaths { get; set; } = [];
     public List<McpServerConfig> McpServers { get; set; } = [];
+    /// <summary>The person's settings for the tools, by tool name, for every project ("toolSettings": ToolSettings reads them).</summary>
+    public JsonObject ToolSettings { get; set; } = [];
     /// <summary>The sandbox for the agent's commands: "auto" (null: one when the system has it), "on" (refuse to start without), "off".</summary>
     public string? Sandbox { get; set; }
     /// <summary>Whether commands in the sandbox may use the network (on unless false).</summary>
@@ -348,6 +355,7 @@ internal sealed class Config
         config.CommitName = raw.Str("commitName");
         config.CommitEmail = raw.Str("commitEmail");
         config.AllowedPaths = raw["allowedPaths"] is JsonArray paths ? [.. paths.Select(p => p?.ToString() ?? "").Where(p => p.Length > 0)] : [];
+        config.ToolSettings = raw["toolSettings"] is JsonObject toolSettings ? toolSettings.Clone() : [];
         config.McpServers = raw["mcpServers"] is JsonObject servers
             ? [.. servers.Select(s => McpServerConfig.From(s.Key, s.Value)).OfType<McpServerConfig>()]
             : [];
@@ -484,6 +492,7 @@ internal sealed class Config
         Set("commitEmail", CommitEmail);
         Set("debugAdapters", DebugAdapters.Count == 0 ? null : new JsonObject(DebugAdapters.Select(a => KeyValuePair.Create(a.Key, a.Value.Raw?.DeepClone()))));
         Set("languageServers", LanguageServers.Count == 0 ? null : new JsonObject(LanguageServers.Select(s => KeyValuePair.Create(s.Key, s.Value.Raw?.DeepClone()))));
+        Set("toolSettings", ToolSettings.Count == 0 ? null : ToolSettings.Clone());
         PrivateFiles.WriteAllText(file, raw.ToJsonString(Json.Indented) + "\n");
         _raw = raw;
     }

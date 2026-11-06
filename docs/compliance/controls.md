@@ -158,6 +158,7 @@ What a person may do comes from roles (built in, or made by the company) held di
 - `Llm.Tests/CodeArenaSyncTests.Only_the_owner_s_key_reads_or_adds_to_a_chat`
 - `Llm.Tests/CodeArenaGoalTests.Code_Arenas_goal_is_kept_with_its_chat_shown_on_the_web_and_only_Code_Arena_changes_it`
 - `Llm.Tests/CodeArenaGoalTests.Code_Arena_lists_the_assistants_the_person_may_use_with_their_skills`
+- `Llm.Tests/SkillTransferTests.Only_who_may_make_skills_imports_them_from_the_page_or_Code_Arena`
 
 **The company's part** Decide who holds which role, and review it.
 
@@ -495,6 +496,7 @@ Safeguards mask personal data before a question reaches the model while the chat
 - `Llm.Tests/SecretScanningTests.A_name_in_code_is_not_a_password`
 - `Llm.Tests/SafeguardRulesTests.Every_block_names_its_rule_what_it_found_and_where_without_the_secret_itself`
 - `Llm.Tests/QueuedMessagesTests.A_queued_message_is_edited_until_it_is_taken_in_and_one_with_files_waits_for_the_answer_to_end`
+- `Llm.Tests/SkillTransferTests.An_imported_skill_goes_through_the_safeguards_and_one_holding_a_private_key_is_refused`
 
 **The company's part** Decide which data may reach which model, and which models are outside the company.
 

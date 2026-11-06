@@ -32,6 +32,11 @@ public sealed class Skill
     public required string Instructions { get; set; }
     /// <summary>Its parameters, JSON: <c>[{ name, description, required, default }]</c>.</summary>
     public string Parameters { get; set; } = "[]";
+    /// <summary>
+    /// The files beside its SKILL.md, as a skill folder of Claude Code's has them (references, scripts, templates), JSON
+    /// <c>{"path/in/folder": "text"}</c>: brought in with it when imported, kept with it when exported, given to Code Arena.
+    /// </summary>
+    public string Files { get; set; } = "{}";
     /// <summary>The model may use it on its own when its description fits what was asked.</summary>
     public bool AutoUse { get; set; } = true;
     public SkillSharing Sharing { get; set; }
