@@ -48,6 +48,7 @@ import policyRisk from '@docs/compliance/policies/risk-management.md?raw'
 import policySuppliers from '@docs/compliance/policies/suppliers.md?raw'
 import complianceDpia from '@docs/compliance/templates/dpia.md?raw'
 import complianceRopa from '@docs/compliance/templates/record-of-processing.md?raw'
+import complianceNotice from '@docs/compliance/templates/sign-in-notice.md?raw'
 import configuration from '@docs/configuration.md?raw'
 import cpuTemperature from '@docs/cpu-temperature.md?raw'
 import data from '@docs/data.md?raw'
@@ -173,6 +174,7 @@ export const manualGroups: ManualGroup[] = [
       doc('compliance/incident-response.md', 'Incident response', 'From noticing to closure, with the register\'s steps and the law\'s clocks.', 'admins', complianceIncidents),
       doc('compliance/templates/record-of-processing.md', 'Record of processing', 'GDPR Art. 30, filled in with what Arena processes.', 'admins', complianceRopa),
       doc('compliance/templates/dpia.md', 'Impact assessment (DPIA)', 'GDPR Art. 35, with Arena\'s measures for each risk.', 'admins', complianceDpia),
+      doc('compliance/templates/sign-in-notice.md', 'Sign-in notice', 'The acceptable use and privacy notice people accept at sign-in, ready to adopt.', 'admins', complianceNotice),
       doc('compliance/policies/information-security.md', 'Information security policy', 'A template: roles, the rules, records, exceptions.', 'admins', policySecurity),
       doc('compliance/policies/risk-management.md', 'Risk management policy', 'A template: the asset inventory and the risk register, started for you.', 'admins', policyRisk),
       doc('compliance/policies/access-control.md', 'Access control policy', 'A template: accounts, two-factor, least privilege, reviews, leavers.', 'admins', policyAccess),

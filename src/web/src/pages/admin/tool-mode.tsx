@@ -37,9 +37,9 @@ export function ToolModePicker({ model, tools, onChanged }: { model: string; too
       <Label htmlFor={id} className="text-muted-foreground">
         Tools
       </Label>
-      <div className="grid gap-1">
+      <div className="grid min-w-0 gap-1">
         <Select value={tools.set ? tools.mode : 'auto'} disabled={save.isPending} onValueChange={(v: ToolMode | 'auto') => save.mutate(v === 'auto' ? null : v)}>
-          <SelectTrigger id={id} size="sm" className="w-56" aria-describedby={`${id}-about`}>
+          <SelectTrigger id={id} size="sm" className="w-full max-w-56" aria-describedby={`${id}-about`}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

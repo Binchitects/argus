@@ -661,7 +661,8 @@ function ModelCard({
             </span>
           </Label>
         )}
-        <div className="grid gap-3 sm:grid-cols-2">
+        {/* One under the other: a card is half the page, too narrow for both side by side. */}
+        <div className="grid min-w-0 gap-3">
           <AccessPicker value={m.access} onChange={(audience, groups) => access.mutate({ audience, groups })} />
           {m.toolMode && <ToolModePicker model={m.name} tools={m.toolMode} onChanged={onChanged} />}
         </div>
