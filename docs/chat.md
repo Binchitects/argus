@@ -1774,7 +1774,8 @@ model reads it to choose it), its **instructions** and its **parameters**.
   chosen skill sits above the box as a chip, with a field for each parameter
   (required ones marked; a default shown in its field). What you write in the
   box goes with it. Enter moves from field to field, then to the box;
-  Backspace in the empty box, or the chip's X, lets the skill go. Sending
+  Esc, Backspace in the empty box, or the chip's X, lets the skill go (Esc
+  keeps what you wrote in the box). Sending
   waits until every required parameter has something.
 - **What the model reads**: the skill's instructions, its parameters filled
   in, then your words, unless the instructions say where they go
@@ -2436,7 +2437,7 @@ use and edit one); a new chat takes `assistantId`.
     a small model, and the sub-agents' model under an answer
   - `/review` chosen from the `/` menu: its chip and parameter fields, not
     sent while a required one is empty, then sent as a skill with the box's
-    words; Backspace letting it go; the menu found by title, closed with Esc;
+    words; Backspace and Esc letting it go; the menu found by title, closed with Esc;
     a skill without parameters; the Skills page (sections, a new skill with
     parameters shared with a group, an admin's for everyone, edit and
     delete)

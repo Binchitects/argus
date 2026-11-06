@@ -2308,7 +2308,8 @@ message, without starting Code Arena again.
   for its skills. In the chat, **/** at the start of the box lists
   `/compact`, `/clear`, your commands and the skills; ↑ and ↓ choose, Tab
   (or Enter) puts one in the box; Enter on a name typed whole sends it as it
-  is (`/clear` runs at once).
+  is (`/clear` runs at once). Esc lets a chosen `/name` go and keeps the
+  words after it.
 - **Skills from Arena**: the skills made in Arena that you may use (yours,
   your groups', the company's: the Skills page) and those the plugins you may
   use bring (Admin → Plugins), kept in the config folder's `plugin-skills/` and

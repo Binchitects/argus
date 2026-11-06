@@ -2658,6 +2658,10 @@ describe('Code Arena, the IDE', () => {
     await userEvent.click(within(panel).getByRole('button', { name: 'Use /code-review in the chat' }))
     const box = screen.getByRole('textbox', { name: 'Message' })
     expect(box).toHaveValue('/code-review ')
+    // Escape lets the skill go, and keeps the words written after it.
+    await userEvent.type(box, 'the diff')
+    await userEvent.keyboard('{Escape}')
+    expect(box).toHaveValue('the diff')
 
     // / at the start of the box lists the chat's commands, the person's and the skills; Enter puts one there.
     await userEvent.clear(box)

@@ -135,6 +135,29 @@ describe('slash skills', () => {
     expect(box).toHaveValue('/gitlab')
   })
 
+  it('Escape lets a chosen skill go, from its fields or from the box, and the box keeps what was typed', async () => {
+    backend()
+    renderApp('/chat')
+    const box = await screen.findByRole('textbox', { name: 'Message' })
+    await userEvent.type(box, '/rev{Enter}')
+    const chosen = screen.getByRole('group', { name: 'Use /review' })
+    const file = within(chosen).getByRole('textbox', { name: /File/ })
+    await waitFor(() => expect(file).toHaveFocus())
+    await userEvent.type(file, 'src/parse.c')
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('group', { name: 'Use /review' })).toBeNull()
+    await waitFor(() => expect(box).toHaveFocus())
+
+    await userEvent.type(box, '/tri{Enter}')
+    expect(screen.getByRole('group', { name: 'Use /triage' })).toBeInTheDocument()
+    await userEvent.click(box)
+    await userEvent.type(box, 'the login bug')
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('group', { name: 'Use /triage' })).toBeNull()
+    expect(box).toHaveValue('the login bug')
+    expect(screen.queryByRole('listbox', { name: 'Skills' })).toBeNull()
+  })
+
   it('a skill without parameters goes alone, and Backspace in the empty box lets one go', async () => {
     const calls = backend()
     renderApp('/chat')

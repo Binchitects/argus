@@ -19,11 +19,15 @@ const own: SlashItem[] = [
 /** A /name being typed at the start of the box, before the caret: what follows the / so far; null: none. */
 const typing = (text: string, caret: number) => /^\/([\w:.-]*)$/.exec(text.slice(0, caret))?.[1] ?? null
 
+/** A /name with a space after it at the start of the box: a command or skill chosen, the words for it after. */
+const chosenName = /^\/[\w:.-]+(\s+|$)/
+
 /**
  * / at the start of the chat's box offers the chat's commands, the person's and the project's own and the skills (as the
  * web chat's / does): those whose name starts with what is typed first, then those that hold it, all of them (the list
  * scrolls); ↑ and ↓ choose, Enter or Tab puts `/name ` in the box for the words after it, Esc leaves it as typed. A name
- * typed whole and chosen, Enter sends as it is (/clear runs at once). A skill sent so goes with its instructions.
+ * typed whole and chosen, Enter sends as it is (/clear runs at once). A skill sent so goes with its instructions. Esc with
+ * the list shut lets a chosen `/name` go, and keeps the words after it.
  */
 export function useSlashMenu({ area, text, setText }: { area: RefObject<HTMLTextAreaElement | null>; text: string; setText: (text: string) => void }) {
   const [caret, setCaret] = useState(0)
@@ -74,6 +78,15 @@ export function useSlashMenu({ area, text, setText }: { area: RefObject<HTMLText
     onCaret: () => setCaret(area.current?.selectionStart ?? 0),
     /** Keys while the list is offered: true when one was used here. */
     onKeyDown: (e: KeyboardEvent<HTMLTextAreaElement>) => {
+      // A /name chosen at the start of the box: Escape lets it go, and keeps the words after it.
+      if (!open && e.key === 'Escape' && !e.nativeEvent.isComposing && chosenName.test(text)) {
+        e.preventDefault()
+        const rest = text.replace(chosenName, '')
+        setText(rest)
+        setDismissed(rest)
+        requestAnimationFrame(() => area.current?.setSelectionRange(rest.length, rest.length))
+        return true
+      }
       if (!open) return false
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault()

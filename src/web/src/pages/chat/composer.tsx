@@ -211,6 +211,12 @@ export function Composer({
         return
       }
     }
+    // Escape lets the chosen skill go; what is written in the box stays.
+    if (e.key === 'Escape' && chosen && !e.nativeEvent.isComposing) {
+      e.preventDefault()
+      unchoose()
+      return
+    }
     // Backspace at the start of an empty box lets the skill go, then takes the quote away.
     if (e.key === 'Backspace' && (chosen || (quote && onClearQuote)) && !text && e.currentTarget.selectionStart === 0 && e.currentTarget.selectionEnd === 0) {
       e.preventDefault()

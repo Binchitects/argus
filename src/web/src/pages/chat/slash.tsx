@@ -61,7 +61,7 @@ export function SlashMenu({ id, items, active, onPick, onActive }: { id: string;
 /**
  * The skill chosen for the message, above the message box: its name, what it is for, and a field for each of its
  * parameters (a default shown as the field's placeholder). Enter goes to the next field, and from the last to the
- * message box (what is written there goes with the skill); Shift+Enter adds a line.
+ * message box (what is written there goes with the skill); Shift+Enter adds a line, Escape lets the skill go.
  */
 export function SkillFields({
   skill,
@@ -83,6 +83,12 @@ export function SkillFields({
 }) {
   const id = useId()
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>, i: number) => {
+    // Escape lets the skill go (the message box takes the focus back).
+    if (e.key === 'Escape' && !e.nativeEvent.isComposing) {
+      e.preventDefault()
+      onClear()
+      return
+    }
     if (e.key !== 'Enter' || e.shiftKey || e.nativeEvent.isComposing) return
     e.preventDefault()
     const next = skill.parameters[i + 1]
