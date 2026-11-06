@@ -756,18 +756,36 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     /// The GPU each vision model on two GPUs or more reads its images on (its projector, mmproj-device): llama.cpp's own is
     /// the first of its GPUs, so every vision model's images were read on GPU 0. One after another by name, each on its GPU
     /// with the fewest projectors so far (ties: the lowest number). <paramref name="gpus"/>: the machine's, for a model that
-    /// names none. One whose extra lines set its own is left as it is.
+    /// names none. One whose extra lines set its own is left as it is, and one on a single GPU has its projector there: both
+    /// are counted on their GPU first.
     /// </summary>
     public static Dictionary<string, int> ProjectorGpus(IEnumerable<LocalModel> models, IReadOnlyList<int> gpus)
     {
         var count = new Dictionary<int, int>();
         var on = new Dictionary<string, int>(StringComparer.Ordinal);
-        foreach (var m in models.Where(m => m.Projector is { Length: > 0 } && !ExtraValues(m.ExtraPreset).ContainsKey("mmproj-device")).OrderBy(m => m.Name, StringComparer.Ordinal))
+        var spread = new List<(LocalModel Model, IReadOnlyList<int> Gpus)>();
+        foreach (var m in models.Where(m => m.Projector is { Length: > 0 }))
         {
-            if ((Hardware.ParseDevices(m.Devices) is { Count: > 0 } named ? named : gpus) is not { Count: > 1 } mine)
+            var mine = Hardware.ParseDevices(m.Devices) is { Count: > 0 } named ? named : gpus;
+            if (ExtraValues(m.ExtraPreset).TryGetValue("mmproj-device", out var own))
             {
-                continue;
+                // The admin's own (mmproj-device = CUDA1: the GPU is its number).
+                if (int.TryParse(new string([.. own.Reverse().TakeWhile(char.IsAsciiDigit).Reverse()]), NumberStyles.None, CultureInfo.InvariantCulture, out var set))
+                {
+                    count[set] = count.GetValueOrDefault(set) + 1;
+                }
             }
+            else if (mine.Count == 1)
+            {
+                count[mine[0]] = count.GetValueOrDefault(mine[0]) + 1;
+            }
+            else if (mine.Count > 1)
+            {
+                spread.Add((m, mine));
+            }
+        }
+        foreach (var (m, mine) in spread.OrderBy(s => s.Model.Name, StringComparer.Ordinal))
+        {
             var gpu = mine.OrderBy(g => count.GetValueOrDefault(g)).ThenBy(g => g).First();
             count[gpu] = count.GetValueOrDefault(gpu) + 1;
             on[m.Name] = gpu;

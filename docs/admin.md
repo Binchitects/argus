@@ -686,7 +686,8 @@ full the models kept loaded would make it.
   there is room when they would not fit). The row split is not used: it keeps
   the whole cache and the attention on one GPU. A vision model's projector (it
   reads the images) goes on one of its GPUs, the one with the fewest projectors
-  (`mmproj-device`), not always on the first. An admin's own `split-mode`,
+  (`mmproj-device`; counting those an admin placed and those of models on one
+  GPU), not always on the first. An admin's own `split-mode`,
   `tensor-split`, `main-gpu` or `mmproj-device` in the extra lines is kept. The
   engine numbers GPUs as `nvidia-smi` does (`CUDA_DEVICE_ORDER=PCI_BUS_ID`). The
   memory estimate uses only the GPUs chosen, and the picture server's share only

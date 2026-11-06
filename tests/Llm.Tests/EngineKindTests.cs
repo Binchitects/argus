@@ -286,9 +286,11 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
         var ini = await File.ReadAllTextAsync(Path.Combine(Config, "models.ini"));
         string? ProjectorOf(string model) => ini.Split("\n[").Single(x => x.TrimStart('[').StartsWith(model + "]", StringComparison.Ordinal)).Split('\n')
             .Where(l => l.StartsWith("mmproj-device = ", StringComparison.Ordinal)).Select(l => l["mmproj-device = ".Length..]).SingleOrDefault();
-        // By name, own and one aside: see0 on GPU 0, see1 on GPU 1... and once each GPU has one, GPU 0 again; two on its GPU with the fewest.
+        // own and one have theirs on GPU 0 already, and count there. Then by name: see0 on GPU 1, see1 on GPU 2... each on
+        // its GPU with the fewest so far; two too.
         var expected = new Dictionary<string, string>(StringComparer.Ordinal);
         var count = new int[gpus];
+        count[0] = 2;
         foreach (var (name, mine) in names.Append("two").Order(StringComparer.Ordinal)
             .Select(n => (n, n == "two" ? new[] { gpus - 2, gpus - 1 } : [.. Enumerable.Range(0, gpus)])))
         {
@@ -297,7 +299,13 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
             expected[name] = $"CUDA{gpu.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
         }
         Assert.All(expected, e => Assert.Equal(e.Value, ProjectorOf(e.Key)));
-        Assert.True(count.Max() - count.Min() <= 1, $"projectors on each GPU: {string.Join(", ", count)}");
+        // Every projector on each GPU, the admin's and the one-GPU model's too: no GPU has two more than another.
+        var total = new int[gpus];
+        foreach (var gpu in names.Append("two").Append("own").Select(ProjectorOf).Append("CUDA0"))
+        {
+            total[int.Parse(gpu![4..], System.Globalization.CultureInfo.InvariantCulture)]++;
+        }
+        Assert.True(total.Max() - total.Min() <= 1, $"projectors on each GPU: {string.Join(", ", total)}");
         // An admin's own line is kept as it is (once), and a model on one GPU has its projector there already.
         Assert.Equal("CUDA0", ProjectorOf("own"));
         Assert.Null(ProjectorOf("one"));
