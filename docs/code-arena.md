@@ -1665,12 +1665,12 @@ On the person's machine:
 
 | tool | what it does |
 |---|---|
-| `read_file` | a text file with line numbers, 2,000 lines at a time (`offset`, `limit`) |
+| `read_file` | a text file with line numbers, 2,000 lines at a time (`offset`, `limit`). A large file (over 500 lines or 24,000 characters) read without a range gives its outline instead: its functions, classes and headings with their lines, and its first 30 lines; the model then reads the part it needs, by lines or by a symbol's name (`symbol`: `Orders.Save`). A file over 16 MB gives its line count and first lines |
 | `write_file` | creates or replaces a file; Windows line endings are kept |
 | `edit_file` | replaces an exact piece of a file; it must match once (or `replace_all`), whitespace included; an empty `old_string` makes a new file. Windows line endings are kept |
 | `list_dir`, `glob` | folders and file names (`**/*.cs`, `*.{ts,tsx}`); `.gitignore` is respected |
-| `grep` | file contents by regular expression, with context lines; binary and ignored files skipped, and those it cannot read, named pipes and links that lead outside |
-| `run_shell` | a command in bash (sh when missing; on Windows Git's bash when Git for Windows is installed, else PowerShell 7, else `cmd.exe`; `"shell"` in the file for another), 120 s by default, at most 600; long output is cut in the middle. With `no_time_limit`, it runs in the background until it ends (below) |
+| `grep` | file contents by regular expression, with context lines; binary and ignored files skipped (outside a repository, each folder's `.gitignore` holds), and those it cannot read, named pipes and links that lead outside. Files are read a line at a time, several at once, and the pattern runs without backtracking (one with a lookaround or a backreference with a time limit instead), so no pattern stalls it. A file over 5 MB in a folder is skipped and named; given as `path`, any file is searched. A search past 30 s gives what it found and says how many files it left |
+| `run_shell` | a command in bash (sh when missing; on Windows Git's bash when Git for Windows is installed, else PowerShell 7, else `cmd.exe`; `"shell"` in the file for another), 120 s by default, at most 600; long output is cut in the middle, the lines of the part cut that look like errors (error, failed, exception, traceback…) are listed with their numbers, and the whole of it (up to 64 MB) is kept for `read_result`. An exit code past 128 says the signal that ended it (137: killed, often out of memory). With `no_time_limit`, it runs in the background until it ends (below) |
 | `command_output` | the state and the latest output of a command run with no time limit; `wait` waits until it ends |
 | `stop_command` | stops a command run with no time limit; it always asks the person first, `yolo` too |
 | `git` | status, diff, log, show, blame, branch: reading only (commits go through `run_shell`), inside the working directory: `diff --no-index` is refused, and so is a file outside it named anywhere in the arguments (`blame --contents FILE`, `-S FILE`), by name or through a link that leads out. It never asks, so the repository's own settings run nothing in it: no fsmonitor, hook, clean or smudge filter, merge driver (`--remerge-diff`), text conversion (so not `status -v`), external diff or signature checker, no submodule looked into (their changes are not shown), and no network (a partial clone does not fetch). Nor do they send it elsewhere: a work tree other than the folder that holds `.git` (`core.worktree`), or a `.git` that leads to another repository's folder, is refused (a worktree of another checkout and a submodule, which git made so, are read), and a `blame.ignoreRevsFile` outside is not read. The file list `grep` and `glob` (and the IDE's search and quick open) take from git is read the same way |
@@ -1679,7 +1679,12 @@ On the person's machine:
 | `plan` | the working plan the person sees (`/plan`), kept in Arena with the session's chat ([below](#the-plan)) |
 | `task` | a sub-agent (below) |
 | `run_steps` | 2 to 4 steps of the plan that wait for nothing not done, at once ([below](#steps-at-once)) |
-| `run_code` | a Python program that calls the session's tools as functions ([below](#code-mode)) |
+| `run_code` | Python in the chat's own interpreter, kept between calls as a notebook keeps its kernel, calling the session's tools as functions ([below](#code-mode)) |
+
+Several calls in one answer: those that only read run at once; one that
+changes something (an edit, a command, `run_code`) runs after the calls
+before it, in the order given, so a command that uses what the one before it
+made finds it made.
 
 The files are read as they are while other programs hold them open (on
 Windows a build, a server's log or an editor would otherwise make the read
@@ -1977,21 +1982,36 @@ Code Arena.
 
 ## Code mode
 
+`run_code` runs Python in the chat's own interpreter, kept from one call to
+the next as a notebook keeps its kernel: variables, imports and loaded data
+stay (`fresh: true` starts a new one). It is the project's virtual
+environment when there is one (`.venv`, `venv` or `env` in the working
+directory, or the one `VIRTUAL_ENV` names), else `python3` (`python` on
+Windows); `"python"` in the config file names another. What it prints comes
+back, and the value of a last line that is an expression (`df.head()`), an
+error with its traceback and line, and the plots it makes: matplotlib's
+figures are saved in `.code-arena/plots/`, named in the result and shown to
+the model (one that sees pictures). A call past its time (120 s by default,
+at most 600) stops the interpreter and says so: its variables are gone, and
+the next call starts a new one. `sys.exit` ends the program, not the
+interpreter. Each chat has its own interpreter (`/new` starts another), and
+it ends with Code Arena.
+
 Rather than calling tools one by one, each call and its whole result passing
-through the model's window, the agent can write a short Python program that
-calls them as functions (`run_code`): `import arena`, then
-`arena.tools.search("…")` lists the functions that match,
-`help(arena.local.read_file)` says one's parameters, and
+through the model's window, the agent can call them as functions from it:
+`import arena`, then `arena.tools.search("…")` lists the functions that
+match, `help(arena.local.read_file)` says one's parameters, and
 `arena.local.grep(...)`, `arena.argus.find_symbol(...)`,
 `arena.<server>.<tool>(...)` call the session's own tools, Arena's, Argus's
 and your MCP servers'. The program loops, filters and joins, and only what it
-prints comes back. Each call goes through a socket to Code Arena and is
-checked as a direct call would be (the mode, your rules, asking where it
-asks); at most 100 a program. The program runs in the working directory, in
-the session's sandbox, with `python3` (`"python"` in the config file names
-another); `run_code` asks first as a command does, and plan mode refuses it,
-since a program could write without a tool. The `arena` module is the one the
-web chat's sandbox has ([chat.md](chat.md#what-it-does)).
+prints comes back. Each call goes through a socket to Code Arena (on Windows,
+where Python has no Unix sockets, TCP on 127.0.0.1 with a token only the
+interpreter is given) and is checked as a direct call would be (the mode,
+your rules, asking where it asks); at most 100 in one run. It runs in the
+working directory, in the session's sandbox; `run_code` asks first as a
+command does, and plan mode refuses it, since a program could write without
+a tool. The `arena` module is the one the web chat's sandbox has
+([chat.md](chat.md#what-it-does)).
 
 How the model is given its tools follows the model in use, as Arena says for
 it (Admin → Models → **Tools**, in Arena's chat config): **direct** leaves
@@ -2237,8 +2257,10 @@ project written for another agent is read as it is.
 **@files.** `@src/parser.cs` in a message sends the file with it, its lines
 numbered as `read_file` numbers them (a folder sends its list; `@"a b.txt"`
 for a name with spaces); `@src/parser.cs:40-60` (or `#L40-L60`) sends those
-lines with three around them. Up to 60,000 characters a file and 150,000 a
-message, cut in the middle beyond. Anything that is not a file the tools may
+lines with three around them. A large file (over 500 lines or 24,000
+characters) sends its outline and first lines, as `read_file` gives them,
+and the model reads the part it needs. Up to 60,000 characters a file and
+150,000 a message, cut in the middle beyond. Anything that is not a file the tools may
 read (an email address, `@Override`) stays as typed. What goes with a message
 comes after what was typed: the IDE shows the question as typed, with a chip
 for each file or lines that went with it (a click opens them).

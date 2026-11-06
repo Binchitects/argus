@@ -77,6 +77,7 @@ The numbers behind the claims, kept as evidence:
 [packs](measurements/pack-measurements.md),
 [KPIs](measurements/kpis.md),
 [tool modes](measurements/tool-modes.md),
+[Code Arena's tools](measurements/code-arena-tools.md),
 [lab mathematics](measurements/lab-math.md),
 [lab quantum computing](measurements/lab-quantum.md),
 [security review](measurements/security-review.md),
