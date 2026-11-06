@@ -464,6 +464,14 @@
   html {
     -webkit-text-size-adjust: 100%;
   }
+  /*
+   * What people type and what they wrote, line by line: each line takes the direction of its own
+   * first letters (a Persian line under an English one), not the first line's for all.
+   */
+  textarea[dir='auto'],
+  .bidi-lines {
+    unicode-bidi: plaintext;
+  }
   body {
     @apply bg-background text-foreground font-sans antialiased;
     font-feature-settings: 'cv11', 'ss01';

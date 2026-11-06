@@ -15,7 +15,7 @@ import { Input, Textarea } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
-import { api, errorMessage } from '@/lib/api'
+import { api, errorMessage, mayUse, meQuery } from '@/lib/api'
 import { applySkillChange, Arguments, dismissSkillChange, matchSkills, mustFill, skillsQuery, sourceLabel, undoSkillChange, variablesOf, type SkillChangeItem, type SkillItem, type SkillLibrary, type SkillParameter, type SkillSharing } from '@/lib/skills'
 
 const sections: { source: SkillItem['source']; title: string; description: string }[] = [
@@ -90,6 +90,7 @@ export function SkillsPage() {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const library = useQuery(skillsQuery)
+  const me = useQuery(meQuery)
   const [editing, setEditing] = useState<SkillItem | 'new' | null>(null)
   const [search, setSearch] = useState('')
   const remove = useMutation({
@@ -104,6 +105,8 @@ export function SkillsPage() {
   })
   if (library.isPending) return <PageSkeleton />
   if (library.error) return <QueryError error={library.error} retry={() => library.refetch()} />
+  // Making one is a feature of its own (Admin → Access): without it, no New skill.
+  const mayMake = mayUse(me.data, 'feature.skills')
   const kept = library.data.skills.filter((p) => !p.proposed)
   const shown = search.trim() ? matchSkills(kept, search.trim().replace(/^\//, '')) : kept
   return (
@@ -112,9 +115,11 @@ export function SkillsPage() {
         title="Skills"
         description="Instructions for work you ask often, with parameters filled in each time: type / in the chat to use one, or let the model use it on its own when a question fits what it is for. Keep them to yourself, share them with your groups, or, as an admin, with everyone."
         actions={
-          <Button onClick={() => setEditing('new')}>
-            <Plus /> New skill
-          </Button>
+          mayMake && (
+            <Button onClick={() => setEditing('new')}>
+              <Plus /> New skill
+            </Button>
+          )
         }
       />
       <div className="mb-8 empty:hidden">
@@ -125,9 +130,11 @@ export function SkillsPage() {
           icon={SquareSlash}
           title="No skills yet"
           action={
-            <Button variant="outline" onClick={() => setEditing('new')}>
-              <Plus /> New skill
-            </Button>
+            mayMake && (
+              <Button variant="outline" onClick={() => setEditing('new')}>
+                <Plus /> New skill
+              </Button>
+            )
           }
         >
           Write how you want a kind of work done once, with parameters like {'{{file}}'}: in the chat, /its-name asks for them and sends the skill; with a description, the model uses it on its own when it fits.

@@ -8,6 +8,12 @@ const table = (rows: string[]) => ['| Model | Score | Note |', '|---|---:|---|',
 const column = (n: number) => screen.getAllByRole('row').slice(1).map((r) => within(r).getAllByRole('cell')[n]!.textContent)
 
 describe('a table in an answer', () => {
+  it('runs its columns the way its first words read, and lays out each cell by its own', () => {
+    render(<Markdown text={['| مدل | امتیاز |', '|---|---:|', '| Qwen | ۹۰ |', '| سریع | fast |'].join('\n')} />)
+    expect(screen.getByRole('table')).toHaveAttribute('dir', 'rtl')
+    expect([...screen.getAllByRole('cell'), ...screen.getAllByRole('columnheader')].every((c) => c.getAttribute('dir') === 'auto')).toBe(true)
+  })
+
   it('sorts by a column on a click: numbers as numbers, then the other way, then as written', async () => {
     render(<Markdown text={table(['| beta | 10 | **b** |', '| alpha | 9 | a |', '| gamma | 1,200 | c |'])} />)
     expect(screen.getByText('b').tagName).toBe('STRONG')

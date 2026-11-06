@@ -72,7 +72,7 @@ export function Thinking({ text, live, ms, since, onHurry, hurried, hurryLabel =
         )}
       </div>
       <Collapsible.Content className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
-        <div ref={box} dir="auto" className="mt-1 max-h-72 overflow-y-auto border-s-2 ps-4 text-sm leading-relaxed whitespace-pre-wrap text-muted-foreground">
+        <div ref={box} dir="auto" className="bidi-lines mt-1 max-h-72 overflow-y-auto border-s-2 ps-4 text-sm leading-relaxed whitespace-pre-wrap text-muted-foreground">
           {text}
         </div>
       </Collapsible.Content>

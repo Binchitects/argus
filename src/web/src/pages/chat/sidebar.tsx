@@ -3,6 +3,7 @@ import { Archive, ArchiveRestore, ArrowLeft, ChevronRight, GitFork, LayoutGrid, 
 import { useId, useState, type ReactNode } from 'react'
 import { Link, NavLink } from 'react-router'
 import { Tooltip } from '@/components/ui/tooltip'
+import { mayUse, meQuery } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
@@ -29,6 +30,7 @@ export function ChatList({ activeId, activeAssistant, onNew, onNavigate, foldabl
   const [archived, setArchived] = useState(false)
   const [makingRoom, setMakingRoom] = useState(false)
   const list = useQuery(listQuery(search.trim(), archived))
+  const me = useQuery(meQuery).data
   const folds = useListFolds()
   const folded = foldable && folds.listFolded
   const listId = useId()
@@ -66,11 +68,13 @@ export function ChatList({ activeId, activeAssistant, onNew, onNavigate, foldabl
               <Button onClick={onNew} className="min-w-0 flex-1 justify-start">
                 <MessageSquarePlus /> New chat
               </Button>
-              <Tooltip content="New room: a chat several people share">
-                <Button variant="outline" size="icon" onClick={() => setMakingRoom(true)} aria-label="New room">
-                  <Users />
-                </Button>
-              </Tooltip>
+              {mayUse(me, 'feature.rooms.create') && (
+                <Tooltip content="New room: a chat several people share">
+                  <Button variant="outline" size="icon" onClick={() => setMakingRoom(true)} aria-label="New room">
+                    <Users />
+                  </Button>
+                </Tooltip>
+              )}
             </>
           )}
         </div>
@@ -241,6 +245,7 @@ function ChatItem({ chat, active, archived, onNavigate }: { chat: ConversationSu
 /** The person's assistants (theirs, those they edit, those they chat with), above their chats; the gallery a click away. */
 function Assistants({ active, onNavigate }: { active?: string; onNavigate?: () => void }) {
   const assistants = useQuery(assistantsQuery)
+  const me = useQuery(meQuery).data
   const folds = useListFolds()
   const open = !folds.isFolded('Assistants')
   const listId = useId()
@@ -260,11 +265,13 @@ function Assistants({ active, onNavigate }: { active?: string; onNavigate?: () =
             </Link>
           </Button>
         </Tooltip>
-        <Tooltip content="New assistant">
-          <Button variant="ghost" size="icon-sm" className="size-6" onClick={() => setCreating(true)} aria-label="New assistant">
-            <Plus />
-          </Button>
-        </Tooltip>
+        {mayUse(me, 'feature.assistants.create') && (
+          <Tooltip content="New assistant">
+            <Button variant="ghost" size="icon-sm" className="size-6" onClick={() => setCreating(true)} aria-label="New assistant">
+              <Plus />
+            </Button>
+          </Tooltip>
+        )}
       </div>
       {listed && (
         <ul id={listId} className="flex min-w-0 flex-col gap-0.5" aria-label="Assistants">

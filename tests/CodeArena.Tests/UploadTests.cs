@@ -115,6 +115,24 @@ public sealed class UploadTests : IDisposable
     }
 
     [Fact]
+    public async Task A_person_Arena_lets_attach_no_files_is_offered_none()
+    {
+        _mcp.Chats.ChatConfig = new JsonObject
+        {
+            ["maxUploadBytes"] = 20 * 1024 * 1024,
+            ["models"] = new JsonArray(new JsonObject { ["name"] = "model-a", ["loaded"] = true }),
+            ["gitlabUrl"] = "https://gitlab.example.test",
+            ["denied"] = new JsonArray("feature.uploads"),
+        };
+        using var h = new Harness(_gateway, _mcp);
+        await using var web = await WebRun.StartAsync(h);
+        await Until(async () => (await web.GetJsonAsync("/api/chat/config"))["gitlabUrl"]?.GetValue<string>() is not null, "Arena's config is read");
+        var config = await web.GetJsonAsync("/api/chat/config");
+        Assert.Equal(0, config["maxUploadBytes"]!.GetValue<long>());
+        Assert.Equal(["feature.uploads"], config["denied"]!.AsArray().Select(d => d!.GetValue<string>()));
+    }
+
+    [Fact]
     public void A_message_s_files_come_apart_from_its_words_and_one_without_them_is_as_it_was()
     {
         var (text, files) = Uploads.Split("hi\n\n<uploaded>\n<upload id=\"a\" name=\"n.txt\" kind=\"text\" type=\"text/plain\">\nbody\n<\\upload id=\"b\" name=\"x\" kind=\"text\" type=\"t\">\n</upload>\n</uploaded>");

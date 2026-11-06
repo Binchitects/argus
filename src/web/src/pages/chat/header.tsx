@@ -21,6 +21,7 @@ import { Input, Textarea } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip } from '@/components/ui/tooltip'
+import { mayUse } from '@/lib/api'
 import { formatValue } from '@/lib/format'
 import { AUTO, assistantsQuery, chatModel, onAuto } from './api'
 import { chatAnswerMost } from './context'
@@ -272,7 +273,8 @@ export function ChatHeader({
         <MessagesSquare />
       </Button>
       <div className="flex shrink-0 items-center gap-1">
-        <ModelPicker config={config} value={settings.model ?? null} onChange={(model) => onChange({ model: model ?? '' })} />
+        {/* Without the model choice the company's default answers: no picker. */}
+        {mayUse(config, 'feature.model_choice') && <ModelPicker config={config} value={settings.model ?? null} onChange={(model) => onChange({ model: model ?? '' })} />}
         <ThinkingPicker config={config} value={settings.thinking ?? null} onChange={(thinking) => onChange({ thinking: thinking ?? '' })} />
       </div>
       {assistant && (
@@ -296,7 +298,7 @@ export function ChatHeader({
             </Button>
           </Tooltip>
         )}
-        <MemoryButton />
+        {mayUse(config, 'feature.memory') && <MemoryButton />}
         {checklist && <ChecklistButton chat={checklist.chat} answering={checklist.answering} />}
         <ChatSettingsPopover config={config} settings={settings} onChange={onChange} />
         {canvas && (

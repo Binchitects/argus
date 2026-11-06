@@ -128,7 +128,7 @@ People come from the company's directory (LDAP or Active Directory), OIDC or SAM
 
 ### IAM-05: Least privilege, by roles and rules
 
-What a person may do comes from roles (built in, or made by the company) held directly, through a group or by everyone, and from rules that give or take a feature; admin roles can be scoped to some groups. The checker says why a person may or may not do something. The wiki finds and shows each person only the documents they may read.
+What a person may do comes from roles (built in, or made by the company) held directly, through a group or by everyone, and from rules that give or take a feature; admin roles can be scoped to some groups. The checker says why a person may or may not do something. The wiki finds and shows each person only the documents they may read. A feature taken from a person is hidden from their menus and pages, not only refused.
 
 **Serves**
 
@@ -150,6 +150,7 @@ What a person may do comes from roles (built in, or made by the company) held di
 - `Llm.Tests/EndpointAccessTests.A_role_reaches_the_reads_of_its_permissions_and_no_others`
 - `Llm.Tests/EndpointAccessTests.Each_built_in_role_holds_exactly_its_permissions`
 - `Llm.Tests/AccessEndpointsTests.A_rule_takes_a_feature_from_a_group_and_the_checker_says_why`
+- `Llm.Tests/AccessBulkTests.Me_and_the_chats_config_name_the_feature_permissions_a_person_does_not_hold`
 - `Llm.Tests/WikiTests.People_find_and_read_the_documents_they_may_read_and_nothing_else`
 
 **The company's part** Decide who holds which role, and review it.
@@ -453,7 +454,7 @@ People download everything of theirs from Your account; an admin exports a perso
 
 ### DAT-04: Personal data and secrets kept from the model
 
-Safeguards mask personal data before a question reaches the model while the chat keeps it as written; answers are masked or withheld by rule; what tools send and bring back is held by their rules; a pasted secret or private key is refused and audited by its kind only; words and prompt injection are read through their disguises and in eleven languages, commands that do damage are kept from agents' tools, and data sent out through images and links is stopped.
+Safeguards mask personal data before a question reaches the model while the chat keeps it as written; answers are masked or withheld by rule; what tools send and bring back is held by their rules; a pasted secret or private key is refused and audited by its kind only, a name in code not taken for one; each refusal names its rule, what it found and where, a secret cut to its first characters; words and prompt injection are read through their disguises and in eleven languages, commands that do damage are kept from agents' tools, and data sent out through images and links is stopped.
 
 **Serves**
 
@@ -479,6 +480,8 @@ Safeguards mask personal data before a question reaches the model while the chat
 - `Llm.Tests/SafeguardDetectorTests.Commands_that_do_damage_are_found`
 - `Llm.Tests/SafeguardDetectorTests.Data_sent_out_through_an_image_or_a_link_is_found_but_not_to_the_companys_own_site`
 - `Llm.Tests/SecretScanningTests.A_pasted_private_key_is_refused_in_the_chat_and_through_the_API_and_audited_by_its_kind_only`
+- `Llm.Tests/SecretScanningTests.A_name_in_code_is_not_a_password`
+- `Llm.Tests/SafeguardRulesTests.Every_block_names_its_rule_what_it_found_and_where_without_the_secret_itself`
 
 **The company's part** Decide which data may reach which model, and which models are outside the company.
 

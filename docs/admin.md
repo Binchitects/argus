@@ -112,6 +112,18 @@ What each person may do is decided in one place, from three things:
   and `feature.assistants.share` stop new memories, tasks, share links and
   sharing assistants; `code.read` takes the Argus tool. What they already
   have stays theirs to read and delete.
+- **What a person may not use is hidden**, not only refused. Their pages
+  leave the sidebar, the command palette and Home (Chat, Memory, Meetings,
+  Plans, Data, Decks, Media studio, Agent Studio, Code Studio without any
+  of `code.studio`, `code.read` and `review.run`, Scheduled tasks, Connect
+  your tools); a link to one says it is not among what they may use, and
+  where to ask. The chat leaves out Compare, Attach and the voice message,
+  Sketch and screen sharing (they are files), Talk, the model picker,
+  Memory, Share, Make it a room, Export and Publish as app when the
+  permission behind each is taken; New room, New assistant and New skill go
+  without the permission to make them; Code Arena offers no Attach without
+  `feature.uploads`. The app
+  says it in `/api/auth/me` and the chat's config as `denied`.
 - **Parts of permissions.** Each broad administrative permission has parts a
   role can hold alone: `people.manage` holds `people.create`, `people.edit`,
   `people.delete`, `people.passwords` (passwords, two-factor, signing out),
@@ -256,8 +268,12 @@ what comes back. Each rule:
 - applies to **everyone**, or to some **groups and people**, and to some
   **models** or all (`@external` names every model on another server or
   provider: personal data can be masked for cloud models only);
-- **does** one thing: **Block** (the person is told why and may ask for a
-  review; a strike counts towards suspension and rings the admins' bell),
+- **does** one thing: **Block** (the person is told why, which rule, what it
+  found and where: their message, a file, a tool's call or result, the
+  answer, or which message of an API key's request, with the line and the
+  words around it and a secret cut to its first two characters, after the
+  rule's own message when it has one; they may ask for a review; a strike
+  counts towards suspension and rings the admins' bell),
   **Mask** (a marker in place of what was found; secrets are never stored,
   the rest is masked on its way to the model and kept as written in the
   chat), **Warn** (the person confirms before it goes), **Ask for a reason**

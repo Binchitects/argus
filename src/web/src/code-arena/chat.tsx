@@ -1235,7 +1235,7 @@ function Composer({
       <section aria-label="Queued messages" className="mb-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
         <span>Sent when the answer ends:</span>
         {queued.map((q, i) => (
-          <span key={i} className="max-w-60 truncate rounded-full border bg-muted/50 px-2 py-0.5 text-foreground" title={q}>
+          <span key={i} dir="auto" className="max-w-60 truncate rounded-full border bg-muted/50 px-2 py-0.5 text-foreground" title={q}>
             {q}
           </span>
         ))}

@@ -5,7 +5,7 @@ import { Link, useOutletContext } from 'react-router'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { api, type Me } from '@/lib/api'
+import { api, mayUse, type Me } from '@/lib/api'
 import { money } from '@/lib/format'
 
 interface Keys {
@@ -44,9 +44,9 @@ export function HomePage() {
         <p className="mt-1 text-muted-foreground">What would you like to do?</p>
       </div>
       <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <QuickAction to="/chat" icon={<MessageSquare />} title="Start a chat" description="Ask the model, with Argus searching the code you can read." />
+        {mayUse(me, 'feature.chat') && <QuickAction to="/chat" icon={<MessageSquare />} title="Start a chat" description="Ask the model, with Argus searching the code you can read." />}
         <QuickAction to="/usage" icon={<BarChart3 />} title="Your usage" description="Tokens, cache hits and cost, over time and by model." />
-        <QuickAction to="/setup" icon={<KeyRound />} title="Connect your tools" description="Your API key, and setups for Claude Code, Qwen Code, your editor or scripts." />
+        {mayUse(me, 'feature.api_keys') && <QuickAction to="/setup" icon={<KeyRound />} title="Connect your tools" description="Your API key, and setups for Claude Code, Qwen Code, your editor or scripts." />}
       </div>
       <Card>
         <CardHeader>

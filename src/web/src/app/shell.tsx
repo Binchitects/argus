@@ -19,7 +19,7 @@ import { continueTo } from './continue'
 import { SetUpTwoFactor } from './set-up-two-factor'
 import { cn } from '@/lib/utils'
 import { CommandMenu } from './command-menu'
-import { findNavItem, visibleNavigation, type NavItem, type NavSection } from './nav'
+import { findNavItem, mayOpen, visibleNavigation, type NavItem, type NavSection } from './nav'
 import { UserMenu } from './user-menu'
 import { WhatsNew } from './whats-new'
 
@@ -79,6 +79,8 @@ function SignedIn({ me }: { me: Me }) {
   const pageTitle = page?.title ?? (isManual(location.pathname) ? 'Manual' : undefined)
   // A page of a feature that is off here: what it is and how it is turned on, not a page that cannot work.
   const notInstalled = page?.feature && me.featuresOff?.includes(page.feature) ? page : undefined
+  // A page of a feature the person may not use (Admin → Access): said so, not a page whose every request is refused.
+  const notAllowed = page && !mayOpen(me, page) ? page : undefined
   useEffect(() => {
     // The chat names its tab after the conversation itself.
     if (fullBleed) return
@@ -163,6 +165,8 @@ function SignedIn({ me }: { me: Me }) {
         <main id="main" tabIndex={-1} className={cn('w-full flex-1 outline-none', fullBleed ? 'min-h-0' : 'mx-auto max-w-(--page-max) px-4 py-6 sm:px-6 lg:px-8')}>
           {notInstalled ? (
             <NotInstalled item={notInstalled} admin={me.isAdmin} />
+          ) : notAllowed ? (
+            <NotAllowed item={notAllowed} />
           ) : fullBleed ? (
             <Outlet context={me} />
           ) : (
@@ -190,6 +194,15 @@ function NotInstalled({ item, admin }: { item: NavItem; admin: boolean }) {
       ) : (
         'This feature is off on this server. Ask an admin if you need it.'
       )}
+    </EmptyState>
+  )
+}
+
+/** A page of a feature the person may not use: whom to ask. */
+function NotAllowed({ item }: { item: NavItem }) {
+  return (
+    <EmptyState icon={item.icon} title={`${item.title} is not among what you may use`} className="mx-auto mt-16 max-w-lg">
+      An admin gives it on the Access page. Ask for it under <Link to="/account" className="underline underline-offset-2">Your account</Link> → Ask for access.
     </EmptyState>
   )
 }

@@ -64,6 +64,8 @@ export function Composer({
   initialText,
   fill,
   onFilled,
+  attach = true,
+  voice = true,
 }: {
   streaming: boolean
   onSend: (text: string, skill?: SkillUse) => Promise<boolean>
@@ -105,6 +107,10 @@ export function Composer({
   /** Words put in the box in place of what it holds (a question rewound to, to edit and send again), once: then onFilled. */
   fill?: string | null
   onFilled?: () => void
+  /** Files may go with a message (the person holds feature.uploads): else no Attach, and nothing pasted is attached. */
+  attach?: boolean
+  /** A spoken message (feature.speech). */
+  voice?: boolean
 }) {
   const [text, setText] = useState(initialText ?? '')
   const area = useRef<HTMLTextAreaElement>(null)
@@ -211,6 +217,12 @@ export function Composer({
         return
       }
     }
+    // Escape lets the chosen skill go; what is written in the box stays.
+    if (e.key === 'Escape' && chosen && !e.nativeEvent.isComposing) {
+      e.preventDefault()
+      unchoose()
+      return
+    }
     // Backspace at the start of an empty box lets the skill go, then takes the quote away.
     if (e.key === 'Backspace' && (chosen || (quote && onClearQuote)) && !text && e.currentTarget.selectionStart === 0 && e.currentTarget.selectionEnd === 0) {
       e.preventDefault()
@@ -316,7 +328,7 @@ export function Composer({
         aria-controls={menuOpen ? menuId : undefined}
         aria-activedescendant={menuOpen ? `${menuId}-${Math.min(active, items.length - 1)}` : undefined}
         onPaste={(e) => {
-          if (e.clipboardData.files.length) {
+          if (attach && e.clipboardData.files.length) {
             e.preventDefault()
             uploads.add(e.clipboardData.files)
           }
@@ -330,13 +342,17 @@ export function Composer({
       {/* The box's own tools on the left, wrapping among themselves when it is narrow; the gauge and Send stay together at the bottom right. */}
       <div className="flex items-end gap-2 px-2 pt-1 pb-2">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1 gap-y-1">
-        <input ref={picker} type="file" multiple hidden onChange={(e) => { if (e.target.files) uploads.add(e.target.files); e.target.value = '' }} aria-label="Attach files" />
-        <Tooltip content="Attach files: Word, Excel, PowerPoint, PDF, text, code, images, sound, video">
-          <Button type="button" variant="ghost" size="icon-sm" onClick={() => picker.current?.click()} aria-label="Attach">
-            <Paperclip />
-          </Button>
-        </Tooltip>
-        <VoiceButton onRecorded={(f) => uploads.add([f])} />
+        {attach && (
+          <>
+            <input ref={picker} type="file" multiple hidden onChange={(e) => { if (e.target.files) uploads.add(e.target.files); e.target.value = '' }} aria-label="Attach files" />
+            <Tooltip content="Attach files: Word, Excel, PowerPoint, PDF, text, code, images, sound, video">
+              <Button type="button" variant="ghost" size="icon-sm" onClick={() => picker.current?.click()} aria-label="Attach">
+                <Paperclip />
+              </Button>
+            </Tooltip>
+          </>
+        )}
+        {attach && voice && <VoiceButton onRecorded={(f) => uploads.add([f])} />}
         {talk}
         {tools}
         {compare}

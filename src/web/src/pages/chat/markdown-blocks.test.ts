@@ -4,11 +4,27 @@ import { LiveBlocks, sanitize, toBlocks } from './markdown-blocks'
 const html = (text: string) => toBlocks(text).map((b) => (b.kind === 'html' ? b.html : '')).join('')
 
 describe('right-to-left text', () => {
-  it('gives each block its own direction', () => {
+  it('gives each block its own direction, and a list or a quote the direction of its first words', () => {
     const out = new DOMParser().parseFromString(html('سلام، این یک پاراگراف است.\n\nAn English paragraph.\n\n- مورد اول\n- مورد دوم\n\n> نقل قول'), 'text/html')
-    expect([...out.body.children].map((e) => `${e.tagName} ${e.getAttribute('dir')}`)).toEqual(['P auto', 'P auto', 'UL auto', 'BLOCKQUOTE auto'])
-    expect(out.querySelector('li')?.hasAttribute('dir')).toBe(false)
-    expect(out.querySelector('blockquote p')?.hasAttribute('dir')).toBe(false)
+    expect([...out.body.children].map((e) => `${e.tagName} ${e.getAttribute('dir')}`)).toEqual(['P auto', 'P auto', 'UL rtl', 'BLOCKQUOTE rtl'])
+    expect(out.querySelector('blockquote p')?.getAttribute('dir')).toBe('auto')
+  })
+
+  it('lays out each item, paragraph and heading of mixed text by its own words', () => {
+    const out = new DOMParser().parseFromString(
+      html('- Install it first\n- سپس آن را اجرا کنید\n  1. `npm i`\n  2. دوم\n\n> An English line\n>\n> و یک خط فارسی\n\n## عنوان فارسی'),
+      'text/html',
+    )
+    const list = out.querySelector('ul')!
+    // The list's side (where its bullets go) by its first item; each item by its own words.
+    expect(list.getAttribute('dir')).toBe('ltr')
+    expect([...list.children].map((li) => li.getAttribute('dir'))).toEqual(['auto', 'auto'])
+    // Code is left to right whatever the text: the list goes by its first words outside it.
+    expect(out.querySelector('ol')?.getAttribute('dir')).toBe('rtl')
+    expect([...out.querySelectorAll('ol > li')].map((li) => li.getAttribute('dir'))).toEqual(['auto', 'auto'])
+    expect(out.querySelector('blockquote')?.getAttribute('dir')).toBe('ltr')
+    expect([...out.querySelectorAll('blockquote p')].map((p) => p.getAttribute('dir'))).toEqual(['auto', 'auto'])
+    expect(out.querySelector('h2')?.getAttribute('dir')).toBe('auto')
   })
 
   it('keeps code left to right inside right-to-left text', () => {

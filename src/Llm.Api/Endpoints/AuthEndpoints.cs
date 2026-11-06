@@ -55,6 +55,8 @@ public static class AuthEndpoints
             isAdmin = member.IsOwner,
             // The administrative permissions they hold (a role of theirs): which admin pages they see.
             permissions = Core.Access.Permissions.AdminKeys.Where(member.Has),
+            // The feature permissions they do not hold: the pages leave out what needs them.
+            denied = Core.Access.Permissions.FeatureKeys.Where(k => !member.Has(k)),
             source = UserSources.Name(user.Source),
             twoFactorEnabled = user.TwoFactorEnabled,
             // Signed in to set up two-factor sign-in, which the company requires, before anything else.

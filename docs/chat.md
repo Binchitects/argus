@@ -195,7 +195,10 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   make the **Leaderboard** (in the sidebar): the company's models on its own
   questions, by Elo rating, with their wins, losses, ties and win rate.
   Admins can keep it to themselves (Settings → Chat → **Arena leaderboard for
-  everyone**).
+  everyone**). Compare is there only for whoever holds `feature.compare`,
+  while two models can answer now and not in a room: when it goes (a model
+  unloaded), a Compare left on goes with it, and the next question is an
+  ordinary message.
 - **Context.** The gauge beside Send shows how full the model's context is,
   from the last answer's prompt as the model counted it (and what it
   answered). Opened, it shows what fills it: the system prompt and the tools'
@@ -547,10 +550,14 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   - The model is told to quote labels with punctuation and to give each
     diagram an `accTitle`, which names it for screen readers.
 - **Right-to-left text.** Persian, Arabic and Hebrew read right to left, as in
-  ChatGPT: each paragraph, heading, list, quote and table of an answer takes
-  the direction of its first words, so Persian and English sit side by side.
-  Questions, the message box, the edit box, thinking and a chat's instructions
-  follow what is typed. Code, code blocks and formulas stay left to right.
+  ChatGPT: each paragraph, heading, list item, table cell and line of a quote
+  takes the direction of its own first words, so Persian and English sit side
+  by side. A list, a quote or a table goes the way its first words read (where
+  its bullets, its border and its first column are), code left out of that.
+  Questions, a quoted part, thinking, the message box and the edit box go line
+  by line: a Persian line under an English one reads right to left. Code, code
+  blocks and formulas stay left to right. Code Arena's chat shows them the same
+  way.
 - **Files panel.** Like Claude's: every attachment, every file Argus read (with
   **Open in GitLab**), and every file the model wrote in the branch on screen.
   It keeps the newest version of each and has a viewer. Files made by a
@@ -1774,7 +1781,8 @@ model reads it to choose it), its **instructions** and its **parameters**.
   chosen skill sits above the box as a chip, with a field for each parameter
   (required ones marked; a default shown in its field). What you write in the
   box goes with it. Enter moves from field to field, then to the box;
-  Backspace in the empty box, or the chip's X, lets the skill go. Sending
+  Esc, Backspace in the empty box, or the chip's X, lets the skill go (Esc
+  keeps what you wrote in the box). Sending
   waits until every required parameter has something.
 - **What the model reads**: the skill's instructions, its parameters filled
   in, then your words, unless the instructions say where they go
@@ -1953,7 +1961,9 @@ question to another model, or allows. The app starts with these:
   kind was found. Set it to **Mask** and it goes with each secret replaced by
   `[removed: GitHub token]`, in the chat as well as to the model. A
   placeholder (`$DB_PASSWORD`, `<password>`, `***`) or a name in code
-  (`config.password`) is not a secret. Each one found is audited by its kind,
+  (`config.password`, `password=db_password`, `api_key=API_KEY`,
+  `Faker::Internet.password`) is not a secret, nor is a message about one
+  (`"Passwords do not match"`). Each one found is audited by its kind,
   never the secret. A refused secret is not a strike: it is an accident, not
   abuse.
 - **Personal data to the model** (off): e-mail addresses, phone and card
@@ -1974,7 +1984,16 @@ question to another model, or allows. The app starts with these:
 **Send it anyway?**; one that **asks for a reason** waits for yours, which is
 recorded. Either way the message is back in the box if you keep it.
 
-**When a message is refused**, the sentence says why. **Ask for a review**
+**When a message is refused**, the sentence says why, then which rule
+refused it, what it found and where: `Rule: Secrets in what people send.
+Found a password in your message, line 3: password = "Su…"`. The place is
+your message, the part of an answer you quote, a file, a tool's call or what
+it brought back, the answer, or (for an API key, as Code Arena's) which
+message of the request: `message 3 of 9 (a tool's result)`, so a password a
+tool read many turns ago can be found. A secret or personal data shows only
+its first two characters. The API's refusal carries the same as `rule`,
+`where` and `finding`, and Code Arena shows Arena's sentence as it is.
+**Ask for a review**
 under it sends your reason to the people who look after the safeguards; if
 they allow it, you may send the same message again within a day, and you hear
 either way in your bell. A refusal that counts as a strike is in the audit
@@ -2436,7 +2455,7 @@ use and edit one); a new chat takes `assistantId`.
     a small model, and the sub-agents' model under an answer
   - `/review` chosen from the `/` menu: its chip and parameter fields, not
     sent while a required one is empty, then sent as a skill with the box's
-    words; Backspace letting it go; the menu found by title, closed with Esc;
+    words; Backspace and Esc letting it go; the menu found by title, closed with Esc;
     a skill without parameters; the Skills page (sections, a new skill with
     parameters shared with a group, an admin's for everyone, edit and
     delete)

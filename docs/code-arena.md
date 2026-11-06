@@ -1198,6 +1198,10 @@ Lines of a file go to the agent from the editor itself:
 The model gets them numbered, after the message, as `<selection path lines>`
 (with `unsaved="true"` for the editor's text); at most eight a message.
 
+Persian, Arabic and Hebrew read right to left in the chat as in the web chat
+([Chat](chat.md#what-it-does)): each paragraph, list item, table cell and line
+of a question or of the box by its own words, code left to right.
+
 ### Reply to part of an answer
 
 Words selected in a finished answer of the chat get the web chat's toolbar
@@ -2350,7 +2354,8 @@ message, without starting Code Arena again.
   for its skills. In the chat, **/** at the start of the box lists
   `/compact`, `/clear`, your commands and the skills; ↑ and ↓ choose, Tab
   (or Enter) puts one in the box; Enter on a name typed whole sends it as it
-  is (`/clear` runs at once).
+  is (`/clear` runs at once). Esc lets a chosen `/name` go and keeps the
+  words after it.
 - **Skills from Arena**: the skills made in Arena that you may use (yours,
   your groups', the company's: the Skills page) and those the plugins you may
   use bring (Admin → Plugins), kept in the config folder's `plugin-skills/` and
@@ -2651,6 +2656,14 @@ Arena waits in the line, as a person in the web chat does: it says so once
 wait)."), asks again when Arena said, says it again every two minutes, and
 gives up after 15 minutes with Arena's words. A turn, a compaction's summary
 and `/compact` all wait so.
+
+A request Arena's safeguards refuse ends the turn with Arena's sentence as it
+is, not as an error of the gateway: which rule, what it found, and in which
+message of the request ("Arena's safeguards refused the request: it holds a
+password. … Rule: Secrets in what people send. Found a password in message 3
+of 9 (a tool's result), line 2: password: k9…"). The whole conversation goes
+with each request, so a file a tool read many turns ago may be the one: change
+it or rewind past it.
 
 
 - **"The certificate of … is not trusted"**: the Arena's certificate comes

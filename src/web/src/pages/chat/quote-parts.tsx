@@ -45,7 +45,7 @@ export function QuotedLine({ quote, onJump }: { quote: string; onJump?: () => bo
     <figure className="flex max-w-[85%] min-w-0 items-start gap-1.5 text-sm text-muted-foreground" aria-label="Quoting an earlier answer">
       <TextQuote className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
       <div className="grid min-w-0">
-        <blockquote ref={text} dir="auto" className={cn('border-s-2 ps-2 break-words whitespace-pre-wrap', !open && 'line-clamp-2')}>
+        <blockquote ref={text} dir="auto" className={cn('bidi-lines border-s-2 ps-2 break-words whitespace-pre-wrap', !open && 'line-clamp-2')}>
           {shown}
         </blockquote>
         <div className="flex flex-wrap gap-x-2">

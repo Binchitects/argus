@@ -50,6 +50,9 @@ internal sealed class GatewayException(string message, int? status = null, bool 
     /// <summary>The request did not fit the model's window (the engine's or LiteLLM's refusal said so): a compaction may make it fit.</summary>
     public bool ContextExceeded { get; init; }
 
+    /// <summary>Arena's safeguards refused the request (a 400 through LiteLLM's guardrail): their words name the rule, the finding and where.</summary>
+    public bool Safeguard { get; init; }
+
     /// <summary>The prompt's size in tokens as the refusal counted it (llama.cpp's n_prompt_tokens), when it said.</summary>
     public long? PromptTokens { get; init; }
 
@@ -601,6 +604,11 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
     private GatewayException Failure(HttpStatusCode status, string body)
     {
         var detail = Json.ParseObject(body)?["error"] is JsonNode e ? e.Str("message") ?? e.ToString() : body.Trim();
+        // Arena's safeguards: their sentence whole (which rule, what it found, in which message), the person's to act on.
+        if (status == HttpStatusCode.BadRequest && detail.IndexOf(SafeguardRefusal, StringComparison.Ordinal) is >= 0 and var said)
+        {
+            return new GatewayException(detail[said..], 400) { Safeguard = true };
+        }
         if (detail.Length > 400)
         {
             detail = detail[..400] + "…";
@@ -640,6 +648,9 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
             _ => new GatewayException($"The gateway answered {(int)status}: {detail}", (int)status),
         };
     }
+
+    /// <summary>How Arena's safeguards begin a refusal of an API key's request (Safeguards.Refused, the "api" stage).</summary>
+    private const string SafeguardRefusal = "Arena's safeguards refused the request";
 
     /// <summary>A limit with its word: "1 request", "60 requests".</summary>
     private static string Count(string limit, string one) => limit == "1" ? $"1 {one}" : $"{limit} {one}s";

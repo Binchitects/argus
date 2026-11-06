@@ -1,5 +1,6 @@
 import { ArrowDown, ArrowUp, ChevronsUpDown, Search } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import { textDirection } from '@/lib/direction'
 import type { Align, TableCell } from './markdown-blocks'
 import { sortRows } from './table-sort'
 
@@ -40,13 +41,14 @@ export function AnswerTable({ head, align, rows }: { head: TableCell[]; align: A
           />
         </label>
       )}
-      <table dir="auto">
+      {/* Its columns run the way its first words read; each cell by its own words. */}
+      <table dir={textDirection([...head, ...rows.flat()].map((c) => c.text).join(' ')) ?? 'auto'}>
         <thead>
           <tr>
             {head.map((h, i) => {
               const sorted = sort?.column === i ? (sort.desc ? 'descending' : 'ascending') : undefined
               return (
-                <th key={i} scope="col" style={{ textAlign: align[i] ?? undefined }} aria-sort={sorted}>
+                <th key={i} scope="col" dir="auto" style={{ textAlign: align[i] ?? undefined }} aria-sort={sorted}>
                   <button
                     type="button"
                     onClick={() => next(i)}
@@ -72,7 +74,7 @@ export function AnswerTable({ head, align, rows }: { head: TableCell[]; align: A
             <tr key={rows.indexOf(r)}>
               {head.map((_, i) => (
                 // Sanitised when the answer was read; the answer is data, never markup we trust.
-                <td key={i} style={{ textAlign: align[i] ?? undefined }}>
+                <td key={i} dir="auto" style={{ textAlign: align[i] ?? undefined }}>
                   <Html html={r[i]?.html ?? ''} />
                 </td>
               ))}

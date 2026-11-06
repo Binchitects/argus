@@ -85,7 +85,7 @@ public static partial class GuardrailEndpoints
         }
         var texts = (body["texts"] as JsonArray ?? []).Select(t => t is JsonValue v && v.TryGetValue<string>(out var s) ? s : "").ToList();
         var model = Str(body, "model");
-        var verdict = await safeguards.CheckApiAsync(user, texts, LastQuestion(body) ?? texts.LastOrDefault(), model, http.RequestAborted);
+        var verdict = await safeguards.CheckApiAsync(user, texts, LastQuestion(body) ?? texts.LastOrDefault(), model, http.RequestAborted, Places(body, texts));
         // Room for its model last, once nothing else holds it back: a model the engine has not loaded, at its limit.
         if (verdict.Action != "BLOCKED" && await route.RoomForKeyAsync(model, http.RequestAborted) is { } full)
         {
@@ -107,6 +107,46 @@ public static partial class GuardrailEndpoints
             _ => null,
         };
     }
+
+    /// <summary>
+    /// Where each text is in the request, for a refusal's words: "message 3 of 9 (a tool's result)", by the message whose
+    /// content (or one of its parts) it is; a text no message holds is named by its place among the texts.
+    /// </summary>
+    private static List<string> Places(JsonObject body, List<string> texts)
+    {
+        var messages = (body["structured_messages"] as JsonArray ?? []).OfType<JsonObject>().ToList();
+        var lastUser = messages.FindLastIndex(m => Str(m, "role") == "user");
+        var taken = new HashSet<int>();
+        var places = new List<string>(texts.Count);
+        for (var i = 0; i < texts.Count; i++)
+        {
+            var at = Enumerable.Range(0, messages.Count).FirstOrDefault(j => !taken.Contains(j) && Holds(messages[j], texts[i]), -1);
+            if (at < 0)
+            {
+                places.Add($"text {i + 1} of {texts.Count} of the request");
+                continue;
+            }
+            taken.Add(at);
+            var role = Str(messages[at], "role") switch
+            {
+                "system" or "developer" => "the instructions",
+                "user" when at == lastUser => "your last message",
+                "user" => "a message of yours",
+                "assistant" => "an answer",
+                "tool" or "function" => "a tool's result",
+                var r => r ?? "a message",
+            };
+            places.Add($"message {at + 1} of {messages.Count} ({role})");
+        }
+        return places;
+    }
+
+    private static bool Holds(JsonObject message, string text) => message["content"] switch
+    {
+        JsonValue v when v.TryGetValue<string>(out var s) => s == text,
+        JsonArray parts => parts.OfType<JsonObject>().Any(p => Str(p, "text") == text),
+        _ => false,
+    };
 
     private static IResult Answer(ApiVerdict v)
     {

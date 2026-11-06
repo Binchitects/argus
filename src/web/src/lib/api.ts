@@ -35,9 +35,14 @@ export interface Me {
   signedInAt: number | null
   /** The features that are off here (deploy/features): their pages are left out. */
   featuresOff?: string[]
+  /** The feature permissions they do not hold (feature.compare, code.studio...): the pages leave out what needs them. */
+  denied?: string[]
   /** Their colour theme ("default", "sakura"...): every device they sign in on takes it. */
   colorTheme?: string
 }
+
+/** Whether the person holds a feature permission (Admin → Access), as their Me or chat config says: what they may not use is not offered. */
+export const mayUse = (of: { denied?: string[] } | null | undefined, permission: string) => !of?.denied?.includes(permission)
 
 /** An API answer that was not 2xx. `status` is the app's code ("invalid", "locked", ...), `message` is for people. */
 export class ApiError extends Error {

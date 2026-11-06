@@ -38,6 +38,17 @@ describe('nav', () => {
     for (const item of navigation.flatMap((s) => s.items)) if (item.feature) expect(features, item.title).toContain(item.feature)
   })
 
+  it('leaves out the pages whose feature permissions a person holds none of', () => {
+    const titles = (denied: string[]) => visibleNavigation({ isAdmin: false, denied }).flatMap((s) => s.items.map((i) => i.title))
+    expect(titles([])).toEqual(expect.arrayContaining(['Chat', 'Decks', 'Code Studio', 'Scheduled tasks']))
+    const without = titles(['feature.chat', 'feature.decks', 'feature.tasks', 'code.studio'])
+    for (const t of ['Chat', 'Decks', 'Scheduled tasks']) expect(without).not.toContain(t)
+    // Code Studio is for reviews too: shown while any of its permissions is held.
+    expect(without).toContain('Code Studio')
+    expect(titles(['code.studio', 'code.read', 'review.run'])).not.toContain('Code Studio')
+    expect(findNavItem('/decks/d1')?.may).toEqual(['feature.decks'])
+  })
+
   it('links a service beside this one, keeping the port', () => {
     expect(serviceUrl('metrics', { protocol: 'https:', host: 'llm.example.com' })).toBe('https://metrics.llm.example.com/')
     expect(serviceUrl('metrics', { protocol: 'https:', host: 'llm.example.com:8443' })).toBe('https://metrics.llm.example.com:8443/')

@@ -56,7 +56,7 @@ public sealed class SecretScanningTests(AppFixture app)
 
         var refused = await SendAsync(b, chat, "Why does this key not work?\n" + Pem);
         await StatusAssert.Is(HttpStatusCode.BadRequest, refused);
-        Assert.Equal("This message was not sent: it holds a private key. Remove it (a placeholder will do) and send it again.", await ErrorAsync(refused));
+        Assert.StartsWith("This message was not sent: it holds a private key. Remove it (a placeholder will do) and send it again. Rule: Secrets in what people send. Found a private key in your message, line 2: --…", await ErrorAsync(refused), StringComparison.Ordinal);
         Assert.DoesNotContain(app.Model.Requests, r => r.Body["user"]?.GetValue<string>() == email);
         Assert.Empty((await b.JsonAsync(await b.GetAsync($"/api/chat/conversations/{chat}"))).GetProperty("messages").EnumerateArray());
 
@@ -207,4 +207,32 @@ public sealed class SecretScanningTests(AppFixture app)
         Assert.Equal("a private key and a GitHub token", Secrets.Kinds(Secrets.Find(Pem + " " + GitHubToken)));
         Assert.Equal("key [removed: GitHub token].", Secrets.Mask("key " + GitHubToken + ".", Secrets.Find("key " + GitHubToken + ".")));
     }
+
+    /// <summary>Code as people paste it and as coding agents read it: a password's name, passed on, is not a password.</summary>
+    [Theory]
+    [Trait("Control", "DAT-04")]
+    [InlineData("conn = psycopg2.connect(host=host, user=user, password=db_password, port=5432)")]
+    [InlineData("client = OpenAI(api_key=API_KEY, base_url=BASE_URL)")]
+    [InlineData("    password: user_password,\n    email: user_email,")]
+    [InlineData("const options = { secret: session_secret, resave: false };")]
+    [InlineData("$mysqli = new mysqli($host, $user, $db_pass, $db_name);\n$password = $_POST['password'];")]
+    [InlineData("api_key = settings.OPENAI_API_KEY\nsecret_key = SECRET_KEY")]
+    [InlineData("export function login(user: string, password: string) {\n  return api.post('/login', { user, password: password_hash });\n}")]
+    [InlineData("services:\n  db:\n    environment:\n      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}\n      password: $DB_PASS")]
+    [InlineData("if (form.password !== form.confirm) { error.password = 'Passwords do not match'; }")]
+    [InlineData("var hash = BCrypt.HashPassword(password); user.PasswordHash = hash; pwd = _pwd_cache;")]
+    [InlineData("token = request.headers.get('Authorization')\naccess_token = jwt_encode(payload)\nauth_token = AUTH_TOKEN")]
+    [InlineData("validates :password, length: { minimum: 8 }\npassword: Faker::Internet.password")]
+    [InlineData("<input type=\"password\" name=\"password\" placeholder=\"Password\" required>")]
+    [InlineData("- name: Log in\n  run: echo \"$PASSWORD\" | docker login -u ci --password-stdin")]
+    public void A_name_in_code_is_not_a_password(string code) => Assert.Empty(Secrets.Find(code).Select(h => code.Substring(h.Index, h.Length)));
+
+    [Theory]
+    [InlineData("password = \"Sup3r-Secret!\"", "Sup3r-Secret!")]
+    [InlineData("DB_URL=postgres://app:k9Lw2pQx@db:5432/app", "k9Lw2pQx")]
+    [InlineData("password: hunter22", "hunter22")]
+    [InlineData("api_key: 'a8f5f167f44f4964e6c998dee827110c'", "a8f5f167f44f4964e6c998dee827110c")]
+    [InlineData("Server=db;User Id=sa;Password=Pa55_word;", "Pa55_word")]
+    public void A_password_written_out_is_still_found(string code, string secret) =>
+        Assert.Equal([secret], Secrets.Find(code).Select(h => code.Substring(h.Index, h.Length)));
 }

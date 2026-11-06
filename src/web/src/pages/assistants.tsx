@@ -8,6 +8,7 @@ import { Segmented } from '@/components/app/segmented'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
+import { mayUse, meQuery } from '@/lib/api'
 import { assistantsQuery } from './chat/api'
 import { AssistantIcon, ReachLabel } from './chat/assistant-icon'
 import { NewAssistant } from './chat/assistant-new'
@@ -18,11 +19,14 @@ const plural = (n: number, one: string, many: string) => `${n.toLocaleString()} 
 /** The gallery: the assistants a person may use (theirs, their teams', the company's), how much each is used, and a chat with one. */
 export function AssistantsPage() {
   const list = useQuery(assistantsQuery)
+  const me = useQuery(meQuery)
   const [search, setSearch] = useState('')
   const [show, setShow] = useState<'all' | 'yours' | 'shared'>('all')
   const [creating, setCreating] = useState(false)
   if (list.isPending) return <PageSkeleton />
   if (list.error) return <QueryError error={list.error} retry={() => list.refetch()} />
+  // Making one is a feature of its own (Admin → Access): without it, no New assistant.
+  const mayMake = mayUse(me.data, 'feature.assistants.create')
   const needle = search.trim().toLowerCase()
   const shown = list.data
     .filter((a) => show === 'all' || (show === 'yours' ? a.mine : !a.mine))
@@ -34,9 +38,11 @@ export function AssistantsPage() {
         title="Assistants"
         description="Instructions, files and settings a chat starts from: your own, your teams', and the company's. Share yours with your groups; an admin can share one with everyone."
         actions={
-          <Button onClick={() => setCreating(true)}>
-            <Plus /> New assistant
-          </Button>
+          mayMake && (
+            <Button onClick={() => setCreating(true)}>
+              <Plus /> New assistant
+            </Button>
+          )
         }
       />
       <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -56,7 +62,7 @@ export function AssistantsPage() {
         />
       </div>
       {list.data.length === 0 ? (
-        <EmptyState icon={Bot} title="No assistants yet" action={<Button onClick={() => setCreating(true)}><Plus /> New assistant</Button>}>
+        <EmptyState icon={Bot} title="No assistants yet" action={mayMake && <Button onClick={() => setCreating(true)}><Plus /> New assistant</Button>}>
           Make one with instructions and files for a task you repeat, then share it with your team.
         </EmptyState>
       ) : shown.length === 0 ? (

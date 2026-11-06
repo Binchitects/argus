@@ -147,6 +147,45 @@ describe('arena mode', () => {
     expect(screen.getByRole('button', { name: 'Compare' })).toHaveAttribute('aria-pressed', 'true')
   })
 
+  it('a person without the compare permission has no Compare, and their question goes as a message', async () => {
+    const calls = fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: { ...config, denied: ['feature.compare'] } }),
+      'GET /api/chat/conversations': () => ({ json: [] }),
+      'GET /api/chat/conversations/c1': () => ({ json: conversation({ messages: savedMessages().slice(0, 1), currentLeafId: 'q1' }) }),
+      'POST /api/chat/conversations/c1/messages': () => ({ events: [{ type: 'question', id: 'q2', parentId: 'q1' }, { type: 'done', id: 'q2' }] }),
+    })
+    renderApp('/chat/c1')
+    await screen.findByRole('textbox', { name: 'Message' })
+    expect(screen.queryByRole('button', { name: 'Compare' })).not.toBeInTheDocument()
+    await ask('Which is fastest?')
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/chat/conversations/c1/messages')).toBe(true))
+    expect(calls.some((c) => c.path === '/api/chat/conversations/c1/compare')).toBe(false)
+  })
+
+  it('Compare left on when fewer than two models can answer any more is off: the question goes as a message', async () => {
+    let unloaded = false
+    const calls = fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: unloaded ? { ...config, models: config.models.map((m) => (m.name === 'Eyes-Model' ? { ...m, loaded: false } : m)) } : config }),
+      'GET /api/chat/conversations': () => ({ json: [] }),
+      'GET /api/chat/conversations/c1': () => ({ json: conversation({ messages: savedMessages().slice(0, 1), currentLeafId: 'q1' }) }),
+      'POST /api/chat/conversations/c1/compare': () => {
+        unloaded = true
+        return { status: 400, json: { status: 'models', error: 'Comparing needs two models you may use that can answer now, and only Main-Model can.' } }
+      },
+      'POST /api/chat/conversations/c1/messages': () => ({ events: [{ type: 'question', id: 'q2', parentId: 'q1' }, { type: 'done', id: 'q2' }] }),
+    })
+    renderApp('/chat/c1')
+    await userEvent.click(await screen.findByRole('button', { name: 'Compare' }))
+    await userEvent.click(within(await screen.findByRole('dialog', { name: 'Compare two models' })).getByRole('button', { name: 'Compare the next question' }))
+    await ask('Which is fastest?')
+    expect(await screen.findByText(/only Main-Model can/)).toBeInTheDocument()
+    // One model can answer now: no Compare to turn off, and none forced on the next try.
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Compare' })).not.toBeInTheDocument())
+    await userEvent.type(screen.getByRole('textbox', { name: 'Message' }), '{Enter}')
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/chat/conversations/c1/messages')?.body).toMatchObject({ content: 'Which is fastest?' }))
+    expect(calls.filter((c) => c.path === '/api/chat/conversations/c1/compare')).toHaveLength(1)
+  })
+
   it('a comparison stopped before both answered has nothing to vote on', () => {
     const tree = new ChatTree(savedMessages().slice(0, 2))
     const view = arenaView(savedMessages()[0]!, [match({ b: null })], null, false)!
