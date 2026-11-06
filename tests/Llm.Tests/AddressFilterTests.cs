@@ -9,6 +9,7 @@ namespace Llm.Tests;
 public sealed class AddressFilterTests(AppFixture app)
 {
     [Fact]
+    [Trait("Control", "NET-02")]
     public void A_list_takes_addresses_and_ranges_of_both_families_with_comments_and_says_the_first_that_is_not_one()
     {
         var (ranges, wrong) = AddressFilter.Parse("10.0.0.0/8\n192.168.1.20, 2001:db8::/32  # the office\n\n# a whole line\n");
@@ -29,6 +30,7 @@ public sealed class AddressFilterTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "NET-02")]
     public async Task Traefik_is_told_which_addresses_may_come_in_and_a_list_that_would_shut_out_its_saver_is_refused()
     {
         await using var f = app.Create(app.ConnectionStringFor("addresses_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway());

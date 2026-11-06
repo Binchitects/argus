@@ -118,6 +118,7 @@ public sealed class EngineMoveTests(AppFixture app) : IDisposable
         (await RowAsync(s, name)).GetProperty("move") is { ValueKind: JsonValueKind.Object } move ? move.GetProperty("phase").GetString() : null;
 
     [Fact]
+    [Trait("Control", "LOG-01")]
     public async Task A_llama_cpp_model_moves_to_vllm_at_runtime_its_answer_in_flight_finishing_on_llama_cpp_first()
     {
         var s = await StartAsync();

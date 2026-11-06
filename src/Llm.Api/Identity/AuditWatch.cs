@@ -78,6 +78,9 @@ public sealed partial class AuditWatch(IServiceScopeFactory scopes, IOptionsMoni
                 try
                 {
                     AuditChain.AppendAnchor(dir, a);
+                    // The walk counted those kept before it: this one is kept too.
+                    report = report with { Anchors = report.Anchors + 1 };
+                    state.Last = report;
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {

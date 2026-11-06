@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-The 37 controls Arena provides, from [controls.yaml](controls.yaml). How they are kept: [README](README.md#controls-and-how-they-are-kept). Each framework's clauses and the controls that serve them: [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md), [SOC 2, Trust Services Criteria](frameworks/soc2.md), [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md), [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md), [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md), [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md), [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md), [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md), [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md), [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md), [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md), [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md), [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md), [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md).
+The 38 controls Arena provides, from [controls.yaml](controls.yaml). How they are kept: [README](README.md#controls-and-how-they-are-kept). Each framework's clauses and the controls that serve them: [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md), [SOC 2, Trust Services Criteria](frameworks/soc2.md), [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md), [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md), [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md), [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md), [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md), [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md), [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md), [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md), [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md), [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md), [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md), [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md).
 
 ## People and access (IAM)
 
@@ -128,7 +128,7 @@ People come from the company's directory (LDAP or Active Directory), OIDC or SAM
 
 ### IAM-05: Least privilege, by roles and rules
 
-What a person may do comes from roles (built in, or made by the company) held directly, through a group or by everyone, and from rules that give or take a feature; admin roles can be scoped to some groups. The checker says why a person may or may not do something. The wiki finds and shows each person only the documents they may read, and searches only the code they may read in GitLab, as them. A feature taken from a person is hidden from their menus and pages, not only refused.
+What a person may do comes from roles (built in, or made by the company) held directly, through a group or by everyone, and from rules that give or take a feature; admin roles can be scoped to some groups. The checker says why a person may or may not do something. The wiki finds and shows each person only the documents they may read, and searches only the code they may read in GitLab, as them. A feature taken from a person is hidden from their menus and pages, not only refused. Taking a request out of the line needs usage.line, restarting an engine runtimes.restart; only a chat's owner rewinds it, and Code Arena's key reads and adds to its own person's chats alone.
 
 **Serves**
 
@@ -153,6 +153,9 @@ What a person may do comes from roles (built in, or made by the company) held di
 - `Llm.Tests/AccessBulkTests.Me_and_the_chats_config_name_the_feature_permissions_a_person_does_not_hold`
 - `Llm.Tests/WikiTests.People_find_and_read_the_documents_they_may_read_and_nothing_else`
 - `Argus.Tests/ReviewToolsTests.The_wiki_search_answers_as_the_person_with_pages_and_filters`
+- `Llm.Tests/FairUseTests.An_admin_takes_a_waiting_answer_out_and_stops_a_running_one_and_the_person_is_told_why`
+- `Llm.Tests/ChatRewindTests.Only_the_owner_rewinds_a_room_for_everyone_and_nobody_while_an_answer_is_written`
+- `Llm.Tests/CodeArenaSyncTests.Only_the_owner_s_key_reads_or_adds_to_a_chat`
 
 **The company's part** Decide who holds which role, and review it.
 
@@ -214,7 +217,7 @@ An access review lists every privileged role given to a person, a group or every
 
 ### LOG-01: Who did what is recorded
 
-The audit log keeps every sign-in, every change to people, groups, roles, settings and the index, every export and every tool an agent calls as a person, with who, whom, when and from where; never content. Reads of another person's data are audited as changes are: an admin's export of them, and their shared chat opened by someone else.
+The audit log keeps every sign-in, every change to people, groups, roles, settings and the index, every export and every tool an agent calls as a person, with who, whom, when and from where; never content. So are the operator's actions on the running service: an engine reloaded or restarted, a sandbox reset, a model moved to another engine, a request taken out of the line (with why). Reads of another person's data are audited as changes are: an admin's export of them, and their shared chat opened by someone else.
 
 **Serves**
 
@@ -239,6 +242,9 @@ The audit log keeps every sign-in, every change to people, groups, roles, settin
 - `Llm.Tests/ArenaMcpTests.An_agent_signs_in_with_the_persons_key_gets_their_chat_tools_and_each_call_is_audited`
 - `Llm.Tests/ArenaMcpTests.At_its_code_address_an_agent_gets_search_tools_and_run_code_whose_program_calls_the_tools_as_the_person`
 - `Llm.Tests/ShareTests.A_shared_chat_opens_for_a_colleague_and_not_for_someone_outside_the_group_and_revoking_stops_it`
+- `Llm.Tests/RuntimeEndpointsTests.Llamacpps_restart_is_a_file_its_router_follows_and_its_reload_loads_each_model_again`
+- `Llm.Tests/EngineMoveTests.A_llama_cpp_model_moves_to_vllm_at_runtime_its_answer_in_flight_finishing_on_llama_cpp_first`
+- `Llm.Tests/FairUseTests.An_admin_takes_a_waiting_answer_out_and_stops_a_running_one_and_the_person_is_told_why`
 
 **Watched by** `app:audit-log` (Admin → Compliance, and `./arenactl check compliance`)
 
@@ -296,6 +302,7 @@ Each entry is sealed onto the one before it with SHA-256, under one lock for eve
 - `Llm.Tests/AuditChainTests.An_entry_changed_removed_or_slipped_in_breaks_the_chain_there_and_every_admin_is_told`
 - `Llm.Tests/AuditChainTests.An_anchor_kept_apart_shows_the_end_of_the_chain_rewritten_and_entries_from_before_the_chain_are_sealed`
 - `Llm.Tests/AuditChainTests.Many_writers_at_once_still_make_one_chain`
+- `Llm.Tests/ComplianceDefaultsTests.The_first_anchor_is_kept_with_the_logs_first_entries_not_a_day_after_the_start`
 
 **Watched by** `app:audit-chain` (Admin → Compliance, and `./arenactl check compliance`)
 
@@ -394,7 +401,7 @@ Many failed sign-ins, an administrative role given, many exports by one person, 
 
 ### DAT-01: Chats and files are deleted when their time is up
 
-The company sets how long chats are kept, a group can set a shorter time, and every hour a job deletes chats past it with their files, and files nobody uses that are as old; each deletion is audited with counts.
+The company sets how long chats are kept (a new installation starts from a year), a group can set a shorter time, and every hour a job deletes chats past it with their files, and files nobody uses that are as old; each deletion is audited with counts.
 
 **Serves**
 
@@ -410,6 +417,7 @@ The company sets how long chats are kept, a group can set a shorter time, and ev
 **Proved by**
 
 - `Llm.Tests/RetentionTests.A_chat_past_its_groups_retention_is_deleted_with_its_files_and_one_under_legal_hold_is_not`
+- `Llm.Tests/ComplianceDefaultsTests.A_new_installation_holds_what_Arena_does_by_itself_and_each_check_left_is_the_companys_step_said_with_why`
 
 **Watched by** `app:chat-retention` (Admin → Compliance, and `./arenactl check compliance`)
 
@@ -596,6 +604,7 @@ The safeguards find e-mail addresses, phone, card, IBAN and social security numb
 - `Llm.Tests/PromptLogTests.With_the_prompt_log_off_API_requests_are_not_kept`
 - `Llm.Tests/PromptLogTests.Every_API_request_is_in_the_log_from_its_arrival_while_it_runs_and_when_it_fails_is_refused_or_is_stopped`
 - `Llm.Tests/PromptLogTests.A_chat_question_is_in_the_log_with_its_answers_state_and_why_it_failed`
+- `Llm.Tests/ComplianceDefaultsTests.A_new_installation_holds_what_Arena_does_by_itself_and_each_check_left_is_the_companys_step_said_with_why`
 
 **Watched by** `app:personal-data` (Admin → Compliance, and `./arenactl check compliance`)
 
@@ -637,6 +646,32 @@ Only Traefik's ports 80 and 443 are published, 80 only to redirect; TLS 1.2 and 
 
 **The company's part** A certificate from the company's CA or Let's Encrypt; the network around the hosts.
 
+### NET-02: Only the company's addresses come in
+
+Settings → Network access holds an allow list and a block list of addresses and ranges (IPv4 and IPv6) for the web, the API, the gateway and Argus; Traefik asks the app before every request and refuses what the lists refuse, and refuses everything while it cannot ask. A list that would shut out the admin saving it is refused, and each change is audited. IP_ALLOW is Traefik's own list in front of it all, even while the app is down.
+
+**Serves**
+
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.8.20 Networks security; A.8.22 Segregation of networks
+- [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC6.6 Security against threats from outside the system's boundaries
+- [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md): 164.312(a)(1) Access control
+- [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.32 Security of processing
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 1.3 Network access to and from the cardholder data environment is restricted; 1.4 Connections between trusted and untrusted networks are controlled
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): IVS Infrastructure and virtualization security
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): PR.IR-01 Networks and environments are protected from unauthorized logical access and usage
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): SC-7 Boundary Protection; SC-7(5) Deny by Default — Allow by Exception; AC-17 Remote Access
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.13.01 Boundary Protection
+- [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): FTA_TSE TOE session establishment
+
+**Documented in** [admin.md#network-access](../admin.md#network-access)
+
+**Proved by**
+
+- `Llm.Tests/AddressFilterTests.A_list_takes_addresses_and_ranges_of_both_families_with_comments_and_says_the_first_that_is_not_one`
+- `Llm.Tests/AddressFilterTests.Traefik_is_told_which_addresses_may_come_in_and_a_list_that_would_shut_out_its_saver_is_refused`
+
+**The company's part** Decide which networks may reach the service (the offices, the VPN) and keep the lists to them; the firewall around the hosts.
+
 ## Operations (OPS)
 
 ### OPS-01: Backups, restored and proven
@@ -667,6 +702,8 @@ scripts/backup.sh backs up the databases, the settings and the files, with a sec
 - `deploy/test_pitr.py::test_the_drill_restores_into_a_scratch_container_never_the_stacks`
 - `deploy/test_recovery.py::test_The_live_project_is_refused_before_anything_runs`
 - `deploy/test_recovery_check.py::test_A_person_lost_in_the_restore_fails_it`
+- `Llm.Tests/ComplianceDefaultsTests.A_new_installation_without_a_backup_yet_is_due_and_a_day_on_it_fails`
+- `deploy/test_installer.py::test_Install_sets_the_daily_backup_or_says_how`
 
 **Watched by** `app:backups` (Admin → Compliance, and `./arenactl check compliance`)
 
@@ -974,7 +1011,7 @@ Under the chat's box, people are told that answers are made by AI and can be wro
 
 ### GOV-11: Readiness is measured and the evidence is kept over time
 
-Each day once, every compliance check's result is kept (six years), so an audit over a period (SOC 2 Type II) reads it day by day. For each framework, Admin → Compliance says how ready the company is, from 0 to 100: Arena's controls that serve it holding now, their operator's parts attested within the year, and the checks of the management system its audit reads; with each gap and where it is put right. Each framework's auditor package is one download: its clauses with Arena's controls, their state and attestations, the checks' history over the period asked, the records its audit reads, and the drafts its scheme asks for (a Common Criteria Security Target, the AI Act's Annex IV for each high-risk system, a CSF profile). Each download is audited.
+Each day once, every compliance check's result is kept (six years), so an audit over a period (SOC 2 Type II) reads it day by day. For each framework, Admin → Compliance says how ready the company is, from 0 to 100: Arena's controls that serve it holding now, their operator's parts attested within the year, and the checks of the management system its audit reads; with each gap and where it is put right. Each framework's auditor package is one download: its clauses with Arena's controls, their state and attestations, the checks' history over the period asked, the records its audit reads, and the drafts its scheme asks for (a Common Criteria Security Target, the AI Act's Annex IV for each high-risk system, a CSF profile). Each download is audited. A check that does not hold says what to do and why, with a step that one click takes where it can (audited, and refused without the permission of what it changes); a new installation starts from the defaults (rules, policy drafts, retention, the supplier register).
 
 **Serves**
 
@@ -990,12 +1027,14 @@ Each day once, every compliance check's result is kept (six years), so an audit 
 - [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md): MEASURE 1.1 Approaches and metrics for measurement of AI risks enumerated during the Map function are selected for implementation starting with the most significant AI risks. The risks or trustworthiness characteristics that will not – or cannot – be measured are properly documented.
 - [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): ASE_TSS TOE summary specification; ATE_FUN Functional tests
 
-**Documented in** [compliance/README.md#readiness-and-the-auditors-package](README.md#readiness-and-the-auditors-package)
+**Documented in** [compliance/README.md#readiness-and-the-auditors-package](README.md#readiness-and-the-auditors-package), [compliance/README.md#a-new-installation-and-its-first-steps](README.md#a-new-installation-and-its-first-steps)
 
 **Proved by**
 
 - `Llm.Tests/ReadinessTests.Each_framework_says_how_ready_and_what_is_missing_and_its_package_holds_what_its_auditor_reads`
 - `Llm.Tests/ReadinessTests.The_checks_are_kept_once_a_day_and_the_package_reads_them_over_the_period`
+- `Llm.Tests/ComplianceDefaultsTests.A_new_installation_holds_what_Arena_does_by_itself_and_each_check_left_is_the_companys_step_said_with_why`
+- `Llm.Tests/ComplianceDefaultsTests.Each_step_is_one_click_audited_and_needs_the_permission_of_what_it_changes`
 
 **The company's part** Read each framework's gaps before its audit, and hand the auditor its package for the period under audit.
 

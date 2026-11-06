@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-Arena's controls serve 25 of the 121 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
+Arena's controls serve 26 of the 121 clauses here. Every clause is met by the company that runs Arena, under the document beside it; where Arena has a control, the control is the technical part and its evidence is in Admin → Compliance. The titles are short names, not the clauses' text. [Shared responsibility](../README.md#shared-responsibility), [the controls](../controls.md).
 
 | Clause | | Arena | The company's document |
 |---|---|---|---|
@@ -76,7 +76,7 @@ Arena's controls serve 25 of the 121 clauses here. Every clause is met by the co
 | FTA_SSL | Session locking and termination | [IAM-02](../controls.md#iam-02-sessions-end-on-their-own) | [Access control policy](../policies/access-control.md) |
 | FTA_TAB | TOE access banners | [GOV-02](../controls.md#gov-02-everyone-accepts-the-acceptable-use-and-privacy-notice) | [Access control policy](../policies/access-control.md) |
 | FTA_TAH | TOE access history |  | [Access control policy](../policies/access-control.md) |
-| FTA_TSE | TOE session establishment |  | [Access control policy](../policies/access-control.md) |
+| FTA_TSE | TOE session establishment | [NET-02](../controls.md#net-02-only-the-companys-addresses-come-in) | [Access control policy](../policies/access-control.md) |
 | FTP_ITC | Inter-TSF trusted channel | [NET-01](../controls.md#net-01-encrypted-in-transit-one-way-in) | [Cryptography policy](../policies/cryptography.md) |
 | FTP_PRO | Trusted channel protocol |  | [Cryptography policy](../policies/cryptography.md) |
 | FTP_TRP | Trusted path | [NET-01](../controls.md#net-01-encrypted-in-transit-one-way-in) | [Cryptography policy](../policies/cryptography.md) |

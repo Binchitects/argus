@@ -15,7 +15,7 @@
 #   install   a new installation: checks the host, loads the images, writes DIR/deploy, makes
 #             .env (secrets generated), starts the stack and waits until it is healthy (a
 #             service waiting for a model file is named, with what to do: healthy, waiting for
-#             models)
+#             models); as root with systemd it sets the daily backup (backup.sh --install-timer)
 #   upgrade  an installation of 5.2.0 or newer: the new images loaded while it runs, then a
 #             backup with the stack stopped (but its database), then the new files (.env,
 #             overrides, certificates and backups kept; a file changed here stays in effect, and
@@ -2358,6 +2358,17 @@ link_cli() {
   if mkdir -p "$dir" 2>/dev/null && ln -sfn "$target" "$dir/arenactl" 2>/dev/null; then ok "arenactl is on the PATH ($dir/arenactl): arenactl help says what it does"
   else note "arenactl could not be put in $dir: $target is the same command"; fi
 }
+# The daily backup (backup.sh --install-timer, at BACKUP_TIME): a new installation has one from its first night, as
+# Admin -> Compliance expects. systemd's timers are root's to make: without root or systemd, how to is said.
+schedule_backups() {
+  local said how="sudo $DEPLOY/scripts/backup.sh$([[ $ENGINE == podman ]] && echo " --podman") --install-timer"
+  if [[ $EUID -ne 0 || ! -d /run/systemd/system ]] || ! command -v systemctl >/dev/null 2>&1; then
+    note "no daily backup yet: it needs root and systemd ($how); Admin -> Compliance shows it due until the first one"
+    return 0
+  fi
+  if said="$(backup_sh --install-timer 2>&1)"; then ok "the daily backup: ${said%%$'\n'*}"
+  else note "the daily backup was not set: ${said##*$'\n'} ($how)"; fi
+}
 unlink_cli() {
   local l
   for l in "${ARENA_CLI_DIR:-/usr/local/bin}/arenactl" "$HOME/.local/bin/arenactl"; do
@@ -2571,6 +2582,7 @@ cmd_install() {
   UNDO_ARMED=0
   sign_builds
   link_cli
+  schedule_backups
   record_state
   record_kept ${SYNC_KEPT[@]+"${SYNC_KEPT[@]}"} ${SYNC_BESIDE[@]+"${SYNC_BESIDE[@]}"}
   state_set target ""

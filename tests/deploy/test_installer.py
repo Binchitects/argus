@@ -654,6 +654,12 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse(link.is_symlink())
         self.assertIn("arenactl taken off the PATH", r.stdout)
 
+    def test_Install_sets_the_daily_backup_or_says_how(self):
+        # Not root here: the timer is systemd's, so the install says how, and Admin -> Compliance shows the first backup due.
+        r = self.install()
+        self.assertIn(f"no daily backup yet: it needs root and systemd (sudo {self.dir / 'deploy'}/scripts/backup.sh --install-timer)", self.output(r))
+        self.assertFalse((self.dir / "deploy" / "backups").exists() and any((self.dir / "deploy" / "backups").glob("20*")), "a backup was taken")
+
     def test_Install_writes_the_folder_env_and_override_and_starts_it(self):
         # A certificate of its own CA by default (--no-cert leaves Traefik's own).
         r = self.install()

@@ -83,7 +83,7 @@ Arena's controls serve 35 of the 128 clauses here. Every clause is met by the co
 | PR.DS-10 | The confidentiality, integrity, and availability of data-in-use are protected |  | [Data protection and retention policy](../policies/data-protection.md) |
 | PR.DS-11 | Backups of data are created, protected, maintained, and tested | [OPS-01](../controls.md#ops-01-backups-restored-and-proven) | [Data protection and retention policy](../policies/data-protection.md) |
 | PR.IR | Technology Infrastructure Resilience |  | [Backup and business continuity policy](../policies/business-continuity.md) |
-| PR.IR-01 | Networks and environments are protected from unauthorized logical access and usage | [NET-01](../controls.md#net-01-encrypted-in-transit-one-way-in) | [Backup and business continuity policy](../policies/business-continuity.md) |
+| PR.IR-01 | Networks and environments are protected from unauthorized logical access and usage | [NET-01](../controls.md#net-01-encrypted-in-transit-one-way-in), [NET-02](../controls.md#net-02-only-the-companys-addresses-come-in) | [Backup and business continuity policy](../policies/business-continuity.md) |
 | PR.IR-02 | The organization's technology assets are protected from environmental threats |  | [Backup and business continuity policy](../policies/business-continuity.md) |
 | PR.IR-03 | Mechanisms are implemented to achieve resilience requirements in normal and adverse situations |  | [Backup and business continuity policy](../policies/business-continuity.md) |
 | PR.IR-04 | Adequate resource capacity to ensure availability is maintained |  | [Backup and business continuity policy](../policies/business-continuity.md) |

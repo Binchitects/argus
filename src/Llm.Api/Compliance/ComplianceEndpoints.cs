@@ -107,6 +107,7 @@ public static class ComplianceEndpoints
         services.AddScoped<AiSystems>();
         services.AddScoped<Readiness>();
         services.AddScoped<Governance>();
+        services.AddScoped<ComplianceDefaults>();
         services.AddSingleton<ComplianceSnapshots>();
         services.AddHostedService(sp => sp.GetRequiredService<ComplianceSnapshots>());
         services.AddHostedService<AccessReviewSchedule>();
@@ -122,6 +123,18 @@ public static class ComplianceEndpoints
         g.MapGet("", async (ComplianceChecks checks, AppDbContext db, Storage.StorageReport storage, TimeProvider clock, CancellationToken ct) =>
             Results.Ok(View(await checks.RunAsync(ct), await LatestAsync(db, ct), clock.GetUtcNow()) with { Retention = await storage.RulesAsync(ct) }));
         g.MapPost("/controls/{id}/attest", AttestAsync);
+        // The step offered beside a check that does not hold, as the person: each needs the permission of what it changes.
+        g.MapPost("/fixes/{check}", async (string check, ClaimsPrincipal p, UserManager<AppUser> users, ComplianceDefaults defaults, CancellationToken ct) =>
+        {
+            try
+            {
+                return Results.Ok(new { done = await defaults.ApplyAsync(check, (await users.GetUserAsync(p))!, ct) });
+            }
+            catch (ComplianceFixException ex)
+            {
+                return AuthEndpoints.Problem(ex.Status, "fix", ex.Message);
+            }
+        });
         // Reading the evidence changes nothing, yet it lists who holds what: it is audited.
         g.MapGet("/evidence", EvidenceAsync);
         // The audit log's hash chain walked now, with its anchors; and an anchor made now (before an audit, say).

@@ -25,6 +25,10 @@ public sealed record ReviewAnswer(bool Allow, string? Note = null);
 
 public sealed record ReviewRequest(string Reason);
 
+/// <summary>A rule to start from: the form opens filled with one, and Admin → Compliance adds some as they are.</summary>
+public sealed record RuleTemplate(string Name, string Description, string Detector, string[] Stages, string Action, string[] Models, string? Patterns, bool Strike,
+    string[] Categories, string? Topics, bool ModelCheck, string[] Domains, string[] Extensions, string[] Kinds);
+
 /// <summary>
 /// Admin → Safeguards: the rules (made, changed, ordered, removed), a test bench, what the rules did (events, with counts
 /// by day and by rule), and people's requests to review a refusal. People ask for a review of their own refusals.
@@ -55,7 +59,7 @@ public static class SafeguardEndpoints
     }
 
     /// <summary>Rules to start from: the form opens filled with one.</summary>
-    public static readonly IReadOnlyList<object> Templates =
+    public static readonly IReadOnlyList<RuleTemplate> Templates =
     [
         Template("Secrets", "Private keys, tokens and passwords in what people send: refused, never stored.", "secrets", ["question", "file", "api"], "block"),
         Template("Secrets in answers", "A secret the model repeats (from a file or a tool) is masked in its answer.", "secrets", ["answer", "tool_result"], "mask"),
@@ -88,9 +92,34 @@ public static class SafeguardEndpoints
         Template("Data sent out from what tools bring", "Images and data-carrying links in what tools bring are removed before the model reads them.", "exfiltration", ["tool_result"], "mask"),
     ];
 
-    private static object Template(string name, string description, string detector, string[] stages, string action, string[]? models = null, string? patterns = null,
+    private static RuleTemplate Template(string name, string description, string detector, string[] stages, string action, string[]? models = null, string? patterns = null,
         bool strike = false, string[]? categories = null, string? topics = null, bool modelCheck = false, string[]? domains = null, string[]? extensions = null, string[]? kinds = null) =>
-        new { name, description, detector, stages, action, models = models ?? [], patterns, strike, categories = categories ?? [], topics, modelCheck, domains = domains ?? [], extensions = extensions ?? [], kinds = kinds ?? [] };
+        new(name, description, detector, stages, action, models ?? [], patterns, strike, categories ?? [], topics, modelCheck, domains ?? [], extensions ?? [], kinds ?? []);
+
+    /// <summary>
+    /// Adds the templates named as rules, enforced, after the others; one whose name a rule has already is left as it is. Audited
+    /// as a rule added by hand is. Returns the names added.
+    /// </summary>
+    public static async Task<List<string>> AddTemplatesAsync(AppDbContext db, Audit audit, AppUser? by, IReadOnlyList<string> names, CancellationToken ct)
+    {
+        var have = (await db.SafeguardRules.AsNoTracking().Select(r => r.Name).ToListAsync(ct)).ToHashSet(StringComparer.Ordinal);
+        var order = await db.SafeguardRules.MaxAsync(r => (int?)r.Order, ct) ?? 0;
+        var added = new List<SafeguardRule>();
+        foreach (var t in names.Select(n => Templates.Single(t => t.Name == n)).Where(t => !have.Contains(t.Name)))
+        {
+            var rule = new SafeguardRule { Name = t.Name, Detector = t.Detector, Action = t.Action, CreatedById = by?.Id, Order = order += 10 };
+            Apply(rule, new RuleRequest(t.Name, t.Detector, [.. t.Stages], t.Action, t.Description, Models: [.. t.Models], Strike: t.Strike, Kinds: [.. t.Kinds],
+                Patterns: t.Patterns, Topics: t.Topics, Categories: [.. t.Categories], Domains: [.. t.Domains], Extensions: [.. t.Extensions], ModelCheck: t.ModelCheck));
+            db.SafeguardRules.Add(rule);
+            added.Add(rule);
+        }
+        await db.SaveChangesAsync(ct);
+        foreach (var rule in added)
+        {
+            await audit.WriteAsync("safeguard.rule_added", rule.Name, detail: Describe(rule), actor: by);
+        }
+        return [.. added.Select(r => r.Name)];
+    }
 
     private static object Shape(SafeguardRule r) => new
     {

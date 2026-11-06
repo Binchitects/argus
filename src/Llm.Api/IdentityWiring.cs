@@ -720,7 +720,12 @@ public static class IdentityWiring
     {
         CheckKeyRing(app.Services);
         await using var scope = app.Services.CreateAsyncScope();
-        await scope.ServiceProvider.GetRequiredService<IdentityBootstrap>().RunAsync();
+        var fresh = await scope.ServiceProvider.GetRequiredService<IdentityBootstrap>().RunAsync();
         await scope.ServiceProvider.GetRequiredService<OidcClients>().RunAsync();
+        // A new installation starts from compliance's defaults (Admin → Compliance offers the rest, a step each).
+        if (fresh && scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<Compliance.ComplianceOptions>>().Value.Starter)
+        {
+            await scope.ServiceProvider.GetRequiredService<Compliance.ComplianceDefaults>().StarterAsync(CancellationToken.None);
+        }
     }
 }

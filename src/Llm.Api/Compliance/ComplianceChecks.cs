@@ -13,8 +13,9 @@ namespace Llm.Api.Compliance;
 
 /// <summary>A check's result.</summary>
 /// <param name="State">ok (met), warn (in part, or a choice to make knowingly), fail (not met), unknown (could not be told: what it reads did not answer).</param>
-/// <param name="Detail">What it found, and when it is not ok, what to change.</param>
-public sealed record CheckResult(string Id, string Title, string State, string Detail);
+/// <param name="Detail">What it found, and when it is not ok, what to change and why.</param>
+/// <param name="Fix">When it is not ok and a step here puts it right, that step (Admin → Compliance offers it as a button).</param>
+public sealed record CheckResult(string Id, string Title, string State, string Detail, ComplianceFix? Fix = null);
 
 /// <summary>
 /// The checks the app runs on itself for Admin → Compliance (their ids are app:ID in controls.yaml): what it is set to, and what
@@ -22,7 +23,7 @@ public sealed record CheckResult(string Id, string Title, string State, string D
 /// </summary>
 public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users, Access.AccessService access, IOptionsMonitor<AuthOptions> auth,
     IOptions<IdentityOptions> identity, IOptionsMonitor<Retention.RetentionOptions> retention, StoragePlaces places, LokiDatasource loki,
-    PromDatasource prom, IOptions<StackOptions> stack, AuditWatch auditWatch, AuditChainState auditState, IOptionsMonitor<AuditOptions> auditOptions, AuditForwarder forwarder, IOptionsMonitor<ComplianceOptions> compliance, IOptionsMonitor<NoticeOptions> notice, Policies policies, Suppliers suppliers, AiSystems ai, TimeProvider clock)
+    PromDatasource prom, IOptions<StackOptions> stack, AuditWatch auditWatch, AuditChainState auditState, IOptionsMonitor<AuditOptions> auditOptions, AuditForwarder forwarder, IOptionsMonitor<ComplianceOptions> compliance, IOptionsMonitor<NoticeOptions> notice, Policies policies, Suppliers suppliers, AiSystems ai, ComplianceDefaults defaults, TimeProvider clock)
 {
     public const string Ok = "ok", Warn = "warn", Fail = "fail", Unknown = "unknown";
 
@@ -76,7 +77,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
                 "chat-retention" => await ChatRetentionAsync(ct),
                 "log-retention" => await LogRetentionAsync(ct),
                 "records-retention" => RecordsRetention(),
-                "backups" => Backups(),
+                "backups" => await BackupsAsync(ct),
                 "certificate" => await CertificateAsync(ct),
                 "data-key" => DataKey(),
                 "files-sealed" => await FilesSealedAsync(ct),
@@ -95,7 +96,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
                 "vulnerabilities" => await VulnerabilitiesAsync(ct),
                 _ => (Unknown, "No such check."),
             };
-            results.Add(new CheckResult(id, title, state, detail));
+            results.Add(new CheckResult(id, title, state, detail, state == Ok ? null : await defaults.OfferAsync(id, ct)));
         }
         return results;
     }
@@ -159,10 +160,13 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         return (Ok, $"{lastDay} entries in the last 24 hours; the oldest is from {oldest:yyyy-MM-dd}.");
     }
 
-    /// <summary>The whole chain walked now, and whether its anchors are kept apart from the database.</summary>
+    /// <summary>
+    /// The whole chain walked now, and whether its anchors are kept apart from the database. While none is kept yet, this walk
+    /// makes the first: a new installation's walk at its start found the log empty, and the next is a day later.
+    /// </summary>
     private async Task<(string, string)> AuditChainAsync(CancellationToken ct)
     {
-        var r = await auditWatch.WalkAsync(anchor: false, ct);
+        var r = await auditWatch.WalkAsync(anchor: auditState.LastAnchor is null, ct);
         if (!r.Holds)
         {
             return (Fail, r.BrokenAt is { } at
@@ -176,14 +180,14 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         }
         return auditState.LastAnchor is { } a
             ? (Ok, $"{walked} {r.Anchors} anchors kept apart, the newest from {a.At:yyyy-MM-dd} (entry {a.Id}).")
-            : (Warn, $"{walked} No anchor is kept yet: the first is made within a day of the app starting.");
+            : (Warn, $"{walked} No anchor is kept yet: the log is empty, and the first is made with its first entry.");
     }
 
     private async Task<(string, string)> AuditForwardingAsync(CancellationToken ct)
     {
         if (!forwarder.On)
         {
-            return (Warn, "The audit log is kept only here: send it on to the company's SIEM as well (Settings → Audit log: syslog or a webhook).");
+            return (Warn, "The audit log is kept only here: send it on to the company's SIEM as well (Settings → Audit log: syslog or a webhook), so that someone who can change this host cannot change its only copy (ISO 27001 A.8.15, SOC 2 CC7.2). Without a SIEM, attest LOG-04 with where the log is reviewed instead.");
         }
         var s = await forwarder.StateAsync(db, ct);
         var behind = s.Newest - s.Sent;
@@ -241,7 +245,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         };
     }
 
-    private (string, string) Backups()
+    private async Task<(string, string)> BackupsAsync(CancellationToken ct)
     {
         var report = places.Backups();
         if (report.State != "ok")
@@ -251,9 +255,15 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
                 : $"The app may not read the backups in {report.Dir}.");
         }
         var good = report.Backups.Where(b => b.Result == "ok" && b.At is not null).MaxBy(b => b.At);
+        const string Schedule = "run ./arenactl backup on a schedule (daily: sudo ./arenactl backup --install-timer; without the release's checkout, sudo scripts/backup.sh --install-timer in deploy/)";
+        if (good is null && report.Backups.Count == 0 && await InstalledAsync(ct) is { } since && clock.GetUtcNow() - since <= BackupDue)
+        {
+            // Within a day of the installation, no backup yet is as a backup a day old: due, not missed.
+            return (Warn, $"No backup yet: this installation is {Span(clock.GetUtcNow() - since)} old, and the first is due within a day. The installer sets the daily timer when it runs as root; else {Schedule}. ./arenactl backup takes one now.");
+        }
         if (good is null)
         {
-            return (Fail, report.Backups.Count == 0 ? "No backup yet: run ./arenactl backup on a schedule (daily: sudo ./arenactl backup --install-timer; without the release's checkout, sudo scripts/backup.sh --install-timer in deploy/)." : "No backup ended well: see the newest one's log.");
+            return (Fail, report.Backups.Count == 0 ? $"No backup yet: {Schedule}." : "No backup ended well: see the newest one's log.");
         }
         var age = clock.GetUtcNow() - good.At!.Value;
         var said = $"The newest that ended well is {good.Name}, {Span(age)} old{(good.Encrypted ? ", encrypted" : "")}; {report.Backups.Count} kept.";
@@ -284,7 +294,10 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         };
     }
 
-    /// <summary>A review closed within the period (and a little), or one under way and not late.</summary>
+    /// <summary>
+    /// A review closed within the period (and a little), or one under way and not late that started within the period (and a
+    /// little) of the one closed before it, or, for the first, of the installation: a new installation's schedule starts it at once.
+    /// </summary>
     private async Task<(string, string)> AccessReviewAsync(CancellationToken ct)
     {
         var now = clock.GetUtcNow();
@@ -299,9 +312,13 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         {
             return (Ok, $"The last review was closed {c:yyyy-MM-dd}{(open is null ? "" : $"; \"{open.Title}\" is under way, due {open.DueAt:yyyy-MM-dd}")}.");
         }
+        if (open is not null && (closed ?? await InstalledAsync(ct)) is { } since && open.CreatedAt - since <= TimeSpan.FromDays(every + 14))
+        {
+            return (Ok, $"\"{open.Title}\" is under way, due {open.DueAt:yyyy-MM-dd}{(closed is { } last ? $"; the one before was closed {last:yyyy-MM-dd}" : ", the first")}.");
+        }
         return open is not null
             ? (Warn, $"\"{open.Title}\" is under way, due {open.DueAt:yyyy-MM-dd}; none was closed in the last {every} days.")
-            : (Warn, closed is null ? "Access was never reviewed: start a review under Admin → Compliance." : $"The last review was closed {closed:yyyy-MM-dd}, over {every} days ago.");
+            : (Warn, closed is null ? "Access was never reviewed: start a review (Admin → Compliance → Access reviews), and keep or revoke each privileged role and unused account in it (ISO 27001 A.5.18, SOC 2 CC6.2)." : $"The last review was closed {closed:yyyy-MM-dd}, over {every} days ago: start the next.");
     }
 
     /// <summary>None open past its month (GDPR 12(3)); amber when one is due within a week.</summary>
@@ -389,7 +406,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         var open = await db.Risks.AsNoTracking().Where(r => r.ClosedAt == null).ToListAsync(ct);
         if (open.Count == 0)
         {
-            return (Warn, "The risk register is empty: assess the risks (Admin → Compliance → Risks).");
+            return (Warn, "The risk register is empty: assess the risks to the information Arena holds, decide how each is treated, and review them (ISO 27001 6.1.2, SOC 2 CC3.2), under Admin → Compliance → Risks.");
         }
         var ids = open.Select(r => r.Id).ToList();
         var late = await db.RiskActions.AsNoTracking().Where(a => ids.Contains(a.RiskId) && a.DoneAt == null && a.Due < now).CountAsync(ct);
@@ -439,7 +456,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
                 state = Warn;
             }
         }
-        return (state, string.Join("; ", said) + (state == Ok ? "." : ": Admin → Compliance → Statement of Applicability."));
+        return (state, string.Join("; ", said) + (state == Ok ? "." : ": decide each Annex A control (applies or not, and why) and have it approved, under Admin → Compliance → Statement of Applicability (ISO 27001 6.1.3)."));
     }
 
     /// <summary>Policies in force, none past its review (red a month past), and each read by those who must within a month of its approval.</summary>
@@ -450,7 +467,9 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         var inForce = all.Where(p => p.Version is not null).ToList();
         if (inForce.Count == 0)
         {
-            return (Warn, "No policy is approved yet: Admin → Compliance → Policies adopts the templates.");
+            return (Warn, all.Count == 0
+                ? "No policy is approved yet: adopt the templates that apply (acceptable use, data protection and retention, AI...), fill in their brackets and approve each (ISO 27001 5.2 and A.5.1), under Admin → Compliance → Policies."
+                : $"No policy is approved yet: {all.Count} draft{(all.Count == 1 ? " waits" : "s wait")} for a person to read, fill in its brackets and approve ({string.Join(", ", all.Take(5).Select(p => p.Title))}{(all.Count > 5 ? $" and {all.Count - 5} more" : "")}), under Admin → Compliance → Policies (ISO 27001 5.2 and A.5.1).");
         }
         var overdue = inForce.Where(p => p.ReviewOverdue).ToList();
         var unread = inForce.Where(p => p.Acknowledged < p.Readers && p.ApprovedAt < now.AddDays(-30)).ToList();
@@ -485,7 +504,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         }
         if (lastInternal is null || lastInternal < now.AddDays(-365))
         {
-            Say(lastInternal is null ? "no internal audit yet" : $"no internal audit since {lastInternal:yyyy-MM-dd}", Warn);
+            Say(lastInternal is null ? "no internal audit yet: plan one within the year and record it under Admin → Compliance → Audits (ISO 27001 9.2)" : $"no internal audit since {lastInternal:yyyy-MM-dd}", Warn);
         }
         if (late.Count > 0)
         {
@@ -561,8 +580,8 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         var said = $"last management review {(last is { } l ? l.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) : "none")}; {objectives.Count} objective{(objectives.Count == 1 ? "" : "s")}; {owned} of {ComplianceControls.All.Controls.Count} controls owned";
         var problems = new[]
         {
-            last is null || last < now.AddDays(-365) ? "no management review within the year" : null,
-            objectives.Count == 0 ? "no security objective set" : null,
+            last is null || last < now.AddDays(-365) ? "no management review within the year: hold one with its inputs and record it under Admin → Compliance → Management (ISO 27001 9.3)" : null,
+            objectives.Count == 0 ? "no security objective set (ISO 27001 6.2)" : null,
             missed.Count > 0 ? $"objectives not met: {string.Join(", ", missed)}" : null,
             unanswered > 0 ? $"{unanswered} auditor's request{(unanswered == 1 ? "" : "s")} unanswered a fortnight" : null,
         }.OfType<string>().ToList();
@@ -580,7 +599,7 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         var last = await db.SecurityScans.AsNoTracking().Where(s => s.Status == Llm.Core.Code.SecurityScan.Done).OrderByDescending(s => s.FinishedAt).FirstOrDefaultAsync(ct);
         if (last is null)
         {
-            return (Warn, "No repository has been reviewed for security: run one in Code Studio → Security.");
+            return (Warn, "No repository has been reviewed for security: review the company's repositories in Code Studio → Security, and fix or accept what is found in time (ISO 27001 A.8.8, SOC 2 CC7.1).");
         }
         var open = await db.SecurityFindings.AsNoTracking().Where(f => f.Verified != false && (f.State == Llm.Core.Code.SecurityFinding.Open
                 || (f.State == Llm.Core.Code.SecurityFinding.Accepted && f.Until != null && f.Until < now)))
@@ -602,6 +621,9 @@ public sealed class ComplianceChecks(AppDbContext db, UserManager<AppUser> users
         }
         return problems.Count == 0 ? (Ok, $"{said}, none past its time.") : (Warn, $"{said}: {string.Join("; ", problems)}.");
     }
+
+    /// <summary>When this installation began: its first admin was made.</summary>
+    private async Task<DateTimeOffset?> InstalledAsync(CancellationToken ct) => await db.Users.AsNoTracking().MinAsync(u => (DateTimeOffset?)u.CreatedAt, ct);
 
     private (string, string) DataKey() => string.IsNullOrEmpty(auth.CurrentValue.DataKey)
         ? (Fail, "APP_KEY is not set: the signing keys and settings' secrets are not encrypted at rest.")

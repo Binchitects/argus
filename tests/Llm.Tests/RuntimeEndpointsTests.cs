@@ -92,6 +92,7 @@ public sealed class RuntimeEndpointsTests(AppFixture app) : IDisposable
     }
 
     [Fact]
+    [Trait("Control", "LOG-01")]
     public async Task Llamacpps_restart_is_a_file_its_router_follows_and_its_reload_loads_each_model_again()
     {
         var config = Path.Combine(_dir, "config");

@@ -8,8 +8,8 @@ Arena's controls serve 28 of the 63 clauses here. Every clause is met by the com
 |---|---|---|---|
 | 1.1 | Processes for network security controls are defined |  | [Information security policy](../policies/information-security.md) |
 | 1.2 | Network security controls are configured and maintained |  | [Information security policy](../policies/information-security.md) |
-| 1.3 | Network access to and from the cardholder data environment is restricted | [NET-01](../controls.md#net-01-encrypted-in-transit-one-way-in) | [Information security policy](../policies/information-security.md) |
-| 1.4 | Connections between trusted and untrusted networks are controlled | [NET-01](../controls.md#net-01-encrypted-in-transit-one-way-in) | [Information security policy](../policies/information-security.md) |
+| 1.3 | Network access to and from the cardholder data environment is restricted | [NET-01](../controls.md#net-01-encrypted-in-transit-one-way-in), [NET-02](../controls.md#net-02-only-the-companys-addresses-come-in) | [Information security policy](../policies/information-security.md) |
+| 1.4 | Connections between trusted and untrusted networks are controlled | [NET-01](../controls.md#net-01-encrypted-in-transit-one-way-in), [NET-02](../controls.md#net-02-only-the-companys-addresses-come-in) | [Information security policy](../policies/information-security.md) |
 | 1.5 | Devices that join untrusted networks and the CDE are risks mitigated |  | [Information security policy](../policies/information-security.md) |
 | 2.1 | Processes for secure configurations are defined |  | [Change and vulnerability management policy](../policies/change-management.md) |
 | 2.2 | System components are configured and managed securely |  | [Change and vulnerability management policy](../policies/change-management.md) |

@@ -319,6 +319,7 @@ public sealed class CodeArenaSyncTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "IAM-05")]
     public async Task Only_the_owner_s_key_reads_or_adds_to_a_chat()
     {
         await using var f = NewApp();

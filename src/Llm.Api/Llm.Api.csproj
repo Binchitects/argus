@@ -35,6 +35,7 @@
     <EmbeddedResource Include="../../docs/compliance/frameworks.yaml" LogicalName="compliance-frameworks.yaml" />
     <EmbeddedResource Include="../../docs/compliance/catalogs/*.yaml" LogicalName="compliance-catalogs/%(Filename)%(Extension)" />
     <EmbeddedResource Include="../../docs/compliance/policies/*.md;../../docs/compliance/isms.md" LogicalName="policy-templates/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="../../docs/compliance/templates/sign-in-notice.md" LogicalName="compliance-notice.md" />
     <EmbeddedResource Include="../../deploy/features" LogicalName="features" />
     <!-- The dashboards go into the image at /dashboards (Dockerfile), not beside the app. -->
     <Content Remove="Dashboards\json\**" />
