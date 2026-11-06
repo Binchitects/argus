@@ -15,6 +15,67 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v7.7.1 (2026-11-06)
+
+A hotfix: an upgrade from 7.6.3 carries on, rolls back and resumes; a model's
+engine changes at runtime from an Engine field, and vLLM runs GGUF files; a
+model's window and its longest answer are right everywhere; Code Arena keeps
+its whole conversation after a compaction, syncs both ways and shows its
+skills; Source Control folds as VS Code's does; the colour themes are calm.
+
+### :sparkles: New features & Enhancements
+
+- **Change engine.** Admin → Models: every chat model's card names its engine
+  and has **Change engine…**; the Edit and Add dialogs have an **Engine** field
+  (llama.cpp, vLLM, SGLang; one that does not run here is listed, saying why).
+  A model moves at runtime: answers in flight end on the old engine, new
+  requests wait for the new one, a failure puts it back; the card shows how far
+  it is. The matching file of the other form is chosen from the library.
+- **vLLM runs GGUF files.** vLLM's image carries its GGUF plugin
+  (vllm-gguf-plugin 0.0.5, gguf 0.19.0), and vLLM and SGLang start a GGUF file
+  from the library: a llama.cpp model moves to vLLM on its own file, no
+  Hugging Face snapshot needed. **Find on Hugging Face** also finds and
+  downloads snapshots for vLLM and SGLang.
+- **Your own skills in Code Arena.** A Skills view, **New Skill** (for the
+  project or for you, saved in Arena when signed in), `/` in the chat lists
+  every command and skill, `/skills` and `/skills new` in the terminal, and a
+  skill made on Arena's web reaches a running Code Arena.
+- **Folding like VS Code.** Source Control's groups and the agent's changes
+  fold, as a list or a tree, with Collapse All and the keyboard, kept per
+  folder; an edit's diff in the chat folds, and a turn lists the files it
+  changed.
+- **Context in Code Arena as in the web.** The ring and the status bar show
+  what fills the window by kind, the room kept for the answer, what is free and
+  the biggest messages.
+
+### :bug: Bugs fixed
+
+- **Upgrades.** Ctrl-C left the image loads holding the installer's lock;
+  `upgrade --rollback` refused an upgrade cut off and lost the record of the
+  old release; the disk check counted every image, not those it loads; a
+  carried-on upgrade forgot the `.env` keys it added; a newer bundle refused to
+  carry on what an older one left; a hotfix bundle packed an unchanged image
+  under the older release's name; an upgrade re-owned the model library.
+  Proven on offline test hosts with every feature on, a model and people's
+  data: interrupted at several points, a failure rolling back by itself, and
+  `upgrade --rollback`.
+- **A model's window and its longest answer.** On llama.cpp the window is one
+  slot's share, on vLLM and SGLang the whole context; the longest answer
+  leaves a prompt room and every request is held to it, through every API;
+  a chat's own longest answer no longer pushes out its conversation, and
+  messages left out to fit are said. Shown the same on the cards, the dialog,
+  the gateway, the chat's gauge and Code Arena.
+- **Code Arena after a compaction.** The whole conversation stays, the mark
+  shows where, the agent goes on (no hidden approval, no stuck spinner), a
+  summary fits a small window, and Show summary shows the latest.
+- **Code Arena's sync with the web chat** works both ways, a compaction on
+  the web reaches it at once, and sessions written by 7.7.0 are sent.
+- **Themes.** The six themes have the default's calm surfaces and accent
+  strength, and every colour in the web and Code Arena keeps WCAG AA.
+- An API key keeps no model its access was just taken from (a 503 instead of
+  a refusal); the functional test waits for the usage ledger and accepts a
+  sign-in notice; offline test hosts leave the machine's power caps alone.
+
 ## v7.7.0 (2026-11-02)
 
 What an airgapped install asked for: who may reach the stack, every setting
