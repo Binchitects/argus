@@ -27,7 +27,9 @@ const skill = (over: Partial<SkillItem>): SkillItem => ({
 })
 
 const library: SkillLibrary = {
-  isAdmin: false,
+  mayShareCompany: false,
+  mayShareGroups: true,
+  mayTurnBuiltIn: false,
   groups: [],
   skills: [
     skill({

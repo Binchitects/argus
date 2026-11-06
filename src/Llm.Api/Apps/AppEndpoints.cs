@@ -58,9 +58,12 @@ public static class AppEndpoints
 
     private static async Task<AppUser> Me(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!;
 
-    /// <summary>Whether this person may open the app: theirs, everyone's, or one of their groups'.</summary>
+    /// <summary>Whether this person may open the app: theirs; everyone's or one of their groups', unless a rule on the app denies them (Admin → Access).</summary>
     private static async Task<bool> MayOpenAsync(ArenaApp a, AppUser me, AccessService access, CancellationToken ct) =>
-        a.OwnerId == me.Id || a.Reach == ArenaApp.Company || (a.Reach == ArenaApp.Groups && (await access.MembershipAsync(me, ct)).Groups.Any(a.GroupIds.Contains));
+        a.OwnerId == me.Id || MayOpen(a, await access.MembershipAsync(me, ct));
+
+    private static bool MayOpen(ArenaApp a, Membership m) =>
+        (a.Reach == ArenaApp.Company || (a.Reach == ArenaApp.Groups && m.Groups.Any(a.GroupIds.Contains))) && m.MayUse(Core.Access.ResourceKinds.App, a.Id.ToString());
 
     private static async Task<ArenaApp?> OpenableAsync(Guid id, AppUser me, AppDbContext db, AccessService access, CancellationToken ct) =>
         await db.Apps.SingleOrDefaultAsync(a => a.Id == id, ct) is { } a && await MayOpenAsync(a, me, access, ct) ? a : null;
@@ -81,10 +84,12 @@ public static class AppEndpoints
     private static async Task<IResult> ListAsync(ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, AccessService access, CancellationToken ct)
     {
         var me = await Me(p, users);
-        var groups = (await access.MembershipAsync(me, ct)).Groups.ToList();
-        var apps = await db.Apps.AsNoTracking()
+        var m = await access.MembershipAsync(me, ct);
+        var groups = m.Groups.ToList();
+        var apps = (await db.Apps.AsNoTracking()
             .Where(a => a.OwnerId == me.Id || a.Reach == ArenaApp.Company || (a.Reach == ArenaApp.Groups && a.GroupIds.Any(g => groups.Contains(g))))
-            .OrderByDescending(a => a.Opens).ThenByDescending(a => a.UpdatedAt).Take(500).ToListAsync(ct);
+            .OrderByDescending(a => a.Opens).ThenByDescending(a => a.UpdatedAt).Take(500).ToListAsync(ct))
+            .Where(a => a.OwnerId == me.Id || MayOpen(a, m)).ToList();
         var names = await NamesAsync(db, apps.Select(a => a.OwnerId), ct);
         return Results.Ok(apps.Select(a => Brief(a, names.GetValueOrDefault(a.OwnerId), me.Id)));
     }
@@ -127,6 +132,11 @@ public static class AppEndpoints
             {
                 return AuthEndpoints.Problem(400, "reach", "Who may open it: private, groups or company.");
             }
+            // Opening it to others is feature.apps.share's; one already open stays so.
+            if (reach != ArenaApp.Private && reach != a.Reach && !await access.MayAsync(me, Core.Access.Permissions.AppsShare, ct))
+            {
+                return AuthEndpoints.Problem(403, "reach", "Opening apps to groups or everyone needs feature.apps.share.");
+            }
             a.Reach = reach;
         }
         if (body.GroupIds is { } groupIds)
@@ -138,7 +148,7 @@ public static class AppEndpoints
             }
             // Shared with groups the person is in, unless they may share with any (as assistants are).
             var mine = (await access.MembershipAsync(me, ct)).Groups;
-            if (!await access.MayAsync(me, Core.Access.Permissions.AssistantsShare, ct) && known.Any(g => !mine.Contains(g)))
+            if (!await access.MayAsync(me, Core.Access.Permissions.SharingGroups, ct) && known.Any(g => !mine.Contains(g) && !a.GroupIds.Contains(g)))
             {
                 return AuthEndpoints.Problem(403, "groups", "Share it with groups you are in.");
             }

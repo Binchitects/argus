@@ -173,7 +173,7 @@ public static class DataEndpoints
             }
             // Shared with groups the person is in, unless they may share with any (as assistants and apps are).
             var mine = (await access.MembershipAsync(me, ct)).Groups;
-            if (!await access.MayAsync(me, Core.Access.Permissions.AssistantsShare, ct) && known.Any(g => !mine.Contains(g)))
+            if (!await access.MayAsync(me, Core.Access.Permissions.SharingGroups, ct) && known.Any(g => !mine.Contains(g)))
             {
                 return AuthEndpoints.Problem(403, "groups", "Share it with groups you are in.");
             }

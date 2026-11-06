@@ -61,7 +61,7 @@ public static class VoiceEndpoints
         me.MapPatch("", ChooseAsync);
         me.MapPost("/try", TryAsync).RequirePermission(Llm.Core.Access.Permissions.Speech);
         // Settings → Speech: the voices to choose the company's from, and a sample of one before it reads for everyone.
-        var company = app.MapGroup("/api/admin/speech").RequirePermissions(Llm.Core.Access.Permissions.SettingsRead, Llm.Core.Access.Permissions.SettingsManage);
+        var company = app.MapGroup("/api/admin/speech").RequirePermissions(Llm.Core.Access.Permissions.SettingsRead, Llm.Core.Access.Permissions.SettingsModels);
         company.MapGet("/voices", OfferedAsync);
         company.MapPost("/try", TryCompanyAsync);
         // API keys' speech at gateway.DOMAIN, sent here while the app is up: every method, as the gateway answers them all

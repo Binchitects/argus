@@ -58,6 +58,8 @@ public static class Permissions
     public const string ReviewsAdmin = "reviews.admin";
     public const string SafeguardsRead = "safeguards.read";
     public const string SafeguardsManage = "safeguards.manage";
+    public const string SharingManage = "sharing.manage";
+    public const string BusinessManage = "business.manage";
 
     // The parts of the broader permissions above: a role may hold one part alone (each one's Parent holds it too).
     public const string SafeguardsReview = "safeguards.review";
@@ -76,6 +78,15 @@ public static class Permissions
     public const string AccessAssign = "access.assign";
     public const string AccessRules = "access.rules";
     public const string AccessRequests = "access.requests";
+    public const string AccessDefaults = "access.defaults";
+    public const string ComplianceAttest = "compliance.attest";
+    public const string ComplianceReviews = "compliance.reviews";
+    public const string ComplianceRisks = "compliance.risks";
+    public const string CompliancePolicies = "compliance.policies";
+    public const string ComplianceAudits = "compliance.audits";
+    public const string SharingCompany = "sharing.company";
+    public const string SharingGroups = "sharing.groups";
+    public const string SkillsCompany = "sharing.skills";
     public const string ModelsAdd = "models.add";
     public const string ModelsEdit = "models.edit";
     public const string ModelsDelete = "models.delete";
@@ -153,6 +164,11 @@ public static class Permissions
     public const string Export = "feature.export";
     public const string Knowledge = "feature.knowledge";
     public const string ModelChoice = "feature.model_choice";
+    public const string Lab = "feature.lab";
+    public const string Wiki = "feature.wiki";
+    public const string Calls = "feature.calls";
+    public const string SkillsShare = "feature.skills.share";
+    public const string AppsShare = "feature.apps.share";
 
     public static readonly IReadOnlyList<PermissionInfo> All =
     [
@@ -202,6 +218,8 @@ public static class Permissions
         new(ArgusExplore, "Argus", "Explore the code index across repositories.", true),
         new(RoomsModerate, "Rooms and reviews", "List rooms, remove members and delete rooms (not read them).", true),
         new(ReviewsAdmin, "Rooms and reviews", "Manage every project's reviews.", true),
+        new(SharingManage, "Sharing", "Share assistants, skills, apps, chats and reviews with the whole company or any group, and look after the company's skills and assistants.", true),
+        new(BusinessManage, "Code", "Remove business maps.", true),
 
         new(PeopleCreate, "People and groups", "Add people.", true, PeopleManage),
         new(PeopleEdit, "People and groups", "Change people's names, emails and sources.", true, PeopleManage),
@@ -218,6 +236,15 @@ public static class Permissions
         new(AccessAssign, "Access", "Give and take roles.", true, AccessManage),
         new(AccessRules, "Access", "Add and remove allow and deny rules.", true, AccessManage),
         new(AccessRequests, "Access", "Answer people's requests for access.", true, AccessManage),
+        new(AccessDefaults, "Access", "Choose the groups new people join at their first sign-in.", true, AccessManage),
+        new(ComplianceAttest, "Oversight", "Attest controls, keep the statement of applicability, waivers and certificates.", true, ComplianceManage),
+        new(ComplianceReviews, "Oversight", "Run access reviews and decide their items.", true, ComplianceManage),
+        new(ComplianceRisks, "Oversight", "Keep the risk register, the suppliers and the AI systems.", true, ComplianceManage),
+        new(CompliancePolicies, "Oversight", "Write, approve and review the policies.", true, ComplianceManage),
+        new(ComplianceAudits, "Oversight", "Keep audits and their findings, objectives, management reviews, incidents and evidence requests.", true, ComplianceManage),
+        new(SharingCompany, "Sharing", "Share assistants, skills, chats and reviews with the whole company.", true, SharingManage),
+        new(SharingGroups, "Sharing", "Share with any group, not only one's own.", true, SharingManage),
+        new(SkillsCompany, "Sharing", "Change and remove the company's skills and assistants, and turn Arena's own skills off or on.", true, SharingManage),
         new(ModelsAdd, "Models, tools and knowledge", "Add models from the library.", true, ModelsManage),
         new(ModelsEdit, "Models, tools and knowledge", "Change models' settings and keep them loaded.", true, ModelsManage),
         new(ModelsDelete, "Models, tools and knowledge", "Remove models.", true, ModelsManage),
@@ -260,41 +287,46 @@ public static class Permissions
         new(ArgusPacks, "Argus", "Install and remove knowledge packs.", true, ArgusManage),
         new(ArgusWebhook, "Argus", "Set GitLab's webhook.", true, ArgusManage),
 
-        new(Chat, "Features", "Use the chat.", false),
-        new(ApiKeys, "Features", "Have API keys (coding agents, IDEs, scripts).", false),
-        new(CodeArena, "Features", "Use Code Arena.", false),
-        new(WebSearch, "Features", "Search and read the web from the chat.", false),
-        new(Pictures, "Features", "Make pictures.", false),
-        new(Video, "Features", "Make videos.", false),
-        new(Speech, "Features", "Speak and hear answers read aloud.", false),
-        new(RoomsCreate, "Features", "Make rooms.", false),
-        new(ShareLinks, "Features", "Share chats by link.", false),
-        new(Tasks, "Features", "Schedule tasks.", false),
-        new(AssistantsShare, "Features", "Share assistants and prompts with groups.", false),
-        new(Memory, "Features", "Let the chat remember things.", false),
+        new(Chat, "Chat and knowledge", "Use the chat.", false),
+        new(ApiKeys, "Agents and keys", "Have API keys (coding agents, IDEs, scripts).", false),
+        new(CodeArena, "Agents and keys", "Use Code Arena.", false),
+        new(WebSearch, "Chat and knowledge", "Search and read the web from the chat.", false),
+        new(Pictures, "Making", "Make pictures.", false),
+        new(Video, "Making", "Make videos.", false),
+        new(Speech, "Chat and knowledge", "Speak and hear answers read aloud.", false),
+        new(RoomsCreate, "Sharing and rooms", "Make rooms.", false),
+        new(ShareLinks, "Sharing and rooms", "Share chats by link.", false),
+        new(Tasks, "Agents and keys", "Schedule tasks.", false),
+        new(AssistantsShare, "Sharing and rooms", "Share assistants and prompts with groups.", false),
+        new(Memory, "Chat and knowledge", "Let the chat remember things.", false),
         new(CodeRead, "Code", "Ask about the company's code (Argus) and use the code assistant.", false),
         new(ReviewRun, "Code", "Start reviews of merge requests and branches.", false),
         new(CodeStudio, "Code", "Open workspaces in Code Studio: edit, run and debug code on the server or one's own machine.", false),
         new(ReviewPolicy, "Code", "Set a project's automatic reviews.", false),
-        new(Python, "Features", "Run Python in the sandbox (data, charts, files).", false),
-        new(Canvas, "Features", "Write documents and code with the canvas.", false),
-        new(ThreeD, "Features", "Make 3D models.", false),
-        new(Browser, "Features", "Let the chat use a browser to do things on websites.", false),
-        new(Apps, "Features", "Publish apps the chat builds, for oneself, groups or everyone.", false),
-        new(Data, "Features", "Ask the databases an admin connected, and keep boards of charts.", false),
-        new(Decks, "Features", "Make slide decks with the model, and download them.", false),
-        new(Studio, "Features", "Build agent workflows in Agent Studio that run as oneself on a trigger.", false),
-        new(FixIt, "Features", "Let an agent change code and open merge requests as oneself (Fix it), with one's own GitLab token.", false),
-        new(Plans, "Features", "Make and keep plans.", false),
-        new(Research, "Features", "Run deep research.", false),
-        new(Compare, "Features", "Compare two models' answers.", false),
-        new(Uploads, "Features", "Attach files to messages.", false),
-        new(AssistantsCreate, "Features", "Make assistants.", false),
-        new(SkillsCreate, "Features", "Make skills (slash commands with instructions and parameters).", false),
-        new(Meetings, "Features", "Record or upload meetings: who said what, the minutes and the action items.", false),
-        new(Export, "Features", "Export their own data and chats.", false),
-        new(Knowledge, "Features", "Search company knowledge from the chat.", false),
-        new(ModelChoice, "Features", "Choose the chat's model (else the company's default answers).", false),
+        new(Python, "Chat and knowledge", "Run Python in the sandbox (data, charts, files).", false),
+        new(Canvas, "Chat and knowledge", "Write documents and code with the canvas.", false),
+        new(ThreeD, "Making", "Make 3D models.", false),
+        new(Browser, "Chat and knowledge", "Let the chat use a browser to do things on websites.", false),
+        new(Apps, "Making", "Make apps with the chat and open them (opening them to others: feature.apps.share).", false),
+        new(Data, "Making", "Ask the databases an admin connected, and keep boards of charts.", false),
+        new(Decks, "Making", "Make slide decks with the model, and download them.", false),
+        new(Studio, "Agents and keys", "Build agent workflows in Agent Studio that run as oneself on a trigger.", false),
+        new(FixIt, "Agents and keys", "Let an agent change code and open merge requests as oneself (Fix it), with one's own GitLab token.", false),
+        new(Plans, "Agents and keys", "Make and keep plans.", false),
+        new(Research, "Chat and knowledge", "Run deep research.", false),
+        new(Compare, "Chat and knowledge", "Compare two models' answers.", false),
+        new(Uploads, "Chat and knowledge", "Attach files to messages.", false),
+        new(AssistantsCreate, "Sharing and rooms", "Make assistants.", false),
+        new(SkillsCreate, "Sharing and rooms", "Make skills (slash commands with instructions and parameters).", false),
+        new(Meetings, "Making", "Record or upload meetings: who said what, the minutes and the action items.", false),
+        new(Export, "Chat and knowledge", "Export their own data and chats.", false),
+        new(Knowledge, "Chat and knowledge", "Search company knowledge from the chat.", false),
+        new(ModelChoice, "Chat and knowledge", "Choose the chat's model (else the company's default answers).", false),
+        new(Lab, "Making", "Use the science and quantum lab.", false),
+        new(Wiki, "Chat and knowledge", "Read the wiki: company knowledge and the code's pages.", false),
+        new(Calls, "Sharing and rooms", "Call in rooms, with voice, video and screen sharing.", false),
+        new(SkillsShare, "Sharing and rooms", "Share their skills with their groups.", false),
+        new(AppsShare, "Sharing and rooms", "Open their apps to groups or everyone.", false),
     ];
 
     private static readonly Dictionary<string, PermissionInfo> ByKey = All.ToDictionary(p => p.Key, StringComparer.Ordinal);
@@ -369,4 +401,31 @@ public static class BuiltInRoles
     ];
 
     public static BuiltInRole? Find(string key) => All.FirstOrDefault(r => r.Key == key);
+}
+
+/// <summary>A starting point for a custom role: Admin → Access makes a role of it, which can then be changed.</summary>
+public sealed record RoleTemplate(string Key, string Name, string Description, IReadOnlyList<string> Permissions);
+
+/// <summary>Common roles a company makes besides the built-in ones.</summary>
+public static class RoleTemplates
+{
+    public static readonly IReadOnlyList<RoleTemplate> All =
+    [
+        new("help-desk", "Help desk", "Resets passwords and two-factor sign-in, disables and enables people, and answers access requests.",
+            [Permissions.PeopleRead, Permissions.PeoplePasswords, Permissions.PeopleDisable, Permissions.AccessRead, Permissions.AccessRequests]),
+        new("team-lead", "Team lead", "A team's people, their API limits, credit, spend and usage. Give it over the team's group.",
+            [Permissions.PeopleRead, Permissions.PeopleLimits, Permissions.CreditsManage, Permissions.BillingRead, Permissions.UsageRead]),
+        new("knowledge-curator", "Knowledge curator", "Company knowledge and the databases people ask: their sources and who may read them.",
+            [Permissions.KnowledgeManage, Permissions.DataManage]),
+        new("integrations-admin", "Integrations admin", "Chat bots, MCP servers, plugins, everyone's scheduled tasks and their settings.",
+            [Permissions.BotsManage, Permissions.McpServersManage, Permissions.PluginsManage, Permissions.TasksManageAll, Permissions.SettingsIntegrations, Permissions.SettingsTools]),
+        new("security-reviewer", "Security reviewer", "Every project's reviews and automatic reviews, the safeguards' log and the audit log.",
+            [Permissions.ReviewsAdmin, Permissions.ReviewPolicy, Permissions.SafeguardsRead, Permissions.AuditRead]),
+        new("data-steward", "Data steward", "People's data requests, retention, legal holds, eDiscovery exports and stored files.",
+            [Permissions.PrivacyManage, Permissions.RetentionManage, Permissions.LegalHoldManage, Permissions.ExportPerson, Permissions.StorageRead]),
+        new("content-moderator", "Content moderator", "Rooms, the company's shared skills and assistants, and what people send about Arena.",
+            [Permissions.RoomsModerate, Permissions.SharingManage, Permissions.FeedbackManage]),
+        new("access-admin", "Access admin", "Roles, who holds them, rules, requests and the groups new people join; not the people themselves.",
+            [Permissions.AccessManage, Permissions.GroupsMembers, Permissions.PeopleRead]),
+    ];
 }

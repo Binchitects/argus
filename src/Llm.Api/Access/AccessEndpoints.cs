@@ -48,6 +48,7 @@ public static partial class AccessEndpoints
         g.MapDelete("/rules/{id:guid}", RemoveRuleAsync);
         // A read: it changes nothing, so access.read is enough.
         g.MapGet("/check", CheckAsync);
+        g.MapGet("/effective", EffectiveAsync);
         g.MapGet("/history", HistoryAsync);
         g.MapGet("/requests", RequestsAsync);
         g.MapPost("/requests/{id:guid}/decide", DecideAsync);
@@ -72,9 +73,12 @@ public static partial class AccessEndpoints
             s.Version,
             permissions = Permissions.All.Select(p => new { p.Key, p.Area, p.Description, p.Admin, p.Parent }),
             resourceKinds = ResourceKinds.Actions.Select(k => new { kind = k.Key, actions = k.Value }),
+            templates = RoleTemplates.All.Select(t => new { t.Key, t.Name, t.Description, t.Permissions }),
             roles = s.Roles.OrderBy(r => !r.BuiltIn).ThenBy(r => r.Name, StringComparer.OrdinalIgnoreCase).Select(r => new
             {
                 r.Id, r.Key, r.Name, r.Description, r.BuiltIn, r.Permissions,
+                // What it gives in all: what it names, their parts, and the reading of the areas it acts in (the matrix).
+                gives = Permissions.All.Where(p => AccessSnapshot.Gives(r, p.Key)).Select(p => p.Key),
                 holders = s.Assignments.Where(a => a.RoleId == r.Id).Select(a => new { a.Id, subject = Subject(s, a.SubjectKind, a.SubjectId), a.Scope, a.ExpiresAt, a.CreatedAt }),
             }),
             rules = s.Rules.OrderBy(r => r.ResourceKind, StringComparer.Ordinal).ThenBy(r => r.Resource, StringComparer.Ordinal).Select(r => new
@@ -331,9 +335,45 @@ public static partial class AccessEndpoints
         });
     }
 
-    private static async Task<IResult> HistoryAsync(AppDbContext db, int? take, CancellationToken ct)
+    /// <summary>
+    /// Everything a person may do, each permission with why (the checker's reasons), their roles and how they hold
+    /// them, their groups, and every rule that reaches them.
+    /// </summary>
+    private static async Task<IResult> EffectiveAsync(Guid person, UserManager<AppUser> users, AccessService access, AppDbContext db, CancellationToken ct)
     {
-        var rows = await db.AccessChanges.AsNoTracking().OrderByDescending(c => c.Id).Take(Math.Clamp(take ?? 100, 1, 1000)).ToListAsync(ct);
+        if (await users.FindByIdAsync(person.ToString()) is not { } user)
+        {
+            return Results.NotFound();
+        }
+        var m = await access.MembershipAsync(user, ct);
+        var held = m.Snapshot.RolesOf(m.Principal, m.Now);
+        var roleIds = held.Select(h => h.Role.Id).ToHashSet();
+        var groupIds = m.Groups.ToList();
+        var groups = await db.Groups.AsNoTracking().Where(g => groupIds.Contains(g.Id)).OrderBy(g => g.Name).Select(g => new { g.Id, g.Name, g.Directory }).ToListAsync(ct);
+        var rules = m.Snapshot.Rules.Where(r => r.ExpiresAt is null || r.ExpiresAt > m.Now).Where(r => r.SubjectKind switch
+        {
+            SubjectKind.Person => r.SubjectId == user.Id,
+            SubjectKind.Group => r.SubjectId is { } g && m.Groups.Contains(g),
+            SubjectKind.Role => r.SubjectId is { } id && roleIds.Contains(id),
+            _ => true,
+        });
+        return Results.Ok(new
+        {
+            person = new { user.Id, user.UserName, user.DisplayName, user.IsDisabled, isOwner = m.IsOwner },
+            roles = held.Select(h => new { h.Role.Id, h.Role.Name, h.Via, h.Scope, h.AssignmentId }),
+            groups,
+            permissions = Permissions.All.Select(p => m.Check(p.Key) is var d ? new { p.Key, d.Allowed, d.Because } : null),
+            rules = rules.Select(r => new { r.Id, r.Effect, subject = Subject(m.Snapshot, r.SubjectKind, r.SubjectId), r.ResourceKind, r.Resource, r.Action, r.ExpiresAt, r.Note }),
+        });
+    }
+
+    /// <summary>The access history, newest first: of one kind (role, assignment, rule, defaults, request) when asked, before a row for the next page.</summary>
+    private static async Task<IResult> HistoryAsync(AppDbContext db, int? take, string? kind, long? before, CancellationToken ct)
+    {
+        var q = db.AccessChanges.AsNoTracking();
+        q = string.IsNullOrEmpty(kind) ? q : q.Where(c => c.Kind == kind);
+        q = before is { } b ? q.Where(c => c.Id < b) : q;
+        var rows = await q.OrderByDescending(c => c.Id).Take(Math.Clamp(take ?? 100, 1, 1000)).ToListAsync(ct);
         var actors = rows.Where(r => r.ActorId is not null).Select(r => r.ActorId!.Value).Distinct().ToList();
         var names = await db.Users.AsNoTracking().Where(u => actors.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => u.UserName, ct);
         return Results.Ok(rows.Select(r => new { r.Id, r.At, r.Kind, actor = r.ActorId is { } a ? names.GetValueOrDefault(a) ?? a.ToString() : null, r.Before, r.After, r.BulkId }));
@@ -396,7 +436,7 @@ public static partial class AccessEndpoints
         var people = await db.Users.AsNoTracking().Where(u => !u.IsDisabled).ToListAsync(ct);
         foreach (var (id, m) in await access.MembershipsAsync(people, ct))
         {
-            if (id != me.Id && m.Has(Permissions.AccessManage))
+            if (id != me.Id && m.Has(Permissions.AccessRequests))
             {
                 await notifier.SendAsync(id, new Notifications.News("access", $"{(string.IsNullOrWhiteSpace(me.DisplayName) ? me.UserName : me.DisplayName)} asks for {what}", reason, "/admin/access?tab=requests"), ct);
             }

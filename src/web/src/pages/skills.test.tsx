@@ -11,7 +11,9 @@ const skill = (over: Partial<SkillItem>): SkillItem => ({
 const team = { id: 'g1', name: 'Platform' }
 
 const library = (over: Partial<SkillLibrary> = {}): SkillLibrary => ({
-  isAdmin: false,
+  mayShareCompany: false,
+  mayShareGroups: true,
+  mayTurnBuiltIn: false,
   groups: [team],
   skills: [
     skill({
@@ -87,7 +89,7 @@ describe('skills page', () => {
 
   it('an admin may share with everyone and keep a skill for / only; a skill is edited and deleted from its card', async () => {
     const calls = fakeApi(admin, {
-      'GET /api/skills': () => ({ json: library({ isAdmin: true }) }),
+      'GET /api/skills': () => ({ json: library({ mayShareCompany: true, mayTurnBuiltIn: true }) }),
       'PUT /api/skills/s1': () => ({ status: 204 }),
       'DELETE /api/skills/s1': () => ({ status: 204 }),
     })
@@ -123,7 +125,8 @@ describe('skills page', () => {
     const calls = fakeApi(admin, {
       'GET /api/skills': () => ({
         json: library({
-          isAdmin: true,
+          mayShareCompany: true,
+          mayTurnBuiltIn: true,
           skills: [skill({ id: 'b1', name: 'code-review', title: 'Review code', description: 'Review code for bugs.', source: 'builtin', sharing: 'Company', canEdit: false, off })],
         }),
       }),

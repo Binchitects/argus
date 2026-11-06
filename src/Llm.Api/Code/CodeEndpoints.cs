@@ -333,7 +333,7 @@ public static class CodeEndpoints
             return AuthEndpoints.Problem(400, "groups", "A group in the list does not exist.");
         }
         var m = await access.MembershipAsync(me, ct);
-        if (!m.IsAdmin && groups.Any(g => !m.Groups.Contains(g) && !r.ShareGroups.Contains(g)))
+        if (!m.Has(Core.Access.Permissions.SharingGroups) && groups.Any(g => !m.Groups.Contains(g) && !r.ShareGroups.Contains(g)))
         {
             return AuthEndpoints.Problem(403, "groups", "You can share with groups you are in.");
         }

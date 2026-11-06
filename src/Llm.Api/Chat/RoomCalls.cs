@@ -79,7 +79,7 @@ public static class RoomCalls
 
     public static void MapRoomCalls(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/rooms/{id:guid}/call").PersonOnly();
+        var g = app.MapGroup("/api/rooms/{id:guid}/call").PersonOnly().RequirePermission(Llm.Core.Access.Permissions.Calls);
         g.MapPost("", JoinAsync);
         g.MapDelete("", LeaveAsync);
         g.MapPost("/signal", SignalAsync);

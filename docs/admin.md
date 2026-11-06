@@ -129,7 +129,16 @@ What each person may do is decided in one place, from three things:
   `people.delete`, `people.passwords` (passwords, two-factor, signing out),
   `people.keys` (keys and API access) and `people.limits`; `groups.manage`
   holds create, edit, delete, members and policies; `access.manage` holds
-  roles, assign, rules and requests; `models.manage` holds add, edit, delete,
+  roles, assign, rules, requests and defaults (the groups new people join);
+  `compliance.manage` holds attest (controls, the statement of
+  applicability, waivers, certificates), reviews (access reviews), risks
+  (the risk register, suppliers, AI systems), policies and audits (audits,
+  findings, objectives, management reviews, incidents, evidence requests);
+  `sharing.manage` holds `sharing.company` (share an assistant, a skill, a
+  chat or a review with the whole company), `sharing.groups` (with any
+  group, not only one's own) and `sharing.skills` (change the company's
+  skills and assistants, and turn Arena's own skills off or on);
+  `business.manage` removes business maps; `models.manage` holds add, edit, delete,
   download, servers, hours and access (`models.load` apart); `tools.manage`,
   `plugins.manage`, `knowledge.manage` (read, add, edit, sync, delete) and
   `storage.manage` (read, cleanup, delete, quota) theirs; `settings.manage`
@@ -142,7 +151,13 @@ What each person may do is decided in one place, from three things:
   read that area (who resets passwords sees the people). Features have more
   parts too: Python, the canvas, 3D models, plans, deep research, comparing
   models, attaching files, making assistants, saving prompts, exporting one's
-  own data, company knowledge, and choosing the chat's model.
+  own data, company knowledge, choosing the chat's model, the science lab
+  (`feature.lab`), the wiki (`feature.wiki`), calls in rooms
+  (`feature.calls`), and sharing: `feature.skills.share` shares one's skills
+  with one's groups, `feature.apps.share` opens one's apps to groups or
+  everyone (`feature.apps` alone makes apps for oneself). Feature
+  permissions are grouped on the Access page by what they are for: Chat and
+  knowledge, Making, Agents and keys, Sharing and rooms, Code.
 - **Roles**: named sets of permissions. The built-in ones are **Owner**
   (everything), **People admin**, **Model admin**, **Billing**, **Auditor**
   (every `.read`, never a change), **Argus admin**, **Room moderator**,
@@ -157,9 +172,13 @@ What each person may do is decided in one place, from three things:
   app group, a directory group linked to one, or a SCIM group) or by
   everyone, maybe until a date.
 - **Rules**: allow or deny one action on a resource (a model, a tool, a
-  knowledge source, a repository, or a feature permission), by its name or a
+  knowledge source, a repository, a feature permission, or one shared
+  assistant, skill or app by its id), by its name or a
   pattern (`*` for anything but a slash, `**` for anything), for a person, a
-  group, a role's holders or everyone, maybe until a date, with a note.
+  group, a role's holders or everyone, maybe until a date, with a note. A
+  deny on a shared assistant, skill or app keeps it from the people its
+  sharing reaches (it leaves their lists, and opening it is refused); its
+  owner and its editors keep it.
 
 How a question is decided: a disabled person may do nothing. Otherwise the
 rules and roles that match are ranked: the person's own over their groups',

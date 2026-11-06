@@ -23,15 +23,16 @@ public static class Assistants
     public static readonly string[] Colors = ["blue", "green", "amber", "red", "violet", "pink", "teal", "slate"];
 
     public static bool MayEdit(Assistant a, Guid me, Membership m) =>
-        a.UserId == me || a.EditorPeople.Contains(me) || a.EditorGroups.Any(m.Groups.Contains) || (a.Reach == Reach.Company && m.IsAdmin);
+        a.UserId == me || a.EditorPeople.Contains(me) || a.EditorGroups.Any(m.Groups.Contains) || (a.Reach == Reach.Company && m.Has(Permissions.SkillsCompany));
 
+    /// <summary>Its editors always may; those its sharing reaches, unless a rule on the assistant denies them (Admin → Access).</summary>
     public static bool MayUse(Assistant a, Guid me, Membership m) =>
-        MayEdit(a, me, m) || a.Reach == Reach.Company || (a.Reach == Reach.Groups && a.Groups.Any(m.Groups.Contains));
+        MayEdit(a, me, m) || ((a.Reach == Reach.Company || (a.Reach == Reach.Groups && a.Groups.Any(m.Groups.Contains))) && m.MayUse(ResourceKinds.Assistant, a.Id.ToString()));
 
-    /// <summary>Its owner shares and removes it; admins too, once it is company-wide.</summary>
-    public static bool MayShare(Assistant a, Guid me, Membership m) => a.UserId == me || (a.Reach == Reach.Company && m.IsAdmin);
+    /// <summary>Its owner shares and removes it; who looks after the company's (sharing.skills) too, once it is company-wide.</summary>
+    public static bool MayShare(Assistant a, Guid me, Membership m) => a.UserId == me || (a.Reach == Reach.Company && m.Has(Permissions.SkillsCompany));
 
-    /// <summary>The assistants a person may use, filtered in the database (as <see cref="MayUse"/>).</summary>
+    /// <summary>The assistants a person may reach by their sharing, filtered in the database; <see cref="MayUse"/> then applies the rules.</summary>
     public static IQueryable<Assistant> Usable(IQueryable<Assistant> all, Guid me, Membership m)
     {
         var groups = m.Groups.ToArray();

@@ -64,7 +64,7 @@ describe('what a person may not use', () => {
       'GET /api/chat/conversations': () => ({ json: [] }),
       'GET /api/chat/conversations/c1': () => ({ json: conversation }),
       'GET /api/assistants': () => ({ json: [] }),
-      'GET /api/skills': () => ({ json: { isAdmin: false, groups: [], skills: [] } }),
+      'GET /api/skills': () => ({ json: { mayShareCompany: false, mayShareGroups: true, mayTurnBuiltIn: false, groups: [], skills: [] } }),
     })
     const { router } = renderApp('/chat/c1')
     expect(await screen.findByRole('button', { name: 'New chat' })).toBeInTheDocument()

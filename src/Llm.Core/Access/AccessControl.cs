@@ -32,6 +32,10 @@ public static class ResourceKinds
     public const string Repo = "repo";
     /// <summary>A feature permission, given or taken per person, group or role.</summary>
     public const string Feature = "feature";
+    /// <summary>A shared assistant, skill or app, by its id: a deny keeps it from people its sharing reaches; its owner always may.</summary>
+    public const string Assistant = "assistant";
+    public const string Skill = "skill";
+    public const string App = "app";
 
     public const string Use = "use";
     public const string Read = "read";
@@ -44,6 +48,9 @@ public static class ResourceKinds
         [KnowledgeSource] = [Read],
         [Repo] = [Permissions.CodeRead, Permissions.ReviewRun, "review.see", "review.resolve"],
         [Feature] = [Use],
+        [Assistant] = [Use],
+        [Skill] = [Use],
+        [App] = [Use],
     };
 }
 

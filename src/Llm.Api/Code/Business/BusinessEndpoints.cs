@@ -132,9 +132,9 @@ public static class BusinessEndpoints
         CancellationToken ct)
     {
         var me = await Me(p, users);
-        if (!(await access.MembershipAsync(me, ct)).IsAdmin)
+        if (!(await access.MembershipAsync(me, ct)).Has(Core.Access.Permissions.BusinessManage))
         {
-            return AuthEndpoints.Problem(403, "admin", "Only admins remove a business map.");
+            return AuthEndpoints.Problem(403, "admin", "Removing a business map needs business.manage (Admin → Access).");
         }
         if (await db.BusinessSystems.SingleOrDefaultAsync(b => b.Id == id, ct) is not { } system)
         {

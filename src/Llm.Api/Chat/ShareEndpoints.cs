@@ -97,7 +97,7 @@ public static class ShareEndpoints
             return AuthEndpoints.Problem(400, "groups", "A group in the list does not exist.");
         }
         var m = await access.MembershipAsync(me, ct);
-        if (!m.IsAdmin && groups.Any(g => !m.Groups.Contains(g) && !(share?.Groups.Contains(g) ?? false)))
+        if (!m.Has(Llm.Core.Access.Permissions.SharingGroups) && groups.Any(g => !m.Groups.Contains(g) && !(share?.Groups.Contains(g) ?? false)))
         {
             return AuthEndpoints.Problem(403, "groups", "You can share with groups you are in.");
         }

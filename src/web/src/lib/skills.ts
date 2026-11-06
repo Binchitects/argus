@@ -61,7 +61,10 @@ export const dismissSkillChange = (id: string) => api(`/api/skills/changes/${id}
 export const undoSkillChange = (id: string) => api(`/api/skills/changes/${id}/undo`, { body: {} })
 
 export interface SkillLibrary {
-  isAdmin: boolean
+  /** What they may do beyond their own: share with the company, with their groups, and turn Arena's own skills off or on. */
+  mayShareCompany: boolean
+  mayShareGroups: boolean
+  mayTurnBuiltIn: boolean
   /** How the person's skills learned and got better, waiting ones first. */
   changes?: SkillChangeItem[]
   /** The groups the person may share a skill with. */

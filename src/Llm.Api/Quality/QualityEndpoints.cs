@@ -139,7 +139,7 @@ public static class QualityEndpoints
         Access.AccessService access, CancellationToken ct)
     {
         var open = options.CurrentValue.PublicLeaderboard;
-        if (!open && !(await users.GetUserAsync(p) is { } me && await access.IsOwnerAsync(me, ct)))
+        if (!open && !(await users.GetUserAsync(p) is { } me && await access.MayAsync(me, Llm.Core.Access.Permissions.MonitoringRead, ct)))
         {
             return AuthEndpoints.Problem(403, "hidden", "Your admins keep the leaderboard to themselves.");
         }

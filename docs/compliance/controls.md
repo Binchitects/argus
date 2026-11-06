@@ -128,7 +128,7 @@ People come from the company's directory (LDAP or Active Directory), OIDC or SAM
 
 ### IAM-05: Least privilege, by roles and rules
 
-What a person may do comes from roles (built in, or made by the company) held directly, through a group or by everyone, and from rules that give or take a feature; admin roles can be scoped to some groups. The checker says why a person may or may not do something. The wiki finds and shows each person only the documents they may read, and searches only the code they may read in GitLab, as them. A feature taken from a person is hidden from their menus and pages, not only refused. Taking a request out of the line needs usage.line, restarting an engine runtimes.restart; only a chat's owner rewinds it, and Code Arena's key reads and adds to its own person's chats alone.
+What a person may do comes from roles (built in, or made by the company) held directly, through a group or by everyone, and from rules that give or take a feature; admin roles can be scoped to some groups. The checker says why a person may or may not do something. The wiki finds and shows each person only the documents they may read, and searches only the code they may read in GitLab, as them. A feature taken from a person is hidden from their menus and pages, not only refused. Taking a request out of the line needs usage.line, restarting an engine runtimes.restart; only a chat's owner rewinds it, and Code Arena's key reads and adds to its own person's chats alone. Sharing with the whole company or with any group is a permission of its own (sharing.company, sharing.groups), not being Owner; a rule can keep one shared assistant, skill or app from people its sharing reaches; the people list with emails and spend needs people.read. Each person's effective permissions are listed with why.
 
 **Serves**
 
@@ -156,6 +156,9 @@ What a person may do comes from roles (built in, or made by the company) held di
 - `Llm.Tests/FairUseTests.An_admin_takes_a_waiting_answer_out_and_stops_a_running_one_and_the_person_is_told_why`
 - `Llm.Tests/ChatRewindTests.Only_the_owner_rewinds_a_room_for_everyone_and_nobody_while_an_answer_is_written`
 - `Llm.Tests/CodeArenaSyncTests.Only_the_owner_s_key_reads_or_adds_to_a_chat`
+- `Llm.Tests/AccessPermissionsTests.The_people_list_with_emails_and_spend_needs_people_read_not_monitoring`
+- `Llm.Tests/AccessPermissionsTests.Sharing_with_the_company_is_a_permission_and_a_rule_keeps_a_shared_assistant_from_a_group`
+- `Llm.Tests/AccessPermissionsTests.A_persons_effective_permissions_say_why_each_is_held_or_not`
 
 **The company's part** Decide who holds which role, and review it.
 
