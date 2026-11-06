@@ -301,7 +301,10 @@ public sealed partial class QueuedMessages(IServiceScopeFactory scopes, AnswerJo
             : Results.NoContent();
     }
 
-    /// <summary>Send now: the message goes first in line, and the answer running stops (keeping what it has) so it goes at once.</summary>
+    /// <summary>
+    /// Send now: the message goes first in line, and the answer running stops (keeping what it has) so it goes at once.
+    /// While Code Arena answers there is nothing here to stop: it only goes first (the page calls it Put first).
+    /// </summary>
     private static async Task<IResult> NowAsync(Guid id, Guid queuedId, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db,
         QueuedMessages queue, AnswerJobs jobs, CancellationToken ct)
     {
