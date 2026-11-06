@@ -946,6 +946,56 @@ describe('Code Arena, the IDE', () => {
     expect(within(tabs()).getAllByRole('tab', { name: 'README.md' })).toHaveLength(1)
   })
 
+  it("opens to the side from the Explorer and from quick open with Ctrl+Enter, lists every group's editors, reverts a file and has Zen Mode", async () => {
+    backend()
+    renderIde()
+    await userEvent.dblClick(await screen.findByRole('treeitem', { name: 'README.md' }))
+    await within(tabs()).findByRole('tab', { name: 'README.md' })
+    // Open to the Side, in the Explorer's menu: a second group with the file.
+    await userEvent.click(screen.getByRole('treeitem', { name: 'src, the agent changed files in it' }))
+    fireEvent.contextMenu(await screen.findByRole('treeitem', { name: 'app.ts, changed by the agent' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Open to the Side' }))
+    const second = await screen.findByRole('tablist', { name: 'Open files in group 2' })
+    expect(await within(second).findByRole('tab', { name: 'app.ts' })).toBeInTheDocument()
+    expect(within(tabs()).queryByRole('tab', { name: 'app.ts' })).not.toBeInTheDocument()
+
+    // Quick open's Ctrl+Enter, from the first group: into the group beside it, which there is now.
+    await act(async () => runCommand('workbench.action.focusFirstEditorGroup'))
+    await act(async () => runCommand('workbench.action.quickOpen'))
+    await userEvent.type(await screen.findByLabelText('File to open'), 'readme')
+    expect(await screen.findByRole('option', { name: /README\.md/ })).toBeInTheDocument()
+    await userEvent.keyboard('{Control>}{Enter}{/Control}')
+    expect(await within(second).findByRole('tab', { name: 'README.md' })).toBeInTheDocument()
+    expect(screen.getAllByRole('tablist')).toHaveLength(2)
+
+    // Show All Editors By Appearance: each group's, under its name.
+    await act(async () => runCommand('workbench.action.showAllEditors'))
+    const picker = await screen.findByRole('dialog', { name: 'Open editors' })
+    expect(within(picker).getAllByRole('option').map((o) => o.textContent)).toEqual([expect.stringContaining('README.md'), expect.stringContaining('app.ts'), expect.stringContaining('README.md')])
+    await userEvent.keyboard('{Escape}')
+
+    // Revert File: what is unsaved goes, the file as on disk in its tab.
+    await act(async () => runCommand('workbench.action.joinAllGroups'))
+    await waitFor(() => expect(screen.getAllByRole('tablist')).toHaveLength(1))
+    await userEvent.click(within(tabs()).getByRole('tab', { name: 'README.md' }))
+    const readme = () => fakes.models.find((m) => !m.disposed && String(m.uri).endsWith('README.md'))
+    await waitFor(() => expect(readme()).toBeTruthy())
+    act(() => readme()!.setValue('# Changed\n'))
+    expect(await within(tabs()).findByRole('tab', { name: 'README.md, not saved' })).toBeInTheDocument()
+    await act(async () => runCommand('workbench.action.files.revert'))
+    expect(await within(tabs()).findByRole('tab', { name: 'README.md' })).toBeInTheDocument()
+    await waitFor(() => expect(readme()?.value).toBe('# Shop\n'))
+
+    // Zen Mode: the editor alone, and the parts back as they were.
+    expect(screen.getByRole('tree', { name: 'Files' })).toBeInTheDocument()
+    await act(async () => runCommand('workbench.action.toggleZenMode'))
+    await waitFor(() => expect(screen.queryByRole('navigation', { name: 'Activity bar' })).not.toBeInTheDocument())
+    expect(document.querySelector('aside[aria-label="Agent"]')).toHaveAttribute('hidden')
+    await act(async () => runCommand('workbench.action.toggleZenMode'))
+    expect(await screen.findByRole('navigation', { name: 'Activity bar' })).toBeInTheDocument()
+    expect(document.querySelector('aside[aria-label="Agent"]')).not.toHaveAttribute('hidden')
+  })
+
   it('moves a tab into a window of its own with its unsaved text, and takes it back when that window says so', async () => {
     backend()
     const opened = vi.spyOn(window, 'open').mockReturnValue({} as Window)

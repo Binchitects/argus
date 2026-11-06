@@ -33,7 +33,7 @@ import { ReviewPanel } from './review'
 import { SourceControlPanel } from './scm'
 import { DetachedChat, DetachedEditor } from './detach'
 import { EditorArea, EditorProvider } from './editor'
-import { groupCommands, GroupStoreContext } from './editor-groups'
+import { groupCommands, GroupStoreContext, openToSide } from './editor-groups'
 import { userFile } from './editor-options'
 import { CodeRefsProvider } from './refs'
 import { rankFiles, useEditor } from './editor-state'
@@ -1164,6 +1164,20 @@ function Workbench({
     } },
   ]
   useCommands(debugCommands)
+  const groups = use(GroupStoreContext)!
+  /** Zen Mode: the editor alone (the parts as they were come back after). */
+  const zen = useRef<Partial<Layout> | null>(null)
+  const toggleZen = () => {
+    if (zen.current) {
+      change(zen.current)
+      zen.current = null
+      return
+    }
+    zen.current = { sideOpen: layout.sideOpen, panelOpen: layout.panelOpen, chatOpen: layout.chatOpen, activityBar: layout.activityBar }
+    change({ sideOpen: false, panelOpen: false, chatOpen: false, activityBar: 'hidden' })
+  }
+  /** A setting on or off for every language (as the editor's View menu does). */
+  const toggleSetting = (key: string) => void settings.update(key, settings.get(key) === false).catch((e: unknown) => toast.error(errorMessage(e)))
   const workbenchCommands: Command[] = [
     { id: 'workbench.action.showCommands', category: 'View', title: 'Show All Commands', hidden: true, run: () => setPalette(true) },
     { id: 'workbench.action.quickOpen', category: 'File', title: 'Go to File…', run: () => setQuickOpen(true) },
@@ -1173,7 +1187,21 @@ function Workbench({
     { id: 'breadcrumbs.toggle', category: 'View', title: 'Toggle Breadcrumbs', run: () => void settings.update('breadcrumbs.enabled', settings.get('breadcrumbs.enabled') === false) },
     { id: 'breadcrumbs.focusAndSelect', category: 'View', title: 'Focus and Select Breadcrumbs', enabled: () => file, run: () => document.querySelector<HTMLElement>('[data-breadcrumbs] button')?.focus() },
     { id: 'markdown.showPreview', category: 'Markdown', title: 'Open Preview', enabled: () => active?.languageId === 'markdown', run: () => active && void ed.openPreview(active.path) },
-    { id: 'markdown.showPreviewToSide', category: 'Markdown', title: 'Open Preview to the Side', enabled: () => active?.languageId === 'markdown', run: () => active && void ed.openPreview(active.path) },
+    { id: 'markdown.showPreviewToSide', category: 'Markdown', title: 'Open Preview to the Side', enabled: () => active?.languageId === 'markdown', run: () => active && void openToSide(groups, { kind: 'preview', path: active.path }) },
+    { id: 'workbench.action.openToSide', category: 'View', title: 'Open the Active Editor to the Side', enabled: () => active?.kind === 'file', run: () => active && void openToSide(groups, active) },
+    { id: 'workbench.action.files.revert', category: 'File', title: 'Revert File', enabled: () => active?.kind === 'file' && !!active.dirty, run: async () => {
+      if (!active) return
+      const at = ed.tabs.findIndex((t) => t.id === active.id)
+      // What is unsaved goes; the file as it is on disk, in the same place.
+      ed.release([active.id])
+      await ed.open(active.path)
+      ed.moveTab(active.path, at)
+    } },
+    { id: 'workbench.action.toggleZenMode', category: 'View', title: 'Toggle Zen Mode', run: toggleZen },
+    { id: 'workbench.action.toggleFullScreen', category: 'View', title: 'Toggle Full Screen', run: () => void (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.())?.catch(() => undefined) },
+    { id: 'editor.action.toggleMinimap', category: 'View', title: 'Toggle Minimap', run: () => toggleSetting('editor.minimap.enabled') },
+    { id: 'editor.action.toggleStickyScroll', category: 'View', title: 'Toggle Sticky Scroll', run: () => toggleSetting('editor.stickyScroll.enabled') },
+    { id: 'editor.action.toggleRenderWhitespace', category: 'View', title: 'Toggle Render Whitespace', run: () => void settings.update('editor.renderWhitespace', settings.get('editor.renderWhitespace') === 'none' ? 'selection' : 'none').catch((e: unknown) => toast.error(errorMessage(e))) },
     { id: 'markdown.showSource', category: 'Markdown', title: 'Show Source', enabled: () => active?.kind === 'preview', run: () => active && void ed.open(active.path) },
     { id: 'workbench.action.files.openFolder', category: 'File', title: 'Open Folder…', run: () => void chooseAndOpenFolder(setOpening) },
     { id: 'workbench.action.openRecent', category: 'File', title: 'Open Recent…', run: () => void openRecentFolder(setOpening) },
@@ -1312,7 +1340,6 @@ function Workbench({
   ]
   useCommands(workbenchCommands)
   // The editor groups' own: split, join, move to a group, focus one by its place.
-  const groups = use(GroupStoreContext)!
   useCommands(groupCommands(groups))
 
 

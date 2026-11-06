@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronRight, ChevronsDownUp, ClipboardPaste, Columns2, Copy, FilePlus, FileSearch, FolderInput, FolderOpen, FolderPlus, GitCompareArrows, Link, MessageSquarePlus, Pencil, RefreshCw, Scissors, SquareDashedMousePointer, SquareTerminal, Trash2, X } from 'lucide-react'
 import { ContextMenu } from 'radix-ui'
-import { useEffect, useId, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
+import { use, useEffect, useId, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react'
 import { useConfirm } from '@/components/ui/confirm'
 import { menuContent, menuItem } from '@/components/ui/dropdown-menu'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -10,6 +10,7 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { onMac, useEditor } from './editor-state'
+import { GroupStoreContext, openToSide } from './editor-groups'
 import { useIconTheme } from './extensions'
 import { FileIcon, FolderIcon } from './file-icon'
 import { PartHelp } from './help'
@@ -145,6 +146,7 @@ export function Explorer({
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const editor = useEditor()
+  const groupStore = use(GroupStoreContext)
   const settings = useSettings()
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
   const [selected, setSelected] = useState<Target | null>(null)
@@ -538,6 +540,11 @@ export function Explorer({
                 {at.kind === 'file' && marks.files.has(at.path) && (
                   <ContextMenu.Item className={menuItem} onSelect={() => onOpenChanges(at.path)}>
                     <GitCompareArrows /> The agent&apos;s changes
+                  </ContextMenu.Item>
+                )}
+                {at.kind === 'file' && groupStore && (
+                  <ContextMenu.Item className={menuItem} onSelect={() => void openToSide(groupStore, { kind: 'file', path: at.path })}>
+                    <Columns2 /> Open to the Side
                   </ContextMenu.Item>
                 )}
                 <ContextMenu.Item className={menuItem} onSelect={() => chatBridge.current?.mention(at.path)}>

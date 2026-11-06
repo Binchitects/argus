@@ -551,6 +551,16 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   back in the first; **Close Editor Group** closes the one with the focus.
   Save, Close and the other commands work on the group with the focus; Save
   All and a file changed on disk reach every group. Eight groups at most.
+  **Open to the Side** (the Explorer's menu, **Ctrl+Enter** in quick open,
+  Markdown's **Open Preview to the Side**) opens a file in the group beside
+  the one with the focus, made when there is none. **Show All Editors By
+  Appearance** (**Ctrl+K Ctrl+P**) lists every group's tabs to go to one.
+- **more of VS Code's View and File commands**: **Revert File** (what is
+  unsaved goes, the file as it is on disk), **Toggle Zen Mode** (**Ctrl+K
+  Z**: the editor alone, the side bar, panel, chat and activity bar back as
+  they were the next time), **Toggle Full Screen** (**F11**), and **Toggle
+  Minimap**, **Toggle Sticky Scroll** and **Toggle Render Whitespace**, which
+  change the settings of the same names in your settings.json.
 - **a tab or the chat in a window of its own**, as VS Code's Move into New
   Window: **Move into New Window** in a tab's menu (the palette's **Move
   Editor into New Window**) opens the file in a new browser window, with what

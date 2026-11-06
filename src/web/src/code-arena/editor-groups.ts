@@ -2,6 +2,7 @@ import type * as Monaco from 'monaco-editor'
 import { createContext } from 'react'
 import type { Command } from './commands'
 import type { EditorApi, FileModel, Tab } from './editor-state'
+import { quickPick } from './quick-pick'
 
 // The editor groups, as VS Code's: the editor split right or down into groups side by side (or one above another), each
 // with its own tabs and its own active tab, all showing the same files (one Monaco model per file, whichever group shows
@@ -222,6 +223,28 @@ export const GroupStoreContext = createContext<GroupStore | null>(null)
 /** A group's own api, for its own tab strip and editor (the workbench's EditorContext is the focused group's). */
 export const OwnEditorContext = createContext<EditorApi | null>(null)
 
+/**
+ * Open to the Side, as VS Code's: in the group right of (or below) the one with the focus, made when there is none, and
+ * the focus goes there.
+ */
+export async function openToSide(store: GroupStore, opening: Opening) {
+  const groups = store.layout.groups
+  const next = groups[groups.indexOf(store.focused) + 1]
+  const api = next === undefined ? undefined : store.apis.get(next)
+  if (next === undefined || !api) {
+    if (groups.length >= mostGroups) {
+      const own = store.apis.get(store.focused)
+      if (own) await openIn(own, opening)
+      return
+    }
+    store.split(store.focused, store.layout.orientation === 'column' && groups.length > 1 ? 'down' : 'right', opening)
+    return
+  }
+  await openIn(api, opening)
+  store.focus(next)
+  api.focusEditor()
+}
+
 const ordinals = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth']
 
 /**
@@ -271,6 +294,16 @@ export function groupCommands(store: GroupStore): Command[] {
     { id: 'workbench.action.moveEditorToPreviousGroup', category: 'View', title: 'Move Editor into Previous Group', enabled: () => !!activeTab() && at() > 0, run: () => moveTo(at() - 1) },
     { id: 'workbench.action.focusNextGroup', category: 'View', title: 'Focus Next Editor Group', enabled: several, run: () => focusGroup(groups()[(at() + 1) % groups().length]!) },
     { id: 'workbench.action.focusPreviousGroup', category: 'View', title: 'Focus Previous Editor Group', enabled: several, run: () => focusGroup(groups()[(at() - 1 + groups().length) % groups().length]!) },
+    { id: 'workbench.action.showAllEditors', category: 'View', title: 'Show All Editors By Appearance', run: async () => {
+      const items = groups().flatMap((g, i) =>
+        (store.apis.get(g)?.tabs ?? []).map((t) => ({ id: `${g}\n${t.id}`, label: t.path.slice(t.path.lastIndexOf('/') + 1) || t.path, description: t.path, group: several() ? `Group ${i + 1}` : undefined, value: { g, id: t.id } })),
+      )
+      const picked = await quickPick({ title: 'Open editors', placeholder: 'Type the name of an open editor', items })
+      if (!picked?.value) return
+      const api = store.apis.get(picked.value.g)
+      api?.activate(picked.value.id)
+      focusGroup(picked.value.g)
+    } },
     { id: 'workbench.action.focusRightGroup', category: 'View', title: 'Focus Editor Group to the Right', hidden: true, enabled: () => store.layout.orientation === 'row' && at() < groups().length - 1, run: () => focusGroup(groups()[at() + 1]!) },
     { id: 'workbench.action.focusLeftGroup', category: 'View', title: 'Focus Editor Group to the Left', hidden: true, enabled: () => store.layout.orientation === 'row' && at() > 0, run: () => focusGroup(groups()[at() - 1]!) },
     ...ordinals.map((o, i): Command => ({

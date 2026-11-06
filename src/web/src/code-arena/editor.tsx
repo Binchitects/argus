@@ -21,7 +21,7 @@ import { installCompletions } from './completion'
 import { compareId, renamed, revertChanges, sideLabel, sidePath, takeChanges, touched, type LineChange, type Side } from './compare'
 import { CompareToolbar } from './compare-toolbar'
 import { EditorContext, loadMonaco, mediaKind, rankFiles, useEditor, type DiffModels, type DiffSource, type EditorApi, type FileModel, type MonacoModule, type Reveal, type SaveReason, type Tab, type Unsaved } from './editor-state'
-import { GroupStoreContext, newGroupStore, openIn, OwnEditorContext, type GroupStore } from './editor-groups'
+import { GroupStoreContext, newGroupStore, openIn, openToSide, OwnEditorContext, type GroupStore } from './editor-groups'
 import { acceptChange, allFilesQuery, changesQuery, changeTexts, gitShow, gitStageText, gitStatusQuery, keepBackup, listBackups, nameOf, rawFileUrl, readFile, revertChange, saveWorkspaceState, skillsQuery, symbolsQuery, userFileQuery, within, workspaceStateQuery, writeFile, writeUserFile, type Change, type CheckProblem, type OpenedFile, type Saved, type UserFileName } from './ide-api'
 import { addDebugActions, installDebugEditor } from './debug/editor-debug'
 import { installExtensions } from './extensions'
@@ -1621,6 +1621,17 @@ function QuickOpen() {
     opened.current = true
     return openFile(...args)
   }
+  // Ctrl+Enter (Cmd+Enter) opens the file to the side, as VS Code's quick open does.
+  const store = use(GroupStoreContext)
+  const toSide = useRef(false)
+  const openFound = (path: string, at?: Reveal) => {
+    if (toSide.current && store && !at) {
+      toSide.current = false
+      opened.current = true
+      return openToSide(store, { kind: 'file', path })
+    }
+    return open(path, at)
+  }
   const mode = typed.startsWith('#') ? 'folder' : typed.startsWith('@') ? 'file' : typed.startsWith('?') ? 'help' : 'files'
   const all = useQuery({ ...allFilesQuery, enabled: quickOpen && mode === 'files', staleTime: 10_000 })
   // The symbols asked for once typing pauses: one request as a name is typed, not one a letter.
@@ -1680,7 +1691,15 @@ function QuickOpen() {
       description={description}
       shouldFilter={false}
     >
-      <CommandInput value={typed} onValueChange={setTyped} placeholder={placeholder} aria-label="File to open" />
+      <CommandInput
+        value={typed}
+        onValueChange={setTyped}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') toSide.current = e.ctrlKey || e.metaKey
+        }}
+        placeholder={placeholder}
+        aria-label="File to open"
+      />
       <CommandList>
         {mode === 'files' && (
           <>
@@ -1693,7 +1712,7 @@ function QuickOpen() {
                 value={path}
                 onSelect={() => {
                   close()
-                  void open(path, line ? { line, column } : undefined)
+                  void openFound(path, line ? { line, column } : undefined)
                 }}
               >
                 <FileText aria-hidden="true" />
