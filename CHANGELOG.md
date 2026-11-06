@@ -15,6 +15,43 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v7.7.2 (2026-11-06)
+
+A hotfix: the load spreads over every GPU, and a chat goes back to any of
+your messages, in the web and in Code Arena.
+
+### :sparkles: New features & Enhancements
+
+- **Rewind to here.** Beside each of your messages in the web chat: back to
+  before the question (its words return to the box) or to after its answer,
+  saying how many messages go and the memories made from them (forgotten too,
+  if you choose); **Undo** while the toast shows. In a room only its owner
+  rewinds, for everyone; never while an answer is being written. Code Arena's
+  IDE has it too, with **The conversation and the code**, **Only the
+  conversation** or **Only the code** and the files that would change shown
+  first; the terminal's `/rewind` lists your questions and goes back in a
+  resumed session as well. The web chat shows a Code Arena rewind at once.
+- **Each GPU in Admin → Models.** What every GPU holds (models loaded or not,
+  their share, the picture, video and music servers, the reserves), how busy
+  it is and its memory in use, from the NVIDIA exporter or DCGM.
+
+### :bug: Bugs fixed
+
+- **The load lands on every GPU, not mostly on the first.** New vLLM and
+  SGLang models and their copies go on the least-placed GPUs, counting every
+  model that names its GPUs and the media servers; the picture, video and
+  music servers go on their model's GPU, else the least placed (they all ran on
+  GPU 0); llama.cpp's vision projectors are spread over a model's GPUs (they
+  all ran on its first); a conversation goes to the least busy copy and stays
+  there while it has room (conversations begun together all went to one copy).
+  An admin's own choice of GPUs is always kept.
+- A skill made or changed on the web is used at once in Code Arena, and saving
+  a web-made skill in the IDE keeps its quotes.
+- Code Arena: the editor's code colours are 4.5:1 in every theme; `/context`
+  says when its figure is an estimate (after a resume, a compaction or another
+  model); the web gauge previews a Code Arena message by its words, not its
+  attached files.
+
 ## v7.7.1 (2026-11-06)
 
 A hotfix: an upgrade from 7.6.3 carries on, rolls back and resumes; a model's
