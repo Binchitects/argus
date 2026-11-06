@@ -570,7 +570,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         if (resumed is not null && resumedFile is not null)
         {
             Session = SessionStore.Open(resumedFile);
-            Agent.Load(resumed.Messages, resumed.Known);
+            Agent.Load(resumed.Messages, resumed.Known, resumed.CharsPerToken);
             Context.Plan = resumed.Plan;
             Demand.Restore(resumed.ToolsOff, resumed.ToolsLoaded);
             Total.Prompt = resumed.Prompt;
@@ -1443,7 +1443,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         _memory = Memory.Again() + LongMemory();
         Session = SessionStore.Open(file);
         Agent.Session = Session;
-        Agent.Load(data.Messages, data.Known);
+        Agent.Load(data.Messages, data.Known, data.CharsPerToken);
         Context.Plan = data.Plan;
         Demand.Restore(data.ToolsOff, data.ToolsLoaded);
         Context.PlanChanged = plan => Session.Plan(plan);
