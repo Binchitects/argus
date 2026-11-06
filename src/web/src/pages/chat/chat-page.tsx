@@ -1149,7 +1149,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     <FilesPanel
       files={files}
       title={title}
-      onPublish={(what) => setPublishing({ ...what, conversationId: id ?? undefined })}
+      onPublish={mayUse(config, 'feature.apps') ? (what) => setPublishing({ ...what, conversationId: id ?? undefined }) : undefined}
       selected={sketched ?? selectedFile}
       onSelect={(key) => {
         setPendingPreview(null)

@@ -39,6 +39,8 @@ describe('what a person may not use', () => {
     expect(await screen.findByRole('button', { name: 'Attach' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Sketch' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /^Model: / })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'New room' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'New assistant' })).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'Chat actions' }))
     for (const name of ['Share', 'Make it a room', 'Export']) expect(await screen.findByRole('menuitem', { name })).toBeInTheDocument()
   })
@@ -54,5 +56,25 @@ describe('what a person may not use', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Chat actions' }))
     expect(await screen.findByRole('menuitem', { name: 'Fork' })).toBeInTheDocument()
     for (const name of ['Share', 'Make it a room', 'Export']) expect(screen.queryByRole('menuitem', { name })).not.toBeInTheDocument()
+  })
+
+  it('no New room, New assistant or New skill for a person who may not make them', async () => {
+    fakeApi({ ...member, denied: ['feature.rooms.create', 'feature.assistants.create', 'feature.skills'] }, {
+      'GET /api/chat/config': () => ({ json: config }),
+      'GET /api/chat/conversations': () => ({ json: [] }),
+      'GET /api/chat/conversations/c1': () => ({ json: conversation }),
+      'GET /api/assistants': () => ({ json: [] }),
+      'GET /api/skills': () => ({ json: { isAdmin: false, groups: [], skills: [] } }),
+    })
+    const { router } = renderApp('/chat/c1')
+    expect(await screen.findByRole('button', { name: 'New chat' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'New room' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'New assistant' })).not.toBeInTheDocument()
+    await router.navigate('/assistants')
+    expect(await screen.findByText('No assistants yet')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /New assistant/ })).not.toBeInTheDocument()
+    await router.navigate('/skills')
+    expect(await screen.findByText('No skills yet')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /New skill/ })).not.toBeInTheDocument()
   })
 })

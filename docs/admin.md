@@ -119,8 +119,10 @@ What each person may do is decided in one place, from three things:
   your tools); a link to one says it is not among what they may use, and
   where to ask. The chat leaves out Compare, Attach and the voice message,
   Sketch and screen sharing (they are files), Talk, the model picker,
-  Memory, Share, Make it a room and Export when the permission behind each
-  is taken; Code Arena offers no Attach without `feature.uploads`. The app
+  Memory, Share, Make it a room, Export and Publish as app when the
+  permission behind each is taken; New room, New assistant and New skill go
+  without the permission to make them; Code Arena offers no Attach without
+  `feature.uploads`. The app
   says it in `/api/auth/me` and the chat's config as `denied`.
 - **Parts of permissions.** Each broad administrative permission has parts a
   role can hold alone: `people.manage` holds `people.create`, `people.edit`,
