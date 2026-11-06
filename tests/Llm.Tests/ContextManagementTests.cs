@@ -196,6 +196,32 @@ public sealed class ContextManagementTests(AppFixture app)
     }
 
     [Fact]
+    public async Task A_Code_Arena_question_among_the_biggest_is_previewed_by_its_words_not_its_attached_files()
+    {
+        var (b, _) = await PersonAsync();
+        var id = await NewChatAsync(b);
+        using (var scope = app.Factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            // As Code Arena syncs it: its @file after the words.
+            var q = new ChatMessage
+            {
+                ConversationId = id, Role = "user", Sequence = 1,
+                Content = $"Which aisle holds SKU-1005? Quote the line from @notes.txt\n\n<attached>\n<file path=\"notes.txt\">\n{new string('n', 3_000)}\n</file>\n</attached>",
+            };
+            var answer = new ChatMessage { ConversationId = id, ParentId = q.Id, Role = "assistant", Sequence = 2, Content = "Aisle 4." };
+            db.ChatMessages.AddRange(q, answer);
+            (await db.Conversations.SingleAsync(c => c.Id == id)).CurrentLeafId = answer.Id;
+            await db.SaveChangesAsync();
+        }
+        await SendAsync(b, id, "And SKU-1006?");
+
+        var context = (await MessagesAsync(b, id)).Last(m => m.GetProperty("role").GetString() == "assistant").GetProperty("context");
+        var first = context.GetProperty("biggest").EnumerateArray().First();
+        Assert.Equal("Which aisle holds SKU-1005? Quote the line from @notes.txt", first.GetProperty("preview").GetString());
+    }
+
+    [Fact]
     public async Task A_chat_that_compacted_finds_and_reads_its_older_messages_again_by_their_numbers()
     {
         var (b, email) = await PersonAsync();
