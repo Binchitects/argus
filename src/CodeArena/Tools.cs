@@ -36,10 +36,28 @@ internal sealed record FileChange(string Path, string? Before, string After);
 internal sealed class ToolDef
 {
     public required string Name { get; init; }
-    public required string Description { get; init; }
-    public required JsonObject Parameters { get; init; }
-    public required Func<JsonObject, ToolContext, CancellationToken, Task<ToolResult>> Run { get; init; }
+    /// <summary>What the model reads of it (the person's own words in its place, when they customised it).</summary>
+    public required string Description { get; set; }
+    public required JsonObject Parameters { get; set; }
+    public required Func<JsonObject, ToolContext, CancellationToken, Task<ToolResult>> Run { get; set; }
     public ToolKind Kind { get; init; }
+    /// <summary>
+    /// How its calls ask, as the person (or the project) set it: "ask" (every call, in every mode), "allow" (none, but in
+    /// plan mode, and a command Laya flags); null: by its kind and the mode.
+    /// </summary>
+    public string? Approval { get; set; }
+    /// <summary>Where a tool of the person's or the project's own was defined (.arena/tools, ~/.code-arena/tools, .mcp.json).</summary>
+    public string? Origin { get; init; }
+    /// <summary>The tool as it was before the person's settings (the IDE lists what it was); itself for one not customised.</summary>
+    public ToolDef? Own { get; set; }
+
+    /// <summary>A copy to customise: the same tool, its description, parameters, run and approval its own to change.</summary>
+    public ToolDef Copy()
+    {
+        var copy = (ToolDef)MemberwiseClone();
+        copy.Own = Own ?? this;
+        return copy;
+    }
     /// <summary>The MCP server it comes from ("arena" for Arena's own), or null for a local tool.</summary>
     public string? Server { get; init; }
     /// <summary>Its name at its MCP server (Name may be renamed: arena_read_file, mcp__server__tool).</summary>
@@ -211,7 +229,9 @@ internal sealed class Permissions(Ui ui, Mode mode)
             : args.Bool("background") == true ? ("background", "in the background")
             : args.Bool("no_time_limit") == true ? ("unlimited", "with no time limit")
             : ((string, string)?)null;
-        var ask = tool.AlwaysAsks || tool.Kind switch
+        // The person's choice for the tool (Configure Tools): every call asks, in every mode; or none does.
+        var everyCall = tool.Approval == "ask";
+        var ask = tool.AlwaysAsks || everyCall || tool.Approval != "allow" && tool.Kind switch
         {
             ToolKind.Read or ToolKind.Agent => false,
             ToolKind.Remote when tool.Trusted || tool.ReadOnly => false,
@@ -226,7 +246,7 @@ internal sealed class Permissions(Ui ui, Mode mode)
         // A command Laya flags asks whatever the mode; its probabilities show whenever a command asks.
         var risk = tool.Kind == ToolKind.Shell && !tool.AlwaysAsks && Guard is { } guard ? await guard.AssessAsync(args.Str("command"), ct) : null;
         var flagged = risk?.High == true;
-        if (ask && !flagged && Workspace is { } here && Rules.Allowed(tool, args, here) is not null)
+        if (ask && !flagged && !everyCall && Workspace is { } here && Rules.Allowed(tool, args, here) is not null)
         {
             ask = false;
         }
@@ -234,8 +254,8 @@ internal sealed class Permissions(Ui ui, Mode mode)
         {
             return null;
         }
-        // A tool that asks every time (stop_command) offers no "always", and none is remembered for it.
-        var (key, always) = tool.AlwaysAsks ? ("", null) : tool.Kind switch
+        // A tool that asks every time (stop_command, one set to) offers no "always", and none is remembered for it.
+        var (key, always) = tool.AlwaysAsks || everyCall ? ("", null) : tool.Kind switch
         {
             ToolKind.Edit => ("edit", "for file edits"),
             ToolKind.Shell when !tool.AlwaysAsks && CommandPrefix(args.Str("command")) is { Length: > 0 } prefix => how is { } h
@@ -256,7 +276,9 @@ internal sealed class Permissions(Ui ui, Mode mode)
             }
             if (Asker is null && !ui.CanAsk)
             {
-                return flagged ? LayaGuard.CannotAsk(tool.Name, risk!) : $"{label} needs the person's approval, and this run cannot ask. " +
+                return flagged ? LayaGuard.CannotAsk(tool.Name, risk!)
+                    : everyCall ? $"{label} asks the person before each call (their tool settings), and this run cannot ask. Say what you would have done."
+                    : $"{label} needs the person's approval, and this run cannot ask. " +
                        "Say what you would have done; the person can run again with --mode auto-edit (edits) or --mode yolo (everything).";
             }
             var answer = Asker is { } asker
@@ -297,8 +319,38 @@ internal sealed class ToolBox(IEnumerable<ToolDef> tools)
 {
     private readonly object _gate = new();
     private IReadOnlyList<ToolDef> _all = [.. tools];
+    private sealed record Kept(IReadOnlyList<ToolDef> Raw, int Version, IReadOnlyList<ToolDef> Customized);
+    private Kept? _customized;
 
-    public IReadOnlyList<ToolDef> All => Volatile.Read(ref _all);
+    /// <summary>
+    /// The tools as the person set them up (Configure Tools: those turned off left out, the others with their settings), as
+    /// they are offered and called; every tool as it is without <see cref="Settings"/>.
+    /// </summary>
+    public IReadOnlyList<ToolDef> All
+    {
+        get
+        {
+            var raw = Volatile.Read(ref _all);
+            if (Settings is not { } settings)
+            {
+                return raw;
+            }
+            var version = settings.Version;
+            if (Volatile.Read(ref _customized) is { } kept && ReferenceEquals(kept.Raw, raw) && kept.Version == version)
+            {
+                return kept.Customized;
+            }
+            IReadOnlyList<ToolDef> customized = [.. raw.Select(settings.Apply).OfType<ToolDef>()];
+            Volatile.Write(ref _customized, new Kept(raw, version, customized));
+            return customized;
+        }
+    }
+
+    /// <summary>Every tool, those turned off too, as they are without the person's settings: what Configure Tools lists.</summary>
+    public IReadOnlyList<ToolDef> Every => Volatile.Read(ref _all);
+
+    /// <summary>The person's and the project's settings for the tools; null: none apply (a sub-agent's are applied already).</summary>
+    public ToolSettings? Settings { get; init; }
 
     /// <summary>The session's choice of remote tools and those loaded on demand; null: every tool is offered whole (a sub-agent's).</summary>
     public ToolDemand? Demand { get; init; }

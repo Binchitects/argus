@@ -66,6 +66,7 @@ import {
   type AgainBody,
 } from './api'
 import { chatBridge, pieceLabel, type Piece } from './bridge'
+import { ConfigureToolsButton } from './tools-dialog'
 import { codeContext } from './context'
 import { useEditor } from './editor-state'
 import { useFileMention } from './mention'
@@ -900,6 +901,7 @@ export function Thread({
         {model?.tools !== false && state.toolGroups && (
           <ToolsPicker tools={state.toolGroups} value={state.toolGroups.filter((g) => g.on).map((g) => g.id)} onChange={(tools) => void settings({ tools })} />
         )}
+        {model?.tools !== false && <ConfigureToolsButton />}
         <span className="ml-auto" />
         <SyncStatus sync={state.sync} />
         {state.mode === 'yolo' && <span className="hidden text-xs text-destructive-ink @md:inline">Yolo: nothing asks</span>}

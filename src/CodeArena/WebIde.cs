@@ -444,6 +444,15 @@ internal sealed partial class WebApp
                 case ("POST", "/api/skills"):
                     await res.JsonAsync(200, await IdeSkills.CreateAsync(_rt, Body(req), ct), ct);
                     return true;
+                case ("GET", "/api/tools/settings"):
+                    await res.JsonAsync(200, ToolsApi.List(_rt), ct);
+                    return true;
+                case ("POST", "/api/tools/settings"):
+                    await res.JsonAsync(200, ToolsApi.Save(_rt, Body(req)), ct);
+                    return true;
+                case ("POST", "/api/tools/enable"):
+                    await res.JsonAsync(200, ToolsApi.Enable(_rt, Body(req)), ct);
+                    return true;
                 case ("GET", "/api/skills/export"):
                 {
                     // Any skill the agent reads, as files: a .zip of their folders, or one alone as its SKILL.md.

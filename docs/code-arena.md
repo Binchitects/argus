@@ -2649,9 +2649,89 @@ The rest of the file: `"model"`, `"thinking"`, `"mode"`, `"context"`,
 `"allowedPaths"`, `"arenaTools": false` (no Arena MCP), `"argusTools": false`
 (no Argus MCP), `"toolChars"` (tools on demand, above), `"argusUrl"`, `"compactAt"`, `"compactTarget"`, `"gateway"`,
 `"mcpUrl"`, `"ca"`, `"autoCommit"`, `"planCritique"`, `"python"`, `"toolMode"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"window"`, `"completion"`, `"completionModel"`, `"completionTemplate"`, `"checkCommand"`, `"sandbox"`,
-`"sandboxNetwork"`, `"sandboxWritable"`, `"permissions"`, `"formatters"`, `"debugAdapters"` and
-`"languageServers"` (the IDE's: above). `ARENA_ARGUS_URL` in the environment gives Argus's address
+`"sandboxNetwork"`, `"sandboxWritable"`, `"permissions"`, `"formatters"`, `"debugAdapters"`,
+`"languageServers"` (the IDE's: above) and `"toolSettings"` (below). `ARENA_ARGUS_URL` in the environment gives Argus's address
 for one run.
+
+## Your own tools and the project's
+
+**Command tools.** A tool of your own is a JSON file: a command, and the JSON
+schema of what the model gives it. Yours are in the config folder's `tools/`
+and `~/.code-arena/tools/` (every project); the project's in
+`.code-arena/tools/` or `.arena/tools/` at its root (committed, for the team).
+
+```json
+{
+  "name": "deploy_preview",
+  "description": "Deploys this branch to a preview environment and says its address.",
+  "command": ["./scripts/deploy-preview.sh"],
+  "kind": "shell",
+  "timeout": 300,
+  "parameters": {
+    "type": "object",
+    "properties": { "env": { "type": "string", "enum": ["dev", "qa"] } },
+    "required": ["env"]
+  }
+}
+```
+
+- `command` is the program and its arguments, or a line for the shell
+  (`"make preview"`). The call's arguments go to it as JSON on its input, and
+  each as `ARENA_ARG_NAME` in its environment (`ARENA_ARG_ENV`); never on its
+  command line, so nothing the model writes becomes a command. It runs in the
+  project's root (yours: in the working directory), in the sandbox as
+  `run_shell` does; what it prints (30,000 characters at most) and its exit
+  code are the result. `timeout`: 1 to 600 seconds (120).
+- `kind` says how its calls ask, as the built-in tools of that kind do:
+  `read` never asks (and is offered in plan mode and to sub-agents), `edit`
+  asks as file edits do, `shell` (the default) as commands do. A name of a
+  built-in tool is not taken; the project's win over yours by name.
+- They are read again at each turn: one added or changed works from the
+  next message.
+
+**The project's MCP servers.** Claude Code's `.mcp.json` at the project's
+root (or `.arena/mcp.json`), in the shape of `"mcpServers"` above. The person's
+own of the same name wins. Their tools are `mcp__<server>__<tool>` and each
+call asks (what such a server says changes nothing is not taken for it).
+
+**Enabled per project.** A repository someone cloned must not run its own
+commands unasked: the project's tools and servers run only once you enable
+them for this project, in **Configure Tools** (the chat's header) or with
+`/tools enable NAME` in the terminal, and the session says which wait. The
+choice is kept on this computer, never in the project, with the tool's
+definition: a change to its command (or a server's) waits for you again.
+A server enabled connects from the next session. `/tools` lists those that
+wait, with their commands.
+
+## Tool settings
+
+As Arena's own tool customisation (Admin → Tools) does for the web chat,
+**Configure Tools** (the gear beside the chat's Tools) sets each tool of the
+session up: the built-in ones, Arena's and Argus's, the MCP servers' and your
+own and the project's.
+
+- **On or off.** A tool turned off is not offered to the model, and a call of
+  it is refused.
+- **How it asks you**: as its kind and the mode say (the default), **Ask
+  before each call** (in every mode, yolo too, with no "always"), or **Never
+  ask** (but plan mode still refuses what changes things, and a command
+  Laya flags still asks). One of Arena's tools that Arena's admins set to ask
+  first, and `stop_command`, cannot be set to never ask.
+- **What the model is told of it**: your words in place of its description.
+- **Its arguments**: **Always this** fixes one (the model is not offered it,
+  and every call gets your value); **A default** fills one the model leaves
+  out (its description says so).
+- **Kept for**: **Every project** (your `config.json`, `"toolSettings"`) or
+  **This project** (on this computer only, over your settings for every
+  project). In the terminal: `/tools set NAME on|off|ask|allow|default
+  [--here]`.
+- **The project's own** (`.arena/settings.json`, `"tools": {"NAME":
+  {"enabled": false}}` or `{"approval": "ask"}`) may only turn a tool off or
+  make it ask, for everyone who opens it; whatever else it says is not read.
+  Your settings do not undo it.
+- **Arena's tools** are as Arena's admins set them: one turned off there is
+  not served, one set to ask first asks here too, and its title and
+  description are Arena's unless you give your own words here.
 
 ## Building it (admins)
 

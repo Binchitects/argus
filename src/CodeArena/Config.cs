@@ -186,6 +186,8 @@ internal sealed class Config
     /// <summary>Directories the tools may use besides the working directory.</summary>
     public List<string> AllowedPaths { get; set; } = [];
     public List<McpServerConfig> McpServers { get; set; } = [];
+    /// <summary>The person's settings for the tools, by tool name, for every project ("toolSettings": ToolSettings reads them).</summary>
+    public JsonObject ToolSettings { get; set; } = [];
     /// <summary>The sandbox for the agent's commands: "auto" (null: one when the system has it), "on" (refuse to start without), "off".</summary>
     public string? Sandbox { get; set; }
     /// <summary>Whether commands in the sandbox may use the network (on unless false).</summary>
@@ -353,6 +355,7 @@ internal sealed class Config
         config.CommitName = raw.Str("commitName");
         config.CommitEmail = raw.Str("commitEmail");
         config.AllowedPaths = raw["allowedPaths"] is JsonArray paths ? [.. paths.Select(p => p?.ToString() ?? "").Where(p => p.Length > 0)] : [];
+        config.ToolSettings = raw["toolSettings"] is JsonObject toolSettings ? toolSettings.Clone() : [];
         config.McpServers = raw["mcpServers"] is JsonObject servers
             ? [.. servers.Select(s => McpServerConfig.From(s.Key, s.Value)).OfType<McpServerConfig>()]
             : [];
@@ -489,6 +492,7 @@ internal sealed class Config
         Set("commitEmail", CommitEmail);
         Set("debugAdapters", DebugAdapters.Count == 0 ? null : new JsonObject(DebugAdapters.Select(a => KeyValuePair.Create(a.Key, a.Value.Raw?.DeepClone()))));
         Set("languageServers", LanguageServers.Count == 0 ? null : new JsonObject(LanguageServers.Select(s => KeyValuePair.Create(s.Key, s.Value.Raw?.DeepClone()))));
+        Set("toolSettings", ToolSettings.Count == 0 ? null : ToolSettings.Clone());
         PrivateFiles.WriteAllText(file, raw.ToJsonString(Json.Indented) + "\n");
         _raw = raw;
     }

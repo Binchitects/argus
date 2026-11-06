@@ -31,6 +31,8 @@ internal sealed class Repl(Runtime rt)
         ("/mode [mode]", "show or switch the mode: ask, auto-edit, plan, yolo"),
         ("/thinking [level]", "show or set thinking: default, off, low, medium, high, xhigh (Tab while it thinks skips it for that turn)"),
         ("/tools [on|off NAME]", "the tools this session has; turn a group of Arena's or a server's tools on or off in it"),
+        ("/tools set NAME off|on|ask|allow|default [--here]", "keep a tool's setting: off, asking before each call, never asking; for every project, or this one"),
+        ("/tools enable NAME", "enable the project's own tool or MCP server (its tools/*.json, .mcp.json) here, as it is defined now"),
         ("/plan", "the plan, as it stands; a proposed one: approve [ask], change N what, another why, reject why; undo N; resume"),
         ("/checklist", "the checklist on, and yours (kept in Arena); N or NAME turns one on; off; tick N, untick N"),
         ("/agent [NAME TASK]", "your own coding agents (Claude Code, Codex, Gemini CLI: your subscriptions), or hand one a task"),
@@ -844,6 +846,49 @@ internal sealed class Repl(Runtime rt)
                     Ui.Error($"Thinking is one of: default, {string.Join(", ", ModelState.Levels)}.");
                 }
                 break;
+            case "/tools" when arg.Split(' ', 2, StringSplitOptions.TrimEntries) is [var verb, { Length: > 0 } which] && verb is "enable" or "disable":
+            {
+                // The project's own tool or MCP server, by its name: enabled for this project on this computer.
+                var key = rt.OwnToolFiles.Any(t => t.Name == which) ? "tool:" + which : "mcp:" + which;
+                var (done, enabled) = rt.EnableOwn(key, verb == "enable");
+                if (done)
+                {
+                    Ui.Line(enabled);
+                }
+                else
+                {
+                    Ui.Error(enabled);
+                }
+                break;
+            }
+            case "/tools" when arg.Split(' ', StringSplitOptions.RemoveEmptyEntries) is ["set", var toolName, var how, ..] words:
+            {
+                // /tools set NAME on|off|ask|allow|default [--here]: kept for every project, or for this one.
+                var here = words.Contains("--here");
+                var tool = rt.Tools.Every.FirstOrDefault(t => t.Name == toolName);
+                if (tool is null || how is not ("on" or "off" or "ask" or "allow" or "default"))
+                {
+                    Ui.Error(tool is null ? $"There is no tool {toolName}: /tools lists them." : "/tools set NAME on, off, ask (every call), allow (never asks) or default [--here].");
+                    break;
+                }
+                var (person, inProject, _) = rt.ToolSettings.Of(toolName);
+                var was = here ? inProject : person;
+                var choice = how switch
+                {
+                    "on" => was with { Enabled = null },
+                    "off" => was with { Enabled = false },
+                    "default" => was with { Approval = null },
+                    _ => was with { Approval = how },
+                };
+                if (rt.ToolSettings.Save(here ? "here" : "person", toolName, choice, tool) is { } refused)
+                {
+                    Ui.Error(refused);
+                    break;
+                }
+                Ui.Line($"{toolName}: {how switch { "on" => "on", "off" => "off", "ask" => "asks before each call", "allow" => "runs without asking (but in plan mode)", _ => "asks as its kind does" }}" +
+                    $"{(here ? ", in this project (kept on this computer)" : ", in every project (config.json)")}.");
+                break;
+            }
             case "/tools" when arg.Split(' ', 2, StringSplitOptions.TrimEntries) is [var verb, { Length: > 0 } which] && verb is "on" or "off":
                 // A group by its id or title (argus, Web search...), or by one of its functions.
                 var found = rt.Tools.All.Where(t => t.Group is { } g && (g == which || t.Name == which || string.Equals(rt.ToolTitle(g), which, StringComparison.OrdinalIgnoreCase)))
@@ -857,28 +902,52 @@ internal sealed class Repl(Runtime rt)
                 Ui.Info($"{string.Join(", ", found.Select(rt.ToolTitle))} {(verb == "off" ? "off" : "on")} in this session.");
                 break;
             case "/tools":
-                var width = rt.Tools.All.Max(t => t.Name.Length);
+                var width = rt.Tools.Every.Max(t => t.Name.Length);
                 var waiting = rt.Tools.ToLoad().Select(t => t.Name).ToHashSet(StringComparer.Ordinal);
-                foreach (var group in rt.Tools.All.GroupBy(t => t.Server))
+                var inForce = rt.Tools.All.ToDictionary(t => t.Name, StringComparer.Ordinal);
+                foreach (var group in rt.Tools.Every.GroupBy(t => t.Server is null ? t.Origin is null ? "" : "own" : t.Server))
                 {
-                    Ui.Line(Ui.Bold(group.Key is null ? "Local" : rt.Links.FirstOrDefault(l => l.Name == group.Key)?.Title ?? group.Key));
-                    foreach (var t in group)
+                    Ui.Line(Ui.Bold(group.Key switch { "" => "Local", "own" => "Your own and the project's", var s => rt.Links.FirstOrDefault(l => l.Name == s)?.Title ?? s }));
+                    foreach (var own in group)
                     {
+                        if (!inForce.TryGetValue(own.Name, out var t))
+                        {
+                            Ui.Line(Ui.Dim($"  {own.Name.PadRight(width)}  off (your tool settings, or the project's)"));
+                            continue;
+                        }
                         if (t.Group is { } g && rt.Demand.IsOff(g))
                         {
                             Ui.Line(Ui.Dim($"  {t.Name.PadRight(width)}  off in this session ({rt.ToolTitle(g)})"));
                             continue;
                         }
-                        var mark = t.Kind switch
+                        var mark = t.Approval switch
                         {
-                            ToolKind.Edit => Ui.Yellow("edits "),
-                            ToolKind.Shell => Ui.Yellow("runs commands "),
-                            ToolKind.Remote when !t.Trusted && !t.ReadOnly => Ui.Yellow("asks "),
-                            _ => "",
+                            "ask" => Ui.Yellow("asks each call "),
+                            "allow" => Ui.Yellow("never asks "),
+                            _ => t.Kind switch
+                            {
+                                ToolKind.Edit => Ui.Yellow("edits "),
+                                ToolKind.Shell => Ui.Yellow("runs commands "),
+                                ToolKind.Remote when !t.Trusted && !t.ReadOnly => Ui.Yellow("asks "),
+                                _ => "",
+                            },
                         };
-                        Ui.Line($"  {t.Name.PadRight(width)}  {mark}{(waiting.Contains(t.Name) ? Ui.Dim("loaded when needed ") : "")}{Ui.Dim(Fmt.OneLine(t.Description, 80))}");
+                        var where = t.Origin is { } o ? Ui.Dim($"({o}) ") : "";
+                        Ui.Line($"  {t.Name.PadRight(width)}  {mark}{where}{(waiting.Contains(t.Name) ? Ui.Dim("loaded when needed ") : "")}{Ui.Dim(Fmt.OneLine(t.Description, 80))}");
                     }
                 }
+                var notYet = rt.OwnToolFiles.Where(f => !rt.IsEnabled(f)).Select(f => $"{f.Name} ({f.Origin}: {(f.Argv is { } argv ? string.Join(' ', argv) : f.Shell)})")
+                    .Concat(rt.ProjectServers.Where(s => !rt.IsEnabled(s)).Select(s => $"{s.Server.Name} (MCP server, {Path.GetFileName(s.File)})")).ToList();
+                if (notYet.Count > 0)
+                {
+                    Ui.Line(Ui.Bold("The project's, not enabled here"));
+                    foreach (var line in notYet)
+                    {
+                        Ui.Line($"  {line}");
+                    }
+                    Ui.Info("/tools enable NAME enables one for this project, as it is defined now (a change to its command needs enabling again).");
+                }
+                Ui.Info("/tools set NAME off|on|ask|allow|default [--here] keeps a tool's setting for every project (or this one); the IDE's Configure Tools does more.");
                 if (waiting.Count > 0)
                 {
                     Ui.Info($"Tools loaded when needed are listed for the model, which loads them with {ToolDemand.Function} (\"toolChars\" in config.json sets when).");
