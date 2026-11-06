@@ -260,16 +260,18 @@ public sealed class LocalToolTests : IDisposable
         Assert.Contains("timed out after 1 s", slow.Text);
         Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(10));
 
-        // The key never reaches the commands the model runs.
+        // The key never reaches the commands the model runs, nor the key Code Studio reaches this engine with.
         Environment.SetEnvironmentVariable("ARENA_API_KEY", "sk-should-not-leak");
+        Environment.SetEnvironmentVariable("CODE_ARENA_TOKEN", "engine-key-should-not-leak-0123456789");
         try
         {
-            var env = await Run("run_shell", Args(new { command = "echo \"key=[$ARENA_API_KEY]\"" }), Context());
-            Assert.Contains("key=[]", env.Text);
+            var env = await Run("run_shell", Args(new { command = "echo \"key=[$ARENA_API_KEY] engine=[$CODE_ARENA_TOKEN]\"" }), Context());
+            Assert.Contains("key=[] engine=[]", env.Text);
         }
         finally
         {
             Environment.SetEnvironmentVariable("ARENA_API_KEY", null);
+            Environment.SetEnvironmentVariable("CODE_ARENA_TOKEN", null);
         }
     }
 

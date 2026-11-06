@@ -1084,8 +1084,9 @@ internal static class Proc
         psi.Environment["PAGER"] = "cat";
         psi.Environment["GIT_TERMINAL_PROMPT"] = "0";
         psi.Environment["CODE_ARENA"] = "1";
-        // The person's key stays with Code Arena, not with the commands the model runs.
+        // The person's key stays with Code Arena, not with the commands the model runs; so does the key Code Studio reaches this engine with.
         psi.Environment.Remove("ARENA_API_KEY");
+        psi.Environment.Remove("CODE_ARENA_TOKEN");
     }
 
     /// <summary>
