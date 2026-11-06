@@ -2604,6 +2604,12 @@ namespace Llm.Core.Data.Migrations
                         .HasColumnType("character varying(1000)")
                         .HasDefaultValue("");
 
+                    b.Property<string>("Files")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("text")
+                        .HasDefaultValueSql("'{}'");
+
                     b.PrimitiveCollection<List<Guid>>("Groups")
                         .IsRequired()
                         .ValueGeneratedOnAdd()

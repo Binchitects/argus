@@ -1828,6 +1828,47 @@ model reads it to choose it), its **instructions** and its **parameters**.
 - Up to 200 skills per person, 20,000 characters of instructions and 20
   parameters each.
 
+### Export and import skills
+
+Skills go out and come in as files, in the folder format Claude Code uses:
+each skill a folder named after it, with its `SKILL.md` (front matter:
+`name`, `description`, and Arena's `title` and `parameters`; then its
+instructions) and the files beside it (references, templates, scripts).
+
+- **Export.** On the Skills page, **Export** on a skill downloads it as a
+  `.zip` of its folder (**Download SKILL.md** for one with no other files).
+  **Select** picks several (any you may use: yours, your groups', the
+  company's, Arena's own, a plugin's); **Export selected** downloads one
+  `.zip` with a folder for each. Unzipped into `.claude/skills/` or
+  `.arena/skills/`, Claude Code and Code Arena read them as they are.
+- **Import.** **Import** takes a `.zip` (or `.skill`) of skill folders, a
+  single `SKILL.md` (or `NAME.md`), or a whole folder (**Choose a folder**).
+  Each folder holding a `SKILL.md` is a skill. A preview lists each one with
+  what it brings (its files, its size) and what is in the way:
+  - a skill of yours with its name: **Replace** it, **Rename** the new one
+    (a free name is suggested), or **Skip** it. Nothing is overwritten that
+    you did not choose to replace;
+  - a name that is not a slash name (Claude Code allows longer ones): it
+    comes in only renamed;
+  - one of your groups', the company's or a plugin's of its name: yours will
+    come first, as the preview says;
+  - what cannot come in, and why: no instructions, too large, or refused by
+    the safeguards.
+- **Safeguards.** Every file of an imported skill goes through the file
+  rules (Admin → Safeguards) as an attachment does: a skill holding a
+  private key or a token is refused, with the rule that refused it, and a
+  masked part comes in masked.
+- **Limits.** 5 MB an import, 50 skills, 50 files beside each `SKILL.md`,
+  200 KB a file and 1 MB a skill; text files only (a picture is left out and
+  said). Paths that lead out of the folder and links are never followed.
+- An imported skill is yours (share it after, as any of yours), and making
+  one needs **Make skills** (Admin → Access), as making one on the page does.
+  Each import is audited as `skill.import` with the names it brought.
+- The files come with the skill to the chat's model (`use_skill` lists them
+  and reads one when the instructions point to it) and to Code Arena, which
+  keeps them beside its `SKILL.md`. Code Arena exports and imports too
+  ([code-arena.md](code-arena.md#your-own-commands-sub-agents-and-skills)).
+
 ## Scheduled tasks
 
 **Scheduled tasks** (in the sidebar, `/tasks`) ask a question on a schedule, as

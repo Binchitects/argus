@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, GraduationCap, History, Pencil, Plus, Search, Sparkles, SquareSlash, Trash2, Undo2, X } from 'lucide-react'
+import { Check, Download, FileText, GraduationCap, History, Pencil, Plus, Search, Sparkles, SquareSlash, Trash2, Undo2, Upload, X } from 'lucide-react'
 import { useState } from 'react'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
@@ -7,6 +7,7 @@ import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { useConfirm } from '@/components/ui/confirm'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -16,7 +17,9 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage, mayUse, meQuery } from '@/lib/api'
-import { applySkillChange, Arguments, dismissSkillChange, matchSkills, mustFill, skillsQuery, sourceLabel, undoSkillChange, variablesOf, type SkillChangeItem, type SkillItem, type SkillLibrary, type SkillParameter, type SkillSharing } from '@/lib/skills'
+import { applySkillChange, Arguments, dismissSkillChange, exportSkills, matchSkills, mustFill, skillsQuery, sourceLabel, undoSkillChange, variablesOf, type SkillChangeItem, type SkillItem, type SkillLibrary, type SkillParameter, type SkillSharing } from '@/lib/skills'
+import { saveBlob } from '@/lib/zip'
+import { SkillImport } from './skills-import'
 
 const sections: { source: SkillItem['source']; title: string; description: string }[] = [
   { source: 'mine', title: 'Yours', description: 'Yours to change; shared with your groups if you chose so.' },
@@ -92,7 +95,15 @@ export function SkillsPage() {
   const library = useQuery(skillsQuery)
   const me = useQuery(meQuery)
   const [editing, setEditing] = useState<SkillItem | 'new' | null>(null)
+  const [importing, setImporting] = useState(false)
   const [search, setSearch] = useState('')
+  // The skills chosen to export together (Export selected).
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const download = useMutation({
+    mutationFn: ({ ids, format }: { ids: string[]; format?: 'zip' | 'md' }) => exportSkills(ids, format),
+    onSuccess: ({ blob, fileName }) => saveBlob(blob, fileName),
+    onError: (e) => toast.error(errorMessage(e)),
+  })
   const remove = useMutation({
     mutationFn: (p: SkillItem) => api(`/api/skills/${p.id}`, { method: 'DELETE' }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: skillsQuery.queryKey }),
@@ -109,6 +120,14 @@ export function SkillsPage() {
   const mayMake = mayUse(me.data, 'feature.skills')
   const kept = library.data.skills.filter((p) => !p.proposed)
   const shown = search.trim() ? matchSkills(kept, search.trim().replace(/^\//, '')) : kept
+  const chosen = kept.filter((p) => selected.has(p.id))
+  const pick = (p: SkillItem, on: boolean) =>
+    setSelected((s) => {
+      const next = new Set(s)
+      if (on) next.add(p.id)
+      else next.delete(p.id)
+      return next
+    })
   return (
     <>
       <PageHeader
@@ -116,9 +135,14 @@ export function SkillsPage() {
         description="Instructions for work you ask often, with parameters filled in each time: type / in the chat to use one, or let the model use it on its own when a question fits what it is for. Keep them to yourself, share them with your groups, or, as an admin, with everyone."
         actions={
           mayMake && (
-            <Button onClick={() => setEditing('new')}>
-              <Plus /> New skill
-            </Button>
+            <>
+              <Button variant="outline" onClick={() => setImporting(true)}>
+                <Upload /> Import
+              </Button>
+              <Button onClick={() => setEditing('new')}>
+                <Plus /> New skill
+              </Button>
+            </>
           )
         }
       />
@@ -131,9 +155,14 @@ export function SkillsPage() {
           title="No skills yet"
           action={
             mayMake && (
-              <Button variant="outline" onClick={() => setEditing('new')}>
-                <Plus /> New skill
-              </Button>
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button variant="outline" onClick={() => setEditing('new')}>
+                  <Plus /> New skill
+                </Button>
+                <Button variant="outline" onClick={() => setImporting(true)}>
+                  <Upload /> Import
+                </Button>
+              </div>
             )
           }
         >
@@ -141,9 +170,25 @@ export function SkillsPage() {
         </EmptyState>
       ) : (
         <div className="grid gap-8">
-          <div className="relative max-w-sm">
-            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-            <Input className="ps-8" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Find by name, title or description" aria-label="Find a skill" />
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative w-full max-w-sm">
+              <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+              <Input className="ps-8" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Find by name, title or description" aria-label="Find a skill" />
+            </div>
+            {chosen.length > 0 && (
+              <fieldset className="flex flex-wrap items-center gap-2 text-sm" aria-label="Selected skills">
+                <span className="text-muted-foreground">{chosen.length} selected</span>
+                <Button size="sm" loading={download.isPending} onClick={() => download.mutate({ ids: chosen.map((p) => p.id) })}>
+                  <Download /> Export selected
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setSelected(new Set(shown.map((p) => p.id)))}>
+                  Select all shown
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+                  Clear
+                </Button>
+              </fieldset>
+            )}
           </div>
           {sections.map((s) => {
             const list = shown.filter((p) => p.source === s.source)
@@ -160,6 +205,9 @@ export function SkillsPage() {
                       key={p.id}
                       skill={p}
                       history={(library.data.changes ?? []).filter((c) => c.skillId === p.id && c.action === 'improved' && c.appliedAt)}
+                      selected={selected.has(p.id)}
+                      onSelect={(on) => pick(p, on)}
+                      onExport={(format) => download.mutate({ ids: [p.id], format })}
                       onTurn={library.data.isAdmin && p.source === 'builtin' ? () => turn.mutate(p) : undefined}
                       onEdit={() => setEditing(p)}
                       onDelete={async () => {
@@ -175,6 +223,9 @@ export function SkillsPage() {
           {shown.length === 0 && <p className="text-sm text-muted-foreground">No skill has “{search}” in its name, title or description.</p>}
         </div>
       )}
+      <Dialog open={importing} onOpenChange={setImporting}>
+        <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-2xl">{importing && <SkillImport onClose={() => setImporting(false)} />}</DialogContent>
+      </Dialog>
       <Dialog open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
         <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-2xl">
           {editing !== null && <SkillForm key={editing === 'new' ? 'new' : editing.id} saved={editing === 'new' ? null : editing} library={library.data} onClose={() => setEditing(null)} />}
@@ -184,7 +235,25 @@ export function SkillsPage() {
   )
 }
 
-function SkillCard({ skill: p, history, onEdit, onDelete, onTurn }: { skill: SkillItem; history: SkillChangeItem[]; onEdit: () => void; onDelete: () => void; onTurn?: () => void }) {
+function SkillCard({
+  skill: p,
+  history,
+  selected,
+  onSelect,
+  onExport,
+  onEdit,
+  onDelete,
+  onTurn,
+}: {
+  skill: SkillItem
+  history: SkillChangeItem[]
+  selected: boolean
+  onSelect: (on: boolean) => void
+  onExport: (format: 'zip' | 'md') => void
+  onEdit: () => void
+  onDelete: () => void
+  onTurn?: () => void
+}) {
   const queryClient = useQueryClient()
   const undo = useMutation({
     mutationFn: undoSkillChange,
@@ -195,6 +264,7 @@ function SkillCard({ skill: p, history, onEdit, onDelete, onTurn }: { skill: Ski
     <Card aria-label={`/${p.name}`}>
       <CardHeader>
         <CardTitle className="flex flex-wrap items-center gap-2 text-base">
+          <Checkbox checked={selected} onCheckedChange={(on) => onSelect(on === true)} aria-label={`Select /${p.name}`} />
           <span className="font-mono text-[0.9375rem]">/{p.name}</span>
           <span dir="auto" className="font-normal text-muted-foreground [overflow-wrap:anywhere]">
             {p.title}
@@ -239,6 +309,16 @@ function SkillCard({ skill: p, history, onEdit, onDelete, onTurn }: { skill: Ski
             ))}
           </p>
         )}
+        {(p.files?.length ?? 0) > 0 && (
+          <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+            <FileText className="size-3.5" aria-hidden="true" /> With
+            {p.files!.map((f) => (
+              <Badge key={f} variant="outline" className="font-mono">
+                {f}
+              </Badge>
+            ))}
+          </p>
+        )}
         {history.length > 0 && (
           <details className="text-xs">
             <summary className="flex cursor-pointer items-center gap-1 text-muted-foreground">
@@ -267,16 +347,26 @@ function SkillCard({ skill: p, history, onEdit, onDelete, onTurn }: { skill: Ski
             </Button>
           </div>
         )}
-        {p.canEdit && (
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={onEdit}>
-              <Pencil /> Edit
+        <div className="flex flex-wrap gap-2">
+          {p.canEdit && (
+            <>
+              <Button variant="outline" size="sm" onClick={onEdit}>
+                <Pencil /> Edit
+              </Button>
+              <Button variant="outline" size="sm" onClick={onDelete}>
+                <Trash2 /> Delete
+              </Button>
+            </>
+          )}
+          <Button variant="outline" size="sm" onClick={() => onExport('zip')} aria-label={`Export /${p.name}`}>
+            <Download /> Export
+          </Button>
+          {(p.files?.length ?? 0) === 0 && (
+            <Button variant="ghost" size="sm" onClick={() => onExport('md')} aria-label={`Download the SKILL.md of /${p.name}`}>
+              <FileText /> SKILL.md
             </Button>
-            <Button variant="outline" size="sm" onClick={onDelete}>
-              <Trash2 /> Delete
-            </Button>
-          </div>
-        )}
+          )}
+        </div>
       </CardContent>
     </Card>
   )

@@ -169,8 +169,19 @@ export const topics = {
       { name: 'From plugins', text: 'They come and go with their plugin.' },
       { name: 'New skill', text: 'A slash name, a title, when to use it, the instructions (a parameter as {{name}}, what you type after the fields as $ARGUMENTS) and its parameters.' },
       { name: 'Used on its own', text: 'A skill that says when to use it is listed to the model (the Skills tool): it loads the skill when a question fits. Off: only with /.' },
+      { name: 'Import', text: 'Skills as Claude Code keeps them: a .zip of skill folders, a SKILL.md, or a folder with its SKILL.md and files. A preview shows each one; one of yours of its name is replaced, renamed or skipped as you choose. Every file goes through the safeguards.' },
+      { name: 'Export', text: 'A skill as a .zip of its folder (**SKILL.md** alone for one with no other files); tick several and **Export selected** for one .zip of them all.' },
     ],
     tasks: [
+      {
+        title: 'Bring in skills from Claude Code',
+        steps: [
+          'Zip the skill folders (each with its SKILL.md), or keep one folder as it is.',
+          'Press **Import**, then **Choose a file** (the .zip, or a SKILL.md) or **Choose a folder**.',
+          'Read the preview: for a skill whose name you have, choose **Replace**, **Rename** (a free name is filled in) or **Skip**.',
+          'Press **Import**: they are yours, in the chat and in Code Arena.',
+        ],
+      },
       {
         title: 'Make a skill with parameters',
         steps: [

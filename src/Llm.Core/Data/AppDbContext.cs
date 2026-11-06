@@ -1485,6 +1485,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(p => p.Description).HasMaxLength(1000).HasDefaultValue("");
             e.Property(p => p.Instructions).HasMaxLength(20_000);
             e.Property(p => p.Parameters).HasMaxLength(10_000).HasDefaultValue("[]");
+            e.Property(p => p.Files).HasDefaultValueSql("'{}'");
             e.Property(p => p.AutoUse).HasDefaultValue(true);
             e.Property(p => p.Groups).HasDefaultValueSql("'{}'::uuid[]");
             e.Property(p => p.Source).HasMaxLength(16).HasDefaultValue(Skill.Typed);

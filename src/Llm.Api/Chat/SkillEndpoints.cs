@@ -13,14 +13,14 @@ namespace Llm.Api.Chat;
 
 /// <summary>A skill made or changed. On a change, only what is sent changes.</summary>
 public sealed record SkillRequest(string? Name = null, string? Title = null, string? Description = null, string? Instructions = null, SkillParameter[]? Parameters = null,
-    bool? AutoUse = null, SkillSharing? Sharing = null, Guid[]? Groups = null);
+    bool? AutoUse = null, SkillSharing? Sharing = null, Guid[]? Groups = null, Dictionary<string, string>? Files = null);
 
 /// <summary>
 /// Skills (Workspace → Skills, and / in the composer): a person's own, those shared with their groups, the company's
 /// (admins make them) and those of the plugins they may use. Only a skill's owner changes it; the company's, any admin;
 /// a plugin's, nobody.
 /// </summary>
-public static class SkillEndpoints
+public static partial class SkillEndpoints
 {
     /// <summary>Skills one person may make (shared ones included).</summary>
     public const int PerPerson = 200;
@@ -33,6 +33,10 @@ public static class SkillEndpoints
         g.MapPut("/{id:guid}", UpdateAsync);
         g.MapDelete("/{id:guid}", DeleteAsync);
         g.MapPut("/{id:guid}/off", OffAsync);
+        // As files (Claude Code's SKILL.md folders): exported one or many, imported with a preview first.
+        g.MapGet("/export", ExportAsync);
+        g.MapPost("/import/preview", ImportPreviewAsync).RequirePermission(Llm.Core.Access.Permissions.SkillsCreate).DisableAntiforgery();
+        g.MapPost("/import", ImportFilesAsync).RequirePermission(Llm.Core.Access.Permissions.SkillsCreate).DisableAntiforgery();
         // What was learned from the person's work: kept, set aside, or undone.
         g.MapPost("/changes/{id:guid}/apply", async (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, AppDbContext db, CancellationToken ct) =>
             await SkillLearning.ApplyAsync(db, (await users.GetUserAsync(p))!.Id, id, ct) ? Results.NoContent() : Results.NotFound());
@@ -104,6 +108,7 @@ public static class SkillEndpoints
             skills = seen.OrderBy(x => x.Name, StringComparer.Ordinal).ThenBy(x => Rank(x, me)).Select(x => new
             {
                 x.Id, x.Name, x.Title, x.Description, x.Instructions, parameters = SkillLibrary.ParametersOf(x), x.AutoUse, x.Sharing, x.Off,
+                files = SkillTransfer.FilesOf(x).Keys.Order(StringComparer.Ordinal),
                 groups = groups.Where(g => x.Groups.Contains(g.Id)),
                 source = Source(x, me),
                 from = x.ServerId is { } s ? plugins.GetValueOrDefault(s) : x.UserId is { } o && o != me ? owners.GetValueOrDefault(o) : null,
@@ -237,6 +242,7 @@ public static class SkillEndpoints
         var instructions = body.Instructions?.Trim() ?? skill.Instructions;
         var parameters = body.Parameters is { } given ? [.. given.Select(x => x with { Name = x.Name?.Trim() ?? "", Description = x.Description?.Trim(), Default = x.Default })]
             : SkillLibrary.Read(skill.Parameters);
+        var files = body.Files ?? SkillTransfer.FilesOf(skill);
         var sharing = body.Sharing ?? skill.Sharing;
         var groups = body.Groups?.Distinct().ToList() ?? (body.Sharing is null ? skill.Groups : []);
         if (SkillLibrary.NameProblem(name) is { } bad)
@@ -258,6 +264,10 @@ public static class SkillEndpoints
         if (SkillLibrary.ParametersProblem(parameters) is { } wrong)
         {
             return AuthEndpoints.Problem(400, "parameters", wrong);
+        }
+        if (SkillTransfer.FilesProblem(files) is { } badFiles)
+        {
+            return AuthEndpoints.Problem(400, "files", badFiles);
         }
         if (sharing == SkillSharing.Company && !who.Member.IsAdmin)
         {
@@ -291,6 +301,7 @@ public static class SkillEndpoints
         (skill.Name, skill.Title, skill.Description, skill.Instructions, skill.Parameters, skill.Sharing, skill.Groups, skill.UserId) =
             (name, title, description, instructions, SkillLibrary.Write(parameters), sharing, groups, owner);
         skill.AutoUse = body.AutoUse ?? skill.AutoUse;
+        skill.Files = SkillTransfer.WriteFiles(files);
         return null;
     }
 }

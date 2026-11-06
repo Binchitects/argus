@@ -59,6 +59,7 @@ public sealed class SkillTool(AccessService access, AppDbContext db) : IChatTool
                             ["additionalProperties"] = new JsonObject { ["type"] = "string" },
                         },
                         ["request"] = Schema.Text("What the person asked, in a line: the skill's $ARGUMENTS."),
+                        ["file"] = Schema.Text("One of the files beside the skill's instructions (their names come with them), to read it instead."),
                     }, "name"),
             ],
             list.ToString(),
@@ -72,13 +73,22 @@ public sealed class SkillTool(AccessService access, AppDbContext db) : IChatTool
         {
             return new ToolResult($"There is no skill {name}: use one of {string.Join(", ", skills.Select(s => s.Name))}.", IsError: true);
         }
+        var files = SkillTransfer.FilesOf(skill);
+        if (Schema.Str(args, "file")?.Trim().TrimStart('/') is { Length: > 0 } file)
+        {
+            // A file the skill brought (an imported skill's references or templates), read as the instructions point to it.
+            return files.TryGetValue(file, out var text)
+                ? new ToolResult($"<skill-file skill=\"{skill.Name}\" path=\"{file}\">\n{text}\n</skill-file>")
+                : new ToolResult($"/{skill.Name} has no file {file}{(files.Count > 0 ? $": it has {string.Join(", ", files.Keys.Order(StringComparer.Ordinal))}" : "")}.", IsError: true);
+        }
         var given = (args["parameters"] as JsonObject ?? []).Where(p => p.Value is JsonValue).ToDictionary(p => p.Key, p => p.Value!.ToString(), StringComparer.Ordinal);
         var (call, problem) = SkillLibrary.Use(skill, given, Schema.Str(args, "request"));
         if (call is null)
         {
             return new ToolResult(problem + " Ask the person for it, or call use_skill again with it.", IsError: true);
         }
-        return new ToolResult($"<skill name=\"{call.Name}\">\n{call.Instructions}\n</skill>\nFollow these instructions for the person's question.")
+        var beside = files.Count > 0 ? $"\nIts files (use_skill with file reads one): {string.Join(", ", files.Keys.Order(StringComparer.Ordinal))}." : "";
+        return new ToolResult($"<skill name=\"{call.Name}\">\n{call.Instructions}\n</skill>{beside}\nFollow these instructions for the person's question.")
         {
             Details = new JsonObject { ["skill"] = new JsonObject { ["name"] = call.Name, ["title"] = call.Title, ["args"] = new JsonObject([.. call.Args.Select(a => KeyValuePair.Create(a.Key, (JsonNode?)a.Value))]) } },
         };
