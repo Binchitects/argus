@@ -183,6 +183,8 @@ controls:
       What fills a chat's window is
       shown to its people only, and Code Arena counts tokens with the person's
       key, only with the models they may use.
+      Code Arena's agent changes a VM only when the
+      person allows it, for that VM.
     frameworks:
       iso27001: [A.5.15, A.5.18, A.8.2, A.8.3]
       soc2: [CC6.1, CC6.3]
@@ -194,7 +196,7 @@ controls:
       nist80053: [AC-3, AC-5, AC-6]
       nist800171: [03.01.02, 03.01.04, 03.01.05]
       commoncriteria: [FDP_ACC, FDP_ACF, FMT_SMR]
-    docs: [admin.md#access-roles-and-rules, code-arena.md#sub-agents-and-tasks]
+    docs: [admin.md#access-roles-and-rules, code-arena.md#sub-agents-and-tasks, code-arena.md#virtual-machines]
     tests:
       - Llm.Tests/EndpointAccessTests.A_role_reaches_the_reads_of_its_permissions_and_no_others
       - Llm.Tests/EndpointAccessTests.Each_built_in_role_holds_exactly_its_permissions
@@ -209,6 +211,7 @@ controls:
       - Llm.Tests/CodeArenaGoalTests.Code_Arena_lists_the_assistants_the_person_may_use_with_their_skills
       - Llm.Tests/SkillTransferTests.Only_who_may_make_skills_imports_them_from_the_page_or_Code_Arena
       - Llm.Tests/ContextWindowTests.Code_Arena_counts_with_the_persons_key_and_only_for_the_models_they_may_use
+      - Llm.Tests/CodeArenaVmTests.Changing_a_VM_asks_the_person_and_always_covers_that_tool_on_that_VM_only
     operator: Decide who holds which role, and review it.
 
   - id: IAM-06
@@ -506,7 +509,9 @@ controls:
       commands that do damage are kept from agents' tools, and data sent out
       through images and links is stopped. A message sent while an answer
       runs is checked when it is queued and again when it is edited, before
-      the answer takes it in.
+      the answer takes it in. A VM's guest password, which Code
+      Arena's VM tools sign in with, never reaches the model, the session, the
+      log or a command line of Code Arena's own.
     frameworks:
       iso27001: [A.8.11, A.8.12]
       soc2: [C1.1, CC6.7]
@@ -518,7 +523,7 @@ controls:
       nist80053: [AC-4, SI-15]
       nist800171: [03.01.03]
       commoncriteria: [FDP_IFC, FDP_IFF]
-    docs: [admin.md#safeguards, chat.md#safeguards]
+    docs: [admin.md#safeguards, chat.md#safeguards, code-arena.md#virtual-machines]
     tests:
       - Llm.Tests/SafeguardsTests.Personal_data_reaches_the_model_masked_and_the_chat_keeps_it_as_written
       - Llm.Tests/SafeguardRulesTests.Answers_are_masked_or_withheld_and_what_tools_send_and_bring_back_is_held_by_their_rules
@@ -531,6 +536,7 @@ controls:
       - Llm.Tests/SafeguardRulesTests.Every_block_names_its_rule_what_it_found_and_where_without_the_secret_itself
       - Llm.Tests/QueuedMessagesTests.A_queued_message_is_edited_until_it_is_taken_in_and_one_with_files_waits_for_the_answer_to_end
       - Llm.Tests/SkillTransferTests.An_imported_skill_goes_through_the_safeguards_and_one_holding_a_private_key_is_refused
+      - Llm.Tests/CodeArenaVmTests.A_VMs_guest_password_never_reaches_the_model_or_a_command_line
     operator: Decide which data may reach which model, and which models are outside the company.
 
   - id: DAT-05

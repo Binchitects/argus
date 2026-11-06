@@ -135,6 +135,7 @@ public sealed class QueuedMessagesTests(AppFixture app)
     }
 
     [Fact]
+    [Trait("Control", "DAT-04")]
     public async Task A_queued_message_is_edited_until_it_is_taken_in_and_one_with_files_waits_for_the_answer_to_end()
     {
         await using var f = await AskingAppAsync();

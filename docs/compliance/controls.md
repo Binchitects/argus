@@ -128,7 +128,7 @@ People come from the company's directory (LDAP or Active Directory), OIDC or SAM
 
 ### IAM-05: Least privilege, by roles and rules
 
-What a person may do comes from roles (built in, or made by the company) held directly, through a group or by everyone, and from rules that give or take a feature; admin roles can be scoped to some groups. The checker says why a person may or may not do something. The wiki finds and shows each person only the documents they may read, and searches only the code they may read in GitLab, as them. A feature taken from a person is hidden from their menus and pages, not only refused. Taking a request out of the line needs usage.line, restarting an engine runtimes.restart; only a chat's owner rewinds it, and Code Arena's key reads and adds to its own person's chats alone. Code Arena reaches only the person's own chats' goals and the assistants they may use, and an assistant uses only skills its maker may use. Its sub-agents get only the tools they are given, never more than the session's mode allows, and one that changes files never asks: what its mode would ask is refused. What fills a chat's window is shown to its people only, and Code Arena counts tokens with the person's key, only with the models they may use.
+What a person may do comes from roles (built in, or made by the company) held directly, through a group or by everyone, and from rules that give or take a feature; admin roles can be scoped to some groups. The checker says why a person may or may not do something. The wiki finds and shows each person only the documents they may read, and searches only the code they may read in GitLab, as them. A feature taken from a person is hidden from their menus and pages, not only refused. Taking a request out of the line needs usage.line, restarting an engine runtimes.restart; only a chat's owner rewinds it, and Code Arena's key reads and adds to its own person's chats alone. Code Arena reaches only the person's own chats' goals and the assistants they may use, and an assistant uses only skills its maker may use. Its sub-agents get only the tools they are given, never more than the session's mode allows, and one that changes files never asks: what its mode would ask is refused. What fills a chat's window is shown to its people only, and Code Arena counts tokens with the person's key, only with the models they may use. Code Arena's agent changes a VM only when the person allows it, for that VM.
 
 **Serves**
 
@@ -143,7 +143,7 @@ What a person may do comes from roles (built in, or made by the company) held di
 - [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.01.02 Access Enforcement; 03.01.04 Separation of Duties; 03.01.05 Least Privilege
 - [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): FDP_ACC Access control policy; FDP_ACF Access control functions; FMT_SMR Security management roles
 
-**Documented in** [admin.md#access-roles-and-rules](../admin.md#access-roles-and-rules), [code-arena.md#sub-agents-and-tasks](../code-arena.md#sub-agents-and-tasks)
+**Documented in** [admin.md#access-roles-and-rules](../admin.md#access-roles-and-rules), [code-arena.md#sub-agents-and-tasks](../code-arena.md#sub-agents-and-tasks), [code-arena.md#virtual-machines](../code-arena.md#virtual-machines)
 
 **Proved by**
 
@@ -160,6 +160,7 @@ What a person may do comes from roles (built in, or made by the company) held di
 - `Llm.Tests/CodeArenaGoalTests.Code_Arena_lists_the_assistants_the_person_may_use_with_their_skills`
 - `Llm.Tests/SkillTransferTests.Only_who_may_make_skills_imports_them_from_the_page_or_Code_Arena`
 - `Llm.Tests/ContextWindowTests.Code_Arena_counts_with_the_persons_key_and_only_for_the_models_they_may_use`
+- `Llm.Tests/CodeArenaVmTests.Changing_a_VM_asks_the_person_and_always_covers_that_tool_on_that_VM_only`
 
 **The company's part** Decide who holds which role, and review it.
 
@@ -468,7 +469,7 @@ People download everything of theirs from Your account; an admin exports a perso
 
 ### DAT-04: Personal data and secrets kept from the model
 
-Safeguards mask personal data before a question reaches the model while the chat keeps it as written; answers are masked or withheld by rule; what tools send and bring back is held by their rules; a pasted secret or private key is refused and audited by its kind only, a name in code not taken for one; each refusal names its rule, what it found and where, a secret cut to its first characters; words and prompt injection are read through their disguises and in eleven languages, commands that do damage are kept from agents' tools, and data sent out through images and links is stopped. A message sent while an answer runs is checked when it is queued and again when it is edited, before the answer takes it in.
+Safeguards mask personal data before a question reaches the model while the chat keeps it as written; answers are masked or withheld by rule; what tools send and bring back is held by their rules; a pasted secret or private key is refused and audited by its kind only, a name in code not taken for one; each refusal names its rule, what it found and where, a secret cut to its first characters; words and prompt injection are read through their disguises and in eleven languages, commands that do damage are kept from agents' tools, and data sent out through images and links is stopped. A message sent while an answer runs is checked when it is queued and again when it is edited, before the answer takes it in. A VM's guest password, which Code Arena's VM tools sign in with, never reaches the model, the session, the log or a command line of Code Arena's own.
 
 **Serves**
 
@@ -483,7 +484,7 @@ Safeguards mask personal data before a question reaches the model while the chat
 - [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.01.03 Information Flow Enforcement
 - [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md): FDP_IFC Information flow control policy; FDP_IFF Information flow control functions
 
-**Documented in** [admin.md#safeguards](../admin.md#safeguards), [chat.md#safeguards](../chat.md#safeguards)
+**Documented in** [admin.md#safeguards](../admin.md#safeguards), [chat.md#safeguards](../chat.md#safeguards), [code-arena.md#virtual-machines](../code-arena.md#virtual-machines)
 
 **Proved by**
 
@@ -498,6 +499,7 @@ Safeguards mask personal data before a question reaches the model while the chat
 - `Llm.Tests/SafeguardRulesTests.Every_block_names_its_rule_what_it_found_and_where_without_the_secret_itself`
 - `Llm.Tests/QueuedMessagesTests.A_queued_message_is_edited_until_it_is_taken_in_and_one_with_files_waits_for_the_answer_to_end`
 - `Llm.Tests/SkillTransferTests.An_imported_skill_goes_through_the_safeguards_and_one_holding_a_private_key_is_refused`
+- `Llm.Tests/CodeArenaVmTests.A_VMs_guest_password_never_reaches_the_model_or_a_command_line`
 
 **The company's part** Decide which data may reach which model, and which models are outside the company.
 

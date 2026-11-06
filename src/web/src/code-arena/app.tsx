@@ -51,6 +51,8 @@ import { debug, Session, useDebug } from './debug/session'
 import { startConfiguration, startTask } from './debug/start'
 import { runConfigsQuery, stopTask, tasksQuery } from './debug/run-api'
 import { PasteDialog } from './paste-dialog'
+import { loginEvent } from './vm-login'
+import { VmLoginDialog } from './vm-login-dialog'
 import { TrustDialog } from './trust-dialog'
 import { askTrust } from './trust'
 import { editorsOwn, formatError, formatModel, formattersOf, skipFormat } from './format'
@@ -147,6 +149,7 @@ export function App() {
             </SettingsRead>
             <QuickPickHost />
             <PasteDialog />
+            <VmLoginDialog />
             <TrustDialog folder={state.data.project} />
           </CodeRefsProvider>
         </HelpProvider>
@@ -539,6 +542,8 @@ function Workbench({
   // What the agent does shows in the editor: a file it edits reloads (when nothing in it is unsaved), a file it makes appears.
   const onEvent = useCallback(
     (e: CodeEvent) => {
+      // A VM's sign-in the agent's VM tools ask for: a dialog.
+      if (e.type === 'vm_login' || e.type === 'vm_login_done') loginEvent(e)
       if (e.type !== 'tool_result' || !e.diff) return
       void refresh(e.diff.path)
       // The language servers see it too (a file the editor does not hold, most of all).

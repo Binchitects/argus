@@ -208,6 +208,14 @@ export const tasks: HelpTask[] = [
     title: "Use Arena's and Argus's tools",
     steps: ['They connect by themselves once you are signed in: the plug in the status bar counts those connected.', 'Click it to see why one is not, and press **Try again**.'],
   },
+  {
+    title: 'Test an app in a virtual machine',
+    steps: [
+      'Have VirtualBox, VMware, libvirt or Hyper-V here, the guest tools in the VM (Guest Additions, VMware Tools, qemu-guest-agent), and a snapshot of it clean.',
+      'Ask the agent, as "test the build in test-vm from the snapshot clean": it restores the snapshot, copies the build in, runs it, brings back the logs and the screen (into .code-arena/vm), and puts the VM back.',
+      'When it needs the guest\'s user and password, a dialog asks; **Keep it in the keyring** saves them for next time (`code-arena vm login VM` does too). The password never shows in the chat.',
+    ],
+  },
 ]
 
 export const keys: [keys: string, what: string][] = [

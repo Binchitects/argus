@@ -89,6 +89,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     private readonly HttpServer _server;
     private readonly object _gate = new();
     private readonly ConcurrentDictionary<string, TaskCompletionSource<Approval>> _waiting = new();
+    // The VM sign-ins asked for in the page's dialog, by question; null: cancelled.
+    private readonly ConcurrentDictionary<string, TaskCompletionSource<LoginAnswer?>> _logins = new();
     private readonly TaskCompletionSource _opened = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private Job? _job;
     // The edits made in this run, by result message, with the whole file's lines: the session file keeps only old and new text.
@@ -146,6 +148,10 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         rt.Agent.Events = app;
         rt.Agent.SentMeanwhile = app.SentMeanwhileAsync;
         rt.Permissions.Asker = app.AskAsync;
+        if (rt.Machines is { } machines)
+        {
+            machines.Logins.Asker = app.AskLoginAsync;
+        }
         rt.Jobs.Started += app.JobStarted;
         rt.Jobs.Output += app.JobOutput;
         rt.Jobs.Ended += app.JobEnded;
@@ -505,6 +511,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
                 return;
             case ("POST", "/api/approvals"):
                 await ApproveAsync(req, res, ct);
+                return;
+            case ("POST", "/api/vm-login"):
+                await VmLoginAsync(req, res, ct);
                 return;
             case ("POST", "/api/stop"):
                 if (Current() is { } job)
@@ -1809,6 +1818,62 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         await res.NoContentAsync(ct);
     }
 
+    /// <summary>
+    /// Asks the page for a VM's sign-in (a dialog with the password unseen) and waits for it; Stop ends the wait. The
+    /// question says no secret, and what comes back is answered to nobody: it goes to the hypervisor only.
+    /// </summary>
+    private async Task<LoginAnswer?> AskLoginAsync(LoginQuestion q, CancellationToken ct)
+    {
+        var id = $"login_{Guid.NewGuid():N}";
+        var answer = new TaskCompletionSource<LoginAnswer?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _logins[id] = answer;
+        try
+        {
+            Emit(new JsonObject
+            {
+                ["type"] = "vm_login",
+                ["id"] = id,
+                ["vm"] = q.Vm,
+                ["hypervisor"] = q.Hypervisor,
+                ["user"] = q.User,
+                ["refused"] = q.Refused,
+                ["canSave"] = q.CanSave,
+                ["keyring"] = q.Keyring,
+            });
+            return await answer.Task.WaitAsync(ct);
+        }
+        finally
+        {
+            _logins.TryRemove(id, out _);
+            Emit(new JsonObject { ["type"] = "vm_login_done", ["id"] = id });
+        }
+    }
+
+    private async Task VmLoginAsync(HttpRequest req, HttpResponse res, CancellationToken ct)
+    {
+        var body = req.Json();
+        if (!_logins.TryRemove(body?.Str("id") ?? "", out var question))
+        {
+            await res.ErrorAsync(404, "not_found", "That sign-in is not asked for any more.", ct);
+            return;
+        }
+        if (body!.Bool("cancel") == true)
+        {
+            question.TrySetResult(null);
+            await res.NoContentAsync(ct);
+            return;
+        }
+        if (body.Str("user") is not { Length: > 0 } user || body.Str("password") is not { } password)
+        {
+            // Asked again: the dialog stays.
+            _logins[body.Str("id")!] = question;
+            await res.ErrorAsync(400, "invalid", "Give the user and the password, or cancel.", ct);
+            return;
+        }
+        question.TrySetResult(new LoginAnswer(new GuestLogin(user.Trim(), password), body.Bool("save") == true));
+        await res.NoContentAsync(ct);
+    }
+
     /// <summary>Asks the page whether a call may run, and waits for the answer (Stop ends the wait).</summary>
     private async Task<Approval> AskAsync(ApprovalQuestion q, CancellationToken ct)
     {
@@ -2179,6 +2244,10 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         _rt.Agent.SentMeanwhile = null;
         _rt.WebNews = null;
         _rt.Permissions.Asker = null;
+        if (_rt.Machines is { } machines)
+        {
+            machines.Logins.Asker = null;
+        }
         _rt.Jobs.Started -= JobStarted;
         _rt.Jobs.Output -= JobOutput;
         _rt.Jobs.Ended -= JobEnded;

@@ -124,23 +124,26 @@ internal sealed partial class Repl(Runtime rt)
             Ui.Interject = _editor.Interject;
             // A question's answer is read by the prompt's own editor, never by a second reader of the same keys: what was
             // typed while the model worked stays for the next message, and Ctrl+C at the question stops the turn.
-            Ui.AnswerReader = prompt =>
+            Ui.AnswerReader = prompt => Answer(prompt, secret: false);
+            // A password the same way, drawn as dots.
+            Ui.SecretAnswerReader = prompt => Answer(prompt, secret: true);
+        }
+        string? Answer(string prompt, bool secret)
+        {
+            // The turn's watch of the keys leaves them to the question meanwhile.
+            lock (_keysGate)
             {
-                // The turn's watch of the keys leaves them to the question meanwhile.
-                lock (_keysGate)
-                {
-                    _asking = true;
-                    KeepTypedAhead();
-                }
-                try
-                {
-                    return _editor.Read(prompt, Ui.Dim("… "), wake: () => _turnStop?.IsCancellationRequested == true, answer: true);
-                }
-                finally
-                {
-                    _asking = false;
-                }
-            };
+                _asking = true;
+                KeepTypedAhead();
+            }
+            try
+            {
+                return _editor!.Read(prompt, Ui.Dim("… "), wake: () => _turnStop?.IsCancellationRequested == true, answer: true, secret: secret);
+            }
+            finally
+            {
+                _asking = false;
+            }
         }
         Ui.NotAnAnswer = text =>
         {
@@ -973,6 +976,7 @@ internal sealed partial class Repl(Runtime rt)
                             {
                                 ToolKind.Edit => Ui.Yellow("edits "),
                                 ToolKind.Shell => Ui.Yellow("runs commands "),
+                                ToolKind.Machine => Ui.Yellow("changes VMs "),
                                 ToolKind.Remote when !t.Trusted && !t.ReadOnly => Ui.Yellow("asks "),
                                 _ => "",
                             },

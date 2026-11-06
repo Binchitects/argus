@@ -282,6 +282,38 @@ internal sealed class Ui(TextReader input, TextWriter output, TextWriter error, 
     /// </summary>
     public Func<string, string?>? AnswerReader { get; set; }
 
+    /// <summary>Reads a secret answered to a question (a guest's password) as <see cref="AnswerReader"/> does, each character shown as a dot.</summary>
+    public Func<string, string?>? SecretAnswerReader { get; set; }
+
+    /// <summary>
+    /// A line typed in answer to a question (a user name; with <paramref name="secret"/>, a password, never shown), with
+    /// nothing printed in the background meanwhile, as <see cref="Ask"/> asks. Null when nobody can be asked or none is given.
+    /// </summary>
+    public string? Answer(string question, bool secret = false)
+    {
+        if (!CanAsk)
+        {
+            return null;
+        }
+        lock (_gate)
+        {
+            _asking = true;
+        }
+        try
+        {
+            var prompt = $"{Yellow("?")} {question} › ";
+            return (secret ? SecretAnswerReader : AnswerReader) is { } reader ? ReadAnswer(reader, prompt) : secret ? ReadSecret(prompt) : ReadLine(prompt);
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                _asking = false;
+                PrintHeldLocked();
+            }
+        }
+    }
+
     /// <summary>Told of a line given at a question that is not an answer: it is the person's next message, not lost.</summary>
     public Action<string>? NotAnAnswer { get; set; }
 

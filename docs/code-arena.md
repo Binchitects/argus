@@ -1767,6 +1767,7 @@ On the person's machine:
 | `stop_command` | stops a command run with no time limit; it always asks the person first, `yolo` too |
 | `git` | status, diff, log, show, blame, branch: reading only (commits go through `run_shell`), inside the working directory: `diff --no-index` is refused, and so is a file outside it named anywhere in the arguments (`blame --contents FILE`, `-S FILE`), by name or through a link that leads out. It never asks, so the repository's own settings run nothing in it: no fsmonitor, hook, clean or smudge filter, merge driver (`--remerge-diff`), text conversion (so not `status -v`), external diff or signature checker, no submodule looked into (their changes are not shown), and no network (a partial clone does not fetch). Nor do they send it elsewhere: a work tree other than the folder that holds `.git` (`core.worktree`), or a `.git` that leads to another repository's folder, is refused (a worktree of another checkout and a submodule, which git made so, are read), and a `blame.ignoreRevsFile` outside is not read. The file list `grep` and `glob` (and the IDE's search and quick open) take from git is read the same way |
 | `screenshot` | a picture of a web page (`url`, at `width` × `height`, 1280 × 800 by default: the app you build, on its dev server) through a headless Chrome, Edge, Chromium or Brave (`CODE_ARENA_BROWSER` names one); without `url`, the whole screen (grim, gnome-screenshot, spectacle, ImageMagick or scrot on Linux; screencapture on macOS; PowerShell on Windows). The picture goes to the model after the result (one that sees pictures; another is told it cannot). It asks first, as a command does |
+| `vm_list`, `vm_run`, `vm_test`... | the person's virtual machines (VirtualBox, VMware, libvirt, Hyper-V): start, snapshot, copy in, run and test an app, read the screen, type ([below](#virtual-machines)). Offered when a hypervisor is installed |
 | `ask_agent` | hands a task to one of the person's own coding agents (below), which runs it in the working directory; what it prints comes back. Offered when one is installed; it asks first, as a command does |
 | `plan` | the working plan the person sees (`/plan`), kept in Arena with the session's chat ([below](#the-plan)) |
 | `task` | a sub-agent (below) |
@@ -1899,6 +1900,78 @@ has the numbers so far).
   src` give the tools' answers in the terminal (`--json` for programs; exit
   code 3 when a name is several symbols, which it lists).
 - `"codeIndexTools": ["code_search"]` offers only some of the three.
+
+### Virtual machines
+
+When VirtualBox, VMware Workstation, Player or Fusion, libvirt (QEMU/KVM) or
+Hyper-V is installed, the agent gets the VM tools, to run and test what it
+builds inside the person's VMs: a clean Windows to try an installer in, a
+Linux server like the one in production, an old browser.
+
+| tool | what it does |
+|---|---|
+| `vm_list` | the VMs of every hypervisor here and whether each runs; with `vm`, one VM's guest system, its snapshots and whether its guest tools answer |
+| `vm_power` | starts a VM (headless; `gui` opens its window) or stops it: the guest is asked to shut down and waited for (`wait`, 90 s), or powered off at once with `force` |
+| `vm_snapshot` | takes a snapshot, or restores one (a running VirtualBox VM is powered off first) |
+| `vm_copy` | copies a file or folder into the guest (`direction: in`) or out of it (`out`); the paths here are in the working directory |
+| `vm_run` | runs a command line in the guest's shell (`sh -c`, or `cmd /c` on Windows) and gives its output and exit code; 120 s by default, at most an hour. `processes` lists the guest's processes |
+| `vm_screenshot` | the guest's screen, as a picture to a model that sees them, else described in words (its size, how dark it is, its main colour, whether it looks blank, a text console or a desktop); kept in `.code-arena/vm/` |
+| `vm_input` | clicks (at a point of the last screenshot), types text, and presses keys and chords (`enter`, `tab`, `ctrl+c`, `alt+f4`, `ctrl+alt+delete`) |
+| `vm_test` | a test from a clean state in one call, below |
+
+**Test in a VM.** `vm_test` restores the snapshot it is given, starts the VM
+headless and waits for its guest to answer (`boot_wait`, 300 s), copies the
+files in (`copy`: the build), runs the command, brings the guest's `logs` back
+and takes the screen, then powers the VM off and restores the snapshot again,
+whatever failed on the way, the person's Stop too. The result says each step
+with its time, passed or failed by the command's exit code, and its output.
+The logs and `screen.png` are kept in `.code-arena/vm/VM-TIME/`, a folder with
+a `.gitignore` of its own, so nothing there is committed. `keep: true` leaves
+the VM running as the test left it, to look at. Take the clean snapshot first
+(`vm_snapshot`, or the hypervisor's own window): the test starts from it.
+
+**What each one does it with.** The programs are found on `PATH` and in their
+usual folders (`C:\Program Files\Oracle\VirtualBox`, VMware's under Program
+Files, `/Applications/VirtualBox.app` and VMware Fusion's on macOS,
+`/usr/lib/virtualbox`); `CODE_ARENA_VBOXMANAGE`, `CODE_ARENA_VMRUN` and
+`CODE_ARENA_VIRSH` name another. They run as you, outside the commands'
+sandbox, since they talk to the hypervisor's own service.
+
+| | commands and files | screen | keys and text | click |
+|---|---|---|---|---|
+| VirtualBox (`VBoxManage`) | `guestcontrol`, through the Guest Additions; signs in | `screenshotpng` | `keyboardputstring`, scancodes | no |
+| VMware (`vmrun`) | `runProgramInGuest`, its output through a file in the guest; through VMware Tools; signs in | `captureScreen` (signs in) | `typeKeystrokesInGuest`: text, Enter and Tab only | no |
+| libvirt (`virsh`, `qemu:///system` or `LIBVIRT_DEFAULT_URI`) | the QEMU guest agent (`qemu-guest-agent` in the guest): no sign-in | `screenshot` | `send-key` (text as a US keyboard types it) | QEMU's input events, with a tablet |
+| Hyper-V (PowerShell's Hyper-V module) | PowerShell Direct, Windows guests; signs in | the VM's video | the VM's keyboard | the VM's mouse |
+
+Where VBoxManage or vmrun cannot click, the tool says so: use keys (Tab,
+Enter), or a command in the guest (`xdotool` on a Linux desktop, a UI test
+driver on Windows).
+
+**The guest's sign-in.** VirtualBox, VMware and Hyper-V sign in to the guest
+as a user of it. Code Arena takes the user and the password from your
+keyring: the Secret Service on Linux (`secret-tool`, GNOME Keyring or
+KWallet), the Keychain on macOS, Credential Manager on Windows, under
+`code-arena-vm` and the VM (`virtualbox:test-vm`). `code-arena vm login VM`
+keeps them there (`code-arena vm forget VM` drops them; `code-arena vm list`
+lists the VMs). Without them, it asks: the IDE in a dialog (the password in a
+password field, **Keep it in the keyring** to keep it), the terminal with the
+password drawn as dots; `-p` cannot ask, and says to run `code-arena vm
+login`. It is kept for the session in memory only. A guest that refuses it is
+asked about again. The password is never in the model's conversation, the
+session's file, the terminal, the log or the page's events: what the guest
+prints has it blanked (`••••`), VirtualBox gets it in a file only you can read,
+deleted after the call, and Hyper-V on PowerShell's stdin. vmrun takes it only
+as `-gp` on its command line, which other users of the same machine could see
+in its process list while the call runs: on a shared machine use VirtualBox,
+libvirt or Hyper-V.
+
+**Asking.** `vm_list` and `vm_screenshot` change nothing and never ask. The
+rest ask where commands ask (ask and auto-edit modes; yolo runs them; plan mode
+refuses them), and **Always** covers that tool on that VM: always for
+`vm_run` on `test-vm` is not for any other VM. A kept rule names VMs:
+`/permissions allow vm_run(test-*)` runs commands in the test VMs unasked,
+`deny vm_power(prod-*)` keeps the agent from starting or stopping those.
 
 ### Commands with no time limit, and in the background
 
@@ -2622,7 +2695,8 @@ same format Arena's Skills page exports and imports
 refuses them whatever the mode; both are kept in `config.json` (`"permissions":
 {"allow": [...], "deny": [...]}`). A rule is a tool's name, with a pattern in
 brackets matched against its command or path (`*` is anything):
-`run_shell(npm test*)`, `edit_file`, `read_file(.env*)`, `mcp__tickets__*`. A
+`run_shell(npm test*)`, `edit_file`, `read_file(.env*)`, `mcp__tickets__*`, a
+VM tool by the VM (`vm_run(test-*)`). A
 command is matched whole and part by part, so `run_shell(rm *)` refuses
 `make && rm -rf build` too. A project's `.arena/settings.json` may deny (the
 same shape) but never allow: a repository someone cloned cannot let itself run

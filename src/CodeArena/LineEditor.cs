@@ -63,6 +63,8 @@ internal sealed partial class LineEditor(IKeyboard keys, TextWriter output, Func
     private int _at;
     private string _draft = "";
     private bool _afterReturn;
+    /// <summary>A password is read: each character is drawn as a dot.</summary>
+    private bool _secret;
 
     private enum Outcome { None, Render, Send, End, Interrupt, Suspend }
 
@@ -81,9 +83,10 @@ internal sealed partial class LineEditor(IKeyboard keys, TextWriter output, Func
     /// read with <see cref="Woken"/> when nothing is typed (a job ended: a turn carries on from it), or with null when
     /// <paramref name="answer"/> (a question's answer, read with no history: the turn was stopped meanwhile).
     /// </summary>
-    public string? Read(string prompt, string more, Func<bool>? wake = null, string initial = "", bool answer = false)
+    public string? Read(string prompt, string more, Func<bool>? wake = null, string initial = "", bool answer = false, bool secret = false)
     {
         _prompt = prompt;
+        _secret = secret;
         _more = more;
         _text.Clear();
         _text.Append(initial);
@@ -528,7 +531,7 @@ internal sealed partial class LineEditor(IKeyboard keys, TextWriter output, Func
         var rows = new List<string>();
         var row = new StringBuilder();
         (caretRow, caretCol) = (0, 0);
-        var lines = _text.ToString().Split('\n');
+        var lines = (_secret ? new string('•', _text.Length) : _text.ToString()).Split('\n');
         var offset = 0;
         for (var i = 0; i < lines.Length; i++)
         {

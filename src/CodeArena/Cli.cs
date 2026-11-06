@@ -135,6 +135,8 @@ internal static partial class Cli
           code-arena index [--rebuild]      build or refresh this folder's code index and say what it holds
           code-arena search "question"      find code by what it does or by name, from the index, with no model
                                             (--symbol NAME, --outline [PATH], --json: code-arena search --help)
+          code-arena vm list                the VMs here (VirtualBox, VMware, libvirt, Hyper-V) the agent's VM tools reach
+          code-arena vm login VM            keep a VM's guest user and password in your keyring (vm forget VM drops it)
 
         Options:
           -p, --print [prompt]       one-shot, for scripts; --output json for a JSON answer
@@ -180,6 +182,10 @@ internal static partial class Cli
         {
             return SearchCommand(searchArgs, env, ct);
         }
+        if (args is ["vm", .. var vmArgs])
+        {
+            return await VmCommand.RunAsync(vmArgs, env, ct);
+        }
         Options o;
         try
         {
@@ -224,7 +230,7 @@ internal static partial class Cli
     /// </summary>
     public static bool Ide(string[] args, bool built)
     {
-        if (args is ["sandbox" or "index" or "search", ..])
+        if (args is ["sandbox" or "index" or "search" or "vm", ..])
         {
             return false;
         }
