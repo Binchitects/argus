@@ -58,6 +58,11 @@ public sealed class EngineOptions
     /// GPU (Admin → Models) goes before it.
     /// </summary>
     public int? MediaGpu { get; set; }
+    /// <summary>
+    /// Whether the picture and video servers run in pods of their own, each with GPUs of its own (the Helm chart): then
+    /// the app names them no GPU (gpu=), since the engines' GPU numbers mean other GPUs, or none, inside their pods.
+    /// </summary>
+    public bool MediaOwnGpus { get; set; }
     /// <summary>The GPU the embedder runs on (EMBED_GPU); null: the CPU, where it keeps nothing on a GPU.</summary>
     public int? EmbedGpu { get; set; }
     /// <summary>What the embedder keeps on its GPU when it runs on one.</summary>

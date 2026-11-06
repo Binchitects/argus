@@ -48,6 +48,8 @@ spec:
             # Engines and GPUs: llama.cpp's backend, and the GPU the picture server and the embedder run on.
             - { name: Engine__Backend, value: {{ .Values.engines.backend | quote }} }
             - { name: Engine__MediaGpu, value: {{ .Values.engines.mediaGpu | quote }} }
+            # The picture and video servers have pods and GPUs of their own: the engines' GPU numbers are not theirs.
+            - { name: Engine__MediaOwnGpus, value: "true" }
             - { name: Engine__EmbedGpu, value: {{ .Values.engines.embedGpu | quote }} }
             - { name: Engine__LmcacheRemote, value: {{ .Values.engines.lmcacheRemote | quote }} }
             {{- include "arena.secretEnv" (list $ "Argus__AdminToken" "ARGUS_KEY") | nindent 12 }}

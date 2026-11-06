@@ -77,7 +77,7 @@ public sealed class ModelStateMediaTests(AppFixture app) : IDisposable
     }
 
     /// <summary>An app with the imagegen module, its files in the library, a control directory of its own, one replica, and a clock the test moves.</summary>
-    private async Task<Setup> NewAsync()
+    private async Task<Setup> NewAsync(Dictionary<string, string?>? settings = null)
     {
         var dir = Directory.CreateTempSubdirectory("model-state-media-");
         var library = Path.Combine(dir.FullName, "library");
@@ -97,7 +97,7 @@ public sealed class ModelStateMediaTests(AppFixture app) : IDisposable
                 ["Engine:MediaStatusDir"] = Path.Combine(dir.FullName, "status"),
                 ["Engine:LibraryDir"] = library,
                 ["Replicas:Enabled"] = "false",
-            },
+            }.Concat(settings ?? []).ToDictionary(),
             s =>
             {
                 s.AddSingleton<TimeProvider>(clock);
@@ -176,6 +176,21 @@ public sealed class ModelStateMediaTests(AppFixture app) : IDisposable
         }
         await s.Media.RefreshAsync(CancellationToken.None);
         await UntilAsync(s, () => Task.FromResult(GpuIn(s) == "0"), "the picture server goes on the GPU its model names");
+    }
+
+    [Fact]
+    public async Task In_a_pod_of_its_own_the_picture_server_is_told_no_gpu_of_the_engines()
+    {
+        // Kubernetes: its own pod with its own GPU, index 0 there. The engines' GPUs (2 here) are not its: gpu=1 would be none.
+        await using var s = await NewAsync(new() { ["Engine:MediaOwnGpus"] = "true", ["Engine:MediaGpu"] = "1" });
+        var state = s.App.Services.GetRequiredService<EngineState>();
+        state.Places = new Dictionary<string, EngineState.ModelPlace>(StringComparer.Ordinal) { ["oss"] = new("vllm", new Dictionary<int, long> { [0] = 86 * FakeHardware.GiB }) };
+        state.Hardware = FakeHardware.Many(2);
+        await s.Media.SetKeptAsync(Image, false);
+        s.Media.Load(Image);
+        await UntilFileAsync(s, "on", "the app turns the picture server on");
+        Assert.Null(GpuIn(s));
+        Assert.Empty(s.Media.Placed());
     }
 
     [Fact]

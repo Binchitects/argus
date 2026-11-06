@@ -102,6 +102,13 @@ class ChartRender(unittest.TestCase):
                 after = checksums(chart, more)
                 self.assertEqual(rolled, {n for n, c in before[more].items() if after[n] != c})
 
+    def test_The_app_names_no_gpu_to_the_media_servers_which_have_pods_and_gpus_of_their_own(self):
+        # A pod's GPUs are numbered from 0 inside it: the engines' GPU 1 would be none there, and sd-server would find no CUDA device.
+        for docs in (self.docs, self.defaults, self.kind):
+            app = next(d for d in docs if d.get("kind") == "Deployment" and d["metadata"]["name"] == "app")
+            env = {e["name"]: e.get("value") for c in app["spec"]["template"]["spec"]["containers"] for e in c.get("env") or []}
+            self.assertEqual("true", env.get("Engine__MediaOwnGpus"))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -635,7 +635,10 @@ how). **no**: missing, with the reason.
   writes `gpu=` in its control file, `services/sd-serve.sh` runs it there), and
   the media studio loads each model on the GPU with the most free memory. The
   app charges their memory to that GPU only, and lends only that GPU to a job
-  short of room (a vLLM model there sleeps, then wakes).
+  short of room (a vLLM model there sleeps, then wakes). With Helm the picture
+  and the video server have pods and GPUs of their own (`gpus`), numbered from
+  0 inside each pod: the chart sets `Engine__MediaOwnGpus`, and the app names
+  them no GPU (a GPU of the engines' would be another, or none, there).
 - **Several machines**: one `Engine__Vllm__N__Name`/`Kind`/`Host`/`ConfigDir`/`StatusDir`
   per vLLM or SGLang machine (`Kind`: `vllm` or `sglang`; its folders on storage
   both machines see; listing them replaces this stack's `vllm` and `sglang`, so

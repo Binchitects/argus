@@ -756,9 +756,14 @@ public sealed partial class MediaControl : BackgroundService
     /// since), else the least placed GPU (GpuPlan.Least) by what the chat models that name their GPUs, the embedder and the
     /// other media server keep there, so the picture and the video server do not both sit on the first GPU, nor where the
     /// chat models are. Null while the machine's GPUs are not known and the control file names none: every GPU it sees.
+    /// Null too in a pod of its own (Engine:MediaOwnGpus): it runs on its pod's GPUs.
     /// </summary>
     private int? PlaceOf(string server, Model m)
     {
+        if (engine.Value.MediaOwnGpus)
+        {
+            return null;
+        }
         if (m.Row.Gpu is { } own)
         {
             return own;
