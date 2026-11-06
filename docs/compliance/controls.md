@@ -454,7 +454,7 @@ People download everything of theirs from Your account; an admin exports a perso
 
 ### DAT-04: Personal data and secrets kept from the model
 
-Safeguards mask personal data before a question reaches the model while the chat keeps it as written; answers are masked or withheld by rule; what tools send and bring back is held by their rules; a pasted secret or private key is refused and audited by its kind only; words and prompt injection are read through their disguises and in eleven languages, commands that do damage are kept from agents' tools, and data sent out through images and links is stopped.
+Safeguards mask personal data before a question reaches the model while the chat keeps it as written; answers are masked or withheld by rule; what tools send and bring back is held by their rules; a pasted secret or private key is refused and audited by its kind only, a name in code not taken for one; each refusal names its rule, what it found and where, a secret cut to its first characters; words and prompt injection are read through their disguises and in eleven languages, commands that do damage are kept from agents' tools, and data sent out through images and links is stopped.
 
 **Serves**
 
@@ -480,6 +480,8 @@ Safeguards mask personal data before a question reaches the model while the chat
 - `Llm.Tests/SafeguardDetectorTests.Commands_that_do_damage_are_found`
 - `Llm.Tests/SafeguardDetectorTests.Data_sent_out_through_an_image_or_a_link_is_found_but_not_to_the_companys_own_site`
 - `Llm.Tests/SecretScanningTests.A_pasted_private_key_is_refused_in_the_chat_and_through_the_API_and_audited_by_its_kind_only`
+- `Llm.Tests/SecretScanningTests.A_name_in_code_is_not_a_password`
+- `Llm.Tests/SafeguardRulesTests.Every_block_names_its_rule_what_it_found_and_where_without_the_secret_itself`
 
 **The company's part** Decide which data may reach which model, and which models are outside the company.
 

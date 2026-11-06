@@ -95,6 +95,23 @@ public sealed class BusyLineTests : IDisposable
     }
 
     [Fact]
+    public async Task A_request_the_safeguards_refuse_says_which_rule_and_what_at_once_in_arenas_words()
+    {
+        const string refusal = "Arena's safeguards refused the request: it holds a password. Remove it and send it again. " +
+            "Rule: Secrets in what people send. Found a password in message 3 of 4 (a tool's result), line 2: password: k9…";
+        _gateway.Failure = _ => 400;
+        _gateway.FailureBody = _ => new JsonObject { ["error"] = new JsonObject { ["message"] = refusal, ["type"] = "None", ["code"] = "400" } };
+        var client = new GatewayClient(new HttpClient(), _gateway.Url, FakeGateway.Key) { BusyWait = TimeSpan.FromMilliseconds(10) };
+
+        var e = await Assert.ThrowsAsync<GatewayException>(() => client.CompleteAsync(Hello(), null, CancellationToken.None));
+
+        // Not "The gateway answered 400": the rule, the finding and where, as Arena said them; not asked again.
+        Assert.Equal(refusal, e.Message);
+        Assert.True(e.Safeguard);
+        Assert.Single(_gateway.Requests);
+    }
+
+    [Fact]
     public async Task A_summary_held_back_waits_in_the_line_and_is_made_not_left_out()
     {
         using var h = new Harness(_gateway, _mcp);

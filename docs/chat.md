@@ -1957,7 +1957,9 @@ question to another model, or allows. The app starts with these:
   kind was found. Set it to **Mask** and it goes with each secret replaced by
   `[removed: GitHub token]`, in the chat as well as to the model. A
   placeholder (`$DB_PASSWORD`, `<password>`, `***`) or a name in code
-  (`config.password`) is not a secret. Each one found is audited by its kind,
+  (`config.password`, `password=db_password`, `api_key=API_KEY`,
+  `Faker::Internet.password`) is not a secret, nor is a message about one
+  (`"Passwords do not match"`). Each one found is audited by its kind,
   never the secret. A refused secret is not a strike: it is an accident, not
   abuse.
 - **Personal data to the model** (off): e-mail addresses, phone and card
@@ -1978,7 +1980,16 @@ question to another model, or allows. The app starts with these:
 **Send it anyway?**; one that **asks for a reason** waits for yours, which is
 recorded. Either way the message is back in the box if you keep it.
 
-**When a message is refused**, the sentence says why. **Ask for a review**
+**When a message is refused**, the sentence says why, then which rule
+refused it, what it found and where: `Rule: Secrets in what people send.
+Found a password in your message, line 3: password = "Su…"`. The place is
+your message, the part of an answer you quote, a file, a tool's call or what
+it brought back, the answer, or (for an API key, as Code Arena's) which
+message of the request: `message 3 of 9 (a tool's result)`, so a password a
+tool read many turns ago can be found. A secret or personal data shows only
+its first two characters. The API's refusal carries the same as `rule`,
+`where` and `finding`, and Code Arena shows Arena's sentence as it is.
+**Ask for a review**
 under it sends your reason to the people who look after the safeguards; if
 they allow it, you may send the same message again within a day, and you hear
 either way in your bell. A refusal that counts as a strike is in the audit

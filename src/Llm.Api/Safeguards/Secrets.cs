@@ -96,15 +96,17 @@ public static partial class Secrets
                 {
                     continue;
                 }
-                // Quoted, code that builds a string around a value (PASSWORD='" + bar + "') is not a password either.
-                if (quoted is not null && Concatenated().IsMatch(quoted.Value))
+                // Quoted, code that builds a string around a value (PASSWORD='" + bar + "') is not a password either,
+                // nor a message about one ("Passwords do not match").
+                if (quoted is not null && (Concatenated().IsMatch(quoted.Value) || Message().IsMatch(quoted.Value)))
                 {
                     continue;
                 }
-                // Unquoted, a name in code (config.password, newPassword) is not a password: a literal has
-                // something besides letters, or ends a connection string's part (Password=...;).
-                if (quoted is null && (CodeName().IsMatch(value.Value) ||
-                    (value.Value.All(char.IsLetter) && !(value.Index + value.Length < text.Length && text[value.Index + value.Length] == ';'))))
+                // Unquoted, a name in code (config.password, Faker::Internet.password, newPassword, db_password, API_KEY)
+                // is not a password: a literal has something besides letters and underscores, or ends a connection
+                // string's part (Password=...;).
+                var endsPart = text.Length > value.Index + value.Length && text[value.Index + value.Length] == ';' && text[value.Index - 1] == '=';
+                if (quoted is null && (CodeName().IsMatch(value.Value) || (Identifier().IsMatch(value.Value) && !endsPart)))
                 {
                     continue;
                 }
@@ -257,8 +259,16 @@ public static partial class Secrets
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase | RegexOptions.Multiline, 1000)]
     private static partial Regex Assignment();
 
-    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]*(?:(?:\.|::|->)[A-Za-z_][A-Za-z0-9_]*)+$", RegexOptions.CultureInvariant)]
     private static partial Regex CodeName();
+
+    /// <summary>A variable's or a constant's name: words of letters, maybe joined by underscores (password_hash, API_KEY, _pwd_cache).</summary>
+    [GeneratedRegex(@"^_*[A-Za-z]+(?:_+[A-Za-z]+)*_*$", RegexOptions.CultureInvariant)]
+    private static partial Regex Identifier();
+
+    /// <summary>Words about a password, not one: a sentence that names it ("Password is required").</summary>
+    [GeneratedRegex(@"^(?=.*\s)(?=.*(?:pass|secret|token|key)).*$", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
+    private static partial Regex Message();
 
     /// <summary>A quoted value that opens or closes on the other quote and a concatenation (+, ., ||, &amp;): code, not a literal.</summary>
     [GeneratedRegex(@"^\s*[""']\s*(?:\+|\.|\|\||&)|(?:\+|\.|\|\||&)\s*[""']\s*$", RegexOptions.CultureInvariant)]

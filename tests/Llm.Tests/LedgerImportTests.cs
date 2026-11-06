@@ -92,7 +92,7 @@ public sealed class LedgerImportTests(AppFixture app)
     [InlineData("GuardrailRaisedException", "You have used all your API credit for this month ($0.00). Ask an admin to raise it.", "credit")]
     [InlineData("GuardrailRaisedException", "Your API access is off. Ask an admin to turn it on (Admin → People).", "api_off")]
     [InlineData("GuardrailRaisedException", "This account is disabled.", "disabled")]
-    [InlineData("GuardrailRaisedException", "The request was refused: it holds a credit card number. Remove it and send it again.", "safeguards")]
+    [InlineData("GuardrailRaisedException", "Arena's safeguards refused the request: it holds a credit card number. Remove it and send it again. Rule: Card numbers. Found a card number in message 1 of 1 (your last message): 41…", "safeguards")]
     [InlineData("GuardrailRaisedException", "Qwen3-4B is starting.", "room")]
     [InlineData("Exception", "Key is blocked. Update via `/key/unblock` if you're an admin.", "blocked")]
     [InlineData("KeyNotFoundError", "Authentication Error, Invalid proxy server token passed.", "key")]

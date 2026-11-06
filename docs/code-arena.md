@@ -2611,6 +2611,14 @@ wait)."), asks again when Arena said, says it again every two minutes, and
 gives up after 15 minutes with Arena's words. A turn, a compaction's summary
 and `/compact` all wait so.
 
+A request Arena's safeguards refuse ends the turn with Arena's sentence as it
+is, not as an error of the gateway: which rule, what it found, and in which
+message of the request ("Arena's safeguards refused the request: it holds a
+password. … Rule: Secrets in what people send. Found a password in message 3
+of 9 (a tool's result), line 2: password: k9…"). The whole conversation goes
+with each request, so a file a tool read many turns ago may be the one: change
+it or rewind past it.
+
 
 - **"The certificate of … is not trusted"**: the Arena's certificate comes
   from a CA the machine does not know. Give the CA's file with `--ca` (above).

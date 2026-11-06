@@ -266,8 +266,12 @@ what comes back. Each rule:
 - applies to **everyone**, or to some **groups and people**, and to some
   **models** or all (`@external` names every model on another server or
   provider: personal data can be masked for cloud models only);
-- **does** one thing: **Block** (the person is told why and may ask for a
-  review; a strike counts towards suspension and rings the admins' bell),
+- **does** one thing: **Block** (the person is told why, which rule, what it
+  found and where: their message, a file, a tool's call or result, the
+  answer, or which message of an API key's request, with the line and the
+  words around it and a secret cut to its first two characters, after the
+  rule's own message when it has one; they may ask for a review; a strike
+  counts towards suspension and rings the admins' bell),
   **Mask** (a marker in place of what was found; secrets are never stored,
   the rest is masked on its way to the model and kept as written in the
   chat), **Warn** (the person confirms before it goes), **Ask for a reason**

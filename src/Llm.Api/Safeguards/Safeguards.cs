@@ -36,6 +36,11 @@ public sealed record Verdict(bool Allowed, string? Reason = null, string Kind = 
 
     /// <summary>For warn and justify: the rules to acknowledge (sent back with the message) to go on.</summary>
     public IReadOnlyList<Guid>? Rules { get; init; }
+
+    /// <summary>When a rule refused it: the rule's name, where it found something (your message, a file...) and what (its line and words, a secret cut short).</summary>
+    public string? Rule { get; init; }
+    public string? Where { get; init; }
+    public string? Finding { get; init; }
 }
 
 /// <summary>What the person sent besides the text: rules they went on past (warned), their reason (justify), the chat.</summary>
@@ -60,6 +65,8 @@ public sealed record RuleRun(string Stage, string Text)
     public string? Justification { get; init; }
     /// <summary>What the text is, for the person's sentence: "message", "quote", "request", "answer", a file's name.</summary>
     public string What { get; init; } = "message";
+    /// <summary>Where in what was sent the text is, when its stage does not say ("message 3 of 9 (a tool's result)" of an API request).</summary>
+    public string? Place { get; init; }
     public string? FileName { get; init; }
     public long FileBytes { get; init; }
     /// <summary>The model may read it (topic and injection rules); off for texts that only need the patterns.</summary>
@@ -86,6 +93,10 @@ public sealed record RuleResult(string Text)
     public IReadOnlyList<(SafeguardRule Rule, string Message)> Pending { get; init; } = [];
     public string? Reroute { get; init; }
     public List<RuleHit> Hits { get; init; } = [];
+    /// <summary>When blocked: the rule's name, where its finding is, and the finding (<see cref="Verdict.Finding"/>).</summary>
+    public string? Rule { get; init; }
+    public string? Where { get; init; }
+    public string? Finding { get; init; }
 }
 
 /// <summary>
@@ -187,9 +198,10 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
     }
 
     /// <summary>A refusal as the API answers it: its code, the sentence, the event to ask a review of, the rules to go on past.</summary>
-    public static IResult Problem(Verdict v) => Results.Json(new { status = $"safeguard_{v.Kind}", error = v.Reason, eventId = v.EventId, rules = v.Rules }, statusCode: v.Status);
+    public static IResult Problem(Verdict v) =>
+        Results.Json(new { status = $"safeguard_{v.Kind}", error = v.Reason, eventId = v.EventId, rules = v.Rules, rule = v.Rule, where = v.Where, finding = v.Finding }, statusCode: v.Status);
 
-    private static Verdict Refusal(RuleResult r) => new(false, r.Reason, r.Kind, r.Status) { EventId = r.EventId };
+    private static Verdict Refusal(RuleResult r) => new(false, r.Reason, r.Kind, r.Status) { EventId = r.EventId, Rule = r.Rule, Where = r.Where, Finding = r.Finding };
 
     /// <summary>An attached file: its name and size, and its text, through the file rules (a secret refused or masked...).</summary>
     public async Task<Verdict> CheckFileAsync(AppUser user, string fileName, string text, CancellationToken ct, long bytes = 0, string? judge = null)
@@ -218,7 +230,8 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
     /// </summary>
     /// <param name="user">The key's person; null for a key the app does not know.</param>
     /// <param name="question">The last thing the person asked (the request's last user message).</param>
-    public async Task<ApiVerdict> CheckApiAsync(AppUser? user, IReadOnlyList<string> texts, string? question, string? model, CancellationToken ct)
+    /// <param name="places">Where each text is in the request ("message 3 of 9 (a tool's result)"), for the refusal's words.</param>
+    public async Task<ApiVerdict> CheckApiAsync(AppUser? user, IReadOnlyList<string> texts, string? question, string? model, CancellationToken ct, IReadOnlyList<string>? places = null)
     {
         var o = O;
         if (!o.Enabled || !o.CheckApi)
@@ -228,11 +241,13 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
         var sent = new List<string>(texts.Count);
         var changed = false;
         var asked = false;
-        foreach (var text in texts)
+        for (var i = 0; i < texts.Count; i++)
         {
+            var text = texts[i];
             var isQuestion = !asked && question is { Length: > 0 } && text == question;
             asked |= isQuestion;
-            var result = await RunAsync(new RuleRun("api", text) { User = user, Model = model, What = "request", ModelChecks = isQuestion, Record = isQuestion }, ct);
+            var place = places is not null && i < places.Count ? places[i] : $"text {i + 1} of {texts.Count} of the request";
+            var result = await RunAsync(new RuleRun("api", text) { User = user, Model = model, What = "request", Place = place, ModelChecks = isQuestion, Record = isQuestion }, ct);
             if (result.Blocked)
             {
                 return new ApiVerdict("BLOCKED", result.Reason);
@@ -386,7 +401,7 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
                         {
                             return result with
                             {
-                                Blocked = true, Kind = "check", Status = 503,
+                                Blocked = true, Kind = "check", Status = 503, Rule = rule.Name, Where = Where(run),
                                 Reason = run.Stage == "api" ? $"The request was refused: the safeguards could not read it first. {ex.Message}" : $"This {run.What} was not sent: the safeguards could not read it first. {ex.Message}",
                             };
                         }
@@ -433,13 +448,22 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
                     break;
                 case "block":
                     result.Hits.Add(new RuleHit(rule.Id, rule.Name, rule.Detector, outcome, detail, false));
+                    // The person is told which rule, what it found and where: a refusal they cannot place reads as a crash.
+                    var (where, found) = (Where(run), spans.Count > 0 ? Excerpt(text, spans[0], rule.Detector is "secrets" or "pii") : null);
+                    var told = Told(rule, detail, where, found);
                     if (run.Trial)
                     {
-                        return result with { Text = text, Blocked = true, Reason = rule.Message ?? Refused(rule, run, detail), Kind = KindOf(rule) };
+                        return result with
+                        {
+                            Text = text, Blocked = true, Reason = $"{rule.Message ?? Refused(rule, run, detail)} {told}", Kind = KindOf(rule), Rule = rule.Name, Where = where, Finding = found,
+                        };
                     }
                     await RecordAllAsync(run, later.Where(l => l.Monitor), ct);
-                    var blocked = await BlockAsync(rule, run, detail, hash, ct);
-                    return result with { Text = text, Blocked = true, Reason = blocked.Reason, Kind = blocked.Kind, Status = blocked.Status, EventId = blocked.EventId };
+                    var blocked = await BlockAsync(rule, run, detail, hash, told, ct);
+                    return result with
+                    {
+                        Text = text, Blocked = true, Reason = blocked.Reason, Kind = blocked.Kind, Status = blocked.Status, EventId = blocked.EventId, Rule = rule.Name, Where = where, Finding = found,
+                    };
             }
             result.Hits.Add(new RuleHit(rule.Id, rule.Name, rule.Detector, outcome, detail, false));
             later.Add((rule, outcome, detail, false));
@@ -631,13 +655,49 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
             "secrets" or "pii" when run.Stage == "file" => $"{what} was not attached: it holds {detail}. Remove it from the file and attach it again.",
             "files" => $"{what} was not attached: {detail} is not taken here.",
             "secrets" or "pii" when run.What == "quote" => $"This message was not sent: the part of an answer it quotes holds {detail}. Remove it from the quote and send it again.",
-            "secrets" or "pii" when run.Stage == "api" => $"The request was refused: it holds {detail}. Remove it and send it again.",
+            "secrets" or "pii" when run.Stage == "api" => $"Arena's safeguards refused the request: it holds {detail}. Remove it and send it again.",
             "secrets" or "pii" => $"This {what} was not sent: it holds {detail}. Remove it (a placeholder will do) and send it again.",
             "links" => $"This {what} was not sent: it links to {detail}, which is not allowed here.",
             "commands" => $"This {what} was not sent: it runs a command that does damage ({detail}).",
             "exfiltration" => $"This {what} was not sent: it would send data out through a link ({detail}).",
             _ => O.RefusalMessage,
         };
+    }
+
+    /// <summary>Which rule refused, what it found and where: "Rule: Secrets. Found a password in your message, line 3: password = "Su…"".</summary>
+    private static string Told(SafeguardRule rule, string detail, string where, string? found) =>
+        $"Rule: {rule.Name}. Found {detail} in {where}" + (found is null ? "." : (found.StartsWith("line ", StringComparison.Ordinal) ? ", " : ": ") + found);
+
+    /// <summary>Where a run's text is, for the person: "your message", "the file notes.txt", "what web_search brought back"...</summary>
+    private static string Where(RuleRun run) => run.Place ?? run.Stage switch
+    {
+        "question" => run.What switch { "message" => "your message", "quote" => "the part of an answer you quote", var w => $"the {w}" },
+        "file" => $"the file {run.FileName ?? run.What}",
+        "tool_call" => $"the call to {run.What}",
+        "tool_result" => $"what {run.What} brought back",
+        "answer" => "the answer",
+        _ => $"the {run.What}",
+    };
+
+    /// <summary>
+    /// A finding as the person can find it: its line (in a text of several) and the words around it, with a secret or
+    /// personal data cut to its first two characters, and any other secret near it masked.
+    /// </summary>
+    internal static string Excerpt(string text, Finding f, bool hide)
+    {
+        var lineStart = f.Index == 0 ? 0 : text.LastIndexOf('\n', f.Index - 1) + 1;
+        var end = f.Index + f.Length;
+        var lineEnd = text.IndexOf('\n', end) is var e and >= 0 ? e : text.Length;
+        var found = text.Substring(f.Index, f.Length);
+        var cut = found.IndexOf('\n', StringComparison.Ordinal);
+        found = hide ? found[..Math.Min(2, found.Length)] + "…" : cut >= 0 ? found[..cut] + "…" : found.Length > 60 ? found[..60] + "…" : found;
+        var from = Math.Max(lineStart, f.Index - 40);
+        var to = Math.Min(lineEnd, end + 20);
+        string Masked(string s) => Secrets.Mask(s, Secrets.Find(s));
+        var after = cut >= 0 ? "" : Masked(text[end..to]) + (to < lineEnd ? "…" : "");
+        var shown = (from > lineStart ? "…" : "") + Masked(text[from..f.Index]) + found + after;
+        shown = string.Join(' ', shown.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return text.Contains('\n', StringComparison.Ordinal) ? $"line {text.AsSpan(0, f.Index).Count('\n') + 1}: {shown}" : shown;
     }
 
     /// <summary>The question a warn or justify rule puts to the person.</summary>
@@ -658,12 +718,13 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
     }
 
     /// <summary>A block: recorded with its excerpt, audited; a strike counts towards suspension and the admins hear of it.</summary>
-    private async Task<(string Reason, string Kind, int Status, Guid EventId)> BlockAsync(SafeguardRule rule, RuleRun run, string detail, string hash, CancellationToken ct)
+    /// <param name="told">Which rule, what it found and where (<see cref="Told"/>): the person's sentence ends with it.</param>
+    private async Task<(string Reason, string Kind, int Status, Guid EventId)> BlockAsync(SafeguardRule rule, RuleRun run, string detail, string hash, string told, CancellationToken ct)
     {
         var o = O;
         var ev = await RecordAsync(rule, run, "blocked", detail, monitor: false, ct, hash);
         var name = run.User?.UserName ?? "(a key the app does not know)";
-        var reason = rule.Message ?? Refused(rule, run, detail);
+        var reason = $"{rule.Message ?? Refused(rule, run, detail)} {told}";
         var auditDetail = rule.Detector switch
         {
             "secrets" => $"secret in a {(run.Stage == "file" ? "file" : run.What)}: {detail}",
@@ -695,7 +756,7 @@ public sealed partial class Safeguards(AppDbContext db, IOptionsMonitor<Safeguar
                 suspended ? $"{user.DisplayName ?? user.UserName} was suspended by safeguards" : $"A message of {user.DisplayName ?? user.UserName} was refused",
                 suspended ? user.DisabledReason : $"{rule.Name}: {detail} ({strikes} today).", suspended ? "/admin/people" : "/admin/safeguards?tab=events"), ct);
         }
-        return (rule.Message ?? o.RefusalMessage, KindOf(rule), 403, ev.Id);
+        return ($"{rule.Message ?? o.RefusalMessage} {told}", KindOf(rule), 403, ev.Id);
     }
 
     private async Task<SafeguardEvent> RecordAsync(SafeguardRule rule, RuleRun run, string outcome, string detail, bool monitor, CancellationToken ct, string? hash = null)

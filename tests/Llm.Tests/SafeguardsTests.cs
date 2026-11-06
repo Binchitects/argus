@@ -56,7 +56,10 @@ public sealed class SafeguardsTests(AppFixture app)
         (await SendAsync(b, chat, "How do falcons fly in a project?")).EnsureSuccessStatusCode();
         var blocked = await SendAsync(b, chat, "Tell me about Project Falcon");
         await StatusAssert.Is(HttpStatusCode.Forbidden, blocked);
-        Assert.Equal("Not here.", await DetailAsync(blocked));
+        // The company's words, then which rule and what it found: a refusal that says nothing more reads as a crash.
+        var said = await DetailAsync(blocked);
+        Assert.StartsWith("Not here. Rule: ", said, StringComparison.Ordinal);
+        Assert.EndsWith(" in your message: Tell me about Project Falcon", said, StringComparison.Ordinal);
         var audit = await (await admin.GetAsync("/api/admin/audit?action=safeguard.refused")).Content.ReadAsStringAsync();
         Assert.Contains("matched", audit, StringComparison.Ordinal);
         var news = (await admin.JsonAsync(await admin.GetAsync("/api/notifications"))).GetProperty("items").EnumerateArray().ToList();
