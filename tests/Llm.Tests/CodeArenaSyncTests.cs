@@ -116,6 +116,37 @@ public sealed class CodeArenaSyncTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Code_Arena_s_settings_stamp_changes_when_what_it_takes_from_Arena_changes()
+    {
+        await using var f = NewApp();
+        var (web, key) = await PersonAsync(f);
+        var (_, otherKey) = await PersonAsync(f);
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await CodeArena(f, null).GetAsync(new Uri("/api/code-arena/settings", UriKind.Relative)));
+        var arena = CodeArena(f, key);
+        async Task<string> StampAsync(HttpClient http) => (await Json(await http.GetAsync(new Uri("/api/code-arena/settings", UriKind.Relative)))).GetProperty("stamp").GetString()!;
+        var kept = Llm.Api.Chat.CodeArenaSync.SettingsFor;
+        // Worked out afresh at each ask here, as it is once the few seconds it is kept have passed.
+        Llm.Api.Chat.CodeArenaSync.SettingsFor = TimeSpan.FromTicks(1);
+        try
+        {
+            var first = await StampAsync(arena);
+            Assert.Equal(first, await StampAsync(arena));
+            // Another person's settings are the same: so is their stamp.
+            Assert.Equal(first, await StampAsync(CodeArena(f, otherKey)));
+
+            // The person's own threshold for compacting changes what Code Arena takes.
+            await StatusAssert.Is(HttpStatusCode.OK, await web.Http.PutAsJsonAsync(new Uri("/api/account/preferences", UriKind.Relative), new { compactAt = 60 }));
+            var changed = await StampAsync(arena);
+            Assert.NotEqual(first, changed);
+            Assert.Equal(first, await StampAsync(CodeArena(f, otherKey)));
+        }
+        finally
+        {
+            Llm.Api.Chat.CodeArenaSync.SettingsFor = kept;
+        }
+    }
+
+    [Fact]
     public async Task Code_Arena_reads_the_web_chat_s_config_with_the_person_s_key()
     {
         await using var f = NewApp();

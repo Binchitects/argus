@@ -405,6 +405,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             case ("GET", "/api/chat/config"):
                 await res.JsonAsync(200, ChatConfig(), ct);
                 return;
+            case ("GET", "/api/settings/changed"):
+                await SettingsChangedAsync(req, res, ct);
+                return;
             case ("GET", "/api/sessions"):
                 await res.JsonAsync(200, Sessions(), ct);
                 return;
@@ -996,6 +999,34 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     /// </summary>
     private JsonArray Sent() => new([.. _rt.History.Entries().AsEnumerable().Reverse().Where(t => !Repl.TerminalOnly(t)).Distinct().Take(500)
         .Select(t => (JsonNode)new JsonObject { ["text"] = t })]);
+
+    /// <summary>How long the page's ask whether settings from Arena changed waits for a change before it answers the same.</summary>
+    internal static TimeSpan SettingsWait { get; set; } = TimeSpan.FromSeconds(25);
+
+    /// <summary>
+    /// GET /api/settings/changed?after=N: how many times settings from Arena were applied in this run, once that is more
+    /// than N (at once when it is; else when it comes, or after <see cref="SettingsWait"/>). The page asks again and again
+    /// and reads its config, state and skills when the number grows: a change in Arena shows within seconds.
+    /// </summary>
+    private async Task SettingsChangedAsync(HttpRequest req, HttpResponse res, CancellationToken ct)
+    {
+        var after = int.TryParse(req.Query.GetValueOrDefault("after"), out var seen) ? seen : -1;
+        var changed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var heard = () => { changed.TrySetResult(); };
+        _rt.SettingsChanged += heard;
+        try
+        {
+            if (_rt.SettingsVersion <= after)
+            {
+                await Task.WhenAny(changed.Task, Task.Delay(SettingsWait, ct));
+            }
+        }
+        finally
+        {
+            _rt.SettingsChanged -= heard;
+        }
+        await res.JsonAsync(200, new JsonObject { ["version"] = _rt.SettingsVersion }, ct);
+    }
 
     /// <summary>The session open now, as the page shows it.</summary>
     private JsonObject SessionJson()

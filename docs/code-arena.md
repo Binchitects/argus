@@ -531,6 +531,16 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   it opens one; closing the last one hides it. A page reloaded attaches to the
   ones still running, with their screens (below). The panel's other tabs are
   the **Debug Console** and the **Output** (the language servers', below).
+- **Settings from Arena, live**: what Code Arena takes from Arena (the
+  models with their windows and what each can do, the thinking default, the
+  tools and how each model is given them, when chats compact, the skills)
+  applies in a running Code Arena within seconds, with no restart. Every 3
+  seconds it asks `GET /api/code-arena/settings` for one word for all of them
+  (Arena works it out at most every 2 seconds a person), and reads them again
+  only when that word changed; Arena's tools are listed again when its tools
+  changed. The IDE's page hears of it at once (`GET /api/settings/changed`, a
+  long poll) and reads its pickers and skills again. A threshold set with the
+  flag, in `config.json` or with `/compact-at` stays as set.
 - **chat**: the agent's chat on the right: the model and thinking pickers,
   Sessions and Hide at its top. **Skip thinking** beside a thinking that is
   still going stops it and the model answers at once, as the web chat's
@@ -2147,8 +2157,8 @@ says**) takes the threshold out of `config.json` again, so it follows the
 account, and `/compact-at default` does that and puts the target back to 25.
 `--compact-at 70 --compact-to 30` sets them for one run. Which wins: the flag,
 then `config.json`, then the Arena account (read at the start from
-`GET /api/code-arena/preferences` with the API key: the person's own choice,
-else Arena's default), then 80%. `/compact-at`, `/context` and the IDE say where
+`GET /api/code-arena/preferences` with the API key, and again within seconds
+of a change there: the person's own choice, else Arena's default), then 80%. `/compact-at`, `/context` and the IDE say where
 the threshold comes from ("from your Arena account", "Arena's default", "set in
 config.json", "set with --compact-at"). A share is written `70`, `70%` or `0.7`
 (in `config.json` too: `70`, `"70%"`, `0.7`, or `0` and `"off"`; anything else

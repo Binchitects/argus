@@ -153,6 +153,23 @@ describe('Code Arena in the browser', () => {
     expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument()
   })
 
+  it('reads its config again as soon as code-arena says settings from Arena changed, with no reload', async () => {
+    let change!: () => void
+    const changed = new Promise<void>((r) => (change = r))
+    let asked = 0
+    const { calls } = backend({
+      extra: {
+        'GET /api/settings/changed': (_body, _init, url) => (url.searchParams.get('after') === '-1' ? { json: { version: 0 } } : asked++ === 0 ? { json: { version: 1 }, until: changed } : { hang: true, events: [] }),
+      },
+    })
+    renderCode()
+    expect(await screen.findByRole('heading', { name: 'What should we work on?' })).toBeInTheDocument()
+    const reads = () => calls.filter((c) => c.method === 'GET' && c.path === '/api/chat/config').length
+    const before = reads()
+    change()
+    await waitFor(() => expect(reads()).toBeGreaterThan(before))
+  })
+
   it('skips the thinking of the answer running: asked of code-arena, and the button says the answer comes now', async () => {
     let end!: () => void
     const over = new Promise<void>((r) => (end = r))

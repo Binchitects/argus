@@ -603,6 +603,8 @@ public sealed class Harness : IDisposable
     public string? Cwd { get; set; }
     /// <summary>How often a running Code Arena asks Arena for its skills again; null: as it does (CliEnv's).</summary>
     public TimeSpan? ArenaSkillsEvery { get; set; }
+    /// <summary>How often a running Code Arena asks Arena whether its settings changed; null: as it does (CliEnv's).</summary>
+    public TimeSpan? SettingsEvery { get; set; }
 
     /// <summary>Runs code-arena with these arguments and typed input; a terminal on stdin unless said otherwise.</summary>
     public async Task<int> Run(string input, params string[] args) => await Run(input, terminal: true, args);
@@ -1181,6 +1183,16 @@ public sealed class FakeChats
                 ctx.Response.ContentType = "application/json";
                 await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes(security.ToJsonString()));
             }
+            return;
+        }
+        if (parts is ["settings"] && method == "GET")
+        {
+            // Arena's word for the settings it gives: it changes with any of them.
+            var said = $"{ChatConfig?.ToJsonString()}|{ArenaSkills?.ToJsonString()}|{string.Join(",", SkillsOff ?? [])}";
+            ctx.Response.StatusCode = 200;
+            ctx.Response.ContentType = "application/json";
+            var stamp = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(said)));
+            await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes(new JsonObject { ["stamp"] = stamp }.ToJsonString()));
             return;
         }
         if (parts is ["config"] && method == "GET")

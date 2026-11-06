@@ -83,6 +83,8 @@ internal sealed class CliEnv
     /// <summary>How often a running Code Arena asks Arena for its skills again unasked (at a turn, as the IDE lists them).</summary>
     public TimeSpan ArenaSkillsEvery { get; init; } = ArenaSkillsAgain;
     public static readonly TimeSpan ArenaSkillsAgain = TimeSpan.FromSeconds(30);
+    /// <summary>How often a running Code Arena asks Arena whether the settings it takes from there changed.</summary>
+    public TimeSpan SettingsEvery { get; init; } = TimeSpan.FromSeconds(3);
 }
 
 /// <summary>The command line: code-arena (the IDE), chat, [options] prompt, login, logout, models.</summary>
