@@ -216,6 +216,8 @@ public sealed class ToolMeasureTests(ITestOutputHelper output) : IDisposable
         Assert.Matches(@"went to r\d+", noisy.Text);
         var kept = KeptResults.Read(c, System.Text.RegularExpressions.Regex.Match(noisy.Text, @"went to (r\d+)").Groups[1].Value)!;
         Assert.Contains("FAILED at the middle", kept);
+        // And the model is told that line, with its number, as Qwen3-4B passed over the note in the real run.
+        Assert.Contains("[In the part not shown, lines that look like errors:\n200001\tFAILED at the middle]", noisy.Text);
         Assert.Contains("started", child.Text);
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(10));
         Assert.Contains("signal 9", killed.Text);

@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 namespace CodeArena;
 
 /// <summary>The tools on the person's own machine: files, search, the shell, git, the to-do list and sub-agents.</summary>
-internal static class LocalTools
+internal static partial class LocalTools
 {
     public const int MaxLines = 2000;
     private const int MaxLineChars = 2000;
@@ -787,7 +787,8 @@ internal static class LocalTools
         var whole = "";
         if (kept is not null && run.Cut)
         {
-            whole = $"\n[The whole output ({run.Chars:N0} characters) went to {kept.Id}: read_result {{\"id\":\"{kept.Id}\",\"find\":\"error\"}} finds lines in it, {{\"id\":\"{kept.Id}\",\"from\":1}} reads it.]";
+            whole = Flagged(kept.Path, run.Output) +
+                $"\n[The whole output ({run.Chars:N0} characters) went to {kept.Id}: read_result {{\"id\":\"{kept.Id}\",\"find\":\"error\"}} finds lines in it, {{\"id\":\"{kept.Id}\",\"from\":1}} reads it.]";
         }
         else
         {
@@ -797,6 +798,45 @@ internal static class LocalTools
         var display = (run.Output.Length > 0 ? Fmt.Tail(run.Output.TrimEnd(), 8) + "\n" : "") + (run.ExitCode == 0 && !run.TimedOut ? c.Ui.Dim(status) : c.Ui.Red(status));
         return new ToolResult(text, run.ExitCode != 0 || run.TimedOut) { Display = display };
     }
+
+    /// <summary>
+    /// The lines of a command's whole output, in the part cut out of what the model sees, that look like an error or a
+    /// failure: the model is told them with their numbers (a test run's one failure in the middle of a long log).
+    /// </summary>
+    internal static string Flagged(string whole, string shown)
+    {
+        var found = new List<string>();
+        var more = 0;
+        try
+        {
+            using var reader = new StreamReader(Files.OpenShared(whole), Encoding.UTF8);
+            var number = 0;
+            while (reader.ReadLine() is { } line)
+            {
+                number++;
+                if (!Failing().IsMatch(line) || shown.Contains(line, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                if (found.Count < 20)
+                {
+                    found.Add($"{number,6}\t{Fmt.OneLine(line, 300)}");
+                }
+                else
+                {
+                    more++;
+                }
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            return "";
+        }
+        return found.Count == 0 ? "" : "\n[In the part not shown, lines that look like errors:\n" + string.Join('\n', found) + (more > 0 ? $"\n… and {more} more]" : "]");
+    }
+
+    [GeneratedRegex(@"(?<!\b0 )\b(?:error|errors|fail|failed|failure|failing|fatal|exception|traceback|panic|assert(?:ion)?(?:error)?|denied|segmentation fault|not found)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex Failing();
 
     /// <summary>An exit code, and on Unix past 128 the signal that ended it (128 + its number), as a shell reports it.</summary>
     internal static string ExitMeaning(int code) => OperatingSystem.IsWindows() || code is <= 128 or >= 160 ? code.ToString() : (code - 128) switch

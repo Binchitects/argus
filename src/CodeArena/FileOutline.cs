@@ -196,9 +196,9 @@ internal static partial class FileOutline
         return symbols;
     }
 
-    // func, fn, def, class… with what may come before them; or a C-like function at the line's start: a type, a name, its
-    // parameters, and no ; after them (a declaration only, or a call).
-    [GeneratedRegex(@"^(?:(?<indent>[ \t]{0,12})(?:(?:export|public|private|protected|internal|static|async|pub(?:\([\w:]+\))?|final|abstract|virtual|override|extern|inline|unsafe|default|open|data|sealed|suspend|const)\s+)*(?:func|fn|def|class|struct|interface|enum|trait|impl|type|module|function|object|record|namespace|package|sub|proc)\s+(?:\([^)]*\)\s*)?(?<name>[A-Za-z_][\w:.]*)|(?<indent>)(?!(?:return|else|if|for|while|switch|case|do|goto)\b)[A-Za-z_][\w:<>,*& ]*[\s*&]+(?<name>[A-Za-z_~][\w:~]*)\s*\((?!.*\)\s*;\s*$))")]
+    // func, fn, def, class… with what may come before them; or a C-like function or method: a type, a name, its parameters,
+    // and no ; after them (a declaration only, or a call).
+    [GeneratedRegex(@"^(?:(?<indent>[ \t]{0,12})(?:(?:export|public|private|protected|internal|static|async|pub(?:\([\w:]+\))?|final|abstract|virtual|override|extern|inline|unsafe|default|open|data|sealed|suspend|const)\s+)*(?:func|fn|def|class|struct|interface|enum|trait|impl|type|module|function|object|record|namespace|sub|proc)\s+(?:\([^)]*\)\s*)?(?<name>[A-Za-z_][\w:.]*)|(?<indent>[ \t]{0,12})(?!(?:return|else|if|for|foreach|while|switch|case|do|goto|throw|await|yield|new|using|lock|catch|when|typeof|sizeof|nameof|delete)\b)[A-Za-z_][\w:<>,*& ]*[\s*&]+(?<name>[A-Za-z_~][\w:~]*)\s*\((?!.*\)\s*;\s*$))")]
     private static partial Regex Declaration();
 
     [GeneratedRegex(@"\[(\d+)-(\d+)\]")]
