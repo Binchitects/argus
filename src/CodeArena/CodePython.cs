@@ -88,9 +88,12 @@ internal sealed class PythonSession : IAsyncDisposable
     private readonly string _mark = "\u0001arena-done-" + Guid.NewGuid().ToString("N")[..12] + " ";
     private readonly SemaphoreSlim _one = new(1, 1);
     private readonly object _gate = new();
-    private readonly Task _pump;
+    private readonly Task _pump, _errors;
     private Proc.Bounded _output = new(30_000);
     private TaskCompletionSource<JsonObject?>? _waiting;
+
+    /// <summary>Whether its output has ended (the interpreter with it): a call made after that is answered at once.</summary>
+    private bool _ended;
 
     /// <summary>The chat it is for, the Python it runs, and how many calls it has run.</summary>
     public string Chat { get; }
@@ -110,7 +113,23 @@ internal sealed class PythonSession : IAsyncDisposable
         {
             throw new ToolError($"Could not start {python} ({e.Message}): set python in the config to the one to use, or make the project's .venv.");
         }
-        _ = _process.StandardError.ReadToEndAsync();
+        // The runner sends its stderr to stdout; what Python says before it runs (a runner it cannot read) comes here.
+        _errors = Task.Run(async () =>
+        {
+            try
+            {
+                while (await _process.StandardError.ReadLineAsync() is { } line)
+                {
+                    lock (_gate)
+                    {
+                        _output.Append(line + "\n");
+                    }
+                }
+            }
+            catch (Exception e) when (e is IOException or ObjectDisposedException or InvalidOperationException)
+            {
+            }
+        });
         _pump = Task.Run(PumpAsync);
     }
 
@@ -191,6 +210,7 @@ internal sealed class PythonSession : IAsyncDisposable
         }
         lock (_gate)
         {
+            _ended = true;
             _waiting?.TrySetResult(null);
         }
     }
@@ -212,6 +232,11 @@ internal sealed class PythonSession : IAsyncDisposable
                 _output = new Proc.Bounded(maxChars);
                 _output.Append(before);
                 _waiting = done;
+                if (_ended)
+                {
+                    // It ended before this call: nothing will answer it.
+                    done.TrySetResult(null);
+                }
             }
             Calls++;
             try
@@ -241,7 +266,7 @@ internal sealed class PythonSession : IAsyncDisposable
             if (end is null)
             {
                 // It ended (or was stopped): what it printed last is read to its end first.
-                await Task.WhenAny(_pump, Task.Delay(TimeSpan.FromSeconds(2), CancellationToken.None));
+                await Task.WhenAny(Task.WhenAll(_pump, _errors), Task.Delay(TimeSpan.FromSeconds(2), CancellationToken.None));
             }
             string output;
             lock (_gate)

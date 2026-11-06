@@ -125,6 +125,38 @@ public sealed class CodePythonTests(ITestOutputHelper output) : IDisposable
         Assert.Contains("False", runs[9].Result);
     }
 
+    [PythonFact]
+    public async Task Calls_given_together_that_change_things_run_in_their_order_and_reads_run_at_once()
+    {
+        // As Qwen3-4B did in the real run: both programs in one answer, the second using what the first made.
+        _gateway.Answer = req => FakeGateway.HasToolResults(req) ? Reply.Say("done") : Reply.Call(
+            ("run_code", """{"code":"import time\ntime.sleep(0.5)\nrows = [1, 2, 3]"}"""),
+            ("run_code", """{"code":"sum(rows)"}"""),
+            ("run_shell", """{"command":"sleep 0.5; echo made > made.txt"}"""),
+            ("run_shell", """{"command":"cat made.txt"}"""));
+        using var h = new Harness(_gateway);
+        Assert.Equal(0, await h.Run("go\n/exit\n", "chat", "--mode", "yolo"));
+        var results = FakeGateway.History(_gateway.Requests[^1]).Where(m => m["role"]!.GetValue<string>() == "tool").Select(m => m["content"]!.ToString()).ToList();
+        Assert.StartsWith("6\n", results[1]);
+        Assert.StartsWith("made\n", results[3]);
+    }
+
+    [Fact]
+    public async Task A_python_that_fails_to_start_says_why()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        var broken = Path.Combine(Directory.CreateTempSubdirectory("arena-python-").FullName, "python");
+        File.WriteAllText(broken, "#!/bin/sh\necho 'Fatal Python error: failed to get the Python codec of the filesystem encoding' >&2\nexit 1\n");
+        File.SetUnixFileMode(broken, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        using var h = new Harness(_gateway, config: c => c["python"] = broken);
+        var runs = await Calls(h, "print(1)");
+        Assert.Contains("Fatal Python error: failed to get the Python codec", runs[0].Result);
+        Assert.Contains("the interpreter ended with exit code 1", runs[0].Result);
+    }
+
     [Fact]
     public async Task On_tcp_the_bridge_answers_only_a_program_that_says_its_token()
     {
