@@ -94,8 +94,12 @@ export function VectorStage({
           // Played through: from the start again, every animation with it.
           started.current = performance.now()
           seekTo(0)
-          for (const a of doc.getAnimations()) a.play()
-          svgOf(doc)?.unpauseAnimations()
+          // As seekTo and play: a page with no drawing in it has nothing to start again.
+          const svg = svgOf(doc)
+          if (svg) {
+            for (const a of doc.getAnimations()) a.play()
+            svg.unpauseAnimations()
+          }
           t = 0
         } else {
           seekTo(seconds)
