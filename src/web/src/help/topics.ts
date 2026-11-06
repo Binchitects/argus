@@ -1125,7 +1125,7 @@ export const topics = {
     about: 'How people rate the answers, per model and per assistant, and how the models fare when people compare them blind.',
     admin: true,
     parts: [
-      { name: 'Time range', text: 'A day, a week, a month or three.' },
+      { name: 'Time range', text: 'A preset (from the last day to the last year, today, this week, this month, last month) or **Custom range…** for two days, kept in the page\'s address.' },
       { name: 'By model and By assistant', text: 'Answers written, the share rated, the share rated up, and why answers were rated down.' },
       { name: 'Latest down-rated answers', text: 'Title, model, reason and the person\'s words, never the chat. A chat opens only when its owner shared it with the down vote; each opening is audited.' },
       { name: 'Arena leaderboard', text: 'The models by the votes cast with Compare in this time range.' },
