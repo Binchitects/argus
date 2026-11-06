@@ -117,6 +117,7 @@ public static class Permissions
     public const string ArgusIndex = "argus.index";
     public const string ArgusPacks = "argus.packs";
     public const string ArgusWebhook = "argus.webhook";
+    public const string ProjectsManage = "projects.manage";
 
     public const string Chat = "feature.chat";
     public const string ApiKeys = "feature.api_keys";
@@ -153,6 +154,8 @@ public static class Permissions
     public const string Export = "feature.export";
     public const string Knowledge = "feature.knowledge";
     public const string ModelChoice = "feature.model_choice";
+    public const string ProjectsCreate = "feature.projects";
+    public const string ProjectsGlobal = "feature.projects.global";
 
     public static readonly IReadOnlyList<PermissionInfo> All =
     [
@@ -202,6 +205,7 @@ public static class Permissions
         new(ArgusExplore, "Argus", "Explore the code index across repositories.", true),
         new(RoomsModerate, "Rooms and reviews", "List rooms, remove members and delete rooms (not read them).", true),
         new(ReviewsAdmin, "Rooms and reviews", "Manage every project's reviews.", true),
+        new(ProjectsManage, "Projects", "See every project and what it used, and change or delete any.", true),
 
         new(PeopleCreate, "People and groups", "Add people.", true, PeopleManage),
         new(PeopleEdit, "People and groups", "Change people's names, emails and sources.", true, PeopleManage),
@@ -295,6 +299,8 @@ public static class Permissions
         new(Export, "Features", "Export their own data and chats.", false),
         new(Knowledge, "Features", "Search company knowledge from the chat.", false),
         new(ModelChoice, "Features", "Choose the chat's model (else the company's default answers).", false),
+        new(ProjectsCreate, "Features", "Make projects, and be their owner.", false),
+        new(ProjectsGlobal, "Features", "Make global projects, which everyone sees and may add to.", false),
     ];
 
     private static readonly Dictionary<string, PermissionInfo> ByKey = All.ToDictionary(p => p.Key, StringComparer.Ordinal);

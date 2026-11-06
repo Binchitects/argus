@@ -1312,9 +1312,15 @@ namespace Llm.Core.Data.Migrations
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("WorkProjectId")
+                        .HasColumnType("uuid");
+
                     b.HasKey("Id");
 
                     b.HasIndex("AssistantId");
+
+                    b.HasIndex("WorkProjectId")
+                        .HasFilter("\"WorkProjectId\" IS NOT NULL");
 
                     b.HasIndex("UserId", "UpdatedAt");
 
@@ -5385,6 +5391,10 @@ namespace Llm.Core.Data.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("pictures");
 
+                    b.Property<Guid?>("ProjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("project_id");
+
                     b.Property<int>("PromptTokens")
                         .HasColumnType("integer")
                         .HasColumnName("prompt_tokens");
@@ -5450,6 +5460,9 @@ namespace Llm.Core.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ConversationId")
+                        .HasFilter("conversation_id IS NOT NULL");
+
                     b.HasIndex("SourceId")
                         .IsUnique()
                         .HasFilter("source_id IS NOT NULL");
@@ -5462,6 +5475,9 @@ namespace Llm.Core.Data.Migrations
                         .HasFilter("key_hash IS NOT NULL");
 
                     b.HasIndex("Person", "StartedAt");
+
+                    b.HasIndex("ProjectId", "StartedAt")
+                        .HasFilter("project_id IS NOT NULL");
 
                     b.HasIndex("UserId", "StartedAt");
 
@@ -6997,6 +7013,247 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("plan_steps", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Projects.Project", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("AlertPercent")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateOnly?>("DueOn")
+                        .HasColumnType("date");
+
+                    b.Property<bool>("Global")
+                        .HasColumnType("boolean");
+
+                    b.Property<decimal?>("MonthlyBudget")
+                        .HasPrecision(12, 4)
+                        .HasColumnType("numeric(12,4)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateOnly?>("StartsOn")
+                        .HasColumnType("date");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)");
+
+                    b.Property<bool>("StopAtBudget")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Global")
+                        .HasFilter("\"Global\"");
+
+                    b.HasIndex("OwnerId");
+
+                    b.ToTable("work_projects", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Projects.ProjectGoal", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTimeOffset?>("DoneAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateOnly?>("DueOn")
+                        .HasColumnType("date");
+
+                    b.Property<int>("Position")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "Position");
+
+                    b.ToTable("work_project_goals", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Projects.ProjectItem", b =>
+                {
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Kind")
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)");
+
+                    b.Property<Guid>("ItemId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("AddedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("AddedById")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("ProjectId", "Kind", "ItemId");
+
+                    b.HasIndex("Kind", "ItemId");
+
+                    b.ToTable("work_project_items", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Projects.ProjectMember", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("AddedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("AddedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("GroupId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(12)
+                        .HasColumnType("character varying(12)");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GroupId");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("ProjectId", "GroupId")
+                        .IsUnique()
+                        .HasFilter("\"GroupId\" IS NOT NULL");
+
+                    b.HasIndex("ProjectId", "UserId")
+                        .IsUnique()
+                        .HasFilter("\"UserId\" IS NOT NULL");
+
+                    b.ToTable("work_project_members", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_work_project_members_one", "(\"UserId\" IS NULL) <> (\"GroupId\" IS NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("Llm.Core.Projects.ProjectRepository", b =>
+                {
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Path")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<DateTimeOffset>("AddedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("AddedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Host")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.HasKey("ProjectId", "Path");
+
+                    b.HasIndex("Path");
+
+                    b.ToTable("work_project_repositories", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Projects.ProjectTask", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("AssigneeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Done")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset?>("DoneAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("GoalId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ProjectId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AssigneeId");
+
+                    b.HasIndex("GoalId");
+
+                    b.HasIndex("ProjectId", "CreatedAt");
+
+                    b.ToTable("work_project_tasks", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Safeguards.SafeguardEvent", b =>
                 {
                     b.Property<Guid>("Id")
@@ -8056,6 +8313,11 @@ namespace Llm.Core.Data.Migrations
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("Llm.Core.Projects.Project", null)
+                        .WithMany()
+                        .HasForeignKey("WorkProjectId")
+                        .OnDelete(DeleteBehavior.SetNull);
                 });
 
             modelBuilder.Entity("Llm.Core.Chat.CustomTool", b =>
@@ -8906,6 +9168,80 @@ namespace Llm.Core.Data.Migrations
                     b.HasOne("Llm.Core.Plans.Plan", null)
                         .WithMany("Steps")
                         .HasForeignKey("PlanId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Projects.Project", b =>
+                {
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("OwnerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Projects.ProjectGoal", b =>
+                {
+                    b.HasOne("Llm.Core.Projects.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Projects.ProjectItem", b =>
+                {
+                    b.HasOne("Llm.Core.Projects.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Projects.ProjectMember", b =>
+                {
+                    b.HasOne("Llm.Core.Access.Group", null)
+                        .WithMany()
+                        .HasForeignKey("GroupId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
+                    b.HasOne("Llm.Core.Projects.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade);
+                });
+
+            modelBuilder.Entity("Llm.Core.Projects.ProjectRepository", b =>
+                {
+                    b.HasOne("Llm.Core.Projects.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Projects.ProjectTask", b =>
+                {
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("AssigneeId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Llm.Core.Projects.ProjectGoal", null)
+                        .WithMany()
+                        .HasForeignKey("GoalId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("Llm.Core.Projects.Project", null)
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

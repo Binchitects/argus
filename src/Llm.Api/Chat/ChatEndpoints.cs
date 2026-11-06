@@ -181,12 +181,12 @@ public static partial class ChatEndpoints
             query = query.Where(c => EF.Functions.ILike(c.Title, "%" + q.Replace("%", "\\%", StringComparison.Ordinal).Replace("_", "\\_", StringComparison.Ordinal) + "%"));
         }
         var list = await query.OrderByDescending(c => c.UpdatedAt).Take(300)
-            .Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.AssistantId, c.Origin, c.OriginPlace, c.CodeArenaTurnUntil, c.Kind, mine = c.UserId == me.Id }).ToListAsync();
+            .Select(c => new { c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.AssistantId, c.Origin, c.OriginPlace, c.CodeArenaTurnUntil, c.Kind, mine = c.UserId == me.Id, c.WorkProjectId }).ToListAsync();
         var now = DateTimeOffset.UtcNow;
         return Results.Ok(list.Select(c => new
         {
             c.Id, c.Title, c.UpdatedAt, c.ArchivedAt, c.AssistantId, c.Origin, c.OriginPlace, answering = jobs.IsAnswering(c.Id), codeArena = c.CodeArenaTurnUntil > now,
-            isRoom = c.Kind == RoomMember.Room, c.mine,
+            isRoom = c.Kind == RoomMember.Room, c.mine, projectId = c.WorkProjectId,
         }));
     }
 
@@ -472,7 +472,7 @@ public static partial class ChatEndpoints
             room,
             c.Id, c.Title, c.Thinking, tools, useArgus = tools.Contains("argus"), c.Model, c.SystemPrompt, c.Temperature, c.TopP, c.MaxTokens,
             c.CurrentLeafId, c.ArchivedAt, forkedFrom, assistant, c.CreatedAt, c.UpdatedAt, answering, messages, earlier, arenas = arenas ?? Array.Empty<object>(), queued = queued ?? [],
-            c.Origin, c.OriginPlace,
+            c.Origin, c.OriginPlace, projectId = c.WorkProjectId,
             // A science lab notebook's field (null: a chat).
             labField = c.LabField,
             // Code Arena is answering in it: what the person sends waits in the queue until its turn ends.

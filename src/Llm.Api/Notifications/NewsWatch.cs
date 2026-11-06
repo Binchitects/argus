@@ -46,6 +46,7 @@ public sealed partial class NewsWatch(IServiceScopeFactory scopes, IConfiguratio
                 if (clock.GetUtcNow() - credit >= CreditEvery)
                 {
                     await CheckCreditAsync(stoppingToken);
+                    await CheckProjectsAsync(stoppingToken);
                     credit = clock.GetUtcNow();
                 }
             }
@@ -126,6 +127,21 @@ public sealed partial class NewsWatch(IServiceScopeFactory scopes, IConfiguratio
         catch (Exception ex) when (ex is GatewayException or HttpRequestException or TaskCanceledException or DbUpdateException or Npgsql.NpgsqlException)
         {
             LogSkipped(logger, "credit", ex.Message);
+        }
+    }
+
+    /// <summary>Projects at their budget's alert share or past it: their owners are told (Projects.ProjectBudgets).</summary>
+    public async Task CheckProjectsAsync(CancellationToken ct)
+    {
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            await Projects.ProjectBudgets.CheckAsync(scope.ServiceProvider.GetRequiredService<AppDbContext>(), scope.ServiceProvider.GetRequiredService<NewsDelivery>(),
+                clock.GetUtcNow(), ct);
+        }
+        catch (Exception ex) when (ex is DbUpdateException or Npgsql.NpgsqlException or TaskCanceledException)
+        {
+            LogSkipped(logger, "projects", ex.Message);
         }
     }
 

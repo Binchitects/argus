@@ -78,7 +78,7 @@ public sealed partial class LedgerImport(IServiceScopeFactory scopes, IOptions<D
     private sealed record Row(string RequestId, string CallType, string ApiKey, double Spend, int Prompt, int Completion, DateTime Start, DateTime End, DateTime? FirstToken,
         string Model, string ApiBase, string? User, string? MetaUser, string? KeyUser, string? EndUser, string? Alias, string? CacheHit, string? Tag, string? Status,
         string? ErrorClass, string? ErrorMessage, string? ErrorCode, long Cached, string? VideoSeconds, string? MusicSeconds, string? Pictures, string? Characters,
-        string? BookedBy, int? DurationMs, DateTime CreatedAt);
+        string? BookedBy, int? DurationMs, DateTime CreatedAt, string? ChatTag = null, string? ProjectTag = null);
 
     /// <summary>One look: the rows LiteLLM wrote since the last, into the ledger; how many it read.</summary>
     public async Task<int> ImportAsync(CancellationToken ct)
@@ -104,15 +104,21 @@ public sealed partial class LedgerImport(IServiceScopeFactory scopes, IOptions<D
                 // No LiteLLM database (a stack that never had one): nothing to bring over.
                 return 0;
             }
+            // The request's tags: what part of the app asked (the first tag that is not one of the two below), and the chat and
+            // the project it was for (chat:ID, project:ID: ProjectTags), so its project's usage counts it.
             await using var cmd = new NpgsqlCommand("""
                 select s.request_id, s.call_type, s.api_key, s.spend, s.prompt_tokens, s.completion_tokens, s."startTime", s."endTime", s."completionStartTime",
                   coalesce(nullif(s.model_group, ''), s.model), coalesce(s.api_base, ''), s."user", s.metadata->>'user_api_key_user_id', v.user_id, s.end_user,
-                  coalesce(s.metadata->>'user_api_key_alias', v.key_alias), s.cache_hit, s.request_tags->>0, s.status,
+                  coalesce(s.metadata->>'user_api_key_alias', v.key_alias), s.cache_hit,
+                  (select x from jsonb_array_elements_text(tg.tags) x where x not like 'chat:%' and x not like 'project:%' limit 1), s.status,
                   s.metadata->'error_information'->>'error_class', s.metadata->'error_information'->>'error_message', s.metadata->'error_information'->>'error_code',
                   coalesce((s.metadata->'usage_object'->'prompt_tokens_details'->>'cached_tokens')::bigint, 0),
                   s.metadata->>'video_seconds', s.metadata->>'music_seconds', s.metadata->>'pictures', s.metadata->>'characters', s.metadata->>'booked_by',
-                  s.request_duration_ms, s.created_at
+                  s.request_duration_ms, s.created_at,
+                  (select substr(x, 6) from jsonb_array_elements_text(tg.tags) x where x like 'chat:%' limit 1),
+                  (select substr(x, 9) from jsonb_array_elements_text(tg.tags) x where x like 'project:%' limit 1)
                 from "LiteLLM_SpendLogs" s left join "LiteLLM_VerificationToken" v on v.token = s.api_key
+                  cross join lateral (select case when jsonb_typeof(s.request_tags) = 'array' then s.request_tags else '[]'::jsonb end as tags) tg
                 where (s.created_at, s.request_id) > (@since, @after)
                 order by s.created_at, s.request_id
                 limit @batch
@@ -127,7 +133,7 @@ public sealed partial class LedgerImport(IServiceScopeFactory scopes, IOptions<D
             {
                 rows.Add(new Row(r.GetString(0), r.GetString(1), r.GetString(2), r.GetDouble(3), r.GetInt32(4), r.GetInt32(5), r.GetDateTime(6), r.GetDateTime(7),
                     r.IsDBNull(8) ? null : r.GetDateTime(8), r.GetString(9), r.GetString(10), S(11), S(12), S(13), S(14), S(15), S(16), S(17), S(18), S(19), S(20), S(21),
-                    r.GetInt64(22), S(23), S(24), S(25), S(26), S(27), r.IsDBNull(28) ? null : r.GetInt32(28), r.GetDateTime(29)));
+                    r.GetInt64(22), S(23), S(24), S(25), S(26), S(27), r.IsDBNull(28) ? null : r.GetInt32(28), r.GetDateTime(29), S(30), S(31)));
             }
         }
         if (rows.Count == 0)
@@ -147,6 +153,7 @@ public sealed partial class LedgerImport(IServiceScopeFactory scopes, IOptions<D
         var ledger = rows.Select(row => owners.TryGetValue(row.ApiKey, out var owner) && row.Alias != Chat.ChatKey.Alias
             ? ToRequest(row, owner.Id, owner.Email?.Trim().ToLowerInvariant())
             : ToRequest(row, Person(row) is { } p && idOf.TryGetValue(p.ToUpperInvariant(), out var id) ? id : null)).ToList();
+        await Projects.ProjectTags.ResolveAsync(db, scope.ServiceProvider.GetRequiredService<Access.AccessService>(), ledger, [.. rows.Select(r => (r.ChatTag, r.ProjectTag))], ct);
         await WriteAsync(db, ledger, ct);
         // A full batch: the next reads on from its last row. Else the next look reads the last minute again (rows written late).
         if (rows.Count == Batch)
@@ -392,9 +399,9 @@ public sealed partial class LedgerImport(IServiceScopeFactory scopes, IOptions<D
             await using var cmd = new NpgsqlCommand("""
                 insert into gateway.requests (id, started_at, first_token_at, ended_at, duration_ms, surface, call, protocol, credit_kind, user_id, person, key_hash,
                   key_alias, tag, model, deployment, prompt_tokens, cached_tokens, completion_tokens, cost, seconds, pictures, characters, status, http_status, refusal,
-                  error, source_id, usage_estimated)
+                  error, source_id, conversation_id, project_id, usage_estimated)
                 select *, false from unnest(@id, @started, @first, @ended, @duration, @surface, @call, @protocol, @credit, @user, @person, @key, @alias, @tag, @model,
-                  @deployment, @prompt, @cached, @completion, @cost, @seconds, @pictures, @characters, @status, @http, @refusal, @error, @source)
+                  @deployment, @prompt, @cached, @completion, @cost, @seconds, @pictures, @characters, @status, @http, @refusal, @error, @source, @conversation, @project)
                 on conflict (source_id) where source_id is not null do nothing
                 """, conn);
             void Add<T>(string name, NpgsqlDbType type, Func<GatewayRequest, T> of) =>
@@ -427,6 +434,8 @@ public sealed partial class LedgerImport(IServiceScopeFactory scopes, IOptions<D
             Add("refusal", NpgsqlDbType.Varchar, r => r.Refusal);
             Add("error", NpgsqlDbType.Varchar, r => r.Error);
             Add("source", NpgsqlDbType.Varchar, r => r.SourceId);
+            Add("conversation", NpgsqlDbType.Uuid, r => r.ConversationId);
+            Add("project", NpgsqlDbType.Uuid, r => r.ProjectId);
             await cmd.ExecuteNonQueryAsync(ct);
         }
         finally

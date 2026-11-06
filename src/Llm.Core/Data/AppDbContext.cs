@@ -151,6 +151,12 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<BotThread> BotThreads => Set<BotThread>();
     public DbSet<PushSubscription> PushSubscriptions => Set<PushSubscription>();
     public DbSet<Code.CodeArenaClient> CodeArenaClients => Set<Code.CodeArenaClient>();
+    public DbSet<Projects.Project> Projects => Set<Projects.Project>();
+    public DbSet<Projects.ProjectMember> ProjectMembers => Set<Projects.ProjectMember>();
+    public DbSet<Projects.ProjectRepository> ProjectRepositories => Set<Projects.ProjectRepository>();
+    public DbSet<Projects.ProjectItem> ProjectItems => Set<Projects.ProjectItem>();
+    public DbSet<Projects.ProjectGoal> ProjectGoals => Set<Projects.ProjectGoal>();
+    public DbSet<Projects.ProjectTask> ProjectTasks => Set<Projects.ProjectTask>();
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder) =>
         // A model for each files' key: their converters seal with it.
@@ -218,6 +224,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(c => c.AssistantId).HasColumnName("ProjectId");
             e.HasIndex(c => c.AssistantId);
             e.HasOne<Assistant>().WithMany().HasForeignKey(c => c.AssistantId).OnDelete(DeleteBehavior.SetNull);
+            e.HasIndex(c => c.WorkProjectId).HasFilter("\"WorkProjectId\" IS NOT NULL");
+            e.HasOne<Projects.Project>().WithMany().HasForeignKey(c => c.WorkProjectId).OnDelete(DeleteBehavior.SetNull);
             // A chat deleted under legal hold is kept, and hidden from every query but the hold's own (IgnoreQueryFilters).
             e.HasQueryFilter(c => c.DeletedAt == null);
         });
@@ -833,6 +841,64 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasIndex(x => x.LastSeenAt);
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });
+        // Projects: work_projects, as "projects" is the assistants' table (they were called projects).
+        builder.Entity<Projects.Project>(e =>
+        {
+            e.ToTable("work_projects");
+            e.Property(x => x.Name).HasMaxLength(100);
+            e.Property(x => x.Description).HasMaxLength(2000);
+            e.Property(x => x.Status).HasMaxLength(12);
+            e.Property(x => x.MonthlyBudget).HasPrecision(12, 4);
+            e.HasIndex(x => x.Global).HasFilter("\"Global\"");
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.OwnerId).OnDelete(DeleteBehavior.Restrict);
+        });
+        builder.Entity<Projects.ProjectMember>(e =>
+        {
+            e.ToTable("work_project_members", t => t.HasCheckConstraint("CK_work_project_members_one", "(\"UserId\" IS NULL) <> (\"GroupId\" IS NULL)"));
+            e.Property(x => x.Role).HasMaxLength(12);
+            e.HasIndex(x => new { x.ProjectId, x.UserId }).IsUnique().HasFilter("\"UserId\" IS NOT NULL");
+            e.HasIndex(x => new { x.ProjectId, x.GroupId }).IsUnique().HasFilter("\"GroupId\" IS NOT NULL");
+            e.HasIndex(x => x.UserId);
+            e.HasIndex(x => x.GroupId);
+            e.HasOne<Projects.Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Group>().WithMany().HasForeignKey(x => x.GroupId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Projects.ProjectRepository>(e =>
+        {
+            e.ToTable("work_project_repositories");
+            e.HasKey(x => new { x.ProjectId, x.Path });
+            e.Property(x => x.Path).HasMaxLength(300);
+            e.Property(x => x.Host).HasMaxLength(200);
+            e.HasIndex(x => x.Path);
+            e.HasOne<Projects.Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Projects.ProjectItem>(e =>
+        {
+            e.ToTable("work_project_items");
+            e.HasKey(x => new { x.ProjectId, x.Kind, x.ItemId });
+            e.Property(x => x.Kind).HasMaxLength(12);
+            e.HasIndex(x => new { x.Kind, x.ItemId });
+            e.HasOne<Projects.Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Projects.ProjectGoal>(e =>
+        {
+            e.ToTable("work_project_goals");
+            e.Property(x => x.Title).HasMaxLength(200);
+            e.Property(x => x.Description).HasMaxLength(2000);
+            e.Property(x => x.Status).HasMaxLength(12);
+            e.HasIndex(x => new { x.ProjectId, x.Position });
+            e.HasOne<Projects.Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<Projects.ProjectTask>(e =>
+        {
+            e.ToTable("work_project_tasks");
+            e.Property(x => x.Title).HasMaxLength(300);
+            e.HasIndex(x => new { x.ProjectId, x.CreatedAt });
+            e.HasOne<Projects.Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<Projects.ProjectGoal>().WithMany().HasForeignKey(x => x.GoalId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.AssigneeId).OnDelete(DeleteBehavior.SetNull);
+        });
         builder.Entity<ProductFeedback>(e =>
         {
             e.ToTable("product_feedback");
@@ -932,6 +998,9 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasIndex(x => new { x.UserId, x.StartedAt });
             e.HasIndex(x => new { x.KeyHash, x.StartedAt }).HasFilter("key_hash IS NOT NULL");
             e.HasIndex(x => x.SourceId).IsUnique().HasFilter("source_id IS NOT NULL");
+            // A project's usage over a time (its page, its budget) reads this index; a chat's requests are tagged again when it moves.
+            e.HasIndex(x => new { x.ProjectId, x.StartedAt }).HasFilter("project_id IS NOT NULL");
+            e.HasIndex(x => x.ConversationId).HasFilter("conversation_id IS NOT NULL");
             e.HasOne<Identity.AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.SetNull);
             Snake(e.Metadata);
         });

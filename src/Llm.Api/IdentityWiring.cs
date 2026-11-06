@@ -684,6 +684,8 @@ public static class IdentityWiring
         Plans.CodeArenaPlans.MapCodeArenaPlans(app);
         Chat.CodeArenaMemory.MapCodeArenaMemory(app);
         Chat.AssistantEndpoints.MapAssistants(app);
+        Projects.ProjectEndpoints.MapProjects(app);
+        Reports.UsageReports.MapUsageReports(app);
         Chat.ShareEndpoints.MapShares(app);
         Access.SharingEndpoints.MapSharing(app);
         Chat.TraceEndpoints.MapTraces(app);

@@ -878,6 +878,104 @@ done means, the files it changes and how its check went. Its agent keeps
 such a plan, so the board shows it as it goes and moves nothing; to change
 it, ask the agent.
 
+## Projects
+
+A **project** is work several people do together, in the web chat and in
+Code Arena, with its own accounting. **Projects** (in the sidebar) lists
+those you are in and the global ones; **New project** makes one, with a name,
+a description, its dates and, for its owners, a monthly budget.
+
+What a project holds:
+
+- **People and groups**, each in a role. An **owner** changes the project,
+  its people and its budget, and sees each person's share of what it used. A
+  **contributor** puts their chats, rooms, Code Arena sessions, assistants,
+  skills and apps in it, and keeps its goals and tasks. A **viewer** sees it
+  and its numbers. Whoever made it is an owner. A group's members hold the
+  group's role; a person in it twice holds the better one.
+- **Global projects** are everyone's: every person sees them and adds to them
+  as a contributor; their owners still run them. Making one is its own
+  permission (`feature.projects.global`), as making a project is
+  (`feature.projects`); both are everyone's unless an admin takes them away
+  (Admin → Access). An admin with `projects.manage` sees and runs every
+  project.
+- **Repositories**, by their path (`payments/api`) or any address of them. A
+  Code Arena session in a clone of one goes in the project by itself, and the
+  changes merged there count to its progress (read through Argus, as you may
+  read them).
+- **Chats, rooms and Code Arena sessions.** A chat's menu (⋯ → **Project**)
+  puts it in a project you may add to, or takes it out. A chat stays yours in
+  a project: the others see that you have chats there, not their titles or
+  what they say. A room is listed by its title for its members.
+- **Assistants, skills and apps** you made (or may edit). Being in a project
+  shares them with no one: who may not use one still may not.
+- **Goals** (milestones with a state: planned, doing, done or dropped, and a
+  due date) and **tasks** (done or not, of a goal or not, with who does
+  them). The plans of the project's chats count too: their steps are tasks.
+
+An archived project is read only: nothing goes in, its chats answer as
+before. Deleting one leaves its chats their owners', in no project.
+
+### What a project used
+
+The project's page shows, over the time chosen (see
+[time windows](#time-windows)): its cost, tokens in (and how many came from
+the engine's cache) and out, requests, the people who worked in it, the
+**active time** (each person's own time in its chats, a stretch at a time:
+messages less than 15 minutes apart are one stretch, and each stretch counts
+a minute more) and the **agent time** (the models' time answering for it),
+by day, by person, by model and by where it came from (the chat, API keys and
+Code Arena, the app's own work). Owners see each person's row; others see
+their own.
+
+Every number comes from the usage log, the same as Usage & cost. A request
+counts to a project when it was for one of the project's chats (its requests
+move with a chat put in or taken out of the project), or when its caller
+named the project: Code Arena does for its sessions, and a script with an
+API key can, with `metadata.tags: ["project:<id>"]` in its request. A
+project named by someone who may not add to it is not counted. Refused
+requests never reached a model and are left out.
+
+**Budget.** An owner can give a project a monthly budget (in dollars, its
+requests together) and the share at which its owners are told (80% unless
+set): they are told in the bell, by email and the alerts' webhook when one is
+set, once at that share and once when it is all spent, each month. With
+**Stop at the budget**, its chats in Arena get no answers once it is spent,
+until the month ends, the budget is raised or the chat is taken out; Code
+Arena's and API keys' requests are not stopped by it.
+
+### Reports and exports
+
+**Export** on a project's page downloads its report for the time chosen:
+
+- **PDF**: a report to read and pass on: the figures at the top, tokens and
+  cost by day, then the people, models, where it came from, its goals, the
+  merged changes and each day's numbers, page by page with the report and the
+  period in each page's footer. It uses the standard PDF fonts: letters of
+  scripts other than the Western European ones show as `?` there, and are
+  kept as they are in the Excel and CSV files.
+- **Excel** (`.xlsx`): a Summary sheet, then a sheet for each chart and each
+  table, with real numbers (dollars, hours, times) that add up and chart in
+  Excel, each header frozen and filtered.
+- **CSV**: the same tables one after another, for any spreadsheet; UTF-8 for
+  every script, numbers plain. A cell that would start a formula is kept as
+  text.
+
+A viewer's export holds their own row of the people, as the page does. Usage
+& cost exports the same way (your own, and everyone's for admins), and so
+does Usage by group. Each export is audited.
+
+### Time windows
+
+Every report and dashboard page (Usage & cost, the admin's dashboards, Usage
+by group, a project's page, and Argus's own overview and people) has the same
+**time window**: a preset (from the last hours to the last year, today, this
+week, this month, last month) or a **custom range** between two days, at most
+400 days. The chargeback stays by whole months. The window is kept in the page's
+address (`?from=…&to=…`, as the dashboards' links always had), so a link
+opens the same view, and the browser's back button goes back to the window
+before.
+
 ## Science lab
 
 **Science lab** (in the sidebar) works problems of a science with the lab's

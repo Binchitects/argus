@@ -47,6 +47,11 @@ public sealed class Conversation
     public string? OriginPlace { get; set; }
     /// <summary>A Code Arena session's project, by its repository's key (its memories are that project's).</summary>
     public string? ProjectKey { get; set; }
+    /// <summary>
+    /// The project (Llm.Core.Projects.Project) it is part of: its requests count to the project's usage, its people see that it
+    /// is there. Not <see cref="ProjectKey"/> (a Code Arena repository's key) and not the assistant (whose column is "ProjectId").
+    /// </summary>
+    public Guid? WorkProjectId { get; set; }
     /// <summary>What memory has read of it: its messages up to this one (by their sequence), reflected on as it went quiet.</summary>
     public int ReflectedSequence { get; set; }
     /// <summary>
