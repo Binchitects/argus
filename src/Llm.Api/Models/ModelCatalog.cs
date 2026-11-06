@@ -872,11 +872,13 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
 
     /// <summary>
     /// Prometheus scrapes each loaded model's metrics: llama.cpp's (/metrics?model=NAME on the router), and each vLLM or
-    /// SGLang process's own (HOST:PORT/metrics, its vllm:* or sglang:* names), labelled with its model, engine and its kind.
+    /// SGLang process's own (HOST:PORT/metrics, its vllm:* or sglang:* names), labelled with its model, engine and its kind,
+    /// and the GPUs it runs on ("0,1"; "all" for a llama.cpp model on every GPU), for the dashboards' figures by GPU.
     /// </summary>
-    public void WriteTargets(IEnumerable<string> loaded)
+    public async Task WriteTargetsAsync(IReadOnlyCollection<string> loaded, CancellationToken ct = default)
     {
         var host = new Uri(options.Value.Url).Authority;
+        var devices = await db.LocalModels.AsNoTracking().Where(m => loaded.Contains(m.Name)).ToDictionaryAsync(m => m.Name, m => m.Devices, ct);
         var targets = new JsonArray();
         foreach (var m in loaded)
         {
@@ -890,6 +892,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
                         ["labels"] = new JsonObject
                         {
                             ["model"] = m, ["replica"] = e.Name, ["engine"] = backend.Name, ["kind"] = backend.Kind, ["tier"] = "optional", ["component"] = "inference",
+                            ["gpus"] = string.Join(',', e.Gpus.Select(g => g.ToString(CultureInfo.InvariantCulture))),
                         },
                     });
                 }
@@ -898,7 +901,10 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             targets.Add(new JsonObject
             {
                 ["targets"] = new JsonArray(host),
-                ["labels"] = new JsonObject { ["model"] = m, ["tier"] = "optional", ["component"] = "inference" },
+                ["labels"] = new JsonObject
+                {
+                    ["model"] = m, ["tier"] = "optional", ["component"] = "inference", ["gpus"] = devices.GetValueOrDefault(m) is { Length: > 0 } on ? on : "all",
+                },
             });
         }
         Write(TargetsFile, targets.ToJsonString());

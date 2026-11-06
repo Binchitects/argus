@@ -35,7 +35,7 @@
       },
       "options": {
         "mode": "markdown",
-        "content": "Read from the **app's own ledger of model requests** (`gateway.requests` in Postgres, one row for each request whatever happened to it), not from the inference engine. That is deliberate: this stack runs vLLM *or* llama.cpp depending on whether throughput or context matters more, and an engine-specific dashboard goes blank the moment you switch. vLLM's Prometheus metrics also carry no user dimension — they answer *how many tokens*, never *whose*.\n\nEvery request through `gateway.<domain>` lands here, from the API and the web UI alike. A refused one (a rate limit, a budget, a safeguard) never reached a model: it is not counted as a request or a failure. GPU panels come from the `nvidia-smi` exporter, which reports whichever engine holds the card.\n\nvLLM-native panels are in the collapsed row at the bottom. They light up when vLLM is the running engine and stay empty otherwise — that is expected, not a fault."
+        "content": "Read from the **app's own ledger of model requests** (`gateway.requests` in Postgres, one row for each request whatever happened to it), not from the inference engine. That is deliberate: this stack runs vLLM *or* llama.cpp depending on whether throughput or context matters more, and an engine-specific dashboard goes blank the moment you switch. vLLM's Prometheus metrics also carry no user dimension — they answer *how many tokens*, never *whose*.\n\nEvery request through `gateway.<domain>` lands here, from the API and the web UI alike. A refused one (a rate limit, a budget, a safeguard) never reached a model: it is not counted as a request or a failure. GPU panels come from the `nvidia-smi` exporter, which reports whichever engine holds the card.\n\nThe engines' panels are in the collapsed row at the bottom: llama.cpp, vLLM and SGLang added together, whichever of them run. Tokens a second there are the whole stack's; how fast one answer streams is on **Stack Performance**."
       }
     },
     {
@@ -441,12 +441,12 @@
     },
     {
       "type": "timeseries",
-      "title": "Token throughput: cached input, uncached input, output",
+      "title": "Tokens a second: cached input, uncached input, output",
       "datasource": {
         "type": "postgres",
         "uid": "gateway-db"
       },
-      "description": "Prompt tokens dominate long-context work; completion tokens are what the GPU actually generates.",
+      "description": "From the ledger: each kind of token a second over each interval, every model and engine, by when its request started.",
       "gridPos": {
         "x": 12,
         "y": 8,
@@ -462,7 +462,7 @@
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(started_at, $__interval), COALESCE(sum(greatest(coalesce(prompt_tokens,0) - cached_tokens,0)),0) AS \"input, cache miss\", COALESCE(sum(cached_tokens),0) AS \"input, cache hit\", COALESCE(sum(completion_tokens),0) AS \"output\" from requests WHERE $__timeFilter(started_at) GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT $__timeGroupAlias(started_at, $__interval), (COALESCE(sum(greatest(coalesce(prompt_tokens,0) - cached_tokens,0)),0)) / ($__interval_ms / 1000.0) AS \"input, cache miss\", (COALESCE(sum(cached_tokens),0)) / ($__interval_ms / 1000.0) AS \"input, cache hit\", (COALESCE(sum(completion_tokens),0)) / ($__interval_ms / 1000.0) AS \"output\" from requests WHERE $__timeFilter(started_at) GROUP BY 1 ORDER BY 1"
         }
       ],
       "fieldConfig": {
@@ -799,7 +799,7 @@
     },
     {
       "type": "row",
-      "title": "Engine (vLLM or llama.cpp, whichever is running)",
+      "title": "Engines (llama.cpp, vLLM and SGLang together)",
       "collapsed": true,
       "gridPos": {
         "x": 0,
@@ -825,7 +825,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(vllm:num_requests_running) or sum(sglang:num_running_reqs{tp_rank=\"0\",priority=\"\"}) or sum(llamacpp:requests_processing)",
+              "expr": "(sum(llamacpp:requests_processing) or vector(0)) + (sum(vllm:num_requests_running) or vector(0)) + (sum(sglang:num_running_reqs{tp_rank=\"0\",priority=\"\"}) or vector(0))",
               "legendFormat": "running"
             }
           ],
@@ -880,7 +880,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(vllm:num_requests_waiting) or sum(sglang:num_queue_reqs{tp_rank=\"0\",priority=\"\"}) or sum(llamacpp:requests_deferred)",
+              "expr": "(sum(llamacpp:requests_deferred) or vector(0)) + (sum(vllm:num_requests_waiting) or vector(0)) + (sum(sglang:num_queue_reqs{tp_rank=\"0\",priority=\"\"}) or vector(0))",
               "legendFormat": "waiting"
             }
           ],
@@ -936,7 +936,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "max(vllm:gpu_cache_usage_perc) or max(sglang:token_usage{tp_rank=\"0\",priority=\"\"}) or max(llamacpp:kv_cache_usage_ratio)",
+              "expr": "max(vllm:kv_cache_usage_perc) or max(sglang:token_usage{tp_rank=\"0\",priority=\"\"}) or max(llamacpp:kv_cache_usage_ratio)",
               "legendFormat": "kv cache"
             }
           ],
@@ -977,7 +977,7 @@
         },
         {
           "type": "stat",
-          "title": "Output tokens/sec (5 min avg)",
+          "title": "Stack throughput: tokens generated a second (5 min)",
           "description": "Tokens delivered per second across all users, averaged over 5 minutes. On llama.cpp tokens are counted when a request finishes, so this lags a long answer; Stack Performance has the live rate.",
           "datasource": {
             "type": "prometheus",
@@ -992,8 +992,8 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(rate(vllm:generation_tokens_total[5m])) or sum(rate(sglang:generation_tokens_total[5m])) or sum(rate(llamacpp:tokens_predicted_total[5m]))",
-              "legendFormat": "tok/s"
+              "expr": "(sum(rate(llamacpp:tokens_predicted_total[5m])) or vector(0)) + (sum(rate(vllm:generation_tokens_total[5m])) or vector(0)) + (sum(rate(sglang:generation_tokens_total[5m])) or vector(0))",
+              "legendFormat": "the stack, every engine"
             }
           ],
           "fieldConfig": {
@@ -1108,12 +1108,12 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum(vllm:num_requests_running) or sum(sglang:num_running_reqs{tp_rank=\"0\",priority=\"\"}) or sum(llamacpp:requests_processing)",
+              "expr": "(sum(llamacpp:requests_processing) or vector(0)) + (sum(vllm:num_requests_running) or vector(0)) + (sum(sglang:num_running_reqs{tp_rank=\"0\",priority=\"\"}) or vector(0))",
               "legendFormat": "running"
             },
             {
               "refId": "B",
-              "expr": "sum(vllm:num_requests_waiting) or sum(sglang:num_queue_reqs{tp_rank=\"0\",priority=\"\"}) or sum(llamacpp:requests_deferred)",
+              "expr": "(sum(llamacpp:requests_deferred) or vector(0)) + (sum(vllm:num_requests_waiting) or vector(0)) + (sum(sglang:num_queue_reqs{tp_rank=\"0\",priority=\"\"}) or vector(0))",
               "legendFormat": "waiting"
             }
           ],

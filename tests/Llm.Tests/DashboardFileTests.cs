@@ -281,6 +281,110 @@ public sealed partial class DashboardFileTests(Promtool promtool) : IClassFixtur
         Assert.Equal("temp GPU 1 · A100-SXM4-80GB", Interpolation.Legend("temp {{gpu}}", new Dictionary<string, string> { ["gpu"] = "GPU 1 · A100-SXM4-80GB" }, "x"));
     }
 
+    /// <summary>A panel's query, by its dashboard, its title and its legend, as Prometheus is sent it (a 1-minute rate interval).</summary>
+    private static string Query(string uid, string title, string legend = "")
+    {
+        var (_, _, t) = PromTargets().Single(x => x.Dashboard.Uid == uid && x.Panel.Title == title && (x.Target.LegendFormat ?? "") == legend);
+        var from = new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero);
+        return Interpolation.Expand(t.Expr!, from, from.AddHours(1), TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15), new Dictionary<string, VariableValue>(), loki: false);
+    }
+
+    [Fact]
+    public async Task Tokens_a_second_are_the_whole_stacks_and_a_requests_own_on_every_engine()
+    {
+        // As measured on llama.cpp (4 answers at once of SmolLM2 on a CPU, 2026-11-06): its decode steps went at 97 a
+        // second while the stack made 382 tokens a second, and "Decode rate (live)" showed the steps. Here: llama.cpp with
+        // 4 slots of 100 tokens a second each (100 steps a second, 4 busy slots a step), vLLM 3 answers of 50 on GPUs 0-1,
+        // SGLang one of 50 on GPU 2. The stack makes 400 + 150 + 50 = 600 a second; a request's decode is 100 or 50, 75
+        // weighed by their tokens (600 tokens over 8 seconds of decoding a second). The old figures were 100 (the steps)
+        // and, in LLM Overview, 150 (vLLM alone: "or" kept the first engine and dropped the others).
+        // To the hundredth: a rate is a float, 599.9999999999999 for 600.
+        string Q(string uid, string title, string legend = "") => JsonSerializer.Serialize($"round({Query(uid, title, legend)}, 0.01)");
+        var test = $$"""
+            evaluation_interval: 15s
+            tests:
+              - interval: 15s
+                input_series:
+                  - series: 'llamacpp:n_decode_total{model="qwen",gpus="all"}'
+                    values: '0+1500x40'
+                  - series: 'llamacpp:n_busy_slots_per_decode{model="qwen",gpus="all"}'
+                    values: '4x40'
+                  - series: 'llamacpp:tokens_predicted_total{model="qwen",gpus="all"}'
+                    values: '0+6000x40'
+                  - series: 'llamacpp:tokens_predicted_seconds_total{model="qwen",gpus="all"}'
+                    values: '0+60x40'
+                  - series: 'llamacpp:prompt_tokens_total{model="qwen",gpus="all"}'
+                    values: '0+15000x40'
+                  - series: 'llamacpp:prompt_seconds_total{model="qwen",gpus="all"}'
+                    values: '0+15x40'
+                  - series: 'llamacpp:requests_processing{model="qwen",gpus="all"}'
+                    values: '4x40'
+                  - series: 'vllm:generation_tokens_total{model="flash",gpus="0,1",model_name="flash"}'
+                    values: '0+2250x40'
+                  - series: 'vllm:request_generation_tokens_sum{model="flash",gpus="0,1",model_name="flash"}'
+                    values: '0+2250x40'
+                  - series: 'vllm:request_decode_time_seconds_sum{model="flash",gpus="0,1",model_name="flash"}'
+                    values: '0+45x40'
+                  - series: 'vllm:request_prompt_tokens_sum{model="flash",gpus="0,1",model_name="flash"}'
+                    values: '0+30000x40'
+                  - series: 'vllm:request_prefill_time_seconds_sum{model="flash",gpus="0,1",model_name="flash"}'
+                    values: '0+15x40'
+                  - series: 'vllm:num_requests_running{model="flash",gpus="0,1",model_name="flash"}'
+                    values: '3x40'
+                  - series: 'sglang:generation_tokens_total{model="swift",gpus="2",model_name="swift",is_streaming="true"}'
+                    values: '0+750x40'
+                  - series: 'sglang:inter_token_latency_seconds_count{model="swift",gpus="2",model_name="swift"}'
+                    values: '0+750x40'
+                  - series: 'sglang:inter_token_latency_seconds_sum{model="swift",gpus="2",model_name="swift"}'
+                    values: '0+15x40'
+                  - series: 'sglang:num_running_reqs{model="swift",gpus="2",tp_rank="0",priority=""}'
+                    values: '1x40'
+                promql_expr_test:
+                  - expr: {{Q("stack-performance", "Stack throughput (live)")}}
+                    eval_time: 8m
+                    exp_samples: [{ labels: '{}', value: 600 }]
+                  - expr: {{Q("stack-performance", "Tokens a second: the stack and a request", "the stack (5 min)")}}
+                    eval_time: 8m
+                    exp_samples: [{ labels: '{}', value: 600 }]
+                  - expr: {{Q("stack-performance", "Decode speed a request (5 min)")}}
+                    eval_time: 8m
+                    exp_samples: [{ labels: '{}', value: 75 }]
+                  - expr: {{Q("stack-performance", "Prefill speed a request (5 min)")}}
+                    eval_time: 8m
+                    exp_samples: [{ labels: '{}', value: 1500 }]
+                  - expr: {{Q("stack-performance", "Active requests")}}
+                    eval_time: 8m
+                    exp_samples: [{ labels: '{}', value: 8 }]
+                  - expr: {{Q("stack-performance", "Tokens a second, by model and its GPUs", "{{model}} · GPUs {{gpus}}")}}
+                    eval_time: 8m
+                    exp_samples:
+                      - { labels: '{model="qwen",gpus="all"}', value: 400 }
+                      - { labels: '{model="flash",gpus="0,1"}', value: 150 }
+                      - { labels: '{model="swift",gpus="2"}', value: 50 }
+                  - expr: {{Q("stack-performance", "Decode speed a request, by model (5 min)", "{{model}}")}}
+                    eval_time: 8m
+                    exp_samples:
+                      - { labels: '{model="qwen"}', value: 100 }
+                      - { labels: '{model="flash"}', value: 50 }
+                      - { labels: '{model="swift"}', value: 50 }
+                  - expr: {{Q("llm-users", "Stack throughput (live)")}}
+                    eval_time: 8m
+                    exp_samples: [{ labels: '{}', value: 600 }]
+                  - expr: {{Q("llm-overview", "Stack throughput: tokens generated a second (5 min)", "the stack, every engine")}}
+                    eval_time: 8m
+                    exp_samples: [{ labels: '{}', value: 600 }]
+                  - expr: {{Q("llm-overview", "Requests running", "running")}}
+                    eval_time: 8m
+                    exp_samples: [{ labels: '{}', value: 8 }]
+                  # Idle: no answer for the 5 minutes before, so a request's speed is none (not 0, not the last one), the stack's 0.
+                  - expr: {{Q("stack-performance", "Decode speed a request (5 min)")}}
+                    eval_time: 20m
+                    exp_samples: []
+            """;
+        var (exit, output) = await promtool.RunAsync("speeds.yml", test, "test", "rules");
+        Assert.True(exit == 0, output);
+    }
+
     /// <summary>Each call of a PromQL function in an expression: its top-level arguments, as written.</summary>
     private static IEnumerable<List<string>> Calls(string expr, string function)
     {

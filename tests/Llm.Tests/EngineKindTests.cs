@@ -465,10 +465,18 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
         Assert.False(File.Exists(Path.Combine(Config, "vllm", VllmBackend.PresetsFile)));
         var row = (await admin.JsonAsync(await admin.GetAsync("/api/admin/models"))).GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == "swift");
         Assert.Equal("sglang", row.GetProperty("engineKind").GetString());
-        // At the gateway: its own port on the sglang engine, never more at once than its answers at once.
+        // At the gateway: its own port on the sglang engine, never more at once than its people at once.
         var registered = gateway.Managed.Values.Single(m => m.Name == "swift");
         Assert.Equal("http://sglang:8001/v1", registered.Params["api_base"]!.GetValue<string>());
         Assert.Equal(48, registered.Params["max_parallel_requests"]!.GetValue<int>());
+        // Loaded, Prometheus scrapes it at its port, labelled with its GPUs for the dashboards' figures by GPU.
+        using (var scope = f.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<ModelCatalog>().WriteTargetsAsync(["swift"]);
+        }
+        var target = Assert.Single(System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(Config, ModelCatalog.TargetsFile)))!.AsArray())!;
+        Assert.Equal(("sglang:8001", "swift", "sglang", "0"), (target["targets"]![0]!.GetValue<string>(), target["labels"]!["model"]!.GetValue<string>(),
+            target["labels"]!["kind"]!.GetValue<string>(), target["labels"]!["gpus"]!.GetValue<string>()));
 
         // LMCache is vLLM's: refused.
         var refused = await admin.PostAsync("/api/admin/models", new { name = "swift2", engineKind = "sglang", file = "hf/acme/Flash@abc123", kvTier = "lmcache" });

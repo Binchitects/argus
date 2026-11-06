@@ -1184,7 +1184,7 @@ export const topics = {
     sectionNames: { one: 'This dashboard', all: 'The dashboards' },
     sections: {
       'llm-overview': { name: 'LLM Overview', text: 'Requests, tokens, cost and latency at the gateway, and the engine behind it, with the share of each prompt read from the cache.' },
-      'stack-performance': { name: 'Stack Performance', text: 'Throughput, time to first token, queues and the cache: how fast the model answers.' },
+      'stack-performance': { name: 'Stack Performance', text: "The stack's throughput (every token a second, all engines) and a request's own decode speed, per GPU and model; time to first token, queues and the cache." },
       'stack-health': { name: 'Stack Health & Alerts', text: 'Which services answer, the alerts firing now, and Prometheus itself.' },
       resources: { name: 'Resources (CPU, Memory, GPU)', text: 'CPU, memory and GPU of the machine and of each service.' },
       'gpu-hardware': { name: 'GPU Hardware', text: 'The GPU: utilisation, memory, temperature, power and clocks.' },

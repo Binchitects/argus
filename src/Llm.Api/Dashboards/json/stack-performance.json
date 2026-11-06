@@ -6,7 +6,9 @@
   "tags": [
     "llmservice",
     "performance",
-    "llamacpp"
+    "llamacpp",
+    "vllm",
+    "sglang"
   ],
   "timezone": "browser",
   "schemaVersion": 39,
@@ -27,7 +29,7 @@
     {
       "id": 1,
       "type": "row",
-      "title": "Engine \u2014 throughput",
+      "title": "Throughput: the stack and a request (every engine)",
       "collapsed": false,
       "gridPos": {
         "h": 1,
@@ -40,8 +42,8 @@
     {
       "id": 2,
       "type": "stat",
-      "title": "Decode rate (live)",
-      "description": "Tokens per second EACH active request is getting right now. Built from the decode-step counter, which advances while tokens are produced, times accepted MTP draft tokens per step when speculative decoding is on. The engine's token counters cannot be used for this: they only move when a request finishes, so a rate over them reads 0 for the whole of a long answer and spikes afterwards. 0 when idle -- it is never a stale value.",
+      "title": "Stack throughput (live)",
+      "description": "Tokens the whole stack generates a second now, every engine and model together (llama.cpp, vLLM, SGLang). On llama.cpp each busy slot makes a token at each decode step, so this counts every slot; the decode steps alone (what this panel used to show) are one request's speed however many run at once. 0 when idle.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -59,7 +61,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(sum(rate(llamacpp:n_decode_total[$__rate_interval])) * (1 + ((sum(rate(llamacpp:spec_decode_num_accepted_tokens_total[5m])) / sum(rate(llamacpp:spec_decode_num_drafts_total[5m]))) > 0 or vector(0))))",
+          "expr": "(sum(rate((llamacpp:n_busy_slots_per_decode * llamacpp:n_decode_total)[1m:15s])) * (1 + ((sum(rate(llamacpp:spec_decode_num_accepted_tokens_total[5m])) / sum(rate(llamacpp:spec_decode_num_drafts_total[5m]))) > 0 or vector(0))) or vector(0)) + (sum(rate(vllm:generation_tokens_total[1m])) or vector(0)) + (sum(rate(sglang:generation_tokens_total[1m])) or vector(0))",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -93,18 +95,6 @@
               {
                 "color": "text",
                 "value": null
-              },
-              {
-                "color": "red",
-                "value": 0.1
-              },
-              {
-                "color": "orange",
-                "value": 5
-              },
-              {
-                "color": "green",
-                "value": 9
               }
             ]
           },
@@ -116,8 +106,8 @@
     {
       "id": 4,
       "type": "stat",
-      "title": "Generation, finished requests (5 min)",
-      "description": "Average decode speed of requests that FINISHED in the last 5 minutes, as the engine timed them. Exact, but it only updates when a request completes. Shows 'idle' when nothing finished in the window, instead of carrying an old number forward.",
+      "title": "Decode speed a request (5 min)",
+      "description": "How fast one answer streams: tokens over the time spent making them (not the prompt, not the wait), averaged over the requests of the last 5 minutes by their tokens, every engine. 'idle' when none answered.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -135,7 +125,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(rate(llamacpp:tokens_predicted_total[5m])) / sum(rate(llamacpp:tokens_predicted_seconds_total[5m])) >= 0",
+          "expr": "((sum(rate(llamacpp:tokens_predicted_total[5m])) or vector(0)) + (sum(rate(vllm:request_generation_tokens_sum[5m])) or vector(0)) + (sum(rate(sglang:inter_token_latency_seconds_count[5m])) or vector(0))) / ((sum(rate(llamacpp:tokens_predicted_seconds_total[5m])) or vector(0)) + (sum(rate(vllm:request_decode_time_seconds_sum[5m])) or vector(0)) + (sum(rate(sglang:inter_token_latency_seconds_sum[5m])) or vector(0))) >= 0",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -188,8 +178,8 @@
     {
       "id": 6,
       "type": "stat",
-      "title": "Prefill, finished requests (5 min)",
-      "description": "Prompt-processing speed of requests that finished in the last 5 minutes. 'idle' when none did.",
+      "title": "Prefill speed a request (5 min)",
+      "description": "Prompt tokens read a second by a request, over the last 5 minutes (llama.cpp and vLLM). 'idle' when none did.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -207,7 +197,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(rate(llamacpp:prompt_tokens_total[5m])) / sum(rate(llamacpp:prompt_seconds_total[5m])) >= 0",
+          "expr": "((sum(rate(llamacpp:prompt_tokens_total[5m])) or vector(0)) + (sum(rate(vllm:request_prompt_tokens_sum[5m])) or vector(0))) / ((sum(rate(llamacpp:prompt_seconds_total[5m])) or vector(0)) + (sum(rate(vllm:request_prefill_time_seconds_sum[5m])) or vector(0))) >= 0",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -253,7 +243,7 @@
       "id": 8,
       "type": "stat",
       "title": "Active requests",
-      "description": "Requests being processed now, across all slots. The engine runs LLAMACPP_PARALLEL slots; beyond that, requests queue.",
+      "description": "Requests answering now, every engine together. Beyond a model's people at once, requests wait.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -271,7 +261,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(llamacpp:requests_processing)",
+          "expr": "(sum(llamacpp:requests_processing) or vector(0)) + (sum(vllm:num_requests_running) or vector(0)) + (sum(sglang:num_running_reqs{tp_rank=\"0\",priority=\"\"}) or vector(0))",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -317,7 +307,7 @@
       "id": 10,
       "type": "stat",
       "title": "Queued",
-      "description": "Requests waiting for a free slot. Anything above 0 for long means more concurrent users than slots.",
+      "description": "Requests waiting for room in an engine. Above 0 for long: more people at once than the models hold.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -335,7 +325,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(llamacpp:requests_deferred)",
+          "expr": "(sum(llamacpp:requests_deferred) or vector(0)) + (sum(vllm:num_requests_waiting) or vector(0)) + (sum(sglang:num_queue_reqs{tp_rank=\"0\",priority=\"\"}) or vector(0))",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -388,8 +378,8 @@
     {
       "id": 12,
       "type": "stat",
-      "title": "MTP draft acceptance (5 min)",
-      "description": "Share of multi-token-prediction draft tokens the model accepted, for requests finished in the last 5 minutes. Higher means more speedup. 'off' when speculative decoding is not enabled or nothing finished recently.",
+      "title": "Draft acceptance (5 min)",
+      "description": "Share of drafted tokens the model accepted (MTP or EAGLE), llama.cpp and vLLM. 'off' when no model drafts.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -407,7 +397,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "100 * sum(rate(llamacpp:spec_decode_num_accepted_tokens_total[5m])) / sum(rate(llamacpp:spec_decode_num_draft_tokens_total[5m])) >= 0",
+          "expr": "100 * ((sum(rate(llamacpp:spec_decode_num_accepted_tokens_total[5m])) or vector(0)) + (sum(rate(vllm:spec_decode_num_accepted_tokens_total[5m])) or vector(0))) / ((sum(rate(llamacpp:spec_decode_num_draft_tokens_total[5m])) or vector(0)) + (sum(rate(vllm:spec_decode_num_draft_tokens_total[5m])) or vector(0))) >= 0",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -460,8 +450,8 @@
     {
       "id": 16,
       "type": "timeseries",
-      "title": "Decode and prefill speed (tok/s)",
-      "description": "'live decode' is per active request, right now. The two '(finished, 5 min)' lines are the engine's own timings of completed requests, so they lag and have gaps when nothing finished. None of these fall back to a lifetime average any more, which is what used to freeze the numbers.",
+      "title": "Tokens a second: the stack and a request",
+      "description": "'the stack' is every token generated a second, all requests and engines together, now and over 5 minutes. 'a request, decode' is how fast one answer streams: its tokens over the time it spent making them, not its prompt or its wait, averaged over requests by their tokens (5 minutes). 'a request, prefill' is how fast its prompt was read. With N answering at once, the stack makes about N times a request's speed.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -479,8 +469,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(sum(rate(llamacpp:n_decode_total[$__rate_interval])) * (1 + ((sum(rate(llamacpp:spec_decode_num_accepted_tokens_total[5m])) / sum(rate(llamacpp:spec_decode_num_drafts_total[5m]))) > 0 or vector(0))))",
-          "legendFormat": "live decode (per request)",
+          "expr": "(sum(rate((llamacpp:n_busy_slots_per_decode * llamacpp:n_decode_total)[1m:15s])) * (1 + ((sum(rate(llamacpp:spec_decode_num_accepted_tokens_total[5m])) / sum(rate(llamacpp:spec_decode_num_drafts_total[5m]))) > 0 or vector(0))) or vector(0)) + (sum(rate(vllm:generation_tokens_total[1m])) or vector(0)) + (sum(rate(sglang:generation_tokens_total[1m])) or vector(0))",
+          "legendFormat": "the stack (live)",
           "refId": "A",
           "instant": false,
           "range": true
@@ -491,8 +481,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(rate(llamacpp:tokens_predicted_total[5m])) / sum(rate(llamacpp:tokens_predicted_seconds_total[5m])) >= 0",
-          "legendFormat": "generation (finished, 5 min)",
+          "expr": "(sum(rate(llamacpp:tokens_predicted_total[5m])) or vector(0)) + (sum(rate(vllm:generation_tokens_total[5m])) or vector(0)) + (sum(rate(sglang:generation_tokens_total[5m])) or vector(0))",
+          "legendFormat": "the stack (5 min)",
           "refId": "B",
           "instant": false,
           "range": true
@@ -503,9 +493,21 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(rate(llamacpp:prompt_tokens_total[5m])) / sum(rate(llamacpp:prompt_seconds_total[5m])) >= 0",
-          "legendFormat": "prefill (finished, 5 min)",
+          "expr": "((sum(rate(llamacpp:tokens_predicted_total[5m])) or vector(0)) + (sum(rate(vllm:request_generation_tokens_sum[5m])) or vector(0)) + (sum(rate(sglang:inter_token_latency_seconds_count[5m])) or vector(0))) / ((sum(rate(llamacpp:tokens_predicted_seconds_total[5m])) or vector(0)) + (sum(rate(vllm:request_decode_time_seconds_sum[5m])) or vector(0)) + (sum(rate(sglang:inter_token_latency_seconds_sum[5m])) or vector(0))) >= 0",
+          "legendFormat": "a request, decode (5 min)",
           "refId": "C",
+          "instant": false,
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "((sum(rate(llamacpp:prompt_tokens_total[5m])) or vector(0)) + (sum(rate(vllm:request_prompt_tokens_sum[5m])) or vector(0))) / ((sum(rate(llamacpp:prompt_seconds_total[5m])) or vector(0)) + (sum(rate(vllm:request_prefill_time_seconds_sum[5m])) or vector(0))) >= 0",
+          "legendFormat": "a request, prefill (5 min)",
+          "refId": "D",
           "instant": false,
           "range": true
         }
@@ -551,7 +553,7 @@
       "id": 19,
       "type": "timeseries",
       "title": "Token volume (per window)",
-      "description": "Tokens counted per window. The engine adds a request's tokens when it FINISHES, so a long answer appears as one bar at its end, not spread over the time it took.",
+      "description": "Tokens counted per window, every engine. llama.cpp adds a request's tokens when it finishes, so a long answer is one bar at its end; vLLM and SGLang count them as they go.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -569,10 +571,11 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
+          "expr": "(sum(increase(llamacpp:tokens_predicted_total[$__rate_interval])) or vector(0)) + (sum(increase(vllm:generation_tokens_total[$__rate_interval])) or vector(0)) + (sum(increase(sglang:generation_tokens_total[$__rate_interval])) or vector(0))",
+          "legendFormat": "generated",
           "refId": "A",
-          "range": true,
-          "expr": "increase(llamacpp:tokens_predicted_total[$__rate_interval])",
-          "legendFormat": "generated"
+          "instant": false,
+          "range": true
         },
         {
           "datasource": {
@@ -580,10 +583,11 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
+          "expr": "(sum(increase(llamacpp:prompt_tokens_total[$__rate_interval])) or vector(0)) + (sum(increase(vllm:prompt_tokens_total[$__rate_interval])) or vector(0)) + (sum(increase(sglang:prompt_tokens_total[$__rate_interval])) or vector(0))",
+          "legendFormat": "prompt",
           "refId": "B",
-          "range": true,
-          "expr": "increase(llamacpp:prompt_tokens_total[$__rate_interval])",
-          "legendFormat": "prompt (processed)"
+          "instant": false,
+          "range": true
         },
         {
           "datasource": {
@@ -591,10 +595,11 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
+          "expr": "(sum(increase(llamacpp:prompt_tokens_cached_total[$__rate_interval])) or vector(0)) + (sum(increase(vllm:prefix_cache_hits_total[$__rate_interval])) or vector(0)) + (sum(increase(sglang:cached_tokens_total[$__rate_interval])) or vector(0))",
+          "legendFormat": "prompt (cache hit)",
           "refId": "C",
-          "range": true,
-          "expr": "increase(llamacpp:prompt_tokens_cached_total[$__rate_interval])",
-          "legendFormat": "prompt (cache hit)"
+          "instant": false,
+          "range": true
         }
       ],
       "options": {
@@ -718,7 +723,7 @@
       "id": 24,
       "type": "timeseries",
       "title": "Concurrency",
-      "description": "Requests in slots versus waiting for one. 'busy slots / decode' was removed: the engine exports it as a LIFETIME average, so it never reflected current load.",
+      "description": "Requests answering now versus waiting for room, every engine together.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -736,7 +741,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(llamacpp:requests_processing)",
+          "expr": "(sum(llamacpp:requests_processing) or vector(0)) + (sum(vllm:num_requests_running) or vector(0)) + (sum(sglang:num_running_reqs{tp_rank=\"0\",priority=\"\"}) or vector(0))",
           "legendFormat": "active",
           "refId": "A",
           "instant": false,
@@ -748,9 +753,154 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(llamacpp:requests_deferred)",
+          "expr": "(sum(llamacpp:requests_deferred) or vector(0)) + (sum(vllm:num_requests_waiting) or vector(0)) + (sum(sglang:num_queue_reqs{tp_rank=\"0\",priority=\"\"}) or vector(0))",
           "legendFormat": "queued",
           "refId": "B",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 62,
+      "type": "row",
+      "title": "Per GPU and model",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 21
+      },
+      "panels": []
+    },
+    {
+      "id": 63,
+      "type": "timeseries",
+      "title": "Tokens a second, by model and its GPUs",
+      "description": "Tokens each model generates a second now, named with the GPUs its engine runs on (a vLLM or SGLang copy on its GPUs; a llama.cpp model on the GPUs it was given, 'all' for every one). Beside the GPU row below, it says which GPU's engine does the work.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 22
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (model, gpus) (rate((llamacpp:n_busy_slots_per_decode * llamacpp:n_decode_total)[1m:15s])) or sum by (model, gpus) (rate(vllm:generation_tokens_total[1m])) or sum by (model, gpus) (rate(sglang:generation_tokens_total[1m]))",
+          "legendFormat": "{{model}} · GPUs {{gpus}}",
+          "refId": "A",
+          "instant": false,
+          "range": true
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "mean",
+            "max",
+            "lastNotNull"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 10,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            }
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 64,
+      "type": "timeseries",
+      "title": "Decode speed a request, by model (5 min)",
+      "description": "How fast one answer of each model streams: its tokens over the time it spent making them, over the last 5 minutes.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 22
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (model) (rate(llamacpp:tokens_predicted_total[5m])) / sum by (model) (rate(llamacpp:tokens_predicted_seconds_total[5m])) >= 0 or sum by (model) (rate(vllm:request_generation_tokens_sum[5m])) / sum by (model) (rate(vllm:request_decode_time_seconds_sum[5m])) >= 0 or sum by (model) (rate(sglang:inter_token_latency_seconds_count[5m])) / sum by (model) (rate(sglang:inter_token_latency_seconds_sum[5m])) >= 0",
+          "legendFormat": "{{model}}",
+          "refId": "A",
           "instant": false,
           "range": true
         }
@@ -801,7 +951,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 21
+        "y": 30
       },
       "panels": []
     },
@@ -818,7 +968,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 22
+        "y": 31
       },
       "targets": [
         {
@@ -898,7 +1048,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 22
+        "y": 31
       },
       "targets": [
         {
@@ -976,7 +1126,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 30
+        "y": 39
       },
       "targets": [
         {
@@ -1066,7 +1216,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 30
+        "y": 39
       },
       "targets": [
         {
@@ -1152,7 +1302,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 38
+        "y": 47
       },
       "panels": []
     },
@@ -1169,7 +1319,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 39
+        "y": 48
       },
       "targets": [
         {
@@ -1237,7 +1387,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 39
+        "y": 48
       },
       "targets": [
         {
@@ -1305,7 +1455,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 47
+        "y": 56
       },
       "targets": [
         {
@@ -1395,7 +1545,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 47
+        "y": 56
       },
       "targets": [
         {
@@ -1473,7 +1623,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 55
+        "y": 64
       },
       "targets": [
         {
@@ -1575,7 +1725,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 55
+        "y": 64
       },
       "targets": [
         {
@@ -1641,7 +1791,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 55
+        "y": 64
       },
       "targets": [
         {
@@ -1680,7 +1830,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 63
+        "y": 72
       },
       "panels": []
     },
@@ -1697,7 +1847,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 64
+        "y": 73
       },
       "targets": [
         {

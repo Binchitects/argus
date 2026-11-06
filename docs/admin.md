@@ -1770,7 +1770,7 @@ role can give one without the others (Admin → Access → Roles):
 
 | area | its dashboard | in detail | permission |
 |---|---|---|---|
-| the model and its users | **LLM and users**: requests, tokens, latency and time to first token, the line (running, waiting, people, the average wait, refusals), the engine's speed, and who uses what (per person, tokens and cost, refused by rate limits) | LLM Overview, Stack Performance, Argus (Usage by person is on Usage) | `usage.read` |
+| the model and its users | **LLM and users**: requests, tokens, latency and time to first token, the line (running, waiting, people, the average wait, refusals), the stack's throughput and a request's speed, and who uses what (per person, tokens, cost and speed, refused by rate limits) | LLM Overview, Stack Performance, Argus (Usage by person is on Usage) | `usage.read` |
 | the system | **System**: targets up and down, alerts firing, the line, each service's requests, server errors and response time (p95, through Traefik), the host | Stack Health & Alerts, Host & Containers, Logs, Indexing | `monitoring.read` |
 | the hardware | **Hardware**: GPU utilisation, memory, temperature, fan, power against its limit, clocks and throttling; CPU by mode and per core, load, clock and temperature; memory, swap, disks, disk I/O, network, NVMe temperature | GPU Hardware, Resources | `hardware.read` |
 
@@ -1788,6 +1788,34 @@ refuses one that came through it. NVIDIA's DCGM detail (SM activity, tensor
 cores, XID errors, ECC, NVLink) needs the **dcgm** profile
 (`COMPOSE_PROFILES=dcgm`; the offline bundle carries its image): the Hardware dashboard
 says so, and GPU Hardware's DCGM panels are empty without it.
+
+**Tokens a second** mean two things, and the dashboards name which:
+
+- **Stack throughput**: every token the stack generates a second, all requests,
+  models and engines added together (llama.cpp, vLLM and SGLang, whichever
+  run). On llama.cpp it counts each busy slot at each decode step; vLLM and
+  SGLang count each token as it is made. With 10 people answering at once at
+  30 tokens a second each, it says about 300.
+- **Decode speed a request**: how fast one answer streams, its tokens over the
+  time it spent making them, not its prompt nor its wait in line, averaged over
+  the last 5 minutes' requests by their tokens; prefill is how fast a prompt
+  was read. It is "idle" when nothing answered, not 0 nor an old figure.
+
+Until 7.8 Stack Performance and LLM and users showed llama.cpp's decode steps a
+second as the "decode rate": one step serves every slot answering at once, so it
+was one answer's speed (and less over a window with idle time), never the
+stack's; and they read llama.cpp's counters only, so vLLM and SGLang showed
+nothing. LLM Overview's output tokens a second took the first engine it found
+and dropped the others. Measured on llama.cpp with 4 answers at once: the steps
+went at 97 a second while the stack made 382 tokens a second. Stack Performance
+also has **Per GPU and model**: the tokens a second each model makes, named with
+the GPUs its engine runs on (Prometheus's `gpus` label, which the app writes in
+its scrape targets: a vLLM or SGLang copy's GPUs, a llama.cpp model's own or
+`all`), and each model's decode speed, beside its GPU row (utilisation, memory,
+power, clocks). **Tokens and cost per person** (LLM and users, Usage by person)
+has each person's **Output tokens a second**: their answers' tokens after the
+first over the time after the first, from the ledger. The ledger's token panels
+are a second over each interval, not a count per bucket.
 
 The dashboards are files in Grafana's JSON format, in `src/Llm.Api/Dashboards/json/`
 (built into the app's image, so an upgrade brings the new ones), and the app draws

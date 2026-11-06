@@ -394,6 +394,8 @@ public sealed class ModelsTests(AppFixture app) : IDisposable
         Assert.Equal("Qwen3.8-Flash-Next\ntiny-b\n", await File.ReadAllTextAsync(Path.Combine(Config, "keep")));
         await EventuallyAsync(() => Task.FromResult(app.Engine.StatusOf("tiny-b") == "loaded" && app.Engine.StatusOf("Qwen3.8-Flash-Next") == "loaded"), "both kept models loaded");
         await EventuallyAsync(async () => (await File.ReadAllTextAsync(Path.Combine(Config, "targets.json"))).Contains("\"model\":\"tiny-b\"", StringComparison.Ordinal), "Prometheus scrapes tiny-b");
+        // Labelled with its GPUs, for the dashboards' figures by GPU: every one, as it names none.
+        Assert.Contains("\"model\":\"tiny-b\",\"tier\":\"optional\",\"component\":\"inference\",\"gpus\":\"all\"", await File.ReadAllTextAsync(Path.Combine(Config, "targets.json")), StringComparison.Ordinal);
 
         // Every place kept: no other loads, and no other can be kept.
         await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", new { name = "plain", file = "plain/Plain-Q8_0.gguf", context = 8192, kvType = "f16", thinking = false, tools = false }));

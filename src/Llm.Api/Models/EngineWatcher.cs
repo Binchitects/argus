@@ -222,7 +222,7 @@ public sealed partial class EngineWatcher : BackgroundService
                 {
                     if (lead)
                     {
-                        catalog.WriteTargets(names);
+                        await catalog.WriteTargetsAsync(names, stoppingToken);
                     }
                     chatModels.Forget();
                     loaded = now;

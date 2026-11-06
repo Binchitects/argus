@@ -96,6 +96,24 @@ public sealed class DashboardTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Each_persons_answers_stream_at_their_own_speed_after_the_first_token()
+    {
+        var b = await Admin();
+        foreach (var uid in new[] { "usage-by-user", "llm-users" })
+        {
+            var (_, k) = await Load(b, uid);
+            var table = (await Query(b, uid, k["Tokens and cost per person"])).GetProperty("results")[0].GetProperty("table");
+            var cols = table.GetProperty("columns").EnumerateArray().Select(c => c.GetProperty("name").GetString()).ToList();
+            var rows = table.GetProperty("rows").EnumerateArray().ToDictionary(r => r[0].GetString()!, r => r);
+            var speed = cols.IndexOf("Output tokens a second");
+            // alice: 9 tokens in the second after her first, then 5 in 2 seconds; bob 4 in half a second. One token alone is no speed.
+            Assert.Equal(4.7, rows["alice@example.test"][speed].GetDouble());
+            Assert.Equal(8.0, rows["bob@example.test"][speed].GetDouble());
+            Assert.Equal(JsonValueKind.Null, rows["(unattributed)"][speed].ValueKind);
+        }
+    }
+
+    [Fact]
     public async Task Per_person_table_attributes_key_and_chat_usage()
     {
         var b = await Admin();

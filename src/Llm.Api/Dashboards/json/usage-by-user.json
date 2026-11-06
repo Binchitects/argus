@@ -1038,7 +1038,7 @@
         "w": 24,
         "h": 9
       },
-      "description": "Per person, every surface combined. Cost is what the gateway recorded per request.",
+      "description": "Per person, every surface combined. Cost is what the gateway recorded per request. Output tokens a second: how fast that person's answers streamed, after their first token.",
       "targets": [
         {
           "datasource": {
@@ -1048,7 +1048,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "select coalesce(s.person, '(unattributed)') as \"Person\", count(*) as \"Requests\", sum(greatest(coalesce(s.prompt_tokens,0) - s.cached_tokens, 0)) as \"Input, cache miss\", sum(s.cached_tokens) as \"Input, cache hit\", round(100.0*sum(s.cached_tokens)/nullif(sum(coalesce(s.prompt_tokens,0)),0),1) as \"Cache hit %\", sum(coalesce(s.completion_tokens,0)) as \"Output\", round(sum(s.cost)::numeric,4) as \"Cost\" from requests s where $__timeFilter(s.started_at) and s.status <> 'refused' group by 1 order by \"Cost\" desc nulls last",
+          "rawSql": "select coalesce(s.person, '(unattributed)') as \"Person\", count(*) as \"Requests\", sum(greatest(coalesce(s.prompt_tokens,0) - s.cached_tokens, 0)) as \"Input, cache miss\", sum(s.cached_tokens) as \"Input, cache hit\", round(100.0*sum(s.cached_tokens)/nullif(sum(coalesce(s.prompt_tokens,0)),0),1) as \"Cache hit %\", sum(coalesce(s.completion_tokens,0)) as \"Output\", round((sum(s.completion_tokens - 1) filter (where s.first_token_at is not null and s.ended_at > s.first_token_at and s.completion_tokens > 1) / nullif(sum(extract(epoch from (s.ended_at - s.first_token_at))) filter (where s.first_token_at is not null and s.ended_at > s.first_token_at and s.completion_tokens > 1), 0))::numeric, 1) as \"Output tokens a second\", round(sum(s.cost)::numeric,4) as \"Cost\" from requests s where $__timeFilter(s.started_at) and s.status <> 'refused' group by 1 order by \"Cost\" desc nulls last",
           "refId": "A"
         }
       ],

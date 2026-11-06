@@ -437,12 +437,12 @@
     },
     {
       "type": "timeseries",
-      "title": "Token throughput: cached input, uncached input, output",
+      "title": "Tokens a second: cached input, uncached input, output",
       "datasource": {
         "type": "postgres",
         "uid": "gateway-db"
       },
-      "description": "Prompt tokens dominate long-context work; completion tokens are what the GPU actually generates.",
+      "description": "From the ledger: each kind of token a second over each interval, every model and engine, by when its request started.",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -458,7 +458,7 @@
           },
           "format": "time_series",
           "rawQuery": true,
-          "rawSql": "SELECT $__timeGroupAlias(started_at, $__interval), COALESCE(sum(greatest(coalesce(prompt_tokens,0) - cached_tokens,0)),0) AS \"input, cache miss\", COALESCE(sum(cached_tokens),0) AS \"input, cache hit\", COALESCE(sum(completion_tokens),0) AS \"output\" from requests WHERE $__timeFilter(started_at) GROUP BY 1 ORDER BY 1"
+          "rawSql": "SELECT $__timeGroupAlias(started_at, $__interval), (COALESCE(sum(greatest(coalesce(prompt_tokens,0) - cached_tokens,0)),0)) / ($__interval_ms / 1000.0) AS \"input, cache miss\", (COALESCE(sum(cached_tokens),0)) / ($__interval_ms / 1000.0) AS \"input, cache hit\", (COALESCE(sum(completion_tokens),0)) / ($__interval_ms / 1000.0) AS \"output\" from requests WHERE $__timeFilter(started_at) GROUP BY 1 ORDER BY 1"
         }
       ],
       "fieldConfig": {
@@ -751,8 +751,8 @@
     {
       "id": 2,
       "type": "stat",
-      "title": "Decode rate (live)",
-      "description": "Tokens per second EACH active request is getting right now. Built from the decode-step counter, which advances while tokens are produced, times accepted MTP draft tokens per step when speculative decoding is on. The engine's token counters cannot be used for this: they only move when a request finishes, so a rate over them reads 0 for the whole of a long answer and spikes afterwards. 0 when idle -- it is never a stale value.",
+      "title": "Stack throughput (live)",
+      "description": "Tokens the whole stack generates a second now, every engine and model together (llama.cpp, vLLM, SGLang). On llama.cpp each busy slot makes a token at each decode step, so this counts every slot; the decode steps alone (what this panel used to show) are one request's speed however many run at once. 0 when idle.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -770,7 +770,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(sum(rate(llamacpp:n_decode_total[$__rate_interval])) * (1 + ((sum(rate(llamacpp:spec_decode_num_accepted_tokens_total[5m])) / sum(rate(llamacpp:spec_decode_num_drafts_total[5m]))) > 0 or vector(0))))",
+          "expr": "(sum(rate((llamacpp:n_busy_slots_per_decode * llamacpp:n_decode_total)[1m:15s])) * (1 + ((sum(rate(llamacpp:spec_decode_num_accepted_tokens_total[5m])) / sum(rate(llamacpp:spec_decode_num_drafts_total[5m]))) > 0 or vector(0))) or vector(0)) + (sum(rate(vllm:generation_tokens_total[1m])) or vector(0)) + (sum(rate(sglang:generation_tokens_total[1m])) or vector(0))",
           "legendFormat": "",
           "refId": "A",
           "instant": true,
@@ -804,18 +804,6 @@
               {
                 "color": "text",
                 "value": null
-              },
-              {
-                "color": "red",
-                "value": 0.1
-              },
-              {
-                "color": "orange",
-                "value": 5
-              },
-              {
-                "color": "green",
-                "value": 9
               }
             ]
           },
@@ -827,8 +815,8 @@
     {
       "id": 16,
       "type": "timeseries",
-      "title": "Decode and prefill speed (tok/s)",
-      "description": "'live decode' is per active request, right now. The two '(finished, 5 min)' lines are the engine's own timings of completed requests, so they lag and have gaps when nothing finished. None of these fall back to a lifetime average any more, which is what used to freeze the numbers.",
+      "title": "Tokens a second: the stack and a request",
+      "description": "'the stack' is every token generated a second, all requests and engines together, now and over 5 minutes. 'a request, decode' is how fast one answer streams: its tokens over the time it spent making them, not its prompt or its wait, averaged over requests by their tokens (5 minutes). 'a request, prefill' is how fast its prompt was read. With N answering at once, the stack makes about N times a request's speed.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -846,8 +834,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "(sum(rate(llamacpp:n_decode_total[$__rate_interval])) * (1 + ((sum(rate(llamacpp:spec_decode_num_accepted_tokens_total[5m])) / sum(rate(llamacpp:spec_decode_num_drafts_total[5m]))) > 0 or vector(0))))",
-          "legendFormat": "live decode (per request)",
+          "expr": "(sum(rate((llamacpp:n_busy_slots_per_decode * llamacpp:n_decode_total)[1m:15s])) * (1 + ((sum(rate(llamacpp:spec_decode_num_accepted_tokens_total[5m])) / sum(rate(llamacpp:spec_decode_num_drafts_total[5m]))) > 0 or vector(0))) or vector(0)) + (sum(rate(vllm:generation_tokens_total[1m])) or vector(0)) + (sum(rate(sglang:generation_tokens_total[1m])) or vector(0))",
+          "legendFormat": "the stack (live)",
           "refId": "A",
           "instant": false,
           "range": true
@@ -858,8 +846,8 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(rate(llamacpp:tokens_predicted_total[5m])) / sum(rate(llamacpp:tokens_predicted_seconds_total[5m])) >= 0",
-          "legendFormat": "generation (finished, 5 min)",
+          "expr": "(sum(rate(llamacpp:tokens_predicted_total[5m])) or vector(0)) + (sum(rate(vllm:generation_tokens_total[5m])) or vector(0)) + (sum(rate(sglang:generation_tokens_total[5m])) or vector(0))",
+          "legendFormat": "the stack (5 min)",
           "refId": "B",
           "instant": false,
           "range": true
@@ -870,9 +858,21 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(rate(llamacpp:prompt_tokens_total[5m])) / sum(rate(llamacpp:prompt_seconds_total[5m])) >= 0",
-          "legendFormat": "prefill (finished, 5 min)",
+          "expr": "((sum(rate(llamacpp:tokens_predicted_total[5m])) or vector(0)) + (sum(rate(vllm:request_generation_tokens_sum[5m])) or vector(0)) + (sum(rate(sglang:inter_token_latency_seconds_count[5m])) or vector(0))) / ((sum(rate(llamacpp:tokens_predicted_seconds_total[5m])) or vector(0)) + (sum(rate(vllm:request_decode_time_seconds_sum[5m])) or vector(0)) + (sum(rate(sglang:inter_token_latency_seconds_sum[5m])) or vector(0))) >= 0",
+          "legendFormat": "a request, decode (5 min)",
           "refId": "C",
+          "instant": false,
+          "range": true
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "editorMode": "code",
+          "expr": "((sum(rate(llamacpp:prompt_tokens_total[5m])) or vector(0)) + (sum(rate(vllm:request_prompt_tokens_sum[5m])) or vector(0))) / ((sum(rate(llamacpp:prompt_seconds_total[5m])) or vector(0)) + (sum(rate(vllm:request_prefill_time_seconds_sum[5m])) or vector(0))) >= 0",
+          "legendFormat": "a request, prefill (5 min)",
+          "refId": "D",
           "instant": false,
           "range": true
         }
@@ -918,7 +918,7 @@
       "id": 24,
       "type": "timeseries",
       "title": "Concurrency",
-      "description": "Requests in slots versus waiting for one. 'busy slots / decode' was removed: the engine exports it as a LIFETIME average, so it never reflected current load.",
+      "description": "Requests answering now versus waiting for room, every engine together.",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -936,7 +936,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(llamacpp:requests_processing)",
+          "expr": "(sum(llamacpp:requests_processing) or vector(0)) + (sum(vllm:num_requests_running) or vector(0)) + (sum(sglang:num_running_reqs{tp_rank=\"0\",priority=\"\"}) or vector(0))",
           "legendFormat": "active",
           "refId": "A",
           "instant": false,
@@ -948,7 +948,7 @@
             "uid": "prometheus"
           },
           "editorMode": "code",
-          "expr": "sum(llamacpp:requests_deferred)",
+          "expr": "(sum(llamacpp:requests_deferred) or vector(0)) + (sum(vllm:num_requests_waiting) or vector(0)) + (sum(sglang:num_queue_reqs{tp_rank=\"0\",priority=\"\"}) or vector(0))",
           "legendFormat": "queued",
           "refId": "B",
           "instant": false,
@@ -1338,7 +1338,7 @@
         "x": 0,
         "y": 48
       },
-      "description": "Per person, every surface combined. Cost is what the gateway recorded per request.",
+      "description": "Per person, every surface combined. Cost is what the gateway recorded per request. Output tokens a second: how fast that person's answers streamed, after their first token.",
       "targets": [
         {
           "datasource": {
@@ -1348,7 +1348,7 @@
           "editorMode": "code",
           "format": "table",
           "rawQuery": true,
-          "rawSql": "select coalesce(s.person, '(unattributed)') as \"Person\", count(*) as \"Requests\", sum(greatest(coalesce(s.prompt_tokens,0) - s.cached_tokens, 0)) as \"Input, cache miss\", sum(s.cached_tokens) as \"Input, cache hit\", round(100.0*sum(s.cached_tokens)/nullif(sum(coalesce(s.prompt_tokens,0)),0),1) as \"Cache hit %\", sum(coalesce(s.completion_tokens,0)) as \"Output\", round(sum(s.cost)::numeric,4) as \"Cost\" from requests s where $__timeFilter(s.started_at) and s.status <> 'refused' group by 1 order by \"Cost\" desc nulls last",
+          "rawSql": "select coalesce(s.person, '(unattributed)') as \"Person\", count(*) as \"Requests\", sum(greatest(coalesce(s.prompt_tokens,0) - s.cached_tokens, 0)) as \"Input, cache miss\", sum(s.cached_tokens) as \"Input, cache hit\", round(100.0*sum(s.cached_tokens)/nullif(sum(coalesce(s.prompt_tokens,0)),0),1) as \"Cache hit %\", sum(coalesce(s.completion_tokens,0)) as \"Output\", round((sum(s.completion_tokens - 1) filter (where s.first_token_at is not null and s.ended_at > s.first_token_at and s.completion_tokens > 1) / nullif(sum(extract(epoch from (s.ended_at - s.first_token_at))) filter (where s.first_token_at is not null and s.ended_at > s.first_token_at and s.completion_tokens > 1), 0))::numeric, 1) as \"Output tokens a second\", round(sum(s.cost)::numeric,4) as \"Cost\" from requests s where $__timeFilter(s.started_at) and s.status <> 'refused' group by 1 order by \"Cost\" desc nulls last",
           "refId": "A"
         }
       ],
