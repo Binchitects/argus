@@ -260,7 +260,7 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/sync [all]` | where this session stands with its chat in Arena; `all` sends what Arena lacks of this folder's sessions |
 | `/memory [add\|forget]` | what it remembers (below; Arena's when signed in); `add TEXT` for this project, `add --all TEXT` for every project, `forget N` |
 | `/remember` | the project's long memory, `.remember/MEMORY.md` in the repository: its sections and topic files (below) |
-| `/rewind [N] [code\|chat]` | the turns kept; `/rewind N` goes back to before turn N (below) |
+| `/rewind [N] [code\|chat]` | your questions; `/rewind N` goes back to before question N (below) |
 | `/search WORDS` | earlier sessions in this folder that said these words |
 | `/index [rebuild\|off\|on]` | the code index, when it is on ([below](#the-code-index)): its files, symbols and languages, its last sync, where it is kept, the files skipped as secrets; `rebuild` builds it again; `off` and `on` for this session |
 | `/permissions [allow\|deny\|remove RULE]` | kept rules (below) |
@@ -2246,9 +2246,14 @@ for each file or lines that went with it (a click opens them).
 **Checkpoints.** Each turn leaves a checkpoint while Code Arena runs (the last
 50): where in the whole conversation it began (a compaction does not change
 that), and what each file the turn's tools wrote held before. `/rewind` lists
-them; `/rewind N` goes back to before turn N: the files put back (a file a
-turn made is removed) and the conversation cut there; `/rewind N code` puts
-back only the files, `/rewind N chat` only cuts the conversation. Back to
+your questions, in a resumed session those before this run too, each with its
+checkpoint when this run kept one; `/rewind N` goes back to before question
+N: the files put back (a file a turn made is removed) and the conversation cut
+there; `/rewind N code` puts back only the files, `/rewind N chat` only cuts
+the conversation. A question with no checkpoint goes back in the conversation
+only. When only the conversation goes back, what the files held before the
+turns it drops is kept with the turn before: a later rewind of the code to
+there, or to an earlier question, puts those files back too. Back to
 before a compaction, the model reads the messages left word for word again:
 the summary covered some that are gone. What commands changed is not put back
 (git has it). With the turn's commits on, the files put back are committed as

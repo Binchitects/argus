@@ -22,7 +22,7 @@ public sealed class RewindTests : IDisposable
         _mcp.Dispose();
     }
 
-    /// <summary>"write X" writes a.txt with X; a summary is asked for; else the answer names the question.</summary>
+    /// <summary>"write X" writes a.txt with X, "put F X" writes F with X; a summary is asked for; else the answer names the question.</summary>
     private static Reply Answer(JsonObject req)
     {
         if (FakeGateway.Summarizing(req))
@@ -34,6 +34,10 @@ public sealed class RewindTests : IDisposable
             return Reply.Say("written");
         }
         var last = FakeGateway.Last(req);
+        if (last.StartsWith("put ", StringComparison.Ordinal) && last[4..].Split(' ', 2) is [var path, var text])
+        {
+            return Reply.Call(("write_file", new JsonObject { ["path"] = path, ["content"] = text }.ToJsonString()));
+        }
         return last.StartsWith("write ", StringComparison.Ordinal)
             ? Reply.Call(("write_file", new JsonObject { ["path"] = "a.txt", ["content"] = last[6..] }.ToJsonString()))
             : Reply.Say($"answer to {last}");
@@ -110,6 +114,58 @@ public sealed class RewindTests : IDisposable
         Assert.Equal(HttpStatusCode.OK, (await web.PostAsync("/api/rewind", new JsonObject { ["message"] = "m6", ["code"] = false })).StatusCode);
         Assert.Equal("three", File.ReadAllText(file));
         Assert.Equal(6, Count(await web.GetJsonAsync("/api/session")));
+    }
+
+    [Fact]
+    public async Task After_only_the_conversation_went_back_an_earlier_rewind_of_the_code_puts_back_what_the_dropped_turns_wrote()
+    {
+        using var h = new Harness(_gateway, _mcp, c => c["mode"] = "auto-edit");
+        var calc = h.Write("calc.py", "def add");
+        await using var web = await WebRun.StartAsync(h);
+        await (await web.SendAsync("put a.txt one")).RestAsync();
+        await (await web.SendAsync("put calc.py def sub")).RestAsync();
+        await (await web.SendAsync("put b.txt three")).RestAsync();
+
+        // The second question with only the conversation: calc.py and b.txt stay as its turns wrote them.
+        Assert.Equal(HttpStatusCode.OK, (await web.PostAsync("/api/rewind", new JsonObject { ["message"] = "m4", ["code"] = false })).StatusCode);
+        Assert.Equal("def sub", File.ReadAllText(calc));
+        await (await web.SendAsync("put c.txt four")).RestAsync();
+
+        // Then the first with the conversation and the code: as before it, calc.py too, and listed so first.
+        var preview = await web.GetJsonAsync("/api/rewind?message=m0");
+        Assert.Equal([("a.txt", true), ("b.txt", true), ("c.txt", true), ("calc.py", false)],
+            preview["files"]!.AsArray().Select(f => (f!["path"]!.GetValue<string>(), f["removed"]!.GetValue<bool>())).Order());
+        Assert.Equal(HttpStatusCode.OK, (await web.PostAsync("/api/rewind", new JsonObject { ["message"] = "m0" })).StatusCode);
+        Assert.Equal("def add", File.ReadAllText(calc));
+        Assert.All(new[] { "a.txt", "b.txt", "c.txt" }, f => Assert.False(File.Exists(Path.Combine(h.Work, f))));
+
+        // The first question with only the conversation, then a new first one: going back to it puts back what both wrote.
+        await (await web.SendAsync("put d.txt five")).RestAsync();
+        Assert.Equal(HttpStatusCode.OK, (await web.PostAsync("/api/rewind", new JsonObject { ["message"] = "m0", ["code"] = false })).StatusCode);
+        await (await web.SendAsync("put e.txt six")).RestAsync();
+        Assert.Equal([("d.txt", true), ("e.txt", true)],
+            (await web.GetJsonAsync("/api/rewind?message=m0"))["files"]!.AsArray().Select(f => (f!["path"]!.GetValue<string>(), f["removed"]!.GetValue<bool>())).Order());
+        Assert.Equal(HttpStatusCode.OK, (await web.PostAsync("/api/rewind", new JsonObject { ["message"] = "m0" })).StatusCode);
+        Assert.False(File.Exists(Path.Combine(h.Work, "d.txt")));
+        Assert.False(File.Exists(Path.Combine(h.Work, "e.txt")));
+    }
+
+    [Fact]
+    public async Task Rewind_in_the_terminal_goes_back_in_a_resumed_session_as_the_IDE_does()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        Assert.Equal(0, await h.Run("first\nsecond\n/exit\n", "chat"));
+        await Until(() => _mcp.Chats.All.SingleOrDefault()?.Messages.Count == 4, "Arena has both turns");
+
+        // Resumed: the questions are the session's, before this run too; with no checkpoint, only the conversation goes back.
+        Assert.Equal(0, await h.Run("/rewind\n/rewind 2 chat\nafter\n/exit\n", "chat", "--continue"));
+        Assert.Matches(@" 1\. .*first.*conversation only", h.Out);
+        Assert.Matches(@" 2\. .*second.*conversation only", h.Out);
+        Assert.Contains("Back to before message 3: the conversation has 2 messages.", h.Out, StringComparison.Ordinal);
+        Assert.Equal(["first", "answer to first", "after"], Asked());
+        var chat = _mcp.Chats.All.Single();
+        await Until(() => chat.Messages.Count == 4 && Content(chat.Messages[^1]) == "answer to after", "the web chat shows it");
+        Assert.Equal(["first", "answer to first", "after", "answer to after"], chat.Messages.Select(Content));
     }
 
     [Fact]

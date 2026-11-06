@@ -28,6 +28,11 @@ internal sealed class Checkpoints
 
     private readonly object _gate = new();
     private readonly List<Turn> _turns = [];
+    /// <summary>
+    /// What the files held before the first turn kept, written by turns whose conversation alone went back (/rewind 1 chat):
+    /// a rewind of the code to the first turn puts them back too.
+    /// </summary>
+    private readonly Turn _base = new(0, "");
 
     /// <summary>A checkpoint before each step of the plan as it began: what each file written since held before it (files only).</summary>
     internal sealed class Step(int number, string title)
@@ -138,6 +143,9 @@ internal sealed class Checkpoints
             if (_turns.Count > Most)
             {
                 _turns.RemoveAt(0);
+                // What came before the turn let go is let go with it.
+                _base.Before.Clear();
+                _base.Lost.Clear();
             }
         }
     }
@@ -189,7 +197,7 @@ internal sealed class Checkpoints
             // Each file as the earliest of those turns found it: what it is put back to.
             var before = new Dictionary<string, byte[]?>(StringComparer.Ordinal);
             var lost = new List<string>();
-            foreach (var turn in _turns.Skip(number - 1))
+            foreach (var turn in Undone(number))
             {
                 foreach (var (path, was) in turn.Before)
                 {
@@ -210,9 +218,14 @@ internal sealed class Checkpoints
         }
     }
 
+    /// <summary>The checkpoints going back to before turn <paramref name="number"/> undoes, earliest first: before the first, what came before it too.</summary>
+    private List<Turn> Undone(int number) => [.. number == 1 ? [_base] : Array.Empty<Turn>(), .. _turns.Skip(number - 1)];
+
     /// <summary>
     /// Back to before turn <paramref name="number"/> (from 1, the oldest kept): its files and every later turn's put back,
-    /// latest first. Where in the conversation that turn began, the files put back, and those that could not be.
+    /// latest first. With only the conversation going back, what those turns' files held before them goes to the turn
+    /// before (or to before the first): a later rewind of the code to there or earlier puts them back too. Where in the
+    /// conversation that turn began, the files put back, and those that could not be.
     /// </summary>
     public (int Place, List<string> Restored, List<string> Lost) Rewind(int number, bool files)
     {
@@ -222,40 +235,37 @@ internal sealed class Checkpoints
             {
                 throw new ArgumentOutOfRangeException(nameof(number));
             }
-            var undone = _turns.Skip(number - 1).ToList();
+            var place = _turns[number - 1].Place;
             var restored = new List<string>();
             var lost = new List<string>();
             if (files)
             {
-                foreach (var turn in Enumerable.Reverse(undone))
+                foreach (var turn in Enumerable.Reverse(Undone(number)))
                 {
-                    foreach (var (path, before) in turn.Before)
-                    {
-                        try
-                        {
-                            if (before is null)
-                            {
-                                File.Delete(path);
-                            }
-                            else
-                            {
-                                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                                File.WriteAllBytes(path, before);
-                            }
-                            if (!restored.Contains(path))
-                            {
-                                restored.Add(path);
-                            }
-                        }
-                        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-                        {
-                            lost.Add($"{path} ({e.Message})");
-                        }
-                    }
+                    Restore(turn.Before, restored, lost);
                     lost.AddRange(turn.Lost.Select(p => $"{p} (too big to keep)"));
                 }
+                if (number == 1)
+                {
+                    _base.Before.Clear();
+                    _base.Lost.Clear();
+                }
             }
-            var place = undone[0].Place;
+            else
+            {
+                var into = number > 1 ? _turns[number - 2] : _base;
+                foreach (var turn in _turns.Skip(number - 1))
+                {
+                    foreach (var (path, was) in turn.Before)
+                    {
+                        if (!into.Lost.Contains(path))
+                        {
+                            into.Before.TryAdd(path, was);
+                        }
+                    }
+                    into.Lost.AddRange(turn.Lost.Where(p => !into.Before.ContainsKey(p) && !into.Lost.Contains(p)));
+                }
+            }
             _turns.RemoveRange(number - 1, _turns.Count - number + 1);
             return (place, restored, lost);
         }

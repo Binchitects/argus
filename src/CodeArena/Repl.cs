@@ -46,7 +46,7 @@ internal sealed class Repl(Runtime rt)
         ("/web [N|all|WORDS]", "your chats in Arena (all, or those with WORDS in the title); /web N continues one here, kept in step both ways"),
         ("/memory [add|forget]", "what it remembers; add TEXT (this project), add --all TEXT (every project), forget N"),
         ("/remember", "the project's long memory (.remember/MEMORY.md, in the repository): what every session reads at its start"),
-        ("/rewind [N] [code|chat]", "the turns kept; /rewind N goes back to before turn N (its files and the conversation)"),
+        ("/rewind [N] [code|chat]", "your questions; /rewind N goes back to before question N (its files and the conversation)"),
         ("/search WORDS", "earlier sessions in this folder that said these words"),
         ("/index [rebuild|off|on]", "the code index, when on: its files, symbols and the files skipped as secrets; rebuild; off or on for this session"),
         ("/permissions [allow|deny|remove RULE]", "kept rules, e.g. run_shell(npm test*), edit_file, read_file(.env*)"),
@@ -1171,23 +1171,35 @@ internal sealed class Repl(Runtime rt)
     private async Task RewindCommandAsync(string arg, CancellationToken ct)
     {
         var words = arg.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        var turns = rt.Checkpoints.Turns;
+        // The person's questions in the whole conversation, as the IDE's Rewind to here has them: before this run too (resumed).
+        var questions = rt.Session.Read(d => d.Stream.Select((e, place) => (e, place)).Where(q => q.e.Message.Str("role") == "user" && q.e.Kind is null)
+            .Select(q => (Place: q.place, Text: Mentions.Typed(Quotes.Split(q.e.Message.Str("content") ?? "").Text))).ToList());
         if (words.Length == 0 || !int.TryParse(words[0], out var n))
         {
-            if (turns.Count == 0)
+            if (questions.Count == 0)
             {
-                Ui.Info("No turn kept yet: each turn leaves a checkpoint while Code Arena runs.");
+                Ui.Info("No question to go back to yet.");
                 return;
             }
-            for (var i = 0; i < turns.Count; i++)
+            var turns = rt.Checkpoints.Turns;
+            for (var i = 0; i < questions.Count; i++)
             {
-                Ui.Line($"  {i + 1,2}. {turns[i].At:HH:mm}  {Fmt.OneLine(turns[i].Input, 70)}  {Ui.Dim($"{turns[i].Before.Count} files")}");
+                // Its checkpoint, when this run kept one: then its code can go back too.
+                var turn = rt.TurnAt(questions[i].Place) is var t and > 0 ? turns[t - 1] : null;
+                Ui.Line($"  {i + 1,2}. {(turn is null ? "     " : $"{turn.At:HH:mm}")}  {Fmt.OneLine(questions[i].Text, 70)}  " +
+                    Ui.Dim(turn is null ? "(conversation only)" : $"{turn.Before.Count} files"));
             }
-            Ui.Info("/rewind N goes back to before turn N: the files its tools and later turns' wrote, and the conversation. /rewind N code: only the files; /rewind N chat: only the conversation.");
+            Ui.Info("/rewind N goes back to before question N: the files its tools and later turns' wrote, and the conversation. /rewind N code: only the files; /rewind N chat: only the conversation. " +
+                "A question with no checkpoint (asked before this run, or too long ago) goes back in the conversation only.");
+            return;
+        }
+        if (n < 1 || n > questions.Count)
+        {
+            Ui.Error(questions.Count == 0 ? "No question to go back to yet." : $"There is no question {n}: /rewind lists them (1 to {questions.Count}).");
             return;
         }
         var only = words.Length > 1 ? words[1].ToLowerInvariant() : null;
-        Ui.Line(await rt.RewindAsync(n, files: only is null or "code", chat: only is null or "chat", ct));
+        Ui.Line(await rt.BackToAsync(questions[n - 1].Place, files: only is null or "code", chat: only is null or "chat", ct));
     }
 
     private void SearchCommand(string arg)
