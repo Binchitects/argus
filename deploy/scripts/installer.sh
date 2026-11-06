@@ -2191,9 +2191,22 @@ cmd_config() {
 
 # ============================================================== start and check
 start_stack() {
+  local svc img ref id stale=()
   step "starting $PROJECT ($ENGINE compose up; nothing pulled or built)"
   images_present || return 1
   dc up -d --no-build --pull never --remove-orphans > "$STATE/up.log" 2>&1 || { tail -n 20 "$STATE/up.log" | sed 's/^/    /'; bad "$ENGINE compose up failed"; return 1; }
+  # A container left on an image its reference no longer names: compose keeps one whose image has the same content under
+  # another id (a release's unchanged image, packed again), and the versions are checked by id. It is made again from it.
+  while IFS='|' read -r svc _ _ _ img ref; do
+    [[ -n "$svc" ]] || continue
+    id="$(image_id "$ref")"
+    [[ -n "$id" && "$img" != "$id" ]] && stale+=("$svc")
+  done < <(container_rows | sort)
+  if [[ ${#stale[@]} -gt 0 ]]; then
+    dc up -d --no-build --pull never --force-recreate "${stale[@]}" >> "$STATE/up.log" 2>&1 \
+      || { tail -n 20 "$STATE/up.log" | sed 's/^/    /'; bad "$ENGINE compose up failed for ${stale[*]}"; return 1; }
+    did "made again from the image its reference names: ${stale[*]}"
+  fi
   ok "started"
 }
 # Every service compose runs: up, and healthy where it has a health check. Those in EXCUSED
