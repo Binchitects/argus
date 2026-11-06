@@ -57,7 +57,11 @@ internal sealed record FrontMatter(IReadOnlyDictionary<string, string> Fields, I
         return new(fields, lists, string.Join('\n', lines.Skip(end + 1)).Trim());
     }
 
-    private static string Unquote(string v) => v.Length >= 2 && (v[0] == '"' && v[^1] == '"' || v[0] == '\'' && v[^1] == '\'') ? v[1..^1] : v;
+    private static string Unquote(string v) =>
+        v.Length >= 2 && v[0] == '"' && v[^1] == '"' ? Unescape(v[1..^1]) : v.Length >= 2 && v[0] == '\'' && v[^1] == '\'' ? v[1..^1] : v;
+
+    /// <summary>What is in double quotes as it is meant: \" is a quote and \\ a backslash, as Arena writes a skill's fields.</summary>
+    public static string Unescape(string v) => v.Contains('\\', StringComparison.Ordinal) ? Regex.Replace(v, @"\\([""\\])", "$1") : v;
 
     public string? Field(string key) => Fields.TryGetValue(key, out var v) && v.Length > 0 ? v : null;
 

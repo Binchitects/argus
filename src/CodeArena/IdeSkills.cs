@@ -22,8 +22,11 @@ internal static partial class IdeSkills
     [GeneratedRegex("^skills/([a-z0-9][a-z0-9_-]{0,63})/SKILL\\.md$")]
     private static partial Regex SkillFile();
 
-    /// <summary>A parameter in a SKILL.md's front matter, as Arena writes it: { name: N, description: "…", required: true, default: "…" }.</summary>
-    [GeneratedRegex("""^\{\s*name:\s*(?<name>[A-Za-z][A-Za-z0-9_-]*)(?:\s*,\s*description:\s*"(?<description>[^"]*)")?(?:\s*,\s*required:\s*(?<required>true|false))?(?:\s*,\s*default:\s*"(?<default>[^"]*)")?\s*\}$""")]
+    /// <summary>
+    /// A parameter in a SKILL.md's front matter, as Arena writes it: { name: N, description: "…", required: true, default: "…" },
+    /// a quote in the text as \" and a backslash as \\.
+    /// </summary>
+    [GeneratedRegex("""^\{\s*name:\s*(?<name>[A-Za-z][A-Za-z0-9_-]*)(?:\s*,\s*description:\s*"(?<description>(?:[^"\\]|\\.)*)")?(?:\s*,\s*required:\s*(?<required>true|false))?(?:\s*,\s*default:\s*"(?<default>(?:[^"\\]|\\.)*)")?\s*\}$""")]
     private static partial Regex Parameter();
 
     private static readonly StringComparison PathCompare = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
@@ -169,9 +172,9 @@ internal static partial class IdeSkills
             parameters.Add(new JsonObject
             {
                 ["name"] = p.Groups["name"].Value,
-                ["description"] = p.Groups["description"].Success ? p.Groups["description"].Value : null,
+                ["description"] = p.Groups["description"].Success ? FrontMatter.Unescape(p.Groups["description"].Value) : null,
                 ["required"] = p.Groups["required"].Value != "false",
-                ["default"] = p.Groups["default"].Success ? p.Groups["default"].Value : null,
+                ["default"] = p.Groups["default"].Success ? FrontMatter.Unescape(p.Groups["default"].Value) : null,
             });
         }
         // Arena's as it is now: one changed on its Skills page since the editor read it is not overwritten.
@@ -181,8 +184,7 @@ internal static partial class IdeSkills
         {
             throw new IdeError(409, "changed", $"/{skill} changed in Arena since it was opened. Reload it, or save again to overwrite it.");
         }
-        // Only the fields changed here: Arena's SKILL.md has their quotes made single, so one sent back as it was read
-        // would change text the person never touched.
+        // Only the fields changed here: one changed on the web meanwhile stays as the web left it.
         var was = FrontMatter.Parse(File.ReadAllText(kept));
         var change = new JsonObject { ["instructions"] = fm.Body };
         if (fm.Field("description") != was.Field("description"))

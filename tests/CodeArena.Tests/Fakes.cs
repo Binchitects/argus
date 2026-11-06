@@ -779,12 +779,38 @@ public sealed class FakeChats
     public List<JsonObject> SkillsMade { get; } = [];
     public List<JsonObject> SkillsChanged { get; } = [];
 
-    /// <summary>One of the person's own skills, as /api/code-arena/skills brings it (its SKILL.md's quotes made single, as Arena writes them).</summary>
-    public static JsonObject OwnSkill(string name, string description, string instructions) => new()
+    /// <summary>
+    /// One of the person's own skills, as /api/code-arena/skills brings it: its SKILL.md as Arena writes it (in double
+    /// quotes, its own quotes and backslashes escaped), with its parameters ({ name, description, required, default }).
+    /// </summary>
+    public static JsonObject OwnSkill(string name, string description, string instructions, JsonArray? parameters = null)
     {
-        ["name"] = name, ["description"] = description, ["version"] = "1", ["mine"] = true,
-        ["files"] = new JsonObject { ["SKILL.md"] = $"---\nname: {name}\ntitle: \"{name.Replace('-', ' ')}\"\ndescription: \"{description.Replace('"', '\'')}\"\n---\n{instructions}\n" },
-    };
+        static string Q(string s) => "\"" + s.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+        var md = new StringBuilder($"---\nname: {name}\ntitle: {Q(name.Replace('-', ' '))}\ndescription: {Q(description)}\n");
+        if (parameters is { Count: > 0 })
+        {
+            md.Append("parameters:\n");
+            foreach (var p in parameters.OfType<JsonObject>())
+            {
+                md.Append("  - { name: ").Append(p["name"]!.GetValue<string>());
+                if (p["description"]?.GetValue<string>() is { } d)
+                {
+                    md.Append(", description: ").Append(Q(d));
+                }
+                md.Append(", required: ").Append(p["required"]?.GetValue<bool>() == false ? "false" : "true");
+                if (p["default"]?.GetValue<string>() is { } def)
+                {
+                    md.Append(", default: ").Append(Q(def));
+                }
+                md.Append(" }\n");
+            }
+        }
+        return new()
+        {
+            ["name"] = name, ["description"] = description, ["version"] = "1", ["mine"] = true, ["parameters"] = parameters?.DeepClone(),
+            ["files"] = new JsonObject { ["SKILL.md"] = md.Append($"---\n{instructions}\n").ToString() },
+        };
+    }
 
     /// <summary>What Code Arena asked of Arena's past chats: search or open, and its body.</summary>
     public List<(string What, JsonObject Body)> HistoryAsked { get; } = [];
@@ -1185,8 +1211,9 @@ public sealed class FakeChats
                 var had = (ArenaSkills ?? []).OfType<JsonObject>().FirstOrDefault(s => s["name"]?.GetValue<string>() == name && s["mine"]?.GetValue<bool>() == true);
                 if (making == (had is null))
                 {
-                    // A description not sent stays as it was.
-                    skill = OwnSkill(name, json["description"]?.GetValue<string>() ?? had?["description"]?.GetValue<string>() ?? "", json["instructions"]?.GetValue<string>() ?? "");
+                    // A description or parameters not sent stay as they were.
+                    skill = OwnSkill(name, json["description"]?.GetValue<string>() ?? had?["description"]?.GetValue<string>() ?? "", json["instructions"]?.GetValue<string>() ?? "",
+                        (json["parameters"] ?? had?["parameters"])?.DeepClone().AsArray());
                     // A new list: GET reads the one it has.
                     ArenaSkills = [.. (ArenaSkills ?? []).OfType<JsonObject>().Where(s => s != had).Select(s => s.DeepClone()), skill.DeepClone()];
                 }

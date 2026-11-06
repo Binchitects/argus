@@ -148,7 +148,7 @@ public sealed class IdeSkillTests : IDisposable
         _mcp.Chats.ArenaSkills = [FakeChats.OwnSkill("websk6", "Says \"hello\" in a language.", "Say hello.")];
         await using var web = await WebRun.StartAsync(h);
 
-        // Only the instructions changed: the description (its quotes single in the SKILL.md) and the title are not sent.
+        // Only the instructions changed: the description and the title are not sent.
         var read = await web.GetJsonAsync("/api/user-files?name=" + Uri.EscapeDataString("skills/websk6/SKILL.md"));
         var text = read["text"]!.GetValue<string>();
         var saved = await web.PostAsync("/api/user-files", new JsonObject
@@ -162,6 +162,53 @@ public sealed class IdeSkillTests : IDisposable
         Assert.Null(changed["title"]);
         Assert.Null(changed["parameters"]);
         Assert.Equal("Says \"hello\" in a language.", _mcp.Chats.ArenaSkills!.OfType<JsonObject>().Single()["description"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task A_web_made_skills_description_edited_in_the_IDE_keeps_its_quotes()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        _mcp.Chats.ArenaSkills = [FakeChats.OwnSkill("websk7", "Says \"hello\" in the \"right\" tone, C:\\notes", "Say hello.")];
+        await using var web = await WebRun.StartAsync(h);
+
+        // Shown with its own quotes, and saved with them when a word is added.
+        var read = await web.GetJsonAsync("/api/user-files?name=" + Uri.EscapeDataString("skills/websk7/SKILL.md"));
+        var text = read["text"]!.GetValue<string>();
+        var saved = await web.PostAsync("/api/user-files", new JsonObject
+        {
+            ["name"] = "skills/websk7/SKILL.md", ["text"] = text.Replace("C:\\\\notes\"", "C:\\\\notes, kindly\"", StringComparison.Ordinal), ["version"] = read["version"]!.GetValue<string>(),
+        });
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        Assert.Equal("Says \"hello\" in the \"right\" tone, C:\\notes, kindly", Assert.Single(_mcp.Chats.SkillsChanged)["description"]!.GetValue<string>());
+        Assert.Equal("Says \"hello\" in the \"right\" tone, C:\\notes, kindly", _mcp.Chats.ArenaSkills!.OfType<JsonObject>().Single()["description"]!.GetValue<string>());
+        Assert.Equal("Says \"hello\" in the \"right\" tone, C:\\notes, kindly",
+            (await web.GetJsonAsync("/api/skills"))["skills"]!.AsArray().Single(s => s!["name"]!.GetValue<string>() == "websk7")!["description"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Changing_one_parameter_of_a_web_made_skill_leaves_the_others_quotes_as_they_were()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        _mcp.Chats.ArenaSkills = [FakeChats.OwnSkill("websk8", "Greets", "Say hello in a {{tone}} way to {{who}}.", new JsonArray
+        {
+            new JsonObject { ["name"] = "tone", ["description"] = "The \"feel\" of it", ["required"] = false, ["default"] = "\"warm\"" },
+            new JsonObject { ["name"] = "who", ["description"] = "Whom to greet", ["required"] = true },
+        })];
+        await using var web = await WebRun.StartAsync(h);
+
+        var read = await web.GetJsonAsync("/api/user-files?name=" + Uri.EscapeDataString("skills/websk8/SKILL.md"));
+        var text = read["text"]!.GetValue<string>();
+        Assert.Contains("  - { name: who, description: \"Whom to greet\", required: true }", text, StringComparison.Ordinal);
+        var saved = await web.PostAsync("/api/user-files", new JsonObject
+        {
+            ["name"] = "skills/websk8/SKILL.md",
+            ["text"] = text.Replace("description: \"Whom to greet\", required: true", "description: \"Whom to greet\", required: false", StringComparison.Ordinal),
+            ["version"] = read["version"]!.GetValue<string>(),
+        });
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        var sent = Assert.Single(_mcp.Chats.SkillsChanged)["parameters"]!.AsArray().OfType<JsonObject>().ToList();
+        Assert.Equal(("The \"feel\" of it", "\"warm\"", false), (sent[0]["description"]!.GetValue<string>(), sent[0]["default"]!.GetValue<string>(), sent[0]["required"]!.GetValue<bool>()));
+        Assert.False(sent[1]["required"]!.GetValue<bool>());
     }
 
     [Fact]

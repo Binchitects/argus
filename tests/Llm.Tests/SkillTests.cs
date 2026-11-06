@@ -84,8 +84,8 @@ public sealed class SkillTests(AppFixture app)
         var skill = Assert.Single(await Skills(aArena));
         Assert.Equal("release_check", skill.GetProperty("name").GetString());
         var md = skill.GetProperty("files").GetProperty("SKILL.md").GetString()!;
-        // Any language as it is; its own quotes made single.
-        Assert.StartsWith("---\nname: release_check\ntitle: \"بررسی انتشار\"\ndescription: \"Check a release: notes, 'version', tags.\"\nparameters:\n", md, StringComparison.Ordinal);
+        // Any language as it is; its own quotes escaped.
+        Assert.StartsWith("---\nname: release_check\ntitle: \"بررسی انتشار\"\ndescription: \"Check a release: notes, \\\"version\\\", tags.\"\nparameters:\n", md, StringComparison.Ordinal);
         Assert.Contains("  - { name: version, description: \"The version: x.y.z\", required: true }\n", md, StringComparison.Ordinal);
         Assert.EndsWith("---\nCheck {{version}} before it ships.\n", md, StringComparison.Ordinal);
         Assert.Empty(await Skills(bArena));

@@ -48,8 +48,9 @@ public static partial class SkillLibrary
     /// </summary>
     public static string ToSkillMd(Skill skill)
     {
-        // In double quotes, as one line, its own quotes made single: read by Code Arena's front matter as it is (any language).
-        static string Q(string? s) => "\"" + (s ?? "").Replace('"', '\'').ReplaceLineEndings(" ").Trim() + "\"";
+        // In double quotes, as one line, its own quotes and backslashes escaped (\" and \\): Code Arena's front matter reads
+        // it back as it is (any language), so a field edited in the IDE is saved with the person's own quotes.
+        static string Q(string? s) => "\"" + (s ?? "").Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal).ReplaceLineEndings(" ").Trim() + "\"";
         var md = new System.Text.StringBuilder("---\n");
         md.Append("name: ").Append(skill.Name).Append('\n');
         md.Append("title: ").Append(Q(skill.Title)).Append('\n');
