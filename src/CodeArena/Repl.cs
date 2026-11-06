@@ -657,11 +657,17 @@ internal sealed class Repl(Runtime rt)
         }
     }
 
-    /// <summary>"context 18.2k / 131k (14%), compacts at 80%" (or "only when a request would not fit").</summary>
+    /// <summary>
+    /// "context 18.2k / 131k (14%), compacts at 80%" (or "only when a request would not fit"). With no count since the last
+    /// compaction or resume, an estimate as the IDE says it: "context about 16.4k / 32.8k (50%, the next answer counts it)".
+    /// </summary>
     private string ContextUse()
     {
         var used = rt.Agent.Estimate();
-        return $"context {Fmt.Tokens(used)} / {Fmt.Tokens(rt.Model.Context)} ({100.0 * used / rt.Model.Context:0}%), compacts {rt.Compaction.When()}";
+        var share = $"{100.0 * used / rt.Model.Context:0}%";
+        return rt.Agent.Counted
+            ? $"context {Fmt.Tokens(used)} / {Fmt.Tokens(rt.Model.Context)} ({share}), compacts {rt.Compaction.When()}"
+            : $"context about {Fmt.Tokens(used)} / {Fmt.Tokens(rt.Model.Context)} ({share}, the next answer counts it), compacts {rt.Compaction.When()}";
     }
 
     /// <summary>
@@ -994,7 +1000,7 @@ internal sealed class Repl(Runtime rt)
                 }
                 break;
             default:
-                if (rt.Extensions.Expand(input) is { } prompt)
+                if (await rt.ExpandAsync(input, ct) is { } prompt)
                 {
                     await TurnAsync(prompt, ct);
                     break;

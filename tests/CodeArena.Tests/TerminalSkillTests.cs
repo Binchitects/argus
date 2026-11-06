@@ -72,6 +72,26 @@ public sealed class TerminalSkillTests : IDisposable
     }
 
     [Fact]
+    public async Task A_skill_made_on_the_web_just_now_is_used_at_once_not_refused()
+    {
+        // Asked again at most this often unasked: here, not within the test.
+        using var h = new Harness(_gateway, _mcp) { ArenaSkillsEvery = TimeSpan.FromHours(1) };
+        _mcp.Chats.ArenaSkills = [];
+        // Made on Arena's Skills page while the first message is answered, and typed at once.
+        _gateway.Answer = req =>
+        {
+            if (FakeGateway.Last(req) == "first")
+            {
+                _mcp.Chats.ArenaSkills = [ArenaSkill("websk3", "Made on the web", "Say WEBSK3-USED.")];
+            }
+            return Reply.Say("ok");
+        };
+        Assert.Equal(0, await h.Run("first\n/websk3 now\n/exit\n", "chat"));
+        Assert.DoesNotContain("There is no command", h.Out + h.Err, StringComparison.Ordinal);
+        Assert.StartsWith("/websk3 now\n\n<attached>\n<skill name=\"websk3\">", LastUser(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Skills_new_makes_one_for_the_project_or_one_of_yours_in_Arena()
     {
         using var h = new Harness(_gateway, _mcp);

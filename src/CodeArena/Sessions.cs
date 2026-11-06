@@ -112,6 +112,8 @@ internal sealed class SessionData
     public int Keys { get; set; }
     /// <summary>The last answer's tokens since the last compaction, and how many of <see cref="Messages"/> its request and answer covered; null: none counted.</summary>
     public (TokenUsage Usage, int Count)? Known { get; set; }
+    /// <summary>The characters a token held when the session last compacted (<see cref="Agent.CharsPerToken"/>): resumed with no count since, it estimates as before.</summary>
+    public double? CharsPerToken { get; set; }
 
     /// <summary>A message line's body as the list keeps it: none (only what its line says before the message counts there).</summary>
     private static readonly JsonObject Unread = [];
@@ -125,7 +127,7 @@ internal sealed class SessionData
         {
             Id = Id, Cwd = Cwd, Model = Model, Conversation = Conversation, Unlinked = Unlinked, From = From, Branch = Branch, Summary = Summary,
             WebSummary = WebSummary, Keys = Keys, _pending = _pending, ToolsOff = ToolsOff, ToolsLoaded = ToolsLoaded, Plan = Plan, PlanVersion = PlanVersion,
-            PlanSent = PlanSent,
+            PlanSent = PlanSent, CharsPerToken = CharsPerToken,
         };
         copy.Stream.AddRange(Stream.Select(e => new SyncEntry
         {
@@ -282,6 +284,7 @@ internal sealed class SessionData
                     Messages.AddRange(all.OfType<JsonObject>().Select(c => c.Clone()));
                 }
                 _pending = null;
+                CharsPerToken = entry["charsPerToken"] is JsonValue chars && chars.TryGetValue<double>(out var c) ? c : CharsPerToken;
                 From = Math.Clamp(entry.Int("from") ?? Stream.Count - (all?.Count ?? 0), 0, Stream.Count);
                 WebSummary = entry.Str("web") ?? WebSummary;
                 if (!light && From > 0 && Agent.SummaryText(Messages.Take(Prefix)) is { } mark)
@@ -480,7 +483,8 @@ internal sealed class SessionStore
     /// word for word, those before them a summary of the rest.
     /// </summary>
     /// <param name="raw">Null: as many as before (long results cut in place).</param>
-    public void Compacted(IEnumerable<JsonObject> messages, int? raw = null, string? webSummary = null)
+    /// <param name="charsPerToken">The characters a token holds now (<see cref="Agent.CharsPerToken"/>); null: as the session last said.</param>
+    public void Compacted(IEnumerable<JsonObject> messages, int? raw = null, string? webSummary = null, double? charsPerToken = null)
     {
         var all = new JsonArray([.. messages.Select(m => (JsonNode)m.Clone())]);
         int from;
@@ -488,12 +492,21 @@ internal sealed class SessionStore
         {
             from = raw is { } r ? Math.Max(0, _state.Stream.Count - r) : _state.From;
         }
-        Write(Compaction(all, from, webSummary));
+        Write(Compaction(all, from, webSummary, charsPerToken));
     }
 
-    /// <summary>A compaction's line: where its history starts in the conversation first, its messages last (the list's scan reads it without them).</summary>
-    private static JsonObject Compaction(JsonArray messages, int from, string? webSummary = null) =>
-        new() { ["type"] = "compact", ["from"] = from, ["web"] = webSummary, ["messages"] = messages };
+    /// <summary>
+    /// A compaction's line: where its history starts in the conversation first, its messages last (the list's scan reads
+    /// it without them). The characters a token holds go with it: the session's count is gone until the next answer.
+    /// </summary>
+    private JsonObject Compaction(JsonArray messages, int from, string? webSummary = null, double? charsPerToken = null)
+    {
+        lock (_gate)
+        {
+            charsPerToken ??= _state.CharsPerToken;
+        }
+        return new() { ["type"] = "compact", ["from"] = from, ["web"] = webSummary, ["charsPerToken"] = charsPerToken, ["messages"] = messages };
+    }
 
     /// <summary>A compaction's summary of all but the last <paramref name="raw"/> messages, for Arena to keep where its own are.</summary>
     public void Summarized(string text, int raw)

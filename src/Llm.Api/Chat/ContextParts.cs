@@ -79,6 +79,9 @@ public static partial class ContextParts
     /// <summary>The kinds <see cref="Measure"/> gives, in characters.</summary>
     public static readonly string[] Kinds = ["system", "instructions", "memory", "tools", "summary", "files", "you", "answers", "toolResults"];
 
+    /// <summary>A message's text without what went with it (<see cref="Attachment"/>): its words.</summary>
+    public static string WithoutAttachments(string text) => Attachment().Replace(text, "");
+
     /// <summary>
     /// What went with a question as the model reads it: a file attached here, or what went with one in Code Arena (its @files,
     /// folders and the lines chosen in its editor, after the words up to the end, as Code Arena's Mentions writes them).

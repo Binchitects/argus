@@ -239,8 +239,9 @@ internal sealed class Agent
     /// <summary>
     /// Starts from these messages (a session resumed, a rewind). <paramref name="known"/>: the last answer's tokens as the
     /// gateway counted them, and how many of the messages its request and answer covered, so the size is known at once.
+    /// <paramref name="charsPerToken"/>: the characters a token held when it last compacted, for an estimate as it made then.
     /// </summary>
-    public void Load(IEnumerable<JsonObject> messages, (TokenUsage Usage, int Count)? known = null)
+    public void Load(IEnumerable<JsonObject> messages, (TokenUsage Usage, int Count)? known = null, double? charsPerToken = null)
     {
         Messages = [.. messages];
         _notes.Clear();
@@ -250,6 +251,10 @@ internal sealed class Agent
         _knownCount = 0;
         _compactedAt = 0;
         _followUps = 0;
+        if (charsPerToken is { } chars)
+        {
+            CharsPerToken = Math.Clamp(chars, 1.0, 8.0);
+        }
         if (known is { } k && k.Count > 0 && k.Count <= Messages.Count && k.Usage.Prompt > 0)
         {
             Learn(Chars(k.Count - 1), k.Usage.Prompt);
@@ -1238,7 +1243,7 @@ internal sealed class Agent
             if (Estimate() < at)
             {
                 // Cleared, not compacted: every message keeps its place, and so do the notes beside them.
-                Session?.Compacted(Messages);
+                Session?.Compacted(Messages, charsPerToken: CharsPerToken);
                 Ui.Info(said);
                 Events?.Compacted(said);
                 _compactedAt = 0;
@@ -1380,6 +1385,9 @@ internal sealed class Agent
         }
         return (long)((SystemPrompt().Length + ToolChars() + added) / CharsPerToken);
     }
+
+    /// <summary>The gateway counted the conversation since the last compaction or resume: <see cref="Estimate"/> builds on its count.</summary>
+    public bool Counted => _knownTokens > 0;
 
     private long ToolChars() => Model.Info.Tools ? Tools.Offered().Sum(t => (long)Json.Line(t.Spec()).Length) : 0;
 
@@ -1841,7 +1849,7 @@ internal sealed class Agent
     /// <param name="raw">How many of the last messages are the conversation's own, word for word (the rest stands for what came before); null: as before.</param>
     private void Saved(int? raw, string said)
     {
-        Session?.Compacted(Messages, raw);
+        Session?.Compacted(Messages, raw, charsPerToken: CharsPerToken);
         _knownTokens = 0;
         _knownCount = 0;
         _notes.Clear();

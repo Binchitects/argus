@@ -142,6 +142,29 @@ public sealed class IdeSkillTests : IDisposable
     }
 
     [Fact]
+    public async Task Saving_a_web_made_skill_leaves_what_was_not_touched_as_Arena_has_it()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        _mcp.Chats.ArenaSkills = [FakeChats.OwnSkill("websk6", "Says \"hello\" in a language.", "Say hello.")];
+        await using var web = await WebRun.StartAsync(h);
+
+        // Only the instructions changed: the description (its quotes single in the SKILL.md) and the title are not sent.
+        var read = await web.GetJsonAsync("/api/user-files?name=" + Uri.EscapeDataString("skills/websk6/SKILL.md"));
+        var text = read["text"]!.GetValue<string>();
+        var saved = await web.PostAsync("/api/user-files", new JsonObject
+        {
+            ["name"] = "skills/websk6/SKILL.md", ["text"] = text.Replace("Say hello.", "Say hello in French.", StringComparison.Ordinal), ["version"] = read["version"]!.GetValue<string>(),
+        });
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        var changed = Assert.Single(_mcp.Chats.SkillsChanged);
+        Assert.Equal("Say hello in French.", changed["instructions"]!.GetValue<string>());
+        Assert.Null(changed["description"]);
+        Assert.Null(changed["title"]);
+        Assert.Null(changed["parameters"]);
+        Assert.Equal("Says \"hello\" in a language.", _mcp.Chats.ArenaSkills!.OfType<JsonObject>().Single()["description"]!.GetValue<string>());
+    }
+
+    [Fact]
     public async Task A_skill_made_or_turned_off_in_Arena_while_the_IDE_runs_is_there_after_Refresh()
     {
         // Asked again at most this often unasked: here, not within the test.
@@ -178,6 +201,22 @@ public sealed class IdeSkillTests : IDisposable
         Assert.StartsWith("/websky2 the team\n\n<attached>\n<skill name=\"websky2\">", asked, StringComparison.Ordinal);
         Assert.Contains("Say WEBSKY2-USED for the team.", asked, StringComparison.Ordinal);
         Assert.Contains("- websky2: Made on the web", _gateway.Requests[^1]["messages"]![0]!["content"]!.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_skill_made_on_the_web_just_after_a_turn_is_used_at_once()
+    {
+        // Asked again at most this often unasked: here, not within the test.
+        using var h = new Harness(_gateway, _mcp) { ArenaSkillsEvery = TimeSpan.FromHours(1) };
+        _mcp.Chats.ArenaSkills = [];
+        await using var web = await WebRun.StartAsync(h);
+        _gateway.Answer = _ => Reply.Say("ok");
+        await (await web.SendAsync("first")).RestAsync();
+
+        _mcp.Chats.ArenaSkills = [new JsonObject { ["name"] = "websk3", ["files"] = new JsonObject { ["SKILL.md"] = "---\nname: websk3\ndescription: Made on the web\n---\nSay WEBSK3-USED." } }];
+        await (await web.SendAsync("/websk3 now")).RestAsync();
+        var asked = _gateway.Requests[^1]["messages"]!.AsArray().Last(m => m!["role"]!.GetValue<string>() == "user")!["content"]!.ToString();
+        Assert.StartsWith("/websk3 now\n\n<attached>\n<skill name=\"websk3\">", asked, StringComparison.Ordinal);
     }
 
     [Fact]

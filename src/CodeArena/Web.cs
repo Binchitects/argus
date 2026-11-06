@@ -1351,7 +1351,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             }
             else if (text is not null)
             {
-                text = _rt.Prepare(text);
+                text = await _rt.PrepareAsync(text, job.Stop.Token);
                 job.Emit(new JsonObject
                 {
                     ["type"] = "question", ["id"] = NextId(), ["parentId"] = LastId(), ["text"] = text, ["quote"] = quote,

@@ -110,7 +110,8 @@ public sealed class CompactionTests : IDisposable
         Assert.Contains("It compacts at 80% of the window, and always before a request would not fit (Arena's default), keeping the recent part within 25%.", h.Out);
         Assert.Contains("It compacts at 60% of the window, and always before a request would not fit, keeping the recent part within 20% (kept in config.json).", h.Out);
         Assert.Contains("The threshold is from 20% to 95% of the model's window, or off", h.Err);
-        Assert.Matches(@"context [\d.]+k? / 20k \(\d+%\), compacts at 60% \(set in config.json\), and always before a request would not fit, keeping the recent part within 20%\.", h.Out);
+        // Nothing counted yet: an estimate, said so.
+        Assert.Matches(@"context about [\d.]+k? / 20k \(\d+%, the next answer counts it\), compacts at 60% \(set in config.json\), and always before a request would not fit, keeping the recent part within 20%\.", h.Out);
         var saved = JsonNode.Parse(File.ReadAllText(h.Paths.ConfigFile))!;
         Assert.Equal(60, saved["compactAt"]!.GetValue<int>());
         Assert.Equal(20, saved["compactTarget"]!.GetValue<int>());
@@ -161,6 +162,32 @@ public sealed class CompactionTests : IDisposable
         Assert.Equal(1, await wrong.Run("", "-p", "hi"));
         Assert.Contains($"\"compactAt\" in {wrong.Paths.ConfigFile} is a share of the model's window: 70, \"70%\" or 0.7, or \"off\".", wrong.Err);
         Assert.Equal("most of it", JsonNode.Parse(File.ReadAllText(wrong.Paths.ConfigFile))!["compactAt"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task After_compacting_and_a_resume_context_says_its_figure_is_an_estimate_made_as_before()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        _gateway.Answer = req => Summarizing(req) ? Reply.Say("SUMMARY: the person asked three questions.") : Reply.Say("answer " + new string('a', 600));
+        double learned;
+        await using (var rt = await StartAsync(h))
+        {
+            for (var i = 0; i < 3; i++)
+            {
+                await rt.Agent.RunAsync($"question {i} " + new string('q', 600), new Spend(), CancellationToken.None);
+            }
+            Assert.True(await rt.Agent.CompactAsync(force: true, CancellationToken.None));
+            learned = rt.Agent.CharsPerToken;
+        }
+        Assert.NotEqual(3.5, learned);
+
+        // Resumed: no count since compacting, so the characters a token held then, and "about".
+        await using (var rt = await StartAsync(h, new Options { Continue = true }))
+        {
+            Assert.Equal(learned, rt.Agent.CharsPerToken);
+        }
+        Assert.Equal(0, await h.Run("/context\n/exit\n", "chat", "--continue"));
+        Assert.Matches(@"context about [\d.]+k? / 20k \(\d+%, the next answer counts it\), compacts at 80%", h.Out);
     }
 
     [Fact]
