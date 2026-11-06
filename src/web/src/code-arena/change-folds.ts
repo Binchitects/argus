@@ -80,7 +80,7 @@ export interface ChangeView {
  * A view's folds and its list or tree, kept for the folder as VS Code keeps a view's state for a workspace: under
  * "<scope>.folded" and "<scope>.viewMode". The first view is scm.defaultViewMode's. Only the keys still there are kept.
  */
-export function useChangeView(scope: 'scm' | 'changes' | 'skills', keys: readonly string[]): ChangeView {
+export function useChangeView(scope: 'scm' | 'changes' | 'skills' | `scm:${string}`, keys: readonly string[]): ChangeView {
   const queryClient = useQueryClient()
   const saved = useQuery(workspaceStateQuery).data
   const defaultMode = useSetting<string>('scm.defaultViewMode')

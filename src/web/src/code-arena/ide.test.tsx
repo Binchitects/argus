@@ -2505,6 +2505,62 @@ describe('Code Arena, the IDE', () => {
     expect(within(panel).getByRole('list', { name: 'Commits' })).toHaveTextContent('First')
   })
 
+  it('shows several repositories at once as VS Code does: a section each, with its branch, its changes and its own commit', async () => {
+    const statuses: Record<string, { repository: boolean; branch: string; ahead: number; behind: number; files: GitFile[] }> = {
+      '.': { repository: true, branch: 'main', ahead: 0, behind: 0, files: [{ path: 'README.md', staged: null, changed: 'M', from: null }] },
+      ui: { repository: true, branch: 'feature/buttons', ahead: 2, behind: 0, files: [{ path: 'ui/button.ts', staged: null, changed: 'M', from: null }, { path: 'ui/new.ts', staged: null, changed: '?', from: null }] },
+    }
+    const { calls } = backend({
+      'POST /api/git/repositories': () => ({ json: { repositories: [{ path: '.', name: 'shop' }, { path: 'ui', name: 'ui' }] } }),
+      'GET /api/git/status': (_, __, url) => ({ json: statuses[url.searchParams.get('repo') ?? '.'] }),
+      'GET /api/git/log': (_, __, url) => ({ json: [{ hash: url.searchParams.get('repo') ? 'bbb2222' : 'aaa1111', subject: url.searchParams.get('repo') ? 'Buttons' : 'First', author: 'Pat', at: '2026-10-11T09:00:00Z' }] }),
+      'GET /api/git/branches': () => ({ json: [{ name: 'main', current: true }] }),
+      'POST /api/git/stage': (body) => {
+        const b = body as { repo?: string; paths: string[] }
+        const r = statuses[b.repo ?? '.']!
+        r.files = r.files.map((f) => (b.paths.includes(f.path) ? { ...f, staged: f.changed === '?' ? 'A' : 'M', changed: null } : f))
+        return { json: r }
+      },
+      'POST /api/git/commit': (body) => {
+        const r = statuses[(body as { repo?: string }).repo ?? '.']!
+        r.files = r.files.filter((f) => !f.staged)
+        return { json: { hash: 'ccc3333', status: r } }
+      },
+    })
+    renderIde()
+    await userEvent.keyboard('{Control>}{Shift>}g{/Shift}{/Control}')
+    const panel = await screen.findByRole('complementary', { name: 'Source control' })
+    // A row for each repository: its name, its branch and how far it is from its upstream.
+    const shop = await within(panel).findByRole('button', { name: 'Repository shop, on main, 1 change' })
+    const ui = await within(panel).findByRole('button', { name: 'Repository ui, on feature/buttons, 2 changes' })
+    expect(ui).toHaveTextContent('feature/buttons ↑2 ↓0')
+    expect(shop).toHaveAttribute('aria-expanded', 'true')
+    expect(within(panel).getAllByRole('list', { name: 'Changed files' })).toHaveLength(2)
+    // The files settings say how they were found: VS Code's defaults, and the files open.
+    expect(calls.find((c) => c.path === '/api/git/repositories')?.body).toEqual({ detect: true, depth: 1, ignored: ['node_modules'], open: [] })
+
+    // Folded: its changes go; the other repository's stay.
+    await userEvent.click(shop)
+    expect(shop).toHaveAttribute('aria-expanded', 'false')
+    expect(within(panel).getAllByRole('list', { name: 'Changed files' })).toHaveLength(1)
+    expect(within(panel).queryByRole('textbox', { name: 'Commit message for shop' })).not.toBeInTheDocument()
+
+    // Staged and committed in its own repository: the calls name it.
+    await userEvent.click(within(panel).getByRole('button', { name: 'Stage ui/button.ts' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/git/stage')?.body).toEqual({ paths: ['ui/button.ts'], repo: 'ui' }))
+    await userEvent.type(within(panel).getByRole('textbox', { name: 'Commit message for ui' }), 'Buttons are round')
+    await userEvent.click(within(panel).getByRole('button', { name: 'Commit 1 staged' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/git/commit')?.body).toEqual({ message: 'Buttons are round', all: false, repo: 'ui' }))
+    await waitFor(() => expect(within(panel).getByRole('button', { name: 'Repository ui, on feature/buttons, 1 change' })).toBeInTheDocument())
+    // Its own history.
+    expect(await within(panel).findByRole('button', { name: /Buttons/ })).toBeInTheDocument()
+
+    // A git command asks which repository, as VS Code's does.
+    act(() => void runCommand('git.fetch'))
+    const pick = await screen.findByRole('dialog', { name: 'Repository' })
+    expect(within(pick).getAllByRole('option').map((o) => o.textContent)).toEqual([expect.stringContaining('shop'), expect.stringContaining('ui')])
+  })
+
   it("folds Source Control's groups and folders as VS Code does: chevrons, arrows, Collapse All, kept with the folder", async () => {
     const status = {
       repository: true, branch: 'main', ahead: 0, behind: 0,

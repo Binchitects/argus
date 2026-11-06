@@ -7,8 +7,8 @@ namespace CodeArena;
 /// version; the IDE's page asks for the paths changed since the version it has (waiting while there are none), and
 /// reloads what it shows of them: an open file not edited there, the Explorer's folders, Source Control and Changes.
 /// What nobody reads there is left out (.git's insides, node_modules, the session's own .code-arena); .git's HEAD and
-/// index say Source Control changed. Where the system will not watch (too many folders for inotify), the page reloads
-/// when it comes back into view instead.
+/// index (a nested repository's too) say Source Control changed. Where the system will not watch (too many folders for
+/// inotify), the page reloads when it comes back into view instead.
 /// </summary>
 internal sealed class DiskWatch : IDisposable
 {
@@ -72,10 +72,10 @@ internal sealed class DiskWatch : IDisposable
             return null;
         }
         var parts = rel.Split('/');
-        if (parts[0] == ".git")
+        if (Array.IndexOf(parts, ".git") is var git and >= 0)
         {
-            // Only what moves Source Control: a commit, a checkout, a staged file.
-            return parts.Length == 2 && parts[1] is "HEAD" or "index" ? "" : null;
+            // Only what moves Source Control: a commit, a checkout, a staged file; in the folder's repository or one nested in it.
+            return parts.Length == git + 2 && parts[git + 1] is "HEAD" or "index" ? "" : null;
         }
         return parts.Any(Unread.Contains) ? null : rel;
     }

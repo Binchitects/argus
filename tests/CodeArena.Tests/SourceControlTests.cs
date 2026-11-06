@@ -135,6 +135,78 @@ public sealed class SourceControlTests : IDisposable
     }
 
     [Fact]
+    public async Task Several_repositories_are_found_as_VS_Code_finds_them_and_each_is_worked_on_its_own()
+    {
+        using var h = new Harness(_gateway, _mcp, c => c["autoCommit"] = false);
+        // The folder's own repository, one in a folder of it, one two levels down, one in node_modules, and a folder added
+        // to the workspace that is a repository too.
+        Init(h.Work);
+        h.Write("README.md", "# Shop\n");
+        Commit(h.Work, "First");
+        var ui = Path.Combine(h.Work, "ui");
+        h.Write("ui/button.ts", "export const a = 1\n");
+        Init(ui);
+        Commit(ui, "UI");
+        var deep = Path.Combine(h.Work, "packages", "core");
+        h.Write("packages/core/index.ts", "export {}\n");
+        Init(deep);
+        Commit(deep, "Core");
+        h.Write("node_modules/dep/index.js", "x\n");
+        Init(Path.Combine(h.Work, "node_modules", "dep"));
+        var lib = Directory.CreateDirectory(Path.Combine(h.Root, "lib")).FullName;
+        File.WriteAllText(Path.Combine(lib, "util.py"), "one\n");
+        Init(lib);
+        Commit(lib, "Lib");
+        await using var web = await WebRun.StartAsync(h);
+        Assert.Equal(HttpStatusCode.OK, (await web.PostAsync("/api/folders/add", new JsonObject { ["path"] = lib })).StatusCode);
+        async Task<List<string>> Found(JsonObject body) =>
+            (await Json(await web.PostAsync("/api/git/repositories", body)))["repositories"]!.AsArray().Select(r => r!["path"]!.GetValue<string>()).ToList();
+
+        // One level down (git.repositoryScanMaxDepth's 1), node_modules not looked into; the folder's own first.
+        Assert.Equal([".", lib, "ui"], await Found(new JsonObject { ["depth"] = 1, ["ignored"] = new JsonArray("node_modules") }));
+        // Two levels: packages/core too; with node_modules not ignored, its repository as well.
+        Assert.Equal([".", lib, "node_modules/dep", "packages/core", "ui"], await Found(new JsonObject { ["depth"] = 2 }));
+        // "openEditors": no scan, but the repository of a file open in the editor.
+        Assert.Equal([".", lib, "packages/core"], await Found(new JsonObject { ["detect"] = "openEditors", ["depth"] = 1, ["open"] = new JsonArray("packages/core/index.ts") }));
+        // false: the folder's own and the added folders' only.
+        Assert.Equal([".", lib], await Found(new JsonObject { ["detect"] = false, ["open"] = new JsonArray("ui/button.ts") }));
+
+        // Each repository on its own: its status by the folder's paths, staged and committed there alone.
+        h.Write("ui/button.ts", "export const a = 2\n");
+        h.Write("README.md", "# Shop!\n");
+        var uiStatus = await web.GetJsonAsync("/api/git/status?repo=ui");
+        Assert.Equal(new Dictionary<string, (string?, string?)> { ["ui/button.ts"] = (null, "M") }, Files(uiStatus));
+        Assert.Equal("main", uiStatus["branch"]!.GetValue<string>());
+        // The folder's own lists its own file, and the nested repository only as a folder git does not know.
+        Assert.Contains("README.md", Files(await web.GetJsonAsync("/api/git/status")).Keys);
+        Assert.DoesNotContain("ui/button.ts", Files(await web.GetJsonAsync("/api/git/status")).Keys);
+        // A file of another repository is refused, not staged in this one.
+        Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/git/stage", new JsonObject { ["repo"] = "ui", ["paths"] = new JsonArray("README.md") })).StatusCode);
+        var staged = await Json(await web.PostAsync("/api/git/stage", new JsonObject { ["repo"] = "ui", ["paths"] = new JsonArray("ui/button.ts") }));
+        Assert.Equal(("M", (string?)null), Files(staged)["ui/button.ts"]);
+        await Json(await web.PostAsync("/api/git/commit", new JsonObject { ["repo"] = "ui", ["message"] = "Two" }));
+        Assert.Equal("Two", GitOut(ui, "log", "-1", "--format=%s"));
+        Assert.Equal("First", GitOut(h.Work, "log", "-1", "--format=%s"));
+        Assert.Equal(["Two", "UI"], (await web.GetJsonAsync("/api/git/log?repo=ui")).AsArray().Select(c => c!["subject"]!.GetValue<string>()));
+
+        // A file's own repository is found for a compare and its history, with no repository named.
+        Assert.Equal("export const a = 2\n", Text(await Show(web, "ui/button.ts", "HEAD")));
+        Assert.Equal(["Two", "UI"], (await web.GetJsonAsync("/api/git/log?path=ui%2Fbutton.ts")).AsArray().Select(c => c!["subject"]!.GetValue<string>()));
+        Assert.Equal("# Shop\n", Text(await Show(web, "README.md", "HEAD")));
+
+        // The added folder's repository: its files by their whole paths, as the Explorer has them; discarded there.
+        File.WriteAllText(Path.Combine(lib, "util.py"), "two\n");
+        var libStatus = await web.GetJsonAsync($"/api/git/status?repo={Uri.EscapeDataString(lib)}");
+        Assert.Equal(new Dictionary<string, (string?, string?)> { [Path.Combine(lib, "util.py").Replace('\\', '/')] = (null, "M") }, Files(libStatus));
+        Assert.Equal("one\n", Text(await Show(web, Path.Combine(lib, "util.py"), "HEAD")));
+        await Json(await web.PostAsync("/api/git/discard", new JsonObject { ["repo"] = lib, ["paths"] = new JsonArray(Path.Combine(lib, "util.py")) }));
+        Assert.Equal("one\n", File.ReadAllText(Path.Combine(lib, "util.py")));
+
+        // A repository outside the workspace is refused.
+        Assert.Equal(HttpStatusCode.Forbidden, (await web.Http.GetAsync($"/api/git/status?repo={Uri.EscapeDataString(h.Root)}")).StatusCode);
+    }
+
+    [Fact]
     public async Task A_branch_is_published_fetched_pulled_synced_and_made_renamed_deleted_amended_and_undone()
     {
         using var h = new Harness(_gateway, _mcp, c => c["autoCommit"] = false);

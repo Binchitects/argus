@@ -471,6 +471,35 @@ export interface DiskChanges {
 /** Waits on the server (up to 25 seconds) for what changes on disk after version `since`; 0 asks for the version to start from. */
 export const diskChanges = (since: number, signal: AbortSignal) => api<DiskChanges>(`/api/fs/changes?since=${since}`, { signal })
 
+/**
+ * A repository Source Control shows: the folder's own ("."), one in a folder of it ("libs/ui"), or an added folder's (its
+ * whole path). Every git call names the one it works on; none is the folder's own.
+ */
+export interface GitRepository {
+  path: string
+  name: string
+}
+
+/** The repository a call names, as the server takes it: none for the folder's own. */
+const repoOf = (repo?: string) => (repo && repo !== '.' ? repo : undefined)
+/** A GET's repository: `&repo=…` after its own query (`?repo=…` with none). */
+const repoQuery = (repo: string | undefined, first: boolean) => (repoOf(repo) ? `${first ? '?' : '&'}repo=${encodeURIComponent(repo!)}` : '')
+/** A POST's body with its repository. */
+const withRepo = <T extends object>(body: T, repo?: string) => (repoOf(repo) ? { ...body, repo } : body)
+
+/** How Source Control finds repositories: VS Code's git.autoRepositoryDetection, git.repositoryScanMaxDepth and git.repositoryScanIgnoredFolders, and the files open. */
+export interface RepositoryDetection {
+  detect: boolean | 'subFolders' | 'openEditors'
+  depth: number
+  ignored: string[]
+  open: string[]
+}
+
+export const gitRepositoriesQuery = (d: RepositoryDetection) => ({
+  queryKey: ['code', 'git', 'repositories', d] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ repositories: GitRepository[] }>('/api/git/repositories', { body: d, signal }).then((r) => r.repositories),
+})
+
 export const gitStatusQuery = {
   queryKey: ['code', 'git', 'status'] as const,
   queryFn: ({ signal }: { signal: AbortSignal }) => api<GitStatus>('/api/git/status', { signal }),
@@ -483,6 +512,22 @@ export const gitBranchesQuery = {
   queryKey: ['code', 'git', 'branches'] as const,
   queryFn: ({ signal }: { signal: AbortSignal }) => api<GitBranch[]>('/api/git/branches', { signal }),
 }
+/** A query of one repository's: its key and how it is read. */
+type RepoQuery<T> = { queryKey: readonly string[]; queryFn: (c: { signal: AbortSignal }) => Promise<T> }
+
+/** A repository's status: the folder's own is gitStatusQuery (the Explorer, the status bar and the editor read it too). */
+export const gitStatusQueryOf = (repo?: string): RepoQuery<GitStatus> =>
+  repoOf(repo)
+    ? { queryKey: ['code', 'git', 'status', repo!] as const, queryFn: ({ signal }: { signal: AbortSignal }) => api<GitStatus>(`/api/git/status${repoQuery(repo, true)}`, { signal }) }
+    : gitStatusQuery
+export const gitLogQueryOf = (repo?: string): RepoQuery<GitCommit[]> =>
+  repoOf(repo)
+    ? { queryKey: ['code', 'git', 'log', repo!] as const, queryFn: ({ signal }: { signal: AbortSignal }) => api<GitCommit[]>(`/api/git/log${repoQuery(repo, true)}`, { signal }) }
+    : gitLogQuery
+export const gitBranchesQueryOf = (repo?: string): RepoQuery<GitBranch[]> =>
+  repoOf(repo)
+    ? { queryKey: ['code', 'git', 'branches', repo!] as const, queryFn: ({ signal }: { signal: AbortSignal }) => api<GitBranch[]>(`/api/git/branches${repoQuery(repo, true)}`, { signal }) }
+    : gitBranchesQuery
 /** A branch: the folder's own (local), a remote's, or a tag. */
 export interface GitBranch {
   name: string
@@ -490,7 +535,7 @@ export interface GitBranch {
   kind: 'local' | 'remote' | 'tag'
 }
 /** The local branches, then the remotes' and the tags (Checkout to…). */
-export const gitAllBranches = () => api<GitBranch[]>('/api/git/branches?all=1')
+export const gitAllBranches = (repo?: string) => api<GitBranch[]>(`/api/git/branches?all=1${repoQuery(repo, false)}`)
 /** A file as a revision has it: HEAD, ":" (the index) or a commit. */
 export interface GitShown {
   path: string
@@ -522,25 +567,25 @@ export interface GitCommitFiles {
   files: { path: string; status: string; from: string | null }[]
   truncated: boolean
 }
-export const gitCommitFiles = (hash: string) => api<GitCommitFiles>(`/api/git/commit?hash=${encodeURIComponent(hash)}`)
+export const gitCommitFiles = (hash: string, repo?: string) => api<GitCommitFiles>(`/api/git/commit?hash=${encodeURIComponent(hash)}${repoQuery(repo, false)}`)
 
 /** Stages exactly this text as the file's (the file in the folder left alone). */
 export const gitStageText = (path: string, text: string) => api<GitStatus>('/api/git/stage-text', { body: { path, text } })
-export const gitStage = (paths: string[]) => api<GitStatus>('/api/git/stage', { body: { paths } })
-export const gitUnstage = (paths: string[]) => api<GitStatus>('/api/git/unstage', { body: { paths } })
-export const gitDiscard = (paths: string[]) => api<GitStatus>('/api/git/discard', { body: { paths } })
-export const gitCommit = (message: string, all: boolean, amend = false) =>
-  api<{ hash: string; status: GitStatus }>('/api/git/commit', { body: amend ? { message, all, amend } : { message, all } })
-export const gitSwitch = (branch: string, kind: GitBranch['kind'] = 'local') => api<GitStatus>('/api/git/switch', { body: { branch, kind } })
-export const gitFetch = () => api<GitStatus>('/api/git/fetch', { body: {} })
-export const gitPull = (rebase: boolean) => api<GitStatus>('/api/git/pull', { body: { rebase } })
+export const gitStage = (paths: string[], repo?: string) => api<GitStatus>('/api/git/stage', { body: withRepo({ paths }, repo) })
+export const gitUnstage = (paths: string[], repo?: string) => api<GitStatus>('/api/git/unstage', { body: withRepo({ paths }, repo) })
+export const gitDiscard = (paths: string[], repo?: string) => api<GitStatus>('/api/git/discard', { body: withRepo({ paths }, repo) })
+export const gitCommit = (message: string, all: boolean, amend = false, repo?: string) =>
+  api<{ hash: string; status: GitStatus }>('/api/git/commit', { body: withRepo(amend ? { message, all, amend } : { message, all }, repo) })
+export const gitSwitch = (branch: string, kind: GitBranch['kind'] = 'local', repo?: string) => api<GitStatus>('/api/git/switch', { body: withRepo({ branch, kind }, repo) })
+export const gitFetch = (repo?: string) => api<GitStatus>('/api/git/fetch', { body: withRepo({}, repo) })
+export const gitPull = (rebase: boolean, repo?: string) => api<GitStatus>('/api/git/pull', { body: withRepo({ rebase }, repo) })
 /** Pushes the branch; one with no upstream is published (to origin, or the only remote). */
-export const gitPush = (force = false) => api<GitStatus>('/api/git/push', { body: { force } })
-export const gitSync = (rebase: boolean) => api<GitStatus>('/api/git/sync', { body: { rebase } })
-export const gitCreateBranch = (name: string, from?: string) => api<GitStatus>('/api/git/branch/create', { body: from ? { name, from } : { name } })
-export const gitRenameBranch = (to: string) => api<GitStatus>('/api/git/branch/rename', { body: { to } })
-export const gitDeleteBranch = (name: string, force = false) => api<GitStatus>('/api/git/branch/delete', { body: { name, force } })
-export const gitUndoCommit = () => api<GitStatus>('/api/git/undo-commit', { body: {} })
+export const gitPush = (force = false, repo?: string) => api<GitStatus>('/api/git/push', { body: withRepo({ force }, repo) })
+export const gitSync = (rebase: boolean, repo?: string) => api<GitStatus>('/api/git/sync', { body: withRepo({ rebase }, repo) })
+export const gitCreateBranch = (name: string, from?: string, repo?: string) => api<GitStatus>('/api/git/branch/create', { body: withRepo(from ? { name, from } : { name }, repo) })
+export const gitRenameBranch = (to: string, repo?: string) => api<GitStatus>('/api/git/branch/rename', { body: withRepo({ to }, repo) })
+export const gitDeleteBranch = (name: string, force = false, repo?: string) => api<GitStatus>('/api/git/branch/delete', { body: withRepo({ name, force }, repo) })
+export const gitUndoCommit = (repo?: string) => api<GitStatus>('/api/git/undo-commit', { body: withRepo({}, repo) })
 
 /** Code completion at the editor's cursor: what goes there (empty: nothing). */
 export const completeCode = (body: { path: string; prefix: string; suffix: string }, signal: AbortSignal) => api<{ text: string }>('/api/complete', { body, signal })

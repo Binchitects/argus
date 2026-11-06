@@ -1280,6 +1280,28 @@ and email commit. Below: the branch, to switch to another, how far it is
 ahead of and behind its upstream, and the last commits. A repository bigger
 than the folder shows the folder's files only.
 
+**Several repositories at once**, as in VS Code: besides the folder's own,
+Source Control finds the repositories in its folders (one level down by
+default) and those of the files open in the editor, and each folder added to
+the workspace (Add Folder to Workspace) that is in one. With more than one,
+each has a section of its own: its name, its branch and how far it is from
+its upstream on its row, which folds it; under it its own commit box, Merge
+Changes, Staged Changes, Changes, branch and last commits, all folding. Its
+row's buttons (shown on hover or focus) switch it between list and tree,
+collapse it, read it again and have its **⋯** menu. Every action works on the
+section's own repository; a git command of the palette (Pull, Push, Fetch,
+Checkout to…) asks which repository first, and **Fetch From All
+Repositories** fetches each. A compare, a file's history and the gutter's
+changes use the repository the file is in. The settings are VS Code's:
+`git.autoRepositoryDetection` (`true`: both ways; `"subFolders"` or
+`"openEditors"`: one of them; `false`: the folder's own and the added
+folders' only), `git.repositoryScanMaxDepth` (levels of folders looked into,
+1 by default, -1 for 10) and `git.repositoryScanIgnoredFolders`
+(`["node_modules"]`: never looked into, nor `.git` nor links). A
+repository's files keep the folder's paths (`libs/ui/button.ts`); an added
+folder's have their whole path, as the Explorer has them. Each repository's
+folds are kept apart, for the folder.
+
 As in VS Code, each group (and the branch and the last commits) folds with
 its chevron, and **View as Tree** shows the files under their folders, each
 folding too, with its own buttons for all the files in it (a folder with only

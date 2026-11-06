@@ -28,6 +28,8 @@ export interface SettingDef {
    * Code takes a theme it does not have (it reads as the nearest one).
    */
   open?: boolean
+  /** A string setting that takes true and false too, as VS Code's git.autoRepositoryDetection does. */
+  booleans?: boolean
 }
 
 const lang = 'language' as const
@@ -155,6 +157,9 @@ export const settingDefs: SettingDef[] = [
   { key: 'git.confirmSync', type: 'boolean', default: true, description: 'Asks before Sync pulls and pushes.', category: 'Source Control' },
   { key: 'git.enableStatusBarSync', type: 'boolean', default: true, description: 'Shows the branch\'s commits to pull and push in the status bar, and syncs them on a click.', category: 'Source Control' },
   { key: 'git.rebaseWhenSync', type: 'boolean', default: false, description: 'Pull and Sync rebase the branch on its upstream, not merge it.', category: 'Source Control' },
+  { key: 'git.autoRepositoryDetection', type: 'string', booleans: true, default: true, enum: ['subFolders', 'openEditors'], description: 'Which repositories Source Control shows besides the folder\'s own and the added folders\': true, those in its folders (down to "git.repositoryScanMaxDepth") and those of the files open; "subFolders" or "openEditors", one of the two; false, neither.', category: 'Source Control' },
+  { key: 'git.repositoryScanMaxDepth', type: 'integer', default: 1, minimum: -1, maximum: 10, description: 'How many levels of folders are looked into for repositories (-1: as deep as 10 levels).', category: 'Source Control' },
+  { key: 'git.repositoryScanIgnoredFolders', type: 'array', items: 'string', default: ['node_modules'], description: 'The folders not looked into for repositories, by name.', category: 'Source Control' },
   { key: 'git.decorations.enabled', type: 'boolean', default: true, description: "Shows git's changes in the Explorer (modified, untracked, added) and dims what the repository ignores.", category: 'Source Control' },
   { key: 'problems.decorations.enabled', type: 'boolean', default: true, description: "Shows the files with problems in the Explorer: errors and warnings coloured, and their folders too.", category: 'Workbench' },
   { key: 'breadcrumbs.enabled', type: 'boolean', default: true, description: 'Shows the breadcrumbs over the editor: the folders, the file and the symbols the cursor is in.', category: 'Workbench' },
@@ -273,7 +278,8 @@ export function settingsSchema(): Record<string, unknown> {
     type: d.type === 'integer' ? 'integer' : d.type,
     default: d.default,
     description: d.description,
-    ...(d.enum && !d.open ? { enum: d.enum, enumDescriptions: d.enumDescriptions } : {}),
+    ...(d.enum && !d.open && !d.booleans ? { enum: d.enum, enumDescriptions: d.enumDescriptions } : {}),
+    ...(d.booleans ? { type: undefined, anyOf: [{ type: 'boolean' }, { type: 'string', enum: d.enum }] } : {}),
     // Other values are taken too: the known ones are offered.
     ...(d.enum && d.open ? { anyOf: [{ enum: d.enum }, { type: 'string' }] } : {}),
     ...(d.minimum !== undefined ? { minimum: d.minimum } : {}),
@@ -292,6 +298,7 @@ export function settingsSchema(): Record<string, unknown> {
 /** A setting's value as written, checked against its definition: the value, or why it is not taken. */
 export function check(d: SettingDef, v: unknown): string | null {
   const t = Array.isArray(v) ? 'array' : v === null ? 'null' : typeof v
+  if (d.booleans && t === 'boolean') return null
   if (d.type === 'integer' ? !Number.isInteger(v) : d.type === 'number' ? t !== 'number' : t !== d.type) return `"${d.key}" takes ${d.type === 'array' ? 'an array' : d.type === 'object' ? 'an object' : `a ${d.type}`}.`
   if (d.enum && !d.open && !d.enum.includes(v as string)) return `"${d.key}" is one of ${d.enum.map((e) => JSON.stringify(e)).join(', ')}.`
   if (typeof v === 'number' && ((d.minimum !== undefined && v < d.minimum) || (d.maximum !== undefined && v > d.maximum))) return `"${d.key}" is from ${d.minimum ?? '…'} to ${d.maximum ?? '…'}.`
