@@ -2151,7 +2151,8 @@ and the target from 5% to 10 points under the threshold (85% when off; a lower
 threshold brings the target down with it), so a compaction does not start the
 next one. The use of the window shows after each turn in the terminal
 (`/context` at any time) and in the IDE's status bar and chat gauge, which marks
-the threshold and says whose it is. With no count since compacting or resuming,
+the threshold and says whose it is. With no count since compacting, resuming or
+choosing another model (`/model`: the count was the other model's),
 the figure is an estimate and says so (`context about 16.4k / 32.8k (50%, the
 next answer counts it)`), made with the characters a token held when the
 session compacted, as the IDE makes it.

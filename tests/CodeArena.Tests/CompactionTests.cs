@@ -191,6 +191,18 @@ public sealed class CompactionTests : IDisposable
     }
 
     [Fact]
+    public async Task After_another_model_is_chosen_context_says_its_figure_is_an_estimate()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        _gateway.Answer = _ => Reply.Say("ok");
+        // Counted by model-a; model-b has its own tokenizer and may get other tools: the count is not its.
+        Assert.Equal(0, await h.Run("hello\n/context\n/model model-b\n/context\n/exit\n", "chat"));
+        var after = h.Out[h.Out.IndexOf("Model: model-b", StringComparison.Ordinal)..];
+        Assert.Matches(@"context [\d.]+k? / 20k \(\d+%\), compacts at 80%", h.Out[..h.Out.IndexOf("Model: model-b", StringComparison.Ordinal)]);
+        Assert.Matches(@"context about [\d.]+k? / [\d.]+k? \(\d+%, the next answer counts it\)", after);
+    }
+
+    [Fact]
     public async Task The_turns_summary_says_how_full_the_window_is_and_context_what_fills_it_as_the_web_chat_does()
     {
         using var h = new Harness(_gateway, _mcp);

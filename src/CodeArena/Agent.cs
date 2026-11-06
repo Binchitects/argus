@@ -230,6 +230,8 @@ internal sealed class Agent
     /// <summary>The tokens of the last request and its answer as the gateway counted them, and the messages they covered (0: not counted since a compaction).</summary>
     private long _knownTokens;
     private int _knownCount;
+    /// <summary>The model that count is of: another model has its own tokenizer and tools, so it is not that one's.</summary>
+    private string? _knownBy;
     /// <summary>The size of the last request sent, in characters (what its tokens are learned against).</summary>
     private long _sentChars;
 
@@ -260,6 +262,7 @@ internal sealed class Agent
             Learn(Chars(k.Count - 1), k.Usage.Prompt);
             _knownTokens = k.Usage.Prompt + k.Usage.Completion;
             _knownCount = k.Count;
+            _knownBy = Model.Name;
         }
     }
 
@@ -662,6 +665,7 @@ internal sealed class Agent
                 }
                 Session?.Usage(usage);
                 _knownTokens = usage.Prompt + usage.Completion;
+                _knownBy = Model.Name;
                 Learn(_sentChars, usage.Prompt);
                 // The room the next answers get grows to the longest one yet: compaction comes before a long answer is cut.
                 _longestAnswer = Math.Max(_longestAnswer, usage.Completion);
@@ -1374,21 +1378,25 @@ internal sealed class Agent
     public long Estimate()
     {
         var notes = NextNotes();
-        if (_knownTokens > 0 && !_notes.Any(n => !IsMemory(n)))
+        if (Counted && !_notes.Any(n => !IsMemory(n)))
         {
             // Resumed with the last count: its request carried a note the session does not keep, and the next one takes its place.
             notes.RemoveAll(n => !IsMemory(n));
         }
-        var added = Messages.Skip(_knownCount).Sum(Size) + notes.Where(n => n.At >= _knownCount).Sum(n => n.Text.Length + 10);
-        if (_knownTokens > 0)
+        var from = Counted ? _knownCount : 0;
+        var added = Messages.Skip(from).Sum(Size) + notes.Where(n => n.At >= from).Sum(n => n.Text.Length + 10);
+        if (Counted)
         {
             return _knownTokens + (long)(added / CharsPerToken);
         }
         return (long)((SystemPrompt().Length + ToolChars() + added) / CharsPerToken);
     }
 
-    /// <summary>The gateway counted the conversation since the last compaction or resume: <see cref="Estimate"/> builds on its count.</summary>
-    public bool Counted => _knownTokens > 0;
+    /// <summary>
+    /// The gateway counted the conversation for this model since the last compaction or resume: <see cref="Estimate"/>
+    /// builds on its count. After /model it is another model's count, so not this one's.
+    /// </summary>
+    public bool Counted => _knownTokens > 0 && _knownBy == Model.Name;
 
     private long ToolChars() => Model.Info.Tools ? Tools.Offered().Sum(t => (long)Json.Line(t.Spec()).Length) : 0;
 
@@ -1844,7 +1852,7 @@ internal sealed class Agent
     }
 
     /// <summary>About how many tokens of a request of this many characters the engine has not cached: what was added since its last count.</summary>
-    private long Uncached(long chars) => Math.Max(0, (long)(chars / CharsPerToken) - _knownTokens);
+    private long Uncached(long chars) => Math.Max(0, (long)(chars / CharsPerToken) - (Counted ? _knownTokens : 0));
 
     /// <summary>The compaction is done: written to the session (as the whole new history), said, and the page shown it.</summary>
     /// <param name="raw">How many of the last messages are the conversation's own, word for word (the rest stands for what came before); null: as before.</param>
