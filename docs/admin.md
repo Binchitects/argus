@@ -527,7 +527,10 @@ would be with them.
   on vLLM and SGLang, below), its GPUs (empty: the ones the
   advisor proposes for this machine, kept on save), copies (`replicas`, each on
   its run of the GPUs; a conversation stays on one), its share of each GPU
-  (`gpuMemoryUtilization`, 0.90), quantisation, speculative decoding (`mtp`,
+  (`gpuMemoryUtilization`, 0.01 to 0.98, empty 0.90; the advice's
+  `recommended.shareMin` is the smallest that holds a whole context and
+  `shareMax` the largest that fits beside what is kept there, and the form's
+  hint and a refused share say them), quantisation, speculative decoding (`mtp`,
   or `eagle3` with a draft snapshot), a CPU tier for its cache (`kvCpuGb`),
   whether it may sleep, and a `fallback` model. **Answers at once** is its
   `--max-num-seqs` and the cache type its `--kv-cache-dtype` (fp8). A setting
@@ -636,9 +639,19 @@ would be with them.
   type becomes fp8 and answers at once 16, on the GPUs proposed for this machine,
   unless set in the form); from vLLM or SGLang, copies, the share of each GPU,
   quantisation, speculative decoding and the cache's tiers (the cache type becomes
-  q8_0, and the form puts it on every GPU); from vLLM to SGLang, LMCache. A move
-  to an engine that does not run (or whose feature is off) is refused, and while a
-  model moves it is not edited, loaded or unloaded.
+  q8_0, and the form puts it on every GPU, its slots from what fits there); from
+  vLLM to SGLang, LMCache. What it had on the kind it leaves is kept (the row's
+  `left`): moved back there, it takes those up again, so a round trip llama.cpp →
+  vLLM → llama.cpp leaves it as it was (its slots, its longest answer, its cache
+  type, its GPUs, its prompt step and the like; on vLLM again its answers at once,
+  share, GPUs and copies). A longest answer a move carries that the new engine's
+  window does not hold (vLLM's whole context on llama.cpp's slots, or one saved
+  before its window shrank) is cut to the longest that leaves the prompt its room
+  there, and the dialog and the save say so: it is not refused. On a save that
+  stays on its engine it is refused, as before. Moved to vLLM where the default
+  share (0.90) does not fit, the dialog starts from the smallest share that fits.
+  A move to an engine that does not run (or whose feature is off) is refused, and
+  while a model moves it is not edited, loaded or unloaded.
   llama.cpp starts again when its list of models changes (it reads its presets as
   it starts), as when a model is added or removed: the answers of its other models
   in flight then are cut. The same through the API: `PATCH /api/admin/models/NAME`

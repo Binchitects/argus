@@ -120,6 +120,21 @@ export interface SavedModel {
   outputPerMtok?: number | null
   /** What it costs now, per million tokens: its own prices, else the defaults (own says which it sets). */
   price?: ModelPrice
+  /** Its settings on the kind of engine it last left, which a move back there takes up again; null: it never moved. */
+  left?: LeftSettings | null
+}
+
+/** A model's settings on the kind of engine it left: llama.cpp's slots, vLLM's answers at once, and what only that kind has. */
+export type LeftSettings = Omit<SavedModel, 'name' | 'left' | 'price' | 'window' | 'output'> & {
+  engineKind: 'llamacpp' | 'vllm' | 'sglang'
+  replicas?: number
+  gpuMemoryUtilization?: number | null
+  quantization?: string | null
+  specDecode?: string | null
+  kvCpuGb?: number | null
+  kvTier?: 'cpu' | 'lmcache' | null
+  kvDiskGb?: number | null
+  sleep?: boolean
 }
 
 export interface ModelPrice {
@@ -138,8 +153,13 @@ const llamaCacheTypes = ['f16', 'bf16', 'q8_0', 'q5_1', 'q5_0', 'q4_1', 'q4_0', 
 
 function initial(saved: SavedModel | null, moving = false) {
   const s = (v: number | null | undefined) => (v === null || v === undefined ? '' : String(v))
-  // A vLLM or SGLang model moved here starts from llama.cpp's own: every GPU, its cache type, and what fits (taken from the advice).
-  if (moving && saved) saved = { ...saved, devices: null, kvType: llamaCacheTypes.includes(saved.kvType ?? '') ? saved.kvType : 'q8_0', draftHead: null, mtp: false }
+  // A vLLM or SGLang model moved back here takes up its own llama.cpp settings again (its slots, its longest answer, what only
+  // llama.cpp has); one that never ran here starts from llama.cpp's own: every GPU, its cache type, and what fits (taken from the advice).
+  if (moving && saved)
+    saved =
+      saved.left?.engineKind === 'llamacpp'
+        ? { ...saved, ...saved.left, file: saved.file, context: saved.context, projector: saved.left.file === saved.file ? saved.left.projector : null }
+        : { ...saved, devices: null, kvType: llamaCacheTypes.includes(saved.kvType ?? '') ? saved.kvType : 'q8_0', draftHead: null, mtp: false, parallel: 1 }
   return {
     name: saved?.name ?? '',
     file: saved?.file ?? '',
@@ -273,7 +293,8 @@ export function ChatModelSection({
   const debounced = useDebounced(request, 350)
   const advice = useQuery({
     queryKey: ['admin', 'models', 'advice', debounced],
-    queryFn: ({ signal }) => api<Advice>('/api/admin/models/advice', { body: debounced, signal }),
+    // A move names the model: the API advises what it carries here (a longest answer it cuts to fit, and why).
+    queryFn: ({ signal }) => api<Advice>('/api/admin/models/advice', { body: moving && saved ? { ...debounced, name: saved.name } : debounced, signal }),
     enabled: !!debounced.file && language,
     placeholderData: keepPreviousData,
     retry: false,
@@ -313,6 +334,8 @@ export function ChatModelSection({
     const picked = files.find((x) => x.path === path)
     // The name follows the file until it is typed by hand.
     setForm((cur) => ({ ...cur, file: path, name: nameTouched ? cur.name : baseName(path) }))
+    // Moved back onto the file it had here: its own settings, not what fits a new model.
+    if (moving && saved?.left?.engineKind === 'llamacpp' && saved.left.file === path) return setForm((cur) => ({ ...cur, projector: saved.left?.projector ?? '' }))
     if ((saved && !moving) || picked?.profile.kind !== 'language') return
     try {
       const first = await api<Advice>('/api/admin/models/advice', { body: { file: path } })
@@ -329,6 +352,15 @@ export function ChatModelSection({
     taken.current = chosen
     void chooseFile(chosen)
   })
+
+  // A vLLM or SGLang model that never ran here, moved on its own file: its slots from what fits here, not vLLM's answers at once.
+  const slotsFromAdvice = useRef(moving && saved?.left?.engineKind !== 'llamacpp')
+  const fits = a?.recommended?.parallel
+  useEffect(() => {
+    if (!slotsFromAdvice.current || !fits) return
+    slotsFromAdvice.current = false
+    setForm((f) => ({ ...f, parallel: String(fits) }))
+  }, [fits])
 
   const save = useMutation({
     mutationFn: () =>
@@ -428,7 +460,11 @@ export function ChatModelSection({
               <Field
                 label="Longest answer (tokens)"
                 error={errors.maxOutput}
-                hint={limits ? `${tokens(limits.maxOutput.min)} to ${tokens(limits.maxOutput.max)}: what a conversation holds (${tokens(held)}) less room for its prompt. Empty: ${tokens(outDefault)}.` : undefined}
+                hint={
+                  // A move cuts one its window here does not hold, and says so.
+                  a?.problems.find((p) => !p.error && p.field === 'maxOutput')?.message ??
+                  (limits ? `${tokens(limits.maxOutput.min)} to ${tokens(limits.maxOutput.max)}: what a conversation holds (${tokens(held)}) less room for its prompt. Empty: ${tokens(outDefault)}.` : undefined)
+                }
               >
                 <Input inputMode="numeric" value={form.maxOutput} placeholder={String(outDefault)} onChange={(e) => set('maxOutput', e.target.value)} />
               </Field>

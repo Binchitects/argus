@@ -565,3 +565,97 @@ describe('admin models: the Engine field as the library and the page change', ()
     expect(await within(dialog).findByRole('form', { name: 'The vLLM model' })).toBeInTheDocument()
   })
 })
+
+// A round trip llama.cpp → vLLM → llama.cpp leaves a model as it was: each move back takes up its own settings of that kind
+// again (the API keeps them as `left`), vLLM's share starts from one that fits a shared GPU, and a longest answer its window
+// there does not hold is cut to fit, saying why, not refused.
+
+type Body = Record<string, unknown>
+
+function roundTrip(models: object[], advice: { llama?: (b: Body) => object; vllm?: (b: Body) => object } = {}) {
+  return fakeApi(admin, {
+    'GET /api/admin/models': () => ({ json: { engine, small: null, models } }),
+    'GET /api/admin/models/library': () => ({ json: both.library }),
+    'GET /api/admin/models/library/snapshots': () => ({ json: [] }),
+    'GET /api/admin/models/media/files': () => ({ json: [] }),
+    'GET /api/admin/models/hf/downloads': () => ({ json: [] }),
+    'POST /api/admin/models/advice': (b) => ({ json: onServer(b) ? (advice.vllm?.(b as Body) ?? vllmAdvice) : (advice.llama?.(b as Body) ?? llamaAdvice) }),
+    'PATCH /api/admin/models/Qwen3': () => ({ json: { restarting: false, warning: null } }),
+  })
+}
+
+const patched = (calls: { method: string; body?: unknown }[]) => calls.find((c) => c.method === 'PATCH')!.body as Body & { clear: string[] }
+
+describe('admin models: a round trip between engines', () => {
+  it('moves a llama.cpp model to vLLM on a shared GPU with the smallest share that fits, and says which shares fit', async () => {
+    const shared = {
+      ...vllmAdvice,
+      recommended: { ...vllmAdvice.recommended, devices: '0', shareMin: 0.03, shareMax: 0.87 },
+      problems: [{ field: 'gpuMemoryUtilization', message: 'At 0.90 of each GPU it would take memory that is kept for others there. A share of 0.03 to 0.87 fits here.', error: true }],
+    }
+    const calls = roundTrip([qwen3], { vllm: (b) => (b.gpuMemoryUtilization ? { ...shared, problems: [] } : shared) })
+    renderApp('/admin/models')
+    const dialog = await edit('Qwen3')
+    await chooseEngine(dialog, 'vLLM')
+    const form = await within(dialog).findByRole('form', { name: 'The vLLM model' })
+    const share = within(form).getByRole('textbox', { name: 'Share of each GPU' })
+    await waitFor(() => expect(share).toHaveValue('0.03'))
+    // Refused at 0.90 saying which shares fit; at the share prefilled, the hint says it.
+    await waitFor(() => expect(share).toHaveAccessibleDescription(/From 0\.03 to 0\.87 here: the smallest holds a whole context, a larger one more answers at once\./))
+    await waitFor(() => expect(within(form).getByRole('button', { name: 'Save' })).toBeEnabled())
+    await userEvent.click(within(form).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true))
+    expect(patched(calls)).toMatchObject({ engineKind: 'vllm', gpuMemoryUtilization: 0.03, parallel: 16 })
+  })
+
+  it('moves a vLLM model back to llama.cpp with its own slots, longest answer and cache type, not 16 slots', async () => {
+    const onVllm = {
+      ...qwen3, engineKind: 'vllm', parallel: 16, maxOutput: 4096, kvType: 'fp8', devices: '0', gpuMemoryUtilization: 0.22, replicas: 1, sleep: true,
+      left: { engineKind: 'llamacpp', file: qwen3Gguf, parallel: 4, maxOutput: 1024, kvType: 'f16', devices: null, ubatch: 512, placement: 'auto', gpuLayers: 99, cpuMoe: 0 },
+    }
+    const calls = roundTrip([onVllm])
+    renderApp('/admin/models')
+    const dialog = await edit('Qwen3')
+    await chooseEngine(dialog, 'llama.cpp')
+    const form = await within(dialog).findByRole('form', { name: 'The chat model' })
+    expect(within(form).getByRole('textbox', { name: 'Answers at once' })).toHaveValue('4')
+    expect(within(form).getByRole('textbox', { name: 'Longest answer (tokens)' })).toHaveValue('1024')
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Save' })).toBeEnabled())
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true))
+    expect(patched(calls)).toMatchObject({ engineKind: 'llamacpp', file: qwen3Gguf, parallel: 4, maxOutput: 1024, kvType: 'f16', ubatch: 512 })
+    expect(patched(calls).clear).toContain('devices')
+  })
+
+  it('moves a llama.cpp model to vLLM again with its own vLLM settings: its answers at once, GPUs and share', async () => {
+    const back = { ...qwen3, parallel: 4, left: { engineKind: 'vllm', file: qwen3Gguf, parallel: 24, maxOutput: 4096, kvType: 'fp8', devices: '1', gpuMemoryUtilization: 0.5, replicas: 1, sleep: false } }
+    const calls = roundTrip([back])
+    renderApp('/admin/models')
+    const dialog = await edit('Qwen3')
+    await chooseEngine(dialog, 'vLLM')
+    const form = await within(dialog).findByRole('form', { name: 'The vLLM model' })
+    await waitFor(() => expect(within(form).getByRole('button', { name: 'Save' })).toBeEnabled())
+    await userEvent.click(within(form).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true))
+    expect(patched(calls)).toMatchObject({ engineKind: 'vllm', parallel: 24, maxOutput: 4096, devices: '1', gpuMemoryUtilization: 0.5, sleep: false })
+  })
+
+  it('moves a vLLM model that never ran on llama.cpp there with the slots that fit, and a longest answer cut to fit with why, Save not held', async () => {
+    const cut = 'Its longest answer of 4,096 tokens does not fit what a conversation holds on llama.cpp (2,048 tokens) with room for its prompt: it becomes 1,024.'
+    const calls = roundTrip([{ ...qwen3, engineKind: 'vllm', parallel: 16, maxOutput: 4096, kvType: 'fp8', devices: '0', left: null }], {
+      llama: () => ({ ...llamaAdvice, problems: [{ field: 'maxOutput', message: cut, error: false }] }),
+    })
+    renderApp('/admin/models')
+    const dialog = await edit('Qwen3')
+    await chooseEngine(dialog, 'llama.cpp')
+    const form = await within(dialog).findByRole('form', { name: 'The chat model' })
+    await waitFor(() => expect(within(form).getByRole('textbox', { name: 'Answers at once' })).toHaveValue('2'))
+    await waitFor(() => expect(within(form).getByRole('textbox', { name: 'Longest answer (tokens)' })).toHaveAccessibleDescription(cut))
+    await waitFor(() => expect(within(dialog).getByRole('button', { name: 'Save' })).toBeEnabled())
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true))
+    expect(patched(calls)).toMatchObject({ engineKind: 'llamacpp', parallel: 2 })
+    // The advice for the move names the model, so the API knows what it carries.
+    expect(calls.some((c) => c.path === '/api/admin/models/advice' && (c.body as Body).name === 'Qwen3' && !onServer(c.body))).toBe(true)
+  })
+})

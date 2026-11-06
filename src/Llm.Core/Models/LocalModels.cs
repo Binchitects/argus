@@ -94,6 +94,12 @@ public sealed class LocalModel
     public decimal? OutputPerMtok { get; set; }
     /// <summary>Its move to another engine, underway or failed (<see cref="ModelMove"/>); null: none.</summary>
     public ModelMove? Move { get; set; }
+    /// <summary>
+    /// Its settings on the kind of engine it last left (a LocalModel as JSON): a move back to that kind takes up again what only
+    /// that kind has and, between llama.cpp and vLLM or SGLang, what each counts its own way (llama.cpp's slots or vLLM's answers
+    /// at once, its longest answer, cache type, GPUs), so a round trip leaves it as it was; null: it never moved.
+    /// </summary>
+    public string? Left { get; set; }
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }

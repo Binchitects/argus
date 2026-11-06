@@ -228,6 +228,91 @@ public sealed class EngineMoveTests(AppFixture app) : IDisposable
         }
     }
 
+    private static async Task<(string Kind, int Parallel, int? MaxOutput, string KvType, int? Ubatch)> SettingsAsync(Stack s, string name)
+    {
+        var row = await RowAsync(s, name);
+        return (row.GetProperty("engineKind").GetString()!, row.GetProperty("parallel").GetInt32(),
+            row.GetProperty("maxOutput") is { ValueKind: JsonValueKind.Number } o ? o.GetInt32() : null, row.GetProperty("kvType").GetString()!,
+            row.GetProperty("ubatch") is { ValueKind: JsonValueKind.Number } u ? u.GetInt32() : null);
+    }
+
+    [Fact]
+    public async Task A_round_trip_llama_cpp_to_vllm_and_back_leaves_the_model_as_it_was_its_slots_and_longest_answer_its_own()
+    {
+        var s = await StartAsync();
+        try
+        {
+            await StatusAssert.Is(HttpStatusCode.Created, await s.Admin.PostAsync("/api/admin/models", new
+            {
+                name = "tiny", file = "tiny/Tiny-4B-Q4_K_M.gguf", context = 8192, parallel = 4, maxOutput = 1024, kvType = "f16", ubatch = 512,
+            }));
+            await UntilAsync(s, () => Task.FromResult(s.State.StatusOf("tiny") == "unloaded"), "llama.cpp lists tiny");
+
+            // To vLLM as the dialog sends it: 16 answers at once there, and a longer answer, which vLLM's whole context holds.
+            await StatusAssert.Is(HttpStatusCode.OK, await s.Admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny", UriKind.Relative), new { engineKind = "vllm", parallel = 16, maxOutput = 4096 }));
+            await UntilAsync(s, async () => await PhaseAsync(s, "tiny") is null && s.State.StatusOf("tiny") == "loaded", "tiny ready on vLLM");
+            Assert.Equal(("vllm", 16, 4096, "fp8", null), await SettingsAsync(s, "tiny"));
+            // Its llama.cpp settings are shown with it, for the dialog's move back.
+            var left = (await RowAsync(s, "tiny")).GetProperty("left");
+            Assert.Equal(("llamacpp", 4, 1024), (left.GetProperty("engineKind").GetString(), left.GetProperty("parallel").GetInt32(), left.GetProperty("maxOutput").GetInt32()));
+
+            // Back with nothing but the engine: its 4 slots, its own longest answer, its cache type and prompt step, not vLLM's.
+            await StatusAssert.Is(HttpStatusCode.OK, await s.Admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny", UriKind.Relative), new { engineKind = "llamacpp" }));
+            await UntilAsync(s, async () => await PhaseAsync(s, "tiny") is null && app.Engine.StatusOf("tiny") == "loaded", "tiny back on llama.cpp");
+            Assert.Equal(("llamacpp", 4, 1024, "f16", 512), await SettingsAsync(s, "tiny"));
+            Assert.Contains("[tiny]\nmodel = /library/tiny/Tiny-4B-Q4_K_M.gguf\n", await File.ReadAllTextAsync(Path.Combine(Config, "models.ini")), StringComparison.Ordinal);
+
+            // And to vLLM again: its 16 answers at once and its longer answer there come back too.
+            await StatusAssert.Is(HttpStatusCode.OK, await s.Admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny", UriKind.Relative), new { engineKind = "vllm" }));
+            await UntilAsync(s, async () => await PhaseAsync(s, "tiny") is null && s.State.StatusOf("tiny") == "loaded", "tiny on vLLM again");
+            Assert.Equal(("vllm", 16, 4096, "fp8", null), await SettingsAsync(s, "tiny"));
+        }
+        finally
+        {
+            await s.Stop();
+        }
+    }
+
+    [Fact]
+    public async Task A_model_moved_back_with_a_longest_answer_its_window_no_longer_holds_has_it_cut_to_fit_and_is_told_why()
+    {
+        var s = await StartAsync();
+        try
+        {
+            await StatusAssert.Is(HttpStatusCode.Created, await s.Admin.PostAsync("/api/admin/models", new { name = "tiny", file = "tiny/Tiny-4B-Q4_K_M.gguf", context = 8192, parallel = 4 }));
+            // Saved before the window rules: 4,096 tokens, more than its 4 slots of 2,048 leave (as SmolLM2's on the live stack).
+            using (var scope = s.App.Services.CreateScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+                (await db.LocalModels.FindAsync("tiny"))!.MaxOutput = 4096;
+                await db.SaveChangesAsync();
+            }
+            await UntilAsync(s, () => Task.FromResult(s.State.StatusOf("tiny") == "unloaded"), "llama.cpp lists tiny");
+            await StatusAssert.Is(HttpStatusCode.OK, await s.Admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny", UriKind.Relative), new { engineKind = "vllm", parallel = 16, maxOutput = 4096 }));
+            await UntilAsync(s, async () => await PhaseAsync(s, "tiny") is null && s.State.StatusOf("tiny") == "loaded", "tiny ready on vLLM");
+
+            // The dialog's advice for the move back says what it becomes, as a warning, not a refusal.
+            var advice = await s.Admin.JsonAsync(await s.Admin.PostAsync("/api/admin/models/advice", new { name = "tiny", engineKind = "llamacpp", file = "tiny/Tiny-4B-Q4_K_M.gguf", maxOutput = 4096, parallel = 4 }));
+            var said = advice.GetProperty("problems").EnumerateArray().Single(p => p.GetProperty("field").GetString() == "maxOutput");
+            Assert.False(said.GetProperty("error").GetBoolean());
+            Assert.Contains("4,096", said.GetProperty("message").GetString(), StringComparison.Ordinal);
+            Assert.Contains("1,024", said.GetProperty("message").GetString(), StringComparison.Ordinal);
+
+            // Moved back as the dialog sends it: saved with the longest answer that fits, and the save says why.
+            using var back = await s.Admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny", UriKind.Relative), new { engineKind = "llamacpp", maxOutput = 4096, parallel = 4 });
+            await StatusAssert.Is(HttpStatusCode.OK, back);
+            Assert.Contains("1,024", (await s.Admin.JsonAsync(back)).GetProperty("warning").GetString(), StringComparison.Ordinal);
+            await UntilAsync(s, async () => await PhaseAsync(s, "tiny") is null && app.Engine.StatusOf("tiny") == "loaded", "tiny back on llama.cpp");
+            Assert.Equal(("llamacpp", 4, 1024), (await SettingsAsync(s, "tiny")) is var (kind, parallel, output, _, _) ? (kind, parallel, output) : default);
+            // Not on a save that stays on its engine: there a longest answer that does not fit is refused, as before.
+            await StatusAssert.Is(HttpStatusCode.BadRequest, await s.Admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/tiny", UriKind.Relative), new { maxOutput = 4096 }));
+        }
+        finally
+        {
+            await s.Stop();
+        }
+    }
+
     [Fact]
     public async Task A_vllm_model_moves_to_llama_cpp_a_failure_there_leaving_it_on_vllm_and_the_next_try_moving_it()
     {
