@@ -1242,7 +1242,7 @@ internal sealed class Agent
         var changed = Task.CompletedTask;
         for (var n = 0; n < planned.Count; n++)
         {
-            var changes = planned[n].Refusal is null && planned[n].Tool?.Kind is ToolKind.Edit or ToolKind.Shell;
+            var changes = planned[n].Refusal is null && planned[n].Tool?.Kind is ToolKind.Edit or ToolKind.Shell or ToolKind.Machine;
             var call = RunCall(planned[n], n, changes ? Task.WhenAll(running) : changed);
             running.Add(call);
             changed = changes ? call : changed;

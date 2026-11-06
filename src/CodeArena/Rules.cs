@@ -91,6 +91,11 @@ internal sealed partial class PermissionRules
         {
             return args.Str("command")?.Trim();
         }
+        // A VM's tool by the VM: vm_run(test-*) allows commands in the test VMs.
+        if (tool.Kind == ToolKind.Machine)
+        {
+            return args.Str("vm")?.Trim();
+        }
         if (args.Str("path") is { } path)
         {
             try

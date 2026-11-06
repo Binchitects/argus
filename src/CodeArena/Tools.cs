@@ -15,6 +15,8 @@ internal enum ToolKind
     Remote,
     /// <summary>A sub-agent: its own tools ask for themselves.</summary>
     Agent,
+    /// <summary>Changes a virtual machine (VmTools.cs): asks where commands ask.</summary>
+    Machine,
 }
 
 /// <summary>A tool's answer for the model, and what the terminal shows of it (a diff, a summary).</summary>
@@ -241,6 +243,8 @@ internal sealed class Permissions(Ui ui, Mode mode)
             ToolKind.Shell when !tool.AlwaysAsks && CommandPrefix(args.Str("command")) is { Length: > 0 } prefix => how is { } h
                 ? ($"shell-{h.Item1}:" + prefix, $"for `{prefix} …` {h.Item2}")
                 : ("shell:" + prefix, $"for `{prefix} …`"),
+            // A VM's tool is agreed to for that VM: "always" to vm_run on a test VM is not to vm_run on every VM.
+            ToolKind.Machine when args.Str("vm") is { Length: > 0 } vm => ($"vm:{tool.Name}:{vm.Trim()}", $"for {tool.Name} on {vm.Trim()}"),
             _ => ("tool:" + tool.Name, $"for {tool.Name}"),
         };
         var label = how is { } kind ? $"{tool.Name} {kind.Item2}" : tool.Name;

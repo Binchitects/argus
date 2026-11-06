@@ -46,6 +46,9 @@ internal sealed partial class Runtime : IAsyncDisposable
     /// <summary>The folder's code index: made at the start when Config.CodeIndex is on (with the agent's tools), else when the IDE first asks for symbols.</summary>
     public CodeIndexHost? CodeIndex { get; private set; }
 
+    /// <summary>The person's VMs and their tools, when a hypervisor is installed here; null when none is.</summary>
+    public VirtualMachines? Machines { get; private set; }
+
     private readonly object _indexGate = new();
 
     /// <summary>The code index for the IDE's Go to Symbol, made now if the session has none (the agent's tools stay as Config says).</summary>
@@ -373,6 +376,12 @@ internal sealed partial class Runtime : IAsyncDisposable
         tools.Add(LocalTools.RunStepsTool());
         tools.Add(RunCodeTool(this));
         tools.Add(Screenshots.Tool(Env.Env));
+        // The VM tools, when VirtualBox, VMware, libvirt or Hyper-V is installed here.
+        if (Hypervisors.Find(Env.Env) is { Count: > 0 } hypervisors)
+        {
+            Machines = new VirtualMachines(hypervisors, new GuestLogins(Keyring.For(Env.Env), Ui), () => Sees(Model.Info));
+            tools.AddRange(Machines.Tools());
+        }
         if (ProviderAgents.Tool(Config, Env.Env) is { } agents)
         {
             tools.Add(agents);
