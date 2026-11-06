@@ -18,6 +18,40 @@ const diffColors = {
   },
 }
 
+// VS Code's code colours ('vs' and 'vs-dark' give them) that fall under 4.5:1 on some theme's background or on the
+// cursor's line, and its bracket pair colours (the 4th to 6th are transparent: not used). Each is made just as much
+// darker (light) or lighter (dark) as it needs to read, so code looks as it does in VS Code.
+const vsCodeTokens = {
+  light: {
+    'number': '#098658', 'attribute.value.number': '#098658', 'attribute.value.unit': '#098658', 'type': '#008080',
+    'attribute.name': '#ff0000', 'metatag.content.html': '#ff0000', 'string.sql': '#ff0000', 'annotation': '#808080',
+    'metatag.html': '#808080', 'metatag.xml': '#808080', 'operator.sql': '#778899', 'tag.id.pug': '#4f76ac', 'tag.class.pug': '#4f76ac',
+  },
+  dark: { 'variable.predefined': '#4864aa', 'tag.id.pug': '#4f76ac', 'tag.class.pug': '#4f76ac', 'regexp': '#b46695', 'string.sql': '#ff0000' },
+}
+const vsCodeBrackets = { light: ['#0431fa', '#319331', '#7b3814'], dark: ['#ffd700', '#da70d6', '#179fff'] }
+
+const rgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
+const hexOf = (c: number[]) => `#${c.map((x) => Math.round(x).toString(16).padStart(2, '0')).join('')}`
+function luminance(c: number[]) {
+  const [r, g, b] = c.map((x) => (x / 255 <= 0.04045 ? x / 255 / 12.92 : ((x / 255 + 0.055) / 1.055) ** 2.4))
+  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!
+}
+const contrast = (a: number[], b: number[]) => {
+  const [x, y] = [luminance(a), luminance(b)].sort((p, q) => q - p)
+  return (x! + 0.05) / (y! + 0.05)
+}
+
+/** A colour of code, 4.5:1 on each of `grounds`: moved towards black (light) or white (dark) in small steps until it is. */
+function readable(hex: string, grounds: number[][], light: boolean) {
+  const from = rgb(hex)
+  for (let t = 0; t <= 1; t += 0.02) {
+    const c = from.map((x) => (light ? x * (1 - t) : x + (255 - x) * t))
+    if (grounds.every((g) => contrast(c.map(Math.round), g) >= 4.5)) return hexOf(c)
+  }
+  return light ? '#000000' : '#ffffff'
+}
+
 /**
  * Monaco's theme for each of the app's colour themes, light and dark, by its name (arena-dark, arena-sakura-light...):
  * the page's colours (lib/color-themes.ts, src/styles/index.css as sRGB, since Monaco takes hex) over VS Code's tokens.
@@ -31,13 +65,18 @@ export function arenaMonacoThemes(): [string, editor.IStandaloneThemeData][] {
       const light = kind === 'light'
       // A selected row (a suggestion, a list's, the palette's): a tint of the accent, as the page's selected items.
       const row = `${p.primary}${light ? '1f' : '26'}`
+      // Code is read on the background and on the cursor's line (the muted colour at 80, half, over it).
+      const back = rgb(p.background)
+      const grounds = [back, rgb(p.muted).map((x, i) => back[i]! + ((x - back[i]!) * 0x80) / 255)]
+      const code = (hex: string) => readable(hex, grounds, light)
       return [
         arenaMonacoTheme(theme.id, kind),
         {
           base: light ? 'vs' : 'vs-dark',
           inherit: true,
-          rules: [],
+          rules: Object.entries(vsCodeTokens[kind]).map(([token, fg]) => ({ token, foreground: code(fg).slice(1) })),
           colors: {
+            ...Object.fromEntries(vsCodeBrackets[kind].map((fg, i) => [`editorBracketHighlight.foreground${i + 1}`, code(fg)])),
             'editor.background': p.background,
             'editor.foreground': p.foreground,
             'editorLineNumber.foreground': p.lineNumber,
