@@ -47,7 +47,8 @@ public sealed record SyncMessage(
     string? Kind = null,
     IReadOnlyList<SyncAttachment>? Attachments = null,
     string? Quote = null,
-    JsonObject? Context = null);
+    JsonObject? Context = null,
+    JsonObject? Details = null);
 
 /// <summary>A file that went with a question on the web: "image" (fetched with the key from /api/code-arena/attachments/{id}), "text", "file", "audio", "video".</summary>
 public sealed record SyncAttachment(Guid Id, string Name, string Kind, string ContentType);
@@ -629,8 +630,9 @@ public static class CodeArenaSync
                 SyncRef = Clip(m.Ref, 160),
                 // Stopped by the person in Code Arena: shown as stopped, as an answer stopped here is.
                 Status = m.Role == "assistant" && m.Status == "stopped" ? MessageStatus.Stopped : MessageStatus.Complete,
-                // Code Arena's own word to its model: a notice on the web, not the person's.
-                DetailsJson = m.Role == "user" && m.Kind == "note" ? """{"note":true}""" : null,
+                // Code Arena's own word to its model: a notice on the web, not the person's; a task call's sub-agents (or the
+                // person's background tasks with a note): their summaries, for the web's line of each.
+                DetailsJson = DetailsOf(m),
                 // What filled the request it answered: the web chat's context gauge shows it, as for the answers written here.
                 ContextJson = m.Role == "assistant" ? ContextOf(m.Context, named) : null,
             };
@@ -641,6 +643,55 @@ public static class CodeArenaSync
         }
         return parent;
     }
+
+    /// <summary>The most sub-agents kept with one message, and the most characters of one's words.</summary>
+    public const int MostAgents = 20;
+    public const int MostAgentText = 8000;
+
+    /// <summary>
+    /// What a message from Code Arena shows beyond what the model read: a note's mark, and its sub-agents' summaries (what each
+    /// was asked, how it ended, its time, model, tokens and report: never its steps, which stay in Code Arena).
+    /// </summary>
+    internal static string? DetailsOf(SyncMessage m)
+    {
+        var note = m.Role == "user" && m.Kind == "note";
+        var agents = m.Role is "tool" or "user" && m.Details?["agents"] is JsonArray given
+            ? new JsonArray([.. given.OfType<JsonObject>().Take(MostAgents).Select(a => (JsonNode)new JsonObject
+            {
+                ["title"] = Clip(Str(a, "title"), 200) ?? "task",
+                ["instructions"] = Clip(Str(a, "instructions"), 4000) ?? "",
+                ["status"] = Str(a, "status") is "done" ? "done" : "failed",
+                ["error"] = Clip(Str(a, "error"), 1000),
+                ["ms"] = a["ms"] is JsonValue ms && ms.TryGetValue<long>(out var t) ? t : null,
+                ["model"] = Clip(Str(a, "model"), 200),
+                ["usage"] = a["usage"] is JsonObject u ? new JsonObject
+                {
+                    ["prompt"] = Long(u, "prompt"), ["cached"] = Long(u, "cached"), ["completion"] = Long(u, "completion"),
+                } : null,
+                ["text"] = Clip(Str(a, "text"), MostAgentText) ?? "",
+                ["reasoning"] = "",
+                ["steps"] = new JsonArray(),
+            })])
+            : null;
+        if (!note && agents is not { Count: > 0 })
+        {
+            return null;
+        }
+        var details = new JsonObject();
+        if (note)
+        {
+            details["note"] = true;
+        }
+        if (agents is { Count: > 0 })
+        {
+            details["agents"] = agents;
+        }
+        return details.ToJsonString();
+    }
+
+    private static string? Str(JsonObject o, string key) => o[key] is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
+
+    private static long Long(JsonObject o, string key) => o[key] is JsonValue v && v.TryGetValue<long>(out var n) ? Math.Max(0, n) : 0;
 
     /// <summary>Code Arena's turn starts: the chat is its until it ends the turn (or stops renewing it). Not while the web answers.</summary>
     private static async Task<IResult> TurnAsync(Guid id, HttpContext http, McpPeople people, AppDbContext db, AnswerJobs jobs)

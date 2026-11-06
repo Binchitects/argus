@@ -1979,6 +1979,11 @@ public sealed partial class ChatService(
         {
             system += $"\n\nThis conversation is with the assistant \"{assistant.Name}\". Its instructions:\n" + assistant.Instructions.Trim();
         }
+        if (assistant is { Skills.Count: > 0 })
+        {
+            // The skills it uses: named, so the model loads them first when the task is what they are for.
+            system += $"\n\nThe assistant's skills: load one with {Llm.Api.Chat.Tools.SkillTool.Function} first when the task is what it is for: {string.Join(", ", assistant.Skills)}.";
+        }
         if (!string.IsNullOrWhiteSpace(conversation.SystemPrompt))
         {
             system += "\n\nThe person's instructions for this conversation:\n" + conversation.SystemPrompt.Trim();
