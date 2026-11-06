@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Nodes;
+using Llm.Core.Chat;
 
 namespace CodeArena;
 
@@ -1694,6 +1695,56 @@ internal sealed class Agent
     /// <summary>The most messages the context gauge lists as the biggest, and the least a message takes to be listed (the web chat's).</summary>
     private const int BiggestCount = 5, BiggestAbove = 1_000;
 
+    /// <summary>The system prompt's sections in order (SystemPrompt.Sections), for what fills the window; null: it is one.</summary>
+    public Func<IReadOnlyList<WindowSection>>? Sections { get; init; }
+
+    /// <summary>
+    /// The next request as it will go, for what fills the window: the system prompt, the conversation with its notes (the one
+    /// it adds included), the tools offered and the thinking switch, as <see cref="AskAsync"/> sends them.
+    /// </summary>
+    internal JsonObject NextRequest()
+    {
+        var notes = NextNotes().OrderBy(n => n.At).ToList();
+        var list = new JsonArray { new JsonObject { ["role"] = "system", ["content"] = SystemPrompt() } };
+        var n = 0;
+        for (var i = 0; i < Messages.Count; i++)
+        {
+            while (n < notes.Count && notes[n].At <= i)
+            {
+                list.Add(new JsonObject { ["role"] = "user", ["content"] = notes[n++].Text });
+            }
+            list.Add(GatewayClient.Sendable(Messages[i]));
+        }
+        while (n < notes.Count)
+        {
+            list.Add(new JsonObject { ["role"] = "user", ["content"] = notes[n++].Text });
+        }
+        var request = new JsonObject { ["model"] = Model.Name, ["messages"] = list };
+        if (Model.Info.Tools && Tools.Offered() is { Count: > 0 } offered)
+        {
+            request["tools"] = new JsonArray([.. offered.Select(t => (JsonNode)t.Spec())]);
+        }
+        if (Model.TemplateKwargs() is { } kwargs)
+        {
+            request["chat_template_kwargs"] = kwargs;
+        }
+        return request;
+    }
+
+    /// <summary>A request in its pieces (ContextWindow): Code Arena's notes are the system prompt's, recalled memories the memory's, a summary the summary's.</summary>
+    internal List<WindowPiece> Pieces(JsonObject request) => ContextWindow.Pieces(new WindowRequest(request)
+    {
+        System = Sections?.Invoke() ?? [],
+        Classify = (_, m) => m.Str("role") != "user" || m["content"] is not JsonValue ? null
+            : m.Str("content") is not { } text ? null
+            : text.StartsWith(global::CodeArena.SystemPrompt.NoteHead, StringComparison.Ordinal) ? ("system", "Code Arena's note")
+            : text.StartsWith(MemoryStore.RecallHeading, StringComparison.Ordinal) ? ("memory", "Recalled for this message")
+            : text.StartsWith(SummaryMark, StringComparison.Ordinal) ? ("summary", "Summary of earlier messages")
+            : null,
+        ToolOf = name => Tools.Find(name)?.Group,
+        PictureChars = PictureChars,
+    });
+
     /// <summary>
     /// What fills a request of the conversation as it stands, in characters by kind, in the shape of the web chat's context
     /// gauge (the page scales them to the tokens the model counted): the system prompt with Code Arena's notes (the one the
@@ -1771,33 +1822,6 @@ internal sealed class Agent
             ["toolResults"] = results,
             ["biggest"] = new JsonArray([.. items.OrderByDescending(x => x.Long("chars")).Take(BiggestCount)]),
         };
-    }
-
-    /// <summary>The kinds <see cref="Measure"/> gives, in the order and the words of the web chat's context gauge.</summary>
-    internal static readonly (string Key, string Label)[] Kinds =
-    [
-        ("system", "System prompt and tool notes"), ("tools", "Tool definitions"), ("instructions", "Your instructions"), ("memory", "Memory"),
-        ("summary", "Summary of earlier messages"), ("files", "Files"), ("you", "Your messages"), ("answers", "Answers"), ("toolResults", "Tool calls and results"),
-    ];
-
-    /// <summary>
-    /// A measure's kinds in tokens, as the web chat's gauge scales them: <paramref name="tokens"/> shared out by their
-    /// characters, rounded so they add up to it.
-    /// </summary>
-    internal static List<(string Label, long Tokens)> InTokens(JsonObject measured, long tokens)
-    {
-        var chars = Kinds.Select(k => measured.Long(k.Key) ?? 0).ToList();
-        var all = (double)chars.Sum();
-        var parts = new List<(string, long)>();
-        long sum = 0, before = 0;
-        for (var i = 0; i < Kinds.Length; i++)
-        {
-            sum += chars[i];
-            var upTo = all > 0 ? (long)Math.Round(sum / all * tokens) : 0;
-            parts.Add((Kinds[i].Label, upTo - before));
-            before = upTo;
-        }
-        return parts;
     }
 
     /// <summary>A request's size in characters: the system prompt, the tools and the first <paramref name="count"/> messages with their notes.</summary>

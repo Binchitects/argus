@@ -189,6 +189,12 @@ public sealed class FakeEngine : HttpMessageHandler
             Known();
             switch (path)
             {
+                // The router passes these to the model's server: its tokenizer, and its chat template.
+                case "/tokenize" when model is not null && _status.GetValueOrDefault(model) == "loaded":
+                    var content = sent!["content"]?.GetValue<string>() ?? "";
+                    return Json(HttpStatusCode.OK, new JsonObject { ["tokens"] = new JsonArray([.. Enumerable.Range(0, CountTokens(content)).Select(i => (JsonNode)i)]) }.ToJsonString());
+                case "/apply-template" when model is not null && _status.GetValueOrDefault(model) == "loaded":
+                    return Json(HttpStatusCode.OK, new JsonObject { ["prompt"] = Template(sent!.AsObject()) }.ToJsonString());
                 case "/models":
                     return Json(HttpStatusCode.OK, new JsonObject
                     {
@@ -248,6 +254,30 @@ public sealed class FakeEngine : HttpMessageHandler
         var section = File.ReadAllLines(PresetsFile).SkipWhile(l => l != $"[{model}]").Skip(1).TakeWhile(l => !l.StartsWith('['));
         return section.Select(l => l.Split('=', 2, StringSplitOptions.TrimEntries)).Where(p => p.Length == 2 && p[0] == "parallel")
             .Select(p => int.Parse(p[1], System.Globalization.CultureInfo.InvariantCulture)).FirstOrDefault(1);
+    }
+
+    /// <summary>The fake tokenizer: each word and each other sign is a token.</summary>
+    public static int CountTokens(string text) => System.Text.RegularExpressions.Regex.Count(text, @"\w+|[^\w\s]");
+
+    /// <summary>The fake chat template: each message in its role's marks, the tools' definitions first, as Qwen's template has them.</summary>
+    public static string Template(JsonObject request)
+    {
+        var prompt = new StringBuilder();
+        if (request["tools"] is JsonArray tools)
+        {
+            prompt.Append("<|im_start|>tools\n").AppendJoin('\n', tools.Select(t => t!.ToJsonString())).Append("<|im_end|>\n");
+        }
+        foreach (var m in (request["messages"] as JsonArray ?? []).OfType<JsonObject>())
+        {
+            var content = m["content"] is JsonArray parts ? string.Concat(parts.OfType<JsonObject>().Select(p => p["text"]?.GetValue<string>() ?? "")) : m["content"]?.GetValue<string>() ?? "";
+            prompt.Append("<|im_start|>").Append(m["role"]?.GetValue<string>()).Append('\n').Append(content);
+            if (m["tool_calls"] is JsonArray calls)
+            {
+                prompt.Append('\n').Append(calls.ToJsonString());
+            }
+            prompt.Append("<|im_end|>\n");
+        }
+        return prompt.Append("<|im_start|>assistant\n").ToString();
     }
 
     private static HttpResponseMessage Json(HttpStatusCode code, string json) => new(code) { Content = new StringContent(json, Encoding.UTF8, "application/json") };

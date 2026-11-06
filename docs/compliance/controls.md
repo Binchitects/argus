@@ -128,7 +128,7 @@ People come from the company's directory (LDAP or Active Directory), OIDC or SAM
 
 ### IAM-05: Least privilege, by roles and rules
 
-What a person may do comes from roles (built in, or made by the company) held directly, through a group or by everyone, and from rules that give or take a feature; admin roles can be scoped to some groups. The checker says why a person may or may not do something. The wiki finds and shows each person only the documents they may read, and searches only the code they may read in GitLab, as them. A feature taken from a person is hidden from their menus and pages, not only refused. Taking a request out of the line needs usage.line, restarting an engine runtimes.restart; only a chat's owner rewinds it, and Code Arena's key reads and adds to its own person's chats alone. Code Arena reaches only the person's own chats' goals and the assistants they may use, and an assistant uses only skills its maker may use. Its sub-agents get only the tools they are given, never more than the session's mode allows, and one that changes files never asks: what its mode would ask is refused.
+What a person may do comes from roles (built in, or made by the company) held directly, through a group or by everyone, and from rules that give or take a feature; admin roles can be scoped to some groups. The checker says why a person may or may not do something. The wiki finds and shows each person only the documents they may read, and searches only the code they may read in GitLab, as them. A feature taken from a person is hidden from their menus and pages, not only refused. Taking a request out of the line needs usage.line, restarting an engine runtimes.restart; only a chat's owner rewinds it, and Code Arena's key reads and adds to its own person's chats alone. Code Arena reaches only the person's own chats' goals and the assistants they may use, and an assistant uses only skills its maker may use. Its sub-agents get only the tools they are given, never more than the session's mode allows, and one that changes files never asks: what its mode would ask is refused. What fills a chat's window is shown to its people only, and Code Arena counts tokens with the person's key, only with the models they may use.
 
 **Serves**
 
@@ -159,6 +159,7 @@ What a person may do comes from roles (built in, or made by the company) held di
 - `Llm.Tests/CodeArenaGoalTests.Code_Arenas_goal_is_kept_with_its_chat_shown_on_the_web_and_only_Code_Arena_changes_it`
 - `Llm.Tests/CodeArenaGoalTests.Code_Arena_lists_the_assistants_the_person_may_use_with_their_skills`
 - `Llm.Tests/SkillTransferTests.Only_who_may_make_skills_imports_them_from_the_page_or_Code_Arena`
+- `Llm.Tests/ContextWindowTests.Code_Arena_counts_with_the_persons_key_and_only_for_the_models_they_may_use`
 
 **The company's part** Decide who holds which role, and review it.
 

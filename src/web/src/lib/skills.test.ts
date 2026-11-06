@@ -43,6 +43,9 @@ describe('skills', () => {
     expect(items.map((i) => i.name)).toEqual(['compact', 'review'])
     expect(slashItems('rev', [skill({ name: 'review' })], true).map((i) => i.name)).toEqual(['review'])
     expect(slashItems('', [], false)).toEqual([])
+    // /context where the chat shows what fills its window: after /compact, as the menu offers them.
+    expect(slashItems('', [], true, true).map((i) => i.command)).toEqual(['compact', 'context'])
+    expect(slashItems('con', [], true, true).map((i) => i.name)).toEqual(['context'])
   })
 
   it('says where a skill comes from', () => {

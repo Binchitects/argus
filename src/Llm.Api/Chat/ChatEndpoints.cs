@@ -92,6 +92,8 @@ public static partial class ChatEndpoints
         g.MapGet("/conversations/{id:guid}/rewind", RewindPreviewAsync);
         g.MapPost("/conversations/{id:guid}/rewind", RewindAsync);
         g.MapPut("/conversations/{id:guid}/messages/{messageId:guid}/context", MessageContextAsync);
+        g.MapPut("/conversations/{id:guid}/messages/{messageId:guid}/file-context", FileContextAsync);
+        g.MapGet("/conversations/{id:guid}/context", ContextWindowAsync);
         g.MapPost("/conversations/{id:guid}/fork", ForkAsync).RequirePermission(Llm.Core.Access.Permissions.Chat);
         g.MapPost("/conversations/{id:guid}/tool-calls/{callId}", DecideAsync);
         g.MapPost("/speech", SpeechAsync).RequirePermission(Llm.Core.Access.Permissions.Speech);
@@ -448,6 +450,8 @@ public static partial class ChatEndpoints
             m.ForPeople, m.Mentions, m.ReplyToId,
             toolCalls = m.ToolCallsJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(m.ToolCallsJson),
             attachments = ChatService.ParseIds(m.AttachmentsJson).Where(files.ContainsKey).Select(a => files[a]),
+            // The files the person left out of what the model reads (the context view).
+            leftOutFiles = ChatService.ParseIds(m.LeftOutFilesJson),
             details = (quality is null ? m.DetailsJson : quality.Details(m)) is { } details ? JsonSerializer.Deserialize<JsonElement>(details) : (JsonElement?)null,
             context = m.ContextJson is null ? (JsonElement?)null : JsonSerializer.Deserialize<JsonElement>(m.ContextJson),
             m.CutShort, m.Pinned, m.LeftOut,

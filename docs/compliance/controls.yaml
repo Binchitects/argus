@@ -180,6 +180,9 @@ controls:
       assistant uses only skills its maker may use. Its sub-agents get only the
       tools they are given, never more than the session's mode allows, and one
       that changes files never asks: what its mode would ask is refused.
+      What fills a chat's window is
+      shown to its people only, and Code Arena counts tokens with the person's
+      key, only with the models they may use.
     frameworks:
       iso27001: [A.5.15, A.5.18, A.8.2, A.8.3]
       soc2: [CC6.1, CC6.3]
@@ -205,6 +208,7 @@ controls:
       - Llm.Tests/CodeArenaGoalTests.Code_Arenas_goal_is_kept_with_its_chat_shown_on_the_web_and_only_Code_Arena_changes_it
       - Llm.Tests/CodeArenaGoalTests.Code_Arena_lists_the_assistants_the_person_may_use_with_their_skills
       - Llm.Tests/SkillTransferTests.Only_who_may_make_skills_imports_them_from_the_page_or_Code_Arena
+      - Llm.Tests/ContextWindowTests.Code_Arena_counts_with_the_persons_key_and_only_for_the_models_they_may_use
     operator: Decide who holds which role, and review it.
 
   - id: IAM-06

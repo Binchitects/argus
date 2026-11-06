@@ -68,6 +68,7 @@ public sealed partial class ChatService(
     IOptionsMonitor<ChatOptions> chat,
     Knowledge.Retrieval retrieval,
     PriceBook prices,
+    ModelTokens windowTokens,
     IServiceScopeFactory scopes,
     ILogger<ChatService> logger)
 {
@@ -373,7 +374,7 @@ public sealed partial class ChatService(
         var offersTools = tools.Count > 0 && chat.CurrentValue.MaxToolRounds > 0;
         var lengthNote = AnswerLengths.Note(user.AnswerLength);
         var (memory, inNote) = conversation.IsRoom ? (null, []) : await memories.NoteAsync(user, ct);
-        var (messages, imagesDropped, systemParts, budget) = await BuildHistoryAsync(conversation, question, model, modelName, helper, email, demand.Notes(), runs.ContainsKey("read_file"),
+        var (messages, imagesDropped, systemParts, budget) = await BuildHistoryAsync(conversation, question, model, modelName, helper, email, demand.NoteParts(), runs.ContainsKey("read_file"),
             lengthNote, memory, new HistoryFit(compactAt, offersTools ? demand.Request().ToJsonString().Length : 0), emit, ct);
         // Said on the person's turn (models follow it more closely there), at the prompt's end (the
         // cache keeps the rest); the question kept stays as written.
@@ -492,7 +493,7 @@ public sealed partial class ChatService(
                 return;
             }
             var answer = messages.Skip(asked + 1).OfType<JsonObject>().ToList();
-            var (rebuilt, _, parts, _) = await BuildHistoryAsync(conversation, question, model, modelName, helper, email, demand.Notes(), runs.ContainsKey("read_file"),
+            var (rebuilt, _, parts, _) = await BuildHistoryAsync(conversation, question, model, modelName, helper, email, demand.NoteParts(), runs.ContainsKey("read_file"),
                 lengthNote, memory, new HistoryFit(0, request["tools"]?.ToJsonString().Length ?? 0, budget, answer.Sum(m => m.ToJsonString().Length), answer.Count, force ?? ToFit), emit, ct);
             // The question as this answer asked it (deep research's steps, answer again) and the answer so far stay as they were.
             askedAt = LastUser(rebuilt);
@@ -500,6 +501,31 @@ public sealed partial class ChatService(
             systemParts = parts with { Recalled = recalledChars };
             request["messages"] = messages.DeepClone();
         }
+
+        // The context view's window of each round's request (ContextWindow): its pieces counted with the model's tokenizer while
+        // the model answers, kept with the round's message once the engine said what the request held. Only the answer's last
+        // round keeps one. A result of this answer is named by its message; the tools called in the chat are not unused.
+        var resultIds = new Dictionary<string, Guid>(StringComparer.Ordinal);
+        var calledHere = await db.ChatMessages.Where(m => m.ConversationId == conversation.Id && m.ToolName != null).Select(m => m.ToolName!).Distinct().ToListAsync(ct);
+        ChatMessage? windowed = null;
+        (List<WindowPiece> Pieces, Task<ModelTokens.Counted> Counting) Window(JsonObject request)
+        {
+            var asked = LastUser(messages);
+            var turns = systemParts.Turns ?? [];
+            var sent = request["messages"] as JsonArray ?? [];
+            var pieces = ContextWindow.Pieces(new WindowRequest(request)
+            {
+                System = systemParts.Sections ?? [],
+                RefOf = i => i >= 1 && i - 1 < turns.Count ? turns[i - 1].ToString()
+                    : sent[i]?["tool_call_id"] is JsonValue c && c.TryGetValue<string>(out var call) && resultIds.TryGetValue(call, out var result) ? result.ToString() : null,
+                Recalled = asked >= 0 && systemParts.Recalled > 0 ? (asked, systemParts.Recalled) : null,
+                ToolOf = name => runs.TryGetValue(name, out var run) ? run.Choice.Tool.Id : null,
+                PictureChars = ImageWeight,
+            });
+            return (pieces, windowTokens.CountAsync(modelName, request, pieces, whole: false, TimeSpan.FromSeconds(20), CancellationToken.None));
+        }
+        // A tool the person may turn off for this chat: one of theirs it has on (not those the chat brings itself: its history, its checklist).
+        bool CanTurnOff(string tool) => allowed.Any(t => t.Tool.Id == tool) && tool is not (ChatHistoryTool.ToolId or ChecklistTool.ToolId);
 
         for (var round = 0; ; round++)
         {
@@ -585,6 +611,7 @@ public sealed partial class ChatService(
             // What fills this request, for the context gauge (scaled to the prompt tokens the model reports).
             var filled = ContextParts.Measure(request, systemParts, ImageWeight);
             msg.ContextJson = filled.ToJsonString();
+            var window = Window(request);
             string? finish = null;
             var retried = false;
             var content = new StringBuilder();
@@ -732,6 +759,7 @@ public sealed partial class ChatService(
                     }
                     filled = ContextParts.Measure(request, systemParts, ImageWeight);
                     msg.ContextJson = filled.ToJsonString();
+                    window = Window(request);
                 }
                 }
             }
@@ -778,6 +806,12 @@ public sealed partial class ChatService(
                 calls.Clear();
             }
             Keep(MessageStatus.Complete);
+            // What filled this round's request, by piece, adding up to what the engine counted of it (the context view).
+            var pieces = window.Pieces;
+            msg.WindowJson = ModelTokens.Window(pieces, await window.Counting, msg.PromptTokens, budget.Context, budget.AnswerRoom, null,
+                tokens => ContextWindow.Freeable(pieces, tokens, budget.Context, CanTurnOff, leaveOut: true, dropFiles: true, compact: true, calledHere)).ToJsonString();
+            windowed?.WindowJson = null;
+            windowed = msg;
             await emit(new
             {
                 type = "usage", prompt = msg.PromptTokens, cached = msg.CachedTokens, completion = msg.CompletionTokens, cost = msg.Cost,
@@ -951,6 +985,7 @@ public sealed partial class ChatService(
                     PromptTokens = outcome.Usage?.Prompt, CachedTokens = outcome.Usage?.Cached, CompletionTokens = outcome.Usage?.Completion,
                 };
                 db.ChatMessages.Add(result);
+                resultIds[id] = result.Id;
                 conversation.CurrentLeafId = result.Id;
                 parent = result.Id;
                 await db.SaveChangesAsync(ct);
@@ -982,10 +1017,15 @@ public sealed partial class ChatService(
                 conversation.LoadedTools = demand.Loaded;
                 await db.SaveChangesAsync(ct);
                 var system = messages[0]!["content"]!.GetValue<string>();
-                var notes = demand.Notes();
+                var noteParts = demand.NoteParts();
+                var notes = string.Join("\n\n", noteParts.Select(n => n.Text));
                 var spliced = system[..systemParts.Base] + (notes.Length > 0 ? "\n\n" + notes : "") + system[(systemParts.Base + systemParts.ToolNotes)..];
                 messages[0]!["content"] = spliced;
-                systemParts = systemParts with { ToolNotes = systemParts.ToolNotes + spliced.Length - system.Length };
+                systemParts = systemParts with
+                {
+                    ToolNotes = systemParts.ToolNotes + spliced.Length - system.Length,
+                    Sections = systemParts.Sections is { } sections ? WithNotes(sections, systemParts.ToolNotes, notes.Length > 0 ? noteParts : []) : null,
+                };
             }
             if (ends)
             {
@@ -1888,7 +1928,7 @@ public sealed partial class ChatService(
     /// was measured with (<see cref="PromptBudget"/>), for the answer's later rounds.
     /// </summary>
     private async Task<(JsonArray Messages, bool ImagesDropped, SystemParts System, PromptBudget Budget)> BuildHistoryAsync(Conversation conversation, ChatMessage question,
-        GatewayModel? model, string modelName, GatewayModel? summarizer, string email, string? toolInstructions, bool canReadFiles, string? lengthNote, string? memory, HistoryFit fit,
+        GatewayModel? model, string modelName, GatewayModel? summarizer, string email, IReadOnlyList<(string? Tool, string Text)> toolNotes, bool canReadFiles, string? lengthNote, string? memory, HistoryFit fit,
         Func<object, Task> emit, CancellationToken ct)
     {
         var stored = await BranchAsync(db, conversation.Id, question, ct);
@@ -1952,10 +1992,17 @@ public sealed partial class ChatService(
                     var images = new List<ChatAttachment>();
                     var heard = new List<JsonObject>();
                     var mediaWeight = 0L;
+                    // A file the person left out (the context view): its name only, so the words about it still read.
+                    var leftOutFiles = ParseIds(m.LeftOutFilesJson).ToHashSet();
                     foreach (var id in ParseIds(m.AttachmentsJson))
                     {
                         if (!files.TryGetValue(id, out var f))
                         {
+                            continue;
+                        }
+                        if (leftOutFiles.Contains(id))
+                        {
+                            text.Append("\n\n[").Append(f.FileName).Append(" was attached here; the person left it out of what you read]");
                             continue;
                         }
                         if (f.Kind is "audio" or "video")
@@ -2026,23 +2073,31 @@ public sealed partial class ChatService(
             system += "\n\n" + RoomNote(await RoomPeopleNamesAsync(conversation, ct), asking);
         }
         var baseLength = system.Length;
+        // The system message's sections, for the context view: each tool's notes, the memory, the instructions, the files, the summary.
+        var sections = new List<WindowSection> { new("system", "Arena's own words", baseLength) };
+        void Section(string part, string name, int before) => sections.Add(new WindowSection(part, name, system.Length - before));
+        var toolInstructions = string.Join("\n\n", toolNotes.Select(n => n.Text));
         if (!string.IsNullOrWhiteSpace(toolInstructions))
         {
             system += "\n\n" + toolInstructions;
+            sections.AddRange(NoteSections(toolNotes));
         }
-        var toolNotes = system.Length - baseLength;
+        var toolNoteChars = system.Length - baseLength;
         // What the person asked to be remembered: after the fixed notes, so a new memory leaves their cache as it was.
         var memoryChars = 0;
         if (memory is not null)
         {
             system += "\n\n" + memory;
             memoryChars = memory.Length + 2;
+            sections.Add(new WindowSection("memory", "Memory", memoryChars));
         }
         // An assistant's instructions, then the chat's own; then the assistant's files.
         var assistant = conversation.AssistantId is { } aid ? await db.Assistants.AsNoTracking().SingleOrDefaultAsync(x => x.Id == aid, ct) : null;
         if (!string.IsNullOrWhiteSpace(assistant?.Instructions))
         {
+            var before = system.Length;
             system += $"\n\nThis conversation is with the assistant \"{assistant.Name}\". Its instructions:\n" + assistant.Instructions.Trim();
+            Section("instructions", $"The assistant {assistant.Name}'s instructions", before);
         }
         if (assistant is { Skills.Count: > 0 })
         {
@@ -2051,13 +2106,16 @@ public sealed partial class ChatService(
         }
         if (!string.IsNullOrWhiteSpace(conversation.SystemPrompt))
         {
+            var before = system.Length;
             system += "\n\nThe person's instructions for this conversation:\n" + conversation.SystemPrompt.Trim();
+            Section("instructions", "This chat's instructions", before);
         }
-        var person = system.Length - baseLength - toolNotes - memoryChars;
+        var person = system.Length - baseLength - toolNoteChars - memoryChars;
         var beforeFiles = system.Length;
         if (assistant is not null)
         {
             system += await AssistantFilesAsync(assistant, canReadFiles, byPassages, ct);
+            Section("files", $"The assistant {assistant.Name}'s files", beforeFiles);
         }
         var assistantFiles = system.Length - beforeFiles;
         if (await retrieval.PassagesAsync(byPassages, stored, question, ct) is { } passages)
@@ -2102,15 +2160,20 @@ public sealed partial class ChatService(
         if (summary is not null)
         {
             system += SummaryIntro + summary + "\n</summary>";
+            Section("summary", "Summary of earlier messages", beforeSummary);
             // What the summary covers that the person pinned, word for word; and the chat's plan as it stands.
             var shown = turns.Select(t => t.Source.Id).ToHashSet();
             if (Pinned(stored.Where(m => m.Pinned && !m.LeftOut && !shown.Contains(m.Id))) is { } pinned)
             {
+                var before = system.Length;
                 system += pinned;
+                Section("summary", "Pinned messages it covers", before);
             }
             if (await PlanNoteAsync(conversation.Id, ct) is { } plan)
             {
+                var before = system.Length;
                 system += plan;
+                Section("summary", "The chat's plan", before);
             }
         }
         // A last resort (the summary failed, or what is kept is still too big): the oldest turns are left out, and the person is told.
@@ -2132,7 +2195,8 @@ public sealed partial class ChatService(
             .Select(t => new WindowItem(t.Source.Id, t.Source.Role, t.Source.Role == "tool" ? t.Source.ToolName : null, t.Weight, Preview(t.Source), t.Source.Pinned))
             .ToList();
         return ([new JsonObject { ["role"] = "system", ["content"] = system }, .. turns.Select(t => t.Turn)], imagesDropped,
-            new SystemParts(baseLength, toolNotes, person, system.Length - beforeSummary, assistantFiles, memoryChars, Biggest: biggest), budget);
+            new SystemParts(baseLength, toolNoteChars, person, system.Length - beforeSummary, assistantFiles, memoryChars, Biggest: biggest,
+                Sections: sections, Turns: [.. turns.Select(t => t.Source.Id)]), budget);
 
         static string Preview(ChatMessage m)
         {
@@ -2144,6 +2208,24 @@ public sealed partial class ChatService(
             }
             return text.Length > 90 ? text[..90] + "…" : text;
         }
+    }
+
+    /// <summary>The system message's sections for the tools' notes, each with the two line breaks before it: the skills listed, the tools to load, a tool's own.</summary>
+    private static IEnumerable<WindowSection> NoteSections(IReadOnlyList<(string? Tool, string Text)> notes) =>
+        notes.Select(n => n.Tool == SkillTool.ToolId ? new WindowSection("skills", "Skills listed", n.Text.Length + 2, n.Tool)
+            : n.Tool is null ? new WindowSection("tools", "Tools to load", n.Text.Length + 2)
+            : new WindowSection("system", $"Notes: {n.Tool}", n.Text.Length + 2, n.Tool));
+
+    /// <summary>The sections of a system message whose tools' notes (<paramref name="noteChars"/> after the app's own words) are now <paramref name="notes"/>.</summary>
+    private static List<WindowSection> WithNotes(IReadOnlyList<WindowSection> sections, int noteChars, IReadOnlyList<(string? Tool, string Text)> notes)
+    {
+        var rest = sections.Skip(1).ToList();
+        var skipped = 0;
+        for (var at = 0; skipped < rest.Count && at < noteChars; skipped++)
+        {
+            at += rest[skipped].Length;
+        }
+        return [.. sections.Take(1), .. string.IsNullOrWhiteSpace(string.Join("\n\n", notes.Select(n => n.Text))) ? [] : NoteSections(notes), .. rest.Skip(skipped)];
     }
 
     /// <summary>

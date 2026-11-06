@@ -66,6 +66,7 @@ import { NewRoomDialog, RoomPanel } from './room'
 import { useReadIn, useRoomTranslations } from './room-language'
 import { mentionsIn, typingLine, useRoomEvents } from './room-live'
 import type { ContextChange } from './message-context'
+import { ContextSheet } from './context-sheet'
 import { isOffline, useOnline, useOutbox } from './outbox'
 import { useRoomCall } from './room-call'
 import { CallBar, CallButton } from './call-bar'
@@ -234,6 +235,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
 
   // The part of an answer the next message quotes (Reply), and a nudge that puts the focus in the box.
   const [quote, setQuote] = useState<Quote | null>(null)
+  // The Context panel: what fills the window, piece by piece (the gauge's What fills it, or /context).
+  const [contextOpen, setContextOpen] = useState(false)
   const [focusBox, setFocusBox] = useState(0)
   const messagesNow = useRef<Message[]>([])
   const quotable = useQuotableSelection(scroller, (messageId) => messagesNow.current.find((m) => m.id === messageId)?.content)
@@ -646,6 +649,11 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     // Compare too: two models answer this message, side by side.
     const versus = fromBox ? comparing : null
     if (versus) setCompare(null)
+    // "/context": the Context panel, not a question.
+    if (text === '/context' && !skill && (files ?? uploads.attachments).length === 0 && id && !room) {
+      setContextOpen(true)
+      return true
+    }
     // "/compact": a command, not a question.
     if (text === '/compact' && !skill && (files ?? uploads.attachments).length === 0) {
       if (!canCompact) {
@@ -1553,6 +1561,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   contextItems={room ? undefined : { find: (m) => data?.messages.find((x) => x.id === m), change: changeContext }}
                   compact={compactSetting}
                   onCompact={canCompact ? () => void compact() : undefined}
+                  onContextView={id && !room ? () => setContextOpen(true) : undefined}
                   history={history}
                   quote={quote}
                   onClearQuote={() => setQuote(null)}
@@ -1561,6 +1570,17 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   onFilled={filled}
                   autoFocus
                 />
+                )}
+                {id && !room && (
+                  <ContextSheet
+                    chat={id}
+                    stamp={data?.currentLeafId}
+                    open={contextOpen}
+                    onOpenChange={setContextOpen}
+                    busy={streaming}
+                    onCompact={canCompact ? () => void compact() : undefined}
+                    onToolOff={(tool) => change({ tools: toolsOnHere.filter((t) => t !== tool) })}
+                  />
                 )}
                 {/* People are told they are talking to an AI (EU AI Act Art. 50(1)). */}
                 <p className="mt-1 text-center text-[11px] text-muted-foreground">Answers are made by AI and can be wrong: check what matters.</p>

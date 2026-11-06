@@ -13,6 +13,7 @@ interface SlashItem {
 
 const own: SlashItem[] = [
   { name: 'compact', description: "Summarize the conversation to free the model's window", kind: 'chat' },
+  { name: 'context', description: 'What fills the window: each tool, skill, file and message, in tokens', kind: 'chat' },
   { name: 'clear', description: 'Start a new session (this one stays saved)', kind: 'chat' },
 ]
 

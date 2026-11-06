@@ -25,11 +25,12 @@
     <InternalsVisibleTo Include="Llm.Tests" />
   </ItemGroup>
 
-  <!-- How a refusal says the prompt did not fit the model's context: the web
-       chat's own reading of it, shared as a file (no project reference). -->
+  <!-- How a refusal says the prompt did not fit the model's context, and what fills the window: the web
+       chat's own, shared as files (no project reference). -->
   <ItemGroup>
     <Compile Include="../Llm.Core/Chat/ContextOverflow.cs" Link="Shared/ContextOverflow.cs" />
     <Compile Include="../Llm.Core/Chat/HistoryWords.cs" Link="Shared/HistoryWords.cs" />
+    <Compile Include="../Llm.Core/Chat/ContextWindow.cs" Link="Shared/ContextWindow.cs" />
   </ItemGroup>
 
   <!-- Code with its comments and strings blanked, lines and columns kept: Argus's own reading, which the code index

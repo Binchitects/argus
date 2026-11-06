@@ -95,7 +95,7 @@ public sealed record SyncRead(
 /// after a message it names, so an edit, a regenerated answer or another branch shown on the web is seen as such. While
 /// Code Arena answers it holds the chat's turn (<see cref="TurnLease"/>): the web queues the person's messages meanwhile.
 /// </summary>
-public static class CodeArenaSync
+public static partial class CodeArenaSync
 {
     public const string Origin = "code-arena";
     /// <summary>The most messages one request adds.</summary>
@@ -119,6 +119,7 @@ public static class CodeArenaSync
         g.MapGet("/attachments/{id:guid}", AttachmentAsync);
         g.MapGet("/preferences", PreferencesAsync);
         g.MapGet("/config", ConfigAsync);
+        g.MapPost("/tokenize", TokenizeAsync);
         g.MapGet("/skills", SkillsAsync);
         g.MapGet("/settings", SettingsAsync);
         g.MapPost("/skills", MakeSkillAsync);

@@ -102,6 +102,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     // How full the window was when no turn ran: the history is not read while a turn changes it.
     private long _lastUsed;
     private JsonObject? _lastWindow;
+    private JsonObject? _lastContext;
     // What code-arena update did from the IDE: said in place of the notice, until Code Arena starts again.
     private string? _updated;
     // The commands with no time limit: their output to the page as it comes, a few times a second, for as long as they run.
@@ -378,6 +379,14 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         {
             case ("GET", "/api/state"):
                 await res.JsonAsync(200, State(), ct);
+                return;
+            case ("GET", "/api/context"):
+                // What fills the window, piece by piece: of the next request while no turn runs, else as it was before the turn.
+                if (Current() is null)
+                {
+                    _lastContext = await ContextView.WindowAsync(_rt, ct);
+                }
+                await res.JsonAsync(200, new JsonObject { ["window"] = _lastContext?.DeepClone(), ["running"] = Current() is not null }, ct);
                 return;
             case ("POST", "/api/update"):
                 var (done, said) = await Updates.UpdateAsync(_rt.Config, _rt.Http, _ => { }, ct, caFile: Net.CaFile(null, _rt.Config.Ca, _rt.Env.Env));

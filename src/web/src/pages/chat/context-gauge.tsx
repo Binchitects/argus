@@ -1,4 +1,4 @@
-import { FoldVertical } from 'lucide-react'
+import { FoldVertical, ListTree } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { categorical } from '@/components/charts/palette'
@@ -17,7 +17,22 @@ export interface ContextItems {
 
 const itemName = (i: ContextItem) => (i.role === 'user' ? 'Your message' : i.role === 'assistant' ? 'An answer' : `${i.tool ?? 'A tool'}'s result`)
 
-export function ContextGauge({ context, onCompact, busy, compact, items }: { context: ContextView; onCompact?: () => void; busy: boolean; compact?: CompactSetting; items?: ContextItems }) {
+/** `onDetails`: opens the Context panel, each piece of the window with its tokens (also: send /context). */
+export function ContextGauge({
+  context,
+  onCompact,
+  busy,
+  compact,
+  items,
+  onDetails,
+}: {
+  context: ContextView
+  onCompact?: () => void
+  busy: boolean
+  compact?: CompactSetting
+  items?: ContextItems
+  onDetails?: () => void
+}) {
   const share = Math.min(1, context.used / context.limit)
   // The ring warns as the chat nears where it compacts (90% when it compacts only when needed).
   const at = compact && compact.at > 0 ? compact.at / 100 : 0.9
@@ -57,9 +72,16 @@ export function ContextGauge({ context, onCompact, busy, compact, items }: { con
             {compact ? compactsText(compact) : 'Near the limit, the chat compacts itself.'} Its older messages then become a summary the model reads instead. Compact now to carry on lighter (also: send /compact).
             {compact?.change ? <> {compact.change}</> : null}
           </p>
-          <Button size="sm" variant="outline" disabled={busy || !onCompact} onClick={onCompact}>
-            <FoldVertical /> Compact now
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {onDetails && (
+              <Button size="sm" variant="outline" className="flex-1" onClick={onDetails}>
+                <ListTree /> What fills it
+              </Button>
+            )}
+            <Button size="sm" variant="outline" className="flex-1" disabled={busy || !onCompact} onClick={onCompact}>
+              <FoldVertical /> Compact now
+            </Button>
+          </div>
         </div>
       </PopoverContent>
     </Popover>

@@ -224,8 +224,9 @@ public sealed class CompactionTests : IDisposable
         var used = rows.Where(r => r.Key is not ("Kept for the answer" or "Free")).Sum(r => r.Value);
         Assert.Equal(20_000 - 2_500 - used, rows["Free"]);
         Assert.True(rows["Files"] > rows["Your messages"]);
-        // The biggest messages, the web chat's way: the file went with the person's message.
-        Assert.Matches(@"Biggest\n +[\d,]+  Your message: read @notes\.txt", context);
+        // Each part's biggest pieces, as the web chat's context view lists them: the file that went with the person's message.
+        Assert.Matches(@"\n {6}Files mentioned +[\d,]+\n", context);
+        Assert.Contains("Estimated from characters", context, StringComparison.Ordinal);
     }
 
     [Fact]

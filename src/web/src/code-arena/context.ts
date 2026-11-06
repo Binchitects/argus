@@ -16,3 +16,6 @@ export function codeContext(path: Message[], state: CodeState, streaming = false
   const now = state.window && (!streaming || !last?.context) ? { fill: state.window, tokens: state.contextUsed } : undefined
   return contextOf(last, state.context, state.reserve ?? null, compacted, now)
 }
+
+/** Opens the chat's Context panel (the status bar's Context asks for it: the panel is the chat's). */
+export const contextEvent = 'code-arena:context'

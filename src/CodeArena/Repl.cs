@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Nodes;
+using Llm.Core.Chat;
 
 namespace CodeArena;
 
@@ -44,7 +45,7 @@ internal sealed partial class Repl(Runtime rt)
         ("/review [BASE]", "review the changes not yet committed, or this branch's over BASE (main...): findings by file and line, and a verdict"),
         ("/compact", "summarize the conversation to free the model's window"),
         ("/compact-at [% [%]]", "show or set when it compacts itself (80% of the window, off, or your Arena account's) and what it keeps (25%)"),
-        ("/context", "how full the model's window is"),
+        ("/context", "what fills the model's window, piece by piece"),
         ("/cost", "tokens spent, and how full the window is"),
         ("/mcp [retry]", "Arena's, Argus's and your MCP servers: connected or not; retry tries now"),
         ("/jobs [stop N]", "the commands run with no time limit or in the background; stop N stops job N"),
@@ -814,37 +815,20 @@ internal sealed partial class Repl(Runtime rt)
     }
 
     /// <summary>
-    /// What fills the window, as the IDE's and the web chat's context gauge say it: the next request by kind (its tokens
-    /// shared out by what each kind takes), the room kept for the answer and what is free, adding up to the window, each with
-    /// a bar of the whole window; then its biggest messages.
+    /// What fills the window, as Claude Code's /context and the web chat's context view show it: a bar of the whole window,
+    /// each part of the next request with its tokens and share and its biggest pieces (each tool's definition, each skill,
+    /// file and message), the room kept for the answer and what is free, adding up to the window; then what could be freed.
     /// </summary>
-    private void WindowCommand()
+    private async Task WindowCommandAsync(CancellationToken ct)
     {
-        var window = rt.Model.Context;
-        var measured = rt.Agent.Measure();
-        var used = rt.Agent.Estimate();
-        var kept = rt.Agent.Reserve;
-        void Row(string what, long tokens, string bar) =>
-            Ui.Line($"  {what,-30} {tokens,8:N0} {Math.Round(100.0 * tokens / window),3:0}%{(bar.Length > 0 ? "  " + bar : "")}");
-        string Bar(long tokens, char mark) => new(mark, (int)Math.Clamp(Math.Round(40.0 * tokens / window), 1, 40));
-        foreach (var (what, tokens) in Agent.InTokens(measured, used).Where(k => k.Tokens > 0))
+        var lines = ContextWindow.Lines(await ContextView.WindowAsync(rt, ct)).ToList();
+        Ui.Line(Ui.Blue(lines[0]));
+        Ui.Line(Ui.Dim(lines[1]));
+        foreach (var line in lines.Skip(2))
         {
-            Row(what, tokens, Ui.Blue(Bar(tokens, '█')));
+            Ui.Line(line.StartsWith("      ", StringComparison.Ordinal) ? Ui.Dim(line) : line == "Could be freed:" ? Ui.Bold(line) : line);
         }
-        // A request holds its prompt and its answer together: the room kept for the answer is not free.
-        Row("Kept for the answer", kept, Ui.Dim(Bar(kept, '░')));
-        Row("Free", Math.Max(0, window - used - kept), "");
-        if (measured["biggest"] is JsonArray { Count: > 0 } biggest)
-        {
-            var chars = (double)Agent.Kinds.Sum(k => measured.Long(k.Key) ?? 0);
-            Ui.Line(Ui.Bold("Biggest"));
-            foreach (var item in biggest.OfType<JsonObject>())
-            {
-                var who = item.Str("role") switch { "user" => "Your message", "assistant" => "An answer", _ => $"{item.Str("tool") ?? "A tool"}'s result" };
-                Ui.Line($"  {(long)Math.Round((item.Long("chars") ?? 0) / chars * used),8:N0}  {who}: {item.Str("preview")}");
-            }
-        }
-        Ui.Info("Big results are kept aside (read_result reads them); before compacting, earlier results are cleared to their note. /compact summarizes now.");
+        Ui.Info("Big results are kept aside (read_result reads them); before compacting, earlier results are cleared to their note. /compact summarizes now; /tools off turns a server's tools off.");
     }
 
     /// <summary>Runs a slash command; false to leave.</summary>
@@ -1090,7 +1074,7 @@ internal sealed partial class Repl(Runtime rt)
             case "/context":
                 Ui.Line(ContextUse() + (rt.CompactAtFrom is { } from ? $" ({from})" : "") + (rt.Compaction.At == Compaction.Off ? "" : ", and always before a request would not fit") +
                     $", keeping the recent part within {rt.Compaction.Target}%.");
-                WindowCommand();
+                await WindowCommandAsync(ct);
                 break;
             case "/compact-at":
                 CompactAt(arg);

@@ -1626,6 +1626,52 @@ describe('Code Arena, the IDE', () => {
     expect(ringBiggest).toEqual(["read_file's resultconst total = 160"])
   })
 
+  it("opens the chat's Context panel from the status bar's Context and with /context, piece by piece, and turns a server's unused tools off", async () => {
+    const groups = [
+      { id: 'arena', title: 'Arena', description: '', icon: 'plug', onByDefault: true, askFirst: false, on: true, loaded: true, functions: 3 },
+      { id: 'jira', title: 'Jira', description: '', icon: 'plug', onByDefault: true, askFirst: false, on: true, loaded: true, functions: 2 },
+    ]
+    const window = {
+      total: 4200, limit: 32768, reserve: 4096, free: 24472, counted: 'tokenizer', by: 'llama.cpp',
+      parts: [
+        { key: 'tools', label: 'Tool definitions', tokens: 3000, count: 2, items: [{ name: 'jira_search', tokens: 2000, tool: 'jira' }, { name: 'read_file', tokens: 1000 }], more: 0, moreTokens: 0 },
+        { key: 'you', label: 'Your messages', tokens: 1100, count: 1, items: [{ name: 'Your message', preview: 'Read the app', tokens: 1100 }], more: 0, moreTokens: 0 },
+        { key: 'format', label: 'Chat format', tokens: 100, count: 0, items: [], more: 0, moreTokens: 0 },
+      ],
+      freeable: [{ kind: 'tool', label: 'jira: not called in this chat', tokens: 2000, ref: 'jira', action: 'tool-off', detail: 'jira_search' }],
+    }
+    let now: CodeState = { ...state, toolGroups: groups }
+    const { calls } = backend({
+      'GET /api/state': () => ({ json: now }),
+      'GET /api/context': () => ({ json: { window, running: false } }),
+      'POST /api/settings': (body) => {
+        const on = (body as { tools: string[] }).tools
+        now = { ...now, toolGroups: groups.map((g) => ({ ...g, on: on.includes(g.id) })) }
+        return { json: now }
+      },
+    })
+    renderIde()
+    const status = await screen.findByRole('contentinfo', { name: 'Status bar' })
+    await userEvent.click(within(status).getByRole('button', { name: /^Context:/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Context' })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'What fills it, piece by piece' }))
+    const panel = await screen.findByRole('dialog', { name: 'Context' })
+    expect(await within(panel).findByText("Counted with the model's own tokenizer (llama.cpp).")).toBeInTheDocument()
+    await userEvent.click(within(panel).getByRole('button', { name: /Tool definitions/ }))
+    expect(within(within(panel).getByRole('list', { name: 'Tool definitions' })).getByText('jira_search')).toBeInTheDocument()
+    await userEvent.click(within(panel).getByRole('button', { name: 'Turn off: jira: not called in this chat' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/settings')?.body).toEqual({ tools: ['arena'] }))
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Context' })).not.toBeInTheDocument())
+
+    // /context in the chat's box: the same panel, and nothing is sent.
+    const box = screen.getByRole('textbox', { name: 'Message' })
+    await userEvent.type(box, '/context')
+    await userEvent.keyboard('{Escape}{Enter}')
+    expect(await screen.findByRole('dialog', { name: 'Context' })).toBeInTheDocument()
+    expect(calls.some((c) => c.path === '/api/messages')).toBe(false)
+  })
+
   it('reloads an open file the agent edits when nothing in it is unsaved, and leaves one with unsaved changes alone', async () => {
     const texts = ['const total = 5\nconsole.log(total)\n', 'the agent again\n']
     let turn = 0
@@ -2671,6 +2717,7 @@ describe('Code Arena, the IDE', () => {
     const menu = await screen.findByRole('listbox', { name: 'Skills and commands' })
     expect(within(menu).getAllByRole('option').map((o) => o.textContent)).toEqual([
       "/compactSummarize the conversation to free the model's window, a command",
+      '/contextWhat fills the window: each tool, skill, file and message, in tokens, a command',
       '/clearStart a new session (this one stays saved), a command',
       '/helloSay hello (NAME), a command',
       '/shipHow we ship, a skill',
@@ -2770,8 +2817,8 @@ describe('Code Arena, the IDE', () => {
     const box = await screen.findByRole('textbox', { name: 'Message' })
     await userEvent.type(box, '/')
     const list = await screen.findByRole('listbox', { name: 'Skills and commands' })
-    // The chat's two commands and all 36 skills.
-    await waitFor(() => expect(within(list).getAllByRole('option')).toHaveLength(38))
+    // The chat's three commands and all 36 skills.
+    await waitFor(() => expect(within(list).getAllByRole('option')).toHaveLength(39))
     await userEvent.keyboard('{ArrowUp}')
     expect(within(list).getByRole('option', { selected: true })).toHaveTextContent('/sk35')
     await userEvent.keyboard('{Enter}')
