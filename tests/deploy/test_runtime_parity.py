@@ -37,6 +37,7 @@ ALLOWED: dict[tuple[str, str, str], str] = {
     ("env", "app", "Storage__BackupsKept"): "backups are backup.sh's (compose); a cluster backs up its own volumes",
     ("env", "app", "Stack__Acme"): "Traefik's Let's Encrypt (compose); the Ingress takes a TLS Secret",
     ("env", "app", "Engine__Enabled"): "Helm can leave the engine out (llamacpp.enabled); compose always runs it",
+    ("env", "app", "Engine__MediaOwnGpus"): "Kubernetes: the picture and video pods get GPUs of their own; on compose they share the engine's",
     ("env", "litellm", "REDIS_HOST"): "the gateway's shared counts: ha.yml on compose, valkey.enabled on Helm",
     ("env", "litellm", "REDIS_PORT"): "as REDIS_HOST",
     ("env", "app", "Engine__LlamaCpp"): "Helm can run vLLM without llama.cpp (llamacpp.enabled false); compose always runs llama.cpp",
