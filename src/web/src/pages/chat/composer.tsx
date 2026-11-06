@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
-import { ArrowUp, Clock3, ListEnd, Paperclip, Square, TextQuote } from 'lucide-react'
+import { ArrowUp, ListEnd, Paperclip, Square } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tooltip } from '@/components/ui/tooltip'
-import { missingOf, skillsQuery, slashItems, slashQuery, type SkillCall, type SkillItem, type SkillUse, type SlashItem } from '@/lib/skills'
+import { missingOf, skillsQuery, slashItems, slashQuery, type SkillItem, type SkillUse, type SlashItem } from '@/lib/skills'
 import { cn } from '@/lib/utils'
 import type { CompactSetting, ContextView } from './context'
 import { ContextGauge, type ContextItems } from './context-gauge'
@@ -12,19 +12,8 @@ import { useRecall, type RecallSource } from './recall'
 import type { Quote } from './quote'
 import { QuoteChip } from './quote-parts'
 import { SkillFields, SlashMenu } from './slash'
-import type { Attachment, ChatModel } from './types'
+import type { ChatModel } from './types'
 import { UploadChips } from './upload-chips'
-
-/** A message written while an answer runs, waiting on the server: sent when the answer ends, or at once with Send now. */
-export interface Queued {
-  key: string
-  text: string
-  attachments: Attachment[]
-  /** The part of an answer it quotes. */
-  quote?: string | null
-  /** The skill it uses. */
-  skill?: SkillCall | null
-}
 import type { Uploads } from './uploads'
 
 /**
@@ -50,10 +39,7 @@ export function Composer({
   contextItems,
   compact,
   onCompact,
-  queued,
   onQueue,
-  onSendNow,
-  onUnqueue,
   compare,
   talk,
   history,
@@ -84,11 +70,8 @@ export function Composer({
   compact?: CompactSetting
   /** Summarize the chat's older messages (also: send /compact). */
   onCompact?: () => void
-  /** While an answer runs: messages waiting to be sent, and how to add (false: it was not taken), hurry or drop one. */
-  queued?: Queued[]
+  /** While an answer runs: how to queue a message (false: it was not taken). The thread shows those waiting (QueuedList). */
   onQueue?: (text: string, skill?: SkillUse) => Promise<boolean>
-  onSendNow?: (key: string) => void
-  onUnqueue?: (key: string) => void
   /** Compare (arena mode): the next question to two models. */
   compare?: ReactNode
   /** The Talk button: a voice conversation. */
@@ -189,7 +172,7 @@ export function Composer({
     setText('')
     unchoose()
     recall.reset()
-    // An answer is running: this one waits its turn (or goes at once with Send now).
+    // An answer is running: this one waits on the server, and the answer reads it at its next step (or after it ends).
     if (!(await (queueing && onQueue ? onQueue(t, skill) : onSend(t, skill)))) {
       setText((now) => now || before.text)
       if (before.chosen) {
@@ -262,47 +245,6 @@ export function Composer({
           onLast={() => area.current?.focus()}
         />
       )}
-      {queued && queued.length > 0 && (
-        <div className="grid gap-1 px-3 pt-3">
-          <ul className="grid gap-1" aria-label="Queued messages">
-            {queued.map((q, i) => (
-              <li key={q.key} className="flex min-w-0 items-center gap-2 rounded-lg border border-dashed bg-muted/40 py-1 ps-2.5 pe-1 text-sm">
-                <Clock3 className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                <span className="sr-only">Queued:</span>
-                {q.quote && (
-                  <>
-                    <TextQuote className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                    <span className="sr-only">Quoting part of an answer:</span>
-                  </>
-                )}
-                <span dir="auto" className="min-w-0 flex-1 truncate">
-                  {q.skill && <span className="font-mono text-[0.8125rem] font-medium">/{q.skill.name} </span>}
-                  {q.text || (q.skill ? '' : `${q.attachments.length} file${q.attachments.length === 1 ? '' : 's'}`)}
-                  {q.text && q.attachments.length > 0 && <span className="text-muted-foreground"> · {q.attachments.length} file{q.attachments.length === 1 ? '' : 's'}</span>}
-                </span>
-                {/* Answered elsewhere: nothing here stops that turn, so one only goes first in line. */}
-                {!elsewhere ? (
-                  <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => onSendNow?.(q.key)}>
-                    Send now
-                  </Button>
-                ) : i > 0 && (
-                  <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => onSendNow?.(q.key)} aria-label={`Put first: ${q.text || 'files'}`}>
-                    Put first
-                  </Button>
-                )}
-                <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => onUnqueue?.(q.key)} aria-label={`Cancel queued message: ${q.text || 'files'}`}>
-                  Cancel
-                </Button>
-              </li>
-            ))}
-          </ul>
-          <p className="text-xs text-muted-foreground">
-            {elsewhere
-              ? `${elsewhere}, and nothing here stops it: these are sent in turn when its turn ends, even if you close the page.`
-              : 'Sent in turn when the answer ends, even if you close the page; Send now stops the answer and sends it at once.'}
-          </p>
-        </div>
-      )}
       {quote && onClearQuote && (
         <QuoteChip
           quote={quote}
@@ -333,7 +275,7 @@ export function Composer({
             uploads.add(e.clipboardData.files)
           }
         }}
-        placeholder={queueing && onQueue ? 'Queue a message…' : chosen ? `Anything to add for /${chosen.name} (optional)` : 'Message, or / for a skill'}
+        placeholder={streaming && onQueue ? 'Add to the answer: it reads this at its next step…' : queueing && onQueue ? 'Queue a message…' : chosen ? `Anything to add for /${chosen.name} (optional)` : 'Message, or / for a skill'}
         aria-label="Message"
         // oxlint-disable-next-line jsx-a11y/no-autofocus -- the chat's whole purpose is this box
         autoFocus={autoFocus}
@@ -362,7 +304,7 @@ export function Composer({
         <span className="hidden text-xs whitespace-nowrap text-muted-foreground @5xl:inline">Enter to send · Shift+Enter for a new line</span>
         {context && <ContextGauge context={context} onCompact={onCompact} busy={streaming} compact={compact} items={contextItems} />}
         {streaming && onQueue && hasContent && (
-          <Tooltip content="Queue: sent when the answer ends (Enter)">
+          <Tooltip content="Queue: the answer reads it at its next step, and goes on (Enter)">
             <Button type="submit" size="icon-sm" variant="outline" className="animate-pop rounded-full" disabled={!canSend} aria-label="Queue">
               <ListEnd />
             </Button>

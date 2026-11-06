@@ -28,6 +28,22 @@ describe('live answer', () => {
     expect(s.leaf).toBe('a1')
   })
 
+  it('a message taken in at the next step is the person\'s, after the tool result, and the next step answers it', () => {
+    const s = play([
+      { type: 'question', id: 'q1', parentId: null },
+      { type: 'assistant', id: 'a1', parentId: 'q1', model: 'M' },
+      { type: 'tool_call', id: 'c1', name: 'calculate', arguments: '{}' },
+      { type: 'tool_result', id: 'c1', messageId: 't1', name: 'calculate', text: '42', isError: false, declined: false, noAccess: false, durationMs: 1 },
+      { type: 'took_in', id: 'q2', parentId: 't1', queuedId: 'w1', content: 'And in words?', quote: 'forty' },
+      { type: 'assistant', id: 'a2', parentId: 'q2', model: 'M' },
+      { type: 'content', text: 'Forty-two' },
+    ])
+    expect(s.messages.map((m) => [m.id, m.role, m.parentId])).toEqual([['q1', 'user', null], ['a1', 'assistant', 'q1'], ['t1', 'tool', 'a1'], ['q2', 'user', 't1'], ['a2', 'assistant', 'q2']])
+    expect(s.messages[3]).toMatchObject({ content: 'And in words?', quote: 'forty', details: { takenIn: true } })
+    expect(s.messages[4]!.content).toBe('Forty-two')
+    expect(s.leaf).toBe('a2')
+  })
+
   it('a long tool call keeps when it started and the last progress its server reported', () => {
     const s = play([
       { type: 'question', id: 'q1', parentId: null },

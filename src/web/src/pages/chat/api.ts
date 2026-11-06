@@ -62,14 +62,18 @@ export interface QueueState {
   answering: boolean
 }
 
-/** Queues a message to send when the answer ends (at once when the chat is not answering). */
+/** Queues a message: the answer running reads it at its next step, or it goes when the answer ends (at once when the chat is not answering). */
 export const queueMessage = (id: string, body: { content: string; attachments: string[]; quote?: string; mentions?: string[]; replyTo?: string; skill?: { name: string; args: Record<string, string> } }) =>
   api<QueueState>(`/api/chat/conversations/${id}/queue`, { body })
 
 /** Takes a queued message out of line. */
 export const cancelQueued = (id: string, queuedId: string) => api(`/api/chat/conversations/${id}/queue/${queuedId}`, { method: 'DELETE' })
 
-/** Send now: first in line, and the answer running stops so it goes at once. */
+/** Changes a queued message's words while it waits (checked again as a sent one is); 404 once it went. */
+export const editQueued = (id: string, queuedId: string, content: string) =>
+  api<QueueState>(`/api/chat/conversations/${id}/queue/${queuedId}`, { method: 'PATCH', body: { content } })
+
+/** Put first: first in line; the answer running goes on (only Stop stops it). */
 export const sendQueuedNow = (id: string, queuedId: string) => api<QueueState>(`/api/chat/conversations/${id}/queue/${queuedId}/now`, { body: {} })
 
 export const archiveChat = (id: string, archived: boolean) => api(`/api/chat/conversations/${id}`, { method: 'PATCH', body: { archived } })

@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, FileCode2, FileText, FoldVertical, GitFork, Info, Pencil, RefreshCw, Reply, Rewind, Square, Telescope, TextQuote, Timer } from 'lucide-react'
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsDownUp, ChevronsUpDown, Copy, CornerDownRight, FileCode2, FileText, FoldVertical, GitFork, Info, Pencil, RefreshCw, Reply, Rewind, Square, Telescope, TextQuote, Timer } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -212,6 +212,12 @@ export function QuestionTurn({
         <p className="px-1 text-xs text-muted-foreground">
           {m.author?.id === room.me ? 'You' : (m.author?.name ?? 'Former member')}
           {m.forPeople && <span> · to the room</span>}
+        </p>
+      )}
+      {m.details?.takenIn && (
+        <p className="flex items-center gap-1 px-1 text-xs text-muted-foreground">
+          <CornerDownRight className="size-3 shrink-0" aria-hidden="true" />
+          Sent while it worked: read at its next step
         </p>
       )}
       {room && m.replyToId && room.replyOf?.(m.replyToId) && (

@@ -107,6 +107,11 @@ export function reduce(state: LiveState, e: ChatEvent, localId: string | null, n
       if (i >= 0) messages[i] = { ...messages[i]!, id: e.id, parentId: e.parentId }
       return { ...state, messages, leaf: e.id, mode: 'answer' }
     }
+    case 'took_in': {
+      // A message sent while the answer worked, read at its next step: the person's message in the thread there.
+      put(messages, { ...blank(e.id, 'user', e.parentId, e.content), quote: e.quote ?? null, author: e.author ?? undefined, details: { takenIn: true } })
+      return { ...state, messages, leaf: e.id }
+    }
     case 'compacting':
       return { ...state, compacting: true, mode: state.mode ?? 'compact' }
     case 'compacted': {

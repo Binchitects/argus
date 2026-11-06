@@ -14,7 +14,7 @@ import { takeShared } from '@/lib/shared'
 import type { SkillUse } from '@/lib/skills'
 import { useMedia } from '@/lib/use-media'
 import { cn } from '@/lib/utils'
-import { archiveChat, assistantQuery, cancelQueued, chatModel, chatWindow, configQuery, conversationQuery, endBranchAt, forkChat, hurryChat, queueMessage, sendQueuedNow, stampQuery, stopChat, streamChat, uploadFile, widenWindow } from './api'
+import { archiveChat, assistantQuery, cancelQueued, chatModel, chatWindow, configQuery, conversationQuery, editQueued, endBranchAt, forkChat, hurryChat, queueMessage, sendQueuedNow, stampQuery, stopChat, streamChat, uploadFile, widenWindow } from './api'
 import { typedOf } from './attached'
 import { useScreenShare } from './screen'
 import { PublishDialog, type ToPublish } from '../apps/publish-dialog'
@@ -51,7 +51,7 @@ import { chatToJson, chatToMarkdown, exportName, markdownToHtml } from './export
 import type { ExportKind } from './header'
 import { saveBlob } from '@/lib/zip'
 import { readsAloud, voiceQuery } from '@/lib/voice'
-import type { Queued } from './composer'
+import { QueuedList, type Queued } from './queued-list'
 import { speak, voicePrefix } from './sound'
 import { TalkBar, TalkButton } from './talk'
 import { useTalk, type TalkTurn } from './use-talk'
@@ -470,6 +470,9 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
             else if (!answered && e.type === 'stopped' && e.why) unanswered = e.why
             watch?.(e)
             canvasEvents.current(e)
+            // Taken into the answer at its next step: it waits no more.
+            if (e.type === 'took_in')
+              queryClient.setQueryData<Conversation>(conversationQuery(conversationId).queryKey, (c) => (c ? { ...c, queued: (c.queued ?? []).filter((q) => q.id !== e.queuedId) } : c))
             setLive((s) => reduce(s ?? start, e, localId))
             // Done while the tab is hidden: the desktop says so (when the person turned that on).
             if (e.type === 'done' && endpoint !== 'compact') {
@@ -767,9 +770,9 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   const comparing = canCompare ? compare : null
   const comparePicker = canCompare ? <ComparePicker models={config.models} value={comparing} onChange={setCompare} /> : null
 
-  // Written while an answer runs: each waits on the server (a reload, or another tab, still shows it)
-  // and becomes the next question once the answer before is over, or at once with Send now (which
-  // stops the answer). This page then watches that answer as it watched the one before.
+  // Written while an answer runs: each waits on the server (a reload, or another tab, still shows it). The answer reads
+  // the first at its next step and goes on (took_in); one it may not take becomes the next question once the answer is
+  // over, and this page then watches that answer as it watched the one before. Only Stop stops an answer.
   const queue: Queued[] = (data?.queued ?? []).map((q) => ({ key: q.id, text: q.content, attachments: q.attachments, quote: q.quote, skill: q.skill }))
   const setQueued = (chat: string, queued: QueuedMessage[]) =>
     queryClient.setQueryData<Conversation>(conversationQuery(chat).queryKey, (c) => (c ? { ...c, queued } : c))
@@ -822,17 +825,29 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
     if (streaming || data?.codeArena) void enqueue(text, q)
     else void send(text, [], undefined, q)
   }
-  const sendNow = async (key: string) => {
+  const putFirst = async (key: string) => {
     const chat = streamingIn.current ?? id
     if (!chat) return
     try {
-      // The server stops the answer; when its stream ends, this page watches the one that follows.
+      // First in line; a chat that ended its answer meanwhile takes it at once, and this page watches that answer.
       const r = await sendQueuedNow(chat, key)
       setQueued(chat, r.queued)
       if (r.answering && !abort.current) await refreshThenWatch(chat)
     } catch (e) {
       toast.error(errorMessage(e))
       void queryClient.invalidateQueries({ queryKey: conversationQuery(chat).queryKey })
+    }
+  }
+  const editQueue = async (key: string, text: string): Promise<boolean> => {
+    const chat = streamingIn.current ?? id
+    if (!chat) return false
+    try {
+      setQueued(chat, (await editQueued(chat, key, text)).queued)
+      return true
+    } catch (e) {
+      toast.error(errorMessage(e, 'The message could not be changed.'))
+      void queryClient.invalidateQueries({ queryKey: conversationQuery(chat).queryKey })
+      return false
     }
   }
   const unqueue = async (key: string) => {
@@ -1432,6 +1447,13 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                         </div>
                       )
                     })}
+                    <QueuedList
+                      queued={queue}
+                      elsewhere={data?.codeArena && !streaming ? 'Code Arena is answering' : undefined}
+                      onEdit={editQueue}
+                      onPutFirst={(key) => void putFirst(key)}
+                      onCancel={(key) => void unqueue(key)}
+                    />
                     {streaming && view.mode === 'compact' && (
                       <output className="flex items-center gap-2 text-sm text-muted-foreground">
                         <span className="flex gap-1" aria-hidden="true">
@@ -1518,10 +1540,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                   talk={talkButton}
                   attach={mayAttach}
                   voice={maySpeak}
-                  queued={queue}
                   onQueue={(text, skill) => enqueue(text, undefined, undefined, skill)}
-                  onSendNow={(key) => void sendNow(key)}
-                  onUnqueue={(key) => void unqueue(key)}
                   // A room's messages go to its queue, never compared.
                   compare={room ? null : comparePicker}
                   onStop={() => void stop()}

@@ -1139,49 +1139,108 @@ describe('chat', () => {
     renderApp('/chat/c1')
     const again = await screen.findByRole('list', { name: 'Queued messages' })
     expect(again).toHaveTextContent('second')
-    expect(within(again).getByRole('button', { name: 'Send now' })).toBeInTheDocument()
+    expect(within(again).getByRole('button', { name: 'Edit queued message: second' })).toBeInTheDocument()
+    // Nothing here stops the answer but Stop.
+    expect(within(again).queryByRole('button', { name: 'Send now' })).not.toBeInTheDocument()
+    expect(screen.getByText(/The answer reads the first at its next step/)).toBeInTheDocument()
   })
 
-  it('Send now asks the server to stop the answer, and the page then watches the queued message being answered', async () => {
-    let stop = () => {}
-    const stopped = new Promise<void>((r) => (stop = r))
-    let phase: 'first' | 'next' | 'done' = 'first'
-    const q2 = msg('q2', 'a1', 'user', { content: 'second' })
-    const before = [msg('q1', null, 'user', { content: 'first' }), msg('a1', 'q1', 'assistant', { content: 'Working on it', status: 'stopped' })]
-    const waiting = [{ id: 'w1', content: 'second', attachments: [], research: false, createdAt: '' }]
-    const calls = fakeApi(member, {
-      'GET /api/chat/config': () => ({ json: config }),
-      'GET /api/chat/conversations': () => ({ json: [] }),
-      'POST /api/chat/conversations': () => ({ status: 201, json: conversation() }),
-      'GET /api/chat/conversations/c1': () => ({
-        json: phase === 'first' ? conversation({ queued: waiting })
-          : phase === 'next' ? conversation({ messages: [...before, q2], currentLeafId: 'q2', answering: true })
-          : conversation({ messages: [...before, q2, msg('a2', 'q2', 'assistant', { content: 'Second answer' })], currentLeafId: 'a2' }),
-      }),
-      'POST /api/chat/conversations/c1/messages': () => ({ events: [{ type: 'question', id: 'q1', parentId: null }, { type: 'assistant', id: 'a1', parentId: 'q1', model: 'Main-Model' }, { type: 'content', text: 'Working on it' }], until: stopped }),
-      'POST /api/chat/conversations/c1/queue': () => ({ json: { queued: waiting, answering: true } }),
-      'POST /api/chat/conversations/c1/queue/w1/now': () => {
-        // The server stops the answer and the queued message becomes the next question.
-        phase = 'next'
-        stop()
-        return { json: { queued: waiting, answering: true } }
-      },
-      'GET /api/chat/conversations/c1/stream': () => {
-        phase = 'done'
-        return { events: [{ type: 'question', id: 'q2', parentId: 'a1' }, { type: 'assistant', id: 'a2', parentId: 'q2', model: 'Main-Model' }, { type: 'content', text: 'Second answer' }, { type: 'done', id: 'a2' }] }
+  it('while an answer runs the box stays open, and a message sent then shows pending at the end of the thread', async () => {
+    const queued: { id: string; content: string; attachments: []; createdAt: string }[] = []
+    const calls = backend({
+      events: [{ type: 'question', id: 'q1', parentId: null }, { type: 'assistant', id: 'a1', parentId: 'q1', model: 'Main-Model' }, { type: 'content', text: 'Working on it' }],
+      hang: true,
+      extra: {
+        'POST /api/chat/conversations/c1/queue': (body: unknown) => {
+          queued.push({ id: `w${queued.length + 1}`, content: (body as { content: string }).content, attachments: [], createdAt: '' })
+          return { json: { queued, answering: true } }
+        },
       },
     })
     renderApp('/chat')
     await ask('first')
     await screen.findByRole('button', { name: 'Stop' })
-    await ask('second')
+    const box = screen.getByRole('textbox', { name: 'Message' })
+    expect(box).toBeEnabled()
+    expect(box).toHaveAttribute('placeholder', 'Add to the answer: it reads this at its next step…')
+    await ask('use the staging server')
+    const pending = await screen.findByRole('region', { name: 'Pending messages' })
+    expect(within(pending).getByRole('list', { name: 'Queued messages' })).toHaveTextContent('use the staging server')
+    expect(pending).toHaveTextContent('Read at the next step')
+    // In the thread, after the answer: not in the box.
+    expect(screen.getByRole('textbox', { name: 'Message' }).closest('form')).not.toContainElement(pending)
+    // The answer goes on: nothing was stopped.
+    expect(calls.some((c) => c.path === '/api/chat/conversations/c1/stop')).toBe(false)
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument()
+  })
+
+  it('a queued message is edited in place until it goes (Enter saves, Esc leaves it as it was), and Put first moves one ahead without stopping the answer', async () => {
+    let queued = [
+      { id: 'w1', content: 'first wait', attachments: [], createdAt: '' },
+      { id: 'w2', content: 'second wait', attachments: [], createdAt: '' },
+    ]
+    const calls = fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config }),
+      'GET /api/chat/conversations': () => ({ json: [] }),
+      'GET /api/chat/conversations/c1': () => ({ json: conversation({ messages: [msg('q1', null, 'user', { content: 'first' })], currentLeafId: 'q1', answering: true, queued }) }),
+      'GET /api/chat/conversations/c1/stream': () => ({ events: [{ type: 'question', id: 'q1', parentId: null }, { type: 'assistant', id: 'a1', parentId: 'q1', model: 'Main-Model' }], hang: true }),
+      'PATCH /api/chat/conversations/c1/queue/w1': (body: unknown) => {
+        queued = [{ ...queued[0]!, content: (body as { content: string }).content }, queued[1]!]
+        return { json: { queued, answering: true } }
+      },
+      'POST /api/chat/conversations/c1/queue/w2/now': () => {
+        queued = [queued[1]!, queued[0]!]
+        return { json: { queued, answering: true } }
+      },
+    })
+    renderApp('/chat/c1')
     const list = await screen.findByRole('list', { name: 'Queued messages' })
-    await userEvent.click(within(list).getByRole('button', { name: 'Send now' }))
-    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/chat/conversations/c1/queue/w1/now')).toBe(true))
-    expect(await screen.findByText('Second answer', {}, { timeout: 4000 })).toBeInTheDocument()
-    expect(calls.some((c) => c.path === '/api/chat/conversations/c1/stream')).toBe(true)
-    expect(calls.filter((c) => c.path === '/api/chat/conversations/c1/messages')).toHaveLength(1)
-    await waitFor(() => expect(screen.queryByRole('list', { name: 'Queued messages' })).not.toBeInTheDocument())
+    await userEvent.click(within(list).getByRole('button', { name: 'Edit queued message: first wait' }))
+    const editing = screen.getByRole('textbox', { name: 'Edit the queued message' })
+    expect(editing).toHaveValue('first wait')
+    await userEvent.type(editing, ' longer{Escape}')
+    expect(screen.queryByRole('textbox', { name: 'Edit the queued message' })).not.toBeInTheDocument()
+    expect(calls.some((c) => c.method === 'PATCH')).toBe(false)
+    await userEvent.click(within(list).getByRole('button', { name: 'Edit queued message: first wait' }))
+    await userEvent.clear(screen.getByRole('textbox', { name: 'Edit the queued message' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Edit the queued message' }), 'first, changed{Enter}')
+    await waitFor(() => expect(calls.find((c) => c.method === 'PATCH' && c.path === '/api/chat/conversations/c1/queue/w1')?.body).toEqual({ content: 'first, changed' }))
+    await waitFor(() => expect(within(list).getAllByRole('listitem')[0]).toHaveTextContent('first, changed'))
+
+    const [first, second] = within(list).getAllByRole('listitem')
+    expect(within(first!).queryByRole('button', { name: /Put first/ })).not.toBeInTheDocument()
+    await userEvent.click(within(second!).getByRole('button', { name: 'Put first: second wait' }))
+    await waitFor(() => expect(within(list).getAllByRole('listitem')[0]).toHaveTextContent('second wait'))
+    expect(calls.some((c) => c.path === '/api/chat/conversations/c1/stop')).toBe(false)
+  })
+
+  it('a message the answer takes in at its next step shows in the thread there, waits no more, and the answer goes on after it', async () => {
+    const queued = [{ id: 'w1', content: 'Use the staging server', attachments: [], createdAt: '' }]
+    fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config }),
+      'GET /api/chat/conversations': () => ({ json: [] }),
+      'GET /api/chat/conversations/c1': () => ({ json: conversation({ messages: [msg('q1', null, 'user', { content: 'Deploy it' })], currentLeafId: 'q1', answering: true, queued }) }),
+      'GET /api/chat/conversations/c1/stream': () => ({
+        events: [
+          { type: 'question', id: 'q1', parentId: null },
+          { type: 'assistant', id: 'a1', parentId: 'q1', model: 'Main-Model' },
+          { type: 'tool_call', id: 'call_1', name: 'calculate', arguments: '{}' },
+          { type: 'tool_result', id: 'call_1', messageId: 't1', name: 'calculate', text: '42', isError: false, declined: false, noAccess: false, durationMs: 5 },
+          { type: 'took_in', id: 'q2', parentId: 't1', queuedId: 'w1', content: 'Use the staging server' },
+          { type: 'assistant', id: 'a2', parentId: 'q2', model: 'Main-Model' },
+          { type: 'content', text: 'Deploying to staging' },
+        ],
+        hang: true,
+      }),
+    })
+    renderApp('/chat/c1')
+    expect(await screen.findByText('Deploying to staging')).toBeInTheDocument()
+    // Not pending any more: the person's message in the thread, after the step it came after, marked so.
+    expect(screen.queryByRole('list', { name: 'Queued messages' })).not.toBeInTheDocument()
+    const said = screen.getAllByRole('region', { name: 'You' }).at(-1)!
+    expect(said).toHaveTextContent('Use the staging server')
+    expect(said).toHaveTextContent('Sent while it worked: read at its next step')
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument()
   })
 
   it('deep research has no switch in the box: it is a tool in the Tools menu, for those an admin gave it to', async () => {
