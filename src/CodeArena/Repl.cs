@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 namespace CodeArena;
 
 /// <summary>The interactive session: the prompt, turns, and the slash commands.</summary>
-internal sealed class Repl(Runtime rt)
+internal sealed partial class Repl(Runtime rt)
 {
     /// <summary>
     /// The prompt edited key by key, with what was sent before on ↑, when someone types at a terminal that can
@@ -33,6 +33,9 @@ internal sealed class Repl(Runtime rt)
         ("/tools [on|off NAME]", "the tools this session has; turn a group of Arena's or a server's tools on or off in it"),
         ("/plan", "the plan, as it stands; a proposed one: approve [ask], change N what, another why, reject why; undo N; resume"),
         ("/checklist", "the checklist on, and yours (kept in Arena); N or NAME turns one on; off; tick N, untick N"),
+        ("/assistant [N|NAME|off]", "your assistants in Arena; N or NAME works as one (its instructions, model, tools and skills); off as none"),
+        ("/tasks [N|stop N|new TASK]", "the sub-agents and background tasks: N shows one, stop N stops it, new [--edits] [--assistant NAME] TASK starts one"),
+        ("/goal [TEXT|pause|resume|cancel]", "work until a goal is met: TEXT [--check COMMAND | --until CONDITION] [--steps N] [--minutes N] [--tokens N]"),
         ("/agent [NAME TASK]", "your own coding agents (Claude Code, Codex, Gemini CLI: your subscriptions), or hand one a task"),
         ("/review [BASE]", "review the changes not yet committed, or this branch's over BASE (main...): findings by file and line, and a verdict"),
         ("/compact", "summarize the conversation to free the model's window"),
@@ -142,6 +145,8 @@ internal sealed class Repl(Runtime rt)
         };
         // What the person adds in the web chat while the prompt waits comes in at once, said above it.
         rt.WebNews = () => _ = TakeInWhileWaitingAsync(ct);
+        // A background task of the person's that ended is said above the prompt.
+        rt.Tasks.Changed += TaskEnded;
         // What Arena lacks of the earlier sessions (every folder's) goes in the background.
         rt.SendLaterInBackground();
         var pending = first;
@@ -153,6 +158,12 @@ internal sealed class Repl(Runtime rt)
                 Ui.Line();
                 Ui.Line(Ui.Cyan("› ") + typed);
                 pending = typed;
+            }
+            if (pending is null && rt.GoalPrompt() is { } goalTurn)
+            {
+                // A goal is being worked on: its next turn (what was typed meanwhile went first).
+                await GoalTurnAsync(goalTurn, ct);
+                continue;
             }
             string? input;
             if (pending is null)
@@ -548,14 +559,18 @@ internal sealed class Repl(Runtime rt)
     }
 
     /// <summary>A turn: the person's message, or (null) the model carrying on after a command that ended.</summary>
-    private async Task TurnAsync(string? input, CancellationToken ct)
+    /// <summary>
+    /// A turn: the person's message (null: carrying on after commands that ended). <paramref name="turn"/> counts what it
+    /// spends, <paramref name="limit"/> also stops it (a goal's budget). Whether it was stopped (Ctrl+C, or the limit).
+    /// </summary>
+    private async Task<bool> TurnAsync(string? input, CancellationToken ct, Spend? turn = null, CancellationToken limit = default)
     {
         if (input is null)
         {
             var ended = rt.Jobs.Follow().Select(j => $"job {j.Id}").ToList();
             if (ended.Count == 0)
             {
-                return;
+                return false;
             }
             Ui.Line();
             Ui.Info($"{string.Join(", ", ended)} ended: the model carries on from {(ended.Count == 1 ? "it" : "them")}.");
@@ -565,11 +580,12 @@ internal sealed class Repl(Runtime rt)
             input = string.Join("\n\n", _ran) + "\n\n" + input;
             _ran.Clear();
         }
-        var turn = new Spend();
+        turn ??= new Spend();
         rt.Turn = turn;
         var planBefore = rt.Context.Plan;
+        var stopped = false;
         using var key = rt.Env.Cancel.BeginTurn();
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, key.Token);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, key.Token, limit);
         _turnStop = linked.Token;
         using var watching = CancellationTokenSource.CreateLinkedTokenSource(linked.Token);
         var watch = WatchKeysAsync(watching.Token);
@@ -587,7 +603,8 @@ internal sealed class Repl(Runtime rt)
         }
         catch (OperationCanceledException) when (linked.IsCancellationRequested)
         {
-            Ui.Warn("Stopped.");
+            stopped = true;
+            Ui.Warn(limit.IsCancellationRequested && !key.Token.IsCancellationRequested ? "Stopped: the goal's budget is spent." : "Stopped.");
             if (_typed.Count > 0)
             {
                 // What was typed for after the turn may no longer apply: it waits in the prompt, to send, change or clear.
@@ -631,6 +648,7 @@ internal sealed class Repl(Runtime rt)
             Ui.Info("Review the plan: /plan approve (carry it out, edits run) · /plan approve ask (asking before each change) · "
                 + "/plan change N what · /plan another why · /plan reject why · or say more.");
         }
+        return stopped;
     }
 
     /// <summary>/plan approve | approve ask | change N what | another why | reject why: the person's review of a proposed plan; /plan undo N.</summary>
@@ -897,6 +915,15 @@ internal sealed class Repl(Runtime rt)
                 break;
             case "/agent":
                 await AgentCommandAsync(arg, ct);
+                break;
+            case "/assistant":
+                Ui.Line(await rt.AssistantCommandAsync(arg, ct));
+                break;
+            case "/tasks":
+                await TasksCommandAsync(arg, ct);
+                break;
+            case "/goal":
+                GoalCommand(arg);
                 break;
             // The project's or the person's own /review command, when there is one, goes first (default: below).
             case "/review" when rt.Extensions.Expand(input) is null:

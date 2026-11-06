@@ -500,6 +500,8 @@ internal sealed partial class Runtime : IAsyncDisposable
             Agents = () => [.. Extensions.Agents.Select(a => (a.Name, a.Description))],
             Checklist = () => Checklist is { } on ? SessionChecklist.Text(on) : "",
             CodeIndex = CodeIndex is not null,
+            Assistant = () => Assistant,
+            Assistants = () => KnownAssistants,
         };
         Context = new ToolContext
         {
@@ -555,8 +557,10 @@ internal sealed partial class Runtime : IAsyncDisposable
         };
         Context.CharsPerToken = () => Agent.CharsPerToken;
         Context.ResultChars = () => Agent.KeepWhole;
-        Context.SubAgent = (description, prompt, agent, token) => RunSubAgentWorkAsync(inputs, description, prompt, agent, token);
+        Context.SubAgent = (ask, token) => RunSubAgentWorkAsync(inputs, ask, token);
+        Agent.News = Tasks.TakeNews;
         Context.RunSteps = RunStepsAsync;
+        Context.GoalCheck = SetGoalCheck;
         Agent.Critique = Config.PlanCritique ? (plan, token) => CritiqueAsync(inputs, plan, token) : null;
         Agent.Ground = GroundAsync;
         _inputs = inputs;
@@ -575,6 +579,9 @@ internal sealed partial class Runtime : IAsyncDisposable
             Agent.Load(resumed.Messages, resumed.Known, resumed.CharsPerToken);
             Context.Plan = resumed.Plan;
             Demand.Restore(resumed.ToolsOff, resumed.ToolsLoaded);
+            RestoreAssistant(resumed.Assistant);
+            Tasks.Reset(KeptTasks(resumed));
+            RestoreGoal(resumed.Goal);
             Total.Prompt = resumed.Prompt;
             Total.Cached = resumed.Cached;
             Total.Completion = resumed.Completion;
@@ -608,6 +615,8 @@ internal sealed partial class Runtime : IAsyncDisposable
         {
             _settingsStamp = await stamped;
             _watchingSettings = Task.Run(() => WatchSettingsAsync(_settingsStop.Token), CancellationToken.None);
+            // The person's assistants, for the prompt's list (a sub-agent can work as one): in the background.
+            _ = AssistantsAsync(_settingsStop.Token);
         }
         if (o.WebChat is { } web && await ContinueWebChatAsync(web, ct) is { } said)
         {
@@ -1420,6 +1429,10 @@ internal sealed partial class Runtime : IAsyncDisposable
         Context.Plan = WorkPlan.None;
         Demand.Restore([], []);
         Context.PlanChanged = plan => Session.Plan(plan);
+        // A new session works as Code Arena's own, with no tasks or goal of the one before.
+        RestoreAssistant(null);
+        Tasks.Reset([]);
+        RestoreGoal(null);
         StartSync();
     }
 
@@ -1551,6 +1564,9 @@ internal sealed partial class Runtime : IAsyncDisposable
         Context.Plan = data.Plan;
         Demand.Restore(data.ToolsOff, data.ToolsLoaded);
         Context.PlanChanged = plan => Session.Plan(plan);
+        RestoreAssistant(data.Assistant);
+        Tasks.Reset(KeptTasks(data));
+        RestoreGoal(data.Goal);
         if (data.Model is not null && data.Model != Model.Name && Models.FirstOrDefault(m => m.Id == data.Model) is { } info)
         {
             Model.Info = info;
@@ -1759,64 +1775,6 @@ internal sealed partial class Runtime : IAsyncDisposable
         return notes.Length == 0 || notes.StartsWith(PlanHolds, StringComparison.OrdinalIgnoreCase) ? null : notes.Length <= 4000 ? notes : notes[..4000];
     }
 
-    private async Task<string> RunSubAgentAsync(SystemPrompt.Inputs inputs, string description, string prompt, string? agent, CancellationToken ct) =>
-        (await RunSubAgentWorkAsync(inputs, description, prompt, agent, ct)).Report;
-
-    /// <summary>
-    /// A sub-agent's run, and what it did: for a task call, its steps go to the page as it works (the call's "agent"
-    /// events) and are kept with the result.
-    /// </summary>
-    private async Task<(string Report, JsonObject? Work)> RunSubAgentWorkAsync(SystemPrompt.Inputs inputs, string description, string prompt, string? agent, CancellationToken ct)
-    {
-        CustomAgent? own = null;
-        if (agent is { Length: > 0 } && (own = Extensions.Agents.FirstOrDefault(a => string.Equals(a.Name, agent, StringComparison.OrdinalIgnoreCase))) is null)
-        {
-            throw new ToolError($"There is no sub-agent {agent}{(Extensions.Agents.Count > 0 ? $": yours are {string.Join(", ", Extensions.Agents.Select(a => a.Name))}" : "")}.");
-        }
-        var tools = Tools.ForSubAgent();
-        if (own is { Tools.Count: > 0 })
-        {
-            // Its own list narrows the reading tools; it never adds one that changes something.
-            tools = new ToolBox(tools.All.Where(t => own.Tools.Any(n => PermissionRules.Glob(n, t.Name))));
-        }
-        var model = own?.Model is { } name && Models.FirstOrDefault(m => m.Id == name) is { } info ? new ModelState { Info = info, Thinking = Model.Thinking, DefaultLevel = Model.DefaultLevel, ContextOverride = Config.Context } : Model;
-        var sub = new Agent
-        {
-            Gateway = Gateway,
-            Tools = tools,
-            Permissions = Permissions,
-            // Its own record of what code answers showed it: it sees none of the agent's conversation.
-            Context = new ToolContext { Workspace = Workspace, Ui = Ui, Shell = Config.Shell, Sandbox = Sandbox, Code = CodeIndex, Shown = [], MayRead = MayRead },
-            Ui = Ui,
-            Model = model,
-            SystemPrompt = () => own is null ? SystemPrompt.Build(inputs, subAgent: true) : own.Prompt + "\n\n" + SystemPrompt.Build(inputs, subAgent: true),
-            Total = Total,
-            Depth = 1,
-            Stream = false,
-            MaxSteps = 60,
-            Compaction = Compaction,
-        };
-        SubAgentWork? work = null;
-        if (Agent.CurrentCall.Value is { Length: > 0 } call)
-        {
-            work = new SubAgentWork(call, description, prompt, Agent.Events);
-            sub.Events = work;
-            work.Start();
-        }
-        string report;
-        try
-        {
-            report = await sub.RunAsync(prompt, Turn ?? new Spend(), ct);
-        }
-        catch (Exception e) when (work is not null)
-        {
-            work.Done(model.Name, e is OperationCanceledException ? "Stopped." : e.Message);
-            throw;
-        }
-        work?.Done(model.Name, null);
-        return (report.Trim().Length > 0 ? report : $"The sub-agent ({description}) returned no report.", work?.Json);
-    }
-
     /// <summary>An MCP tool as the model sees it, calling the server when run; a call that finds the server gone has it connect again.</summary>
     public static ToolDef Remote(McpClient client, JsonObject tool, string name, bool trusted, bool changesNothing, ServerLink? link = null, string? group = null)
     {
@@ -1873,6 +1831,8 @@ internal sealed partial class Runtime : IAsyncDisposable
             await _watchingSettings;
         }
         Jobs.StopAll("code-arena stopped");
+        await _tasksStop.CancelAsync();
+        Tasks.StopAll();
         CodeIndex?.Dispose();
         Sandbox.Clean();
         // The earlier sessions not sent yet go at the next start.

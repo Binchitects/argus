@@ -50,6 +50,8 @@ internal sealed class ToolDef
     public bool ChangesNothing { get; init; }
     /// <summary>The call in a few words for the terminal (a path, a pattern, a command).</summary>
     public Func<JsonObject, string>? Summary { get; init; }
+    /// <summary>What a call does when it depends on its arguments (asked as <see cref="Kind"/> otherwise).</summary>
+    public Func<JsonObject, ToolKind>? KindOf { get; init; }
     /// <summary>Asks the person in every mode, yolo too (stopping a command they let run with no time limit).</summary>
     public bool AlwaysAsks { get; init; }
     /// <summary>
@@ -84,8 +86,10 @@ internal sealed class ToolContext
     public WorkPlan Plan { get; set; } = WorkPlan.None;
     /// <summary>Runs steps of the plan at once (run_steps); null where none may (a sub-agent).</summary>
     public Func<IReadOnlyList<int>, CancellationToken, Task<string>>? RunSteps { get; set; }
-    /// <summary>Runs a sub-agent (description, prompt, which of the person's own if any) and returns its report.</summary>
-    public Func<string, string, string?, CancellationToken, Task<(string Report, JsonObject? Work)>>? SubAgent { get; set; }
+    /// <summary>Runs a sub-agent (what it is asked, as whom, with which tools) and returns its report and what it did.</summary>
+    public Func<SubAgentAsk, CancellationToken, Task<(string Report, JsonObject? Work)>>? SubAgent { get; set; }
+    /// <summary>Writes down how the session's goal is checked (goal_check); null where there is no goal (a sub-agent).</summary>
+    public Func<JsonObject, ToolResult>? GoalCheck { get; set; }
     /// <summary>Whether a step's check is a command to run before the step is done (its first word a program here); null: none is.</summary>
     public Func<string, bool>? IsCommand { get; set; }
     /// <summary>Told when a step of the plan begins (doing): the checkpoint before it, for /plan undo.</summary>
@@ -194,6 +198,9 @@ internal sealed class Permissions(Ui ui, Mode mode)
     public PermissionRules Rules { get; set; } = new();
     public Workspace? Workspace { get; set; }
 
+    /// <summary>Where nobody can be asked (a sub-agent that changes things): why a call that would ask is refused, {0} its name.</summary>
+    public string? CannotAsk { get; init; }
+
     /// <summary>Null when the call may run; otherwise why not, for the model.</summary>
     public async Task<string?> CheckAsync(ToolDef tool, JsonObject args, CancellationToken ct, string? callId = null)
     {
@@ -205,26 +212,28 @@ internal sealed class Permissions(Ui ui, Mode mode)
         {
             return $"Plan mode is read-only: {tool.Name} is not allowed. Finish the plan; the person switches the mode (/mode) to carry it out.";
         }
+        // What this call does: a tool may say per call (goal_check runs a command only when it is given one).
+        var does = tool.KindOf?.Invoke(args) ?? tool.Kind;
         // A command with no time limit, or in the background, asks where commands ask (ask, auto-edit); yolo runs it, watched,
         // and the person can stop it. Each kind of wait is agreed to on its own.
-        var how = tool.Kind != ToolKind.Shell ? null
+        var how = does != ToolKind.Shell ? null
             : args.Bool("background") == true ? ("background", "in the background")
             : args.Bool("no_time_limit") == true ? ("unlimited", "with no time limit")
             : ((string, string)?)null;
-        var ask = tool.AlwaysAsks || tool.Kind switch
+        var ask = tool.AlwaysAsks || does switch
         {
             ToolKind.Read or ToolKind.Agent => false,
             ToolKind.Remote when tool.Trusted || tool.ReadOnly => false,
             ToolKind.Edit => Mode == Mode.Ask,
             _ => Mode != Mode.Yolo,
         };
-        if (tool.Kind == ToolKind.Shell && !tool.AlwaysAsks && !GuardReady.IsCompleted)
+        if (does == ToolKind.Shell && !tool.AlwaysAsks && !GuardReady.IsCompleted)
         {
             await Task.WhenAny(GuardReady, Task.Delay(GuardWait, ct));
             ct.ThrowIfCancellationRequested();
         }
         // A command Laya flags asks whatever the mode; its probabilities show whenever a command asks.
-        var risk = tool.Kind == ToolKind.Shell && !tool.AlwaysAsks && Guard is { } guard ? await guard.AssessAsync(args.Str("command"), ct) : null;
+        var risk = does == ToolKind.Shell && !tool.AlwaysAsks && Guard is { } guard ? await guard.AssessAsync(args.Str("command"), ct) : null;
         var flagged = risk?.High == true;
         if (ask && !flagged && Workspace is { } here && Rules.Allowed(tool, args, here) is not null)
         {
@@ -235,7 +244,7 @@ internal sealed class Permissions(Ui ui, Mode mode)
             return null;
         }
         // A tool that asks every time (stop_command) offers no "always", and none is remembered for it.
-        var (key, always) = tool.AlwaysAsks ? ("", null) : tool.Kind switch
+        var (key, always) = tool.AlwaysAsks ? ("", null) : does switch
         {
             ToolKind.Edit => ("edit", "for file edits"),
             ToolKind.Shell when !tool.AlwaysAsks && CommandPrefix(args.Str("command")) is { Length: > 0 } prefix => how is { } h
@@ -256,6 +265,10 @@ internal sealed class Permissions(Ui ui, Mode mode)
             }
             if (Asker is null && !ui.CanAsk)
             {
+                if (CannotAsk is { } refused)
+                {
+                    return string.Format(System.Globalization.CultureInfo.InvariantCulture, refused, label);
+                }
                 return flagged ? LayaGuard.CannotAsk(tool.Name, risk!) : $"{label} needs the person's approval, and this run cannot ask. " +
                        "Say what you would have done; the person can run again with --mode auto-edit (edits) or --mode yolo (everything).";
             }

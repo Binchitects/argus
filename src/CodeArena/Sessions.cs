@@ -76,6 +76,12 @@ internal sealed class SessionData
     public WorkPlan Plan { get; set; } = WorkPlan.None;
     public int PlanVersion { get; set; }
     public int PlanSent { get; set; }
+    /// <summary>The Arena assistant the session works as (its instructions, model, tools and skills as picked); null: none.</summary>
+    public JsonObject? Assistant { get; set; }
+    /// <summary>The session's goal (goal mode) as it stands, the last line of it counts; null: none. Arena is sent it with the chat.</summary>
+    public JsonObject? Goal { get; set; }
+    public int GoalVersion { get; set; }
+    public int GoalSent { get; set; }
     /// <summary>The groups of remote tools the person turned off in the session, and those the model loaded (<see cref="ToolDemand"/>).</summary>
     public IReadOnlyList<string> ToolsOff { get; set; } = [];
     public IReadOnlyList<string> ToolsLoaded { get; set; } = [];
@@ -127,7 +133,7 @@ internal sealed class SessionData
         {
             Id = Id, Cwd = Cwd, Model = Model, Conversation = Conversation, Unlinked = Unlinked, From = From, Branch = Branch, Summary = Summary,
             WebSummary = WebSummary, Keys = Keys, _pending = _pending, ToolsOff = ToolsOff, ToolsLoaded = ToolsLoaded, Plan = Plan, PlanVersion = PlanVersion,
-            PlanSent = PlanSent, CharsPerToken = CharsPerToken,
+            PlanSent = PlanSent, CharsPerToken = CharsPerToken, Assistant = Assistant, Goal = Goal, GoalVersion = GoalVersion, GoalSent = GoalSent,
         };
         copy.Stream.AddRange(Stream.Select(e => new SyncEntry
         {
@@ -309,6 +315,16 @@ internal sealed class SessionData
                 break;
             case "plan_sent":
                 PlanSent = Math.Max(PlanSent, entry.Int("version") ?? 0);
+                break;
+            case "assistant":
+                Assistant = entry["assistant"] as JsonObject;
+                break;
+            case "goal":
+                Goal = entry["goal"] as JsonObject;
+                GoalVersion++;
+                break;
+            case "goal_sent":
+                GoalSent = Math.Max(GoalSent, entry.Int("version") ?? 0);
                 break;
             case "tools":
                 ToolsOff = Names(entry["off"]);
@@ -613,6 +629,19 @@ internal sealed class SessionStore
         Write(new JsonObject { ["type"] = "plan", ["plan"] = plan.ToJson() });
         PlanWaiting?.Invoke();
     }
+
+    /// <summary>The Arena assistant the session works as from now on (null: none).</summary>
+    public void Assistant(JsonObject? assistant) => Write(new JsonObject { ["type"] = "assistant", ["assistant"] = assistant?.DeepClone() });
+
+    /// <summary>The goal as it is now (null: none any more); Arena is sent it with the session's chat.</summary>
+    public void Goal(JsonObject? goal)
+    {
+        Write(new JsonObject { ["type"] = "goal", ["goal"] = goal?.DeepClone() });
+        PlanWaiting?.Invoke();
+    }
+
+    /// <summary>Arena has the goal as it was at its <paramref name="version"/>th change.</summary>
+    public void GoalSent(int version) => Write(new JsonObject { ["type"] = "goal_sent", ["version"] = version });
 
     /// <summary>Arena has the plan as it was at its <paramref name="version"/>th change.</summary>
     public void PlanSent(int version) => Write(new JsonObject { ["type"] = "plan_sent", ["version"] = version });

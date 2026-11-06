@@ -523,7 +523,7 @@ internal sealed class RunConfigs(Workspace workspace, Terminals terminals, Tasks
     }
 
     /// <summary>Words of a command line as a shell splits them: by spaces, '…' and "…" keeping theirs.</summary>
-    private static List<string> Words(string line)
+    internal static List<string> Words(string line)
     {
         var words = new List<string>();
         var word = new System.Text.StringBuilder();

@@ -341,9 +341,9 @@ internal sealed class Agent
 
     /// <summary>A message added to the conversation: an answer with its tokens; a note (<paramref name="kind"/>) is Code Arena's own word to the model.</summary>
     /// <summary>What happened outside a turn (the person ran their own agent): in the conversation and the session, so the model knows it.</summary>
-    public void Remember(string said)
+    public void Remember(string said, JsonArray? agents = null)
     {
-        Add(new JsonObject { ["role"] = "user", ["content"] = said }, kind: "note");
+        Add(new JsonObject { ["role"] = "user", ["content"] = said }, kind: "note", agents: agents);
         Add(new JsonObject { ["role"] = "assistant", ["content"] = "Noted." }, kind: "note");
     }
 
@@ -418,6 +418,9 @@ internal sealed class Agent
     /// <summary>A proposed plan grounded in the code before its second reading: what its steps' symbols reach (Argus). Null: not looked up.</summary>
     public Func<WorkPlan, CancellationToken, Task<WorkPlan>>? Ground { get; set; }
 
+    /// <summary>What ended outside the conversation since the last turn (the person's background tasks), told before the next message; null: nothing.</summary>
+    public Func<(string Text, JsonArray Work)?>? News { get; set; }
+
     /// <summary>A word for the model for this turn only (answer again shorter or longer), in Code Arena's note; null: none.</summary>
     public string? TurnNote { get; set; }
 
@@ -462,6 +465,11 @@ internal sealed class Agent
         if (takeIn && BeforeTurn is { } news && Depth == 0)
         {
             TakeIn(await news(ct));
+        }
+        if (Depth == 0 && News?.Invoke() is { } ended)
+        {
+            // The person's background tasks that ended since: the model hears their reports before the message.
+            Remember(ended.Text, ended.Work);
         }
         var asked = subject ?? input ?? "Carry on after the commands that ended";
         if (Depth == 0)
