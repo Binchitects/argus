@@ -950,7 +950,8 @@ export function Thread({
                   const isLive = answering && i === lastTurn
                   // Where the conversation was compacted to fit the model's window: marked after the turn, its summary folded,
                   // as the web chat marks it. The turn itself stays as it was (a live one with its answer and its questions).
-                  const summary = [t.question, ...t.answer].find((m) => m?.summary)?.summary
+                  // A turn compacted more than once shows its last summary: the one the model reads now.
+                  const summary = [t.question, ...t.answer].findLast((m) => m?.summary)?.summary
                   const asked = t.question && !covered(t.question) ? t.question.id : undefined
                   return (
                     <div key={t.question?.id ?? t.answer[0]?.id ?? i} className="grid gap-4">

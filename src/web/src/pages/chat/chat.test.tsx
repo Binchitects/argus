@@ -704,6 +704,22 @@ describe('chat', () => {
     expect(within(mark).getByText(/the assistant wrote hello\.py/)).toBeInTheDocument()
   })
 
+  it('a turn compacted more than once shows the summary the model reads now', async () => {
+    // A Code Arena turn synced here: compacted on its way (t1), then /compact with no turn in between (a1).
+    const messages = [
+      answered[0]!,
+      msg('t1', 'q1', 'assistant', { content: 'Reading.', model: 'Main-Model', summary: 'SUMMARY: the turn so far.' }),
+      { ...answered[1]!, parentId: 't1', summary: 'SUMMARY: the whole chat now.' },
+    ]
+    backend({ start: conversation({ messages, currentLeafId: 'a1' }) })
+    renderApp('/chat/c1')
+    await screen.findByText('Hi! Here is code:')
+    const mark = await screen.findByRole('note', { name: 'Chat compacted' })
+    await userEvent.click(within(mark).getByRole('button', { name: /Show summary/ }))
+    expect(within(mark).getByText(/the whole chat now/)).toBeInTheDocument()
+    expect(within(mark).queryByText(/the turn so far/)).not.toBeInTheDocument()
+  })
+
   it('the context gauge shows how full, what fills it, and compacts from there', async () => {
     const context = { system: 4000, instructions: 0, tools: 6000, summary: 0, files: 8000, you: 1000, answers: 1000, toolResults: 0 }
     const full = [answered[0]!, { ...answered[1]!, promptTokens: 20_000, completionTokens: 200, context }]

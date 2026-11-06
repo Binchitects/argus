@@ -660,6 +660,27 @@ describe('Code Arena in the browser', () => {
     end()
   })
 
+  it('shows the summary the model reads now when one turn was compacted more than once', async () => {
+    const read = { id: 'c1', function: { name: 'read_file', arguments: '{"path":"a.txt"}' } }
+    // Compacted on its way (m3), then /compact with no turn in between (m5): both marks fall in the one turn.
+    const messages = [
+      msg('m0', 'user', { content: 'First question' }),
+      msg('m1', 'assistant', { content: 'First answer.', model: 'model-a' }),
+      msg('m2', 'user', { content: 'Read a.txt' }),
+      msg('m3', 'assistant', { model: 'model-a', toolCalls: [read], summary: 'SUMMARY: the turn so far.' }),
+      msg('m4', 'tool', { content: 'one', toolCallId: 'c1', toolName: 'read_file' }),
+      msg('m5', 'assistant', { content: 'It says one.', model: 'model-a', summary: 'SUMMARY: the whole conversation now.' }),
+    ]
+    backend({ session: { id: 's2', messages, diffs: {}, busy: false } })
+    renderCode()
+    expect(await screen.findByText('It says one.')).toBeInTheDocument()
+
+    const mark = screen.getByRole('note', { name: 'Chat compacted' })
+    await userEvent.click(within(mark).getByRole('button', { name: /Show summary/ }))
+    expect(within(mark).getByText(/the whole conversation now/)).toBeInTheDocument()
+    expect(within(mark).queryByText(/the turn so far/)).not.toBeInTheDocument()
+  })
+
   it("still says why a turn failed once it is over: the saved session keeps no failed answer, so the agent never just stops", async () => {
     const busy = 'model-a is busy: 2 answers of the chat wait for it. Try again in 30 seconds.'
     const read = { id: 'c1', function: { name: 'read_file', arguments: '{"path":"src/a.txt"}' } }
