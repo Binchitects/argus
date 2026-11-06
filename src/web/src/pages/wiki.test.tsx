@@ -6,6 +6,16 @@ import { fakeApi, member, renderApp } from '@/test/utils'
 
 const home = { sources: [{ id: 's1', name: 'HR files', kind: 'upload', syncedAt: new Date().toISOString(), documents: 2 }], meaning: true, code: true, data: true }
 
+const page = (n: number, total = 1) => ({
+  total,
+  page: n,
+  perPage: 20,
+  reach: 2000,
+  facets: { repos: [{ repo: 'team/mylib', n: total }, { repo: 'team/other', n: 2 }], langs: [{ lang: 'cpp', n: total }], kinds: { symbol: 3, code: total - 4, doc: 1 } },
+  branches: ['main', 'v2'],
+  branch: null,
+})
+
 describe('wiki', () => {
   it('searches documents, code and data at once, each in its own list, and browses a source', async () => {
     const calls = fakeApi(member, {
@@ -14,7 +24,9 @@ describe('wiki', () => {
         json: {
           query: 'leave',
           knowledge: [{ documentId: 'd1', title: 'policies/leave.md', url: null, source: 'HR files', heading: 'Paid leave', line: 3, snippet: 'Everyone gets 30 days of paid leave.', score: 1 }],
-          code: [{ how: 'text', repoId: 7, repo: 'hr/portal', path: 'src/Leave.cs', line: 12, name: null, kind: null, snippet: 'var days = 30;' }],
+          code: [{ kind: 'code', how: 'words', repoId: 7, repo: 'hr/portal', branch: 'main', path: 'src/Leave.cs', lang: 'csharp', line: 12, name: null, symbolKind: null, scope: null, doc: null, snippet: 'var days = 30;' }],
+          codePage: page(1),
+          meaning: [],
           data: [{ sourceId: 'db1', source: 'HR database', table: 'leave_requests', kind: 'table', comment: null, columns: [{ name: 'days', type: 'integer', comment: null }], matched: ['days'] }],
           problems: [],
         },
@@ -34,6 +46,47 @@ describe('wiki', () => {
     await userEvent.click(screen.getByRole('button', { name: /HR files/ }))
     expect(await within(await screen.findByRole('list', { name: 'Documents' })).findByRole('link', { name: 'policies/leave.md' })).toBeInTheDocument()
     await waitFor(() => expect(calls.some((c) => c.path.startsWith('/api/wiki/documents?source=s1'))).toBe(true))
+  })
+
+  it('finds a qualified name first, filters the code and reaches every match a page at a time', async () => {
+    const symbol = { kind: 'symbol', how: 'name and scope', repoId: 4, repo: 'team/mylib', branch: 'main', path: 'src/mylib.cpp', lang: 'cpp', line: 3, name: 'TestFunc', symbolKind: 'function', scope: 'MyLib', doc: 'Adds one.', snippet: 'TestFunc(int a)' }
+    const calls = fakeApi(member, {
+      'GET /api/wiki': () => ({ json: home }),
+      'GET /api/wiki/search': (_body, _init, url) => {
+        const n = Number(url.searchParams.get('page') ?? '1')
+        return { json: { query: 'MyLib::TestFunc', knowledge: [], code: [symbol], codePage: page(n, 45), meaning: [], data: [], problems: [] } }
+      },
+    })
+    renderApp('/wiki?q=MyLib%3A%3ATestFunc&in=code')
+    const code = await screen.findByRole('region', { name: 'Code' })
+    expect(within(code).getByText('45 matches')).toBeInTheDocument()
+    expect(within(code).getByRole('link', { name: /team\/mylib\/src\/mylib.cpp:3/ })).toHaveAttribute('href', '/wiki/code/4?path=src%2Fmylib.cpp&line=3')
+    expect(within(code).getByText('function MyLib::TestFunc')).toBeInTheDocument()
+    expect(within(code).getByText('name and scope')).toBeInTheDocument()
+
+    // Every match is reached: the pages, then back.
+    expect(within(code).getByText('Page 1 of 3')).toBeInTheDocument()
+    await userEvent.click(within(code).getByRole('button', { name: /Next/ }))
+    await waitFor(() => expect(calls.some((c) => c.path.includes('page=2'))).toBe(true))
+    expect(await within(screen.getByRole('region', { name: 'Code' })).findByText('Page 2 of 3')).toBeInTheDocument()
+
+    // A kind and a path narrow it, from the first page.
+    await userEvent.click(screen.getByRole('radio', { name: /Symbols 3/ }))
+    await waitFor(() => expect(calls.some((c) => c.path.includes('kind=symbol') && !c.path.includes('page='))).toBe(true))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Path' }), 'src/{Enter}')
+    await waitFor(() => expect(calls.some((c) => c.path.includes('kind=symbol') && c.path.includes('path=src%2F'))).toBe(true))
+  })
+
+  it('lists each repository once, with how many branches it has', async () => {
+    fakeApi(member, {
+      'GET /api/wiki/code/repos': () => ({
+        json: [{ repoId: 4, repo: 'team/mylib', files: 12, symbols: 40, indexedAt: null, branches: [{ repoId: 4, branch: 'main', files: 12 }, { repoId: 5, branch: 'v2', files: 11 }] }],
+      }),
+    })
+    renderApp('/wiki/code/repos')
+    const list = await screen.findByRole('list', { name: 'Repositories' })
+    expect(await within(list).findAllByRole('listitem')).toHaveLength(1)
+    expect(within(list).getByText(/2 branches/)).toBeInTheDocument()
   })
 
   it('reads a document whole, its passages joined without their overlap', async () => {

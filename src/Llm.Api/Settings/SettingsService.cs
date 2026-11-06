@@ -156,10 +156,13 @@ public sealed partial class SettingsService(
                 errors[hook.Key] = refusal;
             }
         }
-        // The directory's CA must read as a certificate: a wrong one would refuse every connection.
-        if (normalised.FirstOrDefault(n => n.Def.Key == "Ldap:CaCertificate") is { Def: { } caDef, Value: { Length: > 0 } ca } && Chat.Tools.ServerTls.CheckCa(ca) is { } caError)
+        // The directory's CA and GitLab's must read as certificates: a wrong one would refuse every connection.
+        foreach (var key in new[] { "Ldap:CaCertificate", "Tls:CompanyCa" })
         {
-            errors[caDef.Key] = caError;
+            if (normalised.FirstOrDefault(n => n.Def.Key == key) is { Def: { } caDef, Value: { Length: > 0 } ca } && Chat.Tools.ServerTls.CheckCa(ca) is { } caError)
+            {
+                errors[caDef.Key] = caError;
+            }
         }
         if (normalised.Any(n => n.Def.IsSecret && !n.Reset) && string.IsNullOrEmpty(auth.Value.DataKey))
         {

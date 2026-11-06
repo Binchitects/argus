@@ -566,7 +566,9 @@ person's requests a minute itself ([mcp.md](mcp.md)).
   user of its own. Its model calls go to `http://app:8080`, so they take the
   API key's path too (the key's line, the prompt log, the slot), and its tools
   to the app's MCP and `argus:7700/mcp`. The IDE reaches the workspace's
-  engine through the app. No Docker socket is involved
+  engine through the app. The company CA the app trusts goes with each start
+  (`ca`), as one bundle with the system's CAs in the workspace's home. No
+  Docker socket is involved
   ([chat.md](chat.md#code-studio-workspaces), [code-arena.md](code-arena.md)).
 
 ### Company knowledge and the wiki

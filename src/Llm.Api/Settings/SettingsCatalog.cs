@@ -413,6 +413,8 @@ public static class SettingsCatalog
             { Default = "*/15 * * * *" },
         new("ArgusIndex:TimeZone", Argus, "Time zone of the index schedule", "An IANA name such as Europe/Berlin.", SettingType.Text, SettingScope.Live)
             { Default = "UTC", Pattern = @"^(UTC|[A-Za-z]+(/[A-Za-z0-9_+\-]+){1,2})$", PatternHelp = "An IANA time zone, e.g. Europe/Berlin, or UTC." },
+        new("Tls:CompanyCa", Argus, "GitLab's CA (a company CA)", "When GitLab's certificate comes from your company's own CA (or is self-signed): that CA's certificate (PEM, -----BEGIN CERTIFICATE-----; a bundle for an issuing CA with its root). Trusted besides the public CAs by everything that reaches GitLab: sign-in with it, people's GitLab tokens and apps linked, Fix it, scheduled tasks, knowledge sources, Argus's index and reviews, and Code Studio's workspaces (git clone and push). A certificate must still be for GitLab's name and within its dates. At install: GITLAB_CA_FILE.", SettingType.Text, SettingScope.Live)
+            { Max = global::Llm.Api.Chat.Tools.ServerTls.MaxCaChars, Lines = 6 },
         new("Chat:GitlabLinkUrl", Argus, "GitLab address for links", "Where people's browsers open GitLab, for the files and lines in Argus's answers. Empty: the GitLab address above. Set it when Argus reaches GitLab by an internal name.", SettingType.Url, SettingScope.Live)
             { Pattern = @"https?://\S+", PatternHelp = "http(s)://…" },
 

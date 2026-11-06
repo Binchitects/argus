@@ -82,10 +82,14 @@ describe('admin models: loading and unloading', () => {
     renderApp('/admin/models')
     await screen.findByRole('heading', { name: /FLUX/ })
     const flux = card('FLUX.2-klein-4B')
+    // The card says what is wrong in a line; Details says the whole of it.
     expect(within(flux).getByText('Too little GPU memory to load it')).toBeInTheDocument()
-    expect(within(flux).getByText('CUDA error: out of memory')).toBeInTheDocument()
-    expect(within(flux).getByText(/3 times in a row\./)).toBeInTheDocument()
-    expect(within(flux).getByText(/next from/)).toBeInTheDocument()
+    expect(within(flux).queryByText('CUDA error: out of memory')).not.toBeInTheDocument()
+    await userEvent.click(within(flux).getByRole('button', { name: 'Why' }))
+    const details = await screen.findByRole('dialog', { name: 'FLUX.2-klein-4B' })
+    expect(within(details).getByText('CUDA error: out of memory')).toBeInTheDocument()
+    expect(within(details).getByText(/3 times in a row\./)).toBeInTheDocument()
+    expect(within(details).getByText(/next from/)).toBeInTheDocument()
   })
 
   it('a picture model whose server refused its settings waits to be changed', async () => {
@@ -97,7 +101,8 @@ describe('admin models: loading and unloading', () => {
     renderApp('/admin/models')
     await screen.findByRole('heading', { name: /FLUX/ })
     expect(within(card('FLUX.2-klein-4B')).getByText('Its server refused its settings')).toBeInTheDocument()
-    expect(within(card('FLUX.2-klein-4B')).getByText(/not tried again until it is changed or loaded by hand/)).toBeInTheDocument()
+    await userEvent.click(within(card('FLUX.2-klein-4B')).getByRole('button', { name: 'Details of FLUX.2-klein-4B' }))
+    expect(within(await screen.findByRole('dialog', { name: 'FLUX.2-klein-4B' })).getByText(/not tried again until it is changed or loaded by hand/)).toBeInTheDocument()
   })
 
   it('removes a picture model as a chat model is, its files kept', async () => {

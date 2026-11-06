@@ -35,6 +35,11 @@ public static class IdentityWiring
         services.TryAddSingleton(TimeProvider.System);
         // First of the background services: a lone replica leads before the others start.
         services.Configure<Operations.ReplicaOptions>(config.GetSection("Replicas"));
+        // The company's own CA (GITLAB_CA_FILE at install, or Settings): trusted by every HTTP client that brings no handler of its own.
+        services.Configure<Operations.TlsOptions>(config.GetSection("Tls"));
+        services.AddSingleton<Operations.CompanyCa>();
+        services.AddHostedService<Operations.CompanyCaFile>();
+        services.ConfigureHttpClientDefaults(b => b.ConfigurePrimaryHttpMessageHandler(Operations.CompanyCa.Handler));
         services.Configure<Downloads.CertificateOptions>(config.GetSection("Certificates"));
         services.AddSingleton<Downloads.SiteCertificate>();
         services.AddSingleton<Downloads.CodeArenaClients>();

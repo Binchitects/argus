@@ -1197,7 +1197,12 @@ debugger and its agent), on a project of yours that the server keeps.
   internet, not the stack's databases, engines or browser. What the engine
   says as it starts is kept beside the workspace, and its end is shown when
   it does not start. Its agent uses a gateway key of its own,
-  against your credit. Only you reach it.
+  against your credit. Only you reach it. Its user has a name (`ws0`,
+  `ws1`…) and its home in the system, so `whoami`, the prompt, Python's
+  `getpass`, Node.js's `os.userInfo()` and ssh know it. A GitLab on the
+  company's own CA ([deployment.md](deployment.md#gitlab-on-a-company-ca))
+  is trusted there too: the clone, `git push` in its terminals, curl,
+  Python, pip, .NET and Node.js.
 - **Asleep.** A workspace unused for 30 minutes stops; its files stay, and
   **Open** wakes it. **Delete** takes its files and its key away.
 - **Your own machine.** In a folder on your computer, `code-arena web

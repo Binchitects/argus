@@ -259,6 +259,22 @@ public sealed partial class Tools
         catch (QueryError exc) { throw new QueryError(exc.Message.Replace(DanglingRegexSuggestion, "."), exc); }
     }
 
+    /// <summary>The wiki's search: names, files and words in the code the person may read, a page at a time (CodeSearch).</summary>
+    public JsonNode WikiSearch(Identity identity, string query, string? branch, CodeSearch.Filter filter, int page, int perPage) =>
+        WithAudit(identity, "wiki_search",
+            new JsonObject
+            {
+                ["query"] = PyStr.Prefix(query, 300), ["branch"] = branch, ["repo"] = filter.Repo, ["lang"] = filter.Lang,
+                ["path"] = filter.Path, ["kind"] = filter.Kind, ["page"] = page,
+            },
+            () => RunReadonly(conn =>
+            {
+                var found = CodeSearch.Run(Scoped(conn, identity, branch), conn, query, filter, page, perPage);
+                found["branch"] = branch;
+                found["branches"] = new JsonArray([.. Queries.BranchesAvailable(identity.AllowedRepoIds, conn).Select(b => (JsonNode?)b)]);
+                return (JsonNode)found;
+            }))!;
+
     public JsonNode GetFile(Identity identity, long repoId, string path)
     {
         var result = RunReadonly(conn =>

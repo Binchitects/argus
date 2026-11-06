@@ -32,6 +32,15 @@ public sealed class FakeArgus : HttpMessageHandler
             var good = request.Headers.Authorization?.Parameter == ChatToken && request.Headers.TryGetValues(Llm.Api.Chat.ArgusMcp.TokenHeader("github"), out var gh) && gh.Single() == GoodGitHubToken;
             return good ? Json(HttpStatusCode.OK, """{"kind":"github","login":"octocat"}""") : Json(HttpStatusCode.Forbidden, """{"error":"GitHub does not take this token."}""");
         }
+        if (path == "/review/search")
+        {
+            // The wiki's search as the person: the chat token and their email, answered by the test.
+            var email = request.Headers.TryGetValues(Llm.Api.Chat.ArgusMcp.EmailHeader, out var e) ? e.Single() : null;
+            Searches.Enqueue((email, request.RequestUri.Query));
+            return request.Headers.Authorization?.Parameter == ChatToken && SearchAnswer is { } answer
+                ? Json(HttpStatusCode.OK, answer(request.RequestUri.Query))
+                : Json(HttpStatusCode.BadRequest, """{"error":"That branch is not indexed."}""");
+        }
         Calls.Add((request.Method.Method, request.RequestUri.PathAndQuery, token, body));
         if (token != Token)
         {
@@ -114,6 +123,12 @@ public sealed class FakeArgus : HttpMessageHandler
 
     /// <summary>Tools answered with this structured content (JSON), by name: the merge request tools a review reads.</summary>
     public System.Collections.Concurrent.ConcurrentDictionary<string, string> Answers { get; } = new();
+
+    /// <summary>/review/search's answer (JSON) by its query string; none: Argus refuses the search.</summary>
+    public Func<string, string>? SearchAnswer { get; set; }
+
+    /// <summary>Each wiki search Argus was asked: the person's email and the query string.</summary>
+    public System.Collections.Concurrent.ConcurrentQueue<(string? Email, string Query)> Searches { get; } = new();
 
     /// <summary>/admin/packs' answer instead of the usual one (a test's packs).</summary>
     public string? PacksAnswer { get; set; }

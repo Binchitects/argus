@@ -272,6 +272,7 @@ Three `.env` values point Argus at your GitLab:
 |---|---|
 | `ARGUS_GITLAB_URL` | which GitLab. **Overrides** `url:` in `config/argus/config.yaml`, which is a committed default naming a throwaway test instance |
 | `ARGUS_GITLAB_CA_CERT` | path to the CA that signed GitLab's certificate, **as the container sees it** |
+| `ARGUS_GITLAB_CA_EXTRA` | path to more CAs to trust for GitLab, read again whenever the file changes: in the stack, the company CA the app writes from `GITLAB_CA_FILE` and Settings. Missing or empty: none |
 | `ARGUS_GITLAB_VERIFY` | `false` to skip verification entirely. Last resort |
 
 `ARGUS_GITLAB_CA_CERT` and `ARGUS_GITLAB_VERIFY` both apply to the API **and** to
@@ -731,7 +732,8 @@ exports, per repository and branch:
 | `argus_index_files`, `argus_index_symbols` | how big the indexed copy is |
 | `argus_index_stale` | 1 when there has been no successful pass within `ARGUS_INDEX_STALE_AFTER` |
 | `argus_index_timed_out`, `argus_index_symbols_failed`, `argus_index_errored` | what went wrong on the last pass |
-| `argus_index_repos`, `argus_index_stale_repos`, `argus_index_errored_repos`, `argus_index_scrape_ok` | the estate-wide roll-up, and whether this scrape could read the index at all |
+| `argus_index_repos`, `argus_index_stale_repos`, `argus_index_errored_repos`, `argus_index_scrape_ok` | the estate-wide roll-up, and whether this scrape could read the index at all. A repository counts once with all its branches: stale or failing when any of its branches is |
+| `argus_index_branches` | the branches indexed, of every repository |
 
 The endpoint is under `/admin/`, so it carries a credential — it names every
 repository in the estate, and an open endpoint for that is a map of the

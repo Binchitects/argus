@@ -25,8 +25,11 @@ GOOD = {"repo": "https://gitlab.example.test/team/shop.git", "branch": "main", "
 class Base(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
+        self.passwd, self.group = Path(self.dir.name, "passwd"), Path(self.dir.name, "group")
+        self.passwd.write_text("root:x:0:0:root:/root:/bin/bash\n")
+        self.group.write_text("root:x:0:\n")
         patches = [mock.patch.object(sup, "WORKSPACES", self.dir.name), mock.patch.object(sup, "_own"), mock.patch.object(sup, "_kill_user"),
-                   mock.patch.dict(sup._running, {}, clear=True)]
+                   mock.patch.dict(sup._running, {}, clear=True), mock.patch.object(sup, "PASSWD", str(self.passwd)), mock.patch.object(sup, "GROUP", str(self.group))]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
@@ -122,6 +125,70 @@ class Started(Base):
         engine.kill.assert_called_once()
         self.assertEqual(refused.exception.status, 502)
         self.assertEqual(str(refused.exception), "The workspace's engine did not start: \u2717 Port 4100 is taken: choose another")
+
+
+class Trusted(Base):
+    CA = "-----BEGIN CERTIFICATE-----\nMIIBtest\n-----END CERTIFICATE-----\n"
+
+    def test_the_company_ca_is_one_bundle_with_the_systems_and_every_tool_is_pointed_at_it(self):
+        system = Path(self.dir.name, "system.pem")
+        system.write_text("-----BEGIN CERTIFICATE-----\nSYSTEM\n-----END CERTIFICATE-----\n")
+        home = Path(self.dir.name, "home")
+        home.mkdir()
+        # Before: nothing in the home, and git, curl, Python and .NET check GitLab's certificate against the system's CAs alone.
+        self.assertNotIn("GIT_SSL_CAINFO", sup._env(str(home), GOOD, None))
+        with mock.patch.object(sup, "SYSTEM_CAS", str(system)):
+            sup._trust(str(home), self.CA)
+        bundle = (home / ".ca-bundle.pem").read_text()
+        self.assertIn("SYSTEM", bundle)
+        self.assertIn("MIIBtest", bundle)
+        env = sup._env(str(home), GOOD, "k" * 40)
+        for name in ("GIT_SSL_CAINFO", "CURL_CA_BUNDLE", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "PIP_CERT"):
+            self.assertEqual(env[name], str(home / ".ca-bundle.pem"))
+        self.assertEqual(env["NODE_EXTRA_CA_CERTS"], str(home / ".company-ca.pem"))
+        # Taken away in Settings: gone at the next start.
+        sup._trust(str(home), "")
+        self.assertFalse((home / ".ca-bundle.pem").exists())
+        self.assertNotIn("SSL_CERT_FILE", sup._env(str(home), GOOD, None))
+
+    def test_a_ca_with_a_key_or_no_certificate_is_refused(self):
+        sup._check({**GOOD, "ca": self.CA})
+        sup._check({**GOOD, "ca": ""})
+        for bad in ("-----BEGIN PRIVATE KEY-----\nx\n-----END PRIVATE KEY-----", "not a certificate", 7):
+            with self.assertRaises(sup.Refused) as refused:
+                sup._check({**GOOD, "ca": bad})
+            self.assertIn("ca", str(refused.exception))
+
+    def test_the_clone_gets_the_ca(self):
+        cloned = subprocess.CompletedProcess([], 0, "", "")
+        with mock.patch.object(sup.subprocess, "run", return_value=cloned) as run:
+            sup._clone(WID, 30000, {**GOOD, "ca": self.CA})
+        self.assertEqual(run.call_args.kwargs["env"]["GIT_SSL_CAINFO"], os.path.join(self.dir.name, WID, "home", ".ca-bundle.pem"))
+
+
+class Named(Base):
+    def test_each_workspace_user_has_a_name_a_group_and_its_home_in_the_system(self):
+        # Before: uid 30000 was in neither file: "I have no name!", whoami and getpass failed in its terminals.
+        sup._user(30000, "/workspaces/a/home")
+        sup._user(30001, "/workspaces/b/home")
+        self.assertIn("ws0:x:30000:30000:Code Studio workspace:/workspaces/a/home:/bin/bash", self.passwd.read_text().splitlines())
+        self.assertIn("ws1:x:30001:", self.group.read_text().splitlines())
+        # The slot taken by another workspace: its home moves, the line is not repeated, the others stay.
+        sup._user(30000, "/workspaces/c/home")
+        lines = self.passwd.read_text().splitlines()
+        self.assertEqual([x for x in lines if ":30000:" in x], ["ws0:x:30000:30000:Code Studio workspace:/workspaces/c/home:/bin/bash"])
+        self.assertEqual(lines[0], "root:x:0:0:root:/root:/bin/bash")
+        self.assertEqual(sum(":30001:" in x for x in lines), 1)
+
+
+class Waited(Base):
+    def test_an_engine_that_ends_is_not_waited_for(self):
+        # Before: an engine that stopped at once (Arena not reached) was waited for the whole 30 s before it was said.
+        ended = mock.Mock()
+        ended.poll.return_value = 1
+        started = sup.time.monotonic()
+        self.assertFalse(sup._listening(1, 30, ended))
+        self.assertLess(sup.time.monotonic() - started, 1)
 
 
 class Driven(Base):

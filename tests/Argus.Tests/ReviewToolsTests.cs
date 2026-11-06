@@ -103,6 +103,40 @@ public sealed class ReviewToolsTests : IAsyncLifetime
     }
 
     [Fact]
+    [Trait("Control", "IAM-05")]
+    public async Task The_wiki_search_answers_as_the_person_with_pages_and_filters()
+    {
+        // eal-core, which dev_alpha may read, says ShimEntry too; driver-shim, which defines it, is not theirs.
+        var eal = _ix.Repo(ReviewFixture.EalCore, "root/eal-core");
+        _ix.File(eal, "docs/shim.md", "Call ShimEntry from the loader.\n", "markdown");
+        _ix.File(eal, "src/loader.c", "int load(void) { return ShimEntry(0, 0); }\n");
+
+        async Task<(HttpStatusCode Status, JsonNode Body)> Search(string query)
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, "/review/search?" + query);
+            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Chat);
+            req.Headers.Add(ArgusServer.ChatEmailHeader, Alpha);
+            using var resp = await _http.SendAsync(req);
+            return (resp.StatusCode, JsonNode.Parse(await resp.Content.ReadAsStringAsync())!);
+        }
+
+        var (status, found) = await Search("q=ShimEntry");
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal(2, found["total"]!.GetValue<long>());
+        Assert.All(found["rows"]!.AsArray(), r => Assert.Equal("root/eal-core", r!["repo"]!.ToString()));
+        Assert.Equal(["main"], found["branches"]!.AsArray().Select(b => b!.ToString()));
+        var docs = (await Search("q=ShimEntry&kind=doc")).Body;
+        Assert.Equal("docs/shim.md", Assert.Single(docs["rows"]!.AsArray())!["path"]!.ToString());
+        Assert.Single((await Search("q=ShimEntry&per_page=1&page=2")).Body["rows"]!.AsArray());
+        Assert.Equal(HttpStatusCode.BadRequest, (await Search("q=%20")).Status);
+        Assert.Equal(HttpStatusCode.BadRequest, (await Search("q=ShimEntry&branch=nope")).Status);
+
+        // Without the chat credential, nothing.
+        using var anonymous = new HttpRequestMessage(HttpMethod.Get, "/review/search?q=ShimEntry");
+        Assert.Equal(HttpStatusCode.Unauthorized, (await _http.SendAsync(anonymous)).StatusCode);
+    }
+
+    [Fact]
     public async Task Issues_and_the_wiki_are_read_with_their_comments_and_pages_and_only_ever_read()
     {
         var eal = _gitlab[ReviewFixture.EalCore];

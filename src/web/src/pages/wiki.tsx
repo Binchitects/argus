@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
-import { ArrowLeft, BookOpenText, Code2, Database, ExternalLink, FileText, Search } from 'lucide-react'
+import { ArrowLeft, BookOpenText, ChevronLeft, ChevronRight, Code2, Database, ExternalLink, FileText, Search } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/lib/api'
 import { ago, count } from '@/lib/format'
@@ -36,15 +37,47 @@ interface KnowledgeHit {
   score: number
 }
 
+/** What a code match is: a symbol's definition, a file of code, or a document in a repository. */
+type CodeKind = 'symbol' | 'code' | 'doc'
+
 interface CodeHit {
-  how: 'symbol' | 'text' | 'meaning'
+  kind: CodeKind
+  /** How it matched: "name and scope", "same words", "file name", "words"… */
+  how: string
+  repoId: number | null
+  repo: string | null
+  branch: string | null
+  path: string | null
+  lang: string | null
+  line: number | null
+  name: string | null
+  symbolKind: string | null
+  scope: string | null
+  doc: string | null
+  snippet: string | null
+}
+
+interface CodePage {
+  total: number
+  page: number
+  perPage: number
+  /** How far pages reach: past it the filters narrow the search. */
+  reach: number
+  facets: { repos: { repo: string; n: number }[]; langs: { lang: string; n: number }[]; kinds: Record<CodeKind, number> }
+  branches: string[]
+  branch: string | null
+}
+
+interface MeaningHit {
   repoId: number | null
   repo: string | null
   path: string | null
   line: number | null
   name: string | null
-  kind: string | null
+  symbolKind: string | null
+  doc: string | null
   snippet: string | null
+  score: number | null
 }
 
 interface DataHit {
@@ -61,6 +94,8 @@ interface Found {
   query: string
   knowledge: KnowledgeHit[]
   code: CodeHit[]
+  codePage: CodePage | null
+  meaning: MeaningHit[]
   data: DataHit[]
   problems: string[]
 }
@@ -85,12 +120,14 @@ export function WikiPage() {
   const q = params.get('q') ?? ''
   const where = (params.get('in') as Where | null) ?? 'all'
   const source = params.get('source')
+  const filters = Object.fromEntries(codeFilters.flatMap((k) => (params.get(k) ? [[k, params.get(k)!]] : []))) as Partial<Record<CodeFilter, string>>
   const [typed, setTyped] = useState(q)
   const home = useQuery({ queryKey: ['wiki'], queryFn: ({ signal }) => api<Home>('/api/wiki', { signal }) })
   const found = useQuery({
-    queryKey: ['wiki', 'search', q, where],
-    queryFn: ({ signal }) => api<Found>(`/api/wiki/search?${new URLSearchParams({ q, in: where })}`, { signal }),
+    queryKey: ['wiki', 'search', q, where, filters],
+    queryFn: ({ signal }) => api<Found>(`/api/wiki/search?${new URLSearchParams({ q, in: where, ...filters })}`, { signal }),
     enabled: q.length > 0,
+    placeholderData: (previous) => previous,
   })
   const go = (next: Record<string, string | null>) =>
     setParams(
@@ -106,7 +143,8 @@ export function WikiPage() {
     )
   const submit = (e: FormEvent) => {
     e.preventDefault()
-    go({ q: typed.trim() || null, source: null })
+    // A new search starts on its first page; its filters stay.
+    go({ q: typed.trim() || null, source: null, page: null })
   }
   return (
     <>
@@ -120,7 +158,7 @@ export function WikiPage() {
         <Segmented
           label="Where"
           value={where}
-          onChange={(v) => go({ in: v === 'all' ? null : v })}
+          onChange={(v) => go({ in: v === 'all' ? null : v, page: null })}
           options={[
             { value: 'all', label: 'Everything' },
             { value: 'knowledge', label: 'Documents' },
@@ -160,7 +198,7 @@ export function WikiPage() {
           )}
         </nav>
         <section aria-label={q ? `Results for ${q}` : 'Browse'} className="min-w-0">
-          {q ? <Results found={found} where={where} /> : source ? <SourceDocuments source={source} name={home.data?.sources.find((s) => s.id === source)?.name} /> : <Start home={home.data} />}
+          {q ? <Results found={found} where={where} filters={filters} go={go} /> : source ? <SourceDocuments source={source} name={home.data?.sources.find((s) => s.id === source)?.name} /> : <Start home={home.data} />}
         </section>
       </div>
     </>
@@ -184,11 +222,16 @@ function Start({ home }: { home: Home | undefined }) {
   )
 }
 
-function Results({ found, where }: { found: ReturnType<typeof useQuery<Found>>; where: Where }) {
+const codeFilters = ['kind', 'repo', 'lang', 'branch', 'path', 'page'] as const
+type CodeFilter = (typeof codeFilters)[number]
+type Go = (next: Record<string, string | null>) => void
+
+function Results({ found, where, filters, go }: { found: ReturnType<typeof useQuery<Found>>; where: Where; filters: Partial<Record<CodeFilter, string>>; go: Go }) {
   if (found.isPending) return <Skeleton className="h-48" />
   if (found.error) return <QueryError error={found.error} retry={() => found.refetch()} />
   const f = found.data!
-  const none = f.knowledge.length + f.code.length + f.data.length === 0
+  const filtered = codeFilters.some((k) => k !== 'page' && filters[k])
+  const none = f.knowledge.length + f.code.length + f.meaning.length + f.data.length === 0 && !filtered
   return (
     <div className="grid gap-6">
       {f.problems.map((p) => (
@@ -220,22 +263,19 @@ function Results({ found, where }: { found: ReturnType<typeof useQuery<Found>>; 
           ))}
         </ResultList>
       )}
-      {(where === 'all' || where === 'code') && f.code.length > 0 && (
-        <ResultList title="Code" icon={<Code2 className="size-4" />}>
-          {f.code.map((h, i) => (
+      {(where === 'all' || where === 'code') && f.codePage && (f.codePage.total > 0 || filtered) && <CodeResults hits={f.code} page={f.codePage} filters={filters} go={go} />}
+      {(where === 'all' || where === 'code') && f.meaning.length > 0 && (
+        <ResultList title="Near in meaning" icon={<Code2 className="size-4" />}>
+          {f.meaning.map((h, i) => (
             <li key={`${h.repoId}-${h.path}-${h.line}-${i}`} className="grid gap-1 rounded-lg border bg-card px-4 py-3">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
-                {h.repoId && h.path ? (
-                  <Link to={`/wiki/code/${h.repoId}?${new URLSearchParams({ path: h.path, ...(h.line ? { line: String(h.line) } : {}) })}`} className="min-w-0 truncate font-mono text-xs underline-offset-2 hover:underline">
-                    {h.repo}/{h.path}
-                    {h.line ? `:${h.line}` : ''}
-                  </Link>
-                ) : (
-                  <span className="font-mono text-xs">{h.repo}</span>
-                )}
-                <Badge variant="outline">{h.how === 'symbol' ? `${h.kind ?? 'symbol'} ${h.name ?? ''}` : h.how === 'meaning' ? 'by meaning' : 'by words'}</Badge>
+                <FileLink repoId={h.repoId} repo={h.repo} path={h.path} line={h.line} />
+                <Badge variant="outline">
+                  {h.symbolKind ?? 'symbol'} {h.name}
+                </Badge>
+                {h.score !== null && <span className="text-xs text-muted-foreground tabular-nums">{Math.round(h.score * 100)}% near</span>}
               </div>
-              {h.snippet && <pre className="overflow-x-auto rounded bg-muted/50 px-2 py-1 font-mono text-xs whitespace-pre-wrap">{h.snippet}</pre>}
+              {h.doc && <p className="text-sm text-muted-foreground">{h.doc}</p>}
             </li>
           ))}
         </ResultList>
@@ -266,6 +306,117 @@ function Results({ found, where }: { found: ReturnType<typeof useQuery<Found>>; 
         </ResultList>
       )}
     </div>
+  )
+}
+
+const kindWords: Record<CodeKind, string> = { symbol: 'Symbols', code: 'Code', doc: 'Docs' }
+
+/** A path in a repository, to the line, opening the file there. */
+function FileLink({ repoId, repo, path, line }: { repoId: number | null; repo: string | null; path: string | null; line: number | null }) {
+  if (!repoId || !path) return <span className="font-mono text-xs">{repo}</span>
+  return (
+    <Link to={`/wiki/code/${repoId}?${new URLSearchParams({ path, ...(line ? { line: String(line) } : {}) })}`} className="min-w-0 truncate font-mono text-xs underline-offset-2 hover:underline">
+      {repo}/{path}
+      {line ? `:${line}` : ''}
+    </Link>
+  )
+}
+
+/**
+ * The code that matches, a page at a time: each match with how it matched, the filters (kind, repository, language,
+ * branch, path) with how many each would show, and the pages to every match.
+ */
+function CodeResults({ hits, page, filters, go }: { hits: CodeHit[]; page: CodePage; filters: Partial<Record<CodeFilter, string>>; go: Go }) {
+  const [path, setPath] = useState(filters.path ?? '')
+  const pages = Math.max(1, Math.ceil(Math.min(page.total, page.reach) / page.perPage))
+  const kinds = (Object.keys(kindWords) as CodeKind[]).map((k) => ({ value: k, label: `${kindWords[k]} ${count(page.facets.kinds[k] ?? 0)}` }))
+  const pick = (k: CodeFilter, v: string | null) => go({ [k]: v, page: null })
+  const first = (page.page - 1) * page.perPage + 1
+  return (
+    <section aria-label="Code" className="grid gap-3">
+      <h2 className="flex items-center gap-2 text-sm font-semibold">
+        <Code2 className="size-4" />
+        Code
+        <span className="font-normal text-muted-foreground">
+          {page.total === 0 ? 'nothing matches these filters' : `${count(page.total)} ${page.total === 1 ? 'match' : 'matches'}`}
+        </span>
+      </h2>
+      <fieldset aria-label="Filter the code" className="m-0 flex min-w-0 flex-wrap items-center gap-2 border-0 p-0">
+        <Segmented label="Kind" value={(filters.kind as CodeKind | undefined) ?? 'all'} onChange={(v) => pick('kind', v === 'all' ? null : v)} options={[{ value: 'all', label: 'All' }, ...kinds]} />
+        <FacetSelect label="Repository" all="Every repository" value={filters.repo} options={page.facets.repos.map((r) => ({ value: r.repo, label: r.repo, n: r.n }))} onChange={(v) => pick('repo', v)} />
+        <FacetSelect label="Language" all="Every language" value={filters.lang} options={page.facets.langs.map((l) => ({ value: l.lang, label: l.lang, n: l.n }))} onChange={(v) => pick('lang', v)} />
+        {page.branches.length > 1 && (
+          <FacetSelect label="Branch" all="Default branches" value={filters.branch} options={page.branches.map((b) => ({ value: b, label: b }))} onChange={(v) => pick('branch', v)} />
+        )}
+        <form
+          className="contents"
+          onSubmit={(e) => {
+            e.preventDefault()
+            pick('path', path.trim() || null)
+          }}
+        >
+          <Input value={path} onChange={(e) => setPath(e.target.value)} onBlur={() => path.trim() !== (filters.path ?? '') && pick('path', path.trim() || null)} aria-label="Path" placeholder="Path: src/ or *.h" className="h-9 w-48 font-mono text-xs" />
+        </form>
+      </fieldset>
+      {hits.length > 0 && (
+        <ol aria-label="Code matches" start={first} className="grid gap-2">
+          {hits.map((h, i) => (
+            <li key={`${h.repoId}-${h.path}-${h.line}-${i}`} className="grid gap-1 rounded-lg border bg-card px-4 py-3">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <FileLink repoId={h.repoId} repo={h.repo} path={h.path} line={h.line} />
+                {h.kind === 'symbol' ? (
+                  <Badge variant="secondary" className="font-mono">
+                    {h.symbolKind ?? 'symbol'} {h.scope ? `${h.scope}::` : ''}
+                    {h.name}
+                  </Badge>
+                ) : (
+                  <Badge variant="outline">{h.kind === 'doc' ? 'doc' : (h.lang ?? 'code')}</Badge>
+                )}
+                <span className="text-xs text-muted-foreground">{h.how}</span>
+                {h.branch && filters.branch && <span className="ml-auto text-xs text-muted-foreground">{h.branch}</span>}
+              </div>
+              {h.doc && <p className="text-sm text-muted-foreground">{h.doc}</p>}
+              {h.snippet && <pre className="overflow-x-auto rounded bg-muted/50 px-2 py-1 font-mono text-xs whitespace-pre-wrap">{h.snippet}</pre>}
+            </li>
+          ))}
+        </ol>
+      )}
+      {pages > 1 && (
+        <nav aria-label="Pages of code matches" className="flex flex-wrap items-center gap-2 text-sm">
+          <Button variant="outline" size="sm" disabled={page.page <= 1} onClick={() => go({ page: page.page > 2 ? String(page.page - 1) : null })}>
+            <ChevronLeft /> Previous
+          </Button>
+          <span className="text-muted-foreground tabular-nums">
+            Page {page.page} of {pages}
+          </span>
+          <Button variant="outline" size="sm" disabled={page.page >= pages} onClick={() => go({ page: String(page.page + 1) })}>
+            Next <ChevronRight />
+          </Button>
+          {page.total > page.reach && <span className="text-xs text-muted-foreground">The first {count(page.reach)} of them: narrow the search to reach the rest.</span>}
+        </nav>
+      )}
+    </section>
+  )
+}
+
+function FacetSelect({ label, all, value, options, onChange }: { label: string; all: string; value: string | undefined; options: { value: string; label: string; n?: number }[]; onChange: (v: string | null) => void }) {
+  // A value picked stays a choice even when this page's facets no longer list it.
+  const shown = value && !options.some((o) => o.value === value) ? [{ value, label: value }, ...options] : options
+  return (
+    <Select value={value ?? '*'} onValueChange={(v) => onChange(v === '*' ? null : v)}>
+      <SelectTrigger aria-label={label} className="h-9 w-auto max-w-56">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="*">{all}</SelectItem>
+        {shown.map((o) => (
+          <SelectItem key={o.value} value={o.value}>
+            {o.label}
+            {o.n !== undefined && <span className="ml-2 text-xs text-muted-foreground tabular-nums">{count(o.n)}</span>}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   )
 }
 
@@ -381,7 +532,7 @@ export function WikiFilePage() {
   const path = params.get('path')
   const repos = useQuery({
     queryKey: ['wiki', 'repos'],
-    queryFn: ({ signal }) => api<{ repoId: number; repo: string; files: number | null; symbols: number | null; indexedAt: string | null }[]>('/api/wiki/code/repos', { signal }),
+    queryFn: ({ signal }) => api<{ repoId: number; repo: string; files: number | null; symbols: number | null; indexedAt: string | null; branches: { repoId: number; branch: string; files: number | null }[] }[]>('/api/wiki/code/repos', { signal }),
     enabled: repo === 'repos',
   })
   const file = useQuery({
@@ -409,6 +560,7 @@ export function WikiFilePage() {
                 {r.files !== null ? `${count(r.files)} files` : ''}
                 {r.symbols !== null ? ` · ${count(r.symbols)} symbols` : ''}
                 {r.indexedAt ? ` · ${ago(r.indexedAt)}` : ''}
+                {r.branches.length > 1 ? ` · ${r.branches.length} branches` : ''}
               </span>
             </li>
           ))}

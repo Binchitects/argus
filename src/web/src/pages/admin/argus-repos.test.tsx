@@ -266,12 +266,40 @@ describe('repository schedules', () => {
     expect(scheduleWords('', 'Every 6 hours')).toBe('Same as all (every 6 hours)')
   })
 
+  it('keeps each row short: its default branch at its commit and how many more, the rest of its branches in its details', async () => {
+    const develop = branch({ branch: 'develop', default: false, sha: 'fedcba9876543210', message: 'Try the new decoder', error: 'clone failed' })
+    const rows = [repo(1, 'team-a/eal-core', { branches: ['develop', 'release/*'], indexed: [branch(), develop] })]
+    fakeApi(admin, routes({ 'GET /api/admin/argus/repos': () => view(rows) }))
+    renderApp('/admin/indexing')
+    const c = await card()
+    await within(c).findByText('eal-core')
+    const row = rowOf(c, 'team-a/eal-core')
+    expect(within(row).getByText('01234567')).toBeInTheDocument()
+    expect(within(row).queryByText('fedcba98')).not.toBeInTheDocument()
+    expect(within(row).queryByText('Decode frames faster')).not.toBeInTheDocument()
+    expect(row).toHaveTextContent('+1 branch (1 failing)')
+    expect(row).toHaveTextContent('+2 branches')
+    await userEvent.click(within(row).getByRole('button', { name: 'eal-core' }))
+    const details = await screen.findByRole('dialog', { name: 'team-a/eal-core' })
+    expect(within(details).getByText('release/*')).toBeInTheDocument()
+    expect(within(details).getByText('fedcba98')).toBeInTheDocument()
+    expect(within(details).getByText('Try the new decoder')).toBeInTheDocument()
+    expect(within(details).getByText('clone failed')).toBeInTheDocument()
+    expect(within(details).getByRole('button', { name: /Update/ })).toBeEnabled()
+  })
+
   it('shows what each repository is for, and an admin says it in their own words', async () => {
     const rows = [repo(1, 'team-a/eal-core', { purpose: 'Decodes frames from the radios.', purpose_source: 'readme' })]
     const calls = fakeApi(admin, routes({ 'GET /api/admin/argus/repos': () => view(rows), 'PATCH /api/admin/argus/repos/1': () => ({ json: { status: 'saved' } }) }))
     renderApp('/admin/indexing')
     const c = await card()
-    expect(await within(c).findByText('Decodes frames from the radios.')).toBeInTheDocument()
+    // The row stays two short lines; what it is for is in its details.
+    await within(c).findByText('eal-core')
+    expect(within(c).queryByText('Decodes frames from the radios.')).not.toBeInTheDocument()
+    await userEvent.click(within(rowOf(c, 'team-a/eal-core')).getByRole('button', { name: 'Details of team-a/eal-core' }))
+    const details = await screen.findByRole('dialog', { name: 'team-a/eal-core' })
+    expect(within(details).getByText('Decodes frames from the radios.')).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
     await userEvent.click(within(rowOf(c, 'team-a/eal-core')).getByRole('button', { name: 'More for team-a/eal-core' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: /What it is for…/ }))
     const dialog = await screen.findByRole('dialog', { name: 'What team-a/eal-core is for' })

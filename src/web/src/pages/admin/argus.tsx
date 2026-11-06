@@ -100,7 +100,13 @@ export function IndexingPage() {
       <PageHeader title="Indexing" description="Argus's index of your GitLab: what it holds, how current it is, and runs on demand." />
       <div className="grid grid-cols-[minmax(0,1fr)] gap-6">
         <StatGrid className="xl:grid-cols-4">
-          <Stat icon={Database} label="Repositories" value={idx.repos ?? 0} hint={idx.stale ? `${idx.stale} out of date` : 'all current'} tone={idx.stale ? 'warning' : undefined} />
+          <Stat
+            icon={Database}
+            label="Repositories"
+            value={idx.repos ?? 0}
+            hint={`${idx.branches && idx.branches !== idx.repos ? `${idx.branches.toLocaleString()} branches, ` : ''}${idx.stale ? `${idx.stale} out of date` : 'all current'}`}
+            tone={idx.stale ? 'warning' : undefined}
+          />
           <Stat icon={TriangleAlert} label="Failing" value={idx.errored ?? 0} tone={idx.errored ? 'destructive' : undefined} />
           <Stat icon={FileCode2} label="Files" value={formatValue(idx.files ?? 0)} />
           <Stat icon={Hash} label="Symbols" value={formatValue(idx.symbols ?? 0)} />

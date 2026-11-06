@@ -7,17 +7,23 @@ workspace's engine at its port with that workspace's key.
     GET    /health                     {"ok", "running", "slots"}
     GET    /v1/workspaces              [{"id", "port", "since"}] of those running
     PUT    /v1/workspaces/<id>         {"repo", "branch", "git_user", "git_token", "arena_url",
-                                        "api_key", "gateway_url", "mcp_url", "argus_url", "model"}
+                                        "api_key", "gateway_url", "mcp_url", "argus_url", "model", "ca"}
                                        -> {"port", "key", "cloned"}: cloned once (the branch
                                        checked out), its engine started (again)
     POST   /v1/workspaces/<id>/stop    its engine stopped; its files stay
     DELETE /v1/workspaces/<id>         stopped, and its files gone
 
-Each workspace has a slot (its number, kept in its folder): its user is FIRST_UID + slot,
-its engine's port FIRST_PORT + slot. Its folder (WORKSPACES/<id>, 0700, its user's) holds
+Each workspace has a slot (its number, kept in its folder): its user is FIRST_UID + slot
+(named ws<slot> in /etc/passwd and /etc/group, its home the workspace's, so whoami, a
+prompt, Python's getpass, Node.js's os.userInfo() and ssh know it), its engine's port
+FIRST_PORT + slot. Its folder (WORKSPACES/<id>, 0700, its user's) holds
 the clone (repo) and the engine's home (home: its settings, sessions, and the person's
 code-host token, 0600, which git reads through an askpass helper and never writes into
 the clone's config). Every process of a stopped workspace's user is killed.
+
+"ca" is the company CA the stack trusts (a GitLab on the company's own CA): written into
+the home with the system's CAs as one bundle, which git, curl, Python, pip, .NET and
+Node.js in the workspace (its clone, its engine, its terminals) are pointed at.
 
 The container itself has no Docker socket and no capabilities but those to switch users;
 its network reaches the code host, the package registries and Arena's gateway, not the
@@ -51,6 +57,12 @@ OPEN_FILES = int(os.environ.get("WORKSPACES_OPEN_FILES", "8192"))
 FILE_MB = int(os.environ.get("WORKSPACES_FILE_MB", "1024"))
 CLONE_SECONDS = int(os.environ.get("WORKSPACES_CLONE_SECONDS", "600"))
 START_SECONDS = int(os.environ.get("WORKSPACES_START_SECONDS", "30"))
+
+PASSWD = os.environ.get("WORKSPACES_PASSWD", "/etc/passwd")
+GROUP = os.environ.get("WORKSPACES_GROUP", "/etc/group")
+# The system's CAs, which a bundle with the company CA keeps.
+SYSTEM_CAS = os.environ.get("WORKSPACES_SYSTEM_CAS", "/etc/ssl/certs/ca-certificates.crt")
+CA_MOST = 64 * 1024
 
 ID = re.compile(r"^[0-9a-f]{32}$")
 BRANCH = re.compile(r"^[A-Za-z0-9._/-]{1,200}$")
@@ -97,6 +109,30 @@ def _slot(wid: str) -> int:
     return free
 
 
+def _name(uid: int) -> str:
+    return f"ws{uid - FIRST_UID}"
+
+
+def _rewrite(path: str, uid: int, line: str) -> None:
+    """The file with this uid's line as given (added, or put in place of the one there), written whole at once."""
+    with open(path) as f:
+        lines = f.read().splitlines()
+    kept = [x for x in lines if not (len(x.split(":")) > 2 and x.split(":")[2] == str(uid))]
+    if kept + [line] == lines:
+        return
+    tmp = path + ".ws"
+    with open(tmp, "w") as f:
+        f.write("\n".join(kept + [line]) + "\n")
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, path)
+
+
+def _user(uid: int, home: str) -> None:
+    """The workspace's user as the system knows it: its name, its group and its home (tools that ask getpwuid, not $HOME)."""
+    _rewrite(PASSWD, uid, f"{_name(uid)}:x:{uid}:{uid}:Code Studio workspace:{home}:/bin/bash")
+    _rewrite(GROUP, uid, f"{_name(uid)}:x:{uid}:")
+
+
 def _demote(uid: int):
     """In the child, before it runs: its own session, the workspace's user, its limits, files private to it."""
     def run():
@@ -137,6 +173,12 @@ def _env(home: str, spec: dict, key: str | None) -> dict:
         "LANG": "C.UTF-8", "TERM": "xterm-256color", "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
         "GIT_ASKPASS": os.path.join(home, ".git-askpass"), "GIT_TERMINAL_PROMPT": "0", "GIT_USER": spec.get("git_user") or "oauth2",
     }
+    bundle, company = os.path.join(home, ".ca-bundle.pem"), os.path.join(home, ".company-ca.pem")
+    if os.path.isfile(company):
+        # git and curl, Python (ssl, requests, pip), .NET (OpenSSL) take the bundle; Node.js adds the company CA to its own.
+        for name in ("GIT_SSL_CAINFO", "CURL_CA_BUNDLE", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE", "PIP_CERT"):
+            env[name] = bundle
+        env["NODE_EXTRA_CA_CERTS"] = company
     for name, value in (("ARENA_URL", "arena_url"), ("ARENA_API_KEY", "api_key"), ("ARENA_GATEWAY_URL", "gateway_url"),
                         ("ARENA_MCP_URL", "mcp_url"), ("ARENA_ARGUS_URL", "argus_url"), ("ARENA_MODEL", "model")):
         if spec.get(value):
@@ -156,6 +198,28 @@ def _check(spec: dict) -> None:
         raise Refused(400, "arena_url: Arena's address (http or https).")
     if not isinstance(spec.get("api_key"), str) or len(spec["api_key"]) < 16:
         raise Refused(400, "api_key: the person's key for the workspace's agent.")
+    ca = spec.get("ca")
+    if ca is not None and (not isinstance(ca, str) or len(ca) > CA_MOST or "PRIVATE KEY" in ca
+                           or (ca.strip() and "-----BEGIN CERTIFICATE-----" not in ca)):
+        raise Refused(400, "ca: the company CA's certificates (PEM), no key.")
+
+
+def _trust(home: str, ca: str | None) -> None:
+    """The company CA in the home, with the system's CAs as one bundle; none given: both gone (a CA taken away)."""
+    bundle, company = os.path.join(home, ".ca-bundle.pem"), os.path.join(home, ".company-ca.pem")
+    if not ca or not ca.strip():
+        for path in (bundle, company):
+            if os.path.exists(path):
+                os.remove(path)
+        return
+    system = ""
+    if os.path.isfile(SYSTEM_CAS):
+        with open(SYSTEM_CAS) as f:
+            system = f.read().rstrip() + "\n"
+    for path, text in ((company, ca.strip() + "\n"), (bundle, system + ca.strip() + "\n")):
+        with open(path, "w") as f:
+            f.write(text)
+        os.chmod(path, 0o644)
 
 
 def _clone(wid: str, uid: int, spec: dict) -> bool:
@@ -169,6 +233,7 @@ def _clone(wid: str, uid: int, spec: dict) -> bool:
     with open(token, "w") as f:
         f.write(str(spec.get("git_token") or ""))
     os.chmod(token, 0o600)
+    _trust(home, spec.get("ca"))
     os.chmod(folder, 0o700)
     _own(folder, uid)
     if os.path.isdir(os.path.join(repo, ".git")):
@@ -183,9 +248,12 @@ def _clone(wid: str, uid: int, spec: dict) -> bool:
     return True
 
 
-def _listening(port: int, seconds: float) -> bool:
+def _listening(port: int, seconds: float, process=None) -> bool:
+    """Whether the engine listens within the time; false at once when it ended (it said why in its log)."""
     end = time.monotonic() + seconds
     while time.monotonic() < end:
+        if process is not None and process.poll() is not None:
+            return False
         with socket.socket() as s:
             s.settimeout(0.5)
             if s.connect_ex(("127.0.0.1", port)) == 0:
@@ -223,6 +291,7 @@ def start(wid: str, spec: dict) -> dict:
             return {"port": r["port"], "key": r["key"], "cloned": False}
         slot = _slot(wid)
         uid, port = FIRST_UID + slot, FIRST_PORT + slot
+        _user(uid, os.path.join(_folder(wid), "home"))
         cloned = _clone(wid, uid, spec)
         key = secrets.token_urlsafe(32)
         home, repo = os.path.join(_folder(wid), "home"), os.path.join(_folder(wid), "repo")
@@ -232,7 +301,7 @@ def start(wid: str, spec: dict) -> dict:
         with open(log, "wb") as out:
             process = subprocess.Popen([CODE_ARENA, "web", "--serve", "--port", str(port)], cwd=repo, env=_env(home, spec, key),
                                        preexec_fn=_demote(uid), stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT)
-        if not _listening(port, START_SECONDS):
+        if not _listening(port, START_SECONDS, process):
             process.kill()
             _kill_user(uid)
             said = _tail(log)
