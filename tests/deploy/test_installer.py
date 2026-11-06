@@ -926,6 +926,27 @@ class InstallerTests(unittest.TestCase):
         self.assertTrue(env.rstrip().endswith(f"DATA_DIR={self.dir}/data"), env)
         Path(str(self.r.s.log) + ".info-asks").unlink(missing_ok=True)
 
+    def test_An_upgrade_makes_again_a_container_compose_keeps_on_a_moved_tag(self):
+        # web's image of 9.9.9 is 5.2.0's packed again: arena-web names a new id, and compose, seeing the same
+        # content, keeps the container on the old one. The versions are checked by id: it is made again.
+        self.old_install(version_file=True)
+        # Its data in DATA_DIR already, as a release this installer put there: nothing is moved, so the stack is not
+        # taken down, and compose finds the containers it made before.
+        store = self.r.store()
+        for v in ("postgres", "engine"):
+            store["volumes"][f"arena_{v}"]["device"] = str(self.dir / "data" / v)
+        self.r.state.write_text(json.dumps(store))
+        old_web = next(c for c in self.containers() if c["service"] == "web")["image_id"]
+        r = self.r.run("upgrade", "--dir", str(self.dir), "--yes", "--timeout", "5s", extra={"FAKE_SAME_CONTENT": "arena-web"})
+        self.assertEqual(r.returncode, 0, self.output(r))
+        self.assertIn("done   made again from the image its reference names: web\n", r.stdout)
+        self.assertNotIn("runs an older image", r.stdout)
+        web = next(c for c in self.containers() if c["service"] == "web")
+        self.assertEqual(web["image_id"], self.r.store()["images"]["arena-web:latest"])
+        self.assertNotEqual(web["image_id"], old_web)
+        recreated = [c for c in self.r.calls() if c[1:2] == ["compose"] and "--force-recreate" in c]
+        self.assertEqual([c[-1] for c in recreated], ["web"])
+
     def test_A_failed_upgrade_rolls_back_files_images_and_data(self):
         deploy = self.old_install()
         old_app = next(c for c in self.containers() if c["service"] == "app")["image_id"]

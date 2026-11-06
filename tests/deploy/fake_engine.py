@@ -24,7 +24,9 @@ compose files (COMPOSE_FILE, -f, else docker-compose.yml and its override): a
 service's image:, else PROJECT-service when it builds; `compose config` prints
 each service's bind mounts (a one-line `volumes: [...]`) as compose does. A
 container is healthy unless its image was loaded from a reference in
-FAKE_UNHEALTHY; the services in FAKE_DOWN keep restarting; a service of
+FAKE_UNHEALTHY; the services in FAKE_DOWN keep restarting; a service's container on a reference of FAKE_SAME_CONTENT is kept (and
+started) by compose up when that reference names a new id now (the same image packed again: compose sees
+no change), unless it is --force-recreate; a service of
 FAKE_WAITS_FOR (SERVICE=FILE, a file in MODELS_DIR) is unhealthy while that file
 is missing, as the embedding server is on Docker. As podman, a short name tagged
 lands under localhost/, and a short name is looked for there first, as Podman
@@ -239,7 +241,12 @@ def stateful(args: list[str]) -> int | None:
         st.save()
         return 0
     if args[:2] == ["volume", "inspect"]:
-        return 0 if args[-1] in s["volumes"] or args[-1] in lines("FAKE_VOLUMES") else 1
+        if args[-1] not in s["volumes"] and args[-1] not in lines("FAKE_VOLUMES"):
+            return 1
+        # The folder a volume is bound to (a test sets "device" on one in the store).
+        if "--format" in args and "device" in args[args.index("--format") + 1]:
+            print(s["volumes"].get(args[-1], {}).get("device", ""))
+        return 0
     if args[:2] == ["volume", "create"]:
         s["volumes"][args[-1]] = {"labels": [a for a in args if "=" in a]}
         st.save()
@@ -453,12 +460,17 @@ def compose(st: Store, args: list[str], project: str) -> int:
         unhealthy = set(norm(x) for x in lines("FAKE_UNHEALTHY"))
         down = set(lines("FAKE_DOWN"))
         waits = dict(x.split("=", 1) for x in lines("FAKE_WAITS_FOR"))
+        same = set(norm(x) for x in lines("FAKE_SAME_CONTENT"))
         for svc in services:
             ref = service_image(model, svc, project)
             image_id = st.image(ref)
             if not image_id:
                 print(f"Error: no image {ref} for {svc} (pull never)", file=sys.stderr)
                 return 1
+            kept = next((c for c in s["containers"] if c["project"] == project and c["service"] == svc and c["image_ref"] == ref), None)
+            if kept and "--force-recreate" not in args and norm(ref) in same:
+                kept["state"] = "running" if "--no-start" not in args else kept["state"]
+                continue
             s["containers"] = [c for c in s["containers"] if not (c["project"] == project and c["service"] == svc)]
             n = s["next"]
             s["next"] = n + 1
