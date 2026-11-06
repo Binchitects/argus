@@ -132,13 +132,14 @@ internal sealed class TaskBoard
         var writer = false;
         try
         {
-            await _slots.WaitAsync(token);
-            slot = true;
+            // One that writes waits for the others that write before it takes a place: those that read are not kept waiting meanwhile.
             if (task.Writes)
             {
                 await _writer.WaitAsync(token);
                 writer = true;
             }
+            await _slots.WaitAsync(token);
+            slot = true;
             task.Started = DateTimeOffset.UtcNow;
             task.Status = AgentTask.Running;
             Changed?.Invoke(task);
