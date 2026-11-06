@@ -181,6 +181,16 @@ class Named(Base):
         self.assertEqual(sum(":30001:" in x for x in lines), 1)
 
 
+class Waited(Base):
+    def test_an_engine_that_ends_is_not_waited_for(self):
+        # Before: an engine that stopped at once (Arena not reached) was waited for the whole 30 s before it was said.
+        ended = mock.Mock()
+        ended.poll.return_value = 1
+        started = sup.time.monotonic()
+        self.assertFalse(sup._listening(1, 30, ended))
+        self.assertLess(sup.time.monotonic() - started, 1)
+
+
 class Driven(Base):
     def _ask(self, method, path, body=None, key="k" * 40):
         handler = sup.Handler.__new__(sup.Handler)

@@ -248,9 +248,12 @@ def _clone(wid: str, uid: int, spec: dict) -> bool:
     return True
 
 
-def _listening(port: int, seconds: float) -> bool:
+def _listening(port: int, seconds: float, process=None) -> bool:
+    """Whether the engine listens within the time; false at once when it ended (it said why in its log)."""
     end = time.monotonic() + seconds
     while time.monotonic() < end:
+        if process is not None and process.poll() is not None:
+            return False
         with socket.socket() as s:
             s.settimeout(0.5)
             if s.connect_ex(("127.0.0.1", port)) == 0:
@@ -298,7 +301,7 @@ def start(wid: str, spec: dict) -> dict:
         with open(log, "wb") as out:
             process = subprocess.Popen([CODE_ARENA, "web", "--serve", "--port", str(port)], cwd=repo, env=_env(home, spec, key),
                                        preexec_fn=_demote(uid), stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT)
-        if not _listening(port, START_SECONDS):
+        if not _listening(port, START_SECONDS, process):
             process.kill()
             _kill_user(uid)
             said = _tail(log)
