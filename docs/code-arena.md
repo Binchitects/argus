@@ -374,6 +374,16 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   has them too (Toggle Primary Side Bar Position, Move Panel Left, Right or to
   Bottom, Move View to Panel, Move Panel View to Side Bar, Reset View
   Locations). Where everything is stays for the next run, with the sizes.
+- **customising the activity bar**: as VS Code's, an icon's right-click
+  menu hides it (**Hide 'Search'**), and the bar's own right-click menu lists
+  every view with a check: uncheck one to hide its icon, check it to bring it
+  back. A hidden view still opens by its command or keys (Ctrl+Shift+F shows
+  Search), and its icon shows while it does. **Activity Bar Position** (in
+  the same menu, and the palette's Move Activity Bar to Side, Move Activity
+  Bar to Top, Hide Activity Bar and Toggle Activity Bar Visibility) puts the
+  bar beside the side bar, as a row of icons above it (Accounts and Manage
+  at the row's end), or hides it. Reset View Locations shows every icon again
+  beside the side bar. This is kept with the layout, for the next run.
 - **help**: Help in the activity bar opens the IDE's help over the page:
   what each part does, the common tasks step by step and the keys, with a
   link to this page of the manual in the Arena signed in to
@@ -453,6 +463,7 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   opens it for good (`workbench.editor.enablePreview`: false opens every file
   so). **Pin** (the tab's menu, **Ctrl+K Shift+Enter**) keeps a tab first in
   the strip, and Close Others, Close to the Right and Close Saved leave it;
+  the middle mouse button closes a tab, as in VS Code;
   tabs are dragged to reorder them, or moved with **Ctrl+Shift+PageUp** and
   **PageDown** (**Alt+Shift+** where the browser keeps those). **Breadcrumbs** over
   it name the file's folders (each lists its files to open), the file, and the
@@ -1422,7 +1433,8 @@ run at once at most. A page that comes back, or a second tab, sees the last
 SIGKILL 3 s later to what is left, whether the shell ended or not: the shell,
 the job in the foreground and, on Linux, every job of the shell's session,
 those in the background and those started with `nohup` too (on macOS, the
-shell's and the foreground job's process groups). A program that leaves the
+shell's and the foreground job's process groups); the middle mouse button on
+a terminal's tab closes it so too. A program that leaves the
 session (`setsid`, a daemon, tmux) keeps running. Stopping code-arena closes
 them all.
 

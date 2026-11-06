@@ -50,7 +50,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   activity: {
     name: 'Activity bar',
-    text: 'The icons down the side bar\'s edge. **Explorer**, **Search**, **Source control**, **Run and Debug**, **Extensions**, **Agent changes** (with the number of files), **Problems**, **Skills** and **Chat** switch the side bar; pressing the one shown hides it. Drag an icon to put it elsewhere in the bar, or onto the panel\'s tabs to move its view there (drag the tab back to return it); its right-click menu has the same moves, puts the side bar on the other side (the chat goes opposite) and resets them. At its foot: **Terminal**, the theme (light, dark or the system\'s, and the colour theme: Code Arena, Sakura, Midnight, Copper, Forest, Ocean or Lavender), **Manage** (the gear: Settings, Keyboard Shortcuts, Color Theme, Extensions, the palette, and how the model gets its tools), **Help** and **About Code Arena**.',
+    text: 'The icons down the side bar\'s edge. **Explorer**, **Search**, **Source control**, **Run and Debug**, **Extensions**, **Agent changes** (with the number of files), **Problems**, **Skills** and **Chat** switch the side bar; pressing the one shown hides it. Drag an icon to put it elsewhere in the bar, or onto the panel\'s tabs to move its view there (drag the tab back to return it); its right-click menu has the same moves, hides the icon (**Hide**), puts the side bar on the other side (the chat goes opposite) and resets them. A right-click on the bar lists every view with a check: uncheck one to hide its icon (its command still opens it), and **Activity Bar Position** puts the bar beside the side bar, above it as a row, or hides it. At its foot: **Terminal**, the theme (light, dark or the system\'s, and the colour theme: Code Arena, Sakura, Midnight, Copper, Forest, Ocean or Lavender), **Manage** (the gear: Settings, Keyboard Shortcuts, Color Theme, Extensions, the palette, and how the model gets its tools), **Help** and **About Code Arena**.',
     manual: 'the-ide',
   },
   explorer: {
@@ -95,12 +95,12 @@ export const parts: Record<Part, PartHelp> = {
   },
   editor: {
     name: 'Editor',
-    text: `Your open files, in tabs. A dot marks changes not saved yet, and ${modKey}+S saves. A file the agent edits reloads in its tab when nothing in it is unsaved; saving a file that changed on disk since you opened it asks first.`,
+    text: `Your open files, in tabs. A dot marks changes not saved yet, and ${modKey}+S saves; the middle mouse button closes a tab. A file the agent edits reloads in its tab when nothing in it is unsaved; saving a file that changed on disk since you opened it asks first.`,
     manual: 'the-ide',
   },
   terminal: {
     name: 'Terminal',
-    text: 'Shells in this folder, under the editor. Ctrl+` shows or hides them, **+** opens another, and dragging the panel\'s top edge resizes it. A terminal can do whatever your own shell can: the mode guards the agent, not you.',
+    text: 'Shells in this folder, under the editor. Ctrl+` shows or hides them, **+** opens another (the middle mouse button on its tab closes one), and dragging the panel\'s top edge resizes it. A terminal can do whatever your own shell can: the mode guards the agent, not you.',
     manual: 'terminals',
   },
   chat: {

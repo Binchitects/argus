@@ -158,6 +158,9 @@ export default function TerminalPanel({ shown, onHide, focusKey, newKey = 0, sho
                 aria-selected={selected}
                 aria-controls={`terminal-${t.id}`}
                 onClick={() => setActiveId(t.id)}
+                // The middle button ends it, as VS Code's terminal tabs do.
+                onMouseDown={(e) => e.button === 1 && e.preventDefault()}
+                onAuxClick={(e) => e.button === 1 && void kill(t)}
                 className={cn(
                   'flex h-6 shrink-0 items-center gap-1.5 rounded-sm px-2 text-xs outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring',
                   selected ? 'bg-accent text-foreground' : 'text-muted-foreground',

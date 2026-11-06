@@ -1732,6 +1732,8 @@ export function EditorArea() {
                   onClick={() => ed.activate(t.id)}
                   onDoubleClick={() => ed.keepTab(t.id)}
                   aria-describedby={t.preview || t.pinned ? `${tabStrip}-${i}` : undefined}
+                  // The middle button closes it, as in VS Code; pressed, it starts no scrolling of the page (the browser's autoscroll).
+                  onMouseDown={(e) => e.button === 1 && e.preventDefault()}
                   onAuxClick={(e) => e.button === 1 && void ed.close(t.id)}
                   className="flex h-full max-w-56 items-center gap-1.5 pr-1 pl-3 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                 >

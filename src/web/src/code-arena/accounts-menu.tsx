@@ -10,6 +10,7 @@ import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
 import { Tooltip } from '@/components/ui/tooltip'
+import { cn } from '@/lib/utils'
 import { errorMessage } from '@/lib/api'
 import { api } from './http'
 
@@ -121,7 +122,7 @@ function SignInDialog({ arena, onClose }: { arena: string | null; onClose: () =>
  * Accounts, at the activity bar's foot above the gear (as VS Code's): whose key Code Arena works with, signing in with a
  * user name and password, signing out, and Arena's own pages: your account, and People for those who may see it.
  */
-export function AccountsMenu({ edge }: { edge: 'left' | 'right' }) {
+export function AccountsMenu({ edge, compact = false }: { edge: 'left' | 'right'; compact?: boolean }) {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const account = useQuery(accountQuery)
@@ -144,19 +145,22 @@ export function AccountsMenu({ edge }: { edge: 'left' | 'right' }) {
   return (
     <>
       <DropdownMenu>
-        <Tooltip content={who ? `Accounts: ${who}` : 'Accounts'} side={edge === 'left' ? 'right' : 'left'}>
+        <Tooltip content={who ? `Accounts: ${who}` : 'Accounts'} side={compact ? 'bottom' : edge === 'left' ? 'right' : 'left'}>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
               aria-label="Accounts"
-              className="relative grid size-12 place-items-center text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset [&_svg]:size-5"
+              className={cn(
+                'relative grid shrink-0 place-items-center text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
+                compact ? 'size-9 [&_svg]:size-4' : 'size-12 [&_svg]:size-5',
+              )}
             >
               <CircleUserRound aria-hidden="true" />
-              {a && (!a.signedIn || a.error) && <span className="absolute top-2.5 right-2.5 size-2 rounded-full bg-warning" aria-hidden="true" />}
+              {a && (!a.signedIn || a.error) && <span className={cn('absolute size-2 rounded-full bg-warning', compact ? 'top-1.5 right-1.5' : 'top-2.5 right-2.5')} aria-hidden="true" />}
             </button>
           </DropdownMenuTrigger>
         </Tooltip>
-        <DropdownMenuContent side={edge === 'left' ? 'right' : 'left'} align="end" className="w-80 [&_[role=menuitem]]:whitespace-nowrap">
+        <DropdownMenuContent side={compact ? 'bottom' : edge === 'left' ? 'right' : 'left'} align="end" className="w-80 [&_[role=menuitem]]:whitespace-nowrap">
           <DropdownMenuLabel className="grid gap-0.5 font-normal">
             <span className="truncate text-sm font-medium">{a?.codeStudio ? "Code Studio's workspace" : who ? who : a?.signedIn ? 'Signed in' : 'Not signed in'}</span>
             {host && <span className="truncate text-xs text-muted-foreground">on {host}</span>}

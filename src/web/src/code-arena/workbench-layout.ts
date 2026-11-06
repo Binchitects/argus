@@ -31,6 +31,10 @@ export interface Layout {
   order: View[]
   /** The panel's tabs in their order: its own, and the views moved there (no longer in the activity bar). */
   panelTabs: PanelTab[]
+  /** The views the person hid from the activity bar: a command still shows one, and its button is there while it shows. */
+  hidden: View[]
+  /** The activity bar: beside the side bar (VS Code's default), above it as a row of icons, or hidden. */
+  activityBar: 'default' | 'top' | 'hidden'
 }
 
 export const defaults: Layout = {
@@ -46,6 +50,8 @@ export const defaults: Layout = {
   panelAt: 'bottom',
   order: [...allViews],
   panelTabs: [...panelParts],
+  hidden: [],
+  activityBar: 'default',
 }
 
 /** The panels' sizes, smallest and largest (the panel's largest also follows the window). */
@@ -56,7 +62,7 @@ const isTab = (x: unknown): x is PanelTab => isView(x) || (typeof x === 'string'
 
 /** The layout saved, what of it still makes sense: the known keys, of their kind, the sizes within bounds, every view once. */
 export function layoutOf(saved: Record<string, unknown> | undefined): Layout {
-  const layout: Layout = { ...defaults, order: [...defaults.order], panelTabs: [...defaults.panelTabs] }
+  const layout: Layout = { ...defaults, order: [...defaults.order], panelTabs: [...defaults.panelTabs], hidden: [] }
   if (!saved) return layout
   for (const k of ['side', 'chat', 'panel'] as const) {
     const size = saved[k]
@@ -68,6 +74,8 @@ export function layoutOf(saved: Record<string, unknown> | undefined): Layout {
   }
   if (saved.sideAt === 'left' || saved.sideAt === 'right') layout.sideAt = saved.sideAt
   if (saved.panelAt === 'bottom' || saved.panelAt === 'left' || saved.panelAt === 'right') layout.panelAt = saved.panelAt
+  if (saved.activityBar === 'default' || saved.activityBar === 'top' || saved.activityBar === 'hidden') layout.activityBar = saved.activityBar
+  if (Array.isArray(saved.hidden)) layout.hidden = [...new Set(saved.hidden.filter(isView))]
   if (Array.isArray(saved.order)) {
     const kept = [...new Set(saved.order.filter(isView))]
     layout.order = [...kept, ...allViews.filter((v) => !kept.includes(v))]
@@ -90,6 +98,14 @@ export function layoutOf(saved: Record<string, unknown> | undefined): Layout {
 export const sideViews = (l: Layout): View[] => l.order.filter((v) => !l.panelTabs.includes(v))
 
 export const inPanel = (l: Layout, v: View) => l.panelTabs.includes(v)
+
+/** The views the activity bar shows: the side bar's, but those hidden (one hidden shows while it is the view shown). */
+export const barViews = (l: Layout): View[] => sideViews(l).filter((v) => !l.hidden.includes(v) || (l.sideOpen && l.view === v))
+
+/** A view hidden from the activity bar, or shown there again. */
+export function setHidden(l: Layout, v: View, hide: boolean): Partial<Layout> {
+  return { hidden: hide ? [...new Set([...l.hidden, v])] : l.hidden.filter((x) => x !== v) }
+}
 
 /** A view moved into the panel (shown there); the side bar shows another, or closes when it has none left. */
 export function toPanel(l: Layout, v: View, before?: PanelTab): Partial<Layout> {
@@ -118,7 +134,7 @@ export function reorderPanel(l: Layout, t: PanelTab, before?: PanelTab): Partial
   return { panelTabs: place(l.panelTabs.filter((x) => x !== t), t, before) }
 }
 
-/** Every view back where it started and in its first order; the side bar on the left, the panel below (sizes stay). */
+/** Every view back where it started, in its first order and shown; the activity bar beside the side bar on the left, the panel below (sizes stay). */
 export function resetLocations(l: Layout): Partial<Layout> {
   return {
     order: [...allViews],
@@ -126,6 +142,8 @@ export function resetLocations(l: Layout): Partial<Layout> {
     sideAt: 'left',
     panelAt: 'bottom',
     panelTab: isView(l.panelTab) ? 'terminal' : l.panelTab,
+    hidden: [],
+    activityBar: 'default',
   }
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { allViews, defaults, layoutOf, reorderPanel, reorderSide, resetLocations, sideViews, toPanel, toSide, type Layout } from './workbench-layout'
+import { allViews, barViews, defaults, layoutOf, reorderPanel, reorderSide, resetLocations, setHidden, sideViews, toPanel, toSide, type Layout } from './workbench-layout'
 
 const apply = (l: Layout, c: Partial<Layout>): Layout => ({ ...l, ...c })
 
@@ -66,5 +66,24 @@ describe('the workbench layout', () => {
     expect(l.sideOpen).toBe(false)
     l = apply(apply(l, { sideAt: 'right', panelAt: 'right' }), resetLocations(l))
     expect(l).toMatchObject({ order: [...allViews], panelTabs: ['terminal', 'console', 'output'], sideAt: 'left', panelAt: 'bottom', panelTab: 'terminal', side: 300 })
+  })
+
+  it('hides a view from the activity bar (it shows there while it is the view shown), and keeps where the bar is', () => {
+    let l = apply(defaults, { view: 'explorer' })
+    l = apply(l, setHidden(l, 'review', true))
+    l = apply(l, setHidden(l, 'review', true))
+    expect(l.hidden).toEqual(['review'])
+    expect(barViews(l)).not.toContain('review')
+    // Shown by its command: its button is there meanwhile, as VS Code's is.
+    expect(barViews(apply(l, { view: 'review' }))).toContain('review')
+    expect(barViews(apply(l, { view: 'review', sideOpen: false }))).not.toContain('review')
+    l = apply(l, setHidden(l, 'review', false))
+    expect(barViews(l)).toEqual(sideViews(l))
+
+    const saved = layoutOf({ hidden: ['skills', 'skills', 'nope', 3], activityBar: 'top' })
+    expect(saved.hidden).toEqual(['skills'])
+    expect(saved.activityBar).toBe('top')
+    expect(layoutOf({ activityBar: 'sideways' }).activityBar).toBe('default')
+    expect(resetLocations(apply(saved, {}))).toMatchObject({ hidden: [], activityBar: 'default' })
   })
 })

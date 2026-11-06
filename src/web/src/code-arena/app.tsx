@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Blocks, Brain, Bug, CircleAlert, CircleHelp, Files, GitBranch, GitCompareArrows, Info, ListChecks, MessagesSquare, ScanSearch, Search, SquareTerminal, WandSparkles, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, Blocks, Brain, Bug, Check, Circle, CircleAlert, CircleHelp, Files, GitBranch, GitCompareArrows, Info, ListChecks, MessagesSquare, ScanSearch, Search, SquareTerminal, WandSparkles, type LucideIcon } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { confetti, useKonami } from '@/components/app/games-kit'
 import { toast } from '@/components/ui/toaster'
@@ -64,7 +64,7 @@ import { ensureTheme } from './extensions'
 import { ExtensionsView } from './extensions-view'
 import { appendElement } from './jsonc'
 import { Splitter } from './splitter'
-import { bounds, inPanel, layoutOf, panelParts, reorderPanel, reorderSide, resetLocations, sideViews, toPanel, toSide, type Layout, type PanelTab, type View } from './workbench-layout'
+import { barViews, bounds, inPanel, layoutOf, panelParts, reorderPanel, reorderSide, resetLocations, setHidden, sideViews, toPanel, toSide, type Layout, type PanelTab, type View } from './workbench-layout'
 import { useArenaSettings, useNotices } from './sync'
 import { About, StatusBar } from './status-bar'
 import { languageServers } from './lsp/servers'
@@ -240,19 +240,22 @@ const views: { id: View; label: string; icon: LucideIcon; command: string }[] = 
   { id: 'chat', label: 'Chat', icon: MessagesSquare, command: 'codeArena.view.sessions' },
 ]
 
-function ActivityButton({ label, command, pressed, badge, edge = 'left', onClick, children }: { label: string; command?: string; pressed?: boolean; badge?: number; edge?: 'left' | 'right'; onClick: () => void; children: ReactNode }) {
+/** An activity bar's button; `edge` is the side the bar is on ("top": a row of icons above the side bar). */
+function ActivityButton({ label, command, pressed, badge, edge = 'left', onClick, children }: { label: string; command?: string; pressed?: boolean; badge?: number; edge?: 'left' | 'right' | 'top'; onClick: () => void; children: ReactNode }) {
   const keys = useKeyFor(command ?? '')
   return (
-    <Tooltip content={keys ? `${label} (${keys})` : label} side={edge === 'left' ? 'right' : 'left'}>
+    <Tooltip content={keys ? `${label} (${keys})` : label} side={edge === 'left' ? 'right' : edge === 'top' ? 'bottom' : 'left'}>
       <button
         type="button"
         aria-label={badge ? `${label} (${badge})` : label}
         aria-pressed={pressed}
         onClick={onClick}
         className={cn(
-          'relative grid size-12 place-items-center text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset [&_svg]:size-5',
-          pressed && 'text-foreground before:absolute before:inset-y-2 before:w-0.5 before:bg-primary',
-          pressed && (edge === 'left' ? 'before:left-0 before:rounded-r' : 'before:right-0 before:rounded-l'),
+          'relative grid place-items-center text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
+          edge === 'top' ? 'h-9 w-9 [&_svg]:size-4' : 'size-12 [&_svg]:size-5',
+          pressed && 'text-foreground before:absolute before:bg-primary',
+          pressed && (edge === 'top' ? 'before:inset-x-1.5 before:bottom-0 before:h-0.5 before:rounded-t' : 'before:inset-y-2 before:w-0.5'),
+          pressed && (edge === 'left' ? 'before:left-0 before:rounded-r' : edge === 'right' ? 'before:right-0 before:rounded-l' : ''),
         )}
       >
         {children}
@@ -280,13 +283,78 @@ function dragging(e: DragEvent<HTMLElement>, id: PanelTab) {
   e.dataTransfer.setData('text/plain', id)
 }
 
+const menuSeparator = <ContextMenu.Separator className="-mx-1 my-1 h-px bg-border" />
+
+/**
+ * What the activity bar's right-click menu has wherever it is opened, as VS Code's: each of the side bar's views,
+ * checked while its button shows (unchecked: hidden from the bar), and where the bar itself goes.
+ */
+function BarMenuItems({ layout, change }: { layout: Layout; change: (c: Partial<Layout>) => void }) {
+  const side = sideViews(layout)
+  return (
+    <>
+      {side.map((id) => {
+        const v = views.find((x) => x.id === id)!
+        const shown = !layout.hidden.includes(id)
+        return (
+          <ContextMenu.CheckboxItem
+            key={id}
+            className={cn(menuItem, 'pl-8')}
+            checked={shown}
+            // The last button left stays: the bar is never empty while it shows.
+            disabled={shown && side.filter((x) => !layout.hidden.includes(x)).length === 1}
+            onCheckedChange={(on) => change(setHidden(layout, id, !on))}
+            onSelect={(e) => e.preventDefault()}
+          >
+            <span className="absolute left-2 flex size-3.5 items-center justify-center">
+              <ContextMenu.ItemIndicator>
+                <Check />
+              </ContextMenu.ItemIndicator>
+            </span>
+            {v.label}
+          </ContextMenu.CheckboxItem>
+        )
+      })}
+      {menuSeparator}
+      <ContextMenu.Sub>
+        <ContextMenu.SubTrigger className={menuItem}>Activity Bar Position</ContextMenu.SubTrigger>
+        <ContextMenu.Portal>
+          <ContextMenu.SubContent className={menuContent}>
+            <ContextMenu.RadioGroup value={layout.activityBar} onValueChange={(v) => change({ activityBar: v as Layout['activityBar'] })}>
+              {(
+                [
+                  ['default', 'Default (beside the side bar)'],
+                  ['top', 'Top (above the side bar)'],
+                  ['hidden', 'Hidden'],
+                ] as const
+              ).map(([value, label]) => (
+                <ContextMenu.RadioItem key={value} value={value} className={cn(menuItem, 'pl-8')}>
+                  <span className="absolute left-2 flex size-3.5 items-center justify-center">
+                    <ContextMenu.ItemIndicator>
+                      <Circle className="size-2 fill-current" />
+                    </ContextMenu.ItemIndicator>
+                  </span>
+                  {label}
+                </ContextMenu.RadioItem>
+              ))}
+            </ContextMenu.RadioGroup>
+          </ContextMenu.SubContent>
+        </ContextMenu.Portal>
+      </ContextMenu.Sub>
+      <ContextMenu.Item className={menuItem} onSelect={() => change(resetLocations(layout))}>
+        Reset View Locations
+      </ContextMenu.Item>
+    </>
+  )
+}
+
 /**
  * A view's button in the activity bar: shows its view, drags to another place in the bar or into the panel (dropped on
- * it, the view goes before it), and has a right-click menu with the same moves and where the side bar sits.
+ * it, the view goes before it), and has a right-click menu with the same moves, hiding it, and where the side bar sits.
  */
-function ViewButton({ view, layout, change, badge, onClick }: { view: (typeof views)[number]; layout: Layout; change: (c: Partial<Layout>) => void; badge?: number; onClick: () => void }) {
+function ViewButton({ view, layout, change, badge, across = false, onClick }: { view: (typeof views)[number]; layout: Layout; change: (c: Partial<Layout>) => void; badge?: number; across?: boolean; onClick: () => void }) {
   const [over, setOver] = useState(false)
-  const side = sideViews(layout)
+  const side = barViews(layout)
   const at = side.indexOf(view.id)
   const edge = layout.sideAt
   return (
@@ -308,11 +376,11 @@ function ViewButton({ view, layout, change, badge, onClick }: { view: (typeof vi
           dragged.current = null
           if (moved && moved !== view.id && (views as { id: string }[]).some((v) => v.id === moved)) change(reorderSide(layout, moved as View, view.id))
         }}
-        className={dropLine(over, true)}
+        className={dropLine(over, !across)}
       >
         <ContextMenu.Trigger asChild>
           <div>
-            <ActivityButton label={view.label} command={view.command} pressed={layout.sideOpen && layout.view === view.id} badge={badge} edge={edge} onClick={onClick}>
+            <ActivityButton label={view.label} command={view.command} pressed={layout.sideOpen && layout.view === view.id} badge={badge} edge={across ? 'top' : edge} onClick={onClick}>
               <view.icon aria-hidden="true" />
             </ActivityButton>
           </div>
@@ -320,6 +388,9 @@ function ViewButton({ view, layout, change, badge, onClick }: { view: (typeof vi
       </div>
       <ContextMenu.Portal>
         <ContextMenu.Content className={menuContent} aria-label={`${view.label}: where it goes`}>
+          <ContextMenu.Item className={menuItem} disabled={side.length <= 1} onSelect={() => change(setHidden(layout, view.id, true))}>
+            Hide '{view.label}'
+          </ContextMenu.Item>
           <ContextMenu.Item className={menuItem} onSelect={() => change(toPanel(layout, view.id))}>
             Move to Panel
           </ContextMenu.Item>
@@ -329,13 +400,11 @@ function ViewButton({ view, layout, change, badge, onClick }: { view: (typeof vi
           <ContextMenu.Item className={menuItem} disabled={at < 0 || at >= side.length - 1} onSelect={() => change(reorderSide(layout, view.id, side[at + 2]))}>
             Move Down
           </ContextMenu.Item>
-          <ContextMenu.Separator className="-mx-1 my-1 h-px bg-border" />
           <ContextMenu.Item className={menuItem} onSelect={() => change({ sideAt: edge === 'left' ? 'right' : 'left' })}>
             Move Primary Side Bar {edge === 'left' ? 'Right' : 'Left'}
           </ContextMenu.Item>
-          <ContextMenu.Item className={menuItem} onSelect={() => change(resetLocations(layout))}>
-            Reset View Locations
-          </ContextMenu.Item>
+          {menuSeparator}
+          <BarMenuItems layout={layout} change={change} />
         </ContextMenu.Content>
       </ContextMenu.Portal>
     </ContextMenu.Root>
@@ -1132,6 +1201,12 @@ function Workbench({
     { id: 'codeArena.view.moveToPanel', category: 'View', title: 'Move View to Panel', enabled: () => layout.sideOpen && sideViews(layout).length > 0, run: () => arrange(toPanel(layout, layout.view)) },
     { id: 'codeArena.view.moveToSideBar', category: 'View', title: 'Move Panel View to Side Bar', enabled: () => !(panelParts as readonly string[]).includes(layout.panelTab), run: () => arrange(toSide(layout, layout.panelTab as View)) },
     { id: 'workbench.action.resetViewLocations', category: 'View', title: 'Reset View Locations', run: () => arrange(resetLocations(layout)) },
+    { id: 'workbench.action.activityBarLocation.default', category: 'View', title: 'Move Activity Bar to Side', enabled: () => layout.activityBar !== 'default', run: () => change({ activityBar: 'default' }) },
+    { id: 'workbench.action.activityBarLocation.top', category: 'View', title: 'Move Activity Bar to Top', enabled: () => layout.activityBar !== 'top', run: () => change({ activityBar: 'top', sideOpen: true }) },
+    { id: 'workbench.action.activityBarLocation.hide', category: 'View', title: 'Hide Activity Bar', enabled: () => layout.activityBar !== 'hidden', run: () => change({ activityBar: 'hidden' }) },
+    { id: 'workbench.action.toggleActivityBarVisibility', category: 'View', title: 'Toggle Activity Bar Visibility', run: () => change({ activityBar: layout.activityBar === 'hidden' ? 'default' : 'hidden' }) },
+    { id: 'codeArena.view.hideFromActivityBar', category: 'View', title: 'Hide the Shown View from the Activity Bar', enabled: () => layout.sideOpen && barViews(layout).length > 1, run: () => change(setHidden(layout, layout.view, true)) },
+    { id: 'codeArena.view.showAllInActivityBar', category: 'View', title: 'Show Every View in the Activity Bar', enabled: () => layout.hidden.length > 0, run: () => change({ hidden: [] }) },
     { id: 'workbench.action.togglePanel', category: 'View', title: 'Toggle Panel Visibility', run: togglePanel },
     { id: 'workbench.action.toggleAuxiliaryBar', category: 'View', title: 'Toggle Secondary Side Bar Visibility (the chat)', run: () => change({ chatOpen: !layout.chatOpen }) },
     { id: 'workbench.action.chat.open', category: 'Chat', title: 'Open Chat', run: () => {
@@ -1267,30 +1342,44 @@ function Workbench({
     }
   }
 
-  const activityBar = (
+  const bar = barViews(layout)
+  const badgeOf = (id: View) => (id === 'changes' ? count : id === 'problems' ? errors : id === 'git' ? gitCount : undefined)
+  /** The views' buttons, in the activity bar's order; dropped after them, a view goes last (one from the panel comes back). */
+  const viewButtons = (across: boolean) => (
+    <ContextMenu.Root>
+      <ContextMenu.Trigger asChild>
+        <div
+          className={cn('flex min-h-0 min-w-0 flex-1 [scrollbar-width:none]', across ? 'flex-row overflow-x-auto' : 'flex-col overflow-y-auto')}
+          onDragOver={(e) => {
+            if (dragged.current !== null && views.some((v) => v.id === dragged.current)) e.preventDefault()
+          }}
+          onDrop={(e) => {
+            const moved = dragged.current
+            dragged.current = null
+            if (moved && views.some((v) => v.id === moved)) {
+              e.preventDefault()
+              arrange(reorderSide(layout, moved as View))
+            }
+          }}
+        >
+          {bar.map((id) => (
+            <ViewButton key={id} view={views.find((x) => x.id === id)!} layout={layout} change={arrange} badge={badgeOf(id)} across={across} onClick={() => show(id, true)} />
+          ))}
+          <span className="flex-1" />
+        </div>
+      </ContextMenu.Trigger>
+      <ContextMenu.Portal>
+        <ContextMenu.Content className={menuContent} aria-label="Activity bar">
+          <BarMenuItems layout={layout} change={arrange} />
+        </ContextMenu.Content>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
+  )
+
+  const activityBar = layout.activityBar === 'default' && (
     <nav key="activity" aria-label="Activity bar" className={cn('flex min-h-0 w-12 shrink-0 flex-col overflow-clip bg-sidebar', left ? 'border-r' : 'border-l')}>
-      {/* Dropped below the views: the view goes last (one from the panel comes back to the side bar). In a window too short
-          for every view, they scroll here, the buttons under them staying. */}
-      <div
-        className="flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-width:none]"
-        onDragOver={(e) => {
-          if (dragged.current !== null && views.some((v) => v.id === dragged.current)) e.preventDefault()
-        }}
-        onDrop={(e) => {
-          const moved = dragged.current
-          dragged.current = null
-          if (moved && views.some((v) => v.id === moved)) {
-            e.preventDefault()
-            arrange(reorderSide(layout, moved as View))
-          }
-        }}
-      >
-        {side.map((id) => {
-          const v = views.find((x) => x.id === id)!
-          return <ViewButton key={id} view={v} layout={layout} change={arrange} badge={id === 'changes' ? count : id === 'problems' ? errors : id === 'git' ? gitCount : undefined} onClick={() => show(id, true)} />
-        })}
-        <span className="flex-1" />
-      </div>
+      {/* In a window too short for every view, they scroll here, the buttons under them staying. */}
+      {viewButtons(false)}
       <ActivityButton label="Terminal" command="workbench.action.terminal.toggleTerminal" pressed={layout.panelOpen} edge={layout.sideAt} onClick={toggleTerminal}>
         <SquareTerminal aria-hidden="true" />
       </ActivityButton>
@@ -1307,11 +1396,20 @@ function Workbench({
       </ActivityButton>
     </nav>
   )
+  // Above the side bar, as VS Code's "workbench.activityBar.location": "top": the views in a row, the accounts and the gear at its end.
+  const topBar = layout.activityBar === 'top' && (
+    <nav aria-label="Activity bar" className="flex h-9 shrink-0 items-center border-b">
+      {viewButtons(true)}
+      <AccountsMenu edge={layout.sideAt} compact />
+      <ManageMenu state={state} edge={layout.sideAt} compact />
+    </nav>
+  )
 
   const sideBar = (
-    <aside key="side" data-side={layout.sideAt} hidden={!layout.sideOpen} aria-label={views.find((v) => v.id === layout.view)?.label} style={{ width: layout.side }} className="min-h-0 shrink-0 overflow-clip bg-sidebar text-sidebar-foreground">
+    <aside key="side" data-side={layout.sideAt} hidden={!layout.sideOpen} aria-label={views.find((v) => v.id === layout.view)?.label} style={{ width: layout.side }} className="flex min-h-0 shrink-0 flex-col overflow-clip bg-sidebar text-sidebar-foreground">
+      {topBar}
       {side.map((v) => (
-        <div key={v} hidden={layout.view !== v} className="h-full">
+        <div key={v} hidden={layout.view !== v} className="min-h-0 flex-1">
           {viewPart(v, layout.sideOpen && layout.view === v)}
         </div>
       ))}

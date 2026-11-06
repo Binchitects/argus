@@ -901,6 +901,13 @@ describe('Code Arena, the IDE', () => {
     expect(within(tabs()).getByRole('tab', { name: /app\.ts/ })).toBeInTheDocument()
     // Unsaved, it shows the dot as any tab does; it says it is pinned.
     expect(within(tabs()).getByRole('tab', { name: /app\.ts/ })).toHaveAccessibleDescription('pinned')
+
+    // The middle button closes a tab, as in VS Code; pressing it starts no scrolling of the page.
+    await userEvent.dblClick(screen.getByRole('treeitem', { name: 'README.md' }))
+    const readme = await within(tabs()).findByRole('tab', { name: 'README.md' })
+    expect(fireEvent.mouseDown(readme, { button: 1 })).toBe(false)
+    fireEvent(readme, new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }))
+    await waitFor(() => expect(within(tabs()).queryByRole('tab', { name: 'README.md' })).not.toBeInTheDocument())
   })
 
   it('after a reload, the tabs are back as they were, unsaved text too, and typing keeps the unsaved text until it is saved', async () => {
@@ -1322,6 +1329,51 @@ describe('Code Arena, the IDE', () => {
     )
   })
 
+  it('customises the activity bar as VS Code does: views hidden and shown again from its menu, the bar above the side bar, kept', async () => {
+    const { now } = backend()
+    renderIde()
+    const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
+    // Hidden too: while the bar's menu is open, the rest of the page is hidden from the screen reader.
+    const labels = () => within(screen.getByRole('navigation', { name: 'Activity bar', hidden: true })).getAllByRole('button', { hidden: true }).map((b) => b.getAttribute('aria-label'))
+
+    // Hide 'Review' from its own menu: no longer in the bar.
+    fireEvent.contextMenu(within(bar).getByRole('button', { name: 'Review' }))
+    await userEvent.click(within(await screen.findByRole('menu', { name: 'Review: where it goes' })).getByRole('menuitem', { name: "Hide 'Review'" }))
+    await waitFor(() => expect(labels()).not.toContain('Review'))
+    // Its command still shows it, and its button is there while it shows.
+    await act(async () => runCommand('codeArena.view.review'))
+    await waitFor(() => expect(labels()).toContain('Review'))
+    await act(async () => runCommand('workbench.view.explorer'))
+    await waitFor(() => expect(labels()).not.toContain('Review'))
+
+    // The bar's own menu (a right-click on it) lists every view, checked while shown: Skills unchecked hides it too.
+    fireEvent.contextMenu(within(bar).getByRole('button', { name: 'Explorer' }).closest('[draggable="true"]')!.parentElement!)
+    let menu = await screen.findByRole('menu', { name: 'Activity bar' })
+    expect(within(menu).getByRole('menuitemcheckbox', { name: 'Review' })).toHaveAttribute('aria-checked', 'false')
+    expect(within(menu).getByRole('menuitemcheckbox', { name: 'Explorer' })).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(within(menu).getByRole('menuitemcheckbox', { name: 'Skills' }))
+    await waitFor(() => expect(within(screen.getByRole('menu', { name: 'Activity bar' })).getByRole('menuitemcheckbox', { name: 'Skills' })).toHaveAttribute('aria-checked', 'false'))
+    await waitFor(() => expect(labels()).not.toContain('Skills'))
+    // Review checked again: back in the bar.
+    await userEvent.click(within(menu).getByRole('menuitemcheckbox', { name: 'Review' }))
+    await waitFor(() => expect(labels()).toContain('Review'))
+    await userEvent.keyboard('{Escape}')
+
+    // The bar above the side bar: its views in a row there, the accounts and the gear at its end; the editor first after it.
+    await act(async () => runCommand('workbench.action.activityBarLocation.top'))
+    const top = await screen.findByRole('navigation', { name: 'Activity bar' })
+    expect(top.closest('aside')).toHaveAttribute('data-side', 'left')
+    expect(within(top).getByRole('button', { name: 'Manage' })).toBeInTheDocument()
+    expect(within(top).queryByRole('button', { name: 'Terminal' })).not.toBeInTheDocument()
+    // Hidden: no bar; a command brings it back.
+    await act(async () => runCommand('workbench.action.toggleActivityBarVisibility'))
+    await waitFor(() => expect(screen.queryByRole('navigation', { name: 'Activity bar' })).not.toBeInTheDocument())
+    await act(async () => runCommand('workbench.action.toggleActivityBarVisibility'))
+    expect(await screen.findByRole('navigation', { name: 'Activity bar' })).toBeInTheDocument()
+
+    await waitFor(() => expect(now.preferences.layout).toMatchObject({ hidden: ['skills'], activityBar: 'default' }))
+  })
+
   it("has a gear for its settings, keys and theme, and the model's tools: as Arena says, or the person's own", async () => {
     const { calls } = backend({
       'POST /api/settings': (body) => ({ json: { ...state, toolMode: (body as { toolMode: string | null }).toolMode ?? 'code', toolModeSet: (body as { toolMode: string | null }).toolMode !== null, toolModeArena: 'code' } }),
@@ -1422,6 +1474,12 @@ describe('Code Arena, the IDE', () => {
     await waitFor(() => expect(within(list).getAllByRole('tab')).toHaveLength(1))
     expect(fakes.terminals[1]!.disposed).toBe(true)
     expect(within(list).getByRole('tab', { name: 'bash 1' })).toHaveAttribute('aria-selected', 'true')
+
+    // The middle button on a terminal's tab ends it too, as VS Code's does.
+    const first = within(list).getByRole('tab', { name: 'bash 1' })
+    expect(fireEvent.mouseDown(first, { button: 1 })).toBe(false)
+    fireEvent(first, new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/terminals/close').at(-1)?.body).toEqual({ id: '1' }))
   })
 
   it('shows the branch, the model, the mode, the cursor and the language in the status bar, and the licence, source and log in About', async () => {
@@ -2832,7 +2890,7 @@ describe('Code Arena, the IDE', () => {
     await waitFor(() =>
       expect(now.preferences.layout).toEqual({
         view: 'explorer', side: 300, chat: 960, panel: 280, sideOpen: true, chatOpen: false, panelOpen: false, panelTab: 'terminal',
-        sideAt: 'left', panelAt: 'bottom', order: [...allViews], panelTabs: ['terminal', 'console', 'output'],
+        sideAt: 'left', panelAt: 'bottom', order: [...allViews], panelTabs: ['terminal', 'console', 'output'], hidden: [], activityBar: 'default',
       }),
     )
     expect(saves()).toHaveLength(1)
