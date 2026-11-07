@@ -478,7 +478,7 @@ public sealed partial class ChatService(
         async Task MakeRoomAsync(JsonObject request, string? force)
         {
             var asked = askedAt;
-            if (CutToolResults(messages, asked) && !resultsCut)
+            if (CutToolResults(messages, asked, runs.ContainsKey("read_file")) && !resultsCut)
             {
                 resultsCut = true;
                 await emit(new
@@ -1090,10 +1090,14 @@ public sealed partial class ChatService(
         return null;
     }
 
+    /// <summary>What of a big result's end goes with its start, and the most of its error lines and outline.</summary>
+    private const int EndChars = 1_500, FlaggedChars = 2_000, OutlineChars = 2_000;
+
     /// <summary>
-    /// A tool's result past the budget (Chat:ToolResultChars): the model reads its start, at a line's
-    /// end, and the whole of it is a file in the chat that read_file reads on from there. Every later
-    /// round and turn reads the result again, so one huge result would fill each of them.
+    /// A tool's result past the budget (Chat:ToolResultChars): the model reads its start, at a line's end, the lines of the
+    /// part not shown that look like errors (a test run's one failure in the middle of its log), the outline of a long
+    /// document, and its end (a summary, the last error); the whole of it is a file in the chat that read_file reads on
+    /// from there. Every later round and turn reads the result again, so one huge result would fill each of them.
     /// </summary>
     public static (string Text, ChatAttachment File)? Oversized(string tool, string text, int budget, bool canRead, Guid userId)
     {
@@ -1101,35 +1105,89 @@ public sealed partial class ChatService(
         {
             return null;
         }
-        var cut = text.LastIndexOf('\n', budget);
-        var atLineEnd = cut >= budget / 2;
-        cut = atLineEnd ? cut : budget;
         var name = $"{tool}-result-{Guid.CreateVersion7().ToString("N")[^6..]}.txt";
         var file = new ChatAttachment { UserId = userId, FileName = name, ContentType = "text/plain", Size = Encoding.UTF8.GetByteCount(text), Kind = "text", Text = text, Origin = "tool" };
+        var all = (text.EndsWith('\n') ? text[..^1] : text).Split('\n');
+        // Its end: whole lines, from a line's start.
+        var endFrom = all.Length;
+        for (var chars = 0; endFrom > 1 && chars + all[endFrom - 1].Length + 1 <= EndChars; endFrom--)
+        {
+            chars += all[endFrom - 1].Length + 1;
+        }
+        var outline = FileOutline.Sections(name, text) is { Count: >= 2 } sections ? FileOutline.Render(sections, OutlineChars) : "";
+        // Its start, in the room the rest leaves, at a line's end.
+        var room = Math.Max(budget / 2, budget - EndChars - FlaggedChars - outline.Length - 600);
+        var cut = text.LastIndexOf('\n', room);
+        var atLineEnd = cut >= room / 2;
+        cut = atLineEnd ? cut : room;
         // The first line not read whole.
-        var lines = text.AsSpan(0, cut).Count('\n') + (atLineEnd ? 2 : 1);
-        var said = canRead
-            ? $"[The result is {text.Length:N0} characters; above are its first {cut:N0}. All of it is the file {name} in this chat: read_file reads on from line {lines}, search_file finds lines in it.]"
-            : $"[The result is {text.Length:N0} characters; above are its first {cut:N0}. The rest is in the file {name}, which the person can open.]";
-        return (text[..cut] + "\n\n" + said, file);
+        var next = text.AsSpan(0, cut).Count('\n') + (atLineEnd ? 2 : 1);
+        var said = new StringBuilder(text[..cut]).Append("\n\n").Append(canRead
+            ? $"[The result is {text.Length:N0} characters, {all.Length:N0} lines; above are its first {cut:N0}. All of it is the file {name} in this chat: read_file reads on from line {next}, search_file finds lines in it.]"
+            : $"[The result is {text.Length:N0} characters, {all.Length:N0} lines; above are its first {cut:N0}. The rest is in the file {name}, which the person can open.]");
+        var flagged = new List<string>();
+        var more = 0;
+        for (var i = next - 1; i < endFrom - 1; i++)
+        {
+            if (Failing().IsMatch(all[i]))
+            {
+                if (flagged.Sum(l => l.Length) < FlaggedChars)
+                {
+                    flagged.Add($"{i + 1,6}\t{(all[i].Length > 300 ? all[i][..300] + "…" : all[i])}");
+                }
+                else
+                {
+                    more++;
+                }
+            }
+        }
+        if (flagged.Count > 0)
+        {
+            said.Append("\n[In the part not shown, lines that look like errors:\n").AppendJoin('\n', flagged).Append(more > 0 ? $"\n… and {more} more]" : "]");
+        }
+        if (outline.Length > 0)
+        {
+            said.Append("\n[Its outline (sections and their lines")
+                .Append(canRead ? "; read_file reads one by its section" : "").Append("):\n").Append(outline.TrimEnd()).Append(']');
+        }
+        if (endFrom > next)
+        {
+            said.Append(CultureInfo.InvariantCulture, $"\n[Its end, from line {endFrom + 1}:]\n").AppendJoin('\n', all[endFrom..]);
+        }
+        return (said.ToString(), file);
     }
+
+    /// <summary>A line that reads as an error or a failure (as Code Arena flags them in a command's long output).</summary>
+    [System.Text.RegularExpressions.GeneratedRegex(@"(?<!\b0 )\b(?:error|errors|fail|failed|failure|failing|fatal|exception|traceback|panic|assert(?:ion)?(?:error)?|denied|segmentation fault|not found)\b",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant)]
+    private static partial System.Text.RegularExpressions.Regex Failing();
 
     /// <summary>What of an earlier tool result a request keeps when it would not fit otherwise.</summary>
     public const int CutResultChars = 2_000;
 
+    /// <summary>The handle read_file reads a tool result of the chat whole by: result:&lt;its call's id&gt;.</summary>
+    public static string ResultHandle(string callId) => "result:" + callId;
+
     /// <summary>
     /// This answer's tool results after the question at <paramref name="asked"/>, all but the last two, cut to their start in
-    /// <paramref name="messages"/> (the request only: the chat keeps them whole). True when one was cut.
+    /// <paramref name="messages"/> (the request only: the chat keeps them whole), each with how to read it again: the file a
+    /// big one is kept as, or its handle (read_file, when the model can read files). True when one was cut.
     /// </summary>
-    public static bool CutToolResults(JsonArray messages, int asked)
+    public static bool CutToolResults(JsonArray messages, int asked, bool canRead = false)
     {
         var cut = false;
         var results = messages.Skip(asked + 1).OfType<JsonObject>().Where(m => m["role"]?.GetValue<string>() == "tool").ToList();
         foreach (var m in results.Take(results.Count - 2))
         {
-            if (m["content"] is JsonValue v && v.TryGetValue<string>(out var text) && text.Length > CutResultChars + 200)
+            if (m["content"] is JsonValue v && v.TryGetValue<string>(out var text) && text.Length > CutResultChars + 200 && !text.Contains("\n\n[Cut here:", StringComparison.Ordinal))
             {
-                m["content"] = text[..CutResultChars] + $"\n\n[Cut here: the result was {text.Length:N0} characters, too many for the model's context beside the rest. Call the tool again for a part of it if you need more.]";
+                // A big one kept as a file says so in its own note, which stays.
+                var kept = text.IndexOf("\n\n[The result is ", StringComparison.Ordinal) is var at and >= 0 && text.IndexOf(']', at) is var end and > 0 ? text[(at + 2)..(end + 1)] : null;
+                var again = kept is not null ? kept
+                    : canRead && m["tool_call_id"]?.GetValue<string>() is { Length: > 0 } call
+                        ? $"All of it: read_file with file \"{ResultHandle(call)}\" (from_line to read on, search_file to find lines)."
+                        : "Call the tool again for a part of it if you need more.";
+                m["content"] = text[..CutResultChars] + $"\n\n[Cut here: the result was {text.Length:N0} characters, too many for the model's context beside the rest. {again}]";
                 cut = true;
             }
         }

@@ -171,6 +171,29 @@ public sealed class PromptCacheTests
     }
 
     [Fact]
+    public void A_huge_tool_result_shows_its_end_the_errors_of_what_is_not_shown_and_its_outline()
+    {
+        // A test run's log: its one failure in the middle, its summary at the end. Before: only its start went to the
+        // model, which said nothing failed (as a small model did in Code Arena, whose results already show these).
+        var lines = Enumerable.Range(1, 4000).Select(i => $"test {i} passed").ToList();
+        lines[2199] = "FAILED test 2200: expected 3, got 4";
+        lines.Add("4000 tests, 1 failed");
+        var log = string.Join("\n", lines);
+        var said = ChatService.Oversized("run_tests", log, 24_000, true, Guid.NewGuid())!.Value.Text;
+        Assert.True(said.Length < 26_000, $"{said.Length}");
+        Assert.Contains("2200\tFAILED test 2200: expected 3, got 4", said, StringComparison.Ordinal);
+        Assert.EndsWith("4000 tests, 1 failed", said.TrimEnd(), StringComparison.Ordinal);
+        Assert.Contains("lines that look like errors", said, StringComparison.Ordinal);
+
+        // A long document (an MCP server's page): its outline, each section's line, to read the one needed.
+        var doc = string.Join("\n", Enumerable.Range(1, 60).SelectMany(i => (string[])[$"## Part {i}", .. Enumerable.Range(1, 30).Select(j => $"Words of part {i}, line {j}.")]));
+        var page = ChatService.Oversized("fetch_page", doc, 24_000, true, Guid.NewGuid())!.Value.Text;
+        Assert.Contains("Part 55", page, StringComparison.Ordinal);
+        Assert.Contains("read_file", page, StringComparison.Ordinal);
+        Assert.True(page.Length < 26_000, $"{page.Length}");
+    }
+
+    [Fact]
     public void Passages_about_a_question_are_its_best_blocks_in_order_with_their_headings()
     {
         var text = "# Install\n\nRun the installer on each server.\n\n# Licensing\n\nThe license key renews yearly.\n\n# Upgrade\n\nUpgrade servers one at a time.";

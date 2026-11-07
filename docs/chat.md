@@ -272,7 +272,9 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     holds and that room are more than the context: the next message compacts
     first. An answer whose tool calls outgrow the context cuts
     its earlier tool results to their start in what the model reads (the chat
-    keeps them whole), then compacts everything before the question. A
+    keeps them whole), each with how to read it again (`read_file` with the
+    handle its note gives, `result:<call>`, or the file a big one is kept
+    as), then compacts everything before the question. A
     message bigger than the whole context even at its most compact is not sent:
     the answer says so, with **Compact now** and the models with a larger
     context.
@@ -501,7 +503,12 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     lines), at most 8,000 characters, with a note saying how long it really
     is; the model reads the section it needs by name (`read_file` with
     `section`), reads on by lines, or searches it. `outline_file` gives a
-    file's whole outline. Files a tool made are read the same way. With the embedder, a long attachment goes in
+    file's whole outline. Files a tool made are read the same way. A tool's
+    result longer than its budget (24,000 characters) goes as its start, the
+    lines of the rest that look like errors (with their numbers: a test run's
+    one failure in the middle of its log), the outline of a long document and
+    its end (a summary, the last error); the whole of it is a file in the
+    chat that the model reads on. With the embedder, a long attachment goes in
     as its start, and the passages that match each question come with the
     question, with the file's name and lines (below).
   - **Web** (off until an admin turns it on): search (the stack's SearXNG)
@@ -2300,7 +2307,7 @@ The chat's limits are under Admin → Settings → Chat ([settings.md](settings.
 |---|---|---|
 | Tool calls per answer | 8 | how many rounds of tool use one answer may take |
 | Tool definitions sent whole up to | 6,000 characters | past it, tools go on demand (below); 0: always whole |
-| Tool result the model reads whole up to | 24,000 characters | a longer result goes as its start, and the whole of it becomes a file in the chat that the model reads on with `read_file`; 0: always whole |
+| Tool result the model reads whole up to | 24,000 characters | a longer result goes as its start, its error lines, its outline and its end, and the whole of it becomes a file in the chat that the model reads on with `read_file`; 0: always whole |
 | Largest attachment | 20 MB | per file (up to 100 MB) |
 | Text kept per attachment | 200,000 characters | longer files are cut and marked |
 | Passages of long files per question (Settings → Company knowledge) | 12,000 characters | with the embedder, what of the chat's long files and its assistant's files comes with each question |

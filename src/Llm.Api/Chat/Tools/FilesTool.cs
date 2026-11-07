@@ -32,7 +32,7 @@ public sealed class FilesTool(AppDbContext db) : IChatTool
             Schema.Function("read_file", $"Reads lines of a file in this chat, numbered: from a line, or one section of its outline (a heading, a page, a function) by name. Up to {MaxLines} lines a call; read on from next_from_line.",
                 new JsonObject
                 {
-                    ["file"] = Schema.Text("The file's name, as list_files shows it"),
+                    ["file"] = Schema.Text("The file's name, as list_files shows it; or an earlier tool result's handle (result:...), as the note under it says"),
                     ["from_line"] = new JsonObject { ["type"] = "integer", ["description"] = "First line to read, from 1 (default 1)" },
                     ["lines"] = new JsonObject { ["type"] = "integer", ["description"] = $"How many lines (default 200, at most {MaxLines})" },
                     ["section"] = Schema.Text("Instead of from_line: a section's name as the file's outline shows it (a heading, page 3, a function's name)"),
@@ -58,7 +58,13 @@ public sealed class FilesTool(AppDbContext db) : IChatTool
                 }.ToJsonString(Mcp.Plain));
             }
             var name = Schema.Str(args, "file") ?? "";
-            if (Find(files, name) is not { } file)
+            // An earlier tool result of this chat, by the handle its cut note gives (result:<its call's id>).
+            var file = name.Trim().StartsWith("result:", StringComparison.Ordinal) ? await ResultAsync(context.Conversation.Id, name.Trim(), token) : Find(files, name);
+            if (file is null && name.Trim().StartsWith("result:", StringComparison.Ordinal))
+            {
+                return new ToolResult($"There is no tool result {name.Trim()} in this chat: the handle is in the note under a result that was cut.", IsError: true);
+            }
+            if (file is null)
             {
                 return new ToolResult(files.Count == 0
                     ? "This chat has no files to read."
@@ -75,6 +81,15 @@ public sealed class FilesTool(AppDbContext db) : IChatTool
         }));
 
     public sealed record ChatFile(string Name, string Text, string[] Lines, bool Truncated);
+
+    /// <summary>A tool result of the conversation, whole as the chat keeps it, read as a file by its handle; null when there is none.</summary>
+    private async Task<ChatFile?> ResultAsync(Guid conversationId, string handle, CancellationToken ct)
+    {
+        var call = handle["result:".Length..];
+        var text = await db.ChatMessages.AsNoTracking().Where(m => m.ConversationId == conversationId && m.Role == "tool" && m.ToolCallId == call)
+            .OrderByDescending(m => m.Sequence).Select(m => m.Content).FirstOrDefaultAsync(ct);
+        return text is null ? null : new ChatFile(handle, text, (text.EndsWith('\n') ? text[..^1] : text).Split('\n'), false);
+    }
 
     /// <summary>The conversation's readable files, oldest first; a repeated name gets " (2)".</summary>
     public async Task<IReadOnlyList<ChatFile>> FilesAsync(Guid conversationId, CancellationToken ct)
