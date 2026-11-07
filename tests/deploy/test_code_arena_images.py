@@ -18,12 +18,15 @@ def linked() -> list[str]:
 
 
 def copied(dockerfile: Path) -> set[str]:
-    """What the Dockerfile's COPY lines bring in: each file named, and each folder copied whole (with a trailing /)."""
-    sources: set[str] = set()
+    """What the stage that builds Code Arena (the one copying src/CodeArena/) brings in with its COPY lines: each file
+    named, and each folder copied whole (with a trailing /). Another stage's copies are not there when it compiles."""
+    stages: list[set[str]] = [set()]
     for line in dockerfile.read_text().splitlines():
-        if line.startswith("COPY ") and "--from=" not in line:
-            sources.update(line.split()[1:-1])
-    return sources
+        if line.startswith("FROM "):
+            stages.append(set())
+        elif line.startswith("COPY ") and "--from=" not in line:
+            stages[-1].update(line.split()[1:-1])
+    return next((s for s in stages if "src/CodeArena/" in s), set())
 
 
 class CodeArenaImagesTests(unittest.TestCase):

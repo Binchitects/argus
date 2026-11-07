@@ -58,7 +58,8 @@ FROM code-arena-web-${CODE_ARENA} AS code-arena-web
 # there at that version, from nuget.org's, and only when neither is to be had
 # is it skipped (the page then says how to add it): a newer sdk:10.0 than the
 # packs is no failed image, nor one without Code Arena.
-# online fetches the packs from nuget.org; none skips it.
+# online fetches the packs from nuget.org; none skips it. A Code Arena that does not compile fails the image: only
+# packs that cannot be had (3 offline, 4 online) leave it out.
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS code-arena
 ARG CODE_ARENA
 WORKDIR /src
@@ -70,7 +71,7 @@ COPY tools/offline-nuget/ tools/offline-nuget/
 COPY src/CodeArena/ src/CodeArena/
 COPY skills/ skills/
 # The files Code Arena shares with the app (linked in its project): how a context refusal reads, and how earlier messages are found by their words.
-COPY src/Llm.Core/Chat/ContextOverflow.cs src/Llm.Core/Chat/HistoryWords.cs src/Llm.Core/Chat/ContextWindow.cs src/Llm.Core/Chat/
+COPY src/Llm.Core/Chat/ContextOverflow.cs src/Llm.Core/Chat/HistoryWords.cs src/Llm.Core/Chat/ContextWindow.cs src/Llm.Core/Chat/ResultCondenser.cs src/Llm.Core/Chat/ToolCallRepair.cs src/Llm.Core/Chat/
 COPY src/Argus/Util/CodeText.cs src/Argus/Util/
 # The arena module a run_code program imports (code mode), the sandbox's own, embedded.
 COPY deploy/services/sandbox/arena/__init__.py deploy/services/sandbox/arena/
@@ -82,7 +83,7 @@ RUN mkdir -p dist/code-arena \
       *) bash tools/publish-code-arena.sh --offline \
          || { test $? -eq 3 && echo "Code Arena: publishing with nuget.org's packs instead" \
               && { bash tools/publish-code-arena.sh \
-                   || echo "Code Arena: not built, neither tools/offline-nuget nor nuget.org had the packs (tools/fetch-code-arena-packs.sh, see tools/offline-nuget/README.md)"; }; } ;; \
+                   || { test $? -eq 4 && echo "Code Arena: not built, neither tools/offline-nuget nor nuget.org had the packs (tools/fetch-code-arena-packs.sh, see tools/offline-nuget/README.md)"; }; }; } ;; \
     esac
 
 # Chiseled: no shell, no package manager, runs as a non-root user.
