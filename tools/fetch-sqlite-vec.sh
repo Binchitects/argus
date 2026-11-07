@@ -48,7 +48,7 @@ for row in "${WHEELS[@]}"; do
     continue
   fi
   wheel="$tmp/$rid.whl"
-  curl -fsSL --retry 4 -o "$wheel" "$BASE/$path"
+  curl -fsSL --retry 8 --retry-delay 3 --retry-all-errors --connect-timeout 20 -o "$wheel" "$BASE/$path"
   actual="$(sha256 "$wheel")"
   if [[ "$actual" != "$digest" ]]; then
     echo "sqlite-vec $rid: checksum mismatch (expected $digest, got $actual)" >&2

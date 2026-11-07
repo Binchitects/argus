@@ -79,7 +79,8 @@ Components and data from others keep their own licences: the npm and NuGet
 packages listed in the lock files, the language, speech, picture and video
 models (each under its own licence, which its model card on Hugging Face
 gives; Admin → Models → **Find on Hugging Face** shows it before a download),
-Laya (Apache-2.0), and the knowledge packs (CC-BY-4.0, CC-BY-SA-3.0, PSF-2.0,
+Laya (Apache-2.0), sqlite-vec's Linux build in `native/` (MIT or Apache-2.0,
+taken from its published wheel and checked against its SHA-256), and the knowledge packs (CC-BY-4.0, CC-BY-SA-3.0, PSF-2.0,
 GFDL-1.3 or public domain, per pack; `argus pack info <name>` prints each).
 Their licences, not this one, govern them.
 

@@ -264,6 +264,53 @@ class BuildTests(unittest.TestCase):
             arenactl.build_images(Engine(), ["core"], pull=False, services=["studio"])
         self.assertEqual(calls, [("build", "studio")])
 
+    def test_keep_going_says_what_did_not_build_or_pull_and_goes_on(self):
+        arenactl, calls = self.build_with(lambda args: "studio" in args or args == ("pull", "postgres"))
+        arenactl.warn = lambda *a, **k: None
+        engine = Engine()
+        engine.has_image = lambda ref: False
+        arenactl.pinned_images = lambda: {}
+        failed = arenactl.build_images(engine, ["core"], keep_going=True)
+        self.assertEqual(failed, {"studio", "postgres"})
+        self.assertIn(("build", "web"), calls)
+
+
+class BundleTests(unittest.TestCase):
+    """arenactl bundle: an optional feature whose image cannot be built or pulled is left out, the bundle still made."""
+
+    def bundle(self, failed, without=None):
+        arenactl = load_arenactl()
+        made = []
+        arenactl.doctor_checks = lambda *a: []
+        arenactl.linux_only = lambda *a: None
+        arenactl.build_images = lambda *a, **k: set(failed)
+        arenactl.release_tag_missing = lambda: False
+        arenactl.say = arenactl.step = arenactl.warn = lambda *a, **k: None
+        arenactl.run = lambda cmd, **k: made.append(cmd) or 0
+        args = arenactl.argparse.Namespace(podman=False, engine="docker", dry_run=False, no_build=False, without=without,
+                                           code_arena="dist", with_deps=False, out=None, models_dir=None, image_cache=None,
+                                           models=False, packs=False, no_image_cache=False)
+        return arenactl, made, args
+
+    def test_a_feature_whose_image_failed_is_left_out(self):
+        arenactl, made, args = self.bundle({"lmdeploy"})
+        self.assertEqual(arenactl.cmd_bundle(args), 0)
+        cmd = made[-1]
+        self.assertIn("lmdeploy", cmd[cmd.index("--without") + 1].split(","))
+
+    def test_features_that_need_a_failed_one_go_too(self):
+        arenactl, made, args = self.bundle({"argus"}, without="lean")
+        arenactl.cmd_bundle(args)
+        cmd = made[-1]
+        left = cmd[cmd.index("--without") + 1].split(",")
+        self.assertTrue({"argus", "scanners", "lean"} <= set(left), left)
+
+    def test_a_core_image_that_failed_stops_the_bundle(self):
+        arenactl, made, args = self.bundle({"app"})
+        with self.assertRaises(arenactl.Stop):
+            arenactl.cmd_bundle(args)
+        self.assertEqual(made, [])
+
 
 if __name__ == "__main__":
     unittest.main()

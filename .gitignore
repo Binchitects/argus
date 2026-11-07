@@ -3,8 +3,12 @@ bin/
 obj/
 *.user
 TestResults/
-# sqlite-vec for Argus, fetched by tools/fetch-sqlite-vec.sh
-/native/
+# sqlite-vec for Argus, fetched by tools/fetch-sqlite-vec.sh; the linux-x64 one is kept here, so a
+# checkout builds Argus with no reach to PyPI
+/native/*
+!/native/runtimes/
+/native/runtimes/*
+!/native/runtimes/linux-x64/
 # Written at run time by the API
 src/Llm.Api/wwwroot/
 

@@ -330,7 +330,21 @@ def pinned_images() -> dict[str, str]:
     return {tag.strip(): digest.strip() for tag, digest in rows}
 
 
-def build_images(engine: Engine, profiles: list[str], pull: bool = True, services: list[str] | None = None) -> None:
+def build_images(engine: Engine, profiles: list[str], pull: bool = True, services: list[str] | None = None,
+                 keep_going: bool = False) -> set[str]:
+    """Builds and pulls the images of these features. With keep_going, an image that does not build or pull alone is
+    said and returned instead of stopping: the caller leaves its feature out."""
+    failed: set[str] = set()
+
+    def attempt(what: str, fn) -> None:
+        try:
+            fn()
+        except Stop as e:
+            if not keep_going:
+                raise
+            warn(f"{what}: {e}")
+            failed.add(what)
+
     compose = Compose(engine, profiles)
     try:
         cfg = compose.config()
@@ -354,21 +368,29 @@ def build_images(engine: Engine, profiles: list[str], pull: bool = True, service
                 # Only an image that fails alone fails the build.
                 say("  some did not build at the same time as the others: each again, alone")
                 for s in built:
-                    compose.run("build", s)
+                    attempt(s, lambda s=s: compose.run("build", s))
         if pull and others:
             missing = [s for s in others if not engine.has_image(svcs[s].get("image", ""))]
             step(f"the other images: {len(others)}, {len(missing)} pulled")
             # Those pinned by a tag of our own: their digest pulled (when not here), then tagged.
             pinned = pinned_images()
             for ref in sorted({svcs[s].get("image", "") for s in missing} & set(pinned)):
-                if not engine.has_image(pinned[ref]):
-                    run([engine.need(), "pull", pinned[ref]])
-                run([engine.need(), "tag", pinned[ref], ref])
+                def pin(ref=ref):
+                    if not engine.has_image(pinned[ref]):
+                        run([engine.need(), "pull", pinned[ref]])
+                    run([engine.need(), "tag", pinned[ref], ref])
+                for s in [s for s in missing if svcs[s].get("image", "") == ref][:1]:
+                    attempt(s, pin)
             missing = [s for s in missing if svcs[s].get("image", "") not in pinned]
             if missing:
-                compose.run("pull", *missing)
+                if keep_going:
+                    for s in missing:
+                        attempt(s, lambda s=s: compose.run("pull", s))
+                else:
+                    compose.run("pull", *missing)
     finally:
         compose.close()
+    return failed
 
 
 def cmd_build(a) -> int:
@@ -712,7 +734,23 @@ def cmd_bundle(a) -> int:
     linux_only("Making the bundle")
     profiles = choose_features(None, a.without, all_=True)
     if not a.no_build and not a.dry_run:
-        build_images(engine, profiles)
+        # Every feature's image, each that can be built or pulled here. An optional feature whose image cannot be (the
+        # LMDeploy engine with no reach to pypi.org, a registry that is blocked) is left out of the bundle and said, so
+        # the bundle is still made; the core's images must all be there.
+        failed = build_images(engine, profiles, keep_going=True)
+        if failed:
+            owner = {svc: f["id"] for f in features() for svc in f["services"]}
+            core = sorted(s for s in failed if s not in owner)
+            if core:
+                raise Stop(f"the core's images did not build or pull: {', '.join(core)} (each is said above)")
+            gone = sorted({owner[s] for s in failed})
+            before = set(profiles)
+            profiles = choose_features(None, ",".join(gone + ([a.without] if a.without else [])), all_=True)
+            needing = sorted(before - set(profiles) - set(gone))
+            a.without = ",".join(sorted({f["id"] for f in features()} - set(profiles)))
+            warn(f"left out of the bundle, their images not built or pulled here: {', '.join(gone)}"
+                 + (f"; and {', '.join(needing)}, which need them" if needing else "")
+                 + ". The bundle is made without them; build them and make it again to have them.")
     if not a.code_arena and not list(DIST.glob(f"code-arena-{VERSION}-*")) and not a.dry_run:
         step("Code Arena's packages: none of this version in dist/, made now")
         cmd_code_arena(argparse.Namespace(rids=None, offline=False, no_web=False, out=None, engine=engine.name))
