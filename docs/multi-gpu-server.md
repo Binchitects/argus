@@ -531,6 +531,14 @@ the 61. It lists the model under its file's name (`qwen3.8-flash-next-unsloth-ud
 and answers either. LMDeploy needs `--tool-call-parser` for its model's family (qwen2d5, qwen3, llama3 ...) for tool
 calls, as vLLM and SGLang need theirs: 7.8.3 writes them.
 
+With the parsers the app writes since 7.8.3, checked the same day on the RTX 3090, each engine with its launcher:
+
+| Engine | Qwen2.5-1.5B-Instruct: tool call | Qwen3-0.6B: tool call | Qwen3-0.6B: thinking apart from the answer |
+|---|---|---|---|
+| vLLM 0.31 (`hermes`, `qwen3`) | `get_weather` `{"city": "Paris"}` | yes | yes (`reasoning`) |
+| SGLang 0.5.21 (`qwen`, `qwen3`) | yes | yes | yes (`reasoning_content`) |
+| LMDeploy 0.18.0 (`qwen2d5`; `qwen3`, `default`) | yes | yes | yes (`reasoning_content`) |
+
 ## FP4 on Hopper
 
 The H200 NVL is Hopper (sm_90): FP8 tensor cores, no FP4 ones (Blackwell has them). What the engines in this
