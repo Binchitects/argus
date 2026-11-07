@@ -14,6 +14,14 @@
     <PackageReference Include="Npgsql" Version="10.0.3" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Code Arena's scanners and its code graph, linked, not copied: Argus's symbol graph (callers, callees, the type
+         hierarchy) is the one Code Arena's IDE and agent read, built here on each repository's checkout. -->
+    <Compile Include="../CodeArena/CodeScan.cs" Link="Shared/CodeScan.cs" />
+    <Compile Include="../CodeArena/CodeGraph.cs" Link="Shared/CodeGraph.cs" />
+    <Compile Include="../CodeArena/CodeIndex.cs" Link="Shared/CodeIndex.cs" />
+    <Compile Include="../CodeArena/CodeFiles.cs" Link="Shared/CodeFiles.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- The schema is shared with the Python implementation, not copied: both
          read the same files, so the two can never migrate an index differently. -->
     <EmbeddedResource Include="Migrations/*.sql" LogicalName="migrations/%(Filename)%(Extension)" />

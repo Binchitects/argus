@@ -44,6 +44,8 @@ COPY src/Argus/Argus.csproj src/Argus/
 COPY tests/Argus.Tests/Argus.Tests.csproj tests/Argus.Tests/
 RUN dotnet restore tests/Argus.Tests/Argus.Tests.csproj
 COPY src/Argus/ src/Argus/
+# Code Arena's scanners and code graph, linked by Argus.csproj (the symbol graph): these files, not Code Arena.
+COPY src/CodeArena/CodeScan.cs src/CodeArena/CodeGraph.cs src/CodeArena/CodeIndex.cs src/CodeArena/CodeFiles.cs src/CodeArena/
 COPY tests/Argus.Tests/ tests/Argus.Tests/
 COPY tests/fixtures/argus/ tests/fixtures/argus/
 

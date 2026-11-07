@@ -499,6 +499,9 @@ internal sealed partial class CodeGraph
     /// <summary>A type's bases in the folder, by the names its first line gives.</summary>
     private List<SymbolRef> Bases(SymbolRef type) => _bases.GetOrAdd(type.Id, _ => BasesNow(type));
 
+    /// <summary>A type's bases in the folder (classes it extends, interfaces it implements), as Argus's symbol graph keeps them.</summary>
+    public List<SymbolRef> BasesOfType(SymbolRef type) => IsType(type) ? Bases(type) : [];
+
     private List<SymbolRef> BasesNow(SymbolRef type)
     {
         var family = Family(type.File.Lang)!;

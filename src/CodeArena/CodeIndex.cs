@@ -147,7 +147,7 @@ internal sealed record IndexSync(int Read, int Kept, int Removed, int Skipped, T
 /// and in one file in Code Arena's data folder (never in the repository). A sync reads again only the files whose size or
 /// time changed and whose bytes did; a file of a newer format or another scanner's version is read again whole.
 /// </summary>
-internal sealed class CodeIndex
+internal sealed partial class CodeIndex
 {
     public const int Format = 1;
     private static readonly byte[] Magic = "CAIX"u8.ToArray();
@@ -166,7 +166,6 @@ internal sealed class CodeIndex
     private readonly object _gate = new();
     private Dictionary<string, IndexedFile> _files = new(StringComparer.Ordinal);
     private CodeGraph? _graph;
-    private CodeSearch? _search;
 
     public CodeIndex(string root, string file)
     {
@@ -181,24 +180,6 @@ internal sealed class CodeIndex
 
     /// <summary>How many files were scanned by the last sync (a test counts what is read again).</summary>
     public int LastScanned { get; private set; }
-
-    /// <summary>
-    /// The folder's index as it was kept, brought in step with the folder (built whole when there is none, it cannot be read,
-    /// or a rebuild is asked for), and written back when anything changed.
-    /// </summary>
-    public static (CodeIndex Index, IndexSync Sync, bool Built) Open(string dataDir, Workspace workspace, CancellationToken ct, bool rebuild = false)
-    {
-        var file = FileFor(dataDir, workspace.Root);
-        var index = rebuild ? null : Load(workspace.Root, file);
-        var built = index is null;
-        index ??= new CodeIndex(workspace.Root, file);
-        var sync = index.Sync(workspace, workspace.Roots, ct);
-        if (built || sync.Read > 0 || sync.Removed > 0 || sync.Skipped > 0)
-        {
-            index.Save();
-        }
-        return (index, sync, built);
-    }
 
     public static string FileFor(string dataDir, string root) =>
         System.IO.Path.Combine(dataDir, "index", Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(root)))[..16] + ".bin");
@@ -222,6 +203,9 @@ internal sealed class CodeIndex
         }
     }
 
+    /// <summary>What is made of the files and must be made again when they change (Code Arena's search).</summary>
+    partial void Invalidated();
+
     /// <summary>A file's whole path, from its path as the index keeps it (relative to the root, or whole for an added folder outside it).</summary>
     public string FullOf(string path) => System.IO.Path.GetFullPath(System.IO.Path.Combine(Root, path));
 
@@ -231,15 +215,6 @@ internal sealed class CodeIndex
         lock (_gate)
         {
             return _graph ??= new CodeGraph(this, _files.Values);
-        }
-    }
-
-    /// <summary>The answers by words and by name over the files as the index has them now; made again after a sync changes them.</summary>
-    public CodeSearch Search()
-    {
-        lock (_gate)
-        {
-            return _search ??= new CodeSearch(this, _files.Values);
         }
     }
 
@@ -292,7 +267,7 @@ internal sealed class CodeIndex
                 _files[path] = next;
             }
             _graph = null;
-            _search = null;
+            Invalidated();
         }
         return true;
     }
@@ -308,10 +283,9 @@ internal sealed class CodeIndex
     /// Brings the index in step with the folder: files gone taken out, files new or changed (size or time, then bytes) read,
     /// the rest kept; at most <paramref name="threads"/> at once.
     /// </summary>
-    public IndexSync Sync(Workspace workspace, IEnumerable<string> roots, CancellationToken ct, int threads = 0)
+    public IndexSync Sync(IReadOnlyList<CodeFile> listed, CancellationToken ct, int threads = 0)
     {
         var clock = Stopwatch.StartNew();
-        var listed = CodeFiles.List(workspace, roots, ct);
         Dictionary<string, IndexedFile> before;
         lock (_gate)
         {
@@ -360,7 +334,7 @@ internal sealed class CodeIndex
             if (read > 0 || before.Count != next.Count || before.Keys.Any(k => !next.ContainsKey(k)))
             {
                 _graph = null;
-                _search = null;
+                Invalidated();
             }
         }
         LastScanned = read;

@@ -41,6 +41,22 @@ class CodeArenaImagesTests(unittest.TestCase):
             self.assertEqual([], missing, f"{image.relative_to(REPO)} does not copy what Code Arena links")
 
 
+class ArgusImageTests(unittest.TestCase):
+    def test_Argus_s_image_copies_the_files_its_project_links_from_Code_Arena(self):
+        """Argus links Code Arena's scanners and code graph (its symbol graph): its build stage must copy each one."""
+        project = (REPO / "src" / "Argus" / "Argus.csproj").read_text()
+        files = [f"src/{path}" for path in re.findall(r'<Compile Include="\.\./([^"]+)"', project)]
+        self.assertTrue(files, "Argus.csproj links nothing from elsewhere: the check reads it wrong")
+        stages: list[set[str]] = [set()]
+        for line in (REPO / "src" / "Argus" / "Dockerfile").read_text().splitlines():
+            if line.startswith("FROM "):
+                stages.append(set())
+            elif line.startswith("COPY ") and "--from=" not in line:
+                stages[-1].update(line.split()[1:-1])
+        build = next(st for st in stages if "src/Argus/" in st)
+        self.assertEqual([], [f for f in files if f not in build], "src/Argus/Dockerfile does not copy what Argus links")
+
+
 class BuildContextTests(unittest.TestCase):
     def test_What_the_images_copy_from_the_repository_is_in_the_build_context(self):
         """A COPY of a path .dockerignore leaves out fails the build ("not found"): every source a Dockerfile built from the

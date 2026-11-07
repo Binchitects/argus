@@ -16,12 +16,13 @@ the stack.
 
 ## What your agent gets
 
-**Your private code**, access-controlled per developer — 14 tools:
+**Your private code**, access-controlled per developer — 15 tools:
 
 | Tool | Answers |
 |---|---|
 | `find_symbol` | Exact definitions across every repo |
 | `find_references` | Every mention, product-wide, cross-repo |
+| `symbol_graph` | *"Who calls this? What implements that interface?"* — callers, callees, references, implementations and bases inside each repository, each a use tied to the definition it names (not a word match), with how it was tied ([graph.md](graph.md#the-symbol-graph)) |
 | `search_code` | Lexical search over millions of lines |
 | `semantic_search` | *"Where do we handle retry backoff for uploads?"* — when the question has no identifier in it |
 | `which_repo` | *"Which repo do I change for X?"* — from a description, a symbol, a stack trace, or a diff |

@@ -70,7 +70,11 @@ program, and Edge or Chrome 109.
    the SQL of the graph tools, impact_of and semantic search), 3 (a name several
    repositories provide settled only by the user's own manifests; candidates
    shared among the readable), 4 (secrets taken out of configuration files
-   before they are stored, and out of those stored before).
+   before they are stored, and out of those stored before), and the symbol graph inside
+   each repository with `symbol_graph` (callers, callees, references, implementations,
+   bases; Code Arena's scanners linked). Still to do: stable symbol keys, cross-repository
+   symbol edges, tests and owners, `mr_impact`, contracts, the Code map page, and the
+   measured gates.
 2. **The app's own gateway**, commits 10 to 21 of
    [own-gateway.md](design/own-gateway.md). LiteLLM goes only after the
    measured gates and a day's soak.

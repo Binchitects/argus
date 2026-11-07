@@ -100,6 +100,15 @@ public static class Commands
                 AuditLog.IndexRepo(project.PathWithNamespace, branch, "up_to_date", Ms(started));
                 Progress.BranchDone(project.PathWithNamespace, branch, "up_to_date");
                 log.Say($"{branch}: up to date at {RepoLog.Commit(sha, subject)}; nothing new to read.");
+                // Indexed before the symbol graph was (or by its older version): it is built now, from the same checkout.
+                if (branch == project.DefaultBranch && Symbols.SymbolGraph.Enabled && !Symbols.SymbolGraph.IsCurrent(conn, repoId, sha))
+                {
+                    var current = Mirror.SyncWorktree(cfg.Index, project.GitlabId, mirrorDir, sha, branch);
+                    if (Symbols.SymbolGraph.Refresh(conn, repoId, current, sha) is { } builtSaid)
+                    {
+                        log.Say($"{branch}: {builtSaid}.");
+                    }
+                }
                 return (false, "up_to_date");
             }
             newReader = old is not null && Worker.ContractIsStale(conn, repoId);
@@ -109,6 +118,11 @@ public static class Commands
                 symbols: files => Progress.Symbols(project.PathWithNamespace, branch, files));
             (subject, var committed) = Mirror.CommitInfo(mirrorDir, sha);
             if (!result.TimedOut && !result.SymbolsFailed) Writes.SetCommitInfo(conn, repoId, subject, committed);
+            // Who calls and implements what inside the repository, on its default branch.
+            if (!result.TimedOut && branch == project.DefaultBranch && Symbols.SymbolGraph.Refresh(conn, repoId, tree, sha) is { } graphSaid)
+            {
+                log.Say($"{branch}: {graphSaid}.");
+            }
         }
         catch (GitError exc)
         {

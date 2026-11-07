@@ -211,3 +211,30 @@ For a plain-language description, `which_repo` leans away from a repository
 that many readable repositories build on (counted from likely and strong
 build links of their own code): a new feature rarely belongs in a shared
 library.
+
+## The symbol graph
+
+Inside each repository, Argus also keeps who uses what: every use in its C#, TypeScript, JavaScript and Python code
+tied to the definition it names, and each type tied to the types it extends or implements. It is built when the
+repository's default branch is indexed (and once for a repository indexed before it was), from the files of its
+checkout, by the same scanners and resolution Code Arena's IDE and agent use (linked, so the three agree). Nothing is
+compiled, restored or installed.
+
+`symbol_graph` asks it: `relation` callers (the default), callees, references (calls and other uses: a type in a
+signature, a method passed along), implementations or bases, of a `symbol` given as a name, a qualified name or its
+tail (`Orders.Save`), or `path#Qualified`; `depth` 2 or 3 walks further, each further result naming what it came
+`via`. Each result says how its use was tied:
+
+| evidence | how | confidence |
+|---|---|---|
+| S | by scope or import: a local, the enclosing type or its bases, the file's usings or imports | 0.95 |
+| T | by the declared type of what it is called on | 0.90 |
+| N | the only definition of that name in the repository | 0.70 |
+| G | a guess among two or three definitions (one row each), shown only with `possible` | 0.6 / n |
+
+A name with more than three definitions, or none, makes no edge. A call through reflection, a delegate kept elsewhere or
+a dynamic import is not seen, so an empty answer means "not found by the graph". Like every read, each step puts the
+reader's allowlist in its SQL; the graph is per repository, so a walk never crosses into another. `ARGUS_SYMBOL_GRAPH=0`
+turns it off (nothing built, the tool answers nothing). The edges are in `sym_edges`, one row per use, rebuilt for a
+repository at each new commit of its default branch.
+
