@@ -104,6 +104,14 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
     private JsonObject Tagged(JsonObject body)
     {
         var request = body.Clone();
+        if (Kind != "arena")
+        {
+            foreach (var key in request.Select(kv => kv.Key).Where(k => !Standard.Contains(k)).ToList())
+            {
+                request.Remove(key);
+            }
+            return request;
+        }
         if (Tags?.Invoke() is { Count: > 0 } tags)
         {
             var metadata = request["metadata"] as JsonObject ?? new JsonObject();
@@ -157,9 +165,51 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
 
     public string BaseUrl { get; } = baseUrl.TrimEnd('/');
 
+    /// <summary>What it speaks: Arena's gateway ("arena"), another chat-completions API ("openai"), or Anthropic's Messages API.</summary>
+    public string Kind { get; init; } = "arena";
+
+    /// <summary>The provider's name, for its models' names and what it says (null: Arena's gateway).</summary>
+    public string? Provider { get; init; }
+
+    /// <summary>The window of a provider's models when its API does not say.</summary>
+    public int? ProviderContext { get; init; }
+
+    /// <summary>The providers beside the gateway (<see cref="Providers"/>), by name: their models are "name:model" and asked of them.</summary>
+    public IReadOnlyDictionary<string, GatewayClient> Others { get; set; } = new Dictionary<string, GatewayClient>(StringComparer.Ordinal);
+
+    /// <summary>A client for a provider of the person's, with their key.</summary>
+    public static GatewayClient For(HttpClient http, ProviderConfig p, string key) =>
+        new(http, p.Url, key) { Kind = p.Kind, Provider = p.Name, ProviderContext = p.Context, Configured = p.Models };
+
+    /// <summary>The models a provider offers as the config lists them (empty: those its API lists).</summary>
+    private List<string> Configured { get; init; } = [];
+
+    /// <summary>The provider a request's model is of, and the request as it goes to it (its own model name); null: the gateway's.</summary>
+    private (GatewayClient Client, JsonObject Body)? Routed(JsonObject body)
+    {
+        if (Others.Count == 0 || body.Str("model") is not { } model || Providers.Split(model, Others.Keys) is not { } to)
+        {
+            return null;
+        }
+        var routed = body.Clone();
+        routed["model"] = to.Model;
+        return (Others[to.Provider], routed);
+    }
+
+    // What a chat-completions API that is not Arena's takes: Arena's own fields (its tags, llama.cpp's options) left out.
+    private static readonly HashSet<string> Standard = new(StringComparer.Ordinal)
+    {
+        "model", "messages", "tools", "tool_choice", "parallel_tool_calls", "stream", "stream_options", "max_tokens", "max_completion_tokens",
+        "temperature", "top_p", "stop", "seed", "response_format", "reasoning_effort", "presence_penalty", "frequency_penalty", "user",
+    };
+
     /// <summary>The ids /v1/models lists for this key.</summary>
     public async Task<List<string>> ModelIdsAsync(CancellationToken ct)
     {
+        if (Provider is not null && Configured.Count > 0)
+        {
+            return [.. Configured];
+        }
         using var req = Request(HttpMethod.Get, "/v1/models");
         using var timeout = Deadline(ct, TimeSpan.FromSeconds(30));
         using var res = await Send(req, timeout.Token);
@@ -174,6 +224,28 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
 
     /// <summary>The models, with their windows and abilities from /v1/model/info when the gateway shares it.</summary>
     public async Task<List<ModelInfo>> ModelsAsync(CancellationToken ct)
+    {
+        var mine = await GatewayModelsAsync(ct);
+        foreach (var (name, other) in Others)
+        {
+            try
+            {
+                mine.AddRange((await other.ModelIdsAsync(ct)).Select(id => new ModelInfo($"{name}:{id}")
+                {
+                    Context = other.ProviderContext ?? (other.Kind == "anthropic" ? 200_000 : null),
+                    MaxOutput = other.Kind == "anthropic" ? 32_000 : null,
+                    Vision = other.Kind == "anthropic",
+                }));
+            }
+            catch (Exception e) when (e is HttpRequestException or GatewayException or OperationCanceledException && !ct.IsCancellationRequested)
+            {
+                Retrying?.Invoke($"{name} did not list its models ({Fmt.OneLine(e.Message, 120)}): its models are not offered now.");
+            }
+        }
+        return mine;
+    }
+
+    private async Task<List<ModelInfo>> GatewayModelsAsync(CancellationToken ct)
     {
         var ids = await ModelIdsAsync(ct);
         var info = new Dictionary<string, JsonObject>(StringComparer.Ordinal);
@@ -238,6 +310,10 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
     /// </param>
     public async Task<Completion> CompleteAsync(JsonObject body, IStreamSink? sink, CancellationToken ct, long uncached = 0)
     {
+        if (Routed(body) is { } other)
+        {
+            return await other.Client.CompleteAsync(other.Body, sink, ct, uncached);
+        }
         var request = Tagged(body);
         request["stream"] = true;
         request["stream_options"] = new JsonObject { ["include_usage"] = true };
@@ -295,7 +371,7 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
     {
         if (e is GatewayException g)
         {
-            return (g.Status is 408 or 429 or 502 or 503 or 504) && !g.PerMinute;
+            return (g.Status is 408 or 429 or 502 or 503 or 504 or 529) && !g.PerMinute;
         }
         if (e is not (HttpRequestException or IOException))
         {
@@ -314,8 +390,9 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
 
     private async Task<Completion> StreamOnceAsync(JsonObject request, IStreamSink sink, CancellationToken ct, TimeSpan? expected)
     {
-        using var req = Request(HttpMethod.Post, "/v1/chat/completions");
-        req.Content = new StringContent(Json.Line(request), Encoding.UTF8, "application/json");
+        var anthropic = Kind == "anthropic";
+        using var req = Request(HttpMethod.Post, anthropic ? "/v1/messages" : "/v1/chat/completions");
+        req.Content = new StringContent(Json.Line(anthropic ? Providers.ToAnthropic(request) : request), Encoding.UTF8, "application/json");
         req.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
         // A watchdog: no answer at all for too long (not even its headers), or the stream quiet for too long, is a stalled one.
         // A prompt expected to take longer to read than that waits half as long again as expected (within the longest wait).
@@ -379,6 +456,8 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
         string? finish = null;
         var said = false;
         var ended = false;
+        // Anthropic's events, read into what chat completions would have said.
+        var claude = anthropic ? new Providers.AnthropicStream() : null;
         await using var stream = await res.Content.ReadAsStreamAsync(ct);
         try
         {
@@ -413,6 +492,25 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
         // One event of the stream; true at its end.
         bool Event(string data)
         {
+            if (claude is not null)
+            {
+                var (t, th) = claude.Read(data);
+                if (th is { Length: > 0 })
+                {
+                    said = true;
+                    thought.Append(th);
+                    sink.Reasoning(th);
+                }
+                if (t is { Length: > 0 })
+                {
+                    said = true;
+                    text.Append(t);
+                    sink.Text(t);
+                }
+                finish = claude.Finish ?? finish;
+                usage = claude.Usage;
+                return claude.Ended;
+            }
             if (data == "[DONE]")
             {
                 return true;
@@ -470,7 +568,7 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
             }
             return false;
         }
-        JsonArray? toolCalls = null;
+        JsonArray? toolCalls = claude?.ToolCalls;
         if (pieces.Count > 0)
         {
             toolCalls = [];
@@ -599,7 +697,15 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
     private HttpRequestMessage Request(HttpMethod method, string path)
     {
         var req = new HttpRequestMessage(method, BaseUrl + path);
-        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
+        if (Kind == "anthropic")
+        {
+            req.Headers.Add("x-api-key", key);
+            req.Headers.Add("anthropic-version", "2023-06-01");
+        }
+        else
+        {
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
+        }
         return req;
     }
 

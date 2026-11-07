@@ -245,6 +245,38 @@ internal sealed partial class Runtime : IAsyncDisposable
         {
             Memory.Denied = denied.Any(d => d?.GetValue<string>() == "feature.memory");
         }
+        // Arena's admins allow other providers now: theirs are offered (listed in the background).
+        if (!ProvidersRefused && Gateway.Others.Count == 0 && Config.Providers.Count > 0)
+        {
+            UseProviders();
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    if (await Gateway.ModelsAsync(CancellationToken.None) is { Count: > 0 } listed)
+                    {
+                        Models = listed;
+                    }
+                }
+                catch (Exception e) when (e is HttpRequestException or GatewayException or OperationCanceledException)
+                {
+                    // Listed again with Arena's next change of settings.
+                }
+            });
+        }
+        // Arena's admins turned other providers off: their models go, and a session on one goes on with Arena's.
+        if (ProvidersRefused && Gateway.Others.Count > 0)
+        {
+            var names = Gateway.Others.Keys.ToList();
+            Gateway.Others = new Dictionary<string, GatewayClient>(StringComparer.Ordinal);
+            Models = [.. Models.Where(m => Providers.Split(m.Id, names) is null)];
+            Ui.Warn($"Arena's admins do not let Code Arena use other providers: {string.Join(", ", names)} not offered.");
+            if (Providers.Split(Model.Name, names) is not null && Models.Count > 0)
+            {
+                Ui.Warn($"{Model.Name} is a provider's: going on with {Models[0].Id}.");
+                Model.Info = Models[0];
+            }
+        }
     }
 
     /// <summary>Whether a model sees pictures: as the gateway says, or as Arena's chat config does.</summary>
@@ -259,6 +291,90 @@ internal sealed partial class Runtime : IAsyncDisposable
     /// (Admin → Models → Tools, in its chat config), else both.
     /// </summary>
     public string ToolMode => Config.ToolMode ?? ArenaToolMode ?? "both";
+
+    /// <summary>
+    /// The person's providers beside Arena's gateway, each with its key (one without is said and left out), unless Arena's
+    /// admins turned other providers off (its chat config says codeArenaProviders: false, read when it comes). Their
+    /// models join the list at the next listing.
+    /// </summary>
+    public void UseProviders()
+    {
+        if (ProvidersRefused)
+        {
+            Gateway.Others = new Dictionary<string, GatewayClient>(StringComparer.Ordinal);
+            return;
+        }
+        var others = new Dictionary<string, GatewayClient>(StringComparer.Ordinal);
+        foreach (var p in Config.Providers)
+        {
+            if (Providers.KeyOf(p, Env.Env) is not { } key)
+            {
+                Ui.Warn($"{p.Name} has no key: set {(p.KeyEnv is { } e ? e : "its apiKey")} (/providers add {p.Name} asks for it). Its models are not offered.");
+                continue;
+            }
+            var client = GatewayClient.For(Http, p, key);
+            client.Retrying = said => Notice(true, $"{p.Name}: {said}");
+            others[p.Name] = client;
+        }
+        Gateway.Others = others;
+    }
+
+    /// <summary>
+    /// A provider added (or changed) and kept in config.json: its address and kind (a known one's by its name), its key
+    /// (null: from its environment variable). Its models are listed now; what it says of them, or why not.
+    /// </summary>
+    public async Task<string> AddProviderAsync(string name, string? url, string? kind, string? key, CancellationToken ct)
+    {
+        if (ProvidersRefused)
+        {
+            throw new InvalidOperationException("Arena's admins do not let Code Arena use other providers (Admin → Settings → Code Arena).");
+        }
+        var o = new JsonObject();
+        if (url is { Length: > 0 }) o["url"] = url;
+        if (kind is { Length: > 0 }) o["kind"] = kind;
+        if (key is { Length: > 0 }) o["apiKey"] = key;
+        var provider = Providers.Parse(name, o, Env.Paths.ConfigFile);
+        if (Providers.KeyOf(provider, Env.Env) is null)
+        {
+            throw new InvalidOperationException($"{name} needs its key: paste it, or set {provider.KeyEnv ?? "keyEnv"} first.");
+        }
+        var file = Config.Load(Env.Paths.ConfigFile);
+        file.Providers = [.. file.Providers.Where(x => x.Name != name), provider];
+        file.Save(Env.Paths.ConfigFile);
+        Config.Providers = [.. Config.Providers.Where(x => x.Name != name), provider];
+        UseProviders();
+        var models = await Gateway.ModelsAsync(ct);
+        if (models.Count > 0)
+        {
+            Models = models;
+        }
+        var its = Models.Where(m => m.Id.StartsWith(name + ":", StringComparison.Ordinal)).Select(m => m.Id).ToList();
+        return its.Count == 0
+            ? $"{name} is kept, but it listed no models (its address or key may be wrong; \"models\" in config.json lists them by hand)."
+            : $"{name} is kept: {its.Count} model{(its.Count == 1 ? "" : "s")} ({string.Join(", ", its.Take(6))}{(its.Count > 6 ? ", …" : "")}). /model {its[0]} uses one.";
+    }
+
+    /// <summary>A provider taken out of config.json; false when there was none of that name.</summary>
+    public bool RemoveProvider(string name)
+    {
+        if (Config.Providers.All(p => p.Name != name))
+        {
+            return false;
+        }
+        var file = Config.Load(Env.Paths.ConfigFile);
+        file.Providers = [.. file.Providers.Where(x => x.Name != name)];
+        file.Save(Env.Paths.ConfigFile);
+        Config.Providers = [.. Config.Providers.Where(x => x.Name != name)];
+        UseProviders();
+        Models = [.. Models.Where(m => !m.Id.StartsWith(name + ":", StringComparison.Ordinal))];
+        return true;
+    }
+
+    /// <summary>Arena's admins have not allowed other providers for Code Arena (its chat config says codeArenaProviders: true when they do); false when not signed in to Arena.</summary>
+    public bool ProvidersRefused => ArenaConnectedAccount && ArenaChat?.Bool("codeArenaProviders") != true;
+
+    // Signed in to Arena: its admins decide (until its chat config says they allow them, other providers are not used).
+    private bool ArenaConnectedAccount => Config.Url is { Length: > 0 } && Config.ApiKey is { Length: > 0 };
 
     /// <summary>Arena's word on one of its tools (title, description, icon), from its chat config; null when it has not said.</summary>
     private JsonObject? ArenaTool(string group) => (ArenaChat?["tools"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(t => t.Str("id") == group);
@@ -368,6 +484,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             rt.Notice(true, said);
             rt.Agent?.Events?.Notice(said);
         };
+        rt.UseProviders();
         try
         {
             await rt.InitAsync(o, ct);
@@ -523,6 +640,19 @@ internal sealed partial class Runtime : IAsyncDisposable
         Demand.Changed = (off, loaded) => Session?.Tools(off, loaded);
         Tools = new ToolBox(tools) { Demand = Demand, Mode = () => ToolMode, Settings = ToolSettings, Withheld = name => name is "remember" or "recall" && Memory.Denied };
 
+        // With providers of the person's own, Arena's word on them first: its admins decide whether they are offered.
+        if (Config.Providers.Count > 0 && ArenaConnectedAccount)
+        {
+            if (await offered is { } arenaWord)
+            {
+                ArenaChat = arenaWord;
+            }
+            UseProviders();
+            if (ProvidersRefused)
+            {
+                Ui.Info($"Arena's admins do not let Code Arena use other providers: {string.Join(", ", Config.Providers.Select(p => p.Name))} not offered.");
+            }
+        }
         // The servers connect in the background; the session starts when the gateway has said which models there are.
         var models = Gateway.ModelsAsync(ct);
         AddLinks();

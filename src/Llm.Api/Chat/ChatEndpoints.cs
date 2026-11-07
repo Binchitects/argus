@@ -157,6 +157,8 @@ public static partial class ChatEndpoints
             compactSource = me.CompactAt is null ? "company" : "account",
             // The feature permissions this person does not hold (Compare, attachments...): the chat leaves them out.
             denied = Llm.Core.Access.Permissions.FeatureKeys.Where(k => !membership.Has(k)),
+            // Whether Code Arena may offer other providers' models with a person's own key (Chat:CodeArenaProviders).
+            codeArenaProviders = chat.CurrentValue.CodeArenaProviders,
         };
     }
 

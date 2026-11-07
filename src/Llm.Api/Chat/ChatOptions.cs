@@ -18,6 +18,12 @@ public sealed class ChatOptions
     public bool CondenseResults { get; set; } = true;
 
     /// <summary>
+    /// Whether Code Arena may use other providers' models (Anthropic, OpenAI, DeepSeek...) with a person's own key, beside
+    /// the gateway's. Off by default: what is sent to them leaves the company, and the gateway neither sees nor counts it.
+    /// </summary>
+    public bool CodeArenaProviders { get; set; }
+
+    /// <summary>
     /// A chat is compacted (its older messages summarized) before an answer when the
     /// request would fill this share of the model's context, in percent (20 to 95), as
     /// the context gauge shows it. 0: only when the next request would not fit. Either

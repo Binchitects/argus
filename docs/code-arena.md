@@ -3305,6 +3305,41 @@ key in only when you may use Code Arena. What you may see and change is what
 Arena's page lets you: nothing about a project is decided in Code Arena. In
 Arena's Code Studio the IDE is in your own page, and calls Arena directly.
 
+## Other providers' models
+
+Beside Arena's models, Code Arena can use those of other providers with your own key: Anthropic (Claude, through its
+Messages API), OpenAI, DeepSeek, OpenRouter, Mistral, or any API that speaks OpenAI's chat completions (a team's own
+vLLM, for one). Their models are offered as `provider:model` (`anthropic:claude-sonnet-5-5`, `deepseek:deepseek-chat`)
+in `/model` and the IDE's model picker, and asked of the provider directly; Arena's are asked of its gateway as before.
+
+```text
+/providers                         those set up, their keys and models
+/providers add anthropic           the key is asked (hidden), or read from ANTHROPIC_API_KEY
+/providers add deepseek            DEEPSEEK_API_KEY; openai: OPENAI_API_KEY, openrouter, mistral
+/providers add local http://gpu:8000 openai    any OpenAI-compatible API, by its address
+/providers remove deepseek
+```
+
+They are kept in `config.json` (readable by you only, as Arena's key is):
+
+```json
+"providers": {
+  "anthropic": {"keyEnv": "ANTHROPIC_API_KEY"},
+  "local": {"kind": "openai", "url": "http://gpu:8000", "apiKey": "...", "models": ["qwen3-coder"], "context": 131072}
+}
+```
+
+`models` lists them by hand (else what the provider's `/v1/models` lists), `context` their window where the API does
+not say it (Anthropic's: 200K). Every tool, the plan, sub-agents, compaction and the IDE work with them as with
+Arena's models; Anthropic's prompt cache is used for Code Arena's instructions. What is not Arena's: the gateway
+neither sees nor counts what goes to them, so Arena's budgets, safeguards and usage dashboards cover its own models
+only, and Arena's token counts for the context view are estimates for them.
+
+**Arena's admins decide.** Signed in to Arena, Code Arena uses other providers only when Admin → Settings → Chat →
+**Code Arena may use other providers** is on (off by default: what a session sends them leaves the company). Turned
+off while a session uses one, the session goes on with one of Arena's models. Not signed in to Arena, the person's
+providers are theirs to use.
+
 ## Its commits
 
 In a git repository, each turn that ends commits the files it changed as the

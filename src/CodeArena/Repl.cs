@@ -31,6 +31,7 @@ internal sealed partial class Repl(Runtime rt)
     [
         ("/help", "these commands"),
         ("/model [name]", "show or switch the model"),
+        ("/providers [add NAME [URL] | remove NAME]", "models from other providers with your own key: Anthropic, OpenAI, DeepSeek, OpenRouter, Mistral, any OpenAI-compatible API"),
         ("/mode [mode]", "show or switch the mode: ask, auto-edit, plan, yolo"),
         ("/thinking [level]", "show or set thinking: default, off, low, medium, high, xhigh (Tab while it thinks skips it for that turn)"),
         ("/tools [on|off NAME]", "the tools this session has; turn a group of Arena's or a server's tools on or off in it"),
@@ -983,6 +984,9 @@ internal sealed partial class Repl(Runtime rt)
             case "/model":
                 ChooseModel(arg);
                 break;
+            case "/providers":
+                await ProvidersAsync(arg, ct);
+                break;
             case "/mode":
                 if (arg.Length == 0)
                 {
@@ -1790,6 +1794,63 @@ internal sealed partial class Repl(Runtime rt)
             return;
         }
         Ui.Line($"It {rt.Compaction.Describe(follow ? rt.CompactAtFrom : null)} ({(follow ? "config.json no longer sets when" : "kept in config.json")}).");
+    }
+
+    /// <summary>/providers: those beside Arena's gateway (list), add NAME [URL] [anthropic|openai] (the key asked, hidden), remove NAME.</summary>
+    private async Task ProvidersAsync(string arg, CancellationToken ct)
+    {
+        var words = arg.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        switch (words)
+        {
+            case [] or ["list"]:
+                if (rt.ProvidersRefused)
+                {
+                    Ui.Info("Arena's admins do not let Code Arena use other providers (Admin → Settings → Code Arena).");
+                }
+                foreach (var p in rt.Config.Providers)
+                {
+                    var keyAt = Providers.KeyOf(p, rt.Env.Env) is null ? Ui.Yellow("no key") : p.ApiKey is { Length: > 0 } ? "key in config.json" : $"key from {p.KeyEnv}";
+                    var n = rt.Models.Count(m => m.Id.StartsWith(p.Name + ":", StringComparison.Ordinal));
+                    Ui.Line($"  {p.Name,-12} {p.Kind,-9} {p.Url}  {keyAt}  {n} model{(n == 1 ? "" : "s")}");
+                }
+                if (rt.Config.Providers.Count == 0)
+                {
+                    Ui.Info("None: Arena's models only.");
+                }
+                Ui.Info("/providers add NAME [URL] [anthropic|openai] adds one (known: " + string.Join(", ", Providers.Known.Keys) + "); its models are NAME:model in /model.");
+                break;
+            case ["add", var name, .. var rest]:
+                var url = rest.FirstOrDefault(w => w.Contains("://", StringComparison.Ordinal));
+                var kind = rest.FirstOrDefault(w => w is "anthropic" or "openai");
+                var known = Providers.Known.TryGetValue(name, out var k) ? k : default;
+                string? key = null;
+                if (known.KeyEnv is not { } env || rt.Env.Env(env) is not { Length: > 0 })
+                {
+                    key = Ui.ReadSecret($"{name}'s API key (kept in config.json, readable by you only; Enter: none{(known.KeyEnv is { } e2 ? $", then set {e2}" : "")}): ");
+                }
+                try
+                {
+                    Ui.Info(await rt.AddProviderAsync(name, url, kind, key, ct));
+                }
+                catch (InvalidOperationException e)
+                {
+                    Ui.Error(e.Message);
+                }
+                break;
+            case ["remove", var gone]:
+                if (rt.RemoveProvider(gone))
+                {
+                    Ui.Info($"{gone} is taken out (its key with it).");
+                }
+                else
+                {
+                    Ui.Error($"There is no provider {gone}: /providers lists them.");
+                }
+                break;
+            default:
+                Ui.Error("/providers, /providers add NAME [URL] [anthropic|openai], /providers remove NAME.");
+                break;
+        }
     }
 
     private void ChooseModel(string arg)

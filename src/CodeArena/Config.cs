@@ -197,6 +197,12 @@ internal sealed class Config
     /// subscription. "agents": {"claude": ["claude", "-p", "--permission-mode", "acceptEdits"]}; an empty list turns one off.
     /// </summary>
     public Dictionary<string, List<string>> Agents { get; set; } = [];
+
+    /// <summary>
+    /// Providers of models beside Arena's gateway, with the person's own keys (<see cref="ProviderConfig"/>):
+    /// "providers": {"anthropic": {"apiKey": "..."}, "deepseek": {}, "local": {"kind": "openai", "url": "http://gpu:8000"}}.
+    /// </summary>
+    public List<ProviderConfig> Providers { get; set; } = [];
     /// <summary>The shell the IDE's terminals start (default: $SHELL, else bash or sh; PowerShell on Windows).</summary>
     public string? TerminalShell { get; set; }
     /// <summary>Directories the tools may use besides the working directory.</summary>
@@ -353,6 +359,12 @@ internal sealed class Config
                 : throw new InvalidOperationException($"\"agents\" in {file}: each is a command line, a list: {{\"claude\": [\"claude\", \"-p\"]}}.")),
             _ => throw new InvalidOperationException($"\"agents\" in {file} is an object: {{\"claude\": [\"claude\", \"-p\"]}}."),
         };
+        config.Providers = raw["providers"] switch
+        {
+            null => [],
+            JsonObject providers => [.. providers.Select(p => CodeArena.Providers.Parse(p.Key, p.Value as JsonObject, file))],
+            _ => throw new InvalidOperationException($"\"providers\" in {file} is an object: {{\"anthropic\": {{\"apiKey\": \"...\"}}}}."),
+        };
         config.TerminalShell = raw.Str("terminalShell");
         config.AutoCommit = raw.Bool("autoCommit") ?? true;
         config.PlanCritique = raw.Bool("planCritique") ?? true;
@@ -499,6 +511,7 @@ internal sealed class Config
         Set("context", Context);
         Set("shell", Shell);
         Set("agents", Agents.Count == 0 ? null : new JsonObject(Agents.Select(a => KeyValuePair.Create(a.Key, (JsonNode?)new JsonArray([.. a.Value.Select(x => (JsonNode)x)])))));
+        Set("providers", Providers.Count == 0 ? null : new JsonObject(Providers.Select(p => KeyValuePair.Create(p.Name, (JsonNode?)p.ToJson()))));
         Set("terminalShell", TerminalShell);
         Set("autoCommit", AutoCommit ? null : false);
         Set("planCritique", PlanCritique ? null : false);
