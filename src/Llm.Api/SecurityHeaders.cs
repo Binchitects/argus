@@ -13,6 +13,12 @@ public static class SecurityHeaders
         var hsts = app.ApplicationServices.GetRequiredService<Microsoft.Extensions.Options.IOptions<Operations.StackOptions>>().Value.Hsts;
         return app.Use(async (context, next) =>
         {
+            // A forwarded port's host serves its program's pages, with the program's own headers (a dev server's inline scripts).
+            if (Code.Studio.PortForwards.IsPortHost(context))
+            {
+                await next(context);
+                return;
+            }
             context.Response.OnStarting(() =>
             {
                 var h = context.Response.Headers;

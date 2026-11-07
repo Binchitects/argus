@@ -251,6 +251,10 @@ sandbox:
 workspaces:
   enabled: false
   slots: 32
+  # The agent's commands in bubblewrap, as compose has them: the pod in a user namespace of its own (hostUsers: false),
+  # an unmasked /proc, no seccomp or AppArmor confinement (bubblewrap makes namespaces without a capability). Needs
+  # Kubernetes 1.33 or later with user namespaces on its nodes; off, the commands run unsandboxed and Code Arena says so.
+  sandbox: false
   resources: { requests: { cpu: "1", memory: 2Gi }, limits: { cpu: "4", memory: 16Gi } }
 
 # The chat's 3D models: Blender headless, as the sandbox is (no network, a read-only root), with more room.

@@ -281,8 +281,9 @@ internal sealed class Terminals(Workspace workspace, Config config, Func<string,
                 vars[name] = value;
             }
         }
-        // Whatever a task or a run configuration sets.
+        // Whatever a task or a run configuration sets: neither the person's key nor the one Code Studio reaches this engine with.
         vars.Remove("ARENA_API_KEY");
+        vars.Remove("CODE_ARENA_TOKEN");
         var cwd = start?.Cwd ?? shellIn ?? workspace.Root;
         if (!Directory.Exists(cwd))
         {

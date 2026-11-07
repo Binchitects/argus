@@ -567,6 +567,34 @@ public sealed class ChatToolsTests(AppFixture app)
     }
 
     [Fact]
+    public async Task An_earlier_tool_result_is_read_whole_again_by_the_handle_its_cut_note_gives()
+    {
+        await using var f = NewApp(settings: new() { ["Chat:InlineAttachmentChars"] = "2000" });
+        var (b, _, _) = await PersonAsync(f);
+        var log = string.Join('\n', Enumerable.Range(1, 1000).Select(i => $"line {i}: all quiet"));
+        using var form = new MultipartFormDataContent();
+        var part = new ByteArrayContent(System.Text.Encoding.UTF8.GetBytes(log));
+        part.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("text/plain");
+        form.Add(part, "file", "worker.log");
+        var file = await b.JsonAsync(await b.Http.PostAsync(new Uri("/api/chat/attachments", UriKind.Relative), form));
+        var id = await NewChatAsync(b, new { });
+        async Task<List<JsonElement>> AskAsync(string text)
+        {
+            var res = await b.PostAsync($"/api/chat/conversations/{id}/messages", new { content = text, attachments = new[] { file.GetProperty("id").GetGuid() } });
+            return [.. (await res.Content.ReadAsStringAsync()).Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+                .Where(l => l.StartsWith("data: ", StringComparison.Ordinal)).Select(l => JsonDocument.Parse(l[6..]).RootElement)];
+        }
+        var first = await AskAsync("""[call read_file {"file":"worker.log","from_line":1,"lines":300}]""");
+        var call = Event(first, "tool_call").GetProperty("id").GetString()!;
+
+        var again = await AskAsync($$"""[call read_file {"file":"{{ChatService.ResultHandle(call)}}","from_line":1,"lines":1}]""");
+        var read = JsonDocument.Parse(Event(again, "tool_result").GetProperty("text").GetString()!).RootElement;
+        Assert.Contains("line 2: all quiet", read.GetProperty("text").GetString(), StringComparison.Ordinal);
+        var missing = await AskAsync("""[call read_file {"file":"result:call_nope"}]""");
+        Assert.Contains("There is no tool result result:call_nope", Event(missing, "tool_result").GetProperty("text").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task A_long_file_goes_in_part_and_the_model_reads_on_or_searches_it()
     {
         await using var f = NewApp(settings: new() { ["Chat:InlineAttachmentChars"] = "2000" });

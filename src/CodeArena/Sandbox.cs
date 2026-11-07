@@ -104,7 +104,7 @@ internal sealed class Sandbox
         if (kind == Kinds.Off)
         {
             var why = OperatingSystem.IsLinux()
-                ? (Which("bwrap", env) is null ? "bubblewrap is not installed (apt install bubblewrap, dnf install bubblewrap)" : "bubblewrap cannot make a sandbox here (user namespaces are off?)")
+                ? (Which("bwrap", env) is null ? "bubblewrap is not installed (apt install bubblewrap, dnf install bubblewrap)" : "bubblewrap cannot make a sandbox here (user namespaces are off, or a container's seccomp, AppArmor or masked /proc refuse them)")
                 : OperatingSystem.IsWindows() ? "Windows has no sandbox Code Arena can use" : "this system has no sandbox Code Arena can use";
             if (mode == "on")
             {
@@ -160,12 +160,15 @@ internal sealed class Sandbox
     private static bool Within(string path, string folder) =>
         string.Equals(path, folder, StringComparison.Ordinal) || path.StartsWith(folder.TrimEnd('/') + "/", StringComparison.Ordinal);
 
-    /// <summary>Whether bubblewrap can make a sandbox here (it cannot where user namespaces are off).</summary>
+    /// <summary>
+    /// Whether bubblewrap can make a sandbox here, its own /proc as the commands get (it cannot where user namespaces are
+    /// off, nor in a container whose /proc is masked: there every command would fail to start).
+    /// </summary>
     private static bool Works()
     {
         try
         {
-            using var p = Process.Start(new ProcessStartInfo("bwrap", ["--ro-bind", "/", "/", "--dev", "/dev", "--unshare-pid", "true"])
+            using var p = Process.Start(new ProcessStartInfo("bwrap", ["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--unshare-pid", "true"])
             {
                 RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false,
             });

@@ -1,4 +1,5 @@
-{{- /* The only way in: DOMAIN (the web, and /api, /connect and /.well-known to the app), gateway.DOMAIN and argus.DOMAIN, with TLS. */}}
+{{- /* The only way in: DOMAIN (the web, and /api, /connect and /.well-known to the app), gateway.DOMAIN and argus.DOMAIN, with TLS;
+with workspaces, Code Studio's forwarded ports (ws-<workspace>-<port>.DOMAIN) to the app too. */}}
 {{- if .Values.ingress.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -26,7 +27,7 @@ spec:
   ingressClassName: {{ . }}
   {{- end }}
   tls:
-    - hosts: [{{ .Values.domain | quote }}, {{ printf "gateway.%s" .Values.domain | quote }}, {{ printf "argus.%s" .Values.domain | quote }}]
+    - hosts: [{{ .Values.domain | quote }}, {{ printf "gateway.%s" .Values.domain | quote }}, {{ printf "argus.%s" .Values.domain | quote }}{{ if .Values.workspaces.enabled }}, {{ printf "*.%s" .Values.domain | quote }}{{ end }}]
       secretName: {{ .Values.ingress.tlsSecret }}
   rules:
     - host: {{ .Values.domain | quote }}
@@ -48,5 +49,13 @@ spec:
       http:
         paths:
           - { path: /, pathType: Prefix, backend: { service: { name: argus, port: { number: 7700 } } } }
+    {{- end }}
+    {{- if .Values.workspaces.enabled }}
+    {{- /* Code Studio's forwarded ports: every other name under the domain (the names above are matched first), to the
+    app, which answers only ws-<workspace>-<port> hosts and passes them on to the workspace's dev server. */}}
+    - host: {{ printf "*.%s" .Values.domain | quote }}
+      http:
+        paths:
+          - { path: /, pathType: Prefix, backend: { service: { name: app, port: { number: 8080 } } } }
     {{- end }}
 {{- end }}

@@ -109,6 +109,32 @@ class ChartRender(unittest.TestCase):
             env = {e["name"]: e.get("value") for c in app["spec"]["template"]["spec"]["containers"] for e in c.get("env") or []}
             self.assertEqual("true", env.get("Engine__MediaOwnGpus"))
 
+    def test_The_workspaces_sandbox_is_asked_for_and_otherwise_the_pod_keeps_the_clusters_confinement(self):
+        def pod(docs):
+            d = next(d for d in docs if d.get("kind") == "Deployment" and d["metadata"]["name"] == "workspaces")
+            return d["spec"]["template"]["spec"]
+        plain = pod(self.docs)
+        self.assertNotIn("hostUsers", plain)
+        self.assertNotIn("procMount", plain["containers"][0]["securityContext"])
+        boxed = pod(rendered(*[a for s in ON + ["workspaces.sandbox=true"] for a in ("--set", s)]))
+        self.assertIs(boxed["hostUsers"], False)
+        context = boxed["containers"][0]["securityContext"]
+        self.assertEqual((context["procMount"], context["seccompProfile"]["type"], context["appArmorProfile"]["type"]), ("Unmasked", "Unconfined", "Unconfined"))
+        # Still no capability of its own beyond switching users, and no way to gain one.
+        self.assertIs(context["allowPrivilegeEscalation"], False)
+        self.assertEqual(context["capabilities"]["drop"], ["ALL"])
+
+    def test_forwarded_ports_hosts_reach_the_app_only_with_workspaces(self):
+        def ingress(docs):
+            return next(d for d in docs if d.get("kind") == "Ingress")["spec"]
+        on = ingress(self.docs)
+        wild = next(r for r in on["rules"] if r["host"] == "*.arena.example.test")
+        self.assertEqual(wild["http"]["paths"][0]["backend"]["service"]["name"], "app")
+        self.assertIn("*.arena.example.test", on["tls"][0]["hosts"])
+        # The named hosts stay theirs (an exact host is matched before a wildcard).
+        self.assertEqual([r["host"] for r in on["rules"]][:2], ["arena.example.test", "gateway.arena.example.test"])
+        self.assertNotIn("*.arena.example.test", [r["host"] for r in ingress(self.defaults)["rules"]])
+
 
 if __name__ == "__main__":
     unittest.main()

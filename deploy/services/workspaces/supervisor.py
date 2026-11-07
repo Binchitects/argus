@@ -7,19 +7,32 @@ workspace's engine at its port with that workspace's key.
     GET    /health                     {"ok", "running", "slots"}
     GET    /v1/workspaces              [{"id", "port", "since"}] of those running
     PUT    /v1/workspaces/<id>         {"repo", "branch", "git_user", "git_token", "arena_url",
-                                        "api_key", "gateway_url", "mcp_url", "argus_url", "model", "ca"}
+                                        "api_key", "gateway_url", "mcp_url", "argus_url", "model", "ca",
+                                        "git_name", "git_email"}
                                        -> {"port", "key", "cloned"}: cloned once (the branch
                                        checked out), its engine started (again)
     POST   /v1/workspaces/<id>/stop    its engine stopped; its files stay
     DELETE /v1/workspaces/<id>         stopped, and its files gone
+    GET    /v1/workspaces/<id>/ports   [{"port", "address", "pid", "process"}]: what its programs
+                                       listen on (a dev server), not its engine
+    CONNECT <id>:<port>                a forwarded port: the connection joined, both ways, to
+                                       what the workspace listens on there (on its loopback when
+                                       it listens on all); Arena's own route for its owner
+                                       (Code Studio's Ports) is the only way in
 
 Each workspace has a slot (its number, kept in its folder): its user is FIRST_UID + slot
 (named ws<slot> in /etc/passwd and /etc/group, its home the workspace's, so whoami, a
 prompt, Python's getpass, Node.js's os.userInfo() and ssh know it), its engine's port
 FIRST_PORT + slot. Its folder (WORKSPACES/<id>, 0700, its user's) holds
 the clone (repo) and the engine's home (home: its settings, sessions, and the person's
-code-host token, 0600, which git reads through an askpass helper and never writes into
-the clone's config). Every process of a stopped workspace's user is killed.
+code-host token, 0600 in the engine's config folder, which git reads through an askpass
+helper and never writes into the clone's config). Every process of a stopped workspace's
+user is killed.
+
+The agent's commands run in Code Arena's sandbox, bubblewrap: the clone and the build
+caches writable, the engine's config and data folders (its sessions, the token) hidden.
+It needs user namespaces, which compose's security_opt for this service allows (its own
+seccomp profile, no AppArmor confinement, an unmasked /proc); /health says whether it works.
 
 "ca" is the company CA the stack trusts (a GitLab on the company's own CA): written into
 the home with the system's CAs as one bundle, which git, curl, Python, pip, .NET and
@@ -59,10 +72,16 @@ CLONE_SECONDS = int(os.environ.get("WORKSPACES_CLONE_SECONDS", "600"))
 START_SECONDS = int(os.environ.get("WORKSPACES_START_SECONDS", "30"))
 
 PASSWD = os.environ.get("WORKSPACES_PASSWD", "/etc/passwd")
+# The container's sockets (every workspace shares its network).
+PROC_NET = "/proc/net"
 GROUP = os.environ.get("WORKSPACES_GROUP", "/etc/group")
 # The system's CAs, which a bundle with the company CA keeps.
 SYSTEM_CAS = os.environ.get("WORKSPACES_SYSTEM_CAS", "/etc/ssl/certs/ca-certificates.crt")
 CA_MOST = 64 * 1024
+# A user of no workspace: the sandbox is tried as it.
+NOBODY = 65534
+# Whether the agent's commands get a sandbox (_sandbox), found at start.
+SANDBOX: dict = {"sandbox": "off", "why": "not checked yet"}
 
 ID = re.compile(r"^[0-9a-f]{32}$")
 BRANCH = re.compile(r"^[A-Za-z0-9._/-]{1,200}$")
@@ -159,12 +178,16 @@ def _own(path: str, uid: int) -> None:
 
 ASKPASS = """#!/bin/sh
 # git asks for the code host's user name, then its password: the person's token, read from
-# this home (never written into the clone's config).
+# the engine's own config folder (never written into the clone's config). The agent's sandbox
+# hides that folder, so a command the model runs cannot read it.
 case "$1" in
   Username*) printf '%s\\n' "$GIT_USER" ;;
-  *) cat "$HOME/.git-token" ;;
+  *) cat "$HOME/.config/code-arena/git-token" ;;
 esac
 """
+
+# The engine's config folder in a workspace's home ($XDG_CONFIG_HOME/code-arena), hidden from the agent's commands.
+CONFIG = os.path.join(".config", "code-arena")
 
 
 def _env(home: str, spec: dict, key: str | None) -> dict:
@@ -198,6 +221,10 @@ def _check(spec: dict) -> None:
         raise Refused(400, "arena_url: Arena's address (http or https).")
     if not isinstance(spec.get("api_key"), str) or len(spec["api_key"]) < 16:
         raise Refused(400, "api_key: the person's key for the workspace's agent.")
+    for name in ("git_name", "git_email"):
+        value = spec.get(name)
+        if value is not None and (not isinstance(value, str) or len(value) > 200 or any(c in value for c in "\r\n\0")):
+            raise Refused(400, f"{name}: the person's name and email for their commits, one line each.")
     ca = spec.get("ca")
     if ca is not None and (not isinstance(ca, str) or len(ca) > CA_MOST or "PRIVATE KEY" in ca
                            or (ca.strip() and "-----BEGIN CERTIFICATE-----" not in ca)):
@@ -222,6 +249,30 @@ def _trust(home: str, ca: str | None) -> None:
         os.chmod(path, 0o644)
 
 
+def _identity(home: str, name: str | None, email: str | None) -> None:
+    """The person's name and email for commits in the home's .gitconfig, unless it names an email already (theirs, set in a terminal)."""
+    if not email:
+        return
+    path = os.path.join(home, ".gitconfig")
+    text = ""
+    if os.path.isfile(path):
+        with open(path) as f:
+            text = f.read()
+    section = ""
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("["):
+            section = line.strip("[]").strip().lower()
+        elif section == "user" and line.split("=", 1)[0].strip().lower() == "email":
+            return
+
+    def quoted(value: str) -> str:
+        return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    with open(path, "a") as f:
+        f.write(("\n" if text and not text.endswith("\n") else "") + "[user]\n" + (f"\tname = {quoted(name)}\n" if name else "") + f"\temail = {quoted(email)}\n")
+    os.chmod(path, 0o644)
+
+
 def _clone(wid: str, uid: int, spec: dict) -> bool:
     """The project cloned into the workspace once (its branch), as its user, with the person's token; false when it was there."""
     folder, home, repo = _folder(wid), os.path.join(_folder(wid), "home"), os.path.join(_folder(wid), "repo")
@@ -229,11 +280,17 @@ def _clone(wid: str, uid: int, spec: dict) -> bool:
     with open(os.path.join(home, ".git-askpass"), "w") as f:
         f.write(ASKPASS)
     os.chmod(os.path.join(home, ".git-askpass"), 0o700)
-    token = os.path.join(home, ".git-token")
+    os.makedirs(os.path.join(home, CONFIG), mode=0o700, exist_ok=True)
+    token = os.path.join(home, CONFIG, "git-token")
     with open(token, "w") as f:
         f.write(str(spec.get("git_token") or ""))
     os.chmod(token, 0o600)
+    # Where an earlier supervisor kept it, which the agent's commands could read.
+    if os.path.exists(os.path.join(home, ".git-token")):
+        os.remove(os.path.join(home, ".git-token"))
     _trust(home, spec.get("ca"))
+    # Commits (the IDE's, and the agent's after a turn) are the person's.
+    _identity(home, spec.get("git_name"), spec.get("git_email"))
     os.chmod(folder, 0o700)
     _own(folder, uid)
     if os.path.isdir(os.path.join(repo, ".git")):
@@ -246,6 +303,25 @@ def _clone(wid: str, uid: int, spec: dict) -> bool:
         said = (done.stderr or done.stdout).replace(str(spec.get("git_token") or "\0"), "***").strip()[-600:]
         raise Refused(502, f"The project could not be cloned: {said or 'git failed'}")
     return True
+
+
+def _sandbox() -> dict:
+    """
+    Whether the agent's commands get a sandbox here: bubblewrap making one as Code Arena does (its own /proc and
+    processes), as a user of no workspace. It needs the container's own seccomp profile and no AppArmor confinement or
+    masked /proc (compose's security_opt); without them Code Arena runs the commands unsandboxed and says why.
+    """
+    bwrap = shutil.which("bwrap")
+    if bwrap is None:
+        return {"sandbox": "off", "why": "bubblewrap is not installed in the workspaces image."}
+    try:
+        done = subprocess.run([bwrap, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--unshare-pid", "--die-with-parent", "true"],
+                              preexec_fn=_demote(NOBODY), capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return {"sandbox": "off", "why": f"bubblewrap did not run: {e}"}
+    if done.returncode != 0:
+        return {"sandbox": "off", "why": " ".join((done.stderr or done.stdout or "bubblewrap failed").split())[:300]}
+    return {"sandbox": "bubblewrap"}
 
 
 def _listening(port: int, seconds: float, process=None) -> bool:
@@ -337,6 +413,123 @@ def running() -> list[dict]:
         return [{"id": w, "port": r["port"], "since": r["since"]} for w, r in _running.items()]
 
 
+def _address(hexed: str) -> str:
+    """An address as /proc/net/tcp and tcp6 write it (each 32-bit word in the host's order, little-endian here)."""
+    raw = b"".join(bytes.fromhex(hexed[i:i + 8])[::-1] for i in range(0, len(hexed), 8))
+    return socket.inet_ntop(socket.AF_INET if len(raw) == 4 else socket.AF_INET6, raw)
+
+
+def _listening_sockets() -> list[tuple[int, int, str, int]]:
+    """(uid, port, address, inode) of every TCP socket listening in the container's network."""
+    found = []
+    for name in ("tcp", "tcp6"):
+        try:
+            with open(os.path.join(PROC_NET, name)) as f:
+                lines = f.read().splitlines()[1:]
+        except OSError:
+            continue
+        for line in lines:
+            fields = line.split()
+            # The state 0A is LISTEN.
+            if len(fields) > 9 and fields[3] == "0A":
+                local, port = fields[1].rsplit(":", 1)
+                found.append((int(fields[7]), int(port, 16), _address(local), int(fields[9])))
+    return found
+
+
+def _listeners(uid: int) -> dict[int, str]:
+    """The ports a workspace's user listens on, each with its address (0.0.0.0, ::, a loopback)."""
+    return {port: address for owner, port, address, _ in _listening_sockets() if owner == uid}
+
+
+SOCKETS = r"""
+import json, os
+found = {}
+for pid in filter(str.isdigit, os.listdir("/proc")):
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            cmd = f.read().replace(b"\0", b" ").decode("utf-8", "replace").strip()[:300]
+        for fd in os.listdir(f"/proc/{pid}/fd"):
+            link = os.readlink(f"/proc/{pid}/fd/{fd}")
+            if link.startswith("socket:["):
+                found[link[8:-1]] = [int(pid), cmd]
+    except OSError:
+        pass
+print(json.dumps(found))
+"""
+
+
+def _sockets(uid: int) -> dict[int, tuple[int, str]]:
+    """Which process holds each socket of a workspace's user (inode -> pid, command line): read as that user, who alone may."""
+    try:
+        done = subprocess.run(["python3", "-I", "-c", SOCKETS], preexec_fn=_demote(uid), capture_output=True, text=True, timeout=5)
+        return {int(inode): (pid, cmd) for inode, (pid, cmd) in json.loads(done.stdout or "{}").items()}
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return {}
+
+
+def _running_one(wid: str) -> dict:
+    with _lock:
+        r = _running.get(wid)
+        if r is None or r["process"].poll() is not None:
+            raise Refused(404, "The workspace is not running.")
+        return r
+
+
+def ports(wid: str) -> list[dict]:
+    """
+    What a running workspace's programs listen on (its dev servers), as VS Code's Ports view finds them: each port with its
+    address and the process holding it; not the engine's own port, nor what the engine itself listens on.
+    """
+    r = _running_one(wid)
+    held = _sockets(r["uid"])
+    found = {}
+    for owner, port, address, inode in _listening_sockets():
+        if owner != r["uid"] or port == r["port"] or port in found:
+            continue
+        pid, cmd = held.get(inode, (None, None))
+        if pid == r["process"].pid:
+            continue
+        found[port] = {"port": port, "address": address, "pid": pid, "process": cmd}
+    return sorted(found.values(), key=lambda p: p["port"])
+
+
+def _target(wid: str, port: int) -> tuple[str, int]:
+    """Where the relay joins a forwarded port: one the workspace's user listens on, on its loopback when it listens on all."""
+    r = _running_one(wid)
+    if port == r["port"]:
+        raise Refused(403, "That is the workspace's engine, reached through Arena's IDE only.")
+    listening = _listeners(r["uid"])
+    if port not in listening:
+        raise Refused(404, f"Nothing in the workspace listens on port {port}.")
+    address = listening[port]
+    return ("127.0.0.1" if address == "0.0.0.0" else "::1" if address == "::" else address), port
+
+
+def _splice(a: socket.socket, b: socket.socket) -> None:
+    """Both ways until both ends are done: each end's close is passed to the other."""
+    for s in (a, b):
+        s.settimeout(None)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+
+    def pump(src: socket.socket, dst: socket.socket) -> None:
+        try:
+            while data := src.recv(65536):
+                dst.sendall(data)
+        except OSError:
+            pass
+        finally:
+            try:
+                dst.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass
+
+    back = threading.Thread(target=pump, args=(b, a), daemon=True)
+    back.start()
+    pump(a, b)
+    back.join()
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "workspaces"
 
@@ -355,9 +548,27 @@ class Handler(BaseHTTPRequestHandler):
         given = self.headers.get("Authorization", "")
         return bool(KEY) and hmac.compare_digest(given.encode(), f"Bearer {KEY}".encode())
 
+    def _body(self, most: int) -> bytes:
+        """The request's body, with its length or in chunks (Arena's HttpClient sends JSON chunked); past most: refused."""
+        if self.headers.get("Transfer-Encoding", "").lower() != "chunked":
+            length = int(self.headers.get("Content-Length") or 0)
+            if length > most:
+                raise Refused(413, "Too large.")
+            return self.rfile.read(length)
+        body = b""
+        while True:
+            size = int(self.rfile.readline(64).split(b";")[0].strip() or b"0", 16)
+            if size == 0:
+                self.rfile.readline(64)
+                return body
+            if len(body) + size > most:
+                raise Refused(413, "Too large.")
+            body += self.rfile.read(size)
+            self.rfile.readline(64)
+
     def _handle(self, method: str) -> None:
         if self.path == "/health" and method == "GET":
-            return self._answer(200, {"ok": True, "running": len(running()), "slots": SLOTS})
+            return self._answer(200, {"ok": True, "running": len(running()), "slots": SLOTS, **SANDBOX})
         if not self._allowed():
             return self._answer(401, {"error": "Only Arena drives the workspaces."})
         parts = self.path.strip("/").split("/")
@@ -367,14 +578,13 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) >= 3 and parts[:2] == ["v1", "workspaces"] and ID.match(parts[2]):
                 wid = parts[2]
                 if len(parts) == 3 and method == "PUT":
-                    length = int(self.headers.get("Content-Length") or 0)
-                    if length > 64 * 1024:
-                        raise Refused(413, "Too large.")
-                    spec = json.loads(self.rfile.read(length) or b"{}")
+                    spec = json.loads(self._body(64 * 1024) or b"{}")
                     return self._answer(200, start(wid, spec))
                 if len(parts) == 4 and parts[3] == "stop" and method == "POST":
                     stop(wid)
                     return self._answer(200, {"stopped": True})
+                if len(parts) == 4 and parts[3] == "ports" and method == "GET":
+                    return self._answer(200, ports(wid))
                 if len(parts) == 3 and method == "DELETE":
                     delete(wid)
                     return self._answer(200, {"deleted": True})
@@ -398,11 +608,37 @@ class Handler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         self._handle("DELETE")
 
+    def do_CONNECT(self):
+        """
+        A forwarded port (CONNECT <id>:<port>, with Arena's key): joined to what the workspace listens on there, both
+        ways, for as long as either end keeps it (an HTTP connection, a dev server's WebSocket).
+        """
+        self.close_connection = True
+        if not self._allowed():
+            return self._answer(401, {"error": "Only Arena drives the workspaces."})
+        wid, _, port = self.path.partition(":")
+        try:
+            if not ID.match(wid) or not port.isdigit() or not 0 < int(port) < 65536:
+                raise Refused(404, "CONNECT <workspace>:<port>.")
+            upstream = socket.create_connection(_target(wid, int(port)), timeout=5)
+        except Refused as e:
+            return self._answer(e.status, {"error": str(e)})
+        except OSError as e:
+            return self._answer(502, {"error": f"Port {port} did not answer: {e.strerror or e}"})
+        with upstream:
+            self.send_response(200, "Connection established")
+            self.end_headers()
+            self.wfile.flush()
+            _splice(self.connection, upstream)
+
 
 def main() -> None:
     if len(KEY) < 32:
         raise SystemExit("WORKSPACES_KEY: at least 32 characters, shared with Arena.")
     os.makedirs(WORKSPACES, mode=0o711, exist_ok=True)
+    SANDBOX.clear()
+    SANDBOX.update(_sandbox())
+    print("The agent's commands: " + ("sandboxed by bubblewrap" if SANDBOX["sandbox"] == "bubblewrap" else f"not sandboxed ({SANDBOX['why']})"), flush=True)
     ThreadingHTTPServer(("0.0.0.0", int(os.environ.get("WORKSPACES_PORT", "4000"))), Handler).serve_forever()
 
 

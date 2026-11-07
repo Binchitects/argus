@@ -137,4 +137,31 @@ public sealed class PromptBudgetTests
         // Nothing more to cut.
         Assert.False(ChatService.CutToolResults(messages, 2));
     }
+
+    [Fact]
+    public void A_cut_tool_result_says_how_to_read_it_whole_again()
+    {
+        // Before: "call the tool again", even when the chat keeps it whole and the model can read it, and a big result's
+        // own note (the file it is kept as) was cut away with the rest.
+        var big = new string('r', 10_000);
+        var kept = new string('k', 5_000) + "\n\n[The result is 90,000 characters, 3,000 lines; above are its first 5,000. All of it is the file web-result-a1b2c3.txt in this chat: read_file reads on from line 120, search_file finds lines in it.]\n[Its end, from line 2990:]\nbye";
+        var messages = new JsonArray(
+            new JsonObject { ["role"] = "user", ["content"] = "q" },
+            new JsonObject { ["role"] = "tool", ["tool_call_id"] = "call_7", ["content"] = big },
+            new JsonObject { ["role"] = "tool", ["tool_call_id"] = "call_8", ["content"] = kept },
+            new JsonObject { ["role"] = "tool", ["tool_call_id"] = "call_9", ["content"] = big },
+            new JsonObject { ["role"] = "tool", ["tool_call_id"] = "call_10", ["content"] = big });
+        Assert.True(ChatService.CutToolResults(messages, 0, canRead: true));
+        string Content(int i) => messages[i]!["content"]!.GetValue<string>();
+        Assert.EndsWith("read_file with file \"result:call_7\" (from_line to read on, search_file to find lines).]", Content(1), StringComparison.Ordinal);
+        Assert.Contains("All of it is the file web-result-a1b2c3.txt in this chat", Content(2), StringComparison.Ordinal);
+        Assert.True(Content(2).Length < 2_600);
+        // Cut once: a second pass leaves it.
+        Assert.False(ChatService.CutToolResults(messages, 0, canRead: true));
+        // A model that reads no files is told to call the tool again.
+        var plain = new JsonArray(new JsonObject { ["role"] = "user", ["content"] = "q" }, new JsonObject { ["role"] = "tool", ["tool_call_id"] = "c", ["content"] = big },
+            new JsonObject { ["role"] = "tool", ["content"] = "a" }, new JsonObject { ["role"] = "tool", ["content"] = "b" });
+        ChatService.CutToolResults(plain, 0);
+        Assert.EndsWith("Call the tool again for a part of it if you need more.]", plain[1]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
+    }
 }

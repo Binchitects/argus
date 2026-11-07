@@ -29,6 +29,14 @@ http:
       service: app
       middlewares: [secure]
       tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}
+    # Code Studio's forwarded ports: ws-<workspace>-<port>.DOMAIN, a dev server in a workspace, each its own origin (its
+    # pages never run on Arena's). The app lets in its owner (or everyone signed in, once shared) and passes the request on
+    # through the workspaces service. The *.DOMAIN certificate covers these names.
+    ports:
+      rule: HostRegexp(`^ws-[0-9a-f]{32}-[0-9]{1,5}\.{{ regexQuoteMeta $domain }}$`)
+      service: app
+      middlewares: [secure]
+      tls: {{ if $acme }}{ certResolver: letsencrypt }{{ else }}{}{{ end }}
     # Argus's MCP, for coding agents with their own key.
     argus:
       rule: Host(`argus.{{ $domain }}`)

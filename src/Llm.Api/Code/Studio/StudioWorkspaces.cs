@@ -144,6 +144,8 @@ public sealed class StudioWorkspaces(AppDbContext db, IHttpClientFactory http, I
             ["mcp_url"] = o.ArenaUrl.TrimEnd('/') + "/mcp", ["argus_url"] = o.ArgusUrl,
             // A GitLab on the company's own CA: the workspace's git, engine and terminals trust it too.
             ["ca"] = companyCa.Pem(),
+            // Its commits are the person's (the IDE's and the agent's), unless they set another identity there.
+            ["git_name"] = me.DisplayName is { Length: > 0 } shown ? shown : me.UserName, ["git_email"] = me.Email,
         };
         using var res = await Service().PutAsJsonAsync($"v1/workspaces/{workspace.Id:N}", spec, ct);
         var answer = await res.Content.ReadFromJsonAsync<JsonObject>(ct);

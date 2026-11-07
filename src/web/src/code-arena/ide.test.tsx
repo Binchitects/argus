@@ -18,6 +18,7 @@ import { asks } from './bridge'
 import { allViews } from './workbench-layout'
 import { rankFiles } from './editor-state'
 import { parts, regions, tasks } from './help-text'
+import { PortsPanel } from './ports-panel'
 import type { Change, Entry, GitFile, Preferences, TerminalInfo } from './ide-api'
 import { runCommand } from './commands'
 
@@ -3201,7 +3202,7 @@ describe('Code Arena, the IDE', () => {
     await waitFor(() =>
       expect(now.preferences.layout).toEqual({
         view: 'explorer', side: 300, chat: 960, panel: 280, sideOpen: true, chatOpen: false, panelOpen: false, panelTab: 'terminal',
-        sideAt: 'left', panelAt: 'bottom', order: [...allViews], panelTabs: ['terminal', 'console', 'output'], hidden: [], activityBar: 'default',
+        sideAt: 'left', panelAt: 'bottom', order: [...allViews], panelTabs: ['terminal', 'console', 'output', 'ports'], hidden: [], activityBar: 'default',
       }),
     )
     expect(saves()).toHaveLength(1)
@@ -4667,6 +4668,13 @@ describe('Code Arena, the help', () => {
     await userEvent.click(screen.getByRole('tab', { name: 'Output' }))
     await screen.findByRole('region', { name: 'Output' })
     for (const r of regionsShown()) seen.add(r)
+    // The Ports panel is Code Studio's (no tab of it on code-arena's own page): drawn on its own.
+    const ports = render(
+      <Providers client={makeQueryClient()}>
+        <PortsPanel shown={false} />
+      </Providers>,
+    )
+    if (ports.container.querySelector('section[aria-label="Ports"]')) seen.add('Ports')
     // The workbench's own pages: the Settings and the Keyboard Shortcuts editors.
     await userEvent.keyboard('{Control>},{/Control}')
     await screen.findByRole('region', { name: 'Settings' })

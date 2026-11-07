@@ -328,6 +328,7 @@ public static class IdentityWiring
             services.AddHostedService<Code.Studio.StudioIdle>();
         }
         services.AddSingleton<Code.Studio.MachineTunnels>();
+        Code.Studio.PortForwards.AddPortForwards(services);
         services.AddSingleton<Chat.Tools.CalculatorTool>();
         services.AddSingleton<Chat.Tools.TimeTool>();
         services.AddSingleton<Chat.Tools.AskTool>();
@@ -617,10 +618,11 @@ public static class IdentityWiring
         app.Use(async (ctx, next) =>
         {
             var m = ctx.Request.Method;
+            // A forwarded port's host is its program's, not Arena's API (Arena's session cookie is Lax: no other site posts with it).
             // Events for tasks (/api/hooks) and workflows (/api/studio/hooks), the chat bots' platforms and inbound mail come from other systems, with no
             // session: their secrets are the guard.
             // A SAML identity provider's answer is a form the browser posts from the provider's page: its signature is the guard.
-            if (ctx.Request.Path.StartsWithSegments("/api") && !ctx.Request.Path.StartsWithSegments("/api/authz") && !ctx.Request.Path.StartsWithSegments("/api/hooks") && !ctx.Request.Path.StartsWithSegments("/api/studio/hooks") &&
+            if (ctx.Request.Path.StartsWithSegments("/api") && !Code.Studio.PortForwards.IsPortHost(ctx) && !ctx.Request.Path.StartsWithSegments("/api/authz") && !ctx.Request.Path.StartsWithSegments("/api/hooks") && !ctx.Request.Path.StartsWithSegments("/api/studio/hooks") &&
                 !ctx.Request.Path.StartsWithSegments("/api/bots") && !ctx.Request.Path.StartsWithSegments("/api/mail/inbound") &&
                 !ctx.Request.Path.StartsWithSegments("/api/auth/company/saml/acs") &&
                 !(HttpMethods.IsGet(m) || HttpMethods.IsHead(m) || HttpMethods.IsOptions(m)) &&

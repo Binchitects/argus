@@ -3761,6 +3761,44 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("security_scans", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Code.StudioPort", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Added")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Label")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int>("Port")
+                        .HasColumnType("integer");
+
+                    b.Property<bool>("Stopped")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Visibility")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<Guid>("WorkspaceId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("WorkspaceId", "Port")
+                        .IsUnique();
+
+                    b.ToTable("studio_ports", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Code.StudioWorkspace", b =>
                 {
                     b.Property<Guid>("Id")
@@ -8820,6 +8858,15 @@ namespace Llm.Core.Data.Migrations
                     b.HasOne("Llm.Core.Identity.AppUser", null)
                         .WithMany()
                         .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Code.StudioPort", b =>
+                {
+                    b.HasOne("Llm.Core.Code.StudioWorkspace", null)
+                        .WithMany()
+                        .HasForeignKey("WorkspaceId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });

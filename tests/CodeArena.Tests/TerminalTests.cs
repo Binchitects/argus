@@ -38,15 +38,16 @@ public sealed class TerminalTests : IDisposable
         }
         var sub = Directory.CreateDirectory(Path.Combine(_root, "sub")).FullName;
         await using var terminals = New();
-        var env = new Dictionary<string, string?> { ["GREETING"] = "hi", ["HOME"] = null, ["ARENA_API_KEY"] = "sk-not-passed-on" };
-        var terminal = terminals.Open(80, 24, new TerminalStart("sh", ["-c", "pwd; echo \"[$GREETING] [${HOME-unset}] [${ARENA_API_KEY-none}]\"; exit 3"], sub, env, "Build", TerminalKind.Task, "task:Build"));
+        var env = new Dictionary<string, string?> { ["GREETING"] = "hi", ["HOME"] = null, ["ARENA_API_KEY"] = "sk-not-passed-on", ["CODE_ARENA_TOKEN"] = "engine-key-not-passed-on" };
+        var terminal = terminals.Open(80, 24, new TerminalStart("sh", ["-c", "pwd; echo \"[$GREETING] [${HOME-unset}] [${ARENA_API_KEY-none}] [${CODE_ARENA_TOKEN-none}]\"; exit 3"], sub, env, "Build", TerminalKind.Task, "task:Build"));
 
         Assert.Equal(3, await terminal.Exited.WaitAsync(TimeSpan.FromSeconds(15)));
         var text = Output(terminal);
         Assert.Contains(sub + "\r\n", text);
-        // Set, unset, and the key kept out whatever the task says.
-        Assert.Contains("[hi] [unset] [none]", text);
+        // Set, unset, and the keys kept out whatever the task says (the person's, and the one Code Studio reaches the engine with).
+        Assert.Contains("[hi] [unset] [none] [none]", text);
         Assert.DoesNotContain("sk-not-passed-on", text);
+        Assert.DoesNotContain("engine-key-not-passed-on", text);
         var json = terminal.Json();
         Assert.Equal("task", json["kind"]!.GetValue<string>());
         Assert.Equal("Build", json["title"]!.GetValue<string>());

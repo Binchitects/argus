@@ -12,6 +12,9 @@ export function setIdeBase(prefix: string) {
 /** True on code-arena's own page, false in Arena's Code Studio (the IDE in the person's own page). */
 export const ownPage = () => !base
 
+/** The Code Studio workspace the IDE shows (its id), null on code-arena's own page. */
+export const studioWorkspace = () => /^\/api\/studio\/w\/([0-9a-f-]+)$/i.exec(base)?.[1] ?? null
+
 /** An address of the IDE's API (/api/…) as it is reached from this page. */
 export const ideUrl = (path: string) => (base && path.startsWith('/api/') ? `${base}${path.slice(4)}` : path)
 

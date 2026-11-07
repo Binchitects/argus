@@ -1544,7 +1544,7 @@ The shell is `"terminalShell"` in `config.json` (a path, or a name found on
 `PATH`), else `$SHELL` (a login shell on macOS, as Terminal.app starts it),
 else bash or sh; on Windows PowerShell 7, Windows PowerShell, else `cmd.exe`.
 It starts in the working directory with code-arena's environment, without
-`ARENA_API_KEY`, with `TERM=xterm-256color`, `COLORTERM=truecolor` and
+`ARENA_API_KEY` (nor, in Code Studio, the key Arena reaches the engine with), with `TERM=xterm-256color`, `COLORTERM=truecolor` and
 `TERM_PROGRAM=code-arena`, every signal at its default and none blocked. Ten
 run at once at most. A page that comes back, or a second tab, sees the last
 256 KB of each one's output. Closing one sends what runs in it SIGHUP, and
@@ -1559,6 +1559,24 @@ them all.
 A terminal is as powerful as the person's own shell, and so are the page's
 file calls: the mode (ask, auto-edit, …) guards the agent, not the person.
 That is why everything below is behind this run's key.
+
+### Ports
+
+In a Code Studio workspace on the server, the panel's **Ports** (beside
+Terminal; **Ports: Focus on Ports View** in the command palette) lists what
+the workspace's programs listen on, as VS Code's does for a remote folder:
+each port with its **Forwarded Address**, its own
+`https://ws-<workspace>-<port>.DOMAIN/`, the **Running Process**, its
+**Visibility** and whether it was found (**Auto Forwarded**) or added
+(**User Forwarded**). A dev server that starts listening is announced
+(**Open in Browser**). On each row: open it, copy its address, set its label,
+**Share** it with everyone signed in to Arena (or make it private again),
+**Stop Forwarding**. **Forward a Port** adds one (`3000`, `localhost:3000`)
+before its server starts. Only you reach a private port, signed in to Arena;
+the program gets the request as `Host: localhost:<port>`, without Arena's
+cookies ([chat.md](chat.md#forwarded-ports)). On code-arena's own page and a
+connected machine, the folder is on that machine: its ports are its own,
+at localhost.
 
 ### Only this machine can use it
 
@@ -2827,7 +2845,9 @@ session says why), `"on"` (refuse to start without one), `"off"`.
 `"sandboxNetwork": false` takes the network away from commands;
 `"sandboxWritable": [...]` adds folders they may write. Windows has no sandbox
 Code Arena can use. The IDE's terminals are the person's own: no sandbox.
-`/sandbox` says what applies.
+`/sandbox` says what applies. In a container, bubblewrap needs the container
+to allow user namespaces (Code Studio's workspaces do); where it cannot make
+one with its own `/proc`, the sandbox is off and the session says why.
 
 ## Chats in Arena
 

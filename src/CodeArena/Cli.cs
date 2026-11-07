@@ -679,6 +679,8 @@ internal static partial class Cli
             {
                 // Served for Code Studio: the key Arena's workspace service gave it, at least 32 characters.
                 served = o.Serve ? env.Env("CODE_ARENA_TOKEN") is { Length: >= 32 } given ? given : throw new ArgumentException("--serve needs CODE_ARENA_TOKEN, at least 32 characters.") : null;
+                // Kept here alone: no program it starts (a terminal, a language server, the agent's commands) inherits it.
+                Environment.SetEnvironmentVariable("CODE_ARENA_TOKEN", null);
             }
             catch (ArgumentException e)
             {
