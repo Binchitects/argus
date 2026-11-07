@@ -58,7 +58,7 @@ public sealed partial class SettingsCoverageTests(AppFixture app)
     }
 
     private static bool HasAPlace(string key) =>
-        SettingsCatalog.ByKey.ContainsKey(key) || InstallSettings.ConfigKeys.Contains(key, StringComparer.Ordinal) || InstallSettings.Wiring.Contains(key);
+        SettingsCatalog.ByKey.ContainsKey(key) || InstallSettings.ConfigKeys.Contains(key, StringComparer.Ordinal) || InstallSettings.Wiring.ContainsKey(key);
 
     [Fact]
     public void Every_option_the_app_binds_is_a_setting_an_installation_setting_or_wiring()
@@ -70,10 +70,61 @@ public sealed partial class SettingsCoverageTests(AppFixture app)
             + string.Join('\n', missing));
         // The wiring names only keys there are, and no key is in two places.
         var bound = keys.Select(k => k.Key).ToHashSet(StringComparer.Ordinal);
-        Assert.All(InstallSettings.Wiring.Where(w => !w.StartsWith("Keys:", StringComparison.Ordinal) && !w.StartsWith("Downloads:", StringComparison.Ordinal) && !w.StartsWith("Database:", StringComparison.Ordinal)),
+        Assert.All(InstallSettings.Wiring.Keys.Where(w => !w.StartsWith("Keys:", StringComparison.Ordinal) && !w.StartsWith("Downloads:", StringComparison.Ordinal) && !w.StartsWith("Database:", StringComparison.Ordinal)),
             w => Assert.True(bound.Contains(w), $"{w} is wiring, but nothing binds it"));
-        Assert.All(InstallSettings.Wiring, w => Assert.False(SettingsCatalog.ByKey.ContainsKey(w), $"{w} is a setting and wiring"));
+        Assert.All(InstallSettings.Wiring.Keys, w => Assert.False(SettingsCatalog.ByKey.ContainsKey(w), $"{w} is a setting and wiring"));
         Assert.All(InstallSettings.ConfigKeys, k => Assert.False(SettingsCatalog.ByKey.ContainsKey(k), $"{k} is the app's setting and the installation's"));
+    }
+
+    /// <summary>
+    /// What an admin may want to change is a setting, not wiring: the replicas' timing, the dashboards' scrape interval,
+    /// the embedder, the security alerts, the admin group other services see, a Hugging Face mirror. What stays wiring is
+    /// the stack's plumbing alone, each entry with why it is no setting; an option that means nothing (email in has no
+    /// channels; Argus's GitLab sign-in is Argus's own) is not bound at all.
+    /// </summary>
+    [Fact]
+    public void What_an_admin_may_change_is_a_setting_and_the_wiring_says_why_each_is_not()
+    {
+        string[] settings = ["Replicas:Enabled", "Replicas:Renew", "Replicas:AskTimeout", "Dashboards:ScrapeInterval", "Knowledge:EmbedUrl", "Knowledge:EmbedModel",
+            "Knowledge:EmbedKey", "Knowledge:DocumentPrefix", "Knowledge:QueryPrefix", "Knowledge:PgVector", "Security:Watch", "Auth:AdminGroup", "HuggingFace:BaseUrl"];
+        Assert.All(settings, k => Assert.True(SettingsCatalog.ByKey.ContainsKey(k), $"{k} is no setting"));
+        Assert.All(InstallSettings.Wiring, w => Assert.True(w.Value.Length >= 20 && !w.Value.Contains('\n'), $"{w.Key} is wiring with no reason given"));
+        Assert.Null(typeof(Llm.Api.Bots.MailInOptions).GetProperty("Channels"));
+        Assert.Null(typeof(Llm.Api.Operations.ArgusOptions).GetProperty("GitlabAuth"));
+        Assert.Null(typeof(Llm.Api.Operations.ArgusOptions).GetProperty("GitlabUsername"));
+        // The embedder's prefixes end in a space, which is part of them; its key is never shown.
+        Assert.True(SettingsCatalog.ByKey["Knowledge:DocumentPrefix"].Exact);
+        Assert.True(SettingsCatalog.ByKey["Knowledge:EmbedKey"].IsSecret);
+    }
+
+    [Fact]
+    public async Task The_admin_group_other_services_see_and_the_replicas_timing_apply_when_saved()
+    {
+        var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
+        using var scope = app.Factory.Services.CreateScope();
+        var person = await scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<Llm.Core.Identity.AppUser>>().FindByNameAsync("admin");
+        var claims = scope.ServiceProvider.GetRequiredService<Llm.Api.Oidc.PersonClaims>();
+        Assert.Contains("admins", await claims.GroupsAsync(person!));
+        var res = await admin.Http.PutAsJsonAsync(new Uri("/api/admin/config", UriKind.Relative), new
+        {
+            changes = new[] { new { key = "Auth:AdminGroup", value = (string?)"arena-admins" }, new { key = "Replicas:AskTimeout", value = (string?)"00:00:07" } },
+        });
+        await StatusAssert.Is(HttpStatusCode.OK, res);
+        try
+        {
+            Assert.Contains("arena-admins", await claims.GroupsAsync(person!));
+            Assert.Equal(TimeSpan.FromSeconds(7), app.Factory.Services.GetRequiredService<IOptionsMonitor<Llm.Api.Operations.ReplicaOptions>>().CurrentValue.AskTimeout);
+            // One name other services match: a comma would split forwardAuth's Remote-Groups.
+            res = await admin.Http.PutAsJsonAsync(new Uri("/api/admin/config", UriKind.Relative), new { changes = new[] { new { key = "Auth:AdminGroup", value = "a,b" } } });
+            await StatusAssert.Is(HttpStatusCode.BadRequest, res);
+        }
+        finally
+        {
+            await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri("/api/admin/config", UriKind.Relative), new
+            {
+                changes = new[] { new { key = "Auth:AdminGroup", reset = true }, new { key = "Replicas:AskTimeout", reset = true } },
+            }));
+        }
     }
 
     [GeneratedRegex(@"`([A-Z][A-Za-z]+(?::[A-Z][A-Za-z0-9]+)+)`")]

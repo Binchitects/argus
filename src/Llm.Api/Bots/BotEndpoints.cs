@@ -125,7 +125,7 @@ public static class BotEndpoints
                 {
                     return Results.Ok(new { status = "ignored" });
                 }
-                if (!direct && !slack.Options.Allows(channel))
+                if (!direct && !slack.Allows(channel))
                 {
                     answers.Start(slack, question, refusal: "I do not answer in this channel. Ask me in a direct message, or ask an admin to add the channel.");
                     return Results.Ok(new { status = "refused", reason = "not an allowed channel" });
@@ -153,7 +153,7 @@ public static class BotEndpoints
             return Results.Ok(new { });
         }
         var command = fields.ContainsKey("command");
-        if (!mattermost.Options.Allows(channel, fields.GetValueOrDefault("channel_name")))
+        if (!mattermost.Allows(channel, fields.GetValueOrDefault("channel_name")))
         {
             // A slash command is told at once, to the asker only; a webhook post is left alone.
             return Results.Ok(command ? new { response_type = "ephemeral", text = "I do not answer in this channel. Ask an admin to add it." } : new { response_type = "", text = "" });
@@ -180,7 +180,7 @@ public static class BotEndpoints
         {
             return Results.Ok();
         }
-        if (!direct && !teams.Options.Allows(channel, activity["channelData"]?["team"]?["id"]?.GetValue<string>()))
+        if (!direct && !teams.Allows(channel, activity["channelData"]?["team"]?["id"]?.GetValue<string>()))
         {
             answers.Start(teams, question, refusal: "I do not answer in this channel. Ask me in a chat, or ask an admin to add the channel.");
             return Results.Ok();

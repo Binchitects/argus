@@ -33,6 +33,9 @@ public sealed class SlackBot(IHttpClientFactory http, IOptionsMonitor<BotOptions
 
     public PlatformOptions Options => O;
 
+    /// <summary>Whether it answers in this channel (any of its names).</summary>
+    public bool Allows(params string?[] names) => O.Allows(names);
+
     /// <summary>Whether Slack signed this body: v0= and the HMAC-SHA256 of "v0:timestamp:body" under the signing secret, made at most five minutes ago.</summary>
     public bool SignatureOk(string? timestamp, string? signature, string body)
     {

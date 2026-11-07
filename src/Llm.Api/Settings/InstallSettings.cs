@@ -72,24 +72,66 @@ public static class InstallSettings
     }
 
     /// <summary>
-    /// The app's configuration keys that are the stack's own wiring: where its services, volumes and files are inside
-    /// its containers, and what only tests turn off. No setting: a change breaks the stack, so they are not on the
-    /// Settings page; the installation's settings above move them where one is needed (the database, GitLab). Also the
-    /// external database's CA file (given in an override with the database: deployment.md), and the channels email-in
-    /// shares with the chat platforms but has none of.
+    /// The app's configuration keys that are the stack's own wiring, each with why it is no setting: where its services,
+    /// volumes and files are inside its containers, the secrets between them, how a Helm release or several machines are
+    /// laid out, and what only tests turn off. A change breaks the stack, so they are not on the Settings page; the
+    /// installation's settings above move them where one is needed (the database, GitLab). What an admin may want to
+    /// change is a setting instead (SettingsCatalog).
     /// </summary>
-    public static readonly IReadOnlySet<string> Wiring = new HashSet<string>(StringComparer.Ordinal)
+    public static readonly IReadOnlyDictionary<string, string> Wiring = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        "Argus:Url", "Argus:GitlabAuth", "Argus:GitlabUsername", "Audit:AnchorDir", "Auth:AdminGroup", "Auth:AdminUserName", "Auth:DirectoryFile",
-        "Blender:Dir", "Browser:ProxyClients", "Browser:ProxyPort", "Browser:Url", "Certificates:CaFile", "Certificates:Probe", "Chat:ArgusChatToken", "Chat:GatewayUrl",
-        "Compliance:Starter", "Dashboards:AlertmanagerUrl", "Dashboards:LokiUrl", "Dashboards:Path", "Dashboards:ScrapeInterval", "Dashboards:SqlDatabase",
-        "Engine:ConfigDir", "Engine:Enabled", "Engine:EngineLibraryDir", "Engine:HardwareFile", "Engine:ImageModelDir", "Engine:ImageTextEncoder", "Engine:LibraryDir",
-        "Engine:LlamaCpp", "Engine:MediaOwnGpus", "Engine:MediaStatusDir", "Engine:Url", "Engine:Vllm", "Engine:VllmStatusDir", "Gateway:Url", "HuggingFace:BaseUrl",
-        "Knowledge:DocumentPrefix", "Knowledge:EmbedKey", "Knowledge:EmbedModel", "Knowledge:EmbedUrl", "Knowledge:FolderRoot", "Knowledge:PgVector", "Knowledge:QueryPrefix",
-        "Laya:Url", "Lean:Dir", "Oidc:ApiSecret", "Oidc:LangfuseSecret", "Plugins:Directory", "Replicas:AskTimeout", "Replicas:Enabled", "Replicas:Renew",
-        "Sandbox:Dir", "Security:Watch", "Stack:LiteLlmProbeUrl", "Stack:PrometheusUrl", "Storage:BackupDir", "Storage:DockerDir", "Workspaces:ArenaUrl", "Workspaces:ArgusUrl",
-        "Workspaces:EngineHost", "Workspaces:Key", "Workspaces:SelfUrl", "Workspaces:Url", "Keys:Watch", "Downloads:Directory", "Downloads:SignatureDirectory",
-        "Database:RootCertificate", "Bots:Email:Channels",
+        ["Argus:Url"] = "Argus's admin surface on the stack's network; Argus runs beside the app",
+        ["Audit:AnchorDir"] = "The audit volume as compose mounts it into the app",
+        ["Auth:AdminUserName"] = "The first admin's name, made when nobody exists; a later change would leave that account unprotected",
+        ["Auth:DirectoryFile"] = "The file the app writes for Argus on their shared volume",
+        ["Blender:Dir"] = "The blender-jobs volume as the app mounts it",
+        ["Browser:ProxyClients"] = "The browser's container, the only one its proxy serves",
+        ["Browser:ProxyPort"] = "The proxy port the browser's container is started with",
+        ["Browser:Url"] = "The browser's DevTools on the stack's network (BROWSER_URL in compose)",
+        ["Certificates:CaFile"] = "The CA file a Helm release mounts from a Secret; compose reads the certificate served",
+        ["Certificates:Probe"] = "Traefik on the stack's network, where the site's chain is read",
+        ["Chat:ArgusChatToken"] = "The secret Argus and the app share for the chat, made by the installer",
+        ["Chat:GatewayUrl"] = "LiteLLM on the stack's network",
+        ["Compliance:Starter"] = "Read once, at a new installation's first start, before anything can be saved; Admin → Compliance applies the same defaults a step at a time",
+        ["Dashboards:AlertmanagerUrl"] = "Alertmanager on the stack's network",
+        ["Dashboards:LokiUrl"] = "Loki on the stack's network (the logging feature)",
+        ["Dashboards:Path"] = "The dashboard files inside the image",
+        ["Dashboards:SqlDatabase"] = "The gateway's database, which the installer makes with that name",
+        ["Engine:ConfigDir"] = "The volume the app and the engines share for the engines' desired state",
+        ["Engine:Enabled"] = "Off only in tests, where no engine runs",
+        ["Engine:EngineLibraryDir"] = "The model library's path inside the engines' containers",
+        ["Engine:HardwareFile"] = "The file the GPU probe writes on the engines' status volume",
+        ["Engine:ImageModelDir"] = "The picture model's folder in the library, as the media servers lay it out",
+        ["Engine:ImageTextEncoder"] = "The picture model's text encoder file, as the media servers lay it out",
+        ["Engine:LibraryDir"] = "The model library's path inside the app's container (MODELS_DIR is the installation's)",
+        ["Engine:LlamaCpp"] = "Whether the Helm release runs llama.cpp (llamacpp.enabled in its values)",
+        ["Engine:MediaOwnGpus"] = "Set by the Helm chart, whose media servers have pods and GPUs of their own",
+        ["Engine:MediaStatusDir"] = "The media servers' status volume as the app mounts it",
+        ["Engine:Url"] = "llama.cpp's router on the stack's network",
+        ["Engine:Vllm"] = "The engines of several machines or Helm instances: their hosts and shared folders, laid out with the machines (deployment.md)",
+        ["Engine:VllmStatusDir"] = "The engines' status volume as the app mounts it",
+        ["Gateway:Url"] = "LiteLLM on the stack's network",
+        ["Knowledge:FolderRoot"] = "Where an admin mounts the folders a folder source reads, inside the app's container",
+        ["Laya:Url"] = "Laya on the stack's network",
+        ["Lean:Dir"] = "The lean-jobs volume as the app mounts it",
+        ["Oidc:ApiSecret"] = "The engine API's client secret, made by the installer and shared with its client",
+        ["Oidc:LangfuseSecret"] = "Langfuse's client secret, made by the installer and shared with Langfuse",
+        ["Plugins:Directory"] = "The plugins that come with the app, inside its image",
+        ["Sandbox:Dir"] = "The sandbox-jobs volume as the app mounts it",
+        ["Stack:LiteLlmProbeUrl"] = "LiteLLM on the stack's network, for the health checks",
+        ["Stack:PrometheusUrl"] = "Prometheus on the stack's network",
+        ["Storage:BackupDir"] = "The backups volume as the app mounts it (BACKUP_DIR is the installation's)",
+        ["Storage:DockerDir"] = "Where Docker's own disk is mounted into the app",
+        ["Workspaces:ArenaUrl"] = "The app as the workspaces reach it on the stack's network",
+        ["Workspaces:ArgusUrl"] = "Argus's MCP endpoint as the workspaces reach it",
+        ["Workspaces:EngineHost"] = "The workspaces' service name on the stack's network",
+        ["Workspaces:Key"] = "The secret the app and the workspaces' supervisor share, made by the installer",
+        ["Workspaces:SelfUrl"] = "This replica's own address for the others, found by itself; set only where the network hides it",
+        ["Workspaces:Url"] = "The workspaces' supervisor on the stack's network",
+        ["Keys:Watch"] = "Off only in tests that run its checks themselves: off, a disabled person's API keys would keep working",
+        ["Downloads:Directory"] = "Code Arena's downloads inside the image",
+        ["Downloads:SignatureDirectory"] = "Their signatures inside the image",
+        ["Database:RootCertificate"] = "The external database's CA file, mounted with the database in a compose override (deployment.md)",
     };
 
     /// <summary>The app's configuration keys an installation setting gives it: shown there, not on the app's own settings.</summary>

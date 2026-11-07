@@ -18,7 +18,7 @@ public sealed class BotOptions
         "You answer in a team chat or by email, where the answer is read as a message: keep it short, put the answer first, and use plain Markdown (no wide tables).";
 }
 
-/// <summary>What one platform's bot answers with (its model and tools), and where (its channels).</summary>
+/// <summary>What one platform's bot answers with: its model and tools.</summary>
 public abstract class PlatformOptions
 {
     /// <summary>The model its chats use; empty: the one a new chat of the person would use.</summary>
@@ -27,9 +27,6 @@ public abstract class PlatformOptions
     /// <summary>Tool ids, comma separated; empty: those on in new chats; "none": no tools.</summary>
     public string? Tools { get; set; }
 
-    /// <summary>Channels it answers in, comma separated (ids or names); empty: every channel it is in. Direct messages always.</summary>
-    public string? Channels { get; set; }
-
     /// <summary>The tools of a new chat: null for those on in new chats.</summary>
     public List<string>? ToolList() => Tools?.Trim() switch
     {
@@ -37,6 +34,13 @@ public abstract class PlatformOptions
         "none" => [],
         var t => [.. t.Split([',', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.Ordinal)],
     };
+}
+
+/// <summary>A chat platform's bot, which is in channels: those it answers in. Email in has none.</summary>
+public abstract class ChannelPlatformOptions : PlatformOptions
+{
+    /// <summary>Channels it answers in, comma separated (ids or names); empty: every channel it is in. Direct messages always.</summary>
+    public string? Channels { get; set; }
 
     /// <summary>Whether the bot answers in this channel (any of its names: id, name).</summary>
     public bool Allows(params string?[] names)
@@ -46,7 +50,7 @@ public abstract class PlatformOptions
     }
 }
 
-public sealed class SlackOptions : PlatformOptions
+public sealed class SlackOptions : ChannelPlatformOptions
 {
     /// <summary>The app's signing secret (Basic Information): every event Slack sends is signed with it.</summary>
     public string? SigningSecret { get; set; }
@@ -55,7 +59,7 @@ public sealed class SlackOptions : PlatformOptions
     public string? BotToken { get; set; }
 }
 
-public sealed class MattermostOptions : PlatformOptions
+public sealed class MattermostOptions : ChannelPlatformOptions
 {
     /// <summary>The Mattermost server, https://chat.example.com.</summary>
     public string? Url { get; set; }
@@ -67,7 +71,7 @@ public sealed class MattermostOptions : PlatformOptions
     public string? Tokens { get; set; }
 }
 
-public sealed class TeamsOptions : PlatformOptions
+public sealed class TeamsOptions : ChannelPlatformOptions
 {
     /// <summary>The bot's Microsoft App ID (Azure Bot): the audience of the Bot Connector's tokens.</summary>
     public string? AppId { get; set; }

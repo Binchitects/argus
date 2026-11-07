@@ -28,7 +28,7 @@ public sealed class ReplicaOptions
 /// replicas (Postgres LISTEN/NOTIFY): a yes to a tool call, a stop or "answer now" posted to one
 /// reaches the one writing the answer, and a saved setting applies on all.
 /// </summary>
-public sealed partial class Replicas(IConfiguration config, IOptions<ReplicaOptions> options, IServiceProvider services, ILogger<Replicas> logger) : BackgroundService
+public sealed partial class Replicas(IConfiguration config, IOptionsMonitor<ReplicaOptions> options, IServiceProvider services, ILogger<Replicas> logger) : BackgroundService
 {
     private const string Channel = "arena_replicas";
     private const string AppName = "arena-replica:";
@@ -43,6 +43,8 @@ public sealed partial class Replicas(IConfiguration config, IOptions<ReplicaOpti
     private string? _connectionString;
     private volatile bool _leader;
     private volatile bool _listening;
+    // Read once: a replica that stopped hearing the others mid-run would lead beside the one that leads.
+    private readonly bool _enabled = options.CurrentValue.Enabled;
 
     /// <summary>A message between replicas: who sent it, about what, and for a question its id (an answer names who asked).</summary>
     private sealed record Message(string From, string Topic, string Payload, string? Ask = null, string? To = null);
@@ -51,7 +53,7 @@ public sealed partial class Replicas(IConfiguration config, IOptions<ReplicaOpti
     public string Id { get; } = $"{(Environment.MachineName.Length > 40 ? Environment.MachineName[..40] : Environment.MachineName)}-{Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(3))}";
 
     /// <summary>Whether this replica leads now: only then does it run the once-only background work.</summary>
-    public bool IsLeader => !options.Value.Enabled || _leader;
+    public bool IsLeader => !_enabled || _leader;
 
     /// <summary>Replicas connected to the database now, this one included (as of the last check).</summary>
     public int Count { get; private set; } = 1;
@@ -63,7 +65,7 @@ public sealed partial class Replicas(IConfiguration config, IOptions<ReplicaOpti
     public void Tell(string topic, string payload = "")
     {
         // Even when it counts no other: one that just started may not be counted yet.
-        if (!options.Value.Enabled)
+        if (!_enabled)
         {
             return;
         }
@@ -86,7 +88,7 @@ public sealed partial class Replicas(IConfiguration config, IOptions<ReplicaOpti
     /// </summary>
     public async Task<bool> AskAsync(string topic, string payload, CancellationToken ct)
     {
-        if (!options.Value.Enabled || Count <= 1 || !_listening)
+        if (!_enabled || Count <= 1 || !_listening)
         {
             return false;
         }
@@ -96,7 +98,7 @@ public sealed partial class Replicas(IConfiguration config, IOptions<ReplicaOpti
         try
         {
             await NotifyAsync(new Message(Id, topic, payload, id), ct);
-            await answered.Task.WaitAsync(options.Value.AskTimeout, ct);
+            await answered.Task.WaitAsync(options.CurrentValue.AskTimeout, ct);
             return true;
         }
         catch (TimeoutException)
@@ -148,7 +150,7 @@ public sealed partial class Replicas(IConfiguration config, IOptions<ReplicaOpti
                 return true;
             });
         }
-        if (options.Value.Enabled)
+        if (_enabled)
         {
             try
             {
@@ -166,7 +168,7 @@ public sealed partial class Replicas(IConfiguration config, IOptions<ReplicaOpti
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!options.Value.Enabled)
+        if (!_enabled)
         {
             return;
         }
@@ -176,7 +178,7 @@ public sealed partial class Replicas(IConfiguration config, IOptions<ReplicaOpti
             {
                 _connection ??= await ConnectAsync(stoppingToken);
                 // Notifications are read while it waits; then the lead is tried for again, or found still held.
-                await _connection.WaitAsync(options.Value.Renew, stoppingToken);
+                await _connection.WaitAsync(options.CurrentValue.Renew, stoppingToken);
                 await CheckAsync(_connection, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -190,7 +192,7 @@ public sealed partial class Replicas(IConfiguration config, IOptions<ReplicaOpti
                 await DropAsync();
                 try
                 {
-                    await Task.Delay(options.Value.Renew, stoppingToken);
+                    await Task.Delay(options.CurrentValue.Renew, stoppingToken);
                 }
                 catch (OperationCanceledException)
                 {

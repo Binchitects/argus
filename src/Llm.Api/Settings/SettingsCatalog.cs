@@ -38,6 +38,7 @@ public static class SettingsCatalog
     private const string StudioGroup = "Code Studio";
     private const string LabGroup = "Science lab and 3D";
     private const string DashboardsGroup = "Dashboards";
+    private const string ReplicasGroup = "Replicas";
     private const string Oidc = "CompanySignIn:Protocol=oidc";
     private const string Saml = "CompanySignIn:Protocol=saml";
 
@@ -341,6 +342,17 @@ public static class SettingsCatalog
             { Default = "01:00:00", Unit = "minutes", Min = 15, Max = 10080, Optional = false },
         new("Knowledge:PassageChars", Knowledge, "Passages of long files per question", "With the embedder, a chat's long files and a project's files that do not fit go to the model as their passages that match each question, up to this many characters, instead of their first part.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "12000", Unit = "characters", Min = 2000, Max = 100000, Optional = false },
+        new("Knowledge:EmbedUrl", Knowledge, "Embeddings server", "An OpenAI-compatible embeddings server, without /v1: the stack's own embedder (the embed feature), or one of the company's. Company knowledge, the chat's long files and Ask your data embed with it.", SettingType.Url, SettingScope.Live)
+            { Default = "http://embed:8080", Optional = false, Pattern = @"https?://\S+", PatternHelp = "http://host:port" },
+        new("Knowledge:EmbedModel", Knowledge, "Embedding model", "The model the embeddings server is asked for. The stack's own serves nomic-embed-text.", SettingType.Text, SettingScope.Live)
+            { Default = "nomic-embed-text", Optional = false, Max = 200, Impact = "Each source and file is embedded again with it when it is next read (Read sources again every); until then search finds only what it embedded." },
+        new("Knowledge:EmbedKey", Knowledge, "Embeddings server's key", "A bearer key, for a server outside the stack that asks for one. Empty: none.", SettingType.Secret, SettingScope.Live),
+        new("Knowledge:DocumentPrefix", Knowledge, "Before each passage", "What the embedding model wants before a passage it embeds, a space at the end included: nomic-embed-text wants \"search_document: \". Empty for a model that wants none.", SettingType.Text, SettingScope.Live)
+            { Default = "search_document: ", Max = 100, Exact = true, Impact = "Embed again (change the model, or the sources) for passages embedded before to match." },
+        new("Knowledge:QueryPrefix", Knowledge, "Before each question", "What it wants before a question: nomic-embed-text wants \"search_query: \". Empty for a model that wants none.", SettingType.Text, SettingScope.Live)
+            { Default = "search_query: ", Max = 100, Exact = true },
+        new("Knowledge:PgVector", Knowledge, "Compare with pgvector", "Passages are compared in Postgres with pgvector, which the stack's Postgres has. Off for a company Postgres without the extension: plain SQL, slower but the same answers.", SettingType.Boolean, SettingScope.Live)
+            { Default = "true" },
         new("Mail:Host", Mail, "SMTP server", "The mail server the app sends email through (scheduled tasks' answers). Empty: no email.", SettingType.Text, SettingScope.Live),
         new("Mail:Port", Mail, "SMTP port", "587 for STARTTLS, 25 for plain SMTP inside the network.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "587", Min = 1, Max = 65535, Optional = false },
@@ -433,6 +445,8 @@ public static class SettingsCatalog
             { Default = "01:00:00", Unit = "minutes", Min = 5, Max = 1440, Optional = false },
         new("Oidc:RefreshTokenLifetime", SignIn, "Their refresh tokens last", "How long such an app stays signed in without the person signing in again.", SettingType.Duration, SettingScope.AppRestart)
             { Default = "12:00:00", Unit = "hours", Min = 1, Max = 720, Optional = false },
+        new("Auth:AdminGroup", SignIn, "Admin group other apps see", "The group Arena names its admins in, for the apps that sign in with it (the groups claim) and those behind its sign-in (forwardAuth's Remote-Groups): set it to the name such an app maps to its own admins. Everyone else is in users.", SettingType.Text, SettingScope.Live)
+            { Default = "admins", Optional = false, Max = 100, Pattern = @"[A-Za-z0-9][A-Za-z0-9._/-]*", PatternHelp = "one name: letters, digits and . _ / -", Impact = "Each app sees it at its next sign-in." },
 
         new("Ldap:UserNameAttributes", Directory, "Username attributes", "Tried in order, comma separated; the first a person's entry has is their username here (it must equal their GitLab username). OpenLDAP: uid. Active Directory: sAMAccountName, or userPrincipalName.", SettingType.Text, SettingScope.Live)
             { Default = "uid,sAMAccountName", Optional = false, Max = 200 },
@@ -453,6 +467,8 @@ public static class SettingsCatalog
             { Default = "10", Min = 2, Max = 10_000, Optional = false },
         new("Security:Exports", SecurityGroup, "Exports an hour by one person", "Exports of a person's data or of the compliance evidence by one admin in an hour that raise an alert.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "3", Min = 1, Max = 1000, Optional = false },
+        new("Security:Watch", SecurityGroup, "Raise security alerts", "Whether the audit log and the access history are watched every minute for what raises an alert above (and an administrative role given, a backup failed or missing). Off only where the company's SIEM, fed by Audit log, does the watching.", SettingType.Boolean, SettingScope.Live)
+            { Default = "true", Dangerous = true, Impact = "Off: Admin → Security and the admins' bell get no new security alert." },
 
         new("Sandbox:MaxOutputChars", Tools, "Python's output the model reads", "Of each of a run's output and errors: the rest is cut, and the model told so.", SettingType.WholeNumber, SettingScope.Live)
             { Default = "20000", Unit = "characters", Min = 1000, Max = 1_000_000, Optional = false },
@@ -516,6 +532,8 @@ public static class SettingsCatalog
             { Default = "1073741824", Unit = "bytes", Min = 0, Max = 274_877_906_944, Optional = false },
         new("Engine:VllmStartWait", Model, "Wait for a vLLM model to load", "How long a request, or a model's move, waits for a vLLM or SGLang model it started (a large one loads in minutes).", SettingType.Duration, SettingScope.AppRestart)
             { Default = "00:20:00", Unit = "minutes", Min = 1, Max = 240, Optional = false },
+        new("HuggingFace:BaseUrl", Model, "Hugging Face address", "Where models are searched for and downloaded (Admin → Models): Hugging Face itself, or a mirror of it inside the company (an Artifactory or Nexus Hugging Face remote, a hf-mirror). The Hugging Face token, when set, is sent to it.", SettingType.Url, SettingScope.Live)
+            { Default = "https://huggingface.co", Optional = false, Pattern = @"https?://\S+", PatternHelp = "https://..." },
         new("Credit:Refresh", PricesGroup, "Read spend again after", "How long the month's spend, once read, serves the credit checks (each read scans the month's requests).", SettingType.Duration, SettingScope.Live)
             { Default = "00:00:30", Unit = "seconds", Min = 1, Max = 3600, Optional = false },
 
@@ -525,6 +543,15 @@ public static class SettingsCatalog
             { Default = "1000", Min = 100, Max = 100_000, Optional = false },
         new("Dashboards:StatementTimeout", DashboardsGroup, "A panel's query may take", "Longest one SQL query of a panel may run.", SettingType.Duration, SettingScope.AppRestart)
             { Default = "00:00:15", Unit = "seconds", Min = 1, Max = 600, Optional = false },
+        new("Dashboards:ScrapeInterval", DashboardsGroup, "Prometheus scrapes every", "The scrape interval the dashboards assume: their finest step, and part of $__rate_interval. Prometheus scrapes as config/prometheus/prometheus.yml says (scrape_interval, 15s): change both together.", SettingType.Duration, SettingScope.AppRestart)
+            { Default = "00:00:15", Unit = "seconds", Min = 1, Max = 600, Optional = false, Impact = "Prometheus's own interval is changed in its file, then arenactl restart prometheus." },
+
+        new("Replicas:Enabled", ReplicasGroup, "Replicas work together", "Several app replicas on one database (scale.yml, the Helm chart) choose one to lead the once-only work and tell each other of saved settings and answers. Off only for a single replica behind a database pooler that keeps no sessions (PgBouncer in transaction mode), which breaks the lead and the signals.", SettingType.Boolean, SettingScope.AppRestart)
+            { Default = "true", Dangerous = true, Impact = "Off with two or more replicas, each leads: scheduled tasks run twice and models load twice." },
+        new("Replicas:Renew", ReplicasGroup, "Check the lead every", "How often a replica tries for the lead, or checks it still has it, and counts the others: a replica that stops is replaced within this.", SettingType.Duration, SettingScope.Live)
+            { Default = "00:00:05", Unit = "seconds", Min = 1, Max = 300, Optional = false },
+        new("Replicas:AskTimeout", ReplicasGroup, "Wait for another replica", "How long a stop, a yes to a tool call or \"answer now\" sent to one replica waits for the replica writing that answer.", SettingType.Duration, SettingScope.Live)
+            { Default = "00:00:03", Unit = "seconds", Min = 1, Max = 60, Optional = false },
 
 
 

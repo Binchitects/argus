@@ -403,7 +403,7 @@ Prometheus and Alertmanager watch the stack; an alert that starts firing reaches
 
 ### MON-02: Security events raise alerts, and incidents are handled in time
 
-Many failed sign-ins, an administrative role given, many exports by one person, a failed or late backup raise a security alert once, to every admin; the incident register takes an incident from an alert or by hand, runs the GDPR's 72 hours and HIPAA's 60 days from when it was found, keeps every step with who and when, and is closed only with what was learned (and, with personal data, the authority question answered).
+Many failed sign-ins, an administrative role given, many exports by one person, a failed or late backup raise a security alert once, to every admin; the incident register takes an incident from an alert or by hand, runs the GDPR's 72 hours and HIPAA's 60 days from when it was found, keeps every step with who and when, and is closed only with what was learned (and, with personal data, the authority question answered). The watch is on unless an admin turns it off (Settings → Security alerts), a change asked to confirm and audited like every setting.
 
 **Serves**
 
@@ -430,7 +430,7 @@ Many failed sign-ins, an administrative role given, many exports by one person, 
 
 **Watched by** `app:incidents` (Admin → Compliance, and `./arenactl check compliance`)
 
-**The company's part** Name who answers the alerts and runs incidents, know which supervisory authority to tell and how, and keep the incident-response runbook.
+**The company's part** Name who answers the alerts and runs incidents, know which supervisory authority to tell and how, and keep the incident-response runbook. Turn the watch off only where the company's SIEM, fed by the audit log, does the same watching.
 
 ## Data (DAT)
 

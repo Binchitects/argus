@@ -29,6 +29,9 @@ public sealed class MattermostBot(IHttpClientFactory http, IOptionsMonitor<BotOp
 
     public PlatformOptions Options => O;
 
+    /// <summary>Whether it answers in this channel (any of its names).</summary>
+    public bool Allows(params string?[] names) => O.Allows(names);
+
     /// <summary>Whether the token is one of the webhooks' and commands' an admin saved.</summary>
     public bool TokenOk(string? token) =>
         token is { Length: > 0 } && (O.Tokens ?? "").Split([',', ' ', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)

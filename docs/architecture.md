@@ -703,9 +703,11 @@ or the Helm chart's `app.replicas`). What must happen once runs on one of them:
   (10 seconds), and the key's line, so a key's at-once limit holds on each
   replica. API keys' rate limits are counted by LiteLLM: once for every app
   replica while one LiteLLM runs; with several (`ha.yml`), shared in Valkey.
-- `Replicas:Enabled=false` is for one replica behind a pooler with no
-  sessions: it always leads and hears no other. A transaction pooler breaks
-  the lead and the signals.
+- **Settings → Replicas**: **Replicas work together** off is for one replica
+  behind a pooler with no sessions: it always leads and hears no other. A
+  transaction pooler breaks the lead and the signals. How often the lead is
+  checked and how long one replica waits for another are set there too, and
+  apply at once.
 
 When more than one replica runs, **Admin → Overview** says how many, and
 whether the one answering leads. The replica's id is only in the API's answer
