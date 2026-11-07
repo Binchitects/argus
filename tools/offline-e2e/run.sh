@@ -37,6 +37,8 @@
 #     --with LIST         features on beside the defaults, as installer.sh --with takes them (all: every one); with
 #                         argus or the scanners, installed with a GitLab address where nothing answers; never
 #                         power-limits: the test host shares this machine's GPU and CPU, whose caps are the machine's
+#     --without LIST      features the bundle was made without (arenactl bundle --without): not asked of it; the
+#                         old release of --upgrade-from is asked only for the features its tag's deploy/features has
 #     --keep              leave the test host running afterwards (docker exec -it NAME bash)
 #     --clean             remove the test host's disk (DIR) afterwards
 #     --dir DIR           where the test host keeps its disk (default ~/arena-e2e)
@@ -45,7 +47,7 @@
 # The test host shares this machine's GPU (through CDI), never its network, its Docker or its stack.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
-BUNDLE="" FIRST="" MODEL="" WITH="" UPGRADE_FROM="" INTERRUPT="" INTERRUPT_AT="" AGAIN=0 REUSE=0 CPU=0 KEEP=0 CLEAN=0 DIR="${HOME}/arena-e2e" NAME=arena-e2e IMAGE=arena-offline-host:1
+BUNDLE="" FIRST="" MODEL="" WITH="" WITHOUT="" UPGRADE_FROM="" INTERRUPT="" INTERRUPT_AT="" AGAIN=0 REUSE=0 CPU=0 KEEP=0 CLEAN=0 DIR="${HOME}/arena-e2e" NAME=arena-e2e IMAGE=arena-offline-host:1
 FAIL_UPGRADE=0 ROLLBACK=0 SIGNAL=INT UPGRADE_TIMEOUT="" STOPS=() CUT_BY="" STOP_AFTER=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -53,6 +55,7 @@ while [[ $# -gt 0 ]]; do
     --first) FIRST="$2"; shift ;;
     --model) MODEL="$2"; shift ;;
     --with) WITH="$2"; shift ;;
+    --without) WITHOUT="$2"; shift ;;
     --upgrade-from) UPGRADE_FROM="$2"; shift ;;
     --interrupt-after) INTERRUPT="$2"; shift ;;
     --interrupt-at) INTERRUPT_AT="$2"; shift ;;
@@ -80,6 +83,8 @@ done
 # A test host shares this machine's GPU and CPU: its own power-limits would set their power caps and temperature policy
 # for the whole machine, over the machine's own (it put the GPU back to its default 350 W while a test ran). It stays off.
 WITH="$(tr ',' '\n' <<< "$WITH" | grep -vx power-limits | paste -sd, -)"
+# Features the bundle was made without (make-installer.sh --without): not asked of its installer either.
+[[ -n "$WITHOUT" ]] && WITH="$(tr ',' '\n' <<< "$WITH" | grep -vxF -f <(tr ',' '\n' <<< "$WITHOUT") | paste -sd, -)"
 HOST_FLAGS=(--without power-limits)
 [[ -z "$MODEL" || ( -f "$MODEL" && "$MODEL" == *.gguf ) ]] || { echo "--model names no .gguf file: $MODEL" >&2; exit 2; }
 LOG="$DIR/logs/$(date +%Y%m%d-%H%M%S)"
@@ -127,6 +132,11 @@ if [[ -n "$UPGRADE_FROM" ]]; then
   cp -f "$here/data.py" "$DIR/bundle/data.py"
   rm -f "$DIR/bundle/data.json"
   OLD_VERSION="$(basename "$UPGRADE_FROM" | sed -n 's/^argus-arena-\(.*\)-offline\.run$/\1/p')"
+  # The old release installs only the features it has: those in its own deploy/features (its tag's).
+  OLD_WITH="$WITH"
+  if old_features="$(git -C "$here/../.." show "v$OLD_VERSION:deploy/features" 2>/dev/null)"; then
+    OLD_WITH="$(tr ',' '\n' <<< "$WITH" | grep -xF -f <(sed -n 's/^\([a-z0-9-]*\) *|.*/\1/p' <<< "$old_features") | paste -sd, -)"
+  fi
 fi
 NEW_VERSION="$(basename "$BUNDLE" | sed -n 's/^argus-arena-\(.*\)-offline\.run$/\1/p')"
 
@@ -148,7 +158,7 @@ say "  systemd: $s; network: $(H ip -o link show | awk -F': ' '{ print $2 }' | p
 install_run() {   # install_run RUN.run LABEL [EXTRA...]
   local run="$1" label="$2"; shift 2
   local flags=(--dir /srv/arena --yes --install-requirements ${GITLAB_FLAGS[@]+"${GITLAB_FLAGS[@]}"} "${HOST_FLAGS[@]}") ; [[ $CPU -eq 1 ]] && flags+=(--cpu-only)
-  [[ -n "$WITH" ]] && flags+=(--with "$WITH")
+  [[ -n "${INSTALL_WITH-$WITH}" ]] && flags+=(--with "${INSTALL_WITH-$WITH}")
   say "==> $label: sh $run install ${flags[*]} $*"
   H sh -c "cd /bundle && sha256sum -c $run.sha256" >> "$LOG/$label.log" 2>&1 || fail "$run does not match its checksum"
   local t0=$SECONDS
@@ -261,7 +271,7 @@ interrupted_run() {   # interrupted_run RUN.run SECONDS
 [[ -n "$INTERRUPT" || -n "$INTERRUPT_AT" ]] && interrupted_run "$RUN" "${INTERRUPT:-0}"
 EXPECT="$NEW_VERSION"
 if [[ -n "$UPGRADE_FROM" ]]; then
-  install_run "$OLD_RUN" old-install ${OLD_FLAGS[@]+"${OLD_FLAGS[@]}"} || fail "the old release did not install"
+  INSTALL_WITH="$OLD_WITH" install_run "$OLD_RUN" old-install ${OLD_FLAGS[@]+"${OLD_FLAGS[@]}"} || fail "the old release did not install"
   data_run seed "$OLD_VERSION"
   # The model library's owner is the host's (install asked, and kept it): an upgrade keeps it.
   models_owner=""; [[ -n "$MODEL" ]] && models_owner="$(H stat -c %u:%g /srv/models)"
