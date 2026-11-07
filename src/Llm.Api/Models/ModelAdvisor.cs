@@ -146,7 +146,7 @@ public sealed record ModelProblem(string Field, string Message, bool Error);
 /// <param name="Precision">How a snapshot's weights run on its GPUs and engine (FP4, FP8, BF16...); null for llama.cpp's GGUF files.</param>
 public sealed record ModelAdvice(
     ModelProfile Profile, ModelLimits? Limits, ModelRecommendation? Recommended, MemoryEstimate? Estimate, IReadOnlyList<ModelProblem> Problems, Hardware? Hardware,
-    PrecisionRun? Precision = null)
+    PrecisionRun? Precision = null, ParserAdvice? Parsers = null)
 {
     public ModelProblem? FirstError => Problems.FirstOrDefault(p => p.Error);
 }
@@ -276,6 +276,7 @@ public static class ModelAdvisor
                 problems.Add(new(field, $"{kind.Label} has no {what}.", true));
             }
         }
+        problems.AddRange(EngineParsers.NameProblems(m));
         No(m.Replicas != 1 && !kind.Replicas, "replicas", "copies of one model (one copy runs on its GPUs)");
         No(m.Replicas < 1 || m.Replicas > 8, "replicas", "fewer than 1 or more than 8 copies");
         if (kind.Kind == EngineKinds.LlamaCpp)

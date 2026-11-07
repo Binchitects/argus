@@ -354,6 +354,14 @@ public static class VllmAdvisor
     public static ModelAdvice Advise(LocalModel m, VllmProfile p, Hardware? hw, IReadOnlyDictionary<int, long>? others = null,
         IReadOnlyDictionary<int, long>? placed = null)
     {
+        // Its tool-call and reasoning parsers, by its family: what the form shows under Advanced, and a word when its engine reads none of its calls.
+        var family = EngineParsers.FamilyOf(m, p);
+        var advice = AdviseWeights(m, p, hw, others, placed);
+        return advice with { Problems = [.. advice.Problems, .. EngineParsers.FamilyProblems(m, family)], Parsers = EngineParsers.Advise(m, family) };
+    }
+
+    private static ModelAdvice AdviseWeights(LocalModel m, VllmProfile p, Hardware? hw, IReadOnlyDictionary<int, long>? others, IReadOnlyDictionary<int, long>? placed)
+    {
         if (m.EngineKind == EngineKinds.Strata && hw is not null && p.GgufParts > 0)
         {
             return Spilled(m, p, hw, others, placed);

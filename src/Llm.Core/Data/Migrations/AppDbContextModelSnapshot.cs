@@ -6651,6 +6651,10 @@ namespace Llm.Core.Data.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("character varying(40)");
 
+                    b.Property<string>("ReasoningParser")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
                     b.Property<int>("Replicas")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
@@ -6670,6 +6674,10 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<bool>("Thinking")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("ToolParser")
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
 
                     b.Property<bool>("Tools")
                         .HasColumnType("boolean");

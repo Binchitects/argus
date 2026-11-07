@@ -642,6 +642,8 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(m => m.Replicas).HasDefaultValue(1);
             e.Property(m => m.Quantization).HasMaxLength(40);
             e.Property(m => m.SpecDecode).HasMaxLength(20);
+            e.Property(m => m.ToolParser).HasMaxLength(40);
+            e.Property(m => m.ReasoningParser).HasMaxLength(40);
             e.Property(m => m.Sleep).HasDefaultValue(true);
             e.Property(m => m.Fallback).HasMaxLength(100);
             e.Property(m => m.KvTier).HasMaxLength(20);

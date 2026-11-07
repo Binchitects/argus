@@ -61,6 +61,13 @@ public sealed class LocalModel
     public int? KvDiskGb { get; set; }
     /// <summary>vLLM: it may sleep (its weights to RAM) when its GPUs are lent to a picture or video job, rather than unload.</summary>
     public bool Sleep { get; set; } = true;
+    /// <summary>
+    /// vLLM, SGLang, LMDeploy: the parser that reads its tool calls into tool_calls (--tool-call-parser), by the engine's own
+    /// name; null: the one for its family (EngineParsers); "none": none.
+    /// </summary>
+    public string? ToolParser { get; set; }
+    /// <summary>vLLM, SGLang, LMDeploy: the parser that reads its thinking into the answer's reasoning (--reasoning-parser); null: its family's; "none": none.</summary>
+    public string? ReasoningParser { get; set; }
     /// <summary>The model that answers for it while it cannot (it restarts, or failed): the gateway's fallback, and the chat's.</summary>
     public string? Fallback { get; set; }
     /// <summary>Mixture-of-experts layers whose experts stay in RAM (llama.cpp --n-cpu-moe).</summary>

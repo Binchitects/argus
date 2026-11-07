@@ -22,7 +22,8 @@ public sealed record LocalModelRequest(
     int? Ubatch, bool? Mtp, string? DraftHead, int? DraftMax, bool? Yarn, double? Temperature, double? TopP, int? TopK, double? MinP, double? PresencePenalty,
     string? ExtraPreset, bool? Thinking, bool? Tools, decimal? InputPerMtok, decimal? OutputPerMtok, string[]? Clear = null, string? Devices = null,
     decimal? CachedInputPerMtok = null, string? EngineKind = null, string? Engine = null, int? Replicas = null, double? GpuMemoryUtilization = null,
-    string? Quantization = null, string? SpecDecode = null, int? KvCpuGb = null, bool? Sleep = null, string? Fallback = null, string? KvTier = null, int? KvDiskGb = null)
+    string? Quantization = null, string? SpecDecode = null, int? KvCpuGb = null, bool? Sleep = null, string? Fallback = null, string? KvTier = null, int? KvDiskGb = null,
+    string? ToolParser = null, string? ReasoningParser = null)
 {
     /// <summary>A value to empty: a missing one is left as it is.</summary>
     public bool Clears(string field) => Clear?.Contains(field, StringComparer.OrdinalIgnoreCase) == true;
@@ -155,6 +156,7 @@ public static class ModelEndpoints
                     : TokenCache.Of(m, files.GetValueOrDefault(m.File), onServers.Contains(m.Name), engine.Value.SessionCacheGb),
                 // Its engine, and what only some kinds have (EngineKinds).
                 engineKind = m.EngineKind, m.Engine, m.Replicas, m.GpuMemoryUtilization, m.Quantization, m.SpecDecode, m.KvCpuGb, m.Sleep, m.Fallback, m.KvTier, m.KvDiskGb,
+                m.ToolParser, m.ReasoningParser,
                 // Moving to another engine (or a move that failed): from which kind to which, how far, and why it failed.
                 move = m.Move is { } mv
                     ? new { mv.Phase, from = mv.FromKind, to = mv.ToKind, mv.FromEngine, mv.ToEngine, mv.Old, mv.Since, mv.At, mv.By, mv.Error }
@@ -165,6 +167,7 @@ public static class ModelEndpoints
                     {
                         engineKind = l.EngineKind, file = l.File, l.Projector, l.Context, l.MaxOutput, l.Placement, l.Devices, l.GpuLayers, l.CpuMoe, l.KvType, l.Parallel, l.Ubatch,
                         l.Mtp, l.DraftHead, l.DraftMax, l.Yarn, l.ExtraPreset, l.Replicas, l.GpuMemoryUtilization, l.Quantization, l.SpecDecode, l.KvCpuGb, l.KvTier, l.KvDiskGb, l.Sleep,
+                        l.ToolParser, l.ReasoningParser,
                     }
                     : null,
             });
@@ -1007,6 +1010,7 @@ public static class ModelEndpoints
             // vLLM's and SGLang's own: copies, share of each GPU, quantisation, speculative decoding and its draft, the cache's tiers.
             (m.Replicas, m.GpuMemoryUtilization, m.Quantization, m.SpecDecode, m.DraftHead, m.DraftMax, m.KvCpuGb, m.KvTier, m.KvDiskGb) =
                 (1, null, null, null, null, 3, null, null, null);
+            (m.ToolParser, m.ReasoningParser) = (null, null);
         }
         else if (m.KvTier == "lmcache")
         {
@@ -1027,6 +1031,9 @@ public static class ModelEndpoints
             }
             m.Sleep &= caps.Sleep;
             m.Replicas = caps.Replicas ? m.Replicas : 1;
+            // Its parsers go with it where its new kind has them by the same names ("none" too); else its new kind's for its family.
+            m.ToolParser = EngineParsers.Sets(to) && EngineParsers.Known(EngineParsers.ToolNames, to, m.ToolParser) ? m.ToolParser : null;
+            m.ReasoningParser = EngineParsers.Sets(to) && EngineParsers.Known(EngineParsers.ReasoningNames, to, m.ReasoningParser) ? m.ReasoningParser : null;
         }
         if (back is not null && back.EngineKind == to)
         {
@@ -1041,6 +1048,7 @@ public static class ModelEndpoints
             {
                 (m.Replicas, m.GpuMemoryUtilization, m.Quantization, m.SpecDecode, m.DraftHead, m.DraftMax, m.KvCpuGb, m.KvTier, m.KvDiskGb, m.Sleep) =
                     (back.Replicas, back.GpuMemoryUtilization, back.Quantization, back.SpecDecode, back.DraftHead, back.DraftMax, back.KvCpuGb, back.KvTier, back.KvDiskGb, back.Sleep);
+                (m.ToolParser, m.ReasoningParser) = (back.ToolParser, back.ReasoningParser);
             }
             if (across)
             {
@@ -1117,6 +1125,7 @@ public static class ModelEndpoints
         (m.EngineKind, m.Engine, m.Replicas, m.GpuMemoryUtilization, m.Quantization, m.SpecDecode, m.KvCpuGb, m.Sleep, m.Fallback, m.KvTier, m.KvDiskGb, m.Left) =
             (from.EngineKind, from.Engine, from.Replicas, from.GpuMemoryUtilization, from.Quantization, from.SpecDecode, from.KvCpuGb, from.Sleep, from.Fallback, from.KvTier,
                 from.KvDiskGb, from.Left);
+        (m.ToolParser, m.ReasoningParser) = (from.ToolParser, from.ReasoningParser);
     }
 
     /// <summary>The request's values over the model's: a missing value is kept, one named in "clear" emptied.</summary>
@@ -1161,5 +1170,8 @@ public static class ModelEndpoints
         m.KvDiskGb = body.Clears("kvDiskGb") ? null : body.KvDiskGb ?? m.KvDiskGb;
         m.Sleep = body.Sleep ?? m.Sleep;
         m.Fallback = body.Clears("fallback") ? null : body.Fallback is { } fb ? (fb.Trim() is { Length: > 0 } fallback ? fallback : null) : m.Fallback;
+        // Cleared or empty: automatic, by its family.
+        m.ToolParser = body.Clears("toolParser") ? null : body.ToolParser is { } tp ? (tp.Trim() is { Length: > 0 } tool ? tool : null) : m.ToolParser;
+        m.ReasoningParser = body.Clears("reasoningParser") ? null : body.ReasoningParser is { } rp ? (rp.Trim() is { Length: > 0 } reasoning ? reasoning : null) : m.ReasoningParser;
     }
 }
