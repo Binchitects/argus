@@ -29,7 +29,7 @@ public sealed class SymbolGraphTests
             File.WriteAllText(Path.Combine(tree, path), text);
             ix.File(repo, path, text, path.EndsWith(".ts") ? "typescript" : "csharp");
         }
-        Assert.NotNull(SymbolGraph.Refresh(ix.Conn, repo, tree, "abc"));
+        Assert.StartsWith("symbol graph: ", SymbolGraph.Refresh(ix.Conn, repo, tree, "abc"));
         return (ix, repo, other);
     }
 

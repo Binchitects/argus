@@ -49,7 +49,8 @@ public static class SymbolGraph
             var paths = Sql.Query(conn, "SELECT path FROM files WHERE repo_id = ?", repoId).Select(r => r.Str("path")).ToList();
             var (uses, bases, took) = Build(conn, repoId, tree, paths, ct);
             Record(conn, repoId, sha);
-            return $"symbol graph: {uses} uses and {bases} bases tied to their definitions in {took.TotalSeconds:0.0} s";
+            // A repository with no code the graph reads (C#, TypeScript, JavaScript, Python) has nothing to say.
+            return uses + bases == 0 ? null : $"symbol graph: {uses} uses and {bases} bases tied to their definitions in {took.TotalSeconds:0.0} s";
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or SqliteException or InvalidOperationException or ArgumentException)
         {

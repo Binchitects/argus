@@ -79,6 +79,7 @@ public static class Commands
         var old = Sql.One(conn, "SELECT last_indexed_sha FROM repos WHERE id = ?", repoId)!.StrOrNull("last_indexed_sha");
         var started = NowF();
         IndexResult result;
+        string? graphSaid = null;
         string sha;
         string? subject = null;
         // The symbol reader changed since its last run: every file is read again.
@@ -118,10 +119,10 @@ public static class Commands
                 symbols: files => Progress.Symbols(project.PathWithNamespace, branch, files));
             (subject, var committed) = Mirror.CommitInfo(mirrorDir, sha);
             if (!result.TimedOut && !result.SymbolsFailed) Writes.SetCommitInfo(conn, repoId, subject, committed);
-            // Who calls and implements what inside the repository, on its default branch.
-            if (!result.TimedOut && branch == project.DefaultBranch && Symbols.SymbolGraph.Refresh(conn, repoId, tree, sha) is { } graphSaid)
+            // Who calls and implements what inside the repository, on its default branch (said after what was read).
+            if (!result.TimedOut && branch == project.DefaultBranch)
             {
-                log.Say($"{branch}: {graphSaid}.");
+                graphSaid = Symbols.SymbolGraph.Refresh(conn, repoId, tree, sha);
             }
         }
         catch (GitError exc)
@@ -162,6 +163,8 @@ public static class Commands
         if (result.Deleted > 0) parts.Add($"{result.Deleted:N0} removed");
         if (result.Skipped > 0) parts.Add($"{result.Skipped:N0} skipped (unchanged, not code, or too large)");
         log.Say($"{branch}: at {RepoLog.Commit(sha, subject)}, {what}: {string.Join(", ", parts)} ({RepoLog.Took(took)}).");
+        if (graphSaid is not null)
+            log.Say($"{branch}: {graphSaid}.");
         if (result.SymbolsFailed)
             log.Fail($"{branch}: its symbols could not be read: {result.SymbolsProblem ?? "the symbol reader failed"}. " +
                      "Check that Universal Ctags is installed where Argus runs; the files are read again on the next run.");
