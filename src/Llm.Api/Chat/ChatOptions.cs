@@ -14,6 +14,9 @@ public sealed class ChatOptions
     /// <summary>A tool result past this many characters: the model reads its start, the whole is a file in the chat; 0: no limit.</summary>
     public int ToolResultChars { get; set; } = 24_000;
 
+    /// <summary>Tool results the model has used go to it summarised before each step (ResultCondenser); the chat keeps them whole.</summary>
+    public bool CondenseResults { get; set; } = true;
+
     /// <summary>
     /// A chat is compacted (its older messages summarized) before an answer when the
     /// request would fill this share of the model's context, in percent (20 to 95), as

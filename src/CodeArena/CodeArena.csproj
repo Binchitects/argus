@@ -31,6 +31,8 @@
     <Compile Include="../Llm.Core/Chat/ContextOverflow.cs" Link="Shared/ContextOverflow.cs" />
     <Compile Include="../Llm.Core/Chat/HistoryWords.cs" Link="Shared/HistoryWords.cs" />
     <Compile Include="../Llm.Core/Chat/ContextWindow.cs" Link="Shared/ContextWindow.cs" />
+    <Compile Include="../Llm.Core/Chat/ResultCondenser.cs" Link="Shared/ResultCondenser.cs" />
+    <Compile Include="../Llm.Core/Chat/ToolCallRepair.cs" Link="Shared/ToolCallRepair.cs" />
   </ItemGroup>
 
   <!-- Code with its comments and strings blanked, lines and columns kept: Argus's own reading, which the code index

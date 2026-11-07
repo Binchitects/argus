@@ -108,7 +108,8 @@ public sealed class CodeIndexToolTests : IDisposable
     public async Task Places_shown_before_earlier_results_were_cleared_are_shown_again_whole()
     {
         _gateway.Context = 40_000;
-        using var h = new Harness(_gateway, _mcp, c => { c["compactAt"] = 30; c["codeIndex"] = true; });
+        // Cleared, not summarised once used (CondenseTests): what clearing does alone.
+        using var h = new Harness(_gateway, _mcp, c => { c["compactAt"] = 30; c["codeIndex"] = true; c["condenseResults"] = false; });
         Shop(h);
         for (var i = 1; i <= 5; i++)
         {

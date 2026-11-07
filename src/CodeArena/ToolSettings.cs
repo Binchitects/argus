@@ -175,7 +175,8 @@ internal sealed class ToolSettings
             }
             if (schema["required"] is JsonArray required)
             {
-                schema["required"] = new JsonArray([.. required.Where(r => !fixedArgs.ContainsKey(r?.ToString() ?? "")).Select(r => r?.DeepClone())]);
+                // Nor is one with a default required of the model: left out, it is filled.
+                schema["required"] = new JsonArray([.. required.Where(r => !fixedArgs.ContainsKey(r?.ToString() ?? "") && !defaults.ContainsKey(r?.ToString() ?? "")).Select(r => r?.DeepClone())]);
             }
             foreach (var (key, value) in defaults)
             {

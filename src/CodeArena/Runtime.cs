@@ -673,6 +673,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         Context.RunSteps = RunStepsAsync;
         Context.GoalCheck = SetGoalCheck;
         Agent.Critique = Config.PlanCritique ? (plan, token) => CritiqueAsync(inputs, plan, token) : null;
+        Agent.CondenseResults = Config.CondenseResults;
         Agent.Ground = GroundAsync;
         _inputs = inputs;
         Context.Progress = said =>

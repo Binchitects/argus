@@ -554,6 +554,11 @@ public sealed partial class ChatService(
                 msg.DetailsJson = details.ToJsonString();
             }
 
+            if (chat.CurrentValue.CondenseResults)
+            {
+                // The results the model has used go summarised from now on (the request only: the chat keeps them whole).
+                CondenseResults(messages, runs.ContainsKey("read_file"));
+            }
             var request = new JsonObject
             {
                 ["model"] = modelName,
@@ -851,6 +856,8 @@ public sealed partial class ChatService(
                 ["type"] = "function",
                 ["function"] = new JsonObject { ["name"] = kv.Value.Name ?? "", ["arguments"] = kv.Value.Args.ToString() },
             })]);
+            // A tool named as another harness names it, arguments not quite JSON: mended before they are kept, said under the result.
+            var mended = MendCalls(toolCalls, runs.Keys.Append(OnDemandTools.Function).ToList());
             msg.ToolCallsJson = toolCalls.ToJsonString();
             await db.SaveChangesAsync(ct);
             messages.Add(new JsonObject { ["role"] = "assistant", ["content"] = msg.Content, ["tool_calls"] = toolCalls.DeepClone() });
@@ -968,6 +975,10 @@ public sealed partial class ChatService(
                 if (!loading && known && !outcome.IsError && await safeguards.CheckToolAsync("tool_result", user, modelName, conversation.Id, name, outcome.Text, ct) is var (resultRefused, resultText))
                 {
                     outcome = resultRefused is not null ? outcome with { Text = $"[{resultRefused}]", IsError = true } : outcome with { Text = resultText };
+                }
+                if (mended.TryGetValue(id, out var fix))
+                {
+                    outcome = outcome with { Text = outcome.Text + $"\n\n(This call was mended before it ran: {fix}. Call {name} so next time.)" };
                 }
                 var (text, isError) = (outcome.Text, outcome.IsError);
                 ends |= outcome.EndsAnswer;

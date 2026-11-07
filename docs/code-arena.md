@@ -2451,6 +2451,38 @@ What fills the window is managed before anything is summarized:
   `{"id":"r1","find":"text"}` gives the lines that hold some text. A
   sub-agent's results, with no session file of their own, are cut in the
   middle as before (past 40,000 characters).
+- **Results the model has used are summarised.** Before each step, not only
+  near the threshold, a tool's result that two answers or more have followed
+  (the model answered after it, then stepped on) goes to the model as a
+  summary: what was asked, its key lines with their line numbers (paths and
+  places, errors, the figures, and what the model said of it since), and the
+  handle that reads it whole again ("it is kept as r4, read_result
+  {"id":"r4"} reads it"). A file read goes as its outline (the symbols with
+  their lines) and the lines the model cited after it (by number, word for
+  word in an edit's `old_string`, or by a name written as code), once the
+  latest two steps no longer touch that file. A file read again after it was
+  edited, or read again the same way, drops the older read ("Dropped:
+  read_file of src/Cart.cs: it was read again after it was edited further
+  on, and that read stands."). The step's own results, and those of the step
+  just before, stay whole; a pass that would free under 3,000 characters
+  waits, so the start of the requests the engine has cached does not change
+  for a little. The session keeps the history the model reads (a light
+  line in its file); the IDE and Arena show every result whole. A line
+  says what was done: "Summarised 3 earlier tool results, left 1 file read
+  as its outline and the lines cited (~4,100 tokens freed)."
+  `"condenseResults": false` in the config file turns it off.
+- **Calls are mended.** A tool named as another harness names it (`Bash`,
+  `Read`, `str_replace`, `functions.read_file`, a letter off), arguments that
+  are not quite JSON (in a code fence, a trailing comma, single quotes,
+  Python's `True` and `None`, a raw line break in a string, the closing brace
+  missing, the object sent as a string) and arguments named or typed not as
+  the tool says (`file_path` for `path`, `"12"` for 12, `"yes"` for true, an
+  option in another case) run as meant; the answer keeps the mended call, and
+  its result ends with what was mended ("This call was mended before it ran:
+  Read → read_file; file_path → path. Call read_file so next time."). A call
+  missing what it needs is refused before it runs, with the tool's
+  parameters, each with its type and what it is, and an example. Measured
+  in [measurements/context-condensing.md](measurements/context-condensing.md).
 - **Earlier results are cleared before compacting.** When the next request
   would pass the threshold, the results older than the person's last two
   messages (past 1,000 characters) are kept aside the same way and replaced
@@ -3103,7 +3135,7 @@ The rest of the file: `"model"`, `"thinking"`, `"mode"`, `"context"`,
 `"shell"` (the agent's `run_shell`), `"terminalShell"` (the IDE's terminals),
 `"allowedPaths"`, `"arenaTools": false` (no Arena MCP), `"argusTools": false`
 (no Argus MCP), `"toolChars"` (tools on demand, above), `"argusUrl"`, `"compactAt"`, `"compactTarget"`, `"gateway"`,
-`"mcpUrl"`, `"ca"`, `"autoCommit"`, `"planCritique"`, `"python"`, `"toolMode"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"window"`, `"completion"`, `"completionModel"`, `"completionTemplate"`, `"checkCommand"`, `"sandbox"`,
+`"mcpUrl"`, `"ca"`, `"autoCommit"`, `"planCritique"`, `"condenseResults"`, `"python"`, `"toolMode"`, `"commitName"`, `"commitEmail"`, `"syncChats"`, `"window"`, `"completion"`, `"completionModel"`, `"completionTemplate"`, `"checkCommand"`, `"sandbox"`,
 `"sandboxNetwork"`, `"sandboxWritable"`, `"permissions"`, `"formatters"`, `"debugAdapters"`,
 `"languageServers"` (the IDE's: above) and `"toolSettings"` (below). `ARENA_ARGUS_URL` in the environment gives Argus's address
 for one run.
