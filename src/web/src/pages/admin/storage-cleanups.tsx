@@ -11,7 +11,8 @@ import { useConfirm } from '@/components/ui/confirm'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { toast } from '@/components/ui/toaster'
-import { api, errorMessage } from '@/lib/api'
+import { useOutletContext } from 'react-router'
+import { api, errorMessage, holds, type Me } from '@/lib/api'
 import { when } from '@/lib/format'
 import { useDebounced } from '@/lib/use-debounced'
 import { cleanupKinds, plural, size, type CleanupDone, type CleanupPlan, type CleanupType, type StorageReport } from './storage-api'
@@ -29,6 +30,8 @@ export function Cleanups({ settings }: { settings: StorageReport['settings'] | u
 
 /** One clean-up: its number, what it would take now and the room that frees, and the run after a confirmation. */
 function CleanupCard({ k, start }: { k: CleanupType; start: number | undefined }) {
+  // A preview is storage.read's; cleaning up, storage.cleanup's.
+  const mayClean = holds(useOutletContext<Me>(), 'storage.cleanup')
   const client = useQueryClient()
   const confirm = useConfirm()
   const [value, setValue] = useState<string | null>(null)
@@ -105,7 +108,7 @@ function CleanupCard({ k, start }: { k: CleanupType; start: number | undefined }
           <Button variant="outline" size="sm" className="h-9" disabled={!valid} loading={plan.isFetching} onClick={() => (!asked ? setAsked(true) : settled ? void plan.refetch() : undefined)}>
             <Eye /> {asked ? 'Look again' : 'Preview'}
           </Button>
-          {p && !p.problem && !p.command && (
+          {p && !p.problem && !p.command && mayClean && (
             <Button variant="destructive" size="sm" className="h-9" disabled={count === 0 || plan.isFetching || !settled} loading={running} onClick={() => void run()}>
               <Trash2 /> Clean up
             </Button>

@@ -206,6 +206,27 @@ describe('Admin → Storage', () => {
     expect(screen.getByText('1 file kept: legal hold.')).toBeInTheDocument()
   })
 
+  it('one who may only read storage sees the files, the people and a clean-up’s preview, with nothing to delete, clean up or limit', async () => {
+    const reader = { ...member, permissions: ['storage.read'] }
+    fakeApi(reader, { ...routes, 'GET /api/admin/storage/cleanups/unused-files': () => ({ json: plan({ days: 7, count: 2, bytes: 5 * MB, held: { count: 0, bytes: 0 }, items: [] }) }) })
+    const files = renderApp('/admin/storage?tab=files')
+    expect(await screen.findByText('report.pdf')).toBeInTheDocument()
+    expect(screen.queryAllByRole('checkbox', { name: 'Select row' })).toHaveLength(0)
+    files.unmount()
+
+    const people = renderApp('/admin/storage?tab=people')
+    expect(await screen.findByRole('table')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Give someone a room/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Set the room of/ })).toBeNull()
+    people.unmount()
+
+    renderApp('/admin/storage?tab=cleanups')
+    const card = (await screen.findByText('Files in no chat')).closest('section') as HTMLElement
+    await userEvent.click(within(card).getByRole('button', { name: 'Preview' }))
+    expect(await within(card).findByText('5.0 MiB')).toBeInTheDocument()
+    expect(within(card).queryByRole('button', { name: /Clean up/ })).toBeNull()
+  })
+
   it('a clean-up previews what would go and the room it frees, then runs with the age chosen after a confirmation', async () => {
     const calls = fakeApi(admin, {
       ...routes,
