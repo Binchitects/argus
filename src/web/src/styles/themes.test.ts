@@ -163,11 +163,11 @@ describe('colour themes', () => {
     expect(low).toEqual([])
   })
 
-  // Calm as the default: a theme's surfaces and text are the default's lightness and only as faintly tinted (its card
-  // too, where the chart palette was validated); its accent is about as light and no more vivid, and so are the
-  // accent's shades and the sign-in page's ground and lids.
+  // Calm: a theme's surfaces and text are the default's lightness and at most a third as tinted by its own hue (its
+  // card too, where the chart palette was validated), so the accent alone carries the colour; its accent is about as
+  // light and no more vivid, and so are the accent's shades and the sign-in page's ground and lids.
   it.each(calm.flatMap((id) => (['light', 'dark'] as const).map((mode) => ({ id, mode }))))(
-    '$id $mode: its surfaces and text are tinted about as faintly as the default’s, its accent as strong',
+    '$id $mode: its surfaces and text are a third as tinted as the default’s, its accent as strong',
     ({ id, mode }) => {
       const t = tokensOf(id, mode)
       const d = tokensOf('default', mode)
@@ -175,7 +175,7 @@ describe('colour themes', () => {
       for (const name of [...surfaces, ...texts]) {
         const [L, C] = color(t, name).oklch
         const [L0, C0] = color(d, name).oklch
-        if (Math.abs(L - L0) > 0.02 || Math.abs(C - C0) > 0.004) off.push(`${name}: oklch(${L} ${C}), the default's oklch(${L0} ${C0})`)
+        if (Math.abs(L - L0) > 0.02 || C > C0 / 3 + 0.001) off.push(`${name}: oklch(${L} ${C}), the default's oklch(${L0} ${C0})`)
       }
       for (const name of shades) {
         const [L, C] = color(t, name).oklch
@@ -199,12 +199,12 @@ describe('colour themes', () => {
       const table = hex(palette[name]).rgb.map((c) => Math.round(c * 255))
       expect(Math.max(...css.map((c, i) => Math.abs(c - table[i]!))), `${name}: ${palette[name]}`).toBeLessThanOrEqual(2)
     }
-    // The line numbers have no CSS: text, 4.5:1 on the background, and (a calm theme's) only as faintly tinted as the default's.
+    // The line numbers have no CSS: text, 4.5:1 on the background, and (a calm theme's) at most a third as tinted as the default's.
     expect(contrast(hex(palette.lineNumber), hex(palette.background))).toBeGreaterThanOrEqual(4.5)
-    if (vscode(id)) return
+    if (vscode(id) || id === 'default') return
     const chroma = hex(palette.lineNumber).oklch[1]
     const defaultChroma = hex(colorThemes.find((c) => c.id === 'default')![mode].lineNumber).oklch[1]
-    expect(Math.abs(chroma - defaultChroma), `lineNumber ${palette.lineNumber}`).toBeLessThanOrEqual(0.004)
+    expect(chroma, `lineNumber ${palette.lineNumber}`).toBeLessThanOrEqual(defaultChroma / 3 + 0.002)
   })
 
   it("offers what the server allows (Llm.Api/Identity/ColorThemes.cs)", () => {

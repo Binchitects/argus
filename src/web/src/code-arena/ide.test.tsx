@@ -3291,7 +3291,7 @@ describe('Code Arena, the IDE', () => {
     expect(editor().options.theme).toBe('arena-sakura-dark')
     await userEvent.keyboard('{Control>}j{/Control}')
     await waitFor(() => expect(fakes.terminals).toHaveLength(1))
-    expect(fakes.terminals[0]!.options.theme).toMatchObject({ background: '#120d0f', foreground: '#eeeaeb', cursor: '#d76797', selectionBackground: '#d767974d', red: '#cd3131' })
+    expect(fakes.terminals[0]!.options.theme).toMatchObject({ background: '#0f0e0f', foreground: '#ecebeb', cursor: '#d76797', selectionBackground: '#d767974d', red: '#cd3131' })
 
     // Light keeps the colour theme: Sakura Light, not the preferred light theme.
     await userEvent.click(screen.getByRole('button', { name: 'Theme' }))
@@ -3300,7 +3300,7 @@ describe('Code Arena, the IDE', () => {
     await waitFor(() => expect(document.documentElement).not.toHaveClass('dark'))
     expect(document.documentElement.dataset.colorTheme).toBe('sakura')
     await waitFor(() => expect(fakes.themes.at(-1)).toBe('arena-sakura-light'))
-    await waitFor(() => expect(fakes.terminals[0]!.options.theme).toMatchObject({ background: '#fefcfc', cursor: '#ba4374' }))
+    await waitFor(() => expect(fakes.terminals[0]!.options.theme).toMatchObject({ background: '#fdfcfc', cursor: '#ba4374' }))
 
     // Another colour theme: both of its modes become the preferred ones, and the one of the mode now is chosen.
     await userEvent.click(screen.getByRole('button', { name: 'Theme' }))
