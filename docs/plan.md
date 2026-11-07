@@ -34,27 +34,16 @@ release ships.
   service can take it, else saved with the one command to apply it. No Docker
   socket.
 
-## In progress: v7.8.3
+## Open from the 2026-11-06 list
 
-Everything on the 2026-11-06 list is built and shipped in v7.8.0 to v7.8.2
-except what follows. Each part ships in 7.8.3 when it is ready.
+Everything on it shipped in v7.8.0 to v7.8.3, except what needs the hardware
+below, and two parts kept out on purpose:
 
-1. **Projects in Code Arena.** A Projects view in the IDE, a project's page
-   in a tab, and `/projects` and `/project` in the terminal.
-2. **The last hidden controls.** Every control whose permission a person
-   lacks is hidden (calls, app remix, Code Arena, Fix it). Admin → Models
-   cards have their settings in Details. Every report page has the time
-   window.
-3. **Leaner context.** Tool results and file reads are summarised once used,
-   measured on long sessions with a real model, and tool calls fail less.
-4. **The IDE's last VS Code gaps.** A merge-conflict editor, multi-root
-   workspaces, notebooks and project snippets.
-5. **Settings and the window.** Every option an admin may change is in
-   Settings, and Code Arena's own options are in the IDE. A launcher with no
-   console window ships on Windows.
-6. **Real runs.** Strata and LMDeploy serve a real model on this host's GPU;
-   the LMDeploy image builds; the VM tool drives a real VM; the workspaces
-   have a browser test and a CI job.
+1. **The LMDeploy image in the bundle.** pypi.org stalls from the build
+   host's network, so it was built only with a third-party mirror; it ships
+   once it builds from pypi.org (or the company's own mirror).
+2. **VS Code extensions that need their own code** (an extension host), in
+   Next below.
 
 ## Needs the production host (3x H200 NVL)
 
