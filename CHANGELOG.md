@@ -15,6 +15,38 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v7.8.4 (2026-11-07)
+
+A hotfix: the offline installer builds from a fresh checkout, and can build
+through an HTTP proxy.
+
+### :sparkles: New features & Enhancements
+
+- **Building through a proxy.** `--proxy http://HOST:PORT` (or `ARENA_PROXY`),
+  anywhere on an arenactl line, sends what is downloaded through an HTTP proxy:
+  every image build's apt, pip, npm and curl (as Docker's own proxy build
+  arguments, kept out of the images' history), the .NET and Node containers
+  that make Code Arena's packages, and arenactl's own downloads. A proxy's
+  password is never printed. The images pulled are Docker's own: arenactl
+  warns when its daemon has no proxy, and docs/deployment.md (Building through
+  a proxy) says how to give it one.
+- **The LMDeploy engine's image is built by the bundle** when PyPI can be
+  reached (`--proxy` or `LMDEPLOY_PIP_INDEX`).
+
+### :bug: Bugs fixed
+
+- **`./arenactl bundle --with-deps` stopped on a fresh checkout.** It asked for
+  the LMDeploy engine's image, which no registry has; now an optional feature
+  whose image does not build or pull is left out of the bundle with a warning
+  (and the features that need it), and only a core image stops it.
+- **Argus's image did not build where PyPI is not reached** (sqlite-vec was
+  fetched from it, once, with no retry on a TLS error). Its linux-x64 build is
+  kept in `native/`, and the fetch retries every error.
+- **A bundle from a fresh checkout had no embedding model**, so search by
+  meaning never started on the host installed from it. The bundle fetches it
+  from Hugging Face where the model library lacks it, checked against its
+  SHA-256.
+
 ## v7.8.3 (2026-11-07)
 
 Projects in Code Arena, tool calls on every engine, an IDE with notebooks and

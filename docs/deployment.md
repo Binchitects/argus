@@ -1081,6 +1081,44 @@ On a Linux machine with this checkout. It builds every feature's images first
 | `--podman` | the images in Podman's store |
 | `--out DIR` | where the file goes (default `dist/`) |
 | `--no-build` | the images as this host has them |
+| `--proxy URL` | an HTTP proxy for what is downloaded (below); also `ARENA_PROXY` |
+
+An optional feature whose image does not build or pull here is left out of the
+bundle, those that need it with it, and said at the end as a warning: the bundle
+is still made, and its installer cannot turn them on. The LMDeploy engine's image
+is pulled from nowhere: the bundle builds it (`lmdeploy-build.yml`, 6-10 GB from
+PyPI) when `--proxy` or `LMDEPLOY_PIP_INDEX` is given, and leaves it out
+otherwise. A core image (the app, the web, Postgres, the gateway, Traefik) that
+does not build or pull stops the bundle.
+
+#### Building through a proxy
+
+Where PyPI, Debian, npm or NuGet cannot be reached directly, give the build an
+HTTP proxy, anywhere on the line:
+
+```bash
+./arenactl bundle --with-deps --proxy http://172.10.0.138:10808
+./arenactl build --all --proxy http://172.10.0.138:10808
+```
+
+It goes to arenactl's own downloads (the host's dependencies, sqlite-vec), to
+every `RUN` of each image's build (apt, pip, npm, curl, as Docker's predefined
+`HTTP_PROXY`/`HTTPS_PROXY` build arguments, which stay out of the images'
+history) and to the .NET and Node containers that make Code Arena's packages.
+`localhost`, `127.0.0.1` and `::1` are never sent through it. A proxy's user and
+password (`http://USER:PASSWORD@HOST:PORT`) are never printed.
+
+The images pulled, and each build's `FROM`, are Docker's own downloads, through
+its daemon's proxy, not this one; arenactl warns when the daemon has none. Give
+the daemon the proxy yourself (it is the host's setting, and restarts Docker,
+which stops its running containers):
+
+```bash
+sudo mkdir -p /etc/systemd/system/docker.service.d
+printf '[Service]\nEnvironment="HTTP_PROXY=http://172.10.0.138:10808" "HTTPS_PROXY=http://172.10.0.138:10808" "NO_PROXY=localhost,127.0.0.1,::1"\n' \
+  | sudo tee /etc/systemd/system/docker.service.d/proxy.conf
+sudo systemctl daemon-reload && sudo systemctl restart docker
+```
 
 The release's own images go in as `arena-SERVICE:VERSION`, the others as the
 compose file names them. `MANIFEST` says the version, the commit and the oldest

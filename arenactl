@@ -80,13 +80,80 @@ def human(n: float) -> str:
     return f"{n:.1f} TB"
 
 
+# ----------------------------------------------------------------------------- an HTTP proxy for what is downloaded
+PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy")
+NO_PROXY = "localhost,127.0.0.1,::1"
+
+
+def proxy() -> str | None:
+    """The proxy --proxy (or ARENA_PROXY) set: arenactl's own downloads, the image builds and the SDK's containers use it."""
+    return os.environ.get("ARENA_PROXY") or None
+
+
+def masked(text: str) -> str:
+    # A proxy's user and password are never printed.
+    return re.sub(r"(https?://)[^/@\s:]+:[^/@\s]+@", r"\1***@", text)
+
+
+def use_proxy(url: str | None) -> None:
+    if not url:
+        return
+    if not re.match(r"^https?://[^\s/]+(:\d+)?/?$", url):
+        raise Stop(f"--proxy {masked(url)}: an HTTP proxy is http://HOST:PORT (or http://USER:PASSWORD@HOST:PORT)", 2)
+    os.environ["ARENA_PROXY"] = url
+    for k in PROXY_VARS:
+        os.environ[k] = url
+    no = ",".join(x for x in (os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or "", NO_PROXY) if x)
+    os.environ["NO_PROXY"] = os.environ["no_proxy"] = no
+    say(f"==> downloads through the proxy {masked(url)} (not for {no})")
+    # The images pulled, and a build's FROM, are the engine's own downloads: its daemon's proxy, not this one.
+    if shutil.which("docker") and output(["docker", "info", "--format", "{{.HTTPSProxy}}{{.HTTPProxy}}"]) in ("", "\n"):
+        warn("Docker pulls images without a proxy (its daemon has none): where a registry cannot be reached directly, give "
+             "the daemon this proxy too (docs/deployment.md, Building through a proxy)")
+
+
+def take_proxy(argv: list[str]) -> tuple[list[str], str | None]:
+    url = None
+    out = []
+    i = 0
+    while i < len(argv):
+        x = argv[i]
+        if x == "--proxy":
+            if i + 1 >= len(argv):
+                raise Stop("--proxy needs a URL: --proxy http://HOST:PORT", 2)
+            url = argv[i + 1]
+            i += 2
+            continue
+        if x.startswith("--proxy="):
+            url = x.split("=", 1)[1]
+        else:
+            out.append(x)
+        i += 1
+    return out, url
+
+
+def proxy_build_args() -> list[str]:
+    """Docker's predefined proxy arguments: every RUN of a build (apt, pip, npm, curl) goes through the proxy, and they
+    are left out of the image's history."""
+    if not proxy():
+        return []
+    return [a for k in (*PROXY_VARS, "NO_PROXY", "no_proxy") for a in ("--build-arg", f"{k}={os.environ[k]}")]
+
+
+def proxy_env_args() -> list[str]:
+    """The same proxy for a container arenactl runs (the .NET SDK, Node)."""
+    if not proxy():
+        return []
+    return [a for k in (*PROXY_VARS, "NO_PROXY", "no_proxy") for a in ("-e", f"{k}={os.environ[k]}")]
+
+
 def run(cmd: list[str], cwd: Path | None = None, env: dict | None = None, check: bool = True, quiet: bool = False, input: str | None = None) -> int:
     if not quiet:
-        say("  $ " + " ".join(cmd))
+        say(masked("  $ " + " ".join(cmd)))
     full = None if env is None else {**os.environ, **env}
     r = subprocess.run(cmd, cwd=cwd, env=full, input=input, text=input is not None)
     if check and r.returncode != 0:
-        raise Stop(f"{Path(cmd[0]).name} failed (exit {r.returncode}): {' '.join(cmd)}", r.returncode)
+        raise Stop(masked(f"{Path(cmd[0]).name} failed (exit {r.returncode}): {' '.join(cmd)}"), r.returncode)
     return r.returncode
 
 
@@ -222,12 +289,14 @@ class Compose:
     def env(self) -> dict:
         return {"COMPOSE_PROFILES": ",".join(self.profiles), "COMPOSE_PROJECT_NAME": self.project, "COMPOSE_FILE": ""}
 
-    def cmd(self, *args: str) -> list[str]:
-        files = ["-f", "docker-compose.yml"] + (["-f", "podman.yml"] if self.engine.name == "podman" else [])
+    def cmd(self, *args: str, extra: tuple[str, ...] = ()) -> list[str]:
+        files = ["-f", "docker-compose.yml"] + (["-f", "podman.yml"] if self.engine.name == "podman" else []) + [a for f in extra for a in ("-f", f)]
         return [*self.engine.compose(), "--env-file", str(self.dir / "placeholder.env"), *files, *args]
 
-    def run(self, *args: str) -> None:
-        run(self.cmd(*args), cwd=DEPLOY, env=self.env())
+    def run(self, *args: str, extra: tuple[str, ...] = ()) -> None:
+        if args[:1] == ("build",):
+            args = ("build", *proxy_build_args(), *args[1:])
+        run(self.cmd(*args, extra=extra), cwd=DEPLOY, env=self.env())
 
     def config(self) -> dict:
         out = output(self.cmd("config", "--format", "json"), cwd=DEPLOY, env=self.env())
@@ -352,6 +421,13 @@ def build_images(engine: Engine, profiles: list[str], pull: bool = True, service
         names = services or sorted(svcs)
         built = [s for s in names if s in svcs and svcs[s].get("build")]
         others = [s for s in names if s in svcs and not svcs[s].get("build")]
+        # The LMDeploy engine's image is pulled from nowhere: built from PyPI by lmdeploy-build.yml (6-10 GB), when it is
+        # not here and PyPI can be reached (through --proxy or LMDEPLOY_PIP_INDEX), or it was asked for by name.
+        if "lmdeploy" in others and not engine.has_image(svcs["lmdeploy"].get("image", "")) and \
+                (proxy() or os.environ.get("LMDEPLOY_PIP_INDEX") or (services and "lmdeploy" in services)):
+            others.remove("lmdeploy")
+            step("the LMDeploy engine's image (lmdeploy-build.yml, from PyPI)")
+            attempt("lmdeploy", lambda: compose.run("build", "lmdeploy", extra=("lmdeploy-build.yml",)))
         step(f"the release's own images: {len(built)} built ({engine.name} compose build)")
         if "argus" in built:
             # Argus's sqlite-vec, fetched here and checked against its pinned SHA-256: the image takes this copy, so its
@@ -487,7 +563,7 @@ def dotnet_cmd(engine: Engine) -> tuple[list[str], str]:
     # handed back to this user after (Docker on Linux; Podman and Docker Desktop map it already).
     owner = engine.user_args()[1] if engine.user_args() else ""
     chown = f'; rc=$?; find /repo/src /repo/dist -user 0 -exec chown {owner} {{}} + 2>/dev/null; exit $rc' if owner else ""
-    return [name, "run", "--rm", "-e", "DOTNET_CLI_TELEMETRY_OPTOUT=1", "-e", "DOTNET_NOLOGO=1", "-v", "arenactl-nuget:/root/.nuget",
+    return [name, "run", "--rm", *proxy_env_args(), "-e", "DOTNET_CLI_TELEMETRY_OPTOUT=1", "-e", "DOTNET_NOLOGO=1", "-v", "arenactl-nuget:/root/.nuget",
             "-v", f"{ROOT}:/repo", "-w", "/repo", DOTNET_SDK_IMAGE, "sh", "-c", 'dotnet "$@"' + chown, "dotnet"], "/repo"
 
 
@@ -512,7 +588,7 @@ def build_page(engine: Engine) -> None:
                   "&& npm ci --no-audit --no-fund && "
                   + " && ".join(f"node node_modules/vite/bin/vite.js build {' '.join(c)} --logLevel warn" for c in configs)
                   + " && rm -rf /repo/src/CodeArena/web && cp -r /tmp/w/src/CodeArena/web /repo/src/CodeArena/web")
-        run([engine.name, "run", "--rm", *engine.user_args(), "-e", "HOME=/tmp", "-e", "npm_config_cache=/tmp/.npm", "-v", f"{ROOT}:/repo",
+        run([engine.name, "run", "--rm", *engine.user_args(), *proxy_env_args(), "-e", "HOME=/tmp", "-e", "npm_config_cache=/tmp/.npm", "-v", f"{ROOT}:/repo",
              NODE_IMAGE, "sh", "-c", script])
     elif (page / "code-arena.html").exists():
         say("==> Code Arena's page: built already (no Node.js 20+ or container engine to build it again)")
@@ -664,6 +740,40 @@ def latest_release(repo: str) -> dict:
     return json.loads(fetch_text(f"https://api.github.com/repos/{repo}/releases/latest"))
 
 
+# The embedding model every bundle carries (the embedding server waits for it): fetched where the model library lacks it.
+EMBED_FILE = "embed/nomic-embed-text-v1.5.f16.gguf"
+EMBED_URL = "https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.f16.gguf"
+EMBED_SHA256 = "f7af6f66802f4df86eda10fe9bbcfc75c39562bed48ef6ace719a251cf1c2fdb"
+
+
+def models_dir(arg: str | None) -> Path:
+    """The model library as make-installer.sh reads it: --models-dir, else MODELS_DIR in deploy/.env, else deploy/models."""
+    d = arg
+    env = DEPLOY / ".env"
+    if not d and env.exists():
+        d = next((ln.split("=", 1)[1].strip().strip('"') for ln in reversed(env.read_text(encoding="utf-8").splitlines())
+                  if ln.startswith("MODELS_DIR=")), None)
+    path = Path(d or "./models").expanduser()
+    return path if path.is_absolute() else (DEPLOY / path).resolve()
+
+
+def ensure_embedding(arg: str | None) -> None:
+    target = models_dir(arg) / EMBED_FILE
+    if target.exists():
+        return
+    step(f"the embedding model: not in {target.parent.parent}, fetched ({EMBED_URL}, 274 MB)")
+    part = target.with_name(target.name + ".fetching")
+    try:
+        fetch(EMBED_URL, part)
+        if sha256(part) != EMBED_SHA256:
+            raise Stop(f"{EMBED_URL}: its SHA-256 is not {EMBED_SHA256}")
+        part.replace(target)
+    except (OSError, Stop) as e:
+        part.unlink(missing_ok=True)
+        warn(f"the embedding model could not be fetched ({e}): the bundle goes without it, unless it is put at {target} "
+             "(--proxy, where Hugging Face is not reached directly)")
+
+
 def cmd_deps(a) -> int:
     """Docker's static binaries, its compose plugin, and NVIDIA's container toolkit (deb and rpm), for a bundle's deps/."""
     arch = a.arch
@@ -762,6 +872,8 @@ def cmd_bundle(a) -> int:
             warn("no git tag v5.2.0 here: the bundle installs and repairs as usual, but an upgrade from 5.2.0 cannot tell "
                  "the files a host changed from those it was shipped with (it keeps every one it finds changed, with the release's beside it)")
             no_known = True
+    if not a.dry_run:
+        ensure_embedding(a.models_dir)
     deps_dir = None
     if a.with_deps:
         arch = "arm64" if platform.machine().lower() in ("aarch64", "arm64") else "amd64"
@@ -961,6 +1073,10 @@ def cmd_scripts(_a) -> int:
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(prog="arenactl", description=__doc__.split("\n\n")[0], formatter_class=argparse.RawDescriptionHelpFormatter,
                                 epilog="Each command's own --help says more; docs/scripts.md has them all.")
+    p.add_argument("--proxy", metavar="URL",
+                   help="an HTTP proxy for everything downloaded (http://HOST:PORT; also ARENA_PROXY): arenactl's own "
+                        "downloads, every image build's apt, pip, npm and curl, and the SDK's containers. The images "
+                        "pulled are the engine's: its own proxy setting (docs/deployment.md, Building through a proxy)")
     sub = p.add_subparsers(dest="command", metavar="COMMAND")
 
     s = sub.add_parser("doctor", help="what this machine has for a task, and how to get the rest")
@@ -1033,6 +1149,9 @@ def main(argv: list[str]) -> int:
     s.set_defaults(func=cmd_scripts)
 
     try:
+        # --proxy URL, anywhere on the line (before or after the command), for every command.
+        argv, url = take_proxy(list(argv))
+        use_proxy(url or os.environ.get("ARENA_PROXY"))
         # The commands that pass their options on to a script take them as they come (argparse would read them itself).
         if argv and argv[0] in INSTALLER_COMMANDS + tuple(OPS) + ("check", "doctor") and not (argv[0] in ("check", "doctor") and argv[1:2] in (["-h"], ["--help"])):
             cmd, rest = argv[0], list(argv[1:])

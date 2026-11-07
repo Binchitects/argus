@@ -285,6 +285,7 @@ class BundleTests(unittest.TestCase):
         arenactl.linux_only = lambda *a: None
         arenactl.build_images = lambda *a, **k: set(failed)
         arenactl.release_tag_missing = lambda: False
+        arenactl.ensure_embedding = lambda *a: None
         arenactl.say = arenactl.step = arenactl.warn = lambda *a, **k: None
         arenactl.run = lambda cmd, **k: made.append(cmd) or 0
         args = arenactl.argparse.Namespace(podman=False, engine="docker", dry_run=False, no_build=False, without=without,
@@ -310,6 +311,65 @@ class BundleTests(unittest.TestCase):
         with self.assertRaises(arenactl.Stop):
             arenactl.cmd_bundle(args)
         self.assertEqual(made, [])
+
+    def test_the_embedding_model_is_fetched_when_the_library_lacks_it_and_checked(self):
+        arenactl = load_arenactl()
+        arenactl.step = arenactl.warn = lambda *a, **k: None
+        with tempfile.TemporaryDirectory() as d:
+            body = {"data": b"model"}
+            arenactl.fetch = lambda url, dest: (dest.parent.mkdir(parents=True, exist_ok=True), dest.write_bytes(body["data"]))
+            import hashlib
+            arenactl.EMBED_SHA256 = hashlib.sha256(b"model").hexdigest()
+            arenactl.ensure_embedding(d)
+            target = Path(d) / arenactl.EMBED_FILE
+            self.assertEqual(target.read_bytes(), b"model")
+            # Another file than the one pinned is not kept.
+            target.unlink()
+            body["data"] = b"tampered"
+            arenactl.ensure_embedding(d)
+            self.assertFalse(target.exists())
+            self.assertEqual(list(target.parent.iterdir()), [])
+
+
+class ProxyTests(unittest.TestCase):
+    """--proxy: taken anywhere on the line, given to the builds and the SDK's containers, its password never printed."""
+
+    def setUp(self):
+        self.saved = {k: os.environ.get(k) for k in ("ARENA_PROXY", "HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "NO_PROXY", "no_proxy")}
+
+    def tearDown(self):
+        for k, v in self.saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+    def test_taken_before_or_after_the_command(self):
+        arenactl = load_arenactl()
+        self.assertEqual(arenactl.take_proxy(["--proxy", "http://p:1", "bundle", "--with-deps"]), (["bundle", "--with-deps"], "http://p:1"))
+        self.assertEqual(arenactl.take_proxy(["bundle", "--proxy=http://p:1"]), (["bundle"], "http://p:1"))
+        self.assertEqual(arenactl.take_proxy(["bundle"]), (["bundle"], None))
+        with self.assertRaises(arenactl.Stop):
+            arenactl.take_proxy(["bundle", "--proxy"])
+
+    def test_builds_and_containers_get_it(self):
+        arenactl = load_arenactl()
+        arenactl.say = arenactl.warn = lambda *a, **k: None
+        for k in self.saved:
+            os.environ.pop(k, None)
+        self.assertEqual(arenactl.proxy_build_args(), [])
+        arenactl.use_proxy("http://172.10.0.138:10808")
+        args = arenactl.proxy_build_args()
+        self.assertIn("HTTPS_PROXY=http://172.10.0.138:10808", args)
+        self.assertIn("http_proxy=http://172.10.0.138:10808", args)
+        self.assertIn("NO_PROXY=localhost,127.0.0.1,::1", args)
+        self.assertIn("https_proxy=http://172.10.0.138:10808", arenactl.proxy_env_args())
+        with self.assertRaises(arenactl.Stop):
+            arenactl.use_proxy("172.10.0.138:10808")
+
+    def test_its_password_is_never_printed(self):
+        arenactl = load_arenactl()
+        self.assertEqual(arenactl.masked("--build-arg HTTP_PROXY=http://me:secret@p:1 x"), "--build-arg HTTP_PROXY=http://***@p:1 x")
 
 
 if __name__ == "__main__":

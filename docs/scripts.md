@@ -62,6 +62,7 @@ On a Linux machine with the network and this checkout:
 
 ```bash
 ./arenactl bundle --with-deps             # dist/argus-arena-VERSION-offline.run and its .sha256
+./arenactl bundle --with-deps --proxy http://HOST:PORT   # the same, downloading through an HTTP proxy
 ```
 
 It builds every image (or `--no-build`, those there already), makes Code
