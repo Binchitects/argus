@@ -30,8 +30,15 @@ through an HTTP proxy.
   password is never printed. The images pulled are Docker's own: arenactl
   warns when its daemon has no proxy, and docs/deployment.md (Building through
   a proxy) says how to give it one.
-- **The LMDeploy engine's image is built by the bundle** when PyPI can be
-  reached (`--proxy` or `LMDEPLOY_PIP_INDEX`).
+- **Docker's daemon through the proxy too.** `./arenactl docker-proxy URL`
+  gives Docker's daemon the same proxy (a systemd drop-in), so image pulls and
+  each build's base images go through it; `--off` takes it away. It checks
+  first that the proxy reaches Docker Hub's registry, says what the restart
+  stops (every running container; those with no restart policy by name),
+  and goes on only when `restart` is typed.
+- **The LMDeploy engine is in the offline installer again.** The bundle builds
+  its image (from pypi.org) when PyPI can be reached (`--proxy` or
+  `LMDEPLOY_PIP_INDEX`); 7.8.4's bundle has it, built through a proxy.
 
 ### :bug: Bugs fixed
 
@@ -46,6 +53,8 @@ through an HTTP proxy.
   meaning never started on the host installed from it. The bundle fetches it
   from Hugging Face where the model library lacks it, checked against its
   SHA-256.
+- **Making Code Arena's packages left files of root's in the checkout**
+  (`tools/ide-launcher/obj`), which the checkout's owner could not remove.
 
 ## v7.8.3 (2026-11-07)
 
