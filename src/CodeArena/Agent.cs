@@ -213,7 +213,7 @@ internal sealed record Meanwhile(string Id, string Text, IReadOnlyList<Mentions.
 /// question at once), give back their results, until it answers without a
 /// call. Compacts the history when it nears the model's window.
 /// </summary>
-internal sealed class Agent
+internal sealed partial class Agent
 {
     public required GatewayClient Gateway { get; init; }
     public required ToolBox Tools { get; init; }
@@ -681,6 +681,7 @@ internal sealed class Agent
         for (var step = 0; step < MaxSteps; step++)
         {
             _stepsInTurn++;
+            Condense();
             await MaybeCompactAsync(ct);
             ReportJobs();
             _askedAt = Estimate();
@@ -824,6 +825,7 @@ internal sealed class Agent
             }
             else
             {
+                MendCalls(answer.ToolCalls);
                 Add(answer.Message, answer.Usage);
                 _knownCount = Messages.Count;
             }
@@ -1288,6 +1290,10 @@ internal sealed class Agent
             {
                 refusal = $"The arguments for {name} were not valid JSON: {Fmt.OneLine(raw, 200)}";
             }
+            else if (refusal is null && _misfit.Remove(id, out var misfit))
+            {
+                refusal = misfit;
+            }
             ShowCall(name, tool, args);
             Events?.ToolCall(id, name, tool, string.IsNullOrWhiteSpace(raw) ? "{}" : raw);
             var declined = false;
@@ -1360,6 +1366,7 @@ internal sealed class Agent
                 }
             }
             results[i] = result;
+            Count(p.Name, p.Args, result, p.Refusal);
             ShowResult(p.Name, result, planned.Count > 1);
             Events?.ToolResult(p.Id, p.Name, i, result, clock.Elapsed, p.Declined);
         }
@@ -1375,6 +1382,11 @@ internal sealed class Agent
             else if (text.Length > limit)
             {
                 text = text[..(limit * 2 / 3)] + $"\n\n… ({text.Length - limit:N0} characters cut: ask for less, e.g. a line range or a narrower search) …\n\n" + text[^(limit / 3)..];
+            }
+            if (_mended.Remove(planned[i].Id, out var mended))
+            {
+                // Said under the result, so the model calls it so next time.
+                text += $"\n\n(This call was mended before it ran: {mended}. Call {planned[i].Name} so next time.)";
             }
             Add(new JsonObject { ["role"] = "tool", ["tool_call_id"] = planned[i].Id, ["content"] = text }, agents: results[i].Agents);
             _spending?.Called(planned[i].Name, text.Length);

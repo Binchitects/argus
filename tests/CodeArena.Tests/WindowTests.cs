@@ -34,12 +34,16 @@ public sealed class WindowTests : IDisposable
             _ => Reply.Say("read it"),
         };
         Assert.Equal(0, await h.Run("", "-p", "read big.txt", "--mode", "auto-edit"));
-        var results = Results(_gateway.Requests[^1]);
         // The start and the end, and where the rest is.
-        Assert.Contains("line 1 of the big file", results[0], StringComparison.Ordinal);
+        var read = Results(_gateway.Requests[1])[0];
+        Assert.Contains("line 1 of the big file", read, StringComparison.Ordinal);
+        Assert.Contains("is kept as r1", read, StringComparison.Ordinal);
+        Assert.DoesNotContain("line 700 of the big file", read, StringComparison.Ordinal);
+        Assert.Contains("line 1500 of the big file", read, StringComparison.Ordinal);
+        // Two answers on, it is summarised, by the same handle.
+        var results = Results(_gateway.Requests[^1]);
+        Assert.StartsWith("[Summarised once used: read_file", results[0], StringComparison.Ordinal);
         Assert.Contains("is kept as r1", results[0], StringComparison.Ordinal);
-        Assert.DoesNotContain("line 700 of the big file", results[0], StringComparison.Ordinal);
-        Assert.Contains("line 1500 of the big file", results[0], StringComparison.Ordinal);
         // Read again: the lines that hold some text, and a range.
         Assert.Contains("line 1200 of the big file", results[1], StringComparison.Ordinal);
         Assert.Contains("line 700 of the big file", results[2], StringComparison.Ordinal);
@@ -52,7 +56,8 @@ public sealed class WindowTests : IDisposable
     public async Task Before_compacting_the_earlier_results_are_cleared_and_kept_and_often_that_is_enough()
     {
         _gateway.Context = 40_000;
-        using var h = new Harness(_gateway, _mcp, c => c["compactAt"] = 30);
+        // Cleared, not summarised once used (CondenseTests): what clearing does alone.
+        using var h = new Harness(_gateway, _mcp, c => { c["compactAt"] = 30; c["condenseResults"] = false; });
         for (var i = 1; i <= 5; i++)
         {
             File.WriteAllText(Path.Combine(h.Work, $"f{i}.txt"), Lines($"file {i}", 220));

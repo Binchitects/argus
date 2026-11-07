@@ -205,6 +205,8 @@ internal sealed class Config
     public bool AutoCommit { get; set; } = true;
     /// <summary>A plan proposed in plan mode is read again with fresh eyes before the person reviews it: on unless false.</summary>
     public bool PlanCritique { get; set; } = true;
+    /// <summary>Earlier tool results the model has used are summarised before each step, kept whole for read_result: on unless false.</summary>
+    public bool CondenseResults { get; set; } = true;
     /// <summary>The Python run_code runs (code mode): python3 when not said (python on Windows).</summary>
     public string? Python { get; set; }
     /// <summary>
@@ -322,6 +324,7 @@ internal sealed class Config
         config.TerminalShell = raw.Str("terminalShell");
         config.AutoCommit = raw.Bool("autoCommit") ?? true;
         config.PlanCritique = raw.Bool("planCritique") ?? true;
+        config.CondenseResults = raw.Bool("condenseResults") ?? true;
         config.Python = raw.Str("python");
         config.ToolMode = raw.Str("toolMode") is { } toolMode && ToolBox.Modes.Contains(toolMode) ? toolMode
             : raw.Str("toolMode") is { } wrong ? throw new InvalidOperationException($"\"toolMode\" in {file} is direct, code or both, not {wrong}.") : null;
@@ -467,6 +470,7 @@ internal sealed class Config
         Set("terminalShell", TerminalShell);
         Set("autoCommit", AutoCommit ? null : false);
         Set("planCritique", PlanCritique ? null : false);
+        Set("condenseResults", CondenseResults ? null : false);
         Set("python", Python);
         Set("toolMode", ToolMode);
         Set("builtInSkills", BuiltInSkills ? null : false);

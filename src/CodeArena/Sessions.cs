@@ -309,6 +309,9 @@ internal sealed class SessionData
                     Marks[From - 1] = mark;
                 }
                 break;
+            case "results" when !light:
+                SessionStore.ApplyResults(entry, Messages);
+                break;
             case "model":
                 Model = entry.Str("model") ?? Model;
                 break;
@@ -541,6 +544,31 @@ internal sealed class SessionStore
         return new() { ["type"] = "compact", ["from"] = from, ["web"] = webSummary, ["charsPerToken"] = charsPerToken, ["messages"] = messages };
     }
 
+    /// <summary>
+    /// Tool results in the model's history given new words in place (summarised once used): each by its place in the history.
+    /// Lighter than a compaction's line, which writes every message again; Arena's copy keeps them whole.
+    /// </summary>
+    public void Condensed(IReadOnlyList<(int At, string Content)> changes)
+    {
+        if (changes.Count > 0)
+        {
+            Write(new JsonObject { ["type"] = "results", ["changes"] = new JsonArray([.. changes.Select(c => (JsonNode)new JsonArray(c.At, c.Content))]) });
+        }
+    }
+
+    /// <summary>A results line's changes made to the model's history (<see cref="Condensed"/>).</summary>
+    internal static void ApplyResults(JsonObject entry, List<JsonObject> messages)
+    {
+        foreach (var change in (entry["changes"] as JsonArray ?? []).OfType<JsonArray>())
+        {
+            if (change is [JsonValue at, JsonValue content] && at.TryGetValue<int>(out var i) && content.TryGetValue<string>(out var text)
+                && i >= 0 && i < messages.Count && messages[i].Str("role") == "tool")
+            {
+                messages[i]["content"] = text;
+            }
+        }
+    }
+
     /// <summary>A compaction's summary of all but the last <paramref name="raw"/> messages, for Arena to keep where its own are.</summary>
     public void Summarized(string text, int raw)
     {
@@ -738,6 +766,9 @@ internal sealed class SessionStore
                     data.Known = null;
                     pending = null;
                     data.Messages.AddRange(all.OfType<JsonObject>().Select(m => m.Clone()));
+                    break;
+                case "results":
+                    ApplyResults(entry, data.Messages);
                     break;
                 case "model":
                     data.Model = entry.Str("model") ?? data.Model;
