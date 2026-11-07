@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Loader2, Moon } from 'lucide-react'
+import { ChevronRight, Loader2, Moon } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -113,6 +113,24 @@ interface VllmAdvice {
   problems: { field: string; message: string; error: boolean }[]
   /** How its weights run on its GPUs and engine: stored at FP4, FP8 or BF16, done natively or widened as they are read. */
   precision?: PrecisionRun | null
+  /** Its tool-call and reasoning parsers (EngineParsers): its family, the automatic ones on its engine, and the engine's names. */
+  parsers?: ParserAdvice | null
+}
+
+/** A parser as the advice has it: the one chosen (null: automatic; "none": off), the automatic one, and every name its engine has. */
+interface ParserChoice {
+  chosen: string | null
+  automatic: string | null
+  names: string[]
+}
+
+export interface ParserAdvice {
+  family: string | null
+  familyLabel: string | null
+  /** The engine reads tool calls and thinking itself (Strata; LMDeploy for gpt-oss): no parser to choose. */
+  builtIn: boolean
+  tool: ParserChoice
+  reasoning: ParserChoice
 }
 
 /** How a snapshot's weights run on its GPUs (Precision.On): as stored, the math (W4A16...), its kernels and its memory. */
@@ -154,6 +172,11 @@ interface VllmForm {
   kvDiskGb: string
   sleep: boolean
   fallback: string
+  /** Its parsers by its engine's names; empty: automatic, by its family; "none": none. */
+  toolParser: string
+  reasoningParser: string
+  /** The kind they were chosen for: on another kind (the Engine field changed) they are that kind's automatic ones. */
+  parsersFor: string
 }
 
 /** A file's model for its name: a snapshot's folder without its revision, a GGUF file without its split part or extension. */
@@ -184,6 +207,10 @@ function start(saved: EngineModel | null, file: string, kind: VllmEngine['kind']
     kvDiskGb: saved?.kvDiskGb ? String(saved.kvDiskGb) : '',
     sleep: saved?.sleep ?? true,
     fallback: saved?.fallback ?? '',
+    // A model moving to this kind for the first time takes its automatic ones here: each engine names its parsers its own way.
+    toolParser: saved && serverPerModel(saved.engineKind) && saved.engineKind === kind ? (saved.toolParser ?? '') : '',
+    reasoningParser: saved && serverPerModel(saved.engineKind) && saved.engineKind === kind ? (saved.reasoningParser ?? '') : '',
+    parsersFor: kind,
   }
 }
 
@@ -208,6 +235,8 @@ function allowed(form: VllmForm, kind: VllmEngine['kind']): VllmForm {
     quantization: k.quantization ? form.quantization : '',
     replicas: k.replicas ? form.replicas : '1',
     sleep: k.sleep && form.sleep,
+    toolParser: k.parsers && form.parsersFor === kind ? form.toolParser : '',
+    reasoningParser: k.parsers && form.parsersFor === kind ? form.reasoningParser : '',
   }
 }
 
@@ -215,7 +244,9 @@ function allowed(form: VllmForm, kind: VllmEngine['kind']): VllmForm {
 function request(typed: VllmForm, file: string, engine: VllmEngine) {
   const form = { ...allowed(typed, engine.kind), engine: engine.name }
   const n = (s: string) => (s.trim() === '' ? undefined : Number(s))
-  const clear = (['devices', 'gpuMemoryUtilization', 'quantization', 'maxOutput', 'specDecode', 'draftHead', 'kvCpuGb', 'kvTier', 'kvDiskGb', 'fallback', 'engine'] as const).filter(
+  const clear = (
+    ['devices', 'gpuMemoryUtilization', 'quantization', 'maxOutput', 'specDecode', 'draftHead', 'kvCpuGb', 'kvTier', 'kvDiskGb', 'fallback', 'engine', 'toolParser', 'reasoningParser'] as const
+  ).filter(
     (k) => String(form[k]).trim() === '',
   )
   return {
@@ -237,8 +268,98 @@ function request(typed: VllmForm, file: string, engine: VllmEngine) {
     kvDiskGb: form.kvTier === 'lmcache' ? n(form.kvDiskGb) : undefined,
     sleep: form.sleep,
     fallback: form.fallback || undefined,
+    toolParser: form.toolParser || undefined,
+    reasoningParser: form.reasoningParser || undefined,
     clear,
   }
+}
+
+/**
+ * One of a model's parsers under Advanced: Automatic (its family's on this engine, said), None, or one of the engine's own
+ * names, which the API checks again on save.
+ */
+function ParserField({ label, hint, value, choice, onChange, error }: {
+  label: string
+  hint: string
+  value: string
+  choice: ParserChoice | undefined
+  onChange: (v: string) => void
+  error?: string
+}) {
+  const names = choice?.names ?? []
+  // A name chosen before its engine's list is known (or one it no longer has) stays shown, and the API says why not.
+  const shown = value && value !== 'none' && !names.includes(value) ? [value, ...names] : names
+  return (
+    <Field label={label} hint={hint} error={error}>
+      <Select value={value || 'auto'} onValueChange={(v) => onChange(v === 'auto' ? '' : v)}>
+        <SelectTrigger aria-label={label}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="auto">{`Automatic${choice ? `: ${choice.automatic ?? 'none for its family'}` : ''}`}</SelectItem>
+          <SelectItem value="none">None</SelectItem>
+          {shown.map((n) => (
+            <SelectItem key={n} value={n}>
+              {n}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </Field>
+  )
+}
+
+/** Advanced: its tool-call and reasoning parsers, folded away until one is chosen or refused; Strata reads both itself. */
+function ParsersSection({ kind, label, form, parsers, errors, set }: {
+  kind: ServerKind
+  label: string
+  form: VllmForm
+  parsers: ParserAdvice | null | undefined
+  errors: Record<string, string>
+  set: (patch: Partial<VllmForm>) => void
+}) {
+  const family = parsers?.familyLabel ? `Its family: ${parsers.familyLabel}, from its name and config.` : 'The app does not know its family: choose its parsers here.'
+  // Open as the dialog opens when one is chosen; then as the admin leaves it.
+  const [initiallyOpen] = useState(!!(form.toolParser || form.reasoningParser))
+  return (
+    <details className="group rounded-md border" open={initiallyOpen}>
+      <summary className="flex cursor-pointer items-center gap-2 rounded-md px-3 py-2 text-sm font-medium outline-none select-none focus-visible:ring-[3px] focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+        <ChevronRight className="size-4 text-muted-foreground transition-transform group-open:rotate-90" aria-hidden="true" />
+        Advanced
+      </summary>
+      <div className="grid gap-4 border-t px-3 py-3">
+        {!serverKinds[kind].parsers || parsers?.builtIn ? (
+          <p className="text-sm text-muted-foreground">
+            {label} reads its tool calls and thinking itself{kind === 'strata' ? '' : ` for ${parsers?.familyLabel ?? 'this model'}`}: there is no parser to choose.
+          </p>
+        ) : (
+          <>
+            <p className="text-sm text-muted-foreground">
+              {family} With a tool calls parser {label} answers tools as tool calls; with a reasoning parser its thinking shows as the chat's thinking.
+            </p>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <ParserField
+                label="Tool calls parser"
+                hint={`${label}'s --tool-call-parser${kind === 'vllm' ? ', with --enable-auto-tool-choice' : ''}.`}
+                value={form.toolParser}
+                choice={parsers?.tool}
+                onChange={(v) => set({ toolParser: v, parsersFor: kind })}
+                error={errors.toolParser}
+              />
+              <ParserField
+                label="Reasoning parser"
+                hint={`${label}'s --reasoning-parser.`}
+                value={form.reasoningParser}
+                choice={parsers?.reasoning}
+                onChange={(v) => set({ reasoningParser: v, parsersFor: kind })}
+                error={errors.reasoningParser}
+              />
+            </div>
+          </>
+        )}
+      </div>
+    </details>
+  )
 }
 
 /**
@@ -463,6 +584,7 @@ export function VllmModelSection({
           </Field>
         )}
       </div>
+      <ParsersSection kind={kind} label={label} form={form} parsers={a?.parsers} errors={errors} set={(patch) => setForm((f) => ({ ...f, ...patch }))} />
       <div className="grid gap-4 sm:grid-cols-2">
         {own.sleep ? (
           <Label className="flex items-center gap-3 font-normal">

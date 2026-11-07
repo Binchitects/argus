@@ -133,6 +133,33 @@ describe('admin models: moving a model to another engine', () => {
     expect(calls.find((c) => c.method === 'PATCH')!.body).toMatchObject({ engineKind: 'sglang', file: 'hf/org/flash@r', devices: '0' })
   })
 
+  it("keeps a vLLM model's own parsers on vLLM and takes SGLang's automatic ones on a move there, each engine naming its own", async () => {
+    const own = { ...flash, toolParser: 'qwen3_xml', reasoningParser: 'none' }
+    const calls = fakeApi(admin, {
+      'GET /api/admin/models': () => ({ json: { engine, small: null, models: [own] } }),
+      'GET /api/admin/models/library': () => ({ json: library }),
+      'GET /api/admin/models/library/snapshots': () => ({ json: snapshots }),
+      'GET /api/admin/models/media/files': () => ({ json: [] }),
+      'POST /api/admin/models/advice': () => ({ json: vllmAdvice }),
+      'PATCH /api/admin/models/flash': () => ({ json: { restarting: true, warning: null } }),
+    })
+    renderApp('/admin/models')
+    const dialog = await edit('flash')
+    const form = await within(dialog).findByRole('form', { name: 'The vLLM model' })
+    // Chosen ones open Advanced as the dialog opens.
+    expect(within(form).getByRole('combobox', { name: 'Tool calls parser' })).toHaveTextContent('qwen3_xml')
+    expect(within(form).getByRole('combobox', { name: 'Reasoning parser' })).toHaveTextContent('None')
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'Engine' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'SGLang' }))
+    const sglang = await within(dialog).findByRole('form', { name: 'The SGLang model' })
+    expect(within(sglang).getByRole('combobox', { name: 'Tool calls parser' })).toHaveTextContent('Automatic')
+    await userEvent.click(within(sglang).getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH' && c.path === '/api/admin/models/flash')).toBe(true))
+    const sent = calls.find((c) => c.method === 'PATCH')!.body as Record<string, unknown> & { clear: string[] }
+    expect(sent.toolParser).toBeUndefined()
+    expect(sent.clear).toEqual(expect.arrayContaining(['toolParser', 'reasoningParser']))
+  })
+
   it("moves a llama.cpp model to vLLM without llama.cpp's own draft head or its GPUs: those proposed for vLLM", async () => {
     const calls = fakeApi(admin, {
       'GET /api/admin/models': () => ({ json: { engine, small: null, models: [qwen] } }),

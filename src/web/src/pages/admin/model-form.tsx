@@ -136,6 +136,8 @@ export type LeftSettings = Omit<SavedModel, 'name' | 'left' | 'price' | 'window'
   kvTier?: 'cpu' | 'lmcache' | null
   kvDiskGb?: number | null
   sleep?: boolean
+  toolParser?: string | null
+  reasoningParser?: string | null
 }
 
 export interface ModelPrice {

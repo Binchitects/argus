@@ -46,6 +46,9 @@ export type EngineModel = SavedModel & {
   kvDiskGb?: number | null
   sleep?: boolean
   fallback?: string | null
+  /** vLLM, SGLang, LMDeploy: its tool-call and reasoning parsers by the engine's names; null: its family's; "none": none. */
+  toolParser?: string | null
+  reasoningParser?: string | null
 }
 
 /** A Hugging Face snapshot in the library, for vLLM and SGLang. */
@@ -92,15 +95,17 @@ export const serverKinds: Record<ServerKind, {
   replicas: boolean
   /** A quantisation the app may set on top of its checkpoint's. */
   quantization: boolean
+  /** Tool-call and reasoning parsers the app sets (Strata reads both itself). */
+  parsers: boolean
   /** Its flag for the share of each GPU, for people at once, and the most people at once. */
   share: string
   parallel: string
   maxParallel: number
 }> = {
-  vllm: { label: 'vLLM', snapshot: true, gguf: true, speculative: true, tiers: true, sleep: true, replicas: true, quantization: true, share: '--gpu-memory-utilization', parallel: '--max-num-seqs', maxParallel: 1024 },
-  sglang: { label: 'SGLang', snapshot: true, gguf: true, speculative: true, tiers: true, sleep: true, replicas: true, quantization: true, share: '--mem-fraction-static', parallel: '--max-running-requests', maxParallel: 1024 },
-  lmdeploy: { label: 'LMDeploy', snapshot: true, gguf: false, speculative: false, tiers: false, sleep: false, replicas: true, quantization: false, share: '--cache-max-entry-count, of what is free once its weights are in', parallel: '--max-batch-size', maxParallel: 1024 },
-  strata: { label: 'Strata', snapshot: false, gguf: true, speculative: false, tiers: false, sleep: false, replicas: false, quantization: false, share: 'what of the GPUs it fills; the experts beyond it stay in RAM', parallel: '--parallel', maxParallel: 8 },
+  vllm: { label: 'vLLM', snapshot: true, gguf: true, speculative: true, tiers: true, sleep: true, replicas: true, quantization: true, parsers: true, share: '--gpu-memory-utilization', parallel: '--max-num-seqs', maxParallel: 1024 },
+  sglang: { label: 'SGLang', snapshot: true, gguf: true, speculative: true, tiers: true, sleep: true, replicas: true, quantization: true, parsers: true, share: '--mem-fraction-static', parallel: '--max-running-requests', maxParallel: 1024 },
+  lmdeploy: { label: 'LMDeploy', snapshot: true, gguf: false, speculative: false, tiers: false, sleep: false, replicas: true, quantization: false, parsers: true, share: '--cache-max-entry-count, of what is free once its weights are in', parallel: '--max-batch-size', maxParallel: 1024 },
+  strata: { label: 'Strata', snapshot: false, gguf: true, speculative: false, tiers: false, sleep: false, replicas: false, quantization: false, parsers: false, share: 'what of the GPUs it fills; the experts beyond it stay in RAM', parallel: '--parallel', maxParallel: 8 },
 }
 
 /** The kinds that run one server a model. */
