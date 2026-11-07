@@ -16,7 +16,7 @@ describe('the workbench layout', () => {
     expect(l.order.slice(0, 2)).toEqual(['search', 'explorer'])
     expect([...l.order].sort()).toEqual([...allViews].sort())
     // Problems moved to the panel: its tab there (shown), the panel's own tabs kept; the side bar shows one of its own.
-    expect(l.panelTabs).toEqual(['problems', 'output', 'terminal', 'console'])
+    expect(l.panelTabs).toEqual(['problems', 'output', 'terminal', 'console', 'ports'])
     expect(l.panelTab).toBe('problems')
     expect(l.view).toBe('search')
     expect(sideViews(l)).not.toContain('problems')
@@ -28,7 +28,7 @@ describe('the workbench layout', () => {
   it('moves a view into the panel and back, the side bar showing another meanwhile', () => {
     let l = apply(defaults, { view: 'problems' })
     l = apply(l, toPanel(l, 'problems'))
-    expect(l.panelTabs).toEqual(['terminal', 'console', 'output', 'problems'])
+    expect(l.panelTabs).toEqual(['terminal', 'console', 'output', 'ports', 'problems'])
     expect(l.panelOpen).toBe(true)
     expect(l.panelTab).toBe('problems')
     expect(l.view).toBe('explorer')
@@ -50,9 +50,9 @@ describe('the workbench layout', () => {
     expect(sideViews(l).at(-1)).toBe('git')
     // Dropped on the panel's Output tab: a view comes in before it.
     l = apply(l, reorderPanel(l, 'search', 'output'))
-    expect(l.panelTabs).toEqual(['terminal', 'console', 'search', 'output'])
+    expect(l.panelTabs).toEqual(['terminal', 'console', 'search', 'output', 'ports'])
     l = apply(l, reorderPanel(l, 'terminal'))
-    expect(l.panelTabs).toEqual(['console', 'search', 'output', 'terminal'])
+    expect(l.panelTabs).toEqual(['console', 'search', 'output', 'ports', 'terminal'])
     // Dropped on the activity bar: back in the side bar.
     l = apply(l, reorderSide(l, 'search', 'explorer'))
     expect(sideViews(l)[0]).toBe('search')
@@ -65,6 +65,6 @@ describe('the workbench layout', () => {
     expect(sideViews(l)).toEqual([])
     expect(l.sideOpen).toBe(false)
     l = apply(apply(l, { sideAt: 'right', panelAt: 'right' }), resetLocations(l))
-    expect(l).toMatchObject({ order: [...allViews], panelTabs: ['terminal', 'console', 'output'], sideAt: 'left', panelAt: 'bottom', panelTab: 'terminal', side: 300 })
+    expect(l).toMatchObject({ order: [...allViews], panelTabs: ['terminal', 'console', 'output', 'ports'], sideAt: 'left', panelAt: 'bottom', panelTab: 'terminal', side: 300 })
   })
 })

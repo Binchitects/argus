@@ -8,7 +8,7 @@ import { modKey } from './editor-state'
  */
 
 /** The parts of the workbench. */
-export type Part = 'activity' | 'explorer' | 'search' | 'changes' | 'problems' | 'review' | 'git' | 'sessions' | 'editor' | 'terminal' | 'chat' | 'status' | 'settings' | 'keybindings' | 'debug' | 'console' | 'extensions' | 'output' | 'skills' | 'tasks'
+export type Part = 'activity' | 'explorer' | 'search' | 'changes' | 'problems' | 'review' | 'git' | 'sessions' | 'editor' | 'terminal' | 'chat' | 'status' | 'settings' | 'keybindings' | 'debug' | 'console' | 'extensions' | 'output' | 'ports' | 'skills' | 'tasks'
 
 export interface PartHelp extends HelpPart {
   /** Where the manual's Code Arena page (docs/code-arena.md) tells the rest: one of its headings. */
@@ -42,6 +42,11 @@ export const parts: Record<Part, PartHelp> = {
     name: 'Output',
     text: "What each language server said, one channel each (choose it above): when it started, its messages, why it ended, and the last lines it wrote to stderr. **Restart** starts it again. The status bar's language server item opens it too (**Show Language Server Log**).",
     manual: 'language-servers',
+  },
+  ports: {
+    name: 'Ports',
+    text: "In a Code Studio workspace: what its programs listen on (a dev server you started in a terminal), each at an address of its own that only you open, signed in to Arena. A new one is announced with **Open in Browser**. On a row: open it, copy its address, set its label, **Share** it with everyone signed in (or make it private again), **Stop Forwarding**. **Forward a Port** adds one before its server starts.",
+    manual: 'ports',
   },
   settings: {
     name: 'Settings',
@@ -260,6 +265,7 @@ export const regions: Record<string, Part> = {
   'Debug Console': 'console',
   Extensions: 'extensions',
   Output: 'output',
+  Ports: 'ports',
   'Keyboard Shortcuts': 'keybindings',
   Outline: 'explorer',
   Breadcrumbs: 'editor',

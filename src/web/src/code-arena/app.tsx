@@ -71,6 +71,8 @@ import { useArenaSettings, useNotices } from './sync'
 import { About, StatusBar } from './status-bar'
 import { languageServers } from './lsp/servers'
 import { OutputPanel } from './lsp/output'
+import { ownPage } from './http'
+import { PortNotices, PortsPanel } from './ports-panel'
 import { wholePath } from './whole-path'
 
 // xterm.js loads with the panel, the first time it opens.
@@ -346,7 +348,7 @@ function ViewButton({ view, layout, change, badge, onClick }: { view: (typeof vi
 }
 
 /** The panel's tab names: its own parts' and the views moved there. */
-const tabLabel = (t: PanelTab) => (t === 'terminal' ? 'Terminal' : t === 'console' ? 'Debug Console' : t === 'output' ? 'Output' : (views.find((v) => v.id === t)?.label ?? t))
+const tabLabel = (t: PanelTab) => (t === 'terminal' ? 'Terminal' : t === 'console' ? 'Debug Console' : t === 'output' ? 'Output' : t === 'ports' ? 'Ports' : (views.find((v) => v.id === t)?.label ?? t))
 
 /**
  * A tab of the panel: drags to another place among the tabs or, a view's, back into the activity bar; its right-click
@@ -498,6 +500,8 @@ function Workbench({
     if (view === 'memory') setMemoryUsed(true)
     if (view === 'review') setReviewUsed(true)
   }, [])
+  /** The panel's Ports (Code Studio's forwarded ports). */
+  const showPorts = useCallback(() => change({ panelOpen: true, panelTab: 'ports' }), [change])
   /** A view shown where it is: in the side bar, or (moved there) in the panel. */
   const show = useCallback(
     (view: View, toggle = false) => {
@@ -1162,6 +1166,7 @@ function Workbench({
     },
     { id: 'workbench.view.scm', category: 'View', title: 'Show Source Control', run: () => show('git') },
     { id: 'workbench.actions.view.problems', category: 'View', title: 'Show Problems', run: () => show('problems') },
+    { id: '~remote.forwardedPorts.focus', category: 'Ports', title: 'Focus on Ports View', enabled: () => !ownPage(), run: showPorts },
     { id: 'codeArena.view.changes', category: 'View', title: "Show the Agent's Changes", run: () => show('changes') },
     { id: 'codeArena.view.review', category: 'View', title: 'Show Review', run: () => show('review') },
     { id: 'codeArena.view.memory', category: 'View', title: 'Show Memory', run: () => {
@@ -1350,9 +1355,12 @@ function Workbench({
         }}
       >
         <div role="tablist" aria-label="Panel" className="flex min-w-0 flex-1 items-end gap-3 overflow-x-auto text-[0.6875rem] font-semibold tracking-wider uppercase [scrollbar-width:none]">
-          {layout.panelTabs.map((t) => (
-            <PanelTabButton key={t} tab={t} layout={layout} change={arrange} />
-          ))}
+          {layout.panelTabs
+            // Ports are Code Studio's (a workspace on the server or a machine); code-arena's own page is on the machine already.
+            .filter((t) => t !== 'ports' || !ownPage())
+            .map((t) => (
+              <PanelTabButton key={t} tab={t} layout={layout} change={arrange} />
+            ))}
         </div>
       </div>
       <div hidden={layout.panelTab !== 'terminal'} className="min-h-0 flex-1">
@@ -1374,6 +1382,11 @@ function Workbench({
       {layout.panelTab === 'output' && (
         <div className="min-h-0 flex-1">
           <OutputPanel shown={layout.panelOpen} />
+        </div>
+      )}
+      {layout.panelTab === 'ports' && (
+        <div className="min-h-0 flex-1">
+          <PortsPanel shown={layout.panelOpen} />
         </div>
       )}
       {layout.panelTabs
@@ -1446,6 +1459,7 @@ function Workbench({
       )}
       {/* By key, in the order the side bar's place gives: React moves the parts, never draws the editor or the chat again. */}
       <div className="flex min-h-0 flex-1">{left ? workbenchParts : [...workbenchParts].reverse()}</div>
+      {!ownPage() && <PortNotices onShow={showPorts} />}
       <GitCommands />
       <StatusBar
         state={state}

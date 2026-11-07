@@ -6,9 +6,9 @@ export type View = 'explorer' | 'search' | 'git' | 'debug' | 'extensions' | 'cha
 
 export const allViews: readonly View[] = ['explorer', 'search', 'git', 'debug', 'extensions', 'changes', 'problems', 'review', 'plan', 'memory', 'skills', 'chat']
 
-/** The panel's own tabs: the terminals, the Debug Console, the Output (the language servers'). */
-export type PanelPart = 'terminal' | 'console' | 'output'
-export const panelParts: readonly PanelPart[] = ['terminal', 'console', 'output']
+/** The panel's own tabs: the terminals, the Debug Console, the Output (the language servers'), the Ports (Code Studio's forwarded ports). */
+export type PanelPart = 'terminal' | 'console' | 'output' | 'ports'
+export const panelParts: readonly PanelPart[] = ['terminal', 'console', 'output', 'ports']
 
 /** A tab of the panel: one of its own, or a view moved there. */
 export type PanelTab = PanelPart | View
