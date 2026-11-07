@@ -38,7 +38,8 @@ public sealed class ToolDemandTests : IDisposable
     private static async Task<JsonNode> ConnectedAsync(WebRun web)
     {
         JsonNode state = new JsonObject();
-        for (var i = 0; i < 200 && (state = await web.GetJsonAsync("/api/state"))["toolGroups"]!.AsArray().Count < 2; i++)
+        // Arena's groups, once its tools are connected (Code Arena's own families are there from the start).
+        for (var i = 0; i < 200 && (state = await web.GetJsonAsync("/api/state"))["toolGroups"]!.AsArray().Count(g => !g!["id"]!.ToString().StartsWith("code-arena", StringComparison.Ordinal)) < 2; i++)
         {
             await Task.Delay(25);
         }
@@ -61,13 +62,13 @@ public sealed class ToolDemandTests : IDisposable
         await ConnectedAsync(web);
         // Arena's word on its tools comes in the background too.
         JsonNode state = new JsonObject();
-        for (var i = 0; i < 100 && (state = await web.GetJsonAsync("/api/state"))["toolGroups"]![0]!["title"]!.GetValue<string>() != "Web search"; i++)
+        for (var i = 0; i < 100 && (state = await web.GetJsonAsync("/api/state")).Servers()[0]!["title"]!.GetValue<string>() != "Web search"; i++)
         {
             await Task.Delay(25);
         }
         Assert.True(state["toolsOnDemand"]!.GetValue<bool>());
-        Assert.Equal(("Web search", "globe", "plug"), (state["toolGroups"]![0]!["title"]!.GetValue<string>(), state["toolGroups"]![0]!["icon"]!.GetValue<string>(),
-            state["toolGroups"]![1]!["icon"]!.GetValue<string>()));
+        Assert.Equal(("Web search", "globe", "plug"), (state.Servers()[0]!["title"]!.GetValue<string>(), state.Servers()[0]!["icon"]!.GetValue<string>(),
+            state.Servers()[1]!["icon"]!.GetValue<string>()));
 
         await (await web.SendAsync("what is new?")).RestAsync();
         var first = _gateway.Requests[0];
@@ -87,12 +88,12 @@ public sealed class ToolDemandTests : IDisposable
         Assert.DoesNotContain("create_issue", FakeGateway.ToolNames(second));
         Assert.DoesNotContain("[web]", FakeGateway.Notes(second)[^1]);
         Assert.Contains("Results for news", FakeGateway.History(_gateway.Requests[2])[^1]!["content"]!.GetValue<string>());
-        Assert.True((await web.GetJsonAsync("/api/state"))["toolGroups"]![0]!["loaded"]!.GetValue<bool>());
+        Assert.True((await web.GetJsonAsync("/api/state")).Servers()[0]!["loaded"]!.GetValue<bool>());
 
         // Kept with the session: another one starts with none loaded, and this one read back has them again.
         var id = (await web.GetJsonAsync("/api/session"))["id"]!.GetValue<string>();
         await web.PostAsync("/api/sessions/new", new JsonObject());
-        Assert.False((await web.GetJsonAsync("/api/state"))["toolGroups"]![0]!["loaded"]!.GetValue<bool>());
+        Assert.False((await web.GetJsonAsync("/api/state")).Servers()[0]!["loaded"]!.GetValue<bool>());
         await web.PostAsync("/api/sessions/resume", new JsonObject { ["id"] = id });
         await (await web.SendAsync("again")).RestAsync();
         Assert.Contains("web_search", FakeGateway.ToolNames(_gateway.Requests[^1]));
@@ -151,7 +152,7 @@ public sealed class ToolDemandTests : IDisposable
 
         Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/settings", new JsonObject { ["tools"] = "web" })).StatusCode);
         var state = JsonNode.Parse(await (await web.PostAsync("/api/settings", new JsonObject { ["tools"] = new JsonArray("web") })).Content.ReadAsStringAsync())!;
-        Assert.Equal([("web", true), ("gitlab", false)], state["toolGroups"]!.AsArray().Select(g => (g!["id"]!.GetValue<string>(), g["on"]!.GetValue<bool>())));
+        Assert.Equal([("web", true), ("gitlab", false)], state.Servers().Select(g => (g!["id"]!.GetValue<string>(), g["on"]!.GetValue<bool>())));
 
         await (await web.SendAsync("open an issue")).RestAsync();
         Assert.Contains("web_search", FakeGateway.ToolNames(_gateway.Requests[0]));
@@ -164,4 +165,45 @@ public sealed class ToolDemandTests : IDisposable
         await (await web.SendAsync("now")).RestAsync();
         Assert.Contains("create_issue", FakeGateway.ToolNames(_gateway.Requests[^1]));
     }
+
+    [Fact]
+    public async Task The_Tools_menu_lists_every_tool_the_requests_carry_Code_Arena_s_own_families_too_and_turns_them_off()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        var asked = 0;
+        _gateway.Answer = req => ++asked == 2 ? Reply.Call(("recall", """{"query":"x"}""")) : Reply.Say("done");
+        await using var web = await WebRun.StartAsync(h);
+        var state = await ConnectedAsync(web);
+        await (await web.SendAsync("hello")).RestAsync();
+
+        // Each tool the model is given is in one group of the menu, as the context view counts them.
+        var listed = state["toolGroups"]!.AsArray().SelectMany(g => g!["names"]!.AsArray().Select(n => n!.GetValue<string>())).ToHashSet();
+        Assert.All(FakeGateway.ToolNames(_gateway.Requests[0]).Where(n => n != "load_tools"), n => Assert.Contains(n, listed));
+        var core = state["toolGroups"]!.AsArray().Single(g => g!["id"]!.GetValue<string>() == "code-arena")!;
+        Assert.True(core["locked"]!.GetValue<bool>());
+        Assert.Contains("read_file", core["names"]!.AsArray().Select(n => n!.GetValue<string>()));
+        var memory = state["toolGroups"]!.AsArray().Single(g => g!["id"]!.GetValue<string>() == "code-arena:memory")!;
+        Assert.Equal("Memory", memory["title"]!.GetValue<string>());
+
+        // Memory off, as the menu sends it (every group on but that one): its tools leave the requests, a call is refused.
+        var on = new JsonArray([.. state["toolGroups"]!.AsArray().Select(g => g!["id"]!.GetValue<string>()).Where(id => id != "code-arena:memory").Select(id => (JsonNode)id)]);
+        state = JsonNode.Parse(await (await web.PostAsync("/api/settings", new JsonObject { ["tools"] = on })).Content.ReadAsStringAsync())!;
+        Assert.False(state["toolGroups"]!.AsArray().Single(g => g!["id"]!.GetValue<string>() == "code-arena:memory")!["on"]!.GetValue<bool>());
+        Assert.True(state["toolGroups"]!.AsArray().Single(g => g!["id"]!.GetValue<string>() == "code-arena")!["on"]!.GetValue<bool>());
+        await (await web.SendAsync("what did I say")).RestAsync();
+        Assert.DoesNotContain("recall", FakeGateway.ToolNames(_gateway.Requests[1]));
+        Assert.Contains("read_file", FakeGateway.ToolNames(_gateway.Requests[1]));
+        Assert.Contains("turned off in this session", FakeGateway.History(_gateway.Requests[2])[^1]!["content"]!.GetValue<string>());
+        // A list of the servers' groups alone (as before) leaves Code Arena's own as they are.
+        state = JsonNode.Parse(await (await web.PostAsync("/api/settings", new JsonObject { ["tools"] = new JsonArray("web", "gitlab") })).Content.ReadAsStringAsync())!;
+        Assert.False(state["toolGroups"]!.AsArray().Single(g => g!["id"]!.GetValue<string>() == "code-arena:memory")!["on"]!.GetValue<bool>());
+        Assert.True(state["toolGroups"]!.AsArray().Single(g => g!["id"]!.GetValue<string>() == "code-arena:agents")!["on"]!.GetValue<bool>());
+    }
+}
+
+/// <summary>The Tools menu's groups of the servers (Code Arena's own families left out).</summary>
+internal static class ToolGroupsOf
+{
+    public static JsonArray Servers(this JsonNode state) =>
+        new([.. state["toolGroups"]!.AsArray().Where(g => !g!["id"]!.GetValue<string>().StartsWith("code-arena", StringComparison.Ordinal)).Select(g => g!.DeepClone())]);
 }

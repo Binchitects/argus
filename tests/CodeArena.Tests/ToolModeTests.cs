@@ -31,7 +31,7 @@ public sealed class ToolModeTests : IDisposable
     {
         for (var i = 0; i < 200; i++)
         {
-            var groups = (await web.GetJsonAsync("/api/state"))["toolGroups"]!.AsArray();
+            var groups = (await web.GetJsonAsync("/api/state")).Servers();
             if (groups.Count > 0 && groups[0]!["title"]!.GetValue<string>() == "Web search")
             {
                 return;

@@ -1064,11 +1064,11 @@ internal sealed partial class Repl(Runtime rt)
             }
             case "/tools" when arg.Split(' ', 2, StringSplitOptions.TrimEntries) is [var verb, { Length: > 0 } which] && verb is "on" or "off":
                 // A group by its id or title (argus, Web search...), or by one of its functions.
-                var found = rt.Tools.All.Where(t => t.Group is { } g && (g == which || t.Name == which || string.Equals(rt.ToolTitle(g), which, StringComparison.OrdinalIgnoreCase)))
-                    .Select(t => t.Group!).Distinct().ToList();
+                var found = rt.Tools.All.Where(t => ToolBox.SwitchOf(t) is { } g && (g == which || t.Name == which || string.Equals(rt.ToolTitle(g), which, StringComparison.OrdinalIgnoreCase)))
+                    .Select(t => ToolBox.SwitchOf(t)!).Distinct().ToList();
                 if (found.Count == 0)
                 {
-                    Ui.Error($"There are no tools {which} here: /tools lists them (the local ones are always on).");
+                    Ui.Error($"There are no tools {which} here to turn on or off: /tools lists them (the files, commands and git are always on).");
                     break;
                 }
                 rt.Demand.SetOff(verb == "off" ? rt.Demand.Off.Union(found) : rt.Demand.Off.Except(found));
@@ -1088,7 +1088,7 @@ internal sealed partial class Repl(Runtime rt)
                             Ui.Line(Ui.Dim($"  {own.Name.PadRight(width)}  off (your tool settings, or the project's)"));
                             continue;
                         }
-                        if (t.Group is { } g && rt.Demand.IsOff(g))
+                        if (ToolBox.SwitchOf(t) is { } g && rt.Demand.IsOff(g))
                         {
                             Ui.Line(Ui.Dim($"  {t.Name.PadRight(width)}  off in this session ({rt.ToolTitle(g)})"));
                             continue;

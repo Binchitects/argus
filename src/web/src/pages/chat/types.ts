@@ -24,6 +24,10 @@ export interface ChatTool {
   icon: string
   onByDefault: boolean
   askFirst: boolean
+  /** Always on (Code Arena's files, commands and git): listed, not turned off. */
+  locked?: boolean
+  /** Its functions, as the model is given them (Code Arena lists them). */
+  names?: string[]
 }
 
 export interface ChatConfig {

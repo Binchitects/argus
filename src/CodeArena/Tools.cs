@@ -401,9 +401,62 @@ internal sealed class ToolBox(IEnumerable<ToolDef> tools)
 
     /// <summary>As code, the tools a program calls in place of the model (the servers' ones, but those that hand work on).</summary>
     public List<ToolDef> InCode() =>
-        Mode?.Invoke() == "code" && All.Any(t => t.Name == "run_code") ? [.. All.Where(t => Programmed(t) && (t.Group is null || Demand?.IsOff(t.Group) != true))] : [];
+        Mode?.Invoke() == "code" && All.Any(t => t.Name == "run_code") ? [.. All.Where(t => Programmed(t) && IsOn(t))] : [];
 
     private static bool Programmed(ToolDef t) => t.Kind == ToolKind.Remote && t.Server is not null;
+
+    /// <summary>
+    /// A family of Code Arena's own tools, as the Tools menu lists it beside the servers' groups: on or off for the session
+    /// (<see cref="Locked"/>: always on, the files, commands and git a session works with).
+    /// </summary>
+    public sealed record LocalGroup(string Id, string Title, string About, string Icon, bool Locked = false);
+
+    public static readonly LocalGroup Core = new("code-arena", "Files, commands and git",
+        "Read, search and change the project's files, run commands and git, plans, checks and long results: always on.", "file-pen", Locked: true);
+
+    public static readonly LocalGroup Own = new("code-arena:own", "Your own and the project's",
+        "The tools you and the project defined (Configure Tools lists each).", "square-code");
+
+    private static readonly (LocalGroup Group, string[] Names, string? Prefix)[] LocalGroups =
+    [
+        (new("code-arena:vms", "Virtual machines", "List, start and stop, snapshot, make, clone and delete VMs; copy files, run commands and apps in them, look at and type into them, and test in them.", "box"), [], "vm_"),
+        (new("code-arena:index", "Code index", "Search the project's code by name and meaning, a symbol's definition and uses, a file's outline.", "search-code"), ["code_search", "code_symbol", "code_outline"], null),
+        (new("code-arena:memory", "Memory", "Remember what you ask it to, for you or for the project, and recall it.", "brain"), ["remember", "remember_project", "recall"], null),
+        (new("code-arena:history", "Past sessions", "Search and read this project's earlier sessions and what was said in them.", "library"), ["search_history", "search_sessions", "session_read", "session_search"], null),
+        (new("code-arena:skills", "Skills", "Use the skills there are, and save a new one.", "sparkles"), ["skill", "skill_save"], null),
+        (new("code-arena:agents", "Sub-agents", "Hand a task to a sub-agent, ask another agent, and run steps one after another.", "network"), ["task", "ask_agent", "run_steps"], null),
+        (new("code-arena:screen", "Screenshots", "Take a picture of the screen.", "image"), ["screenshot"], null),
+    ];
+
+    /// <summary>A family of Code Arena's own tools by its id; null: none.</summary>
+    public static LocalGroup? Local(string id) => id == Core.Id ? Core : id == Own.Id ? Own : LocalGroups.FirstOrDefault(g => g.Group.Id == id).Group;
+
+    /// <summary>The family of Code Arena's own tool a tool is in; null for a server's.</summary>
+    public static LocalGroup? LocalGroupOf(ToolDef t)
+    {
+        if (t.Server is not null || t.Group is not null)
+        {
+            return null;
+        }
+        if (t.Origin is not null)
+        {
+            return Own;
+        }
+        foreach (var (group, names, prefix) in LocalGroups)
+        {
+            if (names.Contains(t.Name, StringComparer.Ordinal) || prefix is not null && t.Name.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                return group;
+            }
+        }
+        return Core;
+    }
+
+    /// <summary>The group a tool is turned on or off by in the session (the Tools menu): a server's, or a family of Code Arena's own; null: always on.</summary>
+    public static string? SwitchOf(ToolDef t) => t.Group ?? (LocalGroupOf(t) is { Locked: false } local ? local.Id : null);
+
+    /// <summary>Whether the session has a tool on (its group not turned off in the Tools menu).</summary>
+    public bool IsOn(ToolDef t) => SwitchOf(t) is not { } g || Demand?.IsOff(g) != true;
 
     /// <summary>
     /// What the model is offered: the local tools, and the remote ones the person has on (all of them whole while their
@@ -418,7 +471,7 @@ internal sealed class ToolBox(IEnumerable<ToolDef> tools)
         {
             return all;
         }
-        var on = all.Where(t => t.Group is null || !demand.IsOff(t.Group)).ToList();
+        var on = all.Where(IsOn).ToList();
         if (!demand.Active(on))
         {
             return on;
@@ -450,12 +503,12 @@ internal sealed class ToolBox(IEnumerable<ToolDef> tools)
         {
             return (null, null);
         }
+        if (!IsOn(tool))
+        {
+            return (tool, $"{name} is turned off in this session (the person's Tools menu): do without it, or ask the person to turn it on.");
+        }
         if (tool.Group is { } group && Demand is { } demand)
         {
-            if (demand.IsOff(group))
-            {
-                return (tool, $"{name} is turned off in this session (the person's Tools menu): do without it, or ask the person to turn it on.");
-            }
             if (!demand.IsLoaded(group))
             {
                 demand.Load([group]);
@@ -465,7 +518,7 @@ internal sealed class ToolBox(IEnumerable<ToolDef> tools)
     }
 
     /// <summary>A sub-agent's: reading tools only (of those on), whole, and no sub-agents of its own.</summary>
-    public ToolBox ForSubAgent() => new(All.Where(t => t.ReadOnly && (t.Group is null || Demand?.IsOff(t.Group) != true)));
+    public ToolBox ForSubAgent() => new(All.Where(t => t.ReadOnly && IsOn(t)));
 
     /// <summary>
     /// The tools of the servers as they are now, in a stable order: those offered already keep their places (the start of

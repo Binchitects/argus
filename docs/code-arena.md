@@ -2060,6 +2060,12 @@ a real Laya when `LAYA_URL` names one. It is a second look, not a sandbox:
 
 ## Tools
 
+The IDE's Tools menu (the wrench under the chat box) lists every tool the model is given, as the context view counts
+them: Code Arena's own by family (files, commands and git, always on; virtual machines, the code index, memory, past
+sessions, skills, sub-agents, screenshots; the person's and the project's own), then each server's groups (Arena's,
+Argus's, an MCP server's), each with its functions. A group turned off leaves the requests and a call to it is
+refused, for this session; `/tools off memory` in the terminal does the same.
+
 On the person's machine:
 
 | tool | what it does |

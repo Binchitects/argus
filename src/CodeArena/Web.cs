@@ -753,7 +753,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             // The Tools menu: the remote tools by group (Arena's by its chat's tools, each other server as one), on or off in
             // this session, and loaded (on demand: only those loaded are in the requests whole).
             ["toolGroups"] = ToolGroups(),
-            ["toolsOnDemand"] = _rt.Demand.Active(_rt.Tools.All.Where(t => t.Group is null || !_rt.Demand.IsOff(t.Group))),
+            ["toolsOnDemand"] = _rt.Demand.Active(_rt.Tools.All.Where(_rt.Tools.IsOn)),
             ["tools"] = new JsonObject
             {
                 ["local"] = _rt.Tools.All.Count(t => t.Server is null),
@@ -763,19 +763,43 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         };
     }
 
-    /// <summary>The remote tools by group, in the shape of the web chat's tools (its Tools menu reads them), with whether each is on and loaded.</summary>
-    private JsonArray ToolGroups() => new([.. _rt.Tools.All.Where(t => t.Group is not null).GroupBy(t => t.Group!).Select(g => (JsonNode)new JsonObject
+    /// <summary>
+    /// The session's tools by group, in the shape of the web chat's tools (its Tools menu reads them), with whether each is
+    /// on and loaded: Code Arena's own families first (the files, commands and git always on), then the servers' groups.
+    /// Every tool the requests carry is in one of them, as the context view counts them.
+    /// </summary>
+    private JsonArray ToolGroups()
     {
-        ["id"] = g.Key,
-        ["title"] = _rt.ToolTitle(g.Key),
-        ["description"] = _rt.ToolAbout(g.Key),
-        ["icon"] = _rt.ToolIcon(g.Key),
-        ["onByDefault"] = true,
-        ["askFirst"] = g.Any(t => !t.Trusted && !t.ReadOnly),
-        ["on"] = !_rt.Demand.IsOff(g.Key),
-        ["loaded"] = _rt.Demand.IsLoaded(g.Key),
-        ["functions"] = g.Count(),
-    })]);
+        var all = _rt.Tools.All;
+        var own = all.Select(t => (Tool: t, Local: ToolBox.LocalGroupOf(t))).Where(x => x.Local is not null).GroupBy(x => x.Local!).Select(g => (JsonNode)new JsonObject
+        {
+            ["id"] = g.Key.Id,
+            ["title"] = g.Key.Title,
+            ["description"] = g.Key.About,
+            ["icon"] = g.Key.Icon,
+            ["onByDefault"] = true,
+            ["askFirst"] = g.Any(x => x.Tool.Kind is ToolKind.Machine or ToolKind.Shell or ToolKind.Edit),
+            ["on"] = g.Key.Locked || !_rt.Demand.IsOff(g.Key.Id),
+            ["locked"] = g.Key.Locked,
+            ["loaded"] = true,
+            ["functions"] = g.Count(),
+            ["names"] = new JsonArray([.. g.Select(x => (JsonNode)x.Tool.Name)]),
+        });
+        var remote = all.Where(t => t.Group is not null).GroupBy(t => t.Group!).Select(g => (JsonNode)new JsonObject
+        {
+            ["id"] = g.Key,
+            ["title"] = _rt.ToolTitle(g.Key),
+            ["description"] = _rt.ToolAbout(g.Key),
+            ["icon"] = _rt.ToolIcon(g.Key),
+            ["onByDefault"] = true,
+            ["askFirst"] = g.Any(t => !t.Trusted && !t.ReadOnly),
+            ["on"] = !_rt.Demand.IsOff(g.Key),
+            ["loaded"] = _rt.Demand.IsLoaded(g.Key),
+            ["functions"] = g.Count(),
+            ["names"] = new JsonArray([.. g.Select(t => (JsonNode)t.Name)]),
+        });
+        return new([.. own, .. remote]);
+    }
 
     /// <summary>
     /// The models in the shape of Arena's chat config: the page's model picker and tool output read it as they do there. What
@@ -2044,7 +2068,10 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         if (toolsOn is not null)
         {
             // A group of a server not connected now keeps the choice made for it.
-            var present = _rt.Tools.All.Select(t => t.Group).OfType<string>();
+            // Code Arena's own families are of the choice when the list knows them (it names the files, commands and git,
+            // always on, as the Tools menu sends them); a list of the servers' groups alone leaves them as they are.
+            var mine = toolsOn.Contains(ToolBox.Core.Id);
+            var present = _rt.Tools.All.Select(t => mine ? ToolBox.SwitchOf(t) : t.Group).OfType<string>();
             _rt.Demand.SetOff(_rt.Demand.Off.Union(present).Except(toolsOn));
         }
         await res.JsonAsync(200, State(), ct);

@@ -24,7 +24,7 @@ internal static class ContextView
         var (counts, total, by) = await CountAsync(rt, request, pieces, ct);
         // Estimated: the next request's tokens as the status bar has them (the gateway's last count and what was added since).
         var (tokens, format) = ContextWindow.Count(pieces, counts, total ?? (counts is null ? agent.Estimate() : null), agent.CharsPerToken);
-        var freeable = ContextWindow.Freeable(pieces, tokens, rt.Model.Context, group => rt.Tools.All.Any(t => t.Group == group) && !rt.Demand.IsOff(group),
+        var freeable = ContextWindow.Freeable(pieces, tokens, rt.Model.Context, group => rt.Tools.All.Any(t => ToolBox.SwitchOf(t) == group) && !rt.Demand.IsOff(group),
             leaveOut: false, dropFiles: false, compact: agent.Messages.Count >= 3);
         return ContextWindow.Shape(pieces, tokens, format, rt.Model.Context, agent.Reserve, counts is not null, by, freeable);
     }

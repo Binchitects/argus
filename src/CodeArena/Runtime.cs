@@ -264,15 +264,15 @@ internal sealed partial class Runtime : IAsyncDisposable
     private JsonObject? ArenaTool(string group) => (ArenaChat?["tools"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(t => t.Str("id") == group);
 
     /// <summary>A group of remote tools by name, for the person and the model: Arena's title for its tool, else the server's.</summary>
-    public string ToolTitle(string group) => ArenaTool(group)?.Str("title")
+    public string ToolTitle(string group) => ToolBox.Local(group)?.Title ?? ArenaTool(group)?.Str("title")
         ?? (group.StartsWith("mcp:", StringComparison.Ordinal) ? group[4..] : group == ArgusName ? "Argus" : group == ArenaName ? "Arena" : group);
 
     /// <summary>What a group of remote tools is for: Arena's description of its tool, else which server's tools they are.</summary>
-    public string ToolAbout(string group) => ArenaTool(group)?.Str("description")
+    public string ToolAbout(string group) => ToolBox.Local(group)?.About ?? ArenaTool(group)?.Str("description")
         ?? (group.StartsWith("mcp:", StringComparison.Ordinal) ? $"The tools of the MCP server {group[4..]}." : $"{ToolTitle(group)}'s tools.");
 
     /// <summary>The icon Arena's chat shows for a group (search-code, globe...): a plug for a server of the person's.</summary>
-    public string ToolIcon(string group) => ArenaTool(group)?.Str("icon") ?? "plug";
+    public string ToolIcon(string group) => ToolBox.Local(group)?.Icon ?? ArenaTool(group)?.Str("icon") ?? "plug";
 
     /// <summary>Code Arena's note's list of the remote tools to load, a line per group; empty when every tool on is in the requests.</summary>
     private string ToolsToLoad()

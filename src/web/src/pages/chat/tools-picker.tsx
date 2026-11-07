@@ -38,13 +38,18 @@ export function ToolsPicker({ tools, value, onChange }: { tools: ChatTool[]; val
                 <label htmlFor={id} className="grid min-w-0 flex-1 cursor-pointer gap-0.5">
                   <span className="text-sm font-medium">{t.title}</span>
                   <span className="text-xs text-muted-foreground">{t.description}</span>
+                  {t.names && t.names.length > 0 && <span className="break-words font-mono text-[11px] text-muted-foreground">{t.names.join(', ')}</span>}
                   {t.askFirst && (
                     <span className="flex items-center gap-1 text-xs text-muted-foreground">
                       <ShieldQuestion className="size-3" aria-hidden="true" /> Asks you before each call
                     </span>
                   )}
                 </label>
-                <Switch id={id} checked={on.has(t.id)} onCheckedChange={(v) => onChange(v ? [...value, t.id] : value.filter((x) => x !== t.id))} />
+                {t.locked ? (
+                  <span className="shrink-0 text-xs text-muted-foreground">Always on</span>
+                ) : (
+                  <Switch id={id} checked={on.has(t.id)} onCheckedChange={(v) => onChange(v ? [...value, t.id] : value.filter((x) => x !== t.id))} />
+                )}
               </li>
             )
           })}

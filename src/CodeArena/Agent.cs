@@ -1753,7 +1753,7 @@ internal sealed partial class Agent
             : text.StartsWith(MemoryStore.RecallHeading, StringComparison.Ordinal) ? ("memory", "Recalled for this message")
             : text.StartsWith(SummaryMark, StringComparison.Ordinal) ? ("summary", "Summary of earlier messages")
             : null,
-        ToolOf = name => Tools.Find(name)?.Group,
+        ToolOf = name => Tools.Find(name) is { } t ? ToolBox.SwitchOf(t) : null,
         PictureChars = PictureChars,
     });
 
