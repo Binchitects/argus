@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Building2, Download, LogOut, UserCheck, UserPlus, UserX, Wallet } from 'lucide-react'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { useNavigate } from 'react-router'
+import { useNavigate, useOutletContext } from 'react-router'
 import { z } from 'zod'
 import { PageHeader } from '@/components/app/page-header'
 import { QueryError } from '@/components/app/query-state'
@@ -22,7 +22,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
-import { api, errorMessage } from '@/lib/api'
+import { api, errorMessage, holds, type Me } from '@/lib/api'
 import { ago, money } from '@/lib/format'
 import { DirectoryMoveDialog } from './directory-move'
 import { PersonBadges } from './person-badges'
@@ -95,6 +95,15 @@ export function PeoplePage() {
   const [moving, setMoving] = useState<Person[] | null>(null)
   const directory = useQuery(signInQuery).data?.ldap === true
   const bulk = useBulk()
+  // Each action is its part of people.manage (or credits.manage, signin.moves): offered only to who holds it.
+  const me = useOutletContext<Me>()
+  const may = {
+    add: holds(me, 'people.create'),
+    credit: holds(me, 'credits.manage'),
+    disable: holds(me, 'people.edit'),
+    signOut: holds(me, 'people.passwords'),
+    move: directory && holds(me, 'signin.moves'),
+  }
   const all = people.data?.people ?? []
   const shown = all.filter((p) =>
     filter === 'admins'
@@ -119,9 +128,11 @@ export function PeoplePage() {
                 <Download /> Export CSV
               </a>
             </Button>
-            <Button onClick={() => setAdding(true)}>
-              <UserPlus /> Add person
-            </Button>
+            {may.add && (
+              <Button onClick={() => setAdding(true)}>
+                <UserPlus /> Add person
+              </Button>
+            )}
           </>
         }
       />
@@ -134,7 +145,7 @@ export function PeoplePage() {
         <QueryError error={people.error} retry={() => people.refetch()} />
       ) : (
         <DataTable
-          columns={columns}
+          columns={may.credit || may.disable || may.signOut || may.move ? columns : columns.slice(1)}
           data={people.isPending ? undefined : shown}
           loading={people.isPending}
           noun="people"
@@ -155,21 +166,29 @@ export function PeoplePage() {
               ]}
             />
           }
-          bulk={(selected, table) => (
+          bulk={!may.credit && !may.disable && !may.signOut && !may.move ? undefined : (selected, table) => (
             <>
-              <Button size="sm" variant="outline" onClick={() => setCreditFor(selected)}>
-                <Wallet /> Set credit
-              </Button>
-              <Button size="sm" variant="outline" loading={bulk.isPending} onClick={() => bulk.run('disable', selected, () => table.resetRowSelection())}>
-                <UserX /> Disable
-              </Button>
-              <Button size="sm" variant="outline" loading={bulk.isPending} onClick={() => bulk.run('enable', selected, () => table.resetRowSelection())}>
-                <UserCheck /> Enable
-              </Button>
-              <Button size="sm" variant="outline" loading={bulk.isPending} onClick={() => bulk.run('sign-out', selected, () => table.resetRowSelection())}>
-                <LogOut /> Sign out everywhere
-              </Button>
-              {directory && (
+              {may.credit && (
+                <Button size="sm" variant="outline" onClick={() => setCreditFor(selected)}>
+                  <Wallet /> Set credit
+                </Button>
+              )}
+              {may.disable && (
+                <>
+                  <Button size="sm" variant="outline" loading={bulk.isPending} onClick={() => bulk.run('disable', selected, () => table.resetRowSelection())}>
+                    <UserX /> Disable
+                  </Button>
+                  <Button size="sm" variant="outline" loading={bulk.isPending} onClick={() => bulk.run('enable', selected, () => table.resetRowSelection())}>
+                    <UserCheck /> Enable
+                  </Button>
+                </>
+              )}
+              {may.signOut && (
+                <Button size="sm" variant="outline" loading={bulk.isPending} onClick={() => bulk.run('sign-out', selected, () => table.resetRowSelection())}>
+                  <LogOut /> Sign out everywhere
+                </Button>
+              )}
+              {may.move && (
                 <Button size="sm" variant="outline" onClick={() => setMoving(selected)}>
                   <Building2 /> Move to the directory
                 </Button>
