@@ -49,6 +49,32 @@ public sealed class ProvidersTests : IDisposable
     }
 
     [Fact]
+    public async Task The_IDE_lists_adds_and_removes_providers_and_never_sends_a_key_back()
+    {
+        _mcp.Chats.ChatConfig = new JsonObject { ["model"] = "model-a", ["codeArenaProviders"] = true };
+        using var h = new Harness(_gateway, _mcp);
+        await using var web = await WebRun.StartAsync(h);
+        // Arena's word on providers comes in the background.
+        for (var i = 0; i < 200 && (await web.GetJsonAsync("/api/providers"))["allowed"]!.GetValue<bool>() != true; i++)
+        {
+            await Task.Delay(25);
+        }
+        var added = await web.PostAsync("/api/providers", new JsonObject { ["name"] = "local", ["url"] = _other.Url, ["kind"] = "openai", ["key"] = FakeGateway.Key });
+        var text = await added.Content.ReadAsStringAsync();
+        Assert.True(added.IsSuccessStatusCode, text);
+        Assert.DoesNotContain(FakeGateway.Key, text);
+        var state = JsonNode.Parse(text)!;
+        Assert.Equal(["local:deep-chat"], state["providers"]![0]!["models"]!.AsArray().Select(m => m!.GetValue<string>()));
+        Assert.Equal("config", state["providers"]![0]!["key"]!.GetValue<string>());
+        // Kept in config.json for the next session.
+        Assert.Contains("\"local\"", File.ReadAllText(h.Paths.ConfigFile));
+        Assert.DoesNotContain(FakeGateway.Key, (await web.GetJsonAsync("/api/providers")).ToJsonString());
+
+        Assert.True((await web.PostAsync("/api/providers/remove", new JsonObject { ["name"] = "local" })).IsSuccessStatusCode);
+        Assert.DoesNotContain("\"local\"", File.ReadAllText(h.Paths.ConfigFile));
+    }
+
+    [Fact]
     public void A_known_provider_needs_only_its_name_and_any_other_its_address()
     {
         var anthropic = Providers.Parse("anthropic", null, "config.json");

@@ -19,6 +19,7 @@ import { useFileRefs } from '@/pages/chat/file-refs'
 import { ContextGauge } from '@/pages/chat/context-gauge'
 import { answerNews, bucket } from '@/pages/chat/format'
 import { ModelPicker, ThinkingPicker } from '@/pages/chat/header'
+import { ProvidersButton } from './providers-dialog'
 import { ToolsPicker } from '@/pages/chat/tools-picker'
 import { batched } from '@/pages/chat/batch'
 import { keepSame, stopped, withQuestion, type Notice } from '@/pages/chat/live'
@@ -1018,6 +1019,7 @@ export function Thread({
       <header className="flex h-11 shrink-0 items-center gap-1 border-b px-2">
         <AssistantPicker state={state} />
         <ModelPicker config={config} value={state.model} onChange={(m) => m && m !== state.model && void settings({ model: m })} />
+        <ProvidersButton />
         {model?.thinking && <ThinkingPicker config={config} value={state.thinking} onChange={(level) => void settings({ thinking: level })} />}
         {model?.tools !== false && state.toolGroups && (
           <ToolsPicker tools={state.toolGroups} value={state.toolGroups.filter((g) => g.on).map((g) => g.id)} onChange={(tools) => void settings({ tools })} />

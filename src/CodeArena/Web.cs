@@ -565,6 +565,20 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             case ("POST", "/api/compact"):
                 await CompactAsync(res, ct);
                 return;
+            case ("GET", "/api/providers"):
+                await res.JsonAsync(200, ProvidersState(), ct);
+                return;
+            case ("POST", "/api/providers"):
+                await AddProviderAsync(req, res, ct);
+                return;
+            case ("POST", "/api/providers/remove"):
+                if (req.Json()?.Str("name") is not { Length: > 0 } gone || !_rt.RemoveProvider(gone))
+                {
+                    await res.ErrorAsync(404, "not_found", "There is no such provider.", ct);
+                    return;
+                }
+                await res.JsonAsync(200, ProvidersState(), ct);
+                return;
             case ("POST", "/api/settings"):
                 await SettingsAsync(req, res, ct);
                 return;
@@ -2075,6 +2089,51 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             _rt.Demand.SetOff(_rt.Demand.Off.Union(present).Except(toolsOn));
         }
         await res.JsonAsync(200, State(), ct);
+    }
+
+    /// <summary>
+    /// The person's other providers (their keys never: only where each comes from), the known ones, and whether Arena's
+    /// admins let Code Arena use them.
+    /// </summary>
+    private JsonObject ProvidersState() => new()
+    {
+        ["allowed"] = !_rt.ProvidersRefused,
+        ["providers"] = new JsonArray([.. _rt.Config.Providers.Select(p => (JsonNode)new JsonObject
+        {
+            ["name"] = p.Name,
+            ["kind"] = p.Kind,
+            ["url"] = p.Url,
+            ["key"] = p.ApiKey is { Length: > 0 } ? "config" : Providers.KeyOf(p, _rt.Env.Env) is not null ? "env" : "none",
+            ["keyEnv"] = p.KeyEnv,
+            ["models"] = new JsonArray([.. _rt.Models.Where(m => m.Id.StartsWith(p.Name + ":", StringComparison.Ordinal)).Select(m => (JsonNode)m.Id)]),
+        })]),
+        ["known"] = new JsonArray([.. Providers.Known.Select(k => (JsonNode)new JsonObject
+        {
+            ["name"] = k.Key, ["kind"] = k.Value.Kind, ["url"] = k.Value.Url, ["keyEnv"] = k.Value.KeyEnv, ["about"] = k.Value.About,
+            ["keyInEnv"] = _rt.Env.Env(k.Value.KeyEnv) is { Length: > 0 },
+        })]),
+    };
+
+    /// <summary>POST /api/providers {name, url?, kind?, key?}: a provider added and its models listed (the key goes to config.json, never back).</summary>
+    private async Task AddProviderAsync(HttpRequest req, HttpResponse res, CancellationToken ct)
+    {
+        var body = req.Json();
+        if (body?.Str("name") is not { Length: > 0 } name)
+        {
+            await res.ErrorAsync(400, "invalid", "Name the provider (anthropic, deepseek, or a name of yours with its address).", ct);
+            return;
+        }
+        try
+        {
+            var said = await _rt.AddProviderAsync(name, body.Str("url"), body.Str("kind"), body.Str("key"), ct);
+            var state = ProvidersState();
+            state["said"] = said;
+            await res.JsonAsync(200, state, ct);
+        }
+        catch (InvalidOperationException e)
+        {
+            await res.ErrorAsync(_rt.ProvidersRefused ? 403 : 400, "invalid", e.Message, ct);
+        }
     }
 
     /// <summary>A new session (file null), or a saved one: not while a turn runs. An empty session is not kept.</summary>

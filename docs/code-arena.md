@@ -3320,6 +3320,9 @@ in `/model` and the IDE's model picker, and asked of the provider directly; Aren
 /providers remove deepseek
 ```
 
+In the IDE, the plug beside the model picker opens **Other providers**: the same list, with a form to add one (its
+key typed once, never shown again) and a button to take one out.
+
 They are kept in `config.json` (readable by you only, as Arena's key is):
 
 ```json
