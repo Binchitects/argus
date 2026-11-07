@@ -1,7 +1,8 @@
 """
 The code host and Arena's model API for a real Code Studio workspace (RealWorkspaceTests): GitLab's API as the app asks
 it (the person, a project, a branch), the project's git over smart HTTP (git http-backend) with the person's token as
-the password, and the OpenAI API the workspace's agent asks (a model that runs one command, then answers). What it was
+the password, the OpenAI API the workspace's agent asks (a model that runs one command, then answers), and for a
+stack without a gateway a stand-in of LiteLLM's management API. What it was
 asked is kept: GET /e2e/asked.
 """
 import base64
@@ -11,6 +12,8 @@ import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = "/srv/git"
+# The first words of LiteLLM's management paths (/key/generate, /model/info, ...).
+GATEWAY = {"key", "model", "user", "team", "end_user", "budget", "config", "health", "global"}
 USER, TOKEN = "dana", "glpat-e2e-token"
 COMMAND = os.environ.get("E2E_COMMAND", "true")
 asked = []
@@ -72,7 +75,21 @@ class H(BaseHTTPRequestHandler):
             return self.model(method, path)
         if ".git/" in path or path.endswith(".git"):
             return self.git(method)
+        if path.split("/")[1] in GATEWAY:
+            return self.gateway(method, path)
         self.send(404, {"error": "no"})
+
+    def gateway(self, method, path):
+        """LiteLLM's management API as the app asks it, for a stack whose app has no real gateway (ci/workspaces-stack.sh):
+        a key it is given is taken, its one model is listed, and every other change is said done."""
+        req = json.loads(self.body() or b"{}") if method == "POST" else {}
+        if path == "/key/generate":
+            return self.send(200, {"key": req.get("key") or "sk-e2e-" + os.urandom(12).hex(), "key_alias": req.get("key_alias")})
+        if path == "/model/info":
+            return self.send(200, {"data": [{"model_name": "e2e-model", "model_info": {"mode": "chat", "max_input_tokens": 32768}}]})
+        if method == "GET":
+            return self.send(200, {"data": [], "keys": [], "users": [], "teams": []} if path.endswith("/list") else {})
+        self.send(200, req)
 
     def gitlab(self, path):
         if self.headers.get("PRIVATE-TOKEN") != TOKEN:

@@ -5,6 +5,12 @@ http:
       entryPoints: [websecure]
       service: app
       tls: {}
+    # Code Studio's forwarded ports, each at its own name (ws-<workspace>-<port>), as the stack's Traefik has them.
+    ports:
+      rule: 'HostRegexp(`^ws-[0-9a-f]{32}-[0-9]{1,5}\.llm\.localhost$`)'
+      entryPoints: [websecure]
+      service: app
+      tls: {}
     web:
       rule: "PathPrefix(`/`)"
       entryPoints: [websecure]
