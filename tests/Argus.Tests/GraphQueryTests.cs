@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Argus.Indexing;
 using System.Text.Json;
 using Argus.Server;
 using Argus.Store;
@@ -192,5 +193,108 @@ public sealed class GraphQueryTests
         Assert.Contains("Input should be a valid number, unable to parse string as a number [type=float_parsing, input_value='high', input_type=str]", number.Message);
         var boolean = Assert.Throws<ToolError>(() => ToolRuntime.Validate(spec, Args("{\"repo_id\": 1, \"include_tests\": \"maybe\"}")));
         Assert.Contains("Input should be a valid boolean, unable to interpret input [type=bool_parsing, input_value='maybe', input_type=str]", boolean.Message);
+    }
+
+    // ---- access in SQL: what a person who may read some repositories gets is what an index of only those gives ----
+
+    static readonly (long From, long To, string Kind, double Confidence, string Layer, string Tier, string? Candidates)[] Estate5 =
+    [
+        (1, 2, "package:nuget", 0.97, LinkKinds.Build, "", null),
+        (2, 3, "package:nuget", 0.9, LinkKinds.Build, "", null),
+        (1, 3, "ci:include", 0.95, LinkKinds.Ci, "", null),
+        (3, 4, "package:npm", 0.6, LinkKinds.Build, "", null),
+        (4, 5, "runtime:host", 0.88, LinkKinds.Runtime, "", null),
+        (5, 1, "package:nuget", 0.7, LinkKinds.Build, "", null),
+        (2, 4, "package:nuget", 0.5, LinkKinds.Build, "candidate", "g/r4,g/r5"),
+    ];
+
+    /// <summary>An index of only these of the five repositories, each under its own row id, with the links among them.</summary>
+    static TestIndex Only(IReadOnlyCollection<long> repos)
+    {
+        var ix = new TestIndex();
+        foreach (var id in repos.Order())
+            Sql.Exec(ix.Conn, "INSERT INTO repos (id, gitlab_id, path_with_namespace, default_branch, branch, http_url) VALUES (?, ?, ?, 'main', 'main', 'u')",
+                id, 100 + id, $"g/r{id}");
+        foreach (var l in Estate5.Where(l => repos.Contains(l.From) && repos.Contains(l.To)))
+            Link(ix, l.From, l.To, l.Kind, l.Confidence, l.Layer, tier: l.Tier, candidates: l.Candidates);
+        return ix;
+    }
+
+    static string Answers(IReadOnlyList<long> allowed, TestIndex ix)
+    {
+        var parts = new List<string> { GraphQueries.SystemMap(allowed, ix.Conn).ToJsonString() };
+        foreach (var id in allowed)
+        {
+            parts.Add(GraphQueries.RepoMap(allowed, ix.Conn, id, depth: 3).ToJsonString());
+            parts.Add(GraphQueries.ChangeImpact(allowed, ix.Conn, $"g/r{id}").ToJsonString());
+            foreach (var to in allowed.Where(t => t != id))
+                parts.Add(GraphQueries.DependencyPath(allowed, ix.Conn, $"g/r{id}", $"g/r{to}").ToJsonString());
+        }
+        return string.Join("\n", parts);
+    }
+
+    [Fact]
+    public void Every_graph_answer_for_some_repositories_is_the_answer_of_an_index_without_the_others()
+    {
+        long[] five = [1, 2, 3, 4, 5];
+        using var full = Only(five);
+        // Every allowlist of the five (31 of them): nothing of a repository left out changes a byte of any answer.
+        for (var mask = 1; mask < 32; mask++)
+        {
+            var allowed = five.Where((_, i) => (mask & (1 << i)) != 0).ToList();
+            using var only = Only(allowed);
+            Assert.Equal(Answers(allowed, only), Answers(allowed, full));
+        }
+    }
+
+    [Fact]
+    public void A_path_through_a_repository_the_person_cannot_read_does_not_exist_for_them()
+    {
+        using var ix = Only([1, 2, 3]);
+        // 1 -> 2 -> 3 is the only way from 1 to 3 by build links; without 2 there is none.
+        var path = GraphQueries.DependencyPath([1, 3], ix.Conn, "g/r1", "g/r3", GraphQueries.GraphFilter.Parse(null, "build"));
+        Assert.DoesNotContain("g/r2", path.ToJsonString());
+    }
+
+    [Fact]
+    public void Semantic_search_answers_a_person_who_reads_little_as_fully_as_one_who_reads_everything()
+    {
+        using var ix = new TestIndex();
+        var mine = ix.Repo(1, "g/mine");
+        var others = ix.Repo(2, "g/others");
+        var mineFile = ix.File(mine, "m.c", "");
+        var othersFile = ix.File(others, "o.c", "");
+        Writes.ReplaceSymbols(ix.Conn, mine, mineFile,
+            [.. Enumerable.Range(0, 5).Select(i => new Writes.SymbolRow($"Mine{i}", "function", i + 1, i + 1, "()", null, 1, null))], "2:x");
+        // More of others' code than the coarse pass has places, all nearer the question than anything of hers.
+        Writes.ReplaceSymbols(ix.Conn, others, othersFile,
+            [.. Enumerable.Range(0, Queries.SemanticCoarse + 100).Select(i => new Writes.SymbolRow($"Other{i}", "function", i + 1, i + 1, "()", null, 1, null))], "2:x");
+        var dim = Embed.Dim;
+        double[] Vector(bool near, int seed)
+        {
+            var v = new double[dim];
+            for (var d = 0; d < dim; d++) v[d] = near ? 1 + seed % 7 * 0.001 : (d % 2 == 0 ? 1 : -1) * (1 + seed * 0.01);
+            return v;
+        }
+        Semantic.BuildSymbolEmbeddings(ix.Conn, texts => [.. texts.Select((t, i) => Vector(t.Contains("Other"), i))]);
+        var question = Enumerable.Repeat(1.0, dim).ToList();
+
+        var hers = Queries.SemanticSearch([mine], ix.Conn, question, limit: 5);
+        Assert.Equal(5, hers.Count);
+        Assert.All(hers, h => Assert.StartsWith("Mine", h["name"]!.ToString()));
+        Assert.All(Queries.SemanticSearch([mine, others], ix.Conn, question, limit: 5), h => Assert.StartsWith("Other", h["name"]!.ToString()));
+    }
+
+    [Fact]
+    public void Every_read_of_the_repository_graph_puts_the_allowlist_in_its_sql()
+    {
+        // A read of the graph's tables without the allowlist in the same statement would load what the person may not
+        // read and leave it to C# to drop: each statement naming one must also carry the predicate, on both ends.
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../.."));
+        var source = File.ReadAllText(Path.Combine(root, "src/Argus/Store/GraphQueries.cs"));
+        foreach (var table in new[] { "repo_edges", "repo_links" })
+            foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(source, $@"FROM {table}[^\n]*(\n[^\n]*){{0,1}}"))
+                Assert.True(System.Text.RegularExpressions.Regex.Matches(m.Value, "InAllowed").Count >= 2, $"{table} read without the allowlist on both ends: {m.Value}");
+        Assert.Contains("FROM repos WHERE id {Queries.InAllowed}", source);
     }
 }

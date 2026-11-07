@@ -28,6 +28,12 @@ public static class Queries
 
     static List<long> Ids(IReadOnlyList<long> allowed) => allowed.ToList();
 
+    /// <summary>The allowlist as one bound parameter (a JSON array), for <see cref="InAllowed"/>: no limit on its length.</summary>
+    public static string AllowJson(IEnumerable<long> allowed) => "[" + string.Join(",", allowed.Distinct()) + "]";
+
+    /// <summary>The allowlist predicate, "COLUMN IN (...)", taking <see cref="AllowJson"/> as its one parameter.</summary>
+    public const string InAllowed = "IN (SELECT value FROM json_each(?))";
+
     /// <summary>Split the allowlist so no statement exceeds SQLite's parameter limit.</summary>
     public static List<List<long>> Chunks(IReadOnlyList<long> ids, int reserve)
     {
@@ -568,10 +574,11 @@ public static class Queries
         var target = Sql.One(conn, "SELECT id, path FROM files WHERE repo_id = ? AND path = ?", repoId, path);
         if (target is null) return [];
         long depth = Math.Max(1, Math.Min(maxDepth, 10));
-        var allowedSet = ids.ToHashSet();
+        var list = AllowJson(ids);
         // Imports are read in the file's own repository and the other projects' default branches (links are made there).
-        var gitlab = Sql.Query(conn, "SELECT id, gitlab_id, branch = default_branch AS is_default FROM repos")
+        var gitlab = Sql.Query(conn, $"SELECT id, gitlab_id, branch = default_branch AS is_default FROM repos WHERE id {InAllowed}", list)
             .ToDictionary(r => r.Long("id"), r => (Project: r.Long("gitlab_id"), Default: r.Long("is_default") != 0));
+        var allowedSet = gitlab.Keys.ToHashSet();
         var ownProject = gitlab[repoId].Project;
         bool Reads(long repo) => allowedSet.Contains(repo) && (repo == repoId || gitlab.TryGetValue(repo, out var g) && g.Default && g.Project != ownProject);
 
@@ -589,9 +596,9 @@ public static class Queries
             }
             foreach (var file in frontier)
             {
-                foreach (var i in Sql.Query(conn, "SELECT file_id, repo_id, raw FROM includes WHERE resolved_file_id = ? AND resolution = 'resolved'", file))
-                    if (allowedSet.Contains(i.Long("repo_id"))) Reach(i.Long("file_id"), "#include " + i.Str("raw"));
-                foreach (var (importer, importing, via) in Importers(conn, file))
+                foreach (var i in Sql.Query(conn, $"SELECT file_id, repo_id, raw FROM includes WHERE resolved_file_id = ? AND resolution = 'resolved' AND repo_id {InAllowed}", file, list))
+                    Reach(i.Long("file_id"), "#include " + i.Str("raw"));
+                foreach (var (importer, importing, via) in Importers(conn, file, list))
                     if (Reads(importer)) Reach(importing, via);
             }
             frontier = next;
@@ -626,7 +633,7 @@ public static class Queries
     /// that name the file's C# namespace, its Java type or package, its Python module (or the package it is imported
     /// from), its Go package, its .proto or its npm package.
     /// </summary>
-    static IEnumerable<(long Repo, long File, string Via)> Importers(SqliteConnection conn, long fileId)
+    static IEnumerable<(long Repo, long File, string Via)> Importers(SqliteConnection conn, long fileId, string allowed)
     {
         var file = Sql.One(conn, "SELECT repo_id, path, lang FROM files WHERE id = ?", fileId);
         if (file is null) yield break;
@@ -689,7 +696,7 @@ public static class Queries
         }
         foreach (var (where, args, keep) in asks)
         {
-            foreach (var u in Sql.Query(conn, $"SELECT DISTINCT repo_id, file_id, kind, name FROM file_decls WHERE role = 'uses' AND {where}", args))
+            foreach (var u in Sql.Query(conn, $"SELECT DISTINCT repo_id, file_id, kind, name FROM file_decls WHERE role = 'uses' AND repo_id {InAllowed} AND {where}", [allowed, .. args]))
             {
                 if (u.Long("file_id") == fileId || keep is not null && !keep(u.Str("name"))) continue;
                 yield return (u.Long("repo_id"), u.Long("file_id"), $"{u.Str("kind")} {u.Str("name")}");
@@ -738,6 +745,9 @@ public static class Queries
 
     public const int SemanticCoarse = 600;
 
+    /// <summary>Up to this many readable vectors, every one is scored instead of a coarse pass over all of them.</summary>
+    public const int SemanticExact = 20_000;
+
     /// <summary>Find symbols by MEANING, restricted to repos the caller may see.</summary>
     public static List<JsonObject> SemanticSearch(IReadOnlyList<long> allowed, SqliteConnection conn, IReadOnlyList<double> queryVec,
         int limit = 10, int coarse = SemanticCoarse)
@@ -758,22 +768,37 @@ public static class Queries
             }
         }
 
-        var candidates = Sql.Query(conn,
-            "SELECT symbol_id FROM vec_symbols_bin WHERE embedding MATCH vec_bit(?) AND k = ?",
-            Quantize.ToBits(queryVec), (long)Math.Max(coarse, 1));
-        if (candidates.Count == 0) return [];
-
-        var symbolIds = candidates.Select(r => Convert.ToInt64(r[0])).ToList();
+        var list = AllowJson(ids);
         var allowedVectors = new List<(long, byte[])>();
-        foreach (var chunk in Chunks(symbolIds, 0))
-            foreach (var row in Sql.QueryList(conn,
-                         "SELECT v.symbol_id AS symbol_id, v.embedding AS embedding" +
-                         "  FROM vec_symbols_i8 v" +
-                         "  JOIN symbol_embeddings e ON e.symbol_id = v.symbol_id" +
-                         $" WHERE v.symbol_id IN ({Sql.Marks(chunk.Count)})" +
-                         $"   AND e.repo_id IN ({Sql.Marks(ids.Count)})",
-                         chunk.Concat(ids).Cast<object?>().ToArray()))
+        var readable = Convert.ToInt64(Sql.Scalar(conn, $"SELECT COUNT(*) FROM symbol_embeddings WHERE repo_id {InAllowed}", list));
+        if (readable == 0) return [];
+        if (readable <= SemanticExact)
+        {
+            // Few enough vectors to read: every one the caller may read is scored, so a person who reads little gets as
+            // many answers as one who reads everything (a global coarse pass would spend its places on others' code).
+            foreach (var row in Sql.Query(conn,
+                         // From the readable rows to their vectors, each by its key (CROSS JOIN keeps that order).
+                         "SELECT v.symbol_id AS symbol_id, v.embedding AS embedding FROM symbol_embeddings e" +
+                         $" CROSS JOIN vec_symbols_i8 v ON v.symbol_id = e.symbol_id WHERE e.repo_id {InAllowed}", list))
                 allowedVectors.Add((row.Long("symbol_id"), row.Bytes("embedding") ?? []));
+        }
+        else
+        {
+            // The coarse pass over every vector, widened until enough of what it finds may be read (or it is 16 times wider).
+            var want = Math.Max(limit, 1);
+            for (long k = Math.Max(coarse, 1); ; k *= 4)
+            {
+                var symbolIds = AllowJson(Sql.Query(conn, "SELECT symbol_id FROM vec_symbols_bin WHERE embedding MATCH vec_bit(?) AND k = ?",
+                    Quantize.ToBits(queryVec), k).Select(r => Convert.ToInt64(r[0])));
+                allowedVectors.Clear();
+                foreach (var row in Sql.Query(conn,
+                             "SELECT v.symbol_id AS symbol_id, v.embedding AS embedding FROM symbol_embeddings e" +
+                             " CROSS JOIN vec_symbols_i8 v ON v.symbol_id = e.symbol_id" +
+                             $" WHERE e.symbol_id {InAllowed} AND e.repo_id {InAllowed}", symbolIds, list))
+                    allowedVectors.Add((row.Long("symbol_id"), row.Bytes("embedding") ?? []));
+                if (allowedVectors.Count >= want || k >= Math.Max(coarse, 1) * 16L) break;
+            }
+        }
         if (allowedVectors.Count == 0) return [];
 
         var ranked = Quantize.Rescore(queryVec, allowedVectors).Take(Math.Max(limit, 1)).ToList();
@@ -788,15 +813,15 @@ public static class Queries
     {
         if (byId.Count == 0) return [];
         var keys = order.Where(byId.ContainsKey).Distinct().ToList();
-        var rows = Sql.QueryList(conn,
+        var rows = Sql.Query(conn,
             "SELECT s.id AS symbol_id, s.repo_id, r.path_with_namespace," +
             "       f.path, s.name, s.kind, s.signature, s.scope," +
             "       s.line, s.end_line, s.is_public, s.doc" +
             "  FROM symbols s" +
             "  JOIN files f ON f.id = s.file_id" +
             "  JOIN repos r ON r.id = s.repo_id" +
-            $" WHERE s.id IN ({Sql.Marks(keys.Count)}) AND s.repo_id IN ({Sql.Marks(ids.Count)})",
-            keys.Concat(ids).Cast<object?>().ToArray());
+            $" WHERE s.id {InAllowed} AND s.repo_id {InAllowed}",
+            AllowJson(keys), AllowJson(ids));
         var output = new List<(double, JsonObject)>();
         foreach (var row in rows)
         {

@@ -82,17 +82,18 @@ public static class GraphQueries
     public static Estate Load(IReadOnlyList<long> allowed, SqliteConnection conn, GraphFilter? filter = null)
     {
         filter ??= GraphFilter.Default;
-        var ids = allowed.ToHashSet();
+        // Every read below puts the allowlist in its SQL, on both ends of a pair: nothing of a repository the caller may
+        // not read is loaded at all.
+        var allowJson = Queries.AllowJson(allowed);
         var repos = new Dictionary<long, Repo>();
-        foreach (var r in Sql.Query(conn, "SELECT id, path_with_namespace, branch, default_branch FROM repos"))
-        {
-            if (ids.Contains(r.Long("id")))
-                repos[r.Long("id")] = new Repo(r.Long("id"), r.Str("path_with_namespace"), r.Str("branch"), r.Str("branch") == r.Str("default_branch"));
-        }
+        foreach (var r in Sql.Query(conn, $"SELECT id, path_with_namespace, branch, default_branch FROM repos WHERE id {Queries.InAllowed}", allowJson))
+            repos[r.Long("id")] = new Repo(r.Long("id"), r.Str("path_with_namespace"), r.Str("branch"), r.Str("branch") == r.Str("default_branch"));
         // A pair's layers the filter admits, each with its confidence and files; a pair it leaves out is counted.
         var layers = new Dictionary<(long, long), List<(string Layer, string Scope, double Confidence, long Files)>>();
         var seen = new HashSet<(long, long)>();
-        foreach (var e in Sql.Query(conn, "SELECT from_repo_id, to_repo_id, layer, scope, confidence, files FROM repo_edges"))
+        foreach (var e in Sql.Query(conn,
+                     $"SELECT from_repo_id, to_repo_id, layer, scope, confidence, files FROM repo_edges WHERE from_repo_id {Queries.InAllowed} AND to_repo_id {Queries.InAllowed}",
+                     allowJson, allowJson))
         {
             var pair = (e.Long("from_repo_id"), e.Long("to_repo_id"));
             if (!repos.TryGetValue(pair.Item1, out var from) || !from.Default || !repos.ContainsKey(pair.Item2)) continue;
@@ -112,7 +113,8 @@ public static class GraphQueries
         var estatePossible = new List<Possible>();
         var readable = repos.Values.Where(r => r.Default).Select(r => r.Path.ToLowerInvariant()).ToHashSet(StringComparer.Ordinal);
         foreach (var l in Sql.Query(conn,
-                     "SELECT from_repo_id, to_repo_id, kind, name, layer, scope, how, files, confidence, tier, evidence FROM repo_links ORDER BY confidence DESC, files DESC"))
+                     "SELECT from_repo_id, to_repo_id, kind, name, layer, scope, how, files, confidence, tier, evidence FROM repo_links " +
+                     $"WHERE from_repo_id {Queries.InAllowed} AND to_repo_id {Queries.InAllowed} ORDER BY confidence DESC, files DESC", allowJson, allowJson))
         {
             var (from, to) = (l.Long("from_repo_id"), l.Long("to_repo_id"));
             if (!repos.ContainsKey(from) || !repos.ContainsKey(to)) continue;
