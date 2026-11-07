@@ -183,6 +183,7 @@ async function writeAny(path: string, text: string, version: string | null): Pro
 const SettingsEditor = lazy(() => import('./settings-editor'))
 const KeybindingsEditor = lazy(() => import('./keybindings-editor'))
 const MergeEditor = lazy(() => import('./merge-editor').then((m) => ({ default: m.MergeEditor })))
+const NotebookEditor = lazy(() => import('./notebook-editor').then((m) => ({ default: m.NotebookEditor })))
 
 let keymapInstalled = false
 
@@ -2094,7 +2095,12 @@ function GroupArea({ group, index, count }: { group: number; index: number; coun
         <Breadcrumbs
           path={active.path}
           end={
-            active.languageId === 'markdown' && (
+            isNotebook(active.path) ? (
+              <button type="button" onClick={() => void ed.open(active.path)} className="ml-auto flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent hover:text-foreground" title="Reopen in the notebook editor">
+                <NotebookPen className="size-3.5" aria-hidden="true" />
+                Open as Notebook
+              </button>
+            ) : active.languageId === 'markdown' && (
               <button type="button" onClick={() => void ed.openPreview(active.path)} className="ml-auto flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent hover:text-foreground" title="Open Preview (Ctrl+Shift+V)">
                 <Eye className="size-3.5" aria-hidden="true" />
                 Preview
@@ -2151,6 +2157,11 @@ function GroupArea({ group, index, count }: { group: number; index: number; coun
         )}
         {active?.kind === 'media' && <MediaPreview key={active.id} tab={active} />}
         {active?.kind === 'preview' && <MarkdownPreview key={active.id} path={active.path} />}
+        {active?.kind === 'notebook' && active.status === 'ready' && (
+          <Suspense fallback={<Spinner label="Opening the notebook" />}>
+            <NotebookEditor key={active.id} path={active.path} />
+          </Suspense>
+        )}
         {active?.kind === 'merge' && active.status === 'ready' && (
           <Suspense fallback={<Spinner label="Opening the merge editor" />}>
             <MergeEditor key={active.id} id={active.id} path={active.path} />

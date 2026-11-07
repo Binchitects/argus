@@ -36,7 +36,8 @@ import { EditorArea, EditorProvider } from './editor'
 import { groupCommands, GroupStoreContext, openToSide } from './editor-groups'
 import { userFile } from './editor-options'
 import { CodeRefsProvider } from './refs'
-import { loadMonaco, rankFiles, useEditor } from './editor-state'
+import { isNotebook, loadMonaco, rankFiles, useEditor } from './editor-state'
+import { newNotebook } from './notebook-new'
 import { Explorer } from './explorer'
 import { HelpProvider } from './help'
 import { useOpenHelp } from './help-context'
@@ -722,7 +723,7 @@ function Workbench({
 
   const file = active?.kind === 'file' && active.status === 'ready'
   // A tab with a file to save: a file's, or a compare with a file's side.
-  const savable = file || (active?.kind === 'diff' && [active.left, active.right].some((x) => x?.kind === 'file'))
+  const savable = file || ((active?.kind === 'merge' || active?.kind === 'notebook') && active.status === 'ready') || (active?.kind === 'diff' && [active.left, active.right].some((x) => x?.kind === 'file'))
   const copy = (text: string) =>
     void navigator.clipboard?.writeText(text).then(
       () => toast.success('Copied.'),
@@ -1248,6 +1249,19 @@ function Workbench({
           if (!shown || !conflictAction(shown, action)) toast.info('There is no merge conflict in this file.')
         }),
     })),
+    { id: 'ipynb.newUntitledIpynb', category: 'Create', title: 'New Jupyter Notebook', run: () => void newNotebook((path) => ed.open(path)) },
+    { id: 'workbench.action.reopenWithEditor', category: 'View', title: 'Reopen Editor With…', enabled: () => !!active && isNotebook(active.path) && (active.kind === 'file' || active.kind === 'notebook'), run: async () => {
+      if (!active) return
+      const chosen = await quickPick<'notebook' | 'text'>({
+        title: 'Reopen Editor With',
+        placeholder: `Select an editor for ${active.path.slice(active.path.lastIndexOf('/') + 1)}`,
+        items: [
+          { id: 'notebook', label: 'Jupyter Notebook', description: active.kind === 'notebook' ? 'active' : 'default', value: 'notebook' },
+          { id: 'text', label: 'Text Editor', description: active.kind === 'file' ? 'active' : undefined, value: 'text' },
+        ],
+      })
+      if (chosen?.value) await ed.open(active.path, undefined, chosen.value === 'text' ? { as: 'text' } : undefined)
+    } },
     { id: 'workbench.action.openSnippets', category: 'Snippets', title: 'Configure Snippets', run: () => void configureSnippets((path) => ed.open(path), ed.languages(), queryClient) },
     { id: 'editor.action.insertSnippet', category: 'Snippets', title: 'Insert Snippet', enabled: () => file, run: () => void loadMonaco().then(async (m) => insertSnippet(m, ed.activeModel(), await extensionSnippets(ed.activeModel()?.getLanguageId() ?? ''))) },
     { id: 'editor.action.surroundWithSnippet', category: 'Snippets', title: 'Surround With Snippet', enabled: () => file, run: () => void loadMonaco().then(async (m) => insertSnippet(m, ed.activeModel(), await extensionSnippets(ed.activeModel()?.getLanguageId() ?? ''), true)) },

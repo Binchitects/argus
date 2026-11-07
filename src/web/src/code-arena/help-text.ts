@@ -105,7 +105,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   editor: {
     name: 'Editor',
-    text: `Your open files, in tabs. A dot marks changes not saved yet, and ${modKey}+S saves; the middle mouse button closes a tab. Split Right in a tab's menu (or ${modKey}+\\) opens it in a second group beside it; drag a tab onto another group to move it there. Move into New Window in its menu opens it in a browser window of its own. A file the agent edits reloads in its tab when nothing in it is unsaved; saving a file that changed on disk since you opened it asks first.`,
+    text: `Your open files, in tabs. A dot marks changes not saved yet, and ${modKey}+S saves; the middle mouse button closes a tab. Split Right in a tab's menu (or ${modKey}+\\) opens it in a second group beside it; drag a tab onto another group to move it there. Move into New Window in its menu opens it in a browser window of its own. A file the agent edits reloads in its tab when nothing in it is unsaved; saving a file that changed on disk since you opened it asks first. A Jupyter notebook (.ipynb) opens as cells: **Run** (${modKey}+Enter, Shift+Enter for the next) runs one in the notebook's Python, its outputs below it; **Open as Text** shows its JSON.`,
     manual: 'the-ide',
   },
   terminal: {
@@ -199,6 +199,14 @@ export const tasks: HelpTask[] = [
       `Press ${modKey}+Shift+X (**Extensions**).`,
       'Press **Install from VSIX…** and choose the extension\'s .vsix (its page on Open VSX or the Marketplace has a download), or import it from **VS Code on this computer**.',
       `Choose its theme with ${modKey}+K ${modKey}+T (the editor shows each as you go down the list), or its icons with **Preferences: File Icon Theme**; its snippets and languages apply at once.`,
+    ],
+  },
+  {
+    title: 'Run a Jupyter notebook',
+    steps: [
+      'Open the .ipynb file (or **Create: New Jupyter Notebook**); trust the folder when it asks (**Manage Workspace Trust**).',
+      `Press **Run** beside a cell, or ${modKey}+Enter in it; Shift+Enter runs it and goes to the next. **Run All** runs them all.`,
+      `The kernel is the project's Python (its .venv when there is one). **Interrupt** stops a cell, **Restart** starts it again; ${modKey}+S saves the notebook with its outputs.`,
     ],
   },
   {

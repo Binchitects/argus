@@ -32,6 +32,7 @@ internal sealed partial class WebApp
     private Reviews _reviews = null!;
     private SecurityProblems _security = null!;
     private DiskWatch _watch = null!;
+    private NotebookKernels _kernels = null!;
 
     private readonly TaskCompletionSource<string> _folderOpened = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -69,6 +70,7 @@ internal sealed partial class WebApp
         _reviews = new Reviews(_rt, _problems);
         _security = new SecurityProblems(_rt, _problems);
         _watch = new DiskWatch(_rt.Workspace.Root);
+        _kernels = new NotebookKernels(_rt.Workspace, _rt.Config, _state, _rt.Env.Env, _rt.Env.Paths.DataDir);
         if (!_served)
         {
             Folders.Remember(_rt.Env.Paths.DataDir, _rt.Workspace.Root);
@@ -501,6 +503,30 @@ internal sealed partial class WebApp
                         : _userFiles.Write(name, text, body.Str("version")), ct);
                     return true;
                 }
+                case ("GET", "/api/notebook/kernel"):
+                    // A notebook's kernel: the Python it runs, whether it runs or is busy, its count.
+                    await res.JsonAsync(200, _kernels.Info(Notebook(Query(req, "path"))), ct);
+                    return true;
+                case ("POST", "/api/notebook/execute"):
+                {
+                    // A cell run in the notebook's kernel (started at the first); its outputs are read from /api/notebook/run.
+                    var body = Body(req);
+                    var notebook = Notebook(body.Str("path"));
+                    var code = body["code"] is JsonValue v && v.TryGetValue<string>(out var c) ? c : throw new IdeError(400, "invalid", "Send the cell's code.");
+                    await res.JsonAsync(200, new JsonObject { ["run"] = _kernels.Execute(notebook, code) }, ct);
+                    return true;
+                }
+                case ("GET", "/api/notebook/run"):
+                    await res.JsonAsync(200, await _kernels.OutputAsync(Query(req, "id"), int.TryParse(Query(req, "since"), out var seen) ? seen : 0, ct), ct);
+                    return true;
+                case ("POST", "/api/notebook/interrupt"):
+                case ("POST", "/api/notebook/restart"):
+                {
+                    var notebook = Notebook(Body(req).Str("path"));
+                    await (req.Path == "/api/notebook/interrupt" ? _kernels.InterruptAsync(notebook) : _kernels.StopAsync(notebook));
+                    await res.JsonAsync(200, _kernels.Info(notebook), ct);
+                    return true;
+                }
                 case ("GET", "/api/snippets"):
                     // The project's .vscode/*.code-snippets (the folder's and each added folder's) and the person's own.
                     await res.JsonAsync(200, IdeSnippets.List([_rt.Workspace.Root, .. Folders.Added(_state).Where(_rt.Workspace.Allowed)], _files.Show, _rt.Env.Paths.ConfigDir), ct);
@@ -732,6 +758,13 @@ internal sealed partial class WebApp
     }
 
     private static string? Query(HttpRequest req, string name) => req.Query.GetValueOrDefault(name);
+
+    /// <summary>A notebook of the folder's (or of one added to it), as a full path: a .ipynb file, checked as every path of the page's is.</summary>
+    private string Notebook(string? path)
+    {
+        var full = _files.Resolve(path);
+        return full.EndsWith(".ipynb", StringComparison.OrdinalIgnoreCase) ? full : throw new IdeError(400, "invalid", "Only a notebook (.ipynb) has a kernel.");
+    }
 
     private static bool Flag(HttpRequest req, string name) => Query(req, name) is "1" or "true";
 

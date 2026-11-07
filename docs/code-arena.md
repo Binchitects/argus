@@ -1246,6 +1246,51 @@ folder (`src/**`). The body takes VS Code's syntax: `$1`, `${2:name}`,
 A snippets file saved in the editor, or changed on disk, applies at once. A
 file larger than 1 MB is not read (the first 100 files are).
 
+### Notebooks
+
+A Jupyter notebook (`.ipynb`) opens in the notebook editor, as in VS Code: its
+cells one under another, a code cell in an editor of its own (the language's
+colours, completions and your editor settings) with its outputs below it, a
+Markdown cell shown as it reads (double-click it, or Enter, to edit it).
+**Create: New Jupyter Notebook** makes one with an empty Python cell.
+
+- **Run** beside a cell (or **Ctrl+Enter**) runs it; **Shift+Enter** runs it
+  and goes to the next (a new one after the last), **Alt+Enter** runs it and
+  adds one below. **Run All** runs the code cells in order and stops at the
+  first that fails; **Interrupt** stops the cell running (a
+  `KeyboardInterrupt`, as Jupyter's); **Restart** starts the kernel again
+  (its variables are lost, the outputs stay). Each cell shows its count
+  (`[3]`, `[*]` while it runs) and how long it took.
+- **Outputs**, as Jupyter's renderers show them: what the cell printed
+  (stderr tinted), the value of its last line (none when it ends with `;`),
+  what `display()` shows, the plots matplotlib made (as PNG pictures), and an
+  error with its traceback. Each object is shown in its richest form: a
+  picture (PNG, JPEG, GIF, SVG), HTML (a pandas table: in a frame that runs no
+  script and reaches nothing of the page), Markdown, LaTeX, JSON, or its text.
+- **Cells**: **+ Code** and **+ Markdown** (in the toolbar, and between cells),
+  and beside each cell Change to Markdown or Code, Clear Outputs, Move Up,
+  Move Down and Delete. With the cell itself selected (Escape leaves its
+  editor), Jupyter's keys work: **A** and **B** add a cell above and below,
+  **D D** deletes it, **M** and **Y** make it Markdown or code, ↑ and ↓ (or
+  **K** and **J**) move between cells, Enter edits.
+- **The kernel** is a Python code-arena keeps for the notebook, as Jupyter
+  keeps one: the one `python` in the config names, else the project's own
+  virtual environment (`.venv`, `venv`, `env`, or `VIRTUAL_ENV`, as
+  [run_code](#code-mode) finds it), else `python3`, started in the
+  notebook's folder at its first cell. The toolbar says which, and whether it
+  is busy. It runs with your rights (not in the agent's sandbox), only in a
+  trusted folder (**Manage Workspace Trust**), and ends with the IDE. No
+  Jupyter needs to be installed; `ipywidgets` and other widgets that need a
+  live frontend show their text only. Ten notebooks may have a kernel at once;
+  a cell's outputs are kept up to 2 MB of text and 20 MB of pictures.
+- **Saving**: the notebook is the file, as the editor holds it, so its tab has
+  the dot, **Ctrl+S** saves, and files.autoSave and hot exit work. It is
+  written as Jupyter writes it (keys sorted, the file's own indentation,
+  multi-line text as lists of lines), outputs and counts included, so a
+  notebook opened and saved unchanged is the same file. **Open as Text** (or
+  **Reopen Editor With…**) shows its JSON; **Open as Notebook** above the text
+  goes back. A notebook that is not nbformat 4 opens as text.
+
 ### Language servers
 
 The editor speaks the Language Server Protocol, as VS Code does: open a file
