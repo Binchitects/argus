@@ -357,6 +357,11 @@ services:
     ulimits: { memlock: -1 }
     shm_size: ${STRATA_SHM:-2gb}
     stop_grace_period: 3m
+    # Strata's image checks a Strata server of its own for up to two hours; here the supervisor starts one per model
+    # the app wants, and none while it wants none: the image's check would keep the service "starting" and the
+    # installer waiting for it. The supervisor is the engine, as vLLM's and SGLang's are, with no check of the image's.
+    healthcheck:
+      disable: true
 
   # Embeddings for Argus and the app's company knowledge, on the CPU. The app fetches the file into MODELS_DIR/embed.
   embed:

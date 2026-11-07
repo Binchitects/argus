@@ -78,6 +78,24 @@ class LmdeployLauncherTests(unittest.TestCase):
             proc.stdout.close()
 
 
+class SupervisedEnginesTests(unittest.TestCase):
+    def test_an_engine_run_by_the_supervisor_from_an_image_not_ours_has_no_check_of_the_images(self):
+        """The supervisor starts a server per model the app wants and none while it wants none: an image's own
+        HEALTHCHECK (Strata's waits two hours for a server of its own) keeps such a service "starting" and the installer
+        waiting until it gives up. A supervised engine on an image the stack does not build switches it off."""
+        import yaml
+        compose = yaml.safe_load((REPO / "deploy" / "docker-compose.yml").read_text())
+        wrong = []
+        for name, service in compose["services"].items():
+            entry = " ".join(map(str, service.get("entrypoint") or []))
+            # ${STRATA_IMAGE:-ghcr.io/...}: the image named by default.
+            image = re.sub(r"^\$\{[A-Z_]+:-(.*)\}$", r"\1", str(service.get("image", "")))
+            if "/vllm/supervisor.sh" in entry and not image.startswith("arena-") and "lmsysorg/sglang" not in image:
+                if (service.get("healthcheck") or {}).get("disable") is not True:
+                    wrong.append(name)
+        self.assertEqual([], wrong, "a supervised engine whose image may carry its own HEALTHCHECK keeps it on")
+
+
 class StrataLauncherTests(unittest.TestCase):
     def setUp(self):
         self.serve = load("strata_serve", SERVICES / "strata" / "serve.py")

@@ -73,6 +73,8 @@ a merge editor, and access that no one can widen beyond their own.
 
 ### :bug: Bugs fixed
 
+- An installation with Strata on (7.8.2) never finished: Strata's image checks a
+  server of its own for two hours, which the stack starts only for a model.
 - A report's custom range closed as soon as it opened.
 - A holder of `people.edit` could make anyone Owner, and other admin
   permissions could grant roles, Owner or a password reset beyond their own;

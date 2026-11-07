@@ -39,6 +39,7 @@
 #                         power-limits: the test host shares this machine's GPU and CPU, whose caps are the machine's
 #     --without LIST      features the bundle was made without (arenactl bundle --without): not asked of it; the
 #                         old release of --upgrade-from is asked only for the features its tag's deploy/features has
+#     --old-without LIST  features the old release of --upgrade-from is installed without (one it cannot install)
 #     --keep              leave the test host running afterwards (docker exec -it NAME bash)
 #     --clean             remove the test host's disk (DIR) afterwards
 #     --dir DIR           where the test host keeps its disk (default ~/arena-e2e)
@@ -47,7 +48,7 @@
 # The test host shares this machine's GPU (through CDI), never its network, its Docker or its stack.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
-BUNDLE="" FIRST="" MODEL="" WITH="" WITHOUT="" UPGRADE_FROM="" INTERRUPT="" INTERRUPT_AT="" AGAIN=0 REUSE=0 CPU=0 KEEP=0 CLEAN=0 DIR="${HOME}/arena-e2e" NAME=arena-e2e IMAGE=arena-offline-host:1
+BUNDLE="" FIRST="" MODEL="" WITH="" WITHOUT="" OLD_WITHOUT="" UPGRADE_FROM="" INTERRUPT="" INTERRUPT_AT="" AGAIN=0 REUSE=0 CPU=0 KEEP=0 CLEAN=0 DIR="${HOME}/arena-e2e" NAME=arena-e2e IMAGE=arena-offline-host:1
 FAIL_UPGRADE=0 ROLLBACK=0 SIGNAL=INT UPGRADE_TIMEOUT="" STOPS=() CUT_BY="" STOP_AFTER=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -56,6 +57,7 @@ while [[ $# -gt 0 ]]; do
     --model) MODEL="$2"; shift ;;
     --with) WITH="$2"; shift ;;
     --without) WITHOUT="$2"; shift ;;
+    --old-without) OLD_WITHOUT="$2"; shift ;;
     --upgrade-from) UPGRADE_FROM="$2"; shift ;;
     --interrupt-after) INTERRUPT="$2"; shift ;;
     --interrupt-at) INTERRUPT_AT="$2"; shift ;;
@@ -137,6 +139,8 @@ if [[ -n "$UPGRADE_FROM" ]]; then
   if old_features="$(git -C "$here/../.." show "v$OLD_VERSION:deploy/features" 2>/dev/null)"; then
     OLD_WITH="$(tr ',' '\n' <<< "$WITH" | grep -xF -f <(sed -n 's/^\([a-z0-9-]*\) *|.*/\1/p' <<< "$old_features") | paste -sd, -)"
   fi
+  # Features the old release cannot install (a bug of its own, fixed since): left out of it, turned on by the upgrade.
+  [[ -n "$OLD_WITHOUT" ]] && OLD_WITH="$(tr ',' '\n' <<< "$OLD_WITH" | grep -vxF -f <(tr ',' '\n' <<< "$OLD_WITHOUT") | paste -sd, -)"
 fi
 NEW_VERSION="$(basename "$BUNDLE" | sed -n 's/^argus-arena-\(.*\)-offline\.run$/\1/p')"
 
