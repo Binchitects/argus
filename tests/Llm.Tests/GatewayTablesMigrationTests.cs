@@ -105,11 +105,23 @@ public sealed class GatewayTablesMigrationTests(AppFixture app)
             // The app's own row (no source in LiteLLM's log) is the app's to say.
             ("You have used all your API credit for this month ($0.00).", null),
         ];
-        db.GatewayRequests.AddRange(rows.Select(r => new GatewayRequest
+        // Written as the table was then, not through today's model: columns added later are not there yet.
+        await using (var conn = new NpgsqlConnection(cs))
         {
-            StartedAt = now, EndedAt = now, Surface = "api", Call = "chat", CreditKind = "api", Model = "qwen", Status = GatewayRequest.Failed, Error = r.Error, SourceId = r.Source,
-        }));
-        await db.SaveChangesAsync();
+            await conn.OpenAsync();
+            foreach (var r in rows)
+            {
+                await using var insert = new NpgsqlCommand(
+                    "INSERT INTO gateway.requests (id, started_at, ended_at, duration_ms, surface, call, protocol, credit_kind, model, prompt_tokens, cached_tokens, completion_tokens, "
+                    + "usage_estimated, cost, status, http_status, error, source_id) VALUES (@id, @at, @at, 0, 'api', 'chat', 'openai', 'api', 'qwen', 0, 0, 0, false, 0, @status, 0, @error, @source)", conn);
+                insert.Parameters.AddWithValue("id", Guid.CreateVersion7());
+                insert.Parameters.AddWithValue("at", now);
+                insert.Parameters.AddWithValue("status", GatewayRequest.Failed);
+                insert.Parameters.AddWithValue("error", r.Error);
+                insert.Parameters.AddWithValue("source", (object?)r.Source ?? DBNull.Value);
+                Assert.Equal(1, await insert.ExecuteNonQueryAsync());
+            }
+        }
         await db.Database.MigrateAsync();
 
         var after = await db.GatewayRequests.AsNoTracking().OrderBy(r => r.SourceId).Select(r => new { r.SourceId, r.Status, r.Refusal }).ToListAsync();

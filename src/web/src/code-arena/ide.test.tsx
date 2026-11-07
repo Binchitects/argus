@@ -3003,6 +3003,7 @@ describe('Code Arena, the IDE', () => {
       "/compactSummarize the conversation to free the model's window, a command",
       '/contextWhat fills the window: each tool, skill, file and message, in tokens, a command',
       '/clearStart a new session (this one stays saved), a command',
+      "/projectPut the session (and this folder's next ones) in a project in Arena: its name, or none, a command",
       '/helloSay hello (NAME), a command',
       '/shipHow we ship, a skill',
       '/tidyTidy my notes, a skill',
@@ -3101,8 +3102,8 @@ describe('Code Arena, the IDE', () => {
     const box = await screen.findByRole('textbox', { name: 'Message' })
     await userEvent.type(box, '/')
     const list = await screen.findByRole('listbox', { name: 'Skills and commands' })
-    // The chat's three commands and all 36 skills.
-    await waitFor(() => expect(within(list).getAllByRole('option')).toHaveLength(39))
+    // The chat's four commands and all 36 skills.
+    await waitFor(() => expect(within(list).getAllByRole('option')).toHaveLength(40))
     await userEvent.keyboard('{ArrowUp}')
     expect(within(list).getByRole('option', { selected: true })).toHaveTextContent('/sk35')
     await userEvent.keyboard('{Enter}')

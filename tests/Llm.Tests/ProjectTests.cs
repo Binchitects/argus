@@ -64,7 +64,7 @@ public sealed class ProjectTests(AppFixture app)
     public async Task A_project_s_people_hold_their_roles_and_it_is_not_there_for_anyone_else()
     {
         var admin = await AdminAsync();
-        var (_, ann, _, _) = await PersonAsync(admin);
+        var (annId, ann, _, _) = await PersonAsync(admin);
         var (benId, ben, _, _) = await PersonAsync(admin);
         var (cyId, cy, _, _) = await PersonAsync(admin);
         var (_, dee, _, _) = await PersonAsync(admin);
@@ -78,6 +78,9 @@ public sealed class ProjectTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.NoContent, await ann.PostAsync($"/api/projects/{id}/members", new { userIds = new[] { benId }, role = "viewer" }));
         var group = (await admin.JsonAsync(await admin.PostAsync("/api/admin/groups", new { name = "Checkout " + Guid.NewGuid().ToString("N")[..6] }))).GetProperty("id").GetGuid();
         await StatusAssert.Is(HttpStatusCode.NoContent, await admin.PostAsync($"/api/admin/groups/{group}/members", new { userIds = new[] { cyId } }));
+        // Adding a group is sharing with it: Ann adds only a group she is in (any group needs sharing.groups).
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await ann.PostAsync($"/api/projects/{id}/members", new { groupIds = new[] { group }, role = "contributor" }));
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.PostAsync($"/api/admin/groups/{group}/members", new { userIds = new[] { annId } }));
         await StatusAssert.Is(HttpStatusCode.NoContent, await ann.PostAsync($"/api/projects/{id}/members", new { groupIds = new[] { group }, role = "contributor" }));
 
         var seen = await ben.JsonAsync(await ben.GetAsync($"/api/projects/{id}"));

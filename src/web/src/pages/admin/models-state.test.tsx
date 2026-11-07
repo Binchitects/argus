@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { admin, fakeApi, renderApp } from '@/test/utils'
 
 // "The unloading model text is wrong": a model on its way out reads Unloading…, with why and since when; one on its way
@@ -125,6 +125,11 @@ describe('admin models: loading and unloading', () => {
   })
 
   it('says why a model loads: a request asked for it after an Unload', async () => {
+    // The clock stands still: a slow render under load would otherwise read 6 s.
+    vi.useFakeTimers({ toFake: ['Date'], now: Date.now() })
+    onTestFinished(() => {
+      vi.useRealTimers()
+    })
     fakeApi(admin, { 'GET /api/admin/models': () => ({ json: view({ status: 'loading', why: 'for a chat or an API request', since: ago(5) }) }) })
     renderApp('/admin/models')
     await screen.findByRole('heading', { name: /tiny-b/ })
