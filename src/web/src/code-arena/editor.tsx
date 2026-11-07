@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Eye, FileCode2, FileDiff, FileImage, FileText, FolderOpen, GitCompareArrows, Keyboard, Pin, Settings2, X } from 'lucide-react'
+import { Eye, FileCode2, FileDiff, FileImage, FileText, FolderKanban, FolderOpen, GitCompareArrows, Keyboard, Pin, Settings2, X } from 'lucide-react'
 import type * as Monaco from 'monaco-editor'
 import { Fragment, lazy, Suspense, use, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type PointerEvent, type ReactNode } from 'react'
 import { ContextMenu } from 'radix-ui'
@@ -52,11 +52,11 @@ interface SavedEditors {
   orientation?: 'row' | 'column'
   size?: number
 }
-type SavedTab = { kind: Tab['kind']; path: string; pinned?: boolean; preview?: boolean }
+type SavedTab = { kind: Tab['kind']; path: string; label?: string; pinned?: boolean; preview?: boolean }
 
 /** What a tab is kept as for the next load (a compare is not kept). */
 const savedTabs = (tabs: Tab[]): SavedTab[] =>
-  tabs.filter((t) => t.kind !== 'diff').map((t) => ({ kind: t.kind, path: t.path, ...(t.pinned ? { pinned: true } : {}), ...(t.preview ? { preview: true } : {}) }))
+  tabs.filter((t) => t.kind !== 'diff').map((t) => ({ kind: t.kind, path: t.path, ...(t.label ? { label: t.label } : {}), ...(t.pinned ? { pinned: true } : {}), ...(t.preview ? { preview: true } : {}) }))
 
 /** The files a tab holds in the editor: a file tab's own, a compare's live sides. */
 /** How many files with no tab a peek keeps loaded. */
@@ -176,6 +176,7 @@ async function writeAny(path: string, text: string, version: string | null): Pro
 
 // The workbench's own pages, loaded the first time they open.
 const SettingsEditor = lazy(() => import('./settings-editor'))
+const ProjectTab = lazy(() => import('./project-tab').then((m) => ({ default: m.ProjectTab })))
 const KeybindingsEditor = lazy(() => import('./keybindings-editor'))
 
 let keymapInstalled = false
@@ -840,6 +841,8 @@ export function EditorProvider({ children, group = 1, detached = false }: { chil
       for (const t of saved?.tabs ?? []) {
         if (t.kind === 'settings' || t.kind === 'keybindings') {
           if (!has(t.kind)) add({ id: t.kind, kind: t.kind, path: t.kind === 'settings' ? 'Settings' : 'Keyboard Shortcuts', status: 'ready', dirty: false }, false)
+        } else if (t.kind === 'project') {
+          if (!has(`project:${t.path}`)) add({ id: `project:${t.path}`, kind: 'project', path: t.path, label: t.label, status: 'ready', dirty: false, pinned: t.pinned }, false)
         } else if (t.kind === 'preview') {
           if (!has(`preview:${t.path}`)) add({ id: `preview:${t.path}`, kind: 'preview', path: t.path, status: 'ready', dirty: false }, false)
         } else if (t.kind === 'file' || t.kind === 'media') {
@@ -891,6 +894,17 @@ export function EditorProvider({ children, group = 1, detached = false }: { chil
         return
       }
       add({ id: kind, kind, path: kind === 'settings' ? 'Settings' : 'Keyboard Shortcuts', status: 'ready', dirty: false })
+    }
+
+    /** A project of Arena's: one tab each, shown again when open (its name brought up to date). */
+    const openProject = (id: string, name?: string) => {
+      const tabId = `project:${id}`
+      if (has(tabId)) {
+        if (name) commit(tabsRef.current.map((x) => (x.id === tabId ? { ...x, label: name } : x)))
+        activate(tabId)
+        return
+      }
+      add({ id: tabId, kind: 'project', path: id, label: name || 'Project', status: 'ready', dirty: false })
     }
 
     /**
@@ -1362,6 +1376,7 @@ export function EditorProvider({ children, group = 1, detached = false }: { chil
       compare,
       changeAction,
       openPage,
+      openProject,
       openPreview,
       modelFor,
       restore,
@@ -1961,7 +1976,7 @@ function GroupArea({ group, index, count }: { group: number; index: number; coun
         >
           {tabs.map((t, i) => {
             const selected = t.id === active?.id
-            const name = isUserFile(t.path) ? t.path.slice(5) : t.source === 'compare' && t.left && t.right ? `${sideLabel(t.left)} ↔ ${sideLabel(t.right)}` : nameOf(t.path)
+            const name = t.kind === 'project' ? (t.label ?? 'Project') : isUserFile(t.path) ? t.path.slice(5) : t.source === 'compare' && t.left && t.right ? `${sideLabel(t.left)} ↔ ${sideLabel(t.right)}` : nameOf(t.path)
             return (
               <ContextMenu.Root key={t.id}>
                 <ContextMenu.Trigger asChild>
@@ -1989,7 +2004,7 @@ function GroupArea({ group, index, count }: { group: number; index: number; coun
                   role="tab"
                   aria-selected={selected}
                   aria-controls={panelId}
-                  title={t.kind === 'diff' ? (t.source === 'compare' ? name : `${t.path}: ${t.source === 'git' ? 'its changes, not staged' : t.source === 'staged' ? 'its staged changes' : "the agent's changes"}`) : isUserFile(t.path) ? `Your ${t.path.slice(5)} (every project)` : t.path}
+                  title={t.kind === 'diff' ? (t.source === 'compare' ? name : `${t.path}: ${t.source === 'git' ? 'its changes, not staged' : t.source === 'staged' ? 'its staged changes' : "the agent's changes"}`) : t.kind === 'project' ? `${name}: a project in Arena` : isUserFile(t.path) ? `Your ${t.path.slice(5)} (every project)` : t.path}
                   onClick={() => ed.activate(t.id)}
                   onDoubleClick={() => ed.keepTab(t.id)}
                   aria-describedby={t.preview || t.pinned ? `${tabStrip}-${i}` : undefined}
@@ -2004,6 +2019,8 @@ function GroupArea({ group, index, count }: { group: number; index: number; coun
                     <Settings2 className="size-3.5 shrink-0" aria-hidden="true" />
                   ) : t.kind === 'keybindings' ? (
                     <Keyboard className="size-3.5 shrink-0" aria-hidden="true" />
+                  ) : t.kind === 'project' ? (
+                    <FolderKanban className="size-3.5 shrink-0" aria-hidden="true" />
                   ) : t.kind === 'media' ? (
                     <FileImage className="size-3.5 shrink-0" aria-hidden="true" />
                   ) : t.kind === 'preview' ? (
@@ -2111,6 +2128,11 @@ function GroupArea({ group, index, count }: { group: number; index: number; coun
         {active?.kind === 'keybindings' && (
           <Suspense fallback={<Spinner label="Opening the keyboard shortcuts" />}>
             <KeybindingsEditor />
+          </Suspense>
+        )}
+        {active?.kind === 'project' && (
+          <Suspense fallback={<Spinner label={`Opening ${active.label ?? 'the project'}`} />}>
+            <ProjectTab key={active.id} id={active.path} />
           </Suspense>
         )}
         {active?.kind === 'media' && <MediaPreview key={active.id} tab={active} />}

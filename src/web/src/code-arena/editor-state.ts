@@ -56,8 +56,10 @@ export type DiffSource = 'agent' | 'git' | 'staged' | 'compare'
 export interface Tab {
   /** The path for a file; "diff:" and the path for the agent's changes, "git:" and the path for those since the last commit. */
   id: string
-  /** A file, a picture, sound or video (shown as it is), a compare, or one of the workbench's own pages (Settings, Keyboard Shortcuts). */
-  kind: 'file' | 'media' | 'preview' | 'diff' | 'settings' | 'keybindings'
+  /** A file, a picture, sound or video (shown as it is), a compare, one of the workbench's own pages (Settings, Keyboard Shortcuts), or a project of Arena's (its id the path). */
+  kind: 'file' | 'media' | 'preview' | 'diff' | 'settings' | 'keybindings' | 'project'
+  /** What the strip calls a tab whose path is no file's: a project's name. */
+  label?: string
   /** A diff's: what it compares (the agent's changes when not said). */
   source?: DiffSource
   /** A diff's sides: the left (original) and the right (modified). */
@@ -134,6 +136,8 @@ export interface EditorApi {
   openDiff: (path: string, source?: DiffSource) => Promise<void>
   /** Opens the Settings editor or the Keyboard Shortcuts editor (one tab each). */
   openPage: (kind: 'settings' | 'keybindings', query?: string) => void
+  /** Opens a project of Arena's in a tab of its own (one each, "project:" and its id), or shows it again. */
+  openProject: (id: string, name?: string) => void
   /** A Markdown file's preview, in a tab of its own ("preview:" and its path), following its text as it is edited. */
   openPreview: (path: string) => Promise<void>
   /** The model of a file open (or previewed) here, loaded if it is not yet; null for one that is no text. */

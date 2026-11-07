@@ -857,7 +857,7 @@ describe('Code Arena, the IDE', () => {
     const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
     // The agent's changes are counted on their button.
     expect(await within(bar).findByRole('button', { name: 'Agent changes (1)' })).toBeInTheDocument()
-    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Plan', 'Memory', 'Skills', 'Chat', 'Terminal', 'Theme', 'Accounts', 'Manage', 'Help', 'About Code Arena'])
+    expect(within(bar).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Explorer', 'Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Plan', 'Memory', 'Skills', 'Projects', 'Chat', 'Terminal', 'Theme', 'Accounts', 'Manage', 'Help', 'About Code Arena'])
     expect(within(bar).getByRole('button', { name: 'Explorer' })).toHaveAttribute('aria-pressed', 'true')
     expect(await screen.findByRole('tree', { name: 'Files' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'No file is open' })).toBeInTheDocument()
@@ -1493,7 +1493,7 @@ describe('Code Arena, the IDE', () => {
 
     // Kept for the next run, as arranged.
     await waitFor(() =>
-      expect(now.preferences.layout).toMatchObject({ sideAt: 'right', panelAt: 'right', order: ['search', 'problems', 'explorer', 'git', 'debug', 'extensions', 'changes', 'review', 'plan', 'memory', 'skills', 'chat'] }),
+      expect(now.preferences.layout).toMatchObject({ sideAt: 'right', panelAt: 'right', order: ['search', 'problems', 'explorer', 'git', 'debug', 'extensions', 'changes', 'review', 'plan', 'memory', 'skills', 'projects', 'chat'] }),
     )
   })
 
@@ -3003,7 +3003,8 @@ describe('Code Arena, the IDE', () => {
       "/compactSummarize the conversation to free the model's window, a command",
       '/contextWhat fills the window: each tool, skill, file and message, in tokens, a command',
       '/clearStart a new session (this one stays saved), a command',
-      "/projectPut the session (and this folder's next ones) in a project in Arena: its name, or none, a command",
+      "/projectThe session's project in Arena (alone: open it); NAME or none puts the session in one; new NAME makes one, a command",
+      "/projectsShow the Projects view: Arena's projects you see, a command",
       '/helloSay hello (NAME), a command',
       '/shipHow we ship, a skill',
       '/tidyTidy my notes, a skill',
@@ -3102,8 +3103,8 @@ describe('Code Arena, the IDE', () => {
     const box = await screen.findByRole('textbox', { name: 'Message' })
     await userEvent.type(box, '/')
     const list = await screen.findByRole('listbox', { name: 'Skills and commands' })
-    // The chat's four commands and all 36 skills.
-    await waitFor(() => expect(within(list).getAllByRole('option')).toHaveLength(40))
+    // The chat's five commands and all 36 skills.
+    await waitFor(() => expect(within(list).getAllByRole('option')).toHaveLength(41))
     await userEvent.keyboard('{ArrowUp}')
     expect(within(list).getByRole('option', { selected: true })).toHaveTextContent('/sk35')
     await userEvent.keyboard('{Enter}')
@@ -4651,7 +4652,7 @@ describe('Code Arena, the help', () => {
     await screen.findByRole('navigation', { name: 'Breadcrumbs' })
     for (const r of regionsShown()) seen.add(r)
     // Every view of the side bar, and the terminal panel, drawn once.
-    for (const name of ['Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Skills', 'Chat']) {
+    for (const name of ['Search', 'Source control', 'Run and Debug', 'Extensions', 'Agent changes (1)', 'Problems', 'Review', 'Skills', 'Projects', 'Chat']) {
       await userEvent.click(within(bar).getByRole('button', { name }))
       for (const r of regionsShown()) seen.add(r)
     }

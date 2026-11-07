@@ -270,7 +270,9 @@ cannot ask: edits and commands are refused unless the mode allows them
 | `/resume [id]` | switch to a saved session |
 | `/web [N\|all\|WORDS]` | your chats in Arena, newest first (the 30 newest; `all`: the 5,000 newest; `WORDS`: those of them with the words in their title or folder); `/web N` (a number in the list last shown, or a chat's id) continues one here |
 | `/sync [all]` | where this session stands with its chat in Arena; `all` sends what Arena lacks of this folder's sessions |
-| `/project [N\|NAME\|none]` | the project in Arena the session counts to, and those you may add to; a number, a name (or the start of one) or an id puts this session and the folder's next ones in it, `none` in none ([below](#projects)) |
+| `/project [N\|NAME\|none]` | the session's project in Arena: its cost, tokens, requests, people and time over the last 7 days, its models, its budget and its open goals; a number, a name (or the start of one) or an id puts this session and the folder's next ones in a project, `none` in none ([below](#projects)) |
+| `/project new NAME` | makes a project in Arena, when Arena lets you (you are its owner), and puts this session in it |
+| `/projects` | the projects you see in Arena: those you may add to numbered (as `/project N` takes them) with your role and this month's spend, the session's and the repository's marked; the others (archived, or yours only to look at) after them |
 | `/memory [add\|forget]` | what it remembers (below; Arena's when signed in); `add TEXT` for this project, `add --all TEXT` for every project, `forget N` |
 | `/remember` | the project's long memory, `.remember/MEMORY.md` in the repository: its sections and topic files (below) |
 | `/rewind [N] [code\|chat]` | your questions; `/rewind N` goes back to before question N (below) |
@@ -735,7 +737,8 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   short one. The Chat activity lists this folder's sessions; the list is read
   again when a session's first turn adds it, a turn of a session listed
   already just moves it to the top.
-- **status bar**: the git branch, the agent's changes, the terminal and the
+- **status bar**: the git branch, the project in Arena the session counts
+  to (a click opens it, [below](#projects)), the agent's changes, the terminal and the
   number of commands running with no time limit on the left (and, after the
   first key of a chord, that it waits for the second); the cursor's line and
   column, the file's indentation (**Spaces: 4**: indent with spaces or tabs,
@@ -2976,11 +2979,13 @@ Which project:
 
 - `code-arena --project NAME` (its name, the start of only one name, or its
   id; `none` for none) at the start;
-- `/project` lists the projects you may add to (yours and the global ones, the
+- `/projects` lists the projects you see (those you may add to numbered, the
   repository's marked), and `/project N` or `/project NAME` chooses one;
   `/project none` takes the session out. The chat in Arena goes with it;
+  `/project new NAME` makes one and puts the session in it;
 - in the IDE, the project in the chat's header (a folder mark with its name),
-  or `/project NAME` in the chat's box;
+  **Put this session in it** in the Projects view or a project's tab, or
+  `/project NAME` in the chat's box;
 - else, when none was chosen, the project the repository is in (its address in
   the project's **Repositories**): Arena puts the chat in it as it makes it,
   and the session says so.
@@ -2989,6 +2994,58 @@ The project chosen is kept for the folder: the next sessions there start in
 it. A project you may not add to (archived, or you are only its viewer) is not
 offered, and one Arena refuses is said. A project's budget does not stop Code
 Arena's requests.
+
+In the terminal, `/project` alone shows the session's project: your role, its
+cost, tokens, requests, people, your and the models' time and its models over
+the last 7 days, its budget this month, its goals done and those still open,
+and its tasks. `/projects` lists them all, `/project new NAME` makes one when
+Arena lets you (Admin → Access: `feature.projects`).
+
+In the IDE, **Projects** in the activity bar (a view like the others: moved,
+hidden or put in the panel as you arrange them) lists Arena's projects as its
+Projects page does: **Mine** (those you are in), **Global** (everyone's to add
+to) and **All I see**, found by their words, the archived ones last. The one
+the session counts to is in bold and says so, the one this folder's
+repository is in says so too; **Put this session in it** (on a row's hover)
+moves the session there, and **+** makes a project, a global one too when
+Arena lets you. A click opens the project in an editor tab of its own, the
+same page as Arena's (both are built from the same components):
+
+- **Overview**: its cost, tokens, requests, people, people's and the models'
+  time, goals and tasks done, over the time window (its presets, or a range
+  of your own), with its budget this month, its tokens and cost over time,
+  each person's share (yours alone unless you are an owner), its models,
+  where its requests came from and what was merged in its repositories;
+  **Export** gives the same as a PDF report, an Excel workbook or a CSV;
+- **Goals and tasks**: add goals with a due day and change their state, add
+  tasks of a goal or not, tick them off and give them to someone, as a
+  contributor or owner may;
+- **In it**: **This session** (in it or not: **Put this session in it**,
+  **Take this session out**), its repositories (add or take out), its chats
+  and sessions (one of yours opens here: a session continues in the chat, as
+  one of Arena's chats does; a room opens in Arena), and the assistants,
+  skills and apps it works with (one you made is added on its page in
+  Arena);
+- **People**: its people and groups by role; owners add them and change
+  their roles;
+- **Settings**, for owners: its name, what it is for, its dates, global or
+  not, its monthly budget (when owners are told, whether it stops its chats),
+  archive and delete.
+
+The status bar shows the session's project; a click opens it (in none, the
+Projects view). `/project` in the chat's box opens it too, `/projects` shows
+the view, and `/project new NAME` makes one. What a session uses is in its
+project within seconds (each request carries the project's tag), and an open
+project reads its numbers again every 15 seconds, the list and the project
+every 30, as Arena's page does, and at once when a turn of the session in it
+ends.
+
+The view and the tab call Arena's own project routes, with your API key, through
+code-arena (which sends on only those routes, after its own checks, and never
+gives the page the key); Arena checks each call as for its page, and lets the
+key in only when you may use Code Arena. What you may see and change is what
+Arena's page lets you: nothing about a project is decided in Code Arena. In
+Arena's Code Studio the IDE is in your own page, and calls Arena directly.
 
 ## Its commits
 
