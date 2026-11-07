@@ -232,9 +232,23 @@ public static class StudioEndpoints
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", engine.Key);
         // A machine's tunnel is held by an app replica: its own routes guard against forged forms, so it is told this is no page's.
         request.Headers.TryAddWithoutValidation("X-Requested-With", "arena");
-        if (http.Request.ContentLength is > 0 || http.Request.Headers.TransferEncoding.Count > 0)
+        // The body goes on with its length: Code Arena's server takes no chunked body (501), and a stream that cannot seek
+        // (Kestrel's) would go chunked. One sent with no length is read first (within the app's request size limit).
+        if (http.Request.ContentLength is > 0 and var length)
         {
             request.Content = new StreamContent(http.Request.Body);
+            request.Content.Headers.ContentLength = length;
+        }
+        else if (http.Request.ContentLength is null && (HttpMethods.IsPost(http.Request.Method) || HttpMethods.IsPut(http.Request.Method) || HttpMethods.IsPatch(http.Request.Method)))
+        {
+            var read = new MemoryStream();
+            await http.Request.Body.CopyToAsync(read, ct);
+            if (read.Length > 0)
+            {
+                read.Position = 0;
+                request.Content = new StreamContent(read);
+                request.Content.Headers.ContentLength = read.Length;
+            }
         }
         foreach (var name in Passed)
         {
