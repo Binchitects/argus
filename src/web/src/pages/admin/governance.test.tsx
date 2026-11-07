@@ -23,6 +23,31 @@ const grace: Person = {
   credits: { chat: { spent: 3, credit: 10 }, api: { spent: 0, credit: null }, pictures: { spent: 0, credit: null }, video: { spent: 0, credit: null }, speech: { spent: 0, credit: null } },
 }
 
+describe('groups for who may only read them', () => {
+  it('a people admin without groups.manage sees groups and members with nothing to change, and no chargeback without billing.read', async () => {
+    const reader = { ...member, permissions: ['people.read'] }
+    const calls = fakeApi(reader, {
+      'GET /api/admin/groups': () => ({ json: [{ id: 'g1', name: 'Data science', description: null, directory: null, members: 1, createdAt: '' }] }),
+      'GET /api/admin/groups/g1': () => ({ json: group }),
+    })
+    renderApp('/admin/groups')
+    expect(await screen.findByText('Data science')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /New group/ })).toBeNull()
+    expect(screen.queryByText('Chargeback')).toBeNull()
+    expect(calls.some((c) => c.path.startsWith('/api/admin/groups/chargeback'))).toBe(false)
+  })
+
+  it('a group page offers only the changes its reader may make', async () => {
+    fakeApi({ ...member, permissions: ['people.read', 'groups.members'] }, { 'GET /api/admin/groups/g1': () => ({ json: group }) })
+    renderApp('/admin/groups/g1')
+    expect(await screen.findByRole('button', { name: /Add people/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Remove Ann from Data science' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Edit/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Delete/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Save policies' })).toBeNull()
+  })
+})
+
 describe('retention and credit per group', () => {
   it('a group keeps chats and spends as its policies say, and they are saved together', async () => {
     const calls = fakeApi(admin, {

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Pencil, Trash2, UserMinus, UserPlus } from 'lucide-react'
 import { useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router'
+import { Link, useNavigate, useOutletContext, useParams } from 'react-router'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
 import { ScrollRegion } from '@/components/app/scroll-region'
 import { Alert } from '@/components/ui/alert'
@@ -16,7 +16,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Field } from '@/components/ui/field'
 import { Input, Textarea } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
-import { api, errorMessage } from '@/lib/api'
+import { api, errorMessage, holds, type Me } from '@/lib/api'
 import { money } from '@/lib/format'
 import { GroupPoliciesCard } from './group-policies'
 import { PriorityBadge } from './groups'
@@ -31,6 +31,7 @@ export function GroupPage() {
   const group = useQuery(groupQuery(id))
   const [editing, setEditing] = useState(false)
   const [adding, setAdding] = useState(false)
+  const me = useOutletContext<Me>()
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['admin', 'groups'] })
   const remove = useMutation({
     mutationFn: (userId: string) => api(`/api/admin/groups/${id}/members/${userId}`, { method: 'DELETE' }),
@@ -51,6 +52,8 @@ export function GroupPage() {
   const g = group.data
   // App groups only: a directory or SCIM group's members are someone else's to change.
   const app = g.directory === null && !g.scim
+  // Each change is its part of groups.manage: editing, deleting, choosing members, setting policies.
+  const may = { edit: holds(me, 'groups.edit'), remove: holds(me, 'groups.delete'), members: app && holds(me, 'groups.members'), policies: holds(me, 'groups.policies') }
 
   const columns: ColumnDef<GroupMember>[] = [
     {
@@ -81,7 +84,7 @@ export function GroupPage() {
         ]
       : []),
     { id: 'status', header: 'Status', accessorFn: (m) => (m.isDisabled ? 'Disabled' : 'Active'), cell: ({ row: { original: m } }) => (m.isDisabled ? <Badge variant="warning">Disabled</Badge> : null) },
-    ...(app
+    ...(may.members
       ? [
           {
             id: 'remove',
@@ -114,9 +117,12 @@ export function GroupPage() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => setEditing(true)}>
-            <Pencil /> Edit
-          </Button>
+          {may.edit && (
+            <Button variant="outline" onClick={() => setEditing(true)}>
+              <Pencil /> Edit
+            </Button>
+          )}
+          {may.remove && (
           <Button
             variant="outline"
             className="text-destructive-ink"
@@ -127,6 +133,7 @@ export function GroupPage() {
           >
             <Trash2 /> Delete
           </Button>
+          )}
         </div>
       </div>
       <Card>
@@ -141,7 +148,7 @@ export function GroupPage() {
                   : 'Whoever the directory puts in this group, as of their last sign-in or directory check.'}
             </CardDescription>
           </div>
-          {app && (
+          {may.members && (
             <Button onClick={() => setAdding(true)}>
               <UserPlus /> Add people
             </Button>
@@ -152,7 +159,7 @@ export function GroupPage() {
         </CardContent>
       </Card>
       <div className="mt-6">
-        <GroupPoliciesCard key={g.id} group={g} />
+        <GroupPoliciesCard key={g.id} group={g} maySet={may.policies} />
       </div>
       <EditDialog group={g} open={editing} onOpenChange={setEditing} />
       {app && <AddPeopleDialog group={g} open={adding} onOpenChange={setAdding} />}

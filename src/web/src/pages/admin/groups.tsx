@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FolderTree, UsersRound } from 'lucide-react'
 import { useId, useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { useNavigate } from 'react-router'
+import { useNavigate, useOutletContext } from 'react-router'
 import { z } from 'zod'
 import { PageHeader } from '@/components/app/page-header'
 import { QueryError } from '@/components/app/query-state'
@@ -15,7 +15,7 @@ import { DataTable, SortHeader, type ColumnDef } from '@/components/ui/data-tabl
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Field } from '@/components/ui/field'
 import { Input, Textarea } from '@/components/ui/input'
-import { api, errorMessage } from '@/lib/api'
+import { api, errorMessage, holds, type Me } from '@/lib/api'
 import { money } from '@/lib/format'
 import { creditKinds } from './people-api'
 import { ChargebackCard } from './chargeback'
@@ -85,15 +85,19 @@ export function GroupsPage() {
   const navigate = useNavigate()
   const groups = useQuery(groupsQuery)
   const [adding, setAdding] = useState(false)
+  // Making groups is groups.create's; the chargeback, billing.read's.
+  const me = useOutletContext<Me>()
   return (
     <>
       <PageHeader
         title="Groups"
         description="Who may use which tools and models. An app group has the people you add; a directory group follows the company directory."
         actions={
-          <Button onClick={() => setAdding(true)}>
-            <UsersRound /> New group
-          </Button>
+          holds(me, 'groups.create') && (
+            <Button onClick={() => setAdding(true)}>
+              <UsersRound /> New group
+            </Button>
+          )
         }
       />
       {groups.error ? (
@@ -115,9 +119,11 @@ export function GroupsPage() {
           }
         />
       )}
-      <div className="mt-6">
-        <ChargebackCard />
-      </div>
+      {holds(me, 'billing.read') && (
+        <div className="mt-6">
+          <ChargebackCard />
+        </div>
+      )}
       <NewGroupDialog open={adding} onOpenChange={setAdding} onMade={(id) => navigate(`/admin/groups/${id}`)} />
     </>
   )

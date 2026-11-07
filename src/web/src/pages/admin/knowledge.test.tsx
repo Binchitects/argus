@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import { admin, fakeApi, renderApp } from '@/test/utils'
+import { admin, fakeApi, member, renderApp } from '@/test/utils'
 import type { KnowledgeSource } from './knowledge'
 
 const source = (over: Partial<KnowledgeSource>): KnowledgeSource => ({
@@ -259,5 +259,23 @@ describe('admin knowledge', () => {
     expect(calls.find((c) => c.path === '/api/admin/knowledge/test')?.body).toEqual(expected)
     await userEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
     await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/admin/knowledge')?.body).toEqual(expected))
+  })
+  it('one who may only read the sources sees them, who reads each, and their documents, with nothing to change', async () => {
+    fakeApi({ ...member, permissions: ['knowledge.read'] }, { 'GET /api/admin/knowledge': () => page([source({}), source({ id: 's2', name: 'Uploads', kind: 'upload' }), source({ id: 's3', name: 'Handbook', kind: 'folder', location: '/knowledge/handbook' })]) })
+    renderApp('/admin/knowledge')
+    const gitlab = await screen.findByRole('region', { name: 'Engineering' })
+    expect(within(gitlab).getByRole('button', { name: /Documents/ })).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: 'Handbook' })).getByRole('combobox', { name: 'Who may read it' })).toBeDisabled()
+    for (const name of [/Sync now/, /Settings/, /Remove/]) expect(within(gitlab).queryByRole('button', { name })).toBeNull()
+    expect(within(screen.getByRole('region', { name: 'Uploads' })).queryByRole('button', { name: /Files/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Add a source/ })).toBeNull()
+  })
+
+  it('one who may sync but not change a source syncs it, and nothing more', async () => {
+    fakeApi({ ...member, permissions: ['knowledge.read', 'knowledge.sync'] }, { 'GET /api/admin/knowledge': () => page([source({})]) })
+    renderApp('/admin/knowledge')
+    const gitlab = await screen.findByRole('region', { name: 'Engineering' })
+    expect(within(gitlab).getByRole('button', { name: /Sync now/ })).toBeInTheDocument()
+    expect(within(gitlab).queryByRole('button', { name: /Remove/ })).toBeNull()
   })
 })

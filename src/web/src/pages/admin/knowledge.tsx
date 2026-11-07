@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Archive, BookOpen, Cloud, ExternalLink, Files, FileText, FolderOpen, FolderUp, GitBranch, GitFork, Globe, HardDrive, Library, NotebookText, Pencil, PlugZap, Plus, RefreshCw, Rss, Ticket, Trash2, Upload } from 'lucide-react'
 import { useId, useRef, useState, type DragEvent } from 'react'
-import { Link } from 'react-router'
+import { Link, useOutletContext } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
 import { Alert } from '@/components/ui/alert'
@@ -16,7 +16,7 @@ import { Field } from '@/components/ui/field'
 import { Input, Textarea } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/components/ui/toaster'
-import { api, errorMessage } from '@/lib/api'
+import { api, errorMessage, holds, type Me } from '@/lib/api'
 import { ago, count, formatValue } from '@/lib/format'
 import { AccessPicker, type Audience } from './access-picker'
 import { groupsQuery } from './groups-api'
@@ -111,6 +111,10 @@ export function KnowledgePage() {
   const [editing, setEditing] = useState<KnowledgeSource | null>(null)
   const [reading, setReading] = useState<KnowledgeSource | null>(null)
   const [filing, setFiling] = useState<KnowledgeSource | null>(null)
+  // Each change is its part of knowledge.manage: adding, editing (who may read it, its files), syncing, removing.
+  const me = useOutletContext<Me>()
+  const may: SourcePowers = { edit: holds(me, 'knowledge.edit'), sync: holds(me, 'knowledge.sync'), remove: holds(me, 'knowledge.delete') }
+  const mayAdd = holds(me, 'knowledge.add')
   if (knowledge.isPending) return <PageSkeleton />
   if (knowledge.error) return <QueryError error={knowledge.error} retry={() => knowledge.refetch()} />
   const k = knowledge.data
@@ -120,9 +124,11 @@ export function KnowledgePage() {
         title="Knowledge"
         description="The company's documents the chat searches (Company knowledge, a tool in Admin → Tools), each person only what they may read: GitLab, GitHub and Gitea, Confluence, Jira, Notion, SharePoint and OneDrive, WebDAV, S3 buckets, folders, websites, feeds, and files uploaded here (scans and pictures read by OCR)."
         actions={
-          <Button onClick={() => setAdding(true)}>
-            <Plus /> Add a source
-          </Button>
+          mayAdd && (
+            <Button onClick={() => setAdding(true)}>
+              <Plus /> Add a source
+            </Button>
+          )
         }
       />
       <div className="grid gap-4">
@@ -133,13 +139,13 @@ export function KnowledgePage() {
           </Alert>
         )}
         {k.sources.length === 0 ? (
-          <EmptyState icon={Library} title="No sources yet" action={<Button onClick={() => setAdding(true)}><Plus /> Add a source</Button>}>
+          <EmptyState icon={Library} title="No sources yet" action={mayAdd ? <Button onClick={() => setAdding(true)}><Plus /> Add a source</Button> : undefined}>
             Add a GitLab project or group (its wiki and issues, read by its members), Confluence spaces or SharePoint sites (read by whom they let read), GitHub or Gitea repositories, Jira projects, Notion pages, a WebDAV folder, an S3 bucket, a folder mounted under {k.folderRoot}, a website or feeds, or upload files. Each is read again every {every(k.syncEvery)}.
           </EmptyState>
         ) : (
           <div className="stagger grid gap-4 xl:grid-cols-2">
             {k.sources.map((s) => (
-              <SourceCard key={s.id} source={s} onDocuments={() => setReading(s)} onEdit={() => setEditing(s)} onFiles={() => setFiling(s)} />
+              <SourceCard key={s.id} source={s} may={may} onDocuments={() => setReading(s)} onEdit={() => setEditing(s)} onFiles={() => setFiling(s)} />
             ))}
           </div>
         )}
@@ -173,7 +179,14 @@ function StateBadge({ source }: { source: KnowledgeSource }) {
   }
 }
 
-function SourceCard({ source, onDocuments, onEdit, onFiles }: { source: KnowledgeSource; onDocuments: () => void; onEdit: () => void; onFiles: () => void }) {
+/** What the person may do to a source (Admin → Access). */
+interface SourcePowers {
+  edit: boolean
+  sync: boolean
+  remove: boolean
+}
+
+function SourceCard({ source, may, onDocuments, onEdit, onFiles }: { source: KnowledgeSource; may: SourcePowers; onDocuments: () => void; onEdit: () => void; onFiles: () => void }) {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['admin', 'knowledge'] })
@@ -268,16 +281,19 @@ function SourceCard({ source, onDocuments, onEdit, onFiles }: { source: Knowledg
               label={`Where ${kinds[source.kind].label} cannot tell`}
               value={{ audience: source.audience, groups: source.groups }}
               onChange={(audience, groups) => readers.mutate({ audience, groups })}
+              readOnly={!may.edit}
             />
           </div>
         ) : (
-          <AccessPicker label="Who may read it" value={{ audience: source.audience, groups: source.groups }} onChange={(audience, groups) => readers.mutate({ audience, groups })} />
+          <AccessPicker label="Who may read it" value={{ audience: source.audience, groups: source.groups }} onChange={(audience, groups) => readers.mutate({ audience, groups })} readOnly={!may.edit} />
         )}
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" loading={sync.isPending} disabled={source.state === 'syncing'} onClick={() => sync.mutate()}>
-            <RefreshCw /> Sync now
-          </Button>
-          {source.kind === 'upload' && (
+          {may.sync && (
+            <Button variant="outline" size="sm" loading={sync.isPending} disabled={source.state === 'syncing'} onClick={() => sync.mutate()}>
+              <RefreshCw /> Sync now
+            </Button>
+          )}
+          {source.kind === 'upload' && may.edit && (
             <Button variant="outline" size="sm" onClick={onFiles}>
               <Upload /> Files
             </Button>
@@ -285,9 +301,12 @@ function SourceCard({ source, onDocuments, onEdit, onFiles }: { source: Knowledg
           <Button variant="outline" size="sm" onClick={onDocuments} disabled={source.documents === 0}>
             <FileText /> Documents
           </Button>
-          <Button variant="outline" size="sm" onClick={onEdit}>
-            <Pencil /> Settings
-          </Button>
+          {may.edit && (
+            <Button variant="outline" size="sm" onClick={onEdit}>
+              <Pencil /> Settings
+            </Button>
+          )}
+          {may.remove && (
           <Button
             variant="outline"
             size="sm"
@@ -299,6 +318,7 @@ function SourceCard({ source, onDocuments, onEdit, onFiles }: { source: Knowledg
           >
             <Trash2 /> Remove
           </Button>
+          )}
         </div>
       </CardContent>
     </Card>

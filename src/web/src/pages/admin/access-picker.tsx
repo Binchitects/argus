@@ -21,7 +21,8 @@ export interface AccessRule {
  * "Who may use it": everyone, admins only, or chosen groups. "Chosen groups" is
  * saved once a group is chosen: until then it would let nobody in.
  */
-export function AccessPicker({ value, onChange, label = 'Who may use it' }: { value: AccessRule; onChange: (audience: Audience, groups: string[]) => void; label?: string }) {
+/** readOnly: who may use it is shown, not changed (the person holds no permission to choose it). */
+export function AccessPicker({ value, onChange, label = 'Who may use it', readOnly = false }: { value: AccessRule; onChange: (audience: Audience, groups: string[]) => void; label?: string; readOnly?: boolean }) {
   const id = useId()
   const [choosingGroups, setChoosingGroups] = useState(false)
   const chosen = value.groups.map((g) => g.id)
@@ -34,6 +35,7 @@ export function AccessPicker({ value, onChange, label = 'Who may use it' }: { va
       <div className="flex flex-wrap items-center gap-2">
         <Select
           value={audience}
+          disabled={readOnly}
           onValueChange={(a: Audience) => {
             setChoosingGroups(a === 'Groups' && chosen.length === 0)
             if (a !== 'Groups' || chosen.length > 0) onChange(a, a === 'Groups' ? chosen : [])
@@ -48,7 +50,8 @@ export function AccessPicker({ value, onChange, label = 'Who may use it' }: { va
             <SelectItem value="Groups">Chosen groups</SelectItem>
           </SelectContent>
         </Select>
-        {audience === 'Groups' && (
+        {audience === 'Groups' && readOnly && <span className="text-sm text-muted-foreground">{value.groups.map((g) => g.name).join(', ')}</span>}
+        {audience === 'Groups' && !readOnly && (
           <GroupsPicker
             chosen={chosen}
             names={value.groups}
