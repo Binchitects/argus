@@ -34,140 +34,64 @@ release ships.
   service can take it, else saved with the one command to apply it. No Docker
   socket.
 
-## In progress: v7.7.1 (hotfix)
+## In progress: v7.8.3
 
-Asked 2026-11-02. Built and merged into `main`; left is the release.
+Everything on the 2026-11-06 list is built and shipped in v7.8.0 to v7.8.2
+except what follows. Each part ships in 7.8.3 when it is ready.
 
-1. **Upgrade, rollback and resume.** Built: an upgrade from 7.6.3 works, a
-   failed one rolls back, and one stopped part way carries on.
-2. **A model's window and its longest answer, everywhere.** Built: every
-   engine, picker and page holds one request to both, and the context ring
-   warns when they do not fit.
-3. **Code Arena's compaction, sync, context popup and skills.** Built: the
-   whole conversation kept after a compaction, the web's compaction seen at
-   once, the context popup as detailed as the web's, skills shown, used with
-   `/name` and made by the person.
-4. **A model's engine changed at runtime.** Built: the Engine field in Edit
-   and Add a model, the move without lost answers, and vLLM and SGLang running
-   a GGUF file from the library.
-5. **Source Control and changes fold as VS Code's do**, and **calm themes**
-   with 4.5:1 contrast everywhere. Built.
-6. **Functional-test races.** The races found while building fixed at their
-   cause. Done when the functional test passes ten runs in a row on live.
-7. **Release.** The offline scenarios pass (upgrade, rollback, resume), then
-   the tag, the GitHub release and the bundle.
+1. **Projects in Code Arena.** A Projects view in the IDE, a project's page
+   in a tab, and `/projects` and `/project` in the terminal.
+2. **The last hidden controls.** Every control whose permission a person
+   lacks is hidden (calls, app remix, Code Arena, Fix it). Admin → Models
+   cards have their settings in Details. Every report page has the time
+   window.
+3. **Leaner context.** Tool results and file reads are summarised once used,
+   measured on long sessions with a real model, and tool calls fail less.
+4. **The IDE's last VS Code gaps.** A merge-conflict editor, multi-root
+   workspaces, notebooks and project snippets.
+5. **Settings and the window.** Every option an admin may change is in
+   Settings, and Code Arena's own options are in the IDE. A launcher with no
+   console window ships on Windows.
+6. **Real runs.** Strata and LMDeploy serve a real model on this host's GPU;
+   the LMDeploy image builds; the VM tool drives a real VM; the workspaces
+   have a browser test and a CI job.
 
-## Next: v7.8 — one release with everything below
+## Needs the production host (3x H200 NVL)
 
-Released as one big update right after v7.7.1, not as separate hotfixes and minor releases (asked 2026-11-06). No model training: the model lab is dropped.
+1. Even load on every GPU, on each engine: done when a load test shows each
+   GPU within 10% of the others.
+2. 15 people each with the full 262K window on Qwen3.8 27B at once, with
+   the advisor's numbers checked against the real memory.
+3. The 27B's decode speed: at least 200 tok/s for a person on the fixed
+   dashboard.
+4. FP4 against FP8 on Hopper: `arenactl check fp4-h200` (the RTX 3090
+   numbers are in multi-gpu-server.md).
+5. Strata and LMDeploy measured beside vLLM and SGLang.
 
-The user's production host has three H200 NVL GPUs and serves Qwen3.8 27B
-with a 262K window to 10 to 15 people. Planned before (2026-11-02): even GPU
-load and rewind. Added 2026-11-06: the bugs below.
+## Needs Windows
 
-### Headlines
+Code Arena on a real Windows machine: no console window, the log beside the
+program, and Edge or Chrome 109.
 
-1. **Even load on every GPU.** Requests spread over all three GPUs on
-   llama.cpp, vLLM and SGLang alike. Done when a load test on the H200 host
-   shows each GPU within 10% of the others.
-2. **The full window for each person.** Each of 10 to 15 people gets the whole
-   262K, not 262K split between them (llama.cpp divides `ctx` by its slots).
-   Settings take "context per person" and "people at once", and say what the
-   GPUs' memory allows. Done when 15 chats each hold 262K at once.
-3. **Rewind to a message**, in the web chat and in Code Arena, as Claude
-   desktop does: the chat and the files it changed go back to that point.
-4. **Argus's code graphs.** Who calls a method, what implements an interface,
+## Next
+
+1. **Argus's code graphs.** Who calls a method, what implements an interface,
    what a merge request breaks across every repository a person can read, with
    the lines, tests and owners. A Code map page, call and type hierarchy in
    Code Arena, an Impact card on reviews; `symbol_graph`, `mr_impact` and
    `service_contracts` for agents. Design: [argus-graph.md](design/argus-graph.md),
    31 commits; the headline is reachable at commit 27.
-5. **Tasks and subagents beside the chat.** Code Arena gets assistants and
-   subagents, shown in a tasks panel as Claude desktop does, not mixed into
-   the chat.
-6. **What is in the window.** Both apps show what fills the context: the
-   messages, each tool's and skill's share, the system prompt and the room
-   kept for the answer.
-7. **Test apps in a VM.** A tool that drives VirtualBox and VMware VMs: start,
-   snapshot, copy in, run and test an app, read the screen.
-8. **Skills and tools of your own.** Import and export skills in both apps.
-   Local skills and tools in Code Arena. Tools customised in Code Arena as in
-   the web.
-9. **Projects.** Projects in Argus Arena and Code Arena with their own
-   accounting and metrics (tokens, cost, time, people). Global projects every
-   person may contribute to; each person may make one.
-10. **Reports people can read.** Exports of a project's progress, tokens, time
-   and people, and a time window on every report and dashboard.
-11. **Permissions, redone.** Finer permissions with a clearer admin page. What
-   a person may not use is hidden. New people join a default group.
-
-### Also, and the bugs
-
-1. **Tokens per second, right.** Find why the dashboard shows 100 tok/s on the
-   27B where at least 200 is expected, fix the number or the serving. Add
-   per-GPU and per-person performance panels.
-2. **Code Arena compacts in time.** Compaction starts before the window is
-   full, never sticks, and no history goes missing. Done when a long session
-   test passes three compactions.
-3. **No empty space in Code Arena's chat** after a few prompts.
-4. **Code Arena loads fast.** Opening a chat, its history and the sync with
-   Argus Arena are fast. Done with a measured time for a 500-message chat.
-5. **Settings reach Code Arena live.** A change in Argus Arena applies in a
-   running Code Arena without a restart.
-6. **No forced Compare.** The chat never opens Compare for a person without
-   the compare permission.
-7. **Esc cancels a skill.** An entered skill can be skipped or cancelled with
-    Esc, in both chats.
-8. **Code Arena's tools work and are quick.** grep, run task and the others
-    fixed and measured. The Python tool does something useful, or it goes.
-9. **Large files.** The model gets a short summary of each file in context
-    and reads only the part it needs.
-10. **Safeguard blocks are explained.** The person sees what caused a block
-    and the finding. The false password findings are fixed.
-11. **A self-signed GitLab certificate works.** People connect their apps and
-    accounts to a GitLab with the company's own CA.
-12. **Workspaces work.** Each broken case reproduced in a test and fixed.
-13. **Right to left.** Both chats lay out RTL languages fully.
-14. **Code Arena starts quietly.** No shell window at start. Logs go to a file
-    beside the exe.
-15. **Code Arena is self-contained.** The exe runs with an old Edge or
-    Chromium WebView.
-16. **Argus counts repositories, not branches.** 127 repositories show 127,
-    not 479.
-17. **The wiki search finds things.** No random code results, symbols such as
-    `MyLib::TestFunc` found, every result with pages, and filters.
-18. **A default install passes compliance.** The requirements a fresh install
-    leaves unmet are met by default or explained.
-19. **Send while it works.** In both chats a message sent during a turn is taken
-   in as Claude Code does, without stopping the turn.
-20. **Goal mode.** Code Arena keeps working until a stated goal is met, and
-   says how it checked.
-21. **Skip thinking** in Code Arena, per message or per session.
-22. **Detail in a modal.** Admin's repository rows and model cards are compact,
-   with their detail in a modal.
-23. **The wiki search on the graph.** Symbols and their callers searched by
-   name, with filters of one's own.
-24. **The app's own gateway**, commits 10 to 21 of
+2. **The app's own gateway**, commits 10 to 21 of
    [own-gateway.md](design/own-gateway.md). LiteLLM goes only after the
    measured gates and a day's soak.
-25. **The IDE's editor groups.**
-26. **Evals.** Test sets for assistants, prompts and models, run on every
+3. **Evals.** Test sets for assistants, prompts and models, run on every
    change, scored by rules or a judge model, what got worse shown first.
-27. **Code Arena closer to VS Code.** A customisable sidebar; chat and file
-   tabs that detach; a middle click closes a tab; several repositories open in
-   Source Control at once.
-28. **Themes.** The common VS Code themes, sharp like Arena's own, and options
-   for poor vision (high contrast, larger text).
-29. **Context, much leaner.** Tool results and file reads summarised, measured
-   on the tool-modes tasks, and improved each release.
-30. **Every feature in the UI.** Nothing is left to a setting only the manual
-   names.
-31. **Compliance for new features.** Each feature from 7.7 on has its
-   controls, with default rules and policies on at install.
-32. **FP4 on H200.** Hopper has no native FP4; measure vLLM's MXFP4 and NVFP4
-   paths against FP8. Needs a yes: the models.
-33. **More engines.** Strata as an engine, and others worth adding. Needs a
-   yes: their images.
+4. **Code Arena's extensions.** An extension host for VS Code extensions that
+   need their own code (ESLint, GitLens, Pylance).
+5. **Flaky tests to fix at their cause:** `ConcurrencyTests.A_model_asked_for_at_the_engines_limit_unloads_an_idle_one_not_kept_never_the_big_one`,
+   `StdioChildTests.A_child_that_listens_is_reached_on_its_port_and_one_that_ends_first_says_why`,
+   `ToolMeasureTests.Run_shell_keeps_a_long_output_whole_ends_with_a_child_left_behind_and_says_how_it_ended`
+   (each failed once under a full suite's load, and passes alone).
 
 ## Groundwork, in between
 
