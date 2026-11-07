@@ -198,6 +198,8 @@ its own options with `--help`):
 | `bench` | `multiuser-bench.py` | many people chatting at once |
 | `load` | `people-load.py` | thousands of people signing in and asking |
 | `benchmark` | `benchmark.py` | the model's speed and quality |
+| `fp4` | `fp4-bench.py` | a model's FP4, FP8 and BF16 copies side by side, each in a throwaway vLLM container on the same GPUs (`run`) or as the stack serves them (`endpoint`): memory, speed, quality ([multi-gpu-server.md](multi-gpu-server.md#fp4-on-hopper)) |
+| `fp4-h200` | `fp4-h200.sh` | FP4 against FP8 on the H200 host, every set of snapshots its library has |
 | `qwen-code` | `qwen-code-realworld.py` | Qwen Code against the gateway on real tasks |
 
 The throwaway stacks (`upgrade`, `rollback`, `restore`) never touch the live

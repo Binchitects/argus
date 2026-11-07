@@ -34,6 +34,10 @@ VLLM_IMAGE           | Models        | text    | vllm/vllm-openai:v0.31.0 | The 
 VLLM_SHM             | Models        | size    | 16gb          | vLLM's shared memory
 SGLANG_IMAGE         | Models        | text    | lmsysorg/sglang:v0.5.21-cu130-runtime | SGLang's image (the sglang feature)
 SGLANG_SHM           | Models        | size    | 16gb          | SGLang's shared memory
+LMDEPLOY_IMAGE       | Models        | text    | arena-lmdeploy:0.18.0 | LMDeploy's image (the lmdeploy feature; lmdeploy-build.yml builds it)
+LMDEPLOY_SHM         | Models        | size    | 16gb          | LMDeploy's shared memory
+STRATA_IMAGE         | Models        | text    | ghcr.io/niko1221/strata:0.2.11-cuda13 | Strata's image (the strata feature)
+STRATA_SHM           | Models        | size    | 2gb           | Strata's shared memory
 KVCACHE_DIR          | Models        | path    | ./kvcache     | LMCache's disk tier for vLLM models: fast NVMe
 GITLAB_URL           | GitLab        | url     | -             | The GitLab Argus indexes
 GITLAB_TOKEN         | GitLab        | secret  | -             | Its read-only token (read_api and read_repository)

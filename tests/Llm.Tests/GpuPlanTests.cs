@@ -197,5 +197,11 @@ public sealed class GpuPlanTests : IDisposable
         Assert.Equal((0, 0L), (none.Gpus, none.GpuForModels));
         Assert.Null(HardwareProbe.FromFile("not json", o));
         Assert.Null(HardwareProbe.FromFile("[]", o));
+        var h200 = HardwareProbe.FromFile("""
+            {"ram_bytes": 1649267441664, "source": "nvidia-smi", "gpus": [
+              {"index": 0, "name": "NVIDIA H200 NVL", "vendor": "nvidia", "backend": "cuda", "total_bytes": 150754820096, "free_bytes": 150000000000, "reserved_bytes": 0, "compute": "9.0"}]}
+            """, o)!;
+        Assert.Equal("9.0", h200.Devices![0].Compute);
+        Assert.Null(amd.Devices![0].Compute);
     }
 }

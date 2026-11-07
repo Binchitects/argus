@@ -289,6 +289,75 @@ services:
     # Tensor parallel ranks talk through shared memory (NCCL).
     shm_size: ${SGLANG_SHM:-16gb}
 
+  # LMDeploy (Admin -> Models, engine LMDeploy): one `lmdeploy serve api_server` per model the app wants,
+  # each on its own GPUs, from a Hugging Face snapshot of the library (TurboMind where it has the model,
+  # else LMDeploy's PyTorch engine), run by the same supervisor (ENGINE_SERVER=lmdeploy; it follows
+  # /presets/lmdeploy/models.json). Off until asked for: COMPOSE_PROFILES=lmdeploy. Its image,
+  # arena-lmdeploy, is built from PyPI by lmdeploy-build.yml (LMDeploy's own is on Docker Hub).
+  lmdeploy:
+    <<: [*service, *gpu]
+    image: ${LMDEPLOY_IMAGE:-arena-lmdeploy:0.18.0}
+    container_name: lmdeploy
+    profiles: [lmdeploy]
+    entrypoint: [/bin/sh, /vllm/supervisor.sh]
+    environment:
+      ENGINE_KEY: ${ENGINE_KEY}
+      ENGINE_SERVER: lmdeploy
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
+      VLLM_PRESETS: /presets/lmdeploy
+      VLLM_STATUS: /status/lmdeploy
+      # The LMDeploy to run (fake-gpu.yml: tools/fake-vllm's, as LMDeploy).
+      VLLM_BIN: ${LMDEPLOY_BIN:-python3 /lmdeploy/serve.py}
+      HF_HUB_OFFLINE: "1"
+    volumes:
+      - ./services/vllm:/vllm:ro
+      - ./services/lmdeploy:/lmdeploy:ro
+      - ./services/gpu-probe.py:/gpu-probe.py:ro
+      - ../tools/fake-vllm:/fake-vllm:ro
+      - ${MODELS_DIR:-./models}:/library:ro
+      - engine:/presets:ro
+      - vllm-status:/status
+    ulimits: { memlock: -1 }
+    shm_size: ${LMDEPLOY_SHM:-16gb}
+
+  # Strata (Admin -> Models, engine Strata): its own engine for a few large MoE families as GGUF files
+  # (Qwen3.8-Flash-Next, Qwen3.6-35B-A3B), the experts that do not fit the GPUs read from RAM. One
+  # `strata launch` per model the app wants, on its GPUs, run by the same supervisor
+  # (ENGINE_SERVER=strata; services/strata/serve.py keeps it in the foreground) in Strata's own image
+  # from GitHub's registry, with its Python. Its prepared packs and presets are kept in strata-data.
+  # Nothing is downloaded: it starts without drafting (STRATA_DRAFTING=mtp once its draft layer is in
+  # strata-data). Off until asked for: COMPOSE_PROFILES=strata.
+  strata:
+    <<: [*service, *gpu]
+    image: ${STRATA_IMAGE:-ghcr.io/niko1221/strata:0.2.11-cuda13}
+    container_name: strata
+    profiles: [strata]
+    entrypoint: [/usr/bin/tini, --, /bin/sh, /vllm/supervisor.sh]
+    environment:
+      ENGINE_KEY: ${ENGINE_KEY}
+      ENGINE_SERVER: strata
+      CUDA_DEVICE_ORDER: PCI_BUS_ID
+      VLLM_PRESETS: /presets/strata
+      VLLM_STATUS: /status/strata
+      # Strata's own Python runs the supervisor's helper and the launcher (fake-gpu.yml: tools/fake-vllm's, as Strata).
+      PATH: /opt/strata/terminal/python/bin:/opt/strata/terminal/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      VLLM_BIN: ${STRATA_BIN:-python3 /strata/serve.py}
+      STRATA_CLI: /opt/strata/terminal/bin/strata
+      # A model ends its answers and frees its GPUs in up to two minutes.
+      VLLM_DRAIN: "120"
+    volumes:
+      - ./services/vllm:/vllm:ro
+      - ./services/strata:/strata:ro
+      - ./services/gpu-probe.py:/gpu-probe.py:ro
+      - ../tools/fake-vllm:/fake-vllm:ro
+      - ${MODELS_DIR:-./models}:/library:ro
+      - engine:/presets:ro
+      - vllm-status:/status
+      - strata-data:/data
+    ulimits: { memlock: -1 }
+    shm_size: ${STRATA_SHM:-2gb}
+    stop_grace_period: 3m
+
   # Embeddings for Argus and the app's company knowledge, on the CPU. The app fetches the file into MODELS_DIR/embed.
   embed:
     <<: *service
@@ -737,6 +806,9 @@ volumes:
     driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/loki" }
   power-limits:
     driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/power-limits" }
+  # Strata's prepared packs, presets and tuning, made from the library's files: kept, so a model starts again without preparing.
+  strata-data:
+    driver_opts: { type: none, o: bind, device: "${DATA_DIR:?set DATA_DIR in .env: an absolute folder for the stack's data}/strata-data" }
   # What the picture and video servers say they do (services/sd-serve.sh), every 2 s: kept in memory, theirs to write.
   media-status:
     driver_opts: { type: tmpfs, device: tmpfs, o: "uid=65534,gid=65534,mode=0755,size=64m" }

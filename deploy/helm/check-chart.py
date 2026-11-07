@@ -41,6 +41,10 @@ COPIES = {
     "files/sglang-serve.py": "services/sglang/serve.py",
     "files/fake-sglang-init.py": "../tools/fake-vllm/sglang-module/sglang/__init__.py",
     "files/fake-sglang-launch.py": "../tools/fake-vllm/sglang-module/sglang/launch_server.py",
+    "files/lmdeploy-serve.py": "services/lmdeploy/serve.py",
+    "files/fake-lmdeploy-entrypoint.py": "../tools/fake-vllm/lmdeploy-module/lmdeploy/cli/entrypoint.py",
+    "files/strata-serve.py": "services/strata/serve.py",
+    "files/fake-strata": "../tools/fake-vllm/strata",
 }
 for rule in sorted((DEPLOY / "config/prometheus/rules").glob("*.yml")):
     COPIES[f"files/prometheus/rules/{rule.name}"] = f"config/prometheus/rules/{rule.name}"

@@ -1032,9 +1032,49 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         return args;
     }
 
-    /// <summary>A model's server's arguments, by its kind: vLLM's or SGLang's.</summary>
-    public static IReadOnlyList<string> ServerArgs(LocalModel m, string library, int tp) =>
-        m.EngineKind == EngineKinds.Sglang ? SglangArgs(m, library, tp) : VllmArgs(m, library, tp);
+    /// <summary>
+    /// LMDeploy's `lmdeploy serve api_server` arguments for a snapshot on <paramref name="tp"/> GPUs: TurboMind where it runs
+    /// the model, else its PyTorch engine (LMDeploy's own choice), its context (--session-len), answers at once
+    /// (--max-batch-size), the share of what is free on each GPU once the weights are in for its cache
+    /// (--cache-max-entry-count), its prefix cache, and its cache at int8 for fp8 (--quant-policy 8: the same byte a value).
+    /// Its launcher (services/lmdeploy/serve.py) names the model, host, port and key.
+    /// </summary>
+    public static IReadOnlyList<string> LmdeployArgs(LocalModel m, string library, int tp)
+    {
+        var inv = CultureInfo.InvariantCulture;
+        var args = new List<string>
+        {
+            library.TrimEnd('/') + "/" + m.File, "--tp", tp.ToString(inv), "--session-len", m.Context.ToString(inv),
+            "--max-batch-size", Math.Max(1, m.Parallel).ToString(inv),
+            "--cache-max-entry-count", (m.GpuMemoryUtilization ?? VllmAdvisor.DefaultUtilization).ToString("0.###", inv),
+            "--enable-prefix-caching",
+        };
+        if (m.KvType.StartsWith("fp8", StringComparison.Ordinal))
+        {
+            args.AddRange(["--quant-policy", "8"]);
+        }
+        return args;
+    }
+
+    /// <summary>
+    /// Strata's arguments for a GGUF file (or a split one's folder, which its launcher names): its context, answers at once (1 to
+    /// 8, its batch) and its cache's type (int8 for fp8: the same byte a value; fp16 otherwise). Its launcher
+    /// (services/strata/serve.py) runs `strata launch` with them, on the GPUs the supervisor gives, its port and key.
+    /// </summary>
+    public static IReadOnlyList<string> StrataArgs(LocalModel m, string library) =>
+    [
+        library.TrimEnd('/') + "/" + m.File, "--context", m.Context.ToString(CultureInfo.InvariantCulture),
+        "--parallel", Math.Clamp(m.Parallel, 1, 8).ToString(CultureInfo.InvariantCulture), "--kv", m.KvType.StartsWith("fp8", StringComparison.Ordinal) ? "int8" : "fp16",
+    ];
+
+    /// <summary>A model's server's arguments, by its kind: vLLM's, SGLang's, LMDeploy's or Strata's.</summary>
+    public static IReadOnlyList<string> ServerArgs(LocalModel m, string library, int tp) => m.EngineKind switch
+    {
+        EngineKinds.Sglang => SglangArgs(m, library, tp),
+        EngineKinds.Lmdeploy => LmdeployArgs(m, library, tp),
+        EngineKinds.Strata => StrataArgs(m, library),
+        _ => VllmArgs(m, library, tp),
+    };
 
     /// <summary>
     /// LMCache's configuration for a model's copy (LMCACHE_CONFIG_FILE): its RAM tier, its disk tier under /kvcache (the

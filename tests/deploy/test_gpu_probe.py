@@ -48,6 +48,19 @@ class GpuProbeTests(unittest.TestCase):
         self.assertEqual(200 * MIB, h["gpus"][1]["reserved_bytes"])
         self.assertGreater(h["ram_bytes"], 0)
 
+    def test_each_nvidia_gpu_says_its_compute_capability_when_the_driver_knows_it(self):
+        self.tool("nvidia-smi", 'case "$*" in *compute_cap*) echo "0, 9.0"; echo "1, 8.6";; '
+                  '*) echo "0, NVIDIA H200 NVL, 143771, 140000, 500"; echo "1, NVIDIA GeForce RTX 3090, 24576, 3000, 300";; esac\n')
+        h = self.probe()
+        self.assertEqual(["9.0", "8.6"], [g["compute"] for g in h["gpus"]])
+
+    def test_a_driver_without_compute_cap_lists_its_gpus_without_it(self):
+        self.tool("nvidia-smi", 'case "$*" in *compute_cap*) echo "Field compute_cap is not a valid field" >&2; exit 2;; esac\n'
+                  'echo "0, NVIDIA GeForce RTX 3090, 24576, 3000, 300"\n')
+        h = self.probe()
+        self.assertEqual(1, len(h["gpus"]))
+        self.assertNotIn("compute", h["gpus"][0])
+
     def test_a_driver_without_memory_reserved_is_asked_again_without_it(self):
         self.tool("nvidia-smi", 'case "$*" in *reserved*) echo "Field memory.reserved is not a valid field" >&2; exit 2;; esac\n'
                                 'echo "0, NVIDIA A100-SXM4-80GB, 81920, 80000"\n')

@@ -517,6 +517,69 @@ Commits 1–18 can be built and tested on today's 3090 box: llama.cpp keeps runn
 
 ---
 
+## FP4 on Hopper
+
+The H200 NVL is Hopper (sm_90): FP8 tensor cores, no FP4 ones (Blackwell has them). What the engines in this
+stack's images do with an FP4 checkpoint there, read from their sources (vLLM 0.31.0, SGLang 0.5.21):
+
+- **NVFP4** (ModelOpt's `modelopt_fp4`, NVIDIA's mixed NVFP4 + FP8 checkpoints, compressed-tensors'
+  `nvfp4-pack-quantized`): vLLM and SGLang keep the 4-bit weights and their scales in memory and widen them
+  to BF16 as each GEMM reads them (FP4 Marlin, W4A16). vLLM from sm_75, SGLang from sm_80; both choose Marlin
+  by themselves below sm_100 (SGLang's FP4 GEMM backend `auto`). The FP8 layers of a mixed checkpoint run
+  natively (W8A8) on Hopper.
+- **MXFP4** (gpt-oss): vLLM runs its experts on Triton's kernels on Hopper and on Marlin on Ampere, its dense
+  layers on Marlin; SGLang its MoE layers, from sm_80.
+- **FP8**: native (W8A8) from sm_89; on Ampere both widen it (FP8 Marlin, W8A16). SGLang takes ModelOpt's
+  FP8 from sm_89 only.
+- So on an H200 an FP4 copy saves memory, about a quarter of BF16's and half of FP8's, which leaves more room
+  for the token cache (more people at once, longer contexts) or fits a model on fewer GPUs. While decoding is
+  memory-bound (few people at once) it is about as fast as FP8 or faster; with many at once the math is
+  compute-bound and native FP8 is faster. Quality is the checkpoint's: NVIDIA's NVFP4 copies are calibrated,
+  and the small check below finds a broken one.
+- Admin → Models says this for each snapshot on its GPUs (`docs/admin.md`, FP4 and FP8 checkpoints), and
+  refuses a pair that does not run, saying what does.
+
+### To measure on the RTX 3090 (Ampere)
+
+Not run yet. The three copies are in a folder of their own beside the library (Qwen/Qwen3-0.6B BF16 1.5 GB,
+Qwen/Qwen3-0.6B-FP8 1.06 GB, mgoin/Qwen3-0.6B-NVFP4 0.87 GB, compressed-tensors W4A4), and Admin → Models
+reads their precision as above (W4A16 for the NVFP4 copy on the 3090). The run needs the GPU free of the live chat
+model for about half an hour (the 3090 has 24 GB, and the chat model holds about 21 GB of it):
+
+```sh
+docker stop llamacpp
+python3 deploy/scripts/fp4-bench.py run --image arena-vllm --library /home/ghadyani/fp4-measure --gpus 0 --levels 1,8,32 \
+  --model bf16=hf/Qwen/Qwen3-0.6B@c1899de289a04d12100db370d81485cdf75e47ca \
+  --model fp8=hf/Qwen/Qwen3-0.6B-FP8@e5be08033360965ceca7b0ffd72d521a51331ce0 \
+  --model nvfp4=hf/mgoin/Qwen3-0.6B-NVFP4@545def2dd2492f4abd75435ccde6dd93d1d93e34 --out fp4-3090.json
+python3 deploy/scripts/fp4-bench.py run --image arena-vllm --library /home/ghadyani/fp4-measure --gpus 0 --levels 1,8,32 \
+  --model mxfp4=hf/Qwen/Qwen3-0.6B@c1899de289a04d12100db370d81485cdf75e47ca --out fp4-3090-mxfp4.json --extra --quantization mxfp4
+docker start llamacpp
+```
+
+The second run is MXFP4 by vLLM's own online quantisation of the BF16 copy (no small MXFP4 checkpoint is
+published; gpt-oss-20b's 13.8 GB is the smallest).
+
+### The plan for the H200 host
+
+`deploy/scripts/fp4-h200.sh LIBRARY [GPUS] [OUT]` (`arenactl check fp4-h200`) runs `fp4-bench.py` for each
+set of snapshots the library has, each copy in a throwaway vLLM container on the same GPUs, at 1, 8, 32 and
+64 people at once:
+
+| Set | Copies | GPUs |
+|---|---|---|
+| `flash` | Qwen3.8-Flash-Next FP8 (186 GB) and NVIDIA's NVFP4 (133 GB) | 2 (tensor parallel 2) |
+| `dense` | Qwen3.8-27B BF16, FP8 and NVFP4 | 1 |
+| `oss` | gpt-oss-120b, its own MXFP4 (65 GB) | 1 |
+| `small`, `small-mxfp4` | Qwen3-0.6B BF16, FP8, NVFP4, and BF16 quantised to MXFP4 by vLLM as it loads | 1 |
+
+Free those GPUs first (stop the stack's engines on them, or unload their models), and start them again after.
+What to read in the results: the token cache each copy gets on the same GPUs (`cache`, in GiB and tokens),
+tokens a second each at 1 and 8 people at once (memory-bound: FP4 should match or beat FP8), in all at 32
+and 64 (compute-bound: FP8 should lead), and the arithmetic check (an FP4 copy several points below its FP8
+or BF16 one is broken: keep the FP8 one). `fp4-bench.py endpoint --base-url ... --model A --model B` measures
+models the stack serves already, through the gateway.
+
 ## Supported configurations
 
 What the code handles, how it was checked, and what still needs the real hardware. **Tested** means automated tests run it

@@ -1,0 +1,17 @@
+# The lmdeploy engine's image, arena-lmdeploy, built here (services/lmdeploy.Dockerfile) from PyPI: LMDeploy's own
+# image is on Docker Hub, which this kind of host cannot reach.
+#
+#   docker compose -f docker-compose.yml -f lmdeploy-build.yml --profile lmdeploy build lmdeploy
+#   docker compose -f docker-compose.yml -f lmdeploy-build.yml --profile lmdeploy up -d lmdeploy
+#
+# The build downloads LMDeploy's wheels (PyPI; PyTorch and its CUDA libraries with them), about 6-10 GB.
+# LMDEPLOY_VERSION chooses the release.
+
+services:
+  lmdeploy:
+    image: arena-lmdeploy:${LMDEPLOY_VERSION:-0.18.0}
+    build:
+      context: ./services
+      dockerfile: lmdeploy.Dockerfile
+      args:
+        LMDEPLOY_VERSION: ${LMDEPLOY_VERSION:-0.18.0}

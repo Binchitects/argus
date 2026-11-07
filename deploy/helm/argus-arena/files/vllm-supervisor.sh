@@ -1,9 +1,11 @@
 #!/bin/sh
-# vLLM and SGLang serve one model a process and have no router: this runs one server for each
-# model the app wants, as the app's desired state says, with no Docker socket (the same way
-# llamacpp/router.sh follows models.ini and sd-serve.sh its control file). ENGINE_SERVER says
-# which: vllm (serve.py serve ARGS: `vllm serve`, with a GGUF file's config and tokenizer read
-# from its header first) or sglang (sglang/serve.py ARGS: SGLang's launch_server).
+# vLLM, SGLang, LMDeploy and Strata serve one model a process and have no router:
+# this runs one server for each model the app wants, as the app's desired state says, with no
+# Docker socket (the same way llamacpp/router.sh follows models.ini and sd-serve.sh its control
+# file). ENGINE_SERVER says which: vllm (serve.py serve ARGS: `vllm serve`, with a GGUF file's
+# config and tokenizer read from its header first), sglang (sglang/serve.py ARGS: SGLang's
+# launch_server), lmdeploy (lmdeploy/serve.py: `lmdeploy serve api_server`) or strata
+# (strata/serve.py: `strata launch`, in the foreground while it serves).
 #
 #   /presets/vllm/models.json   written by the app (Admin -> Models):
 #     {"models": [{"name", "port", "gpus": [0, 1], "sleep": false, "args": ["/library/hf/...", "--tensor-parallel-size", "2", ...]}]}
@@ -31,8 +33,9 @@
 #                         of the restart and the reload it has done
 #
 # The key (ENGINE_KEY) goes to each server by the environment (VLLM_API_KEY; SGLANG_API_KEY, which
-# sglang/serve.py hands SGLang inside its process), never on a command line, where ps shows it to
-# anyone in the container; an entry that puts one there is refused.
+# sglang/serve.py hands SGLang inside its process; the other launchers take VLLM_API_KEY the same
+# way), never on a command line, where ps shows it to anyone in the container; an entry that puts
+# one there is refused. Only vLLM and SGLang are put to sleep (the app asks no other kind).
 set -u
 here=$(cd "$(dirname "$0")" && pwd)
 presets=${VLLM_PRESETS:-/presets/vllm}
@@ -43,7 +46,9 @@ server=${ENGINE_SERVER:-vllm}
 case $server in
   vllm) bin=${VLLM_BIN:-python3 $here/serve.py} ;;
   sglang) bin=${VLLM_BIN:-python3 /sglang/serve.py} ;;
-  *) echo "supervisor: ENGINE_SERVER is vllm or sglang, not $server" >&2; exit 2 ;;
+  lmdeploy) bin=${VLLM_BIN:-python3 /lmdeploy/serve.py} ;;
+  strata) bin=${VLLM_BIN:-python3 /strata/serve.py} ;;
+  *) echo "supervisor: ENGINE_SERVER is vllm, sglang, lmdeploy or strata, not $server" >&2; exit 2 ;;
 esac
 helper=${VLLM_HELPER:-$here/vllm-helper.py}
 probe=${GPU_PROBE:-$here/../gpu-probe.py}

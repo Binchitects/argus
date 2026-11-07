@@ -213,6 +213,8 @@ on; its API answers 404; and its background work does not run.
 | `chat-models` | yes | `llamacpp` | a GPU |
 | `vllm` | no | `vllm` (arena-vllm, built on `VLLM_IMAGE`) | a GPU |
 | `sglang` | no | `sglang` (with `SGLANG_IMAGE`) | a GPU |
+| `lmdeploy` | no | `lmdeploy` (arena-lmdeploy, built by `lmdeploy-build.yml`) | an NVIDIA GPU |
+| `strata` | no | `strata` (with `STRATA_IMAGE`) | an NVIDIA GPU, RAM for the experts that do not fit it |
 | `knowledge` | yes | `embed` | |
 | `argus` | yes | `argus` | a GitLab |
 | `pictures` | yes | `imagegen` | a GPU |
@@ -531,6 +533,8 @@ how). **no**: missing, with the reason.
 | `llamacpp` | yes, every GPU | yes, CDI; no locked-memory limit | differs: `llamacpp.gpus` whole GPUs (`gpuResource`: `nvidia.com/gpu` or `amd.com/gpu`); no `ENGINE_RAM_PROTECT` |
 | `vllm` | off (the `vllm` feature: arena-vllm, built on `VLLM_IMAGE`), every GPU; `fake-gpu.yml`: the fake vLLM, no GPU | the same, CDI; no locked-memory limit | off (`vllm.enabled`); a Deployment per `vllm.instances` entry with its GPUs and node; `vllm.fake` |
 | `sglang` | off (the `sglang` feature, `SGLANG_IMAGE`), every GPU; `fake-gpu.yml`: the fake SGLang, no GPU | the same, CDI; no locked-memory limit | off (`sglang.enabled`); a Deployment per `sglang.instances` entry with its GPUs and node; `sglang.fake` |
+| `lmdeploy` | off (the `lmdeploy` feature, `LMDEPLOY_IMAGE`), every GPU; `fake-gpu.yml`: the fake LMDeploy, no GPU | the same, CDI; no locked-memory limit | off (`lmdeploy.enabled`); a Deployment per `lmdeploy.instances` entry; `lmdeploy.fake` |
+| `strata` | off (the `strata` feature, `STRATA_IMAGE`), every GPU, its packs in `strata-data`; `fake-gpu.yml`: the fake Strata, no GPU | the same, CDI; no locked-memory limit | off (`strata.enabled`); a Deployment per `strata.instances` entry, its packs in `arena-strata-data`; `strata.fake` |
 | `embed`, `audio`, `searxng` | yes | yes | yes |
 | `argus` | yes | yes | yes |
 | `imagegen`, `videogen` | yes, every GPU | yes, CDI | differs: whole GPUs each; `videogen` off by default |
@@ -555,7 +559,7 @@ how). **no**: missing, with the reason.
 | `/backups` in the app | `BACKUP_DIR`, read only | the same | no: backups are the cluster's |
 | **Configuration and scripts** | | | |
 | `litellm.yaml` (its 960 s timeouts), `argus.yaml`, `searxng.yml`, `alertmanager.yml`, `loki.yml`, `prometheus/` and its rules | mounted from `config/` | the same | the same files, from the chart's copies |
-| `services/llamacpp/router.sh` (the engine key by `LLAMA_API_KEY`), `services/sd-serve.sh`, `services/cpu-temp-exporter`, `services/vllm/` (the key by `VLLM_API_KEY`), `services/sglang/serve.py` (the key by `SGLANG_API_KEY`, handed to SGLang inside its process), `services/gpu-probe.py`, `tools/fake-vllm` | mounted | the same | the same files, from the chart's copies |
+| `services/llamacpp/router.sh` (the engine key by `LLAMA_API_KEY`), `services/sd-serve.sh`, `services/cpu-temp-exporter`, `services/vllm/` (the key by `VLLM_API_KEY`), `services/sglang/serve.py` (the key by `SGLANG_API_KEY`, handed to SGLang inside its process), `services/lmdeploy/serve.py` and `services/strata/serve.py` (the key by `VLLM_API_KEY`, handed over inside the process or by Strata's `--api-key-env`), `services/gpu-probe.py`, `tools/fake-vllm` | mounted | the same | the same files, from the chart's copies |
 | `promtail.yml`, `traefik/routes.yml` | mounted | the same | no: the cluster's log agent; the Ingress |
 | `services/power-limits.sh` | mounted | no | no |
 | **Secrets** | `.env` | `.env` | the `arena-secrets` Secret, made at install and kept (or `existingSecret`): the same keys |
@@ -617,18 +621,60 @@ how). **no**: missing, with the reason.
   `sglang.instances` entry). Its models are Hugging Face snapshots too, or a
   GGUF file of one part (its own loader reads it; a split one is refused);
   choose the engine as you add one (Admin → Models).
+- **LMDeploy** is off until asked for: the `lmdeploy` feature, `--with
+  lmdeploy`. Its image, arena-lmdeploy, is LMDeploy 0.18.0 from PyPI with the
+  stack's supervisor (`lmdeploy-build.yml`, about 6 to 10 GB fetched; LMDeploy's
+  own image is on Docker Hub). Build it before you turn the feature on, and
+  before a bundle is made with it (`make-installer.sh --without lmdeploy`
+  leaves it out). The same supervisor runs it (`ENGINE_SERVER=lmdeploy`): one
+  `lmdeploy serve api_server` per model, TurboMind where it has the model, else
+  LMDeploy's PyTorch engine; the key goes by the environment to
+  `services/lmdeploy/serve.py`, which hands it over inside its process. Its
+  models are Hugging Face snapshots on NVIDIA GPUs. Kubernetes:
+  `lmdeploy.enabled`.
+- **Strata** is off until asked for: the `strata` feature, `--with strata`.
+  `STRATA_IMAGE` is Strata's own image from GitHub's registry
+  (`ghcr.io/niko1221/strata:0.2.11-cuda13`, 2.5 GB). Strata (MIT,
+  github.com/Niko1221/Strata) is an engine on llama.cpp's for a few large MoE
+  families as GGUF files (Qwen3.8-Flash-Next, Qwen3.6-35B-A3B): the experts that
+  do not fit the GPUs stay in RAM and are read as each token needs them. The
+  same supervisor runs it (`ENGINE_SERVER=strata`) with Strata's own Python:
+  `services/strata/serve.py` runs `strata launch` per model on its GPUs, keeps
+  it in the foreground while it serves, and stops it on a drain. Nothing is
+  downloaded: a split model is named by its folder, and it starts without
+  drafting (`--mtp off --drafting off`), as Strata's draft layers (its MTP pack,
+  5.2 GB for Qwen3.8-Flash-Next, and DFlash2's 1.2 GB drafter) are downloads of
+  its own; `STRATA_DRAFTING=mtp` (or `dflash2`) in the engine's environment
+  turns one on once its files are in `strata-data` (a `strata launch` run on a
+  machine with a network fetches them). Its prepared packs and presets are kept
+  in `strata-data`. Its metrics are vLLM's names, with the engine key. Its CUDA
+  13 image holds machine code for RTX 20 to RTX 50 and PTX the driver compiles
+  for Hopper (H100, H200) on its first start. Kubernetes: `strata.enabled`.
 - **Which engine**: llama.cpp for GGUF files, one machine, layers or experts in
   RAM when the GPU is short, and a few people at once. vLLM or SGLang for
   safetensors snapshots (or a GGUF file, more slowly), tensor parallel over GPUs, many people at once, copies
   of a model, and a prefix cache shared by every request. SGLang's radix cache
   suits many conversations that share long prefixes (agents, the same system
-  prompt); vLLM adds LMCache's tiers on disk and in a shared store. The RAM
+  prompt); vLLM adds LMCache's tiers on disk and in a shared store. LMDeploy's
+  TurboMind is a fast C++ engine for the common dense and MoE families. Strata
+  runs a MoE model larger than the GPUs with its experts in RAM, faster than
+  llama.cpp does it, for one or a few people at once. The RAM
   llama.cpp keeps for conversations that lost their slot (8 GB a loaded model
   by default) is its prompt cache filling up as designed, not a leak: Admin →
   Settings → *RAM for chats that lost their slot* sizes it.
-- **Without a big GPU**, `fake-gpu.yml` (compose and Podman) or `vllm.fake` and
-  `sglang.fake` (Helm) runs the real supervisor over the fake vLLM and SGLang
-  (`tools/fake-vllm`), on the python image the stack already has, with no GPU.
+- **Without a big GPU**, `fake-gpu.yml` (compose and Podman) or `vllm.fake`,
+  `sglang.fake`, `lmdeploy.fake` and `strata.fake` (Helm) runs the real
+  supervisor and launchers over the fake servers (`tools/fake-vllm`: the fake
+  vLLM, and the fake sglang and lmdeploy packages and strata command), on the
+  python image the stack already has, with no GPU.
+- **Engines evaluated and not added**: TensorRT-LLM (`trtllm-serve`) runs on
+  Hopper and is OpenAI-compatible, but its stable release (1.2.1) has no API key
+  on its routes, no served model name and no FP8 cache flag (1.4 adds them, as
+  release candidates), and its image is NGC's (`nvcr.io`), which this build host
+  cannot reach; it is the next to add once 1.4 is released. Text Generation
+  Inference is in maintenance; Ollama and llama.cpp's own server are llama.cpp
+  (here already); MLC-LLM, Aphrodite and KTransformers are less used and less
+  maintained for an H200 company host.
 - **AMD GPUs**: `rocm.yml` after the compose files (and after `podman.yml` on
   Podman) gives the engines `/dev/kfd` and `/dev/dri` and ROCm images
   (`LLAMACPP_ROCM_IMAGE`, `VLLM_ROCM_IMAGE`, `SDCPP_GPU_IMAGE`: check each exists
@@ -646,9 +692,9 @@ how). **no**: missing, with the reason.
   0 inside each pod: the chart sets `Engine__MediaOwnGpus`, and the app names
   them no GPU (a GPU of the engines' would be another, or none, there).
 - **Several machines**: one `Engine__Vllm__N__Name`/`Kind`/`Host`/`ConfigDir`/`StatusDir`
-  per vLLM or SGLang machine (`Kind`: `vllm` or `sglang`; its folders on storage
-  both machines see; listing them replaces this stack's `vllm` and `sglang`, so
-  list those too), or a Helm `vllm.instances` or `sglang.instances` entry per
+  per engine machine (`Kind`: `vllm`, `sglang`, `lmdeploy` or `strata`; its folders on storage
+  both machines see; listing them replaces this stack's `vllm`, `sglang`, `lmdeploy` and `strata`, so
+  list those too), or a Helm `vllm.instances` (or `sglang`, `lmdeploy`, `strata`) entry per
   node; servers the app does not run are added under Admin → Models → Other GPU
   servers.
 

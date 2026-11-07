@@ -13,10 +13,11 @@ namespace Llm.Api.Models;
 /// <param name="StatePerSequence">What each answer keeps whatever its length, in bytes: sliding windows (at fp8) and linear layers' state (float32).</param>
 /// <param name="Approximate">An attention vLLM sizes in its own way (compressed, sparse): read vLLM's reported capacity once it runs.</param>
 /// <param name="GgufParts">A GGUF file's parts (1: one file); 0: a snapshot.</param>
+/// <param name="Checkpoint">The precision a snapshot's weights are stored at (NVFP4, MXFP4, FP8, BF16...); null for a GGUF file.</param>
 public sealed record VllmProfile(
     string? Architecture, string? ModelType, int Layers, int FullLayers, int SlidingLayers, int LinearLayers, int CompressedLayers,
     int AttentionHeads, int KvHeads, int HeadDim, int? SlidingWindow, int TrainedContext, long WeightBytes, long KvPerToken, long StatePerSequence,
-    int? Experts, int MtpLayers, bool Vision, string? Quantization, bool Approximate, int GgufParts = 0);
+    int? Experts, int MtpLayers, bool Vision, string? Quantization, bool Approximate, int GgufParts = 0, CheckpointPrecision? Checkpoint = null);
 
 /// <summary>
 /// The vLLM counterpart of <see cref="ModelAdvisor"/>: which GPUs and tensor parallel size a model takes on this machine
@@ -68,6 +69,9 @@ public static class VllmAdvisor
     {
         [EngineKinds.Vllm] = ["falcon", "gemma3", "gpt2", "llama", "mamba", "minimax-m2", "phi3", "qwen2", "qwen3", "stablelm", "starcoder2"],
         [EngineKinds.Sglang] = ["llama", "qwen2", "qwen3"],
+        // Strata 0.2.11's families: Qwen3.8-Flash-Next (qwen4exp) and Qwen3.6-35B-A3B (qwen35moe), with their packs made from the file.
+        [EngineKinds.Strata] = ["qwen4exp", "qwen35moe"],
+        [EngineKinds.Lmdeploy] = [],
     };
 
     private static string G(long b) => (b / (double)(1L << 30)).ToString("0.0", CultureInfo.InvariantCulture) + " GiB";
@@ -91,7 +95,7 @@ public static class VllmAdvisor
         {
             return null;
         }
-        return c is null ? null : Profile(c, WeightBytes(dir));
+        return c is null ? null : Profile(c, WeightBytes(dir)) with { Checkpoint = Precision.Of(c, dir) };
     }
 
     /// <summary>
@@ -222,7 +226,7 @@ public static class VllmAdvisor
         var q = (config["quantization_config"] ?? t["quantization_config"])?["quant_method"]?.GetValue<string>();
         return new VllmProfile((config["architectures"] as JsonArray)?.FirstOrDefault()?.GetValue<string>(), (t["model_type"] ?? config["model_type"])?.GetValue<string>(),
             layers, full, sliding, linear, compressed, heads, kvHeads, headDim, window > 0 ? window : null, Get("max_position_embeddings", 32768),
-            weightBytes, perToken, state, experts > 0 ? experts : null, mtp, config["vision_config"] is JsonObject, q, approximate);
+            weightBytes, perToken, state, experts > 0 ? experts : null, mtp, config["vision_config"] is JsonObject, q, approximate, Checkpoint: Precision.Of(config));
     }
 
     /// <summary>Bytes an element of the cache takes for vLLM's --kv-cache-dtype.</summary>
@@ -350,10 +354,74 @@ public static class VllmAdvisor
     public static ModelAdvice Advise(LocalModel m, VllmProfile p, Hardware? hw, IReadOnlyDictionary<int, long>? others = null,
         IReadOnlyDictionary<int, long>? placed = null)
     {
+        if (m.EngineKind == EngineKinds.Strata && hw is not null && p.GgufParts > 0)
+        {
+            return Spilled(m, p, hw, others, placed);
+        }
+        var advice = AdviseFit(m, p, hw, others, placed);
+        if (hw is null || p.GgufParts > 0)
+        {
+            return advice;
+        }
+        // How its weights run on its GPUs (those it names, else every one its engine runs on: a proposal is some of them).
+        var usable = GpuPlan.DevicesOf(hw).Where(d => EngineKinds.Of(m.EngineKind)?.Backends.Contains(d.Backend) ?? false).ToList();
+        var named = Hardware.ParseDevices(m.Devices) is { Count: > 0 } ids ? usable.Where(d => ids.Contains(d.Index)).ToList() : [];
+        var checkpoint = p.Checkpoint ?? Precision.None;
+        if (Precision.On(checkpoint, m.EngineKind, named.Count > 0 ? named : usable) is not { } run)
+        {
+            return advice;
+        }
+        run = run with { WeightBytes = p.WeightBytes, Bf16Bytes = checkpoint.Bits < 16 ? (long)(p.WeightBytes * 16 / checkpoint.Bits) : p.WeightBytes };
+        var problems = advice.Problems.ToList();
+        if (run.Refused)
+        {
+            problems.Add(new("file", run.Summary, true));
+        }
+        // A checkpoint stored quantised runs as it is stored: another method on top of it fails as it loads.
+        if (checkpoint.Method is { } method && m.Quantization is { Length: > 0 } q && !string.Equals(q, method, StringComparison.OrdinalIgnoreCase)
+            && !(checkpoint.Fp4 && q is "modelopt_fp4" or "mxfp4" or "compressed-tensors"))
+        {
+            problems.Add(new("quantization", $"This snapshot is stored as {checkpoint.Label} ({method}): leave Quantisation empty, and the engine reads it as it is.", true));
+        }
+        return advice with { Problems = problems, Precision = run };
+    }
+
+    /// <summary>
+    /// Strata's advice: what of its weights its GPUs hold at its share (beside its overhead and a whole context for each person
+    /// at once) stays there, and the rest of its experts in RAM, read as each token needs them: slower than all on the GPUs,
+    /// refused only when RAM cannot hold the rest either.
+    /// </summary>
+    private static ModelAdvice Spilled(LocalModel m, VllmProfile p, Hardware hw, IReadOnlyDictionary<int, long>? others, IReadOnlyDictionary<int, long>? placed)
+    {
+        var usable = GpuPlan.DevicesOf(hw).Where(d => EngineKinds.StrataCapabilities.Backends.Contains(d.Backend)).ToList();
+        var on = Hardware.ParseDevices(m.Devices) is { Count: > 0 } ids ? usable.Where(d => ids.Contains(d.Index)).ToList() : usable;
+        var utilization = m.GpuMemoryUtilization ?? DefaultUtilization;
+        var context = Math.Clamp(m.Context, Math.Min(4096, p.TrainedContext), p.TrainedContext);
+        var held = on.Sum(d => Math.Min((long)(d.Total * utilization), d.Total - d.Reserved - Hardware.FitMargin - (others?.GetValueOrDefault(d.Index) ?? 0)))
+            - (on.Count * OverheadOf(p)) - (PersonCache(p, context, m.KvType) * Math.Max(1, m.Parallel)) - (MinCache(on.Sum(d => (long)(d.Total * utilization))));
+        if (on.Count == 0 || held >= p.WeightBytes || held <= 0)
+        {
+            return AdviseFit(m, p, hw, others, placed);
+        }
+        var advice = AdviseFit(m, p with { WeightBytes = held }, hw, others, placed);
+        var rest = p.WeightBytes - held;
+        var problems = advice.Problems.ToList();
+        problems.Add(rest > hw.RamForModels
+            ? new("memory", $"Its weights ({G(p.WeightBytes)}) are more than its GPUs hold, and the {G(rest)} of experts Strata would keep in RAM are more than the {G(hw.RamForModels)} there for models.", true)
+            : new("memory", $"Its weights ({G(p.WeightBytes)}) are more than its GPUs hold: Strata keeps {G(held)} on them and {G(rest)} of experts in RAM, read as each token needs them (slower than all on the GPUs).", false));
+        return advice with
+        {
+            Problems = problems,
+            Estimate = advice.Estimate is { } e ? e with { RamWeights = rest, RamTotal = e.RamTotal + rest } : null,
+        };
+    }
+
+    private static ModelAdvice AdviseFit(LocalModel m, VllmProfile p, Hardware? hw, IReadOnlyDictionary<int, long>? others, IReadOnlyDictionary<int, long>? placed)
+    {
         var problems = new List<ModelProblem>();
         var inv = CultureInfo.InvariantCulture;
-        // vLLM's or SGLang's: one server a model on its GPUs, either way.
-        var kind = EngineKinds.Of(m.EngineKind) is { Kind: EngineKinds.Sglang } sglang ? sglang : EngineKinds.VllmCapabilities;
+        // One server a model on its GPUs, whichever of its kinds.
+        var kind = EngineKinds.ServerPerModel(m.EngineKind) ? EngineKinds.Of(m.EngineKind)! : EngineKinds.VllmCapabilities;
         var label = kind.Label;
         var utilization = m.GpuMemoryUtilization ?? DefaultUtilization;
         var replicas = Math.Max(1, m.Replicas);
@@ -385,9 +453,18 @@ public static class VllmAdvisor
                 ? $"{label} reads a model's own prediction layers from its snapshot, not from a GGUF file: choose eagle3 with a draft model, or none."
                 : "This model has no prediction layers of its own: choose eagle3 with a draft model, or none.", true));
         }
-        if (p.GgufParts > 0)
+        if (p.GgufParts == 0 && !kind.Formats.Contains("safetensors"))
         {
-            // A GGUF file: quantised as it is, read by vLLM's GGUF plugin (with all its parts) or by SGLang (one file only).
+            problems.Add(new("file", $"{label} runs GGUF files ({string.Join(", ", GgufArchitectures[kind.Kind])}), not a Hugging Face snapshot: choose the model's GGUF file, "
+                + "or run the snapshot on vLLM or SGLang.", true));
+        }
+        if (p.GgufParts > 0 && !kind.Formats.Contains("gguf"))
+        {
+            problems.Add(new("file", $"{label} runs Hugging Face snapshots, not GGUF files: choose the model's snapshot, or run the GGUF file on llama.cpp or vLLM.", true));
+        }
+        else if (p.GgufParts > 0)
+        {
+            // A GGUF file: quantised as it is, read by vLLM's GGUF plugin (with all its parts), by SGLang (one file only), or by Strata.
             var archs = GgufArchitectures[kind.Kind];
             if (!archs.Contains(p.Architecture))
             {
@@ -437,7 +514,7 @@ public static class VllmAdvisor
             problems.Add(new("devices", $"This machine has GPUs {string.Join(", ", devices.Select(d => d.Index))}.", true));
             return new ModelAdvice(profile, limits, recommended, null, problems, hw);
         }
-        if (group.FirstOrDefault(d => !EngineKinds.VllmCapabilities.Backends.Contains(d.Backend)) is { } other)
+        if (group.FirstOrDefault(d => !kind.Backends.Contains(d.Backend)) is { } other)
         {
             problems.Add(new("devices", $"GPU {other.Index} ({other.Name}) runs on {other.Backend}, which {label} does not: it takes {string.Join(" or ", kind.Backends)} GPUs.", true));
         }

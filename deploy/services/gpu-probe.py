@@ -8,7 +8,10 @@ any engine image that has python3 (vLLM's does; the supervisor calls it every fe
 
     {"at": 1760000000, "ram_bytes": N, "source": "nvidia-smi" | "rocm-smi" | "none",
      "gpus": [{"index": 0, "name": "...", "vendor": "nvidia", "backend": "cuda",
-               "total_bytes": N, "free_bytes": N, "reserved_bytes": N}]}
+               "total_bytes": N, "free_bytes": N, "reserved_bytes": N, "compute": "9.0"}]}
+
+"compute" is an NVIDIA GPU's compute capability (nvidia-smi's compute_cap; left out where the driver does not say it):
+what the app tells FP4 and FP8 checkpoints by (Hopper's 9.0 widens FP4 weights as it reads them, Blackwell's 10.0 runs them).
 
 GPU_PROBE_VENDOR=nvidia|amd|none skips the guessing. Never fails: a tool that is missing or says
 something unexpected is passed over, and what is left is written.
@@ -17,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -54,6 +58,14 @@ def nvidia() -> list[dict] | None:
         except (ValueError, IndexError):
             continue
         gpus.append(gpu)
+    # Each one's compute capability, asked apart: a driver that does not know compute_cap still lists its GPUs above.
+    caps = run(["nvidia-smi", "--query-gpu=index,compute_cap", "--format=csv,noheader,nounits"]) or ""
+    for line in caps.strip().splitlines():
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) == 2 and parts[0].isdigit() and re.fullmatch(r"\d+\.\d+", parts[1]):
+            for gpu in gpus:
+                if gpu["index"] == int(parts[0]):
+                    gpu["compute"] = parts[1]
     return gpus
 
 

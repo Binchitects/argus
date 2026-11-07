@@ -618,6 +618,28 @@ full the models kept loaded would make it.
   requests go ahead of API keys'; a request without a priority of its own
   (SGLang's warm-up) counts as an API key's (`--default-priority-value 0`:
   without it SGLang 0.5.21's radix cache overflows on it and the server dies).
+- **LMDeploy models** (`engineKind: lmdeploy`, the `lmdeploy` feature): a
+  Hugging Face snapshot on NVIDIA GPUs, the same form (copies, GPUs, share,
+  context, people at once, cache type, fallback). The app writes LMDeploy's
+  own flags: people at once is its `--max-batch-size`, the context its
+  `--session-len`, the share its `--cache-max-entry-count` (the share of what
+  is free on each GPU once the weights are in, which LMDeploy gives its cache),
+  fp8 its int8 cache (`--quant-policy 8`, the same byte a value), and its prefix
+  cache is on. It has no speculative decoding, tiers beyond the GPU or sleep
+  the app sets, and reads the quantisation its checkpoint has: those are
+  refused, and a move to it drops them. Its load is read from its
+  `lmdeploy:*` metrics.
+- **Strata models** (`engineKind: strata`, the `strata` feature): a GGUF file
+  of the library of one of Strata's families, Qwen3.8-Flash-Next (`qwen4exp`)
+  or Qwen3.6-35B-A3B (`qwen35moe`); a snapshot, or another architecture, is
+  refused. Its GPUs are split by layers (one copy, no copies of it), 1 to 8
+  people at once (its batch), its cache int8 for fp8. When the weights are more
+  than its GPUs hold at its share, the advisor counts what stays on them and
+  the rest of the experts in RAM, says so, and refuses only when RAM cannot
+  hold them either. It has no speculative decoding the app sets (it starts
+  without drafting: Strata's draft layers are downloads of its own; see
+  [deployment.md](deployment.md#engines-and-gpus)), no tiers and no sleep. Its load is read from its metrics, which are
+  vLLM's names.
 - **GGUF files on vLLM and SGLang.** A vLLM or SGLang model's file may be a
   GGUF file of the library instead of a snapshot: the same file llama.cpp runs,
   no snapshot needed. vLLM reads it through its GGUF plugin (vllm-gguf-plugin
@@ -646,6 +668,35 @@ full the models kept loaded would make it.
   on vLLM and SGLang than a snapshot's own safetensors, and llama.cpp often
   runs a GGUF file best: the dialog says so, and recommends the library's
   snapshot of the same model when it has one.
+- **FP4 and FP8 checkpoints.** A snapshot's precision is read from its
+  config (`quantization_config`, or ModelOpt's `hf_quant_config.json` beside
+  it): NVFP4 (ModelOpt's `modelopt_fp4`, NVIDIA's mixed NVFP4 + FP8 ones,
+  compressed-tensors' `nvfp4-pack-quantized`), MXFP4 (gpt-oss' `mxfp4`), FP8,
+  INT4 or INT8 (AWQ, GPTQ), or BF16. **Snapshots** lists it beside each one,
+  and the model form says how the weights run on the model's GPUs and engine,
+  with their memory there and about what BF16 would take:
+  - **Blackwell** (B200, RTX PRO 6000, sm_100 and sm_120) has FP4 tensor
+    cores: NVFP4 runs natively (W4A4).
+  - **Hopper** (H100, H200, sm_90) has none. vLLM and SGLang keep the 4-bit
+    weights in memory and widen them as they read them (FP4 Marlin, W4A16; the
+    math is BF16). gpt-oss' MXFP4 experts run on Triton's kernels on vLLM. The
+    weights take about a quarter of BF16's memory and half of FP8's, which
+    leaves more room for the token cache. Decoding with few people at once is
+    about as fast as FP8 or faster (it is memory-bound); with many at once it
+    is compute-bound, and FP8 (native W8A8 on Hopper) is faster.
+  - **Ampere** (A100, RTX 30, sm_80 and sm_86) runs FP4 the same way, and FP8
+    weight-only too (FP8 Marlin, W8A16).
+  - **AMD** (MI300) runs gpt-oss' MXFP4 weight-only (AITER, Triton); NVFP4 is
+    NVIDIA's and is refused, saying to run its FP8 or BF16 copy.
+  - Refused with why, too: FP4 on a GPU older than the engine's kernels
+    (SGLang's need sm_80), SGLang with ModelOpt's FP8 below sm_89, and a
+    Quantisation set on a snapshot stored quantised already (the engine reads
+    it as it is stored: leave Quantisation empty).
+  The engines pick their kernels themselves; nothing more is set for FP4. The
+  GPU probe (`services/gpu-probe.py`) says each NVIDIA GPU's compute
+  capability; without it the common GPUs are known by their names. What was
+  measured, and the plan for the H200 host, are in
+  [multi-gpu-server.md](multi-gpu-server.md#fp4-on-hopper).
 - **Moving a model to another engine.** A model moves at runtime, with the stack
   running: llama.cpp to vLLM or SGLang and back, and between vLLM and SGLang (or
   another machine's engine of a kind). Each chat model's card says its engine

@@ -70,12 +70,12 @@ public sealed class VllmBackend(VllmEngineOptions instance, EngineOptions engine
 
     public string Name => instance.Name;
 
-    public EngineCapabilities Capabilities => Kind == EngineKinds.Sglang ? EngineKinds.SglangCapabilities : EngineKinds.VllmCapabilities;
+    public EngineCapabilities Capabilities => EngineKinds.Of(Kind)!;
 
-    /// <summary>What it runs: vLLM or SGLang.</summary>
-    public string Kind => instance.Kind == EngineKinds.Sglang ? EngineKinds.Sglang : EngineKinds.Vllm;
+    /// <summary>What it runs: vLLM, SGLang, LMDeploy or Strata (vLLM for a kind there is not).</summary>
+    public string Kind => EngineKinds.ServerPerModel(instance.Kind) ? instance.Kind : EngineKinds.Vllm;
 
-    /// <summary>"vLLM" or "SGLang", for what it says.</summary>
+    /// <summary>"vLLM", "SGLang", "LMDeploy" or "Strata", for what it says.</summary>
     public string Label => Capabilities.Label;
 
     public string ConfigDir => instance.ConfigDir is { Length: > 0 } d ? d : Path.Combine(engine.ConfigDir, instance.Name);
@@ -340,7 +340,14 @@ public sealed class VllmBackend(VllmEngineOptions instance, EngineOptions engine
             string text;
             try
             {
-                using var res = await http.CreateClient(Client).GetAsync(new Uri($"http://{Host}:{e.Port}/metrics"), quick.Token);
+                // Strata answers its metrics in Prometheus' text (with vLLM's names) when asked for it, and only with the key.
+                using var ask = new HttpRequestMessage(HttpMethod.Get, new Uri($"http://{Host}:{e.Port}/metrics"));
+                ask.Headers.Accept.ParseAdd("text/plain");
+                if (Kind == EngineKinds.Strata && engine.ApiKey is { Length: > 0 } key)
+                {
+                    ask.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", key);
+                }
+                using var res = await http.CreateClient(Client).SendAsync(ask, quick.Token);
                 if (!res.IsSuccessStatusCode)
                 {
                     return null;
@@ -370,6 +377,27 @@ public sealed class VllmBackend(VllmEngineOptions instance, EngineOptions engine
                 }
                 continue;
             }
+            if (Kind == EngineKinds.Lmdeploy)
+            {
+                // LMDeploy's lmdeploy:* names: requests running and waiting, the cache's use, and its prefix hit rate (a share,
+                // weighed by the copy's prompt tokens).
+                var m = Metrics(text);
+                running += (int)m.GetValueOrDefault("lmdeploy:num_requests_running");
+                waiting += (int)m.GetValueOrDefault("lmdeploy:num_requests_waiting");
+                load[copy] += (int)(m.GetValueOrDefault("lmdeploy:num_requests_running") + m.GetValueOrDefault("lmdeploy:num_requests_waiting"));
+                if (m.TryGetValue("lmdeploy:gpu_cache_usage_perc", out var used))
+                {
+                    usage = Math.Max(usage ?? 0, used);
+                }
+                if (m.TryGetValue("lmdeploy:prefix_cache_hit_rate", out var rate))
+                {
+                    var prompt = Math.Max(1, m.GetValueOrDefault("lmdeploy:prompt_tokens_total"));
+                    queries += prompt;
+                    hits += rate * prompt;
+                }
+                continue;
+            }
+            // vLLM's names, which Strata writes too.
             var v = Metrics(text);
             running += (int)v.GetValueOrDefault("vllm:num_requests_running");
             waiting += (int)v.GetValueOrDefault("vllm:num_requests_waiting");
@@ -460,7 +488,7 @@ public sealed class VllmBackend(VllmEngineOptions instance, EngineOptions engine
     public const string Client = "vllm";
 }
 
-/// <summary>The vLLM and SGLang engines of this stack (Engine:Vllm), one backend each.</summary>
+/// <summary>The engines of one server a model of this stack (Engine:Vllm): vLLM, SGLang, LMDeploy, Strata; one backend each.</summary>
 public sealed class VllmBackends(IOptions<EngineOptions> options, IHttpClientFactory http, TimeProvider clock)
 {
     private readonly Lazy<IReadOnlyList<VllmBackend>> _all = new(() =>

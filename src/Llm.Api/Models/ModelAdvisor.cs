@@ -89,9 +89,11 @@ public sealed record GpuReserve(int Gpu, string Name, long Bytes);
 /// <summary>
 /// One GPU: its index as its vendor's tool numbers it (nvidia-smi, rocm-smi), its name, its memory, who made it
 /// ("nvidia", "amd", "intel", "apple", or another), the backend engines drive it with ("cuda", "rocm", "vulkan",
-/// "sycl", "metal"), and its free memory when the source says it.
+/// "sycl", "metal"), its free memory when the source says it, and an NVIDIA GPU's compute capability ("9.0") when its probe
+/// says it (<see cref="Precision.ComputeOf"/> knows the common ones by name otherwise).
 /// </summary>
-public sealed record GpuDevice(int Index, string Name, long Total, long Reserved, string Vendor = "nvidia", string Backend = "cuda", long? Free = null);
+public sealed record GpuDevice(int Index, string Name, long Total, long Reserved, string Vendor = "nvidia", string Backend = "cuda", long? Free = null,
+    string? Compute = null);
 
 public sealed record Bounds(int Min, int Max);
 
@@ -141,8 +143,10 @@ public sealed record KeptPlan(IReadOnlyList<ModelProblem> Problems, IReadOnlyLis
 /// <summary>A setting that cannot be used (an error), or one to know about (a warning).</summary>
 public sealed record ModelProblem(string Field, string Message, bool Error);
 
+/// <param name="Precision">How a snapshot's weights run on its GPUs and engine (FP4, FP8, BF16...); null for llama.cpp's GGUF files.</param>
 public sealed record ModelAdvice(
-    ModelProfile Profile, ModelLimits? Limits, ModelRecommendation? Recommended, MemoryEstimate? Estimate, IReadOnlyList<ModelProblem> Problems, Hardware? Hardware)
+    ModelProfile Profile, ModelLimits? Limits, ModelRecommendation? Recommended, MemoryEstimate? Estimate, IReadOnlyList<ModelProblem> Problems, Hardware? Hardware,
+    PrecisionRun? Precision = null)
 {
     public ModelProblem? FirstError => Problems.FirstOrDefault(p => p.Error);
 }
@@ -253,7 +257,8 @@ public static class ModelAdvisor
     /// The settings a model has that its engine's kind does not (EngineKinds): llama.cpp runs one copy on its GPUs, without
     /// vLLM's share of each GPU, quantisation, speculative decoding by EAGLE, or a CPU tier; vLLM and SGLang have none of
     /// llama.cpp's placement by layers, experts in RAM, prompt step, YaRN, extra preset lines or projector file, and SGLang
-    /// none of LMCache's tiers.
+    /// none of LMCache's tiers. LMDeploy and Strata have no speculative decoding, tiers beyond the GPU or sleep
+    /// the app sets, and read the quantisation their checkpoint or file has; Strata answers 1 to 8 at once.
     /// </summary>
     public static IReadOnlyList<ModelProblem> KindProblems(LocalModel m)
     {
@@ -296,6 +301,22 @@ public static class ModelAdvisor
             if (m.GpuMemoryUtilization is < VllmAdvisor.MinUtilization or > VllmAdvisor.MaxUtilization)
             {
                 problems.Add(new("gpuMemoryUtilization", "The share of each GPU is 0.01 to 0.98.", true));
+            }
+            if (!kind.Speculative || kind.KvTiers.Count == 0)
+            {
+                No(m.SpecDecode is not null && !kind.Speculative, "specDecode", "speculative decoding the app sets");
+                No((m.KvCpuGb is > 0 || m.KvTier is not null || m.KvDiskGb is > 0) && kind.KvTiers.Count == 0, "kvCpuGb", "tiers for its token cache beyond the GPU");
+                No(m.Sleep && !kind.Sleep, "sleep", "sleep the app can ask for (it unloads instead)");
+                No(m.Quantization is not null, "quantization", "quantisation to choose (it reads what its checkpoint or file has)");
+                if (kind.Kind == EngineKinds.Strata && m.Parallel is < 1 or > 8)
+                {
+                    problems.Add(new("parallel", "Strata answers 1 to 8 at once (its batch).", true));
+                }
+                else if (m.Parallel is < 1 or > 1024)
+                {
+                    problems.Add(new("parallel", "Answers at once are 1 to 1,024.", true));
+                }
+                return problems;
             }
             if (m.SpecDecode is not (null or "mtp" or "eagle3"))
             {

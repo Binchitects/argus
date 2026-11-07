@@ -317,10 +317,86 @@ public sealed class VllmBackendTests : IDisposable
     }
 
     [Fact]
-    public void This_stacks_engines_are_vllm_and_sglang_and_a_model_goes_to_the_first_of_its_kind_or_the_one_it_names()
+    public void Lmdeploys_and_stratas_arguments_are_their_own_and_never_a_key_host_or_port()
+    {
+        var m = Model("turbo");
+        m.EngineKind = EngineKinds.Lmdeploy;
+        var args = ModelCatalog.ServerArgs(m, "/library", 2);
+        string After(IReadOnlyList<string> a, string flag) => a[a.ToList().IndexOf(flag) + 1];
+        Assert.Equal("/library/hf/org/turbo@abc", args[0]);
+        Assert.Equal(("2", "65536", "32", "0.85", "8"),
+            (After(args, "--tp"), After(args, "--session-len"), After(args, "--max-batch-size"), After(args, "--cache-max-entry-count"), After(args, "--quant-policy")));
+        Assert.Contains("--enable-prefix-caching", args);
+        var strata = Model("flash");
+        (strata.EngineKind, strata.File, strata.Parallel) = (EngineKinds.Strata, "unsloth/Flash-UD-IQ4_XS-00001-of-00003.gguf", 12);
+        var s = ModelCatalog.ServerArgs(strata, "/library", 1);
+        Assert.Equal("/library/unsloth/Flash-UD-IQ4_XS-00001-of-00003.gguf", s[0]);
+        // Strata's batch is 1 to 8; its fp8 cache is its int8 (the same byte a value).
+        Assert.Equal(("65536", "8", "int8"), (After(s, "--context"), After(s, "--parallel"), After(s, "--kv")));
+        foreach (var a in new[] { args, s })
+        {
+            Assert.DoesNotContain(a, x => x is "--api-key" or "--api-keys" or "--host" or "--port" or "--server-port" or "--served-model-name" or "--enable-sleep-mode");
+        }
+    }
+
+    [Fact]
+    public async Task An_lmdeploy_engine_counts_its_own_metrics_and_a_strata_one_is_asked_with_its_key_for_prometheus_text()
+    {
+        var o = Options();
+        o.Vllm = [new VllmEngineOptions { Name = "lmdeploy", Kind = EngineKinds.Lmdeploy }, new VllmEngineOptions { Name = "strata", Kind = EngineKinds.Strata }];
+        var asked = new List<HttpRequestMessage>();
+        var answer = new Asked(asked, """
+            lmdeploy:num_requests_running{model_name="turbo"} 5
+            lmdeploy:num_requests_waiting{model_name="turbo"} 1
+            lmdeploy:gpu_cache_usage_perc{model_name="turbo"} 0.3
+            lmdeploy:prefix_cache_hit_rate{model_name="turbo"} 0.5
+            lmdeploy:prompt_tokens_total{model_name="turbo"} 100
+            vllm:num_requests_running{model_name="flash"} 2
+            vllm:num_requests_waiting{model_name="flash"} 0
+            vllm:kv_cache_usage_perc{model_name="flash"} 0.7
+            """);
+        var all = new VllmBackends(Microsoft.Extensions.Options.Options.Create(o), new OneClient(answer), TimeProvider.System);
+        Assert.Equal([(EngineKinds.Lmdeploy, "LMDeploy"), (EngineKinds.Strata, "Strata")], all.All.Select(b => (b.Kind, b.Label)));
+        var turbo = Model("turbo", "0", sleep: false);
+        turbo.EngineKind = EngineKinds.Lmdeploy;
+        var flash = Model("flash", "1", sleep: false);
+        (flash.EngineKind, flash.File, flash.Parallel) = (EngineKinds.Strata, "q/flash.gguf", 4);
+        foreach (var (b, m) in new[] { (all.All[0], turbo), (all.All[1], flash) })
+        {
+            b.Write(VllmBackend.PresetsFile, ModelCatalog.VllmEntries(m, "/library", new Dictionary<string, int>(), new HashSet<int>(), b.FirstPort));
+            Directory.CreateDirectory(b.StatusDir);
+            File.WriteAllText(Path.Combine(b.StatusDir, "supervisor.json"), $$"""{"at":{{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}}}""");
+            await b.LoadAsync(m.Name, default);
+        }
+        var lmdeploy = (await all.All[0].CapacityAsync("turbo", TimeSpan.FromSeconds(5), default))!;
+        Assert.Equal((32, 5, 1, 0.3), (lmdeploy.Count, lmdeploy.Running, lmdeploy.Waiting, lmdeploy.KvUsage));
+        Assert.Equal(0.5, lmdeploy.PrefixHitRate!.Value, 6);
+        var strata = (await all.All[1].CapacityAsync("flash", TimeSpan.FromSeconds(5), default))!;
+        Assert.Equal((4, 2, 0, 0.7), (strata.Count, strata.Running, strata.Waiting, strata.KvUsage));
+        // Strata answers its metrics as Prometheus text only when asked for it, and only with the key.
+        Assert.Null(asked[0].Headers.Authorization);
+        Assert.Equal(("Bearer", FakeEngine.Key), (asked[1].Headers.Authorization!.Scheme, asked[1].Headers.Authorization!.Parameter));
+        Assert.Contains("text/plain", asked[1].Headers.Accept.ToString(), StringComparison.Ordinal);
+        // Neither is put to sleep by the app.
+        await Assert.ThrowsAsync<EngineException>(() => all.All[0].SleepAsync("turbo", true, default));
+    }
+
+    /// <summary>Answers every request with the same Prometheus text, keeping what was asked.</summary>
+    private sealed class Asked(List<HttpRequestMessage> asked, string text) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            asked.Add(request);
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(text) });
+        }
+    }
+
+    [Fact]
+    public void This_stacks_engines_are_one_of_each_kind_and_a_model_goes_to_the_first_of_its_kind_or_the_one_it_names()
     {
         var o = new EngineOptions();
-        Assert.Equal([("vllm", EngineKinds.Vllm), ("sglang", EngineKinds.Sglang)], o.VllmEngines.Select(e => (e.Name, e.Kind)));
+        Assert.Equal([("vllm", EngineKinds.Vllm), ("sglang", EngineKinds.Sglang), ("lmdeploy", EngineKinds.Lmdeploy), ("strata", EngineKinds.Strata)],
+            o.VllmEngines.Select(e => (e.Name, e.Kind)));
         o.Vllm = [new VllmEngineOptions { Name = "vllm" }, new VllmEngineOptions { Name = "sglang-a", Kind = EngineKinds.Sglang }, new VllmEngineOptions { Name = "sglang-b", Kind = EngineKinds.Sglang }];
         var all = new VllmBackends(Microsoft.Extensions.Options.Options.Create(o), new OneClient(new Answer("")), TimeProvider.System);
         Assert.Equal("sglang-a", all.For(null, EngineKinds.Sglang)!.Name);
@@ -356,8 +432,11 @@ public sealed class VllmBackendTests : IDisposable
     private static readonly string Repo = Path.GetFullPath(Path.Combine(AppFixture.DashboardsPath, "..", "..", "..", ".."));
 
     [Theory]
+    [Trait("Control", "IAM-08")]
     [InlineData(EngineKinds.Vllm)]
     [InlineData(EngineKinds.Sglang)]
+    [InlineData(EngineKinds.Lmdeploy)]
+    [InlineData(EngineKinds.Strata)]
     public async Task The_real_supervisor_runs_the_fake_vllm_as_the_app_drives_it_in_a_container(string kind)
     {
         var port = FreePort();
@@ -373,14 +452,29 @@ public sealed class VllmBackendTests : IDisposable
             .WithResourceMapping(From("deploy", "services", "sglang", "serve.py"), "/sglang/serve.py")
             .WithResourceMapping(From("tools", "fake-vllm", "sglang-module", "sglang", "__init__.py"), "/fake-vllm/sglang-module/sglang/__init__.py")
             .WithResourceMapping(From("tools", "fake-vllm", "sglang-module", "sglang", "launch_server.py"), "/fake-vllm/sglang-module/sglang/launch_server.py")
+            // LMDeploy through its launcher and the fake lmdeploy package; Strata through its launcher and the fake strata command.
+            .WithResourceMapping(From("deploy", "services", "lmdeploy", "serve.py"), "/lmdeploy/serve.py")
+            .WithResourceMapping(From("tools", "fake-vllm", "lmdeploy-module", "lmdeploy", "__init__.py"), "/fake-vllm/lmdeploy-module/lmdeploy/__init__.py")
+            .WithResourceMapping(From("tools", "fake-vllm", "lmdeploy-module", "lmdeploy", "cli", "__init__.py"), "/fake-vllm/lmdeploy-module/lmdeploy/cli/__init__.py")
+            .WithResourceMapping(From("tools", "fake-vllm", "lmdeploy-module", "lmdeploy", "cli", "entrypoint.py"), "/fake-vllm/lmdeploy-module/lmdeploy/cli/entrypoint.py")
+            .WithResourceMapping(From("deploy", "services", "strata", "serve.py"), "/strata/serve.py")
+            .WithResourceMapping(From("tools", "fake-vllm", "strata"), "/fake-vllm/strata")
+            .WithResourceMapping(Encoding.UTF8.GetBytes("GGUF"), "/library/flash/flash.gguf")
             .WithEnvironment("ENGINE_KEY", "key-for-the-container")
             .WithEnvironment("ENGINE_SERVER", kind)
             .WithEnvironment("VLLM_PRESETS", "/presets")
             .WithEnvironment("VLLM_STATUS", "/status")
-            .WithEnvironment("VLLM_BIN", kind == EngineKinds.Sglang ? "env PYTHONPATH=/fake-vllm/sglang-module python3 /sglang/serve.py" : "/fake-vllm/vllm")
+            .WithEnvironment("VLLM_BIN", kind switch
+            {
+                EngineKinds.Sglang => "env PYTHONPATH=/fake-vllm/sglang-module python3 /sglang/serve.py",
+                EngineKinds.Lmdeploy => "env PYTHONPATH=/fake-vllm/lmdeploy-module python3 /lmdeploy/serve.py",
+                EngineKinds.Strata => "python3 /strata/serve.py",
+                _ => "/fake-vllm/vllm",
+            })
+            .WithEnvironment("STRATA_CLI", "/fake-vllm/strata")
             .WithEnvironment("VLLM_TICK", "0.3")
             .WithCreateParameterModifier(p => p.HostConfig!.NetworkMode = "host")
-            .WithEntrypoint("/bin/sh", "-c", "chmod +x /fake-vllm/vllm && exec /bin/sh /vllm/supervisor.sh")
+            .WithEntrypoint("/bin/sh", "-c", "chmod +x /fake-vllm/vllm /fake-vllm/strata && exec /bin/sh /vllm/supervisor.sh")
             .Build();
         await container.StartAsync();
 
@@ -389,8 +483,13 @@ public sealed class VllmBackendTests : IDisposable
         var status = Path.Combine(o.VllmStatusDir, kind);
         Directory.CreateDirectory(status);
         var backend = new VllmBackend(o.VllmEngines[0], o, new HttpClientFactoryOfOne(), TimeProvider.System);
-        var model = Model("flash", "0");
+        var model = Model("flash", "0", sleep: EngineKinds.Of(kind)!.Sleep);
         model.EngineKind = kind;
+        if (kind == EngineKinds.Strata)
+        {
+            // Strata runs a GGUF file, 1 to 8 at once.
+            (model.File, model.Parallel) = ("flash/flash.gguf", 8);
+        }
         var entries = ModelCatalog.VllmEntries(model, "/library", new Dictionary<string, int>(), new HashSet<int>(), port);
         backend.Write(VllmBackend.PresetsFile, entries);
 
@@ -444,11 +543,14 @@ public sealed class VllmBackendTests : IDisposable
         await backend.LoadAsync("flash", default);
         await UntilAsync("loaded");
         var c = await backend.CapacityAsync("flash", TimeSpan.FromSeconds(5), default);
-        Assert.Equal((32, 0, 0), (c!.Count, c.Running, c.Waiting));
-        await backend.SleepAsync("flash", true, default);
-        await UntilAsync("sleeping");
-        await backend.SleepAsync("flash", false, default);
-        await UntilAsync("loaded");
+        Assert.Equal((model.Parallel, 0, 0), (c!.Count, c.Running, c.Waiting));
+        if (model.Sleep)
+        {
+            await backend.SleepAsync("flash", true, default);
+            await UntilAsync("sleeping");
+            await backend.SleepAsync("flash", false, default);
+            await UntilAsync("loaded");
+        }
         await backend.UnloadAsync("flash", default);
         await UntilAsync("unloaded");
         // The key went by the environment: never on the server's command line.

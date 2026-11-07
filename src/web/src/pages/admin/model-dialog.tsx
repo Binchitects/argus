@@ -9,7 +9,7 @@ import { api } from '@/lib/api'
 import { formatValue } from '@/lib/format'
 import { MediaModelSection, type LibraryRow, type SavedMediaModel, type SpeechRow } from './media-model-form'
 import { roleLabel, type MediaMode } from './media-modes'
-import { engineLabel, serverPerModel, useSnapshots, type EngineInstance, type EngineModel, type ModelMove } from './engine-api'
+import { engineLabel, serverKinds, serverPerModel, useSnapshots, type EngineInstance, type EngineModel, type ModelMove } from './engine-api'
 import { engineChoices, engineName, homeOf, matchGguf, matchSnapshot, type EngineChoice, type FormMatch } from './engine-choice'
 import { MovesAlert, VllmModelSection } from './engine-fields'
 import { ChatModelSection, type ChatModelSlot, type SavedModel } from './model-form'
@@ -129,11 +129,11 @@ type FileForm = 'gguf' | 'snapshot'
 
 const formName: Record<FileForm, string> = { gguf: 'GGUF file', snapshot: 'snapshot' }
 
-/** The form of file an engine of this kind runs best, listed first: a snapshot for vLLM and SGLang, a GGUF file for llama.cpp. */
-const formFor = (kind: string | undefined): FileForm => (serverPerModel(kind) ? 'snapshot' : 'gguf')
+/** The form of file an engine of this kind runs best, listed first: a snapshot for vLLM, SGLang and LMDeploy, a GGUF file for llama.cpp and Strata. */
+const formFor = (kind: string | undefined): FileForm => (serverPerModel(kind) && serverKinds[kind].snapshot ? 'snapshot' : 'gguf')
 
-/** Whether an engine of this kind runs a file of this form: llama.cpp a GGUF file only, vLLM and SGLang either. */
-const runsForm = (kind: string | undefined, form: FileForm) => form === 'gguf' || serverPerModel(kind)
+/** Whether an engine of this kind runs a file of this form: llama.cpp and Strata a GGUF file only, LMDeploy a snapshot only, vLLM and SGLang either. */
+const runsForm = (kind: string | undefined, form: FileForm) => (serverPerModel(kind) ? serverKinds[kind][form] : form === 'gguf')
 
 /** A file's model for people: its name without its folder, split part, extension or revision. */
 const fileName = (path: string) => (path.split('/').pop() ?? path).replace(/(-\d{5}-of-\d{5})?\.gguf$/i, '').replace(/@.*$/, '')
@@ -335,8 +335,8 @@ export function ModelDialog({
     return of.find((c) => c.value === own?.name) ?? of.find((c) => runs(c) && !c.down) ?? of.find(runs) ?? of[0]
   }
 
-  // Snapshots are chat models while vLLM or SGLang runs here (or the model is on one).
-  const servers = engines.filter((c) => serverPerModel(c.kind) && runs(c))
+  // Snapshots are chat models while an engine that runs them (vLLM, SGLang, LMDeploy) runs here (or the model is on one).
+  const servers = engines.filter((c) => serverPerModel(c.kind) && serverKinds[c.kind].snapshot && runs(c))
   const serverNames = [...new Set(servers.map((c) => engineLabel(c.kind)))].join(' or ') || engineLabel(own?.kind)
   const all = [
     ...choices(libraryFiles, mediaFiles.data ?? [], speech.data ?? []),
@@ -452,11 +452,11 @@ export function ModelDialog({
   // A GGUF file on vLLM or SGLang: how it runs there, and the library's snapshot of the same model, faster there, when it has one.
   const server = engineLabel(chosen.kind)
   const faster =
-    kind === 'chat' && !held && serverPerModel(chosen.kind) && fileForm === 'gguf'
+    kind === 'chat' && !held && serverPerModel(chosen.kind) && serverKinds[chosen.kind].snapshot && fileForm === 'gguf'
       ? matchSnapshot(file, libraryFiles.find((f) => f.path === file)?.profile, snapshotList.filter((s) => s.complete))
       : null
   const ggufNote =
-    kind === 'chat' && !held && serverPerModel(chosen.kind) && fileForm === 'gguf'
+    kind === 'chat' && !held && serverPerModel(chosen.kind) && serverKinds[chosen.kind].snapshot && fileForm === 'gguf'
       ? faster
         ? `Its snapshot ${faster.path} is in the library too, by its ${faster.how}: ${server} runs a snapshot's own safetensors faster than a GGUF file, so choose it here for speed. llama.cpp often runs a GGUF file best.`
         : `${server} runs this GGUF file through its GGUF support, more slowly than a snapshot's own safetensors; llama.cpp often runs a GGUF file best.`
@@ -618,7 +618,7 @@ export function ModelDialog({
             file={file}
             gguf={fileForm === 'gguf' ? libraryFiles.find((f) => f.path === file) : undefined}
             // Its own engine as it names it (none: the first of its kind); another is named unless it is the first of its kind, the API's default.
-            engine={{ kind: chosen.kind === 'sglang' ? 'sglang' : 'vllm', name: chosen.value === own?.name ? (saved?.engine ?? '') : chosen.value === firstOfKind ? '' : chosen.value }}
+            engine={{ kind: chosen.kind, name: chosen.value === own?.name ? (saved?.engine ?? '') : chosen.value === firstOfKind ? '' : chosen.value }}
             moves={moves ? chosen.label : null}
             gpus={gpus}
             onClose={onClose}

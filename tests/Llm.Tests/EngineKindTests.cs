@@ -483,4 +483,30 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
         await StatusAssert.Is(HttpStatusCode.BadRequest, refused);
         Assert.Contains("kvTier", await refused.Content.ReadAsStringAsync(), StringComparison.Ordinal);
     }
+
+    [Fact]
+    public async Task An_lmdeploy_model_runs_a_snapshot_and_a_strata_model_a_gguf_file_each_on_its_own_engine_and_at_the_gateway()
+    {
+        await using var f = NewApp();
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var gateway = (FakeGateway)f.Services.GetRequiredService<Llm.Api.Gateway.ILiteLlm>();
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", new
+        {
+            name = "turbo", engineKind = "lmdeploy", file = "hf/acme/Flash@abc123", context = 32768, parallel = 24, devices = "0",
+        }));
+        var entry = Assert.Single(System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(Config, "lmdeploy", VllmBackend.PresetsFile)))!["models"]!.AsArray())!;
+        var args = entry["args"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
+        Assert.Equal(("/library/hf/acme/Flash@abc123", "32768", "24"), (args[0], args[args.IndexOf("--session-len") + 1], args[args.IndexOf("--max-batch-size") + 1]));
+        // It was saved without sleep: the app puts no LMDeploy model to sleep.
+        var row = (await admin.JsonAsync(await admin.GetAsync("/api/admin/models"))).GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == "turbo");
+        Assert.Equal(("lmdeploy", false), (row.GetProperty("engineKind").GetString(), row.GetProperty("sleep").GetBoolean()));
+        Assert.Equal("http://lmdeploy:8001/v1", gateway.Managed.Values.Single(m => m.Name == "turbo").Params["api_base"]!.GetValue<string>());
+
+        // Strata runs the library's GGUF file, not a snapshot; and nothing of what it has none of.
+        var snapshot = await admin.PostAsync("/api/admin/models", new { name = "flash", engineKind = "strata", file = "hf/acme/Flash@abc123", context = 32768, parallel = 2 });
+        await StatusAssert.Is(HttpStatusCode.BadRequest, snapshot);
+        var spec = await admin.PostAsync("/api/admin/models", new { name = "flash", engineKind = "strata", file = "tiny/Tiny-4B-Q4_K_M.gguf", context = 32768, parallel = 2, specDecode = "mtp" });
+        await StatusAssert.Is(HttpStatusCode.BadRequest, spec);
+        Assert.Contains("specDecode", await spec.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+    }
 }

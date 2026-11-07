@@ -14,8 +14,9 @@ public sealed class EngineOptions
     /// <summary>Whether llama.cpp's router runs (Helm: llamacpp.enabled); false: the models are vLLM's and SGLang's alone.</summary>
     public bool LlamaCpp { get; set; } = true;
     /// <summary>
-    /// The engines that run one server a model (vLLM's and SGLang's, by <see cref="VllmEngineOptions.Kind"/>), one per machine
-    /// (or per Helm instance); none listed: this stack's "vllm" and "sglang". Each has its desired state under
+    /// The engines that run one server a model (vLLM's, SGLang's, LMDeploy's and Strata's, by <see cref="VllmEngineOptions.Kind"/>),
+    /// one per machine (or per Helm instance); none listed: this stack's "vllm", "sglang", "lmdeploy" and "strata", each named
+    /// after its kind. Each has its desired state under
     /// <see cref="ConfigDir"/>/NAME and its status under <see cref="VllmStatusDir"/>/NAME.
     /// </summary>
     public List<VllmEngineOptions> Vllm { get; set; } = [];
@@ -29,8 +30,10 @@ public sealed class EngineOptions
     /// <summary>Where the vLLM supervisors say what they do (services/vllm/supervisor.sh's status, each in its own folder).</summary>
     public string VllmStatusDir { get; set; } = "/vllm-status";
 
-    /// <summary>The vLLM and SGLang engines as configured, else this stack's two (each runs only with its feature on).</summary>
-    public IReadOnlyList<VllmEngineOptions> VllmEngines => Vllm.Count > 0 ? Vllm : [new VllmEngineOptions(), new VllmEngineOptions { Name = "sglang", Kind = EngineKinds.Sglang }];
+    /// <summary>The engines of one server a model as configured, else this stack's own, one of each kind (each runs only with its feature on).</summary>
+    public IReadOnlyList<VllmEngineOptions> VllmEngines => Vllm.Count > 0
+        ? Vllm
+        : [.. new[] { EngineKinds.Vllm, EngineKinds.Sglang, EngineKinds.Lmdeploy, EngineKinds.Strata }.Select(k => new VllmEngineOptions { Name = k, Kind = k })];
     public string Url { get; set; } = "http://llamacpp:8080";
     /// <summary>ENGINE_KEY.</summary>
     public string? ApiKey { get; set; }
@@ -402,14 +405,14 @@ public sealed class EngineClient(LlamaCppBackend llama, VllmBackends vllm, Exter
 }
 
 /// <summary>
-/// One vLLM or SGLang engine: its name (its Service or container), its kind, where the app reaches its models
+/// One engine of one server a model (vLLM, SGLang, LMDeploy, Strata): its name (its Service or container), its kind, where the app reaches its models
 /// (http://HOST:PORT), and the folders it shares with the app (its desired state, its status); empty folders: those of
 /// this stack, by its name. Another machine's is one more of these, its folders on storage both see (NFS, a ReadWriteMany claim).
 /// </summary>
 public sealed class VllmEngineOptions
 {
     public string Name { get; set; } = "vllm";
-    /// <summary>What it runs: <see cref="EngineKinds.Vllm"/> or <see cref="EngineKinds.Sglang"/> (its supervisor's ENGINE_SERVER).</summary>
+    /// <summary>What it runs: a kind of <see cref="EngineKinds.ServerPerModel"/> (its supervisor's ENGINE_SERVER).</summary>
     public string Kind { get; set; } = EngineKinds.Vllm;
     /// <summary>Its host as the app and the gateway reach it; null: <see cref="Name"/>.</summary>
     public string? Host { get; set; }

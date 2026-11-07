@@ -84,6 +84,10 @@ images:
   # SGLang (sglang.enabled): its own image (ROCm: lmsysorg/sglang v0.5.21-rocm720-mi30x), or arena-sglang built from
   # deploy/services/sglang.Dockerfile and pushed to your registry; nothing is pulled while it is off.
   sglang: { repository: lmsysorg/sglang, tag: v0.5.21-cu130-runtime }
+  # LMDeploy (lmdeploy.enabled): arena-lmdeploy, built from deploy/services/lmdeploy.Dockerfile and pushed to your registry.
+  lmdeploy: { repository: arena-lmdeploy, tag: "0.18.0" }
+  # Strata (strata.enabled): its own image, from GitHub's registry.
+  strata: { repository: ghcr.io/niko1221/strata, tag: 0.2.11-cuda13 }
   pullPolicy: IfNotPresent
   pullSecrets: []
 
@@ -194,6 +198,25 @@ sglang:
     - { name: sglang, gpus: 1, nodeSelector: {}, tolerations: [] }
   shmSize: 16Gi
   resources: { requests: { cpu: "4", memory: 32Gi } }
+
+# LMDeploy (Admin -> Models, engine LMDeploy): the same supervisor, one Deployment per instance, as SGLang's.
+lmdeploy:
+  enabled: false
+  fake: false
+  instances:
+    - { name: lmdeploy, gpus: 1, nodeSelector: {}, tolerations: [] }
+  shmSize: 16Gi
+  resources: { requests: { cpu: "4", memory: 32Gi } }
+
+# Strata (Admin -> Models, engine Strata): GGUF files of a few large MoE families, the experts that do not fit the GPUs
+# in RAM (ask for that RAM here), its packs in arena-strata-data.
+strata:
+  enabled: false
+  fake: false
+  instances:
+    - { name: strata, gpus: 1, nodeSelector: {}, tolerations: [] }
+  shmSize: 2Gi
+  resources: { requests: { cpu: "8", memory: 64Gi } }
 
 # Embeddings for Argus, on the CPU.
 embed:
@@ -320,6 +343,8 @@ persistence:
   sandbox: { size: 10Gi }
   # Code Studio's workspaces: their clones, their engines' homes, what was not pushed yet.
   workspaces: { size: 100Gi }
+  # Strata's prepared packs, presets and tuning (strata.enabled): made from the library's files, kept across restarts.
+  strataData: { size: 50Gi }
   blender: { size: 10Gi }
   lean: { size: 1Gi }
 

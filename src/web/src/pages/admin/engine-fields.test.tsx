@@ -73,6 +73,31 @@ describe('admin models: vLLM', () => {
     expect(sent).toMatchObject({ name: 'gpt-oss-120b', engineKind: 'vllm', file: 'hf/openai/gpt-oss-120b@main', devices: '2,3', replicas: 2, sleep: false, fallback: 'Qwen', kvType: 'fp8', maxOutput: 8192 })
   })
 
+  it("says how an FP4 snapshot's weights run on its GPUs and what memory they take", async () => {
+    const fp4 = [{ ...snapshots[0], path: 'hf/nvidia/flash-nvfp4@r', repo: 'nvidia/Qwen3.8-Flash-Next-NVFP4', precision: 'NVFP4 + FP8' }]
+    const precision = {
+      weights: 'NVFP4 + FP8', runs: 'W4A16', kernel: 'FP4 Marlin', native: false, gpu: 'NVIDIA H200 NVL (Hopper, sm_90)',
+      summary: 'NVFP4 + FP8 weights on NVIDIA H200 NVL (Hopper, sm_90), which has no FP4 tensor cores: vLLM keeps them 4-bit in memory and widens them as it reads them.',
+      refused: false, weightBytes: 116e9, bf16Bytes: 412e9,
+    }
+    fakeApi(admin, {
+      'GET /api/admin/models': () => ({ json: { engine: engine(), small: null, models } }),
+      'GET /api/admin/models/library': () => ({ json: [] }),
+      'GET /api/admin/models/library/snapshots': () => ({ json: fp4 }),
+      'GET /api/admin/models/media/files': () => ({ json: [] }),
+      'POST /api/admin/models/advice': () => ({ json: { ...advice, precision } }),
+    })
+    renderApp('/admin/models')
+    await userEvent.click(await screen.findByRole('button', { name: 'Add a model' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add a model' })
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'File or model' }))
+    await userEvent.click(await screen.findByRole('option', { name: /flash-nvfp4@r · .* · vLLM/ }))
+    const form = await within(dialog).findByRole('form', { name: 'The vLLM model' })
+    expect(await within(form).findByText(/^NVFP4 \+ FP8 · W4A16, weight-only on NVIDIA H200 NVL \(Hopper, sm_90\) · weights 108\.0 GiB, about 383\.7 GiB at BF16\.$/)).toBeInTheDocument()
+    expect(within(form).getByText(/which has no FP4 tensor cores/)).toBeInTheDocument()
+    expect(within(form).getByText(/· NVFP4 \+ FP8 ·/)).toBeInTheDocument()
+  })
+
   it("moves a llama.cpp model to vLLM: its snapshot chosen in its own dialog, saved under its name with vLLM's defaults", async () => {
     const calls = fakeApi(admin, {
       'GET /api/admin/models': () => ({ json: { engine: engine(), small: null, models } }),
@@ -137,6 +162,62 @@ describe('admin models: vLLM', () => {
     // The first SGLang engine is the kind's default: none named.
     expect(sent).toMatchObject({ name: 'gpt-oss-120b', engineKind: 'sglang', file: 'hf/openai/gpt-oss-120b@main' })
     expect(sent.engine).toBeUndefined()
+  })
+
+  it("adds a snapshot as an LMDeploy model with only LMDeploy's fields, and a GGUF file of Strata's family as a Strata model", async () => {
+    const instances = [
+      { name: 'llamacpp', kind: 'llamacpp', managed: true, problem: null, on: true },
+      { name: 'vllm', kind: 'vllm', managed: true, problem: null, on: true },
+      { name: 'lmdeploy', kind: 'lmdeploy', managed: true, problem: null, on: true },
+      { name: 'strata', kind: 'strata', managed: true, problem: null, on: true },
+    ]
+    const flash = {
+      path: 'unsloth/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf', size: 94e9, parts: 3, usedBy: [],
+      profile: {
+        kind: 'language', why: null, note: null, architecture: 'qwen4exp', name: 'Qwen3.8-Flash-Next', sizeLabel: '400B', quant: 'IQ4_XS', structure: 'moe', attention: 'hybrid',
+        parameters: 400e9, activeParameters: 20e9, bitsPerWeight: 1.9, weightBytes: 94e9, layers: 48, attentionLayers: 12, experts: null, trainedContext: 262144,
+        slidingWindow: null, embeddingLength: 4096, vocabSize: 248320, kvBytesPerToken: { q8_0: 12288, f16: 24576 }, recurrentBytesPerSlot: 67e6, mtpLayers: 0,
+        thinking: true, tools: true, sampling: null, ropeScaling: null, canStretch: false, projector: null, approximate: false,
+      },
+    }
+    const calls = fakeApi(admin, {
+      'GET /api/admin/models': () => ({ json: { engine: engine({ instances }), small: null, models } }),
+      'GET /api/admin/models/library': () => ({ json: [flash] }),
+      'GET /api/admin/models/library/snapshots': () => ({ json: snapshots }),
+      'GET /api/admin/models/media/files': () => ({ json: [] }),
+      'POST /api/admin/models/advice': () => ({ json: advice }),
+      'POST /api/admin/models': () => ({ status: 201, json: { restarting: true, warning: null } }),
+    })
+    renderApp('/admin/models')
+    await userEvent.click(await screen.findByRole('button', { name: 'Add a model' }))
+    let dialog = await screen.findByRole('dialog', { name: 'Add a model' })
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'File or model' }))
+    // Snapshots are for vLLM and LMDeploy here; Strata runs none.
+    await userEvent.click(await screen.findByRole('option', { name: /gpt-oss-120b@main · .* · vLLM or LMDeploy/ }))
+    await userEvent.click(await within(dialog).findByRole('combobox', { name: 'Engine' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'LMDeploy' }))
+    let form = await within(dialog).findByRole('form', { name: 'The LMDeploy model' })
+    expect(within(form).getByText(/--cache-max-entry-count/)).toBeInTheDocument()
+    expect(within(form).getByText(/--max-batch-size/)).toBeInTheDocument()
+    // What LMDeploy has none of is not offered.
+    for (const gone of ['Speculative decoding', 'Cache beyond the GPU', 'Quantisation']) expect(within(form).queryByLabelText(gone)).not.toBeInTheDocument()
+    expect(within(form).queryByRole('switch', { name: 'May sleep' })).not.toBeInTheDocument()
+    expect(within(form).getByText(/LMDeploy does not sleep/)).toBeInTheDocument()
+    await userEvent.click(within(form).getByRole('button', { name: 'Add model' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/models')).toBe(true))
+    expect(calls.find((c) => c.method === 'POST' && c.path === '/api/admin/models')!.body).toMatchObject({ engineKind: 'lmdeploy', sleep: false, file: 'hf/openai/gpt-oss-120b@main' })
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Add a model' }))
+    dialog = await screen.findByRole('dialog', { name: 'Add a model' })
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'File or model' }))
+    await userEvent.click(await screen.findByRole('option', { name: /Qwen3\.8-Flash-Next-UD-IQ4_XS/ }))
+    await userEvent.click(await within(dialog).findByRole('combobox', { name: 'Engine' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Strata' }))
+    form = await within(dialog).findByRole('form', { name: 'The Strata model' })
+    // One copy, 1 to 8 at once: no Copies field, and its own batch in the hint.
+    expect(within(form).queryByLabelText('Copies')).not.toBeInTheDocument()
+    expect(within(form).getByText(/--parallel, 1 to 8/)).toBeInTheDocument()
+    expect(within(form).getByLabelText('People at once')).toHaveValue('8')
   })
 
   it('shows a model asleep, one draining, a GPU of another vendor, and an engine that is not running', async () => {
