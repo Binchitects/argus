@@ -150,4 +150,27 @@ public sealed class AccessPermissionsTests(AppFixture app)
         Assert.All(history.EnumerateArray(), h => Assert.Equal("role", h.GetProperty("kind").GetString()));
         Assert.NotEqual(0, history.GetArrayLength());
     }
+
+    [Fact]
+    [Trait("Control", "IAM-05")]
+    public async Task Code_Arenas_memory_needs_feature_memory_as_the_chats_does()
+    {
+        var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
+        var name = "cm" + Guid.NewGuid().ToString("N")[..10];
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = name, email = $"{name}@example.test" }));
+        var id = made.GetProperty("id").GetGuid();
+        var arena = app.Factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions { BaseAddress = new Uri($"https://{AppFixture.Domain}"), AllowAutoRedirect = false, HandleCookies = false });
+        arena.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", made.GetProperty("apiKey").GetString());
+        arena.DefaultRequestHeaders.Add("X-Requested-With", "code-arena");
+        await StatusAssert.Is(HttpStatusCode.OK, await arena.GetAsync(new Uri("/api/code-arena/memories", UriKind.Relative)));
+
+        var res = await admin.PostAsync("/api/admin/access/rules", new { effect = "Deny", subjectKind = "Person", subjectId = id, resourceKind = ResourceKinds.Feature, resource = Permissions.Memory });
+        await StatusAssert.Is(HttpStatusCode.Created, res);
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await arena.GetAsync(new Uri("/api/code-arena/memories", UriKind.Relative)));
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await arena.PostAsJsonAsync("/api/code-arena/memories", new { text = "Not kept." }));
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await arena.PostAsJsonAsync("/api/code-arena/memories/recall", new { query = "how to build" }));
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await arena.PostAsJsonAsync("/api/code-arena/memories/import", new { memories = new[] { new { text = "Not brought in." } } }));
+        // What is theirs they may still forget, as on the web: no such memory, not refused.
+        await StatusAssert.Is(HttpStatusCode.NotFound, await arena.DeleteAsync(new Uri($"/api/code-arena/memories/{Guid.NewGuid()}", UriKind.Relative)));
+    }
 }
