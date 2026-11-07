@@ -815,6 +815,8 @@ CHECKS = {
     "bench": ("multiuser-bench.py", "many people chatting at once"),
     "load": ("people-load.py", "thousands of people signing in and asking"),
     "benchmark": ("benchmark.py", "the model's speed and quality"),
+    "fp4": ("fp4-bench.py", "a model's FP4, FP8 and BF16 copies side by side: memory, speed, quality"),
+    "fp4-h200": ("fp4-h200.sh", "FP4 against FP8 on the H200 host, every set its library has"),
     "qwen-code": ("qwen-code-realworld.py", "Qwen Code against the gateway on real tasks"),
     "argus": ("../../tools/smoke_test.py", "Argus's MCP serves agents: auth, tools, packs, the index (--url, --token)"),
 }
