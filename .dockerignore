@@ -25,6 +25,7 @@ tools/*
 !tools/fetch-sqlite-vec.sh
 !tools/publish-code-arena.sh
 !tools/offline-nuget
+!tools/ide-launcher
 # src/web stays for Code Arena's web interface (the API's code-arena-web stage), without what is built or downloaded.
 src/web/dist/
 src/web/test-results/

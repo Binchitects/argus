@@ -38,5 +38,34 @@ class CodeArenaImagesTests(unittest.TestCase):
             self.assertEqual([], missing, f"{image.relative_to(REPO)} does not copy what Code Arena links")
 
 
+class BuildContextTests(unittest.TestCase):
+    def test_What_the_images_copy_from_the_repository_is_in_the_build_context(self):
+        """A COPY of a path .dockerignore leaves out fails the build ("not found"): every source a Dockerfile built from the
+        repository's root copies is let in. Patterns are read as Docker reads them: in order, the last match decides."""
+        import fnmatch
+        rules = [l.strip() for l in (REPO / ".dockerignore").read_text().splitlines() if l.strip() and not l.startswith("#")]
+
+        def ignored(path: str) -> bool:
+            out = False
+            parts = path.strip("/").split("/")
+            for rule in rules:
+                keep = rule.startswith("!")
+                pattern = rule[1:] if keep else rule
+                pattern = pattern.strip("/")
+                # A pattern matches the path or any folder it is in.
+                if any(fnmatch.fnmatchcase("/".join(parts[: i + 1]), pattern) for i in range(len(parts))):
+                    out = not keep
+            return out
+
+        missing = []
+        for image in IMAGES:
+            for line in image.read_text().splitlines():
+                if line.startswith("COPY ") and "--from=" not in line:
+                    for source in line.split()[1:-1]:
+                        if not source.startswith("--") and ignored(source):
+                            missing.append(f"{image.relative_to(REPO)}: {source}")
+        self.assertEqual([], missing, ".dockerignore leaves these out of the build context")
+
+
 if __name__ == "__main__":
     unittest.main()
