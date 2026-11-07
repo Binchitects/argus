@@ -666,6 +666,49 @@ full the models kept loaded would make it.
   without drafting: Strata's draft layers are downloads of its own; see
   [deployment.md](deployment.md#engines-and-gpus)), no tiers and no sleep. Its load is read from its metrics, which are
   vLLM's names.
+- **Tool calls and thinking** (the form's **Advanced**: `toolParser`,
+  `reasoningParser`). vLLM, SGLang and LMDeploy read a model's tool calls into
+  `tool_calls` only with a tool-call parser, and its thinking into the
+  answer's reasoning (the chat's thinking) only with a reasoning parser.
+  Without one, vLLM and LMDeploy refuse every request with tools and SGLang
+  answers the call as text; the thinking lands in the answer. **Automatic**
+  (empty) chooses them by the model's family, from its name and its
+  `config.json` (`architectures`, `model_type`), each engine by its own names:
+
+  | Family | vLLM | SGLang | LMDeploy |
+  | --- | --- | --- | --- |
+  | Qwen2.5 | hermes | qwen | qwen2d5 |
+  | Qwen3 (thinks as asked) | hermes, qwen3 | qwen, qwen3 | qwen3, default |
+  | Qwen3 Thinking / Instruct (2507, Next, VL) | hermes, qwen3 / hermes | qwen, qwen3-thinking / qwen | qwen3, default / qwen3 |
+  | Qwen3.5 and later (3.6, 3.8) | qwen3_coder, qwen3 | qwen3_coder, qwen3 | qwen3coder, default |
+  | Qwen3-Coder | qwen3_coder | qwen3_coder | qwen3coder |
+  | QwQ | hermes, deepseek_r1 | qwen, deepseek-r1 | qwen2d5, default |
+  | Llama 3.x | llama3_json | llama3 | llama3 |
+  | Llama 4 | llama4_pythonic | pythonic | none |
+  | gpt-oss (harmony) | openai, openai_gptoss | gpt-oss, gpt-oss | by its architecture |
+  | DeepSeek-V3 / R1 | deepseek_v3 (R1: deepseek_r1) | deepseekv3 (R1: deepseek-r1) | none (R1: default) |
+  | DeepSeek-V3.1 / V3.2 / V4 | deepseek_v31 / deepseek_v32 / deepseek_v4, with deepseek_v3 or deepseek_v4 | deepseekv31 / deepseekv32 / deepseekv4, with deepseek-v3 or deepseek-v4 | V3.1: reasoning only (deepseek-v3); V3.2, V4: their own |
+  | DeepSeek-R1 distilled | none, deepseek_r1 | none, deepseek-r1 | none, default |
+  | GLM-4.5, 4.6 / 4.7 | glm45 / glm47 | glm45 / glm47, glm45 | none / glm47, default |
+  | Kimi K2 (Thinking) | kimi_k2 | kimi_k2 | kimi_k2 |
+  | Mistral (Magistral: mistral reasoning) | mistral | mistral | none |
+  | InternLM | internlm | none | internlm |
+  | MiniMax-M2, Gemma 4, Hermes | their own | their own | none |
+
+  A choice of its own (one of that engine's names, or **None**) is kept over
+  the automatic one; a name the engine has not is refused, saying the ones it
+  has. LMDeploy's `default` reasoning parser starts every answer in its
+  thinking, so only a family that thinks gets it. A move to another engine
+  keeps a choice that engine has by the same name, else takes its automatic
+  one, and a move back takes up the old choice. When a model has Tools on and
+  its engine has no tool-call parser for its family, the advisor says so: the
+  app has no text protocol of its own to read calls from an answer, so turn
+  Tools off for it (the chat then sends it none) or run it on an engine that
+  reads its calls (llama.cpp reads them by the model's chat template). Strata
+  reads tool calls and thinking itself and has no parser to choose. vLLM's
+  thinking comes as `reasoning`, SGLang's and LMDeploy's as
+  `reasoning_content`; the gateway gives both to the chat as
+  `reasoning_content`.
 - **GGUF files on vLLM and SGLang.** A vLLM or SGLang model's file may be a
   GGUF file of the library instead of a snapshot: the same file llama.cpp runs,
   no snapshot needed. vLLM reads it through its GGUF plugin (vllm-gguf-plugin

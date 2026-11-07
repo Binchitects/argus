@@ -232,4 +232,78 @@ describe('admin models: vLLM', () => {
     expect(screen.getByText(/GPU 3 · AMD Instinct MI300X · amd/)).toBeInTheDocument()
     expect(screen.getByText('The vLLM engine vllm is not running.')).toBeInTheDocument()
   })
+
+  it("chooses its tool calls and reasoning parsers under Advanced from the engine's own names, Automatic saying its family's", async () => {
+    const parsers = {
+      family: 'gpt-oss', familyLabel: 'gpt-oss (harmony)', builtIn: false,
+      tool: { chosen: null, automatic: 'openai', names: ['hermes', 'openai', 'qwen3_coder'] },
+      reasoning: { chosen: null, automatic: 'openai_gptoss', names: ['openai_gptoss', 'qwen3'] },
+    }
+    const word = 'LMDeploy has no tool-call parser for Mistral: LMDeploy refuses a request with tools, and the app has no text protocol of its own to read calls from an answer.'
+    const calls = fakeApi(admin, {
+      'GET /api/admin/models': () => ({ json: { engine: engine(), small: null, models } }),
+      'GET /api/admin/models/library': () => ({ json: [] }),
+      'GET /api/admin/models/library/snapshots': () => ({ json: snapshots }),
+      'GET /api/admin/models/media/files': () => ({ json: [] }),
+      'POST /api/admin/models/advice': (b) => ({
+        json: { ...advice, parsers, problems: (b as { toolParser?: string }).toolParser === 'none' ? [{ field: 'toolParser', message: word, error: false }] : [] },
+      }),
+      'POST /api/admin/models': () => ({ status: 201, json: { restarting: true, warning: null } }),
+    })
+    renderApp('/admin/models')
+    await userEvent.click(await screen.findByRole('button', { name: 'Add a model' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add a model' })
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'File or model' }))
+    await userEvent.click(await screen.findByRole('option', { name: /gpt-oss-120b@main · .* · vLLM/ }))
+    const form = await within(dialog).findByRole('form', { name: 'The vLLM model' })
+    // Folded away until opened; Automatic says what it is for this family.
+    await userEvent.click(within(form).getByText('Advanced'))
+    expect(await within(form).findByText(/Its family: gpt-oss \(harmony\), from its name and config\./)).toBeInTheDocument()
+    expect(within(form).getByRole('combobox', { name: 'Tool calls parser' })).toHaveTextContent('Automatic: openai')
+    expect(within(form).getByRole('combobox', { name: 'Reasoning parser' })).toHaveTextContent('Automatic: openai_gptoss')
+    expect(within(form).getByText("vLLM's --tool-call-parser, with --enable-auto-tool-choice.")).toBeInTheDocument()
+    await userEvent.click(within(form).getByRole('combobox', { name: 'Tool calls parser' }))
+    expect(screen.getByRole('option', { name: 'qwen3_coder' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('option', { name: 'None' }))
+    // None for tools: the advisor's word on what the engine and the app then do.
+    expect(await within(form).findByText(word)).toBeInTheDocument()
+    await userEvent.click(within(form).getByRole('combobox', { name: 'Reasoning parser' }))
+    await userEvent.click(screen.getByRole('option', { name: 'qwen3' }))
+    await userEvent.click(within(form).getByRole('button', { name: 'Add model' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/models')).toBe(true))
+    const sent = calls.find((c) => c.method === 'POST' && c.path === '/api/admin/models')!.body as Record<string, unknown> & { clear: string[] }
+    expect(sent).toMatchObject({ toolParser: 'none', reasoningParser: 'qwen3' })
+    expect(sent.clear).not.toContain('toolParser')
+  })
+
+  it('says Strata reads tool calls and thinking itself, with no parser to choose', async () => {
+    const strata = [{ name: 'strata', kind: 'strata', managed: true, problem: null, on: true }, ...engine().instances]
+    const gguf = {
+      path: 'unsloth/Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf', size: 94e9, parts: 3, usedBy: [],
+      profile: {
+        kind: 'language', why: null, note: null, architecture: 'qwen4exp', name: 'Qwen3.8-Flash-Next', sizeLabel: '400B', quant: 'IQ4_XS', structure: 'moe', attention: 'hybrid',
+        parameters: 400e9, activeParameters: 20e9, bitsPerWeight: 1.9, weightBytes: 94e9, layers: 48, attentionLayers: 12, experts: null, trainedContext: 262144,
+        slidingWindow: null, embeddingLength: 4096, vocabSize: 248320, kvBytesPerToken: { q8_0: 12288, f16: 24576 }, recurrentBytesPerSlot: 67e6, mtpLayers: 0,
+        thinking: true, tools: true, sampling: null, ropeScaling: null, canStretch: false, projector: null, approximate: false,
+      },
+    }
+    fakeApi(admin, {
+      'GET /api/admin/models': () => ({ json: { engine: engine({ instances: strata }), small: null, models } }),
+      'GET /api/admin/models/library': () => ({ json: [gguf] }),
+      'GET /api/admin/models/library/snapshots': () => ({ json: [] }),
+      'GET /api/admin/models/media/files': () => ({ json: [] }),
+      'POST /api/admin/models/advice': () => ({ json: advice }),
+    })
+    renderApp('/admin/models')
+    await userEvent.click(await screen.findByRole('button', { name: 'Add a model' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Add a model' })
+    await userEvent.click(within(dialog).getByRole('combobox', { name: 'File or model' }))
+    await userEvent.click(await screen.findByRole('option', { name: /Qwen3\.8-Flash-Next-UD-IQ4_XS/ }))
+    await userEvent.click(await within(dialog).findByRole('combobox', { name: 'Engine' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Strata' }))
+    const form = await within(dialog).findByRole('form', { name: 'The Strata model' })
+    await userEvent.click(within(form).getByText('Advanced'))
+    expect(within(form).getByText('Strata reads its tool calls and thinking itself: there is no parser to choose.')).toBeInTheDocument()
+    expect(within(form).queryByRole('combobox', { name: 'Tool calls parser' })).not.toBeInTheDocument()
+  })
 })

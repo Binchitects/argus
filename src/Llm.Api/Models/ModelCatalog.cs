@@ -916,9 +916,11 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     /// of quantisation, sleep mode, speculative decoding, a CPU tier for its cache (the OffloadingConnector) and default
     /// sampling; and its longest answer, which every request is held to. A GGUF file needs nothing more here: vLLM's launcher
     /// (services/vllm/serve.py) names its config and tokenizer, and vLLM's GGUF plugin reads it as GGUF. Never a key, a host or
-    /// a port: the supervisor owns those (and refuses an entry that sets them).
+    /// a port: the supervisor owns those (and refuses an entry that sets them). Its tool-call and reasoning parsers are its own
+    /// choice, else its family's (<paramref name="family"/>, else from its name; <see cref="EngineParsers"/>): with a tool-call parser,
+    /// its calls come back as tool_calls (--enable-auto-tool-choice), and with a reasoning parser its thinking as the answer's reasoning.
     /// </summary>
-    public static IReadOnlyList<string> VllmArgs(LocalModel m, string library, int tp)
+    public static IReadOnlyList<string> VllmArgs(LocalModel m, string library, int tp, ParserFamily? family = null)
     {
         var inv = CultureInfo.InvariantCulture;
         var root = library.TrimEnd('/');
@@ -938,6 +940,15 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         if (m.Sleep)
         {
             args.Add("--enable-sleep-mode");
+        }
+        var (tool, reasoning) = EngineParsers.For(m, family ?? EngineParsers.FamilyOf(m, null));
+        if (tool is not null)
+        {
+            args.AddRange(["--enable-auto-tool-choice", "--tool-call-parser", tool]);
+        }
+        if (reasoning is not null)
+        {
+            args.AddRange(["--reasoning-parser", reasoning]);
         }
         if (m.SpecDecode is "mtp" or "eagle3")
         {
@@ -980,9 +991,10 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     /// on vLLM), and what it chose of quantisation, sleep (the memory saver), speculative decoding (EAGLE-3 with its draft,
     /// or NEXTN, the model's own MTP layers), a RAM tier for its cache (the hierarchical cache) and default sampling. Its
     /// radix cache shares every prefix by itself. Its longest answer is no flag of SGLang's: an environment variable of the
-    /// process (<see cref="VllmEntries"/>). Never a key, a host or a port: the supervisor owns those.
+    /// process (<see cref="VllmEntries"/>). Its tool-call and reasoning parsers as vLLM's, by SGLang's names. Never a key, a host
+    /// or a port: the supervisor owns those.
     /// </summary>
-    public static IReadOnlyList<string> SglangArgs(LocalModel m, string library, int tp)
+    public static IReadOnlyList<string> SglangArgs(LocalModel m, string library, int tp, ParserFamily? family = null)
     {
         var inv = CultureInfo.InvariantCulture;
         var root = library.TrimEnd('/');
@@ -1005,6 +1017,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         {
             args.Add("--enable-memory-saver");
         }
+        Parsers(args, m, family);
         if (m.SpecDecode is "mtp" or "eagle3")
         {
             var steps = Math.Max(1, m.DraftMax);
@@ -1036,10 +1049,11 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     /// LMDeploy's `lmdeploy serve api_server` arguments for a snapshot on <paramref name="tp"/> GPUs: TurboMind where it runs
     /// the model, else its PyTorch engine (LMDeploy's own choice), its context (--session-len), answers at once
     /// (--max-batch-size), the share of what is free on each GPU once the weights are in for its cache
-    /// (--cache-max-entry-count), its prefix cache, and its cache at int8 for fp8 (--quant-policy 8: the same byte a value).
+    /// (--cache-max-entry-count), its prefix cache, its cache at int8 for fp8 (--quant-policy 8: the same byte a value), and its
+    /// tool-call and reasoning parsers as vLLM's, by LMDeploy's names (gpt-oss it reads by its architecture, with no flag).
     /// Its launcher (services/lmdeploy/serve.py) names the model, host, port and key.
     /// </summary>
-    public static IReadOnlyList<string> LmdeployArgs(LocalModel m, string library, int tp)
+    public static IReadOnlyList<string> LmdeployArgs(LocalModel m, string library, int tp, ParserFamily? family = null)
     {
         var inv = CultureInfo.InvariantCulture;
         var args = new List<string>
@@ -1053,13 +1067,29 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         {
             args.AddRange(["--quant-policy", "8"]);
         }
+        Parsers(args, m, family);
         return args;
+    }
+
+    /// <summary>SGLang's and LMDeploy's --tool-call-parser and --reasoning-parser, when it has them (<see cref="EngineParsers.For"/>).</summary>
+    private static void Parsers(List<string> args, LocalModel m, ParserFamily? family)
+    {
+        var (tool, reasoning) = EngineParsers.For(m, family ?? EngineParsers.FamilyOf(m, null));
+        if (tool is not null)
+        {
+            args.AddRange(["--tool-call-parser", tool]);
+        }
+        if (reasoning is not null)
+        {
+            args.AddRange(["--reasoning-parser", reasoning]);
+        }
     }
 
     /// <summary>
     /// Strata's arguments for a GGUF file (or a split one's folder, which its launcher names): its context, answers at once (1 to
     /// 8, its batch) and its cache's type (int8 for fp8: the same byte a value; fp16 otherwise). Its launcher
-    /// (services/strata/serve.py) runs `strata launch` with them, on the GPUs the supervisor gives, its port and key.
+    /// (services/strata/serve.py) runs `strata launch` with them, on the GPUs the supervisor gives, its port and key. Strata reads
+    /// tool calls and thinking itself (its own parser, for the families it runs): it has no parser to name.
     /// </summary>
     public static IReadOnlyList<string> StrataArgs(LocalModel m, string library) =>
     [
@@ -1067,13 +1097,13 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
         "--parallel", Math.Clamp(m.Parallel, 1, 8).ToString(CultureInfo.InvariantCulture), "--kv", m.KvType.StartsWith("fp8", StringComparison.Ordinal) ? "int8" : "fp16",
     ];
 
-    /// <summary>A model's server's arguments, by its kind: vLLM's, SGLang's, LMDeploy's or Strata's.</summary>
-    public static IReadOnlyList<string> ServerArgs(LocalModel m, string library, int tp) => m.EngineKind switch
+    /// <summary>A model's server's arguments, by its kind: vLLM's, SGLang's, LMDeploy's or Strata's; its parsers by its family.</summary>
+    public static IReadOnlyList<string> ServerArgs(LocalModel m, string library, int tp, ParserFamily? family = null) => m.EngineKind switch
     {
-        EngineKinds.Sglang => SglangArgs(m, library, tp),
-        EngineKinds.Lmdeploy => LmdeployArgs(m, library, tp),
+        EngineKinds.Sglang => SglangArgs(m, library, tp, family),
+        EngineKinds.Lmdeploy => LmdeployArgs(m, library, tp, family),
         EngineKinds.Strata => StrataArgs(m, library),
-        _ => VllmArgs(m, library, tp),
+        _ => VllmArgs(m, library, tp, family),
     };
 
     /// <summary>
@@ -1098,7 +1128,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
     }
 
     public static IReadOnlyList<VllmEntry> VllmEntries(LocalModel m, string library, IReadOnlyDictionary<string, int> ports, ISet<int> taken, int firstPort,
-        string? presets = null)
+        string? presets = null, ParserFamily? family = null)
     {
         var replicas = Math.Max(1, m.Replicas);
         var gpus = Hardware.ParseDevices(m.Devices) ?? [];
@@ -1126,7 +1156,7 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             {
                 env["SGLANG_MAX_NEW_TOKENS_LIMIT"] = OutputLimit(m).ToString(CultureInfo.InvariantCulture);
             }
-            entries.Add(new VllmEntry(m.Name, name, port, groups[i], false, ServerArgs(m, library, Math.Max(1, groups[i].Count)), Math.Max(1, m.Parallel),
+            entries.Add(new VllmEntry(m.Name, name, port, groups[i], false, ServerArgs(m, library, Math.Max(1, groups[i].Count), family), Math.Max(1, m.Parallel),
                 env.Count > 0 ? env : null));
         }
         return entries;
@@ -1160,7 +1190,9 @@ public sealed partial class ModelCatalog(AppDbContext db, ILiteLlm gateway, IOpt
             var entries = new List<VllmEntry>();
             foreach (var m in mine.OrderBy(m => ports.ContainsKey(m.Replicas > 1 ? m.Name + "@0" : m.Name) ? 0 : 1))
             {
-                var made = VllmEntries(m, options.Value.EngineLibraryDir, ports, taken, backend.FirstPort, $"/presets/{backend.Name}");
+                // Its parsers by its family: its config's architecture and model type, and its name.
+                var made = VllmEntries(m, options.Value.EngineLibraryDir, ports, taken, backend.FirstPort, $"/presets/{backend.Name}",
+                    EngineParsers.FamilyOf(m, EngineParsers.Sets(m.EngineKind) ? VllmAdvisor.Of(library, m.File) : null));
                 entries.AddRange(made);
                 if (m.KvTier == "lmcache")
                 {

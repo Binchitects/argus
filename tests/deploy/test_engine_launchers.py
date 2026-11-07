@@ -43,7 +43,7 @@ class LmdeployLauncherTests(unittest.TestCase):
         port = 18000 + os.getpid() % 1000
         env = dict(os.environ, VLLM_API_KEY="the-engine-key", PYTHONPATH=str(FAKE / "lmdeploy-module"))
         proc = subprocess.Popen([sys.executable, str(SERVICES / "lmdeploy" / "serve.py"), "/library/hf/a@b", "--session-len", "4096",
-                                 "--served-model-name", "turbo", "--host", "127.0.0.1", "--port", str(port)], env=env,
+                                 "--tool-call-parser", "qwen2d5", "--served-model-name", "turbo", "--host", "127.0.0.1", "--port", str(port)], env=env,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         try:
             import urllib.error
@@ -63,6 +63,13 @@ class LmdeployLauncherTests(unittest.TestCase):
                 self.assertEqual("turbo", json.load(r)["data"][0]["id"])
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/metrics", timeout=2) as r:
                 self.assertIn("lmdeploy:num_requests_running", r.read().decode())
+            # Its tool-call parser as the app writes it reaches LMDeploy: a request with tools gets tool_calls, not its refusal.
+            tools = [{"type": "function", "function": {"name": "find_symbol", "parameters": {"type": "object"}}}]
+            ask = urllib.request.Request(f"http://127.0.0.1:{port}/v1/chat/completions", method="POST",
+                                         headers={"Authorization": "Bearer the-engine-key", "Content-Type": "application/json"},
+                                         data=json.dumps({"model": "turbo", "messages": [{"role": "user", "content": "find"}], "tools": tools}).encode())
+            with urllib.request.urlopen(ask, timeout=5) as r:
+                self.assertEqual("tool_calls", json.load(r)["choices"][0]["finish_reason"])
             # Its command line names no key.
             self.assertNotIn("the-engine-key", Path(f"/proc/{proc.pid}/cmdline").read_bytes().decode(errors="replace"))
         finally:

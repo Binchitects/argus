@@ -4,6 +4,7 @@ using System.Text.Json;
 using Llm.Api.Models;
 using Llm.Core.Models;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Llm.Tests;
@@ -143,6 +144,7 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
         await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", new
         {
             name = "flash", engineKind = "vllm", file = "hf/acme/Flash@abc123", context = 32768, kvTier = "lmcache", kvCpuGb = 8, kvDiskGb = 50,
+            toolParser = "hermes", reasoningParser = "qwen3",
         }));
         foreach (var engine in new[] { "vllm", "sglang" })
         {
@@ -162,7 +164,84 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
             row.GetProperty("move").GetProperty("fromEngine").GetString(), row.GetProperty("move").GetProperty("toEngine").GetString()));
         Assert.Equal((JsonValueKind.Null, JsonValueKind.Null, JsonValueKind.Null), (row.GetProperty("engine").ValueKind, row.GetProperty("kvTier").ValueKind, row.GetProperty("kvDiskGb").ValueKind));
         Assert.Equal(8, row.GetProperty("kvCpuGb").GetInt32());
+        // Its parsers go with it: SGLang has both by the same names.
+        Assert.Equal(("hermes", "qwen3"), (row.GetProperty("toolParser").GetString(), row.GetProperty("reasoningParser").GetString()));
     }
+
+    [Fact]
+    public async Task Its_parsers_are_saved_refused_when_its_engine_has_not_them_and_kept_for_a_move_back()
+    {
+        await using var f = NewApp();
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        // LMDeploy's name on vLLM: refused, saying vLLM's.
+        var refused = await admin.PostAsync("/api/admin/models", new { name = "flash", engineKind = "vllm", file = "hf/acme/Flash@abc123", context = 32768, toolParser = "qwen2d5" });
+        await StatusAssert.Is(HttpStatusCode.BadRequest, refused);
+        Assert.Contains("toolParser", await refused.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/models", new
+        {
+            name = "flash", engineKind = "vllm", file = "hf/acme/Flash@abc123", context = 32768, toolParser = "qwen3_xml", reasoningParser = "none",
+        }));
+        var args = Args("vllm");
+        Assert.Equal("qwen3_xml", args[args.IndexOf("--tool-call-parser") + 1]);
+        Assert.Contains("--enable-auto-tool-choice", args);
+        Assert.DoesNotContain("--reasoning-parser", args);
+        var advice = await admin.JsonAsync(await admin.PostAsync("/api/admin/models/advice", new { name = "flash", engineKind = "vllm", file = "hf/acme/Flash@abc123" }));
+        var parsers = advice.GetProperty("parsers");
+        Assert.Equal(("qwen3", "qwen3_xml", "hermes"), (parsers.GetProperty("family").GetString(), parsers.GetProperty("tool").GetProperty("chosen").GetString(),
+            parsers.GetProperty("tool").GetProperty("automatic").GetString()));
+
+        foreach (var engine in new[] { "vllm", "lmdeploy" })
+        {
+            Directory.CreateDirectory(Path.Combine(_dir, "vllm-status", engine));
+            File.WriteAllText(Path.Combine(_dir, "vllm-status", engine, "supervisor.json"), $$"""{"at":{{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}},"started":0,"restart":0,"reload":0}""");
+        }
+        // To LMDeploy, which has no qwen3_xml: its own for Qwen3 (automatic); "none" it has too.
+        using (var moved = await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/flash", UriKind.Relative), new
+        {
+            engineKind = "lmdeploy", file = "hf/acme/Flash@abc123", kvType = "fp8", context = 32768, parallel = 16, sleep = false,
+        }))
+        {
+            await StatusAssert.Is(HttpStatusCode.OK, moved);
+        }
+        var row = await Row(admin, "flash");
+        Assert.Equal((JsonValueKind.Null, "none"), (row.GetProperty("toolParser").ValueKind, row.GetProperty("reasoningParser").GetString()));
+        Assert.Equal("qwen3_xml", row.GetProperty("left").GetProperty("toolParser").GetString());
+        await Moved(f, "flash");
+        // Back to vLLM: its own choice there again.
+        using (var back = await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/flash", UriKind.Relative), new
+        {
+            engineKind = "vllm", file = "hf/acme/Flash@abc123", kvType = "fp8", context = 32768, parallel = 16,
+        }))
+        {
+            await StatusAssert.Is(HttpStatusCode.OK, back);
+        }
+        await Moved(f, "flash");
+        row = await Row(admin, "flash");
+        Assert.Equal(("qwen3_xml", "none"), (row.GetProperty("toolParser").GetString(), row.GetProperty("reasoningParser").GetString()));
+        // Cleared: automatic again, by its family.
+        using (var cleared = await admin.Http.PatchAsJsonAsync(new Uri("/api/admin/models/flash", UriKind.Relative), new { clear = new[] { "toolParser", "reasoningParser" } }))
+        {
+            await StatusAssert.Is(HttpStatusCode.OK, cleared);
+        }
+        row = await Row(admin, "flash");
+        Assert.Equal((JsonValueKind.Null, JsonValueKind.Null), (row.GetProperty("toolParser").ValueKind, row.GetProperty("reasoningParser").ValueKind));
+    }
+
+    /// <summary>Its move as done: on its new engine alone (ModelMoves' own steps need the engines to answer).</summary>
+    private static async Task Moved(WebApplicationFactory<Program> f, string name)
+    {
+        using var scope = f.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+        (await db.LocalModels.SingleAsync(m => m.Name == name)).Move = null;
+        await db.SaveChangesAsync();
+    }
+
+    private List<string> Args(string engine) =>
+        [.. System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(Path.Combine(Config, engine, VllmBackend.PresetsFile)))!["models"]!.AsArray().Single()!["args"]!.AsArray()
+            .Select(a => a!.GetValue<string>())];
+
+    private static async Task<JsonElement> Row(TestBrowser admin, string name) =>
+        (await admin.JsonAsync(await admin.GetAsync("/api/admin/models"))).GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == name);
 
     [Fact]
     public async Task A_vllm_model_without_gpus_gets_those_proposed_for_the_machine_its_engine_reports()
@@ -462,6 +541,8 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
         // number there is, which its radix cache then overflows on as the request ends, and the server dies.
         Assert.Equal("0", After("--default-priority-value"));
         Assert.Equal("""{"temperature":0.7}""", After("--preferred-sampling-params"));
+        // Its parsers by its family, from its config.json (Qwen3ForCausalLM) as the library has it: SGLang's names for Qwen3's.
+        Assert.Equal(("qwen", "qwen3"), (After("--tool-call-parser"), After("--reasoning-parser")));
         Assert.False(File.Exists(Path.Combine(Config, "vllm", VllmBackend.PresetsFile)));
         var row = (await admin.JsonAsync(await admin.GetAsync("/api/admin/models"))).GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == "swift");
         Assert.Equal("sglang", row.GetProperty("engineKind").GetString());
@@ -497,6 +578,8 @@ public sealed class EngineKindTests(AppFixture app) : IDisposable
         var entry = Assert.Single(System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(Path.Combine(Config, "lmdeploy", VllmBackend.PresetsFile)))!["models"]!.AsArray())!;
         var args = entry["args"]!.AsArray().Select(a => a!.GetValue<string>()).ToList();
         Assert.Equal(("/library/hf/acme/Flash@abc123", "32768", "24"), (args[0], args[args.IndexOf("--session-len") + 1], args[args.IndexOf("--max-batch-size") + 1]));
+        // LMDeploy's names for Qwen3's parsers: without a tool-call parser it refuses every request with tools.
+        Assert.Equal(("qwen3", "default"), (args[args.IndexOf("--tool-call-parser") + 1], args[args.IndexOf("--reasoning-parser") + 1]));
         // It was saved without sleep: the app puts no LMDeploy model to sleep.
         var row = (await admin.JsonAsync(await admin.GetAsync("/api/admin/models"))).GetProperty("models").EnumerateArray().Single(m => m.GetProperty("name").GetString() == "turbo");
         Assert.Equal(("lmdeploy", false), (row.GetProperty("engineKind").GetString(), row.GetProperty("sleep").GetBoolean()));
