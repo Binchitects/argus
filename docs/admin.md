@@ -231,10 +231,15 @@ name is `people.edit`'s and disabling `people.disable`'s. An assignment, a
 role's edit, adding someone to a group (or changing a group's directory
 group), approving a request and a bulk change are refused when they would give
 anyone a permission the one making them does not hold (for everyone, when it
-would be held for everyone). A new password, second factor or API key is made
-only for someone who holds nothing beyond the one asking. The admin group of
-the directory and of company sign-in, the admin group other apps see, and the
-SCIM token are an Owner's to set.
+would be held for everyone). A permission held for some groups is given for
+those groups only: whoever edits the people of team A gives people.edit
+scoped to team A, not to team B nor to everyone, whether by an assignment, a
+group's role or a bulk change; a feature they hold only through such a role
+goes, by a rule, only to the people of those groups. A new password, second
+factor or API key is made only for someone who holds nothing beyond the one
+asking, and so is enabling a disabled person again (one change or in bulk).
+The admin group of the directory and of company sign-in, the admin group other
+apps see, and the SCIM token are an Owner's to set.
 
 **Who may use it**, on a tool's or a knowledge source's card (a model's Details),
 writes rules on that resource: everyone (an allow for everyone), admins (an

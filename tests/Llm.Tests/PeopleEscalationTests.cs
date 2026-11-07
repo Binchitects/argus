@@ -49,6 +49,28 @@ public sealed class PeopleEscalationTests(AppFixture app)
     private static Task<HttpResponseMessage> PatchAsync(TestBrowser b, string path, object body) =>
         b.Http.PatchAsJsonAsync(new Uri(path, UriKind.Relative), body);
 
+    private static async Task<Guid> GroupAsync(TestBrowser admin, string name)
+    {
+        var res = await admin.PostAsync("/api/admin/groups", new { name = name + " " + Guid.NewGuid().ToString("N")[..6] });
+        await StatusAssert.Is(HttpStatusCode.Created, res);
+        return (await admin.JsonAsync(res)).GetProperty("id").GetGuid();
+    }
+
+    private static async Task JoinAsync(TestBrowser admin, Guid group, Guid person) =>
+        await StatusAssert.Is(HttpStatusCode.NoContent, await admin.PostAsync($"/api/admin/groups/{group}/members", new { userIds = new[] { person } }));
+
+    /// <summary>A role given to a person or a group for some groups only.</summary>
+    private static async Task ScopedAsync(TestBrowser admin, Guid role, string kind, Guid subject, params Guid[] groups) =>
+        await StatusAssert.Is(HttpStatusCode.Created, await admin.PostAsync("/api/admin/access/assignments",
+            new { roleId = role, subjectKind = kind, subjectId = subject, scope = new { groups } }));
+
+    private static async Task<Guid> RuleAsync(TestBrowser admin, string effect, string kind, Guid subject, string feature)
+    {
+        var res = await admin.PostAsync("/api/admin/access/rules", new { effect, subjectKind = kind, subjectId = subject, resourceKind = ResourceKinds.Feature, resource = feature });
+        await StatusAssert.Is(HttpStatusCode.Created, res);
+        return (await admin.JsonAsync(res)).GetProperty("id").GetGuid();
+    }
+
     private async Task<bool> IsOwnerAsync(Guid id)
     {
         await using var scope = app.Factory.Services.CreateAsyncScope();
@@ -194,6 +216,113 @@ public sealed class PeopleEscalationTests(AppFixture app)
         await StatusAssert.Is(HttpStatusCode.NoContent, await admin.PostAsync($"/api/admin/groups/{owners}/members", new { userIds = new[] { memberId } }));
         Assert.True(await IsOwnerAsync(memberId));
         await StatusAssert.Is(HttpStatusCode.NoContent, await admin.Http.DeleteAsync(new Uri($"/api/admin/groups/{owners}", UriKind.Relative)));
+    }
+
+    [Fact]
+    [Trait("Control", "IAM-05")]
+    public async Task A_permission_held_for_some_groups_is_given_for_those_groups_only()
+    {
+        var admin = await AdminAsync();
+        var a = await GroupAsync(admin, "Team A");
+        var b = await GroupAsync(admin, "Team B");
+        var edit = await RoleAsync(admin, Permissions.PeopleEdit);
+        // People edit for team A, and giving roles for everyone.
+        var (assignerId, assigner) = await HolderAsync(admin, Permissions.AccessAssign, Permissions.PeopleRead);
+        await ScopedAsync(admin, edit, "Person", assignerId, a);
+        var (otherId, _) = await PersonAsync(admin);
+
+        foreach (var groups in new[] { new[] { b }, new[] { a, b } })
+        {
+            await StatusAssert.Is(HttpStatusCode.BadRequest, await assigner.PostAsync("/api/admin/access/assignments",
+                new { roleId = edit, subjectKind = "Person", subjectId = otherId, scope = new { groups } }));
+        }
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await assigner.PostAsync("/api/admin/access/assignments", new { roleId = edit, subjectKind = "Person", subjectId = otherId }));
+        await StatusAssert.Is(HttpStatusCode.Created, await assigner.PostAsync("/api/admin/access/assignments",
+            new { roleId = edit, subjectKind = "Person", subjectId = otherId, scope = new { groups = new[] { a } } }));
+
+        await using var scope = app.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+        var held = await db.AccessAssignments.Where(x => x.RoleId == edit && x.SubjectId == otherId).ToListAsync();
+        Assert.Equal([a], Assert.Single(held).Scope!.Groups);
+    }
+
+    [Fact]
+    [Trait("Control", "IAM-05")]
+    public async Task Joining_a_group_or_a_bulk_change_gives_a_scoped_role_only_within_the_groups_held()
+    {
+        var admin = await AdminAsync();
+        var a = await GroupAsync(admin, "Team A");
+        var b = await GroupAsync(admin, "Team B");
+        var edit = await RoleAsync(admin, Permissions.PeopleEdit);
+        // Two groups whose members edit people: one of team A's, one of team B's.
+        var forA = await GroupAsync(admin, "Editors of A");
+        var forB = await GroupAsync(admin, "Editors of B");
+        await ScopedAsync(admin, edit, "Group", forA, a);
+        await ScopedAsync(admin, edit, "Group", forB, b);
+        var (memberId, members) = await HolderAsync(admin, Permissions.GroupsMembers, Permissions.AccessManage);
+        await ScopedAsync(admin, edit, "Person", memberId, a);
+        var (otherId, _) = await PersonAsync(admin);
+        var (thirdId, _) = await PersonAsync(admin);
+
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await members.PostAsync($"/api/admin/groups/{forB}/members", new { userIds = new[] { otherId } }));
+        await StatusAssert.Is(HttpStatusCode.Conflict, await members.PostAsync("/api/admin/access/bulk",
+            new { steps = new[] { new { kind = "group.join", groupId = forB } }, people = new[] { thirdId }, dryRun = false }));
+        await StatusAssert.Is(HttpStatusCode.NoContent, await members.PostAsync($"/api/admin/groups/{forA}/members", new { userIds = new[] { otherId } }));
+        await StatusAssert.Is(HttpStatusCode.OK, await members.PostAsync("/api/admin/access/bulk",
+            new { steps = new[] { new { kind = "group.join", groupId = forA } }, people = new[] { thirdId }, dryRun = false }));
+
+        await using var scope = app.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+        Assert.False(await db.GroupMembers.AnyAsync(m => m.GroupId == forB));
+        Assert.Equal(2, await db.GroupMembers.CountAsync(m => m.GroupId == forA));
+    }
+
+    [Fact]
+    [Trait("Control", "IAM-05")]
+    public async Task A_feature_held_through_a_role_for_some_groups_is_given_by_a_rule_to_their_people_only()
+    {
+        var admin = await AdminAsync();
+        var a = await GroupAsync(admin, "Team A");
+        var b = await GroupAsync(admin, "Team B");
+        var without = await GroupAsync(admin, "No video");
+        // The rule writer holds video only through a role for team A: their group's deny overrides Member's.
+        var (writerId, writer) = await HolderAsync(admin, Permissions.AccessRules, Permissions.PeopleRead);
+        await JoinAsync(admin, without, writerId);
+        await RuleAsync(admin, "Deny", "Group", without, Permissions.Video);
+        await ScopedAsync(admin, await RoleAsync(admin, Permissions.Video), "Person", writerId, a);
+        var (inAId, _) = await PersonAsync(admin);
+        var (inBId, _) = await PersonAsync(admin);
+        await JoinAsync(admin, a, inAId);
+        await JoinAsync(admin, b, inBId);
+        var denyA = await RuleAsync(admin, "Deny", "Person", inAId, Permissions.Video);
+        var denyB = await RuleAsync(admin, "Deny", "Person", inBId, Permissions.Video);
+
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await writer.Http.DeleteAsync(new Uri($"/api/admin/access/rules/{denyB}", UriKind.Relative)));
+        await StatusAssert.Is(HttpStatusCode.NoContent, await writer.Http.DeleteAsync(new Uri($"/api/admin/access/rules/{denyA}", UriKind.Relative)));
+
+        await using var scope = app.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<Llm.Core.Data.AppDbContext>();
+        Assert.True(await db.AccessRules.AnyAsync(r => r.Id == denyB));
+        Assert.False(await db.AccessRules.AnyAsync(r => r.Id == denyA));
+    }
+
+    [Fact]
+    [Trait("Control", "IAM-05")]
+    public async Task Enabling_again_is_only_for_who_holds_nothing_beyond_the_one_enabling()
+    {
+        var admin = await AdminAsync();
+        var (_, disabler) = await HolderAsync(admin, Permissions.PeopleDisable, Permissions.AccessManage);
+        var (adminId, _) = await HolderAsync(admin, Permissions.SettingsManage);
+        await StatusAssert.Is(HttpStatusCode.NoContent, await PatchAsync(admin, $"/api/admin/people/{adminId}", new { disabled = true }));
+
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await PatchAsync(disabler, $"/api/admin/people/{adminId}", new { disabled = false }));
+        await StatusAssert.Is(HttpStatusCode.Conflict, await disabler.PostAsync("/api/admin/access/bulk",
+            new { steps = new[] { new { kind = "account.enable" } }, people = new[] { adminId }, dryRun = false }));
+        var person = await admin.JsonAsync(await admin.GetAsync($"/api/admin/people/{adminId}"));
+        Assert.True(person.GetProperty("person").GetProperty("disabled").GetBoolean());
+        // Disabling them is still theirs; an Owner enables them again.
+        await StatusAssert.Is(HttpStatusCode.NoContent, await PatchAsync(admin, $"/api/admin/people/{adminId}", new { disabled = false }));
+        await StatusAssert.Is(HttpStatusCode.NoContent, await PatchAsync(disabler, $"/api/admin/people/{adminId}", new { disabled = true }));
     }
 
     [Fact]

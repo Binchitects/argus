@@ -351,18 +351,78 @@ public sealed class AccessService(AppDbContext db, AccessSnapshotCache cache, IO
         return me.IsOwner ? null : (me, await GrantsAsync(ct));
     }
 
-    /// <summary>
-    /// How far a person holds a permission: 0 not, 1 for some groups only, 2 for everyone. A feature is held or not
-    /// (its rules decide); an admin permission by the roles that give it, and whether one of them is held unscoped.
-    /// </summary>
-    private static int Level(AccessSnapshot s, Principal p, IReadOnlyList<HeldRole> held, string permission, DateTimeOffset now)
+    /// <summary>How far a permission is held: for everyone, or for these scopes only (neither: not held).</summary>
+    private sealed record Hold(bool Everyone, IReadOnlyList<AccessScope> Scopes)
     {
+        public static Hold None { get; } = new(false, []);
+        public static Hold All { get; } = new(true, []);
+        public bool Any => Everyone || Scopes.Count > 0;
+    }
+
+    /// <summary>
+    /// How far a person holds a permission. An admin permission by the roles that give it, and their scopes. A feature is held or
+    /// not (its rules decide); for giving it to others, it is held for everyone unless only roles held for some groups give it.
+    /// </summary>
+    private static Hold HoldOf(AccessSnapshot s, Principal p, IReadOnlyList<HeldRole> held, string permission, DateTimeOffset now)
+    {
+        var giving = held.Where(h => h.Role.Key == BuiltInRoles.Owner || AccessSnapshot.Gives(h.Role, permission)).ToList();
         if (Permissions.IsFeature(permission))
         {
-            return s.Check(p, permission, now).Allowed ? 2 : 0;
+            if (!s.Check(p, permission, now).Allowed)
+            {
+                return Hold.None;
+            }
+            var scoped = giving.Where(h => h.Scope is not null).ToList();
+            if (scoped.Count == 0)
+            {
+                return Hold.All;
+            }
+            // Held without the scoped roles too (Member, a rule): for everyone.
+            var ids = scoped.Select(h => h.AssignmentId).ToHashSet();
+            var without = new AccessSnapshot(s.Version, s.Roles, s.Assignments.Where(a => !ids.Contains(a.Id)), s.Rules);
+            return without.Check(p, permission, now).Allowed ? Hold.All : new Hold(false, [.. scoped.Select(h => h.Scope!)]);
         }
-        var giving = held.Where(h => h.Role.Key == BuiltInRoles.Owner || AccessSnapshot.Gives(h.Role, permission)).ToList();
-        return giving.Count == 0 ? 0 : giving.Any(h => h.Scope is null) ? 2 : 1;
+        return giving.Count == 0 ? Hold.None : giving.Any(h => h.Scope is null) ? Hold.All : new Hold(false, [.. giving.Select(h => h.Scope!)]);
+    }
+
+    /// <summary>Whether the hold reaches one part of a scope: a group (null: any) and a repository pattern (null: any).</summary>
+    private static bool Reaches(Hold hold, Guid? group, string? repo) =>
+        hold.Everyone || hold.Scopes.Any(m => (m.Groups.Count == 0 || (group is { } g && m.Groups.Contains(g)))
+            && (m.Repos.Count == 0 || (repo is { } r && m.Repos.Contains(r, StringComparer.Ordinal))));
+
+    /// <summary>A scope in parts: each group (null: any) with each repository pattern (null: any).</summary>
+    private static IEnumerable<(Guid? Group, string? Repo)> Parts(AccessScope scope) =>
+        from g in scope.Groups.Count == 0 ? [null] : scope.Groups.Select(x => (Guid?)x)
+        from r in scope.Repos.Count == 0 ? [null] : scope.Repos.Select(x => (string?)x)
+        select (g, r);
+
+    /// <summary>Whether a person, for a feature (it is theirs alone), is among the people of the groups the hold is for.</summary>
+    private static bool ReachesPerson(Hold hold, Principal person) =>
+        hold.Everyone || hold.Scopes.Any(m => m.Groups.Any(person.Groups.Contains));
+
+    /// <summary>
+    /// What <paramref name="after"/> holds that neither <paramref name="before"/> held nor <paramref name="mine"/> reaches, in words, or null:
+    /// for everyone where the actor holds it for some groups, or a group (or repository) of its scopes outside both.
+    /// </summary>
+    private static string? Unreached(Hold mine, Hold before, Hold after)
+    {
+        if (after.Everyone)
+        {
+            return before.Everyone || mine.Everyone ? null : "for everyone";
+        }
+        return after.Scopes.SelectMany(Parts).Any(x => !Reaches(before, x.Group, x.Repo) && !Reaches(mine, x.Group, x.Repo))
+            ? "for those groups"
+            : null;
+    }
+
+    /// <summary>The first permission <paramref name="target"/> holds beyond what <paramref name="actor"/> holds (as far, and for the same groups), or null.</summary>
+    private static string? HeldBeyond(AccessSnapshot mineSnapshot, Principal actor, AccessSnapshot theirs, Principal target, DateTimeOffset now)
+    {
+        var mine = mineSnapshot.RolesOf(actor, now);
+        var held = theirs.RolesOf(target, now);
+        return Permissions.All.Select(x => x.Key).FirstOrDefault(k => Permissions.IsFeature(k)
+            ? theirs.Check(target, k, now).Allowed && !ReachesPerson(HoldOf(mineSnapshot, actor, mine, k, now), target)
+            : Unreached(HoldOf(mineSnapshot, actor, mine, k, now), Hold.None, HoldOf(theirs, target, held, k, now)) is not null);
     }
 
     private static string Signature(IReadOnlyList<HeldRole> held) =>
@@ -370,8 +430,9 @@ public sealed class AccessService(AppDbContext db, AccessSnapshotCache cache, IO
 
     /// <summary>
     /// Why the change from <paramref name="before"/> to <paramref name="after"/> gives someone more than <paramref name="actor"/> holds, or null:
-    /// someone made an Owner or no longer one (taken away, disabled, enabled), or a permission someone did not hold (or held for some
-    /// groups only) that the actor does not hold as far.
+    /// someone made an Owner or no longer one (taken away, disabled, enabled); someone enabled again who holds more than the actor; or a
+    /// permission someone did not hold, or held for other groups, that the actor does not hold as far (for everyone, or for those groups;
+    /// a feature for that person's groups).
     /// </summary>
     public static string? Beyond(Membership actor, Grants before, Grants after, DateTimeOffset now)
     {
@@ -380,8 +441,8 @@ public sealed class AccessService(AppDbContext db, AccessSnapshotCache cache, IO
             return null;
         }
         var actorHeld = actor.Snapshot.RolesOf(actor.Principal, now);
-        var mine = new Dictionary<string, int>(StringComparer.Ordinal);
-        int Mine(string permission) => mine.TryGetValue(permission, out var l) ? l : mine[permission] = Level(actor.Snapshot, actor.Principal, actorHeld, permission, now);
+        var mine = new Dictionary<string, Hold>(StringComparer.Ordinal);
+        Hold Mine(string permission) => mine.TryGetValue(permission, out var h) ? h : mine[permission] = HoldOf(actor.Snapshot, actor.Principal, actorHeld, permission, now);
         var rulesChanged = !before.Snapshot.Rules.Select(r => r.Id).Order().SequenceEqual(after.Snapshot.Rules.Select(r => r.Id).Order());
         foreach (var (id, was) in before.People)
         {
@@ -395,6 +456,11 @@ public sealed class AccessService(AppDbContext db, AccessSnapshotCache cache, IO
                 return "Only an Owner makes someone an Owner, takes it away, or disables or enables an Owner.";
             }
             var (p, q) = (was with { Disabled = false }, became with { Disabled = false });
+            // Enabled again: the account handed back, as a reset does; only for someone who holds nothing beyond the actor.
+            if (was.Disabled && !became.Disabled && HeldBeyond(actor.Snapshot, actor.Principal, after.Snapshot, q, now) is { } more)
+            {
+                return $"That would enable someone who holds {more}, which you do not: only someone who holds all they hold does that.";
+            }
             var heldBefore = before.Snapshot.RolesOf(p, now);
             var heldAfter = after.Snapshot.RolesOf(q, now);
             var rolesChanged = Signature(heldBefore) != Signature(heldAfter);
@@ -404,10 +470,22 @@ public sealed class AccessService(AppDbContext db, AccessSnapshotCache cache, IO
             }
             foreach (var permission in Permissions.All.Select(x => x.Key).Where(k => rolesChanged || Permissions.IsFeature(k)))
             {
-                var level = Level(after.Snapshot, q, heldAfter, permission, now);
-                if (level > Level(before.Snapshot, p, heldBefore, permission, now) && level > Mine(permission))
+                // Where it reaches beyond the actor ("" when the actor does not hold it at all), or null.
+                string? where;
+                if (Permissions.IsFeature(permission))
                 {
-                    return $"That would give {permission} to someone, and you do not hold it{(Mine(permission) == 1 ? " for everyone" : "")} yourself: ask an admin who does.";
+                    where = after.Snapshot.Check(q, permission, now).Allowed && !before.Snapshot.Check(p, permission, now).Allowed && !ReachesPerson(Mine(permission), q)
+                        ? Mine(permission).Any ? "for their groups" : ""
+                        : null;
+                }
+                else
+                {
+                    var unreached = Unreached(Mine(permission), HoldOf(before.Snapshot, p, heldBefore, permission, now), HoldOf(after.Snapshot, q, heldAfter, permission, now));
+                    where = unreached is null ? null : Mine(permission).Any ? unreached : "";
+                }
+                if (where is not null)
+                {
+                    return $"That would give {permission} to someone, and you do not hold it{(where.Length > 0 ? " " + where : "")} yourself: ask an admin who does.";
                 }
             }
         }
@@ -442,7 +520,7 @@ public sealed class AccessService(AppDbContext db, AccessSnapshotCache cache, IO
 
     /// <summary>
     /// Why <paramref name="actor"/> may not act on <paramref name="target"/>'s account, or null: an Owner only by an Owner; and with
-    /// <paramref name="credentials"/> (a password, a second factor or a key handed over, which is taking the account), only someone
+    /// <paramref name="credentials"/> (a password, a second factor or a key handed over, or the account enabled again, which is taking it), only someone
     /// who holds nothing beyond the actor.
     /// </summary>
     public async Task<string?> OutranksAsync(AppUser actor, AppUser target, bool credentials, CancellationToken ct = default)
@@ -462,10 +540,7 @@ public sealed class AccessService(AppDbContext db, AccessSnapshotCache cache, IO
         {
             return null;
         }
-        var now = clock.GetUtcNow();
-        var mine = me.Snapshot.RolesOf(me.Principal, now);
-        var theirs = them.Snapshot.RolesOf(p, now);
-        return Permissions.All.Select(x => x.Key).FirstOrDefault(k => Level(them.Snapshot, p, theirs, k, now) > Level(me.Snapshot, me.Principal, mine, k, now)) is { } more
+        return HeldBeyond(me.Snapshot, me.Principal, them.Snapshot, p, clock.GetUtcNow()) is { } more
             ? $"{target.UserName} holds {more}, which you do not: only someone who holds all they hold does that."
             : null;
     }
