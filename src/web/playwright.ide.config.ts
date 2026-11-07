@@ -4,9 +4,10 @@ import { defineConfig, devices } from '@playwright/test'
  * Code Arena's page in a real browser, laid out as people see it, with no stack: Vite serves the page (as
  * vite.code-arena.config.ts builds it) and each test answers its API itself (page.route).
  *   npx playwright test --config playwright.ide.config.ts
- * E2E_CHANNEL=chrome uses the installed Google Chrome instead of Playwright's own browser.
+ * E2E_CHANNEL=chrome uses the installed Google Chrome instead of Playwright's own browser. E2E_IDE_PORT serves it on
+ * another port: two checkouts running these at once would otherwise share one server (the other's code).
  */
-const port = 5179
+const port = Number(process.env.E2E_IDE_PORT) || 5179
 
 export default defineConfig({
   testDir: './e2e-ide',

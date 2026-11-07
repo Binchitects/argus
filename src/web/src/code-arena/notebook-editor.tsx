@@ -51,6 +51,9 @@ export function NotebookEditor({ path }: { path: string }) {
   const [editing, setEditing] = useState<string | null>(null)
   const [runs, setRuns] = useState<Record<string, RunState>>({})
   const [monaco, setMonaco] = useState<MonacoModule | null>(null)
+  // How many times the file was read (opened, or changed by anything else): a cell's editor takes its text then only,
+  // never an echo of its own typing (a render behind the keys would put back what was there a key ago).
+  const [revision, setRevision] = useState(0)
   const busy = Object.values(runs).some((r) => r.state === 'running' || r.state === 'queued')
   const kernel = useQuery({ ...kernelQuery(path), refetchInterval: busy ? 2000 : false })
   const edRef = useRef(ed)
@@ -123,6 +126,7 @@ export function NotebookEditor({ path }: { path: string }) {
         if (before) parsed.cells = parsed.cells.map((c, i) => (before.cells[i] && before.cells[i]!.type === c.type ? { ...c, id: before.cells[i]!.id } : c))
         nbRef.current = parsed
         setNb(parsed)
+        setRevision((r) => r + 1)
         setSelected((s) => s ?? parsed.cells[0]?.id ?? null)
       }
       read()
@@ -365,6 +369,7 @@ export function NotebookEditor({ path }: { path: string }) {
               monaco={monaco}
               theme={theme}
               options={settings.all(language)}
+              revision={revision}
               selected={selected === cell.id}
               editing={editing === cell.id}
               run={runs[cell.id]}
@@ -406,6 +411,7 @@ export function NotebookEditor({ path }: { path: string }) {
 
 interface CellProps {
   cell: Cell
+  revision: number
   index: number
   language: string
   monaco: MonacoModule
@@ -428,7 +434,7 @@ interface CellProps {
   onRemove: () => void
 }
 
-function CellView({ cell, index, language, monaco, theme, options, selected, editing, run, bindBox, bindEditor, onSelect, onSource, onEditorKeys, onCommandKeys, onRun, onEdit, onClearOutputs, onMove, onType, onRemove }: CellProps) {
+function CellView({ revision, cell, index, language, monaco, theme, options, selected, editing, run, bindBox, bindEditor, onSelect, onSource, onEditorKeys, onCommandKeys, onRun, onEdit, onClearOutputs, onMove, onType, onRemove }: CellProps) {
   const code = cell.type === 'code'
   const label = `${code ? 'Code' : cell.type === 'markdown' ? 'Markdown' : 'Raw'} cell ${index + 1}`
   const tool = (name: string, icon: ReactNode, onClick: () => void, disabled = false) => (
@@ -475,6 +481,7 @@ function CellView({ cell, index, language, monaco, theme, options, selected, edi
             <div onKeyDownCapture={onEditorKeys} className="overflow-hidden rounded border bg-background">
               <CellEditor
                 source={cell.source}
+                revision={revision}
                 language={code ? language : cell.type === 'markdown' ? 'markdown' : 'plaintext'}
                 monaco={monaco}
                 theme={theme}
@@ -514,6 +521,8 @@ function CellView({ cell, index, language, monaco, theme, options, selected, edi
 /** A cell's editor: Monaco, as tall as its text, with the workbench's settings for its language. */
 const CellEditor = memo(function CellEditor(p: {
   source: string
+  /** The file's reads: its text is taken from `source` when this changes. */
+  revision: number
   language: string
   monaco: MonacoModule
   theme: string
@@ -571,11 +580,11 @@ const CellEditor = memo(function CellEditor(p: {
       editor.current = null
     }
   }, [p.monaco])
-  // The cell's text changed from outside (the file read again): the editor takes it.
+  // The file read again (changed outside): the editor takes the cell's text, when it is another.
   useEffect(() => {
     const model = editor.current?.getModel()
-    if (model && model.getValue() !== p.source) model.setValue(p.source)
-  }, [p.source])
+    if (model && model.getValue() !== latest.current.source) model.setValue(latest.current.source)
+  }, [p.revision])
   useEffect(() => {
     const model = editor.current?.getModel()
     if (model && model.getLanguageId() !== p.language) p.monaco.monaco.editor.setModelLanguage(model, p.language)
