@@ -655,7 +655,9 @@ full the models kept loaded would make it.
     it as it is stored: leave Quantisation empty).
   The engines pick their kernels themselves; nothing more is set for FP4. The
   GPU probe (`services/gpu-probe.py`) says each NVIDIA GPU's compute
-  capability; without it the common GPUs are known by their names.
+  capability; without it the common GPUs are known by their names. What was
+  measured, and the plan for the H200 host, are in
+  [multi-gpu-server.md](multi-gpu-server.md#fp4-on-hopper).
 - **Moving a model to another engine.** A model moves at runtime, with the stack
   running: llama.cpp to vLLM or SGLang and back, and between vLLM and SGLang (or
   another machine's engine of a kind). Each chat model's card says its engine

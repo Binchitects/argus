@@ -36,6 +36,11 @@ public sealed class PrecisionTests
         Assert.Equal((Precision.Mxfp4, "MXFP4", 4.25, true), (oss.Format, oss.Label, oss.Bits, oss.WeightsOnly));
         Assert.Equal(Precision.Fp8, Load("Qwen3.8-Flash-Next-FP8").Checkpoint!.Format);
         Assert.Equal(Precision.Fp8, Load("DeepSeek-V4-Flash").Checkpoint!.Format);
+        // The small copies fp4-bench.py measures (Qwen/Qwen3-0.6B-FP8, mgoin/Qwen3-0.6B-NVFP4: compressed-tensors, W4A4).
+        Assert.Equal((Precision.Fp8, "fp8"), (Load("Qwen3-0.6B-FP8").Checkpoint!.Format, Load("Qwen3-0.6B-FP8").Checkpoint!.Method));
+        var small = Load("Qwen3-0.6B-NVFP4").Checkpoint!;
+        Assert.Equal((Precision.Nvfp4, "compressed-tensors", false), (small.Format, small.Method, small.WeightsOnly));
+        Assert.Equal("W4A16", Precision.On(small, EngineKinds.Vllm, [Rtx3090])!.Runs);
     }
 
     [Fact]
