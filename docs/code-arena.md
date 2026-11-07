@@ -1198,9 +1198,8 @@ colour themes. So ESLint, GitLens, debuggers and language features need
 Code Arena's own way: ESLint as the project's check (Problems), Source
 control and its compares, Run and Debug's adapters, Prettier and the others
 as formatters, and the language servers themselves (below) for completions,
-definitions and errors. An extension with nothing Code Arena uses is refused. A
-project's own `.vscode/*.code-snippets` and your own snippets files are not
-read yet: only an extension's.
+definitions and errors. An extension with nothing Code Arena uses is refused.
+The project's own snippets and yours are read too: see [Snippets](#snippets).
 
 Extensions are kept in code-arena's data folder, in
 `extensions/<publisher.name>-<version>/` with only the files their
@@ -1214,6 +1213,39 @@ and a path in its `package.json` that leads out of the extension is left out.
 An extension's files are served to the page only when its contributions name
 them, never as a page of its own (an SVG runs no script). Monaco cannot take a
 language back: one an extension added stays until the page reloads.
+### Snippets
+
+Snippets come from three places, as in VS Code, and are suggested as you type
+(and with **Ctrl+Space**) in the files they are for:
+
+- **The project's**: every `.vscode/*.code-snippets` file of the folder, and of
+  each folder added to the workspace (shared with the team when committed).
+- **Yours**: the files in code-arena's config folder under `snippets/`, as
+  VS Code's `User/snippets`: `python.json` is for Python files alone,
+  `NAME.code-snippets` for the languages each snippet names.
+- **An extension's** (see [Extensions](#extensions)).
+
+A snippet is VS Code's: its `prefix` (one or a list), its `body` (a line or a
+list of lines), its `description`, and in a `.code-snippets` file its `scope`
+(`"typescript,javascript"`; none: every language). `include` and `exclude`
+(a glob, or a list) limit it to some files: a glob with no `/` is matched
+against the file's name (`*.test.ts`), one with a `/` against its path in the
+folder (`src/**`). The body takes VS Code's syntax: `$1`, `${2:name}`,
+`${3|one,two|}`, `$0`, and the variables (`$TM_FILENAME`,
+`$TM_SELECTED_TEXT`, `$CURRENT_YEAR`, `$UUID`…). The suggestion says
+**Workspace Snippet** or **User Snippet**.
+
+- **Snippets: Configure Snippets** (the palette) lists the snippets files there
+  are, makes a new one for every project (**New Global Snippets file…**) or for
+  this folder (**New Snippets file for this folder…**, in `.vscode/`), or opens
+  a language's own (`snippets/python.json`), made with an example first.
+- **Snippets: Insert Snippet** chooses one of the file's snippets by name and
+  inserts it at the cursor; **Snippets: Surround With Snippet** lists those that
+  take the selection (`$TM_SELECTED_TEXT`) and puts the selection in it.
+
+A snippets file saved in the editor, or changed on disk, applies at once. A
+file larger than 1 MB is not read (the first 100 files are).
+
 ### Language servers
 
 The editor speaks the Language Server Protocol, as VS Code does: open a file

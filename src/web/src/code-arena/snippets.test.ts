@@ -1,6 +1,7 @@
 import type * as Monaco from 'monaco-editor'
 import { describe, expect, it } from 'vitest'
-import { readSnippets, snippetSuggestions } from './snippets'
+import { isSnippetsFile, snippetsOf } from './project-snippets'
+import { applies, readSnippets, snippetSuggestions } from './snippets'
 
 const kinds = { CompletionItemKind: { Snippet: 27 }, CompletionItemInsertTextRule: { InsertAsSnippet: 4 } } as unknown as Parameters<typeof snippetSuggestions>[0]
 
@@ -45,5 +46,51 @@ describe("VS Code's snippets", () => {
     })
     // A snippet scoped to Python is offered in Python's files only.
     expect(snippetSuggestions(kinds, snippets, model('python', { startColumn: 1, endColumn: 1 }), at(1, 1)).map((i) => i.insertText)).toEqual(['console.log($1)\n$0', 'console.log($1)\n$0', "if __name__ == '__main__':\n\t$0"])
+  })
+
+  it("takes include and exclude: a glob with no folder by the file's name, else by its path", () => {
+    const [test, notGen] = readSnippets(`{
+      "Test": { "prefix": "it", "body": "it('$1', () => {})", "include": "*.test.ts" },
+      "Not generated": { "prefix": "fn", "body": "function $1() {}", "include": ["src/**"], "exclude": ["**/generated/**"] },
+    }`)
+    expect(test!.include).toEqual(['*.test.ts'])
+    expect(applies(test!, 'typescript', 'src/a.test.ts')).toBe(true)
+    expect(applies(test!, 'typescript', 'src/a.ts')).toBe(false)
+    // A file with no path (a compare's side): only a snippet with no include.
+    expect(applies(test!, 'typescript', null)).toBe(false)
+    expect(applies(notGen!, 'typescript', 'src/x/a.ts')).toBe(true)
+    expect(applies(notGen!, 'typescript', 'src/generated/a.ts')).toBe(false)
+    expect(applies(notGen!, 'typescript', 'lib/a.ts')).toBe(false)
+    const items = snippetSuggestions(kinds, [test!, notGen!], model('typescript', { startColumn: 1, endColumn: 1 }), at(1, 1), 'src/a.test.ts')
+    expect(items.map((i) => (i.label as { label: string }).label)).toEqual(['it', 'fn'])
+  })
+})
+
+describe("the project's and the person's snippets", () => {
+  it('reads each file: a user NAME.json is for its language, each says where it is from', () => {
+    const snippets = snippetsOf({
+      problems: [],
+      files: [
+        { source: 'project', path: '.vscode/team.code-snippets', language: null, version: '1', text: '{ "Header": { "prefix": "hdr", "body": "// (c) $CURRENT_YEAR" } }' },
+        { source: 'user', path: 'user:snippets/python.json', language: 'python', version: '2', text: '{ "Main": { "prefix": "main", "body": "if __name__ == 1:\\n\\t$0" } }' },
+        { source: 'user', path: 'user:snippets/mine.code-snippets', language: null, version: '3', text: '{ "TS": { "prefix": "ts", "body": "x", "scope": "typescript" } }' },
+      ],
+    })
+    expect(snippets.map((s) => [s.name, s.from, s.scope])).toEqual([
+      ['Header', 'Workspace Snippet', undefined],
+      ['Main', 'User Snippet', ['python']],
+      ['TS', 'User Snippet', ['typescript']],
+    ])
+    const labels = (language: string) => snippetSuggestions(kinds, snippets, model(language, { startColumn: 1, endColumn: 1 }), at(1, 1), 'a.py').map((i) => i.label)
+    expect(labels('python')).toEqual([{ label: 'hdr', description: 'Header (Workspace Snippet)' }, { label: 'main', description: 'Main (User Snippet)' }])
+    expect(labels('typescript').map((l) => (l as { label: string }).label)).toEqual(['hdr', 'ts'])
+  })
+
+  it('knows the files whose saving reads the snippets again', () => {
+    expect(isSnippetsFile('.vscode/team.code-snippets')).toBe(true)
+    expect(isSnippetsFile('/srv/lib/.vscode/lib.code-snippets')).toBe(true)
+    expect(isSnippetsFile('user:snippets/python.json')).toBe(true)
+    expect(isSnippetsFile('.vscode/settings.json')).toBe(false)
+    expect(isSnippetsFile('src/a.code-snippets')).toBe(false)
   })
 })

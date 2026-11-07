@@ -202,6 +202,14 @@ export const tasks: HelpTask[] = [
     ],
   },
   {
+    title: "Make the project's own snippets, or your own",
+    steps: [
+      'Run **Snippets: Configure Snippets** from the palette.',
+      'Choose **New Snippets file for this folder…** (in .vscode/, for the team), **New Global Snippets file…** (every project), or a language for its own file.',
+      'Write the snippet (the example shows how) and save: its prefix is suggested as you type. **Snippets: Insert Snippet** lists them all.',
+    ],
+  },
+  {
     title: 'Get completions, definitions and errors from a language server',
     steps: [
       'Install the language server for the language (typescript-language-server, pyright, gopls, rust-analyzer, clangd…): the status bar says which, and how, when it is missing.',

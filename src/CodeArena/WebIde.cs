@@ -485,6 +485,10 @@ internal sealed partial class WebApp
                         : _userFiles.Write(name, text, body.Str("version")), ct);
                     return true;
                 }
+                case ("GET", "/api/snippets"):
+                    // The project's .vscode/*.code-snippets (the folder's and each added folder's) and the person's own.
+                    await res.JsonAsync(200, IdeSnippets.List([_rt.Workspace.Root, .. Folders.Added(_state).Where(_rt.Workspace.Allowed)], _files.Show, _rt.Env.Paths.ConfigDir), ct);
+                    return true;
                 case ("GET", "/api/user-files/vscode"):
                     await res.JsonAsync(200, _userFiles.FromVsCode(Query(req, "name"), _rt.Env.Env), ct);
                     return true;

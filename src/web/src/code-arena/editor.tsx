@@ -25,6 +25,7 @@ import { GroupStoreContext, newGroupStore, openIn, openToSide, OwnEditorContext,
 import { acceptChange, allFilesQuery, changesQuery, changeTexts, gitShow, gitStageText, gitStatusQuery, keepBackup, listBackups, nameOf, rawFileUrl, readFile, revertChange, saveWorkspaceState, skillsQuery, symbolsQuery, userFileQuery, within, workspaceStateQuery, writeFile, writeUserFile, type Change, type CheckProblem, type OpenedFile, type Saved, type UserFileName } from './ide-api'
 import { addDebugActions, installDebugEditor } from './debug/editor-debug'
 import { installExtensions } from './extensions'
+import { installSnippets, isSnippetsFile, snippetsChanged } from './project-snippets'
 import { bindEditorContext, keymap, useKeyFor } from './keyboard'
 import { monacoDefaults, monacoKeybinding } from './keys'
 import { installFormatting, lineEdit, minimalEdit, offerFormatting } from './format'
@@ -169,9 +170,12 @@ async function readAny(path: string): Promise<OpenedFile> {
 }
 
 async function writeAny(path: string, text: string, version: string | null): Promise<Saved> {
-  if (!isUserFile(path)) return writeFile(path, text, version)
-  const saved = await writeUserFile(path.slice(5) as UserFileName, text, version)
-  return { path, version: saved.version, size: text.length }
+  const saved: Saved = isUserFile(path)
+    ? { path, version: (await writeUserFile(path.slice(5) as UserFileName, text, version)).version, size: text.length }
+    : await writeFile(path, text, version)
+  // A snippets file saved: its snippets are suggested from now on.
+  if (isSnippetsFile(path)) snippetsChanged()
+  return saved
 }
 
 // The workbench's own pages, loaded the first time they open.
@@ -639,6 +643,7 @@ export function EditorProvider({ children, group = 1, detached = false }: { chil
         files.current.set(path, f)
         markProblems(m, model, problemsOf.current.filter((p) => p.path === path))
         installFormatting({ m, queryClient, settings: (language) => settingsRef.current.all(language) })
+        installSnippets(m, queryClient)
         if (!isUserFile(path)) void offerFormatting(path, language.id)
         return f
       })()

@@ -94,11 +94,15 @@ internal sealed partial class UserFiles(string configDir)
     }
 
     private string Full(string? name) =>
-        name is not null && (Names.Contains(name) || SkillFile().IsMatch(name))
+        name is not null && (Names.Contains(name) || SkillFile().IsMatch(name) || SnippetsFile().IsMatch(name))
             ? Path.Combine([configDir, .. name.Split('/')])
-            : throw new IdeError(400, "invalid", "Ask for settings.json, keybindings.json or one of your skills (skills/NAME/SKILL.md).");
+            : throw new IdeError(400, "invalid", "Ask for settings.json, keybindings.json, one of your skills (skills/NAME/SKILL.md) or snippets files (snippets/NAME.json or .code-snippets).");
 
     /// <summary>A skill of the person's own, as the Skills view names it.</summary>
     [GeneratedRegex("^skills/[a-z0-9][a-z0-9_-]{0,63}/SKILL\\.md$")]
     private static partial Regex SkillFile();
+
+    /// <summary>A snippets file of the person's own, as VS Code's User/snippets: one per language (python.json) or a .code-snippets.</summary>
+    [GeneratedRegex("^snippets/[A-Za-z0-9][A-Za-z0-9._-]{0,63}\\.(json|code-snippets)$")]
+    private static partial Regex SnippetsFile();
 }

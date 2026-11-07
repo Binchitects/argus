@@ -377,6 +377,12 @@ async function configure(m: MonacoModule, l: LanguageContribution & { extension:
   }
 }
 
+/** The enabled extensions' snippets for a language (Monaco's id), for Insert Snippet. */
+export async function extensionSnippets(language: string): Promise<Snippet[]> {
+  const files = state.contributions.snippets.filter((s) => !s.language || monacoLanguageId(s.language) === language)
+  return (await Promise.all(files.map(snippetsOf))).flat()
+}
+
 /** A snippets file, read once (none when it cannot be). */
 function snippetsOf(s: SnippetContribution & { extension: string; version: string }): Promise<Snippet[]> {
   const key = fileKey(s)

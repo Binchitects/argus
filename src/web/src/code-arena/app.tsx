@@ -36,7 +36,7 @@ import { EditorArea, EditorProvider } from './editor'
 import { groupCommands, GroupStoreContext, openToSide } from './editor-groups'
 import { userFile } from './editor-options'
 import { CodeRefsProvider } from './refs'
-import { rankFiles, useEditor } from './editor-state'
+import { loadMonaco, rankFiles, useEditor } from './editor-state'
 import { Explorer } from './explorer'
 import { HelpProvider } from './help'
 import { useOpenHelp } from './help-context'
@@ -64,7 +64,8 @@ import { SearchPanel } from './search'
 import { SettingsProvider, useSettings, workspaceSettingsPath } from './settings'
 import { allColorThemes, allIconThemes, themeNamed } from './settings-schema'
 import { previewTheme, useSeeingSync, useShownTheme, useThemeSync } from './theme'
-import { ensureTheme } from './extensions'
+import { ensureTheme, extensionSnippets } from './extensions'
+import { configureSnippets, insertSnippet, isSnippetsFile, snippetsChanged } from './project-snippets'
 import { ExtensionsView } from './extensions-view'
 import { appendElement } from './jsonc'
 import { Splitter } from './splitter'
@@ -653,6 +654,7 @@ function Workbench({
       read(changesQuery.queryKey)
       // A skill or command written by hand (or by the agent) is listed at once.
       read(skillsQuery.queryKey)
+      if (!d || d.changes.some((c) => isSnippetsFile(c.path))) snippetsChanged()
       if (!d) {
         void refresh()
         read(['code', 'files'])
@@ -1217,6 +1219,9 @@ function Workbench({
     { id: 'workbench.action.addRootFolder', category: 'Workspaces', title: 'Add Folder to Workspace…', run: async () => {
       if (await chooseAndAddFolder()) await queryClient.invalidateQueries({ queryKey: foldersQuery.queryKey })
     } },
+    { id: 'workbench.action.openSnippets', category: 'Snippets', title: 'Configure Snippets', run: () => void configureSnippets((path) => ed.open(path), ed.languages(), queryClient) },
+    { id: 'editor.action.insertSnippet', category: 'Snippets', title: 'Insert Snippet', enabled: () => file, run: () => void loadMonaco().then(async (m) => insertSnippet(m, ed.activeModel(), await extensionSnippets(ed.activeModel()?.getLanguageId() ?? ''))) },
+    { id: 'editor.action.surroundWithSnippet', category: 'Snippets', title: 'Surround With Snippet', enabled: () => file, run: () => void loadMonaco().then(async (m) => insertSnippet(m, ed.activeModel(), await extensionSnippets(ed.activeModel()?.getLanguageId() ?? ''), true)) },
     { id: 'workbench.action.files.save', category: 'File', title: 'Save', enabled: () => savable, run: () => void ed.save() },
     { id: 'workbench.action.files.saveAll', category: 'File', title: 'Save All', run: () => void ed.saveAll() },
     { id: 'workbench.action.closeActiveEditor', category: 'View', title: 'Close Editor', enabled: () => !!active, run: () => active && void ed.close(active.id) },
