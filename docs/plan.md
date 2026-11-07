@@ -67,7 +67,9 @@ program, and Edge or Chrome 109.
    `service_contracts` for agents. Design: [argus-graph.md](design/argus-graph.md),
    31 commits; the headline is reachable at commit 27. Done: 1 (access kept as
    GitLab project ids, repository row ids never reused), 2 (the allowlist in
-   the SQL of the graph tools, impact_of and semantic search).
+   the SQL of the graph tools, impact_of and semantic search), 3 (a name several
+   repositories provide settled only by the user's own manifests; candidates
+   shared among the readable).
 2. **The app's own gateway**, commits 10 to 21 of
    [own-gateway.md](design/own-gateway.md). LiteLLM goes only after the
    measured gates and a day's soak.

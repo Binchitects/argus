@@ -84,8 +84,6 @@ public static class LinkKinds
         return settled switch
         {
             "settled:manifest" => prior * 0.95,
-            "settled:file" => prior * 0.80,
-            "settled:graph" => prior * 0.70,
             _ => prior,
         };
     }

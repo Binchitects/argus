@@ -273,7 +273,7 @@ public sealed class GraphTests(Xunit.Abstractions.ITestOutputHelper output)
             (byPackage, "App.csproj", "<Project><ItemGroup><PackageReference Include=\"Acme.B\" /></ItemGroup></Project>"),
             (byPackage, "One.cs", "using Acme.Shared;"),
             (byPackage, "Two.cs", "using Acme.Shared;"),
-            // The same file's other use says it.
+            // The same file's other use (of a) does not say it: a reader who may not read a would get an answer of a's.
             (byFile, "One.cs", "using Acme.Only;\nusing Acme.Shared;"),
             // Nothing says it.
             (unsure, "One.cs", "using Acme.Shared;"),
@@ -300,19 +300,16 @@ public sealed class GraphTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.Equal(1 - (1 - 0.97) * (1 - 0.8075), edge.Double("confidence"), 4);
         Assert.Equal(("strong", "package:nuget,import:csharp"), (edge.Str("tier"), edge.Str("kinds")));
 
-        // By the same file: Acme.Only is a's alone, so its Acme.Shared is a's too (0.85 × 0.8, less on one file).
-        var byItsFile = Of(byFile, a, "import:csharp")!;
-        Assert.Equal(("settled:file", "likely"), (byItsFile.How, byItsFile.Tier));
-        Assert.Equal(0.578, byItsFile.Confidence, 4);
-        Assert.Contains("same file", byItsFile.Evidence["why"]!.ToString());
-        Assert.Null(Of(byFile, b, "import:csharp"));
+        // Not by the same file's other uses: a candidate of each, as with nothing to say it.
+        Assert.Equal("candidate", Of(byFile, a, "import:csharp")!.Tier);
+        Assert.Equal("candidate", Of(byFile, b, "import:csharp")!.Tier);
 
         // Unsettled: a candidate of each, never walked, and says which.
         var candidate = Of(unsure, a, "import:csharp")!;
         Assert.Equal(("candidate", 0.425), (candidate.Tier, candidate.Confidence));
         Assert.Equal(["g/a", "g/b"], candidate.Evidence["candidates"]!.AsArray().Select(n => n!.ToString()));
         Assert.Equal("candidate", Of(unsure, b, "import:csharp")!.Tier);
-        Assert.Equal(1, stats["candidate"]);
+        Assert.Equal(2, stats["candidate"]);
 
         // Tests only: kept as test scope, never walked by default.
         Assert.Equal("test", Of(testsOnly, a, "import:csharp", "Acme.Only")!.Scope);
@@ -330,6 +327,36 @@ public sealed class GraphTests(Xunit.Abstractions.ITestOutputHelper output)
     sealed record Link(string How, string Scope, double Confidence, string Tier, long Files, long Providers, JsonNode Evidence);
 
     /// <summary>Writes files into repositories as an index run would, with what they declare.</summary>
+    [Fact]
+    public void A_name_several_provide_is_never_settled_by_what_a_reader_cannot_read_and_its_share_is_of_the_readable()
+    {
+        using var ix = new TestIndex();
+        var a = ix.Repo(1, "g/a");
+        var b = ix.Repo(2, "g/b");
+        var c = ix.Repo(3, "g/c");
+        var user = ix.Repo(4, "g/user");
+        Index(ix,
+            (a, "src/Shared.cs", "namespace Acme.Shared;"),
+            (a, "src/Only.cs", "namespace Acme.Only;"),
+            (b, "src/Shared.cs", "namespace Acme.Shared;"),
+            (c, "src/Shared.cs", "namespace Acme.Shared;"),
+            // The file also uses Acme.Only, a's alone: that must not settle Acme.Shared as a's.
+            (user, "One.cs", "using Acme.Only;\nusing Acme.Shared;"));
+        Graph.RebuildLinks(ix.Conn);
+
+        // Someone who may read the user's repository and b, not a or c: b is a candidate of one they may read.
+        var estate = GraphQueries.Load([user, b], ix.Conn);
+        var possible = Assert.Single(estate.Possible, p => p.Name == "Acme.Shared");
+        Assert.Equal(b, possible.To);
+        Assert.Equal(["g/b"], possible.Candidates);
+        Assert.Equal(0.85, possible.Confidence, 3);
+        Assert.DoesNotContain("g/a", estate.Possible.SelectMany(p => p.Candidates));
+        // Someone who reads all three providers: a third each.
+        var all = GraphQueries.Load([user, a, b, c], ix.Conn).Possible.Where(p => p.Name == "Acme.Shared").ToList();
+        Assert.Equal(3, all.Count);
+        Assert.All(all, p => Assert.Equal(0.85 / 3, p.Confidence, 3));
+    }
+
     static void Index(TestIndex ix, params (long Repo, string Path, string Content)[] files)
     {
         foreach (var (repo, path, content) in files)

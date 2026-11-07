@@ -66,16 +66,18 @@ not independent votes). A package reference (0.97) and the imports it brings
 ## A name several repositories provide
 
 Two repositories can both declare `namespace Acme.Shared`. A use of it is
-settled by what else the user has, in this order:
+settled only by what the user's own repository says it builds with:
 
 1. A package reference or submodule of one of them (the prior × 0.95).
-2. The same file's other uses, each provided by one repository (× 0.80).
-3. The user's other links, likely or strong (× 0.70).
-4. The same name, settled in another of the user's files.
+2. The same name, settled that way in another of the user's files.
 
-Otherwise it is a **candidate** of each provider, at the prior divided by
-how many provide it. A candidate is kept with its evidence and listed, never
-walked.
+Nothing else settles it: not the same file's other uses, nor the user's other
+links, since those are made of other repositories, and someone who may not read
+them would get an answer built from what they cannot see. Otherwise it is a
+**candidate** of each provider. A candidate is kept with its evidence and
+listed, never walked. Its share is the prior divided by how many providers the
+person asking may read, and only those are named: neither the share nor the
+list depends on repositories they cannot read.
 
 ## Scope and origin
 

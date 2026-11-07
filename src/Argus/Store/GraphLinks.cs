@@ -260,8 +260,6 @@ public static partial class Graph
         void Count(string state) => stats[state] = stats.GetValueOrDefault(state) + 1;
         var evidence = new Dictionary<(long From, long To, string Kind, string Name), Evidence>();
         var pending = new List<Pending>();
-        // Which projects each file's uses resolved to uniquely: what settles a name its other uses agree on.
-        var perFile = new Dictionary<long, HashSet<long>>();
         var memo = new Dictionary<(string Kind, string Name, long From), Match>();
 
         // A name several provide that nothing settled is a candidate of each, kept apart: it is never walked.
@@ -329,8 +327,6 @@ public static partial class Graph
                     {
                         var to = match.Projects.First();
                         Add(from, to, kind, form, match.Matched, match.How, 1).Use(fileId, path, line, scope);
-                        if (!perFile.TryGetValue(fileId, out var tied)) perFile[fileId] = tied = [];
-                        tied.Add(to);
                         break;
                     }
                     case "ambiguous":
@@ -350,14 +346,14 @@ public static partial class Graph
             for (var i = 0; i < d.Long("weight"); i++) ev.MainFiles.Add(-(i + 1));
         }
 
-        // A name several repositories provide: settled by what else the user has of one of them, else a candidate of each.
+        // A name several repositories provide: settled only by the user repository's own manifests and submodules (what it
+        // says it builds with), else a candidate of each, chosen among those a reader may read when asked. Nothing else of
+        // other repositories settles it (the same file's other uses, the user's other links): a reader who may not read
+        // them would get an answer made of what they cannot see.
         var manifest = new Dictionary<long, HashSet<long>>();
-        var graph = new Dictionary<long, HashSet<long>>();
         foreach (var ((from, to, kind, _), ev) in evidence)
         {
             var project = byId[to].GitlabId;
-            if (!graph.TryGetValue(from, out var g)) graph[from] = g = [];
-            if (ev.Prior >= LinkKinds.Walked) g.Add(project);
             if (ev.MainFiles.Count > 0 && (kind.StartsWith("package:", StringComparison.Ordinal) || kind == "repository" || kind == "ci:include"))
             {
                 if (!manifest.TryGetValue(from, out var m)) manifest[from] = m = [];
@@ -370,7 +366,7 @@ public static partial class Graph
         {
             var candidates = p.Match.Projects.Where(defaultRow.ContainsKey).ToHashSet();
             (long To, string How)? pick = null;
-            foreach (var (how, tied) in new[] { ("settled:manifest", manifest.GetValueOrDefault(p.From.Id)), ("settled:file", perFile.GetValueOrDefault(p.FileId)), ("settled:graph", graph.GetValueOrDefault(p.From.Id)) })
+            foreach (var (how, tied) in new[] { ("settled:manifest", manifest.GetValueOrDefault(p.From.Id)) })
             {
                 if (tied is null) continue;
                 var both = candidates.Where(tied.Contains).ToList();
@@ -436,7 +432,7 @@ public static partial class Graph
                 var why = ev.Why ?? (ev.Candidate
                     ? $"{name} is provided by several repositories; nothing the user has settles which"
                     : ev.How.StartsWith("settled:", StringComparison.Ordinal)
-                        ? $"{name} is provided by several repositories; {ev.How[8..] switch { "manifest" => "a package or submodule of this one", "file" => "the same file's other uses", "name" => "the same name in its other files", _ => "the user's other links" }} settles it"
+                        ? $"{name} is provided by several repositories; {ev.How[8..] switch { "manifest" => "a package or submodule of this one", _ => "the same name in its other files, settled by a package or submodule of this one" }} settles it"
                         : $"{ev.MainFiles.Count + ev.TestFiles.Count} file(s) use {name}");
                 var json = new JsonObject
                 {

@@ -113,7 +113,7 @@ public static class GraphQueries
         var estatePossible = new List<Possible>();
         var readable = repos.Values.Where(r => r.Default).Select(r => r.Path.ToLowerInvariant()).ToHashSet(StringComparer.Ordinal);
         foreach (var l in Sql.Query(conn,
-                     "SELECT from_repo_id, to_repo_id, kind, name, layer, scope, how, files, confidence, tier, evidence FROM repo_links " +
+                     "SELECT from_repo_id, to_repo_id, kind, name, layer, scope, how, files, providers, confidence, tier, evidence FROM repo_links " +
                      $"WHERE from_repo_id {Queries.InAllowed} AND to_repo_id {Queries.InAllowed} ORDER BY confidence DESC, files DESC", allowJson, allowJson))
         {
             var (from, to) = (l.Long("from_repo_id"), l.Long("to_repo_id"));
@@ -128,7 +128,11 @@ public static class GraphQueries
                 var why = tier == "candidate"
                     ? $"{l.Str("name")} is provided by {candidates.Count} repositories you may read; nothing the user has settles which"
                     : evidence?["why"]?.ToString();
-                estatePossible.Add(new Possible(from, to, l.Str("kind"), l.Str("name"), l.Double("confidence"), tier, why, candidates));
+                // A candidate's share is of the providers the caller may read, never of all there are (stored: prior / k).
+                var confidence = tier == "candidate" && candidates.Count > 0
+                    ? Math.Round(l.Double("confidence") * Math.Max(2, l.Long("providers")) / Math.Max(1, candidates.Count), 4)
+                    : l.Double("confidence");
+                estatePossible.Add(new Possible(from, to, l.Str("kind"), l.Str("name"), confidence, tier, why, candidates));
                 continue;
             }
             if (!edges.TryGetValue((from, to), out var edge) || !filter.Layers.Contains(l.Str("layer")) || l.Str("scope") == "test" && !filter.IncludeTests) continue;
