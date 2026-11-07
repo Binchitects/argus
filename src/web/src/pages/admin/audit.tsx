@@ -4,11 +4,14 @@ import { useMemo, useState } from 'react'
 import { PageHeader } from '@/components/app/page-header'
 import { QueryError } from '@/components/app/query-state'
 import { Segmented } from '@/components/app/segmented'
+import { TimeWindow } from '@/components/app/time-window'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DataTable, SortHeader, type ColumnDef } from '@/components/ui/data-table'
 import { api } from '@/lib/api'
 import { ago, when } from '@/lib/format'
+import { allTime, reportPresets } from '@/lib/time'
+import { useTimeWindow } from '@/lib/use-time-window'
 import { toCsv } from './audit-csv'
 
 export interface AuditEvent {
@@ -64,10 +67,17 @@ const columns: ColumnDef<AuditEvent>[] = [
 
 export function AuditPage() {
   const [filter, setFilter] = useState<'all' | 'failed' | 'sign-in' | 'people' | 'settings' | 'argus' | 'operations'>('all')
+  // What happened in a window, in the address; every event until one is chosen.
+  const time = useTimeWindow({ from: allTime.from, to: 'now' })
   const events = useInfiniteQuery({
-    queryKey: ['admin', 'audit'],
+    queryKey: ['admin', 'audit', time.key],
     initialPageParam: null as number | null,
-    queryFn: ({ pageParam, signal }) => api<AuditEvent[]>(`/api/admin/audit?take=${PAGE}${pageParam ? `&before=${pageParam}` : ''}`, { signal }),
+    queryFn: ({ pageParam, signal }) => {
+      const p = time.query()
+      p.set('take', String(PAGE))
+      if (pageParam) p.set('before', String(pageParam))
+      return api<AuditEvent[]>(`/api/admin/audit?${p}`, { signal })
+    },
     getNextPageParam: (last) => (last.length === PAGE ? last[last.length - 1]!.id : undefined),
   })
   const all = useMemo(() => events.data?.pages.flat() ?? [], [events.data])
@@ -86,9 +96,12 @@ export function AuditPage() {
         title="Audit log"
         description="Every sign-in and every change to people, settings and the code index: who, to whom, from where."
         actions={
-          <Button variant="outline" onClick={download} disabled={!shown.length}>
-            <Download /> Export CSV
-          </Button>
+          <>
+            <TimeWindow value={time.range} onChange={time.set} presets={[allTime, ...reportPresets]} />
+            <Button variant="outline" onClick={download} disabled={!shown.length}>
+              <Download /> Export CSV
+            </Button>
+          </>
         }
       />
       {events.error ? (

@@ -3,13 +3,14 @@ import { Timer } from 'lucide-react'
 import { useState } from 'react'
 import { PageHeader } from '@/components/app/page-header'
 import { QueryError } from '@/components/app/query-state'
-import { RangeSelect } from '@/components/app/range-select'
+import { TimeWindow } from '@/components/app/time-window'
 import { Badge } from '@/components/ui/badge'
 import { DataTable, SortHeader, type ColumnDef } from '@/components/ui/data-table'
 import { EmptyState } from '@/components/ui/empty-state'
 import { api } from '@/lib/api'
 import { ago, formatValue, when } from '@/lib/format'
-import { resolve } from '@/lib/time'
+import { dashboardWindowPresets } from '@/lib/time'
+import { useTimeWindow } from '@/lib/use-time-window'
 import { seconds, toolTitle } from '@/pages/chat/format'
 import { TraceSheet } from './trace-view'
 import type { TraceSummary } from './traces-api'
@@ -98,14 +99,12 @@ const columns = (open: (id: string) => void): ColumnDef<TraceSummary>[] => [
  * sizes and tool names only: never what was asked or answered.
  */
 export function TracesPage() {
-  const [range, setRange] = useState('now-24h')
+  // The window, in the address: the live ones (the last minutes, ending now) and the calendar's, or two days.
+  const time = useTimeWindow({ from: 'now-24h', to: 'now' })
   const [open, setOpen] = useState<string | null>(null)
   const list = useQuery({
-    queryKey: ['admin', 'traces', 'list', range],
-    queryFn: ({ signal }) => {
-      const to = new Date()
-      return api<{ answers: TraceSummary[] }>(`/api/admin/traces?from=${resolve(range, to).toISOString()}&to=${to.toISOString()}&limit=100`, { signal })
-    },
+    queryKey: ['admin', 'traces', 'list', time.key],
+    queryFn: ({ signal }) => api<{ answers: TraceSummary[] }>(`/api/admin/traces?${time.query()}&limit=100`, { signal }),
     placeholderData: keepPreviousData,
   })
   return (
@@ -113,7 +112,7 @@ export function TracesPage() {
       <PageHeader
         title="Traces"
         description="The slowest answers, across people, and where their time went. Times, tokens and tool names only: never what was said."
-        actions={<RangeSelect value={range} onChange={setRange} />}
+        actions={<TimeWindow value={time.range} onChange={time.set} presets={dashboardWindowPresets} />}
       />
       {list.error ? (
         <QueryError error={list.error} retry={() => list.refetch()} />

@@ -1041,13 +1041,18 @@ does Usage by group. Each export is audited.
 ### Time windows
 
 Every report and dashboard page (Usage & cost, the admin's dashboards, Usage
-by group, a project's page, and Argus's own overview and people) has the same
-**time window**: a preset (from the last hours to the last year, today, this
-week, this month, last month) or a **custom range** between two days, at most
-400 days. The chargeback stays by whole months. The window is kept in the page's
-address (`?from=…&to=…`, as the dashboards' links always had), so a link
-opens the same view, and the browser's back button goes back to the window
-before.
+by group and its chargeback, a project's page, Traces, Logs, the Leaderboard,
+the Audit log, the Prompt log, Feedback, and Argus's own overview, people and
+Settings) has the same **time window**: a preset (from the last hours to the
+last year, today, this week, this month, last month) or a **custom range**
+between two days, at most 400 days. Traces and Logs offer the live ones too
+(the last five minutes on), and **Live** in Logs follows a window that ends
+now. The Leaderboard, the Audit log, the Prompt log and Feedback start at
+**All time**. The chargeback is by whole months: its presets are months (this
+month to the last twelve, this year), and a custom range counts each month it
+touches. The window is kept in the page's address (`?from=…&to=…`, as the
+dashboards' links always had), so a link opens the same view, and the
+browser's back button goes back to the window before.
 
 ## Science lab
 

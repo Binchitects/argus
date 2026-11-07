@@ -186,6 +186,26 @@ public static class PlatformApi
             return Json(result);
         });
 
+        // The person's own spend in a window (?from=&to=, both days in), as Admin → People reads everyone's; none: the budget period's.
+        api.MapGet("/me/usage", async (HttpContext ctx) =>
+        {
+            var window = Window(ctx.Request);
+            if (window is { Problem: { } problem }) return Error(problem, 400);
+            if (gateway is not { CanAdminister: true }) return Error("No model gateway is configured.", 503);
+            var user = CurrentUser(ctx)!;
+            try
+            {
+                var (spend, budget, _) = await gateway.UserInfo(user.Email);
+                if (window is { First: var first, Last: var last }) spend = (await gateway.SpendBetween(first, last)).GetValueOrDefault(user.Email);
+                return Json(new JsonObject
+                {
+                    ["spend"] = spend, ["max_budget"] = budget,
+                    ["window"] = window is null ? null : new JsonObject { ["from"] = $"{window.First:yyyy-MM-dd}", ["to"] = $"{window.Last:yyyy-MM-dd}" },
+                });
+            }
+            catch (GatewayError exc) { return Error(exc.Message, 502); }
+        });
+
         api.MapPost("/me/password", async (HttpContext ctx) =>
         {
             var user = CurrentUser(ctx)!;

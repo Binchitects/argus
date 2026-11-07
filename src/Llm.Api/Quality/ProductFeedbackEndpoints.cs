@@ -74,9 +74,15 @@ public static class ProductFeedbackEndpoints
         return Results.Created($"/api/feedback/{f.Id}", new { f.Id, f.Kind, f.Text, f.Page, f.Status, f.CreatedAt });
     }
 
-    private static async Task<IResult> ListAsync(string? status, AppDbContext db)
+    /// <summary>What was sent, the newest first, by status; from and to: only what was sent in that window (the counts too).</summary>
+    private static async Task<IResult> ListAsync(string? status, DateTimeOffset? from, DateTimeOffset? to, AppDbContext db)
     {
-        var rows = db.ProductFeedback.AsNoTracking();
+        if (from >= to)
+        {
+            return AuthEndpoints.Problem(400, "range", "The range must start before it ends.");
+        }
+        var sent = db.ProductFeedback.AsNoTracking().Where(f => (from == null || f.CreatedAt >= from) && (to == null || f.CreatedAt < to));
+        var rows = sent;
         if (status is { Length: > 0 } s && s != "all")
         {
             rows = rows.Where(f => f.Status == s);
@@ -84,7 +90,7 @@ public static class ProductFeedbackEndpoints
         var list = await rows.OrderByDescending(f => f.CreatedAt).Take(500).ToListAsync();
         var ids = list.Select(f => f.UserId).Concat(list.Where(f => f.AnsweredBy != null).Select(f => f.AnsweredBy!.Value)).Distinct().ToList();
         var people = await db.Users.AsNoTracking().Where(u => ids.Contains(u.Id)).ToDictionaryAsync(u => u.Id, u => new { u.Id, u.UserName, u.DisplayName });
-        var counts = await db.ProductFeedback.AsNoTracking().GroupBy(f => f.Status).Select(g => new { g.Key, n = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.n);
+        var counts = await sent.GroupBy(f => f.Status).Select(g => new { g.Key, n = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.n);
         return Results.Ok(new
         {
             items = list.Select(f => new

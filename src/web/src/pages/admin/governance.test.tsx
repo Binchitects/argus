@@ -113,6 +113,25 @@ describe('retention and credit per group', () => {
     expect(calls.some((c) => c.path === `/api/admin/groups/chargeback?from=${from}&to=${to}`)).toBe(true)
     expect(screen.getByRole('link', { name: 'CSV' })).toHaveAttribute('href', `/api/admin/groups/chargeback?from=${from}&to=${to}&format=csv`)
   })
+
+  it('the chargeback takes the shared time window, kept in the address: whole months, or the months a custom range touches', async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/groups': () => ({ json: [] }),
+      'GET /api/admin/groups/chargeback': (_b, _i, url) => ({ json: { from: url.searchParams.get('from'), to: url.searchParams.get('to'), rows: [] } }),
+    })
+    const { router } = renderApp('/admin/groups?from=2026-01-05&to=2026-03-10')
+    const range = await screen.findByRole('combobox', { name: 'Time range' })
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/admin/groups/chargeback?from=2026-01&to=2026-03')).toBe(true))
+    await userEvent.click(range)
+    for (const name of ['This month', 'Last month', 'Last 3 months', 'Last 6 months', 'Last 12 months', 'This year', 'Custom range…']) expect(await screen.findByRole('option', { name })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('option', { name: 'Last 12 months' }))
+    expect(new URLSearchParams(router.state.location.search).get('from')).toBe('now-11M/M')
+    const now = new Date()
+    const first = new Date(now.getFullYear(), now.getMonth() - 11, 1)
+    const month = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    await waitFor(() => expect(calls.some((c) => c.path === `/api/admin/groups/chargeback?from=${month(first)}&to=${month(now)}`)).toBe(true))
+    expect(screen.queryByLabelText('From')).not.toBeInTheDocument()
+  })
 })
 
 describe('legal hold and exports', () => {

@@ -338,9 +338,14 @@ public static class AdminEndpoints
     }
 
     /// <param name="actor">Only what this person did (their duties, as Admin → Access hands them out).</param>
-    private static async Task<IResult> AuditAsync(AppDbContext db, int take = 200, long? before = null, Guid? actor = null)
+    /// <summary>The audit log, newest first, a page at a time (before: the last id seen); from and to: what happened in that window.</summary>
+    private static async Task<IResult> AuditAsync(AppDbContext db, int take = 200, long? before = null, Guid? actor = null, DateTimeOffset? from = null, DateTimeOffset? to = null)
     {
-        var q = db.AuditEvents.AsNoTracking();
+        if (from >= to)
+        {
+            return AuthEndpoints.Problem(400, "range", "The range must start before it ends.");
+        }
+        var q = db.AuditEvents.AsNoTracking().Where(e => (from == null || e.At >= from) && (to == null || e.At < to));
         if (actor is { } who)
         {
             q = q.Where(e => e.ActorId == who);

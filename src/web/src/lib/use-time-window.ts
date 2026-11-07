@@ -1,5 +1,5 @@
 import { useSearchParams } from 'react-router'
-import { dashboardRange, maxRangeDays, rangeKey, resolve, resolveRange, type TimeRange } from './time'
+import { allTime, dashboardRange, maxRangeDays, rangeKey, resolve, resolveRange, type TimeRange } from './time'
 
 /**
  * A page's time window, kept in its address (from and to, as the dashboards' links have them) so a link opens the same
@@ -22,10 +22,11 @@ export function useTimeWindow(fallback: TimeRange = { from: 'now-30d', to: 'now'
     set,
     /** The window as two times, worked out now (a window ending now moves with the clock). */
     resolved: () => resolveRange(range),
-    /** The window as the API's from and to (ISO times). */
+    /** The window as the API's from and to (ISO times); All time gives no start, and no end while it ends now. */
     query: () => {
       const r = resolveRange(range)
-      return new URLSearchParams({ from: r.from.toISOString(), to: r.to.toISOString() })
+      if (range.from !== allTime.from) return new URLSearchParams({ from: r.from.toISOString(), to: r.to.toISOString() })
+      return new URLSearchParams(range.to === 'now' ? {} : { to: r.to.toISOString() })
     },
   }
 }

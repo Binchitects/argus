@@ -1,15 +1,14 @@
 import { useQuery } from '@tanstack/react-query'
 import { Download } from 'lucide-react'
-import { useState } from 'react'
 import { QueryError } from '@/components/app/query-state'
+import { TimeWindow } from '@/components/app/time-window'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { DataTable, SortHeader, type ColumnDef } from '@/components/ui/data-table'
-import { Field } from '@/components/ui/field'
-import { Input } from '@/components/ui/input'
 import { money } from '@/lib/format'
-import { chargebackPath, chargebackQuery, monthOf, type ChargeRow } from './groups-api'
+import { useTimeWindow } from '@/lib/use-time-window'
+import { chargebackPath, chargebackQuery, monthPresets, monthsOf, type ChargeRow } from './groups-api'
 
 const kinds: Record<ChargeRow['kind'], string> = { group: 'Group', 'cost centre': 'Cost centre', none: '' }
 
@@ -32,14 +31,12 @@ const columns: ColumnDef<ChargeRow>[] = [
   { id: 'credit', header: 'Credit', accessorFn: (r) => r.credit ?? '', cell: ({ row: { original: r } }) => <span className="tabular-nums">{r.credit === null ? '—' : money(r.credit)}</span> },
 ]
 
-const valid = (m: string) => /^\d{4}-\d{2}$/.test(m)
-
-/** Spend per group and cost centre, month by month, to charge back; CSV for the finance team. */
+/** Spend per group and cost centre, month by month, to charge back; CSV for the finance team. The window is in the address. */
 export function ChargebackCard() {
-  const [from, setFrom] = useState(() => monthOf(new Date(), 2))
-  const [to, setTo] = useState(() => monthOf(new Date()))
-  const ok = valid(from) && valid(to) && from <= to
-  const report = useQuery({ ...chargebackQuery(from, to), enabled: ok })
+  const time = useTimeWindow({ from: 'now-2M/M', to: 'now' })
+  // The months the window touches: a custom range of days counts each month it is in.
+  const { from, to } = monthsOf(time.resolved())
+  const report = useQuery(chargebackQuery(from, to))
   return (
     <Card>
       <CardHeader>
@@ -54,21 +51,16 @@ export function ChargebackCard() {
         ) : (
           <DataTable
             columns={columns}
-            data={ok ? report.data?.rows : []}
-            loading={ok && report.isPending}
+            data={report.data?.rows}
+            loading={report.isPending}
             noun="rows"
             getRowId={(r) => `${r.month}|${r.kind}|${r.name}`}
             initialSorting={[{ id: 'month', desc: true }]}
-            empty={ok ? 'No spend in these months.' : 'Choose months from before to.'}
+            empty={from === to ? `No spend in ${from}.` : `No spend from ${from} to ${to}.`}
             toolbar={
               <div className="flex flex-wrap items-end gap-2">
-                <Field label="From" className="w-36">
-                  <Input type="month" value={from} onChange={(e) => setFrom(e.target.value)} />
-                </Field>
-                <Field label="To" className="w-36">
-                  <Input type="month" value={to} onChange={(e) => setTo(e.target.value)} />
-                </Field>
-                <Button variant="outline" asChild disabled={!ok}>
+                <TimeWindow value={time.range} onChange={time.set} presets={monthPresets} />
+                <Button variant="outline" asChild>
                   <a href={chargebackPath(from, to, true)} download>
                     <Download /> CSV
                   </a>

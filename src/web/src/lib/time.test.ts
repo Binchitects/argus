@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { rangeLabel, resolve, resolveRange } from './time'
+import { allTime, rangeLabel, resolve, resolveRange } from './time'
 import { customProblem } from './use-time-window'
 
 // A Wednesday afternoon, in the test's time zone.
@@ -36,5 +36,9 @@ describe('time windows', () => {
     expect(customProblem('2026-10-02', '2026-10-01')).toBe('The first day comes before the last.')
     expect(customProblem('2024-01-01', '2026-10-01')).toBe('A range is at most 400 days.')
     expect(customProblem('2026-10-01', '2026-10-01')).toBeNull()
+  })
+  it('reads All time from the start of time, and names it', () => {
+    expect(resolve(allTime.from, now)).toEqual(new Date(0))
+    expect(rangeLabel({ from: allTime.from, to: 'now' })).toBe('All time')
   })
 })

@@ -48,6 +48,9 @@ export const reportPresets: Preset[] = [
   { label: 'Last month', from: 'now-1M/M', to: 'now-1M/M' },
 ]
 
+/** Every time there is: a log or a board read whole (the API is given no start). */
+export const allTime: Preset = { label: 'All time', from: 'all' }
+
 /** The ranges a dashboard offers: its live ones, then the report ones it lacks. */
 export const dashboardWindowPresets: Preset[] = [...dashboardPresets, ...reportPresets.filter((p) => !dashboardPresets.some((m) => m.from === p.from))]
 
@@ -130,6 +133,7 @@ function roundTo(d: Date, unit: string, up: boolean): Date {
  */
 export function resolve(t: string, now: Date = new Date(), up = false): Date {
   if (t === 'now') return now
+  if (t === allTime.from) return new Date(0)
   const m = /^now-(\d+)([smhdwMy])$/.exec(t)
   if (m) return new Date(now.getTime() - Number(m[1]) * units[m[2]!]!)
   const rounded = /^now(?:-(\d+)([smhdwMy]))?\/([dwMy])$/.exec(t)
@@ -181,6 +185,7 @@ const unitNames: Record<string, string> = { s: 'second', m: 'minute', h: 'hour',
 
 /** "Last hour", "Last 30 minutes", or the two times of a range that does not end now (the day once when both are on it). */
 export function rangeLabel(r: TimeRange): string {
+  if (r.from === allTime.from && r.to === 'now') return allTime.label
   const named = [...presets, ...dashboardPresets].find((p) => p.from === r.from && r.to === 'now')?.label
   if (named) return named
   const preset = reportPresets.find((p) => p.from === r.from && (p.to ?? 'now') === r.to)?.label
