@@ -124,6 +124,18 @@ contract changed: every file's declarations are read anew), as it was after
 v5.4, when Go, Java, Kotlin, Rust and `.proto` files began to be indexed and
 the manifests to be kept for what they declare.
 
+## Secrets in configuration files
+
+A repository's `.env`, `.properties` and `appsettings*.json` files are read for
+the runtime links they declare (hosts, topics, databases), then stored with
+their secret values taken out: a value whose key names a password, secret,
+token or key, a connection string's password, and anything with a token's shape
+become `[removed: secret]` (or the token's kind) in the stored text and its
+search. Keys, hosts and placeholders (`${VAR}`, `<...>`) are kept, and so is a
+key about a secret that is not one (`TOKEN_URL`, `PASSWORD_MIN_LENGTH`). Files
+an earlier release stored whole are masked once, when the indexer next opens the
+index. Code is never changed.
+
 ## Keeping the index current
 
 Four things keep the index fresh, and the first two are independent:

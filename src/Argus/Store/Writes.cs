@@ -125,6 +125,29 @@ public static class Writes
         return fileId;
     }
 
+    /// <summary>Every configuration file stored before its secrets were taken out, masked now (its search text too). Returns how many changed.</summary>
+    public static int MaskStoredConfigs(SqliteConnection conn)
+    {
+        var changed = 0;
+        var rows = Sql.Query(conn,
+            "SELECT id, path, content FROM files WHERE basename = '.env' OR basename LIKE '.env.%' OR basename LIKE '%.env'" +
+            " OR basename LIKE '%.properties' OR (lower(basename) LIKE 'appsettings%' AND lower(basename) LIKE '%.json')");
+        foreach (var row in rows)
+        {
+            var path = row.Str("path");
+            var masked = ConfigSecrets.Mask(path, row.Str("content"));
+            if (masked == row.Str("content")) continue;
+            Atomic(conn, () =>
+            {
+                FtsDelete(conn, row);
+                Sql.Exec(conn, "UPDATE files SET content = ? WHERE id = ?", masked, row["id"]);
+                Sql.Exec(conn, "INSERT INTO files_fts(rowid, path, content) VALUES (?, ?, ?)", row["id"], path, masked);
+            });
+            changed++;
+        }
+        return changed;
+    }
+
     public static void DeleteFile(SqliteConnection conn, long repoId, string path) =>
         Atomic(conn, () =>
         {

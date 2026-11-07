@@ -69,7 +69,8 @@ program, and Edge or Chrome 109.
    GitLab project ids, repository row ids never reused), 2 (the allowlist in
    the SQL of the graph tools, impact_of and semantic search), 3 (a name several
    repositories provide settled only by the user's own manifests; candidates
-   shared among the readable).
+   shared among the readable), 4 (secrets taken out of configuration files
+   before they are stored, and out of those stored before).
 2. **The app's own gateway**, commits 10 to 21 of
    [own-gateway.md](design/own-gateway.md). LiteLLM goes only after the
    measured gates and a day's soak.

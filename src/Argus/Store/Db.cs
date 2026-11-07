@@ -79,7 +79,18 @@ public static class Db
     {
         var conn = Connect(dbPath);
         Migrate(conn);
+        RunPending(conn);
         return conn;
+    }
+
+    /// <summary>The one-time tasks a migration left for code (pending_tasks), each run once and then taken off the list.</summary>
+    public static void RunPending(SqliteConnection conn)
+    {
+        foreach (var task in Sql.Query(conn, "SELECT name FROM pending_tasks").Select(r => r.Str("name")).ToList())
+        {
+            if (task == "mask-config-secrets") Writes.MaskStoredConfigs(conn);
+            Sql.Exec(conn, "DELETE FROM pending_tasks WHERE name = ?", task);
+        }
     }
 
     /// <summary>Open the index read-only. The server must never write index data.</summary>

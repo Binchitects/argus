@@ -144,10 +144,12 @@ public static class Worker
             {
                 var content = Utf8.DecodeReplace(data);
                 var lang = Filters.DetectLang(change.Path);
+                // What a configuration file declares is read from it as it is; it is stored with its secrets taken out.
+                var decls = Links.Extract(change.Path, lang, content);
                 var fileId = Writes.UpsertFile(conn, rid, change.Path, lang, data.Length,
-                    shas.GetValueOrDefault(change.Path, ""), content);
+                    shas.GetValueOrDefault(change.Path, ""), ConfigSecrets.Mask(change.Path, content));
                 Writes.ReplaceIncludes(conn, rid, fileId, Includes.Extract(content));
-                Writes.ReplaceDecls(conn, rid, fileId, Links.Extract(change.Path, lang, content));
+                Writes.ReplaceDecls(conn, rid, fileId, decls);
                 if (!Filters.HasSymbols(lang))
                 {
                     // A manifest: what it declares is read; ctags has nothing to say about it.
