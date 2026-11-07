@@ -28,6 +28,8 @@ export interface SettingDef {
    * Code takes a theme it does not have (it reads as the nearest one).
    */
   open?: boolean
+  /** A string setting that takes true and false too, as VS Code's git.autoRepositoryDetection does. */
+  booleans?: boolean
 }
 
 const lang = 'language' as const
@@ -55,17 +57,37 @@ export interface ColorTheme {
 /** Monaco's theme for one of the app's colour themes, light or dark (monaco.ts defines them). */
 export const arenaMonacoTheme = (family: ColorThemeId, kind: 'light' | 'dark') => (family === 'default' ? `arena-${kind}` : `arena-${family}-${kind}`)
 
-/** The name of one of the app's colour themes, light or dark, in settings.json: "Code Arena Dark", "Sakura Light"... */
+/** The name of one of the app's colour themes, light or dark, in settings.json: "Code Arena Dark", "Sakura Light"...; VS Code's by their names there ("Default Dark+", "Solarized Light"). */
 export const familyThemeName = (family: ColorThemeId, kind: 'light' | 'dark') =>
-  `${family === 'default' ? 'Code Arena' : colorThemeOf(family).label} ${kind === 'light' ? 'Light' : 'Dark'}`
+  colorThemeOf(family).vscode?.names[kind] ?? `${family === 'default' ? 'Code Arena' : colorThemeOf(family).label} ${kind === 'light' ? 'Light' : 'Dark'}`
 
 /** The themes Code Arena has, by VS Code's names for their kind: the app's colour themes, each dark and light, then VS Code's own. */
 export const colorThemes: ColorTheme[] = [
   ...appColorThemes.flatMap((t) => (['dark', 'light'] as const).map((kind) => ({ name: familyThemeName(t.id, kind), kind, monaco: arenaMonacoTheme(t.id, kind), family: t.id }))),
   { name: 'Dark (Visual Studio)', kind: 'dark', monaco: 'vs-dark' },
   { name: 'Light (Visual Studio)', kind: 'light', monaco: 'vs' },
-  { name: 'High Contrast', kind: 'dark', monaco: 'hc-black' },
-  { name: 'High Contrast Light', kind: 'light', monaco: 'hc-light' },
+]
+
+/** VS Code's other names for its themes (older ones, and those extensions give), as the ones here. */
+const otherNames: [RegExp, string][] = [
+  [/high contrast.*light|light.*high contrast/, 'Default High Contrast Light'],
+  [/high contrast/, 'Default High Contrast'],
+  [/light\+|light \(visual studio code\)/, 'Default Light+'],
+  [/dark\+|dark \(visual studio code\)/, 'Default Dark+'],
+  [/light modern/, 'Default Light Modern'],
+  [/dark modern/, 'Default Dark Modern'],
+  [/monokai.*light/, 'Monokai Light'],
+  [/monokai/, 'Monokai'],
+  [/solarized.*light/, 'Solarized Light'],
+  [/solarized/, 'Solarized Dark'],
+  [/one light|atom one light/, 'One Light'],
+  [/one dark/, 'One Dark Pro'],
+  [/alucard|dracula.*light/, 'Alucard'],
+  [/dracula/, 'Dracula'],
+  [/github.*light/, 'GitHub Light'],
+  [/github/, 'GitHub Dark'],
+  [/nord.*light|snow ?storm/, 'Nord Light'],
+  [/nord/, 'Nord'],
 ]
 
 let extensionThemes: ColorTheme[] = []
@@ -78,12 +100,13 @@ export function setExtensionThemes(list: ColorTheme[]) {
 /** Every theme offered: Code Arena's, then the extensions'. */
 export const allColorThemes = (): ColorTheme[] => [...colorThemes, ...extensionThemes]
 
-/** A theme by its name; one Code Arena does not have (VS Code's Default Dark Modern, Light+…) as the nearest of its own. */
+/** A theme by its name; one Code Arena does not have by that name (an older VS Code name, "Solarized Dark (Bright)") as the nearest of its own. */
 export function themeNamed(name: string | undefined): ColorTheme {
   const exact = colorThemes.find((t) => t.name === name) ?? extensionThemes.find((t) => t.name === name)
   if (exact) return exact
   const n = (name ?? '').toLowerCase()
-  if (n.includes('high contrast')) return colorThemes.find((t) => t.name === (n.includes('light') ? 'High Contrast Light' : 'High Contrast'))!
+  const other = otherNames.find(([match]) => match.test(n))
+  if (other) return colorThemes.find((t) => t.name === other[1])!
   return colorThemes.find((t) => t.name === (n.includes('light') ? 'Code Arena Light' : 'Code Arena Dark'))!
 }
 
@@ -155,6 +178,9 @@ export const settingDefs: SettingDef[] = [
   { key: 'git.confirmSync', type: 'boolean', default: true, description: 'Asks before Sync pulls and pushes.', category: 'Source Control' },
   { key: 'git.enableStatusBarSync', type: 'boolean', default: true, description: 'Shows the branch\'s commits to pull and push in the status bar, and syncs them on a click.', category: 'Source Control' },
   { key: 'git.rebaseWhenSync', type: 'boolean', default: false, description: 'Pull and Sync rebase the branch on its upstream, not merge it.', category: 'Source Control' },
+  { key: 'git.autoRepositoryDetection', type: 'string', booleans: true, default: true, enum: ['subFolders', 'openEditors'], description: 'Which repositories Source Control shows besides the folder\'s own and the added folders\': true, those in its folders (down to "git.repositoryScanMaxDepth") and those of the files open; "subFolders" or "openEditors", one of the two; false, neither.', category: 'Source Control' },
+  { key: 'git.repositoryScanMaxDepth', type: 'integer', default: 1, minimum: -1, maximum: 10, description: 'How many levels of folders are looked into for repositories (-1: as deep as 10 levels).', category: 'Source Control' },
+  { key: 'git.repositoryScanIgnoredFolders', type: 'array', items: 'string', default: ['node_modules'], description: 'The folders not looked into for repositories, by name.', category: 'Source Control' },
   { key: 'git.decorations.enabled', type: 'boolean', default: true, description: "Shows git's changes in the Explorer (modified, untracked, added) and dims what the repository ignores.", category: 'Source Control' },
   { key: 'problems.decorations.enabled', type: 'boolean', default: true, description: "Shows the files with problems in the Explorer: errors and warnings coloured, and their folders too.", category: 'Workbench' },
   { key: 'breadcrumbs.enabled', type: 'boolean', default: true, description: 'Shows the breadcrumbs over the editor: the folders, the file and the symbols the cursor is in.', category: 'Workbench' },
@@ -211,6 +237,14 @@ export const settingDefs: SettingDef[] = [
   { key: 'files.eol', type: 'string', default: 'auto', enum: ['\n', '\r\n', 'auto'], enumDescriptions: ['LF', 'CRLF', "The system's"], description: 'The line ending of new files.', category: 'Files', scope: lang },
   { key: 'files.associations', type: 'object', default: {}, description: 'Languages for files by name or pattern, e.g. {"*.inc": "php"}.', category: 'Files' },
   // Workbench
+  // Accessibility: VS Code's own (the zoom, high contrast as the system asks, motion), and what Code Arena adds over any theme.
+  { key: 'window.zoomLevel', type: 'number', default: 0, minimum: -5, maximum: 9, description: 'The whole page larger or smaller, its text and everything else: each step 20% (1: 120%, -1: about 83%), as VS Code\'s. Ctrl+= and Ctrl+- change it, Ctrl+Numpad0 puts it back. The editor keeps "editor.fontSize".', category: 'Accessibility' },
+  { key: 'window.autoDetectHighContrast', type: 'boolean', default: true, description: 'When the system asks for more contrast (or forces its colours), shows Default High Contrast (or High Contrast Light), as VS Code does.', category: 'Accessibility' },
+  { key: 'workbench.reduceMotion', type: 'string', default: 'auto', enum: ['auto', 'on'], enumDescriptions: ['As the system asks (less motion when it says so)', 'No animation, whatever the system says'], description: 'Animations in the workbench and its menus.', category: 'Accessibility' },
+  { key: 'codeArena.accessibility.contrast', type: 'string', default: 'standard', enum: ['standard', 'more'], enumDescriptions: ["The theme's own", 'Secondary text as the text, borders and fields that stand out, a full-strength focus ring'], description: 'More contrast over any colour theme (Default High Contrast goes further).', category: 'Accessibility' },
+  { key: 'codeArena.accessibility.textSize', type: 'string', default: '100%', enum: ['100%', '112%', '125%', '150%'], description: "The workbench's text larger, the rest as it is (\"window.zoomLevel\" makes everything larger).", category: 'Accessibility' },
+  { key: 'codeArena.accessibility.focusRings', type: 'string', default: 'standard', enum: ['standard', 'strong'], enumDescriptions: ['A ring in the accent', "A solid ring in the text's colour"], description: 'How what the keyboard is on is marked.', category: 'Accessibility' },
+  { key: 'codeArena.accessibility.colorBlindColors', type: 'boolean', default: false, description: "Blue and orange where red and green say added and removed, passed and failed: a compare's lines, the gutter's changes, git's letters, the tests.", category: 'Accessibility' },
   { key: 'workbench.colorTheme', type: 'string', default: 'Code Arena Dark', get enum() { return allColorThemes().map((t) => t.name) }, open: true, description: 'The colour theme (Ctrl+K Ctrl+Alt+T): Code Arena\'s (its own, Sakura, Midnight, Copper, Forest, Ocean and Lavender, each light and dark: the whole page takes its colours), or one an extension brings. VS Code\'s theme names that are not here read as the nearest of Code Arena\'s.', category: 'Workbench' },
   { key: 'window.autoDetectColorScheme', type: 'boolean', default: true, description: 'Follows the system\'s light or dark: "workbench.preferredLightColorTheme" or "workbench.preferredDarkColorTheme". (VS Code: off.)', category: 'Workbench' },
   { key: 'workbench.preferredDarkColorTheme', type: 'string', default: 'Code Arena Dark', get enum() { return allColorThemes().map((t) => t.name) }, open: true, description: 'The theme when the system is dark, with "window.autoDetectColorScheme".', category: 'Workbench' },
@@ -273,7 +307,8 @@ export function settingsSchema(): Record<string, unknown> {
     type: d.type === 'integer' ? 'integer' : d.type,
     default: d.default,
     description: d.description,
-    ...(d.enum && !d.open ? { enum: d.enum, enumDescriptions: d.enumDescriptions } : {}),
+    ...(d.enum && !d.open && !d.booleans ? { enum: d.enum, enumDescriptions: d.enumDescriptions } : {}),
+    ...(d.booleans ? { type: undefined, anyOf: [{ type: 'boolean' }, { type: 'string', enum: d.enum }] } : {}),
     // Other values are taken too: the known ones are offered.
     ...(d.enum && d.open ? { anyOf: [{ enum: d.enum }, { type: 'string' }] } : {}),
     ...(d.minimum !== undefined ? { minimum: d.minimum } : {}),
@@ -292,6 +327,7 @@ export function settingsSchema(): Record<string, unknown> {
 /** A setting's value as written, checked against its definition: the value, or why it is not taken. */
 export function check(d: SettingDef, v: unknown): string | null {
   const t = Array.isArray(v) ? 'array' : v === null ? 'null' : typeof v
+  if (d.booleans && t === 'boolean') return null
   if (d.type === 'integer' ? !Number.isInteger(v) : d.type === 'number' ? t !== 'number' : t !== d.type) return `"${d.key}" takes ${d.type === 'array' ? 'an array' : d.type === 'object' ? 'an object' : `a ${d.type}`}.`
   if (d.enum && !d.open && !d.enum.includes(v as string)) return `"${d.key}" is one of ${d.enum.map((e) => JSON.stringify(e)).join(', ')}.`
   if (typeof v === 'number' && ((d.minimum !== undefined && v < d.minimum) || (d.maximum !== undefined && v > d.maximum))) return `"${d.key}" is from ${d.minimum ?? '…'} to ${d.maximum ?? '…'}.`

@@ -296,6 +296,34 @@ describe('account', () => {
     expect(localStorage.getItem('theme')).toBe('dark')
   })
 
+  it('makes the page easier to see: more contrast, larger text, a larger page, strong focus, no motion, colour-blind safe colours', async () => {
+    fakeApi(member)
+    renderApp('/account')
+    const card = (await screen.findByRole('heading', { name: 'Easier to see' })).closest('[id="easier-to-see"]') as HTMLElement
+    const root = document.documentElement.dataset
+    await userEvent.click(within(card).getByRole('switch', { name: 'More contrast' }))
+    expect(root.contrast).toBe('more')
+    await userEvent.click(within(within(card).getByRole('radiogroup', { name: 'Text size' })).getByRole('radio', { name: '125%' }))
+    expect(root.text).toBe('125')
+    await userEvent.click(within(within(card).getByRole('radiogroup', { name: 'Page size' })).getByRole('radio', { name: '150%' }))
+    expect(root.scale).toBe('150')
+    await userEvent.click(within(card).getByRole('switch', { name: 'Strong focus rings' }))
+    await userEvent.click(within(card).getByRole('switch', { name: 'Reduce motion' }))
+    await userEvent.click(within(card).getByRole('switch', { name: 'Colour-blind safe colours' }))
+    expect({ focus: root.focus, motion: root.motion, colors: root.colors }).toEqual({ focus: 'strong', motion: 'reduce', colors: 'safe' })
+    // Kept on this browser, not with the account.
+    expect(JSON.parse(localStorage.getItem('seeing')!)).toEqual({ contrast: 'more', text: 125, scale: 150, focus: 'strong', motion: 'reduce', colors: 'safe' })
+    expect(within(card).getByRole('switch', { name: 'Reduce motion' })).toHaveAccessibleDescription(/No animation/)
+    // Off again: the page as it was.
+    await userEvent.click(within(card).getByRole('switch', { name: 'More contrast' }))
+    await userEvent.click(within(within(card).getByRole('radiogroup', { name: 'Text size' })).getByRole('radio', { name: '100%' }))
+    expect(root.contrast).toBeUndefined()
+    expect(root.text).toBeUndefined()
+    for (const name of ['Strong focus rings', 'Reduce motion', 'Colour-blind safe colours']) await userEvent.click(within(card).getByRole('switch', { name }))
+    await userEvent.click(within(within(card).getByRole('radiogroup', { name: 'Page size' })).getByRole('radio', { name: '100%' }))
+    expect(Object.keys(root).filter((k) => ['contrast', 'text', 'scale', 'focus', 'motion', 'colors'].includes(k))).toEqual([])
+  })
+
   it('a colour theme applies at once, is kept in this browser and saved to the account', async () => {
     let colorTheme = 'default'
     const calls = fakeApi(member, {
@@ -318,6 +346,15 @@ describe('account', () => {
     await userEvent.click(screen.getByRole('radio', { name: 'Dark' }))
     expect(document.documentElement).toHaveClass('dark')
     expect(document.documentElement.dataset.colorTheme).toBe('sakura')
+
+    // VS Code's, by their names in the mode shown, beside them: one of them, as the others.
+    const vscode = screen.getByRole('radiogroup', { name: "VS Code's colour themes" })
+    expect(within(vscode).getAllByRole('radio').map((r) => r.textContent)).toEqual(['Default Dark+', 'Default Dark Modern', 'Monokai', 'Solarized Dark', 'One Dark Pro', 'Dracula', 'GitHub Dark', 'Nord', 'Default High Contrast'])
+    await userEvent.click(within(vscode).getByRole('radio', { name: 'Solarized Dark' }))
+    expect(document.documentElement.dataset.colorTheme).toBe('solarized')
+    expect(within(vscode).getByRole('radio', { name: 'Solarized Dark' })).toBeChecked()
+    expect(within(group).getByRole('radio', { name: 'Sakura' })).not.toBeChecked()
+    await waitFor(() => expect(colorTheme).toBe('solarized'))
 
     await userEvent.click(within(group).getByRole('radio', { name: 'Arena' }))
     expect(document.documentElement.dataset.colorTheme).toBeUndefined()

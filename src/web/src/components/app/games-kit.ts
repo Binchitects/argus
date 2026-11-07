@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
+import { reducedMotion } from '@/lib/seeing'
 
 /* The easter eggs' triggers (components/app/games.tsx has the games). */
 
@@ -40,7 +41,7 @@ export function useKonami(onDone: () => void) {
 /** A burst of confetti over the page for a few seconds (none for people who asked for less motion). */
 export function confetti() {
   // None for people who asked for less motion, nor where elements cannot animate.
-  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || typeof document.body.animate !== 'function') return
+  if (reducedMotion() || typeof document.body.animate !== 'function') return
   const layer = document.createElement('div')
   layer.setAttribute('aria-hidden', 'true')
   layer.style.cssText = 'position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:9999'

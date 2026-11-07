@@ -25,7 +25,7 @@ const toolModes = { direct: 'Direct', code: 'As code', both: 'Both' } as const
  * The gear at the activity bar's foot (VS Code's Manage): Settings, Keyboard Shortcuts, the colour theme, Extensions and
  * the palette, one click away; and how the model is given its tools (direct, as code, both, or as Arena says for it).
  */
-export function ManageMenu({ state, edge }: { state: CodeState; edge: 'left' | 'right' }) {
+export function ManageMenu({ state, edge, compact = false }: { state: CodeState; edge: 'left' | 'right'; compact?: boolean }) {
   const queryClient = useQueryClient()
   const keys = {
     settings: useKeyFor('workbench.action.openSettings'),
@@ -43,20 +43,21 @@ export function ManageMenu({ state, edge }: { state: CodeState; edge: 'left' | '
   const arena = state.toolModeArena
   return (
     <DropdownMenu>
-      <Tooltip content="Manage: settings, keys, theme" side={edge === 'left' ? 'right' : 'left'}>
+      <Tooltip content="Manage: settings, keys, theme" side={compact ? 'bottom' : edge === 'left' ? 'right' : 'left'}>
         <DropdownMenuTrigger asChild>
           <button
             type="button"
             aria-label="Manage"
             className={cn(
-              'relative grid size-12 place-items-center text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset [&_svg]:size-5',
+              'relative grid shrink-0 place-items-center text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
+              compact ? 'size-9 [&_svg]:size-4' : 'size-12 [&_svg]:size-5',
             )}
           >
             <Settings aria-hidden="true" />
           </button>
         </DropdownMenuTrigger>
       </Tooltip>
-      <DropdownMenuContent side={edge === 'left' ? 'right' : 'left'} align="end" className="w-80 [&_[role=menuitem]]:whitespace-nowrap">
+      <DropdownMenuContent side={compact ? 'bottom' : edge === 'left' ? 'right' : 'left'} align="end" className="w-80 [&_[role=menuitem]]:whitespace-nowrap">
         <DropdownMenuItem onSelect={() => runCommand('workbench.action.openSettings')}>
           Settings {keys.settings && <DropdownMenuShortcut>{keys.settings}</DropdownMenuShortcut>}
         </DropdownMenuItem>

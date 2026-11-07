@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import { useSeeing } from '@/lib/seeing'
 import { useMedia } from '@/lib/use-media'
 import { blinkFrames, CYCLE, EYE_RATIO, EYE_VIEW, eyeFrames, FADE, logoFrames, lookFrames, nextShown, placeEyes, type Box, type Shown } from './eyes'
 
@@ -13,7 +14,10 @@ import { blinkFrames, CYCLE, EYE_RATIO, EYE_VIEW, eyeFrames, FADE, logoFrames, l
  * `eyes-logo`.
  */
 export function EyesBackdrop({ logo }: { logo: RefObject<HTMLElement | null> }) {
-  const still = useMedia('(prefers-reduced-motion: reduce)')
+  // Still as the system asks, or as the person chose here (Appearance: Motion).
+  const systemStill = useMedia('(prefers-reduced-motion: reduce)')
+  const chosen = useSeeing().motion
+  const still = systemStill || chosen === 'reduce'
   const stage = useRef<HTMLDivElement>(null)
   const [eyes, setEyes] = useState<Shown[]>([])
   // One clock for the logo and every eye: one laid out later (the window resized) keeps in step.

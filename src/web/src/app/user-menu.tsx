@@ -82,13 +82,21 @@ export function UserMenu({ me, onWhatsNew }: { me: Me; onWhatsNew?: () => void }
             <SwatchBook /> Colour theme
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent>
-            <DropdownMenuRadioGroup value={colorTheme} onValueChange={(v) => chooseColorTheme(v as ColorThemeId)}>
-              {colorThemes.map((t) => (
-                <DropdownMenuRadioItem key={t.id} value={t.id}>
-                  <span className="size-3.5 shrink-0 rounded-full border border-foreground/20" style={{ background: t[resolved].primary }} aria-hidden="true" /> {t.label}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
+            {[colorThemes.filter((t) => !t.vscode), colorThemes.filter((t) => t.vscode)].map((list, i) => (
+              <DropdownMenuRadioGroup key={i} value={colorTheme} onValueChange={(v) => chooseColorTheme(v as ColorThemeId)}>
+                {i > 0 && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuLabel>VS Code's</DropdownMenuLabel>
+                  </>
+                )}
+                {list.map((t) => (
+                  <DropdownMenuRadioItem key={t.id} value={t.id}>
+                    <span className="size-3.5 shrink-0 rounded-full border border-foreground/20" style={{ background: t[resolved].primary }} aria-hidden="true" /> {t.label}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            ))}
           </DropdownMenuSubContent>
         </DropdownMenuSub>
         <DropdownMenuSub>

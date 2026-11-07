@@ -233,9 +233,11 @@ function Row({
     )
   } else if (def.enum) {
     // A value the list does not know (a theme of an extension not installed here) stays shown as it is written.
-    const values = def.open && typeof value === 'string' && !def.enum.includes(value) ? [value, ...def.enum] : def.enum
+    const values = def.booleans ? ['true', 'false', ...def.enum] : def.open && typeof value === 'string' && !def.enum.includes(value) ? [value, ...def.enum] : def.enum
+    // true and false are written as such, not as words.
+    const taken = (v: string) => (def.booleans && (v === 'true' || v === 'false') ? v === 'true' : v)
     control = (
-      <select id={id} value={String(value)} onChange={(e) => onChange(e.target.value)} className="h-8 max-w-sm rounded-md border bg-background px-2 text-sm">
+      <select id={id} value={String(value)} onChange={(e) => onChange(taken(e.target.value))} className="h-8 max-w-sm rounded-md border bg-background px-2 text-sm">
         {values.map((v, i) => (
           <option key={v} value={v} title={def.enumDescriptions?.[i]}>
             {v === '\n' ? 'LF (\\n)' : v === '\r\n' ? 'CRLF (\\r\\n)' : v}

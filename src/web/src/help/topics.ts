@@ -58,7 +58,8 @@ export const topics = {
     tasks: [
       { title: 'Find a page fast', steps: ['Press Ctrl K (⌘ K on a Mac).', 'Type part of its name, or what it is about ("api key", "credit").', 'Press Enter.'] },
       { title: 'Change the theme or the width', steps: ['Open your account menu (your picture, top right).', 'Choose **Theme** (light, dark or the system\'s) or **Width** (Comfortable, Wide or Full width).'] },
-      { title: 'Choose a colour theme', steps: ['Open your account menu (your picture, top right), or Your account → **Appearance** to see each as a swatch.', 'Choose **Colour theme**: Arena, Sakura, Midnight, Copper, Forest, Ocean or Lavender.', 'It comes with your account to every device you sign in on; light or dark stays as each device has it.'] },
+      { title: 'Make the page easier to see', steps: ['Open Your account → **Easier to see**.', 'Turn on **More contrast**, **Strong focus rings**, **Reduce motion** or **Colour-blind safe colours**, or choose a larger **Text size** or **Page size**.', 'It applies at once and is remembered on this device; VS Code\'s **High Contrast** colour theme goes further.'] },
+      { title: 'Choose a colour theme', steps: ['Open your account menu (your picture, top right), or Your account → **Appearance** to see each as a swatch.', 'Choose **Colour theme**: Arena, Sakura, Midnight, Copper, Forest, Ocean or Lavender, or one of VS Code\'s (Dark+, Light+, Dark Modern, Monokai, Solarized, One Dark Pro, Dracula, GitHub, Nord, High Contrast).', 'It comes with your account to every device you sign in on; light or dark stays as each device has it.'] },
     ],
   },
 
@@ -471,7 +472,8 @@ export const topics = {
       { name: 'API key', text: 'Your key for your tools. **New key** replaces it (five an hour at most); the old one stops working at once. **Rate limits**: the requests and tokens it may use a minute, what it used in the last one, and what the gateway refused in the last day (HTTP 429: wait as long as its Retry-After says).' },
       { name: 'Answers', text: 'How long answers are, in every chat: Short, Normal or Thorough.' },
       { name: 'Memory', text: 'What the chat remembers about you. Add, edit or delete one, **Forget everything**, or turn memory off. Nobody else sees it, admins included.' },
-      { name: 'Appearance', text: 'Your colour theme (Arena, Sakura, Midnight, Copper, Forest, Ocean or Lavender, each light and dark), which follows you to every device; light, dark or the system\'s and the width, remembered on this device.' },
+      { name: 'Appearance', text: 'Your colour theme (Arena, Sakura, Midnight, Copper, Forest, Ocean or Lavender, or VS Code\'s: Dark+ and Light+, Modern, Monokai, Solarized, One Dark Pro, Dracula, GitHub, Nord, High Contrast; each light and dark), which follows you to every device; light, dark or the system\'s and the width, remembered on this device.' },
+      { name: 'Easier to see', text: 'More contrast, a larger text or page, strong focus rings, no motion, and colour-blind safe colours (blue and orange for good and bad), over any colour theme; remembered on this device.' },
       { name: 'Your data', text: 'A zip of your chats, files, assistants, tasks and settings, and how long chats are kept.' },
       { name: 'Connections', text: 'Your own account at services the chat\'s tools work with (plugins). Only you can use what you connect.' },
       { name: 'Push notifications', text: 'The bell\'s news on this device, even with the app closed. **Turn on for this device**, send a test, or remove a device.' },

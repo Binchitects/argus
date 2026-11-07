@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Blocks, Brain, Bug, CircleAlert, CircleHelp, Files, GitBranch, GitCompareArrows, Info, ListChecks, MessagesSquare, ScanSearch, Search, SquareTerminal, WandSparkles, type LucideIcon } from 'lucide-react'
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { AlertTriangle, Blocks, Brain, Bug, Check, Circle, CircleAlert, CircleHelp, Files, GitBranch, GitCompareArrows, Info, ListChecks, MessagesSquare, ScanSearch, Search, SquareTerminal, WandSparkles, type LucideIcon } from 'lucide-react'
+import { lazy, Suspense, use, useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { confetti, useKonami } from '@/components/app/games-kit'
 import { toast } from '@/components/ui/toaster'
 import { Alert } from '@/components/ui/alert'
@@ -31,7 +31,9 @@ import { ProblemsPanel } from './problems'
 import { countProblems, useProblems } from './problems-store'
 import { ReviewPanel } from './review'
 import { SourceControlPanel } from './scm'
+import { DetachedChat, DetachedEditor } from './detach'
 import { EditorArea, EditorProvider } from './editor'
+import { groupCommands, GroupStoreContext, openToSide } from './editor-groups'
 import { userFile } from './editor-options'
 import { CodeRefsProvider } from './refs'
 import { rankFiles, useEditor } from './editor-state'
@@ -61,17 +63,18 @@ import { compareSelection, type Side } from './compare'
 import { SearchPanel } from './search'
 import { SettingsProvider, useSettings, workspaceSettingsPath } from './settings'
 import { allColorThemes, allIconThemes, themeNamed } from './settings-schema'
-import { previewTheme, useShownTheme, useThemeSync } from './theme'
+import { previewTheme, useSeeingSync, useShownTheme, useThemeSync } from './theme'
 import { ensureTheme } from './extensions'
 import { ExtensionsView } from './extensions-view'
 import { appendElement } from './jsonc'
 import { Splitter } from './splitter'
-import { bounds, inPanel, layoutOf, panelParts, reorderPanel, reorderSide, resetLocations, sideViews, toPanel, toSide, type Layout, type PanelTab, type View } from './workbench-layout'
+import { barViews, bounds, inPanel, layoutOf, panelParts, reorderPanel, reorderSide, resetLocations, setHidden, sideViews, toPanel, toSide, type Layout, type PanelTab, type View } from './workbench-layout'
 import { useArenaSettings, useNotices } from './sync'
 import { About, StatusBar } from './status-bar'
 import { languageServers } from './lsp/servers'
 import { OutputPanel } from './lsp/output'
 import { wholePath } from './whole-path'
+import { detachedView, useWindows } from './windows'
 
 // xterm.js loads with the panel, the first time it opens.
 const TerminalPanel = lazy(() => import('./terminals'))
@@ -108,6 +111,8 @@ export function App() {
   const config = useQuery(configQuery)
   // The layout as it was left, in any run: waited for, so the workbench opens as it was.
   const preferences = useQuery(preferencesQuery)
+  // A window of the IDE's own: its chat or an editor tab, moved out (detach.tsx).
+  const [detached] = useState(detachedView)
 
   useEffect(() => {
     if (state.data) document.title = `${state.data.project} · Code Arena`
@@ -141,11 +146,17 @@ export function App() {
 
   return (
     <SettingsProvider>
-      <EditorProvider>
+      <EditorProvider detached={!!detached}>
         <HelpProvider manual={state.data.manual}>
           <CodeRefsProvider folder={state.data.folder}>
             <SettingsRead>
-              <Workbench state={state.data} config={config.data} lost={state.error ?? config.error} saved={preferences.data?.layout} recentSaved={preferences.data?.paletteRecent} />
+              {detached?.kind === 'chat' ? (
+                <DetachedChat state={state.data} config={config.data} />
+              ) : detached?.kind === 'editor' ? (
+                <DetachedEditor path={detached.path} id={detached.id} project={state.data.project} />
+              ) : (
+                <Workbench state={state.data} config={config.data} lost={state.error ?? config.error} saved={preferences.data?.layout} recentSaved={preferences.data?.paletteRecent} />
+              )}
             </SettingsRead>
             <QuickPickHost />
             <PasteDialog />
@@ -243,19 +254,22 @@ const views: { id: View; label: string; icon: LucideIcon; command: string }[] = 
   { id: 'chat', label: 'Chat', icon: MessagesSquare, command: 'codeArena.view.sessions' },
 ]
 
-function ActivityButton({ label, command, pressed, badge, edge = 'left', onClick, children }: { label: string; command?: string; pressed?: boolean; badge?: number; edge?: 'left' | 'right'; onClick: () => void; children: ReactNode }) {
+/** An activity bar's button; `edge` is the side the bar is on ("top": a row of icons above the side bar). */
+function ActivityButton({ label, command, pressed, badge, edge = 'left', onClick, children }: { label: string; command?: string; pressed?: boolean; badge?: number; edge?: 'left' | 'right' | 'top'; onClick: () => void; children: ReactNode }) {
   const keys = useKeyFor(command ?? '')
   return (
-    <Tooltip content={keys ? `${label} (${keys})` : label} side={edge === 'left' ? 'right' : 'left'}>
+    <Tooltip content={keys ? `${label} (${keys})` : label} side={edge === 'left' ? 'right' : edge === 'top' ? 'bottom' : 'left'}>
       <button
         type="button"
         aria-label={badge ? `${label} (${badge})` : label}
         aria-pressed={pressed}
         onClick={onClick}
         className={cn(
-          'relative grid size-12 place-items-center text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset [&_svg]:size-5',
-          pressed && 'text-foreground before:absolute before:inset-y-2 before:w-0.5 before:bg-primary',
-          pressed && (edge === 'left' ? 'before:left-0 before:rounded-r' : 'before:right-0 before:rounded-l'),
+          'relative grid place-items-center text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
+          edge === 'top' ? 'h-9 w-9 [&_svg]:size-4' : 'size-12 [&_svg]:size-5',
+          pressed && 'text-foreground before:absolute before:bg-primary',
+          pressed && (edge === 'top' ? 'before:inset-x-1.5 before:bottom-0 before:h-0.5 before:rounded-t' : 'before:inset-y-2 before:w-0.5'),
+          pressed && (edge === 'left' ? 'before:left-0 before:rounded-r' : edge === 'right' ? 'before:right-0 before:rounded-l' : ''),
         )}
       >
         {children}
@@ -283,13 +297,78 @@ function dragging(e: DragEvent<HTMLElement>, id: PanelTab) {
   e.dataTransfer.setData('text/plain', id)
 }
 
+const menuSeparator = <ContextMenu.Separator className="-mx-1 my-1 h-px bg-border" />
+
+/**
+ * What the activity bar's right-click menu has wherever it is opened, as VS Code's: each of the side bar's views,
+ * checked while its button shows (unchecked: hidden from the bar), and where the bar itself goes.
+ */
+function BarMenuItems({ layout, change }: { layout: Layout; change: (c: Partial<Layout>) => void }) {
+  const side = sideViews(layout)
+  return (
+    <>
+      {side.map((id) => {
+        const v = views.find((x) => x.id === id)!
+        const shown = !layout.hidden.includes(id)
+        return (
+          <ContextMenu.CheckboxItem
+            key={id}
+            className={cn(menuItem, 'pl-8')}
+            checked={shown}
+            // The last button left stays: the bar is never empty while it shows.
+            disabled={shown && side.filter((x) => !layout.hidden.includes(x)).length === 1}
+            onCheckedChange={(on) => change(setHidden(layout, id, !on))}
+            onSelect={(e) => e.preventDefault()}
+          >
+            <span className="absolute left-2 flex size-3.5 items-center justify-center">
+              <ContextMenu.ItemIndicator>
+                <Check />
+              </ContextMenu.ItemIndicator>
+            </span>
+            {v.label}
+          </ContextMenu.CheckboxItem>
+        )
+      })}
+      {menuSeparator}
+      <ContextMenu.Sub>
+        <ContextMenu.SubTrigger className={menuItem}>Activity Bar Position</ContextMenu.SubTrigger>
+        <ContextMenu.Portal>
+          <ContextMenu.SubContent className={menuContent}>
+            <ContextMenu.RadioGroup value={layout.activityBar} onValueChange={(v) => change({ activityBar: v as Layout['activityBar'] })}>
+              {(
+                [
+                  ['default', 'Default (beside the side bar)'],
+                  ['top', 'Top (above the side bar)'],
+                  ['hidden', 'Hidden'],
+                ] as const
+              ).map(([value, label]) => (
+                <ContextMenu.RadioItem key={value} value={value} className={cn(menuItem, 'pl-8')}>
+                  <span className="absolute left-2 flex size-3.5 items-center justify-center">
+                    <ContextMenu.ItemIndicator>
+                      <Circle className="size-2 fill-current" />
+                    </ContextMenu.ItemIndicator>
+                  </span>
+                  {label}
+                </ContextMenu.RadioItem>
+              ))}
+            </ContextMenu.RadioGroup>
+          </ContextMenu.SubContent>
+        </ContextMenu.Portal>
+      </ContextMenu.Sub>
+      <ContextMenu.Item className={menuItem} onSelect={() => change(resetLocations(layout))}>
+        Reset View Locations
+      </ContextMenu.Item>
+    </>
+  )
+}
+
 /**
  * A view's button in the activity bar: shows its view, drags to another place in the bar or into the panel (dropped on
- * it, the view goes before it), and has a right-click menu with the same moves and where the side bar sits.
+ * it, the view goes before it), and has a right-click menu with the same moves, hiding it, and where the side bar sits.
  */
-function ViewButton({ view, layout, change, badge, onClick }: { view: (typeof views)[number]; layout: Layout; change: (c: Partial<Layout>) => void; badge?: number; onClick: () => void }) {
+function ViewButton({ view, layout, change, badge, across = false, onClick }: { view: (typeof views)[number]; layout: Layout; change: (c: Partial<Layout>) => void; badge?: number; across?: boolean; onClick: () => void }) {
   const [over, setOver] = useState(false)
-  const side = sideViews(layout)
+  const side = barViews(layout)
   const at = side.indexOf(view.id)
   const edge = layout.sideAt
   return (
@@ -311,11 +390,11 @@ function ViewButton({ view, layout, change, badge, onClick }: { view: (typeof vi
           dragged.current = null
           if (moved && moved !== view.id && (views as { id: string }[]).some((v) => v.id === moved)) change(reorderSide(layout, moved as View, view.id))
         }}
-        className={dropLine(over, true)}
+        className={dropLine(over, !across)}
       >
         <ContextMenu.Trigger asChild>
           <div>
-            <ActivityButton label={view.label} command={view.command} pressed={layout.sideOpen && layout.view === view.id} badge={badge} edge={edge} onClick={onClick}>
+            <ActivityButton label={view.label} command={view.command} pressed={layout.sideOpen && layout.view === view.id} badge={badge} edge={across ? 'top' : edge} onClick={onClick}>
               <view.icon aria-hidden="true" />
             </ActivityButton>
           </div>
@@ -323,6 +402,9 @@ function ViewButton({ view, layout, change, badge, onClick }: { view: (typeof vi
       </div>
       <ContextMenu.Portal>
         <ContextMenu.Content className={menuContent} aria-label={`${view.label}: where it goes`}>
+          <ContextMenu.Item className={menuItem} disabled={side.length <= 1} onSelect={() => change(setHidden(layout, view.id, true))}>
+            Hide '{view.label}'
+          </ContextMenu.Item>
           <ContextMenu.Item className={menuItem} onSelect={() => change(toPanel(layout, view.id))}>
             Move to Panel
           </ContextMenu.Item>
@@ -332,13 +414,11 @@ function ViewButton({ view, layout, change, badge, onClick }: { view: (typeof vi
           <ContextMenu.Item className={menuItem} disabled={at < 0 || at >= side.length - 1} onSelect={() => change(reorderSide(layout, view.id, side[at + 2]))}>
             Move Down
           </ContextMenu.Item>
-          <ContextMenu.Separator className="-mx-1 my-1 h-px bg-border" />
           <ContextMenu.Item className={menuItem} onSelect={() => change({ sideAt: edge === 'left' ? 'right' : 'left' })}>
             Move Primary Side Bar {edge === 'left' ? 'Right' : 'Left'}
           </ContextMenu.Item>
-          <ContextMenu.Item className={menuItem} onSelect={() => change(resetLocations(layout))}>
-            Reset View Locations
-          </ContextMenu.Item>
+          {menuSeparator}
+          <BarMenuItems layout={layout} change={change} />
         </ContextMenu.Content>
       </ContextMenu.Portal>
     </ContextMenu.Root>
@@ -436,6 +516,7 @@ function Workbench({
   const [palette, setPalette] = useState(false)
   const [recent, setRecent] = useState<string[]>(() => (Array.isArray(recentSaved) ? recentSaved.filter((x): x is string => typeof x === 'string') : []))
   useThemeSync()
+  useSeeingSync()
   // The theme shown now (with "window.autoDetectColorScheme", the preferred one of the page's light or dark): the picker starts at it.
   const shownTheme = useShownTheme()
   useKeyboard()
@@ -555,6 +636,8 @@ function Workbench({
   )
   // A turn over: its commands may have changed files too.
   const onTurnEnd = useCallback(() => void refresh(), [refresh])
+  // A tab or the chat moved into a window of its own, and back.
+  const windows = useWindows({ ed, onChatOut: useCallback(() => change({ chatOpen: false }), [change]), onChatBack: showChat, onEvent, onTurnEnd })
 
   // Files changed on disk by hand (another editor, a command, git) show as they are: a file open here and not edited here
   // reloads, one deleted closes, the Explorer's folders, Source Control and Changes are read again, and the language
@@ -1086,6 +1169,20 @@ function Workbench({
     } },
   ]
   useCommands(debugCommands)
+  const groups = use(GroupStoreContext)!
+  /** Zen Mode: the editor alone (the parts as they were come back after). */
+  const zen = useRef<Partial<Layout> | null>(null)
+  const toggleZen = () => {
+    if (zen.current) {
+      change(zen.current)
+      zen.current = null
+      return
+    }
+    zen.current = { sideOpen: layout.sideOpen, panelOpen: layout.panelOpen, chatOpen: layout.chatOpen, activityBar: layout.activityBar }
+    change({ sideOpen: false, panelOpen: false, chatOpen: false, activityBar: 'hidden' })
+  }
+  /** A setting on or off for every language (as the editor's View menu does). */
+  const toggleSetting = (key: string) => void settings.update(key, settings.get(key) === false).catch((e: unknown) => toast.error(errorMessage(e)))
   const workbenchCommands: Command[] = [
     { id: 'workbench.action.showCommands', category: 'View', title: 'Show All Commands', hidden: true, run: () => setPalette(true) },
     { id: 'workbench.action.quickOpen', category: 'File', title: 'Go to File…', run: () => setQuickOpen(true) },
@@ -1095,7 +1192,21 @@ function Workbench({
     { id: 'breadcrumbs.toggle', category: 'View', title: 'Toggle Breadcrumbs', run: () => void settings.update('breadcrumbs.enabled', settings.get('breadcrumbs.enabled') === false) },
     { id: 'breadcrumbs.focusAndSelect', category: 'View', title: 'Focus and Select Breadcrumbs', enabled: () => file, run: () => document.querySelector<HTMLElement>('[data-breadcrumbs] button')?.focus() },
     { id: 'markdown.showPreview', category: 'Markdown', title: 'Open Preview', enabled: () => active?.languageId === 'markdown', run: () => active && void ed.openPreview(active.path) },
-    { id: 'markdown.showPreviewToSide', category: 'Markdown', title: 'Open Preview to the Side', enabled: () => active?.languageId === 'markdown', run: () => active && void ed.openPreview(active.path) },
+    { id: 'markdown.showPreviewToSide', category: 'Markdown', title: 'Open Preview to the Side', enabled: () => active?.languageId === 'markdown', run: () => active && void openToSide(groups, { kind: 'preview', path: active.path }) },
+    { id: 'workbench.action.openToSide', category: 'View', title: 'Open the Active Editor to the Side', enabled: () => active?.kind === 'file', run: () => active && void openToSide(groups, active) },
+    { id: 'workbench.action.files.revert', category: 'File', title: 'Revert File', enabled: () => active?.kind === 'file' && !!active.dirty, run: async () => {
+      if (!active) return
+      const at = ed.tabs.findIndex((t) => t.id === active.id)
+      // What is unsaved goes; the file as it is on disk, in the same place.
+      ed.release([active.id])
+      await ed.open(active.path)
+      ed.moveTab(active.path, at)
+    } },
+    { id: 'workbench.action.toggleZenMode', category: 'View', title: 'Toggle Zen Mode', run: toggleZen },
+    { id: 'workbench.action.toggleFullScreen', category: 'View', title: 'Toggle Full Screen', run: () => void (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.())?.catch(() => undefined) },
+    { id: 'editor.action.toggleMinimap', category: 'View', title: 'Toggle Minimap', run: () => toggleSetting('editor.minimap.enabled') },
+    { id: 'editor.action.toggleStickyScroll', category: 'View', title: 'Toggle Sticky Scroll', run: () => toggleSetting('editor.stickyScroll.enabled') },
+    { id: 'editor.action.toggleRenderWhitespace', category: 'View', title: 'Toggle Render Whitespace', run: () => void settings.update('editor.renderWhitespace', settings.get('editor.renderWhitespace') === 'none' ? 'selection' : 'none').catch((e: unknown) => toast.error(errorMessage(e))) },
     { id: 'markdown.showSource', category: 'Markdown', title: 'Show Source', enabled: () => active?.kind === 'preview', run: () => active && void ed.open(active.path) },
     { id: 'workbench.action.files.openFolder', category: 'File', title: 'Open Folder…', run: () => void chooseAndOpenFolder(setOpening) },
     { id: 'workbench.action.openRecent', category: 'File', title: 'Open Recent…', run: () => void openRecentFolder(setOpening) },
@@ -1113,6 +1224,8 @@ function Workbench({
     { id: 'workbench.action.unpinEditor', category: 'View', title: 'Unpin Editor', enabled: () => !!active?.pinned, run: () => active && ed.pin(active.id, false) },
     { id: 'workbench.action.moveEditorLeftInGroup', category: 'View', title: 'Move Editor Left', enabled: () => !!active, run: () => active && ed.moveTab(active.id, ed.tabs.findIndex((t) => t.id === active.id) - 1) },
     { id: 'workbench.action.moveEditorRightInGroup', category: 'View', title: 'Move Editor Right', enabled: () => !!active, run: () => active && ed.moveTab(active.id, ed.tabs.findIndex((t) => t.id === active.id) + 1) },
+    { id: 'workbench.action.moveEditorToNewWindow', category: 'View', title: 'Move Editor into New Window', enabled: () => active?.kind === 'file' || active?.kind === 'media', run: windows.moveTab },
+    { id: 'workbench.action.chat.openInNewWindow', category: 'Chat', title: 'Open Chat in New Window', run: windows.moveChat },
     { id: 'workbench.action.reopenClosedEditor', category: 'View', title: 'Reopen Closed Editor', run: () => void ed.reopenClosed() },
     { id: 'workbench.action.nextEditor', category: 'View', title: 'Open Next Editor', run: () => ed.cycle(1) },
     { id: 'workbench.action.previousEditor', category: 'View', title: 'Open Previous Editor', run: () => ed.cycle(-1) },
@@ -1123,7 +1236,6 @@ function Workbench({
     { id: 'copyRelativeFilePath', category: 'File', title: 'Copy Relative Path of Active File', enabled: () => !!active, run: () => active && copy(active.path) },
     { id: 'workbench.action.editor.changeLanguageMode', category: 'Change Language Mode', title: 'Change Language Mode', enabled: () => file, run: () => void pickLanguage() },
     { id: 'editor.action.toggleWordWrap', category: 'View', title: 'Toggle Word Wrap', enabled: () => file, run: () => ed.toggleWordWrap() },
-    { id: 'workbench.action.focusFirstEditorGroup', category: 'View', title: 'Focus First Editor Group', run: () => ed.focusEditor() },
     { id: 'workbench.action.focusSideBar', category: 'View', title: 'Focus into Primary Side Bar', run: () => {
       change({ sideOpen: true })
       // The view shown: the others are in the side bar too, hidden.
@@ -1137,6 +1249,12 @@ function Workbench({
     { id: 'codeArena.view.moveToPanel', category: 'View', title: 'Move View to Panel', enabled: () => layout.sideOpen && sideViews(layout).length > 0, run: () => arrange(toPanel(layout, layout.view)) },
     { id: 'codeArena.view.moveToSideBar', category: 'View', title: 'Move Panel View to Side Bar', enabled: () => !(panelParts as readonly string[]).includes(layout.panelTab), run: () => arrange(toSide(layout, layout.panelTab as View)) },
     { id: 'workbench.action.resetViewLocations', category: 'View', title: 'Reset View Locations', run: () => arrange(resetLocations(layout)) },
+    { id: 'workbench.action.activityBarLocation.default', category: 'View', title: 'Move Activity Bar to Side', enabled: () => layout.activityBar !== 'default', run: () => change({ activityBar: 'default' }) },
+    { id: 'workbench.action.activityBarLocation.top', category: 'View', title: 'Move Activity Bar to Top', enabled: () => layout.activityBar !== 'top', run: () => change({ activityBar: 'top', sideOpen: true }) },
+    { id: 'workbench.action.activityBarLocation.hide', category: 'View', title: 'Hide Activity Bar', enabled: () => layout.activityBar !== 'hidden', run: () => change({ activityBar: 'hidden' }) },
+    { id: 'workbench.action.toggleActivityBarVisibility', category: 'View', title: 'Toggle Activity Bar Visibility', run: () => change({ activityBar: layout.activityBar === 'hidden' ? 'default' : 'hidden' }) },
+    { id: 'codeArena.view.hideFromActivityBar', category: 'View', title: 'Hide the Shown View from the Activity Bar', enabled: () => layout.sideOpen && barViews(layout).length > 1, run: () => change(setHidden(layout, layout.view, true)) },
+    { id: 'codeArena.view.showAllInActivityBar', category: 'View', title: 'Show Every View in the Activity Bar', enabled: () => layout.hidden.length > 0, run: () => change({ hidden: [] }) },
     { id: 'workbench.action.togglePanel', category: 'View', title: 'Toggle Panel Visibility', run: togglePanel },
     { id: 'workbench.action.toggleAuxiliaryBar', category: 'View', title: 'Toggle Secondary Side Bar Visibility (the chat)', run: () => change({ chatOpen: !layout.chatOpen }) },
     { id: 'workbench.action.chat.open', category: 'Chat', title: 'Open Chat', run: () => {
@@ -1185,6 +1303,19 @@ function Workbench({
     { id: 'workbench.action.openGlobalKeybindingsFile', category: 'Preferences', title: 'Open Keyboard Shortcuts (JSON)', run: () => void ed.open(userFile('keybindings.json')) },
     { id: 'workbench.action.selectTheme', category: 'Preferences', title: 'Color Theme', run: () => void pickTheme() },
     { id: 'workbench.action.selectIconTheme', category: 'Preferences', title: 'File Icon Theme', run: () => void pickIconTheme() },
+    // VS Code's zoom: the whole workbench a step (20%) larger or smaller, kept in "window.zoomLevel".
+    { id: 'workbench.action.zoomIn', category: 'View', title: 'Zoom In', run: () => void settings.update('window.zoomLevel', Math.min(9, (settings.get<number>('window.zoomLevel') ?? 0) + 1)) },
+    { id: 'workbench.action.zoomOut', category: 'View', title: 'Zoom Out', run: () => void settings.update('window.zoomLevel', Math.max(-5, (settings.get<number>('window.zoomLevel') ?? 0) - 1)) },
+    { id: 'workbench.action.zoomReset', category: 'View', title: 'Reset Zoom', run: () => void settings.update('window.zoomLevel', 0) },
+    { id: 'codeArena.accessibility.toggleHighContrast', category: 'Preferences', title: 'Toggle High Contrast Theme', run: async () => {
+      const now = themeNamed(shownTheme)
+      const next = now.family === 'contrast' ? (now.kind === 'light' ? settings.get<string>('workbench.preferredLightColorTheme') : settings.get<string>('workbench.preferredDarkColorTheme')) : now.kind === 'light' ? 'Default High Contrast Light' : 'Default High Contrast'
+      await settings.update('workbench.colorTheme', next).catch((e: unknown) => toast.error(errorMessage(e)))
+      if (settings.get('window.autoDetectColorScheme')) await settings.update('window.autoDetectColorScheme', false).catch(() => undefined)
+    } },
+    { id: 'codeArena.accessibility.toggleMoreContrast', category: 'Preferences', title: 'Toggle More Contrast', run: () => void settings.update('codeArena.accessibility.contrast', settings.get('codeArena.accessibility.contrast') === 'more' ? 'standard' : 'more') },
+    { id: 'codeArena.accessibility.toggleColorBlindColors', category: 'Preferences', title: 'Toggle Colour-Blind Safe Colours', run: () => void settings.update('codeArena.accessibility.colorBlindColors', !settings.get('codeArena.accessibility.colorBlindColors')) },
+    { id: 'codeArena.accessibility.toggleReduceMotion', category: 'Preferences', title: 'Toggle Reduce Motion', run: () => void settings.update('workbench.reduceMotion', settings.get('workbench.reduceMotion') === 'on' ? 'auto' : 'on') },
     { id: 'workbench.files.action.compareWithSaved', category: 'File', title: 'Compare Active File with Saved', enabled: () => file, run: () => active && void ed.compare({ kind: 'disk', path: active.path }, { kind: 'file', path: active.path }) },
     { id: 'workbench.files.action.compareWithClipboard', category: 'File', title: 'Compare Active File with Clipboard', enabled: () => file, run: () => void compareWithClipboard() },
     { id: 'workbench.files.action.compareFileWith', category: 'File', title: 'Compare Active File With…', enabled: () => file, run: () => void compareFileWith() },
@@ -1213,6 +1344,8 @@ function Workbench({
     { id: 'codeArena.about', category: 'Help', title: 'About Code Arena', run: () => setAbout(true) },
   ]
   useCommands(workbenchCommands)
+  // The editor groups' own: split, join, move to a group, focus one by its place.
+  useCommands(groupCommands(groups))
 
 
   // The editor's own commands for the palette, while a file is shown: Code Arena's first.
@@ -1272,30 +1405,44 @@ function Workbench({
     }
   }
 
-  const activityBar = (
+  const bar = barViews(layout)
+  const badgeOf = (id: View) => (id === 'changes' ? count : id === 'problems' ? errors : id === 'git' ? gitCount : undefined)
+  /** The views' buttons, in the activity bar's order; dropped after them, a view goes last (one from the panel comes back). */
+  const viewButtons = (across: boolean) => (
+    <ContextMenu.Root>
+      <ContextMenu.Trigger asChild>
+        <div
+          className={cn('flex min-h-0 min-w-0 flex-1 [scrollbar-width:none]', across ? 'flex-row overflow-x-auto' : 'flex-col overflow-y-auto')}
+          onDragOver={(e) => {
+            if (dragged.current !== null && views.some((v) => v.id === dragged.current)) e.preventDefault()
+          }}
+          onDrop={(e) => {
+            const moved = dragged.current
+            dragged.current = null
+            if (moved && views.some((v) => v.id === moved)) {
+              e.preventDefault()
+              arrange(reorderSide(layout, moved as View))
+            }
+          }}
+        >
+          {bar.map((id) => (
+            <ViewButton key={id} view={views.find((x) => x.id === id)!} layout={layout} change={arrange} badge={badgeOf(id)} across={across} onClick={() => show(id, true)} />
+          ))}
+          <span className="flex-1" />
+        </div>
+      </ContextMenu.Trigger>
+      <ContextMenu.Portal>
+        <ContextMenu.Content className={menuContent} aria-label="Activity bar">
+          <BarMenuItems layout={layout} change={arrange} />
+        </ContextMenu.Content>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
+  )
+
+  const activityBar = layout.activityBar === 'default' && (
     <nav key="activity" aria-label="Activity bar" className={cn('flex min-h-0 w-12 shrink-0 flex-col overflow-clip bg-sidebar', left ? 'border-r' : 'border-l')}>
-      {/* Dropped below the views: the view goes last (one from the panel comes back to the side bar). In a window too short
-          for every view, they scroll here, the buttons under them staying. */}
-      <div
-        className="flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-width:none]"
-        onDragOver={(e) => {
-          if (dragged.current !== null && views.some((v) => v.id === dragged.current)) e.preventDefault()
-        }}
-        onDrop={(e) => {
-          const moved = dragged.current
-          dragged.current = null
-          if (moved && views.some((v) => v.id === moved)) {
-            e.preventDefault()
-            arrange(reorderSide(layout, moved as View))
-          }
-        }}
-      >
-        {side.map((id) => {
-          const v = views.find((x) => x.id === id)!
-          return <ViewButton key={id} view={v} layout={layout} change={arrange} badge={id === 'changes' ? count : id === 'problems' ? errors : id === 'git' ? gitCount : undefined} onClick={() => show(id, true)} />
-        })}
-        <span className="flex-1" />
-      </div>
+      {/* In a window too short for every view, they scroll here, the buttons under them staying. */}
+      {viewButtons(false)}
       <ActivityButton label="Terminal" command="workbench.action.terminal.toggleTerminal" pressed={layout.panelOpen} edge={layout.sideAt} onClick={toggleTerminal}>
         <SquareTerminal aria-hidden="true" />
       </ActivityButton>
@@ -1312,11 +1459,20 @@ function Workbench({
       </ActivityButton>
     </nav>
   )
+  // Above the side bar, as VS Code's "workbench.activityBar.location": "top": the views in a row, the accounts and the gear at its end.
+  const topBar = layout.activityBar === 'top' && (
+    <nav aria-label="Activity bar" className="flex h-9 shrink-0 items-center border-b">
+      {viewButtons(true)}
+      <AccountsMenu edge={layout.sideAt} compact />
+      <ManageMenu state={state} edge={layout.sideAt} compact />
+    </nav>
+  )
 
   const sideBar = (
-    <aside key="side" data-side={layout.sideAt} hidden={!layout.sideOpen} aria-label={views.find((v) => v.id === layout.view)?.label} style={{ width: layout.side }} className="min-h-0 shrink-0 overflow-clip bg-sidebar text-sidebar-foreground">
+    <aside key="side" data-side={layout.sideAt} hidden={!layout.sideOpen} aria-label={views.find((v) => v.id === layout.view)?.label} style={{ width: layout.side }} className="flex min-h-0 shrink-0 flex-col overflow-clip bg-sidebar text-sidebar-foreground">
+      {topBar}
       {side.map((v) => (
-        <div key={v} hidden={layout.view !== v} className="h-full">
+        <div key={v} hidden={layout.view !== v} className="min-h-0 flex-1">
           {viewPart(v, layout.sideOpen && layout.view === v)}
         </div>
       ))}
@@ -1422,6 +1578,7 @@ function Workbench({
         config={config}
         onOpenList={() => show('chat')}
         onHide={() => change({ chatOpen: false })}
+        onDetach={windows.moveChat}
         onShow={showChat}
         onEvent={onEvent}
         onTurnEnd={onTurnEnd}

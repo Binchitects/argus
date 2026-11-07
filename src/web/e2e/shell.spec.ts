@@ -28,7 +28,8 @@ for (const theme of ['light', 'dark'] as const) {
 }
 
 // Each colour theme in each mode: the components (/design) and the chat, with axe's contrast checks.
-for (const colorTheme of ['sakura', 'midnight', 'copper', 'forest', 'ocean', 'lavender']) {
+// Arena's calm ones, then VS Code's.
+for (const colorTheme of ['sakura', 'midnight', 'copper', 'forest', 'ocean', 'lavender', 'vscode', 'modern', 'monokai', 'solarized', 'onedark', 'dracula', 'github', 'nord', 'contrast']) {
   for (const theme of ['light', 'dark'] as const) {
     test(`the ${colorTheme} colour theme is accessible in the ${theme} theme`, async ({ page }, info) => {
       const errors = watchConsole(page)

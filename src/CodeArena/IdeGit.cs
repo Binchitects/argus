@@ -9,11 +9,16 @@ namespace CodeArena;
 /// <summary>
 /// The IDE's Source Control: the folder's git as the person works it (not the agent's turn commits): what changed since
 /// the last commit, staged or not; a file as any commit or the index has it; stage, unstage, discard and commit; the
-/// branches, the last commits, a file's history and what a commit changed. Paths are the folder's, with "/"; a
-/// repository bigger than the folder shows the folder's files only. The person's own name commits, as their git is set up.
+/// branches, the last commits, a file's history and what a commit changed. Paths are the folder's, with "/" (a folder
+/// added to the workspace's, whole); a repository bigger than its folder shows that folder's files only. One IdeGit
+/// works one repository: the folder's own, or one in a folder of it or in a folder added (<see cref="RepositoriesAsync"/>
+/// finds them, as VS Code's git.autoRepositoryDetection). The person's own name commits, as their git is set up.
 /// </summary>
-internal sealed partial class IdeGit(Workspace workspace)
+internal sealed partial class IdeGit(Workspace workspace, string? dir = null)
 {
+    /// <summary>The repository's folder git runs in: the folder's own (the default), or one nested in it or added.</summary>
+    private readonly string _dir = Path.TrimEndingDirectorySeparator(Path.GetFullPath(dir ?? workspace.Root));
+
     /// <summary>The most files listed.</summary>
     public const int MostFiles = 2_000;
 
@@ -29,7 +34,7 @@ internal sealed partial class IdeGit(Workspace workspace)
     /// <summary>How long a fetch, a pull or a push may wait on the network.</summary>
     private static readonly TimeSpan Network = TimeSpan.FromMinutes(10);
 
-    private Task<(int Code, string Output)> Remote(IReadOnlyList<string> args, CancellationToken ct) => TurnCommits.GitAsync(workspace.Root, args, ct, timeout: Network);
+    private Task<(int Code, string Output)> Remote(IReadOnlyList<string> args, CancellationToken ct) => TurnCommits.GitAsync(_dir, args, ct, timeout: Network);
 
     /// <summary>A user and password (or token) in a remote's address, as git may say it back: never shown.</summary>
     [GeneratedRegex(@"(https?://)[^/@\s]+@")]
@@ -48,7 +53,7 @@ internal sealed partial class IdeGit(Workspace workspace)
     /// <summary>The repository's top folder; null: the folder is in none (or git is not there).</summary>
     private async Task<string?> RootAsync(CancellationToken ct)
     {
-        var (code, output) = await Git(workspace.Root, ["rev-parse", "--show-toplevel"], ct);
+        var (code, output) = await Git(_dir, ["rev-parse", "--show-toplevel"], ct);
         return code == 0 && output.Trim() is { Length: > 0 } root ? Path.GetFullPath(root) : null;
     }
 
@@ -58,14 +63,39 @@ internal sealed partial class IdeGit(Workspace workspace)
     /// <summary>Where the folder leads: git names the repository's top by that, not through a link (/tmp is /private/tmp on macOS).</summary>
     private readonly string _leads = Workspace.Physical(workspace.Root) ?? workspace.Root;
 
-    /// <summary>A path of the repository's (git's, from its top) as the folder's; null: outside the folder.</summary>
-    private string? Ours(string root, string gitPath)
+    /// <summary>Where the repository's folder leads, for the same reason.</summary>
+    private string Scope => Workspace.Physical(_dir) ?? _dir;
+
+    /// <summary>The part of <paramref name="full"/> under <paramref name="folder"/>, with "/" ("." for the folder); null: not under it.</summary>
+    private static string? Under(string folder, string full)
     {
-        var rel = Path.GetRelativePath(_leads, Path.GetFullPath(Path.Combine(root, gitPath)));
+        var rel = Path.GetRelativePath(folder, full);
         return rel.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(rel) ? null : rel.Replace('\\', '/');
     }
 
-    /// <summary>The folder's paths checked (inside it, no "..") for git, as the folder has them.</summary>
+    /// <summary>
+    /// A path of the repository's (git's, from its top) as the page names it: the folder's, or whole in a folder added;
+    /// null: outside the repository's folder (a repository bigger than it).
+    /// </summary>
+    private string? Ours(string root, string gitPath)
+    {
+        var full = Path.GetFullPath(Path.Combine(root, gitPath));
+        if (Under(Scope, full) is not { } inScope)
+        {
+            return null;
+        }
+        if (Under(_leads, full) is { } ours)
+        {
+            return ours;
+        }
+        // A folder added to the workspace: by its whole path, as the Explorer has it.
+        return workspace.Show(inScope is "." ? _dir : Path.Combine(_dir, inScope)).Replace('\\', '/');
+    }
+
+    /// <summary>
+    /// The page's paths checked for git (inside the folder or one added, no "..", and in this repository's folder), as
+    /// git takes them where it runs: from the repository's folder.
+    /// </summary>
     private List<string> Paths(JsonObject body)
     {
         var paths = (body["paths"] as JsonArray ?? []).Select(p => p is JsonValue v && v.TryGetValue<string>(out var s) ? s : null).OfType<string>().Where(p => p.Length > 0).ToList();
@@ -73,18 +103,21 @@ internal sealed partial class IdeGit(Workspace workspace)
         {
             throw new IdeError(400, "invalid", "Say which files.");
         }
+        var ours = new List<string>();
         foreach (var p in paths)
         {
+            string full;
             try
             {
-                workspace.Resolve(p);
+                full = workspace.Resolve(p);
             }
             catch (ToolError e)
             {
                 throw new IdeError(403, "outside", e.Message);
             }
+            ours.Add(Under(_dir, full) ?? throw new IdeError(400, "other_repository", $"{p} is not in the repository at {workspace.Show(_dir)}."));
         }
-        return paths;
+        return ours;
     }
 
     /// <summary>
@@ -97,10 +130,10 @@ internal sealed partial class IdeGit(Workspace workspace)
         {
             return new JsonObject { ["repository"] = false };
         }
-        var (_, branch) = await Git(workspace.Root, ["rev-parse", "--abbrev-ref", "HEAD"], ct);
-        var (counted, counts) = await Git(workspace.Root, ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"], ct);
+        var (_, branch) = await Git(_dir, ["rev-parse", "--abbrev-ref", "HEAD"], ct);
+        var (counted, counts) = await Git(_dir, ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"], ct);
         // The ignored too, as the Explorer dims them: a folder a pattern names is one entry ("build/"), not its files.
-        var (_, status) = await Git(workspace.Root, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching"], ct);
+        var (_, status) = await Git(_dir, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignored=matching"], ct);
         var files = new JsonArray();
         var ignored = new JsonArray();
         var entries = status.Split('\0');
@@ -162,7 +195,7 @@ internal sealed partial class IdeGit(Workspace workspace)
 
     /// <summary>Stages files (all of what changed in them, a deleted one's deletion too).</summary>
     public async Task StageAsync(JsonObject body, CancellationToken ct) =>
-        Check(await Git(workspace.Root, ["--literal-pathspecs", "add", "-A", "--", .. Paths(body)], ct), "staged");
+        Check(await Git(_dir, ["--literal-pathspecs", "add", "-A", "--", .. Paths(body)], ct), "staged");
 
     /// <summary>
     /// Stages exactly this text as the file's (part of its changes, as a compare's Stage Change does), the working tree
@@ -211,28 +244,29 @@ internal sealed partial class IdeGit(Workspace workspace)
     public async Task UnstageAsync(JsonObject body, CancellationToken ct)
     {
         var paths = Paths(body);
-        var (hasHead, _) = await Git(workspace.Root, ["rev-parse", "--verify", "-q", "HEAD"], ct);
+        var (hasHead, _) = await Git(_dir, ["rev-parse", "--verify", "-q", "HEAD"], ct);
         // Before the first commit there is nothing to go back to: the files leave the index.
         Check(hasHead == 0
-            ? await Git(workspace.Root, ["--literal-pathspecs", "reset", "-q", "HEAD", "--", .. paths], ct)
-            : await Git(workspace.Root, ["--literal-pathspecs", "rm", "-q", "--cached", "-r", "--", .. paths], ct), "unstaged");
+            ? await Git(_dir, ["--literal-pathspecs", "reset", "-q", "HEAD", "--", .. paths], ct)
+            : await Git(_dir, ["--literal-pathspecs", "rm", "-q", "--cached", "-r", "--", .. paths], ct), "unstaged");
     }
 
     /// <summary>Puts files back as the index has them (as the last commit, when not staged); a file git does not know is deleted.</summary>
     public async Task DiscardAsync(JsonObject body, CancellationToken ct)
     {
         var paths = Paths(body);
-        var root = await RequireRootAsync(ct);
-        var (_, known) = await Git(workspace.Root, ["--literal-pathspecs", "ls-files", "-z", "--full-name", "--", .. paths], ct);
-        var tracked = known.Split('\0', StringSplitOptions.RemoveEmptyEntries).Select(p => Ours(root, p) ?? p).ToHashSet(StringComparer.Ordinal);
+        await RequireRootAsync(ct);
+        // Without --full-name git names them from the folder it runs in, as Paths has them.
+        var (_, known) = await Git(_dir, ["--literal-pathspecs", "ls-files", "-z", "--", .. paths], ct);
+        var tracked = known.Split('\0', StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal);
         var restore = paths.Where(tracked.Contains).ToList();
         if (restore.Count > 0)
         {
-            Check(await Git(workspace.Root, ["--literal-pathspecs", "checkout", "-q", "--", .. restore], ct), "put back");
+            Check(await Git(_dir, ["--literal-pathspecs", "checkout", "-q", "--", .. restore], ct), "put back");
         }
         foreach (var p in paths.Where(p => !tracked.Contains(p)))
         {
-            var full = workspace.Resolve(p);
+            var full = Path.Combine(_dir, p);
             if (File.Exists(full))
             {
                 File.Delete(full);
@@ -255,28 +289,28 @@ internal sealed partial class IdeGit(Workspace workspace)
         await RequireRootAsync(ct);
         if (body.Bool("all") == true)
         {
-            Check(await Git(workspace.Root, ["add", "-A", "--", "."], ct), "staged");
+            Check(await Git(_dir, ["add", "-A", "--", "."], ct), "staged");
         }
         if (amend)
         {
-            if ((await Git(workspace.Root, ["rev-parse", "--verify", "-q", "HEAD"], ct)).Code != 0)
+            if ((await Git(_dir, ["rev-parse", "--verify", "-q", "HEAD"], ct)).Code != 0)
             {
                 throw new IdeError(409, "nothing", "There is no commit yet to amend.");
             }
             Check(string.IsNullOrEmpty(message)
-                ? await Git(workspace.Root, ["commit", "-q", "--amend", "--no-edit"], ct)
-                : await Git(workspace.Root, ["commit", "-q", "--amend", "-F", "-"], ct, message), "committed");
+                ? await Git(_dir, ["commit", "-q", "--amend", "--no-edit"], ct)
+                : await Git(_dir, ["commit", "-q", "--amend", "-F", "-"], ct, message), "committed");
         }
         else
         {
-            var (staged, _) = await Git(workspace.Root, ["diff", "--cached", "--quiet"], ct);
+            var (staged, _) = await Git(_dir, ["diff", "--cached", "--quiet"], ct);
             if (staged == 0)
             {
                 throw new IdeError(409, "nothing", "Nothing is staged to commit: stage the files first, or commit all.");
             }
-            Check(await Git(workspace.Root, ["commit", "-q", "-F", "-"], ct, message), "committed");
+            Check(await Git(_dir, ["commit", "-q", "-F", "-"], ct, message), "committed");
         }
-        var (_, hash) = await Git(workspace.Root, ["rev-parse", "--short", "HEAD"], ct);
+        var (_, hash) = await Git(_dir, ["rev-parse", "--short", "HEAD"], ct);
         return hash.Trim();
     }
 
@@ -284,11 +318,11 @@ internal sealed partial class IdeGit(Workspace workspace)
     public async Task UndoCommitAsync(CancellationToken ct)
     {
         await RequireRootAsync(ct);
-        if ((await Git(workspace.Root, ["rev-parse", "--verify", "-q", "HEAD~1"], ct)).Code != 0)
+        if ((await Git(_dir, ["rev-parse", "--verify", "-q", "HEAD~1"], ct)).Code != 0)
         {
             throw new IdeError(409, "first", "The last commit is the first: there is nothing before it to go back to.");
         }
-        Check(await Git(workspace.Root, ["reset", "--soft", "HEAD~1"], ct), "undone");
+        Check(await Git(_dir, ["reset", "--soft", "HEAD~1"], ct), "undone");
     }
 
     /// <summary>Fetch: what the remotes have now, branches gone there pruned.</summary>
@@ -314,7 +348,7 @@ internal sealed partial class IdeGit(Workspace workspace)
     {
         await RequireRootAsync(ct);
         var branch = await BranchAsync(ct);
-        var publish = (await Git(workspace.Root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], ct)).Code != 0;
+        var publish = (await Git(_dir, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], ct)).Code != 0;
         List<string> args = ["push"];
         if (body.Bool("force") == true)
         {
@@ -322,7 +356,7 @@ internal sealed partial class IdeGit(Workspace workspace)
         }
         if (publish)
         {
-            var (_, remotes) = await Git(workspace.Root, ["remote"], ct);
+            var (_, remotes) = await Git(_dir, ["remote"], ct);
             var names = remotes.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             var remote = body.Str("remote") is { Length: > 0 } asked ? (names.Contains(asked) ? asked : throw new IdeError(404, "no_remote", $"There is no remote {asked}."))
                 : names.Contains("origin") ? "origin" : names.FirstOrDefault() ?? throw new IdeError(409, "no_remote", "The repository has no remote to publish to (git remote add makes one).");
@@ -341,14 +375,14 @@ internal sealed partial class IdeGit(Workspace workspace)
     /// <summary>The branch checked out; refused when none is (a commit checked out alone).</summary>
     private async Task<string> BranchAsync(CancellationToken ct)
     {
-        var (_, branch) = await Git(workspace.Root, ["rev-parse", "--abbrev-ref", "HEAD"], ct);
+        var (_, branch) = await Git(_dir, ["rev-parse", "--abbrev-ref", "HEAD"], ct);
         return branch.Trim() is { Length: > 0 } b && b != "HEAD" ? b : throw new IdeError(409, "detached", "No branch is checked out (a commit is): check out a branch first.");
     }
 
     private async Task UpstreamAsync(CancellationToken ct)
     {
         await BranchAsync(ct);
-        if ((await Git(workspace.Root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], ct)).Code != 0)
+        if ((await Git(_dir, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], ct)).Code != 0)
         {
             throw new IdeError(409, "no_upstream", "The branch has no upstream yet: publish it (Push) first.");
         }
@@ -358,7 +392,7 @@ internal sealed partial class IdeGit(Workspace workspace)
     private async Task<string> BranchNameAsync(string? name, CancellationToken ct)
     {
         var n = name?.Trim();
-        if (string.IsNullOrEmpty(n) || n.StartsWith('-') || (await Git(workspace.Root, ["check-ref-format", "--branch", n], ct)).Code != 0)
+        if (string.IsNullOrEmpty(n) || n.StartsWith('-') || (await Git(_dir, ["check-ref-format", "--branch", n], ct)).Code != 0)
         {
             throw new IdeError(400, "invalid", $"\"{n}\" is not a branch name git takes.");
         }
@@ -375,7 +409,7 @@ internal sealed partial class IdeGit(Workspace workspace)
         {
             args.Add(Revision().IsMatch(from) ? from : throw NoRevision(from));
         }
-        Check(await Git(workspace.Root, args, ct), "made");
+        Check(await Git(_dir, args, ct), "made");
     }
 
     /// <summary>A branch renamed (the one checked out when none is named).</summary>
@@ -384,7 +418,7 @@ internal sealed partial class IdeGit(Workspace workspace)
         await RequireRootAsync(ct);
         var from = body.Str("from") is { Length: > 0 } f ? await BranchNameAsync(f, ct) : await BranchAsync(ct);
         var to = await BranchNameAsync(body.Str("to"), ct);
-        Check(await Git(workspace.Root, ["branch", "-m", from, to], ct), "renamed");
+        Check(await Git(_dir, ["branch", "-m", from, to], ct), "renamed");
     }
 
     /// <summary>A branch deleted: refused while it has commits merged nowhere, unless <c>force</c> (said after asking).</summary>
@@ -392,7 +426,7 @@ internal sealed partial class IdeGit(Workspace workspace)
     {
         await RequireRootAsync(ct);
         var name = await BranchNameAsync(body.Str("name"), ct);
-        var (code, said) = await Git(workspace.Root, ["branch", body.Bool("force") == true ? "-D" : "-d", name], ct);
+        var (code, said) = await Git(_dir, ["branch", body.Bool("force") == true ? "-D" : "-d", name], ct);
         if (code != 0 && said.Contains("not fully merged", StringComparison.Ordinal))
         {
             throw new IdeError(409, "not_merged", $"{name} has commits merged into no other branch: deleting it loses them.");
@@ -420,7 +454,7 @@ internal sealed partial class IdeGit(Workspace workspace)
         }
         if (full is null)
         {
-            var (code, output) = await Git(workspace.Root, ["-c", "log.showSignature=false", "log", "-n", Number(most), "--pretty=format:%h%x1f%s%x1f%an%x1f%aI%x1e"], ct);
+            var (code, output) = await Git(_dir, ["-c", "log.showSignature=false", "log", "-n", Number(most), "--pretty=format:%h%x1f%s%x1f%an%x1f%aI%x1e"], ct);
             return code != 0 ? [] : new JsonArray([.. output.Split('\x1e', StringSplitOptions.RemoveEmptyEntries).Select(r => r.Trim('\n').Split('\x1f')).Where(f => f.Length == 4)
                 .Select(f => (JsonNode)new JsonObject { ["hash"] = f[0], ["subject"] = f[1], ["author"] = f[2], ["at"] = f[3] })]);
         }
@@ -554,7 +588,7 @@ internal sealed partial class IdeGit(Workspace workspace)
         var commit = rev == ":" ? null : await CommitOfAsync(rev, ct);
         var result = new JsonObject
         {
-            ["path"] = workspace.Show(full!),
+            ["path"] = workspace.Show(full!).Replace('\\', '/'),
             ["rev"] = rev,
             ["commit"] = commit,
             ["exists"] = false,
@@ -608,26 +642,26 @@ internal sealed partial class IdeGit(Workspace workspace)
         {
             throw new IdeError(400, "invalid", "That is not a revision: give a hash, a branch or a tag (main~2, HEAD^ and the like), with no space in it and not starting with -.");
         }
-        var (code, output) = await Git(workspace.Root, ["rev-parse", "--verify", "-q", $"{rev}^{{commit}}"], ct);
+        var (code, output) = await Git(_dir, ["rev-parse", "--verify", "-q", $"{rev}^{{commit}}"], ct);
         var hash = output.Split('\n')[0].Trim();
         return code == 0 && hash.Length >= 40 && hash.All(char.IsAsciiHexDigitLower) ? hash : null;
     }
 
     private static IdeError NoRevision(string rev) => new(404, "no_revision", $"git knows no commit {rev} here.");
 
-    /// <summary>A file of the folder (checked already: inside it) as git names it, from the repository's top.</summary>
+    /// <summary>A file of the repository's folder (checked already: one the workspace has) as git names it, from the repository's top.</summary>
     private async Task<string> InRepoAsync(string? full, CancellationToken ct)
     {
-        if (full is null || !workspace.InRoot(full) || workspace.Show(full) is "." or "")
+        if (full is null || Under(_dir, full) is not { } inside || inside is ".")
         {
             throw new IdeError(400, "invalid", "Say which file.");
         }
-        var (code, prefix) = await Git(workspace.Root, ["rev-parse", "--show-prefix"], ct);
+        var (code, prefix) = await Git(_dir, ["rev-parse", "--show-prefix"], ct);
         if (code != 0)
         {
             throw new IdeError(404, "no_git", "This folder is in no git repository (git init makes one).");
         }
-        return prefix.Split('\n')[0] + workspace.Show(full);
+        return prefix.Split('\n')[0] + inside;
     }
 
     private static string Number(int n) => n.ToString(CultureInfo.InvariantCulture);
@@ -698,12 +732,12 @@ internal sealed partial class IdeGit(Workspace workspace)
         {
             return [];
         }
-        var (_, output) = await Git(workspace.Root, ["branch", "--format=%(HEAD)%(refname:short)"], ct);
+        var (_, output) = await Git(_dir, ["branch", "--format=%(HEAD)%(refname:short)"], ct);
         var list = new JsonArray([.. output.Split('\n', StringSplitOptions.RemoveEmptyEntries).OrderByDescending(b => b.StartsWith('*'))
             .Select(b => (JsonNode)new JsonObject { ["name"] = b.TrimStart('*', ' '), ["current"] = b.StartsWith('*'), ["kind"] = "local" })]);
         if (all)
         {
-            var (_, refs) = await Git(workspace.Root, ["for-each-ref", "--format=%(refname)", "refs/remotes", "refs/tags"], ct);
+            var (_, refs) = await Git(_dir, ["for-each-ref", "--format=%(refname)", "refs/remotes", "refs/tags"], ct);
             foreach (var r in refs.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
                 // A remote's HEAD names its default branch: not one to check out.
@@ -731,12 +765,126 @@ internal sealed partial class IdeGit(Workspace workspace)
         {
             throw new IdeError(400, "invalid", "Say which branch.");
         }
-        Check(await Git(workspace.Root, body.Str("kind") switch
+        Check(await Git(_dir, body.Str("kind") switch
         {
             "remote" => ["switch", "--track", name],
             "tag" => ["switch", "--detach", name],
             _ => ["switch", name],
         }, ct), "switched");
+    }
+
+    /// <summary>The most folders a scan for repositories looks into.</summary>
+    public const int MostScanned = 20_000;
+
+    /// <summary>The most repositories listed.</summary>
+    public const int MostRepositories = 100;
+
+    /// <summary>
+    /// The repositories Source Control shows, as VS Code's git.autoRepositoryDetection finds them: the folder's own and
+    /// each added folder's (when it is in one); with <paramref name="subFolders"/> those in their folders, down to
+    /// <paramref name="depth"/> levels (a folder named in <paramref name="ignored"/>, a link, and .git are not looked
+    /// into); and the repository of each file of <paramref name="open"/> (the files open in the editor) that is inside
+    /// them. Each once, by its folder as the page names it ("." the folder's own), with its name; the folder's own first.
+    /// </summary>
+    public static async Task<JsonArray> RepositoriesAsync(Workspace workspace, IReadOnlyList<string> roots, bool subFolders, int depth, IReadOnlyCollection<string> ignored, IReadOnlyList<string> open, CancellationToken ct)
+    {
+        var found = new List<string>();
+        var seen = new HashSet<string>(OperatingSystem.IsLinux() ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase);
+        void Add(string dir)
+        {
+            dir = Path.TrimEndingDirectorySeparator(dir);
+            if (found.Count < MostRepositories && seen.Add(Workspace.Physical(dir) ?? dir))
+            {
+                found.Add(dir);
+            }
+        }
+        foreach (var root in roots)
+        {
+            if ((await Git(root, ["rev-parse", "--show-toplevel"], ct)).Code == 0)
+            {
+                Add(root);
+            }
+        }
+        if (subFolders && depth > 0)
+        {
+            var looked = 0;
+            foreach (var root in roots)
+            {
+                var level = new List<string> { root };
+                for (var d = 1; d <= depth && level.Count > 0 && looked < MostScanned; d++)
+                {
+                    var next = new List<string>();
+                    foreach (var folder in level)
+                    {
+                        IEnumerable<string> inside;
+                        try
+                        {
+                            inside = Directory.EnumerateDirectories(folder).Order(StringComparer.Ordinal).ToList();
+                        }
+                        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+                        {
+                            continue;
+                        }
+                        foreach (var sub in inside)
+                        {
+                            ct.ThrowIfCancellationRequested();
+                            var name = Path.GetFileName(sub);
+                            if (++looked > MostScanned || name == ".git" || ignored.Contains(name) || new DirectoryInfo(sub).LinkTarget is not null || !workspace.Allowed(sub))
+                            {
+                                continue;
+                            }
+                            if (Path.Exists(Path.Combine(sub, ".git")))
+                            {
+                                Add(sub);
+                            }
+                            next.Add(sub);
+                        }
+                    }
+                    level = next;
+                }
+            }
+        }
+        foreach (var file in open)
+        {
+            if (await RepositoryOfAsync(roots, file, ct) is { } dir)
+            {
+                Add(dir);
+            }
+        }
+        // The folder's own first, then the others by their place.
+        return new JsonArray([.. found.OrderBy(f => !string.Equals(f, roots[0], StringComparison.Ordinal)).ThenBy(f => workspace.Show(f), StringComparer.Ordinal).Select(f => (JsonNode)new JsonObject
+        {
+            ["path"] = workspace.Show(f).Replace('\\', '/'),
+            ["name"] = Path.GetFileName(f) is { Length: > 0 } n ? n : f,
+        })]);
+    }
+
+    /// <summary>
+    /// The folder a file's repository is worked from: its top, when that is inside one of <paramref name="roots"/> (the
+    /// folder's own, or one added), else the root that holds the file (its repository is bigger than it); null when
+    /// the file is in no repository, or in none of the roots.
+    /// </summary>
+    public static async Task<string?> RepositoryOfAsync(IReadOnlyList<string> roots, string full, CancellationToken ct)
+    {
+        var holder = roots.Where(r => Under(r, full) is not null).MaxBy(r => r.Length);
+        if (holder is null)
+        {
+            return null;
+        }
+        var from = Directory.Exists(full) ? full : Path.GetDirectoryName(full) ?? holder;
+        // A folder not there yet (a file made in it is not saved yet): git asks from the nearest one that is.
+        while (!Directory.Exists(from) && Under(holder, from) is not null && Path.GetDirectoryName(from) is { } up)
+        {
+            from = up;
+        }
+        var (code, output) = await Git(from, ["rev-parse", "--show-toplevel"], ct);
+        if (code != 0 || output.Trim() is not { Length: > 0 } top)
+        {
+            return null;
+        }
+        // git names the top where it leads: the root's own name for it, when it is inside.
+        var physical = Workspace.Physical(holder) ?? holder;
+        return Under(physical, Path.GetFullPath(top)) is { } inside ? (inside is "." ? holder : Path.Combine(holder, inside)) : holder;
     }
 
     private static void Check((int Code, string Output) result, string what)

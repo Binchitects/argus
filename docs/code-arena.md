@@ -384,6 +384,16 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   has them too (Toggle Primary Side Bar Position, Move Panel Left, Right or to
   Bottom, Move View to Panel, Move Panel View to Side Bar, Reset View
   Locations). Where everything is stays for the next run, with the sizes.
+- **customising the activity bar**: as VS Code's, an icon's right-click
+  menu hides it (**Hide 'Search'**), and the bar's own right-click menu lists
+  every view with a check: uncheck one to hide its icon, check it to bring it
+  back. A hidden view still opens by its command or keys (Ctrl+Shift+F shows
+  Search), and its icon shows while it does. **Activity Bar Position** (in
+  the same menu, and the palette's Move Activity Bar to Side, Move Activity
+  Bar to Top, Hide Activity Bar and Toggle Activity Bar Visibility) puts the
+  bar beside the side bar, as a row of icons above it (Accounts and Manage
+  at the row's end), or hides it. Reset View Locations shows every icon again
+  beside the side bar. This is kept with the layout, for the next run.
 - **help**: Help in the activity bar opens the IDE's help over the page:
   what each part does, the common tasks step by step and the keys, with a
   link to this page of the manual in the Arena signed in to
@@ -463,6 +473,7 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   opens it for good (`workbench.editor.enablePreview`: false opens every file
   so). **Pin** (the tab's menu, **Ctrl+K Shift+Enter**) keeps a tab first in
   the strip, and Close Others, Close to the Right and Close Saved leave it;
+  the middle mouse button closes a tab, as in VS Code;
   tabs are dragged to reorder them, or moved with **Ctrl+Shift+PageUp** and
   **PageDown** (**Alt+Shift+** where the browser keeps those). **Breadcrumbs** over
   it name the file's folders (each lists its files to open), the file, and the
@@ -532,6 +543,48 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   **Complete this**, as the editor's does. A tab's right-click menu closes it,
   the others, those to its right, the saved ones or all, copies its path and
   compares it.
+- **editor groups** (split editors), as VS Code's: **Split Right** and
+  **Split Down** in a tab's menu, **Split Editor** (**Ctrl+\\**) and **Split
+  Editor in Orthogonal Direction** (**Ctrl+K Ctrl+\\**) open the tab shown in
+  a new group beside it or below it. Each group has its own tabs and the
+  file shown in it; a file open in two groups is one file (typing in one shows
+  in the other at once, and it is saved once). Drag a tab onto another group's
+  tabs or editor to move it there, or onto the right or bottom edge of an
+  editor to make a new group there; **Move to Next Group** and **Move to
+  Previous Group** in a tab's menu (**Ctrl+Alt+Right**, **Ctrl+Alt+Left**) do
+  the same. A group closes when its last tab goes. **Ctrl+1** to **Ctrl+8**
+  focus a group by its place (one past the last splits to the right),
+  **Ctrl+K Ctrl+Left** and **Right** the one beside; the divider between two
+  groups is dragged, or moved with the arrow keys when focused. **Toggle
+  Vertical/Horizontal Editor Layout** (**Alt+Shift+0**) turns the groups from
+  side by side to one above another; **Join All Editor Groups** puts every tab
+  back in the first; **Close Editor Group** closes the one with the focus.
+  Save, Close and the other commands work on the group with the focus; Save
+  All and a file changed on disk reach every group. Eight groups at most.
+  The groups, their tabs, the one each shows and their sizes are kept with
+  the tabs: a reload (or the next run) puts them back as they were.
+  **Open to the Side** (the Explorer's menu, **Ctrl+Enter** in quick open,
+  Markdown's **Open Preview to the Side**) opens a file in the group beside
+  the one with the focus, made when there is none. **Show All Editors By
+  Appearance** (**Ctrl+K Ctrl+P**) lists every group's tabs to go to one.
+- **more of VS Code's View and File commands**: **Revert File** (what is
+  unsaved goes, the file as it is on disk), **Toggle Zen Mode** (**Ctrl+K
+  Z**: the editor alone, the side bar, panel, chat and activity bar back as
+  they were the next time), **Toggle Full Screen** (**F11**), and **Toggle
+  Minimap**, **Toggle Sticky Scroll** and **Toggle Render Whitespace**, which
+  change the settings of the same names in your settings.json.
+- **a tab or the chat in a window of its own**, as VS Code's Move into New
+  Window: **Move into New Window** in a tab's menu (the palette's **Move
+  Editor into New Window**) opens the file in a new browser window, with what
+  is unsaved in it, and closes its tab in the IDE; the chat's header button
+  **Open the chat in a new window** (the palette's **Open Chat in New
+  Window**) moves the chat there, hidden in the IDE meanwhile. Both windows
+  are the same Code Arena: the session, the files and the settings are one.
+  What the agent changes from the chat's window reloads in the IDE's editor,
+  and a file saved in either reloads in the other. **Move back into the IDE**
+  at the window's top (or closing the window) puts its tabs back in the IDE,
+  unsaved text too, or shows the chat there again. The browser must allow
+  pop-ups for the page.
 - **changes on disk**: what changes in the folder by anyone (your own editor,
   a command, git) shows at once: a file open and not edited here reloads, one
   deleted closes, the Explorer, Source Control and Changes are read again, and
@@ -806,8 +859,41 @@ browser keeps it, so the next page opens in its colours at once (one only
 previewed in the picker is not kept). In Code Studio the IDE shows
 its theme's colours while it is open; going back, Arena's pages wear the
 person's own colour theme again (Your account → Appearance). Visual Studio's
-themes, High Contrast and an extension's themes keep Arena's own colours
-under what they set.
+themes and an extension's themes keep Arena's own colours under what they set.
+
+**VS Code's colour themes.** The **Color Theme** picker (Ctrl+K Ctrl+Alt+T)
+and the theme button also have VS Code's most used themes, by VS Code's own
+names in `workbench.colorTheme`: `Default Dark+`, `Default Light+`, `Default
+Dark Modern`, `Default Light Modern`, `Monokai` and `Monokai Light`,
+`Solarized Dark` and `Solarized Light`, `One Dark Pro` and `One Light`,
+`Dracula` and `Alucard`, `GitHub Dark` and `GitHub Light`, `Nord` and `Nord
+Light`, and `Default High Contrast` and `Default High Contrast Light`. A
+settings.json copied from VS Code keeps its theme. Each colours the whole
+workbench with the theme's own colours, as sharp as VS Code has them (not
+calm, as Arena's are), and the editor with the theme's code colours (its
+keywords, strings, numbers, functions, types and comments); High Contrast is
+Monaco's high contrast, with its outlines. Any of their colours under 4.5:1
+on its ground is made only as much lighter or darker as that asks. Older
+names and the extensions' names for them (`Dark+ (default dark)`, `GitHub
+Dark Default`, `Atom One Light`) read as these.
+
+**Accessibility.** The Settings editor's **Accessibility** has VS Code's own
+and what Code Arena adds over any theme:
+
+| Setting | What it does |
+|---|---|
+| `window.zoomLevel` | the whole workbench larger or smaller, each step 20% (1 is 120%), as VS Code's; **Ctrl+=** and **Ctrl+-** (or Zoom In, Zoom Out) change it, **Ctrl+Numpad0** (Reset Zoom) puts it back. The editor keeps `editor.fontSize` |
+| `window.autoDetectHighContrast` | `true` (the default): when the system asks for more contrast, or forces its colours, the workbench shows Default High Contrast (or High Contrast Light) |
+| `workbench.reduceMotion` | `on`: no animation in the workbench and its menus, whatever the system says; `auto`: as the system asks |
+| `codeArena.accessibility.contrast` | `more`: secondary text as the text, borders and fields that stand out, the focus ring at full strength |
+| `codeArena.accessibility.textSize` | `112%`, `125%` or `150%`: the workbench's text larger, the rest as it is |
+| `codeArena.accessibility.focusRings` | `strong`: a solid ring in the text's colour round what the keyboard is on |
+| `codeArena.accessibility.colorBlindColors` | blue and orange where green and red say added and removed, passed and failed: a compare's lines, the gutter's changes, git's letters, the tests |
+
+The palette has **Toggle High Contrast Theme**, **Toggle More Contrast**,
+**Toggle Colour-Blind Safe Colours** and **Toggle Reduce Motion**. In Code
+Studio, closing the IDE puts the page back as Your account → Easier to see has
+it.
 
 In a terminal the keys go to the shell, but those of the commands that skip
 it (the palette, quick open, the panels and views, the debugger's), and the
@@ -1290,6 +1376,28 @@ and email commit. Below: the branch, to switch to another, how far it is
 ahead of and behind its upstream, and the last commits. A repository bigger
 than the folder shows the folder's files only.
 
+**Several repositories at once**, as in VS Code: besides the folder's own,
+Source Control finds the repositories in its folders (one level down by
+default) and those of the files open in the editor, and each folder added to
+the workspace (Add Folder to Workspace) that is in one. With more than one,
+each has a section of its own: its name, its branch and how far it is from
+its upstream on its row, which folds it; under it its own commit box, Merge
+Changes, Staged Changes, Changes, branch and last commits, all folding. Its
+row's buttons (shown on hover or focus) switch it between list and tree,
+collapse it, read it again and have its **⋯** menu. Every action works on the
+section's own repository; a git command of the palette (Pull, Push, Fetch,
+Checkout to…) asks which repository first, and **Fetch From All
+Repositories** fetches each. A compare, a file's history and the gutter's
+changes use the repository the file is in. The settings are VS Code's:
+`git.autoRepositoryDetection` (`true`: both ways; `"subFolders"` or
+`"openEditors"`: one of them; `false`: the folder's own and the added
+folders' only), `git.repositoryScanMaxDepth` (levels of folders looked into,
+1 by default, -1 for 10) and `git.repositoryScanIgnoredFolders`
+(`["node_modules"]`: never looked into, nor `.git` nor links). A
+repository's files keep the folder's paths (`libs/ui/button.ts`); an added
+folder's have their whole path, as the Explorer has them. Each repository's
+folds are kept apart, for the folder.
+
 As in VS Code, each group (and the branch and the last commits) folds with
 its chevron, and **View as Tree** shows the files under their folders, each
 folding too, with its own buttons for all the files in it (a folder with only
@@ -1443,7 +1551,8 @@ run at once at most. A page that comes back, or a second tab, sees the last
 SIGKILL 3 s later to what is left, whether the shell ended or not: the shell,
 the job in the foreground and, on Linux, every job of the shell's session,
 those in the background and those started with `nohup` too (on macOS, the
-shell's and the foreground job's process groups). A program that leaves the
+shell's and the foreground job's process groups); the middle mouse button on
+a terminal's tab closes it so too. A program that leaves the
 session (`setsid`, a daemon, tmux) keeps running. Stopping code-arena closes
 them all.
 

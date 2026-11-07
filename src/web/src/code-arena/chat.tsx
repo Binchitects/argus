@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronUp, Cloud, CloudUpload, FileCode2, FolderGit2, GitBranch, History, ListChecks, LoaderCircle, MessageSquarePlus, Monitor, Moon, Network, PanelRightClose, Paperclip, ScrollText, ShieldCheck, Square, SquareTerminal, Sun, Target, TestTubeDiagonal, Plus, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, ChevronUp, Cloud, CloudUpload, FileCode2, FolderGit2, GitBranch, History, ListChecks, LoaderCircle, MessageSquarePlus, Monitor, Moon, Network, PanelRightClose, Paperclip, PictureInPicture2, ScrollText, ShieldCheck, Square, SquareTerminal, Sun, Target, TestTubeDiagonal, Plus, X } from 'lucide-react'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -339,13 +339,21 @@ export function ThemeMenu({ side = 'bottom', align = 'end' }: { side?: 'right' |
         </DropdownMenuRadioGroup>
         <DropdownMenuSeparator />
         <DropdownMenuLabel>Color theme</DropdownMenuLabel>
-        <DropdownMenuRadioGroup value={family ?? ''} onValueChange={(v) => setFamily(v as ColorThemeId)}>
-          {appColorThemes.map((t) => (
-            <DropdownMenuRadioItem key={t.id} value={t.id}>
-              <span className="size-3.5 shrink-0 rounded-full border border-foreground/20" style={{ background: t[resolved].primary }} aria-hidden="true" /> {t.id === 'default' ? 'Code Arena' : t.label}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
+        {[appColorThemes.filter((t) => !t.vscode), appColorThemes.filter((t) => t.vscode)].map((list, i) => (
+          <DropdownMenuRadioGroup key={i} value={family ?? ''} onValueChange={(v) => setFamily(v as ColorThemeId)}>
+            {i > 0 && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>VS Code's</DropdownMenuLabel>
+              </>
+            )}
+            {list.map((t) => (
+              <DropdownMenuRadioItem key={t.id} value={t.id}>
+                <span className="size-3.5 shrink-0 rounded-full border border-foreground/20" style={{ background: t[resolved].primary }} aria-hidden="true" /> {t.id === 'default' ? 'Code Arena' : t.label}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        ))}
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -407,6 +415,7 @@ export function Thread({
   config,
   onOpenList,
   onHide,
+  onDetach,
   onShow,
   onEvent,
   onTurnEnd,
@@ -415,6 +424,8 @@ export function Thread({
   config: ChatConfig
   onOpenList: () => void
   onHide?: () => void
+  /** Moves the chat into a window of its own. */
+  onDetach?: () => void
   /** The chat is asked for (the editor sent lines to it): it shows, if hidden. */
   onShow?: () => void
   onEvent?: (e: CodeEvent) => void
@@ -1013,6 +1024,13 @@ export function Thread({
             <History />
           </Button>
         </Tooltip>
+        {onDetach && (
+          <Tooltip content="Open the chat in a new window">
+            <Button variant="ghost" size="icon-sm" onClick={onDetach} aria-label="Open the chat in a new window">
+              <PictureInPicture2 />
+            </Button>
+          </Tooltip>
+        )}
         {onHide && (
           <Tooltip content="Hide the chat">
             <Button variant="ghost" size="icon-sm" onClick={onHide} aria-label="Hide the chat">

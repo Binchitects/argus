@@ -146,25 +146,60 @@ internal sealed partial class WebApp
                 case ("POST", "/api/complete"):
                     await CompleteAsync(Body(req), res, ct);
                     return true;
+                case ("POST", "/api/git/repositories"):
+                {
+                    // Source Control's repositories, as git.autoRepositoryDetection, git.repositoryScanMaxDepth and
+                    // git.repositoryScanIgnoredFolders say (the page sends them, and the files open in its editor).
+                    var body = Body(req);
+                    var detect = body["detect"] is JsonValue v && v.TryGetValue<bool>(out var on) ? (on ? "true" : "false") : body.Str("detect") ?? "true";
+                    var depth = Math.Clamp(body.Int("depth") ?? 1, -1, 10);
+                    var ignored = Strings(body["ignored"]).ToHashSet(StringComparer.Ordinal);
+                    var open = detect is "true" or "openEditors"
+                        ? Strings(body["open"]).Take(200).Select(p =>
+                        {
+                            try
+                            {
+                                return _files.Resolve(p);
+                            }
+                            catch (IdeError)
+                            {
+                                return null;
+                            }
+                        }).OfType<string>().ToList()
+                        : [];
+                    // -1, as VS Code's: no limit; here 10 levels at most.
+                    var list = await IdeGit.RepositoriesAsync(_rt.Workspace, GitRoots(), detect is "true" or "subFolders", depth < 0 ? 10 : depth, ignored, open, ct);
+                    await res.JsonAsync(200, new JsonObject { ["repositories"] = list }, ct);
+                    return true;
+                }
                 case ("GET", "/api/git/status"):
-                    await res.JsonAsync(200, await _git.StatusAsync(ct), ct);
+                    await res.JsonAsync(200, await GitOf(Query(req, "repo")).StatusAsync(ct), ct);
                     return true;
                 case ("GET", "/api/git/log"):
-                    await res.JsonAsync(200, await _git.LogAsync(GitFile(req), Query(req, "limit"), ct), ct);
+                {
+                    var file = GitFile(req);
+                    await res.JsonAsync(200, await (await GitForAsync(Query(req, "repo"), file, ct)).LogAsync(file, Query(req, "limit"), ct), ct);
                     return true;
+                }
                 case ("GET", "/api/git/show"):
-                    await res.JsonAsync(200, await _git.ShowAsync(GitFile(req), Query(req, "rev"), ct), ct);
+                {
+                    var file = GitFile(req);
+                    await res.JsonAsync(200, await (await GitForAsync(Query(req, "repo"), file, ct)).ShowAsync(file, Query(req, "rev"), ct), ct);
                     return true;
+                }
                 case ("GET", "/api/git/commit"):
-                    await res.JsonAsync(200, await _git.CommitFilesAsync(Query(req, "hash"), ct), ct);
+                    await res.JsonAsync(200, await GitOf(Query(req, "repo")).CommitFilesAsync(Query(req, "hash"), ct), ct);
                     return true;
                 case ("GET", "/api/git/branches"):
-                    await res.JsonAsync(200, await _git.BranchesAsync(ct, Flag(req, "all")), ct);
+                    await res.JsonAsync(200, await GitOf(Query(req, "repo")).BranchesAsync(ct, Flag(req, "all")), ct);
                     return true;
                 case ("POST", "/api/git/stage"):
-                    await _git.StageAsync(Body(req), ct);
-                    await res.JsonAsync(200, await _git.StatusAsync(ct), ct);
+                {
+                    var git = GitOf(Body(req).Str("repo"));
+                    await git.StageAsync(Body(req), ct);
+                    await res.JsonAsync(200, await git.StatusAsync(ct), ct);
                     return true;
+                }
                 case ("POST", "/api/git/stage-text"):
                 {
                     var body = Body(req);
@@ -172,26 +207,40 @@ internal sealed partial class WebApp
                     {
                         throw new IdeError(400, "invalid", "Send the text to stage.");
                     }
-                    await _git.StageTextAsync(body.Str("path") is { Length: > 0 } path ? _files.Resolve(path) : null, text, ct);
-                    await res.JsonAsync(200, await _git.StatusAsync(ct), ct);
+                    var file = body.Str("path") is { Length: > 0 } path ? _files.Resolve(path) : null;
+                    var git = await GitForAsync(body.Str("repo"), file, ct);
+                    await git.StageTextAsync(file, text, ct);
+                    await res.JsonAsync(200, await git.StatusAsync(ct), ct);
                     return true;
                 }
                 case ("POST", "/api/git/unstage"):
-                    await _git.UnstageAsync(Body(req), ct);
-                    await res.JsonAsync(200, await _git.StatusAsync(ct), ct);
+                {
+                    var git = GitOf(Body(req).Str("repo"));
+                    await git.UnstageAsync(Body(req), ct);
+                    await res.JsonAsync(200, await git.StatusAsync(ct), ct);
                     return true;
+                }
                 case ("POST", "/api/git/discard"):
-                    await _git.DiscardAsync(Body(req), ct);
-                    await res.JsonAsync(200, await _git.StatusAsync(ct), ct);
+                {
+                    var git = GitOf(Body(req).Str("repo"));
+                    await git.DiscardAsync(Body(req), ct);
+                    await res.JsonAsync(200, await git.StatusAsync(ct), ct);
                     return true;
+                }
                 case ("POST", "/api/git/commit"):
-                    var hash = await _git.CommitAsync(Body(req), ct);
-                    await res.JsonAsync(200, new JsonObject { ["hash"] = hash, ["status"] = await _git.StatusAsync(ct) }, ct);
+                {
+                    var git = GitOf(Body(req).Str("repo"));
+                    var hash = await git.CommitAsync(Body(req), ct);
+                    await res.JsonAsync(200, new JsonObject { ["hash"] = hash, ["status"] = await git.StatusAsync(ct) }, ct);
                     return true;
+                }
                 case ("POST", "/api/git/switch"):
-                    await _git.SwitchAsync(Body(req), ct);
-                    await res.JsonAsync(200, await _git.StatusAsync(ct), ct);
+                {
+                    var git = GitOf(Body(req).Str("repo"));
+                    await git.SwitchAsync(Body(req), ct);
+                    await res.JsonAsync(200, await git.StatusAsync(ct), ct);
                     return true;
+                }
                 case ("POST", "/api/git/fetch"):
                 case ("POST", "/api/git/pull"):
                 case ("POST", "/api/git/push"):
@@ -202,18 +251,19 @@ internal sealed partial class WebApp
                 case ("POST", "/api/git/undo-commit"):
                 {
                     var body = Body(req);
+                    var git = GitOf(body.Str("repo"));
                     await (req.Path switch
                     {
-                        "/api/git/fetch" => _git.FetchAsync(ct),
-                        "/api/git/pull" => _git.PullAsync(body, ct),
-                        "/api/git/push" => _git.PushAsync(body, ct),
-                        "/api/git/sync" => _git.SyncAsync(body, ct),
-                        "/api/git/branch/create" => _git.CreateBranchAsync(body, ct),
-                        "/api/git/branch/rename" => _git.RenameBranchAsync(body, ct),
-                        "/api/git/branch/delete" => _git.DeleteBranchAsync(body, ct),
-                        _ => _git.UndoCommitAsync(ct),
+                        "/api/git/fetch" => git.FetchAsync(ct),
+                        "/api/git/pull" => git.PullAsync(body, ct),
+                        "/api/git/push" => git.PushAsync(body, ct),
+                        "/api/git/sync" => git.SyncAsync(body, ct),
+                        "/api/git/branch/create" => git.CreateBranchAsync(body, ct),
+                        "/api/git/branch/rename" => git.RenameBranchAsync(body, ct),
+                        "/api/git/branch/delete" => git.DeleteBranchAsync(body, ct),
+                        _ => git.UndoCommitAsync(ct),
                     });
-                    await res.JsonAsync(200, await _git.StatusAsync(ct), ct);
+                    await res.JsonAsync(200, await git.StatusAsync(ct), ct);
                     return true;
                 }
                 case ("GET", "/api/problems"):
@@ -667,6 +717,38 @@ internal sealed partial class WebApp
 
     /// <summary>The file a git call names (<c>path</c>), checked as every path of the page's is (403 outside the folder); null when none is named.</summary>
     private string? GitFile(HttpRequest req) => Query(req, "path") is { Length: > 0 } path ? _files.Resolve(path) : null;
+
+    /// <summary>The strings of a JSON array (none when it is not one).</summary>
+    private static IEnumerable<string> Strings(JsonNode? node) =>
+        (node as JsonArray ?? []).Select(n => n is JsonValue v && v.TryGetValue<string>(out var x) ? x : null).OfType<string>().Where(x => x.Length > 0);
+
+    /// <summary>The workspace's folders whose repositories Source Control shows: the folder open, then those added.</summary>
+    private List<string> GitRoots() => [_rt.Workspace.Root, .. Folders.Added(_state).Where(_rt.Workspace.Allowed)];
+
+    /// <summary>
+    /// The repository a call names (<c>repo</c>: its folder as Source Control lists it), the folder's own when none is.
+    /// It is a folder of the workspace's: the folder open, or one added.
+    /// </summary>
+    private IdeGit GitOf(string? repo)
+    {
+        if (string.IsNullOrEmpty(repo) || repo == ".")
+        {
+            return _git;
+        }
+        var full = _files.Resolve(repo);
+        return Directory.Exists(full) ? new IdeGit(_rt.Workspace, full) : throw new IdeError(404, "no_repository", $"There is no folder {repo} for a repository.");
+    }
+
+    /// <summary>A file's repository when the call names none: the one it is in (a repository nested in the folder, or an added folder's).</summary>
+    private async Task<IdeGit> GitForAsync(string? repo, string? file, CancellationToken ct)
+    {
+        if (!string.IsNullOrEmpty(repo) || file is null)
+        {
+            return GitOf(repo);
+        }
+        var dir = await IdeGit.RepositoryOfAsync(GitRoots(), file, ct);
+        return dir is null || string.Equals(dir, _rt.Workspace.Root, StringComparison.Ordinal) ? _git : new IdeGit(_rt.Workspace, dir);
+    }
 
     private static JsonObject Body(HttpRequest req) => req.Json() ?? throw new IdeError(400, "invalid", "Send a JSON object.");
 

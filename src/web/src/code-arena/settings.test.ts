@@ -49,18 +49,19 @@ describe('settings.json', () => {
   })
 
   it("takes any colour theme's name, offers the extensions' themes beside Code Arena's, and reads one it does not have as the nearest", () => {
-    const l = readLayer('{ "workbench.colorTheme": "Dracula", "workbench.iconTheme": "material-icon-theme" }')
+    const l = readLayer('{ "workbench.colorTheme": "Tokyo Night", "workbench.iconTheme": "material-icon-theme" }')
     expect(l.problems).toEqual([])
-    expect(l.values['workbench.colorTheme']).toBe('Dracula')
-    expect(themeNamed('Dracula')).toMatchObject({ name: 'Code Arena Dark', kind: 'dark' })
-    expect(themeNamed('Default Light Modern').name).toBe('Code Arena Light')
-    setExtensionThemes([{ name: 'Dracula', kind: 'dark', monaco: 'ext-dracula', extension: 'dracula-theme.theme-dracula' }, { name: 'Code Arena Light', kind: 'dark', monaco: 'ext-x', extension: 'x.y' }])
+    expect(l.values['workbench.colorTheme']).toBe('Tokyo Night')
+    expect(themeNamed('Tokyo Night')).toMatchObject({ name: 'Code Arena Dark', kind: 'dark' })
+    expect(themeNamed('Tokyo Night Light').name).toBe('Code Arena Light')
+    setExtensionThemes([{ name: 'Tokyo Night', kind: 'dark', monaco: 'ext-tokyo', extension: 'enkia.tokyo-night' }, { name: 'Code Arena Light', kind: 'dark', monaco: 'ext-x', extension: 'x.y' }, { name: 'Dracula', kind: 'dark', monaco: 'ext-dracula', extension: 'dracula-theme.theme-dracula' }])
     setExtensionIconThemes([{ id: 'material-icon-theme', label: 'Material Icon Theme', extension: 'pkief.material-icon-theme' }])
     try {
-      expect(themeNamed('Dracula')).toMatchObject({ monaco: 'ext-dracula', extension: 'dracula-theme.theme-dracula' })
-      // Code Arena's own names stay its own.
+      expect(themeNamed('Tokyo Night')).toMatchObject({ monaco: 'ext-tokyo', extension: 'enkia.tokyo-night' })
+      // Code Arena's own names stay its own, VS Code's themes it has too (Dracula's extension adds nothing over its own).
       expect(themeNamed('Code Arena Light').monaco).toBe('arena-light')
-      expect(settingDef.get('workbench.colorTheme')!.enum).toContain('Dracula')
+      expect(themeNamed('Dracula')).toMatchObject({ monaco: 'arena-dracula-dark', family: 'dracula' })
+      expect(settingDef.get('workbench.colorTheme')!.enum).toContain('Tokyo Night')
       expect(settingDef.get('workbench.iconTheme')!.enum).toEqual(['code-arena', 'material-icon-theme'])
       expect(JSON.stringify(settingsSchema())).toContain('"anyOf":[{"enum":["Code Arena Dark"')
     } finally {
@@ -73,13 +74,20 @@ describe('settings.json', () => {
     expect(themeNamed('Copper Dark')).toEqual({ name: 'Copper Dark', kind: 'dark', monaco: 'arena-copper-dark', family: 'copper' })
     expect(themeNamed('Sakura Light')).toEqual({ name: 'Sakura Light', kind: 'light', monaco: 'arena-sakura-light', family: 'sakura' })
     expect(themeNamed('Code Arena Dark')).toMatchObject({ monaco: 'arena-dark', family: 'default' })
-    // Visual Studio's and High Contrast keep Arena's own colours around the editor.
-    expect(themeNamed('High Contrast').family).toBeUndefined()
+    // Visual Studio's keeps Arena's own colours around the editor.
+    expect(themeNamed('Dark (Visual Studio)').family).toBeUndefined()
     const names = settingDef.get('workbench.colorTheme')!.enum!
     for (const family of ['Code Arena', 'Sakura', 'Midnight', 'Copper', 'Forest', 'Ocean', 'Lavender']) expect(names).toEqual(expect.arrayContaining([`${family} Light`, `${family} Dark`]))
     expect(settingDef.get('workbench.preferredLightColorTheme')!.enum).toContain('Lavender Light')
-    // A theme from elsewhere with "light" in its name still reads as Code Arena Light.
-    expect(themeNamed('Solarized Light').name).toBe('Code Arena Light')
+    // VS Code's themes by VS Code's names: the whole page wears them too.
+    expect(names).toEqual(expect.arrayContaining(['Default Dark+', 'Default Light+', 'Default Dark Modern', 'Default Light Modern', 'Monokai', 'Solarized Dark', 'Solarized Light', 'One Dark Pro', 'Dracula', 'GitHub Dark', 'GitHub Light', 'Nord', 'Default High Contrast', 'Default High Contrast Light']))
+    expect(themeNamed('Solarized Light')).toEqual({ name: 'Solarized Light', kind: 'light', monaco: 'arena-solarized-light', family: 'solarized' })
+    expect(themeNamed('Default High Contrast')).toMatchObject({ kind: 'dark', family: 'contrast' })
+    // Their other names (older VS Code's, the extensions'), as the nearest.
+    expect(themeNamed('High Contrast').name).toBe('Default High Contrast')
+    expect(themeNamed('Dark+ (default dark)').name).toBe('Default Dark+')
+    expect(themeNamed('GitHub Dark Default').name).toBe('GitHub Dark')
+    expect(themeNamed('Atom One Light').name).toBe('One Light')
   })
 
   it('reads nested objects as dotted names, and refuses values of the wrong kind', () => {

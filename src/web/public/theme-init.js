@@ -18,6 +18,23 @@
   } catch {
     // storage unavailable: Arena's colours
   }
+  // How the page is made easier to see (lib/seeing.ts): more contrast, larger text or page, strong focus rings, less
+  // motion, colours told apart without red and green. Only what is not the default is set.
+  try {
+    var seeing = JSON.parse(localStorage.getItem('seeing') || 'null')
+    if (seeing && typeof seeing === 'object') {
+      var root = document.documentElement.dataset
+      var sizes = [112, 125, 150]
+      if (seeing.contrast === 'more') root.contrast = 'more'
+      if (sizes.indexOf(seeing.text) >= 0) root.text = String(seeing.text)
+      if (sizes.indexOf(seeing.scale) >= 0) root.scale = String(seeing.scale)
+      if (seeing.focus === 'strong') root.focus = 'strong'
+      if (seeing.motion === 'reduce') root.motion = 'reduce'
+      if (seeing.colors === 'safe') root.colors = 'safe'
+    }
+  } catch {
+    // storage unavailable, or not JSON: as the page is
+  }
   // The content width ("comfortable", "wide" or "full"); CSS treats a missing one as wide.
   try {
     var width = localStorage.getItem('width')

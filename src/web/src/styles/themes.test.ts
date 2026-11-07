@@ -33,6 +33,9 @@ const all = rules()
 const defaultLight: Tokens = { ...all.get(':root') }
 const defaultDark: Tokens = { ...defaultLight, ...all.get('.dark') }
 const themed = colorThemeIds.filter((id) => id !== 'default')
+// Arena's calm themes, and VS Code's, which are as sharp as VS Code has them.
+const vscode = (id: ColorThemeId) => !!colorThemes.find((t) => t.id === id)!.vscode
+const calm = themed.filter((id) => !vscode(id))
 const blockOf = (id: ColorThemeId, mode: 'light' | 'dark') => all.get(mode === 'light' ? `:root[data-color-theme='${id}']:not(.dark)` : `:root.dark[data-color-theme='${id}']`)
 const tokensOf = (id: ColorThemeId, mode: 'light' | 'dark'): Tokens => ({ ...(mode === 'light' ? defaultLight : defaultDark), ...(id === 'default' ? {} : blockOf(id, mode)) })
 
@@ -125,7 +128,8 @@ describe('colour themes', () => {
       for (const mode of ['light', 'dark'] as const) {
         const block = blockOf(id, mode)!
         expect(own.filter((k) => !(k in block)), `${id} ${mode}`).toEqual([])
-        expect(Object.keys(block).filter((k) => /^--(destructive|success|warning|hl-)/.test(k)), `${id} ${mode}`).toEqual([])
+        // VS Code's themes bring the colours of their code too; no theme changes what means state.
+        expect(Object.keys(block).filter((k) => (vscode(id) ? /^--(destructive|success|warning)/ : /^--(destructive|success|warning|hl-)/).test(k)), `${id} ${mode}`).toEqual([])
         for (const [k, v] of Object.entries(block)) if (v.startsWith('oklch(')) expect(oklch(v).inGamut, `${id} ${mode} ${k}`).toBe(true)
       }
     }
@@ -162,7 +166,7 @@ describe('colour themes', () => {
   // Calm as the default: a theme's surfaces and text are the default's lightness and only as faintly tinted (its card
   // too, where the chart palette was validated); its accent is about as light and no more vivid, and so are the
   // accent's shades and the sign-in page's ground and lids.
-  it.each(themed.flatMap((id) => (['light', 'dark'] as const).map((mode) => ({ id, mode }))))(
+  it.each(calm.flatMap((id) => (['light', 'dark'] as const).map((mode) => ({ id, mode }))))(
     '$id $mode: its surfaces and text are tinted about as faintly as the default’s, its accent as strong',
     ({ id, mode }) => {
       const t = tokensOf(id, mode)
@@ -195,8 +199,9 @@ describe('colour themes', () => {
       const table = hex(palette[name]).rgb.map((c) => Math.round(c * 255))
       expect(Math.max(...css.map((c, i) => Math.abs(c - table[i]!))), `${name}: ${palette[name]}`).toBeLessThanOrEqual(2)
     }
-    // The line numbers have no CSS: text, 4.5:1 on the background, and only as faintly tinted as the default's.
+    // The line numbers have no CSS: text, 4.5:1 on the background, and (a calm theme's) only as faintly tinted as the default's.
     expect(contrast(hex(palette.lineNumber), hex(palette.background))).toBeGreaterThanOrEqual(4.5)
+    if (vscode(id)) return
     const chroma = hex(palette.lineNumber).oklch[1]
     const defaultChroma = hex(colorThemes.find((c) => c.id === 'default')![mode].lineNumber).oklch[1]
     expect(Math.abs(chroma - defaultChroma), `lineNumber ${palette.lineNumber}`).toBeLessThanOrEqual(0.004)
@@ -207,5 +212,47 @@ describe('colour themes', () => {
     expect(cs).toContain('public const string Default = "default";')
     const list = /All = \[Default, ([^\]]*)\]/.exec(cs)![1]!.split(',').map((s) => s.trim().replace(/"/g, ''))
     expect(['default', ...list]).toEqual([...colorThemeIds])
+  })
+
+  it("names VS Code's themes as VS Code does, each light and dark, with the colours of its code", () => {
+    const names = colorThemes.flatMap((t) => (t.vscode ? [t.vscode.names.dark, t.vscode.names.light] : []))
+    expect(names).toEqual(expect.arrayContaining(['Default Dark+', 'Default Light+', 'Default Dark Modern', 'Default Light Modern', 'Monokai', 'Solarized Dark', 'Solarized Light', 'One Dark Pro', 'Dracula', 'GitHub Dark', 'GitHub Light', 'Nord', 'Default High Contrast', 'Default High Contrast Light']))
+    expect(new Set(names).size).toBe(names.length)
+    for (const t of colorThemes.filter((x) => x.vscode)) for (const mode of ['light', 'dark'] as const) for (const c of Object.values(t.vscode!.syntax[mode])) expect(c).toMatch(/^#[0-9a-f]{6}$/)
+  })
+
+  it('makes High Contrast the most contrast of all: its text 15:1 or more on the page, its borders 3:1', () => {
+    for (const mode of ['light', 'dark'] as const) {
+      const t = tokensOf('contrast', mode)
+      expect(contrast(color(t, '--foreground'), color(t, '--background'))).toBeGreaterThanOrEqual(15)
+      expect(contrast(color(t, '--border'), color(t, '--background'))).toBeGreaterThanOrEqual(3)
+    }
+  })
+
+  // Colour-blind safe colours (lib/seeing.ts): good blue, bad orange-red, over every theme, their text still 4.5:1.
+  const safe = (mode: 'light' | 'dark') =>
+    Object.fromEntries(Object.entries(all.get(mode === 'light' ? ":root[data-colors='safe']" : ":root.dark[data-colors='safe']")!).map(([k, v]) => [k, v.replace(/\s*!important$/, '')]))
+  it.each(every)('$id $mode: the colour-blind safe colours read as the status colours do', ({ id, mode }) => {
+    const t = { ...tokensOf(id, mode), ...safe(mode) }
+    expect(color(t, '--success').oklch[2]).toBeGreaterThan(200)
+    expect(color(t, '--destructive').oklch[2]).toBeLessThan(60)
+    const low: string[] = []
+    for (const name of ['success', 'destructive']) {
+      const ink = color(t, `--${name}-ink`)
+      for (const ground of ['--card', '--background'])
+        for (const share of [0, 0.05, 0.1, 0.15]) {
+          const r = contrast(ink, over(color(t, `--${name}`), color(t, ground), share))
+          if (r < 4.5) low.push(`--${name}-ink on ${name}/${share * 100} over ${ground}: ${r.toFixed(2)}`)
+        }
+    }
+    for (const bg of ['--destructive', '--destructive-hover']) if (contrast(color(t, '--destructive-foreground'), color(t, bg)) < 4.5) low.push(`--destructive-foreground on ${bg}`)
+    expect(low).toEqual([])
+  })
+
+  it('more contrast makes secondary text the text, and the focus ring as strong', () => {
+    const more = all.get(":root[data-contrast='more']")!
+    expect(more['--muted-foreground']).toBe('var(--foreground) !important')
+    expect(more['--ring']).toBe('var(--foreground) !important')
+    expect(all.get(":root[data-focus='strong']")!['--ring']).toBe('var(--foreground) !important')
   })
 })

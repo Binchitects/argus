@@ -901,6 +901,180 @@ describe('Code Arena, the IDE', () => {
     expect(within(tabs()).getByRole('tab', { name: /app\.ts/ })).toBeInTheDocument()
     // Unsaved, it shows the dot as any tab does; it says it is pinned.
     expect(within(tabs()).getByRole('tab', { name: /app\.ts/ })).toHaveAccessibleDescription('pinned')
+
+    // The middle button closes a tab, as in VS Code; pressing it starts no scrolling of the page.
+    await userEvent.dblClick(screen.getByRole('treeitem', { name: 'README.md' }))
+    const readme = await within(tabs()).findByRole('tab', { name: 'README.md' })
+    expect(fireEvent.mouseDown(readme, { button: 1 })).toBe(false)
+    fireEvent(readme, new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }))
+    await waitFor(() => expect(within(tabs()).queryByRole('tab', { name: 'README.md' })).not.toBeInTheDocument())
+  })
+
+  it('splits the editor into groups that show the same file, moves a tab between them, and joins them again', async () => {
+    backend()
+    renderIde()
+    await userEvent.dblClick(await screen.findByRole('treeitem', { name: 'README.md' }))
+    await within(tabs()).findByRole('tab', { name: 'README.md' })
+    // Split Right from the tab's menu: a second group with the same file, the same model (an edit in one is in the other).
+    fireEvent.contextMenu(within(tabs()).getByRole('tab', { name: 'README.md' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /^Split Right/ }))
+    const second = await screen.findByRole('tablist', { name: 'Open files in group 2' })
+    expect(await within(second).findByRole('tab', { name: 'README.md' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Editor group 1' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Editor group 2' })).toBeInTheDocument()
+    await waitFor(() => expect(fakes.editors.length).toBe(2))
+    await waitFor(() => expect(fakes.editors[1]!.model).toBe(editor().model))
+    // The divider between them is a separator that moves with the arrow keys.
+    const divider = screen.getByRole('separator', { name: 'Resize the editor groups' })
+    expect(divider).toHaveAttribute('aria-valuenow', '50')
+    fireEvent.keyDown(divider, { key: 'ArrowRight' })
+    expect(divider).toHaveAttribute('aria-valuenow', '55')
+
+    // Move into the first group: closed in the second, which closes once empty, as VS Code's.
+    fireEvent.contextMenu(within(second).getByRole('tab', { name: 'README.md' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Move to Previous Group' }))
+    await waitFor(() => expect(screen.queryByRole('tablist', { name: 'Open files in group 2' })).not.toBeInTheDocument())
+    expect(within(tabs()).getByRole('tab', { name: 'README.md' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: 'Editor' })).toBeInTheDocument()
+
+    // The commands: split down, then join every group into the first.
+    await act(async () => runCommand('workbench.action.splitEditorDown'))
+    expect(await screen.findByRole('tablist', { name: 'Open files in group 2' })).toBeInTheDocument()
+    expect(screen.getByRole('separator', { name: 'Resize the editor groups' })).toHaveAttribute('aria-orientation', 'horizontal')
+    await act(async () => runCommand('workbench.action.joinAllGroups'))
+    await waitFor(() => expect(screen.queryByRole('tablist', { name: 'Open files in group 2' })).not.toBeInTheDocument())
+    expect(within(tabs()).getAllByRole('tab', { name: 'README.md' })).toHaveLength(1)
+  })
+
+  it("opens to the side from the Explorer and from quick open with Ctrl+Enter, lists every group's editors, reverts a file and has Zen Mode", async () => {
+    backend()
+    renderIde()
+    await userEvent.dblClick(await screen.findByRole('treeitem', { name: 'README.md' }))
+    await within(tabs()).findByRole('tab', { name: 'README.md' })
+    // Open to the Side, in the Explorer's menu: a second group with the file.
+    await userEvent.click(screen.getByRole('treeitem', { name: 'src, the agent changed files in it' }))
+    fireEvent.contextMenu(await screen.findByRole('treeitem', { name: 'app.ts, changed by the agent' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Open to the Side' }))
+    const second = await screen.findByRole('tablist', { name: 'Open files in group 2' })
+    expect(await within(second).findByRole('tab', { name: 'app.ts' })).toBeInTheDocument()
+    expect(within(tabs()).queryByRole('tab', { name: 'app.ts' })).not.toBeInTheDocument()
+
+    // Quick open's Ctrl+Enter, from the first group: into the group beside it, which there is now.
+    await act(async () => runCommand('workbench.action.focusFirstEditorGroup'))
+    await act(async () => runCommand('workbench.action.quickOpen'))
+    await userEvent.type(await screen.findByLabelText('File to open'), 'readme')
+    expect(await screen.findByRole('option', { name: /README\.md/ })).toBeInTheDocument()
+    await userEvent.keyboard('{Control>}{Enter}{/Control}')
+    expect(await within(second).findByRole('tab', { name: 'README.md' })).toBeInTheDocument()
+    expect(screen.getAllByRole('tablist')).toHaveLength(2)
+
+    // Show All Editors By Appearance: each group's, under its name.
+    await act(async () => runCommand('workbench.action.showAllEditors'))
+    const picker = await screen.findByRole('dialog', { name: 'Open editors' })
+    expect(within(picker).getAllByRole('option').map((o) => o.textContent)).toEqual([expect.stringContaining('README.md'), expect.stringContaining('app.ts'), expect.stringContaining('README.md')])
+    await userEvent.keyboard('{Escape}')
+
+    // Revert File: what is unsaved goes, the file as on disk in its tab.
+    await act(async () => runCommand('workbench.action.joinAllGroups'))
+    await waitFor(() => expect(screen.getAllByRole('tablist')).toHaveLength(1))
+    await userEvent.click(within(tabs()).getByRole('tab', { name: 'README.md' }))
+    const readme = () => fakes.models.find((m) => !m.disposed && String(m.uri).endsWith('README.md'))
+    await waitFor(() => expect(readme()).toBeTruthy())
+    act(() => readme()!.setValue('# Changed\n'))
+    expect(await within(tabs()).findByRole('tab', { name: 'README.md, not saved' })).toBeInTheDocument()
+    await act(async () => runCommand('workbench.action.files.revert'))
+    expect(await within(tabs()).findByRole('tab', { name: 'README.md' })).toBeInTheDocument()
+    await waitFor(() => expect(readme()?.value).toBe('# Shop\n'))
+
+    // Zen Mode: the editor alone, and the parts back as they were.
+    expect(screen.getByRole('tree', { name: 'Files' })).toBeInTheDocument()
+    await act(async () => runCommand('workbench.action.toggleZenMode'))
+    await waitFor(() => expect(screen.queryByRole('navigation', { name: 'Activity bar' })).not.toBeInTheDocument())
+    expect(document.querySelector('aside[aria-label="Agent"]')).toHaveAttribute('hidden')
+    await act(async () => runCommand('workbench.action.toggleZenMode'))
+    expect(await screen.findByRole('navigation', { name: 'Activity bar' })).toBeInTheDocument()
+    expect(document.querySelector('aside[aria-label="Agent"]')).not.toHaveAttribute('hidden')
+  })
+
+  it('keeps the editor groups for the next load, and puts them back as they were', async () => {
+    const { calls } = backend({
+      'GET /api/workspace/state': () => ({
+        json: { editors: { tabs: [{ kind: 'file', path: 'README.md' }], active: 'README.md', groups: [{ tabs: [{ kind: 'file', path: 'src/app.ts' }, { kind: 'file', path: 'README.md' }], active: 'src/app.ts' }], orientation: 'column' } },
+      }),
+    })
+    renderIde()
+    const second = await screen.findByRole('tablist', { name: 'Open files in group 2' })
+    await waitFor(() => expect(within(second).getAllByRole('tab').map((t) => t.querySelector('.truncate')?.textContent)).toEqual(['app.ts', 'README.md']))
+    await waitFor(() => expect(within(second).getByRole('tab', { name: 'app.ts' })).toHaveAttribute('aria-selected', 'true'))
+    expect(screen.getByRole('separator', { name: 'Resize the editor groups' })).toHaveAttribute('aria-orientation', 'horizontal')
+    expect(within(tabs()).getAllByRole('tab').map((t) => t.querySelector('.truncate')?.textContent)).toEqual(['README.md'])
+    // Kept as they are: the groups with the first's tabs; a group closed is gone from what is kept.
+    const kept = () => (calls.filter((c) => c.method === 'POST' && c.path === '/api/workspace/state').at(-1)?.body as { editors?: Record<string, unknown> } | undefined)?.editors
+    await waitFor(() => expect(kept()).toMatchObject({ groups: [{ tabs: [{ kind: 'file', path: 'src/app.ts' }, { kind: 'file', path: 'README.md' }], active: 'src/app.ts' }], orientation: 'column' }), { timeout: 3000 })
+    fireEvent.contextMenu(within(second).getByRole('tab', { name: 'app.ts' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: /^Close All/ }))
+    await waitFor(() => expect(screen.queryByRole('tablist', { name: 'Open files in group 2' })).not.toBeInTheDocument())
+    await waitFor(() => expect(kept()).not.toHaveProperty('groups'), { timeout: 3000 })
+    expect(kept()).toMatchObject({ tabs: [{ kind: 'file', path: 'README.md' }], active: 'README.md' })
+  })
+
+  it('moves a tab into a window of its own with its unsaved text, and takes it back when that window says so', async () => {
+    backend()
+    const opened = vi.spyOn(window, 'open').mockReturnValue({} as Window)
+    // The other window, as the page there would talk.
+    const other = new BroadcastChannel('code-arena-windows')
+    const heard: unknown[] = []
+    other.onmessage = (m: MessageEvent) => heard.push(m.data)
+    try {
+      renderIde()
+      await userEvent.dblClick(await screen.findByRole('treeitem', { name: 'README.md' }))
+      await within(tabs()).findByRole('tab', { name: 'README.md' })
+      await waitFor(() => expect(editor().model).toBeTruthy())
+      act(() => editor().model!.setValue('# Shop, not saved\n'))
+      fireEvent.contextMenu(await within(tabs()).findByRole('tab', { name: /README\.md/ }))
+      await userEvent.click(await screen.findByRole('menuitem', { name: 'Move into New Window' }))
+      await waitFor(() => expect(opened).toHaveBeenCalledTimes(1))
+      const url = new URL(String(opened.mock.calls[0]![0]))
+      expect(url.searchParams.get('window')).toBe('editor')
+      expect(url.searchParams.get('path')).toBe('README.md')
+      const id = url.searchParams.get('id')!
+      // The new window says it is there: it is given the unsaved text, and the tab closes here without asking.
+      other.postMessage({ type: 'hello', id, path: 'README.md' })
+      await waitFor(() => expect(heard).toContainEqual({ type: 'take', id, text: '# Shop, not saved\n' }))
+      await waitFor(() => expect(screen.queryByRole('tablist', { name: 'Open files' })).not.toBeInTheDocument())
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      // Back, with what was typed there.
+      other.postMessage({ type: 'back', kind: 'editor', files: [{ path: 'README.md', text: '# Shop, typed elsewhere\n' }] })
+      expect(await within(await screen.findByRole('tablist', { name: 'Open files' })).findByRole('tab', { name: 'README.md, not saved' })).toBeInTheDocument()
+      await waitFor(() => expect(editor().model?.value).toBe('# Shop, typed elsewhere\n'))
+
+      // The chat moves out too: hidden here, and shown again when it comes back.
+      await userEvent.click(screen.getByRole('button', { name: 'Open the chat in a new window' }))
+      expect(new URL(String(opened.mock.calls[1]![0])).searchParams.get('window')).toBe('chat')
+      await waitFor(() => expect(document.querySelector('aside[aria-label="Agent"]')).toHaveAttribute('hidden'))
+      other.postMessage({ type: 'back', kind: 'chat' })
+      await waitFor(() => expect(document.querySelector('aside[aria-label="Agent"]')).not.toHaveAttribute('hidden'))
+      expect(screen.getByRole('region', { name: 'Chat' })).toBeVisible()
+    } finally {
+      other.close()
+      opened.mockRestore()
+    }
+  })
+
+  it('opens as a window of its own with one file, or the chat, and says how to go back', async () => {
+    backend({ 'GET /api/workspace/state': () => ({ json: { editors: { tabs: [{ kind: 'file', path: 'src/app.ts' }], active: 'src/app.ts' } } }) })
+    window.history.replaceState(null, '', '/?window=editor&path=README.md&id=w1')
+    try {
+      renderIde()
+      // No IDE window answers here: the file from disk.
+      expect(await within(await screen.findByRole('tablist', { name: 'Open files' })).findByRole('tab', { name: 'README.md' }, { timeout: 4000 })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Move back into the IDE' })).toBeInTheDocument()
+      expect(screen.queryByRole('navigation', { name: 'Activity bar' })).not.toBeInTheDocument()
+      // The IDE's tabs stay the IDE's: none of them opens here.
+      expect(within(tabs()).getAllByRole('tab').map((t) => t.querySelector('.truncate')?.textContent)).toEqual(['README.md'])
+    } finally {
+      window.history.replaceState(null, '', '/')
+    }
   })
 
   it('after a reload, the tabs are back as they were, unsaved text too, and typing keeps the unsaved text until it is saved', async () => {
@@ -1322,6 +1496,51 @@ describe('Code Arena, the IDE', () => {
     )
   })
 
+  it('customises the activity bar as VS Code does: views hidden and shown again from its menu, the bar above the side bar, kept', async () => {
+    const { now } = backend()
+    renderIde()
+    const bar = await screen.findByRole('navigation', { name: 'Activity bar' })
+    // Hidden too: while the bar's menu is open, the rest of the page is hidden from the screen reader.
+    const labels = () => within(screen.getByRole('navigation', { name: 'Activity bar', hidden: true })).getAllByRole('button', { hidden: true }).map((b) => b.getAttribute('aria-label'))
+
+    // Hide 'Review' from its own menu: no longer in the bar.
+    fireEvent.contextMenu(within(bar).getByRole('button', { name: 'Review' }))
+    await userEvent.click(within(await screen.findByRole('menu', { name: 'Review: where it goes' })).getByRole('menuitem', { name: "Hide 'Review'" }))
+    await waitFor(() => expect(labels()).not.toContain('Review'))
+    // Its command still shows it, and its button is there while it shows.
+    await act(async () => runCommand('codeArena.view.review'))
+    await waitFor(() => expect(labels()).toContain('Review'))
+    await act(async () => runCommand('workbench.view.explorer'))
+    await waitFor(() => expect(labels()).not.toContain('Review'))
+
+    // The bar's own menu (a right-click on it) lists every view, checked while shown: Skills unchecked hides it too.
+    fireEvent.contextMenu(within(bar).getByRole('button', { name: 'Explorer' }).closest('[draggable="true"]')!.parentElement!)
+    let menu = await screen.findByRole('menu', { name: 'Activity bar' })
+    expect(within(menu).getByRole('menuitemcheckbox', { name: 'Review' })).toHaveAttribute('aria-checked', 'false')
+    expect(within(menu).getByRole('menuitemcheckbox', { name: 'Explorer' })).toHaveAttribute('aria-checked', 'true')
+    await userEvent.click(within(menu).getByRole('menuitemcheckbox', { name: 'Skills' }))
+    await waitFor(() => expect(within(screen.getByRole('menu', { name: 'Activity bar' })).getByRole('menuitemcheckbox', { name: 'Skills' })).toHaveAttribute('aria-checked', 'false'))
+    await waitFor(() => expect(labels()).not.toContain('Skills'))
+    // Review checked again: back in the bar.
+    await userEvent.click(within(menu).getByRole('menuitemcheckbox', { name: 'Review' }))
+    await waitFor(() => expect(labels()).toContain('Review'))
+    await userEvent.keyboard('{Escape}')
+
+    // The bar above the side bar: its views in a row there, the accounts and the gear at its end; the editor first after it.
+    await act(async () => runCommand('workbench.action.activityBarLocation.top'))
+    const top = await screen.findByRole('navigation', { name: 'Activity bar' })
+    expect(top.closest('aside')).toHaveAttribute('data-side', 'left')
+    expect(within(top).getByRole('button', { name: 'Manage' })).toBeInTheDocument()
+    expect(within(top).queryByRole('button', { name: 'Terminal' })).not.toBeInTheDocument()
+    // Hidden: no bar; a command brings it back.
+    await act(async () => runCommand('workbench.action.toggleActivityBarVisibility'))
+    await waitFor(() => expect(screen.queryByRole('navigation', { name: 'Activity bar' })).not.toBeInTheDocument())
+    await act(async () => runCommand('workbench.action.toggleActivityBarVisibility'))
+    expect(await screen.findByRole('navigation', { name: 'Activity bar' })).toBeInTheDocument()
+
+    await waitFor(() => expect(now.preferences.layout).toMatchObject({ hidden: ['skills'], activityBar: 'default' }))
+  })
+
   it("has a gear for its settings, keys and theme, and the model's tools: as Arena says, or the person's own", async () => {
     const { calls } = backend({
       'POST /api/settings': (body) => ({ json: { ...state, toolMode: (body as { toolMode: string | null }).toolMode ?? 'code', toolModeSet: (body as { toolMode: string | null }).toolMode !== null, toolModeArena: 'code' } }),
@@ -1422,6 +1641,12 @@ describe('Code Arena, the IDE', () => {
     await waitFor(() => expect(within(list).getAllByRole('tab')).toHaveLength(1))
     expect(fakes.terminals[1]!.disposed).toBe(true)
     expect(within(list).getByRole('tab', { name: 'bash 1' })).toHaveAttribute('aria-selected', 'true')
+
+    // The middle button on a terminal's tab ends it too, as VS Code's does.
+    const first = within(list).getByRole('tab', { name: 'bash 1' })
+    expect(fireEvent.mouseDown(first, { button: 1 })).toBe(false)
+    fireEvent(first, new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 }))
+    await waitFor(() => expect(calls.filter((c) => c.path === '/api/terminals/close').at(-1)?.body).toEqual({ id: '1' }))
   })
 
   it('shows the branch, the model, the mode, the cursor and the language in the status bar, and the licence, source and log in About', async () => {
@@ -2493,6 +2718,64 @@ describe('Code Arena, the IDE', () => {
     expect(within(panel).getByRole('list', { name: 'Commits' })).toHaveTextContent('First')
   })
 
+  it('shows several repositories at once as VS Code does: a section each, with its branch, its changes and its own commit', async () => {
+    const statuses: Record<string, { repository: boolean; branch: string; ahead: number; behind: number; files: GitFile[] }> = {
+      '.': { repository: true, branch: 'main', ahead: 0, behind: 0, files: [{ path: 'README.md', staged: null, changed: 'M', from: null }] },
+      ui: { repository: true, branch: 'feature/buttons', ahead: 2, behind: 0, files: [{ path: 'ui/button.ts', staged: null, changed: 'M', from: null }, { path: 'ui/new.ts', staged: null, changed: '?', from: null }] },
+    }
+    const { calls } = backend({
+      'POST /api/git/repositories': () => ({ json: { repositories: [{ path: '.', name: 'shop' }, { path: 'ui', name: 'ui' }] } }),
+      'GET /api/git/status': (_, __, url) => ({ json: statuses[url.searchParams.get('repo') ?? '.'] }),
+      'GET /api/git/log': (_, __, url) => ({ json: [{ hash: url.searchParams.get('repo') ? 'bbb2222' : 'aaa1111', subject: url.searchParams.get('repo') ? 'Buttons' : 'First', author: 'Pat', at: '2026-10-11T09:00:00Z' }] }),
+      'GET /api/git/branches': () => ({ json: [{ name: 'main', current: true }] }),
+      'POST /api/git/stage': (body) => {
+        const b = body as { repo?: string; paths: string[] }
+        const r = statuses[b.repo ?? '.']!
+        r.files = r.files.map((f) => (b.paths.includes(f.path) ? { ...f, staged: f.changed === '?' ? 'A' : 'M', changed: null } : f))
+        return { json: r }
+      },
+      'POST /api/git/commit': (body) => {
+        const r = statuses[(body as { repo?: string }).repo ?? '.']!
+        r.files = r.files.filter((f) => !f.staged)
+        return { json: { hash: 'ccc3333', status: r } }
+      },
+    })
+    renderIde()
+    await userEvent.keyboard('{Control>}{Shift>}g{/Shift}{/Control}')
+    const panel = await screen.findByRole('complementary', { name: 'Source control' })
+    // A row for each repository: its name, its branch and how far it is from its upstream.
+    const shop = await within(panel).findByRole('button', { name: 'Repository shop, on main, 1 change' })
+    const ui = await within(panel).findByRole('button', { name: 'Repository ui, on feature/buttons, 2 changes' })
+    expect(ui).toHaveTextContent('feature/buttons ↑2 ↓0')
+    expect(shop).toHaveAttribute('aria-expanded', 'true')
+    expect(within(panel).getAllByRole('list', { name: 'Changed files' })).toHaveLength(2)
+    // The files settings say how they were found: VS Code's defaults, and the files open.
+    expect(calls.find((c) => c.path === '/api/git/repositories')?.body).toEqual({ detect: true, depth: 1, ignored: ['node_modules'], open: [] })
+
+    // Folded: its changes go; the other repository's stay.
+    await userEvent.click(shop)
+    expect(shop).toHaveAttribute('aria-expanded', 'false')
+    expect(within(panel).getAllByRole('list', { name: 'Changed files' })).toHaveLength(1)
+    expect(within(panel).queryByRole('textbox', { name: 'Commit message for shop' })).not.toBeInTheDocument()
+
+    // Staged and committed in its own repository: the calls name it.
+    await userEvent.click(within(panel).getByRole('button', { name: 'Stage ui/button.ts' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/git/stage')?.body).toEqual({ paths: ['ui/button.ts'], repo: 'ui' }))
+    await userEvent.type(within(panel).getByRole('textbox', { name: 'Commit message for ui' }), 'Buttons are round')
+    await userEvent.click(within(panel).getByRole('button', { name: 'Commit 1 staged' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/git/commit')?.body).toEqual({ message: 'Buttons are round', all: false, repo: 'ui' }))
+    await waitFor(() => expect(within(panel).getByRole('button', { name: 'Repository ui, on feature/buttons, 1 change' })).toBeInTheDocument())
+    // Its own history.
+    expect(await within(panel).findByRole('button', { name: /Buttons/ })).toBeInTheDocument()
+
+    // A git command asks which repository, as VS Code's does.
+    act(() => void runCommand('git.fetch'))
+    const pick = await screen.findByRole('dialog', { name: 'Repository' })
+    expect(within(pick).getAllByRole('option').map((o) => o.textContent)).toEqual([expect.stringContaining('shop'), expect.stringContaining('ui')])
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Repository' })).not.toBeInTheDocument())
+  })
+
   it("folds Source Control's groups and folders as VS Code does: chevrons, arrows, Collapse All, kept with the folder", async () => {
     const status = {
       repository: true, branch: 'main', ahead: 0, behind: 0,
@@ -2918,7 +3201,7 @@ describe('Code Arena, the IDE', () => {
     await waitFor(() =>
       expect(now.preferences.layout).toEqual({
         view: 'explorer', side: 300, chat: 960, panel: 280, sideOpen: true, chatOpen: false, panelOpen: false, panelTab: 'terminal',
-        sideAt: 'left', panelAt: 'bottom', order: [...allViews], panelTabs: ['terminal', 'console', 'output'],
+        sideAt: 'left', panelAt: 'bottom', order: [...allViews], panelTabs: ['terminal', 'console', 'output'], hidden: [], activityBar: 'default',
       }),
     )
     expect(saves()).toHaveLength(1)
@@ -2936,6 +3219,38 @@ describe('Code Arena, the IDE', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Theme' }))
     await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Dark' }))
     await waitFor(() => expect(fakes.themes.at(-1)).toBe('arena-dark'))
+  })
+
+  it("wears VS Code's own themes by their names, and the accessibility settings over any theme: zoom, contrast, text, focus, motion, colours", async () => {
+    const { now } = backend({}, {}, {
+      'settings.json': '{\n  "window.autoDetectColorScheme": false,\n  "workbench.colorTheme": "Monokai",\n  "codeArena.accessibility.contrast": "more",\n  "codeArena.accessibility.textSize": "125%",\n  "codeArena.accessibility.focusRings": "strong",\n  "workbench.reduceMotion": "on",\n  "codeArena.accessibility.colorBlindColors": true\n}\n',
+    })
+    renderIde()
+    const root = document.documentElement
+    await waitFor(() => expect(root.dataset.colorTheme).toBe('monokai'))
+    expect(root).toHaveClass('dark')
+    expect({ contrast: root.dataset.contrast, text: root.dataset.text, focus: root.dataset.focus, motion: root.dataset.motion, colors: root.dataset.colors }).toEqual({ contrast: 'more', text: '125', focus: 'strong', motion: 'reduce', colors: 'safe' })
+    await openApp()
+    expect(editor().options.theme).toBe('arena-monokai-dark')
+
+    // Zoomed as VS Code zooms: Ctrl+= a step (20%) larger, kept in settings.json; Ctrl+Numpad0 back.
+    await userEvent.keyboard('{Control>}={/Control}')
+    await waitFor(() => expect(now.user['settings.json']).toContain('"window.zoomLevel": 1'))
+    await waitFor(() => expect(root.style.fontSize).toBe('120%'))
+    await act(async () => runCommand('workbench.action.zoomReset'))
+    await waitFor(() => expect(root.style.fontSize).toBe(''))
+
+    // High Contrast, by its command: VS Code's own, on Monaco's high contrast.
+    await act(async () => runCommand('codeArena.accessibility.toggleHighContrast'))
+    await waitFor(() => expect(now.user['settings.json']).toContain('"workbench.colorTheme": "Default High Contrast"'))
+    await waitFor(() => expect(root.dataset.colorTheme).toBe('contrast'))
+    await waitFor(() => expect(fakes.themes.at(-1)).toBe('arena-contrast-dark'))
+    // The palette's Color Theme lists VS Code's under their names.
+    await act(async () => runCommand('workbench.action.selectTheme'))
+    const picker = await screen.findByRole('dialog', { name: 'Color theme' })
+    for (const name of ['Default Dark+', 'Default Light Modern', 'Solarized Light', 'One Dark Pro', 'GitHub Dark', 'Nord Light', 'Default High Contrast Light']) expect(within(picker).getByRole('option', { name: new RegExp(`^${name.replace('+', '\\+')}`) })).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Color theme' })).not.toBeInTheDocument())
   })
 
   it("wears one of the app's colour themes: the page's colours, Monaco's and the terminal's; light or dark keeps it", async () => {

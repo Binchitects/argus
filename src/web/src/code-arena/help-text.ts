@@ -45,7 +45,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   settings: {
     name: 'Settings',
-    text: `The settings Code Arena reads, as VS Code's (${modKey}+,). Search by words, or **@modified**, **@lang:python** (a language's own), **@id:editor.tabSize**. **User** is your settings.json, for every project; **Workspace** the project's .vscode/settings.json. A change is written at once, the file's comments kept; the menu beside a setting resets it.`,
+    text: `The settings Code Arena reads, as VS Code's (${modKey}+,). Search by words, or **@modified**, **@lang:python** (a language's own), **@id:editor.tabSize**. **User** is your settings.json, for every project; **Workspace** the project's .vscode/settings.json. A change is written at once, the file's comments kept; the menu beside a setting resets it. **Accessibility** has the zoom (${modKey}+= and ${modKey}+-), High Contrast as the system asks, less motion, more contrast, a larger text, strong focus rings and colour-blind safe colours.`,
     manual: 'settings-and-keyboard-shortcuts',
   },
   keybindings: {
@@ -55,7 +55,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   activity: {
     name: 'Activity bar',
-    text: 'The icons down the side bar\'s edge. **Explorer**, **Search**, **Source control**, **Run and Debug**, **Extensions**, **Agent changes** (with the number of files), **Problems**, **Skills** and **Chat** switch the side bar; pressing the one shown hides it. Drag an icon to put it elsewhere in the bar, or onto the panel\'s tabs to move its view there (drag the tab back to return it); its right-click menu has the same moves, puts the side bar on the other side (the chat goes opposite) and resets them. At its foot: **Terminal**, the theme (light, dark or the system\'s, and the colour theme: Code Arena, Sakura, Midnight, Copper, Forest, Ocean or Lavender), **Manage** (the gear: Settings, Keyboard Shortcuts, Color Theme, Extensions, the palette, and how the model gets its tools), **Help** and **About Code Arena**.',
+    text: 'The icons down the side bar\'s edge. **Explorer**, **Search**, **Source control**, **Run and Debug**, **Extensions**, **Agent changes** (with the number of files), **Problems**, **Skills** and **Chat** switch the side bar; pressing the one shown hides it. Drag an icon to put it elsewhere in the bar, or onto the panel\'s tabs to move its view there (drag the tab back to return it); its right-click menu has the same moves, hides the icon (**Hide**), puts the side bar on the other side (the chat goes opposite) and resets them. A right-click on the bar lists every view with a check: uncheck one to hide its icon (its command still opens it), and **Activity Bar Position** puts the bar beside the side bar, above it as a row, or hides it. At its foot: **Terminal**, the theme (light, dark or the system\'s, and the colour theme: Code Arena, Sakura, Midnight, Copper, Forest, Ocean or Lavender, or VS Code\'s: Dark+ and Light+, Modern, Monokai, Solarized, One Dark Pro, Dracula, GitHub, Nord and High Contrast), **Manage** (the gear: Settings, Keyboard Shortcuts, Color Theme, Extensions, the palette, and how the model gets its tools), **Help** and **About Code Arena**.',
     manual: 'the-ide',
   },
   explorer: {
@@ -90,7 +90,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   git: {
     name: 'Source control',
-    text: "The folder's git: what changed since the last commit, in conflict (**Merge Changes**), **staged** for the next commit or not. A file opens as the last commit has it and as it is now; **+** stages it, **−** unstages it, **↺** puts it back; a group's or a folder's buttons, all of its files. Each group folds with its chevron (← and → too); **View as Tree** shows the files under their folders, **Collapse All** folds everything, and the folder keeps it so. Write the message and **Commit** (all of it when nothing is staged; its arrow has Amend, Commit & Push and Commit & Sync); **Sync Changes** pulls and pushes, **Publish Branch** gives a branch its upstream, and **⋯** has Pull, Push, Fetch, Checkout to…, the branches and Undo Last Commit. Switch the branch below, and see the last commits.",
+    text: "The folder's git: what changed since the last commit, in conflict (**Merge Changes**), **staged** for the next commit or not. A file opens as the last commit has it and as it is now; **+** stages it, **−** unstages it, **↺** puts it back; a group's or a folder's buttons, all of its files. Each group folds with its chevron (← and → too); **View as Tree** shows the files under their folders, **Collapse All** folds everything, and the folder keeps it so. Write the message and **Commit** (all of it when nothing is staged; its arrow has Amend, Commit & Push and Commit & Sync); **Sync Changes** pulls and pushes, **Publish Branch** gives a branch its upstream, and **⋯** has Pull, Push, Fetch, Checkout to…, the branches and Undo Last Commit. Switch the branch below, and see the last commits. With several repositories (one in a folder of this one, or an added folder's) each has a section with its branch, its own commit box and changes, folding on its row; a git command asks which repository.",
     manual: 'source-control',
   },
   sessions: {
@@ -100,12 +100,12 @@ export const parts: Record<Part, PartHelp> = {
   },
   editor: {
     name: 'Editor',
-    text: `Your open files, in tabs. A dot marks changes not saved yet, and ${modKey}+S saves. A file the agent edits reloads in its tab when nothing in it is unsaved; saving a file that changed on disk since you opened it asks first.`,
+    text: `Your open files, in tabs. A dot marks changes not saved yet, and ${modKey}+S saves; the middle mouse button closes a tab. Split Right in a tab's menu (or ${modKey}+\\) opens it in a second group beside it; drag a tab onto another group to move it there. Move into New Window in its menu opens it in a browser window of its own. A file the agent edits reloads in its tab when nothing in it is unsaved; saving a file that changed on disk since you opened it asks first.`,
     manual: 'the-ide',
   },
   terminal: {
     name: 'Terminal',
-    text: 'Shells in this folder, under the editor. Ctrl+` shows or hides them, **+** opens another, and dragging the panel\'s top edge resizes it. A terminal can do whatever your own shell can: the mode guards the agent, not you.',
+    text: 'Shells in this folder, under the editor. Ctrl+` shows or hides them, **+** opens another (the middle mouse button on its tab closes one), and dragging the panel\'s top edge resizes it. A terminal can do whatever your own shell can: the mode guards the agent, not you.',
     manual: 'terminals',
   },
   chat: {
@@ -231,6 +231,7 @@ export const keys: [keys: string, what: string][] = [
   [`${modKey}+K ${modKey}+S`, 'Keyboard shortcuts (keybindings.json, as VS Code\'s)'],
   [`${modKey}+K ${modKey}+T`, 'The colour theme'],
   [`${modKey}+Shift+X`, 'Extensions (VS Code\'s themes, icons, snippets, languages)'],
+  [`${modKey}+\\, ${modKey}+1…8`, 'Split the editor, focus an editor group'],
   [`${modKey}+L`, 'In the editor: the lines chosen go with the next message'],
   ['↑ / ↓', 'In the chat\'s box: what you sent before in this folder (the terminal\'s too); Esc goes back to what you were typing'],
 ]
