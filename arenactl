@@ -109,7 +109,7 @@ def use_proxy(url: str | None) -> None:
     # The images pulled, and a build's FROM, are the engine's own downloads: its daemon's proxy, not this one.
     if shutil.which("docker") and output(["docker", "info", "--format", "{{.HTTPSProxy}}{{.HTTPProxy}}"]) in ("", "\n"):
         warn("Docker pulls images without a proxy (its daemon has none): where a registry cannot be reached directly, give "
-             "the daemon this proxy too (docs/deployment.md, Building through a proxy)")
+             "the daemon this proxy too: ./arenactl docker-proxy URL (restarts Docker)")
 
 
 def take_proxy(argv: list[str]) -> tuple[list[str], str | None]:
@@ -1057,6 +1057,41 @@ def first_line(path: Path) -> str:
     return ""
 
 
+DOCKER_PROXY_CONF = Path("/etc/systemd/system/docker.service.d/http-proxy.conf")
+
+
+def cmd_docker_proxy(a) -> int:
+    """Docker's daemon given an HTTP proxy (a systemd drop-in), so its pulls and each build's FROM go through it too.
+    Restarts Docker: its running containers stop, and those with a restart policy start again."""
+    linux_only("Docker's proxy")
+    if not shutil.which("systemctl"):
+        raise Stop("Docker's daemon is not run by systemd here: give it the proxy in its own way (dockerd's HTTPS_PROXY)", 2)
+    sudo = [] if hasattr(os, "geteuid") and os.geteuid() == 0 else ["sudo"]
+    if a.off:
+        step(f"Docker's daemon without a proxy: {DOCKER_PROXY_CONF} removed")
+        run([*sudo, "rm", "-f", str(DOCKER_PROXY_CONF)])
+    else:
+        url = a.url or proxy()
+        if not url:
+            raise Stop("docker-proxy needs the proxy: ./arenactl docker-proxy http://HOST:PORT", 2)
+        if not proxy():
+            use_proxy(url)
+        no = os.environ.get("NO_PROXY", NO_PROXY)
+        conf = f'[Service]\nEnvironment="HTTP_PROXY={url}" "HTTPS_PROXY={url}" "NO_PROXY={no}"\n'
+        step(f"Docker's daemon through {masked(url)}: {DOCKER_PROXY_CONF}")
+        run([*sudo, "mkdir", "-p", str(DOCKER_PROXY_CONF.parent)])
+        r = subprocess.run([*sudo, "tee", str(DOCKER_PROXY_CONF)], input=conf, text=True, stdout=subprocess.DEVNULL)
+        if r.returncode != 0:
+            raise Stop(f"could not write {DOCKER_PROXY_CONF}", r.returncode)
+        run([*sudo, "chmod", "600", str(DOCKER_PROXY_CONF)])
+    step("Docker restarted (its running containers stop; those with a restart policy start again)")
+    run([*sudo, "systemctl", "daemon-reload"])
+    run([*sudo, "systemctl", "restart", "docker"])
+    got = output(["docker", "info", "--format", "{{.HTTPSProxy}}"]) or ""
+    say(f"Docker's daemon: {'proxy ' + masked(got.strip()) if got.strip() else 'no proxy'}")
+    return 0
+
+
 def cmd_scripts(_a) -> int:
     say("arenactl's commands run these; docs/scripts.md says when to use each.")
     groups = [("deploy/scripts: running a stack", SCRIPTS), ("tools: building and releasing", TOOLS)]
@@ -1144,6 +1179,11 @@ def main(argv: list[str]) -> int:
     s.add_argument("suites", nargs="*")
     s.add_argument("--filter")
     s.set_defaults(func=cmd_test)
+
+    s = sub.add_parser("docker-proxy", help="Docker's daemon through an HTTP proxy too (its pulls), or --off; restarts Docker")
+    s.add_argument("url", nargs="?", metavar="URL", help="http://HOST:PORT (default: --proxy or ARENA_PROXY)")
+    s.add_argument("--off", action="store_true", help="the daemon without a proxy again")
+    s.set_defaults(func=cmd_docker_proxy)
 
     s = sub.add_parser("scripts", help="every script in the repository, by what it is for")
     s.set_defaults(func=cmd_scripts)

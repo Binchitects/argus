@@ -1110,8 +1110,15 @@ password (`http://USER:PASSWORD@HOST:PORT`) are never printed.
 
 The images pulled, and each build's `FROM`, are Docker's own downloads, through
 its daemon's proxy, not this one; arenactl warns when the daemon has none. Give
-the daemon the proxy yourself (it is the host's setting, and restarts Docker,
-which stops its running containers):
+the daemon the proxy too (a systemd drop-in, `/etc/systemd/system/docker.service.d/http-proxy.conf`;
+it restarts Docker, which stops its running containers, and those with a restart
+policy start again; `--off` takes it away):
+
+```bash
+./arenactl docker-proxy http://172.10.0.138:10808
+```
+
+or by hand:
 
 ```bash
 sudo mkdir -p /etc/systemd/system/docker.service.d
