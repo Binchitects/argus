@@ -146,7 +146,7 @@ export const colorThemes: ColorThemeInfo[] = [
     id: 'solarized',
     label: 'Solarized',
     description: "Solarized Dark and Light: Ethan Schoonover's blue-greens and cream.",
-    light: { background: '#fdf6e3', foreground: '#4e646b', card: '#fffbf0', muted: '#eee8d5', border: '#ddd6c1', primary: '#047ac0', primaryInk: '#00629d', primaryForeground: '#ffffff', lineNumber: '#5d6a6a' },
+    light: { background: '#fdf6e3', foreground: '#3c5158', card: '#fffbf0', muted: '#eee8d5', border: '#ddd6c1', primary: '#047ac0', primaryInk: '#00629d', primaryForeground: '#ffffff', lineNumber: '#5d6a6a' },
     dark: { background: '#002b36', foreground: '#9eacac', card: '#00212b', muted: '#073642', border: '#0d4a58', primary: '#268bd2', primaryInk: '#4dacf5', primaryForeground: '#001118', lineNumber: '#8aa1a8' },
     vscode: {
       names: { light: 'Solarized Light', dark: 'Solarized Dark' },
