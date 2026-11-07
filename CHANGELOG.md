@@ -15,6 +15,56 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v7.8.1 (2026-11-07)
+
+Work alongside the agent: send while it works, see what fills the window,
+hand work to sub-agents and goals, bring your own skills and tools, and test
+in a VM.
+
+### :rocket: Epics and highlights
+
+- **Send while it works**, in the web chat and Code Arena, as Claude Code
+  does: a message sent during a turn goes into it at its next step and the turn
+  carries on; one with files, a skill or deep research waits for the answer to
+  end. Waiting messages can be edited, put first or cancelled; Stop is the
+  only thing that stops an answer. Messages sent on the web while Code Arena
+  answers reach it at its next step too.
+- **What fills the window**, in both apps, as Claude Code's `/context`: Arena's
+  words, the instructions, memory, each tool's definition, each skill, file,
+  message and tool result, the summary, and the room kept for the answer,
+  counted with the engine's own tokenizer (llama.cpp, vLLM, SGLang) and adding
+  up to what the engine reported. **Could be freed** turns off tools never
+  called, leaves out big results or old files, or compacts now.
+- **Tasks, sub-agents, assistants and goals in Code Arena.** Sub-agents and
+  background tasks go to a **Tasks** panel (status, time, tokens, their own
+  steps, stop), with one line each in the chat. A session can work as one of
+  your Arena assistants. `/goal` keeps the agent working until a check of
+  yours (a command or a condition) passes, within a budget of steps, minutes
+  and tokens; pause, resume, cancel.
+- **Test in a VM.** Code Arena drives VirtualBox, VMware, libvirt/QEMU and
+  Hyper-V VMs: list, power, snapshot, copy in and out, run, screenshot, type
+  and click, and `vm_test` (restore, copy the build in, run it, bring back the
+  logs and a screenshot, restore). Each change asks you; guest passwords stay
+  in your keyring and never reach the model.
+
+### :sparkles: New features & Enhancements
+
+- **Skills of your own, in and out.** Export skills as a .zip or SKILL.md and
+  import a .zip, .skill, SKILL.md or folder on the Skills page and in Code
+  Arena, with a preview, Replace/Rename/Skip for a name you have, the
+  safeguards on every file, and the skill's files kept with it.
+- **Local skills and tools in Code Arena**: `.code-arena/skills`,
+  `~/.code-arena/skills` and `~/.claude/skills`; tools of your own (a command
+  with a schema, or a project's MCP servers) enabled per project.
+- **Configure Tools in Code Arena**: each tool on or off, how it asks, what
+  the model is told of it, and its arguments fixed or defaulted, for every
+  project or this one.
+
+### :bug: Bugs fixed
+
+- The app and workspaces images copy every file Code Arena links from the
+  app, checked by a test.
+
 ## v7.8.0 (2026-11-06)
 
 The full window for each person, a Code Arena that keeps up in long
