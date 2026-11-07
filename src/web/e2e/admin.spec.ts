@@ -157,6 +157,24 @@ test('my own usage', async ({ page }) => {
   await expect(page.getByLabel('Cost', { exact: true })).toHaveText([/^\$/, /^\$/])
 })
 
+test('a custom range stays open until it is applied, and the report is for those days', async ({ page }) => {
+  await page.goto('/usage')
+  await page.getByRole('combobox', { name: 'Time range' }).click()
+  await page.getByRole('option', { name: 'Custom range…' }).click()
+  const form = page.getByRole('form', { name: 'Custom range' })
+  await expect(form).toBeVisible()
+  // It stays, with the focus in it: the select's closing (its focus going back to its button) does not close it.
+  await expect(form.getByLabel('First day')).toBeFocused()
+  await expect(form).toBeVisible()
+  await form.getByLabel('First day').fill('2026-10-01')
+  await expect(form).toBeVisible()
+  await form.getByLabel('Last day').fill('2026-10-15')
+  await form.getByRole('button', { name: 'Apply' }).click()
+  await expect(form).toBeHidden()
+  await expect(page).toHaveURL(/from=2026-10-01/)
+  await expect(page).toHaveURL(/to=2026-10-15/)
+})
+
 test('a person, from added to deleted', async ({ page }) => {
   test.skip(noGateway, 'people get gateway accounts')
   const name = `e2e${Date.now().toString(36)}`

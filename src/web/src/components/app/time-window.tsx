@@ -1,5 +1,5 @@
 import { Download, FileSpreadsheet, FileText, Sheet } from 'lucide-react'
-import { useId, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
@@ -28,6 +28,9 @@ export function TimeWindow({
 }) {
   const id = useId()
   const [open, setOpen] = useState(false)
+  // Custom range… was just chosen: the select, closing, would hand the focus back to its button, outside the form.
+  const custom = useRef(false)
+  const anchor = useRef<HTMLDivElement>(null)
   const current = resolveRange(value)
   const [from, setFrom] = useState(() => dayOf(current.from))
   const [to, setTo] = useState(() => dayOf(new Date(current.to.getTime() - 1)))
@@ -40,6 +43,7 @@ export function TimeWindow({
       const r = resolveRange(value)
       setFrom(dayOf(r.from))
       setTo(dayOf(new Date(r.to.getTime() - 1)))
+      custom.current = true
       setOpen(true)
       return
     }
@@ -49,12 +53,18 @@ export function TimeWindow({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverAnchor asChild>
-        <div className="inline-flex max-w-full">
+        <div ref={anchor} className="inline-flex max-w-full">
           <Select value={key} onValueChange={choose}>
             <SelectTrigger className={className} aria-label="Time range">
               <SelectValue placeholder="Time range" />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent
+              onCloseAutoFocus={(e) => {
+                // The form takes the focus, not the select's button.
+                if (custom.current) e.preventDefault()
+                custom.current = false
+              }}
+            >
               {shown.map((o) => (
                 <SelectItem key={o.value} value={o.value}>
                   {o.label}
@@ -65,7 +75,14 @@ export function TimeWindow({
           </Select>
         </div>
       </PopoverAnchor>
-      <PopoverContent align="start" className="w-80">
+      <PopoverContent
+        align="start"
+        className="w-80"
+        onInteractOutside={(e) => {
+          // The select it opened from is not outside: its closing (and a click on it) leaves the form open.
+          if (e.target instanceof Node && anchor.current?.contains(e.target)) e.preventDefault()
+        }}
+      >
         <form
           className="grid gap-3"
           aria-label="Custom range"
