@@ -164,7 +164,8 @@ describe('admin models: vLLM', () => {
     expect(sent.engine).toBeUndefined()
   })
 
-  it("adds a snapshot as an LMDeploy model with only LMDeploy's fields, and a GGUF file of Strata's family as a Strata model", async () => {
+  // One test of each engine's form (two dialogs in one test outran its time on a loaded machine).
+  const lmdeployAndStrata = () => {
     const instances = [
       { name: 'llamacpp', kind: 'llamacpp', managed: true, problem: null, on: true },
       { name: 'vllm', kind: 'vllm', managed: true, problem: null, on: true },
@@ -188,15 +189,20 @@ describe('admin models: vLLM', () => {
       'POST /api/admin/models/advice': () => ({ json: advice }),
       'POST /api/admin/models': () => ({ status: 201, json: { restarting: true, warning: null } }),
     })
+    return calls
+  }
+
+  it("adds a snapshot as an LMDeploy model with only LMDeploy's fields", async () => {
+    const calls = lmdeployAndStrata()
     renderApp('/admin/models')
     await userEvent.click(await screen.findByRole('button', { name: 'Add a model' }))
-    let dialog = await screen.findByRole('dialog', { name: 'Add a model' })
+    const dialog = await screen.findByRole('dialog', { name: 'Add a model' })
     await userEvent.click(within(dialog).getByRole('combobox', { name: 'File or model' }))
     // Snapshots are for vLLM and LMDeploy here; Strata runs none.
     await userEvent.click(await screen.findByRole('option', { name: /gpt-oss-120b@main · .* · vLLM or LMDeploy/ }))
     await userEvent.click(await within(dialog).findByRole('combobox', { name: 'Engine' }))
     await userEvent.click(await screen.findByRole('option', { name: 'LMDeploy' }))
-    let form = await within(dialog).findByRole('form', { name: 'The LMDeploy model' })
+    const form = await within(dialog).findByRole('form', { name: 'The LMDeploy model' })
     expect(within(form).getByText(/--cache-max-entry-count/)).toBeInTheDocument()
     expect(within(form).getByText(/--max-batch-size/)).toBeInTheDocument()
     // What LMDeploy has none of is not offered.
@@ -206,14 +212,18 @@ describe('admin models: vLLM', () => {
     await userEvent.click(within(form).getByRole('button', { name: 'Add model' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/models')).toBe(true))
     expect(calls.find((c) => c.method === 'POST' && c.path === '/api/admin/models')!.body).toMatchObject({ engineKind: 'lmdeploy', sleep: false, file: 'hf/openai/gpt-oss-120b@main' })
+  })
 
+  it("adds a GGUF file of Strata's family as a Strata model", async () => {
+    lmdeployAndStrata()
+    renderApp('/admin/models')
     await userEvent.click(await screen.findByRole('button', { name: 'Add a model' }))
-    dialog = await screen.findByRole('dialog', { name: 'Add a model' })
+    const dialog = await screen.findByRole('dialog', { name: 'Add a model' })
     await userEvent.click(within(dialog).getByRole('combobox', { name: 'File or model' }))
     await userEvent.click(await screen.findByRole('option', { name: /Qwen3\.8-Flash-Next-UD-IQ4_XS/ }))
     await userEvent.click(await within(dialog).findByRole('combobox', { name: 'Engine' }))
     await userEvent.click(await screen.findByRole('option', { name: 'Strata' }))
-    form = await within(dialog).findByRole('form', { name: 'The Strata model' })
+    const form = await within(dialog).findByRole('form', { name: 'The Strata model' })
     // One copy, 1 to 8 at once: no Copies field, and its own batch in the hint.
     expect(within(form).queryByLabelText('Copies')).not.toBeInTheDocument()
     expect(within(form).getByText(/--parallel, 1 to 8/)).toBeInTheDocument()
