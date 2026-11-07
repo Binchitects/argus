@@ -466,6 +466,275 @@ public sealed class VmToolTests : IDisposable
     }
 
     [Fact]
+    public async Task VirtualBox_makes_a_VM_with_a_disk_and_the_ISO_clones_one_that_is_off_and_deletes_it_with_its_disks()
+    {
+        using var h = new Harness(_gateway);
+        var bin = Bin(h);
+        var iso = h.Write("isos/alpine.iso", "an ISO");
+        Script(bin, "VBoxManage", """
+            d="$(dirname "$0")"
+            printf '%s\n' "$*" >> "$d/vbox.log"
+            case "$1" in
+            list)
+              [ "$2" = vms ] && { echo '"base" {11111111-2222-3333-4444-555555555555}'; for f in "$d"/vm-*; do [ -f "$f" ] && cat "$f"; done; }; true;;
+            showvminfo) echo 'VMState="poweroff"';;
+            createvm)
+              echo "Virtual machine '$3' is created and registered."
+              echo "UUID: 99999999-0000-0000-0000-000000000001"
+              echo "Settings file: '$d/VirtualBox VMs/$3/$3.vbox'"
+              echo "\"$3\" {99999999-0000-0000-0000-000000000001}" > "$d/vm-$3";;
+            createmedium) [ -f "$d/disk-fails" ] && { echo "VBoxManage: error: no room" >&2; exit 1; }; true;;
+            snapshot) echo 'SnapshotName="clean"';;
+            clonevm) echo "Machine has been successfully cloned as \"$4\""; echo "\"$4\" {99999999-0000-0000-0000-000000000002}" > "$d/vm-$4";;
+            unregistervm) rm -f "$d"/vm-*;;
+            esac
+            """);
+        Calls(("vm_create", $$"""{"action":"create","name":"alpine-test","iso":"isos/alpine.iso","memory":1024,"cpus":1,"disk":8}"""),
+            ("vm_create", """{"action":"create","name":"base"}"""),
+            ("vm_create", """{"action":"clone","vm":"base","name":"base copy","snapshot":"clean","linked":true}"""),
+            ("vm_create", """{"action":"clone","vm":"base","name":"x","linked":true}"""),
+            ("vm_create", """{"action":"create","name":"../evil"}"""),
+            ("vm_delete", """{"vm":"alpine-test"}"""));
+        Assert.Equal(0, await h.Run("go\ny\n/exit\n", "chat", "--mode", "yolo"));
+        var results = Results();
+        Assert.StartsWith("Made alpine-test on VirtualBox (1,024 MB, 1 CPU, 8 GB of disk, alpine.iso in its drive", results[0], StringComparison.Ordinal);
+        Assert.Contains("VirtualBox has a VM named base already", results[1], StringComparison.Ordinal);
+        Assert.Contains("Cloned base as base copy on VirtualBox, from clean, linked to it", results[2], StringComparison.Ordinal);
+        Assert.Contains("A linked clone shares a snapshot's disk", results[3], StringComparison.Ordinal);
+        Assert.Contains("name is up to 64 letters", results[4], StringComparison.Ordinal);
+        Assert.StartsWith("Deleted alpine-test from VirtualBox", results[5], StringComparison.Ordinal);
+        var log = File.ReadAllText(Path.Combine(bin, "vbox.log"));
+        Assert.Contains("createvm --name alpine-test --ostype Linux_64 --register", log, StringComparison.Ordinal);
+        Assert.Contains("modifyvm 99999999-0000-0000-0000-000000000001 --memory 1024 --cpus 1 --nic1 nat", log, StringComparison.Ordinal);
+        Assert.Contains($"createmedium disk --filename {bin}/VirtualBox VMs/alpine-test/alpine-test.vdi --size 8192 --format VDI", log, StringComparison.Ordinal);
+        Assert.Contains($"storageattach 99999999-0000-0000-0000-000000000001 --storagectl SATA --port 1 --device 0 --type dvddrive --medium {iso}", log, StringComparison.Ordinal);
+        Assert.Contains("clonevm 11111111-2222-3333-4444-555555555555 --name base copy --register --snapshot clean --options link", log, StringComparison.Ordinal);
+        Assert.Contains("unregistervm 99999999-0000-0000-0000-000000000001 --delete", log, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_VM_half_made_is_taken_away_again_and_deleting_one_asks_the_person_in_every_mode()
+    {
+        using var h = new Harness(_gateway);
+        var bin = Bin(h);
+        VBoxManage(bin);
+        File.WriteAllText(Path.Combine(bin, "running"), "");
+        Calls(("vm_delete", """{"vm":"test-vm"}"""));
+        // yolo asks too: -p cannot ask, so nothing is deleted.
+        Assert.Equal(0, await h.Run("", "-p", "delete it", "--mode", "yolo"));
+        Assert.Contains("vm_delete needs the person's approval, and this run cannot ask", Results()[0], StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(bin, "vbox.log")));
+        // Asked and allowed, a running VM is refused all the same.
+        Assert.Equal(0, await h.Run("go\ny\n/exit\n", "chat", "--mode", "yolo"));
+        Assert.Contains("test-vm is running: stop it first", Results()[0], StringComparison.Ordinal);
+
+        var tools = new VirtualMachines([], new GuestLogins(new NoKeyring(), new Ui(TextReader.Null, TextWriter.Null, TextWriter.Null, false, false)), () => false).Tools();
+        Assert.True(tools.Single(t => t.Name == "vm_delete").AlwaysAsks);
+        Assert.Equal(ToolKind.Machine, tools.Single(t => t.Name == "vm_create").Kind);
+
+        // A disk that cannot be made: the VM registered for it is unregistered again.
+        File.Delete(Path.Combine(bin, "vbox.log"));
+        Script(bin, "VBoxManage", """
+            d="$(dirname "$0")"
+            printf '%s\n' "$*" >> "$d/vbox.log"
+            case "$1" in
+            list) true;;
+            createvm) echo "UUID: 99999999-0000-0000-0000-000000000001"; echo "Settings file: '$d/vms/$3/$3.vbox'";;
+            createmedium) echo "VBoxManage: error: Could not create the medium storage unit: no room" >&2; exit 1;;
+            esac
+            """);
+        Calls(("vm_create", """{"action":"create","name":"full"}"""));
+        Assert.Equal(0, await h.Run("", "-p", "make it", "--mode", "yolo"));
+        Assert.Contains("no room", Results()[0], StringComparison.Ordinal);
+        Assert.EndsWith("unregistervm 99999999-0000-0000-0000-000000000001 --delete\n", File.ReadAllText(Path.Combine(bin, "vbox.log")), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task The_vm_command_makes_starts_stops_and_deletes_a_VM_without_a_model_and_deleting_asks_first()
+    {
+        using var h = new Harness(_gateway);
+        var bin = Bin(h);
+        VBoxManage(bin);
+        File.AppendAllText(Path.Combine(bin, "VBoxManage"), """
+
+            case "$cmd" in
+            createvm) echo "UUID: 99999999-0000-0000-0000-000000000001"; echo "Settings file: '$d/vms/$2/$2.vbox'";;
+            unregistervm) echo deleted >> "$d/deleted";;
+            esac
+            """);
+        Assert.Equal(0, await h.Run("", "vm", "create", "tiny", "--memory", "256", "--disk", "1", "--os", "other"));
+        Assert.Contains("Made tiny on VirtualBox (256 MB, 2 CPUs, 1 GB of disk", h.Out, StringComparison.Ordinal);
+        Assert.Contains("It is off. Its disk is empty and nothing is in its drive: make it again with an iso to install a system from, or clone a VM that has one.\n", h.Out, StringComparison.Ordinal);
+        Assert.Contains("createvm --name tiny --ostype Other_64 --register", File.ReadAllText(Path.Combine(bin, "vbox.log")), StringComparison.Ordinal);
+        Assert.Equal(0, await h.Run("", "vm", "start", "test-vm"));
+        Assert.Equal(0, await h.Run("", "vm", "stop", "test-vm", "--force"));
+        Assert.Contains("controlvm 11111111-2222-3333-4444-555555555555 poweroff", File.ReadAllText(Path.Combine(bin, "vbox.log")), StringComparison.Ordinal);
+        Assert.Equal(1, await h.Run("n\n", "vm", "delete", "test-vm"));
+        Assert.Contains("Delete test-vm with its disks and snapshots, for good?", h.Out + h.Err, StringComparison.Ordinal);
+        Assert.Contains("nothing deleted", h.Err, StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(bin, "deleted")));
+        Assert.Equal(0, await h.Run("y\n", "vm", "delete", "test-vm"));
+        Assert.True(File.Exists(Path.Combine(bin, "deleted")));
+        Assert.Equal(1, await h.Run("", "vm", "create", "x", "iso"));
+        Assert.Contains("iso is not an option", h.Err, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VMware_that_cannot_start_a_VM_for_want_of_its_kernel_module_says_so_and_how_to_load_it()
+    {
+        using var h = new Harness(_gateway);
+        var bin = Bin(h);
+        // As this machine's Workstation answers when vmmon is not loaded (Secure Boot refuses the unsigned module).
+        Script(bin, "vmrun", """
+            echo "[AppLoader] Use shipped Linux kernel AIO access library."
+            shift 2
+            case "$1" in
+            list) echo "Total running VMs: 0";;
+            start) echo "Error: The operation was canceled"; exit 255;;
+            esac
+            """);
+        var vmx = h.Write("vms/a.vmx", "displayName = \"a\"\n");
+        var device = Vmware.MonitorDevice;
+        Vmware.MonitorDevice = Path.Combine(h.Root, "no-vmmon");
+        try
+        {
+            Assert.Equal(1, await h.Run("", "vm", "start", vmx));
+        }
+        finally
+        {
+            Vmware.MonitorDevice = device;
+        }
+        Assert.Contains("The operation was canceled", h.Err, StringComparison.Ordinal);
+        Assert.Contains("VMware's kernel module vmmon is not loaded", h.Err, StringComparison.Ordinal);
+        Assert.Contains("vmware-modconfig --console --install-all", h.Err, StringComparison.Ordinal);
+        Assert.Contains("Secure Boot", h.Err, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task VMware_makes_a_VM_in_its_folder_lists_it_from_there_clones_it_and_deletes_it()
+    {
+        using var h = new Harness(_gateway);
+        var bin = Bin(h);
+        Script(bin, "vmrun", """
+            d="$(dirname "$0")"
+            printf '%s\n' "$*" >> "$d/vmrun.log"
+            echo "[AppLoader] Use shipped Linux kernel AIO access library."
+            shift 2
+            case "$1" in
+            list) echo "Total running VMs: 0";;
+            clone) mkdir -p "$(dirname "$3")"; echo "displayName = \"copy\"" > "$3";;
+            deleteVM) cp "$2" "$d/deleted.vmx"; rm -rf "$(dirname "$2")";;
+            esac
+            """);
+        Script(bin, "vmware-vdiskmanager", """
+            printf '%s\n' "$*" >> "$(dirname "$0")/vdisk.log"
+            for a in "$@"; do last="$a"; done
+            echo "Virtual disk creation successful." ; touch "$last"
+            """);
+        var iso = h.Write("ubuntu.iso", "an ISO");
+        Calls(("vm_create", """{"action":"create","name":"web","iso":"ubuntu.iso","os":"windows","disk":30}"""), ("vm_list", "{}"),
+            ("vm_create", """{"action":"clone","vm":"web","name":"web2"}"""), ("vm_delete", """{"vm":"web"}"""));
+        Assert.Equal(0, await h.Run("go\ny\n/exit\n", "chat", "--mode", "yolo"));
+        var results = Results();
+        var vmx = Path.Combine(h.Root, "vmware", "web", "web.vmx");
+        Assert.StartsWith($"Made web on VMware Workstation (2,048 MB, 2 CPUs, 30 GB of disk, ubuntu.iso in its drive; id {vmx})", results[0], StringComparison.Ordinal);
+        var text = File.ReadAllText(Path.Combine(bin, "deleted.vmx"));
+        Assert.Contains("guestOS = \"windows9-64\"", text, StringComparison.Ordinal);
+        Assert.Contains("firmware = \"efi\"", text, StringComparison.Ordinal);
+        Assert.Contains($"sata0:1.fileName = \"{iso}\"", text, StringComparison.Ordinal);
+        Assert.Contains("scsi0:0.fileName = \"web.vmdk\"", text, StringComparison.Ordinal);
+        Assert.Equal($"-c -s 30GB -a lsisas1068 -t 1 {Path.Combine(h.Root, "vmware", "web", "web.vmdk")}\n", File.ReadAllText(Path.Combine(bin, "vdisk.log")));
+        Assert.Contains("- web: off", results[1], StringComparison.Ordinal);
+        Assert.Contains("Cloned web as web2", results[2], StringComparison.Ordinal);
+        var log = File.ReadAllText(Path.Combine(bin, "vmrun.log"));
+        Assert.Contains($"-T ws clone {vmx} {Path.Combine(h.Root, "vmware", "web2", "web2.vmx")} full -cloneName=web2", log, StringComparison.Ordinal);
+        Assert.Contains($"-T ws deleteVM {vmx}", log, StringComparison.Ordinal);
+        Assert.StartsWith("Deleted web from VMware Workstation", results[3], StringComparison.Ordinal);
+        Assert.False(File.Exists(vmx));
+    }
+
+    [Fact]
+    public async Task Libvirt_defines_a_VM_on_a_new_volume_with_the_guest_agent_s_channel_clones_with_virt_clone_and_deletes_only_its_disks()
+    {
+        using var h = new Harness(_gateway);
+        var bin = Bin(h);
+        Script(bin, "virsh", """
+            d="$(dirname "$0")"
+            printf '%s\n' "$*" >> "$d/virsh.log"
+            shift 2
+            case "$1" in
+            list) [ "$2" = "--all" ] && { echo "lab"; [ -f "$d/made" ] && cat "$d/made"; }; true;;
+            vol-create-as) true;;
+            vol-path) echo "/var/lib/libvirt/images/$4";;
+            define) cp "$2" "$d/defined.xml"; echo "dev" > "$d/made";;
+            domblklist)
+              echo " Type   Device   Target   Source"
+              echo "------------------------------------------------"
+              echo " file   disk     vda      /var/lib/libvirt/images/lab.qcow2"
+              echo " file   cdrom    sda      /isos/debian.iso"
+              echo " file   cdrom    sdb      -";;
+            esac
+            """);
+        Script(bin, "virt-clone", """
+            printf '%s\n' "$*" >> "$(dirname "$0")/clone.log"
+            echo "Clone 'lab-copy' created successfully."
+            """);
+        h.Write("debian.iso", "an ISO");
+        Calls(("vm_create", """{"action":"create","name":"dev","iso":"debian.iso","memory":4096,"cpus":4}"""),
+            ("vm_create", """{"action":"clone","vm":"lab","name":"lab-copy"}"""),
+            ("vm_create", """{"action":"clone","vm":"lab","name":"lab-old","snapshot":"before"}"""),
+            ("vm_delete", """{"vm":"lab"}"""));
+        Assert.Equal(0, await h.Run("go\ny\n/exit\n", "chat", "--mode", "yolo"));
+        var results = Results();
+        Assert.StartsWith("Made dev on libvirt (4,096 MB, 4 CPUs, 20 GB of disk, debian.iso in its drive", results[0], StringComparison.Ordinal);
+        var xml = System.Xml.Linq.XElement.Parse(File.ReadAllText(Path.Combine(bin, "defined.xml")));
+        Assert.Equal("dev", xml.Element("name")!.Value);
+        Assert.Equal("4096", xml.Element("memory")!.Value);
+        Assert.Equal("/var/lib/libvirt/images/dev.qcow2", xml.Descendants("disk").First().Element("source")!.Attribute("file")!.Value);
+        Assert.Contains(xml.Descendants("channel"), c => c.Element("target")!.Attribute("name")!.Value == "org.qemu.guest_agent.0");
+        Assert.Equal(Path.Combine(h.Work, "debian.iso"), xml.Descendants("disk").Single(d => d.Attribute("device")!.Value == "cdrom").Element("source")!.Attribute("file")!.Value);
+        Assert.Contains("Cloned lab as lab-copy on libvirt", results[1], StringComparison.Ordinal);
+        Assert.Equal("--connect qemu:///system --original lab --name lab-copy --auto-clone\n", File.ReadAllText(Path.Combine(bin, "clone.log")));
+        Assert.Contains("lab has no snapshot before", results[2], StringComparison.Ordinal);
+        Assert.StartsWith("Deleted lab from libvirt", results[3], StringComparison.Ordinal);
+        var log = File.ReadAllText(Path.Combine(bin, "virsh.log"));
+        Assert.Contains("vol-create-as default dev.qcow2 20G --format qcow2", log, StringComparison.Ordinal);
+        // The disk's volume goes; the CD-ROM's ISO stays.
+        Assert.Contains("undefine lab --snapshots-metadata --managed-save --nvram --storage vda\n", log, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Hyper_V_makes_clones_and_deletes_a_VM_by_its_own_cmdlets()
+    {
+        using var h = new Harness(_gateway);
+        var bin = Bin(h);
+        // PowerShell as a stand-in: it keeps each script it is given (-EncodedCommand, UTF-16) and answers an empty list.
+        Script(bin, "powershell", """
+            d="$(dirname "$0")"
+            for a in "$@"; do last="$a"; done
+            printf '%s' "$last" | base64 -d | iconv -f UTF-16LE -t UTF-8 >> "$d/scripts.ps1"
+            printf '\n----\n' >> "$d/scripts.ps1"
+            echo '[]'
+            """);
+        var hyperv = new HyperV(Path.Combine(bin, "powershell"));
+        await hyperv.CreateAsync(new VmSpec("Win 11", 4096, 2, 64, @"C:\isos\win11.iso", "windows"), default);
+        await hyperv.CreateAsync(new VmSpec("tux", 1024, 1, 10, null, "linux"), default);
+        await hyperv.CloneAsync(new VmInfo("Win 11", "Win 11", hyperv, false), "Win 11 test", "clean", false, default);
+        await Assert.ThrowsAsync<ToolError>(() => hyperv.CloneAsync(new VmInfo("tux", "tux", hyperv, false), "t2", null, true, default));
+        await hyperv.DeleteAsync(new VmInfo("tux", "tux", hyperv, false), default);
+        var scripts = File.ReadAllText(Path.Combine(bin, "scripts.ps1")).Split("\n----\n");
+        Assert.Contains("New-VM -Name 'Win 11' -Generation 2 -MemoryStartupBytes 4096MB -NewVHDPath $vhd -NewVHDSizeBytes 64GB", scripts[0], StringComparison.Ordinal);
+        Assert.Contains(@"Add-VMDvdDrive -VM $vm -Path 'C:\isos\win11.iso' -Passthru", scripts[0], StringComparison.Ordinal);
+        Assert.DoesNotContain("SecureBootTemplate", scripts[0], StringComparison.Ordinal);
+        Assert.Contains("Set-VMFirmware -VM $vm -SecureBootTemplate MicrosoftUEFICertificateAuthority", scripts[1], StringComparison.Ordinal);
+        Assert.Contains("Export-VMSnapshot -VMName 'Win 11' -Name 'clean' -Path $tmp", scripts[2], StringComparison.Ordinal);
+        Assert.Contains("Import-VM -Path $config.FullName -Copy -GenerateNewId", scripts[2], StringComparison.Ordinal);
+        Assert.Contains("Rename-VM -VM $copy -NewName 'Win 11 test'", scripts[2], StringComparison.Ordinal);
+        Assert.Contains("Get-VMSnapshot -VM $vm | Remove-VMSnapshot", scripts[3], StringComparison.Ordinal);
+        Assert.Contains("Remove-VM -VM $vm -Force", scripts[3], StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Keys_pictures_and_refusals_are_read_as_the_hypervisors_say_them()
     {
         Assert.Equal("ctrl+alt+delete", KeyChord.Parse("Ctrl+Alt+Del")!.ToString());

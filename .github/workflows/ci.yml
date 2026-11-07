@@ -158,6 +158,49 @@ jobs:
         uses: actions/upload-artifact@v4
         with: { name: web-playwright-report, path: src/web/playwright-report }
 
+  workspaces:
+    # Code Studio's workspaces for real: the workspaces image built from this checkout, run as compose runs it (its
+    # security options, the agent's commands in bubblewrap), beside a code host (GitLab's API, git over HTTP, the
+    # agent's model). RealWorkspaceTests drives the API end to end (clone, a dev server through its forward, the agent
+    # sandboxed, push, sleep, wake); then the same in Chromium through the app, the web and Traefik
+    # (e2e/workspaces.spec.ts on ci/workspaces-stack.sh).
+    needs: [api, web]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      E2E_PASSWORD: ci admin password for tests
+      E2E_BASE_URL: https://llm.localhost:8443
+      E2E_WORKSPACES: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with: { global-json-file: global.json }
+      - name: Build the images
+        run: |
+          docker build -t ws-e2e -f deploy/services/workspaces/Dockerfile .
+          docker build -t llm-app:ci --build-arg APP_VERSION=0.0.0-ci.${{ github.run_number }} -f src/Llm.Api/Dockerfile .
+          docker build -t llm-web:ci --build-arg APP_VERSION=0.0.0-ci.${{ github.run_number }} -f src/web/Dockerfile .
+      - name: A workspace end to end through the API
+        env: { STUDIO_E2E_IMAGE: ws-e2e }
+        run: dotnet test tests/Llm.Tests -c Release --filter "FullyQualifiedName~RealWorkspaceTests" --logger "console;verbosity=normal"
+      - name: Start the stack with workspaces
+        run: |
+          echo "127.0.0.1 llm.localhost" | sudo tee -a /etc/hosts
+          src/web/ci/workspaces-stack.sh up
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: src/web/package-lock.json }
+      - name: A workspace in the browser
+        working-directory: src/web
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npx playwright test e2e/workspaces.spec.ts --project desktop
+      - if: failure()
+        run: src/web/ci/workspaces-stack.sh logs
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with: { name: workspaces-playwright-report, path: src/web/playwright-report, if-no-files-found: ignore }
+
   argus-browser:
     # Argus's own app against its real backend, with fake GitLab, LiteLLM and
     # embeddings on real sockets, driven in Chromium.

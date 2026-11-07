@@ -16,6 +16,15 @@ internal sealed record VmInfo(string Name, string Id, Hypervisor Host, bool Runn
 /// <summary>How a command in a guest ended: its exit code, what it printed (stdout and stderr together), and whether its time ran out.</summary>
 internal sealed record GuestRun(int ExitCode, string Output, bool TimedOut);
 
+/// <summary>
+/// A new VM: its name, memory (MB), processors, an empty disk (GB), the installer's ISO in its drive (a host path), and its
+/// guest system (linux, windows or other), for the hypervisor's own defaults.
+/// </summary>
+internal sealed record VmSpec(string Name, int MemoryMb, int Cpus, int DiskGb, string? Iso, string Os)
+{
+    public string Shown => string.Create(CultureInfo.InvariantCulture, $"{MemoryMb:N0} MB, {Cpus} CPU{(Cpus == 1 ? "" : "s")}, {DiskGb} GB of disk") + (Iso is null ? "" : $", {Path.GetFileName(Iso)} in its drive");
+}
+
 /// <summary>What a guest action needs: some hypervisors sign in to the guest for them.</summary>
 internal enum GuestNeed { Run, Copy, Screen, Input }
 
@@ -120,6 +129,19 @@ internal abstract class Hypervisor(string program)
 
     /// <summary>Restores a snapshot; a running VM is powered off first where the hypervisor needs that.</summary>
     public abstract Task RestoreAsync(VmInfo vm, string name, CancellationToken ct);
+
+    /// <summary>Makes a VM with an empty disk, the ISO in its drive to boot the installer from, known to the hypervisor.</summary>
+    public abstract Task<VmInfo> CreateAsync(VmSpec spec, CancellationToken ct);
+
+    /// <summary>A copy of a VM that is off, named <paramref name="name"/>: of its state now or of a snapshot, full or (linked) sharing its disk.</summary>
+    public abstract Task<VmInfo> CloneAsync(VmInfo vm, string name, string? snapshot, bool linked, CancellationToken ct);
+
+    /// <summary>Deletes a VM that is off, with its disks and snapshots; the ISO in its drive stays.</summary>
+    public abstract Task DeleteAsync(VmInfo vm, CancellationToken ct);
+
+    /// <summary>The VM a call made, by its name, as the hypervisor lists it now.</summary>
+    protected async Task<VmInfo> MadeAsync(string name, CancellationToken ct) =>
+        (await ListAsync(ct)).FirstOrDefault(v => v.Name == name) ?? throw new ToolError($"{Title} made {name} but does not list it.");
 
     /// <summary>Whether the guest answers (its tools or agent run): what a command in it needs.</summary>
     public abstract Task<bool> ReadyAsync(VmInfo vm, GuestLogin? login, CancellationToken ct);
@@ -236,7 +258,8 @@ internal static class Hypervisors
 {
     /// <summary>
     /// Each one found, in a fixed order. CODE_ARENA_VBOXMANAGE, CODE_ARENA_VMRUN and CODE_ARENA_VIRSH name a program of
-    /// their own; LIBVIRT_DEFAULT_URI the libvirt connection (qemu:///system by default).
+    /// their own; LIBVIRT_DEFAULT_URI the libvirt connection (qemu:///system by default), CODE_ARENA_LIBVIRT_POOL the
+    /// storage pool new VMs' disks go in (default).
     /// </summary>
     public static List<Hypervisor> Find(Func<string, string?> env, Func<string, bool>? exists = null)
     {
@@ -270,7 +293,10 @@ internal static class Hypervisors
 
         if (!windows && Program(env, exists, "CODE_ARENA_VIRSH", ["virsh"], mac ? ["/opt/homebrew/bin", "/usr/local/bin"] : []) is { } virsh)
         {
-            found.Add(new Libvirt(virsh, env("LIBVIRT_DEFAULT_URI") is { Length: > 0 } uri ? uri : "qemu:///system"));
+            found.Add(new Libvirt(virsh, env("LIBVIRT_DEFAULT_URI") is { Length: > 0 } uri ? uri : "qemu:///system")
+            {
+                Pool = env("CODE_ARENA_LIBVIRT_POOL") is { Length: > 0 } pool ? pool : "default",
+            });
         }
 
         if (windows && env("SystemRoot") is { Length: > 0 } root
@@ -433,6 +459,53 @@ internal sealed class VirtualBox(string program) : Hypervisor(program)
         }
         await MustAsync(["snapshot", vm.Id, "restore", name], Long, ct);
     }
+
+    /// <summary>
+    /// createvm in VirtualBox's machine folder, then its memory, processors and NAT network, a VDI disk beside its settings
+    /// on SATA port 0 and the ISO on port 1, booting from the ISO first. A step that fails takes the half-made VM away again.
+    /// </summary>
+    public override async Task<VmInfo> CreateAsync(VmSpec spec, CancellationToken ct)
+    {
+        var windows = spec.Os == "windows";
+        var made = await MustAsync(["createvm", "--name", spec.Name, "--ostype", windows ? "Windows11_64" : spec.Os == "linux" ? "Linux_64" : "Other_64", "--register"], Short, ct);
+        var id = Said(made, "UUID:") ?? throw new ToolError($"VirtualBox made {spec.Name} but did not say its id.");
+        try
+        {
+            var settings = Said(made, "Settings file:")?.Trim('\'') ?? throw new ToolError($"VirtualBox did not say where {spec.Name}'s settings are.");
+            var inv = CultureInfo.InvariantCulture;
+            await MustAsync(["modifyvm", id, "--memory", spec.MemoryMb.ToString(inv), "--cpus", spec.Cpus.ToString(inv), "--nic1", "nat", "--ioapic", "on",
+                "--graphicscontroller", "vmsvga", "--boot1", "dvd", "--boot2", "disk", "--boot3", "none", "--boot4", "none",
+                // Windows 11's installer wants UEFI and a TPM.
+                .. windows ? new[] { "--firmware", "efi", "--tpm-type", "2.0" } : []], Short, ct);
+            var disk = Path.Combine(Path.GetDirectoryName(settings)!, spec.Name + ".vdi");
+            await MustAsync(["createmedium", "disk", "--filename", disk, "--size", (spec.DiskGb * 1024L).ToString(inv), "--format", "VDI"], Long, ct);
+            await MustAsync(["storagectl", id, "--name", "SATA", "--add", "sata", "--controller", "IntelAhci", "--portcount", "2"], Short, ct);
+            await MustAsync(["storageattach", id, "--storagectl", "SATA", "--port", "0", "--device", "0", "--type", "hdd", "--medium", disk], Short, ct);
+            if (spec.Iso is { } iso)
+            {
+                await MustAsync(["storageattach", id, "--storagectl", "SATA", "--port", "1", "--device", "0", "--type", "dvddrive", "--medium", iso], Short, ct);
+            }
+        }
+        catch (Exception e) when (e is ToolError or OperationCanceledException)
+        {
+            await CallAsync(["unregistervm", id, "--delete"], Long, CancellationToken.None);
+            throw;
+        }
+        return new VmInfo(spec.Name, id, this, false);
+    }
+
+    /// <summary>A "Name: value" line of VBoxManage's answer.</summary>
+    private static string? Said(string text, string label) =>
+        text.Split('\n', StringSplitOptions.TrimEntries).FirstOrDefault(l => l.StartsWith(label, StringComparison.Ordinal))?[label.Length..].Trim() is { Length: > 0 } v ? v : null;
+
+    public override async Task<VmInfo> CloneAsync(VmInfo vm, string name, string? snapshot, bool linked, CancellationToken ct)
+    {
+        await MustAsync(["clonevm", vm.Id, "--name", name, "--register", .. snapshot is { } s ? new[] { "--snapshot", s } : [], .. linked ? new[] { "--options", "link" } : []], Long, ct);
+        return await MadeAsync(name, ct);
+    }
+
+    /// <summary>unregistervm --delete: its settings, disks, snapshots and logs go; a DVD image is not a disk of its own and stays.</summary>
+    public override async Task DeleteAsync(VmInfo vm, CancellationToken ct) => await MustAsync(["unregistervm", vm.Id, "--delete"], Long, ct);
 
     public override async Task<bool> ReadyAsync(VmInfo vm, GuestLogin? login, CancellationToken ct)
     {

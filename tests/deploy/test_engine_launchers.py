@@ -169,6 +169,22 @@ class LmdeployImageTests(unittest.TestCase):
         self.assertIn("dockerfile: lmdeploy.Dockerfile", build)
         self.assertIn("image: arena-lmdeploy:${LMDEPLOY_VERSION:-0.18.0}", build)
 
+    def test_a_build_host_names_its_mirrors_and_apt_gives_up_in_seconds_not_minutes(self):
+        text = (SERVICES / "lmdeploy.Dockerfile").read_text()
+        self.assertRegex(text, r"(?m)^ARG APT_MIRROR=$")
+        self.assertRegex(text, r"(?m)^ARG PIP_INDEX_URL=$")
+        self.assertIn("Acquire::http::Timeout=30", text)
+        self.assertIn('${PIP_INDEX_URL:+--index-url "$PIP_INDEX_URL"}', text)
+        # A base with a compiler skips apt altogether.
+        self.assertIn("if command -v gcc >/dev/null && command -v ps >/dev/null; then exit 0; fi", text)
+        build = (REPO / "deploy" / "lmdeploy-build.yml").read_text()
+        self.assertIn("APT_MIRROR: ${LMDEPLOY_APT_MIRROR:-}", build)
+        self.assertIn("PIP_INDEX_URL: ${LMDEPLOY_PIP_INDEX:-}", build)
+        # The official addresses are the default; no other mirror is named, as a default or a suggestion.
+        docs = (REPO / "docs" / "deployment.md").read_text()
+        for where in (text, build, docs):
+            self.assertNotRegex(where, r"(?i)https?://(?!deb\.debian\.org|pypi\.org|<)[^\s`]*(mirror|debian|pypi)")
+
 
 if __name__ == "__main__":
     unittest.main()

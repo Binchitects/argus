@@ -32,6 +32,8 @@ public sealed class CodeStudioTests(AppFixture app)
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var uri = request.RequestUri!;
+            // The length the request goes with, read before its body is (reading it would buffer it, and give one).
+            var length = request.Content?.Headers.ContentLength;
             var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
             Asked.Enqueue((request.Method.Method, uri.PathAndQuery, request.Headers.Authorization?.ToString(), body));
             if (uri.Port == 4000)
@@ -49,7 +51,7 @@ public sealed class CodeStudioTests(AppFixture app)
             {
                 "/api/state" => Json(HttpStatusCode.OK, """{"folder":"/workspaces/x/repo","model":"m"}"""),
                 "/api/file" when request.Method == HttpMethod.Post => Json(HttpStatusCode.OK,
-                    new JsonObject { ["got"] = body, ["type"] = request.Content!.Headers.ContentType?.MediaType, ["query"] = uri.Query }.ToJsonString()),
+                    new JsonObject { ["got"] = body, ["type"] = request.Content!.Headers.ContentType?.MediaType, ["query"] = uri.Query, ["length"] = length }.ToJsonString()),
                 "/api/messages" => new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent("data: {\"type\":\"text\",\"text\":\"hi\"}\n\ndata: {\"type\":\"done\"}\n\n", Encoding.UTF8, "text/event-stream"),
@@ -129,6 +131,13 @@ public sealed class CodeStudioTests(AppFixture app)
         Assert.Equal("/workspaces/x/repo", state.GetProperty("folder").GetString());
         var saved = await kim.JsonAsync(await kim.PostAsync($"/api/studio/w/{id}/file?x=1", new { path = "a.txt", text = "hi" }));
         Assert.Equal(("""{"path":"a.txt","text":"hi"}""", "application/json", "?x=1"), (saved.GetProperty("got").GetString(), saved.GetProperty("type").GetString(), saved.GetProperty("query").GetString()));
+        // With its length, as the page sent it: Code Arena takes no chunked body.
+        Assert.Equal(28, saved.GetProperty("length").GetInt32());
+        // A body of no length said (as Kestrel reads one, a stream that cannot seek; or sent chunked): on with its length too.
+        var chunked = new StreamContent(new OneWay(Encoding.UTF8.GetBytes("""{"path":"b.txt","text":"chunked"}""")));
+        chunked.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+        var sent = await kim.JsonAsync(await kim.Http.PostAsync(new Uri($"/api/studio/w/{id}/file", UriKind.Relative), chunked));
+        Assert.Equal(("""{"path":"b.txt","text":"chunked"}""", 33), (sent.GetProperty("got").GetString(), sent.GetProperty("length").GetInt32()));
         var events = await kim.Http.PostAsync(new Uri($"/api/studio/w/{id}/messages", UriKind.Relative), JsonContent.Create(new { text = "hi" }));
         Assert.Equal("text/event-stream", events.Content.Headers.ContentType?.MediaType);
         Assert.Contains("\"type\":\"done\"", await events.Content.ReadAsStringAsync(), StringComparison.Ordinal);
@@ -168,6 +177,12 @@ public sealed class CodeStudioTests(AppFixture app)
     }
 
     /// <summary>A workspace's engine's WebSocket (a terminal): what it is sent comes back as "echo: …"; it keeps the key and path it was asked with.</summary>
+    /// <summary>A body read once, front to back, whose length is not known ahead.</summary>
+    private sealed class OneWay(byte[] bytes) : MemoryStream(bytes)
+    {
+        public override bool CanSeek => false;
+    }
+
     private sealed class EchoEngine : IDisposable
     {
         private readonly HttpListener _listener = new();

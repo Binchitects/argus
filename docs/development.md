@@ -56,6 +56,21 @@ docker build -f deploy/services/workspaces/Dockerfile -t ws-e2e .
 tools/dn test tests/Llm.Tests -c Release --filter RealWorkspace -e STUDIO_E2E_IMAGE=ws-e2e
 ```
 
+The same in a browser: `src/web/ci/workspaces-stack.sh up` starts a stack of
+its own (containers and a network named `wse2e-*`, beside any other) with the
+app, the web and Traefik built from the checkout, the workspaces service and
+the code host; `e2e/workspaces.spec.ts` then makes a workspace in Code Studio,
+waits for its IDE on the clone, runs a dev server in its terminal, finds it in
+the Ports panel and opens its forwarded address in a tab of its own, then puts
+the workspace to sleep. CI's `workspaces` job runs both.
+
+```bash
+docker build -t llm-app:ci -f src/Llm.Api/Dockerfile . && docker build -t llm-web:ci -f src/web/Dockerfile .
+E2E_PASSWORD=pick-one E2E_PORT=18443 src/web/ci/workspaces-stack.sh up
+cd src/web && E2E_WORKSPACES=1 E2E_PASSWORD=pick-one E2E_BASE_URL=https://llm.localhost:18443 npx playwright test e2e/workspaces.spec.ts --project desktop
+src/web/ci/workspaces-stack.sh down
+```
+
 Code Arena uses the base class library only (no packages). Its standalone
 files, one per system, need .NET's runtime packs: `./arenactl code-arena`
 builds them into `dist/code-arena/` and packs them for a release

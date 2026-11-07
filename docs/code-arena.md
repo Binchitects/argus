@@ -2072,7 +2072,7 @@ On the person's machine:
 | `stop_command` | stops a command run with no time limit; it always asks the person first, `yolo` too |
 | `git` | status, diff, log, show, blame, branch: reading only (commits go through `run_shell`), inside the working directory: `diff --no-index` is refused, and so is a file outside it named anywhere in the arguments (`blame --contents FILE`, `-S FILE`), by name or through a link that leads out. It never asks, so the repository's own settings run nothing in it: no fsmonitor, hook, clean or smudge filter, merge driver (`--remerge-diff`), text conversion (so not `status -v`), external diff or signature checker, no submodule looked into (their changes are not shown), and no network (a partial clone does not fetch). Nor do they send it elsewhere: a work tree other than the folder that holds `.git` (`core.worktree`), or a `.git` that leads to another repository's folder, is refused (a worktree of another checkout and a submodule, which git made so, are read), and a `blame.ignoreRevsFile` outside is not read. The file list `grep` and `glob` (and the IDE's search and quick open) take from git is read the same way |
 | `screenshot` | a picture of a web page (`url`, at `width` × `height`, 1280 × 800 by default: the app you build, on its dev server) through a headless Chrome, Edge, Chromium or Brave (Settings → `codeArena.browser`, or `CODE_ARENA_BROWSER`, names one); without `url`, the whole screen (grim, gnome-screenshot, spectacle, ImageMagick or scrot on Linux; screencapture on macOS; PowerShell on Windows). The picture goes to the model after the result (one that sees pictures; another is told it cannot). It asks first, as a command does |
-| `vm_list`, `vm_run`, `vm_test`... | the person's virtual machines (VirtualBox, VMware, libvirt, Hyper-V): start, snapshot, copy in, run and test an app, read the screen, type ([below](#virtual-machines)). Offered when a hypervisor is installed |
+| `vm_list`, `vm_run`, `vm_test`... | the person's virtual machines (VirtualBox, VMware, libvirt, Hyper-V): make, clone and delete, start, snapshot, copy in, run and test an app, read the screen, type ([below](#virtual-machines)). Offered when a hypervisor is installed |
 | `ask_agent` | hands a task to one of the person's own coding agents (below), which runs it in the working directory; what it prints comes back. Offered when one is installed; it asks first, as a command does |
 | `plan` | the working plan the person sees (`/plan`), kept in Arena with the session's chat ([below](#the-plan)) |
 | `task` | a sub-agent (below) |
@@ -2223,6 +2223,8 @@ Linux server like the one in production, an old browser.
 | `vm_screenshot` | the guest's screen, as a picture to a model that sees them, else described in words (its size, how dark it is, its main colour, whether it looks blank, a text console or a desktop); kept in `.code-arena/vm/` |
 | `vm_input` | clicks (at a point of the last screenshot), types text, and presses keys and chords (`enter`, `tab`, `ctrl+c`, `alt+f4`, `ctrl+alt+delete`) |
 | `vm_test` | a test from a clean state in one call, below |
+| `vm_create` | makes a VM (`action: create`: an empty disk, the installer's `iso` in its drive, booted first; `os`, `memory`, `cpus`, `disk`), or clones one that is off (`action: clone`: of its state now or of a `snapshot`; `linked` shares the snapshot's disk) |
+| `vm_delete` | deletes a VM that is off with its disks and snapshots, for good; the ISO in its drive stays. It asks every time, in every mode |
 
 **Test in a VM.** `vm_test` restores the snapshot it is given, starts the VM
 headless and waits for its guest to answer (`boot_wait`, 300 s), copies the
@@ -2234,6 +2236,35 @@ The logs and `screen.png` are kept in `.code-arena/vm/VM-TIME/`, a folder with
 a `.gitignore` of its own, so nothing there is committed. `keep: true` leaves
 the VM running as the test left it, to look at. Take the clean snapshot first
 (`vm_snapshot`, or the hypervisor's own window): the test starts from it.
+
+**Making, cloning and deleting VMs.** A new VM gets an empty disk that grows
+as it fills (20 GB unless `disk` says), 2 GB of memory and 2 processors unless
+said, a NAT network and the ISO in its drive, booted first: start it with its
+window (`vm_power` with `gui`) and install its system, by `vm_screenshot` and
+`vm_input` or by hand, then its guest tools, and take the clean snapshot that
+`vm_test` starts from. A clone is made of a VM that is off and is the quick
+way to a VM to test in without touching the original; `vm_delete` takes it away
+after.
+
+| | create | clone | delete |
+|---|---|---|---|
+| VirtualBox | `createvm --register` in its machine folder, a VDI disk on SATA, the ISO on the next port; Windows gets UEFI and a TPM | `clonevm` (`--snapshot`, linked: `--options link`) | `unregistervm --delete` |
+| VMware | a folder of its own in VMware's folder for VMs (`prefvmx.defaultVMPath`, else `~/vmware`, `Documents\Virtual Machines`, `~/Virtual Machines.localized`), its disk by `vmware-vdiskmanager` and a `.vmx`; the VMs there are listed too | `vmrun clone` (full or linked, `-snapshot`) | `vmrun deleteVM` |
+| libvirt | a qcow2 volume in the `default` pool (`CODE_ARENA_LIBVIRT_POOL`), then `virsh define`: KVM, virtio disk and network, VNC with a tablet, and the guest agent's channel | `virt-clone --auto-clone` (of its state now; no linked clones) | `undefine` with its snapshots' records, saved state, UEFI variables and its disks' volumes, not a CD-ROM's ISO |
+| Hyper-V | `New-VM`, generation 2, a VHDX in the host's disk folder, the Default Switch, the ISO booted first; Linux gets the UEFI CA's Secure Boot template | an export (`Export-VM`, `Export-VMSnapshot`) imported again as a copy with an id of its own | its checkpoints merged, `Remove-VM`, then its disks' files |
+
+The terminal does the same without a model: `code-arena vm create NAME [--iso
+FILE] [--os linux|windows|other] [--memory MB] [--cpus N] [--disk GB]
+[--hypervisor KIND]`, `vm clone VM NAME [--snapshot S] [--linked]`, `vm start
+VM [--gui]`, `vm stop VM [--force]`, `vm list VM` and `vm delete VM`, which
+asks first (`--yes` where nobody can be asked).
+
+On Linux VMware runs a VM only with its kernel modules loaded (`/dev/vmmon`):
+with Secure Boot on, the kernel refuses them until they are signed with a key
+enrolled in the firmware. A start that fails for that says so and how to load
+them (`sudo vmware-modconfig --console --install-all`, then `mokutil
+--import` for the signing key); making, cloning, listing and deleting work
+without them.
 
 **What each one does it with.** The programs are found on `PATH` and in their
 usual folders (`C:\Program Files\Oracle\VirtualBox`, VMware's under Program
@@ -2274,9 +2305,11 @@ as `-gp` on its command line, which other users of the same machine could see
 in its process list while the call runs: on a shared machine use VirtualBox,
 libvirt or Hyper-V.
 
-**Asking.** `vm_list` and `vm_screenshot` change nothing and never ask. The
-rest ask where commands ask (ask and auto-edit modes; yolo runs them; plan mode
-refuses them), and **Always** covers that tool on that VM: always for
+**Asking.** `vm_list` and `vm_screenshot` change nothing and never ask.
+`vm_delete` asks every time, in every mode, yolo too (`-p` cannot ask, so it
+deletes nothing there). The rest ask where commands ask (ask and auto-edit
+modes; yolo runs them; plan mode refuses them), and **Always** covers that tool
+on that VM: always for
 `vm_run` on `test-vm` is not for any other VM. A kept rule names VMs:
 `/permissions allow vm_run(test-*)` runs commands in the test VMs unasked,
 `deny vm_power(prod-*)` keeps the agent from starting or stopping those.
