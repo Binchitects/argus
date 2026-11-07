@@ -40,31 +40,24 @@ dropped (~43,500 tokens freed in the history, each saving repeated in every
 later request). The test fails if either figure stops being under two
 thirds of the before arm.
 
-## With a real model: not run yet
+## With a real model (2026-11-07, RTX 3090 at 125 W)
 
-The benchmark is ready:
-`tests/CodeArena.Tests/ContextBenchmarkTests.cs`,
-`A_long_session_of_coding_tasks_before_and_after_condensing_and_mending`. It
-runs seven real coding tasks on a small C# shop, one after another in one
-session: a bug in a sum, a decimal-comma parser, a constant to find, one
-price in a 900-line catalogue, a method to add, a report's order, and a
-rename across files. After each task a hidden check builds the shop's
-`src/` beside its own program and runs it. It records, per task, prompt
-tokens (cached apart), completion tokens, requests, seconds and pass or
-fail. Per arm it records the tool calls: unknown tool, bad JSON, bad
-arguments, edits that missed, other errors, calls mended, and retries (the
-same failed call made again). `evals/run_context_bench.py` starts the model
-in a throwaway llama.cpp container, runs both arms, and writes
-`evals/context-bench-results.json` and the tables for this page:
+`evals/run_context_bench.py`, one run of each arm, the live engines stopped for it.
 
-    python3 evals/run_context_bench.py --model ~/llm-models/image/flux2-klein-4b/Qwen3-4B-Q4_K_M.gguf \
-        --alias Qwen3-4B-Q4_K_M --free-gpu llamacpp,vllm,videogen,imagegen --health http://172.26.0.23:8080
-    python3 evals/run_context_bench.py --model ~/llm-models/Qwen3.8-27B-UD-Q4_K_XL/Qwen3.8-27B-UD-Q4_K_XL.gguf \
-        --alias Qwen3.8-27B --context 65536 --free-gpu llamacpp,vllm,videogen,imagegen --health http://172.26.0.23:8080
+**Qwen3.8 27B (UD-Q4_K_XL, a 65,536 window):**
 
-It was not run on 2026-11-07. The build host's GPU is held by the live
-chat engine (Qwen3.8-27B and Qwen3-4B, ~22 GB of 24 GB). Stopping those
-containers to free it was refused by the build session's permission
-policy. The live engine's own endpoint needs the stack's key, which is not
-read. The real-model numbers (tokens per task, tasks passed, tool-call
-error rate before and after) go here once it is run.
+| arm | passed | prompt tokens / task (uncached) | completion / task | requests / task | seconds / task | tool-call errors |
+|---|---:|---:|---:|---:|---:|---:|
+| before | 6 / 7 | 65,449 (1,458) | 748 | 6.0 | 96.8 | 0 of 38 |
+| after | 7 / 7 | 62,683 (1,796) | 618 | 5.6 | 82.2 | 1 of 34 |
+
+The 27B solves each task in four to eight requests, and its results are short, so condensing had little to work on:
+it dropped one older read of a file read again, and summarised nothing. Prompt tokens fell 4% and time 15%; one more
+task passed. With one run per arm these differences are within the noise. The saving shows on long sessions (the
+scripted session above: −70%), not on tasks this short.
+
+**Qwen3-4B (Q4_K_M, a 32,768 window):** 0 of 7 passed in both arms. The model loops (200 requests on the first task)
+or stops without a change; its tool results were about 2,000 characters a task, so nothing was condensed. Prompt
+tokens per task fell 26% and time 25% with condensing on, from shorter loops. A 4B model is too small for this
+benchmark.
+
