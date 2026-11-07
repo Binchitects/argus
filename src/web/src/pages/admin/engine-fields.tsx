@@ -14,7 +14,7 @@ import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { useDebounced } from '@/lib/use-debounced'
 import { cn } from '@/lib/utils'
-import { engineLabel, serverPerModel, useFallbacks, useSnapshots, type EngineGpu, type EngineInstance, type EngineModel, type ModelMove } from './engine-api'
+import { engineLabel, serverKinds, serverPerModel, useFallbacks, useSnapshots, type EngineGpu, type EngineInstance, type EngineModel, type ModelMove, type ServerKind } from './engine-api'
 import { bytes, defaultMaxOutput, tokens, type LibraryFile } from './model-profile'
 
 export function FallbackField({ self, value, onChange, error }: { self: string | undefined; value: string; onChange: (v: string) => void; error?: string }) {
@@ -176,7 +176,7 @@ function start(saved: EngineModel | null, file: string, kind: VllmEngine['kind']
     kvType: saved?.kvType && ['fp8', 'auto', 'fp8_e4m3', 'fp8_e5m2'].includes(saved.kvType) ? saved.kvType : 'fp8',
     context: String(saved?.context ?? 32768),
     maxOutput: saved?.maxOutput ? String(saved.maxOutput) : '',
-    parallel: String(fresh ? 16 : (saved?.parallel ?? 16)),
+    parallel: String(Math.min(serverKinds[kind].maxParallel, fresh ? 16 : (saved?.parallel ?? 16))),
     specDecode: fresh ? '' : (saved?.specDecode ?? ''),
     draftHead: fresh ? '' : (saved?.draftHead ?? ''),
     kvCpuGb: saved?.kvCpuGb ? String(saved.kvCpuGb) : '',
@@ -187,14 +187,29 @@ function start(saved: EngineModel | null, file: string, kind: VllmEngine['kind']
   }
 }
 
-/** The engine a vLLM or SGLang model runs on: its kind, and its instance by name ('' for the first of its kind, the API's default). */
+/** The engine a model of one server a model runs on: its kind, and its instance by name ('' for the first of its kind, the API's default). */
 export interface VllmEngine {
-  kind: 'vllm' | 'sglang'
+  kind: ServerKind
   name: string
 }
 
-/** What the form keeps that its engine allows: LMCache is vLLM's alone. */
-const allowed = (form: VllmForm, kind: VllmEngine['kind']): VllmForm => (kind === 'sglang' && form.kvTier === 'lmcache' ? { ...form, kvTier: '' } : form)
+/**
+ * What the form keeps that its engine allows: LMCache is vLLM's alone; LMDeploy and Strata have no speculative decoding,
+ * tiers, sleep or quantisation the app sets, and Strata one copy.
+ */
+function allowed(form: VllmForm, kind: VllmEngine['kind']): VllmForm {
+  const k = serverKinds[kind]
+  return {
+    ...form,
+    kvTier: kind !== 'vllm' && form.kvTier === 'lmcache' ? '' : k.tiers ? form.kvTier : '',
+    kvCpuGb: k.tiers ? form.kvCpuGb : '',
+    specDecode: k.speculative ? form.specDecode : '',
+    draftHead: k.speculative ? form.draftHead : '',
+    quantization: k.quantization ? form.quantization : '',
+    replicas: k.replicas ? form.replicas : '1',
+    sleep: k.sleep && form.sleep,
+  }
+}
 
 /** What the API takes for a vLLM or SGLang model on its engine: what is empty is cleared (the default), what is set is sent. */
 function request(typed: VllmForm, file: string, engine: VllmEngine) {
@@ -257,6 +272,8 @@ export function VllmModelSection({
   const snapshots = useSnapshots()
   const { kind, name } = engine
   const label = engineLabel(kind)
+  // What its kind has of the form's fields, and its own flags' names.
+  const own = serverKinds[kind]
   const [typed, setForm] = useState(() => start(saved, file, kind))
   const form = allowed(typed, kind)
   const [error, setError] = useState<string | null>(null)
@@ -337,19 +354,23 @@ export function VllmModelSection({
         hint={form.devices ? 'Only these, split among its copies in order.' : `None ticked: ${r?.devices ? `GPUs ${r.devices}, proposed for this machine (the least placed)` : 'those the advisor proposes, the least placed'}.`}
       />
       <div className="grid gap-4 sm:grid-cols-3">
-        <Field label="Copies" hint="Each on its share of the GPUs; a conversation goes to the least busy and stays there while it has room." error={errors.replicas}>
-          <Input inputMode="numeric" value={form.replicas} onChange={(ev) => set('replicas', ev.target.value)} />
-        </Field>
+        {own.replicas && (
+          <Field label="Copies" hint="Each on its share of the GPUs; a conversation goes to the least busy and stays there while it has room." error={errors.replicas}>
+            <Input inputMode="numeric" value={form.replicas} onChange={(ev) => set('replicas', ev.target.value)} />
+          </Field>
+        )}
         <Field
           label="Share of each GPU"
-          hint={`${shares ? `From ${shares} here: the smallest holds one person's whole context, a larger one more people at once.` : '0.01 to 0.98.'} Empty: 0.90 (${kind === 'sglang' ? '--mem-fraction-static' : '--gpu-memory-utilization'}).`}
+          hint={`${shares ? `From ${shares} here: the smallest holds one person's whole context, a larger one more people at once.` : '0.01 to 0.98.'} Empty: 0.90 (${own.share}).`}
           error={errors.gpuMemoryUtilization}
         >
           <Input inputMode="decimal" value={form.gpuMemoryUtilization} onChange={(ev) => set('gpuMemoryUtilization', ev.target.value)} placeholder="0.90" />
         </Field>
-        <Field label="Quantisation" hint={gguf ? 'Empty: a GGUF file is quantised as it is.' : 'Empty: what its config says.'} error={errors.quantization}>
-          <Input value={form.quantization} onChange={(ev) => set('quantization', ev.target.value)} placeholder="auto" />
-        </Field>
+        {own.quantization && (
+          <Field label="Quantisation" hint={gguf ? 'Empty: a GGUF file is quantised as it is.' : 'Empty: what its config says.'} error={errors.quantization}>
+            <Input value={form.quantization} onChange={(ev) => set('quantization', ev.target.value)} placeholder="auto" />
+          </Field>
+        )}
         <Field
           label="Context per person"
           hint={`${a?.limits ? `${tokens(a.limits.context.min)} to ${tokens(a.limits.context.max)} tokens` : 'Tokens'}: what each person's conversation holds, its prompt and its answer together, however many are at once.`}
@@ -368,7 +389,7 @@ export function VllmModelSection({
         >
           <Input inputMode="numeric" value={form.maxOutput} placeholder={String(defaultMaxOutput(Number(form.context) || 32768))} onChange={(ev) => set('maxOutput', ev.target.value)} />
         </Field>
-        <Field label="People at once" hint={`Per copy, each with the whole context per person (${kind === 'sglang' ? '--max-running-requests' : '--max-num-seqs'}). More than its cache holds wait or are preempted: the advisor says how many fit.`} error={errors.parallel}>
+        <Field label="People at once" hint={`${own.replicas ? 'Per copy, each' : 'Each'} with the whole context per person (${own.parallel}${own.maxParallel < 1024 ? `, 1 to ${own.maxParallel}` : ''}). More than its cache holds wait or are preempted: the advisor says how many fit.`} error={errors.parallel}>
           <Input inputMode="numeric" value={form.parallel} onChange={(ev) => set('parallel', ev.target.value)} />
         </Field>
         <Field label="Token cache" error={errors.kvType}>
@@ -382,6 +403,7 @@ export function VllmModelSection({
             </SelectContent>
           </Select>
         </Field>
+        {own.speculative && (
         <Field label="Speculative decoding" error={errors.specDecode ?? errors.draftHead}>
           <Select value={form.specDecode || 'none'} onValueChange={(v) => set('specDecode', v === 'none' ? '' : v)}>
             <SelectTrigger>
@@ -394,7 +416,8 @@ export function VllmModelSection({
             </SelectContent>
           </Select>
         </Field>
-        {form.specDecode === 'eagle3' && (
+        )}
+        {own.speculative && form.specDecode === 'eagle3' && (
           <Field label="Draft model" hint="A snapshot in the library." error={errors.draftHead}>
             <Select value={form.draftHead || undefined} onValueChange={(v) => set('draftHead', v)}>
               <SelectTrigger>
@@ -412,6 +435,7 @@ export function VllmModelSection({
             </Select>
           </Field>
         )}
+        {own.tiers && (
         <Field
           label="Cache beyond the GPU"
           hint={kind === 'sglang' ? "SGLang's hierarchical cache, in RAM." : "vLLM's own CPU tier, or LMCache (RAM, local disk that survives a restart, the stack's shared store)."}
@@ -427,9 +451,12 @@ export function VllmModelSection({
             </SelectContent>
           </Select>
         </Field>
-        <Field label="CPU tier for its cache (GB)" hint="RAM a copy keeps conversations in; empty: none." error={errors.kvCpuGb}>
-          <Input inputMode="numeric" value={form.kvCpuGb} onChange={(ev) => set('kvCpuGb', ev.target.value)} />
-        </Field>
+        )}
+        {own.tiers && (
+          <Field label="CPU tier for its cache (GB)" hint="RAM a copy keeps conversations in; empty: none." error={errors.kvCpuGb}>
+            <Input inputMode="numeric" value={form.kvCpuGb} onChange={(ev) => set('kvCpuGb', ev.target.value)} />
+          </Field>
+        )}
         {form.kvTier === 'lmcache' && (
           <Field label="Disk tier (GB)" hint="Under the engine's /kvcache (KVCACHE_DIR), a copy; empty: none." error={errors.kvDiskGb}>
             <Input inputMode="numeric" value={form.kvDiskGb} onChange={(ev) => set('kvDiskGb', ev.target.value)} />
@@ -437,13 +464,17 @@ export function VllmModelSection({
         )}
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
-        <Label className="flex items-center gap-3 font-normal">
-          <Switch checked={form.sleep} onCheckedChange={(v) => set('sleep', v)} aria-label="May sleep" />
-          <span>
-            May sleep <Moon className="inline size-3.5" aria-hidden="true" />
-            <span className="block text-xs text-muted-foreground">Its weights to RAM while a picture or video job has its GPUs: back in seconds. Off: it unloads.</span>
-          </span>
-        </Label>
+        {own.sleep ? (
+          <Label className="flex items-center gap-3 font-normal">
+            <Switch checked={form.sleep} onCheckedChange={(v) => set('sleep', v)} aria-label="May sleep" />
+            <span>
+              May sleep <Moon className="inline size-3.5" aria-hidden="true" />
+              <span className="block text-xs text-muted-foreground">Its weights to RAM while a picture or video job has its GPUs: back in seconds. Off: it unloads.</span>
+            </span>
+          </Label>
+        ) : (
+          <p className="text-sm text-muted-foreground">{label} does not sleep: while a picture or video job needs its GPUs, it unloads.</p>
+        )}
         <FallbackField self={saved?.name ?? form.name} value={form.fallback} onChange={(v) => set('fallback', v)} error={errors.fallback} />
       </div>
       {e && (

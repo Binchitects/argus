@@ -146,7 +146,7 @@ public sealed class GatewayRoutes(AppDbContext db, ModelLibrary library, RemoteS
         // vLLM's and SGLang's models: each copy at its own port, never sent more at once than its answers at once, a pool when
         // there are several; each copy also under its own name (NAME@i, kept out of every list) for the chat to keep a conversation
         // on one; and the fallback that answers while it cannot.
-        foreach (var m in await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.Vllm || m.EngineKind == EngineKinds.Sglang).OrderBy(m => m.CreatedAt).ThenBy(m => m.Name)
+        foreach (var m in await db.LocalModels.AsNoTracking().Where(m => EngineKinds.ServerKinds.Contains(m.EngineKind)).OrderBy(m => m.CreatedAt).ThenBy(m => m.Name)
             .ToListAsync(ct))
         {
             if (vllm.For(m.Engine, m.EngineKind) is not { } backend || backend.Presets().Where(e => e.Model == m.Name).ToList() is not { Count: > 0 } entries)

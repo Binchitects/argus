@@ -16,6 +16,7 @@ import { api, errorMessage } from '@/lib/api'
 import { useDebounced } from '@/lib/use-debounced'
 import { cn } from '@/lib/utils'
 import { attentionLabel, bytes, defaultMaxOutput, params, tokens, type LibraryFile, type ModelProfile } from './model-profile'
+import type { ChatEngineKind } from './engine-api'
 
 interface Bounds {
   min: number
@@ -126,7 +127,7 @@ export interface SavedModel {
 
 /** A model's settings on the kind of engine it left: its people at once there, and what only that kind has. */
 export type LeftSettings = Omit<SavedModel, 'name' | 'left' | 'price' | 'window' | 'output'> & {
-  engineKind: 'llamacpp' | 'vllm' | 'sglang'
+  engineKind: ChatEngineKind
   replicas?: number
   gpuMemoryUtilization?: number | null
   quantization?: string | null

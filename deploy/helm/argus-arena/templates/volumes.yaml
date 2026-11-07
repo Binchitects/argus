@@ -5,6 +5,9 @@
 {{- if .Values.workspaces.enabled }}
 {{- $claims = append $claims (list "arena-workspaces" $p.workspaces.size) }}
 {{- end }}
+{{- if .Values.strata.enabled }}
+{{- $claims = append $claims (list "arena-strata-data" $p.strataData.size) }}
+{{- end }}
 {{- if not $p.models.existingClaim }}
 {{- $claims = prepend $claims (list "arena-models" $p.models.size) }}
 {{- end }}

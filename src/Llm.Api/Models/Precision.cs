@@ -33,7 +33,7 @@ public sealed record PrecisionRun(string Weights, string Runs, string Kernel, bo
 
 /// <summary>
 /// What the engines in this stack's images do with FP4 and FP8 checkpoints on each GPU generation, read from their sources
-/// (vLLM 0.31.0, SGLang 0.5.21, TensorRT-LLM 1.4, LMDeploy 0.18):
+/// (vLLM 0.31.0, SGLang 0.5.21; LMDeploy 0.18 by its documentation):
 /// <list type="bullet">
 /// <item>NVFP4 (ModelOpt's or compressed-tensors' nvfp4-pack-quantized): native W4A4 only on Blackwell (sm_100, sm_120: FP4
 /// tensor cores). On Hopper and Ampere vLLM and SGLang keep the 4-bit weights in memory and widen them in the GEMM: FP4
@@ -274,7 +274,7 @@ public static class Precision
         {
             EngineKinds.Sglang => 80,
             EngineKinds.Vllm => p.Format == Nvfp4 ? 75 : 80,
-            // TensorRT-LLM and LMDeploy run MXFP4 (gpt-oss) from sm_80; NVFP4 only on Blackwell.
+            // LMDeploy runs MXFP4 (gpt-oss) from sm_80; NVFP4 only on Blackwell.
             _ => p.Format == Mxfp4 ? 80 : 100,
         };
         if (engineKind == EngineKinds.Sglang && p.Format == Mxfp4 && p.Method == "compressed-tensors")

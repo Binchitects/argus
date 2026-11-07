@@ -35,7 +35,7 @@ export interface ModelMove {
 export type EngineModel = SavedModel & {
   /** Its move to another engine, underway or failed; null: none. */
   move?: ModelMove | null
-  engineKind?: 'llamacpp' | 'vllm' | 'sglang'
+  engineKind?: ChatEngineKind
   engine?: string | null
   replicas?: number
   gpuMemoryUtilization?: number | null
@@ -72,11 +72,42 @@ export interface EngineInstance {
   on?: boolean
 }
 
-/** The kinds that run one server a model from a Hugging Face snapshot. */
-export const serverPerModel = (kind: string | undefined) => kind === 'vllm' || kind === 'sglang'
+/** The kinds of engine a chat model runs on (Llm.Core EngineKinds). */
+export type ChatEngineKind = 'llamacpp' | 'vllm' | 'sglang' | 'lmdeploy' | 'strata'
+
+/** The kinds that run one server a model, run by the supervisor. */
+export type ServerKind = Exclude<ChatEngineKind, 'llamacpp'>
+
+/**
+ * What the form needs of each kind that runs one server a model (EngineKinds' capabilities): the files it runs, whether the
+ * app sets its speculative decoding, tiers beyond the GPU and sleep, its copies, and its own flags' names for the hints.
+ */
+export const serverKinds: Record<ServerKind, {
+  label: string
+  snapshot: boolean
+  gguf: boolean
+  speculative: boolean
+  tiers: boolean
+  sleep: boolean
+  replicas: boolean
+  /** A quantisation the app may set on top of its checkpoint's. */
+  quantization: boolean
+  /** Its flag for the share of each GPU, for people at once, and the most people at once. */
+  share: string
+  parallel: string
+  maxParallel: number
+}> = {
+  vllm: { label: 'vLLM', snapshot: true, gguf: true, speculative: true, tiers: true, sleep: true, replicas: true, quantization: true, share: '--gpu-memory-utilization', parallel: '--max-num-seqs', maxParallel: 1024 },
+  sglang: { label: 'SGLang', snapshot: true, gguf: true, speculative: true, tiers: true, sleep: true, replicas: true, quantization: true, share: '--mem-fraction-static', parallel: '--max-running-requests', maxParallel: 1024 },
+  lmdeploy: { label: 'LMDeploy', snapshot: true, gguf: false, speculative: false, tiers: false, sleep: false, replicas: true, quantization: false, share: '--cache-max-entry-count, of what is free once its weights are in', parallel: '--max-batch-size', maxParallel: 1024 },
+  strata: { label: 'Strata', snapshot: false, gguf: true, speculative: false, tiers: false, sleep: false, replicas: false, quantization: false, share: 'what of the GPUs it fills; the experts beyond it stay in RAM', parallel: '--parallel', maxParallel: 8 },
+}
+
+/** The kinds that run one server a model. */
+export const serverPerModel = (kind: string | undefined): kind is ServerKind => !!kind && kind in serverKinds
 
 /** A kind's name for people. */
-export const engineLabel = (kind: string | undefined) => (kind === 'sglang' ? 'SGLang' : kind === 'vllm' ? 'vLLM' : 'llama.cpp')
+export const engineLabel = (kind: string | undefined) => (serverPerModel(kind) ? serverKinds[kind].label : 'llama.cpp')
 
 /** The snapshots in the library (vLLM's and SGLang's models). */
 export function useSnapshots() {

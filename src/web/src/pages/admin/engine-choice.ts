@@ -1,13 +1,13 @@
-import { engineLabel, serverPerModel, type EngineInstance, type Snapshot } from './engine-api'
+import { engineLabel, serverPerModel, type ChatEngineKind, type EngineInstance, type Snapshot } from './engine-api'
 import type { LibraryFile, ModelProfile } from './model-profile'
 
-/** The kinds of engine a chat model runs on, in the Engine field's order. */
-export type ChatEngineKind = 'llamacpp' | 'vllm' | 'sglang'
+export type { ChatEngineKind } from './engine-api'
 
-const kinds: ChatEngineKind[] = ['llamacpp', 'vllm', 'sglang']
+/** The kinds of engine a chat model runs on, in the Engine field's order. */
+const kinds: ChatEngineKind[] = ['llamacpp', 'vllm', 'sglang', 'lmdeploy', 'strata']
 
 /** The feature (deploy/features) that runs this stack's engine of each kind. */
-const featureOf: Record<ChatEngineKind, string> = { llamacpp: 'chat-models', vllm: 'vllm', sglang: 'sglang' }
+const featureOf: Record<ChatEngineKind, string> = { llamacpp: 'chat-models', vllm: 'vllm', sglang: 'sglang', lmdeploy: 'lmdeploy', strata: 'strata' }
 
 /** One choice of the Engine field: an engine instance, or a kind this stack has none of, and why it cannot be chosen. */
 export interface EngineChoice {
@@ -26,7 +26,7 @@ export interface EngineChoice {
 
 /** The engine a saved chat model runs on: its kind, and its instance by name. */
 export function homeOf(m: { engineKind?: string; engine?: string | null }, instances: EngineInstance[]): { name: string; kind: ChatEngineKind } {
-  const kind: ChatEngineKind = m.engineKind === 'vllm' || m.engineKind === 'sglang' ? m.engineKind : 'llamacpp'
+  const kind: ChatEngineKind = serverPerModel(m.engineKind) ? m.engineKind : 'llamacpp'
   if (kind === 'llamacpp') return { name: instances.find((i) => i.kind === kind)?.name ?? kind, kind }
   return { name: m.engine || (instances.find((i) => i.kind === kind)?.name ?? kind), kind }
 }
@@ -70,7 +70,7 @@ export function engineChoices(instances: EngineInstance[], { llama, current, mov
         down,
         // As a feature that is off says it elsewhere: from the checkout, or with the offline installer on a host with no network.
         detail: off
-          ? `${name} is off here: the installer turns it on with ./arenactl repair --with ${featureOf[kind]} from the checkout, or sh argus-arena-VERSION-offline.run repair --with ${featureOf[kind]} with the offline installer${kind === 'vllm' ? " (its image, arena-vllm, is vLLM's own with its GGUF plugin: the checkout builds it on VLLM_IMAGE, the offline installer carries it)" : ''}.`
+          ? `${name} is off here: the installer turns it on with ./arenactl repair --with ${featureOf[kind]} from the checkout, or sh argus-arena-VERSION-offline.run repair --with ${featureOf[kind]} with the offline installer${kind === 'vllm' ? " (its image, arena-vllm, is vLLM's own with its GGUF plugin: the checkout builds it on VLLM_IMAGE, the offline installer carries it)" : kind === 'lmdeploy' ? ' (its image, arena-lmdeploy, is built from PyPI by lmdeploy-build.yml first)' : ''}.`
           : down
             ? `${i.problem} ${moving ? 'A model moves there once it runs.' : 'A model added there waits for it.'}`
             : null,

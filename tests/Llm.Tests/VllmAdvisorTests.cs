@@ -293,4 +293,47 @@ public sealed class VllmAdvisorTests
         Assert.NotNull(none.FirstError);
         Assert.Null(none.Recommended?.ShareMin);
     }
+
+    /// <summary>Qwen3.8-Flash-Next's UD-IQ4_XS GGUF as its header says it: 48 layers, 12 of full attention, 94 GB in 3 parts.</summary>
+    private static readonly VllmProfile Flash = new("qwen4exp", "qwen4exp", 48, 12, 0, 36, 0, 32, 2, 256, null, 262144, 94L << 30, 12 * 2 * 256 * 2, 1L << 26, 256, 0, false, "IQ4_XS",
+        false, 3);
+
+    [Fact]
+    public void Each_kind_takes_its_own_form_of_file_and_strata_its_own_families()
+    {
+        var hw = FakeHardware.Eight80;
+        LocalModel M(string kind, string file) => new() { Name = "m", File = file, EngineKind = kind, KvType = "fp8", Context = 32768, Parallel = 4, Sleep = false };
+        // LMDeploy runs snapshots, not GGUF files; Strata GGUF files, not snapshots, and only of its families.
+        Assert.Contains(VllmAdvisor.Advise(M(EngineKinds.Lmdeploy, "q/flash.gguf"), Flash, hw).Problems, p => p.Field == "file" && p.Error && p.Message.Contains("Hugging Face snapshots", StringComparison.Ordinal));
+        Assert.Contains(VllmAdvisor.Advise(M(EngineKinds.Strata, "hf/x/y@r"), Load("Qwen3.8-Flash-Next-FP8"), hw).Problems, p => p.Field == "file" && p.Error && p.Message.Contains("runs GGUF files", StringComparison.Ordinal));
+        Assert.Contains(VllmAdvisor.Advise(M(EngineKinds.Strata, "s/smol.gguf"), Smol, hw).Problems, p => p.Field == "file" && p.Error && p.Message.Contains("qwen4exp", StringComparison.Ordinal));
+        Assert.DoesNotContain(VllmAdvisor.Advise(M(EngineKinds.Strata, "q/flash.gguf"), Flash, hw).Problems, p => p.Field == "file");
+        Assert.DoesNotContain(VllmAdvisor.Advise(M(EngineKinds.Lmdeploy, "hf/x/y@r"), Load("Qwen3.8-Flash-Next-FP8"), hw).Problems, p => p.Field == "file");
+    }
+
+    [Fact]
+    public void Strata_keeps_what_its_gpu_does_not_hold_in_ram_and_is_refused_only_when_ram_cannot_either()
+    {
+        LocalModel M() => new() { Name = "flash", File = "q/flash.gguf", EngineKind = EngineKinds.Strata, KvType = "fp8", Context = 32768, Parallel = 2, Sleep = false };
+        // 94 GB on one 24 GB card with 61 GB of RAM: the experts that do not fit would need more RAM than there is.
+        var small = VllmAdvisor.Advise(M(), Flash, FakeHardware.One24);
+        Assert.Contains(small.Problems, p => p.Field == "memory" && p.Error && p.Message.Contains("RAM", StringComparison.Ordinal));
+        // With 512 GB of RAM it runs, its experts in RAM, said as a warning; the estimate counts them there.
+        var big = FakeHardware.One24 with { RamTotal = 512L << 30 };
+        var advice = VllmAdvisor.Advise(M(), Flash, big);
+        Assert.DoesNotContain(advice.Problems, p => p.Error);
+        var said = Assert.Single(advice.Problems, p => p.Field == "memory");
+        Assert.Contains("experts in RAM", said.Message, StringComparison.Ordinal);
+        Assert.True(advice.Estimate!.RamWeights > 70L << 30);
+        Assert.True(advice.Estimate.GpuWeights < 24L << 30);
+        // A copy over several GPUs is a layer split for Strata: no copies of one model.
+        var many = M();
+        (many.Replicas, many.SpecDecode, many.KvCpuGb, many.Parallel) = (2, "mtp", 8, 12);
+        var problems = ModelAdvisor.KindProblems(many);
+        Assert.Contains(problems, p => p.Field == "replicas" && p.Error);
+        Assert.Contains(problems, p => p.Field == "specDecode" && p.Error);
+        Assert.Contains(problems, p => p.Field == "kvCpuGb" && p.Error);
+        Assert.Contains(problems, p => p.Field == "parallel" && p.Error && p.Message.Contains("1 to 8", StringComparison.Ordinal));
+        Assert.DoesNotContain(ModelAdvisor.KindProblems(M()), p => p.Error);
+    }
 }

@@ -44,6 +44,14 @@ data:
 {{ .Files.Get "files/fake-sglang-init.py" | indent 4 }}
   fake-sglang-launch.py: |-
 {{ .Files.Get "files/fake-sglang-launch.py" | indent 4 }}
+  lmdeploy-serve.py: |-
+{{ .Files.Get "files/lmdeploy-serve.py" | indent 4 }}
+  fake-lmdeploy-entrypoint.py: |-
+{{ .Files.Get "files/fake-lmdeploy-entrypoint.py" | indent 4 }}
+  strata-serve.py: |-
+{{ .Files.Get "files/strata-serve.py" | indent 4 }}
+  fake-strata: |-
+{{ .Files.Get "files/fake-strata" | indent 4 }}
 ---
 apiVersion: v1
 kind: ConfigMap

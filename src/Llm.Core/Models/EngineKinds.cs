@@ -15,19 +15,23 @@ namespace Llm.Core.Models;
 /// <param name="KvTiers">Tiers of the token cache beyond the GPU: "cpu", "lmcache".</param>
 /// <param name="Backends">The GPU backends it runs on: cuda, rocm, vulkan, sycl, metal, cpu.</param>
 /// <param name="Formats">The model formats it loads: gguf, safetensors.</param>
+/// <param name="Speculative">Speculative decoding the app sets for it: the model's own MTP layers, or EAGLE-3 with a draft model.</param>
 public sealed record EngineCapabilities(string Kind, string Label, bool Managed, bool TensorParallel, bool Sleep, bool PrefixCache, bool SlotPinning,
-    bool SpillToRam, bool Replicas, IReadOnlyList<string> KvTiers, IReadOnlyList<string> Backends, IReadOnlyList<string> Formats);
+    bool SpillToRam, bool Replicas, IReadOnlyList<string> KvTiers, IReadOnlyList<string> Backends, IReadOnlyList<string> Formats, bool Speculative = false);
 
 /// <summary>
 /// The kinds of engine. A new one is a new entry here, a backend in Llm.Api/Models (IEngineBackend: list, load, unload,
-/// sleep, capacity, health), and its advisor; nothing else asks which kind a model is beyond these. vLLM and SGLang are
-/// one server a model, run by the same supervisor (<see cref="ServerPerModel"/>): only their arguments and metrics differ.
+/// sleep, capacity, health), and its advisor; nothing else asks which kind a model is beyond these. vLLM, SGLang, LMDeploy
+/// and Strata are one server a model, run by the same supervisor (<see cref="ServerPerModel"/>): only their
+/// arguments, launchers and metrics differ.
 /// </summary>
 public static class EngineKinds
 {
     public const string LlamaCpp = "llamacpp";
     public const string Vllm = "vllm";
     public const string Sglang = "sglang";
+    public const string Lmdeploy = "lmdeploy";
+    public const string Strata = "strata";
     /// <summary>An OpenAI-compatible server the app does not manage (another vLLM, SGLang, TGI, Ollama, a cloud): Admin → Models → Other GPU servers.</summary>
     public const string External = "external";
 
@@ -35,16 +39,28 @@ public static class EngineKinds
         PrefixCache: false, SlotPinning: true, SpillToRam: true, Replicas: false, KvTiers: [], Backends: ["cuda", "rocm", "vulkan", "sycl", "metal", "cpu"], Formats: ["gguf"]);
 
     public static readonly EngineCapabilities VllmCapabilities = new(Vllm, "vLLM", Managed: true, TensorParallel: true, Sleep: true,
-        PrefixCache: true, SlotPinning: false, SpillToRam: false, Replicas: true, KvTiers: ["cpu"], Backends: ["cuda", "rocm"], Formats: ["safetensors", "gguf"]);
+        PrefixCache: true, SlotPinning: false, SpillToRam: false, Replicas: true, KvTiers: ["cpu"], Backends: ["cuda", "rocm"], Formats: ["safetensors", "gguf"], Speculative: true);
 
     /// <summary>SGLang: its radix cache shares every prefix, its memory saver sleeps a model, its hierarchical cache keeps tokens in RAM.</summary>
     public static readonly EngineCapabilities SglangCapabilities = new(Sglang, "SGLang", Managed: true, TensorParallel: true, Sleep: true,
-        PrefixCache: true, SlotPinning: false, SpillToRam: false, Replicas: true, KvTiers: ["cpu"], Backends: ["cuda", "rocm"], Formats: ["safetensors", "gguf"]);
+        PrefixCache: true, SlotPinning: false, SpillToRam: false, Replicas: true, KvTiers: ["cpu"], Backends: ["cuda", "rocm"], Formats: ["safetensors", "gguf"], Speculative: true);
+
+    /// <summary>LMDeploy (TurboMind, else its PyTorch engine): a snapshot on NVIDIA GPUs, its prefix cache on, its cache int8 or int4.</summary>
+    public static readonly EngineCapabilities LmdeployCapabilities = new(Lmdeploy, "LMDeploy", Managed: true, TensorParallel: true, Sleep: false,
+        PrefixCache: true, SlotPinning: false, SpillToRam: false, Replicas: true, KvTiers: [], Backends: ["cuda"], Formats: ["safetensors"]);
+
+    /// <summary>
+    /// Strata: its own engine on llama.cpp's for a few large MoE families (Qwen3.8-Flash-Next, Qwen3.6-35B-A3B) as GGUF files,
+    /// the experts that do not fit the GPUs read from RAM, its GPUs split by layers (not tensor parallel), one copy.
+    /// </summary>
+    public static readonly EngineCapabilities StrataCapabilities = new(Strata, "Strata", Managed: true, TensorParallel: false, Sleep: false,
+        PrefixCache: true, SlotPinning: false, SpillToRam: true, Replicas: false, KvTiers: [], Backends: ["cuda"], Formats: ["gguf"]);
 
     public static readonly EngineCapabilities ExternalCapabilities = new(External, "Another server (OpenAI-compatible)", Managed: false, TensorParallel: false,
         Sleep: false, PrefixCache: false, SlotPinning: false, SpillToRam: false, Replicas: false, KvTiers: [], Backends: [], Formats: []);
 
-    public static IReadOnlyList<EngineCapabilities> All { get; } = [LlamaCppCapabilities, VllmCapabilities, SglangCapabilities, ExternalCapabilities];
+    public static IReadOnlyList<EngineCapabilities> All { get; } =
+        [LlamaCppCapabilities, VllmCapabilities, SglangCapabilities, LmdeployCapabilities, StrataCapabilities, ExternalCapabilities];
 
     /// <summary>A kind's capabilities; null for a kind there is not.</summary>
     public static EngineCapabilities? Of(string? kind) => All.FirstOrDefault(k => k.Kind == kind);
@@ -53,8 +69,15 @@ public static class EngineKinds
     public static bool Managed(string? kind) => Of(kind) is { Managed: true };
 
     /// <summary>
-    /// vLLM and SGLang: one server a model (and a copy), from a Hugging Face snapshot or a GGUF file, on its own GPUs, run by the supervisor
-    /// (services/vllm/supervisor.sh) as the app's desired state says, with its answers at once in each copy and no slots.
+    /// vLLM, SGLang, LMDeploy and Strata: one server a model (and a copy), from a Hugging Face snapshot or a GGUF
+    /// file as the kind takes, on its own GPUs, run by the supervisor (services/vllm/supervisor.sh) as the app's desired state
+    /// says, with its answers at once in each copy and no slots.
     /// </summary>
-    public static bool ServerPerModel(string? kind) => kind is Vllm or Sglang;
+    public static bool ServerPerModel(string? kind) => kind is Vllm or Sglang or Lmdeploy or Strata;
+
+    /// <summary>The kinds of <see cref="ServerPerModel"/>, for a query of the models on them.</summary>
+    public static readonly string[] ServerKinds = [Vllm, Sglang, Lmdeploy, Strata];
+
+    /// <summary>The kinds that schedule by a request's priority (vLLM's and SGLang's own field): the chat goes ahead of API keys there.</summary>
+    public static bool Priority(string? kind) => kind is Vllm or Sglang;
 }

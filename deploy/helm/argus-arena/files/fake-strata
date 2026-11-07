@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""
+`strata` for a stack without Strata: the commands services/strata/serve.py runs, over the fake server (which answers with
+vLLM's metric names, as Strata does). Its state is a folder (FAKE_STRATA_STATE, /tmp/fake-strata): a preset a file, a
+server a pid file by its port.
+
+    strata launch --no-tui --yes --model-path PATH --port N --save-preset NAME ... [--preset NAME]
+    strata launch --status --output json          {"running": [{"name", "state": "ready", "port"}]}
+    strata launch --stop --preset NAME
+    strata launch --list-presets --output json    {"presets": [{"name"}]}
+
+launch starts the fake server in the background and returns once it answers /health, as Strata's does; a model path
+that is not there fails, as Strata's does.
+"""
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+import urllib.request
+
+STATE = os.environ.get("FAKE_STRATA_STATE", "/tmp/fake-strata")
+FAKE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_vllm.py")
+
+
+def value(argv, flag):
+    return argv[argv.index(flag) + 1] if flag in argv[:-1] else None
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def servers():
+    out = []
+    for f in sorted(os.listdir(STATE)) if os.path.isdir(STATE) else []:
+        if f.endswith(".server"):
+            with open(os.path.join(STATE, f)) as h:
+                s = json.load(h)
+            if alive(s["pid"]):
+                out.append(s)
+    return out
+
+
+def main(argv):
+    os.makedirs(STATE, exist_ok=True)
+    if argv[:1] != ["launch"]:
+        print("fake strata: only `strata launch` is here", file=sys.stderr)
+        return 2
+    a = argv[1:]
+    if "--list-presets" in a:
+        print(json.dumps({"schema_version": 1, "ok": True, "presets": [{"name": f[:-7]} for f in sorted(os.listdir(STATE)) if f.endswith(".preset")]}))
+        return 0
+    if "--status" in a:
+        print(json.dumps({"schema_version": 1, "ok": True, "running": [{"name": s["name"], "state": "ready", "port": s["port"]} for s in servers()]}))
+        return 0
+    if "--stop" in a:
+        name = value(a, "--preset")
+        for s in servers():
+            if name in (None, s["name"]):
+                os.kill(s["pid"], signal.SIGTERM)
+                os.remove(os.path.join(STATE, f"{s['port']}.server"))
+        return 0
+    path, port, name = value(a, "--model-path"), value(a, "--port"), value(a, "--save-preset") or value(a, "--preset")
+    if not path or not os.path.exists(path):
+        print(f"strata: {path} is not there", file=sys.stderr)
+        return 2
+    if not os.environ.get(value(a, "--api-key-env") or "-"):
+        print(f"strata: The environment variable {value(a, '--api-key-env')} is empty or not set.", file=sys.stderr)
+        return 2
+    open(os.path.join(STATE, f"{name}.preset"), "w").close()
+    log = open(os.path.join(STATE, f"{port}.log"), "a")
+    p = subprocess.Popen([sys.executable, FAKE, "serve", path, "--port", port, "--served-model-name", name,
+                          "--max-model-len", value(a, "--context") or "32768", "--max-num-seqs", value(a, "--parallel") or "1"],
+                         stdout=log, stderr=log, start_new_session=True,
+                         # The key as Strata takes it (--api-key-env): the fake server asks for it as Strata's does.
+                         env=dict(os.environ, VLLM_API_KEY=os.environ[value(a, "--api-key-env")]))
+    with open(os.path.join(STATE, f"{port}.server"), "w") as h:
+        json.dump({"name": name, "pid": p.pid, "port": int(port)}, h)
+    for _ in range(600):
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2) as r:
+                if r.status == 200:
+                    print(f"Serving on port {port}.")
+                    return 0
+        except OSError:
+            pass
+        if p.poll() is not None:
+            return p.returncode or 1
+        time.sleep(0.1)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

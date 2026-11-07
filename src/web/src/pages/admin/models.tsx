@@ -18,7 +18,7 @@ import { money } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { AccessPicker, type AccessRule } from './access-picker'
 import { type SavedMediaModel } from './media-model-form'
-import { serverPerModel, type EngineInstance, type ModelMove } from './engine-api'
+import { serverPerModel, type ChatEngineKind, type EngineInstance, type ModelMove } from './engine-api'
 import { engineName } from './engine-choice'
 import { EngineProblems, MoveState } from './engine-fields'
 import { engineSlot } from './engine-slot'
@@ -43,8 +43,8 @@ interface ModelRow extends SavedModel {
   /** unloading: told to unload, and not stopped yet; failed: its last load exited with an error (the engine's log says why);
    * missing: the engine does not list it (yet); waiting: a media model whose files are being fetched; off: its server does not run. */
   status: 'loaded' | 'loading' | 'unloading' | 'unloaded' | 'failed' | 'missing' | 'waiting' | 'off' | 'sleeping' | null
-  /** Its engine's kind: llama.cpp's, vLLM's or SGLang's. */
-  engineKind?: 'llamacpp' | 'vllm' | 'sglang'
+  /** Its engine's kind: llama.cpp's, vLLM's, SGLang's, LMDeploy's or Strata's. */
+  engineKind?: ChatEngineKind
   /** Its move to another engine, underway or failed. */
   move?: ModelMove | null
   /** Loading or unloading: why ("loaded by ada", "for a chat or an API request", "making room for X", "kept loaded"), and since when. */

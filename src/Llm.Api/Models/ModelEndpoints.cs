@@ -267,7 +267,7 @@ public static class ModelEndpoints
     /// </summary>
     private static async Task<IResult> SnapshotsAsync(ModelLibrary library, AppDbContext db, CancellationToken ct)
     {
-        var used = await db.LocalModels.AsNoTracking().Where(m => m.EngineKind == EngineKinds.Vllm || m.EngineKind == EngineKinds.Sglang).Select(m => new { m.Name, m.File, m.DraftHead }).ToListAsync(ct);
+        var used = await db.LocalModels.AsNoTracking().Where(m => EngineKinds.ServerKinds.Contains(m.EngineKind)).Select(m => new { m.Name, m.File, m.DraftHead }).ToListAsync(ct);
         return Results.Ok(library.Snapshots().Select(s => new
         {
             s.Path, s.Repo, s.Revision, s.Size, s.Complete, s.Why, s.Architectures,
@@ -1013,6 +1013,21 @@ public static class ModelEndpoints
             // LMCache is vLLM's alone: SGLang keeps its own tier in RAM.
             (m.KvTier, m.KvDiskGb) = (null, null);
         }
+        if (EngineKinds.Of(to) is { } caps && EngineKinds.ServerPerModel(to))
+        {
+            // What its new kind has none of: LMDeploy and Strata set no speculative decoding, tiers or sleep, and read
+            // their checkpoint's quantisation; Strata runs one copy.
+            if (!caps.Speculative)
+            {
+                (m.SpecDecode, m.DraftHead, m.DraftMax, m.Quantization) = (null, null, 3, null);
+            }
+            if (caps.KvTiers.Count == 0)
+            {
+                (m.KvCpuGb, m.KvTier, m.KvDiskGb) = (null, null, null);
+            }
+            m.Sleep &= caps.Sleep;
+            m.Replicas = caps.Replicas ? m.Replicas : 1;
+        }
         if (back is not null && back.EngineKind == to)
         {
             if (to == EngineKinds.LlamaCpp)
@@ -1066,6 +1081,11 @@ public static class ModelEndpoints
         if (body.KvType is null && !ModelAdvisor.VllmCacheTypes.Contains(m.KvType))
         {
             m.KvType = "fp8";
+        }
+        // A kind the app cannot put to sleep unloads instead.
+        if (body.Sleep is null && EngineKinds.Of(m.EngineKind) is { Sleep: false })
+        {
+            m.Sleep = false;
         }
     }
 

@@ -382,4 +382,4 @@ class SglangSupervisorTests(SupervisorBase):
     def test_an_unknown_server_is_refused_at_start(self):
         self.run_supervisor(ENGINE_SERVER="tgi")
         self.assertEqual(2, self.proc.wait(timeout=10))
-        self.assertIn("ENGINE_SERVER is vllm or sglang", self.proc.stdout.read())
+        self.assertIn("ENGINE_SERVER is vllm, sglang, lmdeploy or strata", self.proc.stdout.read())

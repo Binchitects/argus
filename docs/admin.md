@@ -579,6 +579,28 @@ full the models kept loaded would make it.
   requests go ahead of API keys'; a request without a priority of its own
   (SGLang's warm-up) counts as an API key's (`--default-priority-value 0`:
   without it SGLang 0.5.21's radix cache overflows on it and the server dies).
+- **LMDeploy models** (`engineKind: lmdeploy`, the `lmdeploy` feature): a
+  Hugging Face snapshot on NVIDIA GPUs, the same form (copies, GPUs, share,
+  context, people at once, cache type, fallback). The app writes LMDeploy's
+  own flags: people at once is its `--max-batch-size`, the context its
+  `--session-len`, the share its `--cache-max-entry-count` (the share of what
+  is free on each GPU once the weights are in, which LMDeploy gives its cache),
+  fp8 its int8 cache (`--quant-policy 8`, the same byte a value), and its prefix
+  cache is on. It has no speculative decoding, tiers beyond the GPU or sleep
+  the app sets, and reads the quantisation its checkpoint has: those are
+  refused, and a move to it drops them. Its load is read from its
+  `lmdeploy:*` metrics.
+- **Strata models** (`engineKind: strata`, the `strata` feature): a GGUF file
+  of the library of one of Strata's families, Qwen3.8-Flash-Next (`qwen4exp`)
+  or Qwen3.6-35B-A3B (`qwen35moe`); a snapshot, or another architecture, is
+  refused. Its GPUs are split by layers (one copy, no copies of it), 1 to 8
+  people at once (its batch), its cache int8 for fp8. When the weights are more
+  than its GPUs hold at its share, the advisor counts what stays on them and
+  the rest of the experts in RAM, says so, and refuses only when RAM cannot
+  hold them either. It has no speculative decoding the app sets (it starts
+  without drafting: Strata's draft layers are downloads of its own; see
+  [deployment.md](deployment.md#engines-and-gpus)), no tiers and no sleep. Its load is read from its metrics, which are
+  vLLM's names.
 - **GGUF files on vLLM and SGLang.** A vLLM or SGLang model's file may be a
   GGUF file of the library instead of a snapshot: the same file llama.cpp runs,
   no snapshot needed. vLLM reads it through its GGUF plugin (vllm-gguf-plugin

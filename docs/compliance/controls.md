@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-The 38 controls Arena provides, from [controls.yaml](controls.yaml). How they are kept: [README](README.md#controls-and-how-they-are-kept). Each framework's clauses and the controls that serve them: [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md), [SOC 2, Trust Services Criteria](frameworks/soc2.md), [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md), [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md), [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md), [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md), [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md), [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md), [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md), [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md), [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md), [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md), [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md), [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md).
+The 39 controls Arena provides, from [controls.yaml](controls.yaml). How they are kept: [README](README.md#controls-and-how-they-are-kept). Each framework's clauses and the controls that serve them: [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md), [SOC 2, Trust Services Criteria](frameworks/soc2.md), [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md), [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md), [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md), [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md), [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md), [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md), [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md), [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md), [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md), [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md), [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md), [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md).
 
 ## People and access (IAM)
 
@@ -212,6 +212,30 @@ An access review lists every privileged role given to a person, a group or every
 **Watched by** `app:access-review` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Name the reviewers (the Compliance officer role), finish each review by its due date, and review the directory's and SCIM's groups at their source as the review says.
+
+### IAM-08: The engines answer only with the engine key, which no command line shows
+
+Each engine the app runs (llama.cpp, vLLM, SGLang, LMDeploy, Strata) answers its OpenAI-compatible API on the stack's network only with the engine key (ENGINE_KEY), which the app and the gateway hold. The key reaches each engine's server by its environment and is handed over inside the launcher's process (or named to Strata by --api-key-env), never on a command line that anyone in the container can read; an entry of the desired state that puts one there is refused.
+
+**Serves**
+
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.5.17 Authentication information; A.8.5 Secure authentication
+- [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC6.1 Logical access security software, infrastructure and architectures
+- [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md): 8.3 Strong authentication is established and managed
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): IAM Identity and access management
+- [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md): PR.AA-03 Users, services, and hardware are authenticated
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): IA-5 Authenticator Management; AC-3 Access Enforcement
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.05.07 Password Management
+
+**Documented in** [deployment.md#engines-and-gpus](../deployment.md#engines-and-gpus)
+
+**Proved by**
+
+- `Llm.Tests/VllmBackendTests.The_real_supervisor_runs_the_fake_vllm_as_the_app_drives_it_in_a_container`
+- `deploy/test_engine_launchers.py::test_the_fake_lmdeploy_serves_with_the_key_through_the_real_launcher`
+- `deploy/test_engine_launchers.py::test_the_fake_strata_serves_through_the_real_launcher_and_a_term_stops_it`
+
+**The company's part** Keep ENGINE_KEY in .env (or the chart's secret) only, and rotate it with the installer.
 
 ## Records (LOG)
 

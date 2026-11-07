@@ -226,9 +226,11 @@ public sealed class HardwareProbe(IHttpClientFactory http, IOptions<StackOptions
     {
         try
         {
-            // The file named, else the one SGLang's supervisor writes (a stack running SGLang without vLLM).
-            var file = File.Exists(o.HardwareFile) ? o.HardwareFile : Path.Combine(o.VllmStatusDir, "sglang", "hardware.json");
-            return File.Exists(file) ? FromFile(File.ReadAllText(file), o) : null;
+            // The file named, else the one another engine's supervisor writes (a stack running SGLang, LMDeploy or Strata without vLLM).
+            var file = File.Exists(o.HardwareFile)
+                ? o.HardwareFile
+                : o.VllmEngines.Select(e => Path.Combine(e.StatusDir is { Length: > 0 } d ? d : Path.Combine(o.VllmStatusDir, e.Name), "hardware.json")).FirstOrDefault(File.Exists);
+            return file is not null ? FromFile(File.ReadAllText(file), o) : null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

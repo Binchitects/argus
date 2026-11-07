@@ -32,6 +32,13 @@ A GGUF file (MODEL or --model-path ending in .gguf) takes the flags vLLM and SGL
 --tokenizer-path, the folder of its config and tokenizer; --quantization gguf; --load-format gguf), and one that is not
 there fails its load, as theirs does.
 
+As LMDeploy (--lmdeploy, which the fake lmdeploy package passes: see lmdeploy-module): --model-name, --server-name,
+--server-port, --session-len, --max-batch-size, --tp and --api-keys (handed over inside its launcher's process); its
+metrics' names (lmdeploy:num_requests_running, num_requests_waiting, gpu_cache_usage_perc, prefix_cache_hit_rate,
+prompt_tokens_total).
+
+As Strata, it is vLLM itself: Strata writes vLLM's metric names (its fake `strata` command, beside this, starts it).
+
 --fail: exits with an error after the load delay, as vLLM does when the model does not fit.
 --crash-after: exits with code 9 that many seconds after it is ready, as a crashed engine.
 SIGTERM: stops taking requests, lets the running ones end (up to --drain seconds), then exits 0.
@@ -62,6 +69,14 @@ def parse(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--enable-sleep-mode", action="store_true")
     p.add_argument("--tensor-parallel-size", "--tp-size", type=int, default=1)
     p.add_argument("--sglang", action="store_true")
+    p.add_argument("--lmdeploy", action="store_true")
+    p.add_argument("--model-name", default=None)
+    p.add_argument("--server-name", default=None)
+    p.add_argument("--server-port", type=int, default=None)
+    p.add_argument("--session-len", type=int, default=None)
+    p.add_argument("--max-batch-size", type=int, default=None)
+    p.add_argument("--tp", type=int, default=None)
+    p.add_argument("--api-keys", nargs="+", default=None)
     p.add_argument("--model-path", default=None)
     p.add_argument("--context-length", type=int, default=None)
     p.add_argument("--max-running-requests", type=int, default=None)
@@ -82,6 +97,14 @@ def parse(argv: list[str]) -> argparse.Namespace:
         args.max_model_len = args.context_length or args.max_model_len
         args.max_num_seqs = args.max_running_requests or args.max_num_seqs
         args.enable_sleep_mode = args.enable_memory_saver
+    if args.lmdeploy:
+        args.served_model_name = [args.model_name] if args.model_name else args.served_model_name
+        args.host = args.server_name or args.host
+        args.port = args.server_port or args.port
+        args.max_model_len = args.session_len or args.max_model_len
+        args.max_num_seqs = args.max_batch_size or args.max_num_seqs
+        args.tensor_parallel_size = args.tp or args.tensor_parallel_size
+        args.api_key = (args.api_keys or [None])[0]
     return args
 
 
@@ -106,7 +129,7 @@ class State:
         self.sleeping = False
         self.draining = False
         # SGLang's launcher hands it the key as --api-key, inside its process (never on the command line ps shows).
-        self.key = args.api_key if args.sglang else os.environ.get("VLLM_API_KEY") or args.api_key
+        self.key = args.api_key if args.sglang or args.lmdeploy else os.environ.get("VLLM_API_KEY") or args.api_key
         self.started = time.time()
 
 
@@ -132,9 +155,24 @@ def sglang_metrics(s: State) -> str:
     return "\n".join(lines) + "\n"
 
 
+def lmdeploy_metrics(s: State) -> str:
+    """LMDeploy's names, as its api_server writes them."""
+    lines = []
+    for name, kind, value in (("lmdeploy:num_requests_running", "gauge", s.running + s.extra_running),
+                              ("lmdeploy:num_requests_waiting", "gauge", s.waiting + s.extra_waiting),
+                              ("lmdeploy:gpu_cache_usage_perc", "gauge", s.kv_usage),
+                              ("lmdeploy:prefix_cache_hit_rate", "gauge", s.prefix_hits / s.prefix_queries if s.prefix_queries else 0.0),
+                              ("lmdeploy:prompt_tokens_total", "counter", s.prompt_tokens),
+                              ("lmdeploy:generation_tokens_total", "counter", s.generation_tokens)):
+        lines += [f"# TYPE {name} {kind}", f'{name}{{model_name="{s.name}"}} {value}']
+    return "\n".join(lines) + "\n"
+
+
 def metrics(s: State) -> str:
     if s.args.sglang:
         return sglang_metrics(s)
+    if s.args.lmdeploy:
+        return lmdeploy_metrics(s)
     label = f'model_name="{s.name}"'
     blocks = 4096
     lines = [
@@ -316,7 +354,7 @@ def handler(s: State):
 def main(argv: list[str]) -> int:
     args = parse(argv)
     state = State(args)
-    who = "SGLang" if args.sglang else "vLLM"
+    who = "SGLang" if args.sglang else "LMDeploy" if args.lmdeploy else "vLLM"
     gguf = args.model.lower().endswith(".gguf")
     what = f"GGUF {args.model}, its tokenizer from {args.tokenizer or 'its header'}," if gguf else args.model
     print(f"INFO fake {who}: loading {what} as {state.name} (tp {args.tensor_parallel_size}, "
