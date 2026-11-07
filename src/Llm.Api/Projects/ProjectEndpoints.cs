@@ -52,8 +52,11 @@ public static class ProjectEndpoints
 
     public static void MapProjects(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/projects").PersonOnly();
+        // The page signed in, and Code Arena's IDE and terminal with the person's key (its IDE relays them): the same routes
+        // and the same checks; a key's person needs Code Arena too (KeyHolder).
+        var g = app.MapGroup("/api/projects").RequireAuthorization(ArenaMcp.KeyAuthentication.Policy).WithMetadata(new PersonOnlyMetadata()).AddEndpointFilter(KeyHolder);
         g.MapGet("", ListAsync);
+        g.MapGet("/may", MayAsync);
         g.MapPost("", CreateAsync).RequirePermission(Core.Access.Permissions.ProjectsCreate);
         g.MapGet("/{id:guid}", GetAsync);
         g.MapPatch("/{id:guid}", UpdateAsync);
@@ -80,6 +83,36 @@ public static class ProjectEndpoints
     }
 
     private static async Task<AppUser> Me(ClaimsPrincipal p, UserManager<AppUser> users) => (await users.GetUserAsync(p))!;
+
+    /// <summary>
+    /// A call with a key (Code Arena's: its IDE and terminal) is the key's person's, who may use Code Arena (Admin → Access);
+    /// what they may do in a project is then checked as for the page. A call signed in passes as it is.
+    /// </summary>
+    public static async ValueTask<object?> KeyHolder(EndpointFilterInvocationContext ctx, EndpointFilterDelegate next)
+    {
+        var http = ctx.HttpContext;
+        if (http.Request.Headers.Authorization.ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            var (me, refusal) = await CodeArenaSync.CallerAsync(http, http.RequestServices.GetRequiredService<ArenaMcp.McpPeople>());
+            if (me is null)
+            {
+                return refusal;
+            }
+        }
+        return await next(ctx);
+    }
+
+    /// <summary>What the person may do with projects: make one, and make one global (the pages offer only that).</summary>
+    private static async Task<IResult> MayAsync(ClaimsPrincipal principal, UserManager<AppUser> users, AccessService access, CancellationToken ct)
+    {
+        var me = await Me(principal, users);
+        var m = await access.MembershipAsync(me, ct);
+        return Results.Ok(new
+        {
+            create = m.Has(Core.Access.Permissions.ProjectsCreate),
+            global = m.Has(Core.Access.Permissions.ProjectsCreate) && m.Has(Core.Access.Permissions.ProjectsGlobal),
+        });
+    }
 
     private static IResult NotYours() => AuthEndpoints.Problem(403, "role", "Only the project's owners may do that.");
 

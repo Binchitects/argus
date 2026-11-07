@@ -85,5 +85,50 @@ public sealed class ArenaRelayTests : IDisposable
         Assert.Empty(_mcp.Chats.Relayed);
     }
 
+    [Fact]
+    public async Task The_IDE_reaches_Arenas_projects_with_the_key_and_only_their_routes()
+    {
+        _mcp.Chats.AddProject("8f1c2d3e-0000-4000-8000-000000000001", "Payments", "owner", ("Card payments", "doing"));
+        _mcp.Chats.AddProject("8f1c2d3e-0000-4000-8000-000000000002", "Handbook", "viewer");
+        using var h = new Harness(_gateway, _mcp);
+        await using var web = await WebRun.StartAsync(h);
+
+        // The web's own routes and shapes, as Arena gives them: the list, a project, its report in a window, what may be made.
+        var list = JsonNode.Parse(await (await web.Http.GetAsync("/api/projects")).Content.ReadAsStringAsync())!.AsArray();
+        Assert.Equal(["Payments", "Handbook"], list.Select(p => p!["name"]!.GetValue<string>()));
+        var one = await web.GetJsonAsync("/api/projects/8f1c2d3e-0000-4000-8000-000000000001");
+        Assert.Equal("Card payments", one["goals"]![0]!["title"]!.GetValue<string>());
+        Assert.Equal(HttpStatusCode.OK, (await web.Http.GetAsync("/api/projects/8f1c2d3e-0000-4000-8000-000000000001/report?from=2026-11-01T00:00:00Z&to=2026-11-07T00:00:00Z&secret=no")).StatusCode);
+        Assert.Equal("/api/projects/8f1c2d3e-0000-4000-8000-000000000001/report?from=2026-11-01T00%3A00%3A00Z&to=2026-11-07T00%3A00%3A00Z", _mcp.Chats.Relayed[^1].Path);
+        Assert.True((await web.GetJsonAsync("/api/projects/may"))["create"]!.GetValue<bool>());
+        Assert.Equal(HttpStatusCode.OK, (await web.Http.GetAsync("/api/sharing/groups")).StatusCode);
+
+        // A change goes as JSON with the key; Arena's answer comes back as it is, a refusal too (Arena decides, not code-arena).
+        var added = await web.Http.PostAsync("/api/projects/8f1c2d3e-0000-4000-8000-000000000001/goals", JsonContent("""{"title":"Refunds"}"""));
+        Assert.Equal(HttpStatusCode.Created, added.StatusCode);
+        Assert.Equal(("POST", "Bearer " + FakeGateway.Key, """{"title":"Refunds"}"""), (_mcp.Chats.Relayed[^1].Method, _mcp.Chats.Relayed[^1].Authorization, _mcp.Chats.Relayed[^1].Body));
+        var refused = await web.Http.PostAsync("/api/projects/8f1c2d3e-0000-4000-8000-000000000002/goals", JsonContent("""{"title":"Mine"}"""));
+        Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);
+        Assert.Contains("Viewers see the project", await refused.Content.ReadAsStringAsync());
+
+        // Only JSON, and only the projects' routes: a form, another of Arena's routes, a path that only looks like one.
+        var relayed = _mcp.Chats.Relayed.Count;
+        using (var form = Form("a.txt", "x"))
+        {
+            Assert.Equal(HttpStatusCode.UnsupportedMediaType, (await web.Http.PostAsync("/api/projects/8f1c2d3e-0000-4000-8000-000000000001/goals", form)).StatusCode);
+        }
+        Assert.NotEqual(HttpStatusCode.OK, (await web.Http.GetAsync("/api/projects/8f1c2d3e-0000-4000-8000-000000000001/../../admin/people")).StatusCode);
+        Assert.NotEqual(HttpStatusCode.OK, (await web.Http.GetAsync("/api/projects/not-an-id")).StatusCode);
+        Assert.NotEqual(HttpStatusCode.OK, (await web.Http.PostAsync("/api/sharing/groups", JsonContent("{}"))).StatusCode);
+        using (var request = new HttpRequestMessage(HttpMethod.Get, "/api/projects"))
+        {
+            request.Headers.Add("Sec-Fetch-Site", "cross-site");
+            Assert.Equal(HttpStatusCode.Forbidden, (await web.Http.SendAsync(request)).StatusCode);
+        }
+        using var anonymous = WebRun.Client(web.Port, token: null);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync("/api/projects")).StatusCode);
+        Assert.Equal(relayed, _mcp.Chats.Relayed.Count);
+    }
+
     private static StringContent JsonContent(string json) => new(json, System.Text.Encoding.UTF8, "application/json");
 }

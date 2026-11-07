@@ -8,7 +8,7 @@ import { ProjectPicker } from './project-picker'
 describe('the session’s project in the IDE', () => {
   it('lists the projects the person may add to, the repository’s marked, and chooses one or none', async () => {
     const calls = fakeApi(null, {
-      'GET /api/projects': () => ({ json: { projects: [{ id: 'p1', name: 'Payments' }, { id: 'p2', name: 'Company wiki' }], suggested: 'p2', problem: null } }),
+      'GET /api/project': () => ({ json: { projects: [{ id: 'p1', name: 'Payments' }, { id: 'p2', name: 'Company wiki' }], suggested: 'p2', problem: null } }),
       'POST /api/project': () => ({ json: { said: 'In Company wiki.' } }),
     })
     const { rerender } = render(
@@ -34,7 +34,7 @@ describe('the session’s project in the IDE', () => {
   })
 
   it('says why when Arena cannot list them', async () => {
-    fakeApi(null, { 'GET /api/projects': () => ({ json: { projects: null, suggested: null, problem: 'https://llm.test did not answer.' } }) })
+    fakeApi(null, { 'GET /api/project': () => ({ json: { projects: null, suggested: null, problem: 'https://llm.test did not answer.' } }) })
     render(
       <Providers>
         <ProjectPicker project={null} />
