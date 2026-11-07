@@ -979,7 +979,10 @@ What a project holds:
 - **Chats, rooms and Code Arena sessions.** A chat's menu (⋯ → **Project**)
   puts it in a project you may add to, or takes it out. A chat stays yours in
   a project: the others see that you have chats there, not their titles or
-  what they say. A room is listed by its title for its members.
+  what they say. A room is listed by its title for its members. Code Arena
+  has the same projects: its **Projects** view, a project's tab (this page,
+  the same in its IDE) and `/project` in its terminal
+  ([Code Arena](code-arena.md#projects)).
 - **Assistants, skills and apps** you made (or may edit). Being in a project
   shares them with no one: who may not use one still may not.
 - **Goals** (milestones with a state: planned, doing, done or dropped, and a

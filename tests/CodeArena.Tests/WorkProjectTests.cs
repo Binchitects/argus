@@ -60,12 +60,12 @@ public sealed class WorkProjectTests : IDisposable
     }
 
     [Fact]
-    public async Task Project_lists_those_the_person_may_add_to_and_moves_the_chat_with_the_session()
+    public async Task Projects_lists_those_the_person_may_add_to_and_project_moves_the_chat_with_the_session()
     {
         using var h = new Harness(_gateway, _mcp);
         Assert.Equal(0, await h.Run("", "-p", "hello"));
         var chat = Assert.Single(_mcp.Chats.All);
-        Assert.Equal(0, await h.Run("/project\n/project 2\n/project nothing-like-it\n/project none\n/exit\n", "chat", "--continue"));
+        Assert.Equal(0, await h.Run("/projects\n/project 2\n/project nothing-like-it\n/project none\n/exit\n", "chat", "--continue"));
         Assert.Contains("Project: none.", h.Out);
         Assert.Contains("1  Payments", h.Out);
         Assert.Contains("2  Company wiki", h.Out);
@@ -74,6 +74,48 @@ public sealed class WorkProjectTests : IDisposable
         Assert.Contains("In no project", h.Out);
         Assert.Equal([(chat.Id, (string?)"p-wiki"), (chat.Id, null)], _mcp.Chats.Moves);
         Assert.Null(chat.ProjectId);
+    }
+
+    [Fact]
+    public async Task Project_alone_shows_the_sessions_project_its_last_seven_days_and_its_open_goals()
+    {
+        _mcp.Chats.AddProject("p-shop", "Shop", "owner", ("Checkout", "doing"), ("Old idea", "dropped"), ("Launch", "done"), ("Refunds", "planned"));
+        _mcp.Chats.Used["p-shop"] = new JsonObject
+        {
+            ["requests"] = 120, ["input"] = 40_000, ["cached"] = 2_000, ["output"] = 5_000, ["cost"] = 1.5, ["agentSeconds"] = 3_900, ["activeSeconds"] = 600, ["people"] = 2, ["messages"] = 30,
+        };
+        using var h = new Harness(_gateway, _mcp);
+        Assert.Equal(0, await h.Run("/project\n/project shop\n/project\n/exit\n", "chat"));
+        Assert.Contains("Project: none.", h.Out);
+        Assert.Contains("Project: Shop (owner)", h.Out);
+        Assert.Contains("Last 7 days: $1.50 · 47k tokens · 120 requests · 2 people · 10 min active · 1 h 05 min the models'", h.Out);
+        Assert.Contains("Models: qwen $0.25", h.Out);
+        Assert.Contains("Goals: 1 of 3 done; open:", h.Out);
+        Assert.Contains("◦ Checkout (doing)", h.Out);
+        Assert.Contains("◦ Refunds (planned)", h.Out);
+        Assert.DoesNotContain("Old idea", h.Out);
+        // The report asked for is the last seven days, with the key.
+        var report = _mcp.Chats.Relayed.Last(r => r.Path.Contains("/report", StringComparison.Ordinal));
+        Assert.StartsWith("/api/projects/p-shop/report?from=", report.Path);
+        Assert.Equal("Bearer " + FakeGateway.Key, report.Authorization);
+    }
+
+    [Fact]
+    public async Task Project_new_makes_one_when_Arena_lets_the_person_and_puts_the_session_in_it()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        Assert.Equal(0, await h.Run("", "-p", "hello"));
+        var chat = Assert.Single(_mcp.Chats.All);
+        Assert.Equal(0, await h.Run("/project new Billing v2\n/projects\n/exit\n", "chat", "--continue"));
+        Assert.Contains("Made the project Billing v2 in Arena", h.Out);
+        var made = _mcp.Chats.ArenaProjects.Values.Single(p => p.Str("name") == "Billing v2").Str("id");
+        Assert.Equal(made, chat.ProjectId);
+        Assert.Contains("3  Billing v2 (this session's)  owner, $0.00 this month", h.Out);
+
+        _mcp.Chats.MayCreate = false;
+        Assert.Equal(0, await h.Run("/project new Another\n/exit\n", "chat", "--continue"));
+        Assert.Contains("Making projects is not among what you may do in Arena", h.Out + h.Err);
+        Assert.DoesNotContain(_mcp.Chats.ArenaProjects.Values, p => p.Str("name") == "Another");
     }
 
     [Fact]
@@ -92,7 +134,7 @@ public sealed class WorkProjectTests : IDisposable
         using var h = new Harness(_gateway, _mcp);
         await using var web = await WebRun.StartAsync(h);
         Assert.Null((await web.GetJsonAsync("/api/state"))["workProject"]);
-        var listed = await web.GetJsonAsync("/api/projects");
+        var listed = await web.GetJsonAsync("/api/project");
         Assert.Equal(["Payments", "Company wiki"], listed["projects"]!.AsArray().Select(p => p!["name"]!.GetValue<string>()));
 
         var chose = await web.PostAsync("/api/project", new JsonObject { ["project"] = "p-wiki" });

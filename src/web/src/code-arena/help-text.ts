@@ -8,7 +8,7 @@ import { modKey } from './editor-state'
  */
 
 /** The parts of the workbench. */
-export type Part = 'activity' | 'explorer' | 'search' | 'changes' | 'problems' | 'review' | 'git' | 'sessions' | 'editor' | 'terminal' | 'chat' | 'status' | 'settings' | 'keybindings' | 'debug' | 'console' | 'extensions' | 'output' | 'ports' | 'skills' | 'tasks'
+export type Part = 'activity' | 'explorer' | 'search' | 'changes' | 'problems' | 'review' | 'git' | 'sessions' | 'editor' | 'terminal' | 'chat' | 'status' | 'settings' | 'keybindings' | 'debug' | 'console' | 'extensions' | 'output' | 'ports' | 'skills' | 'tasks' | 'projects'
 
 export interface PartHelp extends HelpPart {
   /** Where the manual's Code Arena page (docs/code-arena.md) tells the rest: one of its headings. */
@@ -18,6 +18,11 @@ export interface PartHelp extends HelpPart {
 export const about = 'An editor around the coding agent, for this folder: its files, a terminal, and the agent\'s chat, which can read, change and run things here as the mode allows.'
 
 export const parts: Record<Part, PartHelp> = {
+  projects: {
+    name: 'Projects',
+    text: "Arena's projects, as its Projects page has them: **Mine** (those you are in), **Global** (everyone's to add to) and **All I see**, found by their words. The one this session counts to is in bold, and the one this folder's repository is in says so. A click opens a project in a tab of its own, the same page as Arena's: **Overview** (its cost, tokens, requests, people's and the models' time and models over the time window, with its presets, and **Export** as PDF, Excel or CSV), **Goals and tasks** (add, change and tick off, as a contributor or owner), **In it** (its repositories, chats and sessions: a chat or session of yours continues in the chat; **This session** puts the session open now in it or takes it out), **People** (owners change their roles) and **Settings** for owners (its dates, budget, global, archive). **+** makes a project when Arena lets you (a global one too, when you may). Arena decides what you may do in each, as on its page; what a session uses shows there within seconds. The project in the status bar opens the session's; /project opens it from the chat's box, /projects shows this view and /project new NAME makes one.",
+    manual: 'projects',
+  },
   tasks: {
     name: 'Tasks',
     text: 'The sub-agents of this session, beside the chat (the chat shows one line of each, **Tasks** in its header opens this). The agent hands work to a sub-agent: a context of its own, the reading tools unless it named others, as one of your Arena assistants if it chose. Those that only read work side by side; those that may change files one at a time, never asking (what the mode would ask is refused to them). Each row says where it stands, what it does now, its time and tokens; click one for what it was asked, its thinking, each tool call with its result, and its report. **Stop** (the square) stops one; the agent carries on without it. **+** starts a task of yours in the background, as an assistant if you choose, reading only unless you let it change files: you go on with the chat meanwhile, and its report reaches the agent with your next message. /tasks in the terminal lists them too.',
@@ -120,7 +125,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   status: {
     name: 'Status bar',
-    text: 'Along the bottom: the git branch, the agent\'s changes, the terminal and the commands running with no time limit on the left; the cursor\'s line and column, the file\'s formatter, its language server (starting, ready, failed, or off until the folder is trusted: click it to restart it or see its log; one that is not running, and a formatter that cannot run, in italics) and its language, the MCP servers (**Try again** for one not connected), how full the model\'s window is (**Context**: what fills it, as the chat\'s ring shows it, and when the session compacts), the mode, the model and the version (About: the licence, the source and where its log is, code-arena.log beside the program) on the right.',
+    text: 'Along the bottom: the git branch, the agent\'s changes, the terminal and the commands running with no time limit, and the project in Arena the session counts to (a click opens it), on the left; the cursor\'s line and column, the file\'s formatter, its language server (starting, ready, failed, or off until the folder is trusted: click it to restart it or see its log; one that is not running, and a formatter that cannot run, in italics) and its language, the MCP servers (**Try again** for one not connected), how full the model\'s window is (**Context**: what fills it, as the chat\'s ring shows it, and when the session compacts), the mode, the model and the version (About: the licence, the source and where its log is, code-arena.log beside the program) on the right.',
     manual: 'the-ide',
   },
 }
@@ -272,4 +277,5 @@ export const regions: Record<string, Part> = {
   Breadcrumbs: 'editor',
   Tasks: 'tasks',
   'New task': 'tasks',
+  Projects: 'projects',
 }

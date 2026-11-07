@@ -651,7 +651,7 @@ The safeguards find e-mail addresses, phone, card, IBAN and social security numb
 
 ### DAT-09: A project's data is its people's, and its accounting is true
 
-A project is seen only by its maker, the people and groups in it (each as owner, contributor or viewer) and, for a global one, everyone; to anyone else it is not there. Making one is a permission (feature.projects), and a global one another (feature.projects.global); projects.manage sees and runs every project. A chat stays its owner's in a project: others see that it is there and whose, not what it says. What a project used comes from the usage log: a request counts to it when its chat is in the project (its requests move with it when it is moved) or when its caller names a project the person may add to; one named for another project is not counted. Each person's share is for the owners, a viewer sees their own. A budget tells the owners at its share and when spent, and can stop the chats' answers. Every change and export is audited; exports carry the same numbers as the page, and a CSV cell that would start a formula is kept as text.
+A project is seen only by its maker, the people and groups in it (each as owner, contributor or viewer) and, for a global one, everyone; to anyone else it is not there. Making one is a permission (feature.projects), and a global one another (feature.projects.global); projects.manage sees and runs every project. A chat stays its owner's in a project: others see that it is there and whose, not what it says. What a project used comes from the usage log: a request counts to it when its chat is in the project (its requests move with it when it is moved) or when its caller names a project the person may add to; one named for another project is not counted. Each person's share is for the owners, a viewer sees their own. A budget tells the owners at its share and when spent, and can stop the chats' answers. Every change and export is audited; exports carry the same numbers as the page, and a CSV cell that would start a formula is kept as text. Code Arena (its IDE and terminal) reaches the same project routes with the person's API key, only when that person may use Code Arena, and Arena checks each call there as for the page; code-arena relays only a fixed list of those routes, after its own checks, and the key never reaches its page.
 
 **Serves**
 
@@ -673,6 +673,7 @@ A project is seen only by its maker, the people and groups in it (each as owner,
 - `Llm.Tests/ProjectTests.A_budget_tells_the_owners_and_one_that_stops_refuses_its_chats_answers`
 - `Llm.Tests/ProjectTests.A_Code_Arena_session_goes_in_its_repositorys_project_or_the_one_chosen`
 - `Llm.Tests/ProjectTests.A_projects_report_and_the_usage_reports_export_as_pdf_excel_and_csv`
+- `Llm.Tests/ProjectTests.Code_Arena_reaches_a_project_with_the_persons_key_and_Arena_checks_it_as_for_the_page`
 - `Llm.Tests/WorkProjectsMigrationTests.Chats_and_requests_kept_before_are_in_no_project_and_may_go_in_one`
 
 **The company's part** Decide who may make projects and global ones (Admin → Access), and who holds projects.manage; set budgets for the projects that need them.

@@ -75,7 +75,8 @@ public static class IdentityWiring
             .AddPasswordValidator<StrongPasswordValidator>();
 
         services.AddAuthentication(IdentityConstants.ApplicationScheme).AddIdentityCookies();
-        // The person's API key, on the routes Code Arena's IDE relays (KeyAuthentication.Policy) and no others.
+        // The person's API key, on the routes Code Arena's IDE relays (KeyAuthentication.Policy: the chat's files, projects,
+        // sharing's lookups) and no others.
         services.AddAuthentication().AddScheme<AuthenticationSchemeOptions, ArenaMcp.KeyAuthentication>(ArenaMcp.KeyAuthentication.Name, null);
         services.ConfigureApplicationCookie(o =>
         {

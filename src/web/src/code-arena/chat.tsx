@@ -79,7 +79,8 @@ import { useSlashMenu } from './slash'
 import { isUserFile } from './editor-options'
 import { CodeAnswer } from './answer'
 import { RewindDialog } from './rewind'
-import { useCommands } from './commands'
+import { runCommand, useCommands } from './commands'
+import { makeProject } from '@/pages/projects/api'
 import { useKeyFor } from './keyboard'
 import { PartHelp } from './help'
 import { SyncStatus } from './sync-status'
@@ -773,12 +774,35 @@ export function Thread({
       setContextOpen(true)
       return true
     }
+    if (text === '/projects') {
+      runCommand('codeArena.view.projects')
+      return true
+    }
     if (/^\/project(\s|$)/.test(text)) {
-      // As in the terminal: /project NAME (or N, or none) puts the session in it; alone, says which it is in.
+      // As in the terminal: /project NAME (or N, or none) puts the session in it; alone, opens the session's project (none:
+      // the Projects view); /project new NAME makes one, as Arena lets the person, and puts the session in it.
       const which = text.slice('/project'.length).trim()
       if (!which) {
-        toast.info(state.workProject ? `Project: ${state.workProject.name}.` : 'Project: none.', { description: 'Choose one with the project in the chat’s header, or /project NAME.' })
+        runCommand('codeArena.project.open')
         return true
+      }
+      if (/^new(\s|$)/i.test(which)) {
+        const name = which.slice(3).trim()
+        if (!name) {
+          toast.error('Give it a name: /project new NAME.')
+          return false
+        }
+        try {
+          const { id } = await makeProject({ name })
+          toast.success((await chooseProject(id)).said, { description: `Made ${name} in Arena; you are its owner.` })
+          await queryClient.invalidateQueries({ queryKey: stateQuery.queryKey })
+          await queryClient.invalidateQueries({ queryKey: ['projects'] })
+          runCommand('codeArena.project.open', { id, name })
+          return true
+        } catch (e) {
+          toast.error(e instanceof ApiError && e.http === 403 && e.status === '403' ? 'Making projects is not among what you may do in Arena: ask an admin.' : errorMessage(e))
+          return false
+        }
       }
       try {
         toast.success((await chooseProject(which)).said)

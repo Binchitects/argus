@@ -368,6 +368,52 @@ public sealed class ProjectTests(AppFixture app)
 
     [Fact]
     [Trait("Control", "DAT-09")]
+    public async Task Code_Arena_reaches_a_project_with_the_persons_key_and_Arena_checks_it_as_for_the_page()
+    {
+        var admin = await AdminAsync();
+        var (annId, ann, _, annKey) = await PersonAsync(admin);
+        var (benId, _, _, benKey) = await PersonAsync(admin);
+        var id = await ProjectAsync(ann, new { name = "From the IDE" });
+        await StatusAssert.Is(HttpStatusCode.NoContent, await ann.PostAsync($"/api/projects/{id}/members", new { userIds = new[] { benId }, role = "viewer" }));
+        var arena = CodeArena(annKey);
+
+        // The page's routes, with the key: the list, the project, its report, a goal, a task ticked off, its export.
+        Assert.Contains((await arena.GetFromJsonAsync<JsonElement>("/api/projects")).EnumerateArray(), p => p.GetProperty("id").GetGuid() == id);
+        Assert.Equal("owner", (await arena.GetFromJsonAsync<JsonElement>($"/api/projects/{id}")).GetProperty("role").GetString());
+        var window = Window(DateTimeOffset.UtcNow.AddDays(-7), DateTimeOffset.UtcNow.AddMinutes(1));
+        await StatusAssert.Is(HttpStatusCode.OK, await arena.GetAsync($"/api/projects/{id}/report?{window}"));
+        await StatusAssert.Is(HttpStatusCode.Created, await arena.PostAsJsonAsync($"/api/projects/{id}/goals", new { title = "Typed in the IDE" }));
+        var task = (await (await arena.PostAsJsonAsync($"/api/projects/{id}/tasks", new { title = "Tick me" })).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        await StatusAssert.Is(HttpStatusCode.NoContent, await arena.PatchAsJsonAsync($"/api/projects/{id}/tasks/{task}", new { done = true }));
+        Assert.Equal("text/csv", (await arena.GetAsync($"/api/projects/{id}/report/export?format=csv&{window}")).Content.Headers.ContentType!.MediaType);
+        Assert.True((await arena.GetFromJsonAsync<JsonElement>("/api/projects/may")).GetProperty("create").GetBoolean());
+        await StatusAssert.Is(HttpStatusCode.OK, await arena.GetAsync("/api/sharing/groups"));
+
+        // Making one is the same permission as on the page, and a global one too.
+        await SetFeatureAsync(annId, Llm.Core.Access.Permissions.ProjectsGlobal, on: false);
+        Assert.False((await arena.GetFromJsonAsync<JsonElement>("/api/projects/may")).GetProperty("global").GetBoolean());
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await arena.PostAsJsonAsync("/api/projects", new { name = "Everyone's", global = true }));
+        await StatusAssert.Is(HttpStatusCode.Created, await arena.PostAsJsonAsync("/api/projects", new { name = "Made in the terminal" }));
+        await SetFeatureAsync(annId, Llm.Core.Access.Permissions.ProjectsCreate, on: false);
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await arena.PostAsJsonAsync("/api/projects", new { name = "Not now" }));
+        Assert.False((await arena.GetFromJsonAsync<JsonElement>("/api/projects/may")).GetProperty("create").GetBoolean());
+
+        // Ben, a viewer, sees it and changes nothing with his key either; without Code Arena his key reaches nothing here.
+        var bens = CodeArena(benKey);
+        Assert.Equal("viewer", (await bens.GetFromJsonAsync<JsonElement>($"/api/projects/{id}")).GetProperty("role").GetString());
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await bens.PostAsJsonAsync($"/api/projects/{id}/goals", new { title = "Mine" }));
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await bens.PatchAsJsonAsync($"/api/projects/{id}/tasks/{task}", new { done = false }));
+        await SetFeatureAsync(benId, Llm.Core.Access.Permissions.CodeArena, on: false);
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await bens.GetAsync($"/api/projects/{id}"));
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await bens.GetAsync("/api/sharing/groups"));
+        // A key that is no one's: refused before any route.
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await CodeArena("sk-not-a-key").GetAsync("/api/projects"));
+        // Moving a chat on the page's route stays the page's (Code Arena has its own, by the session's chat).
+        await StatusAssert.Is(HttpStatusCode.Unauthorized, await arena.PutAsJsonAsync($"/api/chat/conversations/{Guid.NewGuid()}/project", new { projectId = id }));
+    }
+
+    [Fact]
+    [Trait("Control", "DAT-09")]
     public async Task A_projects_report_and_the_usage_reports_export_as_pdf_excel_and_csv()
     {
         var admin = await AdminAsync();

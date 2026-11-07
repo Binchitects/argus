@@ -458,6 +458,11 @@ public sealed class FakeMcp : FakeServer
             await Chats.HandleFilesAsync(ctx, body);
             return;
         }
+        if (!Missing && (ctx.Request.Url!.AbsolutePath.StartsWith("/api/projects", StringComparison.Ordinal) || ctx.Request.Url.AbsolutePath.StartsWith("/api/sharing/", StringComparison.Ordinal)))
+        {
+            await Chats.HandleProjectsAsync(ctx, body);
+            return;
+        }
         if (Build is { } build && ctx.Request.Url!.AbsolutePath.StartsWith("/api/downloads/code-arena", StringComparison.Ordinal))
         {
             // Arena's Code Arena builds (anyone may read them): its version, this system's build, and the build itself.
@@ -1157,6 +1162,130 @@ public sealed class FakeChats
 
     /// <summary>The files the relay sent on: what each request was (method, path and query, its type, the key it came with, its body).</summary>
     public List<(string Method, string Path, string? Type, string? Authorization, string? Range, string Body)> Relayed { get; } = [];
+
+    /// <summary>
+    /// Arena's projects as its page and Code Arena reach them (/api/projects…), by id: each the page's shape (name, role, global,
+    /// status, goals, tasks); a role below contributor changes nothing (403), as Arena decides.
+    /// </summary>
+    public Dictionary<string, JsonObject> ArenaProjects { get; } = [];
+
+    /// <summary>Whether Arena lets the person make projects (feature.projects): else POST /api/projects is 403.</summary>
+    public bool MayCreate { get; set; } = true;
+
+    /// <summary>What each project's report says it used (its totals), by id: the report of one not here is all zeros.</summary>
+    public Dictionary<string, JsonObject> Used { get; } = [];
+
+    /// <summary>A project of the page's shape, of the person's in the role given (it is in the choices too when they may add to it).</summary>
+    public JsonObject AddProject(string id, string name, string role = "owner", params (string Title, string Status)[] goals)
+    {
+        var p = new JsonObject
+        {
+            ["id"] = id, ["name"] = name, ["description"] = "", ["global"] = false, ["status"] = "active", ["role"] = role, ["mine"] = true, ["spentThisMonth"] = 0.5,
+            ["members"] = new JsonArray(), ["repositories"] = new JsonArray(), ["items"] = new JsonArray(), ["chats"] = new JsonArray(), ["otherChats"] = new JsonArray(),
+            ["goals"] = new JsonArray([.. goals.Select((g, i) => (JsonNode)new JsonObject { ["id"] = $"{id}-g{i}", ["title"] = g.Title, ["status"] = g.Status, ["dueOn"] = null, ["position"] = i })]),
+            ["tasks"] = new JsonArray(),
+        };
+        lock (_gate)
+        {
+            ArenaProjects[id] = p;
+            if (role is "owner" or "contributor")
+            {
+                Projects.Add((id, name));
+            }
+        }
+        return p;
+    }
+
+    /// <summary>Arena's project routes (and sharing's lookups), taken with the key alone (as Arena's KeyAuthentication does).</summary>
+    internal async Task HandleProjectsAsync(HttpListenerContext ctx, string body)
+    {
+        var path = ctx.Request.Url!.PathAndQuery;
+        lock (_gate)
+        {
+            Relayed.Add((ctx.Request.HttpMethod, path, ctx.Request.ContentType, ctx.Request.Headers["Authorization"], ctx.Request.Headers["Range"], body));
+        }
+        if (ctx.Request.Headers["Authorization"] != "Bearer " + FakeGateway.Key)
+        {
+            ctx.Response.StatusCode = 401;
+            return;
+        }
+        if (ctx.Request.HttpMethod != "GET" && ctx.Request.Headers["X-Requested-With"] is null)
+        {
+            ctx.Response.StatusCode = 400;
+            return;
+        }
+        var parts = ctx.Request.Url.AbsolutePath.Trim('/').Split('/')[1..];
+        var method = ctx.Request.HttpMethod;
+        JsonNode? reply = null;
+        var status = 200;
+        lock (_gate)
+        {
+            switch (parts)
+            {
+                case ["sharing", "groups"]:
+                    reply = new JsonArray(new JsonObject { ["id"] = "g-1", ["name"] = "Payments team", ["mine"] = true });
+                    break;
+                case ["projects"] when method == "GET":
+                    reply = new JsonArray([.. ArenaProjects.Values.Select(p => (JsonNode)p.DeepClone())]);
+                    break;
+                case ["projects"] when method == "POST":
+                    if (!MayCreate)
+                    {
+                        status = 403;
+                        break;
+                    }
+                    var id = Guid.NewGuid().ToString();
+                    var name = Json.ParseObject(body)?.Str("name") ?? "";
+                    // Under the lock already: added as AddProject does.
+                    ArenaProjects[id] = new JsonObject
+                    {
+                        ["id"] = id, ["name"] = name, ["description"] = "", ["global"] = false, ["status"] = "active", ["role"] = "owner", ["mine"] = true, ["spentThisMonth"] = 0,
+                        ["goals"] = new JsonArray(), ["tasks"] = new JsonArray(),
+                    };
+                    Projects.Add((id, name));
+                    (status, reply) = (201, new JsonObject { ["id"] = id });
+                    break;
+                case ["projects", "may"]:
+                    reply = new JsonObject { ["create"] = MayCreate, ["global"] = false };
+                    break;
+                case ["projects", var pid, ..] when !ArenaProjects.ContainsKey(pid):
+                    status = 404;
+                    break;
+                case ["projects", var pid] when method == "GET":
+                    reply = ArenaProjects[pid].DeepClone();
+                    break;
+                case ["projects", var pid, "report"]:
+                    reply = new JsonObject
+                    {
+                        ["from"] = ctx.Request.QueryString["from"], ["to"] = ctx.Request.QueryString["to"],
+                        ["totals"] = Used.TryGetValue(pid, out var used) ? used.DeepClone()
+                            : new JsonObject { ["requests"] = 0, ["input"] = 0, ["cached"] = 0, ["output"] = 0, ["cost"] = 0, ["agentSeconds"] = 0, ["activeSeconds"] = 0, ["people"] = 0, ["messages"] = 0 },
+                        ["models"] = new JsonArray(new JsonObject { ["name"] = "qwen", ["requests"] = 3, ["tokens"] = 1200, ["cost"] = 0.25 }),
+                        ["budget"] = null,
+                    };
+                    break;
+                case ["projects", var pid, "goals"] when method == "POST":
+                    if (ArenaProjects[pid].Str("role") is not ("owner" or "contributor"))
+                    {
+                        (status, reply) = (403, new JsonObject { ["status"] = "role", ["error"] = "Viewers see the project; its contributors and owners add to it." });
+                        break;
+                    }
+                    var goal = new JsonObject { ["id"] = Guid.NewGuid().ToString(), ["title"] = Json.ParseObject(body)?.Str("title"), ["status"] = "planned" };
+                    ArenaProjects[pid]["goals"]!.AsArray().Add(goal);
+                    (status, reply) = (201, new JsonObject { ["id"] = goal["id"]!.GetValue<string>() });
+                    break;
+                default:
+                    status = 404;
+                    break;
+            }
+        }
+        ctx.Response.StatusCode = status;
+        if (reply is not null)
+        {
+            ctx.Response.ContentType = "application/json";
+            await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes(reply.ToJsonString()));
+        }
+    }
 
     /// <summary>The person's files at /api/chat/attachments, taken with the key (as Arena's KeyAuthentication does): an upload, a file's content.</summary>
     internal async Task HandleFilesAsync(HttpListenerContext ctx, string body)

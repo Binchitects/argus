@@ -111,21 +111,56 @@ export interface ProjectReport {
   mergedError: string | null
 }
 
+/**
+ * How often an open project reads its numbers again, in Arena's page and Code Arena's tab alike: what its chats and sessions
+ * use shows within seconds. The list and the project itself read again less often.
+ */
+export const liveEvery = 15_000
+
 export const projectsQuery = {
   queryKey: ['projects'] as const,
   queryFn: ({ signal }: { signal: AbortSignal }) => api<ProjectSummary[]>('/api/projects', { signal }),
+  refetchInterval: 2 * liveEvery,
 }
 
 export const projectQuery = (id: string) => ({
   queryKey: ['projects', id] as const,
   queryFn: ({ signal }: { signal: AbortSignal }) => api<Project>(`/api/projects/${id}`, { signal }),
+  refetchInterval: 2 * liveEvery,
 })
+
+/** What the person may do with projects (Admin → Access): make one, and make one global. */
+export interface ProjectsMay {
+  create: boolean
+  global: boolean
+}
+
+export const projectsMayQuery = {
+  queryKey: ['projects', 'may'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<ProjectsMay>('/api/projects/may', { signal }),
+  staleTime: 60_000,
+}
+
+/** A new project of the person's: they are its owner. */
+export const makeProject = (body: { name: string; description?: string; dueOn?: string; global?: boolean }) => api<{ id: string }>('/api/projects', { method: 'POST', body })
 
 export const roleLabels: Record<ProjectRole, string> = { owner: 'Owner', contributor: 'Contributor', viewer: 'Viewer' }
 
 export const goalLabels: Record<GoalStatus, string> = { planned: 'Planned', doing: 'Doing', done: 'Done', dropped: 'Dropped' }
 
 export const mayAdd = (role: ProjectRole | undefined) => role === 'owner' || role === 'contributor'
+
+/** Which projects a list shows: those the person is in, the global ones, or every one they see. */
+export type ProjectsShown = 'mine' | 'global' | 'all'
+
+/** The projects a list shows, found by their words: the active first, the last changed first (Arena's page and Code Arena's view alike). */
+export function shownProjects(all: ProjectSummary[], show: ProjectsShown, words: string): ProjectSummary[] {
+  const needle = words.trim().toLowerCase()
+  return all
+    .filter((p) => (show === 'mine' ? p.mine : show === 'global' ? p.global : true))
+    .filter((p) => !needle || p.name.toLowerCase().includes(needle) || p.description.toLowerCase().includes(needle))
+    .sort((a, b) => Number(a.status === 'archived') - Number(b.status === 'archived') || b.updatedAt.localeCompare(a.updatedAt))
+}
 
 /** Seconds as people read them: 12 min, 3 h 05 min. */
 export function hours(seconds: number): string {

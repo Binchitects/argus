@@ -15,7 +15,8 @@ const own: SlashItem[] = [
   { name: 'compact', description: "Summarize the conversation to free the model's window", kind: 'chat' },
   { name: 'context', description: 'What fills the window: each tool, skill, file and message, in tokens', kind: 'chat' },
   { name: 'clear', description: 'Start a new session (this one stays saved)', kind: 'chat' },
-  { name: 'project', description: 'Put the session (and this folder\'s next ones) in a project in Arena: its name, or none', kind: 'chat' },
+  { name: 'project', description: 'The session\'s project in Arena (alone: open it); NAME or none puts the session in one; new NAME makes one', kind: 'chat' },
+  { name: 'projects', description: 'Show the Projects view: Arena\'s projects you see', kind: 'chat' },
 ]
 
 /** A /name being typed at the start of the box, before the caret: what follows the / so far; null: none. */

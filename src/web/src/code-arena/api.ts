@@ -228,7 +228,7 @@ export interface CodeProjects {
 
 export const projectsQuery = {
   queryKey: ['code', 'projects'] as const,
-  queryFn: ({ signal }: { signal: AbortSignal }) => api<CodeProjects>('/api/projects', { signal }),
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<CodeProjects>('/api/project', { signal }),
 }
 
 /** The session (and the folder's next ones) in a project: its id, or "none". */

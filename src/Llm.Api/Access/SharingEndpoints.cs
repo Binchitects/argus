@@ -14,7 +14,9 @@ public static class SharingEndpoints
 {
     public static void MapSharing(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/sharing").PersonOnly();
+        // Also with the person's key, for Code Arena's project tab (adding people and groups), as the project routes take it.
+        var g = app.MapGroup("/api/sharing").RequireAuthorization(ArenaMcp.KeyAuthentication.Policy).WithMetadata(new PersonOnlyMetadata())
+            .AddEndpointFilter(Projects.ProjectEndpoints.KeyHolder);
         g.MapGet("/groups", GroupsAsync);
         g.MapGet("/people", PeopleAsync);
     }

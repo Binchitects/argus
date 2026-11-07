@@ -10,7 +10,7 @@ import { quickPick } from './quick-pick'
 // of its own that takes this store. The workbench's commands (save, close, go to a file…) work on the group with the focus.
 
 /** What a group is made with, or what a tab dragged into it opens there: a tab's kind and what it shows. */
-export type Opening = Pick<Tab, 'kind' | 'path' | 'source' | 'left' | 'right'>
+export type Opening = Pick<Tab, 'kind' | 'path' | 'source' | 'left' | 'right' | 'label'>
 
 /** How the groups are laid out: their ids in order, side by side ("row") or one above another ("column"), and their sizes. */
 export interface GroupLayout {
@@ -180,6 +180,9 @@ export async function openIn(api: EditorApi, t: Opening, behind = false) {
     case 'settings':
     case 'keybindings':
       api.openPage(t.kind)
+      return
+    case 'project':
+      api.openProject(t.path, t.label)
       return
     case 'diff':
       if (t.source && t.source !== 'compare') await api.openDiff(t.path, t.source)

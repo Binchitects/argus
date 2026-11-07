@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, ArrowUpCircle, Bot, CircleAlert, CloudUpload, ExternalLink, Gauge, GitBranch, GitCompareArrows, Info, ListTree, LoaderCircle, Plug, RefreshCw, RotateCw, ShieldCheck, Sparkles, SquareTerminal, TriangleAlert, Unplug } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpCircle, Bot, CircleAlert, CloudUpload, ExternalLink, FolderKanban, Gauge, GitBranch, GitCompareArrows, Info, ListTree, LoaderCircle, Plug, RefreshCw, RotateCw, ShieldCheck, Sparkles, SquareTerminal, TriangleAlert, Unplug } from 'lucide-react'
 import { RadioGroup } from 'radix-ui'
 import { useMemo, useState, type ComponentProps, type FormEvent } from 'react'
 import { Button } from '@/components/ui/button'
@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils'
 import { ContextBreakdown, ContextUse } from '@/pages/chat/context-gauge'
 import { changeSettings, compaction, compactWho, inOrder, modeLabels, retryServers, sessionQuery, stateQuery, type CodeState, type ServerStatus } from './api'
 import { codeContext, contextEvent } from './context'
+import { runCommand } from './commands'
 import { useEditor } from './editor-state'
 import { api } from './http'
 import { useGit } from './git-actions'
@@ -120,6 +121,18 @@ export function StatusBar({
               <ArrowUp aria-hidden="true" />
             </>
           )}
+        </Item>
+      )}
+      {(state.workProject || state.manual) && (
+        // The project in Arena the session counts to: a click opens it in a tab (none: the Projects view).
+        <Item
+          onClick={() => runCommand('codeArena.project.open')}
+          className="min-w-0 max-w-48"
+          aria-label={state.workProject ? `Project ${state.workProject.name}: open it` : 'In no project: show the projects'}
+          title={state.workProject ? `What this session uses counts to ${state.workProject.name}: open the project` : 'This session is in no project: show the projects'}
+        >
+          <FolderKanban aria-hidden="true" />
+          <span className="truncate">{state.workProject?.name || (state.workProject ? 'A project' : 'No project')}</span>
         </Item>
       )}
       <Item onClick={onChanges} aria-label={`Agent changes: ${count} ${count === 1 ? 'file' : 'files'}`} title="The files the agent changed">

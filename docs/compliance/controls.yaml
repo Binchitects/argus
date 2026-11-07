@@ -727,7 +727,11 @@ controls:
       the owners, a viewer sees their own. A budget tells the owners at its
       share and when spent, and can stop the chats' answers. Every change and
       export is audited; exports carry the same numbers as the page, and a
-      CSV cell that would start a formula is kept as text.
+      CSV cell that would start a formula is kept as text. Code Arena (its
+      IDE and terminal) reaches the same project routes with the person's API
+      key, only when that person may use Code Arena, and Arena checks each
+      call there as for the page; code-arena relays only a fixed list of
+      those routes, after its own checks, and the key never reaches its page.
     frameworks:
       iso27001: [A.5.15, A.5.18, A.8.3]
       soc2: [CC6.1, CC6.3, C1.1]
@@ -744,6 +748,7 @@ controls:
       - Llm.Tests/ProjectTests.A_budget_tells_the_owners_and_one_that_stops_refuses_its_chats_answers
       - Llm.Tests/ProjectTests.A_Code_Arena_session_goes_in_its_repositorys_project_or_the_one_chosen
       - Llm.Tests/ProjectTests.A_projects_report_and_the_usage_reports_export_as_pdf_excel_and_csv
+      - Llm.Tests/ProjectTests.Code_Arena_reaches_a_project_with_the_persons_key_and_Arena_checks_it_as_for_the_page
       - Llm.Tests/WorkProjectsMigrationTests.Chats_and_requests_kept_before_are_in_no_project_and_may_go_in_one
     operator: >-
       Decide who may make projects and global ones (Admin → Access), and who

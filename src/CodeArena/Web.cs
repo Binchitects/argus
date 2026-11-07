@@ -467,7 +467,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             case ("POST", "/api/messages"):
                 await MessageAsync(req, res, ct);
                 return;
-            case ("GET", "/api/projects"):
+            case ("GET", "/api/project"):
                 await ProjectsAsync(res, ct);
                 return;
             case ("POST", "/api/project"):
@@ -1129,7 +1129,7 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     /// POST /api/plan/review: the person's answer to the plan the agent proposed (approve, approve-ask, change with a
     /// step, another, reject; text: what to change, or why), said to the agent as their next message, answered as a stream.
     /// </summary>
-    /// <summary>The projects in Arena the person may add to, the session's and the repository's (/project in the terminal).</summary>
+    /// <summary>The projects in Arena the person may add to, and the repository's (the chat header's picker; the Projects view marks the folder's).</summary>
     private async Task ProjectsAsync(HttpResponse res, CancellationToken ct)
     {
         var (list, problem) = await _rt.ProjectsAsync(ct);

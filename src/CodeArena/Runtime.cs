@@ -1604,6 +1604,29 @@ internal sealed partial class Runtime : IAsyncDisposable
         return (true, moved is null ? said : $"{said} {moved}");
     }
 
+    /// <summary>
+    /// /project new NAME: a project of the person's in Arena (when Arena lets them make one), and this session (and the folder's
+    /// next ones) in it. What to say, and whether it was made.
+    /// </summary>
+    public async Task<(bool Done, string Said)> NewProjectAsync(string name, CancellationToken ct)
+    {
+        if (name.Trim().Length is 0 or > 100)
+        {
+            return (false, "Give the project a name of 1 to 100 characters: /project new NAME.");
+        }
+        var (id, problem) = await ArenaProjects.CreateAsync(Config, Http, name, ct);
+        if (id is null)
+        {
+            return (false, problem!);
+        }
+        var (_, said) = await ChooseProjectAsync(id, ct);
+        return (true, $"Made the project {name.Trim()} in Arena; you are its owner. {said}");
+    }
+
+    /// <summary>The session's project with its numbers for the last days and its goals (/project); null with why.</summary>
+    public async Task<(ProjectSummary? Summary, string? Problem)> ProjectSummaryAsync(CancellationToken ct) =>
+        WorkProject is { } work ? await ArenaProjects.SummaryAsync(Config, Http, work.Id, DateTimeOffset.UtcNow, ct) : (null, null);
+
     /// <summary>A new, empty session (/clear): the same tools and model.</summary>
     public void NewSession()
     {
