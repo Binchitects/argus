@@ -6,6 +6,13 @@ import { cacheLine } from './model-profile'
 
 const everyone = { audience: 'Everyone', groups: [] }
 
+/** A model's Details: where Keep loaded, who may use it, its tools and its engine are, off the card. */
+async function details(name: string) {
+  const card = screen.getByRole('heading', { name: new RegExp(`^${name}`) }).closest('section')!
+  await userEvent.click(within(card).getByRole('button', { name: `Details of ${name}` }))
+  return screen.findByRole('dialog', { name })
+}
+
 const view = (over: object = {}) => ({
   engine: {
     enabled: true, error: null, checkedAt: '2026-09-25T10:00:00Z', kept: ['Big-Model'], max: 2, onRequest: true, loaded: ['Big-Model'], loading: [],
@@ -88,9 +95,12 @@ describe('admin models', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Load' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.path === '/api/admin/models/Small-Model/load')).toBe(true))
 
-    await userEvent.click(within(big).getByRole('combobox', { name: 'Who may use it' }))
+    // Who may use it is in its Details, not on the card.
+    expect(within(big).queryByRole('combobox', { name: 'Who may use it' })).not.toBeInTheDocument()
+    const bigDetails = await details('Big-Model')
+    await userEvent.click(within(bigDetails).getByRole('combobox', { name: 'Who may use it' }))
     await userEvent.click(await screen.findByRole('option', { name: 'Chosen groups' }))
-    await userEvent.click(within(big).getByRole('button', { name: 'Choose groups' }))
+    await userEvent.click(within(bigDetails).getByRole('button', { name: 'Choose groups' }))
     await userEvent.click(await screen.findByRole('checkbox', { name: /Research/ }))
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toMatchObject({ audience: 'Groups', groups: ['g1'] }))
   })
@@ -101,16 +111,17 @@ describe('admin models', () => {
       'PUT /api/admin/models/Big-Model/tools': () => ({ json: { toolMode: 'code', toolModeSet: true } }),
     })
     renderApp('/admin/models')
-    const big = (await screen.findByRole('heading', { name: /Big-Model/ })).closest('section')!
-    const image = screen.getByRole('heading', { name: /flux-image/ }).closest('section')!
+    await screen.findByRole('heading', { name: /Big-Model/ })
+    const big = await details('Big-Model')
     const picker = within(big).getByRole('combobox', { name: 'Tools' })
     expect(picker).toHaveTextContent('Automatic: both')
     expect(within(big).getByText(/a program for many calls, a direct call for one or two/)).toBeInTheDocument()
-    // Not a chat model: no tools to give it.
-    expect(within(image).queryByRole('combobox', { name: 'Tools' })).not.toBeInTheDocument()
     await userEvent.click(picker)
     await userEvent.click(await screen.findByRole('option', { name: 'As code' }))
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT' && c.path === '/api/admin/models/Big-Model/tools')?.body).toEqual({ mode: 'code' }))
+    // Not a chat model: no tools to give it.
+    await userEvent.keyboard('{Escape}')
+    expect(within(await details('flux-image')).queryByRole('combobox', { name: 'Tools' })).not.toBeInTheDocument()
   })
 
   it("a model's card says what its token cache keeps and the RAM it takes", async () => {
@@ -261,10 +272,13 @@ describe('admin models', () => {
     const engine = await screen.findByText(/Up to 2 models loaded at once, 1 kept loaded \(Big-Model\)/)
     expect(engine).toHaveTextContent(/Any other loads when someone asks for it/)
     expect(screen.getByRole('meter', { name: 'GPU 0: the models kept loaded' })).toHaveAttribute('aria-valuenow', String(18e9))
-    const small = screen.getByRole('heading', { name: /Small-Model/ }).closest('section')!
-    const big = screen.getByRole('heading', { name: /Big-Model/ }).closest('section')!
+    // Keep loaded, and that it is, are in a model's Details: the card stays short.
+    expect(within(screen.getByRole('heading', { name: /Big-Model/ }).closest('section')!).queryByRole('switch')).not.toBeInTheDocument()
+    const big = await details('Big-Model')
     expect(within(big).getByText('Kept loaded')).toBeInTheDocument()
     expect(within(big).getByRole('switch', { name: /Keep loaded/ })).toBeChecked()
+    await userEvent.keyboard('{Escape}')
+    const small = await details('Small-Model')
     await userEvent.click(within(small).getByRole('switch', { name: /Keep loaded/ }))
     await waitFor(() => expect(calls.find((c) => c.method === 'PUT' && c.path.endsWith('/keep'))?.body).toEqual({ keep: true }))
   })
@@ -275,7 +289,7 @@ describe('admin models', () => {
     expect(await screen.findByText(/Every place is kept loaded, or held by the model new chats use or the one for small steps, so no other model loads on request/)).toBeInTheDocument()
     const small = screen.getByRole('heading', { name: /Small-Model/ }).closest('section')!
     expect(within(small).getByRole('button', { name: /Load/ })).toBeDisabled()
-    expect(within(small).getByText('Otherwise it loads only when an admin loads it.')).toBeInTheDocument()
+    expect(within(await details('Small-Model')).getByText('Otherwise it loads only when an admin loads it.')).toBeInTheDocument()
   })
 
   it('with two GPUs, a model runs on the ones chosen', async () => {
@@ -380,8 +394,8 @@ describe('admin models', () => {
     expect(within(server).getByText(/Connection refused/)).toBeInTheDocument()
     expect(within(server).getByText(/big ← org\/Big-Remote/)).toBeInTheDocument()
     const card = screen.getByRole('heading', { name: /^big/ }).closest('section')!
-    expect(within(card).getByText('On GPU box')).toBeInTheDocument()
     expect(within(card).getByText(/org\/Big-Remote on GPU box/)).toBeInTheDocument()
+    expect(within(await details('big')).getByText('On GPU box')).toBeInTheDocument()
   })
 
   it('a model that could not load says so, where to find why, and when it is tried again', async () => {
@@ -420,7 +434,9 @@ describe('admin models', () => {
     fakeApi(admin, { 'GET /api/admin/models': () => ({ json: { ...view({ enabled: false, kept: [], loaded: [], plan: null }), models: view().models.slice(2) } }) })
     renderApp('/admin/models')
     expect(await screen.findByText(/needs the llama.cpp engine/)).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: 'Who may use it' })).toBeInTheDocument()
+    const first = view().models[2]!.name
+    expect(within(await details(first)).getByRole('combobox', { name: 'Who may use it' })).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
     // Picture, video and speech models are added without it; a chat model is not.
     await userEvent.click(screen.getByRole('button', { name: 'Add a model' }))
     const dialog = await screen.findByRole('dialog', { name: 'Add a model' })
@@ -437,10 +453,11 @@ describe('admin models', () => {
       }),
     })
     renderApp('/admin/models')
-    const small = (await screen.findByRole('heading', { name: /Small-Model/ })).closest('section')!
-    expect(within(small).getByText('Small steps')).toBeInTheDocument()
-    const big = screen.getByRole('heading', { name: /Big-Model/ }).closest('section')!
-    expect(within(big).queryByText('Small steps')).not.toBeInTheDocument()
+    await screen.findByRole('heading', { name: /Small-Model/ })
+    expect(within(await details('Small-Model')).getByText('Small steps')).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    expect(within(await details('Big-Model')).queryByText('Small steps')).not.toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
     expect(screen.getByText('The model for small steps')).toBeInTheDocument()
     expect(screen.getByText(/each small step waits for it to load/)).toBeInTheDocument()
   })
@@ -562,6 +579,56 @@ describe('admin models', () => {
     expect(sent).toMatchObject({ file: 'small/Small-Q8.gguf', context: 65536 })
     expect(sent.clear).toContain('maxOutput')
     expect(sent).not.toHaveProperty('name')
+  })
+
+  it('a card is its name, status, one line, what needs a look and the main actions; Details holds every other control', async () => {
+    const v = view()
+    const custom = { ...v.models[0], kept: true, vision: true, atGateway: false, devices: '0', kvType: 'q4_0', parallel: 4, extraPreset: 'flash-attn = on' }
+    const calls = fakeApi(admin, {
+      'GET /api/admin/models': () => ({ json: { ...v, small: { name: 'Big-Model', warning: null }, models: [custom, ...v.models.slice(1)] } }),
+      'PUT /api/admin/models/Big-Model/keep': () => ({ json: { kept: [], warning: null } }),
+    })
+    renderApp('/admin/models')
+    const card = (await screen.findByRole('heading', { name: 'Big-Model' })).closest('section')!
+    expect(within(card).getByText('Loaded')).toBeInTheDocument()
+    expect(within(card).getByText(/big\/Big-Q4\.gguf/)).toBeInTheDocument()
+    expect(within(card).getByText('Not at the gateway yet')).toBeInTheDocument()
+    for (const name of [/Unload/, /Edit/, /Remove/, 'Details of Big-Model']) expect(within(card).getByRole('button', { name })).toBeInTheDocument()
+    // Nothing else: no badges, no Keep loaded, no who may use it, no tools, no engine line.
+    for (const text of ['Kept loaded', 'Sees images', 'Small steps', 'Added here', /^Engine:/]) expect(within(card).queryByText(text)).not.toBeInTheDocument()
+    expect(within(card).queryByRole('switch')).not.toBeInTheDocument()
+    expect(within(card).queryByRole('combobox')).not.toBeInTheDocument()
+    expect(within(card).queryByRole('button', { name: 'Change engine…' })).not.toBeInTheDocument()
+
+    const dialog = await details('Big-Model')
+    for (const text of ['Kept loaded', 'Sees images', 'Small steps', 'Added here', 'llama.cpp']) expect(within(dialog).getByText(text)).toBeInTheDocument()
+    expect(within(dialog).getByRole('combobox', { name: 'Who may use it' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('combobox', { name: 'Tools' })).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Change engine…' })).toBeInTheDocument()
+    await userEvent.click(within(dialog).getByRole('switch', { name: /Keep loaded/ }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT' && c.path.endsWith('/keep'))?.body).toEqual({ keep: false }))
+  })
+
+  it('one who may only see the models has no control to change them, on the card or in Details', async () => {
+    fakeApi({ ...admin, isAdmin: false, permissions: ['models.read'] }, { 'GET /api/admin/models': () => ({ json: view() }) })
+    renderApp('/admin/models')
+    const card = (await screen.findByRole('heading', { name: 'Small-Model' })).closest('section')!
+    expect(screen.queryByRole('button', { name: 'Add a model' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Find on Hugging Face/ })).not.toBeInTheDocument()
+    for (const name of [/^Load/, /Edit/, /Remove/]) expect(within(card).queryByRole('button', { name })).not.toBeInTheDocument()
+    const dialog = await details('Small-Model')
+    expect(within(dialog).getByRole('switch', { name: /Keep loaded/ })).toBeDisabled()
+    expect(within(dialog).queryByRole('combobox', { name: 'Who may use it' })).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: 'Change engine…' })).not.toBeInTheDocument()
+  })
+
+  it('an operator who may load models loads them, and changes nothing else', async () => {
+    fakeApi({ ...admin, isAdmin: false, permissions: ['models.read', 'models.load'] }, { 'GET /api/admin/models': () => ({ json: view() }) })
+    renderApp('/admin/models')
+    const card = (await screen.findByRole('heading', { name: 'Small-Model' })).closest('section')!
+    expect(within(card).getByRole('button', { name: /^Load/ })).toBeInTheDocument()
+    expect(within(card).queryByRole('button', { name: /Edit/ })).not.toBeInTheDocument()
+    expect(within(card).queryByRole('button', { name: /Remove/ })).not.toBeInTheDocument()
   })
 })
 
