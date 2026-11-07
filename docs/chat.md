@@ -297,6 +297,20 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
     still does not fit (its summary failed, or what is kept is too big), its
     oldest messages are left out of what the model reads, and a notice says how
     many (the chat keeps them).
+  - **Results summarised once used.** Before each step of an answer, a tool's
+    result that two answers or more have followed goes to the model as a
+    summary: what was asked, its key lines (paths and places, errors, the
+    figures, what was said of it since; a JSON result's telling fields), and
+    how to read it whole again (`read_file` with `result:<call>`, or the file
+    a big one is kept as). A read of the chat's files goes as its outline and
+    the lines cited after it, and a file read again the same way drops the
+    older read. The step's own results stay whole, and so does what the
+    model could not read again (with no `read_file`, only reads are
+    summarised). The chat keeps every result whole: only what the model
+    reads changes. Admin → Settings → Chat → **Summarise tool results once
+    used** turns it off. A call with a tool named as another harness names
+    it, or with arguments that are not quite JSON, is mended before it runs,
+    and its result says so.
   - **Cleared first.** Before compacting, the results of tools' calls older
     than the last two questions (past 600 characters) are cleared in what the
     model reads, each to a line ("Cleared to make room in the context:
