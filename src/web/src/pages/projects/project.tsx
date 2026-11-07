@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AppWindow, Bot, Clock, Coins, ExternalLink, FolderGit2, GitMerge, Globe2, Hash, ListChecks, MessageSquare, Plus, SquareSlash, SquareTerminal, Target, Timer, Trash2, Users } from 'lucide-react'
-import { useState, type FormEvent } from 'react'
+import { useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
@@ -25,13 +25,14 @@ import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { formatValue, money } from '@/lib/format'
 import { skillsQuery } from '@/lib/skills'
-import { useTimeWindow } from '@/lib/use-time-window'
+import { useTimeWindow, type TimeWindowState } from '@/lib/use-time-window'
 import { assistantsQuery } from '../chat/api'
 import { GroupChecklist, PeoplePicker, type Person } from '../chat/assistant-sharing'
 import {
   goalLabels,
   hours,
   mayAdd,
+  liveEvery,
   progressOf,
   projectQuery,
   roleLabels,
@@ -64,9 +65,47 @@ const usageColumns = (what: string): ColumnDef<ProjectUse>[] => [
 const modelColumns = usageColumns('Model')
 const surfaceColumns = usageColumns('From')
 
-/** A project: what it used and did over the window, its goals and tasks, its people, what is in it, and (owners) its settings. */
+/**
+ * What differs where a project is shown: Arena's page (links to its chats, back to Projects when deleted) or Code Arena's
+ * IDE (its chats and sessions opened in the IDE, the session open now put in or taken out).
+ */
+export interface ProjectHost {
+  /** One of the person's chats, rooms or sessions in it, as a link or a button that opens it here. */
+  chatLink: (c: Project['chats'][number], inner: ReactNode) => ReactNode
+  /** The project was deleted: where to go. */
+  onDeleted: () => void
+  /** More for In it, first (Code Arena: the session open now). */
+  inIt?: (p: Project) => ReactNode
+  /** Where the assistants, skills and apps the person made are added, when not here (Arena's own page): its address. */
+  itemsAt?: (p: Project) => string | null
+}
+
+/** A project in Arena's page: its address says which, and keeps the time window. */
 export function ProjectPage() {
   const { id = '' } = useParams()
+  const navigate = useNavigate()
+  const time = useTimeWindow()
+  return (
+    <ProjectView
+      id={id}
+      time={time}
+      host={{
+        chatLink: (c, inner) => (
+          <Link to={`/chat/${c.id}`} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent">
+            {inner}
+          </Link>
+        ),
+        onDeleted: () => void navigate('/projects'),
+      }}
+    />
+  )
+}
+
+/**
+ * A project: what it used and did over the window, its goals and tasks, its people, what is in it, and (owners) its
+ * settings. Arena's page and Code Arena's project tab both show it, so the two never differ.
+ */
+export function ProjectView({ id, time, host }: { id: string; time: TimeWindowState; host: ProjectHost }) {
   const project = useQuery(projectQuery(id))
   const [tab, setTab] = useState('overview')
   if (project.isPending) return <PageSkeleton />
@@ -110,20 +149,20 @@ export function ProjectPage() {
           {owner && <TabsTrigger value="settings">Settings</TabsTrigger>}
         </TabsList>
         <TabsContent value="overview">
-          <Overview project={p} />
+          <Overview project={p} time={time} />
         </TabsContent>
         <TabsContent value="work">
           <Work project={p} />
         </TabsContent>
         <TabsContent value="contents">
-          <Contents project={p} />
+          <Contents project={p} host={host} />
         </TabsContent>
         <TabsContent value="people">
           <People project={p} />
         </TabsContent>
         {owner && (
           <TabsContent value="settings">
-            <Settings project={p} />
+            <Settings project={p} onDeleted={host.onDeleted} />
           </TabsContent>
         )}
       </Tabs>
@@ -132,10 +171,11 @@ export function ProjectPage() {
 }
 
 /** The project's numbers over the window, as its report has them. */
-function Overview({ project: p }: { project: Project }) {
-  const time = useTimeWindow()
+function Overview({ project: p, time }: { project: Project; time: TimeWindowState }) {
   const report = useQuery({
     queryKey: ['projects', p.id, 'report', time.key],
+    // What its chats and sessions use shows within seconds (the usage log takes it as each request ends).
+    refetchInterval: liveEvery,
     queryFn: async ({ signal }) => {
       const r = time.resolved()
       return { ...(await api<ProjectReport>(`/api/projects/${p.id}/report?${time.query()}`, { signal })), fromMs: r.from.getTime(), toMs: r.to.getTime() }
@@ -452,16 +492,19 @@ const itemIcons: Record<ItemKind, typeof Bot> = { assistant: Bot, skill: SquareS
 const itemLabels: Record<ItemKind, string> = { assistant: 'Assistant', skill: 'Skill', app: 'App' }
 
 /** Its repositories, its chats, rooms and sessions, and the assistants, skills and apps it uses. */
-function Contents({ project: p }: { project: Project }) {
+function Contents({ project: p, host }: { project: Project; host: ProjectHost }) {
   const change = useProjectChange(p.id)
   const may = mayAdd(p.role) && p.status === 'active'
   const owner = p.role === 'owner'
   const [repo, setRepo] = useState('')
   const [kind, setKind] = useState<ItemKind>('assistant')
   const [item, setItem] = useState('')
-  const assistants = useQuery({ ...assistantsQuery, enabled: may && kind === 'assistant' })
-  const skills = useQuery({ ...skillsQuery, enabled: may && kind === 'skill' })
-  const apps = useQuery({ queryKey: ['apps'], queryFn: ({ signal }) => api<{ id: string; name: string; mine: boolean }[]>('/api/apps', { signal }), enabled: may && kind === 'app' })
+  // What the person made is listed by Arena's own page; elsewhere (Code Arena) they are added there.
+  const itemsAt = host.itemsAt?.(p) ?? null
+  const choosing = may && !itemsAt
+  const assistants = useQuery({ ...assistantsQuery, enabled: choosing && kind === 'assistant' })
+  const skills = useQuery({ ...skillsQuery, enabled: choosing && kind === 'skill' })
+  const apps = useQuery({ queryKey: ['apps'], queryFn: ({ signal }) => api<{ id: string; name: string; mine: boolean }[]>('/api/apps', { signal }), enabled: choosing && kind === 'app' })
   const choices =
     kind === 'assistant'
       ? (assistants.data ?? []).filter((a) => a.canEdit).map((a) => ({ id: a.id, name: a.name }))
@@ -471,6 +514,7 @@ function Contents({ project: p }: { project: Project }) {
   const open = choices.filter((c) => !p.items.some((i) => i.kind === kind && i.id === c.id))
   return (
     <div className="grid gap-6 xl:grid-cols-2">
+      {host.inIt?.(p)}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -523,11 +567,14 @@ function Contents({ project: p }: { project: Project }) {
               const Icon = kindIcons[c.kind]
               return (
                 <li key={c.id}>
-                  <Link to={`/chat/${c.id}`} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent">
-                    <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                    <bdi className="min-w-0 flex-1 truncate">{c.title}</bdi>
-                    {c.kind === 'session' && c.place && <span className="max-w-40 truncate text-xs text-muted-foreground">{c.place}</span>}
-                  </Link>
+                  {host.chatLink(
+                    c,
+                    <>
+                      <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                      <bdi className="min-w-0 flex-1 truncate text-start">{c.title}</bdi>
+                      {c.kind === 'session' && c.place && <span className="max-w-40 truncate text-xs text-muted-foreground">{c.place}</span>}
+                    </>,
+                  )}
                 </li>
               )
             })}
@@ -563,7 +610,16 @@ function Contents({ project: p }: { project: Project }) {
               )
             })}
           </ul>
-          {may && (
+          {may && itemsAt && (
+            <p className="text-xs text-muted-foreground">
+              Add one you made on{' '}
+              <a href={itemsAt} target="_blank" rel="noreferrer" className="font-medium text-primary-ink underline underline-offset-2">
+                the project&apos;s page in Arena
+              </a>
+              .
+            </p>
+          )}
+          {choosing && (
             <form
               className="flex flex-wrap gap-2"
               onSubmit={(e) => {
@@ -722,8 +778,7 @@ function People({ project: p }: { project: Project }) {
 }
 
 /** Owners': its name and dates, whether it is global, its budget, archiving and deleting it. */
-function Settings({ project: p }: { project: Project }) {
-  const navigate = useNavigate()
+function Settings({ project: p, onDeleted }: { project: Project; onDeleted: () => void }) {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const start = {
@@ -753,7 +808,7 @@ function Settings({ project: p }: { project: Project }) {
     mutationFn: () => api(`/api/projects/${p.id}`, { method: 'DELETE' }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['projects'] })
-      void navigate('/projects')
+      onDeleted()
     },
     onError: (e) => toast.error(errorMessage(e)),
   })
