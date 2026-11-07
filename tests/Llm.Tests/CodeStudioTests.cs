@@ -115,6 +115,9 @@ public sealed class CodeStudioTests(AppFixture app)
             (spec["repo"]!.GetValue<string>(), spec["branch"]!.GetValue<string>(), spec["git_token"]!.GetValue<string>(), spec["git_user"]!.GetValue<string>(), spec["arena_url"]!.GetValue<string>()));
         // Its agent asks models through the app (the key's line and the prompt log), not past it.
         Assert.Equal("http://app:8080", spec["gateway_url"]!.GetValue<string>());
+        // Its commits are the person's: their name and email (before: none, and every commit there failed).
+        Assert.Equal(email, spec["git_email"]?.GetValue<string>());
+        Assert.False(string.IsNullOrWhiteSpace(spec["git_name"]?.GetValue<string>()));
         // No company CA given: none goes with it, and the workspace trusts the system's CAs alone.
         Assert.Equal("", spec["ca"]!.GetValue<string>());
         // Its agent's own key at the gateway, the person's.

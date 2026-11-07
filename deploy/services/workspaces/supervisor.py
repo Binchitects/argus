@@ -7,7 +7,8 @@ workspace's engine at its port with that workspace's key.
     GET    /health                     {"ok", "running", "slots"}
     GET    /v1/workspaces              [{"id", "port", "since"}] of those running
     PUT    /v1/workspaces/<id>         {"repo", "branch", "git_user", "git_token", "arena_url",
-                                        "api_key", "gateway_url", "mcp_url", "argus_url", "model", "ca"}
+                                        "api_key", "gateway_url", "mcp_url", "argus_url", "model", "ca",
+                                        "git_name", "git_email"}
                                        -> {"port", "key", "cloned"}: cloned once (the branch
                                        checked out), its engine started (again)
     POST   /v1/workspaces/<id>/stop    its engine stopped; its files stay
@@ -220,6 +221,10 @@ def _check(spec: dict) -> None:
         raise Refused(400, "arena_url: Arena's address (http or https).")
     if not isinstance(spec.get("api_key"), str) or len(spec["api_key"]) < 16:
         raise Refused(400, "api_key: the person's key for the workspace's agent.")
+    for name in ("git_name", "git_email"):
+        value = spec.get(name)
+        if value is not None and (not isinstance(value, str) or len(value) > 200 or any(c in value for c in "\r\n\0")):
+            raise Refused(400, f"{name}: the person's name and email for their commits, one line each.")
     ca = spec.get("ca")
     if ca is not None and (not isinstance(ca, str) or len(ca) > CA_MOST or "PRIVATE KEY" in ca
                            or (ca.strip() and "-----BEGIN CERTIFICATE-----" not in ca)):
@@ -244,6 +249,30 @@ def _trust(home: str, ca: str | None) -> None:
         os.chmod(path, 0o644)
 
 
+def _identity(home: str, name: str | None, email: str | None) -> None:
+    """The person's name and email for commits in the home's .gitconfig, unless it names an email already (theirs, set in a terminal)."""
+    if not email:
+        return
+    path = os.path.join(home, ".gitconfig")
+    text = ""
+    if os.path.isfile(path):
+        with open(path) as f:
+            text = f.read()
+    section = ""
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("["):
+            section = line.strip("[]").strip().lower()
+        elif section == "user" and line.split("=", 1)[0].strip().lower() == "email":
+            return
+
+    def quoted(value: str) -> str:
+        return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    with open(path, "a") as f:
+        f.write(("\n" if text and not text.endswith("\n") else "") + "[user]\n" + (f"\tname = {quoted(name)}\n" if name else "") + f"\temail = {quoted(email)}\n")
+    os.chmod(path, 0o644)
+
+
 def _clone(wid: str, uid: int, spec: dict) -> bool:
     """The project cloned into the workspace once (its branch), as its user, with the person's token; false when it was there."""
     folder, home, repo = _folder(wid), os.path.join(_folder(wid), "home"), os.path.join(_folder(wid), "repo")
@@ -260,6 +289,8 @@ def _clone(wid: str, uid: int, spec: dict) -> bool:
     if os.path.exists(os.path.join(home, ".git-token")):
         os.remove(os.path.join(home, ".git-token"))
     _trust(home, spec.get("ca"))
+    # Commits (the IDE's, and the agent's after a turn) are the person's.
+    _identity(home, spec.get("git_name"), spec.get("git_email"))
     os.chmod(folder, 0o700)
     _own(folder, uid)
     if os.path.isdir(os.path.join(repo, ".git")):
@@ -517,6 +548,24 @@ class Handler(BaseHTTPRequestHandler):
         given = self.headers.get("Authorization", "")
         return bool(KEY) and hmac.compare_digest(given.encode(), f"Bearer {KEY}".encode())
 
+    def _body(self, most: int) -> bytes:
+        """The request's body, with its length or in chunks (Arena's HttpClient sends JSON chunked); past most: refused."""
+        if self.headers.get("Transfer-Encoding", "").lower() != "chunked":
+            length = int(self.headers.get("Content-Length") or 0)
+            if length > most:
+                raise Refused(413, "Too large.")
+            return self.rfile.read(length)
+        body = b""
+        while True:
+            size = int(self.rfile.readline(64).split(b";")[0].strip() or b"0", 16)
+            if size == 0:
+                self.rfile.readline(64)
+                return body
+            if len(body) + size > most:
+                raise Refused(413, "Too large.")
+            body += self.rfile.read(size)
+            self.rfile.readline(64)
+
     def _handle(self, method: str) -> None:
         if self.path == "/health" and method == "GET":
             return self._answer(200, {"ok": True, "running": len(running()), "slots": SLOTS, **SANDBOX})
@@ -529,10 +578,7 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) >= 3 and parts[:2] == ["v1", "workspaces"] and ID.match(parts[2]):
                 wid = parts[2]
                 if len(parts) == 3 and method == "PUT":
-                    length = int(self.headers.get("Content-Length") or 0)
-                    if length > 64 * 1024:
-                        raise Refused(413, "Too large.")
-                    spec = json.loads(self.rfile.read(length) or b"{}")
+                    spec = json.loads(self._body(64 * 1024) or b"{}")
                     return self._answer(200, start(wid, spec))
                 if len(parts) == 4 and parts[3] == "stop" and method == "POST":
                     stop(wid)

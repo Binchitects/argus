@@ -44,6 +44,18 @@ tools/dn test tests/Argus.Tests -c Release
 tools/dn test tests/CodeArena.Tests -c Release
 ```
 
+A Code Studio workspace end to end runs against a workspaces image built from
+the checkout, in throwaway containers of its own (the workspaces service with
+compose's security options, and a code host that is GitLab's API, git over
+HTTP and the agent's model): clone, a dev server in a terminal opened through
+its forwarded address, the agent's command in the sandbox, a commit pushed,
+sleep and wake.
+
+```bash
+docker build -f deploy/services/workspaces/Dockerfile -t ws-e2e .
+tools/dn test tests/Llm.Tests -c Release --filter RealWorkspace -e STUDIO_E2E_IMAGE=ws-e2e
+```
+
 Code Arena uses the base class library only (no packages). Its standalone
 files, one per system, need .NET's runtime packs: `./arenactl code-arena`
 builds them into `dist/code-arena/` and packs them for a release

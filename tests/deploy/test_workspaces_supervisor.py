@@ -89,6 +89,31 @@ class Cloned(Base):
         self.assertFalse((home / ".git-token").exists())
 
 
+class Committed(Base):
+    def test_the_workspace_commits_as_its_person_unless_they_set_another_name(self):
+        # Before: no identity in the workspace, so every commit (the IDE's, the agent's after a turn) failed with
+        # "Author identity unknown".
+        home = Path(self.dir.name, WID, "home")
+        spec = {**GOOD, "git_name": "Dana Smith", "git_email": "dana@example.test"}
+        done = subprocess.CompletedProcess([], 0, "", "")
+        with mock.patch.object(sup.subprocess, "run", return_value=done):
+            sup._clone(WID, 30000, spec)
+        config = home / ".gitconfig"
+        got = lambda key: subprocess.run(["git", "config", "--file", str(config), "--get", key], capture_output=True, text=True).stdout.strip()
+        self.assertEqual((got("user.name"), got("user.email")), ("Dana Smith", "dana@example.test"))
+        # Their own, set in a terminal: kept.
+        subprocess.run(["git", "config", "--file", str(config), "user.email", "dana@home.test"], check=True)
+        with mock.patch.object(sup.subprocess, "run", return_value=done):
+            sup._clone(WID, 30000, spec)
+        self.assertEqual(got("user.email"), "dana@home.test")
+
+    def test_a_name_or_email_that_would_write_more_config_is_refused(self):
+        for bad in ({"git_name": "Dana\n[core]\n\tsshCommand = evil"}, {"git_email": "x" * 300}, {"git_email": 7}):
+            with self.assertRaises(sup.Refused) as refused:
+                sup._check({**GOOD, **bad})
+            self.assertEqual(refused.exception.status, 400)
+
+
 class Sandboxed(Base):
     def test_health_says_whether_the_agents_commands_have_a_sandbox(self):
         # bubblewrap made a sandbox as a user of no workspace: on; it could not (the container's security options): why.
@@ -351,6 +376,29 @@ class Driven(Base):
         with mock.patch.object(sup, "delete") as delete:
             self.assertEqual(self._ask("DELETE", f"/v1/workspaces/{WID}"), (200, {"deleted": True}))
         delete.assert_called_once_with(WID)
+
+    def test_a_start_sent_in_chunks_is_read_whole(self):
+        # Arena's HttpClient sends its JSON chunked (no Content-Length). Before: read as no body, every start refused
+        # with "repo: the project's address", so no workspace ever started on a real service.
+        data = json.dumps(GOOD).encode()
+        chunked = b"".join(b"%x\r\n%s\r\n" % (len(data[i:i + 50]), data[i:i + 50]) for i in range(0, len(data), 50)) + b"0\r\n\r\n"
+        handler = sup.Handler.__new__(sup.Handler)
+        handler.path = f"/v1/workspaces/{WID}"
+        handler.headers = {"Authorization": "Bearer " + "k" * 40, "Transfer-Encoding": "chunked"}
+        handler.rfile = io.BytesIO(chunked)
+        handler.wfile = io.BytesIO()
+        answered = {}
+        handler._answer = lambda status, payload: answered.update(status=status, body=payload)
+        with mock.patch.object(sup, "KEY", "k" * 40), mock.patch.object(sup, "start", return_value={"port": 4100, "key": "x", "cloned": True}) as start:
+            handler._handle("PUT")
+        self.assertEqual(answered["status"], 200, answered)
+        start.assert_called_once_with(WID, GOOD)
+        # Too large in chunks too.
+        big = b"%x\r\n%s\r\n0\r\n\r\n" % (70 * 1024, b"x" * 70 * 1024)
+        handler.rfile = io.BytesIO(big)
+        with mock.patch.object(sup, "KEY", "k" * 40):
+            handler._handle("PUT")
+        self.assertEqual(answered["status"], 413)
 
 
 if __name__ == "__main__":

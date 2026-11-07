@@ -1233,7 +1233,9 @@ debugger and its agent), on a project of yours that the server keeps.
 
 - **A new workspace** is a GitLab project and branch (its default branch
   when none), read with your own GitLab token, the one Fix it links. It is
-  cloned once on the workspaces service; it pushes as you.
+  cloned once on the workspaces service; it pushes as you, and commits
+  under your name and email in Arena (until you set another with `git
+  config --global` in its terminal).
 - **Open** starts it and shows the IDE at `/code/w/…`, the whole window. Its
   engine runs as a user of its own, with limits; it has no Docker socket, and
   its network reaches the app, the gateway, Argus (with your own key) and the
