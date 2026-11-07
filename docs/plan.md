@@ -83,8 +83,7 @@ program, and Edge or Chrome 109.
 4. **Code Arena's extensions.** An extension host for VS Code extensions that
    need their own code (ESLint, GitLens, Pylance).
 5. **Flaky tests to fix at their cause:** `ConcurrencyTests.A_model_asked_for_at_the_engines_limit_unloads_an_idle_one_not_kept_never_the_big_one`,
-   `StdioChildTests.A_child_that_listens_is_reached_on_its_port_and_one_that_ends_first_says_why`,
-   `ToolMeasureTests.Run_shell_keeps_a_long_output_whole_ends_with_a_child_left_behind_and_says_how_it_ended`
+   `StdioChildTests.A_child_that_listens_is_reached_on_its_port_and_one_that_ends_first_says_why`
    (each failed once under a full suite's load, and passes alone).
 
 ## Groundwork, in between

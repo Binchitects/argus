@@ -223,6 +223,20 @@ public sealed class ToolMeasureTests(ITestOutputHelper output) : IDisposable
         Assert.Contains("signal 9", killed.Text);
     }
 
+    [Fact]
+    public async Task Run_shell_s_output_reads_in_the_order_the_command_wrote_it_stderr_among_stdout()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+        var c = new ToolContext { Workspace = new Workspace(_root), Ui = new Ui(new StringReader(""), _out, _out, color: false, canAsk: false) };
+        // Many lines at once on both: two pipes read together would put the error lines wherever they arrived.
+        var r = await Run("run_shell", new { command = "for i in $(seq 1 300); do echo out$i; echo err$i >&2; done" }, c);
+        var lines = r.Text.Split('\n').Where(l => l.StartsWith("out") || l.StartsWith("err")).ToList();
+        Assert.Equal([.. Enumerable.Range(1, 300).SelectMany(i => new[] { $"out{i}", $"err{i}" })], lines);
+    }
+
     public void Dispose()
     {
         try

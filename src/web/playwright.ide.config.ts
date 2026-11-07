@@ -20,11 +20,17 @@ export default defineConfig({
     contextOptions: { reducedMotion: 'reduce' },
     trace: 'retain-on-failure',
   },
+  // The page as people get it: built, then served as files. Vite's dev server compiles each module the first time a page
+  // asks for it, so the first test in a worker on a cold machine (CI) waited for Monaco's compile and timed out where the
+  // second did not. E2E_IDE_DEV=1 serves it from the dev server instead, for a quick try of a change.
   webServer: {
-    command: `node_modules/.bin/vite --config vite.code-arena.config.ts --host 127.0.0.1 --port ${port} --strictPort`,
+    command: process.env.E2E_IDE_DEV
+      ? `node_modules/.bin/vite --config vite.code-arena.config.ts --host 127.0.0.1 --port ${port} --strictPort`
+      : `node_modules/.bin/vite build --config vite.code-arena.config.ts --outDir .e2e-ide-dist --emptyOutDir --logLevel warn` +
+        ` && node_modules/.bin/vite preview --config vite.code-arena.config.ts --outDir .e2e-ide-dist --host 127.0.0.1 --port ${port} --strictPort`,
     url: `http://127.0.0.1:${port}/code-arena.html`,
     reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
+    timeout: 300_000,
   },
   projects: [{ name: 'desktop', use: { ...devices['Desktop Chrome'], viewport: { width: 1400, height: 900 } } }],
 })

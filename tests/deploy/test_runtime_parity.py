@@ -385,3 +385,12 @@ class StaticReaderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ChartCopiesTests(unittest.TestCase):
+    def test_every_file_the_chart_carries_is_the_same_as_deploy_s(self):
+        """The chart's copies of deploy/'s files (check-chart.py's COPIES) are byte for byte deploy's: a change to one that
+        was not copied again fails here, not only in CI's chart check."""
+        stale = [copy for copy, source in chart_copies().items()
+                 if (DEPLOY / "helm" / "argus-arena" / copy).read_bytes() != (DEPLOY / source).read_bytes()]
+        self.assertEqual([], stale, "copy each again from deploy/ (python3 deploy/helm/check-chart.py says from where)")

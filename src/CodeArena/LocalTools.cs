@@ -732,8 +732,15 @@ internal static partial class LocalTools
             if (name is "pwsh" or "powershell")
             {
                 psi.ArgumentList.Add("-Command");
+                psi.ArgumentList.Add(command);
             }
-            psi.ArgumentList.Add(command);
+            else
+            {
+                // stderr into stdout in the shell itself: the output reads in the order the command wrote it (two pipes read
+                // at once would put an error line wherever it arrived, even inside another line). On the same line, so the
+                // shell's own messages keep their line numbers.
+                psi.ArgumentList.Add("exec 2>&1; " + command);
+            }
         }
         return c.Sandbox.Wrap(psi);
     }
