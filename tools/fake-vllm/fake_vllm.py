@@ -39,6 +39,13 @@ prompt_tokens_total).
 
 As Strata, it is vLLM itself: Strata writes vLLM's metric names (its fake `strata` command, beside this, starts it).
 
+Tools and thinking as each engine answers them: a request with tools (and tool_choice not "none") gets a call of its first
+tool (tool_calls, finish_reason "tool_calls") only with the engine's tool-call parser (vLLM: --enable-auto-tool-choice and
+--tool-call-parser; SGLang, LMDeploy: --tool-call-parser); without it vLLM and LMDeploy refuse it with their own message
+(400) and SGLang answers the call as text. With --reasoning-parser the answer starts with its thinking ("Thinking."), in
+vLLM's field (reasoning) or SGLang's and LMDeploy's (reasoning_content); none when the request turns thinking off
+(chat_template_kwargs.enable_thinking false).
+
 --fail: exits with an error after the load delay, as vLLM does when the model does not fit.
 --crash-after: exits with code 9 that many seconds after it is ready, as a crashed engine.
 SIGTERM: stops taking requests, lets the running ones end (up to --drain seconds), then exits 0.
@@ -85,6 +92,9 @@ def parse(argv: list[str]) -> argparse.Namespace:
     p.add_argument("--tokenizer", "--tokenizer-path", default=None)
     p.add_argument("--quantization", default=None)
     p.add_argument("--load-format", default=None)
+    p.add_argument("--enable-auto-tool-choice", action="store_true")
+    p.add_argument("--tool-call-parser", default=None)
+    p.add_argument("--reasoning-parser", default=None)
     p.add_argument("--load-delay", type=float, default=float(os.environ.get("FAKE_VLLM_LOAD_DELAY", "0")))
     p.add_argument("--ttft", type=float, default=float(os.environ.get("FAKE_VLLM_TTFT", "0.05")))
     p.add_argument("--tps", type=float, default=float(os.environ.get("FAKE_VLLM_TPS", "200")))
@@ -298,6 +308,17 @@ def handler(s: State):
             if b.get("model") not in (s.name, None):
                 return self.error(404, f"The model `{b.get('model')}` does not exist.")
             prompt = json.dumps(b.get("messages") if chat else b.get("prompt"))
+            tools = b.get("tools") if chat and b.get("tool_choice") != "none" else None
+            # Read as calls only with the engine's parser; vLLM wants its switch beside it.
+            parsed = bool(s.args.tool_call_parser) and (s.args.enable_auto_tool_choice or s.args.sglang or s.args.lmdeploy)
+            if tools and not parsed and not s.args.sglang:
+                return self.error(400, "Please launch the api_server with --tool-call-parser if you want to use tools." if s.args.lmdeploy
+                                  else '"auto" tool choice requires --enable-auto-tool-choice and --tool-call-parser to be set')
+            name = ((tools or [{}])[0].get("function") or {}).get("name") or "tool"
+            call = {"index": 0, "id": "call_fake_0", "type": "function", "function": {"name": name, "arguments": "{}"}} if tools and parsed else None
+            text_call = f'<tool_call>\n{{"name": "{name}", "arguments": {{}}}}\n</tool_call>' if tools and not parsed else None
+            thinking = "Thinking." if chat and s.args.reasoning_parser and (b.get("chat_template_kwargs") or {}).get("enable_thinking") is not False else None
+            field = "reasoning" if not (s.args.sglang or s.args.lmdeploy) else "reasoning_content"
             n = max(1, min(int(b.get("max_tokens") or b.get("max_completion_tokens") or 8), 4096))
             with s.lock:
                 s.running += 1
@@ -319,14 +340,25 @@ def handler(s: State):
                         self.wfile.write(f"{len(data):x}\r\n".encode() + data + b"\r\n")
                         self.wfile.flush()
 
-                    for i in range(n):
+                    def piece_of(delta):
+                        chunk({"id": rid, "object": "chat.completion.chunk", "created": created, "model": s.name,
+                               "choices": [{"index": 0, "delta": delta, "finish_reason": None}]})
+
+                    if thinking:
+                        piece_of({field: thinking})
+                    if call:
+                        piece_of({"tool_calls": [call]})
+                    elif text_call:
+                        piece_of({"content": text_call})
+                    for i in range(0 if call or text_call else n):
                         piece = "tok" if i == 0 else " tok"
                         delta = {"content": piece} if chat else None
                         choice = {"index": 0, "delta": delta, "finish_reason": None} if chat else {"index": 0, "text": piece, "finish_reason": None}
                         chunk({"id": rid, "object": "chat.completion.chunk" if chat else "text_completion", "created": created, "model": s.name, "choices": [choice]})
                         if step:
                             time.sleep(step)
-                    end = {"index": 0, "delta": {}, "finish_reason": "length"} if chat else {"index": 0, "text": "", "finish_reason": "length"}
+                    finish = "tool_calls" if call else "stop" if text_call else "length"
+                    end = {"index": 0, "delta": {}, "finish_reason": finish} if chat else {"index": 0, "text": "", "finish_reason": "length"}
                     chunk({"id": rid, "object": "chat.completion.chunk" if chat else "text_completion", "created": created, "model": s.name, "choices": [end],
                            "usage": {"prompt_tokens": len(prompt) // 4, "completion_tokens": n, "total_tokens": len(prompt) // 4 + n}})
                     chunk("[DONE]")
@@ -336,7 +368,13 @@ def handler(s: State):
                     if step:
                         time.sleep(step * n)
                     text = " ".join(["tok"] * n)
-                    choice = {"index": 0, "message": {"role": "assistant", "content": text}, "finish_reason": "length"} if chat else {"index": 0, "text": text, "finish_reason": "length"}
+                    message = {"role": "assistant", "content": text_call or (None if call else text)}
+                    if call:
+                        message["tool_calls"] = [{k: v for k, v in call.items() if k != "index"}]
+                    if thinking:
+                        message[field] = thinking
+                    finish = "tool_calls" if call else "stop" if text_call else "length"
+                    choice = {"index": 0, "message": message, "finish_reason": finish} if chat else {"index": 0, "text": text, "finish_reason": "length"}
                     self.send(200, json.dumps({"id": rid, "object": "chat.completion" if chat else "text_completion", "created": created, "model": s.name,
                                                "choices": [choice], "usage": {"prompt_tokens": len(prompt) // 4, "completion_tokens": n, "total_tokens": len(prompt) // 4 + n}}))
                 with s.lock:

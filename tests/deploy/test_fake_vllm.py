@@ -186,6 +186,78 @@ class FakeVllmTests(unittest.TestCase):
         self.assertEqual(200, result["answer"][0])
         self.assertEqual(0, proc.wait(timeout=10))
 
+    TOOLS = [{"type": "function", "function": {"name": "find_symbol", "parameters": {"type": "object", "properties": {}}}}]
+
+    def stream(self, base: str, body: dict) -> list[dict]:
+        req = urllib.request.Request(base + "/v1/chat/completions", method="POST", headers={"Content-Type": "application/json"},
+                                     data=json.dumps(body | {"stream": True}).encode())
+        with urllib.request.urlopen(req, timeout=10) as r:
+            events = [line.decode().strip()[6:] for line in r if line.decode().startswith("data: ")]
+        self.assertEqual("[DONE]", events[-1])
+        return [json.loads(e) for e in events[:-1]]
+
+    def test_tools_are_answered_as_tool_calls_only_with_the_engines_tool_call_parser(self):
+        ask = {"model": "org/Model", "max_tokens": 4, "messages": [{"role": "user", "content": "find it"}], "tools": self.TOOLS}
+        # vLLM without --enable-auto-tool-choice and --tool-call-parser: refused, as vLLM refuses it.
+        _, base = self.start("--tool-call-parser", "hermes")
+        self.ready(base)
+        code, body = self.post(base + "/v1/chat/completions", ask)
+        self.assertEqual(400, code)
+        self.assertIn("--enable-auto-tool-choice and --tool-call-parser", json.loads(body)["error"]["message"])
+        # Without tools it answers as ever.
+        self.assertEqual(200, self.post(base + "/v1/chat/completions", {k: v for k, v in ask.items() if k != "tools"})[0])
+
+        _, base = self.start("--enable-auto-tool-choice", "--tool-call-parser", "hermes")
+        self.ready(base)
+        code, body = self.post(base + "/v1/chat/completions", ask)
+        self.assertEqual(200, code)
+        choice = json.loads(body)["choices"][0]
+        self.assertEqual(("tool_calls", "find_symbol"), (choice["finish_reason"], choice["message"]["tool_calls"][0]["function"]["name"]))
+        chunks = self.stream(base, ask)
+        call = next(c["choices"][0]["delta"]["tool_calls"][0] for c in chunks if c["choices"][0]["delta"].get("tool_calls"))
+        self.assertEqual(("find_symbol", "{}"), (call["function"]["name"], call["function"]["arguments"]))
+        self.assertEqual("tool_calls", chunks[-1]["choices"][0]["finish_reason"])
+        # tool_choice "none": words, as vLLM answers it.
+        self.assertNotIn("tool_calls", json.loads(self.post(base + "/v1/chat/completions", ask | {"tool_choice": "none"})[1])["choices"][0]["message"])
+
+        # LMDeploy without --tool-call-parser: its own refusal (as Qwen2.5-1.5B on LMDeploy 0.18 answered on a real run).
+        _, base = self.start("--lmdeploy")
+        self.ready(base)
+        code, body = self.post(base + "/v1/chat/completions", ask)
+        self.assertEqual(400, code)
+        self.assertIn("--tool-call-parser", json.loads(body)["error"]["message"])
+        _, base = self.start("--lmdeploy", "--tool-call-parser", "qwen2d5")
+        self.ready(base)
+        self.assertEqual("tool_calls", json.loads(self.post(base + "/v1/chat/completions", ask)[1])["choices"][0]["finish_reason"])
+
+        # SGLang without one: the call as text in the answer.
+        _, base = self.start("--sglang")
+        self.ready(base)
+        message = json.loads(self.post(base + "/v1/chat/completions", ask)[1])["choices"][0]["message"]
+        self.assertNotIn("tool_calls", message)
+        self.assertIn("<tool_call>", message["content"])
+        _, base = self.start("--sglang", "--tool-call-parser", "qwen")
+        self.ready(base)
+        self.assertEqual("find_symbol", json.loads(self.post(base + "/v1/chat/completions", ask)[1])["choices"][0]["message"]["tool_calls"][0]["function"]["name"])
+
+    def test_thinking_comes_as_reasoning_only_with_the_engines_reasoning_parser(self):
+        ask = {"model": "org/Model", "max_tokens": 3, "messages": [{"role": "user", "content": "hi"}]}
+        _, base = self.start()
+        self.ready(base)
+        self.assertFalse(any(set(c["choices"][0]["delta"]) & {"reasoning", "reasoning_content"} for c in self.stream(base, ask)))
+        # vLLM's field is "reasoning" (vLLM 0.31; the gateway reads it as reasoning_content); SGLang's and LMDeploy's reasoning_content.
+        for flags, field in ((["--reasoning-parser", "qwen3"], "reasoning"), (["--sglang", "--reasoning-parser", "qwen3"], "reasoning_content"),
+                             (["--lmdeploy", "--reasoning-parser", "default"], "reasoning_content")):
+            _, base = self.start(*flags)
+            self.ready(base)
+            chunks = self.stream(base, ask)
+            self.assertEqual("Thinking.", chunks[0]["choices"][0]["delta"][field], flags)
+            self.assertEqual("tok", chunks[1]["choices"][0]["delta"]["content"])
+            self.assertEqual("Thinking.", json.loads(self.post(base + "/v1/chat/completions", ask)[1])["choices"][0]["message"][field])
+            # Thinking off for the request: none.
+            off = ask | {"chat_template_kwargs": {"enable_thinking": False}}
+            self.assertFalse(any(field in c["choices"][0]["delta"] for c in self.stream(base, off)))
+
 
 if __name__ == "__main__":
     unittest.main()
