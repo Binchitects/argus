@@ -863,8 +863,9 @@ a room holds (Settings → Chat → **Most people in a room**, 50).
   the captions. A page that joins late sees the last captions; when the
   last one leaves, they go. Calls, like the room's live events, are held by
   the replica the room's pages reach. Browsers on different networks need a
-  STUN or TURN server: `Rooms:Calls:IceServers` (none by default, for one
-  network); `Rooms:Calls:MostInCall` (8) sets the size.
+  STUN or TURN server: **Settings → Rooms and calls** (`Rooms:Calls:IceServers`,
+  comma separated; none by default, for one network); **People in one call**
+  (`Rooms:Calls:MostInCall`, 8) sets the size.
 
 ## Checklists
 
@@ -991,8 +992,9 @@ minutes. **Make a plan** makes a plan with a step per action item, its owner
 and its due date. **Ask about it** opens a chat with the minutes and the whole
 transcript as a file. A meeting is its owner's only; the speech-to-text model
 must be one they may use, and the recording passes the safeguards like any
-upload. `Meetings:MaxUploadBytes` (60 MB) and `Meetings:MostPerPerson` (500)
-set the limits.
+upload. **Settings → Meetings** sets the limits: the largest recording
+(`Meetings:MaxUploadBytes`, 60 MB) and the meetings one person keeps
+(`Meetings:MostPerPerson`, 500).
 
 ## Code review
 

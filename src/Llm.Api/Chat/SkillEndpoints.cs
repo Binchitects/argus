@@ -51,16 +51,16 @@ public static partial class SkillEndpoints
         /// <summary>Whether they may use it: their own, their groups', the company's, or a plugin's whose tool they may use.</summary>
         public bool Sees(Skill p) => p switch
         {
-            // A built-in one turned off: only admins see it (to turn it on again).
-            { BuiltIn: true, Off: true } => Member.IsAdmin,
+            // A built-in one turned off: only who looks after the company's skills sees it (to turn it on again).
+            { BuiltIn: true, Off: true } => Member.Has(Core.Access.Permissions.SkillsCompany),
             { ServerId: { } server } => Tools.GetValueOrDefault(McpServerTool.Prefix + server) is not { } t || (t.Enabled && Member.MayUse(Core.Access.ResourceKinds.Tool, t.ToolId)),
             { UserId: { } owner } when owner == Me.Id => true,
-            { Sharing: SkillSharing.Groups } => p.Groups.Any(Member.Groups.Contains),
-            { Sharing: SkillSharing.Company, UserId: null } => true,
+            { Sharing: SkillSharing.Groups } => p.Groups.Any(Member.Groups.Contains) && Member.MayUse(Core.Access.ResourceKinds.Skill, p.Id.ToString()),
+            { Sharing: SkillSharing.Company, UserId: null } => Member.MayUse(Core.Access.ResourceKinds.Skill, p.Id.ToString()),
             _ => false,
         };
 
-        public bool Edits(Skill p) => p.ServerId is null && !p.BuiltIn && (p.UserId == Me.Id || (p.UserId is null && Member.IsAdmin));
+        public bool Edits(Skill p) => p.ServerId is null && !p.BuiltIn && (p.UserId == Me.Id || (p.UserId is null && Member.Has(Core.Access.Permissions.SkillsCompany)));
     }
 
     private static async Task<Viewer> ViewerAsync(ClaimsPrincipal p, UserManager<AppUser> users, AccessService access, AppDbContext db, CancellationToken ct) =>
@@ -92,7 +92,7 @@ public static partial class SkillEndpoints
         var seen = (await db.Skills.AsNoTracking().Where(x => x.UserId == me || x.UserId == null || x.Sharing == SkillSharing.Groups).ToListAsync(ct))
             .Where(who.Sees).ToList();
         var groupIds = seen.SelectMany(x => x.Groups).Concat(who.Member.Groups).ToHashSet();
-        var groups = await db.Groups.AsNoTracking().Where(g => groupIds.Contains(g.Id) || who.Member.IsAdmin).OrderBy(g => g.Name).Select(g => new { g.Id, g.Name }).ToListAsync(ct);
+        var groups = await db.Groups.AsNoTracking().Where(g => groupIds.Contains(g.Id) || who.Member.Has(Core.Access.Permissions.SharingGroups)).OrderBy(g => g.Name).Select(g => new { g.Id, g.Name }).ToListAsync(ct);
         var serverIds = seen.Select(x => x.ServerId).OfType<Guid>().ToHashSet();
         var plugins = await db.McpServers.AsNoTracking().Where(s => serverIds.Contains(s.Id)).ToDictionaryAsync(s => s.Id, s => s.Name, ct);
         var ownerIds = seen.Where(x => x.UserId is { } o && o != me).Select(x => x.UserId!.Value).ToHashSet();
@@ -101,10 +101,13 @@ public static partial class SkillEndpoints
         var changes = await db.SkillChanges.AsNoTracking().Where(c => c.UserId == me).OrderByDescending(c => c.Proposed).ThenByDescending(c => c.At).Take(200).ToListAsync(ct);
         return Results.Ok(new
         {
-            isAdmin = who.Member.IsAdmin,
+            // What they may do beyond their own: share with the company, with groups (and which), Arena's own skills.
+            mayShareCompany = who.Member.Has(Core.Access.Permissions.SharingCompany),
+            mayShareGroups = who.Member.Has(Core.Access.Permissions.SkillsShare),
+            mayTurnBuiltIn = who.Member.Has(Core.Access.Permissions.SkillsCompany),
             changes = changes.Select(SkillLearning.View),
-            // The groups they may share with: their own; an admin, any.
-            groups = groups.Where(g => who.Member.IsAdmin || who.Member.Groups.Contains(g.Id)),
+            // The groups they may share with: their own; with sharing.groups, any.
+            groups = groups.Where(g => who.Member.Has(Core.Access.Permissions.SharingGroups) || who.Member.Groups.Contains(g.Id)),
             skills = seen.OrderBy(x => x.Name, StringComparer.Ordinal).ThenBy(x => Rank(x, me)).Select(x => new
             {
                 x.Id, x.Name, x.Title, x.Description, x.Instructions, parameters = SkillLibrary.ParametersOf(x), x.AutoUse, x.Sharing, x.Off,
@@ -223,9 +226,9 @@ public static partial class SkillEndpoints
         {
             return Results.NotFound();
         }
-        if (!who.Member.IsAdmin)
+        if (!who.Member.Has(Core.Access.Permissions.SkillsCompany))
         {
-            return AuthEndpoints.Problem(403, "admin", "Only an admin turns Arena's own skills off or on.");
+            return AuthEndpoints.Problem(403, "admin", "Turning Arena's own skills off or on needs sharing.skills (Admin → Access).");
         }
         (skill.Off, skill.UpdatedAt) = (body.Off, DateTimeOffset.UtcNow);
         await db.SaveChangesAsync(ct);
@@ -269,9 +272,13 @@ public static partial class SkillEndpoints
         {
             return AuthEndpoints.Problem(400, "files", badFiles);
         }
-        if (sharing == SkillSharing.Company && !who.Member.IsAdmin)
+        if (sharing == SkillSharing.Company && skill.Sharing != SkillSharing.Company && !who.Member.Has(Core.Access.Permissions.SharingCompany))
         {
-            return AuthEndpoints.Problem(403, "sharing", "Only admins share skills with the whole company.");
+            return AuthEndpoints.Problem(403, "sharing", "Sharing a skill with the whole company needs sharing.company (Admin → Access).");
+        }
+        if (sharing == SkillSharing.Groups && skill.Sharing != SkillSharing.Groups && !who.Member.Has(Core.Access.Permissions.SkillsShare))
+        {
+            return AuthEndpoints.Problem(403, "sharing", "Sharing skills with groups needs feature.skills.share.");
         }
         if (sharing == SkillSharing.Groups)
         {
@@ -280,7 +287,7 @@ public static partial class SkillEndpoints
                 return AuthEndpoints.Problem(400, "groups", "Choose the groups to share it with.");
             }
             var known = await db.Groups.Where(g => groups.Contains(g.Id)).Select(g => g.Id).ToListAsync(ct);
-            if (known.Count != groups.Count || (!who.Member.IsAdmin && !groups.All(who.Member.Groups.Contains)))
+            if (known.Count != groups.Count || (!who.Member.Has(Core.Access.Permissions.SharingGroups) && !groups.All(who.Member.Groups.Contains)))
             {
                 return AuthEndpoints.Problem(400, "groups", "You can share it only with groups you are in.");
             }

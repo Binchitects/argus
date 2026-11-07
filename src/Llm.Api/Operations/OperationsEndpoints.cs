@@ -51,7 +51,8 @@ public static class OperationsEndpoints
         g.MapGet("/overview", OverviewAsync);
         g.MapGet("/services", async (IHttpClientFactory f, IOptions<StackOptions> s, IOptions<ArgusOptions> a, IOptions<Dashboards.DashboardOptions> d, Features features,
             Models.MediaControl media, CancellationToken ct) => Results.Ok(await ProbeAllAsync(f, s.Value, a.Value, d.Value, features, media, ct)));
-        g.MapGet("/people.csv", PeopleCsvAsync);
+        // People, their emails and spend: people.read's, not monitoring's.
+        g.MapGet("/people.csv", PeopleCsvAsync).RequirePermission(Llm.Core.Access.Permissions.PeopleRead);
 
         var argus = g.MapGroup("/argus").RequirePermissions(Llm.Core.Access.Permissions.ArgusRead, Llm.Core.Access.Permissions.ArgusManage, new Dictionary<string, string>
         {

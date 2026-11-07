@@ -12,7 +12,9 @@ const skill = (over: Partial<SkillItem>): SkillItem => ({
 })
 
 const library = (): SkillLibrary => ({
-  isAdmin: false,
+  mayShareCompany: false,
+  mayShareGroups: false,
+  mayTurnBuiltIn: false,
   groups: [],
   skills: [
     skill({ id: 's1', name: 'review-mr', title: 'My review' }),

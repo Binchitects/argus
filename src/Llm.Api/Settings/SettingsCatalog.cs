@@ -32,6 +32,12 @@ public static class SettingsCatalog
     private const string Api = "API keys";
     private const string Network = "Network access";
     private const string BotsGroup = "Chat bots";
+    private const string SecurityGroup = "Security alerts";
+    private const string RoomsGroup = "Rooms and calls";
+    private const string MeetingsGroup = "Meetings";
+    private const string StudioGroup = "Code Studio";
+    private const string LabGroup = "Science lab and 3D";
+    private const string DashboardsGroup = "Dashboards";
     private const string Oidc = "CompanySignIn:Protocol=oidc";
     private const string Saml = "CompanySignIn:Protocol=saml";
 
@@ -418,6 +424,108 @@ public static class SettingsCatalog
         new("Chat:GitlabLinkUrl", Argus, "GitLab address for links", "Where people's browsers open GitLab, for the files and lines in Argus's answers. Empty: the GitLab address above. Set it when Argus reaches GitLab by an internal name.", SettingType.Url, SettingScope.Live)
             { Pattern = @"https?://\S+", PatternHelp = "http(s)://…" },
 
+        // ------------------------------------------- what was set only by configuration before --
+        new("Auth:SessionRecheck", SignIn, "Check sessions against the account every", "How often a signed-in session is checked again: an account disabled, a password reset or a role taken away ends or changes it at the next check.", SettingType.Duration, SettingScope.AppRestart)
+            { Default = "00:01:00", Unit = "minutes", Min = 1, Max = 60, Optional = false },
+        new("Auth:SignInsPerMinute", SignIn, "Sign-ins a minute from one address", "A flood guard only: guessing is stopped per account by the lockout above. An office behind one address signing in at nine needs room (300 people within a minute were refused at 120).", SettingType.WholeNumber, SettingScope.AppRestart)
+            { Default = "600", Min = 10, Max = 100_000, Optional = false },
+        new("Oidc:AccessTokenLifetime", SignIn, "Tokens of the apps that sign in here last", "The access and identity tokens Arena gives the other apps that sign in with it (Grafana-like tools, the gateway's own clients).", SettingType.Duration, SettingScope.AppRestart)
+            { Default = "01:00:00", Unit = "minutes", Min = 5, Max = 1440, Optional = false },
+        new("Oidc:RefreshTokenLifetime", SignIn, "Their refresh tokens last", "How long such an app stays signed in without the person signing in again.", SettingType.Duration, SettingScope.AppRestart)
+            { Default = "12:00:00", Unit = "hours", Min = 1, Max = 720, Optional = false },
+
+        new("Ldap:UserNameAttributes", Directory, "Username attributes", "Tried in order, comma separated; the first a person's entry has is their username here (it must equal their GitLab username). OpenLDAP: uid. Active Directory: sAMAccountName, or userPrincipalName.", SettingType.Text, SettingScope.Live)
+            { Default = "uid,sAMAccountName", Optional = false, Max = 200 },
+        new("Ldap:EmailAttribute", Directory, "Email attribute", "The attribute with the person's email address: mail on both.", SettingType.Text, SettingScope.Live)
+            { Default = "mail", Optional = false, Max = 100 },
+        new("Ldap:DisplayNameAttributes", Directory, "Display name attributes", "Tried in order, comma separated, for the name shown: displayName, then cn.", SettingType.Text, SettingScope.Live)
+            { Default = "displayName,cn", Optional = false, Max = 200 },
+        new("Ldap:GroupFilter", Directory, "Which entries are groups", "The search for a person's groups under \"Where groups are\"; {0} is the person's DN. The default finds groupOfNames, groupOfUniqueNames and Active Directory groups.", SettingType.Text, SettingScope.Live)
+            { Default = "(&(|(objectClass=groupOfNames)(objectClass=groupOfUniqueNames)(objectClass=group))(|(member={0})(uniqueMember={0})))", Optional = false, Max = 1000, Pattern = @"\(.*\{0\}.*\)", PatternHelp = "a filter in brackets, with {0} for the person's DN" },
+
+        new("Audit:VerifyEvery", AuditGroup, "Check the whole chain every", "How often every entry of the audit log is checked against the one before it and, when the chain holds, anchored outside the database.", SettingType.Duration, SettingScope.Live)
+            { Default = "1.00:00:00", Unit = "hours", Min = 1, Max = 168, Optional = false },
+        new("Compliance:ReviewDueDays", ComplianceGroup, "An access review is due after", "Days from the start of an access review to its due date.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "14", Unit = "days", Min = 1, Max = 365, Optional = false },
+        new("Security:FailedSignIns", SecurityGroup, "Failed sign-ins that raise an alert", "Failed sign-ins in ten minutes, all accounts together, after which the admins hear of it (Admin → Security).", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "20", Min = 2, Max = 100_000, Optional = false },
+        new("Security:FailedSignInsOneAccount", SecurityGroup, "Failed sign-ins for one account", "Failed sign-ins in ten minutes for one account that raise an alert.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "10", Min = 2, Max = 10_000, Optional = false },
+        new("Security:Exports", SecurityGroup, "Exports an hour by one person", "Exports of a person's data or of the compliance evidence by one admin in an hour that raise an alert.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "3", Min = 1, Max = 1000, Optional = false },
+
+        new("Sandbox:MaxOutputChars", Tools, "Python's output the model reads", "Of each of a run's output and errors: the rest is cut, and the model told so.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "20000", Unit = "characters", Min = 1000, Max = 1_000_000, Optional = false },
+        new("Web:MaxPageChars", Tools, "Of a page, one read returns", "What the Web tool reads of one page at a time; the model asks for the next part when it needs it.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "20000", Unit = "characters", Min = 1000, Max = 1_000_000, Optional = false },
+        new("Browser:IdleMinutes", Tools, "Close a chat's browser after", "A browser the chat opened (the browser feature) is closed after this long unused.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "15", Unit = "minutes", Min = 1, Max = 1440, Optional = false },
+        new("Browser:MostSessions", Tools, "Browsers open at once", "The most chats with a browser open at once; the one unused longest is closed for a new one.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "6", Min = 1, Max = 100, Optional = false },
+
+        new("Lean:TimeoutSeconds", LabGroup, "Longest proof check", "How long one Lean check may take (loading Mathlib alone takes seconds).", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "180", Unit = "seconds", Min = 10, Max = 3600, Optional = false },
+        new("Blender:TimeoutSeconds", LabGroup, "Longest 3D run", "How long one Blender run may take (a render on the CPU is slow).", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "240", Unit = "seconds", Min = 10, Max = 3600, Optional = false },
+        new("Laya:TimeoutSeconds", LabGroup, "The decision model waits up to", "Longest one call to the decision model (the laya feature) may take: a forward pass is milliseconds, but calls wait their turn.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "30", Unit = "seconds", Min = 1, Max = 600, Optional = false },
+        new("Blender:MaxOutputChars", LabGroup, "Blender's output the model reads", "Of each of a run's output and errors.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "12000", Unit = "characters", Min = 1000, Max = 1_000_000, Optional = false },
+
+        new("Rooms:Calls:IceServers", RoomsGroup, "STUN or TURN servers", "When people's browsers are not on one network: STUN or TURN servers, comma separated (stun:stun.example.com:3478). Empty: the browsers reach one another directly.", SettingType.Text, SettingScope.Live)
+            { Max = 2000, Pattern = @"((stuns?|turns?):[^\s,]+)(\s*,\s*(stuns?|turns?):[^\s,]+)*", PatternHelp = "stun:host:port or turn:host:port, comma separated" },
+        new("Rooms:Calls:MostInCall", RoomsGroup, "People in one call", "The most people in a room's call at once.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "8", Min = 2, Max = 50, Optional = false, Impact = "Each person sends to every other: past eight, people on slow links drop out." },
+        new("Rooms:Calls:CaptionsKept", RoomsGroup, "Captions kept for late joiners", "The latest captions a room keeps in memory for someone who joins the call late.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "200", Min = 1, Max = 10_000, Optional = false },
+        new("Meetings:MaxUploadBytes", MeetingsGroup, "Largest recording", "One meeting's recording, uploaded or recorded.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "62914560", Unit = "bytes", Min = 1_048_576, Max = 4_294_967_296, Optional = false },
+        new("Meetings:MostPerPerson", MeetingsGroup, "Meetings one person keeps", "Past it, they delete one before adding another.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "500", Min = 1, Max = 100_000, Optional = false },
+
+        new("Workspaces:Idle", StudioGroup, "A workspace sleeps after", "A Code Studio workspace unused this long sleeps: its engine stops, its files stay.", SettingType.Duration, SettingScope.Live)
+            { Default = "00:30:00", Unit = "minutes", Min = 5, Max = 10_080, Optional = false },
+        new("Workspaces:MostPerPerson", StudioGroup, "Workspaces one person keeps", "On the server.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "8", Min = 1, Max = 100, Optional = false },
+        new("Workspaces:MostMachines", StudioGroup, "Machines one person connects", "Their own machines with Code Arena (each folder one).", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "8", Min = 1, Max = 100, Optional = false },
+
+        new("Push:PerPerson", NotificationsGroup, "Devices one person gets news on", "Browsers and phones that show the bell's news as notifications.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "20", Min = 1, Max = 200, Optional = false },
+        new("Push:Hosts", NotificationsGroup, "Push services", "The browsers' own push services the app posts to, comma separated; *.example.com for a domain and its subdomains. Airgapped: none reaches out, and people see the news in the bell.", SettingType.Text, SettingScope.Live)
+            { Default = "fcm.googleapis.com, *.push.services.mozilla.com, *.push.apple.com, *.notify.windows.com", Max = 2000 },
+
+        new("Knowledge:OcrLanguages", Knowledge, "Languages read in scans", "The languages OCR reads pictures and scanned pages in, Tesseract's names joined with + (eng+deu): those the sandbox has.", SettingType.Text, SettingScope.Live)
+            { Default = "eng+fas+ara", Optional = false, Max = 200, Pattern = @"[a-z_]{3,}(\+[a-z_]{3,})*", PatternHelp = "Tesseract names joined with +, e.g. eng+deu" },
+        new("Knowledge:IndexWait", Knowledge, "An answer waits for its files' passages", "Longest an answer waits for attached files to be read into passages; those not ready go in whole.", SettingType.Duration, SettingScope.Live)
+            { Default = "00:00:15", Unit = "seconds", Min = 1, Max = 600, Optional = false },
+        new("Retention:Interval", Retention, "Look for what is past its time every", "How often the clean-up looks for chats, files and logs past the times above.", SettingType.Duration, SettingScope.Live)
+            { Default = "01:00:00", Unit = "minutes", Min = 5, Max = 1440, Optional = false },
+
+        new("Gateway:ConnectWaitSeconds", Model, "Wait for the gateway, at most", "How long a chat's request waits for a gateway it cannot reach (restarting after an upgrade takes it 10 to 20 seconds), trying again meanwhile.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "30", Unit = "seconds", Min = 0, Max = 600, Optional = false },
+        new("Gateway:KeyWaitSeconds", Model, "Wait for the chat's key, at most", "How long a new installation's first chat waits for the gateway to make the chat's key (its first start sets up its database first).", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "90", Unit = "seconds", Min = 0, Max = 600, Optional = false },
+        new("Engine:Threads", Model, "CPU threads for the models", "Of llama.cpp's models. Empty: llama.cpp's own choice.", SettingType.WholeNumber, SettingScope.AppRestart)
+            { Min = 1, Max = 1024, Impact = "Applies as the models are next loaded." },
+        new("Engine:RamReserveBytes", Model, "RAM kept for all but the engine", "What the model planner leaves of the host's memory to the rest of the stack.", SettingType.WholeNumber, SettingScope.AppRestart)
+            { Default = "8589934592", Unit = "bytes", Min = 0, Max = 1_099_511_627_776, Optional = false },
+        new("Engine:ImageReserveBytes", Model, "GPU memory for the picture server", "What the picture server may take beside the engine on its GPU.", SettingType.WholeNumber, SettingScope.AppRestart)
+            { Default = "2147483648", Unit = "bytes", Min = 0, Max = 274_877_906_944, Optional = false },
+        new("Engine:EmbedReserveBytes", Model, "GPU memory for the embedder", "What the embedder keeps on its GPU when it runs on one.", SettingType.WholeNumber, SettingScope.AppRestart)
+            { Default = "1073741824", Unit = "bytes", Min = 0, Max = 274_877_906_944, Optional = false },
+        new("Engine:VllmStartWait", Model, "Wait for a vLLM model to load", "How long a request, or a model's move, waits for a vLLM or SGLang model it started (a large one loads in minutes).", SettingType.Duration, SettingScope.AppRestart)
+            { Default = "00:20:00", Unit = "minutes", Min = 1, Max = 240, Optional = false },
+        new("Credit:Refresh", PricesGroup, "Read spend again after", "How long the month's spend, once read, serves the credit checks (each read scans the month's requests).", SettingType.Duration, SettingScope.Live)
+            { Default = "00:00:30", Unit = "seconds", Min = 1, Max = 3600, Optional = false },
+
+        new("Dashboards:MaxRows", DashboardsGroup, "Rows a table panel reads", "The most rows a dashboard's table or a SQL panel reads.", SettingType.WholeNumber, SettingScope.AppRestart)
+            { Default = "5000", Min = 100, Max = 1_000_000, Optional = false },
+        new("Dashboards:MaxLogLines", DashboardsGroup, "Log lines a panel shows", "The most log lines a logs panel shows.", SettingType.WholeNumber, SettingScope.AppRestart)
+            { Default = "1000", Min = 100, Max = 100_000, Optional = false },
+        new("Dashboards:StatementTimeout", DashboardsGroup, "A panel's query may take", "Longest one SQL query of a panel may run.", SettingType.Duration, SettingScope.AppRestart)
+            { Default = "00:00:15", Unit = "seconds", Min = 1, Max = 600, Optional = false },
+
 
 
 
@@ -439,7 +547,9 @@ public static class SettingsCatalog
         Argus => Permissions.SettingsArgus,
         Tools or PluginsGroup or ArenaMcp => Permissions.SettingsTools,
         Schedules or Mail or NotificationsGroup or BotsGroup => Permissions.SettingsIntegrations,
-        Safeguards => Permissions.SettingsSafeguards,
+        Safeguards or SecurityGroup => Permissions.SettingsSafeguards,
+        RoomsGroup or MeetingsGroup => Permissions.SettingsChat,
+        StudioGroup or LabGroup => Permissions.SettingsTools,
         Knowledge or Retention or StorageGroup => Permissions.SettingsData,
         Api => Permissions.SettingsGateway,
         _ => Permissions.SettingsManage,

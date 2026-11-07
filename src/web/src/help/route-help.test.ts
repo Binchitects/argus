@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import type { RouteObject } from 'react-router'
 import { describe, expect, it } from 'vitest'
 import { routes } from '@/app/routes'
-import { slug as settingsSlug } from '@/pages/admin/settings-model'
+import { installationTitle, slug as settingsSlug } from '@/pages/admin/settings-model'
 import { canRead, manualDocs, parseDoc } from './manual'
 import { pagesMarkdown, pagesOrder, topicAnchor } from './pages-doc'
 import { helpFor, routeHelp } from './route-help'
@@ -53,7 +53,8 @@ describe('help for every page', () => {
 
   it('has help for every group of Settings, by its anchor', () => {
     const catalog = readFileSync(resolve(process.cwd(), '../Llm.Api/Settings/SettingsCatalog.cs'), 'utf8')
-    const groups = [...catalog.matchAll(/private const string \w+ = "([^"]+)";/g)].map((m) => m[1]).filter((g) => !/[:=]/.test(g))
+    // The catalog's groups, and the installation's settings listed after them.
+    const groups = [...[...catalog.matchAll(/private const string \w+ = "([^"]+)";/g)].map((m) => m[1]).filter((g) => !/[:=]/.test(g)), installationTitle]
     expect(groups).toContain('Company directory (LDAP)')
     const sections = Object.keys(topics.settings.sections)
     expect(groups.map(settingsSlug).filter((s) => !sections.includes(s))).toEqual([])

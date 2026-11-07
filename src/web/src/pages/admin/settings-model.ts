@@ -28,12 +28,31 @@ export interface SettingView {
   lines?: number | null
 }
 
+/** One setting of the installation's .env, read here only: its value when the app sees one, and the command that changes it. */
+export interface InstallSettingView {
+  env: string
+  group: string
+  kind: string
+  default: string | null
+  what: string
+  command: string
+  value: string | null
+  isSet: boolean
+  secret: boolean
+}
+
+export const installationTitle = 'Set by the installation'
+
+/** Whether an installation setting matches a search: its .env name, what it does, its group. */
+export const installMatches = (s: InstallSettingView, q: string) => `${s.env} ${s.what} ${s.group}`.toLowerCase().includes(q)
+
 export interface SettingsData {
   groups: { title: string; settings: SettingView[] }[]
   restartNeeded: boolean
+  installation?: InstallSettingView[]
 }
 
-const unitSeconds: Record<string, number> = { minutes: 60, hours: 3600, days: 86400 }
+const unitSeconds: Record<string, number> = { seconds: 1, minutes: 60, hours: 3600, days: 86400 }
 
 /** .NET TimeSpan "c" format ([d.]hh:mm:ss[.fffffff]) to seconds. */
 export function timeSpanSeconds(v: string | null | undefined): number | null {

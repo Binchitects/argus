@@ -120,6 +120,22 @@ The username must equal the person's GitLab username: Argus uses it to answer
 with their own repository access, in the chat and for coding agents with their
 API key.
 
+### Default groups for new people
+
+**Admin → Access → Groups** marks the app groups new people join: tick
+**New people join** on one or several and **Save**. A person joins them once,
+when their account is first made, whichever way it is made: an admin adds
+them, they first sign in from the directory (LDAP or Active Directory) or
+with company sign-in (OIDC or SAML), or SCIM creates them. They join before
+their API key is made, so the key carries the models their groups may use.
+Someone taken out of a default group stays out: signing in again does not
+put them back. A directory or SCIM group cannot be one (the directory or the
+identity provider decides its members); give its people a role through the
+group instead. Each join is in the audit log (`group.add_member`, "a default
+group for new people"), and each change of the defaults in Access →
+**History** (`defaults`). It needs `access.defaults`, a part of
+`access.manage`.
+
 ---
 
 ## The company directory (LDAP / Active Directory)
@@ -508,7 +524,7 @@ set by hand is changed by hand.
 | Guessing one account | 5 failures for one name from one address in 10 minutes ban that pair for 12 hours; colleagues behind the same NAT are unaffected |
 | Password spraying | 50 failures from one address in 10 minutes ban the address for 1 hour |
 | Guessing from many addresses | 10 failures on an account lock it for 15 minutes, counted atomically so parallel guesses cannot slip past |
-| Floods | 600 sign-in requests per minute per address (`Auth__SignInsPerMinute`: an office of 300 behind one address signs in within a minute), the directory's test and try included |
+| Floods | 600 sign-in requests per minute per address (Settings → Sign-in and sessions → **Sign-ins a minute from one address**, `Auth:SignInsPerMinute`: an office of 300 behind one address signs in within a minute), the directory's test and try included |
 | Guessing through the directory's checks | a password typed in **Test the settings** for another service account, or in **Try a person's sign-in**, counts as a sign-in does |
 | Sessions | 1 hour idle, 12 hours absolute (no action extends that), 30 days with "keep me signed in"; re-checked against the account every minute |
 | Two-factor sign-in | an authenticator app's code with the password, and ten recovery codes. **Settings → Sign-in → Require two-factor sign-in**: off, admins (anyone holding an administrative permission) or everyone; a group can require it of its members (Admin → Groups → Policies). Who has none is signed in only to set it up (and to accept the sign-in notice first, when one is due), and the API answers nothing else (`403 enrol_2fa`) until they have; while it is required it cannot be turned off, only reset by an admin (set up again at the next sign-in). Company sign-in uses the provider's own second factor: when one is required of the person, the provider must say it was used (an `amr` or `acr` value in the identity token, or the SAML assertion's `AuthnContextClassRef`, from **Settings → Company sign-in → What counts as a second factor**), or the sign-in is refused and audited with what the provider said; API keys are not affected |

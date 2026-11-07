@@ -29,7 +29,9 @@ const conversation: Conversation = {
 }
 
 const library: SkillLibrary = {
-  isAdmin: false,
+  mayShareCompany: false,
+  mayShareGroups: true,
+  mayTurnBuiltIn: false,
   groups: [],
   skills: [{ id: 'p', name: 'review', title: 'Review code', description: '', instructions: 'Review it.', parameters: [], autoUse: true, sharing: 'Personal', groups: [], source: 'mine', from: null, canEdit: true, updatedAt: '' }],
 }

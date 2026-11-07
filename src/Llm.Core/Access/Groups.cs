@@ -28,6 +28,9 @@ public sealed class Group
     /// <summary>Members sign in with a second factor: who has none sets one up at their next sign-in.</summary>
     public bool RequireTwoFactor { get; set; }
 
+    /// <summary>A new person joins it as they first sign in (local, directory, company sign-in, SCIM). App groups only: the directory or the provider decides the others.</summary>
+    public bool JoinsNewPeople { get; set; }
+
     /// <summary>What the group may spend in a calendar month on the chat's answers; null: no group limit of that kind (Credits).</summary>
     public decimal? ChatCredit { get; set; }
     /// <summary>... on its members' API keys' text requests.</summary>

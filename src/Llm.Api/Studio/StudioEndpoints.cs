@@ -167,7 +167,7 @@ public static class StudioEndpoints
                 return AuthEndpoints.Problem(400, "groups", "A group of those is not here.");
             }
             var mine = (await access.MembershipAsync(me, ct)).Groups;
-            if (!await access.MayAsync(me, Core.Access.Permissions.AssistantsShare, ct) && known.Any(g => !mine.Contains(g)))
+            if (!await access.MayAsync(me, Core.Access.Permissions.SharingGroups, ct) && known.Any(g => !mine.Contains(g)))
             {
                 return AuthEndpoints.Problem(403, "groups", "Share it with groups you are in.");
             }

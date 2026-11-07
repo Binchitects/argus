@@ -16,8 +16,8 @@ public sealed class RoomCallOptions
 {
     public int MostInCall { get; set; } = 8;
 
-    /// <summary>STUN or TURN servers ("stun:stun.example.com:3478"), when the browsers are not on one network. None: they reach one another directly.</summary>
-    public List<string> IceServers { get; set; } = [];
+    /// <summary>STUN or TURN servers ("stun:stun.example.com:3478"), comma separated (Settings → Rooms and calls), when the browsers are not on one network. Empty: they reach one another directly.</summary>
+    public string? IceServers { get; set; }
 
     /// <summary>Captions a room keeps (in memory) for a page that joins the call late.</summary>
     public int CaptionsKept { get; set; } = 200;
@@ -79,7 +79,7 @@ public static class RoomCalls
 
     public static void MapRoomCalls(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/rooms/{id:guid}/call").PersonOnly();
+        var g = app.MapGroup("/api/rooms/{id:guid}/call").PersonOnly().RequirePermission(Llm.Core.Access.Permissions.Calls);
         g.MapPost("", JoinAsync);
         g.MapDelete("", LeaveAsync);
         g.MapPost("/signal", SignalAsync);
@@ -116,7 +116,7 @@ public static class RoomCalls
         return Results.Ok(new
         {
             seats = Seats(hub, id),
-            iceServers = o.IceServers.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => new { urls = s.Trim() }),
+            iceServers = (o.IceServers ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(s => new { urls = s }),
             captions = captions.Recent(id, CaptionsOnJoin).Select(c => c.Json()),
         });
     }

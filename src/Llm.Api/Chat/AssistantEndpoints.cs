@@ -88,7 +88,7 @@ public static class AssistantEndpoints
             myChats = db.Conversations.Count(c => c.AssistantId == a.Id && c.UserId == me.Id),
             files = db.AssistantFiles.Count(f => f.AssistantId == a.Id),
         }).ToListAsync(ct);
-        return Results.Ok(rows.Select(x => new
+        return Results.Ok(rows.Where(x => Assistants.MayUse(x.a, me.Id, m)).Select(x => new
         {
             x.a.Id, x.a.Name, x.a.Description, x.a.Icon, x.a.Color, x.a.Reach, x.owner, mine = x.a.UserId == me.Id, canEdit = Assistants.MayEdit(x.a, me.Id, m),
             chats = x.a.ChatsStarted, x.people, x.myChats, x.files, x.a.UpdatedAt,
@@ -322,9 +322,9 @@ public static class AssistantEndpoints
         {
             return AuthEndpoints.Problem(403, "not_owner", "Only its owner shares this assistant (and admins, once it is company-wide).");
         }
-        if (body.Reach == Reach.Company && !m.IsAdmin)
+        if (body.Reach == Reach.Company && !m.Has(Llm.Core.Access.Permissions.SharingCompany))
         {
-            return AuthEndpoints.Problem(403, "company", "Only admins share an assistant with the whole company.");
+            return AuthEndpoints.Problem(403, "company", "Sharing an assistant with the whole company needs sharing.company (Admin → Access).");
         }
         List<Guid> groups = body.Reach == Reach.Groups ? [.. (body.Groups ?? []).Distinct()] : [];
         if (body.Reach == Reach.Groups && groups.Count == 0)
@@ -338,8 +338,8 @@ public static class AssistantEndpoints
         {
             return AuthEndpoints.Problem(400, "groups", "A group in the list does not exist.");
         }
-        // Groups it has already stay; a new one is one of the person's own (any, for an admin).
-        if (!m.IsAdmin && all.Any(g => !m.Groups.Contains(g) && !a.Groups.Contains(g) && !a.EditorGroups.Contains(g)))
+        // Groups it has already stay; a new one is one of the person's own (any, with sharing.groups).
+        if (!m.Has(Llm.Core.Access.Permissions.SharingGroups) && all.Any(g => !m.Groups.Contains(g) && !a.Groups.Contains(g) && !a.EditorGroups.Contains(g)))
         {
             return AuthEndpoints.Problem(403, "groups", "You can share with groups you are in.");
         }

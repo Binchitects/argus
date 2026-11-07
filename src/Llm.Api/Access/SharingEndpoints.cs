@@ -25,7 +25,7 @@ public static class SharingEndpoints
         var m = await access.MembershipAsync(me, ct);
         var mine = m.Groups.ToList();
         var query = db.Groups.AsNoTracking();
-        if (!m.IsAdmin)
+        if (!m.Has(Llm.Core.Access.Permissions.SharingGroups))
         {
             query = query.Where(g => mine.Contains(g.Id));
         }

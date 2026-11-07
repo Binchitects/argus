@@ -183,13 +183,53 @@ what is left of the minute, so keep the limit well above the largest request.
 How they are counted, and what people and admins see of them:
 [admin.md](admin.md#rate-limits-for-api-keys).
 
+## Everything has a place here
+
+Every option the app reads has a place on this page, in one of three ways:
+
+- **A setting of the app**, in its group: changed here, at once or after the
+  app restarts itself. What was set only by configuration before is here too:
+  the session checks, the sign-in flood guard and the tokens of the apps that
+  sign in with Arena (Sign-in and sessions); the directory's username, email,
+  display name attributes and group search (Company directory); how often the
+  audit chain is checked (Audit log); when an access review is due
+  (Compliance); the failed sign-ins and exports that raise an alert
+  (**Security alerts**); Python's and the web's output, and the chat's
+  browsers (Python and web); the lab's, 3D's and the decision model's limits
+  (**Science lab and 3D**); STUN and TURN servers, the size of a call and the
+  captions kept (**Rooms and calls**); the largest recording and meetings
+  kept (**Meetings**); when a workspace sleeps and how many one person keeps
+  (**Code Studio**); push services and devices (Notifications); the languages
+  read in scans and how long an answer waits for its files (Company
+  knowledge); the clean-up's round (Data retention); the waits for the
+  gateway and a vLLM model, the engine's threads and the memory kept for the
+  rest (Model); how long spend is reused (Prices); and the dashboards' rows,
+  log lines and query time (**Dashboards**).
+- **Set by the installation**, the last entry of the list: every setting of
+  `.env` that the installer asks ([`deploy/settings`](../deploy/settings)),
+  the features, and the secrets the installer made, each with its value where
+  the app sees one (a secret only as set or not) and the one command that
+  changes it on the host, with a button to copy it: `arenactl config --set
+  KEY=VALUE` (`--set KEY=@FILE` for a secret, read from a file, never typed
+  on the command line), or `arenactl repair --with FEATURE` for the features.
+  The command starts again the services they touch and waits until each is
+  healthy. Search finds them too.
+- **The stack's own wiring**: where its services, volumes and files are inside
+  its containers (`Engine:Url`, `Knowledge:EmbedUrl`, `Sandbox:Dir`, …). These
+  are no settings: a change breaks the stack, so they are not shown; the
+  installation's settings move what needs moving (an external database,
+  GitLab).
+
+A test keeps it so: each option the app binds, and each configuration key
+these pages name, is a setting here, an installation setting, or wiring.
+
 ## What cannot be changed here, and why
 
 | Setting | Why not |
 |---|---|
-| The secrets in `.env` (`APP_KEY`, `GATEWAY_KEY`, `DB_PASSWORD`, …) | Changing one after the first start breaks what it protects; `APP_KEY` can never change. |
-| `DOMAIN`, the ports | A wrong value locks you out of this page; every sign-in address follows the domain. |
-| `MODELS_DIR` | It moves the models; every server reads them there. |
+| The secrets in `.env` (`APP_KEY`, `GATEWAY_KEY`, `DB_PASSWORD`, …) | Changing one after the first start breaks what it protects; `APP_KEY` can never change. Shown under **Set by the installation** as set or not. |
+| `DOMAIN`, the ports | A wrong value locks you out of this page; every sign-in address follows the domain. Shown with `arenactl config --set DOMAIN=VALUE`. |
+| `MODELS_DIR` | It moves the models; every server reads them there. Shown with its command. |
 
 ## Every change is audited
 

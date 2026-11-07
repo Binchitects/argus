@@ -208,7 +208,7 @@ export function SkillsPage() {
                       selected={selected.has(p.id)}
                       onSelect={(on) => pick(p, on)}
                       onExport={(format) => download.mutate({ ids: [p.id], format })}
-                      onTurn={library.data.isAdmin && p.source === 'builtin' ? () => turn.mutate(p) : undefined}
+                      onTurn={library.data.mayTurnBuiltIn && p.source === 'builtin' ? () => turn.mutate(p) : undefined}
                       onEdit={() => setEditing(p)}
                       onDelete={async () => {
                         if (await confirm({ title: `Delete /${p.name}?`, description: p.sharing === 'Personal' ? undefined : 'Nobody it is shared with can use it any more.', confirm: 'Delete', destructive: true }))
@@ -499,7 +499,7 @@ function SkillForm({ saved, library, onClose }: { saved: SkillItem | null; libra
         <fieldset className="grid gap-2">
           <legend className="mb-1 text-sm font-medium">Who uses it</legend>
           {sharings
-            .filter((s) => s.value !== 'Company' || library.isAdmin)
+            .filter((s) => (s.value !== 'Company' || library.mayShareCompany) && (s.value !== 'Groups' || library.mayShareGroups || form.sharing === 'Groups'))
             .map((s) => {
               const disabled = s.value === 'Groups' && library.groups.length === 0
               return (

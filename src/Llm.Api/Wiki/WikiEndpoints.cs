@@ -34,7 +34,7 @@ public static partial class WikiEndpoints
 
     public static void MapWiki(this IEndpointRouteBuilder app)
     {
-        var g = app.MapGroup("/api/wiki").PersonOnly();
+        var g = app.MapGroup("/api/wiki").PersonOnly().RequirePermission(Core.Access.Permissions.Wiki);
         g.MapGet("", HomeAsync);
         g.MapGet("/search", SearchAsync);
         g.MapGet("/documents", DocumentsAsync);

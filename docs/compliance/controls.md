@@ -100,7 +100,7 @@ People enrol an authenticator app and get recovery codes; an admin can reset a l
 
 ### IAM-04: Joiners and leavers follow the company's directory
 
-People come from the company's directory (LDAP or Active Directory), OIDC or SAML with their groups and role; SCIM creates, changes and deactivates them, and a person who leaves is disabled with their keys stopped at once.
+People come from the company's directory (LDAP or Active Directory), OIDC or SAML with their groups and role; SCIM creates, changes and deactivates them, and a person who leaves is disabled with their keys stopped at once. A joiner starts in the default groups an admin chose (Admin → Access → Groups), whichever way they first sign in, and only then; each join is in the audit log and each change of the defaults in the access history.
 
 **Serves**
 
@@ -114,7 +114,7 @@ People come from the company's directory (LDAP or Active Directory), OIDC or SAM
 - [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): AC-2 Account Management; AC-2(1) Automated System Account Management; PS-4 Personnel Termination; PS-5 Personnel Transfer
 - [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.01.01 Account Management; 03.09.02 Personnel Termination and Transfer
 
-**Documented in** [authentication.md#the-company-directory-ldap--active-directory](../authentication.md#the-company-directory-ldap--active-directory), [authentication.md#scim-provisioning](../authentication.md#scim-provisioning), [authentication.md#company-sign-in-by-saml-20](../authentication.md#company-sign-in-by-saml-20)
+**Documented in** [authentication.md#the-company-directory-ldap--active-directory](../authentication.md#the-company-directory-ldap--active-directory), [authentication.md#scim-provisioning](../authentication.md#scim-provisioning), [authentication.md#default-groups-for-new-people](../authentication.md#default-groups-for-new-people), [authentication.md#company-sign-in-by-saml-20](../authentication.md#company-sign-in-by-saml-20)
 
 **Proved by**
 
@@ -123,12 +123,13 @@ People come from the company's directory (LDAP or Active Directory), OIDC or SAM
 - `Llm.Tests/SamlSignInTests.Saml_sign_in_creates_the_person_with_their_groups_their_role_and_a_key`
 - `Llm.Tests/CompanySignInTests.Company_sign_in_creates_the_person_with_their_groups_their_role_and_a_key`
 - `Llm.Tests/LdapTests.The_sync_disables_people_who_leave_and_restores_them_when_they_return`
+- `Llm.Tests/DefaultGroupsTests.New_people_join_the_default_groups_however_they_first_sign_in_and_only_then`
 
 **The company's part** The joiner, mover and leaver process in the directory; local accounts kept to the few who need them.
 
 ### IAM-05: Least privilege, by roles and rules
 
-What a person may do comes from roles (built in, or made by the company) held directly, through a group or by everyone, and from rules that give or take a feature; admin roles can be scoped to some groups. The checker says why a person may or may not do something. The wiki finds and shows each person only the documents they may read, and searches only the code they may read in GitLab, as them. A feature taken from a person is hidden from their menus and pages, not only refused. Taking a request out of the line needs usage.line, restarting an engine runtimes.restart; only a chat's owner rewinds it, and Code Arena's key reads and adds to its own person's chats alone. Code Arena reaches only the person's own chats' goals and the assistants they may use, and an assistant uses only skills its maker may use. Its sub-agents get only the tools they are given, never more than the session's mode allows, and one that changes files never asks: what its mode would ask is refused. What fills a chat's window is shown to its people only, and Code Arena counts tokens with the person's key, only with the models they may use. Code Arena's agent changes a VM only when the person allows it, for that VM.
+What a person may do comes from roles (built in, or made by the company) held directly, through a group or by everyone, and from rules that give or take a feature; admin roles can be scoped to some groups. The checker says why a person may or may not do something. The wiki finds and shows each person only the documents they may read, and searches only the code they may read in GitLab, as them. A feature taken from a person is hidden from their menus and pages, not only refused. Taking a request out of the line needs usage.line, restarting an engine runtimes.restart; only a chat's owner rewinds it, and Code Arena's key reads and adds to its own person's chats alone. Code Arena reaches only the person's own chats' goals and the assistants they may use, and an assistant uses only skills its maker may use. Its sub-agents get only the tools they are given, never more than the session's mode allows, and one that changes files never asks: what its mode would ask is refused. What fills a chat's window is shown to its people only, and Code Arena counts tokens with the person's key, only with the models they may use. Code Arena's agent changes a VM only when the person allows it, for that VM. Sharing with the whole company or with any group is a permission of its own (sharing.company, sharing.groups), not being Owner; a rule can keep one shared assistant, skill or app from people its sharing reaches; the people list with emails and spend needs people.read. Each person's effective permissions are listed with why.
 
 **Serves**
 
@@ -161,6 +162,9 @@ What a person may do comes from roles (built in, or made by the company) held di
 - `Llm.Tests/SkillTransferTests.Only_who_may_make_skills_imports_them_from_the_page_or_Code_Arena`
 - `Llm.Tests/ContextWindowTests.Code_Arena_counts_with_the_persons_key_and_only_for_the_models_they_may_use`
 - `Llm.Tests/CodeArenaVmTests.Changing_a_VM_asks_the_person_and_always_covers_that_tool_on_that_VM_only`
+- `Llm.Tests/AccessPermissionsTests.The_people_list_with_emails_and_spend_needs_people_read_not_monitoring`
+- `Llm.Tests/AccessPermissionsTests.Sharing_with_the_company_is_a_permission_and_a_rule_keeps_a_shared_assistant_from_a_group`
+- `Llm.Tests/AccessPermissionsTests.A_persons_effective_permissions_say_why_each_is_held_or_not`
 
 **The company's part** Decide who holds which role, and review it.
 
@@ -527,6 +531,7 @@ The signing keys, settings' secrets (directory, SSO, connectors) and tokens are 
 - `Llm.Tests/KeyRingTests.With_a_data_key_the_key_ring_is_encrypted_and_survives_a_restart`
 - `Llm.Tests/KeyRingTests.A_changed_data_key_fails_loudly_instead_of_silently_resetting_keys`
 - `Llm.Tests/SettingsTests.A_secret_is_stored_encrypted_used_in_plain_and_never_sent_back`
+- `Llm.Tests/SettingsCoverageTests.Settings_lists_what_the_installation_sets_with_the_command_that_changes_it_and_no_secret`
 - `Llm.Tests/KnowledgeConnectorTests.Test_connection_says_what_it_reached_and_secrets_are_stored_encrypted_and_never_sent_back`
 - `Llm.Tests/FileSealingTests.A_file_is_stored_encrypted_read_as_it_was_and_those_stored_before_are_sealed_by_the_job`
 - `Llm.Tests/FileSealingTests.Without_APP_KEY_files_are_stored_as_they_are_and_the_check_says_so`

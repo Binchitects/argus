@@ -81,6 +81,8 @@ public sealed partial class SettingsService(
         {
             groups = rows.GroupBy(r => r.Group).Select(g => new { title = g.Key, settings = g.ToList() }),
             restartNeeded = rows.Any(r => r.RestartPending),
+            // What the installation sets, each with the one command that changes it (read here only).
+            installation = InstallSettings.ViewOf(config),
         };
     }
 
@@ -268,7 +270,7 @@ public sealed partial class SettingsService(
                 {
                     return "A duration.";
                 }
-                var amount = (decimal)(d.Unit switch { "hours" => t.TotalHours, "days" => t.TotalDays, _ => t.TotalMinutes });
+                var amount = (decimal)(d.Unit switch { "seconds" => t.TotalSeconds, "hours" => t.TotalHours, "days" => t.TotalDays, _ => t.TotalMinutes });
                 if (Range(d, amount) is { } rt)
                 {
                     return rt;
