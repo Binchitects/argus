@@ -31,10 +31,14 @@ case "$1 $2" in
     [ -z "${FAIL_RUN:-}" ] || { echo "signing failed" >&2; exit 1; }
     d=$(mktemp -d)
     cp "$IMAGE_SUMS" "$d/SHA256SUMS.image"
-    mkdir "$d/win-x64"
-    printf 'signed by %s' "$(tail -n 1 "$IMAGE_SUMS")" > "$d/win-x64/code-arena.exe"
-    sum=$(openssl dgst -sha256 -r "$d/win-x64/code-arena.exe" | cut -d' ' -f1)
-    sed "s|^[0-9a-f]*  win-x64/code-arena.exe\$|$sum  win-x64/code-arena.exe|" "$IMAGE_SUMS" > "$d/SHA256SUMS"
+    cp "$IMAGE_SUMS" "$d/SHA256SUMS"
+    # Each Windows build the list names (the program and the IDE's launcher), signed, with its new SHA-256 in the list.
+    grep -E '  win-[a-z0-9]+/code-arena(-ide)?\.exe$' "$IMAGE_SUMS" | while read -r old name; do
+      mkdir -p "$d/$(dirname "$name")"
+      printf 'signed by %s' "$old  $name" > "$d/$name"
+      sum=$(openssl dgst -sha256 -r "$d/$name" | cut -d' ' -f1)
+      sed "s|^[0-9a-f]*  $name\$|$sum  $name|" "$d/SHA256SUMS" > "$d/sums" && mv "$d/sums" "$d/SHA256SUMS"
+    done
     tar -cf - -C "$d" .
     rm -rf "$d" ;;
   *) exit 2 ;;
@@ -121,6 +125,26 @@ class SignCodeArenaTests(unittest.TestCase):
         self.assertEqual(again.returncode, 0, again.stdout + again.stderr)
         self.assertNotIn("made signing/code-signing.crt", again.stdout)
         self.assertEqual((self.deploy / "signing" / "code-signing.crt").read_text(), before)
+
+    def test_the_ide_launcher_beside_a_windows_build_is_signed_and_served_with_it(self):
+        self.sums.write_text("a" * 64 + "  linux-x64/code-arena\n" + "b" * 64 + "  win-x64/code-arena-ide.exe\n" + "c" * 64 + "  win-x64/code-arena.exe\n")
+        made = self.run_script()
+        self.assertEqual(made.returncode, 0, made.stdout + made.stderr)
+        self.assertIn("signed 3 builds (2 for Windows, with Authenticode)", made.stdout)
+        out = self.data / "code-arena-signature"
+        launcher = out / "win-x64" / "code-arena-ide.exe"
+        self.assertTrue(launcher.read_text().startswith("signed by"))
+        served = (out / "SHA256SUMS").read_text().splitlines()
+        self.assertIn(self.openssl("dgst", "-sha256", "-r", str(launcher)).stdout.split()[0] + "  win-x64/code-arena-ide.exe", served)
+        self.assertEqual(self.run_script("--check").returncode, 0)
+        # A launcher changed after: not what the list signed.
+        launcher.write_text("changed")
+        self.assertEqual(self.run_script("--check").returncode, 1)
+        # One the image no longer has goes.
+        self.sums.write_text("a" * 64 + "  linux-x64/code-arena\n" + "c" * 64 + "  win-x64/code-arena.exe\n")
+        self.assertEqual(self.run_script().returncode, 0)
+        self.assertFalse(launcher.exists())
+        self.assertTrue((out / "win-x64" / "code-arena.exe").exists())
 
     def test_a_list_changed_since_it_was_signed_fails_the_check_until_signed_again(self):
         self.assertEqual(self.run_script().returncode, 0)

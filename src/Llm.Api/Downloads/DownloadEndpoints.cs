@@ -1,9 +1,15 @@
 using Llm.Api.Access;
 namespace Llm.Api.Downloads;
 
-/// <summary>A build of Code Arena the app serves: its system, file name, size and SHA-256 (and, not shown, where it is).</summary>
+/// <summary>
+/// A build of Code Arena the app serves: its system, file name, size and SHA-256 (and, not shown, where it is); on Windows
+/// the IDE's launcher beside it (code-arena-ide.exe), when the build has one.
+/// </summary>
 public sealed record CodeArenaBuild(string Rid, string System, string FileName, long Size, string? Sha256,
-    [property: System.Text.Json.Serialization.JsonIgnore] string Path = "");
+    [property: System.Text.Json.Serialization.JsonIgnore] string Path = "", CodeArenaFile? Ide = null);
+
+/// <summary>A file beside a build: its name, size and SHA-256 (and, not shown, where it is).</summary>
+public sealed record CodeArenaFile(string FileName, long Size, string? Sha256, [property: System.Text.Json.Serialization.JsonIgnore] string Path = "");
 
 /// <summary>Who signed the builds (the list, SHA256SUMS, and the Windows builds themselves), and until when the certificate holds.</summary>
 public sealed record CodeArenaSignature(string Signer, string Issuer, DateTimeOffset Expires);
@@ -17,6 +23,9 @@ public sealed record CodeArenaSignature(string Signer, string Issuer, DateTimeOf
 /// </summary>
 public static class DownloadEndpoints
 {
+    /// <summary>The IDE's launcher beside code-arena.exe on Windows (tools/ide-launcher): no console on a double-click.</summary>
+    public const string IdeLauncher = "code-arena-ide.exe";
+
     /// <summary>The systems it is built for, in the order the page offers them.</summary>
     public static readonly (string Rid, string System)[] Systems =
     [
@@ -46,6 +55,10 @@ public static class DownloadEndpoints
         g.MapGet("/code-signing.crt", (IConfiguration config) => Signature(config) is not null
             ? Results.File(Path.Combine(SignatureRoot(config), "code-signing.crt"), "application/x-pem-file") : Results.NotFound(new { error = "The builds are not signed." }));
         g.MapGet("/{rid}", Download);
+        // On Windows, the IDE's launcher beside the program: a GUI program that starts it with no console window.
+        g.MapGet("/{rid}/ide", (string rid, IConfiguration config) => Builds(config).FirstOrDefault(b => b.Rid == rid)?.Ide is { } ide
+            ? Results.File(ide.Path, "application/octet-stream", ide.FileName, enableRangeProcessing: true)
+            : Results.NotFound(new { error = $"No IDE launcher for {rid}." }));
         // The certificate people's tools must trust on a self-signed deployment: public, like the web's files.
         var c = app.MapGroup("/api/downloads/certificate").AllowAnonymous("The stack's public CA certificate.");
         c.MapGet("", async (SiteCertificate site, CancellationToken ct) =>
@@ -137,9 +150,24 @@ public static class DownloadEndpoints
             {
                 file = copy;
             }
-            builds.Add(new CodeArenaBuild(rid, system, name, file.Length, sums.GetValueOrDefault($"{rid}/{name}"), file.FullName));
+            builds.Add(new CodeArenaBuild(rid, system, name, file.Length, sums.GetValueOrDefault($"{rid}/{name}"), file.FullName,
+                rid.StartsWith("win-", StringComparison.Ordinal) ? Beside(rid, IdeLauncher) : null));
         }
         return builds;
+
+        CodeArenaFile? Beside(string rid, string name)
+        {
+            var file = new FileInfo(Path.Combine(root, rid, name));
+            if (!file.Exists)
+            {
+                return null;
+            }
+            if (signedRoot is not null && new FileInfo(Path.Combine(signedRoot, rid, name)) is { Exists: true } copy)
+            {
+                file = copy;
+            }
+            return new CodeArenaFile(name, file.Length, sums.GetValueOrDefault($"{rid}/{name}"), file.FullName);
+        }
     }
 
     private static IResult List(IConfiguration config) =>
@@ -205,9 +233,10 @@ public static class DownloadEndpoints
         $chain.ChainPolicy.ApplicationPolicy.Add([System.Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.3')) | Out-Null
         $sums = [IO.File]::ReadAllBytes((Join-Path $sig 'SHA256SUMS'))
         $key = [System.Security.Cryptography.X509Certificates.RSACertificateExtensions]::GetRSAPublicKey($leaf)
-        $good = $chain.Build($leaf) -and $key.VerifyData($sums, [IO.File]::ReadAllBytes((Join-Path $sig 'SHA256SUMS.sig')), [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1) -and ([Text.Encoding]::ASCII.GetString($sums) -split "`n" -contains "$sum  $rid/code-arena.exe")
+        $listed = [Text.Encoding]::ASCII.GetString($sums) -split "`n"
+        $good = $chain.Build($leaf) -and $key.VerifyData($sums, [IO.File]::ReadAllBytes((Join-Path $sig 'SHA256SUMS.sig')), [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1) -and ($listed -contains "$sum  $rid/code-arena.exe") -and (-not $ideSum -or ($listed -contains "$ideSum  $rid/code-arena-ide.exe"))
         Remove-Item -Recurse -Force $sig
-        if (-not $good) { Remove-Item $tmp; throw "Code Arena: the build is not the one this Arena's CA signed (or Windows does not trust that CA: certutil -addstore -f Root ca.crt): nothing installed" }
+        if (-not $good) { Remove-Item $tmp; if ($ideSum) { Remove-Item $ideTmp }; throw "Code Arena: the build is not the one this Arena's CA signed (or Windows does not trust that CA: certutil -addstore -f Root ca.crt): nothing installed" }
         Write-Host "Signed by $($leaf.GetNameInfo('SimpleName', $false)), checked."
         $auth = Get-AuthenticodeSignature $tmp
         if ($auth.Status -eq 'Valid') { Write-Host "Windows names its publisher: $($auth.SignerCertificate.GetNameInfo('SimpleName', $false))." }
@@ -239,7 +268,8 @@ public static class DownloadEndpoints
     /// <summary>
     /// The installer for Windows (irm …/install.ps1 | iex): the build for the machine (x64, or ARM64 on Windows on Arm)
     /// checked against its SHA-256, in %LOCALAPPDATA%\Programs\code-arena (CODE_ARENA_DIR), that folder on the person's
-    /// PATH, then how to sign in.
+    /// PATH, then how to sign in. With it, the IDE's launcher (code-arena-ide.exe), checked the same way, and a shortcut to
+    /// it on the desktop and in the Start menu (not with CODE_ARENA_NO_SHORTCUTS): the IDE with no console window.
     /// </summary>
     public static string InstallPs1(string arena, IReadOnlyList<CodeArenaBuild> builds, bool isSigned = false)
     {
@@ -249,6 +279,7 @@ public static class DownloadEndpoints
             return "Write-Error 'Code Arena: this Arena has no build for Windows yet (an admin adds them: ./arenactl repair, in a checkout of the release, builds them into the app)'\n";
         }
         var sums = string.Join("; ", windows.Select(b => $"'{b.Rid}' = '{b.Sha256}'"));
+        var ides = string.Join("; ", windows.Where(b => b.Ide?.Sha256 is not null).Select(b => $"'{b.Rid}' = '{b.Ide!.Sha256}'"));
         return $$"""
             # Code Arena from {{arena}}: the build for Windows, checked, on your PATH.
             $ErrorActionPreference = 'Stop'
@@ -258,14 +289,38 @@ public static class DownloadEndpoints
             $sums = @{ {{sums}} }
             if (-not $sums.ContainsKey($rid)) { throw "Code Arena: this Arena has no build for $rid yet (an admin adds it: ./arenactl repair, in a checkout of the release)" }
             $sum = $sums[$rid]
+            # The IDE's launcher beside it: a GUI program that starts code-arena.exe with no console window.
+            $ides = @{ {{ides}} }
+            $ideSum = $ides[$rid]
             $dir = if ($env:CODE_ARENA_DIR) { $env:CODE_ARENA_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\code-arena' }
             New-Item -ItemType Directory -Force -Path $dir | Out-Null
             $exe = Join-Path $dir 'code-arena.exe'
             $tmp = "$exe.new"
+            $ide = Join-Path $dir 'code-arena-ide.exe'
+            $ideTmp = "$ide.new"
             Write-Host "Downloading Code Arena {{AppInfo.Current.Version}} for Windows ($rid)..."
             Invoke-WebRequest -UseBasicParsing -Uri "$arena/api/downloads/code-arena/$rid" -OutFile $tmp
             if ((Get-FileHash $tmp -Algorithm SHA256).Hash.ToLowerInvariant() -ne $sum) { Remove-Item $tmp; throw 'Code Arena: the download does not match its SHA-256: nothing installed' }
+            if ($ideSum) {
+              Invoke-WebRequest -UseBasicParsing -Uri "$arena/api/downloads/code-arena/$rid/ide" -OutFile $ideTmp
+              if ((Get-FileHash $ideTmp -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ideSum) { Remove-Item $tmp, $ideTmp; throw 'Code Arena: the IDE launcher does not match its SHA-256: nothing installed' }
+            }
             {{(isSigned ? SignedPs1 : "Write-Host 'Code Arena: this Arena does not sign its builds: checked by its SHA-256 only.'\n")}}Move-Item -Force $tmp $exe
+            if ($ideSum) {
+              Move-Item -Force $ideTmp $ide
+              if (-not $env:CODE_ARENA_NO_SHORTCUTS) {
+                $shell = New-Object -ComObject WScript.Shell
+                foreach ($place in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs')) | Where-Object { $_ }) {
+                  $link = $shell.CreateShortcut((Join-Path $place 'Code Arena.lnk'))
+                  $link.TargetPath = $ide
+                  $link.WorkingDirectory = $HOME
+                  $link.IconLocation = "$exe,0"
+                  $link.Description = 'Code Arena: the IDE, with no console window'
+                  $link.Save()
+                }
+                Write-Host 'Code Arena is on your desktop and in the Start menu: they open the IDE with no console window.'
+              }
+            }
             $path = [Environment]::GetEnvironmentVariable('Path', 'User')
             if (-not (($path -split ';') -contains $dir)) { [Environment]::SetEnvironmentVariable('Path', "$path;$dir", 'User'); Write-Host "Added $dir to your PATH (new terminals have it)." }
             Write-Host "Code Arena is in $exe. Next, sign in: code-arena login --url $arena"

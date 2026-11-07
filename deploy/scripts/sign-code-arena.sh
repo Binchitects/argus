@@ -10,7 +10,7 @@
 #
 # Writes signing/code-signing.key and .crt (made from the CA when missing, or within 30 days of
 # their end; 3 years), and, for the app to serve, $DATA_DIR/code-arena-signature/: the Windows
-# builds Authenticode-signed (win-*/code-arena.exe), SHA256SUMS (the builds' list as served: the
+# builds Authenticode-signed (win-*/code-arena.exe and the IDE's launcher beside it, code-arena-ide.exe), SHA256SUMS (the builds' list as served: the
 # signed Windows builds' SHA-256 in place of the image's), SHA256SUMS.sig (its RSA SHA-256
 # signature), SHA256SUMS.image (the image's list it was made from) and code-signing.crt (the
 # certificate, then the CA). A company's own code-signing certificate goes in signing/ as
@@ -36,7 +36,7 @@ data=$(sed -n 's/^DATA_DIR=//p' .env 2>/dev/null | tail -n 1 | tr -d '"'"'"' ')
 out="$data/code-arena-signature"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
-windows='  win-[a-z0-9]+/code-arena\.exe$'
+windows='  win-[a-z0-9]+/code-arena(-ide)?\.exe$'
 
 # The image's list of builds and their SHA-256.
 if ! "$engine" compose cp app:/downloads/code-arena/SHA256SUMS "$work/SHA256SUMS.image" >/dev/null 2>&1; then
@@ -120,17 +120,17 @@ put() {
   chmod 644 "$2.new"
   mv -f "$2.new" "$2"
 }
-for exe in "$signed"/win-*/code-arena.exe; do
+for exe in "$signed"/win-*/code-arena.exe "$signed"/win-*/code-arena-ide.exe; do
   [ -f "$exe" ] || continue
   rid=$(basename "$(dirname "$exe")")
   mkdir -p "$out/$rid"
   chmod 755 "$out/$rid"
-  put "$exe" "$out/$rid/code-arena.exe"
+  put "$exe" "$out/$rid/$(basename "$exe")"
 done
 # A Windows build the image no longer has: its signed copy goes.
-for exe in "$out"/win-*/code-arena.exe; do
+for exe in "$out"/win-*/code-arena.exe "$out"/win-*/code-arena-ide.exe; do
   [ -f "$exe" ] || continue
-  grep -qF "  $(basename "$(dirname "$exe")")/code-arena.exe" "$signed/SHA256SUMS" || rm -f "$exe"
+  grep -qF "  $(basename "$(dirname "$exe")")/$(basename "$exe")" "$signed/SHA256SUMS" || rm -f "$exe"
 done
 for f in SHA256SUMS SHA256SUMS.image SHA256SUMS.sig; do
   put "$signed/$f" "$out/$f"

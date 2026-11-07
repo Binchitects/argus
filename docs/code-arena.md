@@ -31,7 +31,10 @@ curl -fsSL https://DOMAIN/api/downloads/code-arena/install.sh | sh     # Linux a
 irm https://DOMAIN/api/downloads/code-arena/install.ps1 | iex           # Windows: %LOCALAPPDATA%\Programs\code-arena, on PATH
 ```
 
-`CODE_ARENA_DIR` puts it elsewhere; on a self-signed deployment,
+On Windows it also puts `code-arena-ide.exe` beside `code-arena.exe`, and a
+**Code Arena** shortcut on the desktop and in the Start menu that opens it:
+the IDE, with no console window (below; `CODE_ARENA_NO_SHORTCUTS=1` makes
+none). `CODE_ARENA_DIR` puts it elsewhere; on a self-signed deployment,
 `curl --cacert ca.crt -fsSL …/install.sh | CODE_ARENA_CA=ca.crt sh`. Or
 download the file for a system yourself:
 
@@ -47,7 +50,8 @@ to and says "Code Arena 7.0.0 is available from Arena (this is 6.9.0)"; the
 IDE shows **Update** in its status bar. `code-arena update` (or that button)
 downloads the build for this system, checks its size and SHA-256, and puts it
 in this program's place (on Windows the running one moves aside as
-`code-arena.exe.old`); the next start runs it. `"updateCheck": false` in
+`code-arena.exe.old`), and `code-arena-ide.exe` beside it too, checked the
+same way; the next start runs it. `"updateCheck": false` in
 `config.json` stops the daily look.
 
 **Arena knows who runs an old one.** Every request Code Arena sends names its
@@ -97,7 +101,8 @@ the machine's own (ARM64 even from an x64 PowerShell).
   signed ad hoc, not with an Apple developer ID.
 - **Windows** may warn that the file is unknown (SmartScreen): **More info →
   Run anyway**, or unblock it in the file's properties. Put `code-arena.exe` in
-  a folder on `PATH`.
+  a folder on `PATH`, and `code-arena-ide.exe` (its own download beside the
+  build's, `/api/downloads/code-arena/win-x64/ide`) in the same folder.
 
 When the page says the Arena has no builds yet, an admin adds them (below).
 
@@ -330,11 +335,20 @@ browser says "This browser is too old for Code Arena", with the versions that
 are new enough, instead of a blank page; `code-arena chat` runs the agent in a
 terminal meanwhile.
 
-**Started on its own on Windows.** A double-click on `code-arena.exe` (or a
-shortcut, or the Start menu) leaves the IDE no console window: it starts
+**Started on its own on Windows.** `code-arena-ide.exe`, beside
+`code-arena.exe`, is the IDE for a double-click, the desktop's shortcut and
+the Start menu: a program of Windows' GUI subsystem, so Windows opens no
+console for it, which starts `code-arena.exe` with the same arguments and
+folder and a console that has no window, then ends (a message box says so
+when it cannot). It is a .NET Framework 4 program of a few kilobytes, which
+every Windows 10 and 11 runs as it is, for x64 and ARM64 alike, signed with
+the builds (`tools/ide-launcher` writes it; `tools/code-arena-check.py`
+checks it is a GUI program and `code-arena.exe` a console one).
+`code-arena.exe` stays the program for terminals. A double-click on
+`code-arena.exe` itself also leaves the IDE no console window: it starts
 itself again at once with a console that has no window, and the first one
 ends (Windows shows its console for a moment, as it makes one before any
-program runs). The programs the IDE runs (git, the terminals' shells, language
+program runs: what the launcher avoids). The programs the IDE runs (git, the terminals' shells, language
 servers) share that hidden console, so none of them opens a window either.
 When the IDE gets no window of its own and runs in a tab, a console comes
 back: closing it, or Ctrl+C, stops the IDE. When it cannot start (not signed

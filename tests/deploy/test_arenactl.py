@@ -39,6 +39,15 @@ if args[:1] == ["publish"]:
     exe.write_bytes(check.sample(rid.startswith("win-"), self_contained=os.environ.get("FAKE_PROGRAM") != "framework"))
     (out / "code-arena.pdb").write_bytes(b"symbols")
     sys.exit(0)
+if args[:1] == ["build"] and args[1].endswith("tools/ide-launcher/ide-launcher.csproj"):
+    out = pathlib.Path(args[args.index("-o") + 1])
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "ide-launcher.dll").write_text("writes code-arena-ide.exe")
+    sys.exit(0)
+if args[:1] and args[0].endswith("/ide-launcher.dll"):
+    # The IDE's launcher for Windows (FAKE_LAUNCHER=console: one Windows would open a console for).
+    pathlib.Path(args[1]).write_bytes(check.sample_launcher(subsystem=3 if os.environ.get("FAKE_LAUNCHER") == "console" else 2))
+    sys.exit(0)
 sys.exit(1)
 """
 
@@ -88,6 +97,12 @@ class CodeArenaPackageTests(unittest.TestCase):
         env = {"PATH": str(self.bin), "HOME": str(self.dir), "SOURCE_DATE_EPOCH": "1790000000", **(env or {})}
         return subprocess.run([sys.executable, str(self.root / "arenactl"), *args], cwd=self.root, env=env, capture_output=True, text=True, timeout=120)
 
+    def test_A_launcher_that_would_open_a_console_stops_the_packages(self):
+        r = self.run_it("code-arena", "win-x64", env={"FAKE_LAUNCHER": "console"})
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("code-arena-ide.exe: not a program of the GUI subsystem", r.stdout + r.stderr)
+        self.assertFalse((self.root / "dist" / "code-arena-9.9.9-win-x64.zip").exists())
+
     def test_Each_system_gets_its_package_with_the_program_alone_a_readme_and_the_licences(self):
         r = self.run_it("code-arena", "linux-x64", "win-x64", "win-arm64")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -105,6 +120,9 @@ class CodeArenaPackageTests(unittest.TestCase):
         self.assertIn("code-arena login --url https://DOMAIN", readme)
         with zipfile.ZipFile(dist / "code-arena-9.9.9-win-x64.zip") as z:
             self.assertIn("code-arena-9.9.9-win-x64/code-arena.exe", z.namelist())
+            # The IDE's launcher beside it, a GUI program, and the readme says which one is for what.
+            self.assertEqual(load_check().pe_subsystem(z.read("code-arena-9.9.9-win-x64/code-arena-ide.exe")), 2)
+            self.assertIn(b"use code-arena-ide.exe", z.read("code-arena-9.9.9-win-x64/README.txt"))
             # Notepad's line ends.
             self.assertIn(b"\r\n", z.read("code-arena-9.9.9-win-x64/README.txt"))
         with zipfile.ZipFile(dist / "code-arena-9.9.9-win-arm64.zip") as z:

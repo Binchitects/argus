@@ -114,7 +114,11 @@ public sealed class AuthenticodeTests
             var linux = Encoding.ASCII.GetBytes("#!/bin/sh\n");
             await File.WriteAllBytesAsync(Path.Combine(root, "linux-x64", "code-arena"), linux);
             var linuxLine = $"{Convert.ToHexStringLower(SHA256.HashData(linux))}  linux-x64/code-arena";
-            var image = Encoding.ASCII.GetBytes($"{linuxLine}\n{Convert.ToHexStringLower(SHA256.HashData(exe))}  win-x64/code-arena.exe\n");
+            // The IDE's launcher beside it, a Windows program too (here another one, so the two signatures differ).
+            var launcher = File.ReadAllBytes(typeof(AuthenticodeTests).Assembly.Location);
+            await File.WriteAllBytesAsync(Path.Combine(root, "win-x64", "code-arena-ide.exe"), launcher);
+            var launcherLine = $"{Convert.ToHexStringLower(SHA256.HashData(launcher))}  win-x64/code-arena-ide.exe";
+            var image = Encoding.ASCII.GetBytes($"{linuxLine}\n{launcherLine}\n{Convert.ToHexStringLower(SHA256.HashData(exe))}  win-x64/code-arena.exe\n");
             await File.WriteAllBytesAsync(Path.Combine(root, "SHA256SUMS"), image);
             // The key, then the certificate and its CA: as scripts/sign-code-arena.sh pipes signing/ in.
             var pem = leaf.GetRSAPrivateKey()!.ExportPkcs8PrivateKeyPem() + "\n" + leaf.ExportCertificatePem() + "\n" + ca.ExportCertificatePem() + "\n";
@@ -122,11 +126,14 @@ public sealed class AuthenticodeTests
             var (code, said, files) = await SignAsync(root, pem);
             Assert.True(code == 0, said);
             Assert.Contains("signed win-x64/code-arena.exe (Authenticode) as Code Arena (authenticode)", said, StringComparison.Ordinal);
-            Assert.Equal(["SHA256SUMS", "SHA256SUMS.image", "win-x64/code-arena.exe"], files.Keys.Order(StringComparer.Ordinal));
+            Assert.Equal(["SHA256SUMS", "SHA256SUMS.image", "win-x64/code-arena-ide.exe", "win-x64/code-arena.exe"], files.Keys.Order(StringComparer.Ordinal));
             var signed = files["win-x64/code-arena.exe"];
             Assert.Equal(leaf.Thumbprint, Authenticode.Signer(signed)?.Thumbprint);
+            var signedLauncher = files["win-x64/code-arena-ide.exe"];
+            Assert.Equal(leaf.Thumbprint, Authenticode.Signer(signedLauncher)?.Thumbprint);
             Assert.Equal(image, files["SHA256SUMS.image"]);
-            Assert.Equal($"{linuxLine}\n{Convert.ToHexStringLower(SHA256.HashData(signed))}  win-x64/code-arena.exe\n", Encoding.ASCII.GetString(files["SHA256SUMS"]));
+            Assert.Equal($"{linuxLine}\n{Convert.ToHexStringLower(SHA256.HashData(signedLauncher))}  win-x64/code-arena-ide.exe\n{Convert.ToHexStringLower(SHA256.HashData(signed))}  win-x64/code-arena.exe\n",
+                Encoding.ASCII.GetString(files["SHA256SUMS"]));
             // Nothing of the key in what comes out (the program itself may say "PRIVATE KEY": the key's own bytes are what count).
             var key = leaf.GetRSAPrivateKey()!.ExportPkcs8PrivateKey();
             Assert.DoesNotContain(files.Values, f => f.AsSpan().IndexOf(key.AsSpan(0, 64)) >= 0);

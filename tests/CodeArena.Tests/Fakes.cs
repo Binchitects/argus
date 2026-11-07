@@ -396,6 +396,9 @@ public sealed class FakeMcp : FakeServer
     /// <summary>The Code Arena build Arena serves (/api/downloads/code-arena): its version, its bytes, and the SHA-256 it lists (null: theirs).</summary>
     public (string Version, byte[] Bytes, string? Sha256)? Build { get; set; }
 
+    /// <summary>The IDE's launcher beside the build (Windows'), at the build's address/ide: its bytes, and the SHA-256 it lists (null: theirs).</summary>
+    public (byte[] Bytes, string? Sha256)? Ide { get; set; }
+
     public bool Sse { get; set; }
     /// <summary>Arena's default chat model, told in initialize's _meta as Arena MCP does; null: not told.</summary>
     public string? DefaultModel { get; set; }
@@ -470,9 +473,13 @@ public sealed class FakeMcp : FakeServer
                     ["builds"] = new JsonArray(new JsonObject
                     {
                         ["rid"] = Updates.Rid, ["size"] = build.Bytes.Length, ["sha256"] = build.Sha256 ?? Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(build.Bytes)),
+                        ["ide"] = Ide is { } ide
+                            ? new JsonObject { ["size"] = ide.Bytes.Length, ["sha256"] = ide.Sha256 ?? Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(ide.Bytes)) }
+                            : null,
                     }),
                 }.ToJsonString())
-                : path == "/api/downloads/code-arena/" + Updates.Rid ? build.Bytes : [];
+                : path == "/api/downloads/code-arena/" + Updates.Rid ? build.Bytes
+                : path == $"/api/downloads/code-arena/{Updates.Rid}/ide" && Ide is { } launcher ? launcher.Bytes : [];
             await ctx.Response.OutputStream.WriteAsync(bytes, ct);
             return;
         }
