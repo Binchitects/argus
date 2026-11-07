@@ -517,6 +517,20 @@ Commits 1–18 can be built and tested on today's 3090 box: llama.cpp keeps runn
 
 ---
 
+## Strata and LMDeploy, run for real (2026-11-07)
+
+On the RTX 3090 (24 GB, 125 W) with 61 GB of RAM, the live engines stopped for the run:
+
+| Engine | Model | Chat | Streaming | Tool call | Speed (one answer, prompt included) |
+|---|---|---|---|---|---|
+| Strata 0.2.11, through the stack's supervisor | Qwen3.8-Flash-Next UD-IQ4_XS (93.7 GB of files), 32K context, 2 at once, int8 cache | yes | yes | yes (`get_weather` with its argument) | 10.6 tok/s |
+| LMDeploy 0.18.0 | Qwen2.5-1.5B-Instruct BF16 | yes | yes | no: the server is started without a tool-call parser | 30.1 tok/s |
+
+Strata ran a model nearly four times the GPU's memory by keeping the experts that do not fit in RAM, using 53 GB of
+the 61. It lists the model under its file's name (`qwen3.8-flash-next-unsloth-ud-iq4_xs`), not the name the app gives,
+and answers either. LMDeploy needs `--tool-call-parser` for its model's family (qwen2d5, qwen3, llama3 ...) for tool
+calls, as vLLM and SGLang need theirs: 7.8.3 writes them.
+
 ## FP4 on Hopper
 
 The H200 NVL is Hopper (sm_90): FP8 tensor cores, no FP4 ones (Blackwell has them). What the engines in this
