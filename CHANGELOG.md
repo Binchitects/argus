@@ -15,6 +15,61 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v7.9.0 (2026-11-08)
+
+Argus answers who calls what, Code Arena works with other providers' models,
+and its Tools menu shows every tool its model is given.
+
+### :rocket: Epics and highlights
+
+- **Argus's symbol graph.** Inside each repository, every use in its C#,
+  TypeScript, JavaScript and Python code is tied to the definition it names,
+  and each type to the types it extends or implements, built when the
+  repository is indexed, from its checkout, by the same scanners and
+  resolution Code Arena's IDE and agent use (linked, so the three agree;
+  nothing is compiled or installed). The new `symbol_graph` tool walks it:
+  callers, callees, references, implementations and bases, 1 to 3 steps,
+  each result with how it was tied (by scope or import, by the receiver's
+  declared type, the only definition of the name; guesses among two or three
+  only when asked) and its confidence. A comment or a string that names a
+  method is not a caller. Every step puts the reader's allowlist in its SQL.
+  `ARGUS_SYMBOL_GRAPH=0` turns it off.
+- **Code Arena on other providers' models.** Anthropic (Claude, through its
+  Messages API with tool use, pictures, thinking and its prompt cache),
+  OpenAI, DeepSeek, OpenRouter, Mistral, or any OpenAI-compatible API by its
+  address, with the person's own key. Their models are `provider:model` in
+  `/model` and the IDE's picker. `/providers` in the terminal, or the plug
+  beside the model picker in the IDE, adds and removes them; keys stay in
+  `config.json`, readable by the person only, and are never shown again.
+  Signed in to Arena, they are used only when Admin → Settings → Chat →
+  **Code Arena may use other providers** is on (off by default: what a
+  session sends them leaves the company, and the gateway does not count it).
+
+### :sparkles: New features & Enhancements
+
+- **Code Arena's Tools menu lists every tool the model is given**, as the
+  context view counts them: Code Arena's own by family (files, commands and
+  git always on; virtual machines, the code index, memory, past sessions,
+  skills, sub-agents, screenshots, the person's and the project's own), then
+  each server's groups, each with its functions. A family turned off leaves
+  the requests and a call to it is refused for the session; `/tools off
+  memory` does the same in the terminal.
+- **Calmer tinted themes.** Sakura, Midnight, Copper, Forest, Ocean and
+  Lavender keep their colour in the accent: their greys carry a third of the
+  hue they did, in the page, the editor and the terminal.
+
+### :bug: Bugs fixed
+
+- **A command's error lines landed out of place.** Code Arena's `run_shell`
+  read stdout and stderr through two pipes at once, so a line on stderr went
+  wherever it arrived, a few lines off or inside another line. A POSIX shell
+  now sends stderr into stdout itself, in the order the command wrote them.
+- **CI's `web` and `deploy` jobs failed.** The IDE's browser tests ran on
+  Vite's dev server, whose first compile of the editor outlasted the test on
+  a cold runner; they run on the built page. The chart's copy of the fake
+  engine was stale; it is copied again, and the deploy suite fails on any
+  stale copy.
+
 ## v7.8.5 (2026-11-07)
 
 Argus's access, made tight before its code graphs: what a person may read is
