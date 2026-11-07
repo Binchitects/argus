@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Blocks, Brain, Bug, Check, Circle, CircleAlert, CircleHelp, Files, FolderKanban, GitBranch, GitCompareArrows, Info, ListChecks, MessagesSquare, ScanSearch, Search, SquareTerminal, WandSparkles, type LucideIcon } from 'lucide-react'
-import { lazy, Suspense, use, useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { lazy, Suspense, use, useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { confetti, useKonami } from '@/components/app/games-kit'
 import { toast } from '@/components/ui/toaster'
 import { Alert } from '@/components/ui/alert'
@@ -85,7 +85,7 @@ const mergeCommands: [string, string, ConflictAction][] = [
 import { ExtensionsView } from './extensions-view'
 import { appendElement } from './jsonc'
 import { Splitter } from './splitter'
-import { barViews, bounds, inPanel, layoutOf, panelParts, reorderPanel, reorderSide, resetLocations, setHidden, sideViews, toPanel, toSide, type Layout, type PanelTab, type View } from './workbench-layout'
+import { barViews, bounds, inPanel, keepWithheld, layoutOf, panelParts, reorderPanel, reorderSide, resetLocations, setHidden, sideViews, toPanel, toSide, withhold, type Layout, type PanelTab, type View } from './workbench-layout'
 import { useArenaSettings, useNotices } from './sync'
 import { About, StatusBar } from './status-bar'
 import { languageServers } from './lsp/servers'
@@ -231,7 +231,9 @@ function Unreachable({ error }: { error: unknown }) {
   )
 }
 
-function useLayout(saved: Record<string, unknown> | undefined) {
+/** The layout as saved and changed, shown without the views in `withheld` (those the person may not use); they keep their places in what is saved. */
+function useLayout(saved: Record<string, unknown> | undefined, withheld: readonly View[]) {
+  // withheld: one of the constant lists below, so it changes only when what is withheld does.
   const [layout, setLayout] = useState<Layout>(() => layoutOf(saved))
   // Kept by code-arena (a page's browser storage is per port, and each run takes a new one): a moment after the
   // last change, as a drag changes it at every step, or as the page closes.
@@ -254,9 +256,13 @@ function useLayout(saved: Record<string, unknown> | undefined) {
       window.removeEventListener('pagehide', leaving)
     }
   }, [layout])
-  const change = useCallback((c: Partial<Layout>) => setLayout((l) => ({ ...l, ...c })), [])
-  return [layout, change] as const
+  const shown = useMemo(() => withhold(layout, withheld), [layout, withheld])
+  const change = useCallback((c: Partial<Layout>) => setLayout((l) => ({ ...l, ...keepWithheld(l, c, withheld) })), [withheld])
+  return [shown, change] as const
 }
+
+const none: readonly View[] = []
+const memoryWithheld: readonly View[] = ['memory']
 
 const views: { id: View; label: string; icon: LucideIcon; command: string }[] = [
   { id: 'explorer', label: 'Explorer', icon: Files, command: 'workbench.view.explorer' },
@@ -552,7 +558,9 @@ function Workbench({
     const on = !!state.completion && completing && !state.busy
     completion.wanted = () => on
   }, [state.completion, state.busy, completing])
-  const [layout, change] = useLayout(saved)
+  // Memory, while Arena denies the person feature.memory (as the web leaves it out): no view, no command.
+  const memoryOff = config.denied?.includes('feature.memory') ?? false
+  const [layout, change] = useLayout(saved, memoryOff ? memoryWithheld : none)
   // The editor sent lines to the chat: it shows, if hidden.
   const showChat = useCallback(() => change({ chatOpen: true }), [change])
   const [about, setAbout] = useState(false)
@@ -1351,7 +1359,7 @@ function Workbench({
     { id: '~remote.forwardedPorts.focus', category: 'Ports', title: 'Focus on Ports View', enabled: () => !ownPage(), run: showPorts },
     { id: 'codeArena.view.changes', category: 'View', title: "Show the Agent's Changes", run: () => show('changes') },
     { id: 'codeArena.view.review', category: 'View', title: 'Show Review', run: () => show('review') },
-    { id: 'codeArena.view.memory', category: 'View', title: 'Show Memory', run: () => {
+    { id: 'codeArena.view.memory', category: 'View', title: 'Show Memory', enabled: () => !memoryOff, run: () => {
       setMemoryUsed(true)
       show('memory')
     } },

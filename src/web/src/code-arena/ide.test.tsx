@@ -4797,6 +4797,20 @@ describe('quick open ranking', () => {
     await waitFor(() => expect(within(panel).queryByText(/Builds with make/)).not.toBeInTheDocument())
   })
 
+  it('leaves memory out when Arena denies it: no Memory view, no Show Memory, and a layout left on it opens the Explorer', async () => {
+    const { calls } = backend({ 'GET /api/chat/config': () => ({ json: { ...config, denied: ['feature.memory'] } }) }, { layout: { view: 'memory' } })
+    renderIde()
+    expect(await screen.findByRole('tree', { name: 'Files' })).toBeInTheDocument()
+    const bar = screen.getByRole('navigation', { name: 'Activity bar' })
+    await waitFor(() => expect(within(bar).queryByRole('button', { name: 'Memory' })).not.toBeInTheDocument())
+    expect(within(bar).getByRole('button', { name: 'Explorer' })).toHaveAttribute('aria-pressed', 'true')
+    await userEvent.keyboard('{Control>}{Shift>}p{/Shift}{/Control}')
+    const palette = await screen.findByRole('dialog', { name: 'Commands' })
+    await userEvent.type(within(palette).getByPlaceholderText('Run a command: type a few words of it'), 'show memory')
+    expect(within(palette).queryByRole('option', { name: /Show Memory/ })).not.toBeInTheDocument()
+    expect(calls.some((c) => c.path === '/api/memory')).toBe(false)
+  })
+
   it("shows the agent's plan as it changes: each step with what done means, its check and its files, and where Arena shows it", async () => {
     let plan: CodePlan = {
       title: 'Rename the parser', goal: 'parse_frame everywhere', chat: 'c-42',

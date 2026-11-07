@@ -861,6 +861,9 @@ public sealed class FakeChats
     /// <summary>Whether Arena keeps Code Arena's memory (/api/code-arena/memories; an older one does not).</summary>
     public bool Memory { get; set; } = true;
 
+    /// <summary>The person may not use memory (feature.memory denied): /api/code-arena/memories answers 403.</summary>
+    public bool MemoryDenied { get; set; }
+
     /// <summary>Arena's memories, as /api/code-arena/memories keeps them: id, text, scope, kind, project.</summary>
     public List<JsonObject> Memories { get; } = [];
 
@@ -1470,6 +1473,13 @@ public sealed class FakeChats
             {
                 ["skills"] = ArenaSkills?.DeepClone() ?? new JsonArray(), ["off"] = new JsonArray([.. (SkillsOff ?? []).Select(n => (JsonNode)n)]),
             }.ToJsonString()));
+            return;
+        }
+        if (parts is ["memories", ..] && MemoryDenied)
+        {
+            ctx.Response.StatusCode = 403;
+            ctx.Response.ContentType = "application/json";
+            await ctx.Response.OutputStream.WriteAsync(Encoding.UTF8.GetBytes("""{"error":"permission","detail":"That needs feature.memory."}"""));
             return;
         }
         if (parts is ["memories", ..] && Memory)

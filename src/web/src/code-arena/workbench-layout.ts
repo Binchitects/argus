@@ -102,6 +102,33 @@ export const inPanel = (l: Layout, v: View) => l.panelTabs.includes(v)
 /** The views the activity bar shows: the side bar's, but those hidden (one hidden shows while it is the view shown). */
 export const barViews = (l: Layout): View[] => sideViews(l).filter((v) => !l.hidden.includes(v) || (l.sideOpen && l.view === v))
 
+/**
+ * The layout without views the person may not use (Memory, while Arena denies feature.memory): not in the side bar nor the
+ * panel, and another shown in their place. What is saved keeps them where they were, for when they come back.
+ */
+export function withhold(l: Layout, gone: readonly View[]): Layout {
+  if (gone.length === 0) return l
+  const order = l.order.filter((v) => !gone.includes(v))
+  const panelTabs = l.panelTabs.filter((t) => !(gone as readonly string[]).includes(t))
+  const side = order.filter((v) => !panelTabs.includes(v))
+  return {
+    ...l,
+    order,
+    panelTabs,
+    view: gone.includes(l.view) ? (side[0] ?? 'explorer') : l.view,
+    panelTab: (gone as readonly string[]).includes(l.panelTab) ? 'terminal' : l.panelTab,
+  }
+}
+
+/** A change worked out on a layout with views withheld, made to the saved one: those views stay where they were. */
+export function keepWithheld(saved: Layout, c: Partial<Layout>, gone: readonly View[]): Partial<Layout> {
+  if (gone.length === 0) return c
+  const back = { ...c }
+  if (c.order) back.order = [...c.order, ...saved.order.filter((v) => gone.includes(v) && !c.order!.includes(v))]
+  if (c.panelTabs) back.panelTabs = [...c.panelTabs, ...saved.panelTabs.filter((t) => (gone as readonly string[]).includes(t) && !c.panelTabs!.includes(t))]
+  return back
+}
+
 /** A view hidden from the activity bar, or shown there again. */
 export function setHidden(l: Layout, v: View, hide: boolean): Partial<Layout> {
   return { hidden: hide ? [...new Set([...l.hidden, v])] : l.hidden.filter((x) => x !== v) }

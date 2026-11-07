@@ -129,8 +129,10 @@ What each person may do is decided in one place, from three things:
   `feature.speech` take those tools, the speech routes and those models from
   their API keys; `feature.memory`, `feature.tasks`, `feature.share_links`
   and `feature.assistants.share` stop new memories, tasks, share links and
-  sharing assistants; `code.read` takes the Argus tool. What they already
-  have stays theirs to read and delete.
+  sharing assistants (Code Arena then leaves memory out: no Memory view,
+  `/memory` says it is off, and the model is not offered `remember` or
+  `recall`); `code.read` takes the Argus tool. What they already have stays
+  theirs to read and delete.
 - **What a person may not use is hidden**, not only refused. Their pages
   leave the sidebar, the command palette and Home (Chat, Memory, Meetings,
   Plans, Data, Decks, Media studio, Agent Studio, Code Studio without any

@@ -969,7 +969,8 @@ internal sealed partial class Repl(Runtime rt)
             case "/exit" or "/quit" or "/q":
                 return false;
             case "/help" or "/?":
-                foreach (var (command, what) in Commands)
+                // Memory denied in Arena: /memory is not offered.
+                foreach (var (command, what) in Commands.Where(c => !(rt.Memory.Denied && c.Name.StartsWith("/memory", StringComparison.Ordinal))))
                 {
                     Ui.Line($"  {command,-20} {Ui.Dim(what)}");
                 }
@@ -1447,6 +1448,11 @@ internal sealed partial class Repl(Runtime rt)
     {
         var words = arg.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
         var memory = rt.Memory;
+        if (memory.Denied)
+        {
+            Ui.Warn(MemoryStore.DeniedText);
+            return;
+        }
         if (words is ["add", var rest])
         {
             var person = rest.StartsWith("--all ", StringComparison.Ordinal);

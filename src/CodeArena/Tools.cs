@@ -350,18 +350,24 @@ internal sealed class ToolBox(IEnumerable<ToolDef> tools)
             var raw = Volatile.Read(ref _all);
             if (Settings is not { } settings)
             {
-                return raw;
+                return Withhold(raw);
             }
             var version = settings.Version;
             if (Volatile.Read(ref _customized) is { } kept && ReferenceEquals(kept.Raw, raw) && kept.Version == version)
             {
-                return kept.Customized;
+                return Withhold(kept.Customized);
             }
             IReadOnlyList<ToolDef> customized = [.. raw.Select(settings.Apply).OfType<ToolDef>()];
             Volatile.Write(ref _customized, new Kept(raw, version, customized));
-            return customized;
+            return Withhold(customized);
         }
     }
+
+    /// <summary>Tools left out while it says so (by name), whatever the settings: memory's, while Arena denies the person memory.</summary>
+    public Func<string, bool>? Withheld { get; init; }
+
+    private IReadOnlyList<ToolDef> Withhold(IReadOnlyList<ToolDef> tools) =>
+        Withheld is { } withheld && tools.Any(t => withheld(t.Name)) ? [.. tools.Where(t => !withheld(t.Name))] : tools;
 
     /// <summary>Every tool, those turned off too, as they are without the person's settings: what Configure Tools lists.</summary>
     public IReadOnlyList<ToolDef> Every => Volatile.Read(ref _all);

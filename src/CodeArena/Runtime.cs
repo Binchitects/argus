@@ -238,6 +238,15 @@ internal sealed partial class Runtime : IAsyncDisposable
     /// </summary>
     public JsonObject? ArenaChat { get; private set; }
 
+    /// <summary>The feature permissions Arena says the person does not hold (its chat config's denied): memory follows feature.memory.</summary>
+    private void FollowDenied(JsonObject chat)
+    {
+        if (chat["denied"] is JsonArray denied)
+        {
+            Memory.Denied = denied.Any(d => d?.GetValue<string>() == "feature.memory");
+        }
+    }
+
     /// <summary>Whether a model sees pictures: as the gateway says, or as Arena's chat config does.</summary>
     public bool Sees(ModelInfo model) => model.Vision
         || ArenaChat?["models"] is JsonArray offered && offered.OfType<JsonObject>().Any(m => m.Str("name") == model.Id && m.Bool("vision") == true);
@@ -512,7 +521,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         Demand.Budget = Config.ToolChars ?? ToolDemand.DefaultBudget;
         Demand.Loader = LoadTools;
         Demand.Changed = (off, loaded) => Session?.Tools(off, loaded);
-        Tools = new ToolBox(tools) { Demand = Demand, Mode = () => ToolMode, Settings = ToolSettings };
+        Tools = new ToolBox(tools) { Demand = Demand, Mode = () => ToolMode, Settings = ToolSettings, Withheld = name => name is "remember" or "recall" && Memory.Denied };
 
         // The servers connect in the background; the session starts when the gateway has said which models there are.
         var models = Gateway.ModelsAsync(ct);
@@ -589,6 +598,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             {
                 Model.DefaultLevel = chat.Str("defaultThinking") is { } level && ModelState.Levels.Contains(level) ? level : null;
                 ArenaChat = chat;
+                FollowDenied(chat);
             }
         }, TaskScheduler.Default);
 
@@ -607,6 +617,7 @@ internal sealed partial class Runtime : IAsyncDisposable
             ToolsToLoad = ToolsToLoad,
             ToolsInCode = ToolsInCode,
             Memory = () => _memory,
+            Remembers = () => !Memory.Denied,
             Skills = () => [.. Extensions.Skills.Select(s => (s.Name, s.Description))],
             Agents = () => [.. Extensions.Agents.Select(a => (a.Name, a.Description))],
             Checklist = () => Checklist is { } on ? SessionChecklist.Text(on) : "",
@@ -846,6 +857,7 @@ internal sealed partial class Runtime : IAsyncDisposable
         var toolsChanged = ArenaChat is { } before && Tools(before) != Tools(chat);
         Model.DefaultLevel = chat.Str("defaultThinking") is { } level && ModelState.Levels.Contains(level) ? level : null;
         ArenaChat = chat;
+        FollowDenied(chat);
         if (chat.Int("compactAt") is { } at)
         {
             AccountCompactAt = new AccountCompaction(at, chat.Str("compactSource") == "account");
