@@ -15,6 +15,38 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v7.8.5 (2026-11-07)
+
+Argus's access, made tight before its code graphs: what a person may read is
+kept as GitLab projects and checked in the SQL of every graph read, and
+configuration files lose their secrets before they are stored.
+
+### :bug: Bugs fixed
+
+- **A cached allowlist could open a repository indexed under a reused row
+  id.** The GitLab-token cache kept index row ids for ten minutes (an hour
+  while GitLab is down), and SQLite gave a deleted repository's id to the next
+  one indexed. The cache keeps GitLab project ids only, laid over the rows
+  there are at each request, and a row id is never given again (`repos.id` is
+  AUTOINCREMENT; the table is rebuilt with every id kept).
+- **The graph tools loaded every repository and filtered in code.**
+  `repo_map`, `system_map`, `dependency_path`, `change_impact` and `impact_of`
+  now read only what the person may read, on both ends of every pair; a path
+  through a repository they cannot read does not exist for them.
+- **Semantic search gave few answers to someone who reads little** (its
+  coarse pass of 600 went to others' code first). Up to 20,000 readable
+  vectors, every one is scored; above that the pass widens until enough are
+  readable.
+- **A name several repositories provide was settled by repositories the
+  reader may not see** (the same file's other uses, the user's other links).
+  Only the user repository's own package references and submodules settle it
+  now; a candidate's share and its list are of the providers the person may
+  read.
+- **`.env`, `.properties` and `appsettings*.json` were stored whole**, their
+  passwords and tokens in the index and its search. They are stored with every
+  secret value taken out, keys, hosts and placeholders kept, and those stored
+  before are masked once.
+
 ## v7.8.4 (2026-11-07)
 
 A hotfix: the offline installer builds from a fresh checkout, and can build
