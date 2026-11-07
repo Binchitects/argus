@@ -65,8 +65,14 @@ public static partial class CompanyEndpoints
             };
             return draft.IsSaml ? saml.TestAsync(draft, ct) : idp.TestAsync(draft, ct);
         });
-        admin.MapPost("/scim-token", async (ScimTokens tokens, Audit audit, CancellationToken ct) =>
+        // The token makes people and puts them in groups that may hold any role, and in the admin group: only an Owner makes one.
+        admin.MapPost("/scim-token", async (ScimTokens tokens, Audit audit, System.Security.Claims.ClaimsPrincipal p, Microsoft.AspNetCore.Identity.UserManager<Llm.Core.Identity.AppUser> users,
+            Access.AccessService access, CancellationToken ct) =>
         {
+            if (await users.GetUserAsync(p) is not { } me || !await access.IsOwnerAsync(me, ct))
+            {
+                return AuthEndpoints.Problem(403, "owner", "Only an Owner makes the SCIM token: it decides who is in groups, and so who holds their roles.");
+            }
             var token = await tokens.CreateAsync(ct);
             await audit.WriteAsync("scim.token", detail: "a new token; any earlier one stopped working");
             return Results.Ok(new { token });

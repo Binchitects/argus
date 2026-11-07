@@ -100,7 +100,7 @@ export function PeoplePage() {
   const may = {
     add: holds(me, 'people.create'),
     credit: holds(me, 'credits.manage'),
-    disable: holds(me, 'people.edit'),
+    disable: holds(me, 'people.disable'),
     signOut: holds(me, 'people.passwords'),
     move: directory && holds(me, 'signin.moves'),
   }
@@ -197,7 +197,7 @@ export function PeoplePage() {
           )}
         />
       )}
-      <AddPersonDialog open={adding} onOpenChange={setAdding} />
+      <AddPersonDialog open={adding} onOpenChange={setAdding} mayOwner={me.isAdmin} />
       <CreditDialog people={creditFor} onClose={() => setCreditFor(null)} />
       <DirectoryMoveDialog people={moving} onClose={() => setMoving(null)} />
     </>
@@ -328,7 +328,7 @@ const addSchema = z.object({
   admin: z.boolean(),
 })
 
-function AddPersonDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+function AddPersonDialog({ open, onOpenChange, mayOwner }: { open: boolean; onOpenChange: (o: boolean) => void; mayOwner: boolean }) {
   const queryClient = useQueryClient()
   const [created, setCreated] = useState<Created | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -399,9 +399,12 @@ function AddPersonDialog({ open, onOpenChange }: { open: boolean; onOpenChange: 
               <Field label="API credit ($ a month)" hint="Empty: no limit. Pictures, video and speech: on their page." error={errors.apiCredit?.message}>
                 <Input inputMode="decimal" placeholder="no limit" {...form.register('apiCredit')} />
               </Field>
-              <Label className="font-normal">
-                <Switch checked={form.watch('admin')} onCheckedChange={(v) => form.setValue('admin', v)} /> Admin
-              </Label>
+              {/* Only an Owner makes an admin (Owner). */}
+              {mayOwner && (
+                <Label className="font-normal">
+                  <Switch checked={form.watch('admin')} onCheckedChange={(v) => form.setValue('admin', v)} /> Admin
+                </Label>
+              )}
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={close}>
                   Cancel

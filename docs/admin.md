@@ -225,6 +225,17 @@ takes their own Owner role. Nobody can be left out: the first admin
 change that would leave no active Owner is refused, and nobody can take their
 own `access.manage` away.
 
+**Nobody gives more than they hold.** Only an Owner makes someone an admin,
+takes it away, or disables, enables or deletes an Owner; on a person's page a
+name is `people.edit`'s and disabling `people.disable`'s. An assignment, a
+role's edit, adding someone to a group (or changing a group's directory
+group), approving a request and a bulk change are refused when they would give
+anyone a permission the one making them does not hold (for everyone, when it
+would be held for everyone). A new password, second factor or API key is made
+only for someone who holds nothing beyond the one asking. The admin group of
+the directory and of company sign-in, the admin group other apps see, and the
+SCIM token are an Owner's to set.
+
 **Who may use it**, on a tool's or a knowledge source's card (a model's Details),
 writes rules on that resource: everyone (an allow for everyone), admins (an
 allow for the Owner role) or the chosen groups (an allow for each). Rules for

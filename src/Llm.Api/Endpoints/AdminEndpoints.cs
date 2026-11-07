@@ -21,7 +21,8 @@ public static class AdminEndpoints
         var admin = app.MapGroup("/api/admin").RequirePermissions(Llm.Core.Access.Permissions.PeopleRead, Llm.Core.Access.Permissions.PeopleManage, new Dictionary<string, string>
         {
             ["POST /api/admin/people"] = Llm.Core.Access.Permissions.PeopleCreate,
-            ["PATCH /api/admin/people/{id:guid}"] = Llm.Core.Access.Permissions.PeopleEdit,
+            // Each change by its own permission (below): a name people.edit, disabling people.disable, the Owner role access.assign.
+            ["PATCH /api/admin/people/{id:guid}"] = Llm.Core.Access.Permissions.PeopleRead,
             ["POST /api/admin/people/{id:guid}/password"] = Llm.Core.Access.Permissions.PeoplePasswords,
             ["POST /api/admin/people/{id:guid}/key"] = Llm.Core.Access.Permissions.PeopleKeys,
             ["PUT /api/admin/people/{id:guid}/credits"] = Llm.Core.Access.Permissions.CreditsManage,
@@ -46,10 +47,11 @@ public static class AdminEndpoints
         admin.MapPost("/people", CreateAsync);
         admin.MapGet("/people/{id:guid}", GetAsync);
         admin.MapPatch("/people/{id:guid}", UpdateAsync);
-        admin.MapPost("/people/{id:guid}/password", (Guid id, PeopleService people) =>
-            WithPerson(id, people, async u => Results.Ok(await people.ResetPasswordAsync(u))));
-        admin.MapPost("/people/{id:guid}/key", (Guid id, PeopleService people) =>
-            WithPerson(id, people, async u => Results.Ok(await people.RotateKeyAsync(u))));
+        // A new password, second factor or key is the account itself: only for someone who holds nothing beyond the one asking.
+        admin.MapPost("/people/{id:guid}/password", (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, Access.AccessService access, PeopleService people) =>
+            WithPerson(id, people, async u => await RefusedAsync(p, users, access, u, credentials: true) ?? Results.Ok(await people.ResetPasswordAsync(u))));
+        admin.MapPost("/people/{id:guid}/key", (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, Access.AccessService access, PeopleService people) =>
+            WithPerson(id, people, async u => await RefusedAsync(p, users, access, u, credentials: true) ?? Results.Ok(await people.RotateKeyAsync(u))));
         admin.MapPut("/people/{id:guid}/credits", (Guid id, CreditsRequest body, PeopleService people) =>
             WithPerson(id, people, async u => { await people.SetCreditsAsync(u, body); return Results.NoContent(); }));
         // One kind's credit (the people list sets one kind for many at once).
@@ -79,14 +81,31 @@ public static class AdminEndpoints
                 keys.Wake();
                 return Results.Ok(new { warning });
             }));
-        admin.MapPost("/people/{id:guid}/2fa/reset", (Guid id, PeopleService people) =>
-            WithPerson(id, people, async u => { await people.ResetTwoFactorAsync(u); return Results.NoContent(); }));
+        admin.MapPost("/people/{id:guid}/2fa/reset", (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, Access.AccessService access, PeopleService people) =>
+            WithPerson(id, people, async u =>
+            {
+                if (await RefusedAsync(p, users, access, u, credentials: true) is { } refused)
+                {
+                    return refused;
+                }
+                await people.ResetTwoFactorAsync(u);
+                return Results.NoContent();
+            }));
         admin.MapPost("/people/{id:guid}/sign-out", (Guid id, PeopleService people, Audit audit) =>
             WithPerson(id, people, async u => { await people.EndSessionsAsync(u); await audit.WriteAsync("person.sign_out", u.UserName); return Results.NoContent(); }));
-        admin.MapDelete("/people/{id:guid}", async (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, PeopleService people) =>
+        admin.MapDelete("/people/{id:guid}", async (Guid id, ClaimsPrincipal p, UserManager<AppUser> users, Access.AccessService access, PeopleService people) =>
         {
             var actor = (await users.GetUserAsync(p))!;
-            return await WithPerson(id, people, async u => { await people.DeleteAsync(actor, u); return Results.NoContent(); });
+            return await WithPerson(id, people, async u =>
+            {
+                // Only an Owner deletes an Owner.
+                if (await RefusedAsync(p, users, access, u, credentials: false) is { } refused)
+                {
+                    return refused;
+                }
+                await people.DeleteAsync(actor, u);
+                return Results.NoContent();
+            });
         });
         admin.MapGet("/audit", AuditAsync);
         admin.MapGet("/sign-in", (IOptionsMonitor<LdapOptions> monitor) =>
@@ -191,8 +210,19 @@ public static class AdminEndpoints
         kind = Credits.Name(s.Kind), spent = s.Spent, credit = s.Credit, group = s.Group, groupLeft = s.GroupLeft,
     };
 
-    private static async Task<IResult> CreateAsync(CreatePersonRequest body, PeopleService people)
+    private static async Task<IResult> CreateAsync(CreatePersonRequest body, ClaimsPrincipal p, UserManager<AppUser> users, Access.AccessService access, AppDbContext db, PeopleService people)
     {
+        var actor = (await users.GetUserAsync(p))!;
+        if (body.Admin && !await access.IsOwnerAsync(actor))
+        {
+            return AuthEndpoints.Problem(403, "owner", "Only an Owner makes someone an Owner.");
+        }
+        // A new person joins the default groups: those give them nothing beyond the one making them.
+        var defaults = await db.Groups.AsNoTracking().Where(g => g.JoinsNewPeople && g.Directory == null && !g.Scim).Select(g => g.Id).ToListAsync();
+        if (await access.BeyondForNewAsync(actor, defaults) is { } beyond)
+        {
+            return AuthEndpoints.Problem(403, "beyond", $"New people join the default groups, which give more than you hold. {beyond}");
+        }
         try
         {
             var (user, secrets) = await people.CreateAsync(new NewPerson(body.UserName ?? "", body.Email ?? "", body.DisplayName, body.Admin, body.Credits));
@@ -304,11 +334,44 @@ public static class AdminEndpoints
         return new { own = u.AnswersAtOnce, value, from, group };
     }
 
-    private static async Task<IResult> UpdateAsync(Guid id, UpdatePersonRequest body, ClaimsPrincipal p, UserManager<AppUser> users, PeopleService people, Audit audit)
+    private static async Task<IResult> UpdateAsync(Guid id, UpdatePersonRequest body, ClaimsPrincipal p, UserManager<AppUser> users, PeopleService people, Access.AccessService access, Audit audit)
     {
         var actor = (await users.GetUserAsync(p))!;
         return await WithPerson(id, people, async u =>
         {
+            // Each part by its own permission, held for this person (a role held for some groups reaches their people only).
+            var wants = new List<string>();
+            if (body.DisplayName is { } asked && asked.Trim() != u.DisplayName)
+            {
+                wants.Add(Llm.Core.Access.Permissions.PeopleEdit);
+            }
+            if (body.Admin is not null)
+            {
+                // The Owner role is a role: Admin → Access's, and only an Owner gives or takes it (below).
+                wants.Add(Llm.Core.Access.Permissions.AccessAssign);
+            }
+            if (body.Disabled is not null)
+            {
+                wants.Add(Llm.Core.Access.Permissions.PeopleDisable);
+            }
+            var me = await access.MembershipAsync(actor);
+            foreach (var permission in wants)
+            {
+                if (!me.Has(permission) || (await access.ReachAsync(actor, permission) is { } reach && !reach.People.Contains(u.Id)))
+                {
+                    return AuthEndpoints.Problem(403, "permission", $"That needs {permission}, which you do not hold{(me.Has(permission) ? $" for {u.UserName}" : "")}.");
+                }
+            }
+            var roleChanges = body.Admin is { } a && a != await access.IsOwnerAsync(u);
+            if (roleChanges && !me.IsOwner)
+            {
+                return AuthEndpoints.Problem(403, "owner", "Only an Owner makes someone an Owner or takes it away.");
+            }
+            // Only an Owner disables or enables an Owner.
+            if (body.Disabled is { } d && d != u.IsDisabled && await RefusedAsync(p, users, access, u, credentials: false) is { } refused)
+            {
+                return refused;
+            }
             if (body.DisplayName is { } name && name.Trim() != u.DisplayName)
             {
                 if (u.Source != UserSource.Local)
@@ -336,6 +399,15 @@ public static class AdminEndpoints
             return Results.NoContent();
         });
     }
+
+    /// <summary>
+    /// A 403 when the person signed in may not act on <paramref name="target"/>'s account: an Owner's is only an Owner's to change,
+    /// and with <paramref name="credentials"/> someone holding more than they do is not theirs to take over (<see cref="Access.AccessService.OutranksAsync"/>).
+    /// </summary>
+    private static async Task<IResult?> RefusedAsync(ClaimsPrincipal p, UserManager<AppUser> users, Access.AccessService access, AppUser target, bool credentials) =>
+        await users.GetUserAsync(p) is { } actor && await access.OutranksAsync(actor, target, credentials) is { } why
+            ? AuthEndpoints.Problem(403, "outranks", why)
+            : null;
 
     /// <param name="actor">Only what this person did (their duties, as Admin → Access hands them out).</param>
     /// <summary>The audit log, newest first, a page at a time (before: the last id seen); from and to: what happened in that window.</summary>

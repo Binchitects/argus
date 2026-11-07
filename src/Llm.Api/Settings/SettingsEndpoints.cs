@@ -37,6 +37,12 @@ public static class SettingsEndpoints
             {
                 return AuthEndpoints.Problem(403, "settings", $"You may not change: {string.Join(", ", refused)}.");
             }
+            var current = services.GetRequiredService<IConfiguration>();
+            if (!member.IsOwner && body.Changes.FirstOrDefault(c => SettingsCatalog.OwnerOnly.Contains(c.Key)
+                    && (c.Reset || !string.Equals((c.Value ?? "").Trim(), (current[c.Key] ?? "").Trim(), StringComparison.Ordinal))) is { } owners)
+            {
+                return AuthEndpoints.Problem(403, "owner", $"Only an Owner changes {SettingsCatalog.ByKey.GetValueOrDefault(owners.Key)?.Label ?? owners.Key}: it decides who is an admin.");
+            }
             // Network access: never a list that shuts out the person saving it (their address as Traefik saw it).
             if (body.Changes.Any(c => c.Key is Oidc.AddressFilter.AllowKey or Oidc.AddressFilter.BlockKey) && http.Connection.RemoteIpAddress is { } mine)
             {

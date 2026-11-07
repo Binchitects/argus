@@ -562,6 +562,12 @@ public static class SettingsCatalog
     ];
 
     /// <summary>
+    /// Settings that decide who is an admin (the directory's and the identity provider's admin group, and the group other apps
+    /// read as Arena's admins): changing one makes Owners, so only an Owner changes them, whatever else they hold.
+    /// </summary>
+    public static readonly IReadOnlySet<string> OwnerOnly = new HashSet<string>(StringComparer.Ordinal) { "Ldap:AdminGroup", "CompanySignIn:AdminGroup", "Auth:AdminGroup" };
+
+    /// <summary>
     /// The permission that changes a setting, by its group on the page: each group's part of settings.manage, and the
     /// directory's and company sign-in's under signin.manage.
     /// </summary>

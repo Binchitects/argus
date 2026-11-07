@@ -88,8 +88,10 @@ export function PersonPage() {
           {limits && <RateLimitsCard key={`${limits.own.requestsPerMinute}-${limits.own.tokensPerMinute}-${atOnce?.own}`} p={p} limits={limits} atOnce={atOnce} maySet={holds(me, 'people.limits')} />}
         </div>
         <div className="grid content-start gap-6">
-          {/* Each button its part of people.manage: people.edit changes the account, people.passwords its sign-in. */}
-          {(holds(me, 'people.edit') || holds(me, 'people.passwords')) && <Access p={p} self={self} onSecret={setSecret} mayEdit={holds(me, 'people.edit')} mayReset={holds(me, 'people.passwords')} />}
+          {/* Each button its own permission: only an Owner makes or unmakes an admin (Owner), people.disable disables, people.passwords resets sign-in. */}
+          {(me.isAdmin || holds(me, 'people.disable') || holds(me, 'people.passwords')) && (
+            <Access p={p} self={self} onSecret={setSecret} mayOwner={me.isAdmin} mayDisable={holds(me, 'people.disable') && (me.isAdmin || !p.isAdmin)} mayReset={holds(me, 'people.passwords')} />
+          )}
           <LegalHoldCard p={p} />
           {(me.isAdmin || me.permissions?.includes('privacy.manage')) && <PersonDataRequests person={p} />}
           {!self && holds(me, 'people.delete') && <Danger p={p} />}
@@ -164,7 +166,21 @@ function Profile({ p, mayEdit }: { p: Person; mayEdit: boolean }) {
   )
 }
 
-function Access({ p, self, onSecret, mayEdit, mayReset }: { p: Person; self: boolean; onSecret: (s: { label: string; value: string }) => void; mayEdit: boolean; mayReset: boolean }) {
+function Access({
+  p,
+  self,
+  onSecret,
+  mayOwner,
+  mayDisable,
+  mayReset,
+}: {
+  p: Person
+  self: boolean
+  onSecret: (s: { label: string; value: string }) => void
+  mayOwner: boolean
+  mayDisable: boolean
+  mayReset: boolean
+}) {
   const refresh = useRefresh(p.id)
   const confirm = useConfirm()
   const act = useMutation({
@@ -191,7 +207,7 @@ function Access({ p, self, onSecret, mayEdit, mayReset }: { p: Person; self: boo
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-wrap gap-2">
-        {!managed && !self && mayEdit && (
+        {!managed && !self && mayOwner && (
           <Button
             variant="outline"
             onClick={() =>
@@ -207,7 +223,7 @@ function Access({ p, self, onSecret, mayEdit, mayReset }: { p: Person; self: boo
             <UserCog /> {p.isAdmin ? 'Remove admin' : 'Make admin'}
           </Button>
         )}
-        {!self && mayEdit && (
+        {!self && mayDisable && (
           <Button
             variant="outline"
             onClick={() =>

@@ -271,6 +271,8 @@ public sealed class AccessService(AppDbContext db, AccessSnapshotCache cache, IO
         var changed = await strategy.ExecuteAsync(async () =>
         {
             await using var tx = await db.Database.BeginTransactionAsync(ct);
+            // Who is not an Owner gives nobody more than they hold: everyone's access before, to compare with after.
+            var before = await GrantsBeforeAsync(actor, ct);
             var edit = new Edit(db, actor?.Id ?? Signed(), Guid.CreateVersion7(), clock.GetUtcNow());
             await work(edit);
             if (edit.Changes.Count == 0)
@@ -281,6 +283,7 @@ public sealed class AccessService(AppDbContext db, AccessSnapshotCache cache, IO
             await db.SaveChangesAsync(ct);
             await db.AccessMeta.Where(m => m.Id == 1).ExecuteUpdateAsync(u => u.SetProperty(m => m.Version, m => m.Version + 1), ct);
             await RefuseLockoutAsync(actor, ct);
+            await RefuseBeyondAsync(actor, before, ct);
             await tx.CommitAsync(ct);
             return edit.Changes.Count;
         });
@@ -320,6 +323,166 @@ public sealed class AccessService(AppDbContext db, AccessSnapshotCache cache, IO
         {
             throw new AccessRefusedException("You cannot take your own access.manage away: ask another admin who holds it.");
         }
+    }
+
+    /// <summary>Everyone's access at one moment: the roles, assignments and rules, and each person (as if enabled, and as they are).</summary>
+    public sealed record Grants(AccessSnapshot Snapshot, IReadOnlyDictionary<Guid, Principal> People);
+
+    /// <summary>Everyone's access now, through this context (a transaction's sees its own changes).</summary>
+    private async Task<Grants> GrantsAsync(CancellationToken ct)
+    {
+        var version = await db.AccessMeta.Where(m => m.Id == 1).Select(m => m.Version).FirstOrDefaultAsync(ct);
+        var snapshot = await LoadAsync(db, version, ct);
+        var people = await db.Users.AsNoTracking().ToListAsync(ct);
+        var app = (await db.GroupMembers.AsNoTracking().Select(m => new { m.UserId, m.GroupId }).ToListAsync(ct)).ToLookup(m => m.UserId, m => m.GroupId);
+        var directory = await db.Groups.AsNoTracking().Where(g => g.Directory != null).Select(g => new { g.Id, g.Directory }).ToListAsync(ct);
+        return new Grants(snapshot, people.ToDictionary(p => p.Id, p => PrincipalOf(p,
+            [.. app[p.Id], .. directory.Where(g => p.DirectoryGroups.Count > 0 && InDirectoryGroup(p.DirectoryGroups, g.Directory!)).Select(g => g.Id)])));
+    }
+
+    /// <summary>What a change by <paramref name="actor"/> is compared with: nothing for an Owner or the service itself, who may give anything.</summary>
+    private async Task<(Membership Actor, Grants Grants)?> GrantsBeforeAsync(AppUser? actor, CancellationToken ct)
+    {
+        if (actor is null || actor.Id == Guid.Empty)
+        {
+            return null;
+        }
+        var me = await MembershipAsync(actor, ct);
+        return me.IsOwner ? null : (me, await GrantsAsync(ct));
+    }
+
+    /// <summary>
+    /// How far a person holds a permission: 0 not, 1 for some groups only, 2 for everyone. A feature is held or not
+    /// (its rules decide); an admin permission by the roles that give it, and whether one of them is held unscoped.
+    /// </summary>
+    private static int Level(AccessSnapshot s, Principal p, IReadOnlyList<HeldRole> held, string permission, DateTimeOffset now)
+    {
+        if (Permissions.IsFeature(permission))
+        {
+            return s.Check(p, permission, now).Allowed ? 2 : 0;
+        }
+        var giving = held.Where(h => h.Role.Key == BuiltInRoles.Owner || AccessSnapshot.Gives(h.Role, permission)).ToList();
+        return giving.Count == 0 ? 0 : giving.Any(h => h.Scope is null) ? 2 : 1;
+    }
+
+    private static string Signature(IReadOnlyList<HeldRole> held) =>
+        string.Join(";", held.Select(h => $"{h.Role.Id}:{string.Join(",", h.Role.Permissions)}:{(h.Scope is { } sc ? string.Join(",", sc.Groups) + "|" + string.Join(",", sc.Repos) : "")}").Order(StringComparer.Ordinal));
+
+    /// <summary>
+    /// Why the change from <paramref name="before"/> to <paramref name="after"/> gives someone more than <paramref name="actor"/> holds, or null:
+    /// someone made an Owner or no longer one (taken away, disabled, enabled), or a permission someone did not hold (or held for some
+    /// groups only) that the actor does not hold as far.
+    /// </summary>
+    public static string? Beyond(Membership actor, Grants before, Grants after, DateTimeOffset now)
+    {
+        if (actor.IsOwner)
+        {
+            return null;
+        }
+        var actorHeld = actor.Snapshot.RolesOf(actor.Principal, now);
+        var mine = new Dictionary<string, int>(StringComparer.Ordinal);
+        int Mine(string permission) => mine.TryGetValue(permission, out var l) ? l : mine[permission] = Level(actor.Snapshot, actor.Principal, actorHeld, permission, now);
+        var rulesChanged = !before.Snapshot.Rules.Select(r => r.Id).Order().SequenceEqual(after.Snapshot.Rules.Select(r => r.Id).Order());
+        foreach (var (id, was) in before.People)
+        {
+            if (!after.People.TryGetValue(id, out var became))
+            {
+                continue;
+            }
+            if (before.Snapshot.IsOwner(was with { Disabled = false }, now) != after.Snapshot.IsOwner(became with { Disabled = false }, now)
+                || before.Snapshot.IsOwner(was, now) != after.Snapshot.IsOwner(became, now))
+            {
+                return "Only an Owner makes someone an Owner, takes it away, or disables or enables an Owner.";
+            }
+            var (p, q) = (was with { Disabled = false }, became with { Disabled = false });
+            var heldBefore = before.Snapshot.RolesOf(p, now);
+            var heldAfter = after.Snapshot.RolesOf(q, now);
+            var rolesChanged = Signature(heldBefore) != Signature(heldAfter);
+            if (!rolesChanged && !rulesChanged && p.Groups.SetEquals(q.Groups))
+            {
+                continue;
+            }
+            foreach (var permission in Permissions.All.Select(x => x.Key).Where(k => rolesChanged || Permissions.IsFeature(k)))
+            {
+                var level = Level(after.Snapshot, q, heldAfter, permission, now);
+                if (level > Level(before.Snapshot, p, heldBefore, permission, now) && level > Mine(permission))
+                {
+                    return $"That would give {permission} to someone, and you do not hold it{(Mine(permission) == 1 ? " for everyone" : "")} yourself: ask an admin who does.";
+                }
+            }
+        }
+        return null;
+    }
+
+    private async Task RefuseBeyondAsync(AppUser? actor, (Membership Actor, Grants Grants)? before, CancellationToken ct)
+    {
+        if (actor is not null && before is { } b && Beyond(b.Actor, b.Grants, await GrantsAsync(ct), clock.GetUtcNow()) is { } why)
+        {
+            throw new AccessRefusedException(why);
+        }
+    }
+
+    /// <summary>
+    /// A change outside roles, assignments and rules (who is in a group, a group deleted) made in one transaction, kept only
+    /// when it gives nobody more than <paramref name="actor"/> holds (<see cref="AccessRefusedException"/> otherwise, and nothing kept).
+    /// </summary>
+    public async Task GuardedAsync(AppUser actor, Func<Task> change, CancellationToken ct = default)
+    {
+        var strategy = db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var tx = await db.Database.BeginTransactionAsync(ct);
+            var before = await GrantsBeforeAsync(actor, ct);
+            await change();
+            await RefuseBeyondAsync(actor, before, ct);
+            await tx.CommitAsync(ct);
+        });
+        _seen.Clear();
+    }
+
+    /// <summary>
+    /// Why <paramref name="actor"/> may not act on <paramref name="target"/>'s account, or null: an Owner only by an Owner; and with
+    /// <paramref name="credentials"/> (a password, a second factor or a key handed over, which is taking the account), only someone
+    /// who holds nothing beyond the actor.
+    /// </summary>
+    public async Task<string?> OutranksAsync(AppUser actor, AppUser target, bool credentials, CancellationToken ct = default)
+    {
+        var me = await MembershipAsync(actor, ct);
+        if (me.IsOwner)
+        {
+            return null;
+        }
+        var them = await MembershipAsync(target, ct);
+        var p = them.Principal with { Disabled = false };
+        if (them.Snapshot.IsOwner(p, them.Now))
+        {
+            return $"{target.UserName} is an Owner: only an Owner does that.";
+        }
+        if (!credentials)
+        {
+            return null;
+        }
+        var now = clock.GetUtcNow();
+        var mine = me.Snapshot.RolesOf(me.Principal, now);
+        var theirs = them.Snapshot.RolesOf(p, now);
+        return Permissions.All.Select(x => x.Key).FirstOrDefault(k => Level(them.Snapshot, p, theirs, k, now) > Level(me.Snapshot, me.Principal, mine, k, now)) is { } more
+            ? $"{target.UserName} holds {more}, which you do not: only someone who holds all they hold does that."
+            : null;
+    }
+
+    /// <summary>Why a new person who joins <paramref name="groups"/> would hold more than <paramref name="actor"/>, or null.</summary>
+    public async Task<string?> BeyondForNewAsync(AppUser actor, IReadOnlyCollection<Guid> groups, CancellationToken ct = default)
+    {
+        var me = await MembershipAsync(actor, ct);
+        if (me.IsOwner || groups.Count == 0)
+        {
+            return null;
+        }
+        var id = Guid.NewGuid();
+        var none = Principal.Of(id);
+        var s = await SnapshotAsync(ct);
+        var people = new Dictionary<Guid, Principal> { [id] = none };
+        return Beyond(me, new Grants(s, people), new Grants(s, new Dictionary<Guid, Principal> { [id] = Principal.Of(id, groups) }), clock.GetUtcNow());
     }
 
     /// <summary>The groups, and the people in them, a role held for some groups only reaches.</summary>

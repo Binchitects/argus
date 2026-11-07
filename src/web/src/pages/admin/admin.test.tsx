@@ -138,6 +138,22 @@ describe('people', () => {
     expect(screen.queryByRole('button', { name: /Delete grace/ })).toBeNull()
   })
 
+  it('people.edit renames but makes no admin and disables nobody; people.disable disables alone', async () => {
+    const person = { json: { person: people[0], standing: null, keys: [], groups: [], directoryGroups: [], warning: null } }
+    fakeApi({ ...member, permissions: ['people.read', 'people.edit'] }, { 'GET /api/admin/people/p1': () => person })
+    const first = renderApp('/admin/people/p1')
+    expect(await screen.findByRole('button', { name: /Change name/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Make admin/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Disable/ })).toBeNull()
+    first.unmount()
+
+    fakeApi({ ...member, permissions: ['people.read', 'people.disable'] }, { 'GET /api/admin/people/p1': () => person })
+    renderApp('/admin/people/p1')
+    expect(await screen.findByRole('button', { name: /Disable/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Make admin/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Change name/ })).toBeNull()
+  })
+
   it('deleting asks for the username to be typed', async () => {
     const calls = fakeApi(admin, {
       'GET /api/admin/people/p1': () => ({ json: { person: people[0], keys: [], groups: [], directoryGroups: [], warning: null } }),

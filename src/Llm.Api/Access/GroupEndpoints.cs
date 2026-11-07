@@ -53,10 +53,30 @@ public static class GroupEndpoints
         g.MapGet("/chargeback", ChargebackAsync);
         g.MapPut("/{id:guid}/policies", PoliciesAsync);
         g.MapGet("/{id:guid}", GetAsync);
-        g.MapPatch("/{id:guid}", UpdateAsync);
-        g.MapDelete("/{id:guid}", DeleteAsync);
-        g.MapPost("/{id:guid}/members", AddMembersAsync);
-        g.MapDelete("/{id:guid}/members/{userId:guid}", RemoveMemberAsync);
+        // Who is in a group decides the roles they hold: these give nobody more than the one asking holds (AccessService.GuardedAsync).
+        g.MapPatch("/{id:guid}", (Guid id, GroupRequest body, AppDbContext db, Audit audit, Models.KeyAccessWatcher keys, AccessService access, HttpContext http) =>
+            GuardedAsync(http, access, () => UpdateAsync(id, body, db, audit, keys)));
+        g.MapDelete("/{id:guid}", (Guid id, AppDbContext db, Audit audit, Models.KeyAccessWatcher keys, AccessService access, HttpContext http) =>
+            GuardedAsync(http, access, () => DeleteAsync(id, db, audit, keys)));
+        g.MapPost("/{id:guid}/members", (Guid id, MembersRequest body, AppDbContext db, Audit audit, Models.KeyAccessWatcher keys, AccessService access, HttpContext http) =>
+            GuardedAsync(http, access, () => AddMembersAsync(id, body, db, audit, keys)));
+        g.MapDelete("/{id:guid}/members/{userId:guid}", (Guid id, Guid userId, AppDbContext db, Audit audit, Models.KeyAccessWatcher keys, AccessService access, HttpContext http) =>
+            GuardedAsync(http, access, () => RemoveMemberAsync(id, userId, db, audit, keys)));
+    }
+
+    private static async Task<IResult> GuardedAsync(HttpContext http, AccessService access, Func<Task<IResult>> work)
+    {
+        var me = await http.RequestServices.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<AppUser>>().GetUserAsync(http.User);
+        IResult result = Results.NoContent();
+        try
+        {
+            await access.GuardedAsync(me!, async () => result = await work(), http.RequestAborted);
+        }
+        catch (AccessRefusedException ex)
+        {
+            return AuthEndpoints.Problem(403, "beyond", ex.Message);
+        }
+        return result;
     }
 
     private static async Task<IResult> ListAsync(AppDbContext db, HttpContext http)
