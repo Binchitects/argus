@@ -35,7 +35,7 @@ export function Field({ label, hint, error, children, className }: { label: Reac
         </p>
       )}
       {errorId && (
-        <p id={errorId} className="text-xs font-medium text-destructive">
+        <p id={errorId} className="text-xs font-medium text-destructive-ink">
           {error}
         </p>
       )}

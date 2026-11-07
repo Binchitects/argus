@@ -443,7 +443,7 @@
   --input: oklch(0.8514 0 0);
   --ring: oklch(0.562 0.1526 248.5 / 0.6);
   --sidebar: oklch(0.9642 0 0);
-  --sidebar-foreground: oklch(0.4926 0 0);
+  --sidebar-foreground: oklch(0.4 0 0);
   --sidebar-accent: oklch(0.9266 0.015 277.8);
   --sidebar-border: oklch(0.9219 0 0);
   --shadow-color: 220 30% 20%;
@@ -624,7 +624,7 @@
 /* Solarized Light */
 :root[data-color-theme='solarized']:not(.dark) {
   --background: oklch(0.9735 0.0261 90.1);
-  --foreground: oklch(0.488 0.0283 219.1);
+  --foreground: oklch(0.42 0.0283 219.1);
   --card: oklch(0.9882 0.0151 90.2);
   --popover: oklch(0.9882 0.0151 90.2);
   --primary: oklch(0.5599 0.1394 244.9);
@@ -632,16 +632,16 @@
   --primary-hover: oklch(0.5099 0.1274 244.9);
   --primary-ink: oklch(0.4799 0.1214 244.9);
   --secondary: oklch(0.9306 0.026 92.4);
-  --secondary-foreground: oklch(0.488 0.0283 219.1);
+  --secondary-foreground: oklch(0.42 0.0283 219.1);
   --muted: oklch(0.9306 0.026 92.4);
   --muted-foreground: oklch(0.4882 0.0285 221.9);
   --accent: oklch(0.9031 0.0316 93);
-  --accent-foreground: oklch(0.488 0.0283 219.1);
+  --accent-foreground: oklch(0.42 0.0283 219.1);
   --border: oklch(0.876 0.0292 91.7);
   --input: oklch(0.8141 0.0297 91.7);
   --ring: oklch(0.5599 0.1394 244.9 / 0.6);
   --sidebar: oklch(0.9306 0.026 92.4);
-  --sidebar-foreground: oklch(0.488 0.0283 219.1);
+  --sidebar-foreground: oklch(0.4 0.0283 219.1);
   --sidebar-accent: oklch(0.9031 0.0316 93);
   --sidebar-border: oklch(0.876 0.0292 91.7);
   --shadow-color: 90 30% 20%;
