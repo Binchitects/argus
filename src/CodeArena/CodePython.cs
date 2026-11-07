@@ -287,8 +287,11 @@ internal sealed class PythonSession : IAsyncDisposable
         }
     }
 
-    /// <summary>The exit code it ended with, or null while it runs.</summary>
-    public int? ExitCode => _process.HasExited ? _process.ExitCode : null;
+    /// <summary>
+    /// The exit code it ended with, or null while it runs. Its pipe closes as it exits, a moment before the system says it
+    /// has: an interpreter whose output ended is waited for that moment (up to a second), so its code is not missed.
+    /// </summary>
+    public int? ExitCode => _process.HasExited || _process.WaitForExit(TimeSpan.FromSeconds(1)) ? _process.ExitCode : null;
 
     private void Stop()
     {

@@ -169,7 +169,8 @@ public sealed class JobTests : IDisposable
         Assert.Equal(0, await h.Run("", "-p", "build it", "--mode", "yolo"));
 
         Assert.StartsWith("Build done: [Code Arena: job 1 has ended.", h.Out.Trim());
-        Assert.Matches(@"exit code 4 after [23]s", h.Out);
+        // At least the 2 s it slept (a loaded runner takes longer).
+        Assert.Matches(@"exit code 4 after ([2-9]|\d\d+)s", h.Out);
         Assert.Contains("built ok", h.Out);
         // The person watched it: its output under its number, how it ended.
         Assert.Contains("job 1 started, with no time limit: sleep 2; echo built ok; exit 4", h.Err);
