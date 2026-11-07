@@ -446,8 +446,11 @@ def readme(rid: str, exe: str) -> str:
                    "  (the build is not notarized by Apple).")
     else:
         system = "Windows (" + ("ARM64" if rid == "win-arm64" else "x64") + ")"
-        install = ("  Put code-arena.exe in a folder on your PATH. If SmartScreen stops it:\n"
-                   "  More info, then Run anyway (or unblock it in the file's properties).")
+        install = ("  Put code-arena.exe and code-arena-ide.exe in a folder on your PATH. If SmartScreen\n"
+                   "  stops one: More info, then Run anyway (or unblock it in the file's properties).\n"
+                   "  code-arena.exe is for terminals. For the IDE from a double-click, the desktop or the\n"
+                   "  Start menu, use code-arena-ide.exe (make a shortcut to it): it starts code-arena.exe\n"
+                   "  beside it with no console window.")
     return README.format(version=VERSION, system=system, install=install, exe=exe)
 
 
@@ -548,12 +551,25 @@ def cmd_code_arena(a) -> int:
                 f.unlink()
     if failed:
         raise Stop(f"Code Arena did not publish for {', '.join(failed)} (above)")
-    # Each carries everything it needs: self-contained, nothing to unpack at start, its page, a console program on Windows.
+    # On Windows, the IDE's launcher beside the program (tools/ide-launcher): a GUI program of a few kilobytes that starts
+    # code-arena.exe with no console window. One file for every Windows system, written by a tool built with the SDK alone.
+    windows = [r for r in rids if r.startswith("win-")]
+    if windows:
+        step("Code Arena: the IDE's launcher for Windows (code-arena-ide.exe)")
+        tool = built / ".ide-launcher"
+        shutil.rmtree(tool, ignore_errors=True)
+        run([*dotnet, "build", rel(TOOLS / "ide-launcher" / "ide-launcher.csproj"), "-c", "Release", "-o", rel(tool), *sources, "--disable-build-servers", "-nologo", "-v", "quiet"], cwd=ROOT)
+        for rid in windows:
+            run([*dotnet, rel(tool / "ide-launcher.dll"), rel(built / rid / "code-arena-ide.exe")], cwd=ROOT)
+        shutil.rmtree(tool, ignore_errors=True)
+    # Each carries everything it needs: self-contained, nothing to unpack at start, its page, a console program on Windows,
+    # and the launcher a GUI one.
     step("Code Arena: checked in the files themselves (tools/code-arena-check.py)")
     spec = importlib.util.spec_from_file_location("code_arena_check", TOOLS / "code-arena-check.py")
     checks = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(checks)
-    short = {rid: checks.check(built / rid / ("code-arena.exe" if rid.startswith("win-") else "code-arena"), web=not a.no_web) for rid in rids}
+    short = {rid: checks.check(built / rid / ("code-arena.exe" if rid.startswith("win-") else "code-arena"), web=not a.no_web)
+             + ([f"code-arena-ide.exe: {p}" for p in checks.check(built / rid / "code-arena-ide.exe")] if rid.startswith("win-") else []) for rid in rids}
     for rid, problems in short.items():
         say(f"  {rid}: {'; '.join(problems) or 'carries everything it needs'}")
     if any(short.values()):
@@ -566,6 +582,8 @@ def cmd_code_arena(a) -> int:
         name = f"code-arena-{VERSION}-{rid}"
         files = [(f"{name}/{exe}", (built / rid / exe).read_bytes(), 0o755), (f"{name}/LICENSE.md", (ROOT / "LICENSE.md").read_bytes(), 0o644),
                  (f"{name}/LICENSING.md", (ROOT / "LICENSING.md").read_bytes(), 0o644)]
+        if rid.startswith("win-"):
+            files.append((f"{name}/code-arena-ide.exe", (built / rid / "code-arena-ide.exe").read_bytes(), 0o755))
         text = readme(rid, exe)
         files.append((f"{name}/README.txt", (text.replace("\n", "\r\n") if rid.startswith("win-") else text).encode(), 0o644))
         files.sort()

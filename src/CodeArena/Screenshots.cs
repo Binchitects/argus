@@ -47,7 +47,7 @@ internal static class Screenshots
                 var height = Math.Clamp(args.Int("height") ?? 800, 240, 4000);
                 if (AppWindow.Find(env) is not { } browser)
                 {
-                    return new ToolResult("No Chrome, Edge, Chromium or Brave here to take the page with (CODE_ARENA_BROWSER names one).", true);
+                    return new ToolResult("No Chrome, Edge, Chromium or Brave here to take the page with (Settings → codeArena.browser, or CODE_ARENA_BROWSER, names one).", true);
                 }
                 await RunAsync(browser, ["--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run", $"--user-data-dir={Path.Combine(dir, "profile")}",
                     $"--window-size={width},{height}", $"--screenshot={file}", page.AbsoluteUri], ct);

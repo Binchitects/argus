@@ -7,7 +7,8 @@ using System.Text.RegularExpressions;
 namespace Llm.Api.Downloads;
 
 /// <summary>
-/// dotnet Llm.Api.dll sign-code-arena [FOLDER]: Code Arena's Windows builds in this image (FOLDER, /downloads/code-arena),
+/// dotnet Llm.Api.dll sign-code-arena [FOLDER]: Code Arena's Windows builds in this image (FOLDER, /downloads/code-arena:
+/// code-arena.exe and code-arena-ide.exe beside it),
 /// Authenticode-signed with the code-signing key and certificate read from standard input (PEM: the key, the certificate,
 /// its chain), written to standard output as a tar of the signed copies, the builds' list with their SHA-256 (SHA256SUMS)
 /// and the image's list it was made from (SHA256SUMS.image). scripts/sign-code-arena.sh runs it in a container of the app's
@@ -18,7 +19,8 @@ public static partial class CodeArenaSigner
     /// <summary>What the UAC prompt names the program.</summary>
     public const string ProgramName = "Code Arena";
 
-    [GeneratedRegex(@"^win-[a-z0-9]+/code-arena\.exe$")]
+    /// <summary>A Windows build: code-arena.exe, and the IDE's launcher beside it (code-arena-ide.exe).</summary>
+    [GeneratedRegex(@"^win-[a-z0-9]+/code-arena(-ide)?\.exe$")]
     private static partial Regex WindowsBuild();
 
     public static async Task<int> RunAsync(Stream input, Stream output, TextWriter said, string root)

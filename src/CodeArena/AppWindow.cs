@@ -27,7 +27,7 @@ internal static partial class AppWindow
         if (Find(env) is not { } browser)
         {
             said?.Invoke(env("CODE_ARENA_BROWSER") is { Length: > 0 } chosen
-                ? $"CODE_ARENA_BROWSER names no file ({chosen}): the IDE opens in your default browser instead."
+                ? $"The browser chosen (codeArena.browser, or CODE_ARENA_BROWSER) is no file ({chosen}): the IDE opens in your default browser instead."
                 : "No Chrome, Edge, Chromium or Brave here for the IDE's own window: it opens in your default browser instead.");
             return null;
         }

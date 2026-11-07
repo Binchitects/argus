@@ -139,6 +139,88 @@ public sealed class DownloadTests(AppFixture app)
         }
     }
 
+    /// <summary>
+    /// "After starting code arena a shell window is open": on Windows the IDE's launcher (code-arena-ide.exe, a GUI program)
+    /// is served beside code-arena.exe, listed with its own SHA-256, installed with it, checked the same way, and the
+    /// desktop's and the Start menu's shortcuts open it; code-arena.exe stays the terminals'.
+    /// </summary>
+    [Fact]
+    public async Task On_Windows_the_IDE_launcher_is_served_beside_the_build_installed_with_it_and_the_shortcuts_open_it()
+    {
+        var dir = Directory.CreateTempSubdirectory("launcher-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(dir, "code-arena", "win-x64"));
+            Directory.CreateDirectory(Path.Combine(dir, "code-arena", "win-arm64"));
+            // What the mocked download below writes for each file.
+            var mz = Convert.ToHexStringLower(SHA256.HashData("MZ"u8.ToArray()));
+            await File.WriteAllTextAsync(Path.Combine(dir, "code-arena", "win-x64", "code-arena.exe"), "MZ");
+            await File.WriteAllTextAsync(Path.Combine(dir, "code-arena", "win-x64", "code-arena-ide.exe"), "MZ GUI");
+            await File.WriteAllTextAsync(Path.Combine(dir, "code-arena", "win-arm64", "code-arena.exe"), "MZ");
+            await File.WriteAllTextAsync(Path.Combine(dir, "code-arena", "SHA256SUMS"), $"{mz}  win-arm64/code-arena.exe\n{mz}  win-x64/code-arena-ide.exe\n{mz}  win-x64/code-arena.exe\n");
+            await using var f = app.Create(app.ConnectionStringFor("launcher_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(),
+                new Dictionary<string, string?> { ["Downloads:Directory"] = dir });
+            using var http = f.CreateClient();
+
+            var builds = JsonDocument.Parse(await http.GetStringAsync("/api/downloads/code-arena")).RootElement.GetProperty("builds").EnumerateArray().ToList();
+            var x64 = builds.Single(b => b.GetProperty("rid").GetString() == "win-x64").GetProperty("ide");
+            Assert.Equal(("code-arena-ide.exe", 6L, mz), (x64.GetProperty("fileName").GetString(), x64.GetProperty("size").GetInt64(), x64.GetProperty("sha256").GetString()));
+            Assert.False(x64.TryGetProperty("path", out _));
+            Assert.Equal(JsonValueKind.Null, builds.Single(b => b.GetProperty("rid").GetString() == "win-arm64").GetProperty("ide").ValueKind);
+            using (var res = await http.GetAsync("/api/downloads/code-arena/win-x64/ide"))
+            {
+                Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+                Assert.Equal("code-arena-ide.exe", res.Content.Headers.ContentDisposition?.FileName);
+                Assert.Equal("MZ GUI", await res.Content.ReadAsStringAsync());
+            }
+            Assert.Equal(HttpStatusCode.NotFound, (await http.GetAsync("/api/downloads/code-arena/win-arm64/ide")).StatusCode);
+
+            var ps1 = await http.GetStringAsync("/api/downloads/code-arena/install.ps1");
+            Assert.Contains($"$ides = @{{ 'win-x64' = '{mz}' }}", ps1, StringComparison.Ordinal);
+            if (!File.Exists("/usr/bin/pwsh"))
+            {
+                return;
+            }
+            // install.ps1 as Windows runs it, the downloads and the shortcuts' COM object answered from here.
+            var fetched = Path.Combine(dir, "fetched.txt");
+            var links = Path.Combine(dir, "links.txt");
+            var mocked = $$"""
+                function Invoke-WebRequest { param([string]$Uri, [string]$OutFile, [switch]$UseBasicParsing) Add-Content -Path '{{fetched}}' -Value $Uri; Set-Content -Path $OutFile -Value 'MZ' -NoNewline }
+                function New-Object { param([string]$ComObject)
+                  $shell = [pscustomobject]@{}
+                  $shell | Add-Member ScriptMethod CreateShortcut { param($path)
+                    $link = [pscustomobject]@{ Path = $path; TargetPath = ''; WorkingDirectory = ''; IconLocation = ''; Description = '' }
+                    $link | Add-Member ScriptMethod Save { Add-Content -Path '{{links}}' -Value "$($this.Path)|$($this.TargetPath)|$($this.IconLocation)" }
+                    return $link }
+                  return $shell }
+                $env:LOCALAPPDATA = '{{dir}}'
+                """ + ps1;
+            await File.WriteAllTextAsync(Path.Combine(dir, "install.ps1"), mocked);
+            var start = new System.Diagnostics.ProcessStartInfo("pwsh", ["-NoProfile", "-NonInteractive", "-File", Path.Combine(dir, "install.ps1")]) { RedirectStandardOutput = true, RedirectStandardError = true };
+            start.Environment["PROCESSOR_ARCHITECTURE"] = "AMD64";
+            start.Environment["HOME"] = dir;
+            // A desktop to put a shortcut on (here only as a folder there: .NET names none that is not there).
+            Directory.CreateDirectory(Path.Combine(dir, "Desktop"));
+            using var run = System.Diagnostics.Process.Start(start)!;
+            var said = await run.StandardOutput.ReadToEndAsync() + await run.StandardError.ReadToEndAsync();
+            await run.WaitForExitAsync();
+            Assert.True(run.ExitCode == 0, said);
+            Assert.Equal([$"https://{AppFixture.Domain}/api/downloads/code-arena/win-x64", $"https://{AppFixture.Domain}/api/downloads/code-arena/win-x64/ide"],
+                await File.ReadAllLinesAsync(fetched));
+            var installed = Path.Combine(dir, "Programs", "code-arena");
+            Assert.True(File.Exists(Path.Combine(installed, "code-arena.exe")));
+            Assert.True(File.Exists(Path.Combine(installed, "code-arena-ide.exe")));
+            var made = await File.ReadAllLinesAsync(links);
+            Assert.NotEmpty(made);
+            Assert.All(made, l => Assert.EndsWith($"Code Arena.lnk|{Path.Combine(installed, "code-arena-ide.exe")}|{Path.Combine(installed, "code-arena.exe")},0", l));
+            Assert.Contains("open the IDE with no console window", said, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
     /// <summary>A CA, and a code-signing certificate it signs, as scripts/sign-code-arena.sh makes them.</summary>
     internal static (X509Certificate2 Ca, X509Certificate2 Leaf) CodeSigning(string name)
     {

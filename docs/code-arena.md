@@ -31,7 +31,10 @@ curl -fsSL https://DOMAIN/api/downloads/code-arena/install.sh | sh     # Linux a
 irm https://DOMAIN/api/downloads/code-arena/install.ps1 | iex           # Windows: %LOCALAPPDATA%\Programs\code-arena, on PATH
 ```
 
-`CODE_ARENA_DIR` puts it elsewhere; on a self-signed deployment,
+On Windows it also puts `code-arena-ide.exe` beside `code-arena.exe`, and a
+**Code Arena** shortcut on the desktop and in the Start menu that opens it:
+the IDE, with no console window (below; `CODE_ARENA_NO_SHORTCUTS=1` makes
+none). `CODE_ARENA_DIR` puts it elsewhere; on a self-signed deployment,
 `curl --cacert ca.crt -fsSL …/install.sh | CODE_ARENA_CA=ca.crt sh`. Or
 download the file for a system yourself:
 
@@ -47,7 +50,8 @@ to and says "Code Arena 7.0.0 is available from Arena (this is 6.9.0)"; the
 IDE shows **Update** in its status bar. `code-arena update` (or that button)
 downloads the build for this system, checks its size and SHA-256, and puts it
 in this program's place (on Windows the running one moves aside as
-`code-arena.exe.old`); the next start runs it. `"updateCheck": false` in
+`code-arena.exe.old`), and `code-arena-ide.exe` beside it too, checked the
+same way; the next start runs it. `"updateCheck": false` in
 `config.json` stops the daily look.
 
 **Arena knows who runs an old one.** Every request Code Arena sends names its
@@ -97,7 +101,8 @@ the machine's own (ARM64 even from an x64 PowerShell).
   signed ad hoc, not with an Apple developer ID.
 - **Windows** may warn that the file is unknown (SmartScreen): **More info →
   Run anyway**, or unblock it in the file's properties. Put `code-arena.exe` in
-  a folder on `PATH`.
+  a folder on `PATH`, and `code-arena-ide.exe` (its own download beside the
+  build's, `/api/downloads/code-arena/win-x64/ide`) in the same folder.
 
 When the page says the Arena has no builds yet, an admin adds them (below).
 
@@ -148,7 +153,10 @@ not take the key.
 | the IDE's layout and theme (`ide.json`) | `~/.local/share/code-arena/` | `%LOCALAPPDATA%\code-arena\` |
 
 `CODE_ARENA_HOME` puts both under one folder (`config/` and `data/`), for a
-portable copy on a USB stick. `ARENA_URL`, `ARENA_API_KEY`, `ARENA_GATEWAY_URL`,
+portable copy on a USB stick; the IDE's Settings → **Code Arena on this
+computer** → **Home** does the same from the next start, kept as `"home"` in
+config.json at the usual place, which then only points there (what is in the
+usual folders stays there). `ARENA_URL`, `ARENA_API_KEY`, `ARENA_GATEWAY_URL`,
 `ARENA_MCP_URL` and `ARENA_MODEL` override the file for one run (CI, scripts).
 The gateway is taken to be `https://gateway.DOMAIN` and Arena's tools
 `https://DOMAIN/mcp`; `login --gateway URL` (or `"gateway"`, `"mcpUrl"` in the
@@ -302,8 +310,9 @@ own that sends it on to the address (below). The window is an installed
 Chrome, Edge, Chromium or Brave in app mode: no tabs, no address bar, on a
 profile of Code Arena's own (`window/` in its data folder, so it keeps its
 size and place), and the browser keys VS Code uses there (Ctrl+W, Ctrl+T,
-Ctrl+N) are the IDE's. `CODE_ARENA_BROWSER=/path/to/chrome` picks the
-browser. Closing the window stops code-arena; a second code-arena's window
+Ctrl+N) are the IDE's. Settings → **Code Arena on this computer** →
+**Browser** (`"browser"` in config.json), or `CODE_ARENA_BROWSER=/path/to/chrome`,
+picks the browser. Closing the window stops code-arena; a second code-arena's window
 goes to the browser the first one started, so that one runs until Ctrl+C.
 Without such a browser (Firefox has no app mode; a snap's browser cannot read
 the data folder), with `--browser`, or with `"window": false` in
@@ -328,11 +337,20 @@ browser says "This browser is too old for Code Arena", with the versions that
 are new enough, instead of a blank page; `code-arena chat` runs the agent in a
 terminal meanwhile.
 
-**Started on its own on Windows.** A double-click on `code-arena.exe` (or a
-shortcut, or the Start menu) leaves the IDE no console window: it starts
+**Started on its own on Windows.** `code-arena-ide.exe`, beside
+`code-arena.exe`, is the IDE for a double-click, the desktop's shortcut and
+the Start menu: a program of Windows' GUI subsystem, so Windows opens no
+console for it, which starts `code-arena.exe` with the same arguments and
+folder and a console that has no window, then ends (a message box says so
+when it cannot). It is a .NET Framework 4 program of a few kilobytes, which
+every Windows 10 and 11 runs as it is, for x64 and ARM64 alike, signed with
+the builds (`tools/ide-launcher` writes it; `tools/code-arena-check.py`
+checks it is a GUI program and `code-arena.exe` a console one).
+`code-arena.exe` stays the program for terminals. A double-click on
+`code-arena.exe` itself also leaves the IDE no console window: it starts
 itself again at once with a console that has no window, and the first one
 ends (Windows shows its console for a moment, as it makes one before any
-program runs). The programs the IDE runs (git, the terminals' shells, language
+program runs: what the launcher avoids). The programs the IDE runs (git, the terminals' shells, language
 servers) share that hidden console, so none of them opens a window either.
 When the IDE gets no window of its own and runs in a tab, a console comes
 back: closing it, or Ctrl+C, stops the IDE. When it cannot start (not signed
@@ -856,6 +874,15 @@ it; a setting's menu resets it or copies its id or its JSON; settings of the
 file Code Arena does not use are
 listed apart (they stay in it); **From VS Code** brings over VS Code's own
 settings.json from this computer (what the person set already stays).
+**Code Arena on this computer** (User only) holds what Code Arena itself reads
+before any page: the browser for its window, the hypervisors' programs and the
+home folder. They are kept in config.json, not settings.json, each checked as
+it is saved (a program must be there, a folder a full path); a variable of the
+same name in the environment (`CODE_ARENA_BROWSER`, `CODE_ARENA_VBOXMANAGE`,
+`CODE_ARENA_VMRUN`, `CODE_ARENA_VIRSH`, `CODE_ARENA_HOME`) still wins, and the
+row says so. A test keeps every `CODE_ARENA_*` the code reads a setting there,
+or names why it is none (the `--serve` key, the mark of a start without a
+console).
 **Ctrl+K Ctrl+S** opens the **Keyboard Shortcuts editor**: every command with
 its keys, when they apply and whose rule each is (Default, User, Extension),
 searched by words or by pressing the keys (**Record Keys**); double-click a key
@@ -2044,7 +2071,7 @@ On the person's machine:
 | `command_output` | the state and the latest output of a command run with no time limit; `wait` waits until it ends |
 | `stop_command` | stops a command run with no time limit; it always asks the person first, `yolo` too |
 | `git` | status, diff, log, show, blame, branch: reading only (commits go through `run_shell`), inside the working directory: `diff --no-index` is refused, and so is a file outside it named anywhere in the arguments (`blame --contents FILE`, `-S FILE`), by name or through a link that leads out. It never asks, so the repository's own settings run nothing in it: no fsmonitor, hook, clean or smudge filter, merge driver (`--remerge-diff`), text conversion (so not `status -v`), external diff or signature checker, no submodule looked into (their changes are not shown), and no network (a partial clone does not fetch). Nor do they send it elsewhere: a work tree other than the folder that holds `.git` (`core.worktree`), or a `.git` that leads to another repository's folder, is refused (a worktree of another checkout and a submodule, which git made so, are read), and a `blame.ignoreRevsFile` outside is not read. The file list `grep` and `glob` (and the IDE's search and quick open) take from git is read the same way |
-| `screenshot` | a picture of a web page (`url`, at `width` × `height`, 1280 × 800 by default: the app you build, on its dev server) through a headless Chrome, Edge, Chromium or Brave (`CODE_ARENA_BROWSER` names one); without `url`, the whole screen (grim, gnome-screenshot, spectacle, ImageMagick or scrot on Linux; screencapture on macOS; PowerShell on Windows). The picture goes to the model after the result (one that sees pictures; another is told it cannot). It asks first, as a command does |
+| `screenshot` | a picture of a web page (`url`, at `width` × `height`, 1280 × 800 by default: the app you build, on its dev server) through a headless Chrome, Edge, Chromium or Brave (Settings → `codeArena.browser`, or `CODE_ARENA_BROWSER`, names one); without `url`, the whole screen (grim, gnome-screenshot, spectacle, ImageMagick or scrot on Linux; screencapture on macOS; PowerShell on Windows). The picture goes to the model after the result (one that sees pictures; another is told it cannot). It asks first, as a command does |
 | `vm_list`, `vm_run`, `vm_test`... | the person's virtual machines (VirtualBox, VMware, libvirt, Hyper-V): start, snapshot, copy in, run and test an app, read the screen, type ([below](#virtual-machines)). Offered when a hypervisor is installed |
 | `ask_agent` | hands a task to one of the person's own coding agents (below), which runs it in the working directory; what it prints comes back. Offered when one is installed; it asks first, as a command does |
 | `plan` | the working plan the person sees (`/plan`), kept in Arena with the session's chat ([below](#the-plan)) |
@@ -2211,8 +2238,11 @@ the VM running as the test left it, to look at. Take the clean snapshot first
 **What each one does it with.** The programs are found on `PATH` and in their
 usual folders (`C:\Program Files\Oracle\VirtualBox`, VMware's under Program
 Files, `/Applications/VirtualBox.app` and VMware Fusion's on macOS,
-`/usr/lib/virtualbox`); `CODE_ARENA_VBOXMANAGE`, `CODE_ARENA_VMRUN` and
-`CODE_ARENA_VIRSH` name another. They run as you, outside the commands'
+`/usr/lib/virtualbox`); Settings → **Code Arena on this computer** →
+`codeArena.vm.vboxManage`, `codeArena.vm.vmrun` and `codeArena.vm.virsh`
+(`"vboxManage"`, `"vmrun"`, `"virsh"` in config.json), or
+`CODE_ARENA_VBOXMANAGE`, `CODE_ARENA_VMRUN` and `CODE_ARENA_VIRSH`, name
+another. They run as you, outside the commands'
 sandbox, since they talk to the hypervisor's own service.
 
 | | commands and files | screen | keys and text | click |

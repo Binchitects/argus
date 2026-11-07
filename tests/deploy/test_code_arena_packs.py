@@ -58,6 +58,20 @@ if args[:1] == ["publish"]:
     (out / ("code-arena.exe" if rid.startswith("win") else "code-arena")).write_bytes(check.sample(rid.startswith("win")))
     (out / "code-arena.pdb").write_text("symbols\n")
     sys.exit(0)
+if args[:2] == ["build", "tools/ide-launcher/ide-launcher.csproj"]:
+    # What writes the IDE's launcher for Windows: offline, from where --source says, as the restore.
+    if os.environ.get("FAKE_NUGET_UNREACHABLE") and "--source" not in args:
+        sys.exit("error NU1301: Unable to load the service index for source https://api.nuget.org/v3/index.json.")
+    out = pathlib.Path(args[args.index("-o") + 1])
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "ide-launcher.dll").write_text("writes code-arena-ide.exe\n")
+    sys.exit(0)
+if args[:1] and args[0].endswith("/ide-launcher.dll"):
+    spec = importlib.util.spec_from_file_location("check", "tools/code-arena-check.py")
+    check = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(check)
+    pathlib.Path(args[1]).write_bytes(check.sample_launcher())
+    sys.exit(0)
 sys.exit(f"fake dotnet: no {args}")
 """
 
@@ -120,8 +134,15 @@ class CodeArenaPacksTests(unittest.TestCase):
         return [c for c in (json.loads(line) for line in self.log.read_text().splitlines()) if c[:1] == ["restore"]]
 
     def built(self) -> list[str]:
+        """The programs (not the launchers beside the Windows ones)."""
+        return [b for b in self.files() if not b.endswith("/code-arena-ide.exe")]
+
+    def files(self) -> list[str]:
         out = self.repo / "dist" / "code-arena"
         return sorted(str(p.relative_to(out)) for p in out.rglob("code-arena*")) if out.exists() else []
+
+    def builds(self) -> list[list[str]]:
+        return [c for c in (json.loads(line) for line in self.log.read_text().splitlines()) if c[:1] == ["build"]]
 
     def test_packs_for_an_older_runtime_than_the_sdks_build_nothing_and_name_the_version_to_fetch(self):
         self.packs("10.0.12")
@@ -166,13 +187,22 @@ class CodeArenaPacksTests(unittest.TestCase):
         self.assertIn(f'-p:RuntimeIdentifiers="{";".join(RIDS)}"', restore)
         self.assertEqual(self.built(), sorted(f"{rid}/code-arena{'.exe' if rid.startswith('win') else ''}" for rid in RIDS))
         sums = (self.repo / "dist" / "code-arena" / "SHA256SUMS").read_text()
-        self.assertEqual(len(sums.splitlines()), len(RIDS))
+        self.assertEqual(len(sums.splitlines()), len(RIDS) + 2)
+        # The IDE's launcher beside each Windows build, written by a tool built from that folder only, listed and checked.
+        self.assertEqual(sorted(set(self.files()) - set(self.built())), ["win-arm64/code-arena-ide.exe", "win-x64/code-arena-ide.exe"])
+        [build] = self.builds()
+        self.assertEqual(build[build.index("--source") + 1], "tools/offline-nuget")
+        self.assertIn("  win-x64/code-arena-ide.exe", sums)
+        self.assertIn("code-arena-ide.exe: carries everything it needs", r.stdout)
+        self.assertFalse((self.repo / "dist" / "code-arena" / ".ide-launcher").exists())
 
     def test_only_the_systems_asked_for_need_packs_and_any_case_of_the_names_does(self):
         self.packs("10.0.13", ["linux-x64"], name=lambda pack, rid, v: f"Microsoft.NETCore.App.{pack.title()}.{rid}.{v}.nupkg")
         r = self.publish("10.0.13", "--offline", "linux-x64")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(self.built(), ["linux-x64/code-arena"])
+        self.assertEqual(self.files(), ["linux-x64/code-arena"])
+        # No Windows build: no launcher is made.
+        self.assertEqual(self.builds(), [])
         r = self.publish("10.0.13", "--offline", "linux-x64", "win-x64")
         self.assertEqual(r.returncode, 3, r.stderr)
         self.assertIn("lacks 2 of the 4", r.stderr)

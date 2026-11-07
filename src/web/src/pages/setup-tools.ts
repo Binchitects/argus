@@ -25,6 +25,8 @@ export interface CodeArenaBuild {
   fileName: string
   size: number
   sha256: string | null
+  /** On Windows, the IDE's launcher beside it (code-arena-ide.exe): a GUI program that starts code-arena.exe with no console window. */
+  ide?: { fileName: string; size: number; sha256: string | null } | null
 }
 
 export type System = 'unix' | 'windows'
@@ -76,6 +78,7 @@ export interface Tool {
 
 const json = (v: unknown) => JSON.stringify(v, null, 2)
 const megabytes = (bytes: number) => `${Math.round(bytes / 1024 / 1024)} MB`
+const kilobytes = (bytes: number) => `${Math.max(1, Math.round(bytes / 1024))} KB`
 const unix = (c: Context) => c.os === 'unix'
 
 /** The key in a setup that cannot read it from the environment. */
@@ -165,13 +168,16 @@ export const tools: Tool[] = [
               code: `curl -fsSL ${c.origin}/api/downloads/code-arena/install.sh | sh`,
             }
           : {
-              text: `Install it in one line (version ${c.codeArena!.version}), in PowerShell: the build checked against its SHA-256${signedBy(c)}, on your PATH.`,
+              text: `Install it in one line (version ${c.codeArena!.version}), in PowerShell: the build checked against its SHA-256${signedBy(c)}, on your PATH, with a Code Arena shortcut on your desktop and in the Start menu that opens the IDE with no console window.`,
               file: 'powershell',
               code: `irm ${c.origin}/api/downloads/code-arena/install.ps1 | iex`,
             },
         {
           text: 'Or download it for your system yourself:',
-          links: builds.map((b) => ({ label: b.system, href: `/api/downloads/code-arena/${b.rid}`, detail: megabytes(b.size) })),
+          links: builds.flatMap((b) => [
+            { label: b.system, href: `/api/downloads/code-arena/${b.rid}`, detail: megabytes(b.size) },
+            ...(b.ide ? [{ label: `${b.system}, the IDE launcher (code-arena-ide.exe)`, href: `/api/downloads/code-arena/${b.rid}/ide`, detail: kilobytes(b.ide.size) }] : []),
+          ]),
         },
         unix(c)
           ? {
@@ -181,7 +187,9 @@ export const tools: Tool[] = [
 xattr -d com.apple.quarantine code-arena   # macOS only: the browser's download mark
 mkdir -p ~/.local/bin && mv code-arena ~/.local/bin/`,
             }
-          : { text: 'Downloaded by hand: put code-arena.exe in a folder on your PATH (or run it from where it is, as .\\code-arena.exe).' },
+          : {
+              text: 'Downloaded by hand: put code-arena.exe in a folder on your PATH (or run it from where it is, as .\\code-arena.exe), and code-arena-ide.exe beside it. code-arena.exe is for terminals; for the IDE from a double-click or a shortcut, open code-arena-ide.exe, which starts it with no console window.',
+            },
         {
           text: "Sign in with this Arena's address and your API key. It asks for the key, checks it with the gateway, and keeps it in your config folder, readable by you only.",
           file: 'shell',

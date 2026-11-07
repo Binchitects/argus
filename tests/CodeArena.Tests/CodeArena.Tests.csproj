@@ -21,4 +21,9 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- The IDE's launcher for Windows (tools/ide-launcher), written and run here as it is published. -->
+  <ItemGroup>
+    <Compile Include="../../tools/ide-launcher/IdeLauncher.cs" Link="Shared/IdeLauncher.cs" />
+  </ItemGroup>
+
 </Project>

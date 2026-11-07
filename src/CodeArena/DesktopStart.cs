@@ -9,11 +9,13 @@ namespace CodeArena;
 /// the IDE does not need: it starts itself again at once with a console that has no window (CREATE_NO_WINDOW), and the
 /// first one ends. The programs the IDE runs (git, the terminals' shells, language servers) share that hidden console, so
 /// none of them opens a window either. When the IDE gets no window of its own (it runs in a tab), a console is shown: it
-/// is the way to stop it. What the IDE says goes to its log (LogFile) all the while.
+/// is the way to stop it. What the IDE says goes to its log (LogFile) all the while. The console Windows shows for a moment
+/// before this runs is what code-arena-ide.exe avoids (tools/ide-launcher): a GUI program beside it, for the shortcuts, that
+/// starts this one as <see cref="Child"/> does.
 /// </summary>
 internal static class DesktopStart
 {
-    /// <summary>Set for the IDE started again without a window; taken out of its environment at once.</summary>
+    /// <summary>Set for the IDE started again without a window (here, or by code-arena-ide.exe); taken out of its environment at once.</summary>
     public const string Detached = "CODE_ARENA_DETACHED";
 
     public enum Start

@@ -19,9 +19,16 @@ internal static class Updates
     /// <summary>How often a session's start looks, and how long it waits for Arena.</summary>
     public static readonly TimeSpan Every = TimeSpan.FromDays(1), Wait = TimeSpan.FromSeconds(5);
 
+    /// <summary>The IDE's launcher beside code-arena.exe on Windows: a GUI program that starts it with no console window.</summary>
+    public const string IdeLauncher = "code-arena-ide.exe";
+
     /// <summary>A newer build Arena serves for this system.</summary>
     /// <param name="Signed">Arena signs its builds: the list of them, with a code-signing certificate of its CA.</param>
-    public sealed record Available(string Version, string Rid, string Url, string? Sha256, long Size, bool Signed = false);
+    /// <param name="Ide">The IDE's launcher beside it (Windows), at Url/ide.</param>
+    public sealed record Available(string Version, string Rid, string Url, string? Sha256, long Size, bool Signed = false, Beside? Ide = null);
+
+    /// <summary>A file beside the build: its size and SHA-256.</summary>
+    public sealed record Beside(long Size, string? Sha256);
 
     /// <summary>This program's system, as Arena names its builds (linux-x64, osx-arm64, win-x64…).</summary>
     public static string Rid => RuntimeInformation.RuntimeIdentifier;
@@ -45,7 +52,8 @@ internal static class Updates
                 return null;
             }
             var build = (body["builds"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(b => b.Str("rid") == Rid);
-            return build is null ? null : new Available(version, Rid, $"{root}/{Rid}", build.Str("sha256"), build.Long("size") ?? 0, body["signature"] is JsonObject);
+            return build is null ? null : new Available(version, Rid, $"{root}/{Rid}", build.Str("sha256"), build.Long("size") ?? 0, body["signature"] is JsonObject,
+                build["ide"] is JsonObject ide ? new Beside(ide.Long("size") ?? 0, ide.Str("sha256")) : null);
         }
         catch (Exception e) when (e is HttpRequestException or OperationCanceledException && !ct.IsCancellationRequested)
         {
@@ -107,7 +115,8 @@ internal static class Updates
 
     /// <summary>
     /// Puts Arena's newer build in this program's place: downloaded beside it, checked (size and SHA-256), made runnable, then
-    /// renamed over it (on Windows the running one moves aside first, as code-arena.exe.old). What it did, or why it did not.
+    /// renamed over it (on Windows the running one moves aside first, as code-arena.exe.old); the IDE's launcher beside it
+    /// too, when Arena has one for this system, checked the same way. What it did, or why it did not.
     /// </summary>
     /// <param name="caFile">The CA this machine trusts for Arena (--ca, the config's, ARENA_CA_CERT); null: the system's.</param>
     public static async Task<(bool Done, string Said)> UpdateAsync(Config config, HttpClient http, Action<string> progress, CancellationToken ct, string? exe = null,
@@ -128,33 +137,12 @@ internal static class Updates
         }
         progress($"Downloading Code Arena {found.Version} for {found.Rid} ({Files.Size(found.Size)}) from Arena…");
         var temporary = exe + ".new";
+        var root = found.Url[..found.Url.LastIndexOf('/')];
         try
         {
-            using (var res = await http.GetAsync(new Uri(found.Url), HttpCompletionOption.ResponseHeadersRead, ct))
+            if (await FetchAsync(http, found.Url, temporary, found.Size, found.Sha256, found.Signed ? root : null, $"{found.Rid}/{Path.GetFileName(exe)}", caFile, ct) is { } problem)
             {
-                if (!res.IsSuccessStatusCode)
-                {
-                    return (false, $"Arena did not give the build ({(int)res.StatusCode}): try again in a moment.");
-                }
-                await using var file = File.Create(temporary);
-                await using var body = await res.Content.ReadAsStreamAsync(ct);
-                await body.CopyToAsync(file, ct);
-            }
-            var length = new FileInfo(temporary).Length;
-            string sum;
-            await using (var read = File.OpenRead(temporary))
-            {
-                sum = Convert.ToHexStringLower(await SHA256.HashDataAsync(read, ct));
-            }
-            if ((found.Size > 0 && length != found.Size) || (found.Sha256 is { Length: > 0 } want && !want.Equals(sum, StringComparison.OrdinalIgnoreCase)))
-            {
-                File.Delete(temporary);
-                return (false, $"The download did not match what Arena lists ({length:N0} bytes, SHA-256 {sum[..12]}…): nothing changed. Try again.");
-            }
-            if (found.Signed && await SignatureProblemAsync(http, found.Url[..found.Url.LastIndexOf('/')], $"{found.Rid}/{Path.GetFileName(exe)}", sum, caFile, ct) is { } problem)
-            {
-                File.Delete(temporary);
-                return (false, $"The download is not the one Arena's CA signed ({problem}): nothing changed.");
+                return (false, problem);
             }
             if (!OperatingSystem.IsWindows())
             {
@@ -169,7 +157,8 @@ internal static class Updates
                 File.Move(exe, aside);
                 File.Move(temporary, exe);
             }
-            return (true, $"Code Arena {Cli.Version} → {found.Version}{(found.Signed ? ", signed by Arena's CA" : "")}: the next start runs it.");
+            var launcher = found.Ide is { } ide ? await LauncherAsync(http, found, ide, root, exe, caFile, ct) : "";
+            return (true, $"Code Arena {Cli.Version} → {found.Version}{(found.Signed ? ", signed by Arena's CA" : "")}: the next start runs it.{launcher}");
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or HttpRequestException)
         {
@@ -182,6 +171,66 @@ internal static class Updates
                 // Left beside it: the next update writes over it.
             }
             return (false, $"Code Arena could not be replaced ({e.Message}): nothing changed.");
+        }
+    }
+
+    /// <summary>
+    /// A file of Arena's downloaded to <paramref name="temporary"/> and checked: its size and SHA-256 as Arena lists them, and,
+    /// with <paramref name="signedRoot"/>, that it is in the list Arena's CA signed. Null when it is; else why not (and the file
+    /// is gone).
+    /// </summary>
+    private static async Task<string?> FetchAsync(HttpClient http, string url, string temporary, long size, string? want, string? signedRoot, string entry, string? caFile,
+        CancellationToken ct)
+    {
+        using (var res = await http.GetAsync(new Uri(url), HttpCompletionOption.ResponseHeadersRead, ct))
+        {
+            if (!res.IsSuccessStatusCode)
+            {
+                return $"Arena did not give the build ({(int)res.StatusCode}): try again in a moment.";
+            }
+            await using var file = File.Create(temporary);
+            await using var body = await res.Content.ReadAsStreamAsync(ct);
+            await body.CopyToAsync(file, ct);
+        }
+        var length = new FileInfo(temporary).Length;
+        string sum;
+        await using (var read = File.OpenRead(temporary))
+        {
+            sum = Convert.ToHexStringLower(await SHA256.HashDataAsync(read, ct));
+        }
+        if ((size > 0 && length != size) || (want is { Length: > 0 } && !want.Equals(sum, StringComparison.OrdinalIgnoreCase)))
+        {
+            File.Delete(temporary);
+            return $"The download did not match what Arena lists ({length:N0} bytes, SHA-256 {sum[..12]}…): nothing changed. Try again.";
+        }
+        if (signedRoot is not null && await SignatureProblemAsync(http, signedRoot, entry, sum, caFile, ct) is { } problem)
+        {
+            File.Delete(temporary);
+            return $"The download is not the one Arena's CA signed ({problem}): nothing changed.";
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// The IDE's launcher beside the program, put in place as it is (it only starts code-arena.exe and ends, so nothing runs
+    /// it to move aside); what to add to what the update says. The program is updated whatever becomes of it.
+    /// </summary>
+    private static async Task<string> LauncherAsync(HttpClient http, Available found, Beside ide, string root, string exe, string? caFile, CancellationToken ct)
+    {
+        var beside = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(exe))!, IdeLauncher);
+        try
+        {
+            if (await FetchAsync(http, found.Url + "/ide", beside + ".new", ide.Size, ide.Sha256, found.Signed ? root : null, $"{found.Rid}/{IdeLauncher}", caFile, ct) is { } problem)
+            {
+                return $" The IDE launcher beside it was not updated: {problem}";
+            }
+            File.Move(beside + ".new", beside, overwrite: true);
+            return $" So is {IdeLauncher} beside it.";
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or HttpRequestException)
+        {
+            File.Delete(beside + ".new");
+            return $" The IDE launcher beside it was not updated ({e.Message}).";
         }
     }
 

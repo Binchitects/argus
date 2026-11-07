@@ -45,6 +45,9 @@ public sealed partial class TeamsBot(IHttpClientFactory http, IOptionsMonitor<Bo
 
     public PlatformOptions Options => O;
 
+    /// <summary>Whether it answers in this channel (any of its names).</summary>
+    public bool Allows(params string?[] names) => O.Allows(names);
+
     /// <summary>
     /// Whether the Bot Connector sent this activity: its bearer token is signed by a key the
     /// Bot Framework publishes (and endorses for the activity's channel), issued for this bot,

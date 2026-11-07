@@ -64,6 +64,8 @@ ARG CODE_ARENA
 WORKDIR /src
 COPY global.json Directory.Build.props VERSION ./
 COPY tools/publish-code-arena.sh tools/
+# What writes the IDE's launcher for Windows (code-arena-ide.exe), beside code-arena.exe.
+COPY tools/ide-launcher/ tools/ide-launcher/
 COPY tools/offline-nuget/ tools/offline-nuget/
 COPY src/CodeArena/ src/CodeArena/
 COPY skills/ skills/

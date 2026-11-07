@@ -203,8 +203,14 @@ Every option the app reads has a place on this page, in one of three ways:
   read in scans and how long an answer waits for its files (Company
   knowledge); the clean-up's round (Data retention); the waits for the
   gateway and a vLLM model, the engine's threads and the memory kept for the
-  rest (Model); how long spend is reused (Prices); and the dashboards' rows,
-  log lines and query time (**Dashboards**).
+  rest, and the Hugging Face address, for a mirror inside the company (Model);
+  how long spend is reused (Prices); the dashboards' rows, log lines, query
+  time and the scrape interval they assume (**Dashboards**); the admin group
+  other apps see (Sign-in and sessions); the embeddings server, its model, key
+  and prefixes, and pgvector (Company knowledge); whether security alerts are
+  raised at all (Security alerts); and whether replicas work together, how
+  often they check the lead and how long one waits for another
+  (**Replicas**).
 - **Set by the installation**, the last entry of the list: every setting of
   `.env` that the installer asks ([`deploy/settings`](../deploy/settings)),
   the features, and the secrets the installer made, each with its value where
@@ -215,13 +221,21 @@ Every option the app reads has a place on this page, in one of three ways:
   The command starts again the services they touch and waits until each is
   healthy. Search finds them too.
 - **The stack's own wiring**: where its services, volumes and files are inside
-  its containers (`Engine:Url`, `Knowledge:EmbedUrl`, `Sandbox:Dir`, …). These
-  are no settings: a change breaks the stack, so they are not shown; the
-  installation's settings move what needs moving (an external database,
-  GitLab).
+  its containers (`Engine:Url`, `Gateway:Url`, `Sandbox:Dir`, …), the secrets
+  between them, how a Helm release or several machines are laid out, and the
+  switches only tests turn off. These are no settings: a change breaks the
+  stack, so they are not shown; the installation's settings move what needs
+  moving (an external database, GitLab). Each says why in the code
+  (`InstallSettings.Wiring`). Three that may look like settings are not:
+  `Compliance:Starter` is read once, at a new installation's first start,
+  before anything can be saved (Admin → Compliance applies the same defaults a
+  step at a time); `Auth:AdminUserName` names the first admin, whose account
+  it then protects; and `Keys:Watch`, off, would let a disabled person's API
+  keys keep working.
 
 A test keeps it so: each option the app binds, and each configuration key
-these pages name, is a setting here, an installation setting, or wiring.
+these pages name, is a setting here, an installation setting, or wiring with
+its reason.
 
 ## What cannot be changed here, and why
 

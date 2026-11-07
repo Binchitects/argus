@@ -22,8 +22,6 @@ public sealed class ArgusOptions
     public string Url { get; set; } = "http://argus:7700";
     public string? AdminToken { get; set; }
     public string? GitlabUrl { get; set; }
-    public string? GitlabAuth { get; set; }
-    public string? GitlabUsername { get; set; }
 
     /// <summary>Argus's pages and tools need its address and token (ARGUS_KEY).</summary>
     public bool Enabled => !string.IsNullOrWhiteSpace(Url) && !string.IsNullOrWhiteSpace(AdminToken);

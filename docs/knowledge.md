@@ -383,20 +383,16 @@ their start, and the rest by `read_file`.
 |---|---|---|
 | Read sources again every | 1 hour | 15 minutes to a week |
 | Passages of long files per question | 12,000 characters | |
+| Embeddings server | `http://embed:8080` | an OpenAI-compatible embeddings server, without `/v1`: the stack's own, or the company's |
+| Embedding model | `nomic-embed-text` | each source and file is embedded again with a new one when it is next read; until then search finds only what the new model embedded |
+| Embeddings server's key | empty | a bearer key for a server outside the stack; never shown |
+| Before each passage, before each question | `search_document: `, `search_query: ` | what nomic-embed-text wants, the space at the end included; empty for a model that wants none |
+| Compare with pgvector | on | off for a company Postgres without the extension: plain SQL, slower |
+| Languages read in scans | `eng+fas+ara` | Tesseract's names joined with `+` (the sandbox has `eng`, `fas`, `ara`, `chi_sim`, `chi_tra`) |
+| An answer waits for its files' passages | 15 seconds | |
 
-In configuration (the `Knowledge` section, e.g. `Knowledge__EmbedUrl` in the
-environment), for odd setups only:
-
-| key | default | |
-|---|---|---|
-| `EmbedUrl` | `http://embed:8080` | an OpenAI-compatible embeddings server, without `/v1` |
-| `EmbedModel` | `nomic-embed-text` | |
-| `EmbedKey` | empty | a bearer key for a server outside the stack |
-| `DocumentPrefix`, `QueryPrefix` | `search_document: `, `search_query: ` | what nomic-embed-text wants; empty for a model that wants none |
-| `FolderRoot` | `/knowledge` | where folders must be |
-| `OcrLanguages` | `eng+fas+ara` | the languages OCR reads, Tesseract's names joined with `+` (the sandbox has `eng`, `fas`, `ara`, `chi_sim`, `chi_tra`) |
-| `IndexWait` | 15 seconds | how long an answer waits for its files to be embedded |
-| `PgVector` | true | false compares in plain SQL |
+Where the folders of a folder source must be (`/knowledge` in the app's
+container) is the stack's wiring: mount them there.
 
 ## What comes next
 

@@ -167,7 +167,14 @@ describe('connect your tools', () => {
     fakeApi(member, {
       'GET /api/chat/config': () => ({ json: config({ argus: true }) }),
       'GET /api/downloads/code-arena': () => ({
-        json: { version: '4.2.0', builds: [build('linux-x64', 'Linux (x64)'), build('osx-arm64', 'macOS (Apple silicon)'), build('win-x64', 'Windows (x64)', 'code-arena.exe')] },
+        json: {
+          version: '4.2.0',
+          builds: [
+            build('linux-x64', 'Linux (x64)'),
+            build('osx-arm64', 'macOS (Apple silicon)'),
+            { ...build('win-x64', 'Windows (x64)', 'code-arena.exe'), ide: { fileName: 'code-arena-ide.exe', size: 4096, sha256: 'def' } },
+          ],
+        },
       }),
     })
     renderApp('/setup')
@@ -179,7 +186,9 @@ describe('connect your tools', () => {
     expect(within(steps).getByText(`curl -fsSL ${window.location.origin}/api/downloads/code-arena/install.sh | sh`)).toBeInTheDocument()
     expect(within(steps).getByText('code-arena update')).toBeInTheDocument()
     expect(within(steps).getByRole('link', { name: /Linux \(x64\)/ })).toHaveAttribute('href', '/api/downloads/code-arena/linux-x64')
-    expect(within(steps).getByRole('link', { name: /Windows \(x64\)/ })).toHaveAttribute('href', '/api/downloads/code-arena/win-x64')
+    expect(within(steps).getByRole('link', { name: 'Download for Windows (x64), 38 MB' })).toHaveAttribute('href', '/api/downloads/code-arena/win-x64')
+    // Beside it on Windows, the IDE's launcher: no console window on a double-click.
+    expect(within(steps).getByRole('link', { name: 'Download for Windows (x64), the IDE launcher (code-arena-ide.exe), 4 KB' })).toHaveAttribute('href', '/api/downloads/code-arena/win-x64/ide')
     expect(within(steps).getByRole('link', { name: 'Download for macOS (Apple silicon), 38 MB' })).toHaveAttribute('download')
     expect(within(steps).queryByRole('link', { name: /Linux \(ARM64\)/ })).not.toBeInTheDocument()
     // Signing in names this Arena; a public certificate needs no CA step, and a check closes the steps.

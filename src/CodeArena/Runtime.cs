@@ -459,9 +459,9 @@ internal sealed partial class Runtime : IAsyncDisposable
         tools.Add(LocalTools.SubAgentTool());
         tools.Add(LocalTools.RunStepsTool());
         tools.Add(RunCodeTool(this));
-        tools.Add(Screenshots.Tool(Env.Env));
+        tools.Add(Screenshots.Tool(Env.Options));
         // The VM tools, when VirtualBox, VMware, libvirt or Hyper-V is installed here.
-        if (Hypervisors.Find(Env.Env) is { Count: > 0 } hypervisors)
+        if (Hypervisors.Find(Env.Options) is { Count: > 0 } hypervisors)
         {
             Machines = new VirtualMachines(hypervisors, new GuestLogins(Keyring.For(Env.Env), Ui), () => Sees(Model.Info));
             tools.AddRange(Machines.Tools());

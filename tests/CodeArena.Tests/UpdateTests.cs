@@ -57,6 +57,34 @@ public sealed class UpdateTests : IDisposable
         Assert.Contains("runs from its source", h.Err, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Update_puts_the_IDE_launcher_beside_it_in_place_too_and_one_that_does_not_match_leaves_the_program_updated()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        var exe = Path.Combine(h.Root, "bin", OperatingSystem.IsWindows() ? "code-arena.exe" : "code-arena");
+        var launcher = Path.Combine(h.Root, "bin", Updates.IdeLauncher);
+        Directory.CreateDirectory(Path.GetDirectoryName(exe)!);
+        File.WriteAllText(exe, "the old one");
+        File.WriteAllText(launcher, "the old launcher");
+        _mcp.Build = ("99.0.0", "the new one"u8.ToArray(), null);
+        _mcp.Ide = ("the new launcher"u8.ToArray(), null);
+        Assert.Equal(0, await h.RunUpdate(exe));
+        Assert.Contains($"So is {Updates.IdeLauncher} beside it.", h.Out, StringComparison.Ordinal);
+        Assert.Equal("the new one", File.ReadAllText(exe));
+        Assert.Equal("the new launcher", File.ReadAllText(launcher));
+        Assert.False(File.Exists(launcher + ".new"));
+
+        // A launcher that is not what Arena lists: the program is updated, the launcher left as it was, and that is said.
+        File.WriteAllText(exe, "the old one");
+        _mcp.Build = ("99.0.1", "newer still"u8.ToArray(), null);
+        _mcp.Ide = ("tampered"u8.ToArray(), new string('0', 64));
+        Assert.Equal(0, await h.RunUpdate(exe));
+        Assert.Equal("newer still", File.ReadAllText(exe));
+        Assert.Equal("the new launcher", File.ReadAllText(launcher));
+        Assert.Contains("The IDE launcher beside it was not updated: The download did not match what Arena lists", h.Out, StringComparison.Ordinal);
+        Assert.False(File.Exists(launcher + ".new"));
+    }
+
     /// <summary>A CA, and a certificate it signs for code signing (or, with <paramref name="usage"/>, for something else).</summary>
     private static (X509Certificate2 Ca, X509Certificate2 Leaf) Pki(string usage = "1.3.6.1.5.5.7.3.3")
     {

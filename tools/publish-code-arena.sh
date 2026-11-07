@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Code Arena as one self-contained file per system: dist/code-arena/<rid>/code-arena
-# (code-arena.exe on Windows), with SHA256SUMS beside them. Nothing needs .NET
+# (code-arena.exe on Windows, with code-arena-ide.exe beside it: the IDE's launcher,
+# which opens no console), with SHA256SUMS beside them. Nothing needs .NET
 # installed to run them. The app's image serves them from Your account → Connect
 # your tools (src/Llm.Api/Dockerfile copies dist/code-arena in).
 #
@@ -120,8 +121,24 @@ for i in "${!rids[@]}"; do
 done
 [ "$failed" -eq 0 ] || exit 1
 
-# Each carries everything it needs (self-contained, nothing to unpack, its page, a console program on Windows):
-# checked in the files themselves. The SDK's image has no Python: there the check is left to the release.
+# On Windows, the IDE's launcher beside the program (tools/ide-launcher): a GUI program of a few kilobytes that starts
+# code-arena.exe with no console window, for a double-click and the shortcuts; code-arena.exe stays the terminals' own.
+# One file for every Windows system (IL only, any CPU), the same bytes each time; built with nothing but the SDK.
+windows=()
+for rid in "${rids[@]}"; do case "$rid" in win-*) windows+=("$rid") ;; esac; done
+if [ ${#windows[@]} -gt 0 ]; then
+  echo "== the IDE's launcher for Windows (code-arena-ide.exe)"
+  tool="$out/.ide-launcher"
+  rm -rf "$tool"
+  "${dotnet[@]}" build tools/ide-launcher/ide-launcher.csproj -c Release -o "$tool" "${sources[@]}" --disable-build-servers -nologo -v quiet
+  for rid in "${windows[@]}"; do
+    "${dotnet[@]}" "$tool/ide-launcher.dll" "$out/$rid/code-arena-ide.exe"
+  done
+  rm -rf "$tool"
+fi
+
+# Each carries everything it needs (self-contained, nothing to unpack, its page, a console program on Windows, and the
+# launcher a GUI one): checked in the files themselves. The SDK's image has no Python: there the check is left to the release.
 if command -v python3 >/dev/null 2>&1; then
   echo "== check"
   python3 "$here/code-arena-check.py" $([ -n "$web" ] || echo --no-web) $(for rid in "${rids[@]}"; do ls "$out/$rid"/code-arena*; done)
@@ -129,7 +146,7 @@ else
   echo "== check: skipped (no python3 here; tools/code-arena-check.py dist/code-arena/*/code-arena* runs it)"
 fi
 
-(cd "$out" && find . -type f \( -name code-arena -o -name code-arena.exe \) | sed 's|^\./||' | sort | xargs sha256sum > SHA256SUMS)
+(cd "$out" && find . -type f \( -name code-arena -o -name code-arena.exe -o -name code-arena-ide.exe \) | sed 's|^\./||' | sort | xargs sha256sum > SHA256SUMS)
 echo
 cat "$out/SHA256SUMS"
 ls -l "$out"/*/code-arena*

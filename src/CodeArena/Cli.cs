@@ -62,6 +62,8 @@ internal sealed class CliEnv
     /// <summary>The folder worked in; Open Folder in the IDE changes it.</summary>
     public required string Cwd { get; set; }
     public required AppPaths Paths { get; init; }
+    /// <summary>The environment with the options config.json keeps beneath it (EnvSettings): what finds the browser and the hypervisors reads.</summary>
+    public Func<string, string?> Options => EnvSettings.Over(Env, Paths);
     /// <summary>stdin is a terminal: questions can be asked.</summary>
     public bool InTerminal { get; init; }
     public bool OutTerminal { get; init; }
@@ -756,7 +758,7 @@ internal static partial class Cli
                                 // Its own window first (config.json "window": false, or --browser, a tab instead), else a tab:
                                 // without a browser for the window, or with one too old for the page, it says so.
                                 var window = launcher is null || o.Browser || !rt.Config.Window ? null
-                                    : (env.Window ?? (url => AppWindow.Open(url, Path.Combine(env.Paths.DataDir, "window"), env.Env, ui.Warn)))(launcher.Url);
+                                    : (env.Window ?? (url => AppWindow.Open(url, Path.Combine(env.Paths.DataDir, "window"), env.Options, ui.Warn)))(launcher.Url);
                                 closed = Task.Delay(Timeout.Infinite, linked.Token);
                                 if (window is not null)
                                 {

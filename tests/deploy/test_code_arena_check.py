@@ -60,6 +60,24 @@ class CodeArenaCheckTests(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
 
 
+    def test_the_ide_launcher_beside_it_is_a_small_gui_program_that_windows_runs_as_it_is(self):
+        """code-arena-ide.exe: no console on a double-click, a .NET Framework program (nothing to install), a few kilobytes."""
+        self.assertEqual(check.check(self.program("code-arena-ide.exe", check.sample_launcher())), [])
+        r = subprocess.run([sys.executable, str(TOOL), str(self.dir / "code-arena-ide.exe")], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(check.check(self.program("code-arena-ide.exe", check.sample_launcher(subsystem=3))),
+                         ["not a program of the GUI subsystem: a double-click would open a console"])
+        self.assertEqual(check.check(self.program("code-arena-ide.exe", check.sample_launcher(managed=False))),
+                         ["not a .NET Framework program: Windows would need something installed to run it"])
+        self.assertEqual(check.check(self.program("code-arena-ide.exe", check.sample_launcher() + bytes(check.LAUNCHER_MAX))),
+                         [f"{len(check.sample_launcher()) + check.LAUNCHER_MAX} bytes: a launcher is a few kilobytes"])
+        self.assertEqual(check.check(self.program("code-arena-ide.exe", b"\x7fELF")), ["not a Windows program"])
+        # The program itself stays a console one: the launcher's subsystem is no excuse for it.
+        self.assertEqual(check.check(self.program("code-arena.exe", check.sample_launcher()))[0], "not a .NET single-file bundle: published without PublishSingleFile")
+        r = subprocess.run([sys.executable, str(TOOL), str(self.program("code-arena-ide.exe", check.sample_launcher(subsystem=3)))], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1)
+
+
 class OldestBrowserTests(unittest.TestCase):
     def test_the_page_is_built_for_the_chrome_and_edge_the_window_takes(self):
         """The build's targets (browsers.ts) and the window's MinBrowser (AppWindow.cs) name the same Chrome and Edge."""

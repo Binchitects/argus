@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Writes code-arena-ide.exe, the IDE's launcher on Windows (IdeLauncher.cs): run by tools/publish-code-arena.sh,
+       dotnet ide-launcher.dll OUT. The base class library only: it builds offline with nothing but the SDK. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>ide-launcher</AssemblyName>
+    <RootNamespace>CodeArenaIde</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+</Project>

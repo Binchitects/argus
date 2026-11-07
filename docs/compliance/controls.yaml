@@ -462,7 +462,9 @@ controls:
       admin; the incident register takes an incident from an alert or by hand,
       runs the GDPR's 72 hours and HIPAA's 60 days from when it was found,
       keeps every step with who and when, and is closed only with what was
-      learned (and, with personal data, the authority question answered).
+      learned (and, with personal data, the authority question answered). The
+      watch is on unless an admin turns it off (Settings → Security alerts),
+      a change asked to confirm and audited like every setting.
     frameworks:
       iso27001: [A.5.24, A.5.25, A.5.26, A.5.27, A.8.16]
       soc2: [CC7.3, CC7.4, CC7.5]
@@ -484,7 +486,9 @@ controls:
     checks: [app:incidents]
     operator: >-
       Name who answers the alerts and runs incidents, know which supervisory
-      authority to tell and how, and keep the incident-response runbook.
+      authority to tell and how, and keep the incident-response runbook. Turn
+      the watch off only where the company's SIEM, fed by the audit log, does
+      the same watching.
 
   - id: DAT-01
     title: Chats and files are deleted when their time is up

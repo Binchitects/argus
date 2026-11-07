@@ -678,3 +678,26 @@ export interface CodeAccount {
 }
 
 export const accountQuery = { queryKey: ['code', 'account'] as const, queryFn: () => api<CodeAccount>('/api/account') }
+
+/** One of Code Arena's options on this computer (a program's path, the home folder): kept in config.json, the environment's winning. */
+export interface ComputerOption {
+  variable: string
+  key: string
+  setting: string
+  kind: 'file' | 'folder'
+  description: string
+  /** What config.json keeps; null: nothing. */
+  value: string | null
+  /** What the environment sets, which wins; null: nothing. */
+  environment: string | null
+  file: string
+}
+
+export const computerOptionsQuery = {
+  queryKey: ['code', 'computer-options'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ options: ComputerOption[] }>('/api/options', { signal }),
+  staleTime: 5_000,
+}
+
+/** Keeps one in config.json (null: takes it out); the list as it is now. */
+export const saveComputerOption = (setting: string, value: string | null) => api<{ options: ComputerOption[] }>('/api/options', { body: { setting, value } })

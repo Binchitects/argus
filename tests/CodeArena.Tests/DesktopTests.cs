@@ -220,7 +220,7 @@ public sealed class DesktopTests : IDisposable
 
         // None where CODE_ARENA_BROWSER says: said too.
         Assert.Null(AppWindow.Open("file:///launcher.html", profile, Env(Path.Combine(_dir, "missing")), said.Add));
-        Assert.Equal([$"CODE_ARENA_BROWSER names no file ({Path.Combine(_dir, "missing")}): the IDE opens in your default browser instead."], said);
+        Assert.Equal([$"The browser chosen (codeArena.browser, or CODE_ARENA_BROWSER) is no file ({Path.Combine(_dir, "missing")}): the IDE opens in your default browser instead."], said);
 
         // A version it cannot read is no reason to go without the window.
         Assert.Null(AppWindow.Major("Brave Browser"));
