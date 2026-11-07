@@ -15,6 +15,74 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v7.8.2 (2026-11-07)
+
+Projects with their accounting and reports, permissions redone, an IDE that
+works as VS Code does, workspaces you can run a dev server in, and more
+engines.
+
+### :rocket: Epics and highlights
+
+- **Projects.** A project holds its people and groups (owner, contributor,
+  viewer), repositories, chats, rooms, Code Arena sessions, assistants,
+  skills, apps, goals and tasks; global projects are everyone's to add to,
+  and each person may start one. Its page shows tokens, cost, requests, time
+  and people from the usage log, its goals and tasks, and the changes merged
+  in its GitLab repositories; budgets alert its owners and can stop its
+  chats. Code Arena tags each session with its project (`--project`,
+  `/project`, the IDE's picker, or the repository's project).
+- **Reports to read and send.** A project's report, Usage and Usage by group
+  export as PDF, Excel and CSV, and one time window (presets, calendar
+  periods, a custom range, kept in the address) sits on every report and
+  dashboard page.
+- **Permissions, redone.** Finer permissions for every route (people, sharing
+  with the company or groups, the lab, the wiki, calls, apps, compliance and
+  access in parts), and a new Admin → Access: roles × permissions by area
+  with search and bulk edits, each person's permissions with what decides
+  each, groups with their members, templates and a history. **Default
+  groups** take in new people however they arrive (an admin, the directory,
+  OIDC, SAML, SCIM).
+- **Code Arena works as VS Code does.** Split editors (Split Right and Down,
+  drag a tab to an edge, Ctrl+1..8), a tab or the chat in a window of its
+  own and back, several repositories in Source Control at once, a
+  customisable activity bar and side bar, Open to the Side, Zen Mode and Full
+  Screen; VS Code's common colour themes (Dark+ and Light+, Modern, Monokai,
+  Solarized, One Dark, Dracula, GitHub, Nord, High Contrast) in both apps;
+  and vision options: higher contrast, larger text and UI, stronger focus
+  rings, less motion and colour-blind safe diffs.
+
+### :sparkles: New features & Enhancements
+
+- **Every setting in the UI.** About 45 options that were config only have
+  their place in Settings, and **Set by the installation** lists every
+  installer setting with its value (a secret only as set or not) and the one
+  command that changes it.
+- **Workspaces you can run in.** A dev server in a workspace has its own
+  address, `ws-<id>-<port>.<domain>`, for its owner (or shared with everyone
+  signed in), HTTP and WebSockets, in a Ports panel as VS Code's; the agent's
+  commands there run in a sandbox (bubblewrap).
+- **FP4 models.** NVFP4, MXFP4 and FP8 checkpoints are recognised, and Admin
+  → Models says how each runs on each GPU (native on Blackwell, 4-bit weights
+  widened as read on Hopper and Ampere) and its memory. Measured on an RTX
+  3090: every FP4 path runs, the 4-bit copies about 13% quicker than BF16
+  for one person; `arenactl check fp4-h200` measures FP4 against FP8 on the
+  H200 host.
+- **More engines: Strata and LMDeploy** beside llama.cpp, vLLM and SGLang,
+  with their fields, metrics, alerts and engine moves. TensorRT-LLM was
+  weighed and left out: its stable server has no API key.
+- The web chat gives a long tool result as its start, the error lines of the
+  part left out, an outline and its end, with a handle to read it whole.
+
+### :bug: Bugs fixed
+
+- No workspace could start on a real workspaces service (the request's
+  chunked body was not read), and every commit in one failed for want of a
+  name: both fixed, with an end-to-end test.
+- Code Arena no longer gives its engine key to the terminals and commands it
+  runs.
+- Link buttons and form errors use the text colours, so every colour theme
+  reads at 4.5:1.
+
 ## v7.8.1 (2026-11-07)
 
 Work alongside the agent: send while it works, see what fills the window,
