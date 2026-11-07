@@ -424,6 +424,12 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             case ("GET", "/api/settings/changed"):
                 await SettingsChangedAsync(req, res, ct);
                 return;
+            case ("GET", "/api/options"):
+                await res.JsonAsync(200, EnvSettings.View(_rt.Env.Env, _rt.Env.Paths), ct);
+                return;
+            case ("POST", "/api/options"):
+                await OptionAsync(req, res, ct);
+                return;
             case ("GET", "/api/sessions"):
                 await res.JsonAsync(200, Sessions(), ct);
                 return;
@@ -1920,6 +1926,41 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         {
             _waiting.TryRemove(id, out _);
         }
+    }
+
+    /// <summary>
+    /// POST /api/options {setting, value}: one of Code Arena's options on this computer (EnvSettings) kept in config.json,
+    /// or taken out with an empty value; the environment's, when set, still wins.
+    /// </summary>
+    private async Task OptionAsync(HttpRequest req, HttpResponse res, CancellationToken ct)
+    {
+        var body = req.Json();
+        if (EnvSettings.All.FirstOrDefault(o => o.Setting == body?.Str("setting")) is not { } option)
+        {
+            await res.ErrorAsync(400, "invalid", $"setting is one of: {string.Join(", ", EnvSettings.All.Select(o => o.Setting))}.", ct);
+            return;
+        }
+        if (body!["value"] is { } given && (given is not JsonValue v || !v.TryGetValue<string>(out _)))
+        {
+            await res.ErrorAsync(400, "invalid", "value is a path, or null to take it out.", ct);
+            return;
+        }
+        var value = body.Str("value")?.Trim();
+        if (EnvSettings.Problem(option, value) is { } problem)
+        {
+            await res.ErrorAsync(400, "invalid", problem, ct);
+            return;
+        }
+        try
+        {
+            EnvSettings.Save(option, value, _rt.Env.Paths);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            await res.ErrorAsync(500, "not_saved", $"{EnvSettings.FileOf(option, _rt.Env.Paths)} could not be written: {ex.Message}", ct);
+            return;
+        }
+        await res.JsonAsync(200, EnvSettings.View(_rt.Env.Env, _rt.Env.Paths), ct);
     }
 
     private async Task SettingsAsync(HttpRequest req, HttpResponse res, CancellationToken ct)

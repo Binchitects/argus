@@ -27,6 +27,7 @@ internal sealed partial class WebRun : IAsyncDisposable
     public int Port { get; private set; }
     public string Token { get; private set; } = "";
     public HttpClient Http { get; private set; } = null!;
+    public CliEnv Env => _env;
 
     public string Out
     {

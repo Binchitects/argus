@@ -654,10 +654,10 @@ internal static class VmCommand
     public static async Task<int> RunAsync(string[] args, CliEnv env, CancellationToken ct)
     {
         var ui = new Ui(env.In, env.Out, env.Err, color: false, canAsk: env.InTerminal) { SecretReader = env.ReadSecret };
-        var hosts = Hypervisors.Find(env.Env);
+        var hosts = Hypervisors.Find(env.Options);
         if (hosts.Count == 0)
         {
-            env.Err.WriteLine("code-arena: no hypervisor here: VirtualBox (VBoxManage), VMware (vmrun), libvirt (virsh) or Hyper-V. Install one, or name its program (CODE_ARENA_VBOXMANAGE, CODE_ARENA_VMRUN, CODE_ARENA_VIRSH).");
+            env.Err.WriteLine("code-arena: no hypervisor here: VirtualBox (VBoxManage), VMware (vmrun), libvirt (virsh) or Hyper-V. Install one, or name its program (the IDE's Settings → codeArena.vm, or CODE_ARENA_VBOXMANAGE, CODE_ARENA_VMRUN, CODE_ARENA_VIRSH).");
             return 1;
         }
         var keyring = Keyring.For(env.Env);

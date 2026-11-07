@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Braces, Download, MoreHorizontal, Search } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Alert } from '@/components/ui/alert'
@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils'
 import { runCommand } from './commands'
 import { userFile } from './editor-options'
 import { useEditor } from './editor-state'
-import { userFileQuery, vscodeUserFile, writeUserFile } from './ide-api'
+import { computerOptionsQuery, saveComputerOption, userFileQuery, vscodeUserFile, writeUserFile, type ComputerOption } from './ide-api'
 import { parse, setProperty } from './jsonc'
 import { useSettings, type Layer, type Target } from './settings'
 import { settingDef, settingDefs, titleOf, type SettingDef } from './settings-schema'
@@ -69,6 +69,22 @@ export default function SettingsEditor() {
     return q.words.every((w) => text.includes(w))
   })
   const categories = [...new Set(shown.map((d) => d.category))]
+  // Code Arena's own options on this computer, kept in config.json: the person's alone, never a language's.
+  const computer = useQuery({ ...computerOptionsQuery, enabled: scope === 'user' && !q.lang })
+  const computerShown =
+    scope === 'user' && !q.lang
+      ? (computer.data?.options ?? []).filter((o) => {
+          if (q.ids.length > 0 && !q.ids.includes(o.setting)) return false
+          if (q.modified && !o.value) return false
+          const { group, name } = titleOf(o.setting)
+          const text = `${o.setting} ${group} ${name} ${o.description} ${o.variable} ${computerCategory}`.toLowerCase()
+          return q.words.every((w) => text.includes(w))
+        })
+      : []
+  const saveOption = (setting: string, value: string | null) =>
+    void saveComputerOption(setting, value)
+      .then((now) => queryClient.setQueryData(computerOptionsQuery.queryKey, now))
+      .catch((e: unknown) => toast.error(errorMessage(e)))
   const unknown = Object.entries(layer.values).filter(([k]) => !settingDef.has(k))
 
   const write = (key: string, value: unknown) => void settings.update(key, value, scope, q.lang).catch((e: unknown) => toast.error(errorMessage(e)))
@@ -149,7 +165,7 @@ export default function SettingsEditor() {
       </div>
       <div className="flex min-h-0 flex-1">
         <div className="hidden w-44 shrink-0 overflow-y-auto border-r p-2 text-sm md:block">
-          {categories.map((c) => (
+          {[...categories, ...(computerShown.length > 0 ? [computerCategory] : [])].map((c) => (
             <a key={c} href={`#settings-${c.replaceAll(' ', '-')}`} className="block rounded-sm px-2 py-1 text-muted-foreground hover:bg-accent hover:text-foreground">
               {c}
             </a>
@@ -165,7 +181,7 @@ export default function SettingsEditor() {
               </ul>
             </Alert>
           )}
-          {shown.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">No setting matches.</p>}
+          {shown.length === 0 && computerShown.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">No setting matches.</p>}
           {categories.map((c) => (
             <div key={c} id={`settings-${c.replaceAll(' ', '-')}`} className="mb-6">
               <h2 className="mb-2 text-base font-semibold">{c}</h2>
@@ -185,6 +201,24 @@ export default function SettingsEditor() {
                 ))}
             </div>
           ))}
+          {computerShown.length > 0 && (
+            <div id={`settings-${computerCategory.replaceAll(' ', '-')}`} className="mb-6">
+              <h2 className="mb-1 text-base font-semibold">{computerCategory}</h2>
+              <p className="mb-2 text-sm text-muted-foreground">Kept in config.json, not settings.json: Code Arena reads them itself. A variable set in the environment wins.</p>
+              {computerShown.map((o) => (
+                <Row
+                  key={o.setting}
+                  def={computerDef(o)}
+                  value={o.value ?? ''}
+                  modified={!!o.value}
+                  note={o.environment ? `${o.variable} is set in the environment and wins: ${o.environment}` : `Or ${o.variable} in the environment. Kept in ${o.file}.`}
+                  onChange={(v) => saveOption(o.setting, typeof v === 'string' && v.trim() ? v.trim() : null)}
+                  onReset={() => saveOption(o.setting, null)}
+                  onJson={() => void ed.open(userFile('settings.json'))}
+                />
+              ))}
+            </div>
+          )}
           {unknown.length > 0 && !q.lang && (
             <div className="mb-6">
               <h2 className="mb-1 text-base font-semibold">Other settings in settings.json</h2>
@@ -204,11 +238,17 @@ export default function SettingsEditor() {
   )
 }
 
+const computerCategory = 'Code Arena on this computer'
+
+/** An option of this computer's as a row of the editor: a path, typed. */
+const computerDef = (o: ComputerOption): SettingDef => ({ key: o.setting, type: 'string', default: '', description: o.description, category: computerCategory, scope: 'application' })
+
 function Row({
   def,
   value,
   modified,
   alsoIn,
+  note,
   onChange,
   onReset,
   onJson,
@@ -217,6 +257,8 @@ function Row({
   value: unknown
   modified: boolean
   alsoIn?: string
+  /** A line under the value: where it is kept, or what wins over it. */
+  note?: string
   onChange: (v: unknown) => void
   onReset: () => void
   onJson: () => void
@@ -280,6 +322,7 @@ function Row({
       </div>
       {def.type !== 'boolean' && <p className="text-sm text-muted-foreground">{def.description}</p>}
       {control}
+      {note && <p className="text-xs text-muted-foreground">{note}</p>}
       <p className="font-mono text-[0.6875rem] text-muted-foreground/70">{def.key}</p>
     </div>
   )

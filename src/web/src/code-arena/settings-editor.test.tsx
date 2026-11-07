@@ -10,7 +10,21 @@ import SettingsEditor from './settings-editor'
 /** The Settings editor alone, over the person's settings.json and the project's (null: none), as the server has them. */
 function renderSettings(user: string, workspace: string | null) {
   const files: Record<string, string> = { 'settings.json': user }
+  // Code Arena's options on this computer, as config.json and the environment have them.
+  const options = [
+    { variable: 'CODE_ARENA_BROWSER', key: 'browser', setting: 'codeArena.browser', kind: 'file', description: 'The browser the IDE\'s own window uses.', value: null as string | null, environment: null, file: '/home/ada/.config/code-arena/config.json' },
+    { variable: 'CODE_ARENA_VIRSH', key: 'virsh', setting: 'codeArena.vm.virsh', kind: 'file', description: "libvirt's virsh, for the VM tool.", value: null, environment: '/usr/bin/virsh', file: '/home/ada/.config/code-arena/config.json' },
+  ]
+  const saved: { setting: string; value: string | null }[] = []
   fakeApi(null, {
+    'GET /api/options': () => ({ json: { options } }),
+    'POST /api/options': (body) => {
+      const { setting, value } = body as { setting: string; value: string | null }
+      saved.push({ setting, value })
+      if (value === '/nope') return { status: 400, json: { status: 'invalid', error: 'There is no file /nope.' } }
+      options.find((o) => o.setting === setting)!.value = value
+      return { json: { options } }
+    },
     'GET /api/user-files': (_, __, url) => {
       const name = url.searchParams.get('name')!
       return { json: { name, text: files[name] ?? '', version: 'u1', exists: true } }
@@ -35,10 +49,31 @@ function renderSettings(user: string, workspace: string | null) {
       </SettingsProvider>
     </Providers>,
   )
-  return { files }
+  return { files, saved }
 }
 
 describe('the Settings editor', () => {
+  it("shows Code Arena's options on this computer in the User tab, keeps a change in config.json and says when the environment wins", async () => {
+    const { saved, files } = renderSettings('{}\n', null)
+    const page = await screen.findByRole('region', { name: 'Settings' })
+    await userEvent.type(within(page).getByRole('searchbox', { name: 'Search settings' }), 'browser window')
+    expect(await within(page).findByRole('heading', { name: 'Code Arena on this computer' })).toBeInTheDocument()
+    const box = within(page).getByLabelText(/Browser/)
+    await userEvent.type(box, '/opt/chrome/chrome{Enter}')
+    await waitFor(() => expect(saved).toEqual([{ setting: 'codeArena.browser', value: '/opt/chrome/chrome' }]))
+    // Not settings.json's: Code Arena reads it itself.
+    expect(files['settings.json']).toBe('{}\n')
+    expect(within(page).getByText(/Kept in \/home\/ada\/\.config\/code-arena\/config\.json/)).toBeInTheDocument()
+
+    await userEvent.clear(within(page).getByRole('searchbox', { name: 'Search settings' }))
+    await userEvent.type(within(page).getByRole('searchbox', { name: 'Search settings' }), '@id:codeArena.vm.virsh')
+    expect(await within(page).findByText('CODE_ARENA_VIRSH is set in the environment and wins: /usr/bin/virsh')).toBeInTheDocument()
+
+    // The project's settings cannot name a program on this computer.
+    await userEvent.click(within(page).getByRole('tab', { name: 'Workspace' }))
+    expect(within(page).queryByRole('heading', { name: 'Code Arena on this computer' })).toBeNull()
+  })
+
   it("shows the chosen file's own value, so a change in the User tab is seen though the project's sets the setting too", async () => {
     const { files } = renderSettings('{}\n', '{\n  "editor.formatOnSave": true,\n  "editor.tabSize": 3\n}\n')
     const page = await screen.findByRole('region', { name: 'Settings' })

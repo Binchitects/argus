@@ -20,8 +20,14 @@ internal sealed class AppPaths(string configDir, string dataDir)
     public string? Home { get; init; }
 
     /// <summary>
-    /// CODE_ARENA_HOME holds both when set. Otherwise: %APPDATA% and %LOCALAPPDATA%
-    /// on Windows; $XDG_CONFIG_HOME and $XDG_DATA_HOME (~/.config, ~/.local/share) elsewhere.
+    /// config.json at the system's usual place, which keeps the home (EnvSettings) when one is chosen in the Settings;
+    /// null: <see cref="ConfigFile"/> is that place.
+    /// </summary>
+    public string? UsualConfigFile { get; init; }
+
+    /// <summary>
+    /// CODE_ARENA_HOME holds both when set, or the "home" config.json keeps at the usual place. Otherwise: %APPDATA% and
+    /// %LOCALAPPDATA% on Windows; $XDG_CONFIG_HOME and $XDG_DATA_HOME (~/.config, ~/.local/share) elsewhere.
     /// </summary>
     public static AppPaths From(Func<string, string?> env)
     {
@@ -29,6 +35,16 @@ internal sealed class AppPaths(string configDir, string dataDir)
         {
             return new(Path.Combine(home, "config"), Path.Combine(home, "data"));
         }
+        var usual = Usual(env);
+        if (EnvSettings.Saved(usual.ConfigFile, EnvSettings.HomeKey) is { } chosen && Path.IsPathFullyQualified(chosen))
+        {
+            return new(Path.Combine(chosen, "config"), Path.Combine(chosen, "data")) { UsualConfigFile = usual.ConfigFile };
+        }
+        return usual;
+    }
+
+    private static AppPaths Usual(Func<string, string?> env)
+    {
         var user = env("HOME") is { Length: > 0 } h ? h : Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         if (OperatingSystem.IsWindows())
         {
@@ -241,6 +257,22 @@ internal sealed class Config
     public Dictionary<string, DebugAdapterConfig> DebugAdapters { get; set; } = [];
     /// <summary>The IDE's language servers the person named, by id: their own, or what changes a built-in one ("typescript", "gopls", …).</summary>
     public Dictionary<string, LanguageServerConfig> LanguageServers { get; set; } = [];
+
+    /// <summary>An option the environment can give too (EnvSettings), as the file keeps it.</summary>
+    public string? Option(string key) => _raw.Str(key);
+
+    /// <summary>Keeps it (null: takes it out) at the next <see cref="Save"/>.</summary>
+    public void SetOption(string key, string? value)
+    {
+        if (value is null)
+        {
+            _raw.Remove(key);
+        }
+        else
+        {
+            _raw[key] = value;
+        }
+    }
 
     /// <summary>https://gateway.DOMAIN, or the gateway given; without a trailing /v1.</summary>
     public string? GatewayUrl => Gateway is { Length: > 0 } g ? TrimV1(g) : DeriveGateway(Url);
