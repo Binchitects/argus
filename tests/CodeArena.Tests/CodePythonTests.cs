@@ -171,8 +171,17 @@ public sealed class CodePythonTests(ITestOutputHelper output) : IDisposable
             using var reader = new StreamReader(stream);
             await using var writer = new StreamWriter(stream) { AutoFlush = true };
             await writer.WriteLineAsync(token);
-            await writer.WriteLineAsync("""{"name":"read_file","args":{}}""");
-            return await reader.ReadLineAsync();
+            try
+            {
+                await writer.WriteLineAsync("""{"name":"read_file","args":{}}""");
+                return await reader.ReadLineAsync();
+            }
+            catch (IOException)
+            {
+                // Refused: the bridge closed on the wrong token. When the call's line had reached it unread, TCP ends the
+                // connection with a reset rather than an end of stream, which one depending on the timing.
+                return null;
+            }
         }
         Assert.Null(await Ask("not-the-token"));
         Assert.Equal("""{"ok":true,"result":"read_file"}""", await Ask(bridge.Token!));
