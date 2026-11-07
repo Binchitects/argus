@@ -1,4 +1,4 @@
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Crown, LogOut, UserPlus, Users, X } from 'lucide-react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
@@ -13,7 +13,7 @@ import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { toast } from '@/components/ui/toaster'
-import { errorMessage } from '@/lib/api'
+import { errorMessage, mayUse, meQuery } from '@/lib/api'
 import { addToRoom, conversationQuery, createRoom, handOverRoom, removeFromRoom, removeGroupFromRoom, setRoomRole, updateRoom } from './api'
 import { GroupChecklist, PeoplePicker, type Person } from './assistant-sharing'
 import { InviteLinks, RoomExport } from './room-links'
@@ -118,6 +118,7 @@ export function RoomPanel({ chatId, room, me, open, onOpenChange, here }: { chat
   const [role, setRole] = useState<Role>('member')
   const owner = room.role === 'owner'
   const mayInvite = owner || (room.role === 'member' && room.membersInvite)
+  const signedIn = useQuery(meQuery)
   const refresh = () => queryClient.invalidateQueries({ queryKey: conversationQuery(chatId).queryKey })
   const act = async (work: Promise<unknown>, done?: string) => {
     try {
@@ -228,7 +229,7 @@ export function RoomPanel({ chatId, room, me, open, onOpenChange, here }: { chat
             </section>
           )}
           {mayInvite && <InviteLinks chatId={chatId} owner={owner} />}
-          <RoomExport chatId={chatId} />
+          {mayUse(signedIn.data, 'feature.export') && <RoomExport chatId={chatId} />}
           {owner && (
             <section className="grid gap-3" aria-label="Settings">
               <h3 className="text-sm font-medium">Settings</h3>

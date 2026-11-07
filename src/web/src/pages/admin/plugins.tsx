@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Activity, Blocks, ClipboardCheck, Download, FileCode2, Link2, Pin, PinOff, RefreshCw, RotateCcw, Settings2, Trash2, Upload, Users } from 'lucide-react'
 import { useRef, useState } from 'react'
-import { Link } from 'react-router'
+import { Link, useOutletContext } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
 import { Alert } from '@/components/ui/alert'
@@ -14,7 +14,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
-import { api, ApiError, errorMessage } from '@/lib/api'
+import { api, ApiError, errorMessage, holds, type Me } from '@/lib/api'
 import { PluginGroupsDialog } from './plugin-groups'
 import { tlsBody, type Tls, type TlsCheck } from './tls'
 import { TlsCaLine, TlsChoice, TlsWarning } from './tls-choice'
@@ -104,6 +104,9 @@ type Source = { name: string } | { url: string; sha256?: string } | { zip: strin
 const signIn: Record<string, string> = { oauth2: 'Each person signs in', api_key: 'Each person’s own key' }
 
 export function PluginsPage() {
+  // Installing, updating and pinning are plugins.install's; settings plugins.configure's; removing plugins.remove's.
+  const me = useOutletContext<Me>()
+  const mayInstall = holds(me, 'plugins.install')
   const queryClient = useQueryClient()
   const plugins = useQuery({ queryKey: ['admin', 'plugins'], queryFn: ({ signal }) => api<Plugins>('/api/admin/plugins', { signal }) })
   const [installing, setInstalling] = useState<Source | null>(null)
@@ -160,12 +163,16 @@ export function PluginsPage() {
             <Button variant="outline" onClick={() => checkFile.current?.click()}>
               <ClipboardCheck /> Check a plugin
             </Button>
-            <Button variant="outline" onClick={() => file.current?.click()}>
-              <Upload /> Upload a zip
-            </Button>
-            <Button variant="outline" onClick={() => setFromUrl(true)}>
-              <Link2 /> From an address
-            </Button>
+            {mayInstall && (
+              <>
+                <Button variant="outline" onClick={() => file.current?.click()}>
+                  <Upload /> Upload a zip
+                </Button>
+                <Button variant="outline" onClick={() => setFromUrl(true)}>
+                  <Link2 /> From an address
+                </Button>
+              </>
+            )}
           </>
         }
       />
@@ -210,9 +217,11 @@ export function PluginsPage() {
                     {c.installed ? (
                       <Badge variant="success">Installed {c.installed.version}</Badge>
                     ) : (
-                      <Button size="sm" onClick={() => setInstalling({ name: c.name })}>
-                        <Download /> Install
-                      </Button>
+                      mayInstall && (
+                        <Button size="sm" onClick={() => setInstalling({ name: c.name })}>
+                          <Download /> Install
+                        </Button>
+                      )
                     )}
                   </CardContent>
                 </Card>
@@ -260,6 +269,8 @@ interface Health {
 }
 
 function InstalledCard({ plugin, onEdit, onChanged }: { plugin: Plugins['installed'][number]; onEdit: () => void; onChanged: () => void }) {
+  const me = useOutletContext<Me>()
+  const may = { install: holds(me, 'plugins.install'), configure: holds(me, 'plugins.configure'), groups: holds(me, 'plugins.manage'), remove: holds(me, 'plugins.remove') }
   const confirm = useConfirm()
   const grant = useGrant()
   const [showHealth, setShowHealth] = useState(false)
@@ -346,10 +357,12 @@ function InstalledCard({ plugin, onEdit, onChanged }: { plugin: Plugins['install
           </div>
         )}
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={onEdit}>
-            <Settings2 /> Settings
-          </Button>
-          {plugin.settings.length > 0 && (
+          {may.configure && (
+            <Button variant="outline" size="sm" onClick={onEdit}>
+              <Settings2 /> Settings
+            </Button>
+          )}
+          {plugin.settings.length > 0 && may.groups && (
             <Button variant="outline" size="sm" onClick={() => setForGroups(true)}>
               <Users /> For groups
             </Button>
@@ -363,12 +376,12 @@ function InstalledCard({ plugin, onEdit, onChanged }: { plugin: Plugins['install
           <Button variant="outline" size="sm" loading={check.isPending} onClick={() => check.mutate()}>
             Check now
           </Button>
-          {plugin.update && (
+          {plugin.update && may.install && (
             <Button variant="outline" size="sm" loading={update.isPending} onClick={() => update.mutate(false)}>
               <RefreshCw /> Update to {plugin.update}
             </Button>
           )}
-          {earlier.length > 0 && (
+          {earlier.length > 0 && may.install && (
             <Button variant="outline" size="sm" loading={rollback.isPending} onClick={async () => {
               if (await confirm({ title: `Back to ${earlier[0]!.version}?`, description: `${plugin.title} goes back to the version installed ${new Date(earlier[0]!.installedAt).toLocaleDateString()}, its settings kept.`, confirm: 'Go back' }))
                 rollback.mutate(earlier[0]!.version)
@@ -376,9 +389,12 @@ function InstalledCard({ plugin, onEdit, onChanged }: { plugin: Plugins['install
               <RotateCcw /> Back to {earlier[0]!.version}
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={() => pin.mutate()} aria-pressed={plugin.pinned}>
-            {plugin.pinned ? <PinOff /> : <Pin />} {plugin.pinned ? 'Unpin' : 'Pin this version'}
-          </Button>
+          {may.install && (
+            <Button variant="outline" size="sm" onClick={() => pin.mutate()} aria-pressed={plugin.pinned}>
+              {plugin.pinned ? <PinOff /> : <Pin />} {plugin.pinned ? 'Unpin' : 'Pin this version'}
+            </Button>
+          )}
+          {may.remove && (
           <Button
             variant="outline"
             size="sm"
@@ -390,6 +406,7 @@ function InstalledCard({ plugin, onEdit, onChanged }: { plugin: Plugins['install
           >
             <Trash2 /> Remove
           </Button>
+          )}
         </div>
       </CardContent>
       <PluginGroupsDialog plugin={plugin} open={forGroups} onClose={() => setForGroups(false)} />

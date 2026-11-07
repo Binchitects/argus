@@ -138,16 +138,25 @@ public static partial class CodeArenaSync
         });
     }
 
-    /// <summary>Whose the key is, for Code Arena's Accounts menu: their name, and whether they may see Admin → People.</summary>
+    /// <summary>
+    /// Whose the key is, for Code Arena's Accounts menu: their name, whether they may see Admin → People, and the feature
+    /// permissions they do not hold (as the web's denied), which the IDE leaves out.
+    /// </summary>
     private static async Task<IResult> MeAsync(HttpContext http, McpPeople people, AccessService access)
     {
         var (me, refusal) = await CallerAsync(http, people);
-        return me is null ? refusal! : Results.Ok(new
+        if (me is null)
+        {
+            return refusal!;
+        }
+        var membership = await access.MembershipAsync(me, http.RequestAborted);
+        return Results.Ok(new
         {
             userName = me.UserName,
             displayName = me.DisplayName,
             email = me.Email,
-            managesPeople = await access.MayAsync(me, Core.Access.Permissions.PeopleRead, http.RequestAborted),
+            managesPeople = membership.Has(Core.Access.Permissions.PeopleRead),
+            denied = Core.Access.Permissions.FeatureKeys.Where(k => !membership.Has(k)),
         });
     }
 

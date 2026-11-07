@@ -13,18 +13,7 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 import { errorMessage } from '@/lib/api'
 import { api } from './http'
-
-/** Whose key Code Arena works with, as Arena says it. */
-export interface CodeAccount {
-  arena: string | null
-  signedIn: boolean
-  /** A Code Studio workspace: it works with Arena's key for it, and does not sign in. */
-  codeStudio: boolean
-  account: { userName: string; displayName: string | null; email: string | null; managesPeople: boolean } | null
-  error?: string
-}
-
-const accountQuery = { queryKey: ['code', 'account'] as const, queryFn: () => api<CodeAccount>('/api/account') }
+import { accountQuery, type CodeAccount } from './ide-api'
 
 const open = (url: string) => window.open(url, '_blank', 'noopener,noreferrer')
 

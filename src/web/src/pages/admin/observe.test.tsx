@@ -292,6 +292,25 @@ describe('logs', () => {
     expect(items[1]).toHaveTextContent('an old line')
   }, 10_000)
 
+  it('takes the shared time window in the address; Live is for one that ends now', async () => {
+    const calls = fakeApi(admin, {
+      'GET /api/admin/logs/containers': () => ({ json: { containers: ['app'] } }),
+      'GET /api/admin/logs/': () => ({ json: { query: '', limit: 1000, more: false, lines: [line('1790000060000000000', 'app', 'an old line')] } }),
+      'GET /api/admin/logs/volume': () => ({ json: { intervalMs: 60000, series: [] } }),
+    })
+    const { router } = renderApp('/admin/logs?from=2026-10-03&to=2026-10-04')
+    await screen.findByText('an old line')
+    const asked = new URL(calls.find((c) => c.path.startsWith('/api/admin/logs/?'))!.path, 'https://llm.test')
+    expect(new Date(asked.searchParams.get('from')!).getTime()).toBe(new Date('2026-10-03T00:00:00').getTime())
+    expect(new Date(asked.searchParams.get('to')!).getTime()).toBe(new Date('2026-10-05T00:00:00').getTime())
+    expect(screen.getByRole('button', { name: 'Live' })).toBeDisabled()
+    await userEvent.click(screen.getByRole('combobox', { name: 'Time range' }))
+    for (const name of ['Last 15 minutes', 'This week', 'Custom range…']) expect(await screen.findByRole('option', { name })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('option', { name: 'Last 15 minutes' }))
+    expect(new URLSearchParams(router.state.location.search).get('from')).toBe('now-15m')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Live' })).toBeEnabled())
+  })
+
   it('says when Loki is not there', async () => {
     fakeApi(admin, {
       'GET /api/admin/logs/containers': () => ({ status: 503, json: { status: 'loki', error: 'Loki is not reachable: the logs need the logging profile.' } }),

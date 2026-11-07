@@ -41,6 +41,9 @@ export interface Me {
   colorTheme?: string
 }
 
+/** Whether the person holds any of these administrative permissions (a role's; an Owner holds every one): what they may not do is not offered. */
+export const holds = (me: Pick<Me, 'isAdmin' | 'permissions'> | null | undefined, ...permissions: string[]) => !!me && (me.isAdmin || permissions.some((p) => me.permissions?.includes(p)))
+
 /** Whether the person holds a feature permission (Admin → Access), as their Me or chat config says: what they may not use is not offered. */
 export const mayUse = (of: { denied?: string[] } | null | undefined, permission: string) => !of?.denied?.includes(permission)
 

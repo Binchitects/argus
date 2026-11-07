@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Gauge, UserPlus } from 'lucide-react'
 import { useState } from 'react'
-import { Link } from 'react-router'
+import { Link, useOutletContext } from 'react-router'
 import { QueryError } from '@/components/app/query-state'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -11,13 +11,15 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Field } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
-import { api, errorMessage } from '@/lib/api'
+import { api, errorMessage, holds, type Me } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { peopleQuery, type Person } from './people-api'
 import { parseRoom, plural, roomOf, size, type PersonFiles } from './storage-api'
 
 /** Each person with files or a room of their own: what their files take of their room, and theirs to set; anyone else's too. */
 export function StoragePeople({ personMegabytes }: { personMegabytes: number | null }) {
+  // A person's own room is storage.quota's (a part of storage.manage).
+  const mayQuota = holds(useOutletContext<Me>(), 'storage.quota')
   const [editing, setEditing] = useState<PersonFiles | null>(null)
   const [choosing, setChoosing] = useState(false)
   const people = useQuery({
@@ -74,17 +76,21 @@ export function StoragePeople({ personMegabytes }: { personMegabytes: number | n
         </span>
       ),
     },
-    {
-      id: 'set',
-      enableSorting: false,
-      enableHiding: false,
-      header: () => <span className="sr-only">Set the room</span>,
-      cell: ({ row: { original: p } }) => (
-        <Button variant="outline" size="sm" onClick={() => setEditing(p)} aria-label={`Set the room of ${p.displayName || p.userName}`}>
-          <Gauge /> Room
-        </Button>
-      ),
-    },
+    ...(mayQuota
+      ? [
+          {
+            id: 'set',
+            enableSorting: false,
+            enableHiding: false,
+            header: () => <span className="sr-only">Set the room</span>,
+            cell: ({ row: { original: p } }) => (
+              <Button variant="outline" size="sm" onClick={() => setEditing(p)} aria-label={`Set the room of ${p.displayName || p.userName}`}>
+                <Gauge /> Room
+              </Button>
+            ),
+          } satisfies ColumnDef<PersonFiles>,
+        ]
+      : []),
   ]
   // Someone not listed has no files and the company's room.
   const choose = (p: Person) => {
@@ -102,9 +108,11 @@ export function StoragePeople({ personMegabytes }: { personMegabytes: number | n
           {company ? `Each person's files may take ${size(company * 1024 * 1024)}` : "Each person's files may take any room"} (Settings → Storage), unless they have their own here. Past it,
           uploads and the pictures and videos the tools make are refused until they delete chats.
         </p>
-        <Button variant="outline" size="sm" onClick={() => setChoosing(true)}>
-          <UserPlus /> Give someone a room
-        </Button>
+        {mayQuota && (
+          <Button variant="outline" size="sm" onClick={() => setChoosing(true)}>
+            <UserPlus /> Give someone a room
+          </Button>
+        )}
       </div>
       {people.error ? (
         <QueryError error={people.error} retry={() => people.refetch()} />

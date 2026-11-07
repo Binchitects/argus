@@ -251,9 +251,15 @@ test("the engine's models each say whether they are loaded, and more come from t
   // Read-only: loading another model here would switch it for every other test.
   test.skip(await page.getByText(/needs the llama\.cpp engine/).isVisible(), 'no llama.cpp engine')
   // Every chat model is one added here (none comes from .env); each loads when asked for unless it is kept loaded.
-  const models = page.locator('main section').filter({ has: page.getByText('Added here', { exact: true }) })
+  // A card is its name, status, a line and its main actions; Added here and the rest are in its Details.
+  const models = page.locator('main section').filter({ has: page.getByRole('button', { name: /^Details of / }) })
   test.skip(noGateway, 'no model added here: a stack without a gateway (CI\'s) has none')
   await expect(models.first()).toBeVisible()
+  await models.first().getByRole('button', { name: /^Details of / }).click()
+  const about = page.getByRole('dialog')
+  await expect(about.getByRole('switch', { name: /Keep loaded/ }).or(about.getByRole('combobox', { name: 'Who may use it' })).first()).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(about).toBeHidden()
   const loaded = models.filter({ has: page.getByText('Loaded', { exact: true }) })
   const unloaded = models.filter({ has: page.getByText('Not loaded', { exact: true }) })
   await expect.poll(async () => (await loaded.count()) + (await unloaded.count())).toBeGreaterThan(0)
@@ -270,17 +276,32 @@ test("the engine's models each say whether they are loaded, and more come from t
   await expect(dialog).toBeHidden()
 })
 
-test("each chat model's card names its engine, and Change engine… opens Edit at the Engine field with every engine", async ({ page }, info) => {
+test("each chat model's Details names its engine, and Change engine… opens Edit at the Engine field with every engine", async ({ page }, info) => {
   await page.goto('/admin/models')
   await settled(page, 'Models')
   test.skip(noGateway, 'no model added here: a stack without a gateway (CI\'s) has none')
-  const models = page.locator('main section').filter({ has: page.getByText(/^Engine: (llama\.cpp|vLLM|SGLang)/) })
+  // The engine and Change engine… are in a chat model's Details: the first card that has them.
+  const models = page.locator('main section').filter({ has: page.getByRole('button', { name: /^Details of / }) })
   await expect(models.first()).toBeVisible()
   await screenshot(page, info, 'models-with-engines')
-  // Read-only: the dialog is only opened and closed, nothing saved.
-  const card = models.first()
-  const name = (await card.getByRole('heading').first().innerText()).split('\n')[0]!.trim()
-  await card.getByRole('button', { name: 'Change engine…' }).click()
+  // Read-only: the dialogs are only opened and closed, nothing saved.
+  let name: string | null = null
+  for (let i = 0; i < (await models.count()) && !name; i++) {
+    const card = models.nth(i)
+    const title = (await card.getByRole('heading').first().innerText()).split('\n')[0]!.trim()
+    await card.getByRole('button', { name: `Details of ${title}` }).click()
+    const about = page.getByRole('dialog', { name: title })
+    await expect(about).toBeVisible()
+    if (await about.getByRole('button', { name: 'Change engine…' }).isVisible()) {
+      await expect(about.getByText(/^(llama\.cpp|vLLM|SGLang)/).first()).toBeVisible()
+      name = title
+      await about.getByRole('button', { name: 'Change engine…' }).click()
+    } else {
+      await page.keyboard.press('Escape')
+      await expect(about).toBeHidden()
+    }
+  }
+  test.skip(!name, 'no chat model on an engine here')
   const dialog = page.getByRole('dialog', { name: `Edit ${name}` })
   const engine = dialog.getByRole('combobox', { name: 'Engine' })
   // Focused once the library is read (held with "Reading the library…" until then).

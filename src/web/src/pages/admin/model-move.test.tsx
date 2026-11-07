@@ -7,6 +7,13 @@ import { admin, fakeApi, renderApp } from '@/test/utils'
 // vLLM to SGLang), and its card saying how far the move is, or why it failed.
 
 const everyone = { audience: 'Everyone', groups: [] }
+
+/** A model's Details, where its engine, Change engine… and a move to another engine are. */
+async function details(name: string) {
+  const card = screen.getByRole('heading', { name: new RegExp(`^${name}`) }).closest('section')!
+  await userEvent.click(within(card).getByRole('button', { name: `Details of ${name}` }))
+  return screen.findByRole('dialog', { name })
+}
 const gpu = (index: number) => ({ index, name: 'NVIDIA RTX PRO 6000', total: 102.6e9, vendor: 'nvidia', backend: 'cuda' })
 const instances = [
   { name: 'llamacpp', kind: 'llamacpp', managed: true, problem: null, on: true },
@@ -168,18 +175,22 @@ describe('admin models: moving a model to another engine', () => {
       },
     })
     renderApp('/admin/models')
+    // The card says it moves in a line; how far it is, in its Details.
     const card = (await screen.findByRole('heading', { name: /flash/ })).closest('section')!
     expect(within(card).getByText('Moving to llama.cpp')).toBeInTheDocument()
-    expect(within(card).getByText(/Its answers on vLLM end first, on the same GPUs; then it loads on llama.cpp/)).toBeInTheDocument()
     expect(within(card).getByRole('button', { name: /Edit/ })).toBeDisabled()
     expect(within(card).getByRole('button', { name: /Unload/ })).toBeDisabled()
-    const loading = screen.getByRole('heading', { name: /Qwen/ }).closest('section')!
-    expect(within(loading).getByText(/Loading on SGLang: requests for it wait until it is ready there/)).toBeInTheDocument()
+    expect(within(await details('flash')).getByText(/Its answers on vLLM end first, on the same GPUs; then it loads on llama.cpp/)).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    expect(within(await details(qwen.name)).getByText(/Loading on SGLang: requests for it wait until it is ready there/)).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
     const failed = screen.getByRole('heading', { name: /coder/ }).closest('section')!
-    expect(within(failed).getByText('coder could not move to llama.cpp')).toBeInTheDocument()
-    expect(within(failed).getByText(/llama.cpp could not start it: out of memory. It stays on vLLM, as it was./)).toBeInTheDocument()
+    expect(within(failed).getByText('Could not move to llama.cpp')).toBeInTheDocument()
     expect(within(failed).getByRole('button', { name: /Edit/ })).toBeEnabled()
-    await userEvent.click(within(failed).getByRole('button', { name: 'Dismiss' }))
+    const failedDetails = await details('coder')
+    expect(within(failedDetails).getByText('coder could not move to llama.cpp')).toBeInTheDocument()
+    expect(within(failedDetails).getByText(/llama.cpp could not start it: out of memory. It stays on vLLM, as it was./)).toBeInTheDocument()
+    await userEvent.click(within(failedDetails).getByRole('button', { name: 'Dismiss' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/admin/models/coder/move')).toBe(true))
     await waitFor(() => expect(screen.queryByText('coder could not move to llama.cpp')).not.toBeInTheDocument())
   })
@@ -228,8 +239,9 @@ describe('admin models: the Engine field', () => {
   it("shows a llama.cpp model's engine on its card and in its dialog, with vLLM and SGLang offered beside it", async () => {
     stack()
     renderApp('/admin/models')
-    const card = (await screen.findByRole('heading', { name: /Qwen3/ })).closest('section')!
-    expect(within(card).getByText('Engine: llama.cpp')).toBeInTheDocument()
+    await screen.findByRole('heading', { name: /Qwen3/ })
+    expect(within(await details('Qwen3')).getByText('llama.cpp')).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
     const dialog = await edit('Qwen3')
     const field = within(dialog).getByRole('combobox', { name: 'Engine' })
     expect(field).toHaveTextContent('llama.cpp')
@@ -380,10 +392,10 @@ describe('admin models: the Engine field', () => {
   it('opens Edit with the Engine field focused from Change engine… on the card, and names each engine of a kind that has several', async () => {
     stack({ instances: [...instances, { name: 'vllm-b', kind: 'vllm', managed: true, problem: null, on: true }], models: [qwen3, { ...flash, engine: 'vllm-b' }] })
     renderApp('/admin/models')
-    const card = (await screen.findByRole('heading', { name: /flash/ })).closest('section')!
-    expect(within(card).getByText('Engine: vLLM · vllm-b')).toBeInTheDocument()
-    const qwenCard = screen.getByRole('heading', { name: /Qwen3/ }).closest('section')!
-    await userEvent.click(within(qwenCard).getByRole('button', { name: 'Change engine…' }))
+    await screen.findByRole('heading', { name: /flash/ })
+    expect(within(await details('flash')).getByText('vLLM · vllm-b')).toBeInTheDocument()
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(within(await details('Qwen3')).getByRole('button', { name: 'Change engine…' }))
     const dialog = await screen.findByRole('dialog', { name: 'Edit Qwen3' })
     await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'Engine' })).toHaveFocus())
     await userEvent.click(within(dialog).getByRole('combobox', { name: 'Engine' }))
@@ -412,8 +424,8 @@ describe('admin models: the Engine field as the library and the page change', ()
     let read = () => {}
     stack({ models: [flash], until: new Promise<void>((resolve) => (read = resolve)) })
     renderApp('/admin/models')
-    const card = (await screen.findByRole('heading', { name: /flash/ })).closest('section')!
-    await userEvent.click(within(card).getByRole('button', { name: 'Change engine…' }))
+    await screen.findByRole('heading', { name: /flash/ })
+    await userEvent.click(within(await details('flash')).getByRole('button', { name: 'Change engine…' }))
     const dialog = await screen.findByRole('dialog', { name: 'Edit flash' })
     const field = within(dialog).getByRole('combobox', { name: 'Engine' })
     expect(field).toBeDisabled()

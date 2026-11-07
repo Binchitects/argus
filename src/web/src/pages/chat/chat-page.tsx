@@ -252,6 +252,8 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
   // A room's call: its people talk, with live captions in each reader's language.
   const [readIn, setReadIn] = useReadIn()
   const call = useRoomCall(room ? id : undefined, me?.id ?? '', readIn)
+  // A call is feature.calls' (Admin → Access); a viewer of the room only reads it.
+  const mayCall = !!room && room.role !== 'viewer' && mayUse(config, 'feature.calls')
   const roomLive = useRoomEvents(id, room, me?.id ?? '', call.on)
   /** Who wrote the message a room's message replies to, and its start. */
   const replyOf = (messageId: string) => {
@@ -1245,7 +1247,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
             onMove={id ? (assistantId) => void move(assistantId) : undefined}
             onShare={id && path.length && mayUse(config, 'feature.share_links') ? () => setSharing(true) : undefined}
             onCompact={canCompact ? () => void compact() : undefined}
-            room={room ? { people: room.members.length, here: roomLive.here.length, onOpen: () => setPeopleOpen(true), readIn: { value: readIn, onChange: setReadIn }, call: <CallButton call={call} canSpeak={room.role !== 'viewer'} /> } : undefined}
+            room={room ? { people: room.members.length, here: roomLive.here.length, onOpen: () => setPeopleOpen(true), readIn: { value: readIn, onChange: setReadIn }, call: <CallButton call={call} canSpeak={mayCall} /> } : undefined}
             onMakeRoom={id && data && !room && !data.origin && mayUse(config, 'feature.rooms.create') ? () => setMakingRoom(true) : undefined}
             checklist={id && data && !room ? { chat: id, answering: streaming } : undefined}
           />
@@ -1285,7 +1287,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                 <ScreenBar share={share} sees={model?.vision ?? false} seer={seer} onSeer={(m) => void change({ model: m })} />
                 <TalkBar state={talk.state} onEnd={talk.end} />
                 {waiting}
-                {room && <CallBar call={call} me={me?.id ?? ''} readIn={readIn} canSpeak={room.role !== 'viewer'} names={(person) => room.members.find((m) => m.id === person)?.name ?? 'Someone'} />}
+                {room && <CallBar call={call} me={me?.id ?? ''} readIn={readIn} canSpeak={mayCall} names={(person) => room.members.find((m) => m.id === person)?.name ?? 'Someone'} />}
                 <Composer
                   key={seed?.n ?? 0}
                   initialText={seed?.text}
@@ -1507,7 +1509,7 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
                 <ScreenBar share={share} sees={model?.vision ?? false} seer={seer} onSeer={(m) => void change({ model: m })} />
                 <TalkBar state={talk.state} onEnd={talk.end} />
                 {waiting}
-                {room && <CallBar call={call} me={me?.id ?? ''} readIn={readIn} canSpeak={room.role !== 'viewer'} names={(person) => room.members.find((m) => m.id === person)?.name ?? 'Someone'} />}
+                {room && <CallBar call={call} me={me?.id ?? ''} readIn={readIn} canSpeak={mayCall} names={(person) => room.members.find((m) => m.id === person)?.name ?? 'Someone'} />}
                 {data?.codeArena && !streaming && (
                   <output className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground">
                     <SquareTerminal className="size-3.5 shrink-0 animate-pulse" aria-hidden="true" />

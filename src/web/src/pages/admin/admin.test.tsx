@@ -104,6 +104,40 @@ describe('people', () => {
     expect(within(dialog).getByLabelText('Password')).toHaveTextContent('generated-pass-123')
   })
 
+  it('one who may only read people sees them with no button to change them', async () => {
+    const reader = { ...member, permissions: ['people.read'] }
+    fakeApi(reader, {
+      'GET /api/admin/people': () => ({ json: { warning: null, people } }),
+    })
+    renderApp('/admin/people')
+    expect(await screen.findByText('Grace Hopper')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Add person/ })).toBeNull()
+    expect(screen.queryAllByRole('checkbox', { name: 'Select row' })).toHaveLength(0)
+  })
+
+  it('one who may only read a person sees no button to change them', async () => {
+    fakeApi({ ...member, permissions: ['people.read'] }, {
+      'GET /api/admin/people/p1': () => ({ json: { person: { ...people[0], twoFactorEnabled: true }, standing: null, keys: [], groups: [], directoryGroups: [], warning: null } }),
+    })
+    renderApp('/admin/people/p1')
+    expect(await screen.findByRole('heading', { name: 'Credits this month' })).toBeInTheDocument()
+    for (const name of [/Change name/, /Make admin/, /Disable/, /Reset password/, /Reset 2FA/, /Sign out everywhere/, /Set credits/, /New API key/, /Set limits/, /Delete grace/]) {
+      expect(screen.queryByRole('button', { name })).toBeNull()
+    }
+    expect(screen.getByRole('switch')).toBeDisabled()
+  })
+
+  it('one who may reset passwords sees those buttons alone on a person', async () => {
+    fakeApi({ ...member, permissions: ['people.read', 'people.passwords'] }, {
+      'GET /api/admin/people/p1': () => ({ json: { person: people[0], standing: null, keys: [], groups: [], directoryGroups: [], warning: null } }),
+    })
+    renderApp('/admin/people/p1')
+    expect(await screen.findByRole('button', { name: /Reset password/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Sign out everywhere/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Make admin/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Delete grace/ })).toBeNull()
+  })
+
   it('deleting asks for the username to be typed', async () => {
     const calls = fakeApi(admin, {
       'GET /api/admin/people/p1': () => ({ json: { person: people[0], keys: [], groups: [], directoryGroups: [], warning: null } }),

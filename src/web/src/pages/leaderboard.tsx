@@ -3,11 +3,14 @@ import { EyeOff, Scale, Trophy } from 'lucide-react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
+import { TimeWindow } from '@/components/app/time-window'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { DataTable, type ColumnDef } from '@/components/ui/data-table'
 import { EmptyState } from '@/components/ui/empty-state'
 import { api, ApiError } from '@/lib/api'
 import { formatValue } from '@/lib/format'
+import { allTime, reportPresets } from '@/lib/time'
+import { useTimeWindow } from '@/lib/use-time-window'
 
 /** A model's place: its Elo rating and its votes ("ties" counts tie and both bad; "bad" the second alone). */
 export interface Standing {
@@ -74,9 +77,11 @@ export function LeaderboardTable({ board, label }: { board: Board; label: string
 
 /** The company's models on its own questions: the arena's votes, for everyone unless an admin keeps it to the admins. */
 export function LeaderboardPage() {
+  // The votes cast in a window, in the address; every vote until one is chosen.
+  const time = useTimeWindow({ from: allTime.from, to: 'now' })
   const q = useQuery({
-    queryKey: ['arena', 'leaderboard'],
-    queryFn: ({ signal }) => api<{ public: boolean; board: Board }>('/api/arena/leaderboard', { signal }),
+    queryKey: ['arena', 'leaderboard', time.key],
+    queryFn: ({ signal }) => api<{ public: boolean; board: Board }>(`/api/arena/leaderboard?${time.query()}`, { signal }),
   })
   const hidden = q.error instanceof ApiError && q.error.http === 403
   return (
@@ -84,6 +89,7 @@ export function LeaderboardPage() {
       <PageHeader
         title="Leaderboard"
         description="The company's models on its own questions: people compare two models in the chat, blind, and vote for the better answer. Each vote moves an Elo rating."
+        actions={!hidden && <TimeWindow value={time.range} onChange={time.set} presets={[allTime, ...reportPresets]} />}
       />
       {q.isPending && <PageSkeleton />}
       {hidden && (
@@ -94,7 +100,7 @@ export function LeaderboardPage() {
       {q.error && !hidden && <QueryError error={q.error} retry={() => q.refetch()} />}
       {q.data &&
         (q.data.board.models.length === 0 ? (
-          <EmptyState icon={Scale} title="No votes yet">
+          <EmptyState icon={Scale} title={time.range.from === allTime.from ? 'No votes yet' : 'No votes in this time'}>
             Turn on <strong>Compare</strong> in the chat's message box: two models answer your next question side by side, and your vote lands here.{' '}
             <Link to="/chat" className="font-medium text-foreground underline-offset-2 hover:underline">
               Open the chat

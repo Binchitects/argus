@@ -6,7 +6,7 @@ import { CodeBlock } from '@/components/app/code-block'
 import { PageHeader } from '@/components/app/page-header'
 import { Pick } from '@/components/app/pick'
 import { QueryError } from '@/components/app/query-state'
-import { RangeSelect } from '@/components/app/range-select'
+import { TimeWindow } from '@/components/app/time-window'
 import { Segmented } from '@/components/app/segmented'
 import type { ChartSeries } from '@/components/charts/fold'
 import { TimeChart } from '@/components/charts/time-chart'
@@ -18,7 +18,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/lib/api'
-import { intervalFor, resolve } from '@/lib/time'
+import { dashboardWindowPresets, intervalFor, resolveRange } from '@/lib/time'
+import { useTimeWindow } from '@/lib/use-time-window'
 import { cn } from '@/lib/utils'
 
 interface Lines {
@@ -58,11 +59,15 @@ const levelNames: Record<string, string> = { error: 'Errors', warn: 'Warnings', 
  */
 export function LogsPage() {
   const [params, setParams] = useSearchParams()
-  const from = params.get('range') ?? 'now-1h'
+  // The window, in the address (from and to): the live ones end now, and Live follows them; a past one is read as it was.
+  const time = useTimeWindow({ from: 'now-1h', to: 'now' })
+  const { from: since, to: until } = time.range
+  const endsNow = until === 'now'
   const containers = params.getAll('container')
   const level = params.get('level') ?? 'all'
   const search = params.get('q') ?? ''
-  const [live, setLive] = useState(false)
+  const [following, setLive] = useState(false)
+  const live = following && endsNow
   const set = (change: (p: URLSearchParams) => void) =>
     setParams((prev) => {
       const p = new URLSearchParams(prev)
@@ -79,7 +84,7 @@ export function LogsPage() {
     if (search) p.set('search', search)
     return p.toString()
   }, [containerKey, level, search])
-  const key = `${from}?${filter}`
+  const key = `${time.key}?${filter}`
 
   const names = useQuery({
     queryKey: ['admin', 'logs', 'containers'],
@@ -89,16 +94,15 @@ export function LogsPage() {
   const lines = useQuery({
     queryKey: ['admin', 'logs', 'lines', key],
     queryFn: ({ signal }) => {
-      const to = new Date()
-      return api<Lines>(`/api/admin/logs/?${filter}&from=${resolve(from, to).toISOString()}&to=${to.toISOString()}&limit=${LIMIT}`, { signal })
+      const { from, to } = time.resolved()
+      return api<Lines>(`/api/admin/logs/?${filter}&from=${from.toISOString()}&to=${to.toISOString()}&limit=${LIMIT}`, { signal })
     },
     placeholderData: keepPreviousData,
   })
   const volume = useQuery({
     queryKey: ['admin', 'logs', 'volume', key],
     queryFn: ({ signal }): Promise<Volume> => {
-      const to = new Date()
-      const start = resolve(from, to)
+      const { from: start, to } = time.resolved()
       return api<Omit<Volume, 'from' | 'to'>>(
         `/api/admin/logs/volume?${filter}&from=${start.toISOString()}&to=${to.toISOString()}&intervalMs=${intervalFor(start, to, 120)}`,
         { signal },
@@ -124,9 +128,9 @@ export function LogsPage() {
       if (busy) return
       busy = true
       try {
-        const to = new Date()
+        const { from, to } = resolveRange({ from: since, to: until })
         const after = newest.current ? `&after=${newest.current}` : ''
-        const r = await api<Lines>(`/api/admin/logs/?${filter}&from=${resolve(from, to).toISOString()}&to=${to.toISOString()}&limit=500${after}`, { signal: controller.signal })
+        const r = await api<Lines>(`/api/admin/logs/?${filter}&from=${from.toISOString()}&to=${to.toISOString()}&limit=500${after}`, { signal: controller.signal })
         if (r.lines.length) setTail((prev) => ({ key, lines: [...r.lines, ...(prev.key === key ? prev.lines : [])].slice(0, KEEP) }))
       } catch {
         // A missed tick is caught up by the next: it asks from the newest line here.
@@ -138,7 +142,7 @@ export function LogsPage() {
       clearInterval(t)
       controller.abort()
     }
-  }, [live, ready, key, filter, from])
+  }, [live, ready, key, filter, since, until])
 
   const refresh = () => {
     setTail({ key: '', lines: [] })
@@ -154,7 +158,7 @@ export function LogsPage() {
         <div className="flex flex-wrap items-end gap-3">
           <div className="grid gap-1">
             <span className="text-xs text-muted-foreground">Time range</span>
-            <RangeSelect value={from} onChange={(v) => set((p) => p.set('range', v))} />
+            <TimeWindow value={time.range} onChange={time.set} presets={dashboardWindowPresets} />
           </div>
           <Pick
             label="Containers"
@@ -181,7 +185,15 @@ export function LogsPage() {
             <Button variant="outline" size="sm" className="h-9" onClick={refresh}>
               <RefreshCw /> Refresh
             </Button>
-            <Button variant={live ? 'default' : 'outline'} size="sm" className="h-9" aria-pressed={live} onClick={() => setLive(!live)}>
+            <Button
+              variant={live ? 'default' : 'outline'}
+              size="sm"
+              className="h-9"
+              aria-pressed={live}
+              disabled={!endsNow}
+              title={endsNow ? undefined : 'Live follows a window that ends now'}
+              onClick={() => setLive(!live)}
+            >
               <Radio className={cn(live && 'animate-pulse')} /> Live
             </Button>
           </div>

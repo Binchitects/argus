@@ -10,7 +10,8 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/components/ui/toaster'
-import { api, errorMessage } from '@/lib/api'
+import { useOutletContext } from 'react-router'
+import { api, errorMessage, holds, type Me } from '@/lib/api'
 import { ago, when } from '@/lib/format'
 import { useDebounced } from '@/lib/use-debounced'
 import { ANY, fileSearch, kinds, noFilter, origins, plural, size, states, type Amount, type FileList, type FileQuery, type FileRow, type PersonFiles } from './storage-api'
@@ -131,6 +132,8 @@ function Pick({ label, value, onChange, options, className }: { label: string; v
  * by the selection, never one of a person on legal hold.
  */
 export function StorageFiles() {
+  // Deleting files is storage.delete's (a part of storage.manage).
+  const mayDelete = holds(useOutletContext<Me>(), 'storage.delete')
   const [f, setF] = useState<FileQuery>(noFilter)
   const set = (key: keyof FileQuery) => (value: string) => setF((x) => ({ ...x, [key]: value }))
   const people = useQuery({
@@ -182,7 +185,7 @@ export function StorageFiles() {
             </p>
           )}
           <DataTable
-            columns={columns}
+            columns={mayDelete ? columns : columns.filter((c) => c.id !== 'select')}
             data={d?.rows}
             loading={list.isPending}
             noun="files"
@@ -194,7 +197,7 @@ export function StorageFiles() {
                 Uploads and what the tools make appear here. Try fewer filters.
               </EmptyState>
             }
-            bulk={(selected, table) => (
+            bulk={!mayDelete ? undefined : (selected, table) => (
               <Button size="sm" variant="destructive" loading={remove.pending} onClick={() => void remove.run(selected, () => table.resetRowSelection())}>
                 <Trash2 /> Delete {plural(selected.length, 'file')}
               </Button>

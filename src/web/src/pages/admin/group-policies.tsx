@@ -17,7 +17,8 @@ import { noPolicies, type GroupDetail, type GroupPolicies } from './groups-api'
 import { creditKinds, parseCredit, type CreditKind, type Credits } from './people-api'
 
 /** A group's retention, credit, cost centre and API keys' rate limits: one form, saved together. Safeguards for a group are rules (Admin → Safeguards). */
-export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
+/** maySet: groups.policies; without it the policies are read, not saved. */
+export function GroupPoliciesCard({ group, maySet = true }: { group: GroupDetail; maySet?: boolean }) {
   const queryClient = useQueryClient()
   const p = group.policies ?? noPolicies
   const [days, setDays] = useState(p.retentionDays === null ? '' : String(p.retentionDays))
@@ -139,11 +140,13 @@ export function GroupPoliciesCard({ group }: { group: GroupDetail }) {
           </div>
         </div>
       </CardContent>
-      <CardFooter>
-        <Button onClick={submit} loading={save.isPending}>
-          Save policies
-        </Button>
-      </CardFooter>
+      {maySet && (
+        <CardFooter>
+          <Button onClick={submit} loading={save.isPending}>
+            Save policies
+          </Button>
+        </CardFooter>
+      )}
     </Card>
   )
 }

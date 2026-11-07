@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Layers, Pencil, Plug, PlugZap, Plus, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
 import { useRef, useState } from 'react'
+import { useOutletContext } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
 import { Alert } from '@/components/ui/alert'
@@ -15,7 +16,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Segmented } from '@/components/app/segmented'
 import { toast } from '@/components/ui/toaster'
-import { api, errorMessage } from '@/lib/api'
+import { api, errorMessage, holds, type Me } from '@/lib/api'
 import { toolIcon } from '../chat/tools'
 import { AccessPicker, type Audience } from './access-picker'
 import { tlsBody, type CertificateProblem, type Tls, type TlsCheck } from './tls'
@@ -99,6 +100,9 @@ export function ToolsPage() {
   const [customizing, setCustomizing] = useState<string | null>(null)
   const [making, setMaking] = useState<CustomToolRow | 'new' | null>(null)
   const [sets, setSets] = useState(false)
+  // tools.edit turns tools on and off, sets who may use them, how they ask, toolsets and customizing; mcpservers.manage adds servers, APIs and tools of one's own.
+  const me = useOutletContext<Me>()
+  const may: ToolPowers = { edit: holds(me, 'tools.edit'), servers: holds(me, 'mcpservers.manage') }
   if (tools.isPending) return <PageSkeleton />
   if (tools.error) return <QueryError error={tools.error} retry={() => tools.refetch()} />
   return (
@@ -108,15 +112,21 @@ export function ToolsPage() {
         description="What the chat's model may call, and for whom. Turn a tool off, give it to some groups only, have it ask before each call, customize it, or add an MCP server, an API, or a tool of your own."
         actions={
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => setSets(true)}>
-              <Layers /> Toolsets
-            </Button>
-            <Button variant="outline" onClick={() => setMaking('new')}>
-              <Plus /> New tool
-            </Button>
-            <Button onClick={() => setEditing('new')}>
-              <Plus /> Add a server or API
-            </Button>
+            {may.edit && (
+              <Button variant="outline" onClick={() => setSets(true)}>
+                <Layers /> Toolsets
+              </Button>
+            )}
+            {may.servers && (
+              <>
+                <Button variant="outline" onClick={() => setMaking('new')}>
+                  <Plus /> New tool
+                </Button>
+                <Button onClick={() => setEditing('new')}>
+                  <Plus /> Add a server or API
+                </Button>
+              </>
+            )}
           </div>
         }
       />
@@ -126,6 +136,7 @@ export function ToolsPage() {
             key={t.id}
             tool={t}
             usage={usage.data?.find((u) => u.toolId === t.id)}
+            may={may}
             onEdit={() => (t.custom ? setMaking(customs.data?.find((c) => c.toolId === t.id) ?? null) : setEditing(t.server))}
             onCustomize={() => setCustomizing(t.id)}
           />
@@ -139,7 +150,13 @@ export function ToolsPage() {
   )
 }
 
-function ToolCard({ tool, usage, onEdit, onCustomize }: { tool: ToolRow; usage: ToolUsage | undefined; onEdit: () => void; onCustomize: () => void }) {
+/** What the person may do to the tools (Admin → Access). */
+interface ToolPowers {
+  edit: boolean
+  servers: boolean
+}
+
+function ToolCard({ tool, usage, may, onEdit, onCustomize }: { tool: ToolRow; usage: ToolUsage | undefined; may: ToolPowers; onEdit: () => void; onCustomize: () => void }) {
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const Icon = toolIcon[tool.icon] ?? Wrench
@@ -175,7 +192,7 @@ function ToolCard({ tool, usage, onEdit, onCustomize }: { tool: ToolRow; usage: 
           </CardDescription>
           <UsageLine usage={usage} />
         </div>
-        <Switch checked={tool.setting.enabled} onCheckedChange={(enabled) => set({ enabled })} aria-label={`${tool.title} on`} />
+        <Switch checked={tool.setting.enabled} disabled={!may.edit} onCheckedChange={(enabled) => set({ enabled })} aria-label={`${tool.title} on`} />
       </CardHeader>
       <CardContent className="grid gap-4">
         {tool.unavailable && <Alert variant="warning">{tool.unavailable}</Alert>}
@@ -207,33 +224,35 @@ function ToolCard({ tool, usage, onEdit, onCustomize }: { tool: ToolRow; usage: 
             </p>
           </div>
         )}
-        <AccessPicker value={tool.setting} onChange={(audience, groups) => set({ audience, groups })} />
+        <AccessPicker value={tool.setting} onChange={(audience, groups) => set({ audience, groups })} readOnly={!may.edit} />
         <div className="grid gap-2">
           <Label className="flex items-center justify-between gap-3 font-normal">
             <span>
               {words.onByDefault[0]}
               <span className="block text-xs text-muted-foreground">{words.onByDefault[1]}</span>
             </span>
-            <Switch checked={tool.setting.onByDefault} onCheckedChange={(onByDefault) => set({ onByDefault })} />
+            <Switch checked={tool.setting.onByDefault} disabled={!may.edit} onCheckedChange={(onByDefault) => set({ onByDefault })} />
           </Label>
           <Label className="flex items-center justify-between gap-3 font-normal">
             <span>
               {words.askFirst[0]}
               <span className="block text-xs text-muted-foreground">{words.askFirst[1]}</span>
             </span>
-            <Switch checked={tool.setting.askFirst} onCheckedChange={(askFirst) => set({ askFirst })} />
+            <Switch checked={tool.setting.askFirst} disabled={!may.edit} onCheckedChange={(askFirst) => set({ askFirst })} />
           </Label>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={onCustomize}>
-            <SlidersHorizontal /> Customize
-          </Button>
-          {(tool.server || tool.custom) && (
+          {may.edit && (
+            <Button variant="outline" size="sm" onClick={onCustomize}>
+              <SlidersHorizontal /> Customize
+            </Button>
+          )}
+          {(tool.server || tool.custom) && may.servers && (
             <Button variant="outline" size="sm" onClick={onEdit}>
               <Pencil /> Edit
             </Button>
           )}
-          {(tool.server || tool.custom) && (
+          {(tool.server || tool.custom) && may.servers && (
             <Button
               variant="outline"
               size="sm"

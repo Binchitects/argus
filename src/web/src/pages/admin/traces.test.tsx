@@ -74,6 +74,21 @@ describe('traces', () => {
     expect(Date.parse(asked.searchParams.get('to')!) - Date.parse(asked.searchParams.get('from')!)).toBe(7 * 24 * 3600 * 1000)
   })
 
+  it('takes the shared time window, kept in the address: live ones, the calendar’s and a custom range', async () => {
+    const calls = fakeApi(admin, { 'GET /api/admin/traces': () => ({ json: { answers: [] } }) })
+    const { router } = renderApp('/admin/traces?from=2026-10-03&to=2026-10-09')
+    const range = await screen.findByRole('combobox', { name: 'Time range' })
+    await waitFor(() => expect(calls.some((c) => c.path.startsWith('/api/admin/traces?'))).toBe(true))
+    const asked = new URL(calls.find((c) => c.path.startsWith('/api/admin/traces?'))!.path, 'https://llm.test')
+    expect(new Date(asked.searchParams.get('from')!).getTime()).toBe(new Date('2026-10-03T00:00:00').getTime())
+    expect(new Date(asked.searchParams.get('to')!).getTime()).toBe(new Date('2026-10-10T00:00:00').getTime())
+    await userEvent.click(range)
+    for (const name of ['Last 5 minutes', 'Last hour', 'Today', 'This month', 'Last month', 'Custom range…']) expect(await screen.findByRole('option', { name })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('option', { name: 'Last month' }))
+    expect(new URLSearchParams(router.state.location.search).get('from')).toBe('now-1M/M')
+    expect(new URLSearchParams(router.state.location.search).get('to')).toBe('now-1M/M')
+  })
+
   it('is for admins only', async () => {
     fakeApi(member)
     renderApp('/admin/traces')

@@ -358,6 +358,27 @@ public sealed class PlatformHttpTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_person_reads_their_own_spend_for_a_window_and_for_the_budget_period_without_one()
+    {
+        var admin = NewBrowser();
+        await admin.Login("root", "root-long-password");
+        var made = await admin.Json(HttpMethod.Post, "/api/admin/users", new { username = "erin", email = "erin@example.invalid" }, HttpStatusCode.Created);
+        _gateway.Users["erin@example.invalid"]["spend"] = 7.0;
+        _gateway.Spent[new DateOnly(2026, 10, 2)] = new() { ["erin@example.invalid"] = 1.5, ["root@example.invalid"] = 40 };
+        _gateway.Spent[new DateOnly(2026, 11, 2)] = new() { ["erin@example.invalid"] = 3 };
+        var erin = NewBrowser();
+        await erin.Login("erin", made["password"]!.GetValue<string>());
+
+        var october = await erin.Json(HttpMethod.Get, "/api/me/usage?from=2026-10-01&to=2026-10-31");
+        Assert.Equal(1.5, october["spend"]!.GetValue<double>());
+        Assert.Equal("2026-10-01", october["window"]!["from"]!.GetValue<string>());
+        var period = await erin.Json(HttpMethod.Get, "/api/me/usage");
+        Assert.Equal(7.0, period["spend"]!.GetValue<double>());
+        Assert.Null(period["window"]);
+        Assert.Equal(HttpStatusCode.BadRequest, (await erin.Send(HttpMethod.Get, "/api/me/usage?from=2026-10-31&to=2026-10-01")).StatusCode);
+    }
+
+    [Fact]
     public async Task Administration_creates_people_in_the_gateway_and_is_closed_to_everyone_else()
     {
         var admin = NewBrowser();

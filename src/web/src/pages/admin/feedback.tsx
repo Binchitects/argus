@@ -1,9 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
 import { Segmented } from '@/components/app/segmented'
+import { TimeWindow } from '@/components/app/time-window'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -11,6 +12,8 @@ import { Textarea } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage } from '@/lib/api'
 import { when } from '@/lib/format'
+import { allTime, reportPresets } from '@/lib/time'
+import { useTimeWindow } from '@/lib/use-time-window'
 
 type Status = 'new' | 'read' | 'done'
 
@@ -102,13 +105,25 @@ function FeedbackItem({ item }: { item: Item }) {
 /** Admin → Feedback: what people send about Arena (Send feedback), by status, to read, mark and answer. */
 export function FeedbackPage() {
   const [status, setStatus] = useState<Status | 'all'>('new')
-  const list = useQuery({ queryKey: ['admin', 'feedback', status], queryFn: ({ signal }) => api<{ items: Item[]; counts: Record<Status, number> }>(`/api/admin/feedback?status=${status}`, { signal }) })
+  // What was sent in a window, in the address (the counts too); any time until one is chosen.
+  const time = useTimeWindow({ from: allTime.from, to: 'now' })
+  const list = useQuery({
+    queryKey: ['admin', 'feedback', status, time.key],
+    queryFn: ({ signal }) => {
+      const p = time.query()
+      p.set('status', status)
+      return api<{ items: Item[]; counts: Record<Status, number> }>(`/api/admin/feedback?${p}`, { signal })
+    },
+    placeholderData: keepPreviousData,
+  })
   if (list.isPending) return <PageSkeleton />
   if (list.error) return <QueryError error={list.error} retry={() => list.refetch()} />
   const { items, counts } = list.data
   return (
     <>
       <PageHeader title="Feedback" description="What people send about Arena and Code Arena (Send feedback, in their menu): ideas, problems and praise, with the page they sent it from. Answer it, and they get the answer in their bell." />
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+      <TimeWindow value={time.range} onChange={time.set} presets={[allTime, ...reportPresets]} />
       <Segmented
         label="Which"
         value={status}
@@ -119,8 +134,8 @@ export function FeedbackPage() {
           { value: 'done', label: `Done (${counts.done})` },
           { value: 'all', label: 'All' },
         ]}
-        className="mb-4"
       />
+      </div>
       {items.length === 0 ? (
         <p className="text-sm text-muted-foreground">Nothing here.</p>
       ) : (

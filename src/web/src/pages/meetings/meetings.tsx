@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { EmptyState } from '@/components/ui/empty-state'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
-import { errorMessage } from '@/lib/api'
+import { errorMessage, mayUse, meQuery } from '@/lib/api'
 import { clock, meetingsQuery, uploadMeeting, type MeetingBrief } from './api'
 
 const when = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
@@ -127,6 +127,8 @@ export function MeetingsPage() {
   const [params] = useSearchParams()
   const [title, setTitle] = useState('')
   const picker = useRef<HTMLInputElement>(null)
+  // A meeting is heard by speech to text: feature.speech's as well as feature.meetings'.
+  const me = useQuery(meQuery)
   const send = useMutation({
     mutationFn: (file: File) => uploadMeeting(file, title),
     onSuccess: (m) => {
@@ -144,6 +146,7 @@ export function MeetingsPage() {
         title="Meetings"
         description="Record a meeting here, or upload one: who said what, the minutes with the decisions and the action items, a reminder for each on its day, and a chat to ask about it."
       />
+      {mayUse(me.data, 'feature.speech') && (
       <Card className="mb-8">
         <CardHeader>
           <CardTitle className="text-base">A new meeting</CardTitle>
@@ -171,6 +174,7 @@ export function MeetingsPage() {
           </div>
         </CardContent>
       </Card>
+      )}
       {list.data.length === 0 ? (
         <EmptyState icon={Users} title="No meetings yet">
           Record one or upload one: the transcript tells who said what, and the minutes what was decided and who does what next.

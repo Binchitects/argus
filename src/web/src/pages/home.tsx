@@ -81,7 +81,7 @@ export function HomePage() {
           )}
         </CardContent>
       </Card>
-      {me.isAdmin && <AdminSummary />}
+      {(me.isAdmin || me.permissions?.includes('monitoring.read')) && <AdminSummary />}
     </div>
   )
 }

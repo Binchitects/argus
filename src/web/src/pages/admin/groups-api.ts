@@ -1,5 +1,6 @@
 import { api } from '@/lib/api'
 import type { CreditKind, Credits } from './people-api'
+import type { Preset } from '@/lib/time'
 
 export interface GroupSummary {
   id: string
@@ -110,6 +111,22 @@ export const chargebackQuery = (from: string, to: string) => ({
   queryKey: ['admin', 'groups', 'chargeback', from, to] as const,
   queryFn: ({ signal }: { signal: AbortSignal }) => api<{ from: string; to: string; rows: ChargeRow[] }>(chargebackPath(from, to), { signal }),
 })
+
+/** A chargeback is by the month: whole months, from this one to the last year's. */
+export const monthPresets: Preset[] = [
+  { label: 'This month', from: 'now/M' },
+  { label: 'Last month', from: 'now-1M/M', to: 'now-1M/M' },
+  { label: 'Last 3 months', from: 'now-2M/M' },
+  { label: 'Last 6 months', from: 'now-5M/M' },
+  { label: 'Last 12 months', from: 'now-11M/M' },
+  { label: 'This year', from: 'now/y' },
+]
+
+/** The months a time window covers (yyyy-MM, the browser's calendar): its first and its last, the end not included. */
+export function monthsOf(r: { from: Date; to: Date }): { from: string; to: string } {
+  const month = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  return { from: month(r.from), to: month(new Date(r.to.getTime() - 1)) }
+}
 
 /** The month (yyyy-MM, UTC) of a date, or so many months before it. */
 export function monthOf(date: Date, back = 0): string {

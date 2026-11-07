@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { api, money, relTime } from "../api";
 import { useAuth } from "../auth";
 import Secret from "../components/Secret";
+import { TimeWindowPicker, useTimeWindow } from "../components/TimeWindowPicker";
 import { useAsync } from "../components/useAsync";
 import { useTable, type Key } from "../components/useTable";
 
@@ -169,18 +170,26 @@ function ModelKeys({ gatewayUrl }: { gatewayUrl: string | null }) {
 export default function Settings() {
   const { me } = useAuth();
   const user = me!.user;
-  const usage = me!.usage;
-  const pct = usage && usage.max_budget ? Math.min(100, (usage.spend / usage.max_budget) * 100) : null;
+  // One's own spend in the window the address keeps; the budget period's (and its meter) without one.
+  const time = useTimeWindow();
+  const asked = useAsync(() => (time.query ? api.get<{ spend: number; max_budget: number | null }>("/api/me/usage" + time.query) : Promise.resolve(null)), [time.query]);
+  const usage = time.query ? asked.value : me!.usage;
+  const pct = !time.query && usage && usage.max_budget ? Math.min(100, (usage.spend / usage.max_budget) * 100) : null;
   return (
     <div className="page">
       <h1>Settings &amp; keys</h1>
+      <TimeWindowPicker value={time.window} onChange={time.set} />
       <div className="tiles">
         <div className="tile"><div className="tile-label">Signed in as</div><div className="tile-value small">{user.username}</div><div className="dim">{user.email}</div></div>
         <div className="tile"><div className="tile-label">Role</div><div className="tile-value small">{user.role}</div><div className="dim">{user.gitlab_username ? `GitLab: ${user.gitlab_username}` : "GitLab matched by email"}</div></div>
         <div className="tile">
-          <div className="tile-label">Usage this period</div>
+          <div className="tile-label">Usage, {time.said}</div>
           <div className="tile-value small">{usage ? money(usage.spend) : "—"}</div>
-          <div className="dim">{usage ? (usage.max_budget ? `of ${money(usage.max_budget)}` : "no limit") : me!.usage_error ?? "gateway not configured"}</div>
+          <div className="dim">
+            {time.query
+              ? asked.error ?? (usage?.max_budget ? `the budget is ${money(usage.max_budget)} a period` : "no limit")
+              : usage ? (usage.max_budget ? `of ${money(usage.max_budget)}` : "no limit") : me!.usage_error ?? "gateway not configured"}
+          </div>
           {pct !== null && <div className="meter" aria-label="Budget used"><span style={{ width: `${pct}%` }} /></div>}
         </div>
       </div>

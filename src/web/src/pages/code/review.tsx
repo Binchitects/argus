@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ExternalLink, MessagesSquare, RefreshCw, Wrench } from 'lucide-react'
 import { useState } from 'react'
-import { useNavigate, useParams } from 'react-router'
+import { Link, useNavigate, useParams } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { QueryError } from '@/components/app/query-state'
 import { Alert } from '@/components/ui/alert'
@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
-import { api, errorMessage } from '@/lib/api'
+import { api, errorMessage, mayUse, meQuery } from '@/lib/api'
 import { Markdown } from '@/pages/chat/markdown'
 import { decideFinding, reviewAgain, reviewQuery, reviewRoom, type Finding } from './api'
 import { ReviewState } from './code'
@@ -18,7 +18,8 @@ import { ShareReview } from './review-share'
 
 const severityVariant = { critical: 'destructive', major: 'warning', minor: 'default', nit: 'secondary' } as const
 
-function FindingCard({ f, onDecide, onFix, readOnly }: { f: Finding; onDecide: (state: Finding['state']) => void; onFix: () => void; readOnly: boolean }) {
+/** onFix: left out without feature.fixit. */
+function FindingCard({ f, onDecide, onFix, readOnly }: { f: Finding; onDecide: (state: Finding['state']) => void; onFix?: () => void; readOnly: boolean }) {
   const refuted = f.verified === false
   return (
     <li className={`grid gap-2 rounded-lg border p-4 ${refuted || f.state !== 'open' ? 'opacity-70' : ''}`}>
@@ -56,9 +57,11 @@ function FindingCard({ f, onDecide, onFix, readOnly }: { f: Finding; onDecide: (
               <Button size="sm" variant="ghost" onClick={() => onDecide('dismissed')}>
                 Dismiss
               </Button>
-              <Button size="sm" variant="ghost" onClick={onFix}>
-                <Wrench /> Fix it
-              </Button>
+              {onFix && (
+                <Button size="sm" variant="ghost" onClick={onFix}>
+                  <Wrench /> Fix it
+                </Button>
+              )}
             </>
           ) : (
             <Button size="sm" variant="ghost" onClick={() => onDecide('open')}>
@@ -78,6 +81,9 @@ export function ReviewPage() {
   const queryClient = useQueryClient()
   const review = useQuery(reviewQuery(id))
   const [busy, setBusy] = useState(false)
+  // Each action is its permission's: share_links, rooms.create, review.run, feature.fixit.
+  const me = useQuery(meQuery)
+  const may = (permission: string) => mayUse(me.data, permission)
   if (review.error) return <QueryError error={review.error} retry={() => review.refetch()} />
   if (!review.data) return <Skeleton className="h-64" />
   const d = review.data
@@ -128,13 +134,23 @@ export function ReviewPage() {
                 </a>
               </Button>
             )}
-            {d.share && r.status === 'done' && <ShareReview id={id} share={d.share} />}
-            {r.status === 'done' && !d.readOnly && (
-              <Button variant="outline" disabled={busy} onClick={() => void go(() => reviewRoom(id), (room) => `/chat/${room}`)}>
-                <MessagesSquare /> {d.roomId ? 'Its room' : 'Discuss in a room'}
+            {d.share && r.status === 'done' && may('feature.share_links') && <ShareReview id={id} share={d.share} />}
+            {r.status === 'done' && !d.readOnly && d.roomId ? (
+              <Button variant="outline" asChild>
+                <Link to={`/chat/${d.roomId}`}>
+                  <MessagesSquare /> Its room
+                </Link>
               </Button>
+            ) : (
+              r.status === 'done' &&
+              !d.readOnly &&
+              may('feature.rooms.create') && (
+                <Button variant="outline" disabled={busy} onClick={() => void go(() => reviewRoom(id), (room) => `/chat/${room}`)}>
+                  <MessagesSquare /> Discuss in a room
+                </Button>
+              )
             )}
-            {(r.status === 'done' || r.status === 'failed') && !d.readOnly && (
+            {(r.status === 'done' || r.status === 'failed') && !d.readOnly && may('review.run') && (
               <Button disabled={busy} onClick={() => void go(() => reviewAgain(id), (again) => `/code/reviews/${again}`)}>
                 <RefreshCw /> Review again
               </Button>
@@ -166,7 +182,7 @@ export function ReviewPage() {
           ) : (
             <ul className="grid gap-3" aria-label="Findings">
               {kept.map((f) => (
-                <FindingCard key={f.id} f={f} readOnly={d.readOnly} onDecide={(state) => void decide(f.id, state)} onFix={() => void fix(f.id)} />
+                <FindingCard key={f.id} f={f} readOnly={d.readOnly} onDecide={(state) => void decide(f.id, state)} onFix={may('feature.fixit') ? () => void fix(f.id) : undefined} />
               ))}
             </ul>
           )}
@@ -175,7 +191,7 @@ export function ReviewPage() {
               <summary className="cursor-pointer text-sm text-muted-foreground">Doubted by the second check ({doubted.length})</summary>
               <ul className="mt-3 grid gap-3" aria-label="Doubted findings">
                 {doubted.map((f) => (
-                  <FindingCard key={f.id} f={f} readOnly={d.readOnly} onDecide={(state) => void decide(f.id, state)} onFix={() => void fix(f.id)} />
+                  <FindingCard key={f.id} f={f} readOnly={d.readOnly} onDecide={(state) => void decide(f.id, state)} onFix={may('feature.fixit') ? () => void fix(f.id) : undefined} />
                 ))}
               </ul>
             </details>

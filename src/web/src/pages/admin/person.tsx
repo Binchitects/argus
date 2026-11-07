@@ -18,7 +18,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
-import { api, errorMessage, type Me } from '@/lib/api'
+import { api, errorMessage, holds, type Me } from '@/lib/api'
 import { ago, money, when } from '@/lib/format'
 import { maxRequests, maxTokens, parseLimit, type KeyLimits } from '@/lib/rate-limits'
 import { PersonDataRequests } from './data-requests'
@@ -81,17 +81,18 @@ export function PersonPage() {
       )}
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="grid content-start gap-6">
-          <Profile p={p} />
+          <Profile p={p} mayEdit={holds(me, 'people.edit')} />
           <Groups groups={groups} directoryGroups={directoryGroups} />
-          <CreditsCard key={creditKinds.map((k) => p.credits[k.kind].credit).join('-')} p={p} standing={standing} />
-          <ApiKeyCard p={p} keys={keys} onSecret={setSecret} />
-          {limits && <RateLimitsCard key={`${limits.own.requestsPerMinute}-${limits.own.tokensPerMinute}-${atOnce?.own}`} p={p} limits={limits} atOnce={atOnce} />}
+          <CreditsCard key={creditKinds.map((k) => p.credits[k.kind].credit).join('-')} p={p} standing={standing} maySet={holds(me, 'credits.manage')} />
+          <ApiKeyCard p={p} keys={keys} onSecret={setSecret} mayChange={holds(me, 'people.keys')} />
+          {limits && <RateLimitsCard key={`${limits.own.requestsPerMinute}-${limits.own.tokensPerMinute}-${atOnce?.own}`} p={p} limits={limits} atOnce={atOnce} maySet={holds(me, 'people.limits')} />}
         </div>
         <div className="grid content-start gap-6">
-          <Access p={p} self={self} onSecret={setSecret} />
+          {/* Each button its part of people.manage: people.edit changes the account, people.passwords its sign-in. */}
+          {(holds(me, 'people.edit') || holds(me, 'people.passwords')) && <Access p={p} self={self} onSecret={setSecret} mayEdit={holds(me, 'people.edit')} mayReset={holds(me, 'people.passwords')} />}
           <LegalHoldCard p={p} />
           {(me.isAdmin || me.permissions?.includes('privacy.manage')) && <PersonDataRequests person={p} />}
-          {!self && <Danger p={p} />}
+          {!self && holds(me, 'people.delete') && <Danger p={p} />}
         </div>
       </div>
     </>
@@ -106,7 +107,7 @@ function useRefresh(id: string) {
   }
 }
 
-function Profile({ p }: { p: Person }) {
+function Profile({ p, mayEdit }: { p: Person; mayEdit: boolean }) {
   const refresh = useRefresh(p.id)
   const [name, setName] = useState<string | null>(null)
   const rename = useMutation({
@@ -132,6 +133,7 @@ function Profile({ p }: { p: Person }) {
           ]}
         />
         {p.source === 'local' &&
+          mayEdit &&
           (name === null ? (
             <div>
               <Button variant="outline" size="sm" onClick={() => setName(p.displayName)}>
@@ -162,7 +164,7 @@ function Profile({ p }: { p: Person }) {
   )
 }
 
-function Access({ p, self, onSecret }: { p: Person; self: boolean; onSecret: (s: { label: string; value: string }) => void }) {
+function Access({ p, self, onSecret, mayEdit, mayReset }: { p: Person; self: boolean; onSecret: (s: { label: string; value: string }) => void; mayEdit: boolean; mayReset: boolean }) {
   const refresh = useRefresh(p.id)
   const confirm = useConfirm()
   const act = useMutation({
@@ -189,7 +191,7 @@ function Access({ p, self, onSecret }: { p: Person; self: boolean; onSecret: (s:
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-wrap gap-2">
-        {!managed && !self && (
+        {!managed && !self && mayEdit && (
           <Button
             variant="outline"
             onClick={() =>
@@ -205,7 +207,7 @@ function Access({ p, self, onSecret }: { p: Person; self: boolean; onSecret: (s:
             <UserCog /> {p.isAdmin ? 'Remove admin' : 'Make admin'}
           </Button>
         )}
-        {!self && (
+        {!self && mayEdit && (
           <Button
             variant="outline"
             onClick={() =>
@@ -219,7 +221,7 @@ function Access({ p, self, onSecret }: { p: Person; self: boolean; onSecret: (s:
             {p.disabled ? <UserCheck /> : <UserX />} {p.disabled ? 'Enable' : 'Disable'}
           </Button>
         )}
-        {!managed && (
+        {!managed && mayReset && (
           <Button
             variant="outline"
             onClick={() => ask(`Give ${p.displayName} a new password?`, 'The old one stops working at once. You will see the new one here, once.', 'Reset password', () => act.mutate({ path: '/password', done: 'Password reset' }))}
@@ -227,7 +229,7 @@ function Access({ p, self, onSecret }: { p: Person; self: boolean; onSecret: (s:
             <KeyRound /> Reset password
           </Button>
         )}
-        {p.twoFactorEnabled && (
+        {p.twoFactorEnabled && mayReset && (
           <Button
             variant="outline"
             onClick={() => ask(`Turn off two-factor sign-in for ${p.displayName}?`, 'For a lost phone. They can set it up again from their account page.', 'Turn off 2FA', () => act.mutate({ path: '/2fa/reset', done: 'Two-factor sign-in turned off' }))}
@@ -235,16 +237,19 @@ function Access({ p, self, onSecret }: { p: Person; self: boolean; onSecret: (s:
             <ShieldOff /> Reset 2FA
           </Button>
         )}
-        <Button variant="outline" onClick={() => act.mutate({ path: '/sign-out', done: 'Signed out everywhere' })}>
-          <LogOut /> Sign out everywhere
-        </Button>
+        {mayReset && (
+          <Button variant="outline" onClick={() => act.mutate({ path: '/sign-out', done: 'Signed out everywhere' })}>
+            <LogOut /> Sign out everywhere
+          </Button>
+        )}
       </CardContent>
     </Card>
   )
 }
 
 /** Their own credit of each kind for a calendar month, with this month's spend; the tightest group's credit beside it. */
-function CreditsCard({ p, standing }: { p: Person; standing: Standing[] | null }) {
+/** maySet: credits.manage; without it the credits are read, not set. */
+function CreditsCard({ p, standing, maySet }: { p: Person; standing: Standing[] | null; maySet: boolean }) {
   const refresh = useRefresh(p.id)
   const [values, setValues] = useState<Record<CreditKind, string>>(
     () => Object.fromEntries(creditKinds.map(({ kind }) => [kind, p.credits[kind].credit === null ? '' : String(p.credits[kind].credit)])) as Record<CreditKind, string>,
@@ -294,6 +299,7 @@ function CreditsCard({ p, standing }: { p: Person; standing: Standing[] | null }
                 <Input
                   inputMode="decimal"
                   aria-label={`${label} credit ($)`}
+                  readOnly={!maySet}
                   value={values[kind]}
                   onChange={(e) => setValues((v) => ({ ...v, [kind]: e.target.value }))}
                   placeholder="no limit"
@@ -301,11 +307,13 @@ function CreditsCard({ p, standing }: { p: Person; standing: Standing[] | null }
               </div>
             )
           })}
-          <div>
-            <Button type="submit" variant="outline" loading={save.isPending}>
-              Set credits
-            </Button>
-          </div>
+          {maySet && (
+            <div>
+              <Button type="submit" variant="outline" loading={save.isPending}>
+                Set credits
+              </Button>
+            </div>
+          )}
         </form>
       </CardContent>
     </Card>
@@ -313,7 +321,8 @@ function CreditsCard({ p, standing }: { p: Person; standing: Standing[] | null }
 }
 
 /** API access (on for everyone; an admin can take it), and their keys. */
-function ApiKeyCard({ p, keys, onSecret }: { p: Person; keys: PersonDetail['keys']; onSecret: (s: { label: string; value: string }) => void }) {
+/** mayChange: people.keys, which turns API access on and off and makes keys anew. */
+function ApiKeyCard({ p, keys, onSecret, mayChange }: { p: Person; keys: PersonDetail['keys']; onSecret: (s: { label: string; value: string }) => void; mayChange: boolean }) {
   const refresh = useRefresh(p.id)
   const confirm = useConfirm()
   const access = useMutation({
@@ -346,7 +355,7 @@ function ApiKeyCard({ p, keys, onSecret }: { p: Person; keys: PersonDetail['keys
         <Label className="flex items-start gap-3 font-normal">
           <Switch
             checked={!p.apiOff}
-            disabled={access.isPending}
+            disabled={access.isPending || !mayChange}
             onCheckedChange={async (on) => {
               if (
                 on ||
@@ -384,7 +393,7 @@ function ApiKeyCard({ p, keys, onSecret }: { p: Person; keys: PersonDetail['keys
           ))}
         </ul>
       </CardContent>
-      {!p.apiOff && (
+      {!p.apiOff && mayChange && (
         <CardFooter>
           <Button
             variant="outline"
@@ -404,7 +413,8 @@ function ApiKeyCard({ p, keys, onSecret }: { p: Person; keys: PersonDetail['keys
 const limitText = (v: number | null) => (v === null ? '' : String(v))
 
 /** Their API keys' requests and tokens a minute: what applies now, and their own (empty: their groups' or the company's; 0: no limit). */
-function RateLimitsCard({ p, limits, atOnce }: { p: Person; limits: KeyLimits; atOnce?: PersonDetail['atOnce'] }) {
+/** maySet: people.limits; without it the limits are read, not set. */
+function RateLimitsCard({ p, limits, atOnce, maySet }: { p: Person; limits: KeyLimits; atOnce?: PersonDetail['atOnce']; maySet: boolean }) {
   const refresh = useRefresh(p.id)
   const [requests, setRequests] = useState(limitText(limits.own.requestsPerMinute))
   const [tokens, setTokens] = useState(limitText(limits.own.tokensPerMinute))
@@ -436,6 +446,7 @@ function RateLimitsCard({ p, limits, atOnce }: { p: Person; limits: KeyLimits; a
               : `${atOnce.value === 0 ? 'no limit' : atOnce.value}, ${atOnce.from === 'person' ? 'their own' : `from ${atOnce.group}`}`}
           </p>
         )}
+        {maySet && (
         <form
           className="flex flex-wrap items-end gap-2"
           onSubmit={(e) => {
@@ -462,6 +473,7 @@ function RateLimitsCard({ p, limits, atOnce }: { p: Person; limits: KeyLimits; a
             Set limits
           </Button>
         </form>
+        )}
         {error ? (
           <Alert variant="destructive">{error}</Alert>
         ) : (

@@ -135,15 +135,20 @@ public static class QualityEndpoints
     }
 
     /// <summary>The company's models on its own questions: Elo from every vote, for everyone unless an admin keeps it to the admins.</summary>
+    /// <summary>The arena's leaderboard from the votes cast in a window (from and to; none: every vote).</summary>
     private static async Task<IResult> LeaderboardAsync(ClaimsPrincipal p, AppDbContext db, IOptionsMonitor<QualityOptions> options, UserManager<AppUser> users,
-        Access.AccessService access, CancellationToken ct)
+        Access.AccessService access, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct)
     {
+        if (from >= to)
+        {
+            return AuthEndpoints.Problem(400, "range", "The range must start before it ends.");
+        }
         var open = options.CurrentValue.PublicLeaderboard;
         if (!open && !(await users.GetUserAsync(p) is { } me && await access.MayAsync(me, Llm.Core.Access.Permissions.MonitoringRead, ct)))
         {
             return AuthEndpoints.Problem(403, "hidden", "Your admins keep the leaderboard to themselves.");
         }
-        return Results.Ok(new { @public = open, board = await BoardAsync(db, null, null, ct) });
+        return Results.Ok(new { @public = open, board = await BoardAsync(db, from, to, ct) });
     }
 
     private static async Task<object> BoardAsync(AppDbContext db, DateTimeOffset? from, DateTimeOffset? to, CancellationToken ct)

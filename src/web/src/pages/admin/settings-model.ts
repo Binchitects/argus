@@ -24,6 +24,8 @@ export interface SettingView {
   warning?: string | null
   /** Shown only while another setting has a value: "CompanySignIn:Protocol=saml". */
   shownWhen?: string | null
+  /** The permission that changes it (its group's part of settings.manage, Admin → Access): without it, it is read only. */
+  permission?: string
   /** Edited in a box of this many lines (pasted XML, a certificate). */
   lines?: number | null
 }

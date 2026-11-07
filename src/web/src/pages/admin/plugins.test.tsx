@@ -138,4 +138,22 @@ describe('account connections', () => {
     expect(await within(await screen.findByRole('listitem', { name: 'Pets' })).findByText('Connected')).toBeInTheDocument()
     expect(within(screen.getByRole('listitem', { name: 'GitLab issues' })).getByRole('link', { name: /Connect/ })).toHaveAttribute('href', '/api/account/connections/mcp%3Ab/connect')
   })
+  it('one who may only see the plugins checks them, and installs, configures and removes nothing', async () => {
+    const installed = {
+      id: 's1', toolId: 'mcp:s1', plugin: 'gitlab-issues', title: 'GitLab issues', version: '1.0.0', url: 'https://gitlab.corp.test/api/v4', personAuth: 'oauth2', writes: [],
+      settings: [{ key: 'gitlab_url', title: 'GitLab address', type: 'url', required: true, help: null, value: 'https://gitlab.corp.test', set: true }],
+      tls: 'Verify', tlsCa: null, tlsCaNames: [], update: '1.1.0', versions: [{ version: '0.9.0', installedAt: '2026-10-01T00:00:00Z' }],
+    }
+    fakeApi({ ...member, permissions: ['plugins.read'] }, {
+      'GET /api/admin/plugins': () => ({ json: { problem: null, catalog: [{ name: 'jira', version: '1.0.0', title: 'Jira', description: 'Issues.', source: 'app', personAuth: null, installed: null }], installed: [installed] } }),
+    })
+    renderApp('/admin/plugins')
+    const card = (await screen.findByRole('heading', { name: /GitLab issues/ })).closest('section')!
+    expect(within(card).getByRole('button', { name: 'Check now' })).toBeInTheDocument()
+    for (const name of [/Settings/, /For groups/, /Update to/, /Back to/, /Pin this version/, /Remove/]) expect(within(card).queryByRole('button', { name })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Install/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Upload a zip/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /From an address/ })).toBeNull()
+    expect(screen.getByRole('button', { name: /Check a plugin/ })).toBeInTheDocument()
+  })
 })

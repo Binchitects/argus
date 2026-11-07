@@ -935,7 +935,7 @@ export const topics = {
     admin: true,
     parts: [
       { name: 'The engine', text: 'How many models it holds, which are kept loaded, and how full each GPU would be. **Reload** and **Restart** for each engine the app runs, as under Monitoring.' },
-      { name: 'Each model', text: 'Its state (loaded, loading, not loaded, could not load), its engine, **Keep loaded**, **Load**, **Unload**, **Edit**, **Change engine…**, and who may use it. What needs a look is a line on the card; **Why** says the whole of it.' },
+      { name: 'Each model', text: 'The card: its name, its state (loaded, loading, not loaded, could not load), one line about it, what needs a look, and **Load**, **Unload**, **Edit**, **Remove** and **Details**. **Details** holds its engine and **Change engine…**, a move under way, **Keep loaded**, who may use it and its tools; **Why** says the whole of a problem.' },
       { name: 'Details', text: 'On each card: its file and context, how it runs (its own settings), its price and token cache, and each problem in full. The card stays short however it is set up.' },
       { name: 'Working hours', text: 'Other models kept loaded at some hours: a small fast one by day, the big one at night.' },
       { name: 'Other servers and providers', text: 'Another machine\'s OpenAI-compatible engine, or a provider\'s API (OpenAI, Anthropic, Gemini, OpenRouter...) with the company\'s key: their models the gateway serves beside these, to the chat, API keys and Code Arena.' },
@@ -943,7 +943,7 @@ export const topics = {
       { name: 'Add a model', text: 'One dialog for every kind: choose a file from the model library or a model the speech server has, and it is taken as what it is (a chat, picture, video or speech model), which you can change. A chat model has an **Engine** (llama.cpp, vLLM, SGLang, LMDeploy or Strata; one that does not run here is disabled, saying why) and its **File or model** in that engine\'s form: a GGUF file for llama.cpp and Strata, a Hugging Face snapshot for vLLM, SGLang and LMDeploy. Its form shows what fits this machine, and for a snapshot how its precision runs on its GPUs (an FP4 one is widened as it is read on Hopper and Ampere, and runs natively on Blackwell). **Edit** on a card opens the same dialog.' },
     ],
     tasks: [
-      { title: 'Switch the chat to another model', steps: ['Press **Load** on the model (or **Keep loaded** to keep it).', 'Wait while it loads: seconds from memory, minutes from disk.', 'Set **Model new chats use** under Settings → Model to make it the default.'] },
+      { title: 'Switch the chat to another model', steps: ['Press **Load** on the model (or **Keep loaded** in its **Details** to keep it).', 'Wait while it loads: seconds from memory, minutes from disk.', 'Set **Model new chats use** under Settings → Model to make it the default.'] },
       {
         title: 'Download a model',
         steps: [

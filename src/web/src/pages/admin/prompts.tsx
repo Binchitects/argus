@@ -5,6 +5,7 @@ import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { QueryError } from '@/components/app/query-state'
 import { Segmented } from '@/components/app/segmented'
+import { TimeWindow } from '@/components/app/time-window'
 import { Avatar } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -14,6 +15,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/lib/api'
 import { formatValue, when } from '@/lib/format'
+import { allTime, reportPresets } from '@/lib/time'
+import { useTimeWindow } from '@/lib/use-time-window'
 import { cn } from '@/lib/utils'
 import { Markdown } from '@/pages/chat/markdown'
 
@@ -68,11 +71,14 @@ const states: Record<State, { label: string; icon: ReactNode; variant: 'default'
 export function PromptLogPage() {
   const [form, setForm] = useState({ q: '', person: '' })
   const [search, setSearch] = useState({ q: '', person: '', source: 'all' as Source, state: 'all' as State | 'all' })
+  // When it was asked, in the address; any time until a window is chosen.
+  const time = useTimeWindow({ from: allTime.from, to: 'now' })
   const log = useInfiniteQuery({
-    queryKey: ['admin', 'prompts', search],
+    queryKey: ['admin', 'prompts', search, time.key],
     initialPageParam: null as string | null,
     queryFn: ({ pageParam, signal }) => {
-      const p = new URLSearchParams({ source: search.source })
+      const p = time.query()
+      p.set('source', search.source)
       if (search.state !== 'all') p.set('state', search.state)
       if (search.q) p.set('q', search.q)
       if (search.person) p.set('person', search.person)
@@ -125,6 +131,7 @@ export function PromptLogPage() {
             { value: 'api', label: 'API' },
           ]}
         />
+        <TimeWindow value={time.range} onChange={time.set} presets={[allTime, ...reportPresets]} />
         <Button type="submit">Search</Button>
       </form>
       {log.error && <QueryError error={log.error} retry={() => log.refetch()} />}

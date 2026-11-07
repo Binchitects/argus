@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowRightLeft, AudioLines, Boxes, CircleDot, Clapperboard, Clock, Eye, Info, Search, HelpCircle, Image as ImageIcon, Loader2, Mic, Moon, Pencil, Pin, Plus, Power, PowerOff, Sparkles, Trash2, TriangleAlert, XCircle } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
-import { Link } from 'react-router'
+import { Link, useOutletContext } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
 import { Alert } from '@/components/ui/alert'
@@ -13,12 +13,12 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
-import { api, ApiError, errorMessage } from '@/lib/api'
+import { api, ApiError, errorMessage, holds, type Me } from '@/lib/api'
 import { money } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { AccessPicker, type AccessRule } from './access-picker'
 import { type SavedMediaModel } from './media-model-form'
-import { serverPerModel, type ChatEngineKind, type EngineInstance, type ModelMove } from './engine-api'
+import { engineLabel, serverPerModel, type ChatEngineKind, type EngineInstance, type ModelMove } from './engine-api'
 import { engineName } from './engine-choice'
 import { EngineProblems, MoveState } from './engine-fields'
 import { engineSlot } from './engine-slot'
@@ -168,6 +168,15 @@ export function ModelsPage() {
   // The one dialog that adds and edits every kind of model.
   const [dialog, setDialog] = useState<ModelDialogOpen | null>(null)
   const [hf, setHf] = useState(false)
+  // Each change is its part of models.manage (models.load apart): offered only to who holds it.
+  const me = useOutletContext<Me>()
+  const may: ModelPowers = {
+    load: holds(me, 'models.load'),
+    edit: holds(me, 'models.edit'),
+    editMedia: holds(me, 'models.manage'),
+    remove: holds(me, 'models.delete'),
+    access: holds(me, 'models.access'),
+  }
   if (models.isPending) return <PageSkeleton />
   if (models.error) return <QueryError error={models.error} retry={() => models.refetch()} />
   const { engine, small, gpu } = models.data
@@ -180,12 +189,16 @@ export function ModelsPage() {
         description="Every model at the gateway, and who may use each. The engine holds several at once: the ones kept loaded stay, and the others load when asked for."
         actions={
           <>
-            <Button variant="outline" onClick={() => setHf(true)}>
-              <Search /> Find on Hugging Face
-            </Button>
-            <Button onClick={() => setDialog({ add: null })}>
-              <Plus /> Add a model
-            </Button>
+            {holds(me, 'models.download') && (
+              <Button variant="outline" onClick={() => setHf(true)}>
+                <Search /> Find on Hugging Face
+              </Button>
+            )}
+            {holds(me, 'models.add') && (
+              <Button onClick={() => setDialog({ add: null })}>
+                <Plus /> Add a model
+              </Button>
+            )}
           </>
         }
       />
@@ -218,6 +231,7 @@ export function ModelsPage() {
             model={m}
             engine={engine}
             small={m.name === small?.name && (m.mode ?? 'chat') === 'chat'}
+            may={may}
             onEdit={() => setDialog({ edit: m.source === 'media' ? { kind: 'media', model: m as SavedMediaModel } : { kind: 'chat', model: m } })}
             onChangeEngine={() => setDialog({ edit: { kind: 'chat', model: m }, focus: 'engine' })}
             onChanged={() => queryClient.invalidateQueries({ queryKey: ['admin', 'models'] })}
@@ -422,10 +436,25 @@ function GpuSharing({ gpu }: { gpu: NonNullable<ModelsView['gpu']> }) {
   )
 }
 
+/** What the person may do to a model (Admin → Access): each control is left out without its permission. */
+interface ModelPowers {
+  load: boolean
+  edit: boolean
+  /** A picture, video or speech model is changed with models.manage. */
+  editMedia: boolean
+  remove: boolean
+  access: boolean
+}
+
+/**
+ * A model's card: its name, status, one line about it, what needs a look, and the main actions. Keep loaded, who may
+ * use it, its tools, its engine and a move to another engine are in its Details, with everything else about it.
+ */
 function ModelCard({
   model: m,
   engine,
   small,
+  may,
   onEdit,
   onChangeEngine,
   onChanged,
@@ -433,6 +462,7 @@ function ModelCard({
   model: ModelRow
   engine: ModelsView['engine']
   small: boolean
+  may: ModelPowers
   onEdit: () => void
   /** Edit with its Engine field focused. */
   onChangeEngine: () => void
@@ -573,6 +603,13 @@ function ModelCard({
         </>
       ),
     })
+  // A move to another engine: a line on the card, its progress in Details.
+  if (m.move)
+    problems.push({
+      title: m.move.phase === 'failed' ? `Could not move to ${engineLabel(m.move.to)}` : `Moving to ${engineLabel(m.move.to)}`,
+      variant: m.move.phase === 'failed' ? 'destructive' : 'warning',
+      body: null,
+    })
   const description = media
     ? `On the ${m.server} server`
     : [m.source === 'remote' ? `${m.remote} on ${m.server}` : m.file, m.context ? contextLine(m.context, m.window, m.output, m.source === 'local' ? m.parallel : null) : null].filter(Boolean).join(' · ') ||
@@ -582,55 +619,67 @@ function ModelCard({
     { label: 'Price', text: priceLine(m) },
     { label: 'Token cache', text: m.cache ? cacheLine(m.cache) : null },
   ].filter((d): d is { label: string; text: string } => !!d.text)
+  const badges = (
+    <>
+      <Badge variant={m.source === 'local' ? 'default' : 'secondary'}>
+        {m.source === 'local' ? 'Added here' : m.source === 'remote' ? `On ${m.server}` : media ? 'This stack' : 'Gateway'}
+      </Badge>
+      {kind && <Badge variant="outline">{kind.label}</Badge>}
+      {m.kept && (
+        <Badge variant="outline">
+          <Pin /> Kept loaded
+        </Badge>
+      )}
+      {m.keptNow && !m.kept && (
+        <Badge variant="outline">
+          <Clock /> Kept by working hours
+        </Badge>
+      )}
+      {m.instead && (
+        <Badge variant="outline" title="Loaded by an admin in place of a model that never makes room: it keeps its place until unloaded">
+          <Pin /> Holds its place
+        </Badge>
+      )}
+      {m.vision && (
+        <Badge variant="outline">
+          <Eye /> Sees images
+        </Badge>
+      )}
+      {small && (
+        <Badge variant="outline" title="The model for sub-agents and small steps (Settings → Model)">
+          <Sparkles /> Small steps
+        </Badge>
+      )}
+    </>
+  )
+  const removeIt = async () => {
+    const description = media
+      ? `It is unloaded and removed from the gateway and the chat’s tools${m.kept ? ', and stops being kept loaded' : ''}. Its files stay in the library unless you delete them too.`
+      : m.kept
+        ? 'It is kept loaded: it stops being kept, and chats that chose it fall back to a loaded model. The model file stays in the library unless you delete it too.'
+        : 'Chats that chose it fall back to a loaded model. The model file stays in the library unless you delete it too.'
+    let files = false
+    if (await confirm({ title: `Remove ${m.name}?`, description, confirm: 'Remove', destructive: true, check: filesCheck((on) => (files = on)) })) remove.mutate(files)
+  }
+  const mayEdit = media ? may.editMedia : m.source === 'local' && may.edit
   return (
     <Card className={cn(m.status === 'loaded' && 'border-success/40')}>
-      <CardHeader className="flex flex-row flex-wrap items-start gap-3">
+      <CardHeader className="flex flex-row items-start gap-3">
         <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary-ink">
           <Icon className="size-4.5" aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
-          <CardTitle className="flex flex-wrap items-center gap-2 [overflow-wrap:anywhere]">
+          <CardTitle className="truncate" title={m.name}>
             {m.name}
-            <Badge variant={m.source === 'local' ? 'default' : 'secondary'}>
-              {m.source === 'local' ? 'Added here' : m.source === 'remote' ? `On ${m.server}` : media ? 'This stack' : 'Gateway'}
-            </Badge>
-            {kind && <Badge variant="outline">{kind.label}</Badge>}
-            {m.kept && (
-              <Badge variant="outline">
-                <Pin /> Kept loaded
-              </Badge>
-            )}
-            {m.keptNow && !m.kept && (
-              <Badge variant="outline">
-                <Clock /> Kept by working hours
-              </Badge>
-            )}
-            {m.instead && (
-              <Badge variant="outline" title="Loaded by an admin in place of a model that never makes room: it keeps its place until unloaded">
-                <Pin /> Holds its place
-              </Badge>
-            )}
-            {m.vision && (
-              <Badge variant="outline">
-                <Eye /> Sees images
-              </Badge>
-            )}
-            {small && (
-              <Badge variant="outline" title="The model for sub-agents and small steps (Settings → Model)">
-                <Sparkles /> Small steps
-              </Badge>
-            )}
           </CardTitle>
           {/* One line: the whole of it, and how it is set up, are under Details. */}
           <CardDescription className="truncate" title={description}>
             {description}
           </CardDescription>
-          {m.source === 'local' && <p className="mt-1 truncate text-xs text-muted-foreground">{`Engine: ${engineName(m, engine.instances ?? [])}`}</p>}
         </div>
         <Status status={m.status} why={m.why} since={m.since} draining={serverPerModel(m.engineKind)} />
       </CardHeader>
       <CardContent className="grid gap-3">
-        {m.move && <MoveState name={m.name} move={m.move} onDismiss={() => dismiss.mutate()} />}
         {problems.length > 0 && (
           <ul aria-label={`What needs a look at ${m.name}`} className="grid gap-1">
             {problems.map((p) => (
@@ -644,30 +693,8 @@ function ModelCard({
             ))}
           </ul>
         )}
-        {onEngine && (
-          <Label className="flex items-start gap-3 font-normal">
-            <Switch checked={m.kept === true} disabled={keep.isPending} onCheckedChange={(on) => keep.mutate(on)} aria-describedby={`keep-${m.name}`} />
-            <span className="grid gap-0.5">
-              <span className="font-medium">Keep loaded</span>
-              <span id={`keep-${m.name}`} className="text-xs text-muted-foreground">
-                {m.kept
-                  ? 'Loaded at start, and again whenever it is not.'
-                  : media
-                    ? `Otherwise it loads when someone asks for it, and unloads after ${m.idleMinutes ?? 10} minutes unused.${m.mode === 'image_generation' || m.mode === 'video_generation' ? ' Its server runs one model at a time: keeping this one stops keeping the others.' : ''}`
-                    : engine.onRequest
-                      ? 'Otherwise it loads when someone asks for it.'
-                      : 'Otherwise it loads only when an admin loads it.'}
-              </span>
-            </span>
-          </Label>
-        )}
-        {/* One under the other: a card is half the page, too narrow for both side by side. */}
-        <div className="grid min-w-0 gap-3">
-          <AccessPicker value={m.access} onChange={(audience, groups) => access.mutate({ audience, groups })} />
-          {m.toolMode && <ToolModePicker model={m.name} tools={m.toolMode} onChanged={onChanged} />}
-        </div>
         <div className="flex flex-wrap gap-2">
-          {onEngine && m.status !== 'loaded' && (
+          {onEngine && m.status !== 'loaded' && may.load && (
             <Button
               size="sm"
               loading={load.isPending}
@@ -692,7 +719,7 @@ function ModelCard({
               <Power /> Load
             </Button>
           )}
-          {onEngine && m.status === 'loaded' && (
+          {onEngine && m.status === 'loaded' && may.load && (
             <Button
               size="sm"
               variant="outline"
@@ -709,54 +736,15 @@ function ModelCard({
               <PowerOff /> Unload
             </Button>
           )}
-          {media && (
-            <Button size="sm" variant="outline" onClick={onEdit}>
+          {mayEdit && (
+            <Button size="sm" variant="outline" onClick={onEdit} disabled={moving} title={moving ? 'It is moving to another engine: edit it once it is there' : undefined}>
               <Pencil /> Edit
             </Button>
           )}
-          {media && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="text-destructive-ink"
-              onClick={async () => {
-                const description = `It is unloaded and removed from the gateway and the chat’s tools${m.kept ? ', and stops being kept loaded' : ''}. Its files stay in the library unless you delete them too.`
-                let files = false
-                if (await confirm({ title: `Remove ${m.name}?`, description, confirm: 'Remove', destructive: true, check: filesCheck((on) => (files = on)) })) remove.mutate(files)
-              }}
-            >
+          {(media || m.source === 'local') && may.remove && (
+            <Button size="sm" variant="outline" className="text-destructive-ink" onClick={() => void removeIt()}>
               <Trash2 /> Remove
             </Button>
-          )}
-          {m.source === 'local' && (
-            <>
-              <Button size="sm" variant="outline" onClick={onEdit} disabled={moving} title={moving ? 'It is moving to another engine: edit it once it is there' : undefined}>
-                <Pencil /> Edit
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={onChangeEngine}
-                disabled={moving}
-                title={moving ? 'It is moving to another engine: change it once it is there' : 'llama.cpp, vLLM or SGLang: it moves there with the stack running'}
-              >
-                <ArrowRightLeft /> Change engine…
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="text-destructive-ink"
-                onClick={async () => {
-                  const description = m.kept
-                    ? 'It is kept loaded: it stops being kept, and chats that chose it fall back to a loaded model. The model file stays in the library unless you delete it too.'
-                    : 'Chats that chose it fall back to a loaded model. The model file stays in the library unless you delete it too.'
-                  let files = false
-                  if (await confirm({ title: `Remove ${m.name}?`, description, confirm: 'Remove', destructive: true, check: filesCheck((on) => (files = on)) })) remove.mutate(files)
-                }}
-              >
-                <Trash2 /> Remove
-              </Button>
-            </>
           )}
           <Button size="sm" variant="ghost" onClick={() => setDetails(true)} aria-label={`Details of ${m.name}`}>
             <Info /> Details
@@ -769,11 +757,28 @@ function ModelCard({
             <DialogTitle className="[overflow-wrap:anywhere]">{m.name}</DialogTitle>
             <DialogDescription className="[overflow-wrap:anywhere]">{description}</DialogDescription>
           </DialogHeader>
+          <div className="flex flex-wrap gap-1.5">{badges}</div>
           <dl className="grid gap-2 text-sm sm:grid-cols-[10rem_minmax(0,1fr)]">
             {m.source === 'local' && (
               <>
                 <dt className="text-muted-foreground">Engine</dt>
-                <dd>{engineName(m, engine.instances ?? [])}</dd>
+                <dd className="flex flex-wrap items-center gap-2">
+                  {engineName(m, engine.instances ?? [])}
+                  {may.edit && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setDetails(false)
+                        onChangeEngine()
+                      }}
+                      disabled={moving}
+                      title={moving ? 'It is moving to another engine: change it once it is there' : 'llama.cpp, vLLM or SGLang: it moves there with the stack running'}
+                    >
+                      <ArrowRightLeft /> Change engine…
+                    </Button>
+                  )}
+                </dd>
               </>
             )}
             <dt className="text-muted-foreground">Status</dt>
@@ -784,11 +789,34 @@ function ModelCard({
               <ModelDetail key={d.label} label={d.label} text={d.text} />
             ))}
           </dl>
-          {problems.map((p) => (
-            <Alert key={p.title} variant={p.variant} title={p.title}>
-              {p.body}
-            </Alert>
-          ))}
+          {m.move && <MoveState name={m.name} move={m.move} onDismiss={() => dismiss.mutate()} />}
+          {problems
+            .filter((p) => p.body !== null)
+            .map((p) => (
+              <Alert key={p.title} variant={p.variant} title={p.title}>
+                {p.body}
+              </Alert>
+            ))}
+          {onEngine && (
+            <Label className="flex items-start gap-3 font-normal">
+              <Switch checked={m.kept === true} disabled={keep.isPending || !may.edit} onCheckedChange={(on) => keep.mutate(on)} aria-describedby={`keep-${m.name}`} />
+              <span className="grid gap-0.5">
+                <span className="font-medium">Keep loaded</span>
+                <span id={`keep-${m.name}`} className="text-xs text-muted-foreground">
+                  {m.kept
+                    ? 'Loaded at start, and again whenever it is not.'
+                    : media
+                      ? `Otherwise it loads when someone asks for it, and unloads after ${m.idleMinutes ?? 10} minutes unused.${m.mode === 'image_generation' || m.mode === 'video_generation' ? ' Its server runs one model at a time: keeping this one stops keeping the others.' : ''}`
+                      : engine.onRequest
+                        ? 'Otherwise it loads when someone asks for it.'
+                        : 'Otherwise it loads only when an admin loads it.'}
+                </span>
+              </span>
+            </Label>
+          )}
+          {/* One under the other: the dialog is too narrow for both side by side on a phone. */}
+          {may.access && <AccessPicker value={m.access} onChange={(audience, groups) => access.mutate({ audience, groups })} />}
+          {m.toolMode && may.edit && <ToolModePicker model={m.name} tools={m.toolMode} onChanged={onChanged} />}
         </DialogContent>
       </Dialog>
     </Card>

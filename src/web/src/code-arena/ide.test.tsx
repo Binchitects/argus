@@ -3140,6 +3140,28 @@ describe('Code Arena, the IDE', () => {
     expect(await screen.findByText(/Made \/notes/)).toBeInTheDocument()
   })
 
+  it('offers no skill of yours in Arena, to make or import, without Arena’s feature.skills', async () => {
+    backend({
+      'GET /api/account': () => ({
+        json: { arena: 'https://arena.example.com', signedIn: true, codeStudio: false, account: { userName: 'mo', displayName: 'Mo', email: null, managesPeople: false, denied: ['feature.skills'] } },
+      }),
+      'GET /api/skills': () => ({ json: { skills: [{ name: 'triage', description: 'Sort the issues', source: 'arena', path: null }], commands: [], mineInArena: true } }),
+    })
+    renderIde()
+    await userEvent.click(await screen.findByRole('button', { name: 'Skills' }))
+    const panel = await screen.findByRole('complementary', { name: 'Skills' })
+    await within(panel).findByRole('button', { name: /^\/triage/ })
+    await userEvent.click(within(panel).getByRole('button', { name: 'New Skill' }))
+    expect(await screen.findByRole('menuitem', { name: 'For this project (.arena/skills)…' })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: /For you, in Arena/ })).toBeNull()
+    await userEvent.keyboard('{Escape}')
+    await userEvent.click(within(panel).getByRole('button', { name: 'More skill actions' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Import Skills…' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Import skills' })
+    expect(within(dialog).getByRole('radio', { name: /For this project/ })).toBeChecked()
+    expect(within(dialog).queryByRole('radio', { name: /For you, in Arena/ })).toBeNull()
+  })
+
   it('replaces what the search finds, in one file or in all of them after asking', async () => {
     const { calls } = backend({ 'POST /api/replace': () => ({ json: { files: [{ path: 'src/app.ts', replaced: 2, version: 'v2' }], count: 2, truncated: false } }) })
     renderIde()

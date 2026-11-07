@@ -183,4 +183,20 @@ describe('calls in rooms', () => {
     expect(peers[0]!.closed).toBe(true)
     expect(track.stop).toHaveBeenCalled()
   })
+  it('shows no Call or Join to one who may not call (feature.calls), while the call is still said', async () => {
+    const olivia = { page: 'p-olivia', person: 'o1', muted: false }
+    fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: { ...config, denied: ['feature.calls'] } }),
+      'GET /api/chat/conversations': () => ({ json: [{ id: 'r1', title: 'Launch', updatedAt: new Date().toISOString(), isRoom: true, mine: false }] }),
+      'GET /api/chat/conversations/r1': () => ({ json: room }),
+      'GET /api/rooms/languages': () => ({ json: [{ code: 'en', name: 'English', own: 'English' }] }),
+      'POST /api/rooms/r1/translations': () => ({ json: { translations: [], error: null } }),
+      'GET /api/rooms/r1/events': () => ({ events: [{ type: 'call', seats: [olivia] }], hang: true }),
+    })
+    renderApp('/chat/r1')
+    const bar = await screen.findByRole('region', { name: 'The call' })
+    expect(within(bar).getByRole('status', { name: 'In the call' })).toHaveTextContent('Olivia is in a call.')
+    expect(within(bar).queryByRole('button', { name: 'Join' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /call/i })).toBeNull()
+  })
 })
