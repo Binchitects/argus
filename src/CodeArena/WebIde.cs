@@ -54,7 +54,8 @@ internal sealed partial class WebApp
     private void StartIde()
     {
         // The project's skills too, when the folder is inside the repository (they are at its root).
-        _files = new IdeFiles(_rt.Workspace) { AlsoEdits = full => IdeSkills.ProjectSkillFile(_rt, full) };
+        // Search goes through the folders added to the workspace too, as VS Code's does in a multi-root workspace.
+        _files = new IdeFiles(_rt.Workspace) { AlsoEdits = full => IdeSkills.ProjectSkillFile(_rt, full), SearchAlso = () => [.. Folders.Added(_state).Where(_rt.Workspace.Allowed)] };
         _changes = new AgentChanges(_rt.Workspace);
         _terminals = new Terminals(_rt.Workspace, _rt.Config, _rt.Env.Env);
         _state = new WorkspaceState(_rt.Env.Paths.DataDir, _rt.Workspace.Root);
@@ -84,7 +85,7 @@ internal sealed partial class WebApp
     {
         try
         {
-            if (await AccountAsync(req, res, ct))
+            if (await AccountAsync(req, res, ct) || await WorkspaceFileAsync(req, res, ct))
             {
                 return true;
             }

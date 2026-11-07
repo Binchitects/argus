@@ -111,6 +111,9 @@ internal sealed class IdeFiles(Workspace workspace)
 
     public string Show(string full) => workspace.Show(full);
 
+    /// <summary>The folders search goes through besides the working directory (those added to the workspace).</summary>
+    public Func<IReadOnlyList<string>> SearchAlso { get; init; } = () => [];
+
     /// <summary>A folder's entries: folders first, then files, by name. Links that lead outside are left out.</summary>
     public JsonObject List(string? path)
     {
@@ -512,11 +515,14 @@ internal sealed class IdeFiles(Workspace workspace)
         var truncated = false;
         try
         {
-            foreach (var full in workspace.FilesUnder(workspace.Root, limit.Token).OrderBy(f => f, StringComparer.Ordinal))
+            // The folder's files, then each added folder's (a glob is matched against the path in its own folder too).
+            var all = new[] { workspace.Root }.Concat(SearchAlso()).SelectMany(dir => workspace.FilesUnder(dir, limit.Token).OrderBy(f => f, StringComparer.Ordinal).Select(f => (Dir: dir, Full: f)));
+            foreach (var (dir, full) in all)
             {
                 limit.Token.ThrowIfCancellationRequested();
                 var relative = Show(full);
-                if ((include.Count > 0 && !include.Any(g => Matches(g, relative))) || exclude.Any(g => Matches(g, relative)))
+                var own = dir == workspace.Root ? relative : OperatingSystem.IsWindows() ? Path.GetRelativePath(dir, full).Replace('\\', '/') : Path.GetRelativePath(dir, full);
+                if ((include.Count > 0 && !include.Any(g => Matches(g, relative) || Matches(g, own))) || exclude.Any(g => Matches(g, relative) || Matches(g, own)))
                 {
                     continue;
                 }

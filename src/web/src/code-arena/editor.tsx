@@ -2095,7 +2095,12 @@ function GroupArea({ group, index, count }: { group: number; index: number; coun
         <Breadcrumbs
           path={active.path}
           end={
-            isNotebook(active.path) ? (
+            /\.code-workspace$/i.test(active.path) ? (
+              <button type="button" onClick={() => runCommand('codeArena.openWorkspaceFile', active.path)} className="ml-auto flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent hover:text-foreground" title="Open this multi-root workspace: its folders in the Explorer, Source Control and search">
+                <FolderOpen className="size-3.5" aria-hidden="true" />
+                Open Workspace
+              </button>
+            ) : isNotebook(active.path) ? (
               <button type="button" onClick={() => void ed.open(active.path)} className="ml-auto flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent hover:text-foreground" title="Reopen in the notebook editor">
                 <NotebookPen className="size-3.5" aria-hidden="true" />
                 Open as Notebook

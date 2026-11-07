@@ -65,7 +65,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   explorer: {
     name: 'Explorer',
-    text: 'The folder\'s files, following the file the editor shows. Click opens one; a right-click has New file, New folder, Cut, Copy, Paste, Copy Path, Copy Relative Path, Find in Folder, Open in Integrated Terminal, Rename (F2) and Delete; Ctrl+click and Shift+click select several, a drag moves rows into a folder, and files dropped from the computer are written there. The files the agent changed are marked, and git\'s changes (M, U, A), what git ignores (dimmed) and the files with problems (red, yellow) too, with their folders. **Outline**, at its foot, lists the symbols of the file shown (the one the cursor is in marked); a click goes to one.',
+    text: 'The folder\'s files, following the file the editor shows. Click opens one; a right-click has New file, New folder, Cut, Copy, Paste, Copy Path, Copy Relative Path, Find in Folder, Open in Integrated Terminal, Rename (F2) and Delete; Ctrl+click and Shift+click select several, a drag moves rows into a folder, and files dropped from the computer are written there. The files the agent changed are marked, and git\'s changes (M, U, A), what git ignores (dimmed) and the files with problems (red, yellow) too, with their folders. **Outline**, at its foot, lists the symbols of the file shown (the one the cursor is in marked); a click goes to one. A folder added to the workspace, or each folder of a .code-workspace file opened (**Open Workspace from File…**), is a root of its own below, with its name.',
     manual: 'the-ide',
   },
   search: {
@@ -199,6 +199,14 @@ export const tasks: HelpTask[] = [
       `Press ${modKey}+Shift+X (**Extensions**).`,
       'Press **Install from VSIX…** and choose the extension\'s .vsix (its page on Open VSX or the Marketplace has a download), or import it from **VS Code on this computer**.',
       `Choose its theme with ${modKey}+K ${modKey}+T (the editor shows each as you go down the list), or its icons with **Preferences: File Icon Theme**; its snippets and languages apply at once.`,
+    ],
+  },
+  {
+    title: 'Work on several folders at once (a .code-workspace)',
+    steps: [
+      'Run **File: Open Workspace from File…** and choose the .code-workspace file (or press **Open Workspace** above it in the editor).',
+      'Its folders are roots in the Explorer, each with its repository in Source control; Search goes through them all. **Add Folder to Workspace…** and the × beside a folder change the file.',
+      'Settings has **User**, **Workspace** (the file\'s settings) and **Folder** tabs. **Save Workspace As…** makes a file of the folders open now; **Close Workspace** leaves the folder alone.',
     ],
   },
   {

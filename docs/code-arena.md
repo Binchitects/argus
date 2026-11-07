@@ -405,7 +405,8 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   folder shown and its folders, Enter goes into one, the first row opens the
   one shown, and a path typed (from the folder shown, or whole: `~/`, `/`,
   `C:\`) goes there; the folders opened lately and, on Windows, the drives are
-  listed too. **Open Recent…** (**Ctrl+R**) lists the folders opened lately.
+  listed too. **Open Recent…** (**Ctrl+R**) lists the folders and workspace
+  files opened lately.
   Code Arena then starts again on that folder in the same window, at the same
   address with the same key (its terminal says so): the session, the
   terminals and the language servers are that folder's. The last session of
@@ -415,9 +416,31 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   chooses a folder the same way: the agent's tools may use it from then on,
   and the Explorer shows it below the folder's files, as a root of its own
   (× takes it out again). Its files open and save in the editor by their
-  whole paths; Search, Source control and the language servers stay the
-  folder's. The folders added are kept with the folder, and the next run has
-  them.
+  whole paths; Search goes through it and Source control shows its
+  repository; the language servers stay the folder's. The folders added are
+  kept with the folder, and the next run has them.
+- **A multi-root workspace** (VS Code's `NAME.code-workspace` file): **File:
+  Open Workspace from File…** (or **Open Workspace** above such a file open
+  in the editor) opens one. Its `folders` (each a `path` from the file's
+  folder or whole, or a `file:` `uri`, with a `name` to show) are the
+  workspace: Code Arena runs on the folder open when the file names it, else
+  starts again on its first folder there, and adds the others, as Add Folder
+  does. The Explorer's title is the workspace's name, each folder a root with
+  its `name`; Source control has a section for each folder's repository;
+  Search goes through every folder (a glob such as `src/**` matches in each).
+  The file's `settings` are a layer of their own: the Settings editor has
+  **User**, **Workspace** (the file's) and **Folder** (`.vscode/settings.json`)
+  then, the folder's over the workspace's over yours (a setting that is yours
+  alone stays yours); the folders added keep no settings of their own here.
+  With a workspace open, Add Folder and Remove Folder change its `folders`
+  (its comments and the rest of it kept), and the file edited by hand or by
+  git applies when it is read again. **Workspaces: Save Workspace As…** writes
+  the folder open and those added into a new file (paths relative to it),
+  **Close Workspace** leaves the folder open alone, and **Open Workspace
+  Configuration File** opens the file when it is in one of its folders. The
+  file's `launch`, `tasks` and `extensions` are kept as written and not read
+  yet (the folder's `.vscode` ones are). A folder that is not there is left
+  out, and said so.
 - **Explorer**: the project's files, with New file, New folder, Refresh and
   Collapse at its top. Click opens; a right-click menu has new file, new
   folder, **Copy Path** (the whole path), **Copy Relative Path**, **Find in
@@ -1757,6 +1780,16 @@ status (403 `outside` for a path outside the folder).
 | `GET /api/folders?path=` | for Open Folder: a folder's folders by name (hidden ones last, no files, at most 2,000) as `{path, parent, folders, why, current, home, separator, drives, recent, added, files}` (`why`: what is not listed; `recent`: the folders opened lately, the one open now first; `added`: the folders added to this workspace; `files`: its files' names, with `files=1`, for @ in the chat); with no path, the open folder's parent; 404 `not_found` when it is not a folder |
 | `POST /api/folders/add` `{path}` | Add Folder to Workspace: the tools may use it, kept with this folder: `{folder, added}` (`added`: the folders added, whole); 409 `inside` for the folder open now or one in it |
 | `POST /api/folders/remove` `{path}` | takes an added folder out again: `{added}`; 404 `not_added` |
+| `GET /api/workspace-file` | the `.code-workspace` file the folder was opened with: `{path, name, dir, text, version, settings, folders: [{path, full, name, exists, root}], rootInIt, problems}` (`path` null without one); read, its folders become those added |
+| `POST /api/workspace-file` `{text, version}` | writes it (the page's edit: folders, settings), then applies its folders; 400 `invalid` for a text with no `folders` list, 409 `changed` for a stale version, 404 `no_workspace` without one |
+| `POST /api/workspace-file/open` `{path}` | opens a `.code-workspace` file: `{folder, restart, workspace}`; with `restart`, code-arena starts again on its first folder there (as `folders/open`); 400 for another file, 404 when it is not there, 409 `not_here` in Code Studio |
+| `POST /api/workspace-file/save-as` `{path, replace}` | the folder open and those added, in a new file (`.code-workspace` added to the name); 409 `exists` unless `replace` |
+| `POST /api/workspace-file/close` | the folder open alone again: `{path: null}` |
+| `GET /api/snippets` | the project's `.vscode/*.code-snippets` (the folder's and each added folder's) and the person's `snippets/*.json` and `*.code-snippets`: `{files: [{source, path, language, text, version}], problems}` |
+| `GET /api/notebook/kernel?path=` | a notebook's kernel: `{python, running, busy, count, trusted}`; 400 for a file that is no `.ipynb` |
+| `POST /api/notebook/execute` `{path, code}` | runs a cell in the notebook's kernel (started at the first): `{run}`; 409 `untrusted` in a folder not trusted, `no_python` when Python cannot start, `too_many` past ten kernels |
+| `GET /api/notebook/run?id=&since=` | a run's outputs, once its version is past `since` (or within 25 s): `{version, outputs, done, ok, count}` (`outputs`: nbformat's, all of them) |
+| `POST /api/notebook/interrupt` `{path}`, `POST /api/notebook/restart` `{path}` | a KeyboardInterrupt to the cell running (on Windows, a restart); the kernel ended, the next cell starting another: the kernel's state |
 | `POST /api/folders/open` `{path}` | opens that folder (`~` is the home folder; relative to the one open now): answers `{folder}` with its full path, then code-arena starts again on it at the same address with the same key; 404 `not_found` when it is not a folder, 409 `not_here` in Code Studio |
 | `GET /api/projects` | the projects in Arena the person may add to: `{projects: [{id, name}], suggested, problem}` (`suggested`: the repository's; `projects` null with `problem` when Arena cannot say) |
 | `POST /api/project` | `{project}`: the session (and the folder's next ones) in it, by its id, name or number, or `none`; `{said}`, 400 `project` with why when it is not one the person may add to |
@@ -1769,6 +1802,8 @@ status (403 `outside` for a path outside the folder).
 | `POST /api/replace` `{q, case, word, regex, include, exclude, replacement, paths}` | replaces what that search finds (in `paths` only, when given): `{files: [{path, replaced, version}], count, truncated}` |
 | `GET /api/skills` (`?fresh=1`: Arena asked at once) | `{skills: [{name, description, source, path}], commands: [{name, description, argumentHint}], mineInArena}`, read again first (Arena's at most every 30 s); `source`: project, person (on this computer, or theirs in Arena), arena or builtin; `path`: where the editor opens it (the project's in the folder, or by its whole path when the folder is inside the repository; the person's as `user:skills/NAME/SKILL.md`; null: not edited here); `mineInArena`: a new one of the person's is made in Arena |
 | `POST /api/skills` `{name, scope}` | a new skill's SKILL.md to fill in, the project's (`.arena/skills` at the repository's root) or the person's (`scope` person: one of theirs in Arena when signed in, else in the config folder): the skill as listed; 409 `exists` (or Arena's refusal, as it words it) |
+| `GET /api/git/merge?path=` | a file in conflict: `{path, unmerged, stages, kind, current, incoming}` (`kind`: `merge`, `rebase`, `cherry-pick`, `revert` or null; each side `{name, commit, short, subject}`) |
+| `POST /api/git/merge/complete` `{path, anyway}` | Complete Merge: stages the file (git has it merged); 409 `markers` while it has conflict markers, unless `anyway` |
 | `GET /api/git/status` | `{repository, branch, ahead, behind, files: [{path, staged, changed, from, conflict}]}` (`staged`, `changed`: git's letters M, A, D, R, U, `?` untracked; null: none; `conflict`: true for a file left unmerged) |
 | `POST /api/git/stage`, `/api/git/unstage`, `/api/git/discard` `{paths}` | the status after; 409 `git` with what git said |
 | `POST /api/git/commit` `{message, all}` | commits what is staged (all of it first, with `all`): `{hash, status}`; 409 `nothing` when nothing is staged |

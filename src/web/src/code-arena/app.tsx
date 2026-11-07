@@ -17,7 +17,8 @@ import { stateQuery, type CodeEvent, type CodeState } from './api'
 import { ChangesPanel } from './changes'
 import { Sessions, ThemeMenu, Thread } from './chat'
 import { runCommand, useCommands, type Command } from './commands'
-import { chooseAndAddFolder, chooseAndOpenFolder, foldersQuery, openRecentFolder } from './folders'
+import { chooseAndOpenFolder, foldersQuery, openRecentFolder } from './folders'
+import { addFolder, chooseAndOpenWorkspace, closeWorkspace, openWorkspace, saveWorkspaceAs, workspaceFileQuery } from './code-workspace'
 import { completion } from './completion'
 import { CommandPalette, recentLimit, type PaletteCommand } from './palette'
 import { MemoryPanel } from './memory-panel'
@@ -537,6 +538,8 @@ function Workbench({
   // The theme shown now (with "window.autoDetectColorScheme", the preferred one of the page's light or dark): the picker starts at it.
   const shownTheme = useShownTheme()
   useKeyboard()
+  const folders = useQuery(foldersQuery)
+  const workspaceFile = useQuery(workspaceFileQuery).data
   // Merge conflicts in the editor: their lenses and colours, as the settings say.
   const conflictLenses = settings.get<boolean>('merge-conflict.codeLens.enabled') !== false
   const conflictColours = settings.get<boolean>('merge-conflict.decorators.enabled') !== false
@@ -1233,10 +1236,21 @@ function Workbench({
     { id: 'editor.action.toggleRenderWhitespace', category: 'View', title: 'Toggle Render Whitespace', run: () => void settings.update('editor.renderWhitespace', settings.get('editor.renderWhitespace') === 'none' ? 'selection' : 'none').catch((e: unknown) => toast.error(errorMessage(e))) },
     { id: 'markdown.showSource', category: 'Markdown', title: 'Show Source', enabled: () => active?.kind === 'preview', run: () => active && void ed.open(active.path) },
     { id: 'workbench.action.files.openFolder', category: 'File', title: 'Open Folder…', run: () => void chooseAndOpenFolder(setOpening) },
-    { id: 'workbench.action.openRecent', category: 'File', title: 'Open Recent…', run: () => void openRecentFolder(setOpening) },
-    { id: 'workbench.action.addRootFolder', category: 'Workspaces', title: 'Add Folder to Workspace…', run: async () => {
-      if (await chooseAndAddFolder()) await queryClient.invalidateQueries({ queryKey: foldersQuery.queryKey })
+    { id: 'workbench.action.openRecent', category: 'File', title: 'Open Recent…', run: () => void openRecentFolder(setOpening, (path) => openWorkspace(path, setOpening, queryClient)) },
+    { id: 'workbench.action.addRootFolder', category: 'Workspaces', title: 'Add Folder to Workspace…', run: () => void addFolder(queryClient) },
+    { id: 'workbench.action.openWorkspace', category: 'File', title: 'Open Workspace from File…', run: () => void chooseAndOpenWorkspace(setOpening, queryClient) },
+    { id: 'workbench.action.saveWorkspaceAs', category: 'Workspaces', title: 'Save Workspace As…', run: () => void saveWorkspaceAs(queryClient) },
+    { id: 'workbench.action.closeFolder', category: 'Workspaces', title: 'Close Workspace', enabled: () => !!workspaceFile?.path, run: () => void closeWorkspace(queryClient) },
+    { id: 'workbench.action.openWorkspaceConfigFile', category: 'Workspaces', title: 'Open Workspace Configuration File', enabled: () => !!workspaceFile?.path, run: () => {
+      const file = workspaceFile?.path?.replace(/\\/g, '/')
+      if (!file) return
+      const root = state.folder.replace(/\\/g, '/').replace(/\/$/, '')
+      // In the folder: by its path there; in an added folder: whole; elsewhere the editor cannot open it.
+      if (file.startsWith(`${root}/`)) void ed.open(file.slice(root.length + 1))
+      else if ((folders.data?.added ?? []).some((f) => file.startsWith(`${f.replace(/\/$/, '')}/`))) void ed.open(file)
+      else toast.info(`${file} is outside the workspace's folders: its settings are in Settings, under Workspace; its folders change with Add Folder and Remove Folder.`)
     } },
+    { id: 'codeArena.openWorkspaceFile', category: 'Workspaces', title: 'Open Workspace', hidden: true, run: (path) => typeof path === 'string' && void openWorkspace(wholePath(state.folder, path), setOpening, queryClient) },
     { id: 'git.openMergeEditor', category: 'Git', title: 'Resolve in Merge Editor', enabled: () => file, run: (path) => void ed.openMerge(typeof path === 'string' ? path : active!.path) },
     ...mergeCommands.map(([id, title, action]): Command => ({
       id,
