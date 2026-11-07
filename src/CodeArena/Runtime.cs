@@ -352,6 +352,8 @@ internal sealed partial class Runtime : IAsyncDisposable
             throw new StartException(e.Message);
         }
         var rt = new Runtime(config, ui, env, http, new GatewayClient(http, config.GatewayUrl, config.ApiKey));
+        // Each request names its chat and project in Arena: what the session uses counts to the project.
+        rt.Gateway.Tags = () => WorkProjects.Tags(rt.Sync?.Conversation, rt.Session?.Read(d => d.WorkProject));
         rt.Gateway.Retrying = said =>
         {
             rt.Notice(true, said);
@@ -702,6 +704,20 @@ internal sealed partial class Runtime : IAsyncDisposable
         else
         {
             Session = SessionStore.Create(Env.Paths.SessionsDir, Workspace.Root, Model.Name);
+            InFolderProject();
+        }
+        if (o.Project is { } asked)
+        {
+            // --project: this session (and the folder's next) in it; said, and the session goes on, when Arena cannot say.
+            var (done, chose) = await ChooseProjectAsync(asked, ct);
+            if (done)
+            {
+                Ui.Info(chose);
+            }
+            else
+            {
+                Ui.Warn(chose);
+            }
         }
         Agent.Session = Session;
         Context.PlanChanged = plan => Session.Plan(plan);
@@ -1535,11 +1551,65 @@ internal sealed partial class Runtime : IAsyncDisposable
         }
     }
 
+    /// <summary>The project in Arena the session counts to (null: none).</summary>
+    public WorkProject? WorkProject => Session?.Read(d => d.WorkProject);
+
+    /// <summary>The folder's own state: the project chosen there last.</summary>
+    private WorkspaceState FolderState => new(Env.Paths.DataDir, Workspace.Root);
+
+    /// <summary>A new session is in the project chosen in its folder last.</summary>
+    private void InFolderProject()
+    {
+        if (WorkProjects.OfFolder(FolderState) is { } project)
+        {
+            Session.Project(project);
+        }
+    }
+
+    /// <summary>The projects in Arena the person may add to, and this folder's repository's (null with why when Arena cannot say).</summary>
+    public Task<(WorkProjectList? List, string? Problem)> ProjectsAsync(CancellationToken ct) =>
+        WorkProjects.ListAsync(Config, Http, ProjectKeys.Of(Workspace.Root), ct);
+
+    /// <summary>
+    /// /project NAME, --project, the IDE: the session in the project <paramref name="which"/> names (its number, name or id;
+    /// "none": in none), its chat in Arena with it, and the folder's next sessions too. What to say, and whether it was done.
+    /// </summary>
+    public async Task<(bool Done, string Said)> ChooseProjectAsync(string which, CancellationToken ct)
+    {
+        WorkProject? chosen = null;
+        if (!which.Trim().Equals("none", StringComparison.OrdinalIgnoreCase))
+        {
+            var (list, problem) = await ProjectsAsync(ct);
+            if (list is null)
+            {
+                return (false, problem!);
+            }
+            (chosen, var why) = WorkProjects.Pick(list.Projects, which);
+            if (chosen is null)
+            {
+                return (false, why!);
+            }
+        }
+        if (chosen?.Id == WorkProject?.Id)
+        {
+            WorkProjects.Remember(FolderState, chosen);
+            return (true, chosen is null ? "The session is in no project." : $"The session is in {chosen.Name} already.");
+        }
+        Session.Project(chosen);
+        WorkProjects.Remember(FolderState, chosen);
+        var moved = Sync?.Conversation is { } chat ? await WorkProjects.MoveChatAsync(Config, Http, chat, chosen, ct) : null;
+        var said = chosen is null
+            ? "In no project: what this session uses counts to none, and the next sessions in this folder start in none."
+            : $"In {chosen.Name}: what this session uses counts to it, its chat in Arena is in it, and the next sessions in this folder start in it.";
+        return (true, moved is null ? said : $"{said} {moved}");
+    }
+
     /// <summary>A new, empty session (/clear): the same tools and model.</summary>
     public void NewSession()
     {
         _memory = Memory.Again() + LongMemory();
         Session = SessionStore.Create(Env.Paths.SessionsDir, Workspace.Root, Model.Name);
+        InFolderProject();
         Agent.Session = Session;
         Agent.Clear();
         Context.Plan = WorkPlan.None;

@@ -50,6 +50,7 @@ import {
   openWebChat,
   reduceCode,
   resumeSession,
+  chooseProject,
   sendAllSessions,
   sessionQuery,
   widenSession,
@@ -82,6 +83,7 @@ import { useCommands } from './commands'
 import { useKeyFor } from './keyboard'
 import { PartHelp } from './help'
 import { SyncStatus } from './sync-status'
+import { ProjectPicker } from './project-picker'
 import { changesQuery } from './ide-api'
 import { useSettings } from './settings'
 import { familyThemeName, themeNamed } from './settings-schema'
@@ -760,6 +762,22 @@ export function Thread({
       setContextOpen(true)
       return true
     }
+    if (/^\/project(\s|$)/.test(text)) {
+      // As in the terminal: /project NAME (or N, or none) puts the session in it; alone, says which it is in.
+      const which = text.slice('/project'.length).trim()
+      if (!which) {
+        toast.info(state.workProject ? `Project: ${state.workProject.name}.` : 'Project: none.', { description: 'Choose one with the project in the chat’s header, or /project NAME.' })
+        return true
+      }
+      try {
+        toast.success((await chooseProject(which)).said)
+        await queryClient.invalidateQueries({ queryKey: stateQuery.queryKey })
+        return true
+      } catch (e) {
+        toast.error(errorMessage(e))
+        return false
+      }
+    }
     if (text === '/clear' || text === '/new') {
       await newSession().catch((e) => toast.error(errorMessage(e)))
       await refresh()
@@ -971,6 +989,7 @@ export function Thread({
         )}
         {model?.tools !== false && <ConfigureToolsButton />}
         <span className="ml-auto" />
+        {state.arenaChats && <ProjectPicker project={state.workProject} />}
         <SyncStatus sync={state.sync} />
         <Tooltip content={goalActive(state.goal) ? 'A goal is set: its bar is above the box' : 'Work toward a goal: the agent carries on until its check passes'}>
           <Button variant="ghost" size="icon-sm" onClick={() => (goalActive(state.goal) ? setGoalAway(null) : askGoal())} aria-label="Goal" aria-pressed={goalActive(state.goal)}>

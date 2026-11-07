@@ -276,6 +276,8 @@ export interface Overview {
   users: { total: number; admins: number; disabled: number };
   spend?: number;
   spend_error?: string;
+  /** The days the spend is of (both in); null: the budget period. */
+  window?: { from: string; to: string } | null;
 }
 
 // --- formatting ------------------------------------------------------------------

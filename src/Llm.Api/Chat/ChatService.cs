@@ -563,6 +563,8 @@ public sealed partial class ChatService(
                 // The spend is the person's by this field (the header only attributes): their chat credit counts it.
                 ["user"] = email,
             };
+            // The chat it is for, so its project counts it (ProjectTags).
+            Projects.ProjectTags.Tag(request, conversation.Id);
             if (conversation.Temperature is { } temperature)
             {
                 request["temperature"] = temperature;
@@ -1482,6 +1484,7 @@ public sealed partial class ChatService(
                 ["model"] = kit.Model, ["messages"] = messages.DeepClone(), ["stream"] = true,
                 ["stream_options"] = new JsonObject { ["include_usage"] = true }, ["user"] = kit.Email,
             };
+            Projects.ProjectTags.Tag(request, kit.Conversation.Id);
             if (PromptBudget.Asked(budget.Context, its?.MaxOutput, stepTokens) is { } stepMost)
             {
                 request["max_tokens"] = stepMost;
@@ -1631,6 +1634,8 @@ public sealed partial class ChatService(
             ? (await policy.ForAsync(user, await models.ListAsync(ct), ct)).Default
             : await models.ResolveAsync(requested, ct);
         var refusal = model is null ? null : await policy.RefusalAsync(user, model.Name, ct);
+        // A project that stops at its budget, past it this month.
+        refusal ??= await Projects.ProjectBudgets.RefusalAsync(db, conversation.WorkProjectId, ct);
         return (model, model?.Name ?? "default", refusal);
     }
 

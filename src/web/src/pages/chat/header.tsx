@@ -1,5 +1,6 @@
 import { Archive, ArchiveRestore, Bot, Brain, Check, ChevronDown, Eye, FileDown, FilePen, FoldVertical, FolderOpen, GitFork, MessagesSquare, MoreHorizontal, Share2, SlidersHorizontal, Sparkles, Trash2, Users, Wrench } from 'lucide-react'
 import { ReadInMenu } from './read-in'
+import { ChatProjectMenu } from '../projects/chat-project'
 import { useQuery } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
@@ -250,7 +251,7 @@ export function ChatHeader({
   onToggleFiles: () => void
   onOpenList: () => void
   /** The chat on screen, once it exists: fork, archive and delete it from here too. */
-  chat?: { id: string; title: string; archived: boolean }
+  chat?: { id: string; title: string; archived: boolean; projectId?: string | null; mayMoveProject?: boolean }
   /** Summarize the branch on screen (undefined: nothing to compact now). */
   onCompact?: () => void
   /** Export the branch on screen, or its summary. */
@@ -338,7 +339,7 @@ function ChatMenu({
   onShare,
   onMakeRoom,
 }: {
-  chat: { id: string; title: string; archived: boolean }
+  chat: { id: string; title: string; archived: boolean; projectId?: string | null; mayMoveProject?: boolean }
   onCompact?: () => void
   onExport?: (kind: ExportKind) => void
   assistant?: HeaderAssistant | null
@@ -395,6 +396,7 @@ function ChatMenu({
             </DropdownMenuSubContent>
           </DropdownMenuSub>
         )}
+        {chat.mayMoveProject && <ChatProjectMenu chatId={chat.id} projectId={chat.projectId ?? null} />}
         {onExport && (
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>

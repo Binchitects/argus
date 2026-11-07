@@ -128,6 +128,7 @@ public static class Permissions
     public const string ArgusIndex = "argus.index";
     public const string ArgusPacks = "argus.packs";
     public const string ArgusWebhook = "argus.webhook";
+    public const string ProjectsManage = "projects.manage";
 
     public const string Chat = "feature.chat";
     public const string ApiKeys = "feature.api_keys";
@@ -169,6 +170,8 @@ public static class Permissions
     public const string Calls = "feature.calls";
     public const string SkillsShare = "feature.skills.share";
     public const string AppsShare = "feature.apps.share";
+    public const string ProjectsCreate = "feature.projects";
+    public const string ProjectsGlobal = "feature.projects.global";
 
     public static readonly IReadOnlyList<PermissionInfo> All =
     [
@@ -220,6 +223,7 @@ public static class Permissions
         new(ReviewsAdmin, "Rooms and reviews", "Manage every project's reviews.", true),
         new(SharingManage, "Sharing", "Share assistants, skills, apps, chats and reviews with the whole company or any group, and look after the company's skills and assistants.", true),
         new(BusinessManage, "Code", "Remove business maps.", true),
+        new(ProjectsManage, "Projects", "See every project and what it used, and change or delete any.", true),
 
         new(PeopleCreate, "People and groups", "Add people.", true, PeopleManage),
         new(PeopleEdit, "People and groups", "Change people's names, emails and sources.", true, PeopleManage),
@@ -327,6 +331,8 @@ public static class Permissions
         new(Calls, "Sharing and rooms", "Call in rooms, with voice, video and screen sharing.", false),
         new(SkillsShare, "Sharing and rooms", "Share their skills with their groups.", false),
         new(AppsShare, "Sharing and rooms", "Open their apps to groups or everyone.", false),
+        new(ProjectsCreate, "Sharing and rooms", "Make projects, and be their owner.", false),
+        new(ProjectsGlobal, "Sharing and rooms", "Make global projects, which everyone sees and may add to.", false),
     ];
 
     private static readonly Dictionary<string, PermissionInfo> ByKey = All.ToDictionary(p => p.Key, StringComparer.Ordinal);

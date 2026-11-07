@@ -286,17 +286,34 @@ internal sealed class ChatSync : IAsyncDisposable
                 }
                 if (plan.Conversation is null)
                 {
+                    var asked = _store.Read(d => d.WorkProject);
                     var made = await SendAsync(HttpMethod.Post, "/api/code-arena/chats", new JsonObject
                     {
                         ["ref"] = _store.Id, ["place"] = _place, ["model"] = _model(), ["title"] = null,
                         // The project its memories are of (what memory proposes from the session is that project's).
                         ["project"] = ProjectKeys.Of(_place),
+                        // The project in Arena it counts to, as chosen here; none: its repository's, when one has it.
+                        ["projectId"] = asked?.Id,
                     }, ct);
                     if (made.Status != HttpStatusCode.OK || made.Body?.Str("id") is not { } id)
                     {
                         return Refused(made);
                     }
                     _store.Link(id);
+                    // The project Arena put the chat in: the one asked for, else its repository's; the session counts to it too.
+                    // Another chosen (/project) while the chat was made: the chat goes in that one.
+                    var put = made.Body.Str("projectId") is { Length: > 0 } pid ? new WorkProject(pid, made.Body.Str("projectName") ?? "") : null;
+                    var now = _store.Read(d => d.WorkProject);
+                    if (now?.Id != asked?.Id)
+                    {
+                        await SendAsync(HttpMethod.Put, $"/api/code-arena/chats/{id}/project", new JsonObject { ["projectId"] = now?.Id }, ct);
+                    }
+                    else if (put?.Id != asked?.Id)
+                    {
+                        _store.Project(put);
+                        _notice(asked is not null, (asked is null ? "" : $"Arena did not put its chat in {asked.Name} (archived, or you may not add to it). ")
+                            + (put is null ? "It is in no project." : $"In the project {put.Name} (its repository is in it): what this session uses counts to it.") + " /project changes it.");
+                    }
                     continue;
                 }
                 var body = new JsonObject

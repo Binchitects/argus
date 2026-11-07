@@ -33,6 +33,24 @@ public static class PlatformApi
 
     static IResult Error(string message, int status) => Json(new JsonObject { ["error"] = message }, status);
 
+    /// <summary>Two days, both in (UTC), a report's window; or why the request's are none.</summary>
+    sealed record DayWindow(DateOnly First, DateOnly Last, string? Problem = null);
+
+    /// <summary>The longest window read at once, as Arena's reports.</summary>
+    const int MostWindowDays = 400;
+
+    /// <summary>The window the request asks for (?from=2026-10-01&amp;to=2026-10-31); null: none, the budget period's.</summary>
+    static DayWindow? Window(HttpRequest request)
+    {
+        string? from = request.Query["from"], to = request.Query["to"];
+        if (string.IsNullOrEmpty(from) && string.IsNullOrEmpty(to)) return null;
+        if (!DateOnly.TryParseExact(from, "yyyy-MM-dd", out var first) || !DateOnly.TryParseExact(to, "yyyy-MM-dd", out var last))
+            return new DayWindow(default, default, "from and to are days: 2026-10-01.");
+        if (last < first) return new DayWindow(first, last, "The first day comes before the last.");
+        if (last.DayNumber - first.DayNumber >= MostWindowDays) return new DayWindow(first, last, $"A window is at most {MostWindowDays} days.");
+        return new DayWindow(first, last);
+    }
+
     public static AppUser? CurrentUser(HttpContext ctx) => ctx.Items[UserItem] as AppUser;
 
     static async Task<JsonObject> Body(HttpRequest request)
@@ -301,7 +319,7 @@ public static class PlatformApi
         var admin = api.MapGroup("/admin").AddEndpointFilter(async (context, next) =>
             CurrentUser(context.HttpContext) is { IsAdmin: true } ? await next(context) : Error("Administrators only.", 403));
 
-        admin.MapGet("/overview", async () =>
+        admin.MapGet("/overview", async (HttpContext ctx) =>
         {
             var services = new JsonArray();
             async Task Probe(string name, string? url)
@@ -337,27 +355,46 @@ public static class PlatformApi
                     ["total"] = users.Count, ["admins"] = users.Count(u => u.IsAdmin && !u.Disabled), ["disabled"] = users.Count(u => u.Disabled),
                 },
             };
+            var window = Window(ctx.Request);
+            if (window is { Problem: { } problem }) return Error(problem, 400);
             if (gateway is { CanAdminister: true })
             {
                 try
                 {
-                    var all = await gateway.AllUsers();
-                    result["spend"] = users.Sum(u => all.TryGetValue(u.Email, out var s) ? s.Spend : 0);
+                    if (window is { First: var first, Last: var last })
+                    {
+                        var spent = await gateway.SpendBetween(first, last);
+                        result["spend"] = users.Sum(u => spent.GetValueOrDefault(u.Email));
+                    }
+                    else
+                    {
+                        var all = await gateway.AllUsers();
+                        result["spend"] = users.Sum(u => all.TryGetValue(u.Email, out var s) ? s.Spend : 0);
+                    }
                 }
                 catch (GatewayError exc) { result["spend_error"] = exc.Message; }
             }
+            result["window"] = window is null ? null : new JsonObject { ["from"] = $"{window.First:yyyy-MM-dd}", ["to"] = $"{window.Last:yyyy-MM-dd}" };
             return Json(result);
         });
 
-        admin.MapGet("/users", async () =>
+        admin.MapGet("/users", async (HttpContext ctx) =>
         {
+            var window = Window(ctx.Request);
+            if (window is { Problem: { } problem }) return Error(problem, 400);
             using var conn = AppDb.Open(appDbPath);
             var users = Users.List(conn);
             Dictionary<string, (double Spend, double? MaxBudget)>? usage = null;
+            Dictionary<string, double>? spent = null;
             string? usageError = null;
             if (gateway is { CanAdminister: true })
             {
-                try { usage = await gateway.AllUsers(); }
+                try
+                {
+                    usage = await gateway.AllUsers();
+                    // A window: each person's spend in it; the budget stays the period's.
+                    if (window is { First: var first, Last: var last }) spent = await gateway.SpendBetween(first, last);
+                }
                 catch (GatewayError exc) { usageError = exc.Message; }
             }
             var list = new JsonArray();
@@ -365,9 +402,14 @@ public static class PlatformApi
             {
                 var o = u.ToJson();
                 if (usage is not null && usage.TryGetValue(u.Email, out var s)) { o["spend"] = s.Spend; o["max_budget"] = s.MaxBudget; }
+                if (spent is not null) o["spend"] = spent.GetValueOrDefault(u.Email);
                 list.Add(o);
             }
-            return Json(new JsonObject { ["users"] = list, ["usage_error"] = usageError });
+            return Json(new JsonObject
+            {
+                ["users"] = list, ["usage_error"] = usageError,
+                ["window"] = window is null ? null : new JsonObject { ["from"] = $"{window.First:yyyy-MM-dd}", ["to"] = $"{window.Last:yyyy-MM-dd}" },
+            });
         });
 
         admin.MapPost("/users", async (HttpContext ctx) =>

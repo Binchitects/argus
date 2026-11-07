@@ -135,6 +135,24 @@ public sealed class Gateway
         return result;
     }
 
+    /// <summary>
+    /// Each internal user's spend between two days, both in (UTC), by email: the gateway's spend log summed by day
+    /// (/spend/logs with dates; its end day is taken up to its start, so the day after the last is asked for).
+    /// </summary>
+    public async Task<Dictionary<string, double>> SpendBetween(DateOnly first, DateOnly last)
+    {
+        var node = await Send(HttpMethod.Get, $"/spend/logs?start_date={first:yyyy-MM-dd}&end_date={last.AddDays(1):yyyy-MM-dd}", timeout: TimeSpan.FromSeconds(60));
+        var result = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        foreach (var day in node as JsonArray ?? [])
+        {
+            foreach (var (user, spend) in day?["users"] as JsonObject ?? [])
+            {
+                if (user.Length > 0 && spend is JsonValue v && v.TryGetValue<double>(out var d)) result[user] = result.GetValueOrDefault(user) + d;
+            }
+        }
+        return result;
+    }
+
     // --- keys -----------------------------------------------------------------------
 
     /// <summary>A new virtual key owned by the person. Returns the secret (shown once) and its hashed token.</summary>

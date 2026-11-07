@@ -22,6 +22,8 @@ internal sealed class Options
     /// <summary>A chat in Arena to continue here (its id, or its number in the list --web prints).</summary>
     public string? WebChat { get; set; }
     public string? Model { get; set; }
+    /// <summary>The project in Arena the session counts to (its name, number or id; "none"), kept for the folder.</summary>
+    public string? Project { get; set; }
     public string? Mode { get; set; }
     public string? Thinking { get; set; }
     /// <summary>For this run: the share of the window (percent) at which the session compacts, and what it keeps.</summary>
@@ -145,6 +147,7 @@ internal static partial class Cli
           -r, --resume [id]          pick a saved session (or give its id)
               --web [N|id]           your chats in Arena; with N or an id, continue that one here
           -m, --model NAME           the model (see code-arena models)
+              --project NAME         count the session to this project in Arena (its name or id; none), kept for the folder
               --mode MODE            ask (default), auto-edit, plan or yolo
               --thinking LEVEL       off, low, medium, high, xhigh, or default
               --compact-at PERCENT   compact the conversation at this share of the model's window (default: your
@@ -295,6 +298,9 @@ internal static partial class Cli
                     break;
                 case "-m" or "--model":
                     o.Model = Value();
+                    break;
+                case "--project":
+                    o.Project = Value();
                     break;
                 case "--mode" or "--permission-mode":
                     o.Mode = Value();

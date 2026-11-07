@@ -467,6 +467,13 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             case ("POST", "/api/messages"):
                 await MessageAsync(req, res, ct);
                 return;
+            case ("GET", "/api/projects"):
+                await ProjectsAsync(res, ct);
+                return;
+            case ("POST", "/api/project"):
+                var (chose, chosen) = await _rt.ChooseProjectAsync(req.Json()?.Str("project") ?? "none", ct);
+                await (chose ? res.JsonAsync(200, new JsonObject { ["said"] = chosen }, ct) : res.ErrorAsync(400, "project", chosen, ct));
+                return;
             case ("POST", "/api/plan/review"):
                 await ReviewPlanAsync(req, res, ct);
                 return;
@@ -715,6 +722,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             // Whether sessions are kept with chats in Arena here (the side bar lists them), and this one's chat (null: none yet).
             ["arenaChats"] = _rt.Config.SyncChats && _rt.Config.Url is { Length: > 0 },
             ["chat"] = _rt.Sync?.Conversation,
+            // The project in Arena the session counts to (null: none).
+            ["workProject"] = _rt.WorkProject is { } work ? new JsonObject { ["id"] = work.Id, ["name"] = work.Name } : null,
             // Whose chats they are (the key's account): another account's key syncs with that account's chats.
             ["account"] = _rt.Account,
             // Where the sync stands: the chat, how many messages Arena lacks, what stopped them, whether the web has news (null: no sync).
@@ -1120,6 +1129,18 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     /// POST /api/plan/review: the person's answer to the plan the agent proposed (approve, approve-ask, change with a
     /// step, another, reject; text: what to change, or why), said to the agent as their next message, answered as a stream.
     /// </summary>
+    /// <summary>The projects in Arena the person may add to, the session's and the repository's (/project in the terminal).</summary>
+    private async Task ProjectsAsync(HttpResponse res, CancellationToken ct)
+    {
+        var (list, problem) = await _rt.ProjectsAsync(ct);
+        await res.JsonAsync(200, new JsonObject
+        {
+            ["projects"] = list is null ? null : new JsonArray([.. list.Projects.Select(p => (JsonNode)new JsonObject { ["id"] = p.Id, ["name"] = p.Name })]),
+            ["suggested"] = list?.Suggested,
+            ["problem"] = problem,
+        }, ct);
+    }
+
     private async Task ReviewPlanAsync(HttpRequest req, HttpResponse res, CancellationToken ct)
     {
         var body = req.Json();

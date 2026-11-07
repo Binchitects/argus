@@ -54,7 +54,9 @@ public sealed record SyncMessage(
 /// <summary>A file that went with a question on the web: "image" (fetched with the key from /api/code-arena/attachments/{id}), "text", "file", "audio", "video".</summary>
 public sealed record SyncAttachment(Guid Id, string Name, string Kind, string ContentType);
 
-public sealed record SyncNewChat(string? Ref, string? Place, string? Model, string? Title, string? Project = null);
+/// <param name="Project">The repository's key (its memories are that project's).</param>
+/// <param name="ProjectId">The Arena project it goes in, chosen in Code Arena; none: its repository's, if one has it (Projects.ProjectChats).</param>
+public sealed record SyncNewChat(string? Ref, string? Place, string? Model, string? Title, string? Project = null, Guid? ProjectId = null);
 
 /// <summary>A summary of the branch from its start down to the message <paramref name="UpTo"/>, read instead of those messages.</summary>
 public sealed record SyncSummary(Guid UpTo, string? Text);
@@ -478,7 +480,7 @@ public static partial class CodeArenaSync
         var reference = Clip(body.Ref, 128);
         if (reference is not null && await db.Conversations.FirstOrDefaultAsync(c => c.UserId == me.Id && c.Origin == Origin && c.OriginRef == reference, http.RequestAborted) is { } known)
         {
-            return Results.Ok(new { id = known.Id, created = false });
+            return Results.Ok(new { id = known.Id, created = false, projectId = known.WorkProjectId, projectName = await ProjectNameAsync(db, known.WorkProjectId, http.RequestAborted) });
         }
         var c = new Conversation
         {
@@ -487,13 +489,18 @@ public static partial class CodeArenaSync
             OriginRef = reference,
             OriginPlace = Clip(body.Place, 1000),
             ProjectKey = Clip(body.Project, 300),
+            WorkProjectId = await Projects.ProjectChats.ForNewSessionAsync(db, http.RequestServices.GetRequiredService<AccessService>(), me, body.ProjectId, Clip(body.Project, 300), http.RequestAborted),
             Model = Clip(body.Model, 200),
             Title = Clip(body.Title, 200) ?? "New chat",
         };
         db.Conversations.Add(c);
         await db.SaveChangesAsync(http.RequestAborted);
-        return Results.Ok(new { id = c.Id, created = true });
+        return Results.Ok(new { id = c.Id, created = true, projectId = c.WorkProjectId, projectName = await ProjectNameAsync(db, c.WorkProjectId, http.RequestAborted) });
     }
+
+    /// <summary>The project's name, for Code Arena to say which project its session went in.</summary>
+    private static async Task<string?> ProjectNameAsync(AppDbContext db, Guid? id, CancellationToken ct) =>
+        id is { } p ? await db.Projects.AsNoTracking().Where(x => x.Id == p).Select(x => x.Name).SingleOrDefaultAsync(ct) : null;
 
     /// <summary>
     /// The branch on screen after what Code Arena has (<paramref name="since"/>: the last message it has from here; none: from

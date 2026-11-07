@@ -389,11 +389,44 @@ export const topics = {
     manual: { doc: 'chat', section: 'scheduled-tasks' },
   },
 
+  projects: {
+    title: 'Projects',
+    about: 'Work several people do together, in the chat and in Code Arena, with what it used. Global projects are everyone\'s to add to.',
+    parts: [
+      { name: 'Mine, Global, All I see', text: 'The projects you are in (or made), the global ones, or every one you may see.' },
+      { name: 'A project\'s card', text: 'Its goals done, its people, its chats, and what it spent this month (of its budget, when it has one). Your role is on it.' },
+      { name: 'New project', text: 'Makes one with you as its owner. **Global project** makes it everyone\'s to see and add to, when you may.' },
+    ],
+    tasks: [
+      { title: 'Start a project for a team', steps: ['Press **New project**, name it and say what it is for.', 'Open it, then **People**: add the people or their group as contributors.', 'Under **In it**, add its repositories.', 'Put your chats in it from each chat\'s menu (⋯ → **Project**).'] },
+    ],
+    manual: { doc: 'chat', section: 'projects' },
+  },
+
+  project: {
+    title: 'Project',
+    about: 'One project: what it used and did over the time chosen, its goals and tasks, what is in it and its people.',
+    parts: [
+      { name: 'Overview', text: 'Cost, tokens, requests, people, active and agent time, goals and tasks done, by day, by person (owners), by model and by where it came from; the merged changes of its repositories.' },
+      { name: 'Time range and Export', text: 'The period shown, kept in the address; **Export** downloads it as a PDF report, an Excel workbook or a CSV.' },
+      { name: 'Goals and tasks', text: 'Milestones with their state and due day, and tasks with who does them. Contributors keep them.' },
+      { name: 'In it', text: 'Its repositories, your chats and sessions in it (the others\' are only counted), and the assistants, skills and apps it uses.' },
+      { name: 'People', text: 'Owners run it, contributors add to it, viewers see it. Owners add people and groups.' },
+      { name: 'Settings', text: 'Owners: its name, dates, whether it is global, its monthly budget and alert, stopping at the budget, archiving and deleting.' },
+    ],
+    tasks: [
+      { title: 'Send a monthly report', steps: ['Choose **Last month** as the time range.', 'Press **Export**, then **PDF report**.', 'Each person\'s share is in it when you are an owner.'] },
+      { title: 'Keep the project in its budget', steps: ['Open **Settings**.', 'Give a monthly budget and the share at which you are told.', 'Turn on **Stop at the budget** to stop its chats\' answers once it is spent.'] },
+    ],
+    manual: { doc: 'chat', section: 'what-a-project-used' },
+  },
+
   usage: {
     title: 'Usage & cost',
     about: 'Tokens and cost over time and by model. Input is split into cache miss and cache hit, which are priced differently.',
     parts: [
-      { name: 'Time range', text: 'The period the page shows.' },
+      { name: 'Time range', text: 'The period the page shows: a preset, or **Custom range…** for two days. It is kept in the page\'s address, so a link opens the same view.' },
+      { name: 'Export', text: 'The same numbers for the time shown as a **PDF report**, an **Excel workbook** or a **CSV**. Admins export everyone\'s from the Everyone tab.' },
       { name: 'Everyone and Mine', text: 'Admins see everyone\'s usage, and their own under **Mine**.' },
       { name: 'The totals', text: 'Requests, input (cache miss and cache hit), output and cost.' },
       { name: 'Tokens by kind and Cost', text: 'The same, over time.' },
@@ -1055,13 +1088,15 @@ export const topics = {
 
   'usage-groups': {
     title: 'Usage by group',
-    about: "Each group's requests, tokens and spend over a day, a week, 30 or 90 days, chat and API keys together, and the people in no group.",
+    about: "Each group's requests, tokens and spend over the time chosen, chat and API keys together, and the people in no group.",
     admin: true,
     parts: [
+      { name: 'Time range', text: 'A preset or **Custom range…**, kept in the page\'s address.' },
+      { name: 'Export', text: 'The groups for the time shown as a **PDF report**, an **Excel workbook** or a **CSV**.' },
       { name: 'The groups', text: 'Members, how many used it, requests, tokens, the share of input read from the cache, and spend, the most spent first; a person in two groups counts in both.' },
       { name: 'Members', text: 'Open a group for its members who used it, each with their own requests, tokens and spend.' },
     ],
-    tasks: [{ title: 'See which team uses the models most', steps: ['Choose **30 days**.', 'Read the spend column.', 'Open the group for who in it.'] }],
+    tasks: [{ title: 'See which team uses the models most', steps: ['Choose **Last 30 days**.', 'Read the spend column.', 'Open the group for who in it.'] }],
     manual: { doc: 'admin', section: 'usage-by-group' },
   },
 
@@ -1114,7 +1149,7 @@ export const topics = {
     about: 'How people rate the answers, per model and per assistant, and how the models fare when people compare them blind.',
     admin: true,
     parts: [
-      { name: 'Time range', text: 'A day, a week, a month or three.' },
+      { name: 'Time range', text: 'A preset (from the last day to the last year, today, this week, this month, last month) or **Custom range…** for two days, kept in the page\'s address.' },
       { name: 'By model and By assistant', text: 'Answers written, the share rated, the share rated up, and why answers were rated down.' },
       { name: 'Latest down-rated answers', text: 'Title, model, reason and the person\'s words, never the chat. A chat opens only when its owner shared it with the down vote; each opening is audited.' },
       { name: 'Arena leaderboard', text: 'The models by the votes cast with Compare in this time range.' },

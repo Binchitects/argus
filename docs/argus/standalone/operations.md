@@ -49,6 +49,15 @@ and calls with their model keys count against the same budget, because the
 app sends each person's chats with their own key. When it is spent, the chat
 says so; raise it on the People page.
 
+The overview's spend and each person's on People are this budget period's
+unless a **time window** is chosen above them: today, the last 7, 30 or 90
+days, this month, last month, or a custom range of two days (both in, at most
+400). The window is kept in the page's address (`?from=now-7d&to=now`, or two
+days), so a link opens the same view. A window's spend comes from the
+gateway's spend log, by day in UTC (`GET /api/admin/overview` and
+`GET /api/admin/users` take `?from=2026-10-01&to=2026-10-31`); the budget
+shown beside it stays the period's.
+
 ## Backup and restore
 
 ```bash

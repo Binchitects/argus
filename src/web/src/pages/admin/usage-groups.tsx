@@ -4,10 +4,11 @@ import { Fragment, useState } from 'react'
 import { Link } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
-import { Segmented } from '@/components/app/segmented'
+import { ExportMenu, TimeWindow } from '@/components/app/time-window'
 import { Card, CardContent } from '@/components/ui/card'
 import { api } from '@/lib/api'
 import { formatValue, money } from '@/lib/format'
+import { useTimeWindow } from '@/lib/use-time-window'
 
 interface Used {
   requests: number
@@ -35,9 +36,6 @@ interface GroupRow {
   people: Member[]
 }
 
-const ranges = { day: 1, week: 7, month: 30, quarter: 90 } as const
-type Range = keyof typeof ranges
-
 const n = (v: number) => formatValue(v, 'short')
 
 /** The share of input tokens the engine read from its cache. */
@@ -45,15 +43,11 @@ const cacheShare = (u: Used) => (u.inputMiss + u.inputHit > 0 ? `${Math.round((1
 
 /** Admin → Usage by group: each group's requests, tokens and spend over a time, its members who used it, and the people in no group. */
 export function UsageByGroupPage() {
-  const [range, setRange] = useState<Range>('week')
+  const time = useTimeWindow({ from: 'now-7d', to: 'now' })
   const [open, setOpen] = useState<string | null>(null)
   const usage = useQuery({
-    queryKey: ['admin', 'usage', 'groups', range],
-    queryFn: ({ signal }) => {
-      const to = new Date()
-      const from = new Date(to.getTime() - ranges[range] * 86_400_000)
-      return api<{ groups: GroupRow[]; none: GroupRow; total: Used }>(`/api/admin/usage/groups?${new URLSearchParams({ from: from.toISOString(), to: to.toISOString() })}`, { signal })
-    },
+    queryKey: ['admin', 'usage', 'groups', time.key],
+    queryFn: ({ signal }) => api<{ groups: GroupRow[]; none: GroupRow; total: Used }>(`/api/admin/usage/groups?${time.query()}`, { signal }),
   })
   if (usage.isPending) return <PageSkeleton />
   if (usage.error) return <QueryError error={usage.error} retry={() => usage.refetch()} />
@@ -67,7 +61,8 @@ export function UsageByGroupPage() {
         description="Each group's requests, tokens and spend, chat and API keys together, with the members who used it. A person in two groups counts in both, so the groups can add up to more than everyone's together. Each person's own is on the LLM and users dashboard."
       />
       <div className="mb-4 flex flex-wrap items-center gap-4">
-        <Segmented label="Time" value={range} onChange={setRange} options={[{ value: 'day', label: 'Day' }, { value: 'week', label: 'Week' }, { value: 'month', label: '30 days' }, { value: 'quarter', label: '90 days' }]} />
+        <TimeWindow value={time.range} onChange={time.set} />
+        <ExportMenu path="/api/admin/usage/groups/export" query={time.query} />
         <p className="text-sm text-muted-foreground">
           Everyone: {n(total.requests)} requests, {n(total.tokens)} tokens, {money(total.cost)}
         </p>

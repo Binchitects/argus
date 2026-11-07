@@ -66,7 +66,8 @@ export const help: Record<ArgusRoute, Topic> = {
     about: "Everything the service is made of, at a glance.",
     admin: true,
     parts: [
-      ["Tiles", "Services up, people, spend, the code index and the knowledge packs."],
+      ["Time window", "The period the spend is of: this budget period (the gateway's own), a preset (today, the last days, this or last month) or a custom range of two days. It is kept in the page's address."],
+      ["Tiles", "Services up, people, spend in the time window, the code index and the knowledge packs."],
       ["Services", "Each service with its state and how long it took to answer."],
     ],
     tasks: [{ title: "When the index is empty or stale", steps: ["Open Indexing.", "Start a pass with Index all repositories."] }],
@@ -76,7 +77,8 @@ export const help: Record<ArgusRoute, Topic> = {
     about: "Who can sign in, what they may do, and how much of the model they have used.",
     admin: true,
     parts: [
-      ["Everyone", "Each person with their role, status, spend against budget and last sign-in. Edit, Reset password and Delete per person."],
+      ["Time window", "The period each person's spend is of, as on the overview; the budget stays the period's."],
+      ["Everyone", "Each person with their role, status, spend in the time window against budget and last sign-in. Edit, Reset password and Delete per person."],
       ["GitLab", "How the code index knows what a person may read: by their email, or a GitLab username when the email does not match."],
       ["Add a person", "A password is made and shown once."],
     ],

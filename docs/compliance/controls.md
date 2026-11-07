@@ -2,7 +2,7 @@
 
 <!-- Written by tools/compliance-docs.py from controls.yaml and frameworks.yaml: change those and run it, not this. -->
 
-The 38 controls Arena provides, from [controls.yaml](controls.yaml). How they are kept: [README](README.md#controls-and-how-they-are-kept). Each framework's clauses and the controls that serve them: [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md), [SOC 2, Trust Services Criteria](frameworks/soc2.md), [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md), [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md), [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md), [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md), [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md), [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md), [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md), [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md), [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md), [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md), [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md), [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md).
+The 39 controls Arena provides, from [controls.yaml](controls.yaml). How they are kept: [README](README.md#controls-and-how-they-are-kept). Each framework's clauses and the controls that serve them: [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md), [SOC 2, Trust Services Criteria](frameworks/soc2.md), [HIPAA, 45 CFR Part 164 (Security Rule, Breach Notification, Privacy Rule)](frameworks/hipaa.md), [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md), [ISO/IEC 42001:2023, the AI management system: clauses 4 to 10 and Annex A](frameworks/iso42001.md), [ISO 22301:2019, business continuity management systems](frameworks/iso22301.md), [PCI DSS v4.0.1: its twelve requirements and their sections](frameworks/pcidss.md), [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md), [NIST Cybersecurity Framework 2.0: its categories and subcategories](frameworks/nistcsf.md), [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md), [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md), [NIST AI Risk Management Framework 1.0 (AI 100-1): Govern, Map, Measure and Manage, as its Playbook lists them](frameworks/airmf.md), [EU Artificial Intelligence Act, Regulation (EU) 2024/1689: its articles and annexes](frameworks/euaiact.md), [Common Criteria CC:2022 (ISO/IEC 15408): the functional (Part 2) and assurance (Part 3) families](frameworks/commoncriteria.md).
 
 ## People and access (IAM)
 
@@ -622,6 +622,34 @@ The safeguards find e-mail addresses, phone, card, IBAN and social security numb
 **Watched by** `app:personal-data` (Admin → Compliance, and `./arenactl check compliance`)
 
 **The company's part** Decide which models may see which data (a HIPAA BAA, a GDPR processing agreement with any provider outside the company), add the templates, and add the company's own identifiers as words or patterns.
+
+### DAT-09: A project's data is its people's, and its accounting is true
+
+A project is seen only by its maker, the people and groups in it (each as owner, contributor or viewer) and, for a global one, everyone; to anyone else it is not there. Making one is a permission (feature.projects), and a global one another (feature.projects.global); projects.manage sees and runs every project. A chat stays its owner's in a project: others see that it is there and whose, not what it says. What a project used comes from the usage log: a request counts to it when its chat is in the project (its requests move with it when it is moved) or when its caller names a project the person may add to; one named for another project is not counted. Each person's share is for the owners, a viewer sees their own. A budget tells the owners at its share and when spent, and can stop the chats' answers. Every change and export is audited; exports carry the same numbers as the page, and a CSV cell that would start a formula is kept as text.
+
+**Serves**
+
+- [ISO/IEC 27001:2022, clauses 4 to 10 and Annex A](frameworks/iso27001.md): A.5.15 Access control; A.5.18 Access rights; A.8.3 Information access restriction
+- [SOC 2, Trust Services Criteria](frameworks/soc2.md): CC6.1 Logical access security software, infrastructure and architectures; CC6.3 Role-based access, least privilege and segregation of duties; C1.1 Identifying and keeping confidential information
+- [The GDPR, Regulation (EU) 2016/679](frameworks/gdpr.md): Art.5(1)(c) Principles of processing personal data; Art.25 Data protection by design and by default; Art.32 Security of processing
+- [CSA Cloud Controls Matrix v4 (CSA STAR), by its domains](frameworks/csaccm.md): IAM Identity and access management; DSP Data security and privacy lifecycle management
+- [NIST SP 800-53 Rev. 5 (5.2.0), with the low, moderate, high and privacy baselines](frameworks/nist80053.md): AC-3 Access Enforcement; AC-6 Least Privilege; AU-2 Event Logging
+- [NIST SP 800-171 Rev. 3, protecting controlled unclassified information (CMMC builds on it)](frameworks/nist800171.md): 03.01.01 Account Management; 03.01.05 Least Privilege
+
+**Documented in** [chat.md#projects](../chat.md#projects), [code-arena.md#projects](../code-arena.md#projects)
+
+**Proved by**
+
+- `Llm.Tests/ProjectTests.A_project_s_people_hold_their_roles_and_it_is_not_there_for_anyone_else`
+- `Llm.Tests/ProjectTests.A_global_project_is_everyones_to_add_to_and_making_one_is_a_permission`
+- `Llm.Tests/ProjectTests.A_projects_usage_is_its_chats_requests_and_those_tagged_with_it_and_a_moved_chat_takes_its_own`
+- `Llm.Tests/ProjectTests.Each_persons_share_is_for_the_owners_and_a_viewer_sees_their_own`
+- `Llm.Tests/ProjectTests.A_budget_tells_the_owners_and_one_that_stops_refuses_its_chats_answers`
+- `Llm.Tests/ProjectTests.A_Code_Arena_session_goes_in_its_repositorys_project_or_the_one_chosen`
+- `Llm.Tests/ProjectTests.A_projects_report_and_the_usage_reports_export_as_pdf_excel_and_csv`
+- `Llm.Tests/WorkProjectsMigrationTests.Chats_and_requests_kept_before_are_in_no_project_and_may_go_in_one`
+
+**The company's part** Decide who may make projects and global ones (Admin → Access), and who holds projects.manage; set budgets for the projects that need them.
 
 ## Network (NET)
 

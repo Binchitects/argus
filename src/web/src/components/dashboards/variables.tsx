@@ -4,7 +4,7 @@ import { Pick } from '@/components/app/pick'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { api } from '@/lib/api'
-import { resolve } from '@/lib/time'
+import { resolve, resolveEnd } from '@/lib/time'
 import type { VariableDef } from './types'
 
 export type Chosen = Record<string, string[]>
@@ -21,7 +21,7 @@ export function Variables({ uid, variables, from, to, value, onChange }: { uid: 
     queryFn: ({ signal }) => {
       // The range as times: "now-1h" means now, when the options are asked for.
       const now = new Date()
-      const [start, end] = [resolve(from, now).toISOString(), resolve(to, now).toISOString()]
+      const [start, end] = [resolve(from, now).toISOString(), resolveEnd(to, now).toISOString()]
       return api<{ name: string; options: string[]; error: string | null }[]>(`/api/dashboards/${uid}/variables?from=${encodeURIComponent(start)}&to=${encodeURIComponent(end)}`, { signal })
     },
     enabled: variables.some((v) => v.type !== 'textbox'),

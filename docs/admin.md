@@ -42,7 +42,7 @@ heading, and has a box above it that keeps the rows holding what is typed.
 | **Settings** | Every setting, grouped and searchable: applied at once, or by a restart the app does itself. See [settings.md](settings.md). **Company directory (LDAP)** has a step-by-step guide with examples for OpenLDAP and Active Directory, **Test the settings** (each step, and exactly what is wrong) and **Try a person's sign-in** ([authentication.md](authentication.md#the-company-directory-ldap--active-directory)). **Chat bots** sets up the Slack, Mattermost and Teams bots and email in, and shows the address to give each platform ([integrations.md](integrations.md)). |
 | **Audit log** | Every sign-in and every change to people or the index, with who, whom and from where. |
 | **Compliance** | ISO 27001, SOC 2, HIPAA and the GDPR: each control with what meets it, its checks now (green, amber, red), the company's part attested, and the evidence for an auditor in one download. See [compliance](compliance/README.md#the-compliance-center). |
-| **Quality** | How people rate the answers, over a day, a week, a month or three: per model and per assistant, the answers written, the share rated, the share rated up, and why they were rated down. The latest down-rated answers by title, model, reason and the person's words, never their content: a chat opens (read only, down to the rated answer) only when its owner shared it with the down vote, and each opening is audited. Below, the arena's leaderboard from the votes cast in the range. See [Quality](#quality) below. |
+| **Quality** | How people rate the answers, over the time window chosen (a preset or a custom range, kept in the address): per model and per assistant, the answers written, the share rated, the share rated up, and why they were rated down. The latest down-rated answers by title, model, reason and the person's words, never their content: a chat opens (read only, down to the rated answer) only when its owner shared it with the down vote, and each opening is audited. Below, the arena's leaderboard from the votes cast in the range. See [Quality](#quality) below. |
 | **Sign-in** | Local accounts, the company directory ("Check the directory now") and company sign-in: OIDC or SAML, the identity provider (its issuer or SAML entity ID), its admin and required groups, and whether SCIM is on. |
 
 Indexing, Packs and Explore talk to Argus through the app's server with
@@ -172,7 +172,8 @@ What each person may do is decided in one place, from three things:
   models, attaching files, making assistants, saving prompts, exporting one's
   own data, company knowledge, choosing the chat's model, the science lab
   (`feature.lab`), the wiki (`feature.wiki`), calls in rooms
-  (`feature.calls`), and sharing: `feature.skills.share` shares one's skills
+  (`feature.calls`), projects (`feature.projects`; global ones
+  `feature.projects.global`), and sharing: `feature.skills.share` shares one's skills
   with one's groups, `feature.apps.share` opens one's apps to groups or
   everyone (`feature.apps` alone makes apps for oneself). Feature
   permissions are grouped on the Access page by what they are for: Chat and

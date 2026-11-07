@@ -2,10 +2,11 @@ import { useState, type FormEvent } from "react";
 import { api, money, relTime, type User } from "../../api";
 import { useAuth } from "../../auth";
 import Secret from "../../components/Secret";
+import { TimeWindowPicker, useTimeWindow } from "../../components/TimeWindowPicker";
 import { useAsync } from "../../components/useAsync";
 import { useTable, type Key } from "../../components/useTable";
 
-interface UsersResponse { users: User[]; usage_error: string | null }
+interface UsersResponse { users: User[]; usage_error: string | null; window?: { from: string; to: string } | null }
 
 const EMPTY: User[] = [];
 
@@ -58,7 +59,8 @@ function EditRow({ user, onClose, onSaved }: { user: User; onClose: () => void; 
 
 export default function People() {
   const { me } = useAuth();
-  const data = useAsync(() => api.get<UsersResponse>("/api/admin/users"), []);
+  const time = useTimeWindow();
+  const data = useAsync(() => api.get<UsersResponse>("/api/admin/users" + time.query), [time.query]);
   const [editing, setEditing] = useState<number | null>(null);
   const [secret, setSecret] = useState<{ label: string; value: string } | null>(null);
   const [flash, setFlash] = useState<{ ok: boolean; text: string } | null>(null);
@@ -92,6 +94,7 @@ export default function People() {
     <div className="page">
       <h1>People</h1>
       <p className="lede">Who can sign in, what they may do, and how much of the model they have used.</p>
+      <TimeWindowPicker value={time.window} onChange={time.set} />
       {flash && <div className={`msg ${flash.ok ? "ok" : "bad"}`} role="status">{flash.text}</div>}
       {secret && <Secret label={secret.label} value={secret.value} onDone={() => setSecret(null)} />}
       {data.value?.usage_error && <div className="msg bad">Spend is unavailable: {data.value.usage_error}</div>}
@@ -101,7 +104,7 @@ export default function People() {
           {table.search("Filter people")}
         </div>
         <table data-testid="people-table">
-          <thead><tr>{table.header("person", "Person")}{table.header("role", "Role")}{table.header("status", "Status")}{table.header("spend", "Spend / budget")}{table.header("last", "Last sign-in")}{table.header("gitlab", "GitLab")}<th /></tr></thead>
+          <thead><tr>{table.header("person", "Person")}{table.header("role", "Role")}{table.header("status", "Status")}{table.header("spend", `Spend (${time.said}) / budget`)}{table.header("last", "Last sign-in")}{table.header("gitlab", "GitLab")}<th /></tr></thead>
           <tbody>
             {users.map((u) => [
               <tr key={u.id}>

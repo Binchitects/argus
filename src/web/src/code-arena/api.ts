@@ -72,6 +72,8 @@ export interface CodeState {
   account?: string | null
   /** The chat in Arena this session is kept in step with (null: none yet): the state is read often, for the web's news. */
   chat?: string | null
+  /** The project in Arena the session counts to (/project); null: none. */
+  workProject?: { id: string; name: string } | null
   /** Where the sync with Arena stands (null: sessions are not kept with Arena here). */
   sync?: SyncState | null
   /** What was said while nothing ran here (Arena out of reach, the web's news taken in), the newest last: each is shown once. */
@@ -216,6 +218,21 @@ export type CodeEvent =
   /** A VM's sign-in the VM tools ask for (a dialog: vm-login.ts), and its end. */
   | { type: 'vm_login'; id: string; vm: string; hypervisor: string; user: string | null; refused: boolean; canSave: boolean; keyring: string }
   | { type: 'vm_login_done'; id: string }
+
+/** The projects in Arena the person may add to (null with why when Arena cannot say), and the repository's. */
+export interface CodeProjects {
+  projects: { id: string; name: string }[] | null
+  suggested: string | null
+  problem: string | null
+}
+
+export const projectsQuery = {
+  queryKey: ['code', 'projects'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<CodeProjects>('/api/projects', { signal }),
+}
+
+/** The session (and the folder's next ones) in a project: its id, or "none". */
+export const chooseProject = (project: string) => api<{ said: string }>('/api/project', { body: { project } })
 
 export const stateQuery = {
   queryKey: ['code', 'state'] as const,

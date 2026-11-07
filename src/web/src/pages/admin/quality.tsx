@@ -3,8 +3,8 @@ import { MessageSquareText, Scale, Share2, ThumbsDown, ThumbsUp, Vote } from 'lu
 import { useState } from 'react'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
-import { Segmented } from '@/components/app/segmented'
 import { Stat, StatGrid } from '@/components/app/stat'
+import { TimeWindow } from '@/components/app/time-window'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -14,7 +14,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 import { api } from '@/lib/api'
 import { ago, formatValue, when } from '@/lib/format'
-import { presets, resolve } from '@/lib/time'
+import { useTimeWindow } from '@/lib/use-time-window'
 import { cn } from '@/lib/utils'
 import { LeaderboardTable, type Board } from '@/pages/leaderboard'
 import { reasonLabel } from '@/pages/chat/quality'
@@ -93,18 +93,18 @@ function CountsTable({ rows, first, label }: { rows: CountsRow[]; first: string;
  * and the arena's leaderboard from the votes cast in the range.
  */
 export function QualityPage() {
-  const [from, setFrom] = useState('now-30d')
+  const time = useTimeWindow()
   const [open, setOpen] = useState<string | null>(null)
   const q = useQuery({
-    queryKey: ['admin', 'quality', from],
-    queryFn: ({ signal }) => api<Quality>(`/api/admin/quality?${new URLSearchParams({ from: resolve(from).toISOString(), to: new Date().toISOString() })}`, { signal }),
+    queryKey: ['admin', 'quality', time.key],
+    queryFn: ({ signal }) => api<Quality>(`/api/admin/quality?${time.query()}`, { signal }),
   })
   const d = q.data
   return (
     <>
       <PageHeader title="Quality" description="How people rate the answers (thumbs up or down, and why), per model and per assistant, and how the models fare when people compare them blind." />
       <div className="grid gap-6">
-        <Segmented label="Time range" value={from} onChange={setFrom} options={presets.map((p) => ({ value: p.from, label: p.label.replace('Last ', '') }))} />
+        <TimeWindow value={time.range} onChange={time.set} />
         {q.error && <QueryError error={q.error} retry={() => q.refetch()} />}
         {q.isPending && <PageSkeleton />}
         {d && (

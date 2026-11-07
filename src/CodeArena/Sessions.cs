@@ -96,6 +96,8 @@ internal sealed class SessionData
     public string? Conversation { get; set; }
     /// <summary>The chat in Arena was deleted: the session is no longer kept in step.</summary>
     public bool Unlinked { get; set; }
+    /// <summary>The project in Arena its requests count to (chosen at its start, by /project, or its repository's); null: none.</summary>
+    public WorkProject? WorkProject { get; set; }
     /// <summary>
     /// Every message of the conversation in the order of its chat in Arena, compactions aside (the chat keeps what was
     /// summarized): those this session added, and those taken in from the web.
@@ -134,6 +136,7 @@ internal sealed class SessionData
             Id = Id, Cwd = Cwd, Model = Model, Conversation = Conversation, Unlinked = Unlinked, From = From, Branch = Branch, Summary = Summary,
             WebSummary = WebSummary, Keys = Keys, _pending = _pending, ToolsOff = ToolsOff, ToolsLoaded = ToolsLoaded, Plan = Plan, PlanVersion = PlanVersion,
             PlanSent = PlanSent, CharsPerToken = CharsPerToken, Assistant = Assistant, Goal = Goal, GoalVersion = GoalVersion, GoalSent = GoalSent,
+            WorkProject = WorkProject,
         };
         copy.Stream.AddRange(Stream.Select(e => new SyncEntry
         {
@@ -308,6 +311,9 @@ internal sealed class SessionData
                 break;
             case "model":
                 Model = entry.Str("model") ?? Model;
+                break;
+            case "project":
+                WorkProject = entry.Str("id") is { Length: > 0 } project ? new WorkProject(project, entry.Str("name") ?? "") : null;
                 break;
             case "plan":
                 Plan = WorkPlan.FromJson(entry["plan"] as JsonObject);
@@ -498,6 +504,9 @@ internal sealed class SessionStore
 
     /// <summary>The chat in Arena the session is kept with (null: none any more, it was deleted there).</summary>
     public void Link(string? conversation) => Write(new JsonObject { ["type"] = "sync", ["conversation"] = conversation });
+
+    /// <summary>The project in Arena the session counts to from now on (null: none).</summary>
+    public void Project(WorkProject? project) => Write(new JsonObject { ["type"] = "project", ["id"] = project?.Id, ["name"] = project?.Name });
 
     /// <summary>What the session adds next goes on a branch of its own in Arena (the web moved elsewhere while it was on its way).</summary>
     public void Branch() => Write(new JsonObject { ["type"] = "branch" });

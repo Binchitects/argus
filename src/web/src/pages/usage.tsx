@@ -1,11 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
 import { Coins, Database, DatabaseZap, Hash, MessageSquareText } from 'lucide-react'
-import { useState } from 'react'
 import { useOutletContext } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { QueryError } from '@/components/app/query-state'
-import { Segmented } from '@/components/app/segmented'
 import { Stat, StatGrid } from '@/components/app/stat'
+import { ExportMenu, TimeWindow } from '@/components/app/time-window'
 import { TimeChart } from '@/components/charts/time-chart'
 import { DashboardView } from '@/components/dashboards/dashboard-view'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -15,7 +14,8 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { api, type Me } from '@/lib/api'
 import { formatValue, money } from '@/lib/format'
-import { intervalFor, presets, resolve } from '@/lib/time'
+import { intervalFor } from '@/lib/time'
+import { useTimeWindow } from '@/lib/use-time-window'
 import { PromptList } from './usage-prompts'
 
 export function UsagePage() {
@@ -31,7 +31,7 @@ export function UsagePage() {
             <TabsTrigger value="mine">Mine</TabsTrigger>
           </TabsList>
           <TabsContent value="everyone">
-            <DashboardView uid="usage-by-user" />
+            <DashboardView uid="usage-by-user" actions={(query) => <ExportMenu path="/api/admin/usage/export" query={query} label="Export everyone's" />} />
           </TabsContent>
           <TabsContent value="prompts">
             <PromptList everyone />
@@ -70,12 +70,11 @@ const modelColumns: ColumnDef<ModelUse>[] = [
 ]
 
 function MyUsage() {
-  const [from, setFrom] = useState('now-30d')
+  const time = useTimeWindow()
   const data = useQuery({
-    queryKey: ['usage', 'me', from],
+    queryKey: ['usage', 'me', time.key],
     queryFn: async ({ signal }) => {
-      const f = resolve(from)
-      const t = new Date()
+      const { from: f, to: t } = time.resolved()
       const q = new URLSearchParams({ from: f.toISOString(), to: t.toISOString(), intervalMs: String(Math.max(intervalFor(f, t, 60), 3_600_000)) })
       return { ...(await api<Mine>(`/api/usage/me?${q}`, { signal })), from: f.getTime(), to: t.getTime() }
     },
@@ -87,7 +86,10 @@ function MyUsage() {
   const cost = d?.series.filter((s) => s.name === 'cost').map((s) => ({ ...s, name: 'Cost' })) ?? []
   return (
     <div className="grid gap-6">
-      <Segmented label="Time range" value={from} onChange={setFrom} options={presets.map((p) => ({ value: p.from, label: p.label.replace('Last ', '') }))} />
+      <div className="flex flex-wrap items-center gap-2">
+        <TimeWindow value={time.range} onChange={time.set} />
+        <ExportMenu path="/api/usage/me/export" query={time.query} />
+      </div>
       {data.error && <QueryError error={data.error} retry={() => data.refetch()} />}
       {data.isPending && <Skeleton className="h-28" />}
       {t && (
@@ -142,7 +144,7 @@ function MyUsage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <PromptList from={from} />
+          <PromptList time={time} />
         </CardContent>
       </Card>
     </div>

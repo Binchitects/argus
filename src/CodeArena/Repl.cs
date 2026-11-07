@@ -64,9 +64,56 @@ internal sealed partial class Repl(Runtime rt)
         ("/skills import PATH [--mine]", "skills from a .zip, a SKILL.md or a folder, for the project (or yours); a name taken: --replace, --rename or --skip, else asked"),
         ("/NAME [words]", "use a skill, or a command of yours or the project's, with your words"),
         ("/commands", "your own and the project's commands, sub-agents and skills"),
+        ("/project [N|NAME|none]", "the project in Arena the session counts to, and those you may add to; N or NAME puts it (and this folder's next sessions) in one"),
         ("/sync [all]", "where this session stands with its chat in Arena; all sends this folder's sessions Arena never had"),
         ("/exit", "leave (also Ctrl+D, or Ctrl+C twice)"),
     ];
+
+    /// <summary>/project: the session's project in Arena and those the person may add to; /project N, NAME or none chooses.</summary>
+    private async Task ProjectCommandAsync(string arg, CancellationToken ct)
+    {
+        if (arg.Length > 0)
+        {
+            var (done, said) = await rt.ChooseProjectAsync(arg, ct);
+            if (done)
+            {
+                Ui.Line(said);
+            }
+            else
+            {
+                Ui.Error(said);
+            }
+            return;
+        }
+        Ui.Line(rt.WorkProject is { } now ? $"Project: {now.Name} — what this session uses counts to it." : "Project: none.");
+        Ui.StartSpinner("Asking Arena for its projects");
+        (WorkProjectList? List, string? Problem) asked;
+        try
+        {
+            asked = await rt.ProjectsAsync(ct);
+        }
+        finally
+        {
+            Ui.StopSpinner();
+        }
+        if (asked.List is not { } list)
+        {
+            Ui.Warn(asked.Problem!);
+            return;
+        }
+        if (list.Projects.Count == 0)
+        {
+            Ui.Info("You may add to no project in Arena yet: make one under Projects in Arena, or ask its owner to add you.");
+            return;
+        }
+        for (var i = 0; i < list.Projects.Count; i++)
+        {
+            var p = list.Projects[i];
+            var marks = (p.Id == rt.WorkProject?.Id ? " (this session's)" : "") + (p.Id == list.Suggested ? " (this repository's)" : "");
+            Ui.Line($"  {i + 1,3}  {p.Name}{Ui.Dim(marks)}");
+        }
+        Ui.Info("/project N or NAME puts this session, and the next ones in this folder, in it; /project none in none.");
+    }
 
     /// <summary>/index: the code index's state; rebuild builds it again; off and on for this session.</summary>
     private async Task IndexCommandAsync(string arg, CancellationToken ct)
@@ -1163,6 +1210,9 @@ internal sealed partial class Repl(Runtime rt)
                 break;
             case "/skills":
                 await SkillsCommandAsync(arg, ct);
+                break;
+            case "/project":
+                await ProjectCommandAsync(arg, ct);
                 break;
             case "/sync" when arg.Equals("all", StringComparison.OrdinalIgnoreCase):
                 Ui.StartSpinner("Sending this folder's sessions to Arena");

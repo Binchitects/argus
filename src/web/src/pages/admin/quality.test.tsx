@@ -79,9 +79,12 @@ describe('quality page', () => {
 
   it('asks for the time range chosen', async () => {
     const calls = fakeApi(admin, { 'GET /api/admin/quality': () => ({ json: quality }) })
-    renderApp('/admin/quality')
+    const { router } = renderApp('/admin/quality')
     await screen.findByRole('table', { name: 'By model' })
-    await userEvent.click(screen.getByRole('radio', { name: '7 days' }))
+    await userEvent.click(screen.getByRole('combobox', { name: 'Time range' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'Last 7 days' }))
+    // Kept in the address, as every report's window.
+    expect(new URLSearchParams(router.state.location.search).get('from')).toBe('now-7d')
     await waitFor(() => expect(calls.filter((c) => c.path.startsWith('/api/admin/quality?')).length).toBe(2))
     const asked = new URL(calls.filter((c) => c.path.startsWith('/api/admin/quality?')).at(-1)!.path, 'https://llm.test').searchParams
     const days = (new Date(asked.get('to')!).getTime() - new Date(asked.get('from')!).getTime()) / 86_400_000

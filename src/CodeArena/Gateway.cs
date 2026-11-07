@@ -97,6 +97,27 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
     /// <summary>Told before each new try: what failed, the wait, which try; and when an answer is slow to start.</summary>
     public Action<string>? Retrying { get; set; }
 
+    /// <summary>The tags each request carries in its metadata (its chat and project in Arena: <see cref="WorkProjects.Tags"/>); null: none.</summary>
+    public Func<IReadOnlyList<string>>? Tags { get; set; }
+
+    /// <summary>The request with its tags: Arena's gateway logs them, and its ledger counts the request to the project they name.</summary>
+    private JsonObject Tagged(JsonObject body)
+    {
+        var request = body.Clone();
+        if (Tags?.Invoke() is { Count: > 0 } tags)
+        {
+            var metadata = request["metadata"] as JsonObject ?? new JsonObject();
+            var kept = metadata["tags"] as JsonArray ?? [];
+            foreach (var tag in tags.Where(t => !kept.Any(k => k?.ToString() == t)))
+            {
+                kept.Add(tag);
+            }
+            metadata["tags"] = kept;
+            request["metadata"] = metadata;
+        }
+        return request;
+    }
+
     /// <summary>When the person is told that the answer has not started yet.</summary>
     public TimeSpan SlowNotice { get; set; } = TimeSpan.FromSeconds(60);
 
@@ -217,7 +238,7 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
     /// </param>
     public async Task<Completion> CompleteAsync(JsonObject body, IStreamSink? sink, CancellationToken ct, long uncached = 0)
     {
-        var request = body.Clone();
+        var request = Tagged(body);
         request["stream"] = true;
         request["stream_options"] = new JsonObject { ["include_usage"] = true };
         var shown = false;
@@ -563,7 +584,7 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
     public async Task<(string Text, TokenUsage? Usage)> TextCompleteAsync(JsonObject body, CancellationToken ct)
     {
         using var req = Request(HttpMethod.Post, "/v1/completions");
-        req.Content = new StringContent(body.ToJsonString(), Encoding.UTF8, "application/json");
+        req.Content = new StringContent(Tagged(body).ToJsonString(), Encoding.UTF8, "application/json");
         using var res = await Send(req, ct);
         var text = await res.Content.ReadAsStringAsync(ct);
         if (!res.IsSuccessStatusCode)

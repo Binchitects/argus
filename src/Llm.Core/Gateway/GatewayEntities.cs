@@ -37,6 +37,8 @@ public sealed class GatewayRequest
     /// <summary>What part of the app asked (title, safeguards, deck, meetings…), for its side requests.</summary>
     public string? Tag { get; set; }
     public Guid? ConversationId { get; set; }
+    /// <summary>The project it counts to (Llm.Core.Projects.Project): its chat's, or the one its caller tagged it with.</summary>
+    public Guid? ProjectId { get; set; }
     /// <summary>The model's name as callers ask for it.</summary>
     public required string Model { get; set; }
     /// <summary>Where it was answered: llamacpp, vllm:flash@1, remote:gpu2, imagegen…</summary>
