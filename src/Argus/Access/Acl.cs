@@ -17,6 +17,12 @@ public class AclDenied(string message, Exception? inner = null) : Exception(mess
 /// <summary>Who is asking, and which index repo ids they may read.</summary>
 public sealed record Identity(long UserId, string Username, IReadOnlyList<long> AllowedRepoIds)
 {
+    /// <summary>
+    /// The GitLab projects the person may read, by GitLab id: what access is kept as. Row ids
+    /// (<see cref="AllowedRepoIds"/>) are laid over them per request, from the rows there are then.
+    /// </summary>
+    public IReadOnlyList<long> AllowedProjects { get; init; } = [];
+
     /// <summary>How the person was identified, for the audit lines: api_key, gitlab_token, chat, argus_key.</summary>
     public string? Via { get; init; }
 
@@ -95,11 +101,16 @@ public static class Acl
     static Identity For(long userId, string username, List<long> repoIds, IEnumerable<long> gitlabIds)
     {
         var projects = gitlabIds.ToHashSet();
-        return new Identity(userId, username, repoIds) { MayRead = projects.Contains };
+        return new Identity(userId, username, repoIds) { MayRead = projects.Contains, AllowedProjects = projects.Order().ToList() };
     }
 
-    static Identity FromCache(Row cached) =>
-        For(cached.Long("user_id"), cached.Str("username"), Ids(cached.Str("repo_ids_json")), Ids(cached.StrOrNull("gitlab_ids_json")));
+    // The cache keeps GitLab ids only: the rows they are now are looked up on every request, so a row deleted and its
+    // id given to another repository can never be read through an allowlist kept from before.
+    static Identity FromCache(SqliteConnection conn, Row cached)
+    {
+        var gitlabIds = Ids(cached.StrOrNull("gitlab_ids_json"));
+        return For(cached.Long("user_id"), cached.Str("username"), MapToRepoIds(conn, gitlabIds), gitlabIds);
+    }
 
     public static Identity Resolve(SqliteConnection conn, GitLabConfig cfg, string token, HttpClient? client = null, Func<double>? now = null)
     {
@@ -110,7 +121,9 @@ public static class Acl
         var key = Hash(token);
         var cached = Writes.GetAclCache(conn, key);
         double? age = cached is null ? null : now() - cached.Long("fetched_at");
-        if (cached is not null && age >= 0 && age < TtlSeconds) return FromCache(cached);
+        // A row from before GitLab ids were kept holds row ids only: asked of GitLab again.
+        if (cached?.StrOrNull("gitlab_ids_json") is null) cached = null;
+        if (cached is not null && age >= 0 && age < TtlSeconds) return FromCache(conn, cached);
 
         var owns = client is null;
         client ??= Tls.ClientFor(cfg, 15.0);
@@ -131,7 +144,7 @@ public static class Acl
             if (cached is not null && age < StaleGraceSeconds)
             {
                 Console.Error.WriteLine($"GitLab is unwell ({exc.Message}); serving ACL cached {age:0}s ago");
-                return FromCache(cached);
+                return FromCache(conn, cached);
             }
             throw new AclDenied(
                 "Cannot verify your GitLab access right now and no recent cached " +
@@ -143,7 +156,7 @@ public static class Acl
         }
 
         var repoIds = MapToRepoIds(conn, gitlabIds);
-        Writes.UpsertAclCache(conn, key, userId, username, "[" + string.Join(", ", repoIds) + "]", (long)now(),
+        Writes.UpsertAclCache(conn, key, userId, username, "[]", (long)now(),
             "[" + string.Join(", ", gitlabIds.Distinct().Order()) + "]");
         return For(userId, username, repoIds, gitlabIds);
     }

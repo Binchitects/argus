@@ -33,7 +33,7 @@ public sealed class ServerTests : IDisposable
         var hidden = _ix.Repo(12, "grp/hidden");
         _ix.File(hidden, "h.c", "int Hidden;\n");
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        Writes.UpsertAclCache(_ix.Conn, Acl.Hash("tok-alice"), 5, "alice", $"[{_repo}]", now);
+        Writes.UpsertAclCache(_ix.Conn, Acl.Hash("tok-alice"), 5, "alice", "[]", now, "[11]");
 
         _app = ArgusServer.Create(_ix.Config(), configure: b => b.WebHost.UseTestServer());
         _app.StartAsync().GetAwaiter().GetResult();
@@ -598,7 +598,7 @@ public sealed class ServerWithoutAppTests : IDisposable
     public ServerWithoutAppTests()
     {
         var repo = _ix.Repo(11, "grp/alpha");
-        Writes.UpsertAclCache(_ix.Conn, Acl.Hash("tok-alice"), 5, "alice", $"[{repo}]", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        Writes.UpsertAclCache(_ix.Conn, Acl.Hash("tok-alice"), 5, "alice", "[]", DateTimeOffset.UtcNow.ToUnixTimeSeconds(), "[11]");
         _app = ArgusServer.Create(_ix.Config(), configure: b => b.WebHost.UseTestServer());
         _app.StartAsync().GetAwaiter().GetResult();
         _http = _app.GetTestClient();

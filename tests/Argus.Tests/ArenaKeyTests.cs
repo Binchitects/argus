@@ -7,6 +7,7 @@ using Argus.Access;
 using Argus.Configuration;
 using Argus.Server;
 using Argus.Store;
+using Argus.Util;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -194,7 +195,7 @@ public sealed class ArenaKeyServerTests : IAsyncLifetime
         var hidden = _ix.Repo(12, "grp/hidden");
         _ix.Symbol(hidden, _ix.File(hidden, "h.c", "int Hidden(void);\n"), "Hidden");
         // A GitLab token that would work in a standalone Argus: its access is cached already.
-        Writes.UpsertAclCache(_ix.Conn, Acl.Hash("glpat-alice"), 5, "alice", $"[{alpha}]", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        Writes.UpsertAclCache(_ix.Conn, Acl.Hash("glpat-alice"), 5, "alice", "[]", DateTimeOffset.UtcNow.ToUnixTimeSeconds(), "[11]");
 
         var cfg = _ix.Config() with { GitLab = GitLabConfig.Create(_platform.Url, "svc") };
         _app = ArgusServer.Create(cfg, configure: b => b.WebHost.UseTestServer());
@@ -271,11 +272,12 @@ public sealed class ArenaKeyServerTests : IAsyncLifetime
         var session = await McpCalls.Session(_http, "sk-alice");
         Assert.False((await McpCalls.Call(_http, "sk-alice", session, "find_symbol", new { name = "ChargeCard" }))["isError"]!.GetValue<bool>());
 
-        // Taken out of Argus; grp/hr-secrets, which only Bob may read, is indexed next and SQLite gives it the same row id.
+        // Taken out of Argus; grp/hr-secrets, which only Bob may read, is indexed under the same row id (as SQLite gave
+        // a deleted row's id to the next before repos.id was AUTOINCREMENT; written here by hand, since it no longer does).
         Writes.DeleteRepos(_ix.Conn, [payments]);
         _platform.Members[14] = [(7, "bob", "Bob", 40)];
-        var secrets = _ix.Repo(14, "grp/hr-secrets");
-        Assert.Equal(payments, secrets);
+        Sql.Exec(_ix.Conn, "INSERT INTO repos (id, gitlab_id, path_with_namespace, default_branch, branch, http_url) VALUES (?, 14, 'grp/hr-secrets', 'main', 'main', 'http://x/grp/hr-secrets.git')", payments);
+        var secrets = payments;
         _ix.Symbol(secrets, _ix.File(secrets, "salaries.c", "int SalaryTable(void);\n"), "SalaryTable");
 
         var notice = await McpCalls.Call(_http, "sk-alice", session, "find_symbol", new { name = "SalaryTable" });
@@ -414,7 +416,7 @@ public sealed class StandaloneTokenTests : IDisposable
         AuditLog.Writer = _log;
         var repo = _ix.Repo(11, "grp/alpha");
         _ix.Symbol(repo, _ix.File(repo, "src/decode.c", "int DecodeFrame(int x) { return x; }\n"), "DecodeFrame");
-        Writes.UpsertAclCache(_ix.Conn, Acl.Hash("glpat-alice"), 5, "alice", $"[{repo}]", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        Writes.UpsertAclCache(_ix.Conn, Acl.Hash("glpat-alice"), 5, "alice", "[]", DateTimeOffset.UtcNow.ToUnixTimeSeconds(), "[11]");
         _app = ArgusServer.Create(_ix.Config(), configure: b => b.WebHost.UseTestServer());
         _app.StartAsync().GetAwaiter().GetResult();
         _http = _app.GetTestClient();

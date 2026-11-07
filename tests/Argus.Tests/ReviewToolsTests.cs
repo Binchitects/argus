@@ -728,8 +728,69 @@ public sealed class ProjectRightsTests
         Assert.True(alice.MayRead(40));
         Assert.False(alice.MayRead(12));
 
+        // A row kept before GitLab ids were (row ids only) is not served: GitLab is asked, and here it cannot be.
         Writes.UpsertAclCache(ix.Conn, Acl.Hash("glpat-old"), 6, "old", $"[{repo}]", now);
-        Assert.False(Acl.Resolve(ix.Conn, cfg, "glpat-old", now: () => now).MayRead(11));
+        Assert.Throws<AclDenied>(() => Acl.Resolve(ix.Conn, cfg, "glpat-old", now: () => now));
+    }
+
+    [Fact]
+    public void A_repository_deleted_and_its_row_id_reused_inside_the_cache_time_is_never_read_through_the_cache()
+    {
+        using var ix = new TestIndex();
+        var alpha = ix.Repo(11, "grp/alpha");
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var cfg = GitLabConfig.Create("http://127.0.0.1:9", "svc");
+        Writes.UpsertAclCache(ix.Conn, Acl.Hash("glpat-alice"), 5, "alice", "[]", now, "[11]");
+        Assert.Equal([alpha], Acl.Resolve(ix.Conn, cfg, "glpat-alice", now: () => now).AllowedRepoIds);
+
+        // alpha is deleted, and a repository alice cannot read is indexed with the same row id (as SQLite gave a
+        // deleted row's id to the next one before ids were AUTOINCREMENT): five minutes later, inside the cache's time.
+        Sql.Exec(ix.Conn, "DELETE FROM repos WHERE id = ?", alpha);
+        Sql.Exec(ix.Conn, "INSERT INTO repos (id, gitlab_id, path_with_namespace, default_branch, branch, http_url) VALUES (?, 99, 'grp/secret', 'main', 'main', 'u')", alpha);
+        var later = Acl.Resolve(ix.Conn, cfg, "glpat-alice", now: () => now + 300);
+        Assert.Empty(later.AllowedRepoIds);
+        Assert.Equal([11L], later.AllowedProjects);
+        Assert.False(later.MayRead(99));
+    }
+
+    [Fact]
+    public void Upgrading_an_index_with_data_keeps_every_row_and_its_id_and_makes_ids_never_reused()
+    {
+        using var dir = new TempDir();
+        var db = Path.Combine(dir.Path, "index.db");
+        long alpha, beta, file;
+        using (var conn = Db.Connect(db))
+        {
+            Assert.Equal(24, Db.Migrate(conn, upTo: 24));
+            alpha = Writes.UpsertRepo(conn, 11, "grp/alpha", "main", "http://x/a.git", "main");
+            beta = Writes.UpsertRepo(conn, 12, "grp/beta", "main", "http://x/b.git", "main");
+            file = Writes.UpsertFile(conn, beta, "src/b.c", "c", 3, "sha-b", "int");
+            Writes.ReplaceSymbols(conn, beta, file, [new Writes.SymbolRow("b", "function", 1, 1, "()", null, 1, null)], "2:x");
+            Writes.UpsertAclCache(conn, Acl.Hash("glpat-x"), 5, "x", $"[{alpha}]", 1000, "[11]");
+        }
+        using (var conn = Db.Open(db))
+        {
+            Assert.Equal([alpha, beta], Sql.QueryList(conn, "SELECT id FROM repos ORDER BY id", []).Select(r => r.Long("id")));
+            Assert.Equal(1L, Convert.ToInt64(Sql.Scalar(conn, "SELECT COUNT(*) FROM symbols WHERE repo_id = ?", beta)));
+            Assert.Equal(beta, Convert.ToInt64(Sql.Scalar(conn, "SELECT repo_id FROM files WHERE id = ?", file)));
+            Assert.Empty(Sql.QueryList(conn, "PRAGMA foreign_key_check", []));
+            // Allowlists kept as row ids are asked of GitLab again.
+            Assert.Equal(0L, Convert.ToInt64(Sql.Scalar(conn, "SELECT COUNT(*) FROM acl_cache")));
+            // Deleting still takes a repository's files with it, and its id is not given again.
+            Sql.Exec(conn, "DELETE FROM repos WHERE id = ?", beta);
+            Assert.Equal(0L, Convert.ToInt64(Sql.Scalar(conn, "SELECT COUNT(*) FROM files")));
+            Assert.True(Writes.UpsertRepo(conn, 13, "grp/gamma", "main", "http://x/c.git", "main") > beta);
+        }
+    }
+
+    [Fact]
+    public void A_deleted_repositorys_row_id_is_never_given_to_the_next_one()
+    {
+        using var ix = new TestIndex();
+        ix.Repo(11, "grp/alpha");
+        var beta = ix.Repo(12, "grp/beta");
+        Sql.Exec(ix.Conn, "DELETE FROM repos WHERE id = ?", beta);
+        Assert.True(ix.Repo(13, "grp/gamma") > beta);
     }
 }
 

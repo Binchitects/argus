@@ -36,14 +36,10 @@ release ships.
 
 ## Open from the 2026-11-06 list
 
-Everything on it shipped in v7.8.0 to v7.8.3, except what needs the hardware
-below, and two parts kept out on purpose:
-
-1. **The LMDeploy image in the bundle.** pypi.org stalls from the build
-   host's network, so it was built only with a third-party mirror; it ships
-   once it builds from pypi.org (or the company's own mirror).
-2. **VS Code extensions that need their own code** (an extension host), in
-   Next below.
+Everything on it shipped in v7.8.0 to v7.8.4, except what needs the hardware
+below, and VS Code extensions that need their own code (an extension host, in
+Next below). The LMDeploy image is in the bundle since v7.8.4, built from
+pypi.org through an HTTP proxy (`arenactl --proxy`).
 
 ## Needs the production host (3x H200 NVL)
 
@@ -69,7 +65,8 @@ program, and Edge or Chrome 109.
    the lines, tests and owners. A Code map page, call and type hierarchy in
    Code Arena, an Impact card on reviews; `symbol_graph`, `mr_impact` and
    `service_contracts` for agents. Design: [argus-graph.md](design/argus-graph.md),
-   31 commits; the headline is reachable at commit 27.
+   31 commits; the headline is reachable at commit 27. Done: 1 (access kept as
+   GitLab project ids, repository row ids never reused).
 2. **The app's own gateway**, commits 10 to 21 of
    [own-gateway.md](design/own-gateway.md). LiteLLM goes only after the
    measured gates and a day's soak.
