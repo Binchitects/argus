@@ -15,6 +15,72 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v7.8.3 (2026-11-07)
+
+Projects in Code Arena, tool calls on every engine, an IDE with notebooks and
+a merge editor, and access that no one can widen beyond their own.
+
+### :rocket: Epics and highlights
+
+- **Projects in Code Arena.** A Projects view in the IDE (Mine, Global, All I
+  see, New project), a project's page in an editor tab (the same page as
+  Arena's: figures with the time window and exports, goals and tasks, what is
+  in it, people, settings), the session's project in the status bar, and
+  `/projects`, `/project` (with its last 7 days and open goals) and
+  `/project new NAME` in the terminal. Arena decides every permission.
+- **Tool calls and thinking on every engine.** vLLM, SGLang and LMDeploy are
+  started with the tool-call and reasoning parsers of the model's family
+  (about 30 families), chosen automatically or under Edit → Advanced; before,
+  a chat with tools failed on vLLM and LMDeploy and came back as text on
+  SGLang. Checked on the GPU: each engine answers a tool call, and a thinking
+  model's thinking comes apart from its answer.
+- **The IDE closes on VS Code.** A merge editor (Accept Current, Incoming or
+  Both above each conflict, and a 3-way editor with Complete Merge), Jupyter
+  notebooks (cells, outputs with pictures and plots, a kernel in the
+  project's Python), multi-root `.code-workspace` files, and project and user
+  snippets.
+- **Access no one can widen.** Every change to roles, assignments, rules and
+  groups is compared before and after, group by group, and refused when it
+  would give anyone a permission the person making it does not hold; only an
+  Owner makes or changes an Owner; resets and re-enabling work only on people
+  who hold nothing beyond the one doing it.
+
+### :sparkles: New features & Enhancements
+
+- **Leaner context.** Tool results the model has used go as a summary, a
+  file read as its outline and the lines cited, an older read of a file read
+  again is dropped, each readable whole again; tool calls named or written
+  as other harnesses write them are mended. Measured: −70% characters on a
+  scripted long session; with Qwen3.8 27B on short tasks, 7 of 7 tasks
+  passed against 6, 15% quicker.
+- **What a person may not use is hidden everywhere**: calls, remix, sharing,
+  Fix it, Code Studio's parts, account pages, admin pages' change controls.
+- **Short model cards**: name, status, a line, problems and the main buttons;
+  everything else in Details.
+- **One time window on every report**: chargeback, traces, logs,
+  leaderboard, audit, prompts, feedback and Argus's own, with custom ranges.
+- **Every setting in the UI**: replicas, dashboards' scrape interval,
+  company knowledge's embeddings, security watching, the admin group, the
+  Hugging Face mirror; and Code Arena's own options in its Settings.
+- **Code Arena starts with no console window on Windows** from
+  `code-arena-ide.exe`, a small launcher beside it, with desktop and Start
+  menu shortcuts.
+- **VMs**: make, clone and delete them too, on each hypervisor.
+- **Strata and LMDeploy run for real**: Strata served Qwen3.8-Flash-Next
+  (93.7 GB of files) on a 24 GB GPU with tool calls; LMDeploy's image builds
+  with a mirror where the network stalls (`LMDEPLOY_APT_MIRROR`,
+  `LMDEPLOY_PIP_INDEX`).
+
+### :bug: Bugs fixed
+
+- A report's custom range closed as soon as it opened.
+- A holder of `people.edit` could make anyone Owner, and other admin
+  permissions could grant roles, Owner or a password reset beyond their own;
+  Code Arena's memory did not check `feature.memory`.
+- Argus's indexing page called repositories "refs".
+- Code Studio's IDE got 501 for its POST requests through the app.
+- The offline test asked an older release for features newer than it.
+
 ## v7.8.2 (2026-11-07)
 
 Projects with their accounting and reports, permissions redone, an IDE that
