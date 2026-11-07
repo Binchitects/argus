@@ -193,6 +193,46 @@ internal sealed class VirtualMachines(IReadOnlyList<Hypervisor> hosts, GuestLogi
         },
         new()
         {
+            Name = "vm_create",
+            Kind = ToolKind.Machine,
+            Description = "Make a new VM, or clone one. create: an empty disk and the installer's ISO (a file on this machine) in its drive, booting " +
+                "from it; start it with gui: true and install its system (by vm_screenshot and vm_input, or the person in its window), then its guest " +
+                "tools or agent, which commands and files in it need. clone: a copy of a VM that is off, of its state now or of a snapshot " +
+                "(linked: sharing the snapshot's disk, where VirtualBox or VMware can), to test in without touching the original.",
+            Parameters = LocalTools.Schema($$$"""
+                {"type":"object","properties":{
+                  "action":{"type":"string","enum":["create","clone"]},
+                  "name":{"type":"string","description":"The new VM's name: letters, digits, spaces, '.', '-' and '_'."},
+                  "vm":{"type":"string","description":"clone: the VM to copy."},
+                  "hypervisor":{"type":"string","enum":["virtualbox","vmware","libvirt","hyperv"],"description":"create: where, when more than one is here."},
+                  "iso":{"type":"string","description":"create: the installer's ISO, a path on this machine."},
+                  "os":{"type":"string","enum":["linux","windows","other"],"description":"create: its guest system (default linux)."},
+                  "memory":{"type":"integer","description":"create: MB of memory (default {{{DefaultMemory}}})."},
+                  "cpus":{"type":"integer","description":"create: processors (default 2)."},
+                  "disk":{"type":"integer","description":"create: GB of disk, grown as it fills (default {{{DefaultDisk}}})."},
+                  "snapshot":{"type":"string","description":"clone: copy this snapshot instead of its state now."},
+                  "linked":{"type":"boolean","description":"clone: share the snapshot's disk instead of copying it (needs snapshot)."}},
+                  "required":["action","name"]}
+                """),
+            Summary = a => a.Str("action") == "clone" ? $"clone {a.Str("vm")} as {a.Str("name")}" : $"create {a.Str("name")}",
+            Run = (a, c, ct) => CreateAsync(a, c, ct),
+        },
+        new()
+        {
+            Name = "vm_delete",
+            Kind = ToolKind.Machine,
+            // Its disks go for good: the person is asked each time, in every mode.
+            AlwaysAsks = true,
+            Description = "Delete a VM that is off, with its disks and snapshots, for good (an ISO in its drive stays). The person is asked each time. " +
+                "Use it for VMs you made or cloned to test in.",
+            Parameters = LocalTools.Schema("""
+                {"type":"object","properties":{"vm":{"type":"string","description":"The VM's name."}},"required":["vm"]}
+                """),
+            Summary = a => $"delete {a.Str("vm")}",
+            Run = (a, c, ct) => DeleteAsync(a, ct),
+        },
+        new()
+        {
             Name = "vm_test",
             Kind = ToolKind.Machine,
             Description = "Test a build in a VM from a clean state, in one call: restore the snapshot, start the VM and wait for its guest, copy the " +
@@ -216,6 +256,84 @@ internal sealed class VirtualMachines(IReadOnlyList<Hypervisor> hosts, GuestLogi
     ];
 
     private static string Required(JsonObject a, string name) => a.Str(name) is { Length: > 0 } v ? v : throw new ToolError($"{name} is required.");
+
+    /// <summary>A new VM's memory (MB) and disk (GB) when none is said.</summary>
+    public const int DefaultMemory = 2048;
+    public const int DefaultDisk = 20;
+
+    /// <summary>A name every hypervisor takes as a VM's and a folder's.</summary>
+    private static string NewName(JsonObject a) =>
+        Required(a, "name").Trim() is var name && name.Length <= 64 && System.Text.RegularExpressions.Regex.IsMatch(name, "^[A-Za-z0-9][A-Za-z0-9 ._-]*$") && !name.EndsWith('.')
+            ? name : throw new ToolError("name is up to 64 letters, digits, spaces, '.', '-' and '_', starting with a letter or digit.");
+
+    private async Task<ToolResult> CreateAsync(JsonObject a, ToolContext c, CancellationToken ct)
+    {
+        var name = NewName(a);
+        var (vms, _) = await ListAsync(ct);
+        if (Required(a, "action") == "clone")
+        {
+            var source = await FindAsync(a.Str("vm"), ct);
+            if (source.Running)
+            {
+                throw new ToolError($"{source.Name} is running: a clone is made of a VM that is off. Stop it first (vm_power).");
+            }
+            if (vms.Any(v => v.Host == source.Host && string.Equals(v.Name, name, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new ToolError($"{source.Host.Title} has a VM named {name} already.");
+            }
+            var snapshot = a.Str("snapshot") is { Length: > 0 } s ? s : null;
+            var linked = a.Bool("linked") == true;
+            if (linked && snapshot is null)
+            {
+                throw new ToolError("A linked clone shares a snapshot's disk: name the snapshot.");
+            }
+            if (snapshot is not null && !(await source.Host.SnapshotsAsync(source, ct)).Contains(snapshot))
+            {
+                throw new ToolError($"{source.Name} has no snapshot {snapshot}.");
+            }
+            var copy = await source.Host.CloneAsync(source, name, snapshot, linked, ct);
+            return new ToolResult($"Cloned {source.Name} as {copy.Name} on {source.Host.Title}{(snapshot is null ? "" : $", from {snapshot}")}{(linked ? ", linked to it" : "")} (id {copy.Id}). It is off: start it with vm_power.");
+        }
+        var host = a.Str("hypervisor") is { Length: > 0 } kind
+            ? Hosts.FirstOrDefault(h => h.Kind == kind) ?? throw new ToolError($"There is no {kind} here: there is {string.Join(", ", Hosts.Select(h => h.Kind))}.")
+            : Hosts.Count == 1 ? Hosts[0] : throw new ToolError($"Say which hypervisor: {string.Join(", ", Hosts.Select(h => h.Kind))}.");
+        if (vms.Any(v => v.Host == host && string.Equals(v.Name, name, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new ToolError($"{host.Title} has a VM named {name} already.");
+        }
+        string? iso = null;
+        if (a.Str("iso") is { Length: > 0 } given)
+        {
+            iso = Path.GetFullPath(given, c.Workspace.Root);
+            if (!File.Exists(iso))
+            {
+                throw new ToolError($"There is no ISO {given} here.");
+            }
+        }
+        var os = a.Str("os") is { Length: > 0 } o ? o : "linux";
+        if (os is not ("linux" or "windows" or "other"))
+        {
+            throw new ToolError($"os is linux, windows or other, not {os}.");
+        }
+        var spec = new VmSpec(name, Math.Clamp(a.Int("memory") ?? DefaultMemory, 256, 1024 * 1024), Math.Clamp(a.Int("cpus") ?? 2, 1, 128), Math.Clamp(a.Int("disk") ?? DefaultDisk, 1, 64 * 1024), iso, os);
+        var vm = await host.CreateAsync(spec, ct);
+        return new ToolResult($"Made {vm.Name} on {host.Title} ({spec.Shown}; id {vm.Id}). It is off. " +
+            (iso is null ? "Its disk is empty and nothing is in its drive: make it again with an iso to install a system from, or clone a VM that has one."
+                : "Start it with vm_power (gui: true opens its window) to install its system from the ISO, then install its guest tools (VirtualBox's " +
+                  "Guest Additions, VMware Tools, qemu-guest-agent, or a Windows guest's PowerShell for Hyper-V), and take a snapshot of the clean state for vm_test."));
+    }
+
+    private async Task<ToolResult> DeleteAsync(JsonObject a, CancellationToken ct)
+    {
+        var vm = await FindAsync(a.Str("vm"), ct);
+        if (vm.Running)
+        {
+            throw new ToolError($"{vm.Name} is running: stop it first (vm_power).");
+        }
+        await vm.Host.DeleteAsync(vm, ct);
+        Logins.Refused(vm);
+        return new ToolResult($"Deleted {vm.Name} from {vm.Host.Title}, with its disks and snapshots.");
+    }
 
     /// <summary>Runs an action with the VM's sign-in when its hypervisor needs one; what goes back has the password blanked.</summary>
     private async Task<T> AsGuestAsync<T>(VmInfo vm, GuestNeed need, CancellationToken ct, Func<GuestLogin?, Task<T>> act)
@@ -649,7 +767,43 @@ internal sealed class VirtualMachines(IReadOnlyList<Hypervisor> hosts, GuestLogi
 /// <summary>code-arena vm: the VMs here, and the guests' sign-ins kept in the keyring (login, forget), without a model.</summary>
 internal static class VmCommand
 {
-    public const string Usage = "code-arena vm list | vm login VM | vm forget VM";
+    public const string Usage = "code-arena vm list [VM] | vm login VM | vm forget VM | vm start VM [--gui] | vm stop VM [--force] | " +
+        "vm create NAME [--iso FILE] [--os linux|windows|other] [--memory MB] [--cpus N] [--disk GB] [--hypervisor KIND] | " +
+        "vm clone VM NAME [--snapshot S] [--linked] | vm delete VM [--yes]";
+
+    private static JsonObject With(JsonObject o, params (string Key, string Value)[] set)
+    {
+        foreach (var (key, value) in set)
+        {
+            o[key] = value;
+        }
+        return o;
+    }
+
+    /// <summary>"--iso a.iso --linked": the options after the words, as a tool's arguments (a flag alone is true).</summary>
+    internal static JsonObject Options(IEnumerable<string> words)
+    {
+        var o = new JsonObject();
+        var list = words.ToList();
+        for (var i = 0; i < list.Count; i++)
+        {
+            if (!list[i].StartsWith("--", StringComparison.Ordinal))
+            {
+                throw new ToolError($"{list[i]} is not an option ({Usage}).");
+            }
+            var key = list[i][2..];
+            if (i + 1 < list.Count && !list[i + 1].StartsWith("--", StringComparison.Ordinal))
+            {
+                var value = list[++i];
+                o[key] = int.TryParse(value, CultureInfo.InvariantCulture, out var n) && key is "memory" or "cpus" or "disk" ? n : value;
+            }
+            else
+            {
+                o[key] = true;
+            }
+        }
+        return o;
+    }
 
     public static async Task<int> RunAsync(string[] args, CliEnv env, CancellationToken ct)
     {
@@ -664,12 +818,37 @@ internal static class VmCommand
         var machines = new VirtualMachines(hosts, new GuestLogins(keyring, ui), () => false);
         try
         {
+            // The tools' own calls, as the agent makes them, in the folder it is run in.
+            async Task<int> Tool(string name, JsonObject a)
+            {
+                var result = await machines.Tools().Single(t => t.Name == name).Run(a, new ToolContext { Workspace = new Workspace(env.Cwd), Ui = ui }, ct);
+                (result.Error ? env.Err : env.Out).WriteLine(result.Error ? $"code-arena: {result.Text}" : result.Text);
+                return result.Error ? 1 : 0;
+            }
             switch (args)
             {
                 case [] or ["list"]:
                     var list = await machines.ListToolAsync([], ct);
                     env.Out.WriteLine(list.Text);
                     return 0;
+                case ["list", var one]:
+                    return await Tool("vm_list", new JsonObject { ["vm"] = one });
+                case ["start", var name, .. var rest]:
+                    return await Tool("vm_power", With(Options(rest), ("vm", name), ("action", "start")));
+                case ["stop", var name, .. var rest]:
+                    return await Tool("vm_power", With(Options(rest), ("vm", name), ("action", "stop")));
+                case ["create", var name, .. var rest]:
+                    return await Tool("vm_create", With(Options(rest), ("name", name), ("action", "create")));
+                case ["clone", var source, var name, .. var rest]:
+                    return await Tool("vm_create", With(Options(rest), ("vm", source), ("name", name), ("action", "clone")));
+                case ["delete", var name, .. var rest]:
+                    var yes = Options(rest).Bool("yes") == true;
+                    if (!yes && !(env.InTerminal && ui.Answer($"Delete {name} with its disks and snapshots, for good? [y/N]")?.Trim().ToLowerInvariant() is "y" or "yes"))
+                    {
+                        env.Err.WriteLine(env.InTerminal ? "code-arena: nothing deleted." : "code-arena: deleting a VM asks first: add --yes to delete it without asking.");
+                        return 1;
+                    }
+                    return await Tool("vm_delete", new JsonObject { ["vm"] = name });
                 case ["login", var name]:
                     var vm = await machines.FindAsync(name, ct);
                     if (!keyring.CanSave)

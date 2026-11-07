@@ -77,4 +77,23 @@ public sealed class CodeArenaVmTests : IDisposable
         permissions.Mode = Ca.Mode.Plan;
         Assert.Contains("read-only", await permissions.CheckAsync(tools.Single(t => t.Name == "vm_snapshot"), new JsonObject { ["vm"] = "test-vm" }, default));
     }
+
+    [Fact]
+    [Trait("Control", "IAM-05")]
+    public async Task Deleting_a_VM_asks_the_person_every_time_in_every_mode()
+    {
+        var (machines, _) = Machines("");
+        var delete = machines.Tools().Single(t => t.Name == "vm_delete");
+        var output = new StringWriter();
+        var permissions = new Ca.Permissions(new Ca.Ui(new StringReader("n\ny\nn\n"), output, output, false, true), Ca.Mode.Yolo);
+        var vm = new JsonObject { ["vm"] = "test-vm" };
+        // No "always": an answer covers that call alone, and the next is asked again.
+        Assert.Contains("declined", await permissions.CheckAsync(delete, vm, default));
+        Assert.Null(await permissions.CheckAsync(delete, vm, default));
+        Assert.Contains("declined", await permissions.CheckAsync(delete, vm, default));
+        Assert.DoesNotContain("[a]lways", output.ToString(), StringComparison.Ordinal);
+        // Where nobody can be asked, nothing is deleted.
+        var headless = new Ca.Permissions(new Ca.Ui(TextReader.Null, TextWriter.Null, TextWriter.Null, false, false), Ca.Mode.Yolo);
+        Assert.Contains("cannot ask", await headless.CheckAsync(delete, vm, default));
+    }
 }

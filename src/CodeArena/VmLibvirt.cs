@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.Json.Nodes;
+using System.Xml.Linq;
 
 namespace CodeArena;
 
@@ -86,6 +87,106 @@ internal sealed class Libvirt(string program, string uri) : Hypervisor(program)
 
     public override async Task<bool> ReadyAsync(VmInfo vm, GuestLogin? login, CancellationToken ct) =>
         await AgentAsync(vm, new JsonObject { ["execute"] = "guest-ping" }, ct, quiet: true) is not null;
+
+    /// <summary>The storage pool new disks go in (LIBVIRT_POOL; libvirt's own is "default").</summary>
+    public string Pool { get; init; } = "default";
+
+    /// <summary>
+    /// A qcow2 volume in the pool, then the machine defined around it: KVM, the host's CPU, a virtio disk and network
+    /// (libvirt's default network), the ISO as a CD-ROM booted first, a VNC screen with a tablet (for clicks), and the QEMU
+    /// guest agent's channel, which commands and files need once qemu-guest-agent runs in the guest.
+    /// </summary>
+    public override async Task<VmInfo> CreateAsync(VmSpec spec, CancellationToken ct)
+    {
+        var volume = spec.Name + ".qcow2";
+        await MustAsync([.. C, "vol-create-as", Pool, volume, $"{spec.DiskGb}G", "--format", "qcow2"], Long, ct);
+        var file = HostTemp(".xml");
+        try
+        {
+            var disk = (await MustAsync([.. C, "vol-path", "--pool", Pool, volume], Short, ct)).Trim();
+            await File.WriteAllTextAsync(file, DomainXml(spec, disk), ct);
+            await MustAsync([.. C, "define", file], Short, ct);
+        }
+        catch (Exception e) when (e is ToolError or IOException or OperationCanceledException)
+        {
+            await CallAsync([.. C, "vol-delete", "--pool", Pool, volume], Short, CancellationToken.None);
+            throw;
+        }
+        finally
+        {
+            Delete(file);
+        }
+        return new VmInfo(spec.Name, spec.Name, this, false);
+    }
+
+    /// <summary>A new machine's domain XML.</summary>
+    internal static string DomainXml(VmSpec spec, string disk)
+    {
+        var devices = X("devices", [],
+            X("disk", [("type", "file"), ("device", "disk")],
+                X("driver", [("name", "qemu"), ("type", "qcow2")]), X("source", [("file", disk)]), X("target", [("dev", "vda"), ("bus", "virtio")]), X("boot", [("order", "2")])),
+            X("interface", [("type", "network")], X("source", [("network", "default")]), X("model", [("type", "virtio")])),
+            X("graphics", [("type", "vnc"), ("autoport", "yes")]),
+            X("video", [], X("model", [("type", "virtio")])),
+            X("input", [("type", "tablet"), ("bus", "usb")]),
+            X("channel", [("type", "unix")], X("target", [("type", "virtio"), ("name", "org.qemu.guest_agent.0")])));
+        if (spec.Iso is { } iso)
+        {
+            devices.Add(X("disk", [("type", "file"), ("device", "cdrom")],
+                X("driver", [("name", "qemu"), ("type", "raw")]), X("source", [("file", iso)]), X("target", [("dev", "sda"), ("bus", "sata")]), X("readonly", []), X("boot", [("order", "1")])));
+        }
+        var domain = X("domain", [("type", "kvm")],
+            new XElement("name", spec.Name),
+            new XElement("memory", new XAttribute("unit", "MiB"), spec.MemoryMb),
+            new XElement("vcpu", spec.Cpus),
+            X("os", [], new XElement("type", new XAttribute("arch", "x86_64"), "hvm")),
+            X("features", [], X("acpi", []), X("apic", [])),
+            X("cpu", [("mode", "host-passthrough")]),
+            devices);
+        if (spec.Os == "windows")
+        {
+            // libvirt's hint that the guest is Windows (Hyper-V's enlightenments, a Windows clock): what WindowsAsync reads too.
+            XNamespace os = "http://libosinfo.org/xmlns/libvirt/domain/1.0";
+            domain.Add(X("metadata", [], new XElement(os + "libosinfo", new XElement(os + "os", new XAttribute("id", "http://microsoft.com/win/11")))));
+        }
+        return domain.ToString();
+    }
+
+    private static XElement X(string name, (string Name, string Value)[] attributes, params object[] children) =>
+        new(name, [.. attributes.Select(a => new XAttribute(a.Name, a.Value)), .. children]);
+
+    /// <summary>virt-clone (virtinst), beside virsh or on PATH: it copies each disk and gives the copy its own id and MAC.</summary>
+    public override async Task<VmInfo> CloneAsync(VmInfo vm, string name, string? snapshot, bool linked, CancellationToken ct)
+    {
+        if (snapshot is not null || linked)
+        {
+            throw new ToolError("libvirt clones a VM as it is now, into full copies of its disks: restore the snapshot first (vm_snapshot), then clone it without snapshot or linked.");
+        }
+        var dirs = new[] { Path.GetDirectoryName(Program) }.Concat((Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries));
+        var cloner = dirs.OfType<string>().Select(d => Path.Combine(d, "virt-clone")).FirstOrDefault(File.Exists)
+            ?? throw new ToolError("Cloning on libvirt needs virt-clone (the virtinst package: apt install virtinst, dnf install virt-install).");
+        var psi = new System.Diagnostics.ProcessStartInfo(cloner);
+        foreach (var a in new[] { "--connect", uri, "--original", vm.Id, "--name", name, "--auto-clone" })
+        {
+            psi.ArgumentList.Add(a);
+        }
+        var r = await Proc.PipeAsync(psi, "", Long, 1024 * 1024, ct);
+        if (r.ExitCode != 0 || r.TimedOut)
+        {
+            throw new ToolError(r.TimedOut ? $"virt-clone did not end within {Fmt.Duration(Long)}." : $"virt-clone: {Said(r)}");
+        }
+        return new VmInfo(name, name, this, false);
+    }
+
+    /// <summary>undefine with its snapshots' records, saved state and UEFI variables, and the volumes of its disks (not a CD-ROM's ISO).</summary>
+    public override async Task DeleteAsync(VmInfo vm, CancellationToken ct)
+    {
+        // Type, Device, Target, Source.
+        var disks = (await MustAsync([.. C, "domblklist", vm.Id, "--details"], Short, ct)).Split('\n', StringSplitOptions.TrimEntries)
+            .Select(l => l.Split((char[]?)null, 4, StringSplitOptions.RemoveEmptyEntries))
+            .Where(c => c.Length == 4 && c[1] == "disk" && c[3] != "-").Select(c => c[2]).ToList();
+        await MustAsync([.. C, "undefine", vm.Id, "--snapshots-metadata", "--managed-save", "--nvram", .. disks.Count > 0 ? new[] { "--storage", string.Join(',', disks) } : []], Long, ct);
+    }
 
     /// <summary>A guest agent command's "return"; null when quiet and it failed (the agent does not answer).</summary>
     private async Task<JsonNode?> AgentAsync(VmInfo vm, JsonObject command, CancellationToken ct, bool quiet = false)

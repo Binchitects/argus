@@ -22,6 +22,9 @@ internal sealed partial class Vmware(string program, string type, Func<string, s
 
     private IEnumerable<string> T => ["-T", type];
 
+    /// <summary>The device of VMware's monitor module on Linux (vmmon), without which no VM starts.</summary>
+    internal static string MonitorDevice { get; set; } = "/dev/vmmon";
+
     /// <summary>The guest's sign-in, before the command (as vmrun wants it).</summary>
     private static IEnumerable<string> As(GuestLogin? login) =>
         login is null ? throw new ToolError("VMware needs the guest's user and password for this.") : ["-gu", login.User, "-gp", login.Password];
@@ -72,8 +75,132 @@ internal sealed partial class Vmware(string program, string type, Func<string, s
                 seen.Add((value, values.GetValueOrDefault(stem + ".DisplayName") is { Length: > 0 } name ? name : null));
             }
         }
+        // The VMs in VMware's folder for new ones (vm_create makes its own there), each in a folder of its own.
+        if (Folder() is { } folder && Directory.Exists(folder))
+        {
+            foreach (var vmx in Directory.EnumerateDirectories(folder).SelectMany(d => Directory.EnumerateFiles(d, "*.vmx")).Order(StringComparer.Ordinal))
+            {
+                if (!seen.Any(s => Same(s.Item1, vmx)))
+                {
+                    seen.Add((vmx, null));
+                }
+            }
+        }
         return seen;
     }
+
+    /// <summary>
+    /// The folder VMware makes new VMs in: its preference (prefvmx.defaultVMPath), else its default (~/vmware on Linux,
+    /// Documents\Virtual Machines on Windows, ~/Virtual Machines.localized on macOS).
+    /// </summary>
+    public string? Folder()
+    {
+        var home = env("HOME") ?? env("USERPROFILE");
+        if (home is null)
+        {
+            return null;
+        }
+        var prefs = OperatingSystem.IsWindows() ? Path.Combine(env("APPDATA") ?? "", "VMware", "preferences.ini")
+            : OperatingSystem.IsMacOS() ? Path.Combine(home, "Library", "Preferences", "VMware Fusion", "preferences")
+            : Path.Combine(home, ".vmware", "preferences");
+        if (File.Exists(prefs) && File.ReadLines(prefs).Select(l => Setting().Match(l)).FirstOrDefault(m => m.Success && m.Groups[1].Value.Equals("prefvmx.defaultVMPath", StringComparison.OrdinalIgnoreCase)) is { } set
+            && set.Groups[2].Value.Length > 0)
+        {
+            return set.Groups[2].Value;
+        }
+        return OperatingSystem.IsWindows() ? Path.Combine(home, "Documents", "Virtual Machines")
+            : OperatingSystem.IsMacOS() ? Path.Combine(home, "Virtual Machines.localized") : Path.Combine(home, "vmware");
+    }
+
+    /// <summary>vmware-vdiskmanager, which makes a VM's disk: beside vmrun, else on PATH.</summary>
+    private string DiskManager()
+    {
+        var name = OperatingSystem.IsWindows() ? "vmware-vdiskmanager.exe" : "vmware-vdiskmanager";
+        var dirs = new[] { Path.GetDirectoryName(Program) }.Concat((env("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries));
+        return dirs.OfType<string>().Select(d => Path.Combine(d, name)).FirstOrDefault(File.Exists)
+            ?? throw new ToolError($"{Title} has no vmware-vdiskmanager here to make a disk with (VMware Player leaves it out): make the VM in VMware's window, or clone one.");
+    }
+
+    /// <summary>
+    /// A folder of its own in VMware's folder: a growable disk (vmware-vdiskmanager), then the .vmx naming it, its memory,
+    /// processors, a NAT network and the ISO in its CD drive, booting from it while the disk is empty. Listed from its folder.
+    /// </summary>
+    public override async Task<VmInfo> CreateAsync(VmSpec spec, CancellationToken ct)
+    {
+        if (spec.Iso?.Contains('"', StringComparison.Ordinal) == true)
+        {
+            throw new ToolError("The ISO's path has a \" in it, which a .vmx file cannot hold: move or rename it.");
+        }
+        var dir = Path.Combine(Folder() ?? throw new ToolError("There is no home folder to make the VM in."), spec.Name);
+        if (Directory.Exists(dir))
+        {
+            throw new ToolError($"{dir} is there already: give the VM another name.");
+        }
+        var tool = DiskManager();
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var disk = Path.Combine(dir, spec.Name + ".vmdk");
+            var psi = new System.Diagnostics.ProcessStartInfo(tool);
+            foreach (var a in new[] { "-c", "-s", $"{spec.DiskGb}GB", "-a", spec.Os == "windows" ? "lsisas1068" : "lsilogic", "-t", "1", disk })
+            {
+                psi.ArgumentList.Add(a);
+            }
+            var r = await Proc.PipeAsync(psi, "", Long, 1024 * 1024, ct);
+            if (r.ExitCode != 0 || r.TimedOut)
+            {
+                throw new ToolError($"vmware-vdiskmanager could not make the disk: {Said(r)}");
+            }
+            var vmx = Path.Combine(dir, spec.Name + ".vmx");
+            await File.WriteAllTextAsync(vmx, VmxFile(spec), ct);
+            return new VmInfo(spec.Name, vmx, this, false);
+        }
+        catch (Exception e) when (e is ToolError or IOException or OperationCanceledException)
+        {
+            Directory.Delete(dir, recursive: true);
+            throw;
+        }
+    }
+
+    /// <summary>A new VM's .vmx: what Workstation's own wizard writes for one, in short.</summary>
+    internal static string VmxFile(VmSpec spec)
+    {
+        var lines = new List<(string, string)>
+        {
+            (".encoding", "UTF-8"), ("config.version", "8"), ("virtualHW.version", "19"), ("displayName", spec.Name),
+            ("guestOS", spec.Os switch { "windows" => "windows9-64", "linux" => "other5xlinux-64", _ => "other-64" }),
+            ("memsize", spec.MemoryMb.ToString(CultureInfo.InvariantCulture)), ("numvcpus", spec.Cpus.ToString(CultureInfo.InvariantCulture)),
+            ("scsi0.present", "TRUE"), ("scsi0.virtualDev", spec.Os == "windows" ? "lsisas1068" : "lsilogic"),
+            ("scsi0:0.present", "TRUE"), ("scsi0:0.fileName", spec.Name + ".vmdk"),
+            ("ethernet0.present", "TRUE"), ("ethernet0.connectionType", "nat"), ("ethernet0.virtualDev", "e1000"), ("ethernet0.addressType", "generated"),
+            ("usb.present", "TRUE"), ("tools.syncTime", "TRUE"),
+        };
+        if (spec.Os == "windows")
+        {
+            lines.Add(("firmware", "efi"));
+        }
+        if (spec.Iso is { } iso)
+        {
+            lines.AddRange([("sata0.present", "TRUE"), ("sata0:1.present", "TRUE"), ("sata0:1.deviceType", "cdrom-image"), ("sata0:1.fileName", iso), ("sata0:1.startConnected", "TRUE")]);
+        }
+        return string.Concat(lines.Select(l => $"{l.Item1} = \"{l.Item2}\"\n"));
+    }
+
+    /// <summary>vmrun clone, into a folder of its own beside the others: full, or linked to the snapshot.</summary>
+    public override async Task<VmInfo> CloneAsync(VmInfo vm, string name, string? snapshot, bool linked, CancellationToken ct)
+    {
+        var dir = Path.Combine(Folder() ?? Path.GetDirectoryName(Path.GetDirectoryName(vm.Id)!)!, name);
+        if (Directory.Exists(dir))
+        {
+            throw new ToolError($"{dir} is there already: give the copy another name.");
+        }
+        var vmx = Path.Combine(dir, name + ".vmx");
+        await MustAsync([.. T, "clone", vm.Id, vmx, linked ? "linked" : "full", .. snapshot is { } s ? new[] { $"-snapshot={s}" } : [], $"-cloneName={name}"], Long, ct);
+        return new VmInfo(name, vmx, this, false);
+    }
+
+    /// <summary>vmrun deleteVM: the VM's folder goes, its disks and snapshots with it.</summary>
+    public override async Task DeleteAsync(VmInfo vm, CancellationToken ct) => await MustAsync([.. T, "deleteVM", vm.Id], Long, ct);
 
     [GeneratedRegex("""^\s*([A-Za-z0-9_.]+)\s*=\s*"(.*)"\s*$""")]
     private static partial Regex Setting();
@@ -112,7 +239,23 @@ internal sealed partial class Vmware(string program, string type, Func<string, s
         return Task.FromResult(windows);
     }
 
-    public override async Task StartAsync(VmInfo vm, bool gui, CancellationToken ct) => await MustAsync([.. T, "start", vm.Id, gui ? "gui" : "nogui"], Long, ct);
+    /// <summary>
+    /// vmrun start. On Linux a start that fails with VMware's monitor module missing says only "The operation was canceled":
+    /// the reason is said with it, and how to load the module.
+    /// </summary>
+    public override async Task StartAsync(VmInfo vm, bool gui, CancellationToken ct)
+    {
+        try
+        {
+            await MustAsync([.. T, "start", vm.Id, gui ? "gui" : "nogui"], Long, ct);
+        }
+        catch (ToolError e) when (OperatingSystem.IsLinux() && !File.Exists(MonitorDevice))
+        {
+            throw new ToolError($"{e.Message.TrimEnd('.')}. VMware's kernel module vmmon is not loaded ({MonitorDevice} is missing), so no VM starts here. " +
+                "Build and load it with sudo vmware-modconfig --console --install-all; with Secure Boot on, the kernel refuses it until it is " +
+                "signed with a key enrolled in the firmware (mokutil --import), or Secure Boot is turned off.");
+        }
+    }
 
     public override async Task<bool> StopAsync(VmInfo vm, bool force, TimeSpan wait, CancellationToken ct)
     {

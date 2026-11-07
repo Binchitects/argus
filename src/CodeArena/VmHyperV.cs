@@ -69,6 +69,70 @@ internal sealed class HyperV(string program) : Hypervisor(program)
     public override async Task RestoreAsync(VmInfo vm, string name, CancellationToken ct) =>
         await ScriptAsync($"Restore-VMSnapshot -VMName {Ps(vm.Id)} -Name {Ps(name)} -Confirm:$false", Long, ct);
 
+    /// <summary>
+    /// New-VM as Hyper-V Manager makes one: generation 2, a new VHDX in the host's disk folder, its processors, the Default
+    /// Switch when there is one, and the ISO in a DVD drive booted first. A Linux guest gets the UEFI CA's Secure Boot template
+    /// (the Windows one refuses Linux installers); another, Secure Boot off.
+    /// </summary>
+    public override async Task<VmInfo> CreateAsync(VmSpec spec, CancellationToken ct)
+    {
+        var n = Ps(spec.Name);
+        var script = new StringBuilder()
+            .Append($"if (Get-VM -Name {n} -ErrorAction SilentlyContinue) {{ throw 'There is a VM named {spec.Name.Replace("'", "''", StringComparison.Ordinal)} already.' }}\n")
+            .Append($"$vhd = Join-Path (Get-VMHost).VirtualHardDiskPath ({n} + '.vhdx')\n")
+            .Append($"$vm = New-VM -Name {n} -Generation 2 -MemoryStartupBytes {spec.MemoryMb}MB -NewVHDPath $vhd -NewVHDSizeBytes {spec.DiskGb}GB\n")
+            .Append("try {\n")
+            .Append($"  Set-VMProcessor -VM $vm -Count {spec.Cpus}\n")
+            .Append("  if (Get-VMSwitch -Name 'Default Switch' -ErrorAction SilentlyContinue) { Connect-VMNetworkAdapter -VMName $vm.Name -SwitchName 'Default Switch' }\n")
+            .Append(spec.Os switch
+            {
+                "windows" => "",
+                "linux" => "  Set-VMFirmware -VM $vm -SecureBootTemplate MicrosoftUEFICertificateAuthority\n",
+                _ => "  Set-VMFirmware -VM $vm -EnableSecureBoot Off\n",
+            });
+        if (spec.Iso is { } iso)
+        {
+            script.Append($"  $dvd = Add-VMDvdDrive -VM $vm -Path {Ps(iso)} -Passthru\n  Set-VMFirmware -VM $vm -FirstBootDevice $dvd\n");
+        }
+        script.Append("} catch { Remove-VM -VM $vm -Force; Remove-Item -Force -ErrorAction SilentlyContinue $vhd; throw }\n");
+        await ScriptAsync(script.ToString(), Long, ct);
+        return new VmInfo(spec.Name, spec.Name, this, false);
+    }
+
+    /// <summary>
+    /// Hyper-V has no clone: the VM (or its snapshot) is exported to a temporary folder and imported again as a copy with an
+    /// id of its own, its disks in a folder named after the copy, then renamed. The export is deleted after.
+    /// </summary>
+    public override async Task<VmInfo> CloneAsync(VmInfo vm, string name, string? snapshot, bool linked, CancellationToken ct)
+    {
+        if (linked)
+        {
+            throw new ToolError("Hyper-V clones only as full copies (an export imported again): leave linked out.");
+        }
+        var n = Ps(name);
+        var export = snapshot is null ? $"Export-VM -Name {Ps(vm.Id)} -Path $tmp" : $"Export-VMSnapshot -VMName {Ps(vm.Id)} -Name {Ps(snapshot)} -Path $tmp";
+        await ScriptAsync(
+            $"if (Get-VM -Name {n} -ErrorAction SilentlyContinue) {{ throw 'There is a VM named {name.Replace("'", "''", StringComparison.Ordinal)} already.' }}\n" +
+            "$tmp = Join-Path $env:TEMP ('code-arena-clone-' + [guid]::NewGuid().ToString('N'))\n" +
+            $"try {{\n  {export}\n" +
+            "  $config = Get-ChildItem -Path $tmp -Recurse -Filter *.vmcx | Select-Object -First 1\n" +
+            "  $h = Get-VMHost\n" +
+            $"  $copy = Import-VM -Path $config.FullName -Copy -GenerateNewId -VirtualMachinePath (Join-Path $h.VirtualMachinePath {n}) -VhdDestinationPath (Join-Path $h.VirtualHardDiskPath {n})\n" +
+            $"  Rename-VM -VM $copy -NewName {n}\n" +
+            "} finally { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $tmp }", Long, ct);
+        return new VmInfo(name, name, this, false);
+    }
+
+    /// <summary>Its checkpoints first (merged into its disks), then the VM, then its disks' files; an ISO in its drive stays.</summary>
+    public override async Task DeleteAsync(VmInfo vm, CancellationToken ct) =>
+        await ScriptAsync(
+            $"$vm = Get-VM -Name {Ps(vm.Id)}\n" +
+            "Get-VMSnapshot -VM $vm | Remove-VMSnapshot\n" +
+            "while ((Get-VM -Id $vm.Id).Status -match 'Merging') { Start-Sleep -Seconds 2 }\n" +
+            "$disks = @(Get-VMHardDiskDrive -VM $vm | ForEach-Object { $_.Path })\n" +
+            "Remove-VM -VM $vm -Force\n" +
+            "$disks | ForEach-Object { Remove-Item -Force -ErrorAction SilentlyContinue $_ }", Long, ct);
+
     public override async Task<bool> ReadyAsync(VmInfo vm, GuestLogin? login, CancellationToken ct) =>
         (await ScriptAsync($"\"$((Get-VM -Name {Ps(vm.Id)}).Heartbeat)\"", Short, ct)).Trim().StartsWith("Ok", StringComparison.OrdinalIgnoreCase);
 
