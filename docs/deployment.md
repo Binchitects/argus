@@ -1118,6 +1118,14 @@ policy start again; `--off` takes it away):
 ./arenactl docker-proxy http://172.10.0.138:10808
 ```
 
+Before it changes anything it checks that the proxy reaches Docker Hub's
+registry (a proxy that does not answer changes nothing), then says what the
+restart stops: every running container (those with a restart policy, Argus
+Arena's, start again by themselves; those without are named, and stay stopped),
+builds, pulls and bundles in progress, and that every pull needs the proxy from
+then on. It goes on only when `restart` is typed (`--yes` at no terminal), and
+names the containers left stopped afterwards.
+
 or by hand:
 
 ```bash

@@ -13,6 +13,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+import unittest.mock
 import zipfile
 from pathlib import Path
 
@@ -366,6 +367,29 @@ class ProxyTests(unittest.TestCase):
         self.assertIn("https_proxy=http://172.10.0.138:10808", arenactl.proxy_env_args())
         with self.assertRaises(arenactl.Stop):
             arenactl.use_proxy("172.10.0.138:10808")
+
+    def test_docker_is_restarted_only_after_a_yes(self):
+        arenactl = load_arenactl()
+        arenactl.warn = lambda *a, **k: None
+        arenactl.output = lambda cmd, **k: "app\tarena\nup782\t\n" if cmd[1] == "ps" else "/app\tunless-stopped\n/up782\tno\n"
+        err = io.StringIO()
+        with unittest.mock.patch("sys.stderr", err), unittest.mock.patch("sys.stdin", io.StringIO("")):
+            with self.assertRaises(arenactl.Stop):
+                arenactl.docker_restart_notice(["sudo"], yes=False)
+        self.assertIn("STAY STOPPED until started by hand: up782", err.getvalue())
+        self.assertIn("every running container stops: 2 now", err.getvalue())
+        tty = io.StringIO("no\n")
+        tty.isatty = lambda: True
+        with unittest.mock.patch("sys.stderr", io.StringIO()), unittest.mock.patch("sys.stdin", tty), \
+                unittest.mock.patch("builtins.input", lambda *_: "no"):
+            with self.assertRaises(arenactl.Stop):
+                arenactl.docker_restart_notice(["sudo"], yes=False)
+        with unittest.mock.patch("sys.stderr", io.StringIO()):
+            arenactl.docker_restart_notice(["sudo"], yes=True)
+
+    def test_a_proxy_that_does_not_answer_changes_nothing(self):
+        arenactl = load_arenactl()
+        self.assertIsNotNone(arenactl.proxy_answers("http://127.0.0.1:9"))
 
     def test_its_password_is_never_printed(self):
         arenactl = load_arenactl()
