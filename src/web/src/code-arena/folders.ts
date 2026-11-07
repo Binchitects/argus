@@ -71,7 +71,7 @@ export async function pickFolder(title: string, action: string, start?: string):
       ...(here.parent ? [item('up', '..', { kind: 'go', path: here.parent }, { description: here.parent, icon: createElement(Undo2) })] : []),
       ...here.folders.map((name) => item(`f:${name}`, name, { kind: 'go', path: inside(here.path, name, here.separator) }, { icon: createElement(FolderInput) })),
       ...here.recent
-        .filter((f) => f !== here.path)
+        .filter((f) => f !== here.path && !/\.code-workspace$/i.test(f))
         .map((f) => item(`r:${f}`, f, { kind: 'go', path: f }, { group: 'recently opened', icon: createElement(History) })),
       ...here.drives.map((d) => item(`d:${d}`, d, { kind: 'go', path: d }, { group: 'drives', icon: createElement(HardDrive) })),
     ]
@@ -109,6 +109,11 @@ export async function openFolder(path: string, onOpening: (folder: string) => vo
     return
   }
   onOpening(folder)
+  await waitForFolder(folder)
+}
+
+/** Waits for code-arena to answer for the folder it starts again on, then loads the page there (within a minute; else it says so). */
+export async function waitForFolder(folder: string) {
   for (let waited = 0; waited < 60_000; waited += 300) {
     await new Promise((r) => setTimeout(r, 300))
     try {
@@ -129,8 +134,8 @@ export async function chooseAndOpenFolder(onOpening: (folder: string) => void) {
   if (path) await openFolder(path, onOpening)
 }
 
-/** Open Recent…: one of the folders opened lately, then opened. */
-export async function openRecentFolder(onOpening: (folder: string) => void) {
+/** Open Recent…: one of the folders (or workspace files, opened with `openWorkspace`) opened lately, then opened. */
+export async function openRecentFolder(onOpening: (folder: string) => void, openWorkspace?: (path: string) => Promise<void>) {
   let list: FolderList
   try {
     list = await listFolders()
@@ -143,10 +148,11 @@ export async function openRecentFolder(onOpening: (folder: string) => void) {
     title: 'Open Recent',
     placeholder: recent.length ? 'A folder opened lately' : 'No other folder was opened lately: Open Folder… chooses one',
     items: [
-      ...recent.map((f) => ({ id: f, label: f.split(list.separator).filter(Boolean).at(-1) ?? f, description: f, value: f, icon: createElement(History) })),
+      ...recent.map((f) => ({ id: f, label: `${f.split(list.separator).filter(Boolean).at(-1) ?? f}${/\.code-workspace$/i.test(f) ? ' (Workspace)' : ''}`, description: f, value: f, icon: createElement(History) })),
       { id: 'more', label: 'More…', description: 'Open Folder', value: '', icon: createElement(FolderOpen) },
     ],
   })
   if (chosen?.id === 'more') await chooseAndOpenFolder(onOpening)
+  else if (chosen?.value && /\.code-workspace$/i.test(chosen.value) && openWorkspace) await openWorkspace(chosen.value)
   else if (chosen?.value) await openFolder(chosen.value, onOpening)
 }

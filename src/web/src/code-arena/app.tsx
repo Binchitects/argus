@@ -17,7 +17,8 @@ import { stateQuery, type CodeEvent, type CodeState } from './api'
 import { ChangesPanel } from './changes'
 import { Sessions, ThemeMenu, Thread } from './chat'
 import { runCommand, useCommands, type Command } from './commands'
-import { chooseAndAddFolder, chooseAndOpenFolder, foldersQuery, openRecentFolder } from './folders'
+import { chooseAndOpenFolder, foldersQuery, openRecentFolder } from './folders'
+import { addFolder, chooseAndOpenWorkspace, closeWorkspace, openWorkspace, saveWorkspaceAs, workspaceFileQuery } from './code-workspace'
 import { completion } from './completion'
 import { CommandPalette, recentLimit, type PaletteCommand } from './palette'
 import { MemoryPanel } from './memory-panel'
@@ -37,7 +38,8 @@ import { EditorArea, EditorProvider } from './editor'
 import { groupCommands, GroupStoreContext, openToSide } from './editor-groups'
 import { userFile } from './editor-options'
 import { CodeRefsProvider } from './refs'
-import { rankFiles, useEditor } from './editor-state'
+import { isNotebook, loadMonaco, rankFiles, useEditor } from './editor-state'
+import { newNotebook } from './notebook-new'
 import { Explorer } from './explorer'
 import { HelpProvider } from './help'
 import { useOpenHelp } from './help-context'
@@ -65,7 +67,21 @@ import { SearchPanel } from './search'
 import { SettingsProvider, useSettings, workspaceSettingsPath } from './settings'
 import { allColorThemes, allIconThemes, themeNamed } from './settings-schema'
 import { previewTheme, useSeeingSync, useShownTheme, useThemeSync } from './theme'
-import { ensureTheme } from './extensions'
+import { ensureTheme, extensionSnippets } from './extensions'
+import { configureSnippets, insertSnippet, isSnippetsFile, snippetsChanged } from './project-snippets'
+import { conflictAction, setInlineOptions, type ConflictAction } from './merge-inline'
+
+/** VS Code's merge-conflict commands, by their ids. */
+const mergeCommands: [string, string, ConflictAction][] = [
+  ['merge-conflict.accept.current', 'Accept Current', 'current'],
+  ['merge-conflict.accept.incoming', 'Accept Incoming', 'incoming'],
+  ['merge-conflict.accept.both', 'Accept Both', 'both'],
+  ['merge-conflict.accept.all-current', 'Accept All Current', 'all-current'],
+  ['merge-conflict.accept.all-incoming', 'Accept All Incoming', 'all-incoming'],
+  ['merge-conflict.accept.all-both', 'Accept All Both', 'all-both'],
+  ['merge-conflict.next', 'Next Conflict', 'next'],
+  ['merge-conflict.previous', 'Previous Conflict', 'previous'],
+]
 import { ExtensionsView } from './extensions-view'
 import { appendElement } from './jsonc'
 import { Splitter } from './splitter'
@@ -524,6 +540,12 @@ function Workbench({
   // The theme shown now (with "window.autoDetectColorScheme", the preferred one of the page's light or dark): the picker starts at it.
   const shownTheme = useShownTheme()
   useKeyboard()
+  const folders = useQuery(foldersQuery)
+  const workspaceFile = useQuery(workspaceFileQuery).data
+  // Merge conflicts in the editor: their lenses and colours, as the settings say.
+  const conflictLenses = settings.get<boolean>('merge-conflict.codeLens.enabled') !== false
+  const conflictColours = settings.get<boolean>('merge-conflict.decorators.enabled') !== false
+  useEffect(() => setInlineOptions({ codeLens: conflictLenses, decorators: conflictColours }), [conflictLenses, conflictColours])
   // Code completion: the person's choice (settings), and not while the agent is working.
   const completing = settings.get<boolean>('codeArena.inlineCompletion.enabled') && settings.get<boolean>('editor.inlineSuggest.enabled')
   useEffect(() => {
@@ -655,6 +677,7 @@ function Workbench({
       read(changesQuery.queryKey)
       // A skill or command written by hand (or by the agent) is listed at once.
       read(skillsQuery.queryKey)
+      if (!d || d.changes.some((c) => isSnippetsFile(c.path))) snippetsChanged()
       if (!d) {
         void refresh()
         read(['code', 'files'])
@@ -705,7 +728,7 @@ function Workbench({
 
   const file = active?.kind === 'file' && active.status === 'ready'
   // A tab with a file to save: a file's, or a compare with a file's side.
-  const savable = file || (active?.kind === 'diff' && [active.left, active.right].some((x) => x?.kind === 'file'))
+  const savable = file || ((active?.kind === 'merge' || active?.kind === 'notebook') && active.status === 'ready') || (active?.kind === 'diff' && [active.left, active.right].some((x) => x?.kind === 'file'))
   const copy = (text: string) =>
     void navigator.clipboard?.writeText(text).then(
       () => toast.success('Copied.'),
@@ -1215,10 +1238,49 @@ function Workbench({
     { id: 'editor.action.toggleRenderWhitespace', category: 'View', title: 'Toggle Render Whitespace', run: () => void settings.update('editor.renderWhitespace', settings.get('editor.renderWhitespace') === 'none' ? 'selection' : 'none').catch((e: unknown) => toast.error(errorMessage(e))) },
     { id: 'markdown.showSource', category: 'Markdown', title: 'Show Source', enabled: () => active?.kind === 'preview', run: () => active && void ed.open(active.path) },
     { id: 'workbench.action.files.openFolder', category: 'File', title: 'Open Folder…', run: () => void chooseAndOpenFolder(setOpening) },
-    { id: 'workbench.action.openRecent', category: 'File', title: 'Open Recent…', run: () => void openRecentFolder(setOpening) },
-    { id: 'workbench.action.addRootFolder', category: 'Workspaces', title: 'Add Folder to Workspace…', run: async () => {
-      if (await chooseAndAddFolder()) await queryClient.invalidateQueries({ queryKey: foldersQuery.queryKey })
+    { id: 'workbench.action.openRecent', category: 'File', title: 'Open Recent…', run: () => void openRecentFolder(setOpening, (path) => openWorkspace(path, setOpening, queryClient)) },
+    { id: 'workbench.action.addRootFolder', category: 'Workspaces', title: 'Add Folder to Workspace…', run: () => void addFolder(queryClient) },
+    { id: 'workbench.action.openWorkspace', category: 'File', title: 'Open Workspace from File…', run: () => void chooseAndOpenWorkspace(setOpening, queryClient) },
+    { id: 'workbench.action.saveWorkspaceAs', category: 'Workspaces', title: 'Save Workspace As…', run: () => void saveWorkspaceAs(queryClient) },
+    { id: 'workbench.action.closeFolder', category: 'Workspaces', title: 'Close Workspace', enabled: () => !!workspaceFile?.path, run: () => void closeWorkspace(queryClient) },
+    { id: 'workbench.action.openWorkspaceConfigFile', category: 'Workspaces', title: 'Open Workspace Configuration File', enabled: () => !!workspaceFile?.path, run: () => {
+      const file = workspaceFile?.path?.replace(/\\/g, '/')
+      if (!file) return
+      const root = state.folder.replace(/\\/g, '/').replace(/\/$/, '')
+      // In the folder: by its path there; in an added folder: whole; elsewhere the editor cannot open it.
+      if (file.startsWith(`${root}/`)) void ed.open(file.slice(root.length + 1))
+      else if ((folders.data?.added ?? []).some((f) => file.startsWith(`${f.replace(/\/$/, '')}/`))) void ed.open(file)
+      else toast.info(`${file} is outside the workspace's folders: its settings are in Settings, under Workspace; its folders change with Add Folder and Remove Folder.`)
     } },
+    { id: 'codeArena.openWorkspaceFile', category: 'Workspaces', title: 'Open Workspace', hidden: true, run: (path) => typeof path === 'string' && void openWorkspace(wholePath(state.folder, path), setOpening, queryClient) },
+    { id: 'git.openMergeEditor', category: 'Git', title: 'Resolve in Merge Editor', enabled: () => file, run: (path) => void ed.openMerge(typeof path === 'string' ? path : active!.path) },
+    ...mergeCommands.map(([id, title, action]): Command => ({
+      id,
+      category: 'Merge Conflict',
+      title,
+      enabled: () => file || active?.kind === 'merge',
+      run: () =>
+        void loadMonaco().then((m) => {
+          const shown = m.monaco.editor.getEditors().find((e) => e.hasTextFocus()) ?? m.monaco.editor.getEditors().find((e) => e.getModel() === ed.activeModel())
+          if (!shown || !conflictAction(shown, action)) toast.info('There is no merge conflict in this file.')
+        }),
+    })),
+    { id: 'ipynb.newUntitledIpynb', category: 'Create', title: 'New Jupyter Notebook', run: () => void newNotebook((path) => ed.open(path)) },
+    { id: 'workbench.action.reopenWithEditor', category: 'View', title: 'Reopen Editor With…', enabled: () => !!active && isNotebook(active.path) && (active.kind === 'file' || active.kind === 'notebook'), run: async () => {
+      if (!active) return
+      const chosen = await quickPick<'notebook' | 'text'>({
+        title: 'Reopen Editor With',
+        placeholder: `Select an editor for ${active.path.slice(active.path.lastIndexOf('/') + 1)}`,
+        items: [
+          { id: 'notebook', label: 'Jupyter Notebook', description: active.kind === 'notebook' ? 'active' : 'default', value: 'notebook' },
+          { id: 'text', label: 'Text Editor', description: active.kind === 'file' ? 'active' : undefined, value: 'text' },
+        ],
+      })
+      if (chosen?.value) await ed.open(active.path, undefined, chosen.value === 'text' ? { as: 'text' } : undefined)
+    } },
+    { id: 'workbench.action.openSnippets', category: 'Snippets', title: 'Configure Snippets', run: () => void configureSnippets((path) => ed.open(path), ed.languages(), queryClient) },
+    { id: 'editor.action.insertSnippet', category: 'Snippets', title: 'Insert Snippet', enabled: () => file, run: () => void loadMonaco().then(async (m) => insertSnippet(m, ed.activeModel(), await extensionSnippets(ed.activeModel()?.getLanguageId() ?? ''))) },
+    { id: 'editor.action.surroundWithSnippet', category: 'Snippets', title: 'Surround With Snippet', enabled: () => file, run: () => void loadMonaco().then(async (m) => insertSnippet(m, ed.activeModel(), await extensionSnippets(ed.activeModel()?.getLanguageId() ?? ''), true)) },
     { id: 'workbench.action.files.save', category: 'File', title: 'Save', enabled: () => savable, run: () => void ed.save() },
     { id: 'workbench.action.files.saveAll', category: 'File', title: 'Save All', run: () => void ed.saveAll() },
     { id: 'workbench.action.closeActiveEditor', category: 'View', title: 'Close Editor', enabled: () => !!active, run: () => active && void ed.close(active.id) },

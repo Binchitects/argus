@@ -614,6 +614,62 @@ public sealed class SourceControlTests : IDisposable
     }
 
     [Fact]
+    public async Task The_merge_editor_learns_both_sides_of_a_conflict_and_complete_merge_stages_it_once_resolved()
+    {
+        using var h = new Harness(_gateway, _mcp, c => c["autoCommit"] = false);
+        Init(h.Work);
+        h.Write("c.txt", "c\n");
+        h.Write("plain.txt", "p\n");
+        Commit(h.Work, "Start");
+        Git(h.Work, "switch", "-q", "-c", "feature");
+        h.Write("c.txt", "c on feature\n");
+        Commit(h.Work, "Feature work");
+        Git(h.Work, "switch", "-q", "main");
+        h.Write("c.txt", "c on main\n");
+        Commit(h.Work, "Main work");
+        var psi = new ProcessStartInfo("git") { WorkingDirectory = h.Work, RedirectStandardOutput = true, RedirectStandardError = true, ArgumentList = { "merge", "-q", "feature" } };
+        using (var merging = Process.Start(psi)!)
+        {
+            merging.WaitForExit();
+            Assert.NotEqual(0, merging.ExitCode);
+        }
+        await using var web = await WebRun.StartAsync(h);
+
+        // Unmerged, its three stages, a merge, and each side's name, commit and subject.
+        var info = await web.GetJsonAsync("/api/git/merge?path=c.txt");
+        Assert.True(info["unmerged"]!.GetValue<bool>());
+        Assert.Equal([1, 2, 3], info["stages"]!.AsArray().Select(n => n!.GetValue<int>()));
+        Assert.Equal("merge", info["kind"]!.GetValue<string>());
+        Assert.Equal(("main", "Main work"), (info["current"]!["name"]!.GetValue<string>(), info["current"]!["subject"]!.GetValue<string>()));
+        Assert.Equal(("feature", "Feature work"), (info["incoming"]!["name"]!.GetValue<string>(), info["incoming"]!["subject"]!.GetValue<string>()));
+        Assert.Equal(GitOut(h.Work, "rev-parse", "feature"), info["incoming"]!["commit"]!.GetValue<string>());
+        // A file not in conflict: nothing unmerged, though the merge goes on.
+        var plain = await web.GetJsonAsync("/api/git/merge?path=plain.txt");
+        Assert.False(plain["unmerged"]!.GetValue<bool>());
+        Assert.Equal("merge", plain["kind"]!.GetValue<string>());
+        Assert.Equal(HttpStatusCode.Forbidden, (await Get(web, "/api/git/merge", ("path", "../x.txt"))).StatusCode);
+
+        // With its markers, Complete Merge is refused (unless anyway); resolved, it stages the file: git has it merged.
+        var refused = await web.PostAsync("/api/git/merge/complete", new JsonObject { ["path"] = "c.txt" });
+        Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        Assert.Contains("conflict markers", await refused.Content.ReadAsStringAsync());
+        h.Write("c.txt", "c on main\nc on feature\n");
+        var status = await Json(await web.PostAsync("/api/git/merge/complete", new JsonObject { ["path"] = "c.txt" }));
+        Assert.Null(status["files"]!.AsArray().Single(f => f!["path"]!.GetValue<string>() == "c.txt")!["conflict"]);
+        Assert.Matches(@"^100644 [0-9a-f]+ 0\tc\.txt$", GitOut(h.Work, "ls-files", "-s", "c.txt"));
+        Assert.False((await web.GetJsonAsync("/api/git/merge?path=c.txt"))["unmerged"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public void Conflict_markers_are_found_only_when_whole()
+    {
+        Assert.True(IdeGit.HasConflictMarkers("a\n<<<<<<< HEAD\nx\n=======\ny\n>>>>>>> b\n"));
+        Assert.True(IdeGit.HasConflictMarkers("<<<<<<< HEAD\r\nx\r\n||||||| base\r\no\r\n=======\r\ny\r\n>>>>>>> b"));
+        Assert.False(IdeGit.HasConflictMarkers("<<<<<<< HEAD\nx\n=======\ny\n"));
+        Assert.False(IdeGit.HasConflictMarkers("a heading\n=======\n"));
+    }
+
+    [Fact]
     public async Task Part_of_an_agents_change_is_accepted_and_the_rest_stays_to_accept_or_revert()
     {
         using var h = new Harness(_gateway, _mcp);

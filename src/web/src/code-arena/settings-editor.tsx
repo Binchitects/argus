@@ -57,11 +57,14 @@ export default function SettingsEditor() {
   const [query, setQuery] = useState(ed.pageQuery)
   const [scope, setScope] = useState<Target>('user')
   const q = readQuery(query)
-  const layer = scope === 'user' ? settings.user : settings.workspace
-  const other = scope === 'user' ? settings.workspace : settings.user
+  // With a .code-workspace file open, as VS Code: User, Workspace (the file's settings) and Folder (.vscode/settings.json).
+  const scopes: [Target, string][] = settings.workspaceFile ? [['user', 'User'], ['workspaceFile', 'Workspace'], ['workspace', 'Folder']] : [['user', 'User'], ['workspace', 'Workspace']]
+  const shownScope: Target = scope === 'workspaceFile' && !settings.workspaceFile ? 'user' : scope
+  const layer = shownScope === 'user' ? settings.user : shownScope === 'workspaceFile' ? settings.workspaceFile! : settings.workspace
+  const other = shownScope === 'user' ? settings.workspace : settings.user
   const shown = settingDefs.filter((d) => {
     if (q.lang && d.scope !== 'language') return false
-    if (scope === 'workspace' && d.scope === 'application') return false
+    if (shownScope !== 'user' && d.scope === 'application') return false
     if (q.ids.length > 0 && !q.ids.includes(d.key)) return false
     if (q.modified && !setIn(layer, d.key, q.lang)) return false
     const { group, name } = titleOf(d.key)
@@ -71,7 +74,7 @@ export default function SettingsEditor() {
   const categories = [...new Set(shown.map((d) => d.category))]
   const unknown = Object.entries(layer.values).filter(([k]) => !settingDef.has(k))
 
-  const write = (key: string, value: unknown) => void settings.update(key, value, scope, q.lang).catch((e: unknown) => toast.error(errorMessage(e)))
+  const write = (key: string, value: unknown) => void settings.update(key, value, shownScope, q.lang).catch((e: unknown) => toast.error(errorMessage(e)))
 
   /** VS Code's settings.json merged into the person's: what they set already stays. */
   const importVsCode = async () => {
@@ -127,21 +130,22 @@ export default function SettingsEditor() {
           <Button size="sm" variant="ghost" onClick={() => void importVsCode()} title="Bring over VS Code's settings.json from this computer">
             <Download /> <span className="hidden md:inline">From VS Code</span>
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => (scope === 'user' ? void ed.open(userFile('settings.json')) : runCommand('workbench.action.openWorkspaceSettingsFile'))} title="Open Settings (JSON)" aria-label="Open Settings (JSON)">
+          <Button size="sm" variant="ghost" onClick={() => (shownScope === 'user' ? void ed.open(userFile('settings.json')) : runCommand(shownScope === 'workspaceFile' ? 'workbench.action.openWorkspaceConfigFile' : 'workbench.action.openWorkspaceSettingsFile'))} title="Open Settings (JSON)" aria-label="Open Settings (JSON)">
             <Braces />
           </Button>
         </div>
         <div role="tablist" aria-label="Whose settings" className="flex gap-4 text-sm">
-          {(['user', 'workspace'] as const).map((s) => (
+          {scopes.map(([s, name]) => (
             <button
               key={s}
               type="button"
               role="tab"
-              aria-selected={scope === s}
+              aria-selected={shownScope === s}
               onClick={() => setScope(s)}
-              className={cn('border-b-2 pb-1 outline-none focus-visible:ring-2 focus-visible:ring-ring', scope === s ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}
+              title={s === 'workspaceFile' ? `${settings.workspaceFileName}: the workspace's settings` : s === 'workspace' ? '.vscode/settings.json of the folder open' : 'Yours, for every project'}
+              className={cn('border-b-2 pb-1 outline-none focus-visible:ring-2 focus-visible:ring-ring', shownScope === s ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground')}
             >
-              {s === 'user' ? 'User' : 'Workspace'}
+              {name}
             </button>
           ))}
           {q.lang && <span className="text-muted-foreground">for {q.lang} only</span>}
@@ -157,7 +161,7 @@ export default function SettingsEditor() {
         </div>
         <div className="min-w-0 flex-1 overflow-y-auto px-4 py-3">
           {layer.problems.length > 0 && (
-            <Alert variant="warning" title={`${scope === 'user' ? 'Your' : "The project's"} settings.json has values that are not taken`} className="mb-3">
+            <Alert variant="warning" title={`${shownScope === 'user' ? 'Your settings.json has' : shownScope === 'workspaceFile' ? "The workspace file's settings have" : "The project's settings.json has"} values that are not taken`} className="mb-3">
               <ul className="list-disc pl-4">
                 {layer.problems.map((p) => (
                   <li key={p}>{p}</li>
@@ -177,10 +181,10 @@ export default function SettingsEditor() {
                     def={d}
                     value={valueIn(layer, d, q.lang)}
                     modified={setIn(layer, d.key, q.lang)}
-                    alsoIn={setIn(other, d.key, q.lang) ? (scope === 'user' ? 'Workspace' : 'User') : undefined}
+                    alsoIn={setIn(other, d.key, q.lang) ? (shownScope === 'user' ? (settings.workspaceFile ? 'Folder' : 'Workspace') : 'User') : undefined}
                     onChange={(v) => write(d.key, v)}
                     onReset={() => write(d.key, undefined)}
-                    onJson={() => (scope === 'user' ? void ed.open(userFile('settings.json')) : runCommand('workbench.action.openWorkspaceSettingsFile'))}
+                    onJson={() => (shownScope === 'user' ? void ed.open(userFile('settings.json')) : runCommand(shownScope === 'workspaceFile' ? 'workbench.action.openWorkspaceConfigFile' : 'workbench.action.openWorkspaceSettingsFile'))}
                   />
                 ))}
             </div>

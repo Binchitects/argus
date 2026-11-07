@@ -306,6 +306,19 @@ public sealed class IdeTests : IDisposable
             ("POST", "/api/git/discard", new() { ["paths"] = new JsonArray("inside.txt") }),
             ("POST", "/api/git/commit", new() { ["message"] = "x" }),
             ("POST", "/api/git/switch", new() { ["branch"] = "main" }),
+            ("GET", "/api/git/merge?path=inside.txt", null),
+            ("POST", "/api/git/merge/complete", new() { ["path"] = "inside.txt" }),
+            ("GET", "/api/snippets", null),
+            ("GET", "/api/notebook/kernel?path=a.ipynb", null),
+            ("POST", "/api/notebook/execute", new() { ["path"] = "a.ipynb", ["code"] = "1" }),
+            ("GET", "/api/notebook/run?id=x", null),
+            ("POST", "/api/notebook/interrupt", new() { ["path"] = "a.ipynb" }),
+            ("POST", "/api/notebook/restart", new() { ["path"] = "a.ipynb" }),
+            ("GET", "/api/workspace-file", null),
+            ("POST", "/api/workspace-file", new() { ["text"] = "{}" }),
+            ("POST", "/api/workspace-file/open", new() { ["path"] = "x.code-workspace" }),
+            ("POST", "/api/workspace-file/save-as", new() { ["path"] = "x" }),
+            ("POST", "/api/workspace-file/close", new()),
         ];
         using var anonymous = WebRun.Client(web.Port, token: null);
         var wrong = new List<string>();

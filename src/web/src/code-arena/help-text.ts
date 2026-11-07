@@ -70,7 +70,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   explorer: {
     name: 'Explorer',
-    text: 'The folder\'s files, following the file the editor shows. Click opens one; a right-click has New file, New folder, Cut, Copy, Paste, Copy Path, Copy Relative Path, Find in Folder, Open in Integrated Terminal, Rename (F2) and Delete; Ctrl+click and Shift+click select several, a drag moves rows into a folder, and files dropped from the computer are written there. The files the agent changed are marked, and git\'s changes (M, U, A), what git ignores (dimmed) and the files with problems (red, yellow) too, with their folders. **Outline**, at its foot, lists the symbols of the file shown (the one the cursor is in marked); a click goes to one.',
+    text: 'The folder\'s files, following the file the editor shows. Click opens one; a right-click has New file, New folder, Cut, Copy, Paste, Copy Path, Copy Relative Path, Find in Folder, Open in Integrated Terminal, Rename (F2) and Delete; Ctrl+click and Shift+click select several, a drag moves rows into a folder, and files dropped from the computer are written there. The files the agent changed are marked, and git\'s changes (M, U, A), what git ignores (dimmed) and the files with problems (red, yellow) too, with their folders. **Outline**, at its foot, lists the symbols of the file shown (the one the cursor is in marked); a click goes to one. A folder added to the workspace, or each folder of a .code-workspace file opened (**Open Workspace from File…**), is a root of its own below, with its name.',
     manual: 'the-ide',
   },
   search: {
@@ -100,7 +100,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   git: {
     name: 'Source control',
-    text: "The folder's git: what changed since the last commit, in conflict (**Merge Changes**), **staged** for the next commit or not. A file opens as the last commit has it and as it is now; **+** stages it, **−** unstages it, **↺** puts it back; a group's or a folder's buttons, all of its files. Each group folds with its chevron (← and → too); **View as Tree** shows the files under their folders, **Collapse All** folds everything, and the folder keeps it so. Write the message and **Commit** (all of it when nothing is staged; its arrow has Amend, Commit & Push and Commit & Sync); **Sync Changes** pulls and pushes, **Publish Branch** gives a branch its upstream, and **⋯** has Pull, Push, Fetch, Checkout to…, the branches and Undo Last Commit. Switch the branch below, and see the last commits. With several repositories (one in a folder of this one, or an added folder's) each has a section with its branch, its own commit box and changes, folding on its row; a git command asks which repository.",
+    text: "The folder's git: what changed since the last commit, in conflict (**Merge Changes**: a file opens with **Accept Current Change**, **Accept Incoming Change** and **Accept Both Changes** above each conflict; the merge icon opens it in the merge editor, incoming and current above the result, and **Complete Merge** stages it), **staged** for the next commit or not. A file opens as the last commit has it and as it is now; **+** stages it, **−** unstages it, **↺** puts it back; a group's or a folder's buttons, all of its files. Each group folds with its chevron (← and → too); **View as Tree** shows the files under their folders, **Collapse All** folds everything, and the folder keeps it so. Write the message and **Commit** (all of it when nothing is staged; its arrow has Amend, Commit & Push and Commit & Sync); **Sync Changes** pulls and pushes, **Publish Branch** gives a branch its upstream, and **⋯** has Pull, Push, Fetch, Checkout to…, the branches and Undo Last Commit. Switch the branch below, and see the last commits. With several repositories (one in a folder of this one, or an added folder's) each has a section with its branch, its own commit box and changes, folding on its row; a git command asks which repository.",
     manual: 'source-control',
   },
   sessions: {
@@ -110,7 +110,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   editor: {
     name: 'Editor',
-    text: `Your open files, in tabs. A dot marks changes not saved yet, and ${modKey}+S saves; the middle mouse button closes a tab. Split Right in a tab's menu (or ${modKey}+\\) opens it in a second group beside it; drag a tab onto another group to move it there. Move into New Window in its menu opens it in a browser window of its own. A file the agent edits reloads in its tab when nothing in it is unsaved; saving a file that changed on disk since you opened it asks first.`,
+    text: `Your open files, in tabs. A dot marks changes not saved yet, and ${modKey}+S saves; the middle mouse button closes a tab. Split Right in a tab's menu (or ${modKey}+\\) opens it in a second group beside it; drag a tab onto another group to move it there. Move into New Window in its menu opens it in a browser window of its own. A file the agent edits reloads in its tab when nothing in it is unsaved; saving a file that changed on disk since you opened it asks first. A Jupyter notebook (.ipynb) opens as cells: **Run** (${modKey}+Enter, Shift+Enter for the next) runs one in the notebook's Python, its outputs below it; **Open as Text** shows its JSON.`,
     manual: 'the-ide',
   },
   terminal: {
@@ -204,6 +204,38 @@ export const tasks: HelpTask[] = [
       `Press ${modKey}+Shift+X (**Extensions**).`,
       'Press **Install from VSIX…** and choose the extension\'s .vsix (its page on Open VSX or the Marketplace has a download), or import it from **VS Code on this computer**.',
       `Choose its theme with ${modKey}+K ${modKey}+T (the editor shows each as you go down the list), or its icons with **Preferences: File Icon Theme**; its snippets and languages apply at once.`,
+    ],
+  },
+  {
+    title: 'Work on several folders at once (a .code-workspace)',
+    steps: [
+      'Run **File: Open Workspace from File…** and choose the .code-workspace file (or press **Open Workspace** above it in the editor).',
+      'Its folders are roots in the Explorer, each with its repository in Source control; Search goes through them all. **Add Folder to Workspace…** and the × beside a folder change the file.',
+      'Settings has **User**, **Workspace** (the file\'s settings) and **Folder** tabs. **Save Workspace As…** makes a file of the folders open now; **Close Workspace** leaves the folder alone.',
+    ],
+  },
+  {
+    title: 'Run a Jupyter notebook',
+    steps: [
+      'Open the .ipynb file (or **Create: New Jupyter Notebook**); trust the folder when it asks (**Manage Workspace Trust**).',
+      `Press **Run** beside a cell, or ${modKey}+Enter in it; Shift+Enter runs it and goes to the next. **Run All** runs them all.`,
+      `The kernel is the project's Python (its .venv when there is one). **Interrupt** stops a cell, **Restart** starts it again; ${modKey}+S saves the notebook with its outputs.`,
+    ],
+  },
+  {
+    title: 'Resolve a merge conflict',
+    steps: [
+      'Open **Source control** and the file under **Merge Changes**.',
+      'Click **Accept Current Change**, **Accept Incoming Change** or **Accept Both Changes** above each conflict, or **Resolve in Merge Editor** to take each side from the panes above the result.',
+      'Save, then stage the file (+), or press **Complete Merge** in the merge editor, which does both. Commit to finish the merge.',
+    ],
+  },
+  {
+    title: "Make the project's own snippets, or your own",
+    steps: [
+      'Run **Snippets: Configure Snippets** from the palette.',
+      'Choose **New Snippets file for this folder…** (in .vscode/, for the team), **New Global Snippets file…** (every project), or a language for its own file.',
+      'Write the snippet (the example shows how) and save: its prefix is suggested as you type. **Snippets: Insert Snippet** lists them all.',
     ],
   },
   {

@@ -56,8 +56,12 @@ export type DiffSource = 'agent' | 'git' | 'staged' | 'compare'
 export interface Tab {
   /** The path for a file; "diff:" and the path for the agent's changes, "git:" and the path for those since the last commit. */
   id: string
-  /** A file, a picture, sound or video (shown as it is), a compare, one of the workbench's own pages (Settings, Keyboard Shortcuts), or a project of Arena's (its id the path). */
-  kind: 'file' | 'media' | 'preview' | 'diff' | 'settings' | 'keybindings' | 'project'
+  /**
+   * A file, a picture, sound or video (shown as it is), a compare, one of the workbench's own pages (Settings, Keyboard
+   * Shortcuts), a file in conflict in the merge editor ("merge:" and its path), a Jupyter notebook ("notebook:"), or a
+   * project of Arena's (its id the path).
+   */
+  kind: 'file' | 'media' | 'preview' | 'diff' | 'settings' | 'keybindings' | 'merge' | 'notebook' | 'project'
   /** What the strip calls a tab whose path is no file's: a project's name. */
   label?: string
   /** A diff's: what it compares (the agent's changes when not said). */
@@ -96,6 +100,9 @@ export function mediaKind(path: string): 'picture' | 'sound' | 'video' | null {
   return dot > path.lastIndexOf('/') ? (mediaKinds[path.slice(dot + 1).toLowerCase()] ?? null) : null
 }
 
+/** A Jupyter notebook: it opens in the notebook editor. */
+export const isNotebook = (path: string) => /\.ipynb$/i.test(path)
+
 /** Why a file is saved: by the person (Ctrl+S, the menu), or by "files.autoSave" (after a delay, the focus or the window leaving). */
 export type SaveReason = 'explicit' | 'auto' | 'focus' | 'window'
 
@@ -122,7 +129,10 @@ export interface EditorApi {
   active: Tab | null
   /** The cursor in the file shown, 1-based. */
   cursor: { line: number; column: number } | null
-  open: (path: string, at?: Reveal, how?: { preview?: boolean }) => Promise<void>
+  /** Opens a file in its tab; a notebook (.ipynb) opens in the notebook editor unless `as` is text. */
+  open: (path: string, at?: Reveal, how?: { preview?: boolean; as?: 'text' }) => Promise<void>
+  /** A file in conflict in the merge editor: the incoming and current sides above, the result (the file) below. */
+  openMerge: (path: string) => Promise<void>
   /** A preview tab kept as a tab of its own (the active one when none is named). */
   keepTab: (id?: string) => void
   /** Pins a tab (first in the strip, left by Close Others), or unpins it. */

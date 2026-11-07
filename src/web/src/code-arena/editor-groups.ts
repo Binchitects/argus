@@ -177,6 +177,12 @@ export async function openIn(api: EditorApi, t: Opening, behind = false) {
     case 'preview':
       await api.openPreview(t.path)
       return
+    case 'merge':
+      await api.openMerge(t.path)
+      return
+    case 'notebook':
+      await api.open(t.path)
+      return
     case 'settings':
     case 'keybindings':
       api.openPage(t.kind)

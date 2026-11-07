@@ -25,7 +25,8 @@ import { chatBridge } from './bridge'
 import { runCommand, useCommands } from './commands'
 import { useKeyFor } from './keyboard'
 import { compareSelection } from './compare'
-import { foldersQuery, removeFolder } from './folders'
+import { takeOutFolder, workspaceFileQuery } from './code-workspace'
+import { foldersQuery } from './folders'
 import { Outline } from './outline'
 
 /** A row's place in the tree, for keys and the context menu. */
@@ -462,14 +463,11 @@ export function Explorer({
   // The folders added to the workspace (Add Folder), each a root below this folder's files.
   const folders = useQuery(foldersQuery)
   const added = folders.data?.added ?? []
-  const takeOut = async (folder: string) => {
-    try {
-      await removeFolder(folder)
-      await queryClient.invalidateQueries({ queryKey: foldersQuery.queryKey })
-    } catch (e) {
-      toast.error(errorMessage(e))
-    }
-  }
+  // A multi-root workspace (.code-workspace): its name over the Explorer, its folders' names on their roots.
+  const workspaceFile = useQuery(workspaceFileQuery).data
+  const names = new Map((workspaceFile?.folders ?? []).map((f) => [f.path, f.name]))
+  const title = workspaceFile?.path ? `${workspaceFile.name} (Workspace)` : project
+  const takeOut = (folder: string) => takeOutFolder(queryClient, folder)
   const first = root.data?.entries[0]
   const tools: [string, ReactNode, () => void][] = [
     ['New file', <FilePlus key="f" />, () => startNew('file')],
@@ -484,8 +482,8 @@ export function Explorer({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex h-9 shrink-0 items-center gap-1 pr-1.5 pl-3">
-        <h2 className="min-w-0 flex-1 truncate text-[0.6875rem] font-semibold tracking-wider text-muted-foreground uppercase" title={project}>
-          {project}
+        <h2 className="min-w-0 flex-1 truncate text-[0.6875rem] font-semibold tracking-wider text-muted-foreground uppercase" title={workspaceFile?.path ?? project}>
+          {title}
         </h2>
         {tools.map(([label, icon, run]) => (
           <Tooltip key={label} content={label}>
@@ -517,7 +515,7 @@ export function Explorer({
               </ul>
             )}
             {added.map((folder) => (
-              <AddedFolder key={folder} folder={folder} rows={rows} onRemove={() => void takeOut(folder)} />
+              <AddedFolder key={folder} folder={folder} name={names.get(folder)} rows={rows} onRemove={() => void takeOut(folder)} />
             ))}
           </div>
         </ContextMenu.Trigger>
@@ -607,10 +605,10 @@ export function Explorer({
 }
 
 /** A folder added to the workspace (Add Folder): its name as a root, its files below it as the folder's are, × takes it out. */
-function AddedFolder({ folder, rows, onRemove }: { folder: string; rows: RowProps; onRemove: () => void }) {
+function AddedFolder({ folder, name: given, rows, onRemove }: { folder: string; name?: string; rows: RowProps; onRemove: () => void }) {
   const [open, setOpen] = useState(true)
   const list = useQuery({ ...folderQuery(folder), enabled: open })
-  const name = folder.split('/').filter(Boolean).at(-1) ?? folder
+  const name = given ?? folder.split('/').filter(Boolean).at(-1) ?? folder
   return (
     <section aria-label={`Added folder ${name}`} className="mt-2">
       <div className="flex h-6 items-center gap-1 pr-1.5 pl-1">

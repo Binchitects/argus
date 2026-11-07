@@ -115,6 +115,9 @@ for (const [name, theme] of arenaMonacoThemes()) monaco.editor.defineTheme(name,
 // Code Arena reads (schemas() sets them again as commands come and go).
 monaco.json.jsonDefaults.setDiagnosticsOptions({ validate: true, allowComments: true, trailingCommas: 'ignore', enableSchemaRequest: false, schemas: [] })
 
+// VS Code's own JSON files besides: snippets files, a multi-root workspace's file, a notebook read as text.
+monaco.languages.register({ id: 'json', extensions: ['.code-snippets', '.code-workspace', '.ipynb'] })
+
 /** The schemas the settings files are checked with: settings.json's, keybindings.json's (by command id), and more given. */
 export function schemas(list: { uri: string; fileMatch: string[]; schema: unknown }[]) {
   monaco.json.jsonDefaults.setDiagnosticsOptions({ validate: true, allowComments: true, trailingCommas: 'ignore', enableSchemaRequest: false, schemas: list })

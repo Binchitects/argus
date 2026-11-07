@@ -217,7 +217,7 @@ export interface UserFile {
 }
 
 /** The person's settings, keybindings, and their own skills (the Skills view opens them so). */
-export type UserFileName = 'settings.json' | 'keybindings.json' | `skills/${string}/SKILL.md`
+export type UserFileName = 'settings.json' | 'keybindings.json' | `skills/${string}/SKILL.md` | `snippets/${string}`
 
 export const userFileQuery = (name: UserFileName) => ({
   queryKey: ['code', 'user-file', name] as const,

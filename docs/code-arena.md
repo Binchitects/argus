@@ -407,7 +407,8 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   folder shown and its folders, Enter goes into one, the first row opens the
   one shown, and a path typed (from the folder shown, or whole: `~/`, `/`,
   `C:\`) goes there; the folders opened lately and, on Windows, the drives are
-  listed too. **Open Recent…** (**Ctrl+R**) lists the folders opened lately.
+  listed too. **Open Recent…** (**Ctrl+R**) lists the folders and workspace
+  files opened lately.
   Code Arena then starts again on that folder in the same window, at the same
   address with the same key (its terminal says so): the session, the
   terminals and the language servers are that folder's. The last session of
@@ -417,9 +418,31 @@ The page is laid out as VS Code is, in Argus Arena's design system:
   chooses a folder the same way: the agent's tools may use it from then on,
   and the Explorer shows it below the folder's files, as a root of its own
   (× takes it out again). Its files open and save in the editor by their
-  whole paths; Search, Source control and the language servers stay the
-  folder's. The folders added are kept with the folder, and the next run has
-  them.
+  whole paths; Search goes through it and Source control shows its
+  repository; the language servers stay the folder's. The folders added are
+  kept with the folder, and the next run has them.
+- **A multi-root workspace** (VS Code's `NAME.code-workspace` file): **File:
+  Open Workspace from File…** (or **Open Workspace** above such a file open
+  in the editor) opens one. Its `folders` (each a `path` from the file's
+  folder or whole, or a `file:` `uri`, with a `name` to show) are the
+  workspace: Code Arena runs on the folder open when the file names it, else
+  starts again on its first folder there, and adds the others, as Add Folder
+  does. The Explorer's title is the workspace's name, each folder a root with
+  its `name`; Source control has a section for each folder's repository;
+  Search goes through every folder (a glob such as `src/**` matches in each).
+  The file's `settings` are a layer of their own: the Settings editor has
+  **User**, **Workspace** (the file's) and **Folder** (`.vscode/settings.json`)
+  then, the folder's over the workspace's over yours (a setting that is yours
+  alone stays yours); the folders added keep no settings of their own here.
+  With a workspace open, Add Folder and Remove Folder change its `folders`
+  (its comments and the rest of it kept), and the file edited by hand or by
+  git applies when it is read again. **Workspaces: Save Workspace As…** writes
+  the folder open and those added into a new file (paths relative to it),
+  **Close Workspace** leaves the folder open alone, and **Open Workspace
+  Configuration File** opens the file when it is in one of its folders. The
+  file's `launch`, `tasks` and `extensions` are kept as written and not read
+  yet (the folder's `.vscode` ones are). A folder that is not there is left
+  out, and said so.
 - **Explorer**: the project's files, with New file, New folder, Refresh and
   Collapse at its top. Click opens; a right-click menu has new file, new
   folder, **Copy Path** (the whole path), **Copy Relative Path**, **Find in
@@ -1201,9 +1224,8 @@ colour themes. So ESLint, GitLens, debuggers and language features need
 Code Arena's own way: ESLint as the project's check (Problems), Source
 control and its compares, Run and Debug's adapters, Prettier and the others
 as formatters, and the language servers themselves (below) for completions,
-definitions and errors. An extension with nothing Code Arena uses is refused. A
-project's own `.vscode/*.code-snippets` and your own snippets files are not
-read yet: only an extension's.
+definitions and errors. An extension with nothing Code Arena uses is refused.
+The project's own snippets and yours are read too: see [Snippets](#snippets).
 
 Extensions are kept in code-arena's data folder, in
 `extensions/<publisher.name>-<version>/` with only the files their
@@ -1217,6 +1239,84 @@ and a path in its `package.json` that leads out of the extension is left out.
 An extension's files are served to the page only when its contributions name
 them, never as a page of its own (an SVG runs no script). Monaco cannot take a
 language back: one an extension added stays until the page reloads.
+### Snippets
+
+Snippets come from three places, as in VS Code, and are suggested as you type
+(and with **Ctrl+Space**) in the files they are for:
+
+- **The project's**: every `.vscode/*.code-snippets` file of the folder, and of
+  each folder added to the workspace (shared with the team when committed).
+- **Yours**: the files in code-arena's config folder under `snippets/`, as
+  VS Code's `User/snippets`: `python.json` is for Python files alone,
+  `NAME.code-snippets` for the languages each snippet names.
+- **An extension's** (see [Extensions](#extensions)).
+
+A snippet is VS Code's: its `prefix` (one or a list), its `body` (a line or a
+list of lines), its `description`, and in a `.code-snippets` file its `scope`
+(`"typescript,javascript"`; none: every language). `include` and `exclude`
+(a glob, or a list) limit it to some files: a glob with no `/` is matched
+against the file's name (`*.test.ts`), one with a `/` against its path in the
+folder (`src/**`). The body takes VS Code's syntax: `$1`, `${2:name}`,
+`${3|one,two|}`, `$0`, and the variables (`$TM_FILENAME`,
+`$TM_SELECTED_TEXT`, `$CURRENT_YEAR`, `$UUID`…). The suggestion says
+**Workspace Snippet** or **User Snippet**.
+
+- **Snippets: Configure Snippets** (the palette) lists the snippets files there
+  are, makes a new one for every project (**New Global Snippets file…**) or for
+  this folder (**New Snippets file for this folder…**, in `.vscode/`), or opens
+  a language's own (`snippets/python.json`), made with an example first.
+- **Snippets: Insert Snippet** chooses one of the file's snippets by name and
+  inserts it at the cursor; **Snippets: Surround With Snippet** lists those that
+  take the selection (`$TM_SELECTED_TEXT`) and puts the selection in it.
+
+A snippets file saved in the editor, or changed on disk, applies at once. A
+file larger than 1 MB is not read (the first 100 files are).
+
+### Notebooks
+
+A Jupyter notebook (`.ipynb`) opens in the notebook editor, as in VS Code: its
+cells one under another, a code cell in an editor of its own (the language's
+colours, completions and your editor settings) with its outputs below it, a
+Markdown cell shown as it reads (double-click it, or Enter, to edit it).
+**Create: New Jupyter Notebook** makes one with an empty Python cell.
+
+- **Run** beside a cell (or **Ctrl+Enter**) runs it; **Shift+Enter** runs it
+  and goes to the next (a new one after the last), **Alt+Enter** runs it and
+  adds one below. **Run All** runs the code cells in order and stops at the
+  first that fails; **Interrupt** stops the cell running (a
+  `KeyboardInterrupt`, as Jupyter's); **Restart** starts the kernel again
+  (its variables are lost, the outputs stay). Each cell shows its count
+  (`[3]`, `[*]` while it runs) and how long it took.
+- **Outputs**, as Jupyter's renderers show them: what the cell printed
+  (stderr tinted), the value of its last line (none when it ends with `;`),
+  what `display()` shows, the plots matplotlib made (as PNG pictures), and an
+  error with its traceback. Each object is shown in its richest form: a
+  picture (PNG, JPEG, GIF, SVG), HTML (a pandas table: in a frame that runs no
+  script and reaches nothing of the page), Markdown, LaTeX, JSON, or its text.
+- **Cells**: **+ Code** and **+ Markdown** (in the toolbar, and between cells),
+  and beside each cell Change to Markdown or Code, Clear Outputs, Move Up,
+  Move Down and Delete. With the cell itself selected (Escape leaves its
+  editor), Jupyter's keys work: **A** and **B** add a cell above and below,
+  **D D** deletes it, **M** and **Y** make it Markdown or code, ↑ and ↓ (or
+  **K** and **J**) move between cells, Enter edits.
+- **The kernel** is a Python code-arena keeps for the notebook, as Jupyter
+  keeps one: the one `python` in the config names, else the project's own
+  virtual environment (`.venv`, `venv`, `env`, or `VIRTUAL_ENV`, as
+  [run_code](#code-mode) finds it), else `python3`, started in the
+  notebook's folder at its first cell. The toolbar says which, and whether it
+  is busy. It runs with your rights (not in the agent's sandbox), only in a
+  trusted folder (**Manage Workspace Trust**), and ends with the IDE. No
+  Jupyter needs to be installed; `ipywidgets` and other widgets that need a
+  live frontend show their text only. Ten notebooks may have a kernel at once;
+  a cell's outputs are kept up to 2 MB of text and 20 MB of pictures.
+- **Saving**: the notebook is the file, as the editor holds it, so its tab has
+  the dot, **Ctrl+S** saves, and files.autoSave and hot exit work. It is
+  written as Jupyter writes it (keys sorted, the file's own indentation,
+  multi-line text as lists of lines), outputs and counts included, so a
+  notebook opened and saved unchanged is the same file. **Open as Text** (or
+  **Reopen Editor With…**) shows its JSON; **Open as Notebook** above the text
+  goes back. A notebook that is not nbformat 4 opens as text.
+
 ### Language servers
 
 The editor speaks the Language Server Protocol, as VS Code does: open a file
@@ -1368,8 +1468,8 @@ reads the quote before the message, and the editor's lines after it.
 
 **Source control** in the activity bar (Ctrl+Shift+G) is the folder's git as you work it, beside the agent's own turn
 commits: what changed since the last commit, **Merge Changes** (files a merge,
-rebase or cherry-pick left in conflict: one opens as it is, with its markers,
-and **+** settles it), **Staged Changes** (in the next commit) and **Changes**
+rebase or cherry-pick left in conflict: see [Merge conflicts](#merge-conflicts)),
+**Staged Changes** (in the next commit) and **Changes**
 (not yet). A file opens as a diff tab, as the last commit has it and as it is
 now; **+** stages it, **−** unstages it, **↺** puts it back as the index has
 it (a file git does not know is deleted; it asks first); a group's own
@@ -1427,6 +1527,39 @@ minutes. A fetch, pull or push waits ten minutes at most, asks for nothing
 (ssh's `BatchMode`, unless `GIT_SSH_COMMAND` says otherwise: your own keys and
 credential helper hold), and a password or token in a remote's address is
 never shown in what git said.
+
+### Merge conflicts
+
+A file a merge, rebase, cherry-pick or revert left in conflict is in **Merge
+Changes**. It opens in the text editor as git wrote it, as in VS Code: each
+conflict's current change (`<<<<<<< HEAD` down to `=======`, green), the
+incoming one (down to `>>>>>>>`, blue) and, with `merge.conflictStyle diff3`,
+the common ancestor (grey) are coloured, with a bar beside the line numbers
+and a mark in the scroll bar; above each conflict, **Accept Current Change**,
+**Accept Incoming Change**, **Accept Both Changes** (the current first) and
+**Resolve in Merge Editor**. Each is one edit, which Undo takes back. The
+palette has VS Code's commands for the conflict at the cursor:
+**Merge Conflict: Accept Current**, **Accept Incoming**, **Accept Both**, the
+same for all of the file's conflicts (**Accept All Current**…), and **Next
+Conflict** and **Previous Conflict**. `merge-conflict.codeLens.enabled` and
+`merge-conflict.decorators.enabled` turn the buttons and the colours off.
+
+**The merge editor** (**Resolve in Merge Editor**, the merge icon beside the
+file in Merge Changes, or **Git: Resolve in Merge Editor**) is VS Code's
+3-way merge editor: **Incoming** (the branch merged in, its commit and
+subject) and **Current** (yours) side by side above, the **Result** below.
+Each conflict's part of a side has **☐ Accept Incoming** (or **Accept
+Current**) and **Accept Combination** above it: taking one side puts it in
+the result, taking both puts both (the current first), and taking neither
+puts the conflict back. The result is the file itself: type in it too, and
+**Ctrl+S** saves it. The toolbar says how many conflicts remain, goes to the
+next and the previous (the three panes follow), **Reset** puts the result
+back as the file was when the merge editor opened, and **Complete Merge**
+saves the file and stages it, which tells git the conflict is resolved (it
+asks first when markers are left). The panes stack on a narrow window.
+`git.mergeEditor` opens a file in conflict in the merge editor from Source
+Control at once. In a rebase, as git has it, current is the branch being
+rebased onto and incoming your commit being replayed.
 
 ### Problems
 
@@ -1650,6 +1783,16 @@ status (403 `outside` for a path outside the folder).
 | `GET /api/folders?path=` | for Open Folder: a folder's folders by name (hidden ones last, no files, at most 2,000) as `{path, parent, folders, why, current, home, separator, drives, recent, added, files}` (`why`: what is not listed; `recent`: the folders opened lately, the one open now first; `added`: the folders added to this workspace; `files`: its files' names, with `files=1`, for @ in the chat); with no path, the open folder's parent; 404 `not_found` when it is not a folder |
 | `POST /api/folders/add` `{path}` | Add Folder to Workspace: the tools may use it, kept with this folder: `{folder, added}` (`added`: the folders added, whole); 409 `inside` for the folder open now or one in it |
 | `POST /api/folders/remove` `{path}` | takes an added folder out again: `{added}`; 404 `not_added` |
+| `GET /api/workspace-file` | the `.code-workspace` file the folder was opened with: `{path, name, dir, text, version, settings, folders: [{path, full, name, exists, root}], rootInIt, problems}` (`path` null without one); read, its folders become those added |
+| `POST /api/workspace-file` `{text, version}` | writes it (the page's edit: folders, settings), then applies its folders; 400 `invalid` for a text with no `folders` list, 409 `changed` for a stale version, 404 `no_workspace` without one |
+| `POST /api/workspace-file/open` `{path}` | opens a `.code-workspace` file: `{folder, restart, workspace}`; with `restart`, code-arena starts again on its first folder there (as `folders/open`); 400 for another file, 404 when it is not there, 409 `not_here` in Code Studio |
+| `POST /api/workspace-file/save-as` `{path, replace}` | the folder open and those added, in a new file (`.code-workspace` added to the name); 409 `exists` unless `replace` |
+| `POST /api/workspace-file/close` | the folder open alone again: `{path: null}` |
+| `GET /api/snippets` | the project's `.vscode/*.code-snippets` (the folder's and each added folder's) and the person's `snippets/*.json` and `*.code-snippets`: `{files: [{source, path, language, text, version}], problems}` |
+| `GET /api/notebook/kernel?path=` | a notebook's kernel: `{python, running, busy, count, trusted}`; 400 for a file that is no `.ipynb` |
+| `POST /api/notebook/execute` `{path, code}` | runs a cell in the notebook's kernel (started at the first): `{run}`; 409 `untrusted` in a folder not trusted, `no_python` when Python cannot start, `too_many` past ten kernels |
+| `GET /api/notebook/run?id=&since=` | a run's outputs, once its version is past `since` (or within 25 s): `{version, outputs, done, ok, count}` (`outputs`: nbformat's, all of them) |
+| `POST /api/notebook/interrupt` `{path}`, `POST /api/notebook/restart` `{path}` | a KeyboardInterrupt to the cell running (on Windows, a restart); the kernel ended, the next cell starting another: the kernel's state |
 | `POST /api/folders/open` `{path}` | opens that folder (`~` is the home folder; relative to the one open now): answers `{folder}` with its full path, then code-arena starts again on it at the same address with the same key; 404 `not_found` when it is not a folder, 409 `not_here` in Code Studio |
 | `GET /api/projects` | the projects in Arena the person may add to: `{projects: [{id, name}], suggested, problem}` (`suggested`: the repository's; `projects` null with `problem` when Arena cannot say) |
 | `POST /api/project` | `{project}`: the session (and the folder's next ones) in it, by its id, name or number, or `none`; `{said}`, 400 `project` with why when it is not one the person may add to |
@@ -1662,6 +1805,8 @@ status (403 `outside` for a path outside the folder).
 | `POST /api/replace` `{q, case, word, regex, include, exclude, replacement, paths}` | replaces what that search finds (in `paths` only, when given): `{files: [{path, replaced, version}], count, truncated}` |
 | `GET /api/skills` (`?fresh=1`: Arena asked at once) | `{skills: [{name, description, source, path}], commands: [{name, description, argumentHint}], mineInArena}`, read again first (Arena's at most every 30 s); `source`: project, person (on this computer, or theirs in Arena), arena or builtin; `path`: where the editor opens it (the project's in the folder, or by its whole path when the folder is inside the repository; the person's as `user:skills/NAME/SKILL.md`; null: not edited here); `mineInArena`: a new one of the person's is made in Arena |
 | `POST /api/skills` `{name, scope}` | a new skill's SKILL.md to fill in, the project's (`.arena/skills` at the repository's root) or the person's (`scope` person: one of theirs in Arena when signed in, else in the config folder): the skill as listed; 409 `exists` (or Arena's refusal, as it words it) |
+| `GET /api/git/merge?path=` | a file in conflict: `{path, unmerged, stages, kind, current, incoming}` (`kind`: `merge`, `rebase`, `cherry-pick`, `revert` or null; each side `{name, commit, short, subject}`) |
+| `POST /api/git/merge/complete` `{path, anyway}` | Complete Merge: stages the file (git has it merged); 409 `markers` while it has conflict markers, unless `anyway` |
 | `GET /api/git/status` | `{repository, branch, ahead, behind, files: [{path, staged, changed, from, conflict}]}` (`staged`, `changed`: git's letters M, A, D, R, U, `?` untracked; null: none; `conflict`: true for a file left unmerged) |
 | `POST /api/git/stage`, `/api/git/unstage`, `/api/git/discard` `{paths}` | the status after; 409 `git` with what git said |
 | `POST /api/git/commit` `{message, all}` | commits what is staged (all of it first, with `all`): `{hash, status}`; 409 `nothing` when nothing is staged |

@@ -15,13 +15,13 @@ internal static class Folders
     /// <summary>The most folders one folder lists in the picker.</summary>
     private const int Listed = 2000;
 
-    /// <summary>The folders opened lately, the last first (those that still exist).</summary>
+    /// <summary>The folders and workspace files (.code-workspace) opened lately, the last first (those that still exist).</summary>
     public static List<string> Recent(string dataDir)
     {
         try
         {
             var list = JsonSerializer.Deserialize<List<string>>(File.ReadAllText(Path.Combine(dataDir, FileName))) ?? [];
-            return [.. list.Where(Directory.Exists)];
+            return [.. list.Where(f => Directory.Exists(f) || (f.EndsWith(CodeWorkspace.Extension, StringComparison.OrdinalIgnoreCase) && File.Exists(f)))];
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
         {

@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { createContext, createElement, use, useCallback, useMemo, type ReactNode } from 'react'
 import { ApiError } from '@/lib/api'
+import { setWorkspaceFileSetting, workspaceFileQuery } from './code-workspace'
 import { useContributions } from './extensions'
 import { parse, setProperty } from './jsonc'
 import { projectFileQuery, userFileQuery, writeFile, writeUserFile, type OpenedFile, type UserFile } from './ide-api'
@@ -56,7 +57,7 @@ export function extensionDefaults(list: { values: Record<string, unknown> }[]): 
 }
 
 /** Settings as an object holds them, read as readLayer reads a file's. */
-function layerOf(value: unknown, workspace: boolean): Layer {
+export function layerOf(value: unknown, workspace: boolean): Layer {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return { ...empty, problems: ['The file holds one object: {"setting": value, …}.'] }
   const problems: string[] = []
   const take = (all: Record<string, unknown>, into: Record<string, unknown>, language?: string) => {
@@ -108,22 +109,26 @@ function layerOf(value: unknown, workspace: boolean): Layer {
 const defaults = Object.fromEntries(settingDefs.map((d) => [d.key, d.default]))
 
 /**
- * Every setting's value: the default, the extensions' defaults, then the person's, then the project's; then, for the
- * language, the extensions', the person's and the project's (a language's own wins, as in VS Code).
+ * Every setting's value: the default, the extensions' defaults, then the person's, then a multi-root workspace file's
+ * (its "settings"), then the folder's (.vscode/settings.json); then, for the language, the same in that order (a
+ * language's own wins, as in VS Code).
  */
-export function effective(user: Layer, workspace: Layer, language?: string, extension: Layer = empty): Record<string, unknown> {
+export function effective(user: Layer, workspace: Layer, language?: string, extension: Layer = empty, workspaceFile: Layer = empty): Record<string, unknown> {
   return {
     ...defaults,
     ...extension.values,
     ...user.values,
+    ...workspaceFile.values,
     ...workspace.values,
     ...(language ? extension.languages[language] : undefined),
     ...(language ? user.languages[language] : undefined),
+    ...(language ? workspaceFile.languages[language] : undefined),
     ...(language ? workspace.languages[language] : undefined),
   }
 }
 
-export type Target = 'user' | 'workspace'
+/** Whose settings: the person's, the folder's (.vscode/settings.json), or the open .code-workspace file's. */
+export type Target = 'user' | 'workspace' | 'workspaceFile'
 
 export interface SettingsApi {
   /** The settings read (both files answered, or failed). */
@@ -134,6 +139,10 @@ export interface SettingsApi {
   all: (language?: string) => Record<string, unknown>
   user: Layer
   workspace: Layer
+  /** The open .code-workspace file's settings; null when the folder is open alone. */
+  workspaceFile: Layer | null
+  /** That file's name (shop.code-workspace), when one is open. */
+  workspaceFileName: string | null
   /** The enabled extensions' configuration defaults. */
   extension: Layer
   userText: string
@@ -173,6 +182,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const workspace = useMemo(() => readLayer(workspaceText, true), [workspaceText])
   const defaultsOf = contributions.data?.configurationDefaults
   const extension = useMemo(() => extensionDefaults(defaultsOf ?? []), [defaultsOf])
+  // A multi-root workspace's own settings, between the person's and the folder's.
+  const fileQ = useQuery(workspaceFileQuery)
+  const fileSettings = fileQ.data?.path ? fileQ.data.settings : null
+  const workspaceFile = useMemo(() => (fileSettings ? layerOf(fileSettings, true) : null), [fileSettings])
+  const workspaceFileName = fileQ.data?.path ? (fileQ.data.path.split(/[\\/]/).at(-1) ?? null) : null
 
   const reload = useCallback(async () => {
     await Promise.all([
@@ -186,7 +200,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       const path = language ? [`[${language}]`, key] : [key]
       for (let attempt = 0; ; attempt++) {
         try {
-          if (target === 'user') {
+          if (target === 'workspaceFile') {
+            await setWorkspaceFileSetting(queryClient, key, value, language)
+          } else if (target === 'user') {
             const q = userFileQuery('settings.json')
             const now: UserFile = queryClient.getQueryData<UserFile>(q.queryKey) ?? (await queryClient.fetchQuery(q))
             const text = setProperty(now.text, path, value)
@@ -221,7 +237,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     const all = (language?: string) => {
       const k = language ?? ''
       let v = cache.get(k)
-      if (!v) cache.set(k, (v = effective(user, workspace, language, extension)))
+      if (!v) cache.set(k, (v = effective(user, workspace, language, extension, workspaceFile ?? empty)))
       return v
     }
     return {
@@ -231,13 +247,15 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       all,
       user,
       workspace,
+      workspaceFile,
+      workspaceFileName,
       extension,
       userText,
       workspaceText,
       update,
       reload,
     }
-  }, [user, workspace, extension, userText, workspaceText, userQ.isPending, projectQ.isPending, contributions.isPending, update, reload])
+  }, [user, workspace, workspaceFile, workspaceFileName, extension, userText, workspaceText, userQ.isPending, projectQ.isPending, contributions.isPending, update, reload])
 
   return createElement(SettingsContext, { value }, children)
 }
