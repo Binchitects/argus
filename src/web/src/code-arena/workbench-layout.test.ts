@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { allViews, barViews, defaults, layoutOf, reorderPanel, reorderSide, resetLocations, setHidden, sideViews, toPanel, toSide, type Layout } from './workbench-layout'
+import { allViews, barViews, defaults, keepWithheld, layoutOf, reorderPanel, reorderSide, resetLocations, setHidden, sideViews, toPanel, toSide, withhold, type Layout } from './workbench-layout'
 
 const apply = (l: Layout, c: Partial<Layout>): Layout => ({ ...l, ...c })
 
@@ -85,5 +85,22 @@ describe('the workbench layout', () => {
     expect(saved.activityBar).toBe('top')
     expect(layoutOf({ activityBar: 'sideways' }).activityBar).toBe('default')
     expect(resetLocations(apply(saved, {}))).toMatchObject({ hidden: [], activityBar: 'default' })
+  })
+
+  it('withholds a view the person may not use, and keeps it where it was in what is saved', () => {
+    const saved = apply(layoutOf({}), { view: 'memory', sideOpen: true })
+    const shown = withhold(saved, ['memory'])
+    expect(shown.order).not.toContain('memory')
+    expect(shown.view).toBe('explorer')
+    expect(barViews(shown)).not.toContain('memory')
+    expect(withhold(saved, [])).toBe(saved)
+    // In the panel too: its tab goes, the panel shows the terminal.
+    const inPanel = apply(saved, toPanel(saved, 'memory'))
+    expect(withhold(inPanel, ['memory'])).toMatchObject({ panelTab: 'terminal' })
+    expect(withhold(inPanel, ['memory']).panelTabs).not.toContain('memory')
+    // A move made while it is withheld: memory stays in the saved order.
+    const moved = keepWithheld(saved, reorderSide(shown, 'search'), ['memory'])
+    expect([...moved.order!].sort()).toEqual([...allViews].sort())
+    expect(moved.order!.at(-2)).toBe('search')
   })
 })

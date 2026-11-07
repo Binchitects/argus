@@ -16,6 +16,15 @@ internal sealed class MemoryStore(AppPaths paths, string projectRoot)
     /// <summary>Arena's memory, when Code Arena is signed in (null: the files on this machine only).</summary>
     public ArenaMemory? Arena { get; set; }
 
+    /// <summary>
+    /// Arena says the person may not use memory (feature.memory is in its denied list, or its memory answered 403): nothing is
+    /// remembered or recalled, here or there, and the model, /memory and the IDE do not offer it.
+    /// </summary>
+    public bool Denied { get; set; }
+
+    /// <summary>What the person, /memory and a tool are told when memory is denied.</summary>
+    public const string DeniedText = "Memory is off for you: Arena's admins have not given you feature.memory (Admin → Access). Nothing is remembered or recalled.";
+
     /// <summary>Arena answered at the session's start: memory is Arena's for this session.</summary>
     public bool Online { get; private set; }
 
@@ -37,7 +46,14 @@ internal sealed class MemoryStore(AppPaths paths, string projectRoot)
         if (Arena is { } arena)
         {
             await ImportAsync(arena, say, ct);
-            if (await arena.ListAsync(ProjectKey, ct) is { } list)
+            var listed = await arena.ListAsync(ProjectKey, ct);
+            // Denied: no memory in the prompt, and the machine's files neither sent nor used.
+            if (arena.Refused)
+            {
+                (Denied, Online) = (true, false);
+                return _prompt = "";
+            }
+            if (listed is { } list)
             {
                 (Online, Listed) = (true, list.Memories);
                 try
@@ -60,7 +76,7 @@ internal sealed class MemoryStore(AppPaths paths, string projectRoot)
     private string _prompt = "";
 
     /// <summary>The prompt's memory again (a new or resumed session): Arena's as the session started, else the files read anew.</summary>
-    public string Again() => Online ? _prompt : _prompt = Offline();
+    public string Again() => Denied ? "" : Online ? _prompt : _prompt = Offline();
 
     private string Offline()
     {
@@ -92,6 +108,10 @@ internal sealed class MemoryStore(AppPaths paths, string projectRoot)
     /// <summary>Keeps a memory: in Arena when it answered at the start, else in the files (they go to Arena next time). False: the same is kept already.</summary>
     public async Task<(bool Added, string Where)> RememberAsync(bool person, string text, string kind, CancellationToken ct)
     {
+        if (Denied)
+        {
+            throw new ToolError(DeniedText);
+        }
         var where = person ? "for every project" : "for this project";
         if (Online && Arena is { } arena)
         {
@@ -107,6 +127,10 @@ internal sealed class MemoryStore(AppPaths paths, string projectRoot)
     /// </summary>
     public async Task<(string Note, List<string> Ids)?> RecallAsync(string query, IReadOnlyCollection<string> besides, int budget, CancellationToken ct)
     {
+        if (Denied)
+        {
+            return null;
+        }
         if (Online && Arena is { } arena)
         {
             return await arena.RecallAsync(query, ProjectKey, besides, budget, ct);
@@ -139,8 +163,9 @@ internal sealed class MemoryStore(AppPaths paths, string projectRoot)
     /// <summary>The memories as Arena has them now (the IDE's Memory view), kept as the list /memory numbers; null when Arena does not answer.</summary>
     public async Task<List<ArenaMemoryItem>?> RefreshAsync(CancellationToken ct)
     {
-        if (Arena is not { } arena || await arena.ListAsync(ProjectKey, ct) is not { } list)
+        if (Denied || Arena is not { } arena || await arena.ListAsync(ProjectKey, ct) is not { } list)
         {
+            Denied |= Arena?.Refused == true;
             return null;
         }
         (Online, Listed) = (true, list.Memories);
@@ -472,6 +497,9 @@ internal sealed class ArenaMemory(Config config, HttpClient http)
 
     private string Url(string path) => config.Url!.TrimEnd('/') + (path.StartsWith("/api/", StringComparison.Ordinal) ? path : "/api/code-arena/memories" + path);
 
+    /// <summary>Arena's memory answered 403 last: the person may not use memory (feature.memory).</summary>
+    public bool Refused { get; private set; }
+
     /// <summary>A skill the agent worked out, kept as the person's in Arena (or a better version of theirs): what Arena did, and whether it refused.</summary>
     public async Task<(string Text, bool Error)> LearnSkillAsync(string name, string description, string instructions, string why, CancellationToken ct)
     {
@@ -500,6 +528,10 @@ internal sealed class ArenaMemory(Config config, HttpClient http)
             within.CancelAfter(Limit);
             using var res = await http.SendAsync(req, within.Token);
             var answer = res.StatusCode == System.Net.HttpStatusCode.NoContent ? new JsonObject() : Json.ParseObject(await res.Content.ReadAsStringAsync(within.Token));
+            if (!path.StartsWith("/api/", StringComparison.Ordinal))
+            {
+                Refused = res.StatusCode == System.Net.HttpStatusCode.Forbidden;
+            }
             if (!res.IsSuccessStatusCode)
             {
                 return throwRefusal ? throw new ToolError($"Arena did not keep it: {answer?.Str("error") ?? answer?.Str("detail") ?? $"HTTP {(int)res.StatusCode}"}") : null;

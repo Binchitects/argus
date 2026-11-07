@@ -1,3 +1,5 @@
+using System.Net;
+using System.Text;
 using System.Text.Json.Nodes;
 
 namespace CodeArena.Tests;
@@ -79,6 +81,84 @@ public sealed class ArenaMemoryTests : IDisposable
         Assert.Contains("1. Run the tests with make check", h.Out);
         Assert.Contains("Forgotten: Run the tests with make check", h.Out);
         Assert.Empty(_mcp.Chats.Memories);
+    }
+
+    private static List<string> ToolNames(JsonObject request) =>
+        [.. (request["tools"] as JsonArray ?? []).Select(t => t!["function"]!["name"]!.GetValue<string>())];
+
+    [Fact]
+    public async Task Memory_denied_in_Arena_is_not_offered_to_the_model_nor_kept_on_this_machine()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        _mcp.Chats.MemoryDenied = true;
+        var store = new MemoryStore(h.Paths, h.Work);
+        store.Add(person: false, "Build with make, test with make check");
+        _gateway.Answer = _ => Reply.Say("ok");
+
+        Assert.Equal(0, await h.Run("", "-p", "how do I build it?"));
+        var request = _gateway.Requests[^1];
+        var tools = ToolNames(request);
+        Assert.Contains("read_file", tools);
+        Assert.DoesNotContain("remember", tools);
+        Assert.DoesNotContain("recall", tools);
+        Assert.DoesNotContain("make check", System(request), StringComparison.Ordinal);
+        Assert.DoesNotContain("with remember", System(request), StringComparison.Ordinal);
+        Assert.DoesNotContain(request["messages"]!.AsArray(), m => m!["content"]!.ToString().StartsWith(MemoryStore.RecallHeading, StringComparison.Ordinal));
+        // The machine's memories stay where they are: not sent, not used.
+        Assert.True(File.Exists(store.ProjectFile));
+
+        Assert.Equal(0, await h.Run("/memory\n/memory add Use tabs\n/exit\n", "chat"));
+        Assert.Contains("feature.memory", h.Out, StringComparison.Ordinal);
+        Assert.Equal(["Build with make, test with make check"], store.Read(false));
+        Assert.Empty(_mcp.Chats.Memories);
+    }
+
+    [Fact]
+    public async Task Memory_follows_Arenas_denied_list_while_Code_Arena_runs()
+    {
+        _mcp.Chats.ChatConfig = new JsonObject { ["model"] = "model-a", ["denied"] = new JsonArray("feature.memory") };
+        using var h = new Harness(_gateway, _mcp);
+        var output = TextWriter.Synchronized(new StringWriter());
+        var env = new CliEnv
+        {
+            In = new StringReader(""), Out = output, Err = output, Env = _ => null, Cwd = h.Work, Paths = h.Paths, SettingsEvery = TimeSpan.FromMilliseconds(100),
+        };
+        await using var rt = await Runtime.StartAsync(new Options(), env, new Ui(env.In, output, output, false, false), CancellationToken.None);
+        await Within(() => rt.ArenaChat is not null);
+        Assert.True(rt.Memory.Denied);
+        Assert.DoesNotContain(rt.Tools.Offered(), t => t.Name is "remember" or "recall");
+
+        // An admin gives it back: offered again, without a restart.
+        _mcp.Chats.ChatConfig = new JsonObject { ["model"] = "model-a", ["denied"] = new JsonArray() };
+        await Within(() => rt.SettingsVersion == 1);
+        Assert.False(rt.Memory.Denied);
+        Assert.Contains(rt.Tools.Offered(), t => t.Name == "remember");
+    }
+
+    [Fact]
+    public async Task The_IDE_hears_that_memory_is_denied_and_keeps_nothing()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        _mcp.Chats.MemoryDenied = true;
+        await using var web = await WebRun.StartAsync(h);
+
+        var config = JsonNode.Parse(await web.Http.GetStringAsync("/api/chat/config"))!;
+        Assert.Contains("feature.memory", config["denied"]!.AsArray().Select(d => d!.GetValue<string>()));
+        var memory = JsonNode.Parse(await web.Http.GetStringAsync("/api/memory"))!;
+        Assert.True(memory["denied"]!.GetValue<bool>());
+        Assert.Empty(memory["memories"]!.AsArray());
+        using var kept = await web.Http.PostAsync("/api/memory", new StringContent("""{"text":"Use tabs"}""", Encoding.UTF8, "application/json"));
+        Assert.Equal(HttpStatusCode.Forbidden, kept.StatusCode);
+        Assert.Empty(new MemoryStore(h.Paths, h.Work).Read(true));
+    }
+
+    private static async Task Within(Func<bool> condition)
+    {
+        var deadline = Task.Delay(TimeSpan.FromSeconds(20));
+        while (!condition())
+        {
+            Assert.True(await Task.WhenAny(deadline, Task.Delay(20)) != deadline, "not within the deadline");
+        }
     }
 
     [Fact]

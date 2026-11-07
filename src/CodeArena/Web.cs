@@ -405,6 +405,9 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             case ("GET", "/api/memory"):
                 await res.JsonAsync(200, await MemoryJsonAsync(ct), ct);
                 return;
+            case ("POST", "/api/memory") when _rt.Memory.Denied:
+                await res.ErrorAsync(403, "denied", MemoryStore.DeniedText, ct);
+                return;
             case ("POST", "/api/memory"):
                 await RememberAsync(req, res, ct);
                 return;
@@ -636,6 +639,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
         return new JsonObject
         {
             ["online"] = listed is not null,
+            // Arena denies the person memory (feature.memory): the IDE leaves it out.
+            ["denied"] = _rt.Memory.Denied,
             ["project"] = _rt.Memory.ProjectKey,
             // The project's long memory in the repository, to open in the editor (null: none yet, or off).
             ["notebook"] = _rt.Config.ProjectMemory && File.Exists(Path.Combine(ProjectMemory.Folder(ProjectMemory.Root(_rt.Workspace.Root)), ProjectMemory.MainName))
@@ -781,6 +786,11 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
     {
         var arena = _rt.ArenaChat;
         var denied = (arena?["denied"] as JsonArray)?.Select(d => d?.GetValue<string>()).OfType<string>().ToList() ?? [];
+        // Memory refused at the start (403) is denied too, whether or not Arena's config has said so yet.
+        if (_rt.Memory.Denied && !denied.Contains("feature.memory"))
+        {
+            denied.Add("feature.memory");
+        }
         var offered =(arena?["models"] as JsonArray)?.OfType<JsonObject>().Where(m => m.Str("name") is not null)
             .GroupBy(m => m.Str("name")!).ToDictionary(g => g.Key, g => g.First()) ?? [];
         // The deployment's levels that Code Arena can send; its own when Arena names none of them.

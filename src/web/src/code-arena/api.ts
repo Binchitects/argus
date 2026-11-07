@@ -252,7 +252,7 @@ export interface CodeMemory {
 
 export const memoryQuery = {
   queryKey: ['code', 'memory'] as const,
-  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ online: boolean; project: string; notebook?: string | null; memories: CodeMemory[] }>('/api/memory', { signal }),
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ online: boolean; denied?: boolean; project: string; notebook?: string | null; memories: CodeMemory[] }>('/api/memory', { signal }),
 }
 
 /** A step of the agent's plan: what done means (its check), the files it changes, what it waits for, how its check went. */

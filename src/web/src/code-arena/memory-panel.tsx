@@ -76,7 +76,7 @@ export function MemoryPanel() {
             <label className="flex items-center gap-1.5 text-muted-foreground">
               <input type="checkbox" checked={project} onChange={(e) => setProject(e.target.checked)} /> For this project only
             </label>
-            <button type="submit" disabled={!text.trim() || keep.isPending || memory.data?.online === false} className="ms-auto flex h-6 items-center gap-1 rounded bg-primary px-2 text-primary-foreground disabled:opacity-50">
+            <button type="submit" disabled={!text.trim() || keep.isPending || memory.data?.online === false || memory.data?.denied} className="ms-auto flex h-6 items-center gap-1 rounded bg-primary px-2 text-primary-foreground disabled:opacity-50">
               <Plus className="size-3.5" aria-hidden="true" /> Remember
             </button>
           </div>
@@ -85,6 +85,8 @@ export function MemoryPanel() {
       <div className="min-h-0 flex-1 overflow-auto px-3 pb-3 text-xs">
         {memory.isPending ? (
           <p className="text-muted-foreground">Reading…</p>
+        ) : memory.data?.denied ? (
+          <p className="text-muted-foreground">Memory is off for you: Arena&apos;s admins have not given you feature.memory. Nothing is remembered or recalled.</p>
         ) : memory.data?.online === false ? (
           <p className="text-muted-foreground">Arena does not answer: the memories are Arena&apos;s, and this session uses those it gave at its start.</p>
         ) : all.length === 0 ? (

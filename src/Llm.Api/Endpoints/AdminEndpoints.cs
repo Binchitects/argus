@@ -367,8 +367,9 @@ public static class AdminEndpoints
             {
                 return AuthEndpoints.Problem(403, "owner", "Only an Owner makes someone an Owner or takes it away.");
             }
-            // Only an Owner disables or enables an Owner.
-            if (body.Disabled is { } d && d != u.IsDisabled && await RefusedAsync(p, users, access, u, credentials: false) is { } refused)
+            // Only an Owner disables or enables an Owner; enabling again hands the account back, as a reset does: only for
+            // someone who holds nothing beyond the one asking.
+            if (body.Disabled is { } d && d != u.IsDisabled && await RefusedAsync(p, users, access, u, credentials: !d) is { } refused)
             {
                 return refused;
             }

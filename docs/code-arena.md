@@ -2872,6 +2872,16 @@ prompt carries both, and the block Arena gave last time. What is kept
 meanwhile goes to Arena when Code Arena next reaches it (once: the files are
 kept beside as `.imported`).
 
+**When memory is denied.** Memory needs `feature.memory` in Arena, as the web
+chat's does. When the person does not hold it (Admin → Access; Arena's chat
+config lists it among what they are denied, or its memory answers 403),
+Code Arena leaves memory out: the prompt has no memory, the model is not
+offered `remember` or `recall`, nothing is recalled for a message, and the
+machine's memory files are neither sent nor used. `/memory` says it is off
+and why, and `/help` does not list it; the IDE has no Memory view nor
+**Show Memory** (a layout left on it opens the Explorer). Given back in
+Arena, it returns within seconds, without a restart.
+
 **The project's long memory: `.remember/`.** Beside Arena's memories (short
 facts, found by relevance), a project keeps a long memory of its own in the
 repository: `.remember/MEMORY.md`, what the project is, how it builds, tests
