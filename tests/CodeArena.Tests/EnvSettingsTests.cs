@@ -93,6 +93,9 @@ public sealed partial class EnvSettingsTests : IDisposable
         // A relative one is not taken.
         Assert.NotNull(EnvSettings.Problem(EnvSettings.Find("CODE_ARENA_HOME")!, "portable"));
         Assert.NotNull(EnvSettings.Problem(EnvSettings.Find("CODE_ARENA_BROWSER")!, Path.Combine(_dir, "no-browser")));
+        // A libvirt pool is a name, not a path.
+        Assert.Null(EnvSettings.Problem(EnvSettings.Find("CODE_ARENA_LIBVIRT_POOL")!, "fast-ssd"));
+        Assert.NotNull(EnvSettings.Problem(EnvSettings.Find("CODE_ARENA_LIBVIRT_POOL")!, "/var/lib/libvirt/images"));
     }
 
     [Fact]

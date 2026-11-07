@@ -679,12 +679,12 @@ export interface CodeAccount {
 
 export const accountQuery = { queryKey: ['code', 'account'] as const, queryFn: () => api<CodeAccount>('/api/account') }
 
-/** One of Code Arena's options on this computer (a program's path, the home folder): kept in config.json, the environment's winning. */
+/** One of Code Arena's options on this computer (a program's path, the home folder, a libvirt pool's name): kept in config.json, the environment's winning. */
 export interface ComputerOption {
   variable: string
   key: string
   setting: string
-  kind: 'file' | 'folder'
+  kind: 'file' | 'folder' | 'name'
   description: string
   /** What config.json keeps; null: nothing. */
   value: string | null

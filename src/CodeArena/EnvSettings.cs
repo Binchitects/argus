@@ -13,7 +13,7 @@ internal static class EnvSettings
     /// <param name="Variable">The environment's name for it.</param>
     /// <param name="Key">Its key in config.json.</param>
     /// <param name="Setting">Its id in the IDE's Settings.</param>
-    /// <param name="Kind">file (a program's path, which must be there) or folder (an absolute path, made when needed).</param>
+    /// <param name="Kind">file (a program's path, which must be there), folder (an absolute path, made when needed) or name (a word: letters, digits, . _ -).</param>
     public sealed record Option(string Variable, string Key, string Setting, string Kind, string What);
 
     public const string HomeKey = "home";
@@ -28,6 +28,8 @@ internal static class EnvSettings
             "VMware's vmrun (Workstation, Player or Fusion), for the VM tool, when it is not on PATH or in VMware's usual folder."),
         new("CODE_ARENA_VIRSH", "virsh", "codeArena.vm.virsh", "file",
             "libvirt's virsh, for the VM tool, when it is not on PATH."),
+        new("CODE_ARENA_LIBVIRT_POOL", "libvirtPool", "codeArena.vm.libvirtPool", "name",
+            "The libvirt storage pool the VM tool makes new VMs' disks in. Empty: default."),
         new("CODE_ARENA_HOME", HomeKey, "codeArena.home", "folder",
             "One folder for all of Code Arena's settings and sessions (config and data below it) instead of the system's usual places: a portable copy, or a disk of its own. From the next start; what is in the usual folders stays there."),
     ];
@@ -89,6 +91,10 @@ internal static class EnvSettings
         if (string.IsNullOrEmpty(value))
         {
             return null;
+        }
+        if (option.Kind == "name")
+        {
+            return value.Length <= 128 && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-') ? null : "A name: letters, digits, . _ and -, at most 128.";
         }
         if (value.Length > 1024 || value.Contains('\n'))
         {

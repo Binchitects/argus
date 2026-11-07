@@ -875,11 +875,13 @@ file Code Arena does not use are
 listed apart (they stay in it); **From VS Code** brings over VS Code's own
 settings.json from this computer (what the person set already stays).
 **Code Arena on this computer** (User only) holds what Code Arena itself reads
-before any page: the browser for its window, the hypervisors' programs and the
-home folder. They are kept in config.json, not settings.json, each checked as
-it is saved (a program must be there, a folder a full path); a variable of the
-same name in the environment (`CODE_ARENA_BROWSER`, `CODE_ARENA_VBOXMANAGE`,
-`CODE_ARENA_VMRUN`, `CODE_ARENA_VIRSH`, `CODE_ARENA_HOME`) still wins, and the
+before any page: the browser for its window, the hypervisors' programs, the
+libvirt pool new VMs' disks go in, and the home folder. They are kept in
+config.json, not settings.json, each checked as it is saved (a program must be
+there, a folder a full path, a pool a plain name); a variable of the same name
+in the environment (`CODE_ARENA_BROWSER`, `CODE_ARENA_VBOXMANAGE`,
+`CODE_ARENA_VMRUN`, `CODE_ARENA_VIRSH`, `CODE_ARENA_LIBVIRT_POOL`,
+`CODE_ARENA_HOME`) still wins, and the
 row says so. A test keeps every `CODE_ARENA_*` the code reads a setting there,
 or names why it is none (the `--serve` key, the mark of a start without a
 console).
@@ -2250,7 +2252,7 @@ after.
 |---|---|---|---|
 | VirtualBox | `createvm --register` in its machine folder, a VDI disk on SATA, the ISO on the next port; Windows gets UEFI and a TPM | `clonevm` (`--snapshot`, linked: `--options link`) | `unregistervm --delete` |
 | VMware | a folder of its own in VMware's folder for VMs (`prefvmx.defaultVMPath`, else `~/vmware`, `Documents\Virtual Machines`, `~/Virtual Machines.localized`), its disk by `vmware-vdiskmanager` and a `.vmx`; the VMs there are listed too | `vmrun clone` (full or linked, `-snapshot`) | `vmrun deleteVM` |
-| libvirt | a qcow2 volume in the `default` pool (`CODE_ARENA_LIBVIRT_POOL`), then `virsh define`: KVM, virtio disk and network, VNC with a tablet, and the guest agent's channel | `virt-clone --auto-clone` (of its state now; no linked clones) | `undefine` with its snapshots' records, saved state, UEFI variables and its disks' volumes, not a CD-ROM's ISO |
+| libvirt | a qcow2 volume in the `default` pool (Settings → `codeArena.vm.libvirtPool`, or `CODE_ARENA_LIBVIRT_POOL`), then `virsh define`: KVM, virtio disk and network, VNC with a tablet, and the guest agent's channel | `virt-clone --auto-clone` (of its state now; no linked clones) | `undefine` with its snapshots' records, saved state, UEFI variables and its disks' volumes, not a CD-ROM's ISO |
 | Hyper-V | `New-VM`, generation 2, a VHDX in the host's disk folder, the Default Switch, the ISO booted first; Linux gets the UEFI CA's Secure Boot template | an export (`Export-VM`, `Export-VMSnapshot`) imported again as a copy with an id of its own | its checkpoints merged, `Remove-VM`, then its disks' files |
 
 The terminal does the same without a model: `code-arena vm create NAME [--iso
