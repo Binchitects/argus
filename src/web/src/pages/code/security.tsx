@@ -14,7 +14,7 @@ import { Field } from '@/components/ui/field'
 import { Input, Textarea } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
-import { api, errorMessage } from '@/lib/api'
+import { api, errorMessage, mayUse, meQuery } from '@/lib/api'
 import { Markdown } from '@/pages/chat/markdown'
 import { securityScanQuery, securityScansQuery, type ScanBrief, type SecurityFinding } from './api'
 
@@ -54,7 +54,8 @@ export function ScanState({ s }: { s: ScanBrief }) {
 }
 
 /** Code Studio's security reviews: start one on a project (and a branch), and the list of them with what is open. */
-export function SecurityReviews() {
+/** mayStart: review.run, without which one's earlier security reviews (and those shared) are only listed. */
+export function SecurityReviews({ mayStart = true }: { mayStart?: boolean } = {}) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const scans = useQuery(securityScansQuery)
@@ -73,11 +74,13 @@ export function SecurityReviews() {
       setBusy(false)
     }
   }
+  if (!mayStart && !scans.data?.length) return null
   return (
     <section aria-labelledby="security-title" className="mt-8">
       <h2 id="security-title" className="mb-3 text-lg font-semibold">
         Security
       </h2>
+      {mayStart && (
       <Card>
         <CardHeader>
           <CardTitle>Review a repository's security</CardTitle>
@@ -106,6 +109,7 @@ export function SecurityReviews() {
           </form>
         </CardContent>
       </Card>
+      )}
       {scans.error ? (
         <QueryError error={scans.error} retry={() => scans.refetch()} />
       ) : !scans.data ? (
@@ -148,7 +152,8 @@ function FindingCard({
   chosen: boolean
   onChoose: (on: boolean) => void
   onDecide: (state: SecurityFinding['state'], why?: string, until?: string) => Promise<void>
-  onFix: () => void
+  /** Left out without feature.fixit: no Fix it, nothing to choose to fix. */
+  onFix?: () => void
 }) {
   const [asking, setAsking] = useState<'accepted' | 'wrong' | null>(null)
   const [why, setWhy] = useState('')
@@ -159,7 +164,7 @@ function FindingCard({
   return (
     <li className={`grid gap-2 rounded-lg border p-4 ${refuted || f.state !== 'open' ? 'opacity-70' : ''}`}>
       <div className="flex flex-wrap items-center gap-2">
-        {f.state === 'open' && <Checkbox checked={chosen} onCheckedChange={(v) => onChoose(v === true)} aria-label={`Choose “${f.title}” to fix`} />}
+        {f.state === 'open' && onFix && <Checkbox checked={chosen} onCheckedChange={(v) => onChoose(v === true)} aria-label={`Choose “${f.title}” to fix`} />}
         <Badge variant={severityVariant[f.severity]}>{f.severity}</Badge>
         {f.exploited && <Badge variant="destructive">known exploited</Badge>}
         {since && new Date(f.foundAt).getTime() > new Date(since).getTime() + 60_000 && (
@@ -282,9 +287,11 @@ function FindingCard({
       <div className="flex flex-wrap gap-2">
         {f.state === 'open' ? (
           <>
-            <Button size="sm" variant="outline" onClick={onFix} title="An agent makes the change from the branch reviewed, and opens the merge request as you">
-              <Wrench /> Fix it
-            </Button>
+            {onFix && (
+              <Button size="sm" variant="outline" onClick={onFix} title="An agent makes the change from the branch reviewed, and opens the merge request as you">
+                <Wrench /> Fix it
+              </Button>
+            )}
             <Button size="sm" variant="outline" onClick={() => void onDecide('fixed')}>
               <ShieldCheck /> Fixed
             </Button>
@@ -343,6 +350,7 @@ export function SecurityScanPage() {
   const [by, setBy] = useState<Found>('all')
   const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set())
   const [fixing, setFixing] = useState(false)
+  const me = useQuery(meQuery)
   if (scan.error) return <QueryError error={scan.error} retry={() => scan.refetch()} />
   if (!scan.data) return <Skeleton className="h-64" />
   const d = scan.data
@@ -399,7 +407,7 @@ export function SecurityScanPage() {
       chosen={chosen.has(f.id)}
       onChoose={(on) => choose(f.id, on)}
       onDecide={(state, why, until) => decide(f.id, state, why, until)}
-      onFix={() => void fix(f.id)}
+      onFix={mayUse(me.data, 'feature.fixit') ? () => void fix(f.id) : undefined}
     />
   )
   const age = s.advisoriesAsOf ? Math.floor((Date.now() - new Date(`${s.advisoriesAsOf}T00:00:00Z`).getTime()) / 86_400_000) : null

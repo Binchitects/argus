@@ -15,7 +15,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Field } from '@/components/ui/field'
 import { Input, Textarea } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
-import { errorMessage } from '@/lib/api'
+import { errorMessage, mayUse, meQuery } from '@/lib/api'
 import { LivePreview } from '../chat/live-preview'
 import { appArena } from './arena-host'
 import { appQuery, appsQuery, changeApp, reachLabels, remixApp, removeApp, restoreVersion, versionsQuery, type AppBrief, type AppReach } from './apps-api'
@@ -73,6 +73,9 @@ function EditDialog({ app, onClose }: { app: AppBrief; onClose: () => void }) {
   const [name, setName] = useState(app.name)
   const [description, setDescription] = useState(app.description)
   const [reach, setReach] = useState<AppReach>(app.reach === 'groups' ? 'company' : app.reach)
+  // Opening it to everyone is feature.apps.share's; one already open may stay so.
+  const me = useQuery(meQuery)
+  const reaches = (['private', 'company'] as const).filter((r) => r === 'private' || app.reach === r || mayUse(me.data, 'feature.apps.share'))
   const [error, setError] = useState<string | null>(null)
   const save = useMutation({
     mutationFn: () => changeApp(app.id, { name: name.trim(), description: description.trim(), ...(app.reach === 'groups' && reach === 'company' ? {} : { reach }) }),
@@ -101,8 +104,8 @@ function EditDialog({ app, onClose }: { app: AppBrief; onClose: () => void }) {
       <Field label="What it is for">
         <Textarea rows={2} maxLength={500} value={description} onChange={(e) => setDescription(e.target.value)} />
       </Field>
-      {app.reach !== 'groups' && (
-        <Segmented label="Who may open it" value={reach} onChange={setReach} options={(['private', 'company'] as const).map((r) => ({ value: r, label: reachLabels[r] }))} />
+      {app.reach !== 'groups' && reaches.length > 1 && (
+        <Segmented label="Who may open it" value={reach} onChange={setReach} options={reaches.map((r) => ({ value: r, label: reachLabels[r] }))} />
       )}
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onClose}>
@@ -168,6 +171,8 @@ export function AppPage() {
   const loaded = useQuery(appQuery(id))
   const arena = useMemo(() => appArena(id), [id])
   const [dialog, setDialog] = useState<'edit' | 'versions' | null>(null)
+  // A remix is a new app of one's own: feature.apps'.
+  const me = useQuery(meQuery)
   const remix = useMutation({
     mutationFn: () => remixApp(id),
     onSuccess: (copy) => {
@@ -198,9 +203,11 @@ export function AppPage() {
         <Button variant="outline" size="sm" onClick={() => void navigator.clipboard.writeText(window.location.href).then(() => toast.success('Link copied'))}>
           <Copy /> Copy link
         </Button>
-        <Button variant="outline" size="sm" onClick={() => remix.mutate()} loading={remix.isPending}>
-          <GitFork /> Remix
-        </Button>
+        {mayUse(me.data, 'feature.apps') && (
+          <Button variant="outline" size="sm" onClick={() => remix.mutate()} loading={remix.isPending}>
+            <GitFork /> Remix
+          </Button>
+        )}
         {app.mine && (
           <>
             <Button variant="outline" size="sm" onClick={() => setDialog('edit')}>

@@ -13,7 +13,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
-import { api, errorMessage } from '@/lib/api'
+import { api, errorMessage, mayUse } from '@/lib/api'
 import { serviceUrl } from '@/app/nav'
 import { arenaMcp, CA_FILE, caShell, KEY, tools, type Context, type Step, type System, type Tool } from './setup-tools'
 
@@ -21,6 +21,8 @@ interface ChatConfig {
   model: string | null
   models: { name: string; context: number | null; maxOutput: number | null; vision: boolean; tools: boolean; thinking: boolean; loaded: boolean }[]
   argus: boolean
+  /** The feature permissions the person does not hold (feature.code_arena…). */
+  denied?: string[]
 }
 
 /**
@@ -75,7 +77,9 @@ export function ConnectPage() {
   const model = chosen ?? config.data?.model ?? models[0]?.name ?? 'your-model'
   const current = models.find((m) => m.name === model)
   const argusUrl = `${serviceUrl('argus')}mcp`
-  const tool = tools.find((t) => t.id === toolId) ?? tools[0]!
+  // Code Arena is feature.code_arena's (Admin → Access): not offered to one who may not use it.
+  const offered = tools.filter((t) => t.id !== 'code-arena' || mayUse(config.data, 'feature.code_arena'))
+  const tool = offered.find((t) => t.id === toolId) ?? offered.find((t) => t.id === 'claude') ?? offered[0]!
   const context: Context = {
     root, base: `${root}/v1`, model, context: current?.context ?? 32768, maxOutput: current?.maxOutput ?? 8192, argusUrl,
     apiKey: fill && newKey ? newKey : undefined, origin: window.location.origin, codeArena: codeArena.data ?? null,
@@ -160,10 +164,10 @@ export function ConnectPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {groups.map((g) => (
+                    {groups.filter((g) => offered.some((t) => t.group === g)).map((g) => (
                       <SelectGroup key={g}>
                         <SelectLabel>{g}</SelectLabel>
-                        {tools
+                        {offered
                           .filter((t) => t.group === g)
                           .map((t) => (
                             <SelectItem key={t.id} value={t.id}>

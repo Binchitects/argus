@@ -13,7 +13,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Field } from '@/components/ui/field'
 import { Input, Textarea } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
-import { errorMessage } from '@/lib/api'
+import { errorMessage, mayUse, meQuery } from '@/lib/api'
 import { AutoReviews } from './auto-reviews'
 import { askCode, mergeRequestsQuery, reviewsQuery, startReview, verdictLabel, type ReviewBrief } from './api'
 import { BusinessMapSection } from './business'
@@ -35,6 +35,10 @@ export function CodePage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const reviews = useQuery(reviewsQuery)
+  // Each part is its permission's (Admin → Access): code.studio's workspaces, code.read's merge requests, business maps
+  // and questions, review.run's reviews, review.policy's automatic ones, feature.fixit's fixes.
+  const me = useQuery(meQuery)
+  const may = (permission: string) => mayUse(me.data, permission)
   const [project, setProject] = useState('')
   const [shown, setShown] = useState('')
   const [state, setState] = useState<'opened' | 'merged' | 'all'>('opened')
@@ -77,11 +81,13 @@ export function CodePage() {
         title="Code Studio"
         description="Code in an IDE like VS Code, on the server or your own machine; review merge requests with the model, and ask Argus about your code. Reviews read with your own access and write nothing; workspaces and Fix it push and open merge requests as you, with your own token."
         actions={
-          <Button variant="outline" asChild>
-            <Link to="/code/fixes">
-              <Wrench /> Fix it
-            </Link>
-          </Button>
+          may('feature.fixit') && (
+            <Button variant="outline" asChild>
+              <Link to="/code/fixes">
+                <Wrench /> Fix it
+              </Link>
+            </Button>
+          )
         }
       />
       {error && (
@@ -89,13 +95,19 @@ export function CodePage() {
           {error}
         </Alert>
       )}
-      <div className="mb-8">
-        <Workspaces />
-      </div>
-      <div className="mb-8">
-        <BusinessMapSection />
-      </div>
-      <h2 className="mb-3 text-lg font-semibold">Review and ask</h2>
+      {may('code.studio') && (
+        <div className="mb-8">
+          <Workspaces />
+        </div>
+      )}
+      {may('code.read') && (
+        <div className="mb-8">
+          <BusinessMapSection />
+        </div>
+      )}
+      {may('code.read') && (
+      <>
+      <h2 className="mb-3 text-lg font-semibold">{may('review.run') ? 'Review and ask' : 'Merge requests and questions'}</h2>
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
@@ -146,13 +158,16 @@ export function CodePage() {
                             {m.author} · {m.source_branch} → {m.target_branch}
                           </span>
                         </span>
-                        <Button size="sm" disabled={busy} onClick={() => void review({ project: shown, iid: m.iid })}>
-                          Review
-                        </Button>
+                        {may('review.run') && (
+                          <Button size="sm" disabled={busy} onClick={() => void review({ project: shown, iid: m.iid })}>
+                            Review
+                          </Button>
+                        )}
                       </li>
                     ))}
                   </ul>
                 )}
+                {may('review.run') && (
                 <details className="text-sm">
                   <summary className="cursor-pointer text-muted-foreground">Review a branch without a merge request</summary>
                   <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -169,6 +184,7 @@ export function CodePage() {
                     </div>
                   </div>
                 </details>
+                )}
               </>
             )}
           </CardContent>
@@ -188,8 +204,10 @@ export function CodePage() {
           </CardContent>
         </Card>
       </div>
-      <AutoReviews />
-      <SecurityReviews />
+      </>
+      )}
+      {may('review.run') && may('review.policy') && <AutoReviews />}
+      <SecurityReviews mayStart={may('review.run')} />
       <h2 className="mt-8 mb-3 text-lg font-semibold">Reviews</h2>
       {reviews.error ? (
         <QueryError error={reviews.error} retry={() => reviews.refetch()} />

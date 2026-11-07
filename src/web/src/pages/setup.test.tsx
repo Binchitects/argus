@@ -195,6 +195,17 @@ describe('connect your tools', () => {
     expect(within(steps).getByText(/Code Arena connects to Argus by itself, beside Arena's own tools/)).toBeInTheDocument()
   })
 
+  it('does not offer Code Arena to one who may not use it (feature.code_arena)', async () => {
+    fakeApi(member, {
+      'GET /api/chat/config': () => ({ json: config({ denied: ['feature.code_arena'] }) }),
+      'GET /api/downloads/code-arena': () => ({ json: { version: '4.2.0', builds: [] } }),
+    })
+    renderApp('/setup')
+    await userEvent.click(await screen.findByRole('combobox', { name: 'Your tool' }))
+    expect(await screen.findByRole('option', { name: /Claude Code/ })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: 'Code Arena (our own agent)' })).toBeNull()
+  })
+
   it('says how to add Code Arena when this Arena has no builds of it', async () => {
     fakeApi(member, {
       'GET /api/chat/config': () => ({ json: config() }),

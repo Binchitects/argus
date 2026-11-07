@@ -14,7 +14,7 @@ import { rowKeys, useChangeView } from './change-folds'
 import { FoldGroup } from './change-tree'
 import { useEditor } from './editor-state'
 import { PartHelp } from './help'
-import { createSkill, exportIdeSkills, importSkills, previewSkillImport, refreshSkills, skillsQuery, type SkillInfo, type SkillScope } from './ide-api'
+import { accountQuery, createSkill, exportIdeSkills, importSkills, previewSkillImport, refreshSkills, skillsQuery, type SkillInfo, type SkillScope } from './ide-api'
 
 const action =
   'grid size-6 place-items-center rounded-sm text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 [&_svg]:size-3.5'
@@ -74,6 +74,9 @@ export function SkillsPanel() {
   })
   const reading = listed.isFetching || again.isPending
   const inArena = listed.data?.mineInArena ?? false
+  // One's own in Arena are feature.skills' there (Admin → Access): without it, only the project's are made here.
+  const account = useQuery(accountQuery)
+  const scopes = inArena && account.data?.account?.denied?.includes('feature.skills') ? (['project'] as const) : (['project', 'person'] as const)
   const skills = listed.data?.skills ?? []
   const mine = skills.filter((s) => s.source === 'project' || s.source === 'person')
   return (
@@ -97,7 +100,7 @@ export function SkillsPanel() {
               nameBox.current?.focus()
             }}
           >
-            {(['project', 'person'] as const).map((scope) => (
+            {scopes.map((scope) => (
               <DropdownMenuItem
                 key={scope}
                 onSelect={() => {
@@ -153,7 +156,7 @@ export function SkillsPanel() {
               about="Every file is looked at for secrets first (by Arena's safeguards too, when signed in)."
               intro={
                 <div role="radiogroup" aria-label="Where they go" className="grid gap-1.5 text-sm">
-                  {(['project', 'person'] as const).map((s) => (
+                  {scopes.map((s) => (
                     <label key={s} className="flex items-start gap-2">
                       <input type="radio" name="skill-scope" className="mt-1 accent-primary" checked={scope === s} onChange={() => setScope(s)} />
                       <span>

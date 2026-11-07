@@ -178,6 +178,14 @@ What each person may do is decided in one place, from three things:
   everyone (`feature.apps` alone makes apps for oneself). Feature
   permissions are grouped on the Access page by what they are for: Chat and
   knowledge, Making, Agents and keys, Sharing and rooms, Code.
+  What a person may not use is left out of the pages, not shown to fail:
+  a room's Call without `feature.calls`, an app's Remix without
+  `feature.apps`, Fix it without `feature.fixit`, Code Arena on Connect your
+  tools without `feature.code_arena`, each part of Code Studio without its
+  permission, voice, memory and API keys on the account page without theirs,
+  and the same in Code Arena's IDE (one's own skills in Arena without
+  `feature.skills`). A page opened by its address says it is not among what
+  they may use.
 - **Roles**: named sets of permissions. The built-in ones are **Owner**
   (everything), **People admin**, **Model admin**, **Billing**, **Auditor**
   (every `.read`, never a change), **Argus admin**, **Room moderator**,

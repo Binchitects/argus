@@ -111,9 +111,14 @@ export function visibleNavigation(me: { isAdmin: boolean; permissions?: string[]
 /** Whether the person holds a feature permission the page needs (or it needs none). */
 export const mayOpen = (me: { denied?: string[] }, item: NavItem) => !item.may || item.may.some((k) => !me.denied?.includes(k))
 
+/** Pages inside a menu entry that need a permission of their own: opened by their link, never listed. */
+export const innerPages: NavItem[] = [
+  { title: 'Fix it', path: '/code/fixes', icon: Wrench, feature: 'code-studio', may: ['feature.fixit'] },
+]
+
 /** The nav item a path belongs to: the longest matching prefix. */
 export function findNavItem(pathname: string): NavItem | undefined {
-  const all = navigation.flatMap((s) => s.items)
+  const all = [...navigation.flatMap((s) => s.items), ...innerPages]
   return all
     .filter((i) => (i.path === '/' ? pathname === '/' : pathname === i.path || pathname.startsWith(i.path + '/')))
     .sort((a, b) => b.path.length - a.path.length)[0]

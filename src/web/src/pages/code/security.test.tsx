@@ -101,6 +101,17 @@ describe('code security', () => {
     expect(calls.find((c) => c.path === '/api/fixes' && c.method === 'POST')?.body).toEqual({ securityFindingId: 'f1' })
   })
 
+  it('has no Fix it, nor findings to choose to fix, for one without feature.fixit', async () => {
+    fakeApi({ ...member, denied: ['feature.fixit'] }, {
+      'GET /api/code/security/s1': () => ({ json: { scan: brief, summary: null, model: 'Main', by: 'Mo', mine: true, findings: [finding('f1', {})] } }),
+    })
+    renderApp('/code/security/s1')
+    const list = await screen.findByRole('list', { name: 'Weaknesses' })
+    expect(within(list).getByRole('button', { name: /Fixed/ })).toBeInTheDocument()
+    expect(within(list).queryByRole('button', { name: 'Fix it' })).toBeNull()
+    expect(within(list).queryByRole('checkbox')).toBeNull()
+  })
+
   it('fixes the findings chosen at once, a fix each, the rest waiting their turn', async () => {
     const calls = fakeApi(member, {
       'GET /api/code/security/s1': () => ({

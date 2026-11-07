@@ -665,3 +665,16 @@ export const nameOf = (path: string) => path.slice(path.lastIndexOf('/') + 1)
 export const join = (folder: string, name: string) => (folder ? `${folder}/${name}` : name)
 /** The path itself, or one inside it. */
 export const within = (path: string, folder: string) => path === folder || path.startsWith(`${folder}/`)
+
+/** Whose key Code Arena works with, as Arena says it. */
+export interface CodeAccount {
+  arena: string | null
+  signedIn: boolean
+  /** A Code Studio workspace: it works with Arena's key for it, and does not sign in. */
+  codeStudio: boolean
+  /** denied: Arena's feature permissions the person does not hold (feature.skills…): what needs them is left out. */
+  account: { userName: string; displayName: string | null; email: string | null; managesPeople: boolean; denied?: string[] } | null
+  error?: string
+}
+
+export const accountQuery = { queryKey: ['code', 'account'] as const, queryFn: () => api<CodeAccount>('/api/account') }

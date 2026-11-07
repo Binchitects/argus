@@ -23,7 +23,8 @@ interface AccountData {
 }
 
 /** A person's own copy of their data, how long their chats are kept, and what their files take of their room. */
-export function YourData() {
+/** mayExport: feature.export, which downloading one's own data needs. */
+export function YourData({ mayExport = true }: { mayExport?: boolean } = {}) {
   const data = useQuery({ queryKey: ['account', 'data'], queryFn: () => api<AccountData>('/api/account/data') })
   const days = data.data?.retentionDays
   const files = data.data?.files
@@ -60,13 +61,15 @@ export function YourData() {
             )}
           </div>
         )}
-        <div>
-          <Button variant="outline" asChild>
-            <a href="/api/account/export" download>
-              <Download /> Download your data
-            </a>
-          </Button>
-        </div>
+        {mayExport && (
+          <div>
+            <Button variant="outline" asChild>
+              <a href="/api/account/export" download>
+                <Download /> Download your data
+              </a>
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   )

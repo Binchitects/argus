@@ -180,4 +180,44 @@ describe('apps', () => {
     expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ name: 'Lunch poll', description: 'Where the team eats.', code: page, reach: 'private', groupIds: [], note: 'Bigger buttons' })
     expect(calls.some((c) => c.method === 'POST' && c.path === '/api/apps')).toBe(false)
   })
+
+  it('without feature.apps an app opens but has no Remix', async () => {
+    fakeApi({ ...member, denied: ['feature.apps'] }, {
+      'GET /api/apps/p1': () => ({ json: { app: brief({}), code: page, viewer: 'Mo Member' } }),
+    })
+    renderApp('/apps/p1')
+    expect(await screen.findByRole('button', { name: /Copy link/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Remix/ })).toBeNull()
+  })
+
+  it('without feature.apps.share, a private app of one’s own is changed with no choice of who opens it', async () => {
+    fakeApi({ ...member, denied: ['feature.apps.share'] }, {
+      'GET /api/apps/p2': () => ({ json: { app: brief({ id: 'p2', mine: true, owner: 'Mo Member', reach: 'private' }), code: page, viewer: 'Mo Member' } }),
+    })
+    renderApp('/apps/p2')
+    await userEvent.click(await screen.findByRole('button', { name: /Change/ }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByLabelText('Name')).toBeInTheDocument()
+    expect(within(dialog).queryByRole('radio', { name: 'Everyone' })).toBeNull()
+  })
+
+  it('without feature.apps.share, a page is published for oneself only', async () => {
+    const { config, conversation } = chatWithPage()
+    const calls = fakeApi({ ...member, denied: ['feature.apps.share'] }, {
+      'GET /api/chat/config': () => ({ json: { ...config, denied: ['feature.apps.share'] } }),
+      'GET /api/chat/conversations': () => ({ json: [conversation] }),
+      'GET /api/chat/conversations/c1': () => ({ json: conversation }),
+      'GET /api/apps': () => ({ json: [] }),
+      'POST /api/apps': () => ({ json: brief({ id: 'n1', name: 'Lunch poll', mine: true, reach: 'private' }) }),
+    })
+    renderApp('/chat/c1')
+    await userEvent.click(within(await screen.findByRole('figure', { name: 'Code: html' })).getByRole('button', { name: 'Preview this page' }))
+    await userEvent.click(within(await screen.findByRole('complementary', { name: 'Files' })).getByRole('button', { name: 'Publish as app' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Publish as app' })
+    expect(await within(dialog).findByLabelText('Name')).toBeInTheDocument()
+    expect(within(dialog).queryByRole('radio', { name: 'Some groups' })).toBeNull()
+    expect(within(dialog).queryByRole('radio', { name: 'Everyone' })).toBeNull()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Publish' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/apps' && c.method === 'POST')?.body).toMatchObject({ reach: 'private' }))
+  })
 })

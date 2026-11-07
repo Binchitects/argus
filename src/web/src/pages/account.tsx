@@ -25,7 +25,7 @@ import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
-import { api, errorMessage, type Me } from '@/lib/api'
+import { api, errorMessage, mayUse, type Me } from '@/lib/api'
 import { colorThemes, type ColorThemeId, type Palette } from '@/lib/color-themes'
 import { ago } from '@/lib/format'
 import { useTheme, type ThemePreference } from '@/lib/theme'
@@ -48,13 +48,13 @@ export function AccountPage() {
           <PoliciesToRead />
           <Profile me={me} />
           <ApiKey />
-          <OwnKeys />
+          {mayUse(me, 'feature.api_keys') && <OwnKeys />}
           <Answers />
-          <VoiceSection />
-          <Memory />
+          {mayUse(me, 'feature.speech') && <VoiceSection />}
+          {mayUse(me, 'feature.memory') && <Memory />}
           <Appearance />
           <EasierToSee />
-          <YourData />
+          <YourData mayExport={mayUse(me, 'feature.export')} />
           <DataRights />
         </div>
         <div className="grid content-start gap-6">

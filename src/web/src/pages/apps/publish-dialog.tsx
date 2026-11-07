@@ -11,7 +11,7 @@ import { Input, Textarea } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
-import { api, errorMessage } from '@/lib/api'
+import { api, errorMessage, mayUse, meQuery } from '@/lib/api'
 import { appsQuery, changeApp, publishApp, reachLabels, type AppBrief, type AppReach } from './apps-api'
 
 interface MyGroup {
@@ -44,16 +44,18 @@ function earlier(apps: AppBrief[], what: ToPublish): AppBrief[] {
 
 function PublishLoader({ what, onClose }: { what: ToPublish; onClose: () => void }) {
   const apps = useQuery(appsQuery)
-  if (apps.isPending) return <Skeleton className="h-64" />
-  return <PublishForm what={what} mine={earlier(apps.data ?? [], what)} onClose={onClose} />
+  const me = useQuery(meQuery)
+  if (apps.isPending || me.isPending) return <Skeleton className="h-64" />
+  return <PublishForm what={what} mine={earlier(apps.data ?? [], what)} mayShare={mayUse(me.data, 'feature.apps.share')} onClose={onClose} />
 }
 
 const NEW = 'new'
 
-function PublishForm({ what, mine, onClose }: { what: ToPublish; mine: AppBrief[]; onClose: () => void }) {
+/** mayShare: feature.apps.share, without which an app is opened to nobody else (one already open may stay so). */
+function PublishForm({ what, mine, mayShare, onClose }: { what: ToPublish; mine: AppBrief[]; mayShare: boolean; onClose: () => void }) {
   const queryClient = useQueryClient()
   const id = useId()
-  const fresh = { name: what.name.replace(/\.(html?|jsx|tsx)$/i, '').replace(/[-_]+/g, ' ').trim() || 'My app', description: '', reach: 'company' as AppReach, groupIds: [] as string[] }
+  const fresh = { name: what.name.replace(/\.(html?|jsx|tsx)$/i, '').replace(/[-_]+/g, ' ').trim() || 'My app', description: '', reach: (mayShare ? 'company' : 'private') as AppReach, groupIds: [] as string[] }
   // Published from this chat before: its new version, unless they choose a new app.
   const first = mine.find((a) => what.conversationId && a.conversationId === what.conversationId)
   const [target, setTarget] = useState(first?.id ?? NEW)
@@ -65,6 +67,7 @@ function PublishForm({ what, mine, onClose }: { what: ToPublish; mine: AppBrief[
   const [note, setNote] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<{ link: string; version: number | null } | null>(null)
+  const reaches = (['private', 'groups', 'company'] as const).filter((r) => r === 'private' || mayShare || r === mine.find((a) => a.id === target)?.reach)
   const groups = useQuery({ queryKey: ['sharing', 'groups'], queryFn: ({ signal }) => api<MyGroup[]>('/api/sharing/groups', { signal }), enabled: reach === 'groups' })
   const choose = (t: string) => {
     setTarget(t)
@@ -156,7 +159,7 @@ function PublishForm({ what, mine, onClose }: { what: ToPublish; mine: AppBrief[
           <Input value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} placeholder="Published from the chat" />
         </Field>
       )}
-      <Segmented label="Who may open it" value={reach} onChange={setReach} options={(['private', 'groups', 'company'] as const).map((r) => ({ value: r, label: reachLabels[r] }))} />
+      {reaches.length > 1 && <Segmented label="Who may open it" value={reach} onChange={setReach} options={reaches.map((r) => ({ value: r, label: reachLabels[r] }))} />}
       {reach === 'groups' && (
         <fieldset className="grid gap-1.5">
           <legend className="mb-1 text-sm font-medium">Groups</legend>

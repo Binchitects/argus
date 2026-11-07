@@ -206,6 +206,15 @@ public sealed class OwnKeyTests(AppFixture app)
         var adminKey = (await admin.JsonAsync(await admin.PostAsync("/api/account/keys/rotate"))).GetProperty("apiKey").GetString()!;
         var adminMe = JsonDocument.Parse(await (await Arena(adminKey).GetAsync(new Uri("/api/code-arena/me", UriKind.Relative))).Content.ReadAsStringAsync()).RootElement;
         Assert.True(adminMe.GetProperty("managesPeople").GetBoolean());
+        // The features they may not use, as the web's denied: Code Arena's IDE leaves out what needs them.
+        Assert.Empty(me.GetProperty("denied").EnumerateArray());
+        await using (var scope = f.Services.CreateAsyncScope())
+        {
+            var users = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<Llm.Core.Identity.AppUser>>();
+            await scope.ServiceProvider.GetRequiredService<Llm.Api.Access.AccessService>().SetFeatureAsync(null, (await users.FindByNameAsync(name))!, Llm.Core.Access.Permissions.SkillsCreate, on: false);
+        }
+        var denied = JsonDocument.Parse(await (await Arena(machine).GetAsync(new Uri("/api/code-arena/me", UriKind.Relative))).Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal(["feature.skills"], denied.GetProperty("denied").EnumerateArray().Select(d => d.GetString()));
 
         // The main key is not Code Arena's to revoke; the machine's is.
         Assert.Equal(HttpStatusCode.Conflict, (await Arena(mainKey).PostAsync(new Uri("/api/code-arena/sign-out", UriKind.Relative), null)).StatusCode);
