@@ -5,7 +5,8 @@
 #   docker compose -f docker-compose.yml -f lmdeploy-build.yml --profile lmdeploy up -d lmdeploy
 #
 # The build downloads LMDeploy's wheels (PyPI; PyTorch and its CUDA libraries with them), about 6-10 GB.
-# LMDEPLOY_VERSION chooses the release.
+# LMDEPLOY_VERSION chooses the release; LMDEPLOY_APT_MIRROR and LMDEPLOY_PIP_INDEX a Debian and a PyPI mirror, where
+# deb.debian.org or pypi.org do not answer from the build host (services/lmdeploy.Dockerfile says why that happens).
 
 services:
   lmdeploy:
@@ -15,3 +16,5 @@ services:
       dockerfile: lmdeploy.Dockerfile
       args:
         LMDEPLOY_VERSION: ${LMDEPLOY_VERSION:-0.18.0}
+        APT_MIRROR: ${LMDEPLOY_APT_MIRROR:-}
+        PIP_INDEX_URL: ${LMDEPLOY_PIP_INDEX:-}

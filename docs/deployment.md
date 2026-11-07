@@ -626,7 +626,13 @@ how). **no**: missing, with the reason.
   stack's supervisor (`lmdeploy-build.yml`, about 6 to 10 GB fetched; LMDeploy's
   own image is on Docker Hub). Build it before you turn the feature on, and
   before a bundle is made with it (`make-installer.sh --without lmdeploy`
-  leaves it out). The same supervisor runs it (`ENGINE_SERVER=lmdeploy`): one
+  leaves it out). Where deb.debian.org or pypi.org do not answer from the build
+  host (both are on Fastly's network, and from some networks part of Fastly's
+  addresses stall: apt then waits minutes on each file and ends with a 404 for
+  the plain `Packages` file it falls back to), name a mirror of each:
+  `LMDEPLOY_APT_MIRROR=http://ftp.de.debian.org/debian` and
+  `LMDEPLOY_PIP_INDEX=https://<a PyPI mirror>/simple/`; a base image that
+  already has a C compiler (`BASE_IMAGE`) skips apt. The same supervisor runs it (`ENGINE_SERVER=lmdeploy`): one
   `lmdeploy serve api_server` per model, TurboMind where it has the model, else
   LMDeploy's PyTorch engine; the key goes by the environment to
   `services/lmdeploy/serve.py`, which hands it over inside its process. Its
