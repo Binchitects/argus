@@ -541,7 +541,19 @@ stack's images do with an FP4 checkpoint there, read from their sources (vLLM 0.
 
 ### To measure on the RTX 3090 (Ampere)
 
-Not run yet. The three copies are in a folder of their own beside the library (Qwen/Qwen3-0.6B BF16 1.5 GB,
+Run on 2026-11-07 (vLLM 0.31, the RTX 3090 at its 125 W power limit, 1, 8 and 32 people at once, 256 tokens each):
+
+| Copy | Weights (GiB) | Token cache (GiB) | 1 at once (tok/s) | 8 at once, in all | 32 at once, in all | First token at 32 (s) |
+|---|---|---|---|---|---|---|
+| BF16 | 1.12 | 19.52 | 76.7 | 421 | 922 | 0.136 |
+| FP8 (widened to 16 bits on Ampere) | 0.74 | 19.93 | 84.3 | 447 | 928 | 0.162 |
+| NVFP4 (W4A16 on Ampere) | 0.83 | 19.84 | 87.0 | 499 | 945 | 0.167 |
+| MXFP4 (vLLM's own, from the BF16 copy) | 0.54 | 20.11 | 87.6 | 511 | 957 | 0.125 |
+
+Every FP4 path loads and runs on Ampere. With a model this small the speed is bound by memory, so the 4-bit copies
+are about 13% faster than BF16 for one person and 20% at eight, and leave a little more of the GPU to the token
+cache. The arithmetic check (13 to 32 of 60 right) is too noisy on a 0.6B model to rank the copies: quality is for
+the H200 run below, on the 27B and Flash models. The three copies are in a folder of their own beside the library (Qwen/Qwen3-0.6B BF16 1.5 GB,
 Qwen/Qwen3-0.6B-FP8 1.06 GB, mgoin/Qwen3-0.6B-NVFP4 0.87 GB, compressed-tensors W4A4), and Admin → Models
 reads their precision as above (W4A16 for the NVFP4 copy on the 3090). The run needs the GPU free of the live chat
 model for about half an hour (the 3090 has 24 GB, and the chat model holds about 21 GB of it):
