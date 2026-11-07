@@ -199,6 +199,15 @@ controls:
       signed in, at an origin of its own, or by everyone signed in who may use
       Code Studio once its owner shares it (audited); Arena's session cookies
       never reach the program, which cannot set one for Arena's domain.
+      Nobody gives more than they hold: changing a person's role needs
+      access.assign, disabling people.disable alone, and no assignment, role
+      edit, group membership, approved request or bulk change gives anyone a
+      permission the one making it does not hold. Only an Owner makes, takes
+      away, disables or deletes an Owner, sets who is an admin through the
+      directory or company sign-in, or makes the SCIM token; a password,
+      second factor or key is reset only for someone who holds nothing beyond
+      the one resetting it. Code Arena's memory needs feature.memory, as the
+      chat's does.
     frameworks:
       iso27001: [A.5.15, A.5.18, A.8.2, A.8.3]
       soc2: [CC6.1, CC6.3]
@@ -232,6 +241,15 @@ controls:
       - Llm.Tests/AccessPermissionsTests.A_persons_effective_permissions_say_why_each_is_held_or_not
       - Llm.Tests/StudioPortsTests.A_dev_server_is_listed_and_reached_by_its_owner_alone_at_its_own_address_without_arenas_session
       - Llm.Tests/StudioPortsTests.A_port_is_named_shared_with_everyone_signed_in_stopped_and_forwarded_by_hand
+      - Llm.Tests/PeopleEscalationTests.People_edit_alone_renames_but_makes_nobody_Owner
+      - Llm.Tests/PeopleEscalationTests.Only_an_Owner_makes_an_Owner_even_with_access_assign
+      - Llm.Tests/PeopleEscalationTests.People_disable_alone_disables_and_enables
+      - Llm.Tests/PeopleEscalationTests.Nobody_gives_a_role_holding_what_they_do_not_hold
+      - Llm.Tests/PeopleEscalationTests.A_request_is_granted_only_by_who_holds_what_it_gives
+      - Llm.Tests/PeopleEscalationTests.Joining_a_group_gives_nobody_what_the_one_adding_does_not_hold
+      - Llm.Tests/PeopleEscalationTests.Credentials_are_reset_only_for_who_holds_nothing_beyond_the_one_resetting
+      - Llm.Tests/PeopleEscalationTests.Who_is_an_admin_through_sign_in_and_SCIM_is_set_by_an_Owner
+      - Llm.Tests/AccessPermissionsTests.Code_Arenas_memory_needs_feature_memory_as_the_chats_does
     operator: Decide who holds which role, and review it.
 
   - id: IAM-06
