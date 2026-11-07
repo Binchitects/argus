@@ -1397,8 +1397,8 @@ reads the quote before the message, and the editor's lines after it.
 
 **Source control** in the activity bar (Ctrl+Shift+G) is the folder's git as you work it, beside the agent's own turn
 commits: what changed since the last commit, **Merge Changes** (files a merge,
-rebase or cherry-pick left in conflict: one opens as it is, with its markers,
-and **+** settles it), **Staged Changes** (in the next commit) and **Changes**
+rebase or cherry-pick left in conflict: see [Merge conflicts](#merge-conflicts)),
+**Staged Changes** (in the next commit) and **Changes**
 (not yet). A file opens as a diff tab, as the last commit has it and as it is
 now; **+** stages it, **−** unstages it, **↺** puts it back as the index has
 it (a file git does not know is deleted; it asks first); a group's own
@@ -1456,6 +1456,39 @@ minutes. A fetch, pull or push waits ten minutes at most, asks for nothing
 (ssh's `BatchMode`, unless `GIT_SSH_COMMAND` says otherwise: your own keys and
 credential helper hold), and a password or token in a remote's address is
 never shown in what git said.
+
+### Merge conflicts
+
+A file a merge, rebase, cherry-pick or revert left in conflict is in **Merge
+Changes**. It opens in the text editor as git wrote it, as in VS Code: each
+conflict's current change (`<<<<<<< HEAD` down to `=======`, green), the
+incoming one (down to `>>>>>>>`, blue) and, with `merge.conflictStyle diff3`,
+the common ancestor (grey) are coloured, with a bar beside the line numbers
+and a mark in the scroll bar; above each conflict, **Accept Current Change**,
+**Accept Incoming Change**, **Accept Both Changes** (the current first) and
+**Resolve in Merge Editor**. Each is one edit, which Undo takes back. The
+palette has VS Code's commands for the conflict at the cursor:
+**Merge Conflict: Accept Current**, **Accept Incoming**, **Accept Both**, the
+same for all of the file's conflicts (**Accept All Current**…), and **Next
+Conflict** and **Previous Conflict**. `merge-conflict.codeLens.enabled` and
+`merge-conflict.decorators.enabled` turn the buttons and the colours off.
+
+**The merge editor** (**Resolve in Merge Editor**, the merge icon beside the
+file in Merge Changes, or **Git: Resolve in Merge Editor**) is VS Code's
+3-way merge editor: **Incoming** (the branch merged in, its commit and
+subject) and **Current** (yours) side by side above, the **Result** below.
+Each conflict's part of a side has **☐ Accept Incoming** (or **Accept
+Current**) and **Accept Combination** above it: taking one side puts it in
+the result, taking both puts both (the current first), and taking neither
+puts the conflict back. The result is the file itself: type in it too, and
+**Ctrl+S** saves it. The toolbar says how many conflicts remain, goes to the
+next and the previous (the three panes follow), **Reset** puts the result
+back as the file was when the merge editor opened, and **Complete Merge**
+saves the file and stages it, which tells git the conflict is resolved (it
+asks first when markers are left). The panes stack on a narrow window.
+`git.mergeEditor` opens a file in conflict in the merge editor from Source
+Control at once. In a rebase, as git has it, current is the branch being
+rebased onto and incoming your commit being replayed.
 
 ### Problems
 

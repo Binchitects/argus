@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Eye, FileCode2, FileDiff, FileImage, FileText, FolderOpen, GitCompareArrows, Keyboard, Pin, Settings2, X } from 'lucide-react'
+import { Eye, FileCode2, FileDiff, FileImage, FileText, FolderOpen, GitCompareArrows, GitMerge, Keyboard, NotebookPen, Pin, Settings2, X } from 'lucide-react'
 import type * as Monaco from 'monaco-editor'
 import { Fragment, lazy, Suspense, use, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type PointerEvent, type ReactNode } from 'react'
 import { ContextMenu } from 'radix-ui'
@@ -20,12 +20,13 @@ import { allCommands, onCommandsChange, runCommand } from './commands'
 import { installCompletions } from './completion'
 import { compareId, renamed, revertChanges, sideLabel, sidePath, takeChanges, touched, type LineChange, type Side } from './compare'
 import { CompareToolbar } from './compare-toolbar'
-import { EditorContext, loadMonaco, mediaKind, rankFiles, useEditor, type DiffModels, type DiffSource, type EditorApi, type FileModel, type MonacoModule, type Reveal, type SaveReason, type Tab, type Unsaved } from './editor-state'
+import { EditorContext, isNotebook, loadMonaco, mediaKind, rankFiles, useEditor, type DiffModels, type DiffSource, type EditorApi, type FileModel, type MonacoModule, type Reveal, type SaveReason, type Tab, type Unsaved } from './editor-state'
 import { GroupStoreContext, newGroupStore, openIn, openToSide, OwnEditorContext, type GroupStore } from './editor-groups'
 import { acceptChange, allFilesQuery, changesQuery, changeTexts, gitShow, gitStageText, gitStatusQuery, keepBackup, listBackups, nameOf, rawFileUrl, readFile, revertChange, saveWorkspaceState, skillsQuery, symbolsQuery, userFileQuery, within, workspaceStateQuery, writeFile, writeUserFile, type Change, type CheckProblem, type OpenedFile, type Saved, type UserFileName } from './ide-api'
 import { addDebugActions, installDebugEditor } from './debug/editor-debug'
 import { installExtensions } from './extensions'
 import { installSnippets, isSnippetsFile, snippetsChanged } from './project-snippets'
+import { installMergeConflicts } from './merge-inline'
 import { bindEditorContext, keymap, useKeyFor } from './keyboard'
 import { monacoDefaults, monacoKeybinding } from './keys'
 import { installFormatting, lineEdit, minimalEdit, offerFormatting } from './format'
@@ -64,7 +65,7 @@ const savedTabs = (tabs: Tab[]): SavedTab[] =>
 const peekKept = 30
 
 const fileSidesOf = (t: Tab): string[] =>
-  t.kind === 'file' || t.kind === 'preview' ? [t.path] : [t.left, t.right].flatMap((x) => (x?.kind === 'file' ? [x.path] : []))
+  t.kind === 'file' || t.kind === 'preview' || t.kind === 'merge' || t.kind === 'notebook' ? [t.path] : [t.left, t.right].flatMap((x) => (x?.kind === 'file' ? [x.path] : []))
 
 /** A compare tab's id for its sides: the agent's and git's as they were, any other by its sides. */
 const idOf = (t: Pick<Tab, 'source' | 'path' | 'left' | 'right'>) => (t.source === 'compare' || !t.source ? compareId(t.left!, t.right!) : diffId(t.path, t.source))
@@ -181,6 +182,7 @@ async function writeAny(path: string, text: string, version: string | null): Pro
 // The workbench's own pages, loaded the first time they open.
 const SettingsEditor = lazy(() => import('./settings-editor'))
 const KeybindingsEditor = lazy(() => import('./keybindings-editor'))
+const MergeEditor = lazy(() => import('./merge-editor').then((m) => ({ default: m.MergeEditor })))
 
 let keymapInstalled = false
 
@@ -534,8 +536,12 @@ export function EditorProvider({ children, group = 1, detached = false }: { chil
       }
     }
 
-    /** Opens a file in its tab (at a place); behind the tab shown, not shown, with `behind`. */
-    const open = async (path: string, at?: Reveal, behind = false, preview = false) => {
+    /** Opens a file in its tab (at a place); behind the tab shown, not shown, with `behind`. A notebook opens in the notebook editor, unless as text. */
+    const open = async (path: string, at?: Reveal, behind = false, preview = false, asText = false) => {
+      if (!asText && !behind && isNotebook(path)) {
+        await openOwn('notebook', path)
+        return
+      }
       const id = path
       // In a tab now: no longer only a peek's.
       peeked.current.delete(path)
@@ -644,6 +650,7 @@ export function EditorProvider({ children, group = 1, detached = false }: { chil
         markProblems(m, model, problemsOf.current.filter((p) => p.path === path))
         installFormatting({ m, queryClient, settings: (language) => settingsRef.current.all(language) })
         installSnippets(m, queryClient)
+        installMergeConflicts(m)
         if (!isUserFile(path)) void offerFormatting(path, language.id)
         return f
       })()
@@ -828,6 +835,19 @@ export function EditorProvider({ children, group = 1, detached = false }: { chil
       await loadFile(path).catch(() => undefined)
     }
 
+    /** A file in the merge editor, or a notebook in the notebook editor: a tab of its own over the file's model (its dot, its save). */
+    const openOwn = async (kind: 'merge' | 'notebook', path: string) => {
+      const id = `${kind}:${path}`
+      peeked.current.delete(path)
+      if (has(id)) {
+        activate(id)
+        return
+      }
+      const load = Symbol(path)
+      add({ id, kind, path, status: 'loading', dirty: false, load })
+      await finishOpen(path, load)
+    }
+
     const modelFor = async (path: string) => {
       const f = await loadFile(path).catch(() => null)
       return f && typeof f !== 'string' ? f.model : null
@@ -847,6 +867,12 @@ export function EditorProvider({ children, group = 1, detached = false }: { chil
           if (!has(t.kind)) add({ id: t.kind, kind: t.kind, path: t.kind === 'settings' ? 'Settings' : 'Keyboard Shortcuts', status: 'ready', dirty: false }, false)
         } else if (t.kind === 'preview') {
           if (!has(`preview:${t.path}`)) add({ id: `preview:${t.path}`, kind: 'preview', path: t.path, status: 'ready', dirty: false }, false)
+        } else if (t.kind === 'merge' || t.kind === 'notebook') {
+          if (!has(`${t.kind}:${t.path}`)) {
+            const load = Symbol(t.path)
+            add({ id: `${t.kind}:${t.path}`, kind: t.kind, path: t.path, status: 'loading', dirty: false, load }, false)
+            await finishOpen(t.path, load)
+          }
         } else if (t.kind === 'file' || t.kind === 'media') {
           await open(t.path, undefined, true).catch(() => undefined)
           if (t.pinned || t.preview) commit(pinnedFirst(tabsRef.current.map((x) => (x.id === t.path ? { ...x, pinned: t.pinned, preview: t.preview && !t.pinned } : x))))
@@ -964,7 +990,7 @@ export function EditorProvider({ children, group = 1, detached = false }: { chil
     async function save(id?: string, reason: SaveReason = 'explicit'): Promise<boolean> {
       const tab = tabsRef.current.find((t) => t.id === (id ?? activeRef.current))
       let path: string | undefined
-      if (tab?.kind === 'file') path = tab.path
+      if (tab?.kind === 'file' || tab?.kind === 'merge' || tab?.kind === 'notebook') path = tab.path
       else if (tab) {
         // A compare: the side with the focus, else its right side's file, else its left's.
         const l = tab.left?.kind === 'file' ? tab.left.path : undefined
@@ -1361,7 +1387,7 @@ export function EditorProvider({ children, group = 1, detached = false }: { chil
     }
 
     return {
-      open: (path: string, at?: Reveal, how?: { preview?: boolean }) => open(path, at, false, how?.preview === true), keepTab, pin, moveTab, keep, preload, openDiff, activate: (id: string) => activate(id), close, save: (id?: string) => save(id), refresh, moved, removed, accept, revert, selection, pieceOf, editorCommands, runAction, showProblems, bindEditor, bindDiff,
+      open: (path: string, at?: Reveal, how?: { preview?: boolean; as?: 'text' }) => open(path, at, false, how?.preview === true, how?.as === 'text'), openMerge: (path: string) => openOwn('merge', path), keepTab, pin, moveTab, keep, preload, openDiff, activate: (id: string) => activate(id), close, save: (id?: string) => save(id), refresh, moved, removed, accept, revert, selection, pieceOf, editorCommands, runAction, showProblems, bindEditor, bindDiff,
       saveAll, closeMany, reopenClosed, cycle, activateIndex, navigate, focusEditor, toggleWordWrap, languages, setLanguage, activeModel, autoSaveOn,
       saveWith: save,
       compare,
@@ -2013,6 +2039,10 @@ function GroupArea({ group, index, count }: { group: number; index: number; coun
                     <FileImage className="size-3.5 shrink-0" aria-hidden="true" />
                   ) : t.kind === 'preview' ? (
                     <Eye className="size-3.5 shrink-0" aria-hidden="true" />
+                  ) : t.kind === 'merge' ? (
+                    <GitMerge className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+                  ) : t.kind === 'notebook' ? (
+                    <NotebookPen className="size-3.5 shrink-0" aria-hidden="true" />
                   ) : (
                     <FileCode2 className="size-3.5 shrink-0" aria-hidden="true" />
                   )}
@@ -2024,6 +2054,7 @@ function GroupArea({ group, index, count }: { group: number; index: number; coun
                   )}
                   {isUserFile(t.path) && <span className="text-xs text-muted-foreground">User</span>}
                   {t.kind === 'diff' && t.source !== 'compare' && <span className="text-xs text-muted-foreground">{t.source === 'git' ? 'working tree' : t.source === 'staged' ? 'index' : 'changes'}</span>}
+                  {t.kind === 'merge' && <span className="text-xs text-muted-foreground">merge</span>}
                   {t.dirty && <span className="sr-only">, not saved</span>}
                 </button>
                 {t.pinned && !t.dirty ? (
@@ -2120,6 +2151,11 @@ function GroupArea({ group, index, count }: { group: number; index: number; coun
         )}
         {active?.kind === 'media' && <MediaPreview key={active.id} tab={active} />}
         {active?.kind === 'preview' && <MarkdownPreview key={active.id} path={active.path} />}
+        {active?.kind === 'merge' && active.status === 'ready' && (
+          <Suspense fallback={<Spinner label="Opening the merge editor" />}>
+            <MergeEditor key={active.id} id={active.id} path={active.path} />
+          </Suspense>
+        )}
         {!active && (group === 1 ? <Welcome /> : <p className="absolute inset-0 grid place-items-center text-sm text-muted-foreground">Drag a tab here, or open a file.</p>)}
         {active?.status === 'loading' && (
           <div className="absolute inset-0 grid place-items-center bg-background">

@@ -635,6 +635,91 @@ internal sealed partial class IdeGit(Workspace workspace, string? dir = null)
         return result;
     }
 
+    /// <summary>
+    /// A file in conflict as the merge editor shows it: whether git has it unmerged still (its stages: 1 the common
+    /// ancestor, 2 the current side, 3 the incoming one), what stopped on it (a merge, a rebase, a cherry-pick, a revert),
+    /// and each side's name, commit and subject, as git's own words have them (in a rebase, current is the branch being
+    /// rebased onto and incoming the commit replayed).
+    /// </summary>
+    public async Task<JsonObject> MergeAsync(string? full, CancellationToken ct)
+    {
+        var root = await RequireRootAsync(ct);
+        var name = await InRepoAsync(full, ct);
+        var (_, unmerged) = await Git(root, ["--literal-pathspecs", "ls-files", "-u", "-z", "--", name], ct);
+        var stages = unmerged.Split('\0', StringSplitOptions.RemoveEmptyEntries)
+            .Where(e => e.EndsWith('\t' + name, StringComparison.Ordinal))
+            .Select(e => e.Split('\t')[0].Split(' ') is [_, _, var stage] && int.TryParse(stage, out var n) ? n : 0)
+            .Where(n => n is >= 1 and <= 3).Distinct().Order().ToList();
+        var (_, gitDirSaid) = await Git(root, ["rev-parse", "--absolute-git-dir"], ct);
+        var gitDir = gitDirSaid.Split('\n')[0].Trim();
+        var (kind, incomingRef) =
+            File.Exists(Path.Combine(gitDir, "MERGE_HEAD")) ? ("merge", "MERGE_HEAD")
+            : File.Exists(Path.Combine(gitDir, "CHERRY_PICK_HEAD")) ? ("cherry-pick", "CHERRY_PICK_HEAD")
+            : File.Exists(Path.Combine(gitDir, "REVERT_HEAD")) ? ("revert", "REVERT_HEAD")
+            : Directory.Exists(Path.Combine(gitDir, "rebase-merge")) || Directory.Exists(Path.Combine(gitDir, "rebase-apply")) ? ("rebase", "REBASE_HEAD")
+            : ((string?)null, (string?)null);
+        return new JsonObject
+        {
+            ["path"] = workspace.Show(full!).Replace('\\', '/'),
+            ["unmerged"] = stages.Count > 0,
+            ["stages"] = new JsonArray([.. stages.Select(n => (JsonNode)n)]),
+            ["kind"] = kind,
+            ["current"] = await SideAsync(root, "HEAD", ct),
+            ["incoming"] = incomingRef is null ? null : await SideAsync(root, incomingRef, ct),
+        };
+    }
+
+    /// <summary>A side of a merge: its name (a branch, else what name-rev finds, else the short hash), its commit and subject; null when git has no such commit.</summary>
+    private static async Task<JsonObject?> SideAsync(string root, string rev, CancellationToken ct)
+    {
+        var (found, said) = await Git(root, ["log", "-1", "--format=%H%x00%h%x00%s", rev, "--"], ct);
+        if (found != 0 || said.Trim().Split('\0') is not [var hash, var shortHash, var subject])
+        {
+            return null;
+        }
+        var (branch, branchSaid) = rev == "HEAD" ? await Git(root, ["symbolic-ref", "--short", "-q", "HEAD"], ct) : (1, "");
+        var (named, nameSaid) = branch == 0 ? (1, "") : await Git(root, ["name-rev", "--name-only", "--no-undefined", "--exclude=refs/tags/*", hash.Trim()], ct);
+        var label = branch == 0 ? branchSaid.Trim() : named == 0 && nameSaid.Trim() is { Length: > 0 } n ? n : shortHash.Trim();
+        return new JsonObject { ["name"] = label, ["commit"] = hash.Trim(), ["short"] = shortHash.Trim(), ["subject"] = subject.Trim() };
+    }
+
+    /// <summary>
+    /// Complete Merge: the file staged, which tells git its conflict is resolved. Refused while it has conflict markers
+    /// still, unless <paramref name="anyway"/> (the person said so).
+    /// </summary>
+    public async Task CompleteMergeAsync(string? full, bool anyway, CancellationToken ct)
+    {
+        var root = await RequireRootAsync(ct);
+        var name = await InRepoAsync(full, ct);
+        if (!anyway && File.Exists(full) && Files.Regular(full!) && new FileInfo(full!).Length <= IdeFiles.MaxTextBytes && HasConflictMarkers(File.ReadAllText(full!)))
+        {
+            throw new IdeError(409, "markers", $"{workspace.Show(full!)} still has conflict markers: resolve them, or complete the merge anyway.");
+        }
+        Check(await Git(root, ["--literal-pathspecs", "add", "-A", "--", name], ct), "staged");
+    }
+
+    /// <summary>Whether a text has a conflict as git writes one: a line starting &lt;&lt;&lt;&lt;&lt;&lt;&lt;, then =======, then &gt;&gt;&gt;&gt;&gt;&gt;&gt;.</summary>
+    public static bool HasConflictMarkers(string text)
+    {
+        var at = 0;
+        foreach (var raw in text.Split('\n'))
+        {
+            var line = raw.TrimEnd('\r');
+            at = at switch
+            {
+                0 when line.StartsWith("<<<<<<<", StringComparison.Ordinal) => 1,
+                1 when line == "=======" || line.StartsWith("======= ", StringComparison.Ordinal) => 2,
+                2 when line.StartsWith(">>>>>>>", StringComparison.Ordinal) => 3,
+                _ => at,
+            };
+            if (at == 3)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /// <summary>The full hash of the commit a revision names; null when git knows of none. A revision that is not one is 400.</summary>
     private async Task<string?> CommitOfAsync(string rev, CancellationToken ct)
     {

@@ -187,6 +187,22 @@ internal sealed partial class WebApp
                     await res.JsonAsync(200, await (await GitForAsync(Query(req, "repo"), file, ct)).ShowAsync(file, Query(req, "rev"), ct), ct);
                     return true;
                 }
+                case ("GET", "/api/git/merge"):
+                {
+                    // The merge editor's file: unmerged or not, what stopped on it, and its two sides' names and commits.
+                    var file = GitFile(req) ?? throw new IdeError(400, "invalid", "Say which file.");
+                    await res.JsonAsync(200, await (await GitForAsync(Query(req, "repo"), file, ct)).MergeAsync(file, ct), ct);
+                    return true;
+                }
+                case ("POST", "/api/git/merge/complete"):
+                {
+                    var body = Body(req);
+                    var file = body.Str("path") is { Length: > 0 } path ? _files.Resolve(path) : throw new IdeError(400, "invalid", "Say which file.");
+                    var git = await GitForAsync(body.Str("repo"), file, ct);
+                    await git.CompleteMergeAsync(file, body.Bool("anyway") == true, ct);
+                    await res.JsonAsync(200, await git.StatusAsync(ct), ct);
+                    return true;
+                }
                 case ("GET", "/api/git/commit"):
                     await res.JsonAsync(200, await GitOf(Query(req, "repo")).CommitFilesAsync(Query(req, "hash"), ct), ct);
                     return true;

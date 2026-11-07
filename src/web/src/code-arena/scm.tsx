@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, CloudUpload, Ellipsis, GitBranch, GitCommitHorizontal, Minus, Plus, RefreshCw, Undo2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, CloudUpload, Ellipsis, GitBranch, GitCommitHorizontal, GitMerge, Minus, Plus, RefreshCw, Undo2 } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { useConfirm } from '@/components/ui/confirm'
@@ -17,6 +17,7 @@ import { useEditor } from './editor-state'
 import { FileIcon } from './file-icon'
 import { useGit } from './git-actions'
 import { PartHelp } from './help'
+import { useSetting } from './settings'
 import {
   gitBranchesQueryOf,
   gitCommit,
@@ -138,6 +139,7 @@ export function SourceControlPanel() {
  */
 function Repository({ repo, section }: { repo: string; section?: GitRepository }) {
   const editor = useEditor()
+  const mergeEditorFirst = useSetting<boolean>('git.mergeEditor') === true
   const queryClient = useQueryClient()
   const confirm = useConfirm()
   const status = useQuery(gitStatusQueryOf(repo))
@@ -237,8 +239,8 @@ function Repository({ repo, section }: { repo: string; section?: GitRepository }
           type="button"
           data-row
           onKeyDown={rowKeys}
-          onClick={() => void (list === 'merge' ? editor.open(f.path) : editor.openDiff(f.path, list === 'staged' ? 'staged' : 'git'))}
-          title={list === 'merge' ? `${f.path}: in conflict; staging it settles it` : list === 'staged' ? `${f.path}: as the last commit has it, and as staged` : `${f.path}: as staged (or committed), and now`}
+          onClick={() => void (list === 'merge' ? (mergeEditorFirst ? editor.openMerge(f.path) : editor.open(f.path)) : editor.openDiff(f.path, list === 'staged' ? 'staged' : 'git'))}
+          title={list === 'merge' ? `${f.path}: in conflict; resolve it (Accept Current, Incoming or Both, or the merge editor), then stage it` : list === 'staged' ? `${f.path}: as the last commit has it, and as staged` : `${f.path}: as staged (or committed), and now`}
           style={depth === null ? undefined : treeIndent(depth)}
           className={cn('flex h-full min-w-0 flex-1 items-center gap-1.5 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset', depth === null && 'pl-3')}
         >
@@ -247,7 +249,16 @@ function Repository({ repo, section }: { repo: string; section?: GitRepository }
           {depth === null && <span className="min-w-0 truncate text-xs text-muted-foreground">{parentOf(f.path)}</span>}
           <span className="sr-only">, {list === 'merge' ? letters.U : (letters[letter] ?? letter)}</span>
         </button>
-        <span className="hidden shrink-0 items-center group-hover:flex group-focus-within:flex">{actions(list, [f.path], f.path)}</span>
+        <span className="hidden shrink-0 items-center group-hover:flex group-focus-within:flex">
+          {list === 'merge' && (
+            <Tooltip content="Resolve in Merge Editor">
+              <button type="button" aria-label={`Resolve ${f.path} in the merge editor`} onClick={() => void editor.openMerge(f.path)} className={action}>
+                <GitMerge />
+              </button>
+            </Tooltip>
+          )}
+          {actions(list, [f.path], f.path)}
+        </span>
         <span className={cn('ml-1 w-3 shrink-0 text-center font-mono text-[0.6875rem] font-semibold', list === 'merge' ? tones.U : (tones[letter] ?? 'text-muted-foreground'))} aria-hidden="true">
           {letter === '?' ? 'U' : letter}
         </span>

@@ -95,7 +95,7 @@ export const parts: Record<Part, PartHelp> = {
   },
   git: {
     name: 'Source control',
-    text: "The folder's git: what changed since the last commit, in conflict (**Merge Changes**), **staged** for the next commit or not. A file opens as the last commit has it and as it is now; **+** stages it, **−** unstages it, **↺** puts it back; a group's or a folder's buttons, all of its files. Each group folds with its chevron (← and → too); **View as Tree** shows the files under their folders, **Collapse All** folds everything, and the folder keeps it so. Write the message and **Commit** (all of it when nothing is staged; its arrow has Amend, Commit & Push and Commit & Sync); **Sync Changes** pulls and pushes, **Publish Branch** gives a branch its upstream, and **⋯** has Pull, Push, Fetch, Checkout to…, the branches and Undo Last Commit. Switch the branch below, and see the last commits. With several repositories (one in a folder of this one, or an added folder's) each has a section with its branch, its own commit box and changes, folding on its row; a git command asks which repository.",
+    text: "The folder's git: what changed since the last commit, in conflict (**Merge Changes**: a file opens with **Accept Current Change**, **Accept Incoming Change** and **Accept Both Changes** above each conflict; the merge icon opens it in the merge editor, incoming and current above the result, and **Complete Merge** stages it), **staged** for the next commit or not. A file opens as the last commit has it and as it is now; **+** stages it, **−** unstages it, **↺** puts it back; a group's or a folder's buttons, all of its files. Each group folds with its chevron (← and → too); **View as Tree** shows the files under their folders, **Collapse All** folds everything, and the folder keeps it so. Write the message and **Commit** (all of it when nothing is staged; its arrow has Amend, Commit & Push and Commit & Sync); **Sync Changes** pulls and pushes, **Publish Branch** gives a branch its upstream, and **⋯** has Pull, Push, Fetch, Checkout to…, the branches and Undo Last Commit. Switch the branch below, and see the last commits. With several repositories (one in a folder of this one, or an added folder's) each has a section with its branch, its own commit box and changes, folding on its row; a git command asks which repository.",
     manual: 'source-control',
   },
   sessions: {
@@ -199,6 +199,14 @@ export const tasks: HelpTask[] = [
       `Press ${modKey}+Shift+X (**Extensions**).`,
       'Press **Install from VSIX…** and choose the extension\'s .vsix (its page on Open VSX or the Marketplace has a download), or import it from **VS Code on this computer**.',
       `Choose its theme with ${modKey}+K ${modKey}+T (the editor shows each as you go down the list), or its icons with **Preferences: File Icon Theme**; its snippets and languages apply at once.`,
+    ],
+  },
+  {
+    title: 'Resolve a merge conflict',
+    steps: [
+      'Open **Source control** and the file under **Merge Changes**.',
+      'Click **Accept Current Change**, **Accept Incoming Change** or **Accept Both Changes** above each conflict, or **Resolve in Merge Editor** to take each side from the panes above the result.',
+      'Save, then stage the file (+), or press **Complete Merge** in the merge editor, which does both. Commit to finish the merge.',
     ],
   },
   {

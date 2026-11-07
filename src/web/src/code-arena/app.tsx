@@ -66,6 +66,19 @@ import { allColorThemes, allIconThemes, themeNamed } from './settings-schema'
 import { previewTheme, useSeeingSync, useShownTheme, useThemeSync } from './theme'
 import { ensureTheme, extensionSnippets } from './extensions'
 import { configureSnippets, insertSnippet, isSnippetsFile, snippetsChanged } from './project-snippets'
+import { conflictAction, setInlineOptions, type ConflictAction } from './merge-inline'
+
+/** VS Code's merge-conflict commands, by their ids. */
+const mergeCommands: [string, string, ConflictAction][] = [
+  ['merge-conflict.accept.current', 'Accept Current', 'current'],
+  ['merge-conflict.accept.incoming', 'Accept Incoming', 'incoming'],
+  ['merge-conflict.accept.both', 'Accept Both', 'both'],
+  ['merge-conflict.accept.all-current', 'Accept All Current', 'all-current'],
+  ['merge-conflict.accept.all-incoming', 'Accept All Incoming', 'all-incoming'],
+  ['merge-conflict.accept.all-both', 'Accept All Both', 'all-both'],
+  ['merge-conflict.next', 'Next Conflict', 'next'],
+  ['merge-conflict.previous', 'Previous Conflict', 'previous'],
+]
 import { ExtensionsView } from './extensions-view'
 import { appendElement } from './jsonc'
 import { Splitter } from './splitter'
@@ -523,6 +536,10 @@ function Workbench({
   // The theme shown now (with "window.autoDetectColorScheme", the preferred one of the page's light or dark): the picker starts at it.
   const shownTheme = useShownTheme()
   useKeyboard()
+  // Merge conflicts in the editor: their lenses and colours, as the settings say.
+  const conflictLenses = settings.get<boolean>('merge-conflict.codeLens.enabled') !== false
+  const conflictColours = settings.get<boolean>('merge-conflict.decorators.enabled') !== false
+  useEffect(() => setInlineOptions({ codeLens: conflictLenses, decorators: conflictColours }), [conflictLenses, conflictColours])
   // Code completion: the person's choice (settings), and not while the agent is working.
   const completing = settings.get<boolean>('codeArena.inlineCompletion.enabled') && settings.get<boolean>('editor.inlineSuggest.enabled')
   useEffect(() => {
@@ -1219,6 +1236,18 @@ function Workbench({
     { id: 'workbench.action.addRootFolder', category: 'Workspaces', title: 'Add Folder to Workspace…', run: async () => {
       if (await chooseAndAddFolder()) await queryClient.invalidateQueries({ queryKey: foldersQuery.queryKey })
     } },
+    { id: 'git.openMergeEditor', category: 'Git', title: 'Resolve in Merge Editor', enabled: () => file, run: (path) => void ed.openMerge(typeof path === 'string' ? path : active!.path) },
+    ...mergeCommands.map(([id, title, action]): Command => ({
+      id,
+      category: 'Merge Conflict',
+      title,
+      enabled: () => file || active?.kind === 'merge',
+      run: () =>
+        void loadMonaco().then((m) => {
+          const shown = m.monaco.editor.getEditors().find((e) => e.hasTextFocus()) ?? m.monaco.editor.getEditors().find((e) => e.getModel() === ed.activeModel())
+          if (!shown || !conflictAction(shown, action)) toast.info('There is no merge conflict in this file.')
+        }),
+    })),
     { id: 'workbench.action.openSnippets', category: 'Snippets', title: 'Configure Snippets', run: () => void configureSnippets((path) => ed.open(path), ed.languages(), queryClient) },
     { id: 'editor.action.insertSnippet', category: 'Snippets', title: 'Insert Snippet', enabled: () => file, run: () => void loadMonaco().then(async (m) => insertSnippet(m, ed.activeModel(), await extensionSnippets(ed.activeModel()?.getLanguageId() ?? ''))) },
     { id: 'editor.action.surroundWithSnippet', category: 'Snippets', title: 'Surround With Snippet', enabled: () => file, run: () => void loadMonaco().then(async (m) => insertSnippet(m, ed.activeModel(), await extensionSnippets(ed.activeModel()?.getLanguageId() ?? ''), true)) },
