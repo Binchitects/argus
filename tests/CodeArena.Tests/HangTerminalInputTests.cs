@@ -246,8 +246,9 @@ public sealed class HangTerminalInputTests : IDisposable
                 $"Within 30 s the second prompt never reached the model. The question was asked {Count(said, "Allow edit_file?")} time(s); " +
                 $"a.txt is now {File.ReadAllText(file).Trim()}; the program {(run.IsCompleted ? "ended" : "still runs")}; " +
                 $"the model got: [{string.Join(" | ", _gateway.Requests.Select(r => Fmt.OneLine(FakeGateway.Last(r), 40)))}]\n{Tail(said)}");
-            // The prompt typed ahead was kept for after the turn, and the y answered the question: the edit was made.
-            Assert.Contains("Taken when this turn ends: second prompt", said);
+            // The prompt typed ahead went into the turn at its next step, after the edit's result (as Claude Code takes
+            // one in), and the y answered the question: the edit was made.
+            Assert.Contains(_gateway.Requests, r => FakeGateway.Last(r) == "second prompt" && FakeGateway.HasToolResults(r));
             Assert.Equal("new", File.ReadAllText(file).Trim());
         }
         finally
