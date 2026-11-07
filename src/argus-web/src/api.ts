@@ -167,7 +167,10 @@ export interface IndexStatus {
     symbols_failed: number | null;
   }[];
   index: {
+    /** Repositories indexed, each counted once whatever its branches. */
     repos?: number;
+    /** The branches indexed across them. */
+    branches?: number;
     stale?: number;
     errored?: number;
     never_run?: number;
