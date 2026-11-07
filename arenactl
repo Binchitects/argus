@@ -562,7 +562,7 @@ def dotnet_cmd(engine: Engine) -> tuple[list[str], str]:
     # engine's host's: arenactl itself in a container). As root in there; what it writes into the checkout is
     # handed back to this user after (Docker on Linux; Podman and Docker Desktop map it already).
     owner = engine.user_args()[1] if engine.user_args() else ""
-    chown = f'; rc=$?; find /repo/src /repo/dist -user 0 -exec chown {owner} {{}} + 2>/dev/null; exit $rc' if owner else ""
+    chown = f'; rc=$?; find /repo/src /repo/dist /repo/tools -user 0 -exec chown {owner} {{}} + 2>/dev/null; exit $rc' if owner else ""
     return [name, "run", "--rm", *proxy_env_args(), "-e", "DOTNET_CLI_TELEMETRY_OPTOUT=1", "-e", "DOTNET_NOLOGO=1", "-v", "arenactl-nuget:/root/.nuget",
             "-v", f"{ROOT}:/repo", "-w", "/repo", DOTNET_SDK_IMAGE, "sh", "-c", 'dotnet "$@"' + chown, "dotnet"], "/repo"
 
