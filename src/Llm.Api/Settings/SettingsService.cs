@@ -91,7 +91,7 @@ public sealed partial class SettingsService(
         IReadOnlyList<string>? Options, decimal? Min, decimal? Max, string? PatternHelp, string? Unit, bool Optional,
         string? Impact, bool Dangerous, string? Default,
         string? Value, bool IsSet, string Source, string? EnvironmentValue, bool RestartPending, string? Warning,
-        string? ShownWhen, int? Lines);
+        string? ShownWhen, int? Lines, string Permission);
 
     private SettingView View(SettingDefinition d, HashSet<string> saved, string? warning)
     {
@@ -103,7 +103,7 @@ public sealed partial class SettingsService(
         var restart = d.Scope == SettingScope.AppRestart && atStart.Changed(d.Key, effective);
         return new(d.Key, d.Group, d.Label, d.Help, d.Type.ToString().ToLowerInvariant(), d.Scope.ToString().ToLowerInvariant(),
             d.Options, d.Min, d.Max, d.PatternHelp, d.Unit, d.Optional, d.Impact, d.Dangerous, d.IsSecret ? null : d.Default,
-            value, isSet, source, environment, restart, warning, d.ShownWhen, d.Lines);
+            value, isSet, source, environment, restart, warning, d.ShownWhen, d.Lines, SettingsCatalog.PermissionOf(d));
     }
 
     /// <summary>What the configuration says without the Settings page (environment, appsettings).</summary>

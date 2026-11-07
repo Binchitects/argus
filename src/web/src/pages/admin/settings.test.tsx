@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import { admin, fakeApi, renderApp } from '@/test/utils'
+import { admin, fakeApi, member, renderApp } from '@/test/utils'
 import type { SettingsData, SettingView } from './settings-model'
 
 const s = (over: Partial<SettingView>): SettingView => ({
@@ -41,6 +41,26 @@ function data(over: Partial<SettingsData> = {}): SettingsData {
 }
 
 describe('settings', () => {
+  it('a setting is changed only by who holds its group’s part of settings.manage; the others are read only', async () => {
+    const d = data({ restartNeeded: true })
+    for (const g of d.groups) for (const x of g.settings) x.permission = g.title === 'Chat' ? 'settings.chat' : g.title === 'Model' ? 'settings.models' : 'signin.directory'
+    fakeApi({ ...member, permissions: ['settings.read', 'settings.chat'] }, { 'GET /api/admin/config': () => ({ json: d }) })
+    const chat = renderApp('/admin/settings')
+    expect(await screen.findByLabelText('Tool calls per answer')).toBeEnabled()
+    chat.unmount()
+    const model = renderApp('/admin/settings#model')
+    expect(await screen.findByLabelText('Models loaded at once')).toBeDisabled()
+    expect(screen.getByLabelText('Thinking levels offered')).toBeDisabled()
+    model.unmount()
+    renderApp('/admin/settings#company-directory-ldap')
+    expect(await screen.findByLabelText('Directory server')).toBeDisabled()
+    // A saved one goes back to its default only with the permission.
+    expect(screen.queryByRole('button', { name: /Back to the default/ })).toBeNull()
+    // Some changes wait for a restart, which is settings.restart's.
+    expect(screen.getByText('Some changes apply when the app restarts')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Restart the app now/ })).toBeNull()
+  })
+
   it('explains every setting in plain view, not only on hover: what it does, when it applies, and what is risky', async () => {
     fakeApi(admin, { 'GET /api/admin/config': () => ({ json: data() }) })
     renderApp('/admin/settings#model')

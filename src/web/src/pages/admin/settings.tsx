@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, RotateCcw, RotateCw, Save, Search, Undo2, Zap } from 'lucide-react'
 import { Fragment, useMemo, useState, type ReactNode } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router'
+import { Link, useLocation, useNavigate, useOutletContext } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
 import { PageSkeleton, QueryError } from '@/components/app/query-state'
 import { Alert } from '@/components/ui/alert'
@@ -16,7 +16,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
-import { api, ApiError, errorMessage, infoQuery } from '@/lib/api'
+import { api, ApiError, errorMessage, infoQuery, holds, type Me } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { CompanySignInPanel } from './company-sign-in'
 import { DirectoryChecks, DirectoryGuide } from './directory-panel'
@@ -271,6 +271,8 @@ function SettingRow({ s, value, error, valueOf, onChange }: { s: SettingView; va
   const reset = (key: string, what: string) =>
     save.mutate([{ key, reset: true }], { onSuccess: () => toast.success(what), onError: (e) => toast.error(errorMessage(e)) })
   const describedBy = `${id}-help${error ? ` ${id}-error` : ''}`
+  // Each setting is changed with its group's permission: without it, it is read, not changed.
+  const mayChange = holds(useOutletContext<Me>(), s.permission ?? 'settings.manage')
   return (
     <div className="grid gap-3 py-4 first:pt-0 last:pb-0 md:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] md:gap-6">
       <div className="min-w-0">
@@ -305,7 +307,9 @@ function SettingRow({ s, value, error, valueOf, onChange }: { s: SettingView; va
         <code className="mt-1 block font-mono text-[0.6875rem] text-muted-foreground">{s.key}</code>
       </div>
       <div className="grid content-start gap-1.5">
-        <Editor s={s} id={id} value={value} onChange={onChange} describedBy={describedBy} invalid={!!error} valueOf={valueOf} />
+        <fieldset disabled={!mayChange} className="contents">
+          <Editor s={s} id={id} value={value} onChange={onChange} describedBy={describedBy} invalid={!!error} valueOf={valueOf} />
+        </fieldset>
         {error && (
           <p id={`${id}-error`} className="text-xs font-medium text-destructive-ink">
             {error}
@@ -313,7 +317,7 @@ function SettingRow({ s, value, error, valueOf, onChange }: { s: SettingView; va
         )}
         {s.warning && <Alert variant="warning">{s.warning}</Alert>}
         <Provenance s={s} />
-        {s.source === 'saved' && (
+        {s.source === 'saved' && mayChange && (
           <div>
             <Button
               variant="link"
@@ -472,6 +476,8 @@ function readingSpeed(text: string): number | undefined {
 function RestartBanner() {
   const queryClient = useQueryClient()
   const [phase, setPhase] = useState<'idle' | 'restarting' | 'failed'>('idle')
+  // Restarting the app is settings.restart's (a part of settings.manage).
+  const mayRestart = holds(useOutletContext<Me>(), 'settings.restart')
   const restart = async () => {
     setPhase('restarting')
     try {
@@ -500,9 +506,11 @@ function RestartBanner() {
       variant="info"
       title="Some changes apply when the app restarts"
       action={
-        <Button size="sm" onClick={restart} loading={phase === 'restarting'}>
-          <RotateCw /> Restart the app now
-        </Button>
+        mayRestart && (
+          <Button size="sm" onClick={restart} loading={phase === 'restarting'}>
+            <RotateCw /> Restart the app now
+          </Button>
+        )
       }
     >
       It takes a few seconds; people see a short pause, and answers being written are cut off.

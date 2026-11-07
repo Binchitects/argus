@@ -80,6 +80,9 @@ public sealed partial class SettingsTests(AppFixture app)
         Assert.Equal("environment", Setting(view, "Ldap:AdminGroup").GetProperty("source").GetString());
         Assert.Equal("default", Setting(view, "Chat:MaxToolRounds").GetProperty("source").GetString());
         Assert.Equal("8", Setting(view, "Chat:MaxToolRounds").GetProperty("value").GetString());
+        // The permission that changes each, so the page holds the ones the person may not change.
+        Assert.Equal("settings.chat", Setting(view, "Chat:MaxToolRounds").GetProperty("permission").GetString());
+        Assert.Equal("signin.directory", Setting(view, "Ldap:AdminGroup").GetProperty("permission").GetString());
     }
 
     [Fact]
