@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import { admin, fakeApi, renderApp } from '@/test/utils'
+import { admin, fakeApi, member, renderApp } from '@/test/utils'
 
 const tool = (id: string, title: string, over: object = {}) => ({
   id, title, description: `${title} does things.`, icon: 'calculator', unavailable: null,
@@ -192,5 +192,18 @@ describe('admin tools', () => {
     await waitFor(() =>
       expect(calls.find((c) => c.method === 'POST' && c.path === '/api/admin/tools/servers')?.body).toMatchObject({ name: 'Pets', url: '', spec: null, specUrl: 'https://pets.example.test/openapi.json' }),
     )
+  })
+  it('one who may only see the tools has every switch and choice held, and nothing to add, customize or remove', async () => {
+    fakeApi({ ...member, permissions: ['tools.read'] }, {
+      'GET /api/admin/tools': () => ({ json: [tool('calculator', 'Calculator')] }),
+      'GET /api/admin/tools/usage': () => ({ json: [] }),
+      'GET /api/admin/tools/custom': () => ({ json: [] }),
+    })
+    renderApp('/admin/tools')
+    const card = (await screen.findByRole('heading', { name: /Calculator/ })).closest('section')!
+    expect(within(card).getByRole('switch', { name: 'Calculator on' })).toBeDisabled()
+    expect(within(card).getByRole('combobox', { name: 'Who may use it' })).toBeDisabled()
+    expect(within(card).queryByRole('button', { name: /Customize/ })).toBeNull()
+    for (const name of [/Toolsets/, /New tool/, /Add a server or API/]) expect(screen.queryByRole('button', { name })).toBeNull()
   })
 })
