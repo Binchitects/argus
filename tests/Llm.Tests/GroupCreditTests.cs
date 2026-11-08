@@ -195,6 +195,61 @@ public sealed class GroupCreditTests(AppFixture app)
     }
 
     [Fact]
+    public async Task Accounting_shares_the_running_cost_of_power_hardware_and_service_out_to_people_groups_and_projects_by_their_use()
+    {
+        // Power at $0.50 a kWh with no overhead, 1 kW for the machine besides its GPUs (none measured here), and $730.50 of
+        // service a month (an average month is 730.5 hours): a window of two hours costs $1.00 of power and $2.00 of service.
+        await using var f = app.Create(app.ConnectionStringFor("acct_" + Guid.NewGuid().ToString("N")[..8]), new FakeGateway(), new Dictionary<string, string?>
+        {
+            ["Costs:PowerPricePerKwh"] = "0.5", ["Costs:Pue"] = "1", ["Costs:OtherPowerWatts"] = "1000", ["Costs:ServicePerMonth"] = "730.5",
+            ["Stack:PrometheusUrl"] = "http://127.0.0.1:9",
+        }, s => s.AddSingleton<TimeProvider>(new MovableClock(Now)));
+        var admin = await new TestBrowser(f).SignedInAsync("admin", AppFixture.AdminPassword);
+        var (_, annId, annEmail) = await PersonAsync(f, admin);
+        var (_, benId, benEmail) = await PersonAsync(f, admin);
+        var (_, _, cyEmail) = await PersonAsync(f, admin);
+        var data = await GroupAsync(admin, new { }, annId, benId);
+        // A window of its own in the shared ledger, so other tests' requests are not in it.
+        var at = new DateTimeOffset(2023, 5, 9, 10, 0, 0, TimeSpan.Zero);
+        await app.SpendAsync(annEmail, 1m, at);
+        await app.SpendAsync(annEmail, 2m, at.AddMinutes(1), apiKey: true);
+        await app.SpendAsync(benEmail, 4m, at.AddMinutes(2));
+        await app.SpendAsync(cyEmail, 8m, at.AddMinutes(3));
+        await app.SpendAsync(benEmail, 16m, at.AddDays(2));
+
+        var from = Uri.EscapeDataString(at.AddHours(-1).ToString("O"));
+        var to = Uri.EscapeDataString(at.AddHours(1).ToString("O"));
+        var report = await admin.JsonAsync(await admin.GetAsync($"/api/admin/accounting?from={from}&to={to}"));
+        var running = report.GetProperty("running");
+        Assert.Equal(JsonValueKind.Null, running.GetProperty("gpuKwh").ValueKind);
+        Assert.Equal((2d, 1.00m, 0m, 2.00m, 3.00m), (running.GetProperty("kwh").GetDouble(), running.GetProperty("power").GetDecimal(), running.GetProperty("hardware").GetDecimal(),
+            running.GetProperty("service").GetDecimal(), running.GetProperty("total").GetDecimal()));
+        Assert.Equal("spend", report.GetProperty("basis").GetString());
+        Assert.Equal((4L, 15m, 3), (report.GetProperty("used").GetProperty("requests").GetInt64(), report.GetProperty("used").GetProperty("charged").GetDecimal(),
+            report.GetProperty("used").GetProperty("people").GetInt32()));
+        Assert.Equal(0.75m, report.GetProperty("unit").GetProperty("perRequest").GetDecimal());
+        // Each one's share of the spend: Cy 8 of 15, Ben 4, Ann 3; the group of Ann and Ben 7 of 15.
+        var people = report.GetProperty("people").EnumerateArray().ToDictionary(p => p.GetProperty("email").GetString()!, p => p.GetProperty("cost").GetDecimal());
+        Assert.Equal((1.60m, 0.80m, 0.60m), (people[cyEmail], people[benEmail], people[annEmail]));
+        var groups = report.GetProperty("groups").EnumerateArray().ToList();
+        Assert.Equal(1.40m, groups.Single(g => g.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String && id.GetGuid() == data).GetProperty("cost").GetDecimal());
+        Assert.Equal(1.60m, groups.Single(g => g.GetProperty("name").GetString() == "(in no group)").GetProperty("cost").GetDecimal());
+        Assert.Equal(3.00m, Assert.Single(report.GetProperty("projects").EnumerateArray()).GetProperty("cost").GetDecimal());
+
+        // By tokens instead: every share still adds up to the whole.
+        var byTokens = await admin.JsonAsync(await admin.GetAsync($"/api/admin/accounting?from={from}&to={to}&basis=tokens"));
+        Assert.Equal(1d, byTokens.GetProperty("people").EnumerateArray().Sum(p => p.GetProperty("share").GetDouble()), 3);
+        var csv = await admin.GetAsync($"/api/admin/accounting?from={from}&to={to}&format=csv");
+        await StatusAssert.Is(HttpStatusCode.OK, csv);
+        Assert.Contains("running,total,,,,,,,,,3.00", await csv.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+
+        // For billing.read only.
+        var (person, _, _) = await PersonAsync(f, admin);
+        await StatusAssert.Is(HttpStatusCode.Forbidden, await person.GetAsync($"/api/admin/accounting?from={from}&to={to}"));
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await admin.GetAsync($"/api/admin/accounting?from={from}&to={to}&basis=moon"));
+    }
+
+    [Fact]
     public async Task Usage_by_group_has_each_groups_requests_tokens_and_spend_with_each_member_and_the_people_in_no_group()
     {
         await using var f = NewApp(new FakeGateway());

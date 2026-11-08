@@ -680,6 +680,7 @@ public static class IdentityWiring
         Chat.LineMetrics.MapLineMetrics(app);
         Dashboards.UsageEndpoints.MapUsage(app);
         Dashboards.GroupUsage.MapGroupUsage(app);
+        Reports.Accounting.MapAccounting(app);
         Dashboards.LogEndpoints.MapLogs(app);
         Dashboards.AlertEndpoints.MapAlerts(app);
         Operations.OperationsEndpoints.MapOperations(app);

@@ -14,6 +14,7 @@ public static class SettingsCatalog
     private const string Chat = "Chat";
     private const string Model = "Model";
     private const string PricesGroup = "Prices";
+    private const string CostsGroup = "Costs";
     private const string Speech = "Speech";
     private const string Argus = "Argus (GitLab)";
     private const string Tools = "Python and web";
@@ -258,6 +259,22 @@ public static class SettingsCatalog
             { Default = "0.015", Unit = "$ per 1,000 characters", Min = 0, Max = 100, Optional = false },
         new("Prices:PerMusicMinute", PricesGroup, "A minute of music", "Each minute of music the media studio's music model makes.", SettingType.Number, SettingScope.Live)
             { Default = "0.06", Unit = "$ per minute", Min = 0, Max = 100, Optional = false },
+
+        // ---------------------------------------------------------------- running costs, live (Admin → Accounting) --
+        new("Costs:PowerPricePerKwh", CostsGroup, "Power, per kWh", "What a kilowatt-hour of electricity costs here. Admin → Accounting counts the GPUs' measured draw and the rest of the machine's, times the cooling overhead.", SettingType.Number, SettingScope.Live)
+            { Default = "0.15", Unit = "$ per kWh", Min = 0, Max = 100, Optional = false },
+        new("Costs:Pue", CostsGroup, "Cooling and power overhead (PUE)", "What the room draws for each watt the machine draws: cooling, power supplies, UPS. 1.0 is none; a typical server room is 1.3 to 1.6.", SettingType.Number, SettingScope.Live)
+            { Default = "1.4", Min = 1, Max = 4, Optional = false },
+        new("Costs:OtherPowerWatts", CostsGroup, "The rest of the machine's draw", "What the machine draws besides its GPUs, on average: CPUs, memory, disks, fans. The GPUs' own draw is measured.", SettingType.Number, SettingScope.Live)
+            { Default = "300", Unit = "W", Min = 0, Max = 100000, Optional = false },
+        new("Costs:HardwarePrice", CostsGroup, "What the hardware cost", "The machine's price (servers, GPUs, network): spread over its life below, a month at a time. 0 leaves it out.", SettingType.Number, SettingScope.Live)
+            { Default = "0", Unit = "$", Min = 0, Max = 1000000000, Optional = false },
+        new("Costs:HardwareMonths", CostsGroup, "Written off over", "The hardware's life, the months its price is spread over.", SettingType.WholeNumber, SettingScope.Live)
+            { Default = "36", Unit = "months", Min = 1, Max = 240, Optional = false },
+        new("Costs:ServicePerMonth", CostsGroup, "Service, a month", "Everything else running it costs a month: support contracts, licences, hosting or rack space, the people who look after it.", SettingType.Number, SettingScope.Live)
+            { Default = "0", Unit = "$ per month", Min = 0, Max = 1000000000, Optional = false },
+        new("Costs:ShareBy", CostsGroup, "Share the cost out by", "How Admin → Accounting shares the running cost among people, groups and projects: spend (their use at the prices above, so output, pictures and video weigh more), tokens, or time (the model's time on their requests).", SettingType.Choice, SettingScope.Live)
+            { Default = "spend", Options = ["spend", "tokens", "time"], Optional = false },
 
         new("Chat:RequestTimeout", Chat, "Longest single answer", "An answer still running after this long is stopped.", SettingType.Duration, SettingScope.AppRestart)
             { Default = "00:15:00", Unit = "minutes", Min = 1, Max = 240, Optional = false },

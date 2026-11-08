@@ -105,6 +105,7 @@ export const routes: RouteObject[] = [
               { path: 'monitoring', ...lazy(() => import('@/pages/admin/monitoring').then((m) => ({ Component: m.MonitoringPage }))) },
               { path: 'line', ...lazy(() => import('@/pages/admin/line').then((m) => ({ Component: m.LinePage }))) },
               { path: 'usage-groups', ...lazy(() => import('@/pages/admin/usage-groups').then((m) => ({ Component: m.UsageByGroupPage }))) },
+              { path: 'accounting', ...lazy(() => import('@/pages/admin/accounting').then((m) => ({ Component: m.AccountingPage }))) },
               { path: 'feedback', ...lazy(() => import('@/pages/admin/feedback').then((m) => ({ Component: m.FeedbackPage }))) },
               { path: 'prompts', ...lazy(() => import('@/pages/admin/prompts').then((m) => ({ Component: m.PromptLogPage }))) },
               { path: 'dashboards', ...lazy(() => import('@/pages/admin/dashboards').then((m) => ({ Component: m.DashboardsPage }))) },

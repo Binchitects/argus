@@ -75,6 +75,7 @@ export const routeHelp: Record<string, TopicId> = {
   '/admin/security': 'admin-security',
   '/admin/line': 'line',
   '/admin/usage-groups': 'usage-groups',
+  '/admin/accounting': 'accounting',
   '/admin/feedback': 'feedback',
   '/admin/prompts': 'prompts',
   '/admin/quality': 'quality',

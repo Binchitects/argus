@@ -1001,6 +1001,7 @@ export const topics = {
       speech: { name: 'Speech', text: 'Reading aloud and speech to text for everyone, unless a person chooses their own under Your account → Voice: the language people speak (or found by itself), the voice for each language, the reading speed, and whether Talk reads answers aloud. **Try it** reads a sample with the voice chosen.' },
       storage: { name: 'Storage', text: 'When a disk is too full (the alert), how much each person\'s files may take, and what the clean-up under Admin → Storage takes as old media.' },
       prices: { name: 'Prices', text: 'What a chat model costs when it has no price of its own under Admin → Models (input, cached input and output, per million tokens), and what pictures, video and speech cost. Every request gets its cost from these. **Recalculate past costs** prices requests recorded at no cost, for the dates you choose, after showing how many and the total.' },
+      costs: { name: 'Costs', text: 'What running the machine costs, for **Admin → Accounting**: the price of a kWh, the cooling overhead (PUE), what the machine draws besides its GPUs (theirs is measured), the hardware\'s price and the months it is written off over, service a month, and how the cost is shared out (by spend, tokens or model time).' },
       'api-keys': { name: 'API keys', text: 'The requests and tokens a minute each key may use (a group\'s or a person\'s own replaces them; 0: no limit), and the answer cache: repeated API requests answered from it, at no cost, and for how long.' },
       'security-alerts': { name: 'Security alerts', text: 'How many failed sign-ins, from one address or on one account, and how many exports raise an alert for the admins, and whether alerts are raised at all.' },
       'rooms-and-calls': { name: 'Rooms and calls', text: 'The STUN or TURN servers browsers on different networks need, the most people in one call, and the captions a room keeps for who joins late.' },
@@ -1102,6 +1103,21 @@ export const topics = {
     ],
     tasks: [{ title: 'See which team uses the models most', steps: ['Choose **Last 30 days**.', 'Read the spend column.', 'Open the group for who in it.'] }],
     manual: { doc: 'admin', section: 'usage-by-group' },
+  },
+
+  accounting: {
+    title: 'Accounting',
+    about: 'What running the models cost over the time chosen (power, hardware, service), what a unit of use costs, and that cost shared out to groups, cost centres, people and projects.',
+    admin: true,
+    parts: [
+      { name: 'Running cost', text: "Power: the GPUs' measured draw and the rest of the machine's, times the cooling overhead, at the power price. Hardware: its price over its life. Service: the monthly cost. All set in **Settings → Costs**." },
+      { name: 'What a unit costs', text: 'The running cost over a million tokens, a request and a person who used it; and the spend at the prices of Settings → Prices, against the running cost.' },
+      { name: 'Share the cost out', text: '**By spend** (the default: output, pictures and video weigh more), **by tokens** or **by model time**.' },
+      { name: 'Shared out', text: 'Groups, cost centres, people and projects, each with requests, tokens, model hours, spend, share and cost. A person in two groups counts in both.' },
+      { name: 'CSV', text: 'Every row and the running cost, for the finance team.' },
+    ],
+    tasks: [{ title: 'Charge each team its share of last month', steps: ['Set the costs in **Settings → Costs**.', 'Choose **Last 30 days**.', 'Open **Cost centres** or **Groups**, or download the **CSV**.'] }],
+    manual: { doc: 'admin', section: 'accounting' },
   },
 
   line: {

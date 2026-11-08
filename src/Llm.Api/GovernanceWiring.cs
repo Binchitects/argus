@@ -19,6 +19,7 @@ public static class GovernanceWiring
         services.AddScoped<Gateway.RateLimits>();
         services.AddSingleton<Gateway.ModelCalls>();
         services.Configure<Gateway.PriceOptions>(config.GetSection("Prices"));
+        services.Configure<Reports.CostOptions>(config.GetSection("Costs"));
         services.AddScoped<Gateway.PriceBook>();
         services.AddSingleton<Gateway.SpendLog>();
         services.AddSingleton<Gateway.LedgerSql>();
