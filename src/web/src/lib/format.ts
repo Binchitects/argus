@@ -83,6 +83,9 @@ export function formatValue(v: unknown, unit?: string, decimals?: number | null)
       return `${fixed(v, decimals ?? (Number.isInteger(v) ? 0 : 1))} °C`
     case 'watt':
       return Math.abs(v) >= 1000 ? `${fixed(v / 1000, decimals ?? 2)} kW` : `${fixed(v, decimals ?? 0)} W`
+    // Energy, as Grafana's kwatth: a GPU's draw over a time.
+    case 'kwatth':
+      return Math.abs(v) >= 1000 ? `${fixed(v / 1000, decimals ?? 2)} MWh` : `${fixed(v, decimals ?? (Math.abs(v) < 10 ? 2 : 0))} kWh`
     case 'rotmhz':
       return formatValue(v * 1e6, 'hertz', decimals)
     case 'hertz':

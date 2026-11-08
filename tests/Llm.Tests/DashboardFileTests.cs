@@ -204,8 +204,9 @@ public sealed partial class DashboardFileTests(Promtool promtool) : IClassFixtur
     [Fact]
     public async Task Gpus_are_told_apart_by_their_index_and_model_only_on_a_machine_with_more_than_one()
     {
-        // A total over every GPU (a sum, an average, the hottest; how many of each model) is one series, with no GPU to tell apart.
-        static bool Total(string e) => Regex.IsMatch(e, @"^(sum|avg|max|min|count)( by \(name\))? ?\(") && !e.Contains("uuid", StringComparison.Ordinal);
+        // A total over every GPU (a sum, an average, the hottest; how many of each model) is one series, with no GPU to tell
+        // apart; so is a total over a time ("the busiest hour", "the share of the window").
+        static bool Total(string e) => Regex.IsMatch(e, @"^((avg|max|min)_over_time\(\(?)?(sum|avg|max|min|count)( by \(name\))? ?\(") && !e.Contains("uuid", StringComparison.Ordinal);
         var targets = PromTargets().Where(x => x.Target.Expr!.Contains("nvidia_smi_", StringComparison.Ordinal) && !Total(x.Target.Expr!)).ToList();
         Assert.True(targets.Count > 20, $"only {targets.Count} nvidia-smi queries");
         // Every nvidia-smi query ends in the same naming of its GPU, and its legend shows it.

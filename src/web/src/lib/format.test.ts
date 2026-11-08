@@ -33,6 +33,8 @@ describe('formatValue (Grafana units)', () => {
     expect(formatValue(1234567)).toBe('1.23 M')
     expect(formatValue(0.000102)).toBe('0.000102')
     expect(formatValue(0.25, 'percentunit')).toBe('25.0%')
+    expect(formatValue(3.456, 'kwatth')).toBe('3.46 kWh')
+    expect(formatValue(2500, 'kwatth')).toBe('2.50 MWh')
     expect(formatValue(1536, 'bytes')).toBe('1.5 KiB')
     expect(formatValue(0.004, 'currencyUSD')).toBe('$0.004')
     expect(formatValue(12.5, 'currencyUSD')).toBe('$12.50')

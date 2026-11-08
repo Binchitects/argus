@@ -1375,7 +1375,7 @@
     },
     {
       "type": "row",
-      "title": "CPU",
+      "title": "GPU time and what holds work back",
       "collapsed": false,
       "panels": [],
       "gridPos": {
@@ -1383,6 +1383,592 @@
         "w": 24,
         "x": 0,
         "y": 43
+      }
+    },
+    {
+      "type": "stat",
+      "title": "GPU time busy",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(avg_over_time(nvidia_smi_utilization_gpu_ratio[$__range])) * $__range_s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "dtdurations"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "hideWhenEmpty": true,
+        "textMode": "value"
+      },
+      "description": "Every GPU's busy time in the window, added together: a GPU busy half of a day counts 12 hours.",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 0,
+        "y": 44
+      }
+    },
+    {
+      "type": "stat",
+      "title": "GPU time idle",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(1 - avg_over_time(nvidia_smi_utilization_gpu_ratio[$__range])) * $__range_s"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "dtdurations"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "hideWhenEmpty": true,
+        "textMode": "value"
+      },
+      "description": "Every GPU's idle time in the window, added together: room for more people, or GPUs to give other work.",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 4,
+        "y": 44
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Busy, on average",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg(avg_over_time(nvidia_smi_utilization_gpu_ratio[$__range]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "hideWhenEmpty": true,
+        "textMode": "value"
+      },
+      "description": "All the GPUs together, over the whole window.",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 8,
+        "y": 44
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Busiest hour",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max_over_time(avg(avg_over_time(nvidia_smi_utilization_gpu_ratio[1h]))[$__range:5m])"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "hideWhenEmpty": true,
+        "textMode": "value"
+      },
+      "description": "The hour in the window the GPUs were busiest, all of them together: near 100 % is when people waited.",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 12,
+        "y": 44
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Energy the GPUs used",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(avg_over_time(nvidia_smi_power_draw_watts[$__range])) * $__range_s / 3600 / 1000"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "kwatth"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "hideWhenEmpty": true,
+        "textMode": "value"
+      },
+      "description": "What the GPUs drew in the window. The cost of it is on Admin → Usage by group's accountant view, at the power price set there.",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 16,
+        "y": 44
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Time people waited in line",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(arena_line_waited_seconds_sum[$__range]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
+          "unit": "dtdurations"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "none",
+        "graphMode": "none",
+        "hideWhenEmpty": true,
+        "textMode": "value"
+      },
+      "description": "Every wait in the line in the window, added together. When it grows, the GPUs are the bottleneck: more parallel requests per model (Admin → Models) or another GPU.",
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 20,
+        "y": 44
+      }
+    },
+    {
+      "type": "stat",
+      "title": "What held work back: the share of the window",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg_over_time((avg(nvidia_smi_utilization_gpu_ratio) >= bool 0.9)[$__range:1m])",
+          "legendFormat": "GPUs saturated (90 % busy or more)"
+        },
+        {
+          "refId": "B",
+          "expr": "avg_over_time((sum(arena_line_waiting) > bool 0)[$__range:1m])",
+          "legendFormat": "Someone waiting in line"
+        },
+        {
+          "refId": "C",
+          "expr": "avg_over_time((max(vllm:kv_cache_usage_perc or llamacpp:kv_cache_usage_ratio) >= bool 0.9)[$__range:1m])",
+          "legendFormat": "Context cache nearly full (90 % or more)"
+        },
+        {
+          "refId": "D",
+          "expr": "avg_over_time((max(nvidia_smi_memory_used_bytes / nvidia_smi_memory_total_bytes) >= bool 0.95)[$__range:1m])",
+          "legendFormat": "VRAM nearly full (95 % or more)"
+        },
+        {
+          "refId": "E",
+          "expr": "avg_over_time((max(nvidia_smi_clocks_event_reasons_hw_thermal_slowdown + nvidia_smi_clocks_event_reasons_sw_thermal_slowdown + nvidia_smi_clocks_event_reasons_hw_power_brake_slowdown) > bool 0)[$__range:1m])",
+          "legendFormat": "Slowed down for heat or power"
+        },
+        {
+          "refId": "F",
+          "expr": "avg_over_time((rate(node_pressure_cpu_waiting_seconds_total[5m]) > bool 0.1)[$__range:1m])",
+          "legendFormat": "Short of CPU (work waiting for a core)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.2
+              },
+              {
+                "color": "red",
+                "value": 0.5
+              }
+            ]
+          },
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "none",
+        "hideWhenEmpty": true,
+        "textMode": "value_and_name"
+      },
+      "description": "How much of the window each limit was reached. The biggest is the bottleneck; a cause the machine does not report is left out.",
+      "gridPos": {
+        "h": 7,
+        "w": 16,
+        "x": 0,
+        "y": 49
+      }
+    },
+    {
+      "type": "text",
+      "title": "",
+      "options": {
+        "mode": "markdown",
+        "content": "**What to do about each.** GPUs saturated and people waiting: another GPU, a smaller or quantized model, or [a vLLM model with more at once](/admin/models). Context cache full: fewer at once or a shorter context per person, or FP8 cache. VRAM full: fewer models kept loaded. Slowed for heat or power: cooling, or a lower power limit. Short of CPU: fewer CPU-only services (OCR, indexing) at busy hours."
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 49
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "GPUs busy, hour by hour",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg(avg_over_time(nvidia_smi_utilization_gpu_ratio[1h]))",
+          "legendFormat": "all GPUs"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "description": "Each hour's average, all the GPUs together: the busy times of the day and the week stand out.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 56
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "What held work back, over time",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "avg_over_time((avg(nvidia_smi_utilization_gpu_ratio) >= bool 0.9)[$__rate_interval:1m])",
+          "legendFormat": "GPUs saturated (90 % busy or more)"
+        },
+        {
+          "refId": "B",
+          "expr": "avg_over_time((sum(arena_line_waiting) > bool 0)[$__rate_interval:1m])",
+          "legendFormat": "Someone waiting in line"
+        },
+        {
+          "refId": "C",
+          "expr": "avg_over_time((max(vllm:kv_cache_usage_perc or llamacpp:kv_cache_usage_ratio) >= bool 0.9)[$__rate_interval:1m])",
+          "legendFormat": "Context cache nearly full (90 % or more)"
+        },
+        {
+          "refId": "D",
+          "expr": "avg_over_time((max(nvidia_smi_memory_used_bytes / nvidia_smi_memory_total_bytes) >= bool 0.95)[$__rate_interval:1m])",
+          "legendFormat": "VRAM nearly full (95 % or more)"
+        },
+        {
+          "refId": "E",
+          "expr": "avg_over_time((max(nvidia_smi_clocks_event_reasons_hw_thermal_slowdown + nvidia_smi_clocks_event_reasons_sw_thermal_slowdown + nvidia_smi_clocks_event_reasons_hw_power_brake_slowdown) > bool 0)[$__rate_interval:1m])",
+          "legendFormat": "Slowed down for heat or power"
+        },
+        {
+          "refId": "F",
+          "expr": "avg_over_time((rate(node_pressure_cpu_waiting_seconds_total[5m]) > bool 0.1)[$__rate_interval:1m])",
+          "legendFormat": "Short of CPU (work waiting for a core)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 10
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "description": "The same limits as they came and went: when a line is high, that limit was holding work back then.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 56
+      }
+    },
+    {
+      "type": "table",
+      "title": "The busiest hours of the week",
+      "datasource": {
+        "type": "postgres",
+        "uid": "gateway-db"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "gateway-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select to_char(started_at, 'Dy') as \"Day\", to_char(started_at, 'HH24') || ':00' as \"Hour\", count(*) as \"Requests\", coalesce(sum(total_tokens),0) as \"Tokens\", round(coalesce(sum(duration_ms),0) / 3600000.0, 2) as \"Answering, hours\", count(distinct person) as \"People\" from requests where $__timeFilter(started_at) and status <> 'refused' group by extract(isodow from started_at), 1, 2 order by 4 desc limit 12"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      },
+      "description": "The day and hour, in the server's time, with the most tokens in the window. Answering, hours: every request's time added together (requests at once overlap).",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 64
+      }
+    },
+    {
+      "type": "table",
+      "title": "Each hour of the day",
+      "datasource": {
+        "type": "postgres",
+        "uid": "gateway-db"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "gateway-db"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "select to_char(started_at, 'HH24') || ':00' as \"Hour\", count(*) as \"Requests\", coalesce(sum(total_tokens),0) as \"Tokens\", round(coalesce(sum(duration_ms),0) / 3600000.0, 2) as \"Answering, hours\", round(coalesce(percentile_cont(0.95) within group (order by extract(epoch from (first_token_at - started_at))), 0)::numeric, 2) as \"p95 first token, s\", count(distinct person) as \"People\" from requests where $__timeFilter(started_at) and status <> 'refused' group by 1 order by 1"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      },
+      "description": "The window's requests by hour of the day, in the server's time: when the first token is slow, people waited.",
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 64
+      }
+    },
+    {
+      "type": "row",
+      "title": "CPU",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 73
       }
     },
     {
@@ -1426,7 +2012,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 44
+        "y": 74
       }
     },
     {
@@ -1462,7 +2048,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 44
+        "y": 74
       },
       "datasource": {
         "type": "prometheus",
@@ -1502,7 +2088,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 60
+        "y": 90
       },
       "datasource": {
         "type": "prometheus",
@@ -1544,7 +2130,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 60
+        "y": 90
       },
       "datasource": {
         "type": "prometheus",
@@ -1587,7 +2173,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 52
+        "y": 82
       },
       "datasource": {
         "type": "prometheus",
@@ -1634,7 +2220,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 52
+        "y": 82
       }
     },
     {
@@ -1646,7 +2232,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 68
+        "y": 98
       }
     },
     {
@@ -1731,7 +2317,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 69
+        "y": 99
       }
     },
     {
@@ -1770,7 +2356,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 69
+        "y": 99
       },
       "datasource": {
         "type": "prometheus",
@@ -1815,7 +2401,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 69
+        "y": 99
       },
       "datasource": {
         "type": "prometheus",
@@ -1831,7 +2417,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 77
+        "y": 107
       }
     },
     {
@@ -1890,7 +2476,7 @@
         "h": 8,
         "w": 6,
         "x": 0,
-        "y": 78
+        "y": 108
       }
     },
     {
@@ -1935,7 +2521,7 @@
         "h": 8,
         "w": 6,
         "x": 6,
-        "y": 78
+        "y": 108
       }
     },
     {
@@ -1980,7 +2566,7 @@
         "h": 8,
         "w": 6,
         "x": 12,
-        "y": 78
+        "y": 108
       }
     },
     {
@@ -2023,7 +2609,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 78
+        "y": 108
       }
     }
   ]
