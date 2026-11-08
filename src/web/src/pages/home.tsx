@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
-import { ArrowRight, BarChart3, CheckCircle2, KeyRound, MessageSquare, XCircle } from 'lucide-react'
+import { ArrowRight, CheckCircle2, XCircle } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Link, useOutletContext } from 'react-router'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { api, mayUse, type Me } from '@/lib/api'
+import { findNavItem, mayOpen } from '@/app/nav'
+import { api, type Me } from '@/lib/api'
 import { money } from '@/lib/format'
 
 interface Keys {
@@ -43,11 +44,16 @@ export function HomePage() {
         </h1>
         <p className="mt-1 text-muted-foreground">What would you like to do?</p>
       </div>
-      <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {mayUse(me, 'feature.chat') && <QuickAction to="/chat" icon={<MessageSquare />} title="Start a chat" description="Ask the model, with Argus searching the code you can read." />}
-        <QuickAction to="/usage" icon={<BarChart3 />} title="Your usage" description="Tokens, cache hits and cost, over time and by model." />
-        {mayUse(me, 'feature.api_keys') && <QuickAction to="/setup" icon={<KeyRound />} title="Connect your tools" description="Your API key, and setups for Claude Code, Qwen Code, your editor or scripts." />}
-      </div>
+      <section aria-labelledby="get-started" className="grid gap-3">
+        <h2 id="get-started" className="text-sm font-semibold text-muted-foreground">
+          Get started
+        </h2>
+        <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {startersFor(me).map(({ to, title, description, Icon }) => (
+            <QuickAction key={to} to={to} icon={<Icon />} title={title} description={description} />
+          ))}
+        </div>
+      </section>
       <Card>
         <CardHeader>
           <CardTitle>Your credit this month</CardTitle>
@@ -84,6 +90,30 @@ export function HomePage() {
       {(me.isAdmin || me.permissions?.includes('monitoring.read')) && <AdminSummary />}
     </div>
   )
+}
+
+/** The first steps on Home: each of the main areas, in the order people usually start. */
+const starters: { to: string; title: string; description: string }[] = [
+  { to: '/chat', title: 'Start a chat', description: 'Ask the model, with Argus searching the code you can read, files, the web and the tools you turn on.' },
+  { to: '/code', title: 'Code Studio', description: 'A repository in an IDE in your browser: review a branch, or have the agent fix an issue and open the merge request.' },
+  { to: '/projects', title: 'Projects', description: 'A team’s repositories, goals and tasks, with what its work costs and how far it has come.' },
+  { to: '/setup', title: 'Connect your tools', description: 'Code Arena on your own machine, your API key, and setups for Claude Code, Qwen Code, your editor or scripts.' },
+  { to: '/studio', title: 'Agent Studio', description: 'An agent or a workflow that runs by itself: on a schedule, on a merge request, on a form.' },
+  { to: '/skills', title: 'Skills', description: 'Slash commands for the chat and Code Arena: a code review, a test plan, a design doc, your own.' },
+  { to: '/media', title: 'Media studio', description: 'Pictures, video, voice and music: made, edited and cut out.' },
+  { to: '/meetings', title: 'Meetings', description: 'Record a meeting or a call: its transcript, minutes and actions.' },
+  { to: '/usage', title: 'Your usage', description: 'Tokens, cache hits and cost, over time and by model.' },
+]
+
+/** The first steps this person can take: a page whose feature is off here, or that they may not open, is left out. */
+function startersFor(me: Me) {
+  const off = new Set(me.featuresOff ?? [])
+  return starters.flatMap((s) => {
+    const item = findNavItem(s.to)
+    if (!item || off.has(item.feature ?? '') || !mayOpen(me, item)) return []
+    if (item.permission && !me.isAdmin && !me.permissions?.includes(item.permission)) return []
+    return [{ ...s, Icon: item.icon }]
+  })
 }
 
 function QuickAction({ to, icon, title, description }: { to: string; icon: ReactNode; title: string; description: string }) {

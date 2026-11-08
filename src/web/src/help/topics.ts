@@ -67,9 +67,7 @@ export const topics = {
     title: 'Home',
     about: 'Where you land after signing in: the quickest ways in, and your credit.',
     parts: [
-      { name: 'Start a chat', text: 'Opens the chat, with Argus searching the code you can read in GitLab.' },
-      { name: 'Your usage', text: 'Your tokens, cache hits and cost, over time and by model.' },
-      { name: 'Connect your tools', text: 'Your API key, and the steps for Claude Code, Qwen Code, your editor or a script.' },
+      { name: 'Get started', text: 'The main areas, in the order people usually start: **Start a chat**, **Code Studio**, **Projects**, **Connect your tools**, **Agent Studio**, **Skills**, **Media studio**, **Meetings** and **Your usage**. Those not installed here, or that you may not use, are left out.' },
       { name: 'Your credit this month', text: 'Kind by kind (the chat, API keys, pictures, video, speech): what you spent this month, of your credit, and what is left (your group\'s when it binds first).' },
       { name: 'System', text: 'For admins: the services, people, total spend and who is over credit, with a link to **Overview**.' },
     ],

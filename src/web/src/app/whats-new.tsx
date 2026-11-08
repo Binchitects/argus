@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ArrowRight, Bot, ExternalLink, Laptop, ListX, Palette, RefreshCw, ShieldCheck, SquareSlash, type LucideIcon } from 'lucide-react'
+import { ArrowLeft, ArrowRight, Bot, Calculator, Cpu, ExternalLink, Gauge, Network, Palette, Plug, Repeat, UsersRound, type LucideIcon } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
@@ -18,6 +18,8 @@ interface Slide {
   action: string
   /** Shown only to those who hold it (an admin page's permission); everyone else skips the page. */
   permission?: string
+  /** The feature it is about, when its page is not that feature's own (deploy/features): skipped where it is off. */
+  feature?: string
 }
 
 /** A release's tour: shown once to each person after it is deployed (the newest one only). */
@@ -29,60 +31,76 @@ interface Tour {
 }
 
 const latestTour: Tour = {
-  release: '7.7',
-  title: "What's new in Argus Arena 7.7",
+  release: '7.10',
+  title: "What's new in Argus Arena",
   slides: [
     {
-      icon: Palette,
-      title: 'Six colour themes',
-      text: 'Sakura, Midnight, Copper, Forest, Ocean and Lavender, each light and dark, in the web and in Code Arena. Your theme follows you to every device; light or dark stays each device’s.',
-      to: '/account',
-      action: 'Choose a theme',
+      icon: Network,
+      title: 'Argus knows who calls what',
+      text: 'Ask the chat for the callers of a method, what implements an interface or what a class extends: Argus walks the code’s symbol graph, in the repositories you can read, and says how sure it is.',
+      to: '/chat',
+      action: 'Ask in a chat',
+      feature: 'argus',
     },
     {
-      icon: Bot,
-      title: 'Code Arena’s sub-agents, at work',
-      text: 'A task Code Arena hands to a sub-agent shows what it thinks, the tools it calls and what they return, as it works and after, in the chat and the IDE.',
+      icon: Plug,
+      title: 'Code Arena on other providers',
+      text: 'Besides Argus Arena’s own models, Code Arena can work with Claude, DeepSeek or any OpenAI-style API you add, and its Tools menu lists every tool its model is given.',
       to: '/help/code-arena',
       action: 'Read about Code Arena',
     },
     {
-      icon: Laptop,
-      title: 'Code Arena, signed for Windows and on Arm',
-      text: 'Windows names its publisher instead of “Unknown publisher”, and there is a build for Windows on Arm, with Code Arena’s icon.',
-      to: '/setup',
-      action: 'Connect your tools',
+      icon: Bot,
+      title: 'A tidier Code Arena chat',
+      text: 'Sub-agents started together are one card and a run of tool calls is one line, each opening to the detail; long sessions keep up, and Skip thinking answers at once.',
+      to: '/help/code-arena',
+      action: 'Read about Code Arena',
     },
     {
-      icon: SquareSlash,
-      title: 'Fourteen more skills',
-      text: 'A threat model, an ADR, a design doc, an incident response, a runbook, a test plan, user stories, an accessibility or privacy review and more, in the chat and in Code Arena.',
-      to: '/skills',
-      action: 'Open Skills',
+      icon: Repeat,
+      title: 'No more endless loops',
+      text: 'A model stuck repeating itself, in its thinking or its answer, is stopped there: what came before is kept, and a loop in the thinking gets the answer asked for again.',
+      to: '/chat',
+      action: 'Start a chat',
     },
     {
-      icon: ListX,
-      title: 'Out of the line',
-      text: 'Take a waiting request out of the line, or stop a running one, with a reason the person sees.',
-      to: '/admin/line',
-      action: 'Open the line',
-      permission: 'usage.line',
+      icon: Palette,
+      title: 'Calmer themes',
+      text: 'The colour themes keep their colour to buttons, links and highlights; backgrounds are neutral, in light and dark.',
+      to: '/account',
+      action: 'Choose a theme',
     },
     {
-      icon: RefreshCw,
-      title: 'Engines and sandboxes, restarted from here',
-      text: 'Reload an engine’s models, restart it, or reset a sandbox, from Admin → Monitoring, with no shell.',
-      to: '/admin/monitoring',
-      action: 'Open Monitoring',
-      permission: 'runtimes.restart',
+      icon: Calculator,
+      title: 'Accounting',
+      text: 'What running the models really costs, power measured on the GPUs, the hardware written off and service, and each group’s, cost centre’s, person’s and project’s share, with a CSV for finance.',
+      to: '/admin/accounting',
+      action: 'Open Accounting',
+      permission: 'billing.read',
     },
     {
-      icon: ShieldCheck,
-      title: 'Who may reach Argus Arena',
-      text: 'An allow list and a block list of addresses and ranges, checked before every request to every page, the gateway and Argus.',
-      to: '/admin/settings#network-access',
-      action: 'Open Network access',
-      permission: 'settings.read',
+      icon: Cpu,
+      title: 'Where the GPU time goes',
+      text: 'The Hardware dashboard shows GPU time busy and idle, the busiest hours of the week, the energy used, and what held work back: the GPUs, the line, the cache, memory, heat or the CPU.',
+      to: '/admin/dashboards/hardware',
+      action: 'Open the Hardware dashboard',
+      permission: 'hardware.read',
+    },
+    {
+      icon: Gauge,
+      title: 'The whole context for each person',
+      text: 'Each person gets a model’s full window, and the advisors say how many people fit at once on the GPUs; a model set too low for its GPU is pointed out.',
+      to: '/admin/models',
+      action: 'Open Models',
+      permission: 'models.read',
+    },
+    {
+      icon: UsersRound,
+      title: 'Sub-agents at once, per person and group',
+      text: 'How many sub-agents one person may run at once, in the chat and Code Arena, set for a group or a person, beside their requests at once.',
+      to: '/admin/groups',
+      action: 'Open Groups',
+      permission: 'groups.policies',
     },
   ],
 }
@@ -119,7 +137,7 @@ export function WhatsNew({ open, onOpenChange }: { open: boolean; onOpenChange: 
   // A page about a feature that is off here (deploy/features), or that the person may not use, is skipped too.
   const slides = latestTour.slides.filter((s) => {
     const item = findNavItem(s.to)
-    return (!s.permission || me?.isAdmin || me?.permissions?.includes(s.permission)) && !off.has(item?.feature ?? '') && (!item || !me || mayOpen(me, item))
+    return (!s.permission || me?.isAdmin || me?.permissions?.includes(s.permission)) && !off.has(item?.feature ?? '') && !off.has(s.feature ?? '') && (!item || !me || mayOpen(me, item))
   })
   const [page, setPage] = useState(0)
   const opened = useRef(false)
