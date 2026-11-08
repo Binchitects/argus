@@ -45,6 +45,7 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Code.ReviewFinding> ReviewFindings => Set<Code.ReviewFinding>();
     public DbSet<Code.SecurityScan> SecurityScans => Set<Code.SecurityScan>();
     public DbSet<Code.SecurityFinding> SecurityFindings => Set<Code.SecurityFinding>();
+    public DbSet<Code.SecurityBatch> SecurityBatches => Set<Code.SecurityBatch>();
     public DbSet<Code.ReviewRule> ReviewRules => Set<Code.ReviewRule>();
     public DbSet<ChatShareView> ChatShareViews => Set<ChatShareView>();
     public DbSet<Canvas> Canvases => Set<Canvas>();
@@ -380,9 +381,22 @@ public partial class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasOne<Conversation>().WithMany().HasForeignKey(x => x.RoomId).OnDelete(DeleteBehavior.SetNull);
             e.HasMany(x => x.Findings).WithOne().HasForeignKey(f => f.ReviewId).OnDelete(DeleteBehavior.Cascade);
         });
+        builder.Entity<Code.SecurityBatch>(e =>
+        {
+            e.ToTable("security_batches");
+            e.Property(x => x.Title).HasMaxLength(200);
+            e.Property(x => x.Ref).HasMaxLength(300);
+            e.Property(x => x.Status).HasMaxLength(16);
+            e.Property(x => x.Step).HasMaxLength(200);
+            e.Property(x => x.Model).HasMaxLength(200);
+            e.HasIndex(x => new { x.UserId, x.CreatedAt });
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
         builder.Entity<Code.SecurityScan>(e =>
         {
             e.ToTable("security_scans");
+            e.HasIndex(x => x.BatchId);
+            e.HasOne<Code.SecurityBatch>().WithMany().HasForeignKey(x => x.BatchId).OnDelete(DeleteBehavior.Cascade);
             e.Property(x => x.Project).HasMaxLength(500);
             e.Property(x => x.Ref).HasMaxLength(300);
             e.Property(x => x.Status).HasMaxLength(16);

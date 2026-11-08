@@ -88,7 +88,8 @@ public static class SecurityEndpoints
         {
             return AuthEndpoints.Problem(400, "ref", "300 characters at most.");
         }
-        if (await db.SecurityScans.CountAsync(s => s.UserId == me.Id && (s.Status == SecurityScan.Queued || s.Status == SecurityScan.Running), ct) >= 2)
+        // A review of several repositories runs its own one at a time: not counted here.
+        if (await db.SecurityScans.CountAsync(s => s.UserId == me.Id && s.BatchId == null && (s.Status == SecurityScan.Queued || s.Status == SecurityScan.Running), ct) >= 2)
         {
             return AuthEndpoints.Problem(429, "busy", "Two of your security reviews are running: wait for one to end.");
         }
@@ -108,14 +109,27 @@ public static class SecurityEndpoints
             return Results.NotFound();
         }
         var by = await db.Users.AsNoTracking().Where(u => u.Id == s.UserId).Select(u => u.DisplayName == "" ? u.UserName : u.DisplayName).SingleOrDefaultAsync(ct);
+        // The review of the same repository and ref before this one: what is new since, and what is gone.
+        var previous = await db.SecurityScans.AsNoTracking().Include(x => x.Findings)
+            .Where(x => x.Project == s.Project && x.Ref == s.Ref && x.Status == SecurityScan.Done && x.CreatedAt < s.CreatedAt && x.Id != s.Id)
+            .OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
+        var before = previous?.Findings.Where(f => f.Verified != false).Select(SecurityReview.Sameness).ToHashSet(StringComparer.Ordinal);
+        var now = s.Findings.Where(f => f.Verified != false).Select(SecurityReview.Sameness).ToHashSet(StringComparer.Ordinal);
         return Results.Ok(new
         {
-            scan = Brief(s), s.Summary, s.Model, s.PromptTokens, s.CompletionTokens, by, mine = s.UserId == me.Id,
+            scan = Brief(s), s.Summary, s.Model, s.PromptTokens, s.CompletionTokens, by, mine = s.UserId == me.Id, s.BatchId,
+            previous = previous is null ? null : new
+            {
+                previous.Id, previous.CreatedAt, previous.Commit,
+                added = s.Findings.Count(f => f.Verified != false && !before!.Contains(SecurityReview.Sameness(f))),
+                gone = before!.Count(x => !now.Contains(x)),
+            },
             findings = s.Findings.OrderBy(f => f.Verified == false).ThenByDescending(f => f.Exploited).ThenBy(f => f.Severity switch { "critical" => 0, "high" => 1, "medium" => 2, _ => 3 }).ThenBy(f => f.Path).ThenBy(f => f.Line)
                 .Select(f => new
                 {
                     f.Id, f.Kind, f.FoundBy, f.Rule, f.Commit, f.Exploited, f.Path, f.Line, f.SinkCode, f.Cwe, f.CweTitle, f.Severity, f.Title, f.Source, f.Flow,
                     f.Exploit, f.Fix, pages = JsonNode.Parse(f.Pages), f.Verified, f.VerifyNote, f.State, f.DecidedAt, f.Why, f.Until, f.FoundAt,
+                    isNew = before is not null && f.Verified != false && !before.Contains(SecurityReview.Sameness(f)),
                 }),
         });
     }

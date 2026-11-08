@@ -84,7 +84,8 @@ describe('code', () => {
     expect(screen.queryByRole('link', { name: /Fix it/ })).toBeNull()
     expect(screen.queryByLabelText('Project')).toBeNull()
     expect(screen.queryByLabelText('Question about code')).toBeNull()
-    expect(screen.getByRole('button', { name: /Review security/ })).toBeInTheDocument()
+    // Security review is its own section, a link away.
+    expect(screen.getByRole('link', { name: 'Open Security review' })).toHaveAttribute('href', '/security')
     // Nothing they may not use is asked for.
     expect(calls.some((c) => c.path.startsWith('/api/studio') || c.path.startsWith('/api/code/rules') || c.path.startsWith('/api/code/business'))).toBe(false)
   })

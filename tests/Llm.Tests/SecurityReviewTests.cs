@@ -286,8 +286,13 @@ public sealed class SecurityReviewTests(AppFixture app)
         await Decide("src/Orders.cs", new { state = "accepted", why = "Internal tool only", until });
         await Decide("Dockerfile", new { state = "fixed" });
 
+        Assert.Equal(JsonValueKind.Null, first.GetProperty("previous").ValueKind);
         var second = await ReviewAsync();
         Assert.Equal(2, second.GetProperty("scan").GetProperty("remembered").GetInt32());
+        // Against the review before: nothing new, nothing gone.
+        Assert.Equal((firstId, 0, 0), (second.GetProperty("previous").GetProperty("id").GetGuid(), second.GetProperty("previous").GetProperty("added").GetInt32(),
+            second.GetProperty("previous").GetProperty("gone").GetInt32()));
+        Assert.All(second.GetProperty("findings").EnumerateArray(), f => Assert.False(f.GetProperty("isNew").GetBoolean()));
         var audit = At(second, "src/Audit.cs");
         Assert.Equal(("wrong", "who comes from our own audit table"), (audit.GetProperty("state").GetString(), audit.GetProperty("why").GetString()));
         var orders = At(second, "src/Orders.cs");
@@ -297,6 +302,68 @@ public sealed class SecurityReviewTests(AppFixture app)
         // Marked fixed, found again: open again.
         Assert.Equal("open", At(second, "Dockerfile").GetProperty("state").GetString());
         Assert.Contains("2 decided in an earlier review of the repository", second.GetProperty("summary").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Control", "VUL-01")]
+    public async Task Several_repositories_are_reviewed_one_after_the_other_then_looked_at_across_for_what_they_share()
+    {
+        Argus();
+        var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
+        var user = "sb" + Guid.NewGuid().ToString("N")[..8];
+        var made = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = user, email = $"{user}@example.test", displayName = "Bea" }));
+        var me = await new TestBrowser(app.Factory).SignedInAsync(user, made.GetProperty("password").GetString()!);
+        var tag = Guid.NewGuid().ToString("N")[..6];
+        string[] projects = [$"g/shop-{tag}", $"g/admin-{tag}", $"g/shop-{tag}"];
+
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await me.PostAsync("/api/code/security/batches", new { projects = new[] { projects[0] } }));
+        var res = await me.PostAsync("/api/code/security/batches", new { projects, @ref = "main", cross = true, title = "Payments" });
+        await StatusAssert.Is(HttpStatusCode.Accepted, res);
+        var id = (await me.JsonAsync(res)).GetProperty("id").GetGuid();
+        // One at a time per person.
+        await StatusAssert.Is((HttpStatusCode)429, await me.PostAsync("/api/code/security/batches", new { projects = new[] { "g/a", "g/b" } }));
+        JsonElement batch = default;
+        for (var i = 0; i < 600; i++)
+        {
+            batch = await me.JsonAsync(await me.GetAsync($"/api/code/security/batches/{id}"));
+            if (batch.GetProperty("batch").GetProperty("status").GetString() is "done" or "failed")
+            {
+                break;
+            }
+            await Task.Delay(50);
+        }
+        Assert.True(batch.GetProperty("batch").GetProperty("status").GetString() == "done", batch.GetProperty("batch").GetProperty("error").ToString());
+        // The same path twice is one repository; each reviewed, in the order asked.
+        var scans = batch.GetProperty("scans").EnumerateArray().ToList();
+        Assert.Equal([projects[0], projects[1]], scans.Select(x => x.GetProperty("project").GetString()));
+        Assert.All(scans, x => Assert.Equal("done", x.GetProperty("status").GetString()));
+        // What they share: the injection in both, the vulnerable package in both.
+        var weakness = batch.GetProperty("weaknesses").EnumerateArray().Single(w => w.GetProperty("cwe").GetString() == "CWE-89");
+        Assert.Equal([$"g/admin-{tag}@main", $"g/shop-{tag}@main"], weakness.GetProperty("repositories").EnumerateArray().Select(r => r.GetString()));
+        Assert.Equal("Newtonsoft.Json", batch.GetProperty("packages").EnumerateArray().Single().GetProperty("package").GetString());
+        Assert.Equal(2, batch.GetProperty("withSecrets").GetArrayLength());
+        Assert.Contains(batch.GetProperty("findings").EnumerateArray(), f => f.GetProperty("project").GetString() == projects[1] && f.GetProperty("path").GetString() == "src/Orders.cs");
+        // The model looked across them, given both repositories' findings.
+        var asked = app.Model.Requests.Last(r => r.Body["messages"]![0]!["content"]!.GetValue<string>().Contains("looking across several repositories", StringComparison.Ordinal));
+        var question = asked.Body["messages"]![1]!["content"]!.GetValue<string>();
+        Assert.Contains($"# g/admin-{tag}@main", question, StringComparison.Ordinal);
+        Assert.Contains("# Weaknesses in more than one repository", question, StringComparison.Ordinal);
+        Assert.False(string.IsNullOrWhiteSpace(batch.GetProperty("report").GetString()));
+
+        var list = await me.JsonAsync(await me.GetAsync("/api/code/security/batches"));
+        var listed = list.EnumerateArray().Single(b => b.GetProperty("batch").GetProperty("id").GetGuid() == id);
+        Assert.Equal((2, "Payments"), (listed.GetProperty("done").GetInt32(), listed.GetProperty("batch").GetProperty("title").GetString()));
+        var csv = await me.GetAsync($"/api/code/security/batches/{id}/findings.csv");
+        await StatusAssert.Is(HttpStatusCode.OK, csv);
+        Assert.Contains($"g/admin-{tag}", await csv.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+
+        // Someone else sees none of it; deleting it takes its repositories' reviews with it.
+        var other = "so" + Guid.NewGuid().ToString("N")[..8];
+        var theirs = await admin.JsonAsync(await admin.PostAsync("/api/admin/people", new { userName = other, email = $"{other}@example.test" }));
+        var them = await new TestBrowser(app.Factory).SignedInAsync(other, theirs.GetProperty("password").GetString()!);
+        await StatusAssert.Is(HttpStatusCode.NotFound, await them.GetAsync($"/api/code/security/batches/{id}"));
+        await StatusAssert.Is(HttpStatusCode.NoContent, await me.Http.DeleteAsync(new Uri($"/api/code/security/batches/{id}", UriKind.Relative)));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await me.GetAsync($"/api/code/security/{scans[0].GetProperty("id").GetGuid()}"));
     }
 
     [Fact]

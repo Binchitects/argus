@@ -651,6 +651,7 @@ public static class IdentityWiring
         Chat.RoomCalls.MapRoomCalls(app);
         Code.CodeEndpoints.MapCode(app);
         Code.SecurityEndpoints.MapSecurityScans(app);
+        Code.SecurityBatches.MapSecurityBatches(app);
         Code.SecurityOverview.MapSecurityOverview(app);
         Code.ReviewRuleEndpoints.MapReviewRules(app);
         Code.CodeHostLinks.MapCodeHostLinks(app);

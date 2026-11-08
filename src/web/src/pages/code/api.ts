@@ -304,6 +304,8 @@ export interface SecurityFinding {
   until: string | null
   /** When it was found: the review's end, or a later check of the packages. */
   foundAt: string
+  /** Not in the review of the same repository and ref before this one. */
+  isNew?: boolean
 }
 
 export interface Scan {
@@ -313,7 +315,54 @@ export interface Scan {
   by: string
   mine: boolean
   findings: SecurityFinding[]
+  /** The review of several repositories it is one of. */
+  batchId?: string | null
+  /** The review of the same repository and ref before this one: what is new since, and what is gone. */
+  previous?: { id: string; createdAt: string; commit: string | null; added: number; gone: number } | null
 }
+
+type Severity = SecurityFinding['severity']
+
+/** A review of several repositories at once (Security review). */
+export interface BatchBrief {
+  id: string
+  title: string | null
+  ref: string | null
+  cross: boolean
+  status: 'queued' | 'running' | 'done' | 'failed'
+  step: string | null
+  model: string | null
+  error: string | null
+  createdAt: string
+  finishedAt: string | null
+}
+
+export interface Batch {
+  batch: BatchBrief
+  report: string | null
+  by: string
+  mine: boolean
+  scans: { id: string; project: string; ref: string | null; commit: string | null; status: ScanBrief['status']; step: string | null; error: string | null; open: Partial<Record<Severity, number>> }[]
+  weaknesses: { cwe: string; title: string; worst: Severity; findings: number; repositories: string[] }[]
+  packages: { package: string; advisories: string; worst: Severity; repositories: string[] }[]
+  withSecrets: string[]
+  findings: { scanId: string; project: string; id: string; kind: SecurityFinding['kind']; path: string; line: number; cwe: string; cweTitle: string; severity: Severity; title: string; exploited: boolean; state: SecurityFinding['state']; foundBy: string[]; source: string | null }[]
+}
+
+const batchRunning = (b: BatchBrief) => b.status === 'running' || b.status === 'queued'
+
+export const securityBatchesQuery = {
+  queryKey: ['code', 'security', 'batches'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) =>
+    api<{ batch: BatchBrief; mine: boolean; repositories: string[]; done: number; open: Partial<Record<Severity, number>> }[]>('/api/code/security/batches', { signal }),
+  refetchInterval: (q: { state: { data?: { batch: BatchBrief }[] } }) => (q.state.data?.some((b) => batchRunning(b.batch)) ? 3000 : false),
+}
+
+export const securityBatchQuery = (id: string) => ({
+  queryKey: ['code', 'security', 'batches', id] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<Batch>(`/api/code/security/batches/${id}`, { signal }),
+  refetchInterval: (q: { state: { data?: Batch } }) => (q.state.data && batchRunning(q.state.data.batch) ? 2000 : false),
+})
 
 const running = (s: ScanBrief) => s.status === 'running' || s.status === 'queued'
 

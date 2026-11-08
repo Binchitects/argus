@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { BookOpen, Download, FileCog, KeyRound, Package, ScanSearch, ShieldAlert, ShieldCheck, Wrench } from 'lucide-react'
+import { BookOpen, Download, FileCog, KeyRound, Package, ScanSearch, ShieldCheck, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -7,7 +7,7 @@ import { QueryError } from '@/components/app/query-state'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Field } from '@/components/ui/field'
@@ -16,10 +16,9 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { toast } from '@/components/ui/toaster'
 import { api, errorMessage, mayUse, meQuery } from '@/lib/api'
 import { Markdown } from '@/pages/chat/markdown'
-import { securityScanQuery, securityScansQuery, type ScanBrief, type SecurityFinding } from './api'
+import { securityScanQuery, type ScanBrief, type SecurityFinding } from './api'
+import { severityVariant } from './severity'
 
-const severityVariant = { critical: 'destructive', high: 'destructive', medium: 'warning', low: 'secondary' } as const
-const severities = ['critical', 'high', 'medium', 'low'] as const
 
 /** Who found a finding, in words: the model's review, the scanners, or both. */
 const foundBy = (f: SecurityFinding) => (f.foundBy.length === 0 ? ['model'] : f.foundBy)
@@ -51,92 +50,6 @@ export function ScanState({ s }: { s: ScanBrief }) {
   if (s.status === 'failed') return <Badge variant="destructive">Failed</Badge>
   if (s.status !== 'done') return <Badge variant="secondary">{s.step ?? 'Waiting'}…</Badge>
   return <Badge variant="success">Done</Badge>
-}
-
-/** Code Studio's security reviews: start one on a project (and a branch), and the list of them with what is open. */
-/** mayStart: review.run, without which one's earlier security reviews (and those shared) are only listed. */
-export function SecurityReviews({ mayStart = true }: { mayStart?: boolean } = {}) {
-  const navigate = useNavigate()
-  const queryClient = useQueryClient()
-  const scans = useQuery(securityScansQuery)
-  const [project, setProject] = useState('')
-  const [ref, setRef] = useState('')
-  const [busy, setBusy] = useState(false)
-  const start = async () => {
-    setBusy(true)
-    try {
-      const made = await api<{ id: string }>('/api/code/security', { body: { project: project.trim(), ...(ref.trim() && { ref: ref.trim() }) } })
-      await queryClient.invalidateQueries({ queryKey: ['code', 'security'] })
-      navigate(`/code/security/${made.id}`)
-    } catch (e) {
-      toast.error(errorMessage(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-  if (!mayStart && !scans.data?.length) return null
-  return (
-    <section aria-labelledby="security-title" className="mt-8">
-      <h2 id="security-title" className="mb-3 text-lg font-semibold">
-        Security
-      </h2>
-      {mayStart && (
-      <Card>
-        <CardHeader>
-          <CardTitle>Review a repository's security</CardTitle>
-          <CardDescription>
-            Where data from outside reaches a query, a command, a path, a fetch, a deserialiser or HTML, traced to its callers and judged by the model. A finding is kept only when it cites
-            the line as the file has it and names a weakness the security pack knows. Read with your own access; nothing is written.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form
-            className="flex flex-wrap items-end gap-2"
-            onSubmit={(e) => {
-              e.preventDefault()
-              void start()
-            }}
-          >
-            <Field label="Repository" className="min-w-56 flex-1">
-              <Input value={project} onChange={(e) => setProject(e.target.value)} placeholder="group/project" />
-            </Field>
-            <Field label="Branch, tag or commit" className="w-48">
-              <Input value={ref} onChange={(e) => setRef(e.target.value)} placeholder="the default branch" />
-            </Field>
-            <Button type="submit" loading={busy} disabled={!project.trim()}>
-              <ShieldAlert /> Review security
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-      )}
-      {scans.error ? (
-        <QueryError error={scans.error} retry={() => scans.refetch()} />
-      ) : !scans.data ? (
-        <Skeleton className="mt-3 h-16" />
-      ) : (
-        scans.data.length > 0 && (
-          <ul className="mt-3 grid gap-2" aria-label="Security reviews">
-            {scans.data.map(({ scan: s, open }) => (
-              <li key={s.id}>
-                <Link to={`/code/security/${s.id}`} className="flex items-center gap-3 rounded-lg border px-4 py-3 text-sm outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring">
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium">
-                      {s.project}
-                      {s.ref && <span className="text-muted-foreground"> @ {s.ref}</span>}
-                    </span>
-                    <span className="block text-xs text-muted-foreground">{new Date(s.createdAt).toLocaleString()}</span>
-                  </span>
-                  {severities.map((v) => (open[v] ? <Badge key={v} variant={severityVariant[v]}>{`${open[v]} ${v}`}</Badge> : null))}
-                  <ScanState s={s} />
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )
-      )}
-    </section>
-  )
 }
 
 function FindingCard({
@@ -172,6 +85,7 @@ function FindingCard({
             new since the review
           </Badge>
         )}
+        {f.isNew && <Badge variant="warning">new since the last review</Badge>}
         {f.kind === 'secret' && <Badge variant="destructive">secret</Badge>}
         {f.kind === 'config' && <Badge variant="outline">configuration</Badge>}
         {!f.cwe ? null : f.kind === 'dependency' ? (
@@ -451,6 +365,24 @@ export function SecurityScanPage() {
         )}
         {s.status === 'done' && <ScannersLine scanners={s.scanners} />}
       </div>
+      {(d.previous || d.batchId) && (
+        <p className="mb-4 flex flex-wrap gap-x-3 gap-y-1 text-sm text-muted-foreground">
+          {d.previous && (
+            <span>
+              Since{' '}
+              <Link to={`/security/scans/${d.previous.id}`} className="underline underline-offset-2 hover:text-foreground">
+                the review of {new Date(d.previous.createdAt).toLocaleDateString(undefined, { dateStyle: 'medium' })}
+              </Link>
+              : {d.previous.added} new, {d.previous.gone} gone.
+            </span>
+          )}
+          {d.batchId && (
+            <Link to={`/security/batches/${d.batchId}`} className="underline underline-offset-2 hover:text-foreground">
+              Part of a review of several repositories
+            </Link>
+          )}
+        </p>
+      )}
       {s.status === 'failed' && <Alert variant="destructive">{s.error}</Alert>}
       {age !== null && age > 7 && (
         <Alert variant="warning" className="mb-4">

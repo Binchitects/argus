@@ -18,6 +18,8 @@ public sealed class SecurityScan
     /// <summary>Who ran it: it read the code as them, and its cost is theirs.</summary>
     public Guid UserId { get; set; }
     /// <summary>The project's path (group/project).</summary>
+    /// <summary>The review of several repositories it is one of; null: reviewed by itself.</summary>
+    public Guid? BatchId { get; set; }
     public required string Project { get; set; }
     /// <summary>The branch, tag or commit read; null: the default branch.</summary>
     public string? Ref { get; set; }
@@ -53,6 +55,37 @@ public sealed class SecurityScan
     /// <summary>When its packages were last checked again, against advisories renewed since (<see cref="AdvisoriesAsOf"/> is theirs then).</summary>
     public DateTimeOffset? RecheckedAt { get; set; }
     public List<SecurityFinding> Findings { get; set; } = [];
+}
+
+/// <summary>
+/// A security review of several repositories at once: each its own <see cref="SecurityScan"/>, run one after the other,
+/// then, when <see cref="Cross"/>, a look across them (the model's report of what one repository's weakness means for
+/// the others, the weaknesses and vulnerable packages they share, and what to fix first).
+/// </summary>
+public sealed class SecurityBatch
+{
+    public const string Queued = "queued";
+    public const string Running = "running";
+    public const string Done = "done";
+    public const string Failed = "failed";
+
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid UserId { get; set; }
+    /// <summary>What it is for, in a few words; null: its repositories name it.</summary>
+    public string? Title { get; set; }
+    /// <summary>The branch, tag or commit of each repository; null: each one's default branch.</summary>
+    public string? Ref { get; set; }
+    public bool Cross { get; set; } = true;
+    public string Status { get; set; } = Queued;
+    public string? Step { get; set; }
+    public string? Model { get; set; }
+    /// <summary>The model's look across the repositories, as Markdown.</summary>
+    public string? Report { get; set; }
+    public int PromptTokens { get; set; }
+    public int CompletionTokens { get; set; }
+    public string? Error { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? FinishedAt { get; set; }
 }
 
 /// <summary>A weakness a security review found: where untrusted data reaches a sink, how, and how to fix it.</summary>

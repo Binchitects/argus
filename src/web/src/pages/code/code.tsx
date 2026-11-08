@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { GitMerge, GitPullRequest, MessageSquareCode, ScanSearch, Wrench } from 'lucide-react'
+import { GitMerge, GitPullRequest, MessageSquareCode, ScanSearch, ShieldCheck, Wrench } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { PageHeader } from '@/components/app/page-header'
@@ -17,7 +17,6 @@ import { errorMessage, mayUse, meQuery } from '@/lib/api'
 import { AutoReviews } from './auto-reviews'
 import { askCode, mergeRequestsQuery, reviewsQuery, startReview, verdictLabel, type ReviewBrief } from './api'
 import { BusinessMapSection } from './business'
-import { SecurityReviews } from './security'
 import { Workspaces } from './studio'
 
 /** A review's state in a word or two, with its verdict once done. */
@@ -207,7 +206,19 @@ export function CodePage() {
       </>
       )}
       {may('review.run') && may('review.policy') && <AutoReviews />}
-      <SecurityReviews mayStart={may('review.run')} />
+      <Card className="mt-8">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ShieldCheck className="size-5" aria-hidden="true" /> Security review
+          </CardTitle>
+          <CardDescription>A repository&apos;s weaknesses, packages and secrets, or several repositories at once and what they share: in its own section.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button variant="outline" asChild>
+            <Link to="/security">Open Security review</Link>
+          </Button>
+        </CardContent>
+      </Card>
       <h2 className="mt-8 mb-3 text-lg font-semibold">Reviews</h2>
       {reviews.error ? (
         <QueryError error={reviews.error} retry={() => reviews.refetch()} />

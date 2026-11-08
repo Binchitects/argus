@@ -3551,6 +3551,64 @@ namespace Llm.Core.Data.Migrations
                     b.ToTable("review_rules", (string)null);
                 });
 
+            modelBuilder.Entity("Llm.Core.Code.SecurityBatch", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("CompletionTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("Cross")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Model")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("PromptTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Ref")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("Report")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Step")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "CreatedAt");
+
+                    b.ToTable("security_batches", (string)null);
+                });
+
             modelBuilder.Entity("Llm.Core.Code.SecurityFinding", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3684,6 +3742,9 @@ namespace Llm.Core.Data.Migrations
                     b.Property<DateOnly?>("AdvisoriesAsOf")
                         .HasColumnType("date");
 
+                    b.Property<Guid?>("BatchId")
+                        .HasColumnType("uuid");
+
                     b.Property<int>("Candidates")
                         .HasColumnType("integer");
 
@@ -3756,6 +3817,8 @@ namespace Llm.Core.Data.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("BatchId");
 
                     b.HasIndex("Project", "CreatedAt");
 
@@ -8859,6 +8922,15 @@ namespace Llm.Core.Data.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Llm.Core.Code.SecurityBatch", b =>
+                {
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Llm.Core.Code.SecurityFinding", b =>
                 {
                     b.HasOne("Llm.Core.Identity.AppUser", null)
@@ -8875,6 +8947,11 @@ namespace Llm.Core.Data.Migrations
 
             modelBuilder.Entity("Llm.Core.Code.SecurityScan", b =>
                 {
+                    b.HasOne("Llm.Core.Code.SecurityBatch", null)
+                        .WithMany()
+                        .HasForeignKey("BatchId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
                     b.HasOne("Llm.Core.Identity.AppUser", null)
                         .WithMany()
                         .HasForeignKey("UserId")

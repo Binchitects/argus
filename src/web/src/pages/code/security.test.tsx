@@ -16,22 +16,69 @@ const finding = (id: string, over: object) => ({
 })
 
 describe('code security', () => {
-  it('starts a security review of a repository at a branch', async () => {
+  it('starts a security review of a repository at a branch, in the Security review section', async () => {
     const calls = fakeApi(member, {
-      'GET /api/code/reviews': () => ({ json: [] }),
       'GET /api/code/security': () => ({ json: [{ scan: brief, mine: true, open: { high: 2 } }] }),
+      'GET /api/code/security/batches': () => ({ json: [] }),
       'POST /api/code/security': () => ({ status: 202, json: { id: 's2' } }),
       'GET /api/code/security/s2': () => ({ json: { scan: { ...brief, id: 's2', status: 'running', step: 'Tracing src/Orders.cs:4 (1 of 12)' }, summary: null, model: null, by: 'Mo', mine: true, findings: [] } }),
     })
-    const { router } = renderApp('/code')
+    const { router } = renderApp('/security')
     const reviews = await screen.findByRole('list', { name: 'Security reviews' })
     expect(within(reviews).getByText('2 high')).toBeInTheDocument()
+    // What is open across each repository's latest review.
+    expect(within(screen.getByRole('region', { name: 'What is open' })).getByText('Open high').closest('div')!.parentElement).toHaveTextContent('2')
     await userEvent.type(screen.getByLabelText('Repository'), 'g/shop')
     await userEvent.type(screen.getByLabelText('Branch, tag or commit'), 'main')
     await userEvent.click(screen.getByRole('button', { name: 'Review security' }))
-    await waitFor(() => expect(router.state.location.pathname).toBe('/code/security/s2'))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/security/scans/s2'))
     expect(calls.find((c) => c.path === '/api/code/security' && c.method === 'POST')?.body).toEqual({ project: 'g/shop', ref: 'main' })
     expect(await screen.findByText(/Tracing src\/Orders.cs:4/)).toBeInTheDocument()
+  })
+
+  it('reviews several repositories at once and shows what they share, the look across them and every finding together', async () => {
+    const batch = { id: 'b1', title: 'Payments', ref: 'main', cross: true, status: 'done', step: null, model: 'Main', error: null, createdAt: '2026-11-01T10:00:00Z', finishedAt: '2026-11-01T10:20:00Z' }
+    const calls = fakeApi(member, {
+      'GET /api/code/security': () => ({ json: [] }),
+      'GET /api/code/security/batches': () => ({ json: [] }),
+      'POST /api/code/security/batches': () => ({ status: 202, json: { id: 'b1' } }),
+      'GET /api/code/security/batches/b1': () => ({
+        json: {
+          batch, report: '## Fix first\n1. pay/api: the injection in src/Orders.cs:4', by: 'Mo', mine: true,
+          scans: [
+            { id: 's1', project: 'pay/api', ref: 'main', commit: 'abc', status: 'done', step: null, error: null, open: { high: 1 } },
+            { id: 's2', project: 'pay/web', ref: 'main', commit: 'def', status: 'done', step: null, error: null, open: { medium: 1 } },
+          ],
+          weaknesses: [{ cwe: 'CWE-89', title: 'CWE-89: SQL Injection (Base)', worst: 'high', findings: 2, repositories: ['pay/api@main', 'pay/web@main'] }],
+          packages: [{ package: 'Newtonsoft.Json', advisories: 'GHSA-5crp-9r3c-p9vr', worst: 'high', repositories: ['pay/api@main', 'pay/web@main'] }],
+          withSecrets: ['pay/web@main'],
+          findings: [
+            { scanId: 's1', project: 'pay/api', id: 'f1', kind: 'code', path: 'src/Orders.cs', line: 4, cwe: 'CWE-89', cweTitle: '', severity: 'high', title: 'SQL built from the request', exploited: false, state: 'open', foundBy: ['model'], source: null },
+            { scanId: 's2', project: 'pay/web', id: 'f2', kind: 'code', path: 'src/Find.cs', line: 9, cwe: 'CWE-89', cweTitle: '', severity: 'medium', title: 'A query from a header', exploited: false, state: 'open', foundBy: ['model'], source: null },
+          ],
+        },
+      }),
+    })
+    const { router } = renderApp('/security')
+    await userEvent.click(await screen.findByRole('radio', { name: 'Several repositories' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Repositories' }), 'pay/api{Enter}pay/web{Enter}pay/api')
+    await userEvent.type(screen.getByLabelText('What it is for'), 'Payments')
+    await userEvent.click(screen.getByRole('button', { name: 'Review 2 repositories' }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/security/batches/b1'))
+    expect(calls.find((c) => c.path === '/api/code/security/batches' && c.method === 'POST')?.body).toEqual({ projects: ['pay/api', 'pay/web'], cross: true, title: 'Payments' })
+
+    expect(await screen.findByRole('heading', { name: 'Payments', level: 1 })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Fix first' })).toBeInTheDocument()
+    expect(within(screen.getByRole('table', { name: 'Weaknesses in more than one' })).getByText('pay/api@main, pay/web@main')).toBeInTheDocument()
+    expect(within(screen.getByRole('table', { name: 'Vulnerable packages in more than one' })).getByText('Newtonsoft.Json')).toBeInTheDocument()
+    expect(screen.getByText(/Secrets in the code or history of pay\/web@main/)).toBeInTheDocument()
+    const every = screen.getByRole('list', { name: 'Every finding' })
+    expect(within(every).getAllByRole('listitem')).toHaveLength(2)
+    await userEvent.click(screen.getByRole('combobox', { name: 'Repository' }))
+    await userEvent.click(await screen.findByRole('option', { name: 'pay/web' }))
+    expect(within(every).getAllByRole('listitem')).toHaveLength(1)
+    expect(within(every).getByRole('link')).toHaveAttribute('href', '/security/scans/s2')
+    expect(screen.getByRole('link', { name: /Findings \(CSV\)/ })).toHaveAttribute('href', '/api/code/security/batches/b1/findings.csv')
   })
 
   it('shows each weakness with its sink, path and the pack’s pages, doubted ones apart, and accepts a risk with why and until when', async () => {

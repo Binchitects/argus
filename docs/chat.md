@@ -1277,9 +1277,13 @@ as they open and get new commits, without anyone pressing Review:
 
 ### Security reviews
 
-**Code Studio → Security** reviews a repository's security at a branch, tag
-or commit, read with your own access (Argus, read-only); nothing is written
-to the code host. Starting one needs `review.run`.
+**Security review** (its own section in the menu, `/security`) reviews a
+repository's security at a branch, tag or commit, read with your own access
+(Argus, read-only); nothing is written to the code host. Starting one needs
+`review.run`. The page opens with what is open across the latest review of
+each repository, by severity; then the form (one repository, or several at
+once); then the reviews of several repositories and each repository's
+review, found by its name.
 
 1. **The packages**: `deps_check` reads its lock files and manifests and
    matches each pinned version against the `advisories` pack (GitHub's
@@ -1340,6 +1344,30 @@ when to look again, within the year) or **Not a weakness** (why); each is
 audited as `security.finding.*`. A reviews admin sees everyone's. The
 `/security-review` skill does the same in a chat or Code Arena, with the
 Argus tools.
+
+A review of a repository says what is **new since the last review** of the
+same repository and ref (a badge on each new finding, and how many are new
+and how many are gone), by the same sameness that keeps decisions.
+
+**Several repositories at once.** Choose **Several repositories**, put 2 to 20
+repositories one a line, a name for the review (a product, a release) and the
+same branch in each or each one's default branch. They are reviewed one after
+the other, each its own review as above (your two reviews at once are not
+taken by it; one review of several runs at a time). With **Look across them**
+on, the model is then given every repository's summary and findings (the
+worst 15 of each) and what they share, and writes **Across the
+repositories**: how exposed they are together, the **paths across
+repositories** (a weakness in one reached through another: a service that
+trusts another's input, a shared secret or package), the **shared causes**,
+what to **fix first** (at most ten, each naming the repository and the
+finding) and what to **standardise**. It is told never to name a finding,
+file or line it was not given. Beside the report, without the model: the
+weaknesses (CWEs) found in more than one repository, the vulnerable packages
+in more than one, and the repositories with secrets in their code or history.
+**Every finding** has all the repositories' findings together, the worst
+first, filtered by repository and severity, each opening in its repository's
+review to triage or fix; **Findings (CSV)** downloads them. Deleting a review
+of several repositories deletes each repository's review in it.
 
 ### Fix it
 

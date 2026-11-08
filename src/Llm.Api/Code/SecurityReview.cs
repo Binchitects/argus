@@ -133,6 +133,58 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
 
     public void Start(Guid scanId) => _ = Task.Run(() => RunAsync(scanId, lifetime.ApplicationStopping));
 
+    /// <summary>A review of several repositories: each one's in turn, then the look across them.</summary>
+    public void StartBatch(Guid batchId) => _ = Task.Run(() => RunBatchAsync(batchId, lifetime.ApplicationStopping));
+
+    private async Task RunBatchAsync(Guid id, CancellationToken ct)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        var services = scope.ServiceProvider;
+        var db = services.GetRequiredService<AppDbContext>();
+        if (await db.SecurityBatches.SingleOrDefaultAsync(b => b.Id == id, ct) is not { } batch)
+        {
+            return;
+        }
+        try
+        {
+            batch.Status = SecurityBatch.Running;
+            await db.SaveChangesAsync(ct);
+            var ids = await db.SecurityScans.AsNoTracking().Where(s => s.BatchId == id).OrderBy(s => s.CreatedAt).ThenBy(s => s.Project).Select(s => s.Id).ToListAsync(ct);
+            for (var i = 0; i < ids.Count; i++)
+            {
+                var project = await db.SecurityScans.AsNoTracking().Where(s => s.Id == ids[i]).Select(s => s.Project).SingleAsync(ct);
+                batch.Step = Cut($"Reviewing {project} ({i + 1} of {ids.Count})", 200);
+                await db.SaveChangesAsync(ct);
+                await RunAsync(ids[i], ct);
+            }
+            var scans = await db.SecurityScans.AsNoTracking().Include(s => s.Findings).Where(s => s.BatchId == id && s.Status == SecurityScan.Done).ToListAsync(ct);
+            if (batch.Cross && scans.Count >= 2)
+            {
+                batch.Step = "Looking across the repositories";
+                await db.SaveChangesAsync(ct);
+                var user = await services.GetRequiredService<UserManager<AppUser>>().FindByIdAsync(batch.UserId.ToString()) ?? throw new ReviewException("Its person is gone.");
+                batch.Model = await ModelAsync(services, user, ct);
+                var across = SecurityCross.Of(scans);
+                batch.Report = (await AskModelAsync(services, batch.Model, user.Email!, SecurityCross.Prompt, SecurityCross.Question(scans, across), 2_000,
+                    (p, c) => (batch.PromptTokens, batch.CompletionTokens) = (batch.PromptTokens + p, batch.CompletionTokens + c), ct)).Trim();
+            }
+            batch.Status = scans.Count == 0 ? SecurityBatch.Failed : SecurityBatch.Done;
+            batch.Error = scans.Count == 0 ? "No repository's review ended: see each one for why." : null;
+            batch.Step = null;
+            batch.FinishedAt = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            LogFailed(logger, id, ex);
+            batch.Status = SecurityBatch.Failed;
+            batch.Error = ex is ReviewException or ChatGatewayException ? ex.Message : "The look across the repositories failed on the server. Each repository's review is kept.";
+            batch.Step = null;
+            batch.FinishedAt = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
+    }
+
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         // Scans cut short by a restart say so.
@@ -142,6 +194,9 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             await db.SecurityScans.Where(s => s.Status == SecurityScan.Running || s.Status == SecurityScan.Queued)
                 .ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, SecurityScan.Failed).SetProperty(x => x.Error, "The app restarted while it ran: run it again."), cancellationToken);
+            await db.SecurityBatches.Where(s => s.Status == SecurityBatch.Running || s.Status == SecurityBatch.Queued)
+                .ExecuteUpdateAsync(s => s.SetProperty(x => x.Status, SecurityBatch.Failed).SetProperty(x => x.Step, (string?)null)
+                    .SetProperty(x => x.Error, "The app restarted while it ran: run it again."), cancellationToken);
         }
         catch (Exception ex) when (ex is DbUpdateException or InvalidOperationException or Npgsql.NpgsqlException)
         {
@@ -783,11 +838,15 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
     private static IEnumerable<JsonObject> Rows(JsonNode? node) => (node as JsonArray ?? (node as JsonObject)?["result"] as JsonArray ?? []).OfType<JsonObject>();
 
     /// <summary>One request to the model, as the person, tagged "security"; its tokens counted on the scan.</summary>
-    private static async Task<string> AskAsync(IServiceProvider services, SecurityScan scan, string email, string system, string ask, int maxTokens, CancellationToken ct)
+    private static Task<string> AskAsync(IServiceProvider services, SecurityScan scan, string email, string system, string ask, int maxTokens, CancellationToken ct) =>
+        AskModelAsync(services, scan.Model!, email, system, ask, maxTokens, (p, c) => (scan.PromptTokens, scan.CompletionTokens) = (scan.PromptTokens + p, scan.CompletionTokens + c), ct);
+
+    /// <summary>The model's answer to a question, streamed through the gateway as the person, thinking off; its tokens to <paramref name="used"/>.</summary>
+    internal static async Task<string> AskModelAsync(IServiceProvider services, string model, string email, string system, string ask, int maxTokens, Action<int, int> used, CancellationToken ct)
     {
         var request = new JsonObject
         {
-            ["model"] = scan.Model,
+            ["model"] = model,
             ["messages"] = new JsonArray(new JsonObject { ["role"] = "system", ["content"] = system }, new JsonObject { ["role"] = "user", ["content"] = ask }),
             ["stream"] = true,
             ["stream_options"] = new JsonObject { ["include_usage"] = true },
@@ -806,8 +865,7 @@ public sealed partial class SecurityReview(IServiceScopeFactory scopes, IHostApp
             }
             else if (e is UsageReport u)
             {
-                scan.PromptTokens += u.Prompt;
-                scan.CompletionTokens += u.Completion;
+                used(u.Prompt, u.Completion);
             }
         }
         return text.ToString();

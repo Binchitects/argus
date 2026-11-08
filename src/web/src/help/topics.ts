@@ -800,7 +800,34 @@ export const topics = {
       { name: 'Triage', text: '**Fix it** (an agent\'s change, opened as a merge request as you), **Fixed**, **Accept the risk** (why, and by when to look again) or **Not a weakness** (why); each is audited.' },
       { name: 'Downloads', text: 'The bill of materials (CycloneDX) and the findings as SARIF, for a code host\'s or an IDE\'s security view.' },
     ],
-    tasks: [{ title: 'Review a repository\'s security', steps: ['In Code Studio, under **Security**, name the repository and maybe a branch.', 'Press **Review security**.', 'Read each weakness and triage it, or press **Fix it**.'] }],
+    tasks: [{ title: 'Review a repository\'s security', steps: ['Open **Security review**, name the repository and maybe a branch.', 'Press **Review security**.', 'Read each weakness and triage it, or press **Fix it**.'] }],
+    manual: { doc: 'chat', section: 'security-reviews' },
+  },
+
+  security: {
+    title: 'Security review',
+    about: 'The security reviews in one place: what is open across the latest review of each repository, a review of one repository or of several at once, and every review.',
+    parts: [
+      { name: 'What is open', text: 'The open findings by severity across each repository\'s latest review, how many repositories, and what is running.' },
+      { name: 'One repository', text: 'Name it (group/project, github:owner/repo or gitea:owner/repo) and maybe a branch, tag or commit.' },
+      { name: 'Several repositories', text: 'One a line, 2 to 20, with a name for the review and the same branch in each or each one\'s default. **Look across them** adds what they share and the paths from one to another.' },
+      { name: 'Reviews', text: 'Reviews of several repositories, and each repository\'s review, with what is still open; find one by its repository.' },
+    ],
+    tasks: [
+      { title: 'Review a product made of several repositories', steps: ['Choose **Several repositories**.', 'Put each repository on a line, and a name such as the product.', 'Keep **Look across them** on, and press **Review**.'] },
+    ],
+    manual: { doc: 'chat', section: 'security-reviews' },
+  },
+
+  'security-batch': {
+    title: 'A review of several repositories',
+    about: 'Several repositories reviewed one after the other, then looked at across them.',
+    parts: [
+      { name: 'The repositories', text: 'Each one\'s state and what is open; each opens to its own review, to triage its findings.' },
+      { name: 'Across the repositories', text: 'The model\'s look: how exposed they are together, the paths from one repository\'s weakness into another, the causes they share, what to fix first and what to standardise; and the weaknesses (CWEs) and vulnerable packages in more than one, and where secrets are.' },
+      { name: 'Every finding', text: 'All of them together, the worst first, filtered by repository and severity; **Findings (CSV)** has them all.' },
+    ],
+    tasks: [{ title: 'Decide what to fix first across the product', steps: ['Read **Fix first** under **Across the repositories**.', 'Open each one in its repository\'s review, and press **Fix it** or triage it.'] }],
     manual: { doc: 'chat', section: 'security-reviews' },
   },
 
