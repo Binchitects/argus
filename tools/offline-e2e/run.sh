@@ -360,6 +360,16 @@ done
 [[ -z "$(not_ok)" ]] || fail "the admin overview says not ok: $(not_ok)"
 say "  the admin signs in; the overview: every one of $(python3 -c "import json; print(len(json.load(open('$LOG/overview.json'))['services']))") services ok"
 if [[ -n "$MODEL" ]]; then
+  # The chat model it brought is offered first: the app adds it once the engine has loaded it, which waits for every
+  # other model the bundle carried to be in place (a bundle with the models takes minutes longer). Up to 10 minutes.
+  stem="$(basename "$MODEL" .gguf)"
+  for _ in $(seq 120); do
+    H sh -c "curl -sk --resolve '$domain:$port:127.0.0.1' -b /tmp/e2e.cookies -H 'X-Requested-With: e2e' 'https://$domain:$port/api/chat/config'" | grep -q "\"$stem\"" && break
+    sleep 5
+  done
+  H sh -c "curl -sk --resolve '$domain:$port:127.0.0.1' -b /tmp/e2e.cookies -H 'X-Requested-With: e2e' 'https://$domain:$port/api/chat/config'" | grep -q "\"$stem\"" \
+    || fail "the chat model $stem is not offered 10 minutes after the install (Admin -> Models says why)"
+  say "  the chat model $stem is offered"
   # The functional test, on the test host (no python there: in the stack's own python image, with the host's
   # docker for its LiteLLM questions and the names --hosts wrote).
   say "==> the functional test (deploy/scripts/functional-test.py, on the test host)"
