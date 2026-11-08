@@ -50,7 +50,7 @@ internal sealed partial class WebApp
                 }
                 return true;
             case ("GET", "/api/goal"):
-                await res.JsonAsync(200, new JsonObject { ["goal"] = _rt.Goal?.ToJson() }, ct);
+                await res.JsonAsync(200, GoalState(), ct);
                 return true;
             case ("POST", "/api/goal"):
                 await SetGoalAsync(req, res, ct);
@@ -64,6 +64,41 @@ internal sealed partial class WebApp
                 return true;
             case ("DELETE", "/api/goal"):
                 await GoalAnswerAsync(_rt.CancelGoal(), res, ct);
+                return true;
+            case ("POST", "/api/goal/next"):
+                await GoalAnswerAsync(_rt.NextGoal(), res, ct);
+                StartNext();
+                return true;
+            case ("POST", "/api/goal/drop"):
+                await GoalAnswerAsync(req.Json()?.Int("place") is { } place ? _rt.DropGoal(place) : "Say which goal waiting (place, from 1).", res, ct);
+                return true;
+            case ("GET", "/api/loops"):
+                await res.JsonAsync(200, LoopState(), ct);
+                return true;
+            case ("POST", "/api/loops"):
+            {
+                var body = req.Json();
+                if (Runtime.ParseEvery(body?.Str("every") ?? "") is not { } every)
+                {
+                    await res.ErrorAsync(400, "invalid", "Say how often: 30m, 2h, 1d.", ct);
+                    return true;
+                }
+                var (loop, wrong) = _rt.StartLoop(every, body?.Str("prompt") ?? "", body?.Bool("edits") == true);
+                if (loop is null)
+                {
+                    await res.ErrorAsync(400, "invalid", wrong!, ct);
+                    return true;
+                }
+                await res.JsonAsync(201, LoopState(), ct);
+                return true;
+            }
+            case ("DELETE", var loopPath) when loopPath.StartsWith("/api/loops/", StringComparison.Ordinal):
+                if (!_rt.StopLoop(loopPath["/api/loops/".Length..]))
+                {
+                    await res.ErrorAsync(404, "not_found", "There is no such loop in this session.", ct);
+                    return true;
+                }
+                await res.NoContentAsync(ct);
                 return true;
             case ("GET", "/api/assistants"):
                 var list = await _rt.AssistantsAsync(ct);
@@ -112,7 +147,7 @@ internal sealed partial class WebApp
     {
         var body = req.Json();
         var b = body?["budget"] as JsonObject;
-        var budget = new GoalBudget(b?.Int("steps") ?? GoalBudget.DefaultSteps, b?.Int("minutes") ?? GoalBudget.DefaultMinutes, b?.Long("tokens") ?? GoalBudget.DefaultTokens);
+        var budget = new GoalBudget(b?.Int("steps") ?? GoalBudget.DefaultSteps, b?.Int("minutes") ?? GoalBudget.DefaultMinutes, b?.Long("tokens") ?? GoalBudget.DefaultTokens, b?.Bool("untilMet") == true);
         var c = body?["check"] as JsonObject;
         var check = c?.Str("kind") is { } kind && c.Str("text") is { } text ? new GoalCheck(kind, text) : null;
         if (_rt.StartGoal(body?.Str("text") ?? "", check, budget) is { } wrong)
@@ -120,10 +155,22 @@ internal sealed partial class WebApp
             await res.ErrorAsync(400, "invalid", wrong, ct);
             return;
         }
-        await res.JsonAsync(200, new JsonObject { ["goal"] = _rt.Goal?.ToJson() }, ct);
+        await res.JsonAsync(200, GoalState(), ct);
         // The goal's first turn starts now when nothing runs, else when the answer running ends.
         StartNext();
     }
+
+    /// <summary>The goal worked on and those waiting their turn.</summary>
+    private JsonObject GoalState() => new() { ["goal"] = _rt.Goal?.ToJson(), ["next"] = new JsonArray([.. _rt.NextGoals.Select(g => (JsonNode)g.ToJson())]) };
+
+    private JsonObject LoopState() => new()
+    {
+        ["loops"] = new JsonArray([.. _rt.Loops.Select(l => (JsonNode)new JsonObject
+        {
+            ["id"] = l.Id, ["prompt"] = l.Prompt, ["everyMs"] = (long)l.Every.TotalMilliseconds, ["edits"] = l.Edits, ["runs"] = l.Runs, ["skipped"] = l.Skipped,
+            ["nextAt"] = l.NextAt.ToString("o"), ["lastAt"] = l.LastAt?.ToString("o"), ["lastTask"] = l.Last?.Id, ["lastStatus"] = l.Last?.Status,
+        })]),
+    };
 
     private async Task GoalAnswerAsync(string? wrong, HttpResponse res, CancellationToken ct)
     {
@@ -132,7 +179,7 @@ internal sealed partial class WebApp
             await res.ErrorAsync(409, "goal", wrong, ct);
             return;
         }
-        await res.JsonAsync(200, new JsonObject { ["goal"] = _rt.Goal?.ToJson() }, ct);
+        await res.JsonAsync(200, GoalState(), ct);
     }
 
     private async Task UseAssistantAsync(HttpRequest req, HttpResponse res, CancellationToken ct)

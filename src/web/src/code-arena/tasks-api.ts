@@ -83,6 +83,8 @@ export interface GoalBudget {
   steps: number
   minutes: number
   tokens: number
+  /** No limit but its being met (or stuck, or stopped): a very long session. */
+  untilMet?: boolean
 }
 
 /** The session's goal (goal mode), as it stands. */
@@ -90,7 +92,7 @@ export interface CodeGoal {
   text: string
   check: GoalCheck | null
   budget: GoalBudget
-  status: 'working' | 'paused' | 'met' | 'budget' | 'stuck' | 'cancelled'
+  status: 'working' | 'paused' | 'met' | 'budget' | 'stuck' | 'cancelled' | 'queued'
   turns: number
   steps: number
   tokens: number
@@ -107,7 +109,7 @@ export interface CodeGoal {
 }
 
 export const goalDefaults: GoalBudget = { steps: 200, minutes: 60, tokens: 5_000_000 }
-export const goalBounds = { steps: 5_000, minutes: 24 * 60, tokens: 500_000_000 } as const
+export const goalBounds = { steps: 100_000, minutes: 30 * 24 * 60, tokens: 10_000_000_000 } as const
 
 export const goalActive = (g: Pick<CodeGoal, 'status'> | null | undefined) => g?.status === 'working' || g?.status === 'paused'
 
@@ -115,6 +117,32 @@ export const setGoal = (body: { text: string; check?: GoalCheck | null; budget: 
 export const pauseGoal = () => api<{ goal: CodeGoal }>('/api/goal/pause', { body: {} })
 export const resumeGoal = () => api<{ goal: CodeGoal }>('/api/goal/resume', { body: {} })
 export const cancelGoal = () => api<{ goal: CodeGoal }>('/api/goal', { method: 'DELETE', body: {} })
+/** The first goal waiting, started now (the one before ended). */
+export const nextGoal = () => api<{ goal: CodeGoal }>('/api/goal/next', { body: {} })
+/** A waiting goal dropped, by its place from 1. */
+export const dropGoal = (place: number) => api<{ goal: CodeGoal }>('/api/goal/drop', { body: { place } })
+
+/** A prompt run as a background agent every so often, while the session is open. */
+export interface CodeLoop {
+  id: string
+  prompt: string
+  everyMs: number
+  edits: boolean
+  runs: number
+  skipped: number
+  nextAt: string
+  lastAt: string | null
+  lastTask: string | null
+  lastStatus: string | null
+}
+
+export const loopsQuery = {
+  queryKey: ['code', 'loops'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ loops: CodeLoop[] }>('/api/loops', { signal }),
+  refetchInterval: 10_000,
+}
+export const startLoop = (body: { every: string; prompt: string; edits: boolean }) => api<{ loops: CodeLoop[] }>('/api/loops', { body })
+export const stopLoop = (id: string) => api(`/api/loops/${id}`, { method: 'DELETE', body: {} })
 
 /** One of the person's assistants in Arena, as Code Arena works as it. */
 export interface CodeAssistant {

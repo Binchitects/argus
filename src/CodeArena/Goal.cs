@@ -13,14 +13,15 @@ internal sealed record GoalCheck(string Kind, string Text)
 }
 
 /// <summary>What a goal may spend before it stops: steps (requests to the model), minutes of work, tokens.</summary>
-internal sealed record GoalBudget(int Steps = GoalBudget.DefaultSteps, int Minutes = GoalBudget.DefaultMinutes, long Tokens = GoalBudget.DefaultTokens)
+/// <remarks><see cref="UntilMet"/>: no limit but the goal's being met (or stuck, or the person stopping it): a very long session.</remarks>
+internal sealed record GoalBudget(int Steps = GoalBudget.DefaultSteps, int Minutes = GoalBudget.DefaultMinutes, long Tokens = GoalBudget.DefaultTokens, bool UntilMet = false)
 {
     public const int DefaultSteps = 200;
     public const int DefaultMinutes = 60;
     public const long DefaultTokens = 5_000_000;
-    public const int MostSteps = 5_000;
-    public const int MostMinutes = 24 * 60;
-    public const long MostTokens = 500_000_000;
+    public const int MostSteps = 100_000;
+    public const int MostMinutes = 30 * 24 * 60;
+    public const long MostTokens = 10_000_000_000;
 
     /// <summary>Null when it is within bounds, else why not.</summary>
     public string? Wrong() =>
@@ -29,7 +30,7 @@ internal sealed record GoalBudget(int Steps = GoalBudget.DefaultSteps, int Minut
         : Tokens is < 10_000 or > MostTokens ? $"Tokens are 10,000 to {MostTokens:N0}."
         : null;
 
-    public string Describe() => $"{Steps:N0} steps, {Minutes:N0} minutes, {Fmt.Tokens(Tokens)} tokens";
+    public string Describe() => UntilMet ? "until it is met (no limit)" : $"{Steps:N0} steps, {Minutes:N0} minutes, {Fmt.Tokens(Tokens)} tokens";
 }
 
 /// <summary>
@@ -45,6 +46,8 @@ internal sealed class GoalRun
     public const string OutOfBudget = "budget";
     public const string Stuck = "stuck";
     public const string Cancelled = "cancelled";
+    /// <summary>Waiting its turn in the session's goals: it starts when the one before it is met.</summary>
+    public const string Queued = "queued";
 
     /// <summary>Turns in a row with no tool call and the check not passing: the agent is not getting on, so the goal stops.</summary>
     public const int MostIdleTurns = 3;
@@ -76,19 +79,22 @@ internal sealed class GoalRun
 
     /// <summary>What is left of the budget, or null when some of it is spent.</summary>
     public string? Spent() =>
-        Steps >= Budget.Steps ? $"its {Budget.Steps:N0} steps are used"
+        Budget.UntilMet ? null
+        : Steps >= Budget.Steps ? $"its {Budget.Steps:N0} steps are used"
         : Ms >= Budget.Minutes * 60_000L ? $"its {Budget.Minutes:N0} minutes are used"
         : Tokens >= Budget.Tokens ? $"its {Fmt.Tokens(Budget.Tokens)} tokens are used"
         : null;
 
-    public string Usage() => $"{Turns} {(Turns == 1 ? "turn" : "turns")}, {Steps:N0} of {Budget.Steps:N0} steps, {Fmt.Duration(TimeSpan.FromMilliseconds(Ms))} of {Budget.Minutes} minutes, " +
-        $"{Fmt.Tokens(Tokens)} of {Fmt.Tokens(Budget.Tokens)} tokens";
+    public string Usage() => Budget.UntilMet
+        ? $"{Turns} {(Turns == 1 ? "turn" : "turns")}, {Steps:N0} steps, {Fmt.Duration(TimeSpan.FromMilliseconds(Ms))}, {Fmt.Tokens(Tokens)} tokens"
+        : $"{Turns} {(Turns == 1 ? "turn" : "turns")}, {Steps:N0} of {Budget.Steps:N0} steps, {Fmt.Duration(TimeSpan.FromMilliseconds(Ms))} of {Budget.Minutes} minutes, " +
+          $"{Fmt.Tokens(Tokens)} of {Fmt.Tokens(Budget.Tokens)} tokens";
 
     public JsonObject ToJson() => new()
     {
         ["text"] = Text,
         ["check"] = Check is null ? null : new JsonObject { ["kind"] = Check.Kind, ["text"] = Check.Text, ["by"] = CheckBy },
-        ["budget"] = new JsonObject { ["steps"] = Budget.Steps, ["minutes"] = Budget.Minutes, ["tokens"] = Budget.Tokens },
+        ["budget"] = new JsonObject { ["steps"] = Budget.Steps, ["minutes"] = Budget.Minutes, ["tokens"] = Budget.Tokens, ["untilMet"] = Budget.UntilMet },
         ["status"] = Status,
         ["turns"] = Turns,
         ["steps"] = Steps,
@@ -116,7 +122,7 @@ internal sealed class GoalRun
             Text = text,
             Check = c?.Str("kind") is { } kind && c.Str("text") is { Length: > 0 } t ? new GoalCheck(kind, t) : null,
             CheckBy = c?.Str("by"),
-            Budget = new GoalBudget(b?.Int("steps") ?? GoalBudget.DefaultSteps, b?.Int("minutes") ?? GoalBudget.DefaultMinutes, b?.Long("tokens") ?? GoalBudget.DefaultTokens),
+            Budget = new GoalBudget(b?.Int("steps") ?? GoalBudget.DefaultSteps, b?.Int("minutes") ?? GoalBudget.DefaultMinutes, b?.Long("tokens") ?? GoalBudget.DefaultTokens, b?.Bool("untilMet") == true),
             Status = o.Str("status") ?? Paused,
             Turns = o.Int("turns") ?? 0,
             Steps = o.Int("steps") ?? 0,
@@ -161,6 +167,23 @@ internal static class GoalTools
 internal sealed partial class Runtime
 {
     private GoalRun? _goal;
+    // The goals after this one, in order: each starts when the one before it is met.
+    private readonly List<GoalRun> _nextGoals = [];
+
+    /// <summary>The most goals one session holds: the one worked on and those waiting.</summary>
+    public const int MostGoals = 20;
+
+    /// <summary>The goals waiting their turn, in order.</summary>
+    public IReadOnlyList<GoalRun> NextGoals
+    {
+        get
+        {
+            lock (_nextGoals)
+            {
+                return [.. _nextGoals];
+            }
+        }
+    }
     // Set while a goal's turn runs: when its budget runs out mid-turn, the turn is stopped.
     private CancellationTokenSource? _goalLimit;
     private volatile bool _budgetHit;
@@ -177,12 +200,22 @@ internal sealed partial class Runtime
         {
             goal.Updated = DateTimeOffset.UtcNow;
         }
-        Session.Goal(Goal?.ToJson());
+        var json = Goal?.ToJson();
+        if (json is not null)
+        {
+            json["next"] = new JsonArray([.. NextGoals.Select(g => (JsonNode)g.ToJson())]);
+        }
+        Session.Goal(json);
     }
 
     private void RestoreGoal(JsonObject? kept)
     {
         var goal = GoalRun.FromJson(kept);
+        lock (_nextGoals)
+        {
+            _nextGoals.Clear();
+            _nextGoals.AddRange((kept?["next"] as JsonArray ?? []).OfType<JsonObject>().Select(GoalRun.FromJson).OfType<GoalRun>().Select(g => { g.Status = GoalRun.Queued; return g; }));
+        }
         // A goal that was working when the session closed waits for the person: resume carries it on.
         if (goal is { Status: GoalRun.Working })
         {
@@ -222,15 +255,26 @@ internal sealed partial class Runtime
         {
             return "A check is a command or a condition, of 1 to 2,000 characters.";
         }
-        if (Goal is { Active: true })
-        {
-            return "A goal is set already: cancel it first (/goal cancel, or Cancel in the IDE).";
-        }
         if (Permissions.Mode == Mode.Plan)
         {
             return "Plan mode is read-only: switch the mode (/mode auto-edit, or yolo) to work toward a goal.";
         }
         var goal = new GoalRun { Text = text.Trim(), Check = check is null ? null : check with { Text = check.Text.Trim() }, CheckBy = check is null ? null : "person", Budget = budget };
+        if (Goal is { Active: true })
+        {
+            // One is being worked on: this one waits its turn, and starts once those before it are met.
+            lock (_nextGoals)
+            {
+                if (_nextGoals.Count + 1 >= MostGoals)
+                {
+                    return $"At most {MostGoals} goals in a session: drop one first (/goal drop N).";
+                }
+                goal.Status = GoalRun.Queued;
+                _nextGoals.Add(goal);
+            }
+            SaveGoal();
+            return null;
+        }
         Volatile.Write(ref _goal, goal);
         OfferGoalCheck(check is null);
         SaveGoal();
@@ -263,6 +307,49 @@ internal sealed partial class Runtime
         goal.CheckBy = "agent";
         SaveGoal();
         return new ToolResult($"Written down: the goal is met once {check.Describe()}. Code Arena checks it at the end of each of your turns. Now work toward it.");
+    }
+
+    /// <summary>The next goal waiting, started now (the one before ended, met or not). Null when it started, else why not.</summary>
+    public string? NextGoal()
+    {
+        if (Goal is { Active: true })
+        {
+            return "A goal is being worked on: it goes first (cancel it to skip it).";
+        }
+        if (Permissions.Mode == Mode.Plan)
+        {
+            return "Plan mode is read-only: switch the mode to work toward a goal.";
+        }
+        GoalRun next;
+        lock (_nextGoals)
+        {
+            if (_nextGoals.Count == 0)
+            {
+                return "No goal is waiting.";
+            }
+            next = _nextGoals[0];
+            _nextGoals.RemoveAt(0);
+        }
+        next.Status = GoalRun.Working;
+        Volatile.Write(ref _goal, next);
+        OfferGoalCheck(next.Check is null);
+        SaveGoal();
+        return null;
+    }
+
+    /// <summary>A waiting goal dropped, by its place (1: the next one). Null when dropped, else why not.</summary>
+    public string? DropGoal(int place)
+    {
+        lock (_nextGoals)
+        {
+            if (place < 1 || place > _nextGoals.Count)
+            {
+                return _nextGoals.Count == 0 ? "No goal is waiting." : $"Goals waiting are 1 to {_nextGoals.Count}.";
+            }
+            _nextGoals.RemoveAt(place - 1);
+        }
+        SaveGoal();
+        return null;
     }
 
     public string? PauseGoal()
@@ -318,14 +405,18 @@ internal sealed partial class Runtime
         {
             return null;
         }
-        var budget = $"Budget left: {goal.Budget.Steps - goal.Steps:N0} steps, {Math.Max(0, goal.Budget.Minutes - goal.Ms / 60_000):N0} minutes, " +
-                     $"{Fmt.Tokens(Math.Max(0, goal.Budget.Tokens - goal.Tokens))} tokens.";
+        var budget = goal.Budget.UntilMet
+            ? "No budget: work until it is met, as long as it takes (a long session: keep notes in files and commit as you go)."
+            : $"Budget left: {goal.Budget.Steps - goal.Steps:N0} steps, {Math.Max(0, goal.Budget.Minutes - goal.Ms / 60_000):N0} minutes, " +
+              $"{Fmt.Tokens(Math.Max(0, goal.Budget.Tokens - goal.Tokens))} tokens.";
+        var waiting = NextGoals.Count;
+        var after = waiting > 0 ? $" {waiting} more {(waiting == 1 ? "goal waits" : "goals wait")} after this one; Code Arena starts each when this one is met." : "";
         var check = goal.Check is { } c
             ? $"It is checked once you end your turn: {c.Describe()}{(goal.CheckBy == "person" ? " (the person's check)" : " (your check)")}."
             : $"First, before any change, write down how it will be checked with {GoalTools.CheckName}: a command that succeeds only when it is met (the tests, a build), or a condition to read. Then work.";
         if (goal.Turns == 0)
         {
-            return $"Goal: {goal.Text}\n\nWork toward this goal until it is met, across as many turns as it takes: Code Arena carries on after each turn until the check passes. {check} {budget}\n" +
+            return $"Goal: {goal.Text}\n\nWork toward this goal until it is met, across as many turns as it takes: Code Arena carries on after each turn until the check passes. {check} {budget}{after}\n" +
                    "End your turn when you believe it is met, or when you need the check's word on where it stands.";
         }
         var last = goal.Passed == false && goal.Said is { Length: > 0 } said ? $"The check did not pass yet:\n{said}\n\n" : "";
@@ -341,6 +432,12 @@ internal sealed partial class Runtime
         var goal = Goal!;
         _budgetHit = false;
         var limit = new CancellationTokenSource();
+        if (goal.Budget.UntilMet)
+        {
+            // No budget to watch: only the person stops it.
+            _goalLimit = limit;
+            return limit;
+        }
         var left = TimeSpan.FromMilliseconds(Math.Max(1, goal.Budget.Minutes * 60_000L - goal.Ms));
         limit.CancelAfter(left);
         limit.Token.Register(() => _budgetHit = Goal?.Status == GoalRun.Working);
@@ -432,7 +529,14 @@ internal sealed partial class Runtime
             var how = goal.Check.Kind == GoalCheck.Command
                 ? $"`{goal.Check.Text}` succeeded (exit code 0)"
                 : $"a fresh reader found that this holds: {goal.Check.Text}{(said.Length > 0 ? $" ({Fmt.OneLine(said, 300)})" : "")}";
-            return End(goal, GoalRun.Met, $"Goal met: {how}, after {goal.Usage()}.");
+            var met = End(goal, GoalRun.Met, $"Goal met: {how}, after {goal.Usage()}.");
+            // The next goal waiting starts at once: the session carries on until every goal is met.
+            if (NextGoals.Count > 0 && NextGoal() is null)
+            {
+                var left = NextGoals.Count;
+                return $"{met}\nNext goal{(left > 0 ? $" ({left} more after it)" : "")}: {Goal!.Text}";
+            }
+            return met;
         }
         if ((goal.Spent() ?? (budgetHit ? "its budget is used" : null)) is { } spent)
         {
@@ -488,7 +592,7 @@ internal sealed partial class Runtime
     {
         if (Goal is not { } goal)
         {
-            return "No goal is set. /goal TEXT sets one: the agent works until it is met.";
+            return "No goal is set. /goal TEXT sets one: the agent works until it is met (more /goal TEXT wait their turn after it).";
         }
         var state = goal.Status switch
         {
@@ -513,6 +617,12 @@ internal sealed partial class Runtime
         if (goal.Outcome is { } outcome)
         {
             lines.Add($"  {outcome}");
+        }
+        var next = NextGoals;
+        if (next.Count > 0)
+        {
+            lines.Add($"Next ({next.Count}), each when the one before is met{(goal.Active ? "" : "; /goal next starts the first")}:");
+            lines.AddRange(next.Select((g, i) => $"  {i + 1}. {Fmt.OneLine(g.Text, 100)}{(g.Check is { } c ? $" · {c.Describe()}" : "")}"));
         }
         return string.Join("\n", lines);
     }

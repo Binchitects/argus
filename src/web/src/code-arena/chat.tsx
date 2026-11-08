@@ -91,9 +91,9 @@ import { useSettings } from './settings'
 import { familyThemeName, themeNamed } from './settings-schema'
 import { useShownTheme } from './theme'
 import { AssistantPicker } from './assistant-picker'
-import { GoalBar, GoalDialog } from './goal'
+import { GoalBar, GoalDialog, LoopsDialog } from './goal'
 import { TasksPanel } from './tasks-panel'
-import { cancelGoal, goalActive, pauseGoal, resumeGoal } from './tasks-api'
+import { cancelGoal, dropGoal, goalActive, nextGoal, pauseGoal, resumeGoal } from './tasks-api'
 
 // The agent's chat, in the IDE's side panel: the folder's sessions (the side
 // bar's Chat view), the thread, the composer, the model and the mode.
@@ -518,9 +518,19 @@ export function Thread({
     setGoalOpen(true)
   }
   const goalChanged = () => void queryClient.invalidateQueries({ queryKey: stateQuery.queryKey })
+  const [loopOpen, setLoopOpen] = useState(false)
+  const [loopText, setLoopText] = useState('')
+  const [loopKey, setLoopKey] = useState(0)
+  const askLoop = (text = '') => {
+    setLoopText(text)
+    setLoopKey((k) => k + 1)
+    setLoopOpen(true)
+  }
   useCommands([
     { id: 'codeArena.chat.showTasks', title: 'Show Tasks and Sub-agents', category: 'Chat', run: () => setTasksOpen(true) },
     { id: 'codeArena.chat.goal', title: 'Work Toward a Goal…', category: 'Chat', run: () => askGoal(), enabled: () => !goalActive(state.goal) },
+    { id: 'codeArena.chat.goalNext', title: 'Add a Goal After This One…', category: 'Chat', run: () => askGoal(), enabled: () => goalActive(state.goal) },
+    { id: 'codeArena.chat.loops', title: 'Loops…', category: 'Chat', run: () => askLoop() },
   ])
   /** The chat's own /tasks and /goal: done here, not sent; true when the text was one of them. */
   const chatCommand = (text: string): boolean => {
@@ -531,11 +541,17 @@ export function Thread({
       setTasksOpen(true)
       return true
     }
+    if (name === '/loop') {
+      askLoop(/^stop\b/.test(arg) ? '' : arg.replace(/^\S+\s+/, (w) => (/^\d+[smhd]\s+$/.test(w) ? '' : w)))
+      return true
+    }
     if (name !== '/goal') return false
     const act = (what: () => Promise<unknown>) => void what().then(goalChanged, (e: unknown) => toast.error(errorMessage(e)))
     if (arg === 'pause') act(pauseGoal)
     else if (arg === 'resume') act(resumeGoal)
     else if (arg === 'cancel') act(cancelGoal)
+    else if (arg === 'next') act(nextGoal)
+    else if (/^drop \d+$/.test(arg)) act(() => dropGoal(Number(arg.slice(5))))
     else askGoal(arg)
     return true
   }
@@ -960,7 +976,7 @@ export function Thread({
   const goal = state.goal && state.goal.started !== goalAway ? state.goal : null
   const jobBoxes = (
     <>
-      {goal && <GoalBar goal={goal} onChanged={goalChanged} onDismiss={() => setGoalAway(goal.started)} />}
+      {goal && <GoalBar goal={goal} next={state.nextGoals ?? []} onChanged={goalChanged} onDismiss={() => setGoalAway(goal.started)} />}
       {jobs.length > 0 && <Jobs jobs={jobs} onStopped={() => void queryClient.invalidateQueries({ queryKey: stateQuery.queryKey })} />}
     </>
   )
@@ -1210,7 +1226,8 @@ export function Thread({
         </div>
       )}
       </div>
-      <GoalDialog key={goalKey} open={goalOpen} onOpenChange={setGoalOpen} onSet={goalChanged} initial={goalText} />
+      <GoalDialog key={goalKey} open={goalOpen} onOpenChange={setGoalOpen} onSet={goalChanged} initial={goalText} queued={goalActive(state.goal)} />
+      <LoopsDialog key={`loop-${loopKey}`} open={loopOpen} onOpenChange={setLoopOpen} initial={loopText} />
       <RewindDialog question={rewinding} onClose={() => setRewinding(null)} onRewound={(said, chat) => rewinding && void rewound(rewinding, said, chat)} />
     </section>
   )

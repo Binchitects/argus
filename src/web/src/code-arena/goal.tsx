@@ -1,5 +1,7 @@
-import { CircleCheck, CircleSlash, Pause, Play, Target, X } from 'lucide-react'
+import { CircleCheck, CircleSlash, Pause, Play, Repeat, SkipForward, Target, Trash2, X } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useId, useState } from 'react'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Field } from '@/components/ui/field'
@@ -10,7 +12,7 @@ import { Tooltip } from '@/components/ui/tooltip'
 import { errorMessage } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { seconds } from '@/pages/chat/format'
-import { cancelGoal, goalActive, goalBounds, goalDefaults, pauseGoal, resumeGoal, setGoal, tokens, type CodeGoal, type GoalCheck } from './tasks-api'
+import { cancelGoal, dropGoal, goalActive, goalBounds, goalDefaults, loopsQuery, nextGoal, pauseGoal, resumeGoal, setGoal, startLoop, stopLoop, tokens, type CodeGoal, type GoalCheck } from './tasks-api'
 
 // Goal mode: the agent keeps working, turn after turn, until a goal is met as its check says, within the budget set here.
 
@@ -23,7 +25,8 @@ const checks: { value: CheckChoice; label: string; hint: string }[] = [
 ]
 
 /** Set a goal: what it is, how it is checked, and what it may spend. */
-export function GoalDialog({ open, onOpenChange, onSet, initial }: { open: boolean; onOpenChange: (open: boolean) => void; onSet: () => void; initial?: string }) {
+/** queued: a goal is being worked on already, so this one waits its turn behind it. */
+export function GoalDialog({ open, onOpenChange, onSet, initial, queued }: { open: boolean; onOpenChange: (open: boolean) => void; onSet: () => void; initial?: string; queued?: boolean }) {
   const [text, setText] = useState(initial ?? '')
   const [choice, setChoice] = useState<CheckChoice>('command')
   const [command, setCommand] = useState('')
@@ -31,10 +34,11 @@ export function GoalDialog({ open, onOpenChange, onSet, initial }: { open: boole
   const [steps, setSteps] = useState(String(goalDefaults.steps))
   const [minutes, setMinutes] = useState(String(goalDefaults.minutes))
   const [budgetTokens, setBudgetTokens] = useState(String(goalDefaults.tokens))
+  const [untilMet, setUntilMet] = useState(false)
   const [busy, setBusy] = useState(false)
   const n = (s: string) => Number(s.replace(/[_,\s]/g, ''))
-  const budget = { steps: n(steps), minutes: n(minutes), tokens: n(budgetTokens) }
-  const inBounds = Number.isInteger(budget.steps) && budget.steps >= 1 && budget.steps <= goalBounds.steps
+  const budget = { steps: n(steps), minutes: n(minutes), tokens: n(budgetTokens), untilMet }
+  const inBounds = untilMet || Number.isInteger(budget.steps) && budget.steps >= 1 && budget.steps <= goalBounds.steps
     && Number.isInteger(budget.minutes) && budget.minutes >= 1 && budget.minutes <= goalBounds.minutes
     && Number.isInteger(budget.tokens) && budget.tokens >= 10_000 && budget.tokens <= goalBounds.tokens
   const check: GoalCheck | null = choice === 'command' ? { kind: 'command', text: command.trim() } : choice === 'condition' ? { kind: 'condition', text: condition.trim() } : null
@@ -55,8 +59,12 @@ export function GoalDialog({ open, onOpenChange, onSet, initial }: { open: boole
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Work toward a goal</DialogTitle>
-          <DialogDescription>The agent keeps working, turn after turn, until the check passes or the budget is spent, then says how it checked.</DialogDescription>
+          <DialogTitle>{queued ? 'Add a goal after this one' : 'Work toward a goal'}</DialogTitle>
+          <DialogDescription>
+            {queued
+              ? 'It waits its turn: it starts once the goals before it are met, and the session carries on until every one is met.'
+              : 'The agent keeps working, turn after turn, until the check passes or the budget is spent, then says how it checked.'}
+          </DialogDescription>
         </DialogHeader>
         <form
           id="goal-form"
@@ -89,6 +97,14 @@ export function GoalDialog({ open, onOpenChange, onSet, initial }: { open: boole
           </fieldset>
           <fieldset className="grid gap-2">
             <legend className="mb-1 text-sm font-medium">Budget</legend>
+            <div className="flex items-start gap-2 text-sm">
+              <Checkbox id="goal-until-met" checked={untilMet} onCheckedChange={(v) => setUntilMet(v === true)} className="mt-0.5" />
+              <label htmlFor="goal-until-met" className="grid gap-0.5">
+                Until it is met
+                <span className="text-xs text-muted-foreground">No limit of steps, time or tokens: a long session that stops only when the check passes, the agent makes no progress, or you stop it.</span>
+              </label>
+            </div>
+            {!untilMet && (
             <div className="grid gap-2 sm:grid-cols-3">
               <Field label="Steps" hint={`1 to ${goalBounds.steps.toLocaleString()}`}>
                 <Input inputMode="numeric" value={steps} onChange={(e) => setSteps(e.target.value)} />
@@ -100,6 +116,7 @@ export function GoalDialog({ open, onOpenChange, onSet, initial }: { open: boole
                 <Input inputMode="numeric" value={budgetTokens} onChange={(e) => setBudgetTokens(e.target.value)} />
               </Field>
             </div>
+            )}
             {!inBounds && <p className="text-xs text-destructive-ink">The budget is out of bounds.</p>}
           </fieldset>
         </form>
@@ -108,7 +125,7 @@ export function GoalDialog({ open, onOpenChange, onSet, initial }: { open: boole
             Cancel
           </Button>
           <Button type="submit" form="goal-form" disabled={!ready || busy}>
-            {busy ? <Spinner /> : <Target />} Start
+            {busy ? <Spinner /> : <Target />} {queued ? 'Add' : 'Start'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -123,10 +140,12 @@ const statusWords: Record<CodeGoal['status'], string> = {
   budget: 'Budget spent',
   stuck: 'Stopped: no progress',
   cancelled: 'Cancelled',
+  queued: 'Waiting',
 }
 
 /** What the goal spent of its budget, as a few words. */
 function goalUsage(g: CodeGoal): string {
+  if (g.budget.untilMet) return [`turn ${Math.max(1, g.turns)}`, `${g.steps.toLocaleString()} steps`, seconds(g.ms) || '0 s', `${tokens(g.tokens)} tokens`, 'until it is met'].join(' · ')
   return [
     `turn ${Math.max(1, g.turns)}`,
     `${g.steps.toLocaleString()} of ${g.budget.steps.toLocaleString()} steps`,
@@ -139,7 +158,7 @@ function goalUsage(g: CodeGoal): string {
  * The goal above the chat's box while it is set: what it is, where it stands, what it spent and how it is checked, with
  * Pause or Resume and Cancel; once ended, how it ended, until put away.
  */
-export function GoalBar({ goal, onChanged, onDismiss }: { goal: CodeGoal; onChanged: () => void; onDismiss: () => void }) {
+export function GoalBar({ goal, next = [], onChanged, onDismiss }: { goal: CodeGoal; next?: CodeGoal[]; onChanged: () => void; onDismiss: () => void }) {
   const [busy, setBusy] = useState(false)
   const act = async (what: () => Promise<unknown>) => {
     setBusy(true)
@@ -207,7 +226,7 @@ export function GoalBar({ goal, onChanged, onDismiss }: { goal: CodeGoal; onChan
         {goalUsage(goal)}
         {active && <span className="sr-only">: {Math.round(most)}% of the budget used</span>}
       </p>
-      {active && (
+      {active && !goal.budget.untilMet && (
         <div className="h-1 overflow-hidden rounded-full bg-muted" aria-hidden="true">
           <div className={cn('h-full rounded-full bg-primary transition-[width]', most >= 90 && 'bg-warning')} style={{ width: `${most}%` }} />
         </div>
@@ -224,6 +243,128 @@ export function GoalBar({ goal, onChanged, onDismiss }: { goal: CodeGoal; onChan
         )}
       </p>
       {goal.outcome && <p className="text-xs">{goal.outcome}</p>}
+      {next.length > 0 && (
+        <div className="grid gap-1 border-t pt-1.5">
+          <div className="flex items-center gap-2 text-xs font-medium">
+            <span className="flex-1">
+              Next, each when the one before is met ({next.length})
+            </span>
+            {!active && (
+              <Button variant="outline" size="sm" className="h-6 px-2 text-xs" disabled={busy} onClick={() => void act(nextGoal)}>
+                <SkipForward className="size-3.5" /> Start the next
+              </Button>
+            )}
+          </div>
+          <ol className="grid gap-0.5 text-xs text-muted-foreground" aria-label="Goals waiting">
+            {next.map((g, i) => (
+              <li key={`${i}-${g.text}`} className="flex items-center gap-1.5">
+                <span className="tabular-nums">{i + 1}.</span>
+                <bdi className="min-w-0 flex-1 truncate">{g.text}</bdi>
+                <Button variant="ghost" size="icon-sm" className="size-6" aria-label={`Drop goal ${i + 1}`} disabled={busy} onClick={() => void act(() => dropGoal(i + 1))}>
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
     </section>
+  )
+}
+
+const intervals = [
+  { value: '15m', label: 'Every 15 minutes' },
+  { value: '30m', label: 'Every 30 minutes' },
+  { value: '1h', label: 'Every hour' },
+  { value: '4h', label: 'Every 4 hours' },
+  { value: '1d', label: 'Every day' },
+]
+
+/** "1h", "30m" from an interval in milliseconds, as /loop says it. */
+const every = (ms: number) => (ms % 86_400_000 === 0 ? `${ms / 86_400_000}d` : ms % 3_600_000 === 0 ? `${ms / 3_600_000}h` : ms % 60_000 === 0 ? `${ms / 60_000}m` : `${Math.round(ms / 1000)}s`)
+
+/**
+ * Loops: a prompt run as a background agent every so often while the session is open (/loop), each run a task under Tasks.
+ * Listed with their runs, stopped, and added here.
+ */
+export function LoopsDialog({ open, onOpenChange, initial }: { open: boolean; onOpenChange: (open: boolean) => void; initial?: string }) {
+  const queryClient = useQueryClient()
+  const loops = useQuery({ ...loopsQuery, enabled: open })
+  const [prompt, setPrompt] = useState(initial ?? '')
+  const [interval, setInterval] = useState('1h')
+  const [edits, setEdits] = useState(false)
+  const changed = () => void queryClient.invalidateQueries({ queryKey: loopsQuery.queryKey })
+  const add = useMutation({
+    mutationFn: () => startLoop({ every: interval, prompt: prompt.trim(), edits }),
+    onSuccess: () => {
+      setPrompt('')
+      changed()
+    },
+    onError: (e) => toast.error(errorMessage(e)),
+  })
+  const stop = useMutation({ mutationFn: stopLoop, onSuccess: changed, onError: (e) => toast.error(errorMessage(e)) })
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Loops</DialogTitle>
+          <DialogDescription>A prompt run as a background agent every so often while this session is open: each run is a task under Tasks, its report reaching the agent with your next message.</DialogDescription>
+        </DialogHeader>
+        {(loops.data?.loops.length ?? 0) > 0 && (
+          <ul className="grid gap-1.5" aria-label="Loops">
+            {loops.data!.loops.map((l) => (
+              <li key={l.id} className="flex items-start gap-2 rounded-md border px-2.5 py-2 text-sm">
+                <Repeat className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span className="grid min-w-0 flex-1 gap-0.5">
+                  <bdi className="break-words">{l.prompt}</bdi>
+                  <span className="text-xs text-muted-foreground">
+                    {l.id} · every {every(l.everyMs)}
+                    {l.edits ? ' · may change files' : ''} · {l.runs} {l.runs === 1 ? 'run' : 'runs'}
+                    {l.skipped > 0 ? `, ${l.skipped} skipped` : ''}
+                    {l.lastTask ? ` · last ${l.lastTask} ${l.lastStatus}` : ''}
+                  </span>
+                </span>
+                <Button variant="ghost" size="icon-sm" className="size-7" aria-label={`Stop loop ${l.id}`} disabled={stop.isPending} onClick={() => stop.mutate(l.id)}>
+                  <X />
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <form
+          id="loop-form"
+          className="grid gap-3"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (prompt.trim()) add.mutate()
+          }}
+        >
+          <Field label="Each run">
+            <Textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} maxLength={4000} placeholder="Run the tests; if one fails, find why and say so." />
+          </Field>
+          <div className="flex flex-wrap items-center gap-3">
+            <select value={interval} onChange={(e) => setInterval(e.target.value)} aria-label="How often" className="h-9 rounded-md border bg-background px-2 text-sm">
+              {intervals.map((i) => (
+                <option key={i.value} value={i.value}>
+                  {i.label}
+                </option>
+              ))}
+            </select>
+            <div className="flex items-center gap-2 text-sm">
+              <Checkbox id="loop-edits" checked={edits} onCheckedChange={(v) => setEdits(v === true)} />
+              <label htmlFor="loop-edits">It may change files</label>
+            </div>
+          </div>
+        </form>
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+          <Button type="submit" form="loop-form" disabled={!prompt.trim() || add.isPending}>
+            {add.isPending ? <Spinner /> : <Repeat />} Add the loop
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

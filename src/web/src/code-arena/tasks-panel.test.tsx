@@ -6,7 +6,7 @@ import { makeQueryClient, Providers } from '@/app/providers'
 import type { Message } from '@/pages/chat/types'
 import { fakeApi } from '@/test/utils'
 import { SubAgentLine } from './answer'
-import { GoalBar, GoalDialog } from './goal'
+import { GoalBar, GoalDialog, LoopsDialog } from './goal'
 import { TasksPanel } from './tasks-panel'
 import type { AgentTask, AgentTaskDetail, CodeGoal } from './tasks-api'
 
@@ -194,7 +194,7 @@ describe('the goal', () => {
     await userEvent.type(steps, '50')
     await userEvent.click(start)
     await waitFor(() => expect(onSet).toHaveBeenCalled())
-    expect(calls.find((c) => c.path === '/api/goal')?.body).toEqual({ text: 'The tests pass', check: { kind: 'command', text: 'dotnet test' }, budget: { steps: 50, minutes: 60, tokens: 5_000_000 } })
+    expect(calls.find((c) => c.path === '/api/goal')?.body).toEqual({ text: 'The tests pass', check: { kind: 'command', text: 'dotnet test' }, budget: { steps: 50, minutes: 60, tokens: 5_000_000, untilMet: false } })
   })
 
   it('lets the agent write its check down', async () => {
@@ -204,5 +204,47 @@ describe('the goal', () => {
     await userEvent.click(within(dialog).getByRole('radio', { name: /The agent writes it down first/ }))
     await userEvent.click(within(dialog).getByRole('button', { name: 'Start' }))
     await waitFor(() => expect(calls.find((c) => c.path === '/api/goal')?.body).toMatchObject({ text: 'Ship it', check: null }))
+  })
+
+  it('works until it is met with no limit, and waits its turn while another goal is worked on', async () => {
+    const calls = fakeApi(null, { 'POST /api/goal': () => ({ json: { goal: goal({}) } }) })
+    wrap(<GoalDialog open onOpenChange={vi.fn()} onSet={vi.fn()} initial="Every test passes" queued />)
+    const dialog = await screen.findByRole('dialog', { name: 'Add a goal after this one' })
+    await userEvent.type(within(dialog).getByRole('textbox', { name: 'The command' }), 'npm test')
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: /Until it is met/ }))
+    // No budget to set.
+    expect(within(dialog).queryByRole('textbox', { name: /Steps/ })).toBeNull()
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add' }))
+    await waitFor(() => expect((calls.find((c) => c.path === '/api/goal')?.body as { budget: { untilMet: boolean } }).budget.untilMet).toBe(true))
+  })
+
+  it('lists the goals waiting in its bar, drops one, and starts the next once the one before ended', async () => {
+    const calls = fakeApi(null, { 'POST /api/goal/drop': () => ({ json: { goal: goal({}) } }), 'POST /api/goal/next': () => ({ json: { goal: goal({}) } }) })
+    const onChanged = vi.fn()
+    wrap(<GoalBar goal={goal({ status: 'met', outcome: 'Goal met.' })} next={[goal({ text: 'Then the docs' }), goal({ text: 'Then the release notes' })]} onChanged={onChanged} onDismiss={vi.fn()} />)
+    const waiting = await screen.findByRole('list', { name: 'Goals waiting' })
+    expect(within(waiting).getAllByRole('listitem').map((l) => l.textContent)).toEqual(['1.Then the docs', '2.Then the release notes'])
+    await userEvent.click(within(waiting).getByRole('button', { name: 'Drop goal 2' }))
+    await waitFor(() => expect(calls.find((c) => c.path === '/api/goal/drop')?.body).toEqual({ place: 2 }))
+    await userEvent.click(screen.getByRole('button', { name: /Start the next/ }))
+    await waitFor(() => expect(calls.some((c) => c.path === '/api/goal/next')).toBe(true))
+  })
+
+  it('adds a loop and stops one', async () => {
+    const loop = { id: 'L1', prompt: 'Run the tests', everyMs: 3_600_000, edits: false, runs: 2, skipped: 0, nextAt: '2026-11-09T10:00:00Z', lastAt: null, lastTask: 'b3', lastStatus: 'done' }
+    const calls = fakeApi(null, {
+      'GET /api/loops': () => ({ json: { loops: [loop] } }),
+      'POST /api/loops': () => ({ status: 201, json: { loops: [loop] } }),
+      'DELETE /api/loops/L1': () => ({ status: 204 }),
+    })
+    wrap(<LoopsDialog open onOpenChange={vi.fn()} />)
+    const list = await screen.findByRole('list', { name: 'Loops' })
+    expect(within(list).getByText(/L1 · every 1h · 2 runs · last b3 done/)).toBeInTheDocument()
+    await userEvent.click(within(list).getByRole('button', { name: 'Stop loop L1' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.path === '/api/loops/L1')).toBe(true))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Each run' }), 'Check the build')
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'How often' }), '30m')
+    await userEvent.click(screen.getByRole('button', { name: /Add the loop/ }))
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST' && c.path === '/api/loops')?.body).toEqual({ every: '30m', prompt: 'Check the build', edits: false }))
   })
 })

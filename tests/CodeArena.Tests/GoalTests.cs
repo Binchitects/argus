@@ -170,7 +170,12 @@ public sealed class GoalTests : IDisposable
             ["budget"] = new JsonObject { ["steps"] = 50, ["minutes"] = 10, ["tokens"] = 1_000_000 },
         });
         Assert.Equal(HttpStatusCode.OK, set.StatusCode);
-        Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/goal", new JsonObject { ["text"] = "another" })).StatusCode);
+        // Another one waits its turn behind it.
+        var queued = await web.PostAsync("/api/goal", new JsonObject { ["text"] = "another" });
+        Assert.Equal(HttpStatusCode.OK, queued.StatusCode);
+        Assert.Equal(["another"], JsonNode.Parse(await queued.Content.ReadAsStringAsync())!["next"]!.AsArray().Select(g => g!["text"]!.ToString()));
+        Assert.Equal(HttpStatusCode.OK, (await web.PostAsync("/api/goal/drop", new JsonObject { ["place"] = 1 })).StatusCode);
+        Assert.Empty((await web.GetJsonAsync("/api/goal"))["next"]!.AsArray());
         await Until(async () => (await web.GetJsonAsync("/api/state"))["busy"]!.GetValue<bool>(), "the goal's first turn runs");
         // Paused while its turn runs: the turn ends, and no other starts.
         Assert.Equal(HttpStatusCode.OK, (await web.PostAsync("/api/goal/pause", new JsonObject())).StatusCode);
@@ -201,6 +206,84 @@ public sealed class GoalTests : IDisposable
         Assert.All(_mcp.Chats.GoalsSent(), g => Assert.Equal(chat.Id, g.Chat));
         Assert.Contains(_mcp.Chats.GoalsSent(), g => g.Goal?["status"]?.ToString() == "paused");
         Assert.Equal("test -f done.txt", _mcp.Chats.GoalsSent()[^1].Goal!["check"]!["text"]!.ToString());
+    }
+
+    [Fact]
+    public async Task Goals_wait_their_turn_and_each_starts_when_the_one_before_is_met_until_every_one_is_met()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        var hold = new SemaphoreSlim(0);
+        _gateway.Answer = req =>
+        {
+            if (GoalTurn(req) == 0)
+            {
+                return Reply.Say("Hello.");
+            }
+            if (req["messages"]!.AsArray()[^1]!["role"]!.ToString() == "tool")
+            {
+                return Reply.Say("Written.");
+            }
+            // The goal this turn works on: the last message that set one.
+            var goal = req["messages"]!.AsArray().Select(m => m!["content"]?.ToString() ?? "").Last(c => c.StartsWith("Goal", StringComparison.Ordinal));
+            if (goal.Contains("make a.txt", StringComparison.Ordinal))
+            {
+                // The first goal's turn waits until the second one is set.
+                hold.Wait(TimeSpan.FromSeconds(20));
+                return Reply.Call(("write_file", """{"path":"a.txt","content":"a\n"}"""));
+            }
+            Assert.Contains("No budget: work until it is met", goal, StringComparison.Ordinal);
+            return Reply.Call(("write_file", """{"path":"b.txt","content":"b\n"}"""));
+        };
+        await using var web = await WebRun.StartAsync(h, "--mode", "auto-edit");
+        await (await web.SendAsync("hi")).RestAsync();
+        Assert.Equal(HttpStatusCode.OK, (await web.PostAsync("/api/goal", new JsonObject { ["text"] = "make a.txt", ["check"] = new JsonObject { ["kind"] = "command", ["text"] = "test -f a.txt" } })).StatusCode);
+        await Until(async () => (await web.GetJsonAsync("/api/state"))["busy"]!.GetValue<bool>(), "the first goal's turn runs");
+        Assert.Equal(HttpStatusCode.OK, (await web.PostAsync("/api/goal", new JsonObject
+        {
+            ["text"] = "make b.txt", ["check"] = new JsonObject { ["kind"] = "command", ["text"] = "test -f b.txt" }, ["budget"] = new JsonObject { ["untilMet"] = true },
+        })).StatusCode);
+        hold.Release();
+        await Until(async () => (await web.GetJsonAsync("/api/goal"))["goal"]?["text"]?.ToString() == "make b.txt" && (await web.GetJsonAsync("/api/goal"))["goal"]!["status"]!.ToString() == "met",
+            "both goals are met");
+        Assert.True(File.Exists(Path.Combine(h.Work, "a.txt")) && File.Exists(Path.Combine(h.Work, "b.txt")));
+        var state = await web.GetJsonAsync("/api/goal");
+        Assert.Empty(state["next"]!.AsArray());
+        Assert.True(state["goal"]!["budget"]!["untilMet"]!.GetValue<bool>());
+        Assert.Equal(HttpStatusCode.Conflict, (await web.PostAsync("/api/goal/next", new JsonObject())).StatusCode);
+    }
+
+    [Fact]
+    public async Task A_loop_runs_its_prompt_as_a_background_agent_every_so_often_and_stops_when_asked()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        _gateway.Answer = req => Reply.Say(IsSub(req) ? "The build is green." : "Hello.");
+        await using var web = await WebRun.StartAsync(h, "--mode", "auto-edit");
+        Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/loops", new JsonObject { ["every"] = "now", ["prompt"] = "x" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await web.PostAsync("/api/loops", new JsonObject { ["every"] = "10s", ["prompt"] = "too often" })).StatusCode);
+        var made = await web.PostAsync("/api/loops", new JsonObject { ["every"] = "1h", ["prompt"] = "check the build" });
+        Assert.Equal(HttpStatusCode.Created, made.StatusCode);
+        // Its first run starts at once, a background task of its own.
+        await Until(async () => (await web.GetJsonAsync("/api/agent-tasks"))["tasks"]!.AsArray().Any(t => t!["title"]?.ToString() == "Loop L1 · run 1" && t["status"]!.ToString() == "done"),
+            "the loop's first run is done");
+        var loop = (await web.GetJsonAsync("/api/loops"))["loops"]!.AsArray().Single()!;
+        Assert.Equal(("L1", 1, "done", 3_600_000L), (loop["id"]!.ToString(), loop["runs"]!.GetValue<int>(), loop["lastStatus"]!.ToString(), loop["everyMs"]!.GetValue<long>()));
+        using (var stop = new HttpRequestMessage(HttpMethod.Delete, "/api/loops/L1") { Content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json") })
+        {
+            Assert.Equal(HttpStatusCode.NoContent, (await web.Http.SendAsync(stop)).StatusCode);
+        }
+        Assert.Empty((await web.GetJsonAsync("/api/loops"))["loops"]!.AsArray());
+    }
+
+    [Fact]
+    public async Task In_the_terminal_a_loop_is_started_listed_and_stopped()
+    {
+        using var h = new Harness(_gateway, _mcp);
+        _gateway.Answer = req => Reply.Say(IsSub(req) ? "Looked." : "Hello.");
+        Assert.Equal(0, await h.Run("/loop 2h --edits tidy the imports\n/loop\n/loop stop 1\n/loop\n/exit\n", "chat", "--mode", "auto-edit"));
+        Assert.Contains("Loop L1: every 2h", h.Out);
+        Assert.Contains("L1 every 2h, may change files: tidy the imports", h.Out);
+        Assert.Contains("Loop 1 is stopped.", h.Out);
+        Assert.Contains("No loops.", h.Out);
     }
 
     [Fact]

@@ -2573,6 +2573,38 @@ The session keeps the goal: a resumed session shows it, a goal that was being
 worked on waits paused for **Resume**. Arena keeps it with the session's chat,
 and the web chat shows it above the conversation. Plan mode sets no goal.
 
+### Several goals, and sessions that run until they are met
+
+- **Goals wait their turn.** `/goal TEXT` (or **Add a Goal After This One…**
+  in the command palette, and the dialog while one runs) while a goal is
+  being worked on adds the new one after it, with its own check and budget.
+  When a goal is met, the next starts at once, so the session carries on,
+  goal after goal, until every one is met. A goal that stops (its budget, no
+  progress, Stop, Cancel) leaves the rest waiting: `/goal next` (or **Start
+  the next** in the bar) starts the next, and `/goal drop N` (the bar's bin)
+  drops the Nth waiting. At most 20 goals in a session; they are kept with it,
+  in order, and a resumed session has them all.
+- **Until it is met.** `--until-met` (or **Until it is met** in the dialog)
+  gives a goal no budget of steps, time or tokens: it stops only when its
+  check passes, when the agent makes no progress (three idle turns in a row),
+  or when you stop it. The agent is told to keep notes in files and commit as
+  it goes; the conversation compacts as it grows, as any long one does.
+  Budgets otherwise go up to 100,000 steps, 30 days and 10 billion tokens.
+
+### Loops
+
+`/loop EVERY [--edits] PROMPT` (or **Loops…** in the command palette) runs a
+prompt as a background agent every so often while the session is open: `30m`,
+`2h`, `1d` (1 minute to 7 days). The first run starts at once; each run is a
+task in `/tasks` (**Tasks** in the IDE), titled with its loop and run, whose
+report reaches the agent with your next message, as any background task's.
+A run never overlaps the one before it: while that one still runs, the turn
+is skipped and counted. `--edits` lets its agent change files (not in Plan
+mode). `/loop` lists the loops (their runs, the last task, when the next
+is); `/loop stop N` stops one. At most 10 loops; they end with the session.
+For something to run when Code Arena is closed, use **Scheduled tasks** in
+Arena.
+
 ## Assistants
 
 `/assistant` lists your assistants in Arena (yours, those shared with you and

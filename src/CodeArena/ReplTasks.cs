@@ -173,7 +173,7 @@ internal sealed partial class Repl
                 Ui.Line(rt.DescribeGoal());
                 if (rt.Goal is null)
                 {
-                    Ui.Info("/goal TEXT [--check COMMAND | --until CONDITION] [--steps N] [--minutes N] [--tokens N] · /goal pause · resume · cancel");
+                    Ui.Info("/goal TEXT [--check COMMAND | --until CONDITION] [--steps N] [--minutes N] [--tokens N] [--until-met] · /goal pause · resume · cancel · next · drop N");
                 }
                 return;
             case "pause":
@@ -185,6 +185,14 @@ internal sealed partial class Repl
             case "cancel":
                 Ui.Line(rt.CancelGoal() ?? "The goal is cancelled.");
                 return;
+            case "next":
+                Ui.Line(rt.NextGoal() is { } refused ? refused : rt.DescribeGoal());
+                return;
+        }
+        if (arg.StartsWith("drop ", StringComparison.OrdinalIgnoreCase))
+        {
+            Ui.Line(int.TryParse(arg[5..].Trim(), out var place) ? rt.DropGoal(place) ?? $"Goal {place} is dropped." : "/goal drop N drops the Nth goal waiting.");
+            return;
         }
         if (ParseGoal(arg) is not { } parsed)
         {
@@ -196,7 +204,43 @@ internal sealed partial class Repl
             return;
         }
         Ui.Line(rt.DescribeGoal());
-        Ui.Info("The agent works on it now, turn after turn, until the check passes or the budget is spent. Ctrl+C pauses it; /goal cancel gives it up.");
+        Ui.Info(rt.Goal?.Text == parsed.Text
+            ? "The agent works on it now, turn after turn, until the check passes or the budget is spent. Ctrl+C pauses it; /goal cancel gives it up."
+            : "It waits its turn: it starts once the goals before it are met.");
+    }
+
+    /// <summary>/loop: the loops; /loop EVERY [--edits] PROMPT starts one; /loop stop N stops one.</summary>
+    private void LoopCommand(string arg)
+    {
+        var words = arg.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (words.Length == 0)
+        {
+            Ui.Line(rt.DescribeLoops());
+            return;
+        }
+        if (words[0].Equals("stop", StringComparison.OrdinalIgnoreCase))
+        {
+            Ui.Line(words.Length > 1 && rt.StopLoop(words[1]) ? $"Loop {words[1]} is stopped." : "/loop stop N stops loop N (/loop lists them).");
+            return;
+        }
+        if (Runtime.ParseEvery(words[0]) is not { } every || words.Length < 2)
+        {
+            Ui.Error("/loop EVERY [--edits] PROMPT: every 30m, 2h or 1d, a prompt run as a background agent.");
+            return;
+        }
+        var rest = words[1];
+        var edits = rest.StartsWith("--edits ", StringComparison.Ordinal);
+        if (edits)
+        {
+            rest = rest["--edits ".Length..];
+        }
+        var (loop, wrong) = rt.StartLoop(every, rest, edits);
+        if (loop is null)
+        {
+            Ui.Error(wrong!);
+            return;
+        }
+        Ui.Line($"Loop {loop.Id}: every {Runtime.EveryText(every)}, the first run now, each a background task (/tasks). /loop stop {loop.Id[1..]} stops it; it ends with the session.");
     }
 
     /// <summary>The goal's words and options, or null (said why).</summary>
@@ -210,6 +254,11 @@ internal sealed partial class Repl
         for (var i = 0; i < words.Count; i++)
         {
             var w = words[i];
+            if (w is "--until-met" or "--forever")
+            {
+                budget = budget with { UntilMet = true };
+                continue;
+            }
             if (!options.Contains(w))
             {
                 text.Add(w);

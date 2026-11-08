@@ -762,6 +762,8 @@ internal sealed partial class WebApp : IAgentEvents, IAsyncDisposable
             // as it stands (null: none); the Arena assistant the session works as.
             ["tasksRunning"] = _rt.Tasks.RunningCount,
             ["goal"] = _rt.Goal?.ToJson(),
+            ["nextGoals"] = new JsonArray([.. _rt.NextGoals.Select(g => (JsonNode)g.ToJson())]),
+            ["loops"] = _rt.Loops.Count,
             ["assistant"] = _rt.Assistant is { } assistant ? new JsonObject { ["id"] = assistant.Id, ["name"] = assistant.Name, ["icon"] = assistant.Icon, ["color"] = assistant.Color } : null,
             ["arenaTools"] = _rt.ArenaConnected,
             // The Tools menu: the remote tools by group (Arena's by its chat's tools, each other server as one), on or off in

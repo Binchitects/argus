@@ -60,6 +60,10 @@ export interface CodeState {
   tasksRunning?: number
   /** The goal the agent works toward (goal mode), as it stands; null: none. */
   goal?: CodeGoal | null
+  /** The goals waiting their turn after it. */
+  nextGoals?: CodeGoal[]
+  /** How many loops run in the session. */
+  loops?: number
   /** The Arena assistant the session works as; null: none. */
   assistant?: { id: string; name: string; icon: string; color: string } | null
   /** The number of the answer (or compaction) running or last run: a new one is attached to when it differs. */

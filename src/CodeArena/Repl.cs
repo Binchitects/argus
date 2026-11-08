@@ -41,7 +41,8 @@ internal sealed partial class Repl(Runtime rt)
         ("/checklist", "the checklist on, and yours (kept in Arena); N or NAME turns one on; off; tick N, untick N"),
         ("/assistant [N|NAME|off]", "your assistants in Arena; N or NAME works as one (its instructions, model, tools and skills); off as none"),
         ("/tasks [N|stop N|new TASK]", "the sub-agents and background tasks: N shows one, stop N stops it, new [--edits] [--assistant NAME] TASK starts one"),
-        ("/goal [TEXT|pause|resume|cancel]", "work until a goal is met: TEXT [--check COMMAND | --until CONDITION] [--steps N] [--minutes N] [--tokens N]"),
+        ("/goal [TEXT|pause|resume|cancel|next|drop N]", "work until a goal is met, then the next: TEXT [--check COMMAND | --until CONDITION] [--steps N] [--minutes N] [--tokens N] [--until-met]"),
+        ("/loop [EVERY [--edits] PROMPT|stop N]", "a prompt run as a background agent every 30m, 2h or 1d while the session is open"),
         ("/agent [NAME TASK]", "your own coding agents (Claude Code, Codex, Gemini CLI: your subscriptions), or hand one a task"),
         ("/review [BASE]", "review the changes not yet committed, or this branch's over BASE (main...): findings by file and line, and a verdict"),
         ("/compact", "summarize the conversation to free the model's window"),
@@ -1155,6 +1156,9 @@ internal sealed partial class Repl(Runtime rt)
                 break;
             case "/goal":
                 GoalCommand(arg);
+                break;
+            case "/loop":
+                LoopCommand(arg);
                 break;
             // The project's or the person's own /review command, when there is one, goes first (default: below).
             case "/review" when rt.Extensions.Expand(input) is null:
