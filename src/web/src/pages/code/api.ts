@@ -22,6 +22,10 @@ export interface ReviewBrief {
   trigger?: 'webhook' | 'check' | 'schedule' | null
   /** Shared with others (everyone, groups or people). */
   shared?: boolean
+  /** A change (a merge request, or a branch over another), or the whole repository at toRef. */
+  scope?: 'change' | 'repository'
+  /** The review of several repositories it is one of. */
+  batchId?: string | null
 }
 
 export type ReviewReach = 'Private' | 'Groups' | 'Company'
@@ -98,7 +102,45 @@ export const mergeRequestsQuery = (project: string, state: string) => ({
   enabled: project.trim().length > 0,
 })
 
-export const startReview = (body: { project: string; iid?: number; from?: string; to?: string }) => api<{ id: string }>('/api/code/reviews', { body })
+export const startReview = (body: { project: string; iid?: number; from?: string; to?: string; scope?: 'repository'; ref?: string }) => api<{ id: string }>('/api/code/reviews', { body })
+
+/** A code review of several whole repositories at once. */
+export interface ReviewBatchBrief {
+  id: string
+  title: string | null
+  ref: string | null
+  cross: boolean
+  status: ReviewBrief['status']
+  step: string | null
+  model: string | null
+  error: string | null
+  createdAt: string
+  finishedAt: string | null
+}
+
+export interface ReviewBatch {
+  batch: ReviewBatchBrief
+  report: string | null
+  links: string | null
+  by: string
+  mine: boolean
+  reviews: { id: string; project: string; toRef: string | null; headSha: string | null; status: ReviewBrief['status']; step: string | null; error: string | null; verdict: ReviewBrief['verdict']; risk: ReviewBrief['risk']; files: number; open: Record<string, number> }[]
+  findings: { reviewId: string; project: string; id: string; path: string; line: number | null; severity: 'critical' | 'major' | 'minor' | 'nit'; category: string | null; title: string; state: string }[]
+}
+
+const batchBusy = (b: ReviewBatchBrief) => b.status === 'running' || b.status === 'queued'
+
+export const reviewBatchesQuery = {
+  queryKey: ['code', 'reviews', 'batches'] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<{ batch: ReviewBatchBrief; mine: boolean; repositories: string[]; done: number; changes: number }[]>('/api/code/reviews/batches', { signal }),
+  refetchInterval: (q: { state: { data?: { batch: ReviewBatchBrief }[] } }) => (q.state.data?.some((b) => batchBusy(b.batch)) ? 3000 : false),
+}
+
+export const reviewBatchQuery = (id: string) => ({
+  queryKey: ['code', 'reviews', 'batches', id] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => api<ReviewBatch>(`/api/code/reviews/batches/${id}`, { signal }),
+  refetchInterval: (q: { state: { data?: ReviewBatch } }) => (q.state.data && batchBusy(q.state.data.batch) ? 2000 : false),
+})
 
 export const reviewAgain = (id: string) => api<{ id: string }>(`/api/code/reviews/${id}/again`, { body: {} })
 

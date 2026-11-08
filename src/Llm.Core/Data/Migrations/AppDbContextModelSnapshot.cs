@@ -3283,6 +3283,9 @@ namespace Llm.Core.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("BatchId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Ci")
                         .HasColumnType("text");
 
@@ -3340,6 +3343,13 @@ namespace Llm.Core.Data.Migrations
                     b.Property<Guid?>("RuleId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasDefaultValue("change");
+
                     b.PrimitiveCollection<List<Guid>>("ShareGroups")
                         .IsRequired()
                         .ValueGeneratedOnAdd()
@@ -3393,6 +3403,8 @@ namespace Llm.Core.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("BatchId");
+
                     b.HasIndex("Reach");
 
                     b.HasIndex("RoomId");
@@ -3404,6 +3416,67 @@ namespace Llm.Core.Data.Migrations
                     b.HasIndex("UserId", "CreatedAt");
 
                     b.ToTable("code_reviews", (string)null);
+                });
+
+            modelBuilder.Entity("Llm.Core.Code.CodeReviewBatch", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("CompletionTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("Cross")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Error")
+                        .HasColumnType("text");
+
+                    b.Property<DateTimeOffset?>("FinishedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Links")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Model")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("PromptTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Ref")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("Report")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("Step")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "CreatedAt");
+
+                    b.ToTable("code_review_batches", (string)null);
                 });
 
             modelBuilder.Entity("Llm.Core.Code.ReviewFinding", b =>
@@ -8882,6 +8955,11 @@ namespace Llm.Core.Data.Migrations
 
             modelBuilder.Entity("Llm.Core.Code.CodeReview", b =>
                 {
+                    b.HasOne("Llm.Core.Code.CodeReviewBatch", null)
+                        .WithMany()
+                        .HasForeignKey("BatchId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
                     b.HasOne("Llm.Core.Chat.Conversation", null)
                         .WithMany()
                         .HasForeignKey("RoomId")
@@ -8892,6 +8970,15 @@ namespace Llm.Core.Data.Migrations
                         .HasForeignKey("RuleId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("Llm.Core.Identity.AppUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Llm.Core.Code.CodeReviewBatch", b =>
+                {
                     b.HasOne("Llm.Core.Identity.AppUser", null)
                         .WithMany()
                         .HasForeignKey("UserId")

@@ -23,7 +23,7 @@ public sealed partial class Tools
 {
     public static readonly IReadOnlySet<string> ReviewTools = new HashSet<string>(StringComparer.Ordinal)
     {
-        "mr_list", "mr_get", "mr_diff", "mr_commits", "mr_discussions", "ci_status", "job_log", "compare_refs", "file_at", "grep_at",
+        "mr_list", "mr_get", "mr_diff", "mr_commits", "mr_discussions", "ci_status", "job_log", "compare_refs", "file_at", "files_at", "grep_at",
         "issue_list", "issue_get", "wiki_list", "wiki_get", "deps_check", "sbom", "scan_at",
     };
 
@@ -485,6 +485,39 @@ public sealed partial class Tools
         return o;
     }
 
+    /// <summary>The most files one files_at lists.</summary>
+    public const int MostListed = 5000;
+
+    /// <summary>
+    /// A project's files at any commit, each with its size and language, under a path or glob when given; at most
+    /// <paramref name="limit"/>, the rest counted, with how many files and bytes each language has.
+    /// </summary>
+    public JsonNode FilesAt(Identity who, string project, string? rev, long? iid, string? path, long limit)
+    {
+        var p = Readable(who, project);
+        if (p.Foreign) throw new ToolError($"files_at lists Argus's copies of GitLab projects; {p.Path} has none.");
+        var pathspec = string.IsNullOrWhiteSpace(path) ? null : PyStr.Strip(path);
+        try
+        {
+            var (mirror, sha, label) = At(p, rev, iid);
+            var all = CodeAt.ListFilesWithSizes(mirror, sha, pathspec);
+            var most = (int)Math.Clamp(limit <= 0 ? 1000 : limit, 1, MostListed);
+            static string Language(string f) => Indexing.Filters.DetectLang(f) ?? "";
+            return new JsonObject
+            {
+                ["project"] = p.Path, ["ref"] = label, ["sha"] = sha, ["total"] = all.Count, ["bytes"] = all.Sum(f => f.Size),
+                ["languages"] = new JsonObject(all.GroupBy(f => Language(f.Path)).Where(g => g.Key.Length > 0).OrderByDescending(g => g.Sum(f => f.Size))
+                    .Select(g => KeyValuePair.Create(g.Key, (JsonNode?)new JsonObject { ["files"] = g.Count(), ["bytes"] = g.Sum(f => f.Size) }))),
+                ["files"] = Arr(all.Take(most).Select(f => (JsonNode?)new JsonObject { ["path"] = f.Path, ["size"] = f.Size, ["language"] = Language(f.Path) is { Length: > 0 } l ? l : null })),
+                ["more"] = Math.Max(0, all.Count - most),
+            };
+        }
+        catch (GitError exc)
+        {
+            throw new ToolError($"git could not list {p.Path}: {exc.Message}", exc);
+        }
+    }
+
     public JsonNode GrepAt(Identity who, string project, string pattern, string? rev, long? iid, string? path, bool ignoreCase, bool fixedText, long limit)
     {
         var p = Readable(who, project);
@@ -610,6 +643,8 @@ public sealed partial class Tools
                     ["path"] = a.Str("path"), ["ref"] = a.OptStr("ref"), ["iid"] = a.OptInt("iid"), ["start_line"] = a.OptInt("start_line"), ["end_line"] = a.OptInt("end_line"),
                 }),
                 () => FileAt(who, project, a.Str("path"), a.OptStr("ref"), a.OptInt("iid"), a.OptInt("start_line"), a.OptInt("end_line"))),
+            "files_at" => WithAudit(who, tool, Audited(new JsonObject { ["ref"] = a.OptStr("ref"), ["iid"] = a.OptInt("iid"), ["path"] = a.OptStr("path"), ["limit"] = a.Int("limit") }),
+                () => FilesAt(who, project, a.OptStr("ref"), a.OptInt("iid"), a.OptStr("path"), a.Int("limit"))),
             "grep_at" => WithAudit(who, tool,
                 Audited(new JsonObject
                 {

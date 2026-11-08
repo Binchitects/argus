@@ -650,6 +650,7 @@ public static class IdentityWiring
         Chat.RoomTranslations.MapRoomTranslations(app);
         Chat.RoomCalls.MapRoomCalls(app);
         Code.CodeEndpoints.MapCode(app);
+        Code.CodeReviewBatches.MapCodeReviewBatches(app);
         Code.SecurityEndpoints.MapSecurityScans(app);
         Code.SecurityBatches.MapSecurityBatches(app);
         Code.SecurityOverview.MapSecurityOverview(app);

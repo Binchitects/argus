@@ -793,6 +793,7 @@ checked yet says that its access cannot be checked, not that it is missing.
 | `job_log` | A job's last characters (20,000 by default), colours and section markers out, **secrets masked** (tokens, keys, passwords, as the app's safeguards find them) |
 | `compare_refs` | Two branches, tags or commits: from their merge base, or `straight` |
 | `file_at` | A file at a merge request's head (`iid`), a branch or tag that need not be indexed, or a commit; a line range; at most 64 KB |
+| `files_at` | The files at the same, each with its size and language, with each language's files and bytes; under a `path` or glob; at most `limit` (1,000 by default, 5,000 at most), `more` counting the rest |
 | `grep_at` | `git grep` at the same, where `search_code` cannot reach (an extended regular expression, or `fixed` text) |
 
 ## Issues and the wiki

@@ -223,7 +223,8 @@ public sealed class FakeModel : HttpMessageHandler
         }
         // Code review: a finding on each diff's first added line that says "[bug]", refuted when it says "[harmless]"; then a summary.
         var system0 = messages[0]!["content"]?.GetValue<string>() ?? "";
-        if (system0.StartsWith("You review code changes", StringComparison.Ordinal))
+        // A whole repository's file reads the same: its lines numbered, a "[bug]" line found.
+        if (system0.StartsWith("You review code changes", StringComparison.Ordinal) || system0.StartsWith("You review a repository's code", StringComparison.Ordinal))
         {
             var hit = lastUser.Split('\n').FirstOrDefault(l => l.Contains("[bug]", StringComparison.Ordinal) && l.Length > 5 && int.TryParse(l[..5].Trim(), out _));
             var findings = hit is null ? "[]"
@@ -458,6 +459,16 @@ public sealed class FakeModel : HttpMessageHandler
         {
             var real = !lastUser.Contains("(harmless)", StringComparison.Ordinal);
             chunks = [Delta(new JsonObject { ["content"] = $$"""{"real": {{(real ? "true" : "false")}}, "why": "{{(real ? "The diff shows it." : "The caller checks the bound.")}}"}""" }), Finish("stop"), Usage(200, 0, 20)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
+        if (system0.StartsWith("You write the summary of a review of a whole repository", StringComparison.Ordinal))
+        {
+            chunks = [Delta(new JsonObject { ["content"] = "A counter library in C.\n\n- count.c: risky.\n{\"verdict\": \"changes\", \"risk\": \"medium\"}" }), Finish("stop"), Usage(250, 0, 30)];
+            return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
+        }
+        if (system0.StartsWith("You review several repositories of one organisation together", StringComparison.Ordinal))
+        {
+            chunks = [Delta(new JsonObject { ["content"] = "## How they fit together\nThe app uses the library.\n## Fix first\n1. g/lib count.c:2" }), Finish("stop"), Usage(400, 0, 40)];
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new SseContent(chunks, delay) };
         }
         if (system0.StartsWith("You write the summary of a code review", StringComparison.Ordinal))

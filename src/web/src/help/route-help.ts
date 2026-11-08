@@ -41,6 +41,7 @@ export const routeHelp: Record<string, TopicId> = {
   '/rooms/join/:token': 'room-join',
   '/code': 'code',
   '/code/reviews/:id': 'review',
+  '/code/reviews/batches/:id': 'review-batch',
   '/code/security/:id': 'security-review',
   '/security': 'security',
   '/security/scans/:id': 'security-review',

@@ -47,7 +47,7 @@ describe('business map', () => {
       'POST /api/code/business': () => ({ status: 201, json: { ...billing, id: 'b3', project: 'shop/stock' } }),
       'GET /api/code/business/b3': () => ({ json: { system: { ...billing, id: 'b3', project: 'shop/stock' }, profile: { capabilities: [], entities: [], rules: [], processes: [], integrations: [], glossary: [] }, web: null } }),
     })
-    const { router } = renderApp('/code')
+    const { router } = renderApp('/code?tab=ask')
     const section = await screen.findByRole('region', { name: 'Business map' })
     const systems = await within(section).findByRole('list', { name: 'Mapped systems' })
     expect(within(systems).getByRole('link', { name: /Checkout/ })).toHaveAttribute('href', '/code/business/b1')

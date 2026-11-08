@@ -65,6 +65,7 @@ export const routes: RouteObject[] = [
           { path: 'plans/:id', ...lazy(() => import('@/pages/plans').then((m) => ({ Component: m.PlanPage }))) },
           { path: 'code', ...lazy(() => import('@/pages/code/code').then((m) => ({ Component: m.CodePage }))) },
           { path: 'code/reviews/:id', ...lazy(() => import('@/pages/code/review').then((m) => ({ Component: m.ReviewPage }))) },
+          { path: 'code/reviews/batches/:id', ...lazy(() => import('@/pages/code/review-batch').then((m) => ({ Component: m.ReviewBatchPage }))) },
           { path: 'code/security/:id', ...lazy(() => import('@/pages/code/security').then((m) => ({ Component: m.SecurityScanPage }))) },
           { path: 'security', ...lazy(() => import('@/pages/security/security').then((m) => ({ Component: m.SecurityPage }))) },
           { path: 'security/scans/:id', ...lazy(() => import('@/pages/code/security').then((m) => ({ Component: m.SecurityScanPage }))) },

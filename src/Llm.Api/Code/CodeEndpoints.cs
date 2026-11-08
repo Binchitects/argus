@@ -15,7 +15,8 @@ using Microsoft.EntityFrameworkCore;
 namespace Llm.Api.Code;
 
 /// <summary>A review to start: a merge request (project and number), or what one ref has over another (from, to).</summary>
-public sealed record NewReview(string Project, int? Iid = null, string? From = null, string? To = null);
+/// <summary>A review: of a merge request (Iid), of what one branch has over another (From, To), or of the whole repository (Scope "repository", at Ref or its default branch).</summary>
+public sealed record NewReview(string Project, int? Iid = null, string? From = null, string? To = null, string? Scope = null, string? Ref = null);
 
 public sealed record FindingChange(string State);
 
@@ -100,7 +101,7 @@ public static class CodeEndpoints
 
     private static object Brief(CodeReview r) => new
     {
-        r.Id, r.Project, r.Iid, r.FromRef, r.ToRef, r.Title, r.WebUrl, r.Status, r.Step, r.Verdict, r.Risk, r.Files, r.CreatedAt, r.FinishedAt, r.Error, r.RuleId, r.Trigger,
+        r.Id, r.Project, r.Iid, r.FromRef, r.ToRef, r.Title, r.WebUrl, r.Status, r.Step, r.Verdict, r.Risk, r.Files, r.CreatedAt, r.FinishedAt, r.Error, r.RuleId, r.Trigger, r.Scope, r.BatchId,
         shared = r.Reach != Core.Access.Reach.Private || r.SharePeople.Count > 0,
     };
 
@@ -181,24 +182,36 @@ public static class CodeEndpoints
         {
             return AuthEndpoints.Problem(400, "project", "Name the project by its path, as group/project.");
         }
-        if (body.Iid is null && (string.IsNullOrWhiteSpace(body.From) || string.IsNullOrWhiteSpace(body.To)))
+        var whole = body.Scope == CodeReview.Repository;
+        if (body.Scope is { } scope && scope != CodeReview.Repository && scope != CodeReview.Change)
         {
-            return AuthEndpoints.Problem(400, "change", "Review a merge request (its number), or what one branch has over another (from and to).");
+            return AuthEndpoints.Problem(400, "scope", "Review a change or the whole repository.");
+        }
+        if (!whole && body.Iid is null && (string.IsNullOrWhiteSpace(body.From) || string.IsNullOrWhiteSpace(body.To)))
+        {
+            return AuthEndpoints.Problem(400, "change", "Review a merge request (its number), what one branch has over another (from and to), or the whole repository.");
+        }
+        if (body.Ref is { Length: > 300 })
+        {
+            return AuthEndpoints.Problem(400, "ref", "300 characters at most.");
         }
         // Automatic reviews wait their own turn: they do not hold up the person's.
         if (await db.CodeReviews.CountAsync(r => r.UserId == me.Id && r.RuleId == null && (r.Status == CodeReview.Queued || r.Status == CodeReview.Running), ct) >= 3)
         {
             return AuthEndpoints.Problem(429, "busy", "Three of your reviews are running: wait for one to end.");
         }
-        var review = new CodeReview
-        {
-            UserId = me.Id, Project = project, Iid = body.Iid, FromRef = body.From?.Trim(), ToRef = body.To?.Trim(),
-            Title = body.Iid is { } iid ? $"!{iid}" : $"{body.To} over {body.From}",
-        };
+        var at = string.IsNullOrWhiteSpace(body.Ref) ? null : body.Ref.Trim();
+        var review = whole
+            ? new CodeReview { UserId = me.Id, Project = project, Scope = CodeReview.Repository, ToRef = at, Title = $"{project} @ {at ?? "the default branch"}" }
+            : new CodeReview
+            {
+                UserId = me.Id, Project = project, Iid = body.Iid, FromRef = body.From?.Trim(), ToRef = body.To?.Trim(),
+                Title = body.Iid is { } iid ? $"!{iid}" : $"{body.To} over {body.From}",
+            };
         db.CodeReviews.Add(review);
         await db.SaveChangesAsync(ct);
         engine.Start(review.Id);
-        await audit.WriteAsync("review.start", $"{project}{(body.Iid is { } n ? $"!{n}" : "")}");
+        await audit.WriteAsync("review.start", whole ? $"{project} (the whole repository{(at is null ? "" : $" at {at}")})" : $"{project}{(body.Iid is { } n ? $"!{n}" : "")}");
         return Results.Accepted($"/api/code/reviews/{review.Id}", new { review.Id });
     }
 
@@ -212,7 +225,7 @@ public static class CodeEndpoints
         }
         var review = new CodeReview
         {
-            UserId = me.Id, Project = previous.Project, Iid = previous.Iid, FromRef = previous.FromRef, ToRef = previous.ToRef, Title = previous.Title,
+            UserId = me.Id, Project = previous.Project, Iid = previous.Iid, FromRef = previous.FromRef, ToRef = previous.ToRef, Title = previous.Title, Scope = previous.Scope,
             PreviousId = previous.Iid is null ? null : previous.Id, RoomId = previous.RoomId,
         };
         db.CodeReviews.Add(review);

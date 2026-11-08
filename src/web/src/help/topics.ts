@@ -738,19 +738,35 @@ export const topics = {
 
   code: {
     title: 'Code Studio',
-    about: 'Your workspaces (an IDE in the browser on your projects), reviews of merge requests by the model, and the code assistant. Reviews read the code with your own GitLab access, through Argus, and write nothing to GitLab.',
+    about: 'Three parts, each shown to those who may use it: Workspaces (an IDE in the browser on your projects), Review (a change, a whole repository or several, by the model) and Ask and explore (questions and Argus\'s tools across repositories). Reviews read the code with your own access, through Argus, and write nothing to the code host.',
     parts: [
-      { name: 'Business map', text: 'What each system does for the business, read from its code, documents, issues and wiki: Argus explains the business from it.' },
       { name: 'Workspaces', text: 'A GitLab project and branch the server keeps for you, with Code Arena\'s IDE: **Open** starts it, unused for 30 minutes it sleeps (its files stay), **Delete** takes it away. It clones and pushes with your GitLab token.' },
-      { name: 'Merge requests', text: 'A project by its path (group/project): its open, merged or all merge requests. **Review** starts a review; a branch without a merge request can be reviewed against the one it goes into. GitHub and Gitea projects are github:owner/repo and gitea:owner/repo, once your token is linked in **Account → Code hosts**.' },
-      { name: 'Ask about code', text: 'A question about a project, a branch or a merge request: answered in a chat with Argus, which reads the code as you may.' },
+      { name: 'Review: a merge request', text: 'A project by its path (group/project): its open, merged or all merge requests; **Review** starts a review. GitHub and Gitea projects are github:owner/repo and gitea:owner/repo, once your token is linked in **Account → Code hosts**.' },
+      { name: 'Review: a branch', text: 'What a branch has over the one it goes into, without a merge request.' },
+      { name: 'Review: a whole repository', text: 'Its product\'s code at a branch, tag or commit, read file by file (tests, vendored and generated code left out; the entry points and largest files first, at most 30), each finding checked by a second reviewer, then a summary of its health area by area.' },
+      { name: 'Review: several repositories', text: '2 to 10, each reviewed whole, then looked at across: how they depend on each other (Argus\'s links), problems at their boundaries, what they do alike or differently, what to fix first.' },
       { name: 'Automatic reviews', text: 'A project whose merge requests are reviewed as they open and get new commits (GitLab\'s webhook, and a look every few minutes), and a branch reviewed on a schedule. Read with your access, at your cost; each review can go to a room.' },
-      { name: 'Reviews', text: 'Yours, and those of rooms you are in, with their verdict and how many findings are still open.' },
+      { name: 'Reviews', text: 'Yours, those of rooms you are in and those shared with you, with their verdict and what is still open: **All**, **Changes**, **Repositories** or **Automatic**, and found by a word.' },
+      { name: 'Ask and explore', text: '**Ask about code** in a chat with Argus; **What a change reaches**, **How two repositories are linked**, **Where a change belongs** and **The estate\'s map**, each asked in a chat with Argus\'s graph of the repositories; and the **Business map**.' },
+      { name: 'Security review, Fix it', text: 'The buttons at the top: Security review is its own section; Fix it lists the agent\'s fixes.' },
     ],
     tasks: [
-      { title: 'Review a merge request', steps: ['Type the project\'s path and press **Show**.', 'Press **Review** beside the merge request.', 'Read the findings when it is ready; the bell says so.'] },
+      { title: 'Review a merge request', steps: ['Open **Review**, keep **A merge request**, type the project\'s path and press **Show**.', 'Press **Review** beside the merge request.', 'Read the findings when it is ready; the bell says so.'] },
+      { title: 'Review a whole repository', steps: ['Open **Review**, choose **A whole repository**.', 'Type its path, and a branch if not the default.', 'Press **Review the repository**.'] },
       { title: 'Review a project automatically', steps: ['Under **Automatic reviews**, press **A project** and type its path.', 'Choose the branches, how often to look, and a room if the team should see each review.', 'Press **Review automatically**, then put the URL and the secret token in the project\'s GitLab webhook (Merge request events).'] },
     ],
+    manual: { doc: 'chat', section: 'code-review' },
+  },
+
+  'review-batch': {
+    title: 'A review of several repositories',
+    about: 'Several repositories, each reviewed whole, then looked at across them.',
+    parts: [
+      { name: 'The repositories', text: 'Each one\'s state, verdict and what is open; each opens to its own review.' },
+      { name: 'Across the repositories', text: 'The model\'s look: how they fit together, problems between them, what they do alike and differently, and what to fix first; and how they depend on each other, as Argus resolved it.' },
+      { name: 'Every finding', text: 'All of them together, the worst first, filtered by repository and severity.' },
+    ],
+    tasks: [{ title: 'Settle a convention across repositories', steps: ['Read **Alike and different** under **Across the repositories**.', 'Open each repository\'s review for the files it names.'] }],
     manual: { doc: 'chat', section: 'code-review' },
   },
 

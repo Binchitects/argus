@@ -209,6 +209,29 @@ public static partial class CodeAt
         return [.. r.Stdout.Split('\0', StringSplitOptions.RemoveEmptyEntries)];
     }
 
+    /// <summary>Every file at a commit with its size in bytes (a submodule's entry has none), under a pathspec when given.</summary>
+    public static List<(string Path, long Size)> ListFilesWithSizes(string mirror, string sha, string? pathspec)
+    {
+        List<string> args = ["ls-tree", "-r", "-l", "-z", sha];
+        if (pathspec is { Length: > 0 })
+        {
+            args.AddRange(["--", pathspec]);
+        }
+        var r = Indexing.Mirror.RunGit(mirror, [.. args]);
+        if (r.Code != 0) throw new GitError($"git ls-tree failed: {PyStr.Prefix(PyStr.Strip(r.Stderr), 300)}");
+        var files = new List<(string, long)>();
+        foreach (var entry in r.Stdout.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+        {
+            // "<mode> <type> <object> <size>\t<path>"
+            var tab = entry.IndexOf('\t');
+            if (tab < 0) continue;
+            var meta = entry[..tab].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (meta.Length < 4 || meta[1] != "blob") continue;
+            files.Add((entry[(tab + 1)..], long.TryParse(meta[3], out var size) ? size : 0));
+        }
+        return files;
+    }
+
     /// <summary>A file at a commit; null when the commit has no such file (a directory is not one).</summary>
     public static FileAtCommit? Show(string mirror, string sha, string path)
     {

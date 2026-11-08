@@ -55,7 +55,7 @@ Argus's read-only credential and checked per person, indexed or not — 10 tools
 | `mr_commits` · `mr_discussions` | Its commits; its threads, with where each comment is anchored |
 | `ci_status` · `job_log` | The latest pipeline and its jobs; a job's log, secrets masked |
 | `compare_refs` | Two branches, tags or commits compared, without a merge request |
-| `file_at` · `grep_at` | A file, or a search, at a merge request's head, a branch nobody indexed, or a commit |
+| `file_at` · `files_at` · `grep_at` | A file, the files (with sizes and languages), or a search, at a merge request's head, a branch nobody indexed, or a commit |
 
 **Issues and the wiki**, where the business speaks, read the same way — 4
 tools ([README](README.md#issues-and-the-wiki)):

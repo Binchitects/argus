@@ -15,7 +15,7 @@ describe('code', () => {
       'POST /api/code/reviews': () => ({ status: 202, json: { id: 'v1' } }),
       'GET /api/code/reviews/v1': () => ({ json: { review: { ...brief, status: 'running', step: 'Reviewing count.c (1 of 2)' }, summary: null, ci: null, model: null, headSha: null, previousId: null, roomId: null, promptTokens: 0, completionTokens: 0, by: 'Mo', mine: true, findings: [] } }),
     })
-    const { router } = renderApp('/code')
+    const { router } = renderApp('/code?tab=review')
     await userEvent.type(await screen.findByLabelText('Project'), 'g/app')
     await userEvent.click(screen.getByRole('button', { name: 'Show' }))
     const list = await screen.findByRole('list', { name: 'Merge requests' })
@@ -58,7 +58,7 @@ describe('code', () => {
       },
       'POST /api/code/rules/r1/check': () => ({ json: { said: ['!7: reviewed already'] } }),
     })
-    renderApp('/code')
+    renderApp('/code?tab=review')
     expect(await screen.findByText(/automatic/)).toBeInTheDocument()
     await userEvent.click(await screen.findByRole('button', { name: 'A project' }))
     const form = screen.getByRole('form', { name: 'Add automatic reviews' })
@@ -79,15 +79,79 @@ describe('code', () => {
       'GET /api/code/reviews': () => ({ json: [{ review: brief, open: 1, mine: false, sharedBy: 'Ana' }] }),
       'GET /api/code/security': () => ({ json: [] }),
     })
-    renderApp('/code')
+    renderApp('/code?tab=review')
     expect(await screen.findByRole('list', { name: 'Reviews' })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /Fix it/ })).toBeNull()
-    expect(screen.queryByLabelText('Project')).toBeNull()
+    // No merge requests to list, no tabs of the parts they may not use: a branch, a whole repository or several to review.
+    expect(screen.queryByRole('radio', { name: 'A merge request' })).toBeNull()
+    expect(screen.getByRole('radio', { name: 'A whole repository' })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: 'Workspaces' })).toBeNull()
+    expect(screen.queryByRole('tab', { name: 'Ask and explore' })).toBeNull()
     expect(screen.queryByLabelText('Question about code')).toBeNull()
     // Security review is its own section, a link away.
-    expect(screen.getByRole('link', { name: 'Open Security review' })).toHaveAttribute('href', '/security')
+    expect(within(screen.getByRole('main')).getByRole('link', { name: /Security review/ })).toHaveAttribute('href', '/security')
     // Nothing they may not use is asked for.
     expect(calls.some((c) => c.path.startsWith('/api/studio') || c.path.startsWith('/api/code/rules') || c.path.startsWith('/api/code/business'))).toBe(false)
+  })
+
+  it('reviews a whole repository at a branch, and several repositories looked at across', async () => {
+    const calls = fakeApi(member, {
+      'GET /api/code/reviews': () => ({ json: [{ review: { ...brief, id: 'w1', scope: 'repository', title: 'g/lib @ develop' }, open: 2, mine: true, sharedBy: null }, { review: brief, open: 1, mine: true, sharedBy: null }] }),
+      'GET /api/code/reviews/batches': () => ({ json: [] }),
+      'POST /api/code/reviews': () => ({ status: 202, json: { id: 'w2' } }),
+      'GET /api/code/reviews/w2': () => ({ json: { review: { ...brief, id: 'w2', scope: 'repository', status: 'running', step: 'Listing its files' }, summary: null, ci: null, model: null, headSha: null, previousId: null, roomId: null, promptTokens: 0, completionTokens: 0, by: 'Mo', mine: true, findings: [] } }),
+      'POST /api/code/reviews/batches': () => ({ status: 202, json: { id: 'b1' } }),
+      'GET /api/code/reviews/batches/b1': () => ({
+        json: {
+          batch: { id: 'b1', title: 'Counting', ref: null, cross: true, status: 'done', step: null, model: 'Main', error: null, createdAt: '2026-11-01T00:00:00Z', finishedAt: '2026-11-01T00:10:00Z' },
+          report: '## How they fit together\nThe app uses the library.', links: 'g/app depends on g/lib: g/app -> g/lib (package:nuget Lib), confidence 0.95', by: 'Mo', mine: true,
+          reviews: [
+            { id: 'r1', project: 'g/app', toRef: null, headSha: 'a', status: 'done', step: null, error: null, verdict: 'changes', risk: 'medium', files: 12, open: { major: 1 } },
+            { id: 'r2', project: 'g/lib', toRef: null, headSha: 'b', status: 'done', step: null, error: null, verdict: 'comments', risk: 'low', files: 4, open: {} },
+          ],
+          findings: [{ reviewId: 'r1', project: 'g/app', id: 'f1', path: 'src/count.c', line: 2, severity: 'major', category: 'bug', title: 'Off by one', state: 'open' }],
+        },
+      }),
+    })
+    const { router } = renderApp('/code?tab=review')
+    // The list says which reviews are of whole repositories, and keeps to them when asked.
+    const reviews = await screen.findByRole('list', { name: 'Reviews' })
+    expect(within(reviews).getAllByRole('listitem')).toHaveLength(2)
+    await userEvent.click(screen.getByRole('radio', { name: 'Repositories' }))
+    expect(within(screen.getByRole('list', { name: 'Reviews' })).getAllByRole('listitem')).toHaveLength(1)
+
+    await userEvent.click(screen.getByRole('radio', { name: 'A whole repository' }))
+    await userEvent.type(screen.getByLabelText('Repository'), 'g/lib')
+    await userEvent.type(screen.getByLabelText('Branch, tag or commit'), 'develop')
+    await userEvent.click(screen.getByRole('button', { name: 'Review the repository' }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/code/reviews/w2'))
+    expect(calls.find((c) => c.path === '/api/code/reviews' && c.method === 'POST')?.body).toEqual({ project: 'g/lib', scope: 'repository', ref: 'develop' })
+
+    await router.navigate('/code?tab=review')
+    await userEvent.click(await screen.findByRole('radio', { name: 'Several repositories' }))
+    await userEvent.type(screen.getByRole('textbox', { name: 'Repositories' }), 'g/app{Enter}g/lib')
+    await userEvent.type(screen.getByLabelText('What it is for'), 'Counting')
+    await userEvent.click(screen.getByRole('button', { name: 'Review 2 repositories' }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/code/reviews/batches/b1'))
+    expect(calls.find((c) => c.path === '/api/code/reviews/batches' && c.method === 'POST')?.body).toEqual({ projects: ['g/app', 'g/lib'], cross: true, title: 'Counting' })
+    expect(await screen.findByRole('heading', { name: 'How they fit together' })).toBeInTheDocument()
+    expect(within(screen.getByRole('list', { name: 'How they depend on each other' })).getByText(/g\/app depends on g\/lib/)).toBeInTheDocument()
+    expect(within(screen.getByRole('list', { name: 'Every finding' })).getByRole('link')).toHaveAttribute('href', '/code/reviews/r1')
+  })
+
+  it('explores across repositories with Argus’s tools, each asked in a chat', async () => {
+    const calls = fakeApi(member, {
+      'GET /api/code/business': () => ({ json: { argus: true, systems: [] } }),
+      'POST /api/code/ask': () => ({ json: { id: 'c9', message: 'asked' } }),
+      'GET /api/chat/conversations/c9': () => ({ json: { id: 'c9', title: 'Code', messages: [] } }),
+    })
+    const { router } = renderApp('/code?tab=ask')
+    const form = await screen.findByRole('form', { name: 'How two repositories are linked' })
+    await userEvent.type(within(form).getByRole('textbox', { name: 'From' }), 'payments/web')
+    await userEvent.type(within(form).getByRole('textbox', { name: 'To' }), 'shared/auth')
+    await userEvent.click(within(form).getByRole('button', { name: 'Ask' }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/chat/c9'))
+    expect((calls.find((c) => c.path === '/api/code/ask')?.body as { question: string }).question).toMatch(/^Use dependency_path from payments\/web to shared\/auth/)
   })
 
   it('lists merge requests without a Review button to one who may read code but not run reviews', async () => {
@@ -95,7 +159,7 @@ describe('code', () => {
       'GET /api/code/reviews': () => ({ json: [] }),
       'GET /api/code/mrs': () => ({ json: [{ iid: 7, title: 'Count faster', state: 'opened', author: 'dev', source_branch: 'fast', target_branch: 'main' }] }),
     })
-    renderApp('/code')
+    renderApp('/code?tab=review')
     await userEvent.type(await screen.findByLabelText('Project'), 'g/app')
     await userEvent.click(screen.getByRole('button', { name: 'Show' }))
     const list = await screen.findByRole('list', { name: 'Merge requests' })

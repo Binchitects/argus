@@ -1166,10 +1166,50 @@ upload. **Settings → Meetings** sets the limits: the largest recording
 
 ## Code review
 
-**Code** (in the sidebar) reviews merge requests with the model and answers
-questions about code. Both read the code through Argus with **your own**
-GitLab access (Reporter or above on the project, and the rules of Admin →
-Access), and write nothing to GitLab: no comments, no approvals.
+**Code Studio** (in the sidebar) has three parts, each shown to those who
+may use it: **Workspaces** (`code.studio`), **Review** (`review.run` starts
+reviews; `code.read` lists merge requests) and **Ask and explore**
+(`code.read`); **Security review** and **Fix it** are the buttons at the top.
+Reviews and questions read the code through Argus with **your own** GitLab
+access (Reporter or above on the project, and the rules of Admin → Access),
+and write nothing to GitLab: no comments, no approvals.
+
+**Review** starts one of four: **a merge request**, **a branch** (what it has
+over the one it goes into), **a whole repository** or **several
+repositories**. Below the form: automatic reviews, the reviews of several
+repositories, and every review, filtered to **All**, **Changes**,
+**Repositories** or **Automatic** and found by a word.
+
+- **A whole repository** at a branch, tag or commit (its default branch when
+  none): its files listed (Argus's `files_at`), its product's code chosen
+  (tests, examples, vendored, generated and built code left out, only code
+  languages, 200 bytes to 200 KB each; the entry points first, then the
+  largest, at most 30), each read whole with its lines numbered and reviewed
+  for bugs, security holes, leaks, races, error handling, performance,
+  missing tests and design that will cause bugs (at most eight findings a
+  file); each finding is put to a second pass told to refute it; then a
+  summary from its README, layout and languages: what it is and how it is
+  built, its health area by area, what to fix and test first, with a
+  verdict and a risk. Review again reads it whole again.
+- **Several repositories** (2 to 10, one a line, a name, the same branch in
+  each or each one's default): each reviewed whole as above, one after the
+  other (one review of several runs at a time), then, with **Look across
+  them** on, Argus's `dependency_path` is asked for each pair (at most 15) and
+  the model, given each repository's summary and findings and those links,
+  writes **How they fit together**, **Between the repositories** (contracts
+  one side breaks, a shared package at different versions, logic done twice,
+  a dependency the wrong way), **Alike and different** and **Fix first**. Its
+  page has each repository's review, the links, the report, and every
+  finding together, filtered by repository and severity. Deleting it deletes
+  the repositories' reviews in it.
+- **Ask and explore**: **Ask about code**, and four of Argus's tools across
+  repositories, each asked in a chat with Argus: **What a change reaches**
+  (`change_impact`, with a symbol for the lines that use it), **How two
+  repositories are linked** (`dependency_path`), **Where a change belongs**
+  (`which_repo`) and **The estate's map** (`system_map`, for a group or the
+  whole estate); then the **Business map**.
+
+For a merge request:
 
 - **A review.** Type a project's path (group/project) and press **Show**:
   its merge requests. **Review** reads the merge request (its description,

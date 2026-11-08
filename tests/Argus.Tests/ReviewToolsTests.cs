@@ -369,6 +369,25 @@ public sealed class ReviewToolsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Files_at_lists_a_commits_files_with_their_sizes_and_languages()
+    {
+        var all = await Answer("files_at", new { project = "root/eal-core", iid = 1 });
+        var files = all["files"]!.AsArray().Select(f => (Path: f!["path"]!.GetValue<string>(), Size: f["size"]!.GetValue<long>(), Lang: f["language"]?.GetValue<string>())).ToList();
+        Assert.Contains(files, f => f.Path == "src/decoder.c" && f.Size > 0 && f.Lang == "c");
+        Assert.Equal(files.Count, all["total"]!.GetValue<int>());
+        Assert.Equal(files.Sum(f => f.Size), all["bytes"]!.GetValue<long>());
+        Assert.True(all["languages"]!["c"]!["files"]!.GetValue<int>() >= 1);
+        // Narrowed to a directory, and limited, the rest counted.
+        var config = await Answer("files_at", new { project = "root/eal-core", iid = 1, path = "config" });
+        Assert.All(config["files"]!.AsArray(), f => Assert.StartsWith("config/", f!["path"]!.GetValue<string>(), StringComparison.Ordinal));
+        var one = await Answer("files_at", new { project = "root/eal-core", iid = 1, limit = 1 });
+        Assert.Equal((1, files.Count - 1), (one["files"]!.AsArray().Count, one["more"]!.GetValue<int>()));
+        var nothing = await Call("files_at", new { project = "root/eal-core", @ref = "no-such-branch" });
+        Assert.True(nothing["isError"]!.GetValue<bool>());
+        _gitlab.AssertOnlyReads();
+    }
+
+    [Fact]
     public async Task Deps_check_matches_a_branchs_locked_packages_against_the_advisories_and_sbom_lists_them()
     {
         // Three real advisories (lodash, requests, Newtonsoft.Json), as an installed advisories pack.
@@ -531,6 +550,7 @@ public sealed class ReviewToolsTests : IAsyncLifetime
         ["job_log"] = new { project = "root/driver-shim", job_id = 1 },
         ["compare_refs"] = new { project = "root/driver-shim", from = "main", to = "shim-secret" },
         ["file_at"] = new { project = "root/driver-shim", @ref = "shim-secret", path = "src/shim.c" },
+        ["files_at"] = new { project = "root/driver-shim", @ref = "shim-secret" },
         ["grep_at"] = new { project = "root/driver-shim", @ref = "shim-secret", pattern = "SHIM_ONLY" },
         ["deps_check"] = new { project = "root/driver-shim", @ref = "shim-secret" },
         ["sbom"] = new { project = "root/driver-shim", @ref = "shim-secret" },

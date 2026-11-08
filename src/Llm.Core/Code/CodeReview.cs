@@ -16,6 +16,12 @@ public sealed class CodeReview
     /// <summary>Who ran it: it read the code as them, and its cost is theirs.</summary>
     public Guid UserId { get; set; }
     /// <summary>The project's path (group/project).</summary>
+    /// <summary>What is reviewed: a change (a merge request, or what a branch has over another) or the whole repository at a ref (<see cref="ToRef"/>, null: the default branch).</summary>
+    public string Scope { get; set; } = Change;
+    public const string Change = "change";
+    public const string Repository = "repository";
+    /// <summary>The review of several repositories it is one of; null: reviewed by itself.</summary>
+    public Guid? BatchId { get; set; }
     public required string Project { get; set; }
     /// <summary>The merge request's number; null for a comparison of two refs.</summary>
     public int? Iid { get; set; }
@@ -64,7 +70,33 @@ public sealed class CodeReview
     public DateTimeOffset? SharedAt { get; set; }
 }
 
-/// <summary>One thing a review found, on a line of a file the change touched.</summary>
+/// <summary>
+/// A code review of several whole repositories at once: each its own <see cref="CodeReview"/> (scope repository), run one
+/// after the other, then, when <see cref="Cross"/>, a look across them: how they depend on each other, the contracts
+/// between them, what they do alike or differently, and what to fix first.
+/// </summary>
+public sealed class CodeReviewBatch
+{
+    public Guid Id { get; set; } = Guid.CreateVersion7();
+    public Guid UserId { get; set; }
+    public string? Title { get; set; }
+    public string? Ref { get; set; }
+    public bool Cross { get; set; } = true;
+    public string Status { get; set; } = CodeReview.Queued;
+    public string? Step { get; set; }
+    public string? Model { get; set; }
+    /// <summary>The model's look across the repositories, as Markdown.</summary>
+    public string? Report { get; set; }
+    /// <summary>How the repositories depend on each other, as Argus resolved it: one line a link.</summary>
+    public string? Links { get; set; }
+    public int PromptTokens { get; set; }
+    public int CompletionTokens { get; set; }
+    public string? Error { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? FinishedAt { get; set; }
+}
+
+/// <summary>One thing a review found, on a line of a file the change touched (or, reviewing a whole repository, of a file in it).</summary>
 public sealed class ReviewFinding
 {
     public const string Open = "open";

@@ -89,6 +89,95 @@ public sealed class ReviewTests(AppFixture app)
         Assert.Equal("Nothing changed since the last review.", second.GetProperty("summary").GetString());
     }
 
+    private void Repository()
+    {
+        // Its product's code: two C files (the larger one read first), a test and a vendored file left out, a README read for what it is.
+        app.Argus.Handlers["files_at"] = args => JsonSerializer.Serialize(new
+        {
+            project = args.GetProperty("project").GetString(), @ref = args.TryGetProperty("ref", out var r) && r.ValueKind == JsonValueKind.String ? r.GetString() : "main", sha = "c0de", total = 5, bytes = 9000,
+            languages = new { c = new { files = 3, bytes = 8000 } },
+            files = new object[]
+            {
+                new { path = "README.md", size = 300, language = "markdown" },
+                new { path = "src/count.c", size = 4000, language = "c" },
+                new { path = "src/util.c", size = 2500, language = "c" },
+                new { path = "tests/count_test.c", size = 1500, language = "c" },
+                new { path = "vendor/zlib.c", size = 90000, language = "c" },
+            },
+            more = 0,
+        });
+        app.Argus.Handlers["file_at"] = args => args.GetProperty("path").GetString() switch
+        {
+            "README.md" => """{"start_line": 1, "end_line": 1, "total_lines": 1, "content": "A counter library.\n"}""",
+            "src/count.c" => """{"start_line": 1, "end_line": 3, "total_lines": 3, "content": "int count(int *a, int n) {\n  for (i = 0; i <= n; i++) total += a[i]; // [bug]\n}\n"}""",
+            _ => """{"start_line": 1, "end_line": 1, "total_lines": 1, "content": "int ok(void) { return 1; }\n"}""",
+        };
+        app.Argus.Handlers["dependency_path"] = args => JsonSerializer.Serialize(new
+        {
+            from = args.GetProperty("from").GetString(), to = args.GetProperty("to").GetString(), direction = $"{args.GetProperty("from").GetString()} depends on {args.GetProperty("to").GetString()}",
+            paths = new[] { new { length = 1, confidence = 0.95, steps = new[] { new { from = args.GetProperty("from").GetString(), to = args.GetProperty("to").GetString(), confidence = 0.95, tier = "strong", by = new[] { "package:nuget Lib" } } } } },
+        });
+    }
+
+    [Fact]
+    public async Task A_whole_repository_is_reviewed_at_a_branch_from_its_products_code_with_a_summary_of_its_health()
+    {
+        Repository();
+        var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
+        var (_, email, me) = await PersonAsync(admin);
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await me.PostAsync("/api/code/reviews", new { project = "g/lib", scope = "everything" }));
+        var res = await me.PostAsync("/api/code/reviews", new { project = "g/lib", scope = "repository", @ref = "develop" });
+        await StatusAssert.Is(HttpStatusCode.Accepted, res);
+        var done = await DoneAsync(me, (await me.JsonAsync(res)).GetProperty("id").GetGuid());
+        var review = done.GetProperty("review");
+        Assert.True(review.GetProperty("status").GetString() == "done", review.GetProperty("error").ToString());
+        Assert.Equal(("repository", "g/lib @ develop", 2, "changes"), (review.GetProperty("scope").GetString(), review.GetProperty("title").GetString(), review.GetProperty("files").GetInt32(),
+            review.GetProperty("verdict").GetString()));
+        Assert.StartsWith("A counter library in C.", done.GetProperty("summary").GetString(), StringComparison.Ordinal);
+        var finding = Assert.Single(done.GetProperty("findings").EnumerateArray());
+        Assert.Equal(("src/count.c", 2), (finding.GetProperty("path").GetString(), finding.GetProperty("line").GetInt32()));
+        // Read as the person at the branch: the test and the vendored file never.
+        var read = app.Argus.McpCalls.Where(c => c.Email == email && c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "file_at")
+            .Select(c => c.Params!.Value.GetProperty("arguments").GetProperty("path").GetString()).ToList();
+        Assert.Equal(["README.md", "src/count.c", "src/util.c"], read);
+        Assert.All(app.Argus.McpCalls.Where(c => c.Email == email && c.Method == "tools/call" && c.Params?.GetProperty("name").GetString() == "file_at"),
+            c => Assert.Equal("develop", c.Params!.Value.GetProperty("arguments").GetProperty("ref").GetString()));
+    }
+
+    [Fact]
+    public async Task Several_whole_repositories_are_reviewed_then_looked_at_across_with_how_they_depend_on_each_other()
+    {
+        Repository();
+        var admin = await new TestBrowser(app.Factory).SignedInAsync("admin", AppFixture.AdminPassword);
+        var (_, email, me) = await PersonAsync(admin);
+        await StatusAssert.Is(HttpStatusCode.BadRequest, await me.PostAsync("/api/code/reviews/batches", new { projects = new[] { "g/app" } }));
+        var res = await me.PostAsync("/api/code/reviews/batches", new { projects = new[] { "g/app", "g/lib" }, title = "Counting" });
+        await StatusAssert.Is(HttpStatusCode.Accepted, res);
+        var id = (await me.JsonAsync(res)).GetProperty("id").GetGuid();
+        JsonElement batch = default;
+        for (var i = 0; i < 400; i++)
+        {
+            batch = await me.JsonAsync(await me.GetAsync($"/api/code/reviews/batches/{id}"));
+            if (batch.GetProperty("batch").GetProperty("status").GetString() is "done" or "failed")
+            {
+                break;
+            }
+            await Task.Delay(50);
+        }
+        Assert.True(batch.GetProperty("batch").GetProperty("status").GetString() == "done", batch.GetProperty("batch").GetProperty("error").ToString());
+        Assert.Equal(["g/app", "g/lib"], batch.GetProperty("reviews").EnumerateArray().Select(r => r.GetProperty("project").GetString()));
+        Assert.All(batch.GetProperty("reviews").EnumerateArray(), r => Assert.Equal("changes", r.GetProperty("verdict").GetString()));
+        Assert.Contains("g/app depends on g/lib", batch.GetProperty("links").GetString(), StringComparison.Ordinal);
+        Assert.StartsWith("## How they fit together", batch.GetProperty("report").GetString(), StringComparison.Ordinal);
+        Assert.Equal(2, batch.GetProperty("findings").GetArrayLength());
+        var asked = app.Model.Requests.Last(r => r.Body["user"]?.GetValue<string>() == email);
+        Assert.Contains("# How they depend on each other", asked.Body["messages"]![1]!["content"]!.GetValue<string>(), StringComparison.Ordinal);
+        var listed = (await me.JsonAsync(await me.GetAsync("/api/code/reviews/batches"))).EnumerateArray().Single(b => b.GetProperty("batch").GetProperty("id").GetGuid() == id);
+        Assert.Equal((2, 2, "Counting"), (listed.GetProperty("done").GetInt32(), listed.GetProperty("changes").GetInt32(), listed.GetProperty("batch").GetProperty("title").GetString()));
+        await StatusAssert.Is(HttpStatusCode.NoContent, await me.Http.DeleteAsync(new Uri($"/api/code/reviews/batches/{id}", UriKind.Relative)));
+        await StatusAssert.Is(HttpStatusCode.NotFound, await me.GetAsync($"/api/code/reviews/{batch.GetProperty("reviews")[0].GetProperty("id").GetGuid()}"));
+    }
+
     [Fact]
     public async Task A_shared_review_is_read_by_whom_it_is_shared_with_while_they_may_read_its_project_and_they_change_nothing()
     {
