@@ -152,14 +152,18 @@ internal sealed class IdeFiles(Workspace workspace)
     {
         var files = new List<string>();
         var truncated = false;
-        foreach (var full in workspace.FilesUnder(workspace.Root, ct))
+        // Every folder of the workspace: the one it opened and those added to it (each added one's files by its own path).
+        foreach (var root in workspace.Roots)
         {
-            if (files.Count == MaxListed)
+            foreach (var full in workspace.FilesUnder(root, ct))
             {
-                truncated = true;
-                break;
+                if (files.Count == MaxListed)
+                {
+                    truncated = true;
+                    break;
+                }
+                files.Add(Show(full));
             }
-            files.Add(Show(full));
         }
         files.Sort(StringComparer.Ordinal);
         return new JsonObject { ["files"] = new JsonArray([.. files.Select(f => (JsonNode)f)]), ["truncated"] = truncated };
