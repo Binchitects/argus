@@ -59,6 +59,36 @@ public sealed class RateLimitTests(AppFixture app)
 
     private static KeyRate RateOf(FakeGateway gateway, string email) => gateway.KeysOf(email).Single().Rate;
 
+    [Fact]
+    public async Task Sub_agents_at_once_come_from_the_person_else_their_most_generous_group_else_the_company_and_reach_Code_Arena()
+    {
+        await using var f = NewApp(new FakeGateway());
+        var admin = await AdminAsync(f);
+        var p = await PersonAsync(admin, "sa");
+        async Task<JsonElement> AtOnce() => (await admin.JsonAsync(await admin.GetAsync($"/api/admin/people/{p.Id}"))).GetProperty("atOnce").GetProperty("subAgents");
+        var none = await AtOnce();
+        Assert.Equal("company", none.GetProperty("from").GetString());
+
+        // Two groups: the most generous holds (2 and 6: 6).
+        await GroupAsync(admin, new { subAgentsAtOnce = 2 }, p.Id);
+        await GroupAsync(admin, new { subAgentsAtOnce = 6 }, p.Id);
+        var fromGroup = await AtOnce();
+        Assert.Equal((6, "group"), (fromGroup.GetProperty("value").GetInt32(), fromGroup.GetProperty("from").GetString()));
+        // Out of range: refused.
+        var refused = await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/groups/{await GroupAsync(admin, new { })}/policies", UriKind.Relative), new { subAgentsAtOnce = 300 });
+        await StatusAssert.Is(HttpStatusCode.BadRequest, refused);
+
+        // Their own replaces their groups'.
+        await StatusAssert.Is(HttpStatusCode.OK, await admin.Http.PutAsJsonAsync(new Uri($"/api/admin/people/{p.Id}/limits", UriKind.Relative), new { subAgentsAtOnce = 1 }));
+        var own = await AtOnce();
+        Assert.Equal((1, "person"), (own.GetProperty("value").GetInt32(), own.GetProperty("from").GetString()));
+
+        // Code Arena reads it with the chat's config.
+        var person = await new TestBrowser(f).SignedInAsync(p.Name, p.Password);
+        var config = await person.JsonAsync(await person.GetAsync("/api/chat/config"));
+        Assert.Equal(1, config.GetProperty("subAgentsAtOnce").GetInt32());
+    }
+
     /// <summary>Waits (up to 15 seconds) for the key sync to give the person's key this rate.</summary>
     private static async Task KeyHasAsync(FakeGateway gateway, string email, KeyRate want)
     {

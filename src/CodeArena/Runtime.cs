@@ -245,6 +245,11 @@ internal sealed partial class Runtime : IAsyncDisposable
         {
             Memory.Denied = denied.Any(d => d?.GetValue<string>() == "feature.memory");
         }
+        // The person's sub-agents at once, as Arena's admins set them (theirs, their groups', or the company's); 0: no limit.
+        if (chat.Int("subAgentsAtOnce") is { } agents)
+        {
+            Tasks.AtOnce = agents == 0 ? TaskBoard.Unlimited : agents;
+        }
         // Arena's admins allow other providers now: theirs are offered (listed in the background).
         if (!ProvidersRefused && Gateway.Others.Count == 0 && Config.Providers.Count > 0)
         {

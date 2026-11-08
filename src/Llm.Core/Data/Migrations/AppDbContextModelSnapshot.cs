@@ -331,6 +331,9 @@ namespace Llm.Core.Data.Migrations
                     b.Property<decimal?>("SpeechCredit")
                         .HasColumnType("numeric");
 
+                    b.Property<int?>("SubAgentsAtOnce")
+                        .HasColumnType("integer");
+
                     b.Property<int?>("TokensPerMinute")
                         .HasColumnType("integer");
 
@@ -5786,6 +5789,9 @@ namespace Llm.Core.Data.Migrations
 
                     b.Property<decimal?>("SpeechCredit")
                         .HasColumnType("numeric");
+
+                    b.Property<int?>("SubAgentsAtOnce")
+                        .HasColumnType("integer");
 
                     b.Property<int?>("TokensPerMinute")
                         .HasColumnType("integer");

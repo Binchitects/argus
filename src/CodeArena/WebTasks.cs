@@ -20,7 +20,7 @@ internal sealed partial class WebApp
                 {
                     ["tasks"] = new JsonArray([.. _rt.Tasks.All.Select(t => (JsonNode)TaskBoard.ToJson(t, whole: false))]),
                     ["running"] = _rt.Tasks.RunningCount,
-                    ["mostAtOnce"] = TaskBoard.MostAtOnce,
+                    ["mostAtOnce"] = _rt.Tasks.AtOnce,
                 }, ct);
                 return true;
             case ("POST", TasksPath):

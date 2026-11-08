@@ -10,7 +10,7 @@ const group: GroupDetail = {
   members: [{ id: 'p1', userName: 'ann', displayName: 'Ann', email: 'ann@example.test', isDisabled: false, spend: 3.5 }],
   policies: {
     retentionDays: null, credits: { chat: 50, api: null, pictures: null, video: null, speech: null }, creditPerMember: false, costCentre: null,
-    requestsPerMinute: null, tokensPerMinute: null, requireTwoFactor: false, answersAtOnce: null,
+    requestsPerMinute: null, tokensPerMinute: null, requireTwoFactor: false, answersAtOnce: null, subAgentsAtOnce: null,
   },
   spentThisMonth: 3.5,
   spentByKind: { chat: 3, api: 0.5, pictures: 0, video: 0, speech: 0 },
@@ -74,7 +74,7 @@ describe('retention and credit per group', () => {
     await waitFor(() =>
       expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({
         retentionDays: 90, credits: { chat: 50, api: 20, pictures: null, video: null, speech: null }, creditPerMember: true, costCentre: 'CC-42',
-        requestsPerMinute: null, tokensPerMinute: null, requireTwoFactor: true, answersAtOnce: 2,
+        requestsPerMinute: null, tokensPerMinute: null, requireTwoFactor: true, answersAtOnce: 2, subAgentsAtOnce: null,
       }),
     )
   })

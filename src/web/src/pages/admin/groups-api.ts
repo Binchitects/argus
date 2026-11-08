@@ -23,6 +23,7 @@ export interface GroupSummary {
   tokensPerMinute?: number | null
   requireTwoFactor?: boolean
   answersAtOnce?: number | null
+  subAgentsAtOnce?: number | null
 }
 
 export interface GroupMember {
@@ -50,6 +51,7 @@ export interface GroupPolicies {
   requireTwoFactor: boolean
   /** Each member's requests answered at once, chat and API together: null is the company's setting, 0 no limit. */
   answersAtOnce: number | null
+  subAgentsAtOnce: number | null
 }
 
 export const noPolicies: GroupPolicies = {
@@ -61,6 +63,7 @@ export const noPolicies: GroupPolicies = {
   tokensPerMinute: null,
   requireTwoFactor: false,
   answersAtOnce: null,
+  subAgentsAtOnce: null,
 }
 
 export interface GroupDetail extends Omit<GroupSummary, 'members'> {

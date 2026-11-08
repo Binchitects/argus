@@ -58,19 +58,64 @@ internal sealed class AgentTask
 /// </summary>
 internal sealed class TaskBoard
 {
-    /// <summary>Sub-agents running at once at most: each is a request to the model at a time.</summary>
+    /// <summary>Sub-agents running at once at most, unless Arena says otherwise for the person: each is a request to the model at a time.</summary>
     public const int MostAtOnce = 4;
+
+    /// <summary>The most Arena allows when it says "no limit" for the person (0): still a number, the model's own line takes the rest.</summary>
+    public const int Unlimited = 32;
     /// <summary>The tasks kept on the board: the oldest that ended go first past it.</summary>
     public const int MostKept = 200;
 
     private readonly object _gate = new();
     private readonly List<AgentTask> _tasks = [];
-    private readonly SemaphoreSlim _slots = new(MostAtOnce, MostAtOnce);
+    // The tasks running and those that may (AtOnce, which Arena may change while they run): a waiter is woken at each change.
+    private int _running;
+    private int _atOnce = MostAtOnce;
+    private readonly SemaphoreSlim _changed = new(0);
     private readonly SemaphoreSlim _writer = new(1, 1);
     private int _next;
 
     /// <summary>Told when a task begins or ends (the terminal says a background one ended; the IDE reads the board again).</summary>
     public event Action<AgentTask>? Changed;
+
+    /// <summary>
+    /// How many run at once: <see cref="MostAtOnce"/>, or the person's limit as Arena says it (Admin → People and Groups:
+    /// Sub-agents at once), at least one. Those beyond it wait; a change takes effect for the next to start.
+    /// </summary>
+    public int AtOnce
+    {
+        get => Volatile.Read(ref _atOnce);
+        set
+        {
+            Volatile.Write(ref _atOnce, Math.Max(1, value));
+            _changed.Release();
+        }
+    }
+
+    private async Task TakeSlotAsync(CancellationToken ct)
+    {
+        while (true)
+        {
+            lock (_gate)
+            {
+                if (_running < AtOnce)
+                {
+                    _running++;
+                    return;
+                }
+            }
+            await _changed.WaitAsync(ct);
+        }
+    }
+
+    private void GiveSlot()
+    {
+        lock (_gate)
+        {
+            _running--;
+        }
+        _changed.Release();
+    }
 
     public IReadOnlyList<AgentTask> All
     {
@@ -138,7 +183,7 @@ internal sealed class TaskBoard
                 await _writer.WaitAsync(token);
                 writer = true;
             }
-            await _slots.WaitAsync(token);
+            await TakeSlotAsync(token);
             slot = true;
             task.Started = DateTimeOffset.UtcNow;
             task.Status = AgentTask.Running;
@@ -168,7 +213,7 @@ internal sealed class TaskBoard
             }
             if (slot)
             {
-                _slots.Release();
+                GiveSlot();
             }
             task.Ended = DateTimeOffset.UtcNow;
             Changed?.Invoke(task);

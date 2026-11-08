@@ -79,6 +79,8 @@ public sealed class AppUser : IdentityUser<Guid>
     /// groups' (the most generous), else the company's for the chat (Chat:AnswersPerPerson) and none for their keys; 0: no limit.
     /// </summary>
     public int? AnswersAtOnce { get; set; }
+    /// <summary>Sub-agents one of their answers runs side by side; null: their groups' (the most generous), else the company's Chat:AgentsAtOnce; 0: no limit.</summary>
+    public int? SubAgentsAtOnce { get; set; }
 
     /// <summary>What they may spend in a calendar month on the chat's answers; null: no limit of their own (Credits).</summary>
     public decimal? ChatCredit { get; set; }

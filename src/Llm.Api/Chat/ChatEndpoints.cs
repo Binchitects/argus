@@ -159,6 +159,8 @@ public static partial class ChatEndpoints
             denied = Llm.Core.Access.Permissions.FeatureKeys.Where(k => !membership.Has(k)),
             // Whether Code Arena may offer other providers' models with a person's own key (Chat:CodeArenaProviders).
             codeArenaProviders = chat.CurrentValue.CodeArenaProviders,
+            // The sub-agents one of their answers runs side by side (theirs, their groups', else the company's); 0: no limit.
+            subAgentsAtOnce = (await access.SubAgentsAtOnceAsync(me, ct)).Value ?? chat.CurrentValue.AgentsAtOnce,
         };
     }
 

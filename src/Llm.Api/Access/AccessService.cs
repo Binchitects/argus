@@ -196,6 +196,27 @@ public sealed class AccessService(AppDbContext db, AccessSnapshotCache cache, IO
         return (best.AnswersAtOnce, "group", best.Name);
     }
 
+    /// <summary>
+    /// The sub-agents one of the person's answers runs side by side: their own (Admin → People), else the most generous of
+    /// their groups' (0, no limit, the most generous of all), else none set (the company's Chat:AgentsAtOnce).
+    /// </summary>
+    public async Task<(int? Value, string From, string? Group)> SubAgentsAtOnceAsync(AppUser user, CancellationToken ct = default)
+    {
+        if (user.SubAgentsAtOnce is { } own)
+        {
+            return (own, "person", null);
+        }
+        var groups = (await MembershipAsync(user, ct)).Groups;
+        var set = groups.Count == 0 ? [] : await db.Groups.AsNoTracking().Where(g => groups.Contains(g.Id) && g.SubAgentsAtOnce != null)
+            .Select(g => new { g.Name, g.SubAgentsAtOnce }).ToListAsync(ct);
+        if (set.Count == 0)
+        {
+            return (null, "company", null);
+        }
+        var best = set.OrderBy(g => g.SubAgentsAtOnce == 0 ? 0 : 1).ThenByDescending(g => g.SubAgentsAtOnce).ThenBy(g => g.Name, StringComparer.OrdinalIgnoreCase).First();
+        return (best.SubAgentsAtOnce, "group", best.Name);
+    }
+
     /// <summary>The directory's rule for group names: the full DN, or its common name, in any case.</summary>
     public static bool InDirectoryGroup(IEnumerable<string> memberOf, string group) => memberOf.Any(g => LdapDirectory.IsNamed(g, group));
 

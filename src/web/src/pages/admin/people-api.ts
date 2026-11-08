@@ -69,7 +69,14 @@ export interface PersonDetail {
   /** Their API keys' rate limits: their own, and what applies with where it comes from. */
   limits?: KeyLimits
   /** Their requests answered at once (chat and API): their own, and what applies, from them, a group, or the company. */
-  atOnce?: { own: number | null; value: number | null; from: 'person' | 'group' | 'company'; group: string | null }
+  atOnce?: {
+    own: number | null
+    value: number | null
+    from: 'person' | 'group' | 'company'
+    group: string | null
+    /** Sub-agents one of their answers runs side by side: theirs, their groups', or the company's. */
+    subAgents?: { own: number | null; value: number | null; from: 'person' | 'group' | 'company'; group: string | null }
+  }
   warning: string | null
 }
 

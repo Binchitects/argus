@@ -76,7 +76,7 @@ public static class AdminEndpoints
         admin.MapPut("/people/{id:guid}/limits", (Guid id, LimitsRequest body, PeopleService people, Models.KeyAccessWatcher keys) =>
             WithPerson(id, people, async u =>
             {
-                var warning = await people.SetLimitsAsync(u, body.RequestsPerMinute, body.TokensPerMinute, body.AnswersAtOnce);
+                var warning = await people.SetLimitsAsync(u, body.RequestsPerMinute, body.TokensPerMinute, body.AnswersAtOnce, body.SubAgentsAtOnce);
                 // A key sync already under way read the person before this change: one more after it puts the new limit back if that sync undid it.
                 keys.Wake();
                 return Results.Ok(new { warning });
@@ -331,7 +331,8 @@ public static class AdminEndpoints
     private static async Task<object> AtOnceAsync(AppUser u, Access.AccessService access)
     {
         var (value, from, group) = await access.AnswersAtOnceAsync(u);
-        return new { own = u.AnswersAtOnce, value, from, group };
+        var (agents, agentsFrom, agentsGroup) = await access.SubAgentsAtOnceAsync(u);
+        return new { own = u.AnswersAtOnce, value, from, group, subAgents = new { own = u.SubAgentsAtOnce, value = agents, from = agentsFrom, group = agentsGroup } };
     }
 
     private static async Task<IResult> UpdateAsync(Guid id, UpdatePersonRequest body, ClaimsPrincipal p, UserManager<AppUser> users, PeopleService people, Access.AccessService access, Audit audit)

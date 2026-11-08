@@ -1474,7 +1474,10 @@ public sealed partial class ChatService(
         // No more at once than their model serves at once (its places): one more would push another's cache out, and it
         // would read its whole context again. Each keeps an engine slot of its own for its steps (SlotTable), as a chat does.
         var places = gate.PlacesOf(kit.Model);
-        var atOnce = Math.Max(1, places > 0 ? Math.Min(chat.CurrentValue.AgentsAtOnce, places) : chat.CurrentValue.AgentsAtOnce);
+        // The person's own, else their groups' (Admin → People, Groups), else the company's; 0 (no limit): their model's places.
+        var allowed = (await access.SubAgentsAtOnceAsync(kit.User, ct)).Value ?? chat.CurrentValue.AgentsAtOnce;
+        var wanted = allowed == 0 ? (places > 0 ? places : parts.Count) : allowed;
+        var atOnce = Math.Max(1, places > 0 ? Math.Min(wanted, places) : wanted);
         using var turns = new SemaphoreSlim(atOnce);
         var done = 0;
         async Task<(JsonObject Result, JsonObject Shown, List<ChatAttachment> Files, AgentRun Run)> RunAsync(AgentTask part, int index)

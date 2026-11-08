@@ -435,9 +435,10 @@ function RateLimitsCard({ p, limits, atOnce, maySet }: { p: Person; limits: KeyL
   const [requests, setRequests] = useState(limitText(limits.own.requestsPerMinute))
   const [tokens, setTokens] = useState(limitText(limits.own.tokensPerMinute))
   const [running, setRunning] = useState(limitText(atOnce?.own ?? null))
+  const [agents, setAgents] = useState(limitText(atOnce?.subAgents?.own ?? null))
   const [error, setError] = useState<string | null>(null)
   const save = useMutation({
-    mutationFn: (body: { requestsPerMinute: number | null; tokensPerMinute: number | null; answersAtOnce: number | null }) =>
+    mutationFn: (body: { requestsPerMinute: number | null; tokensPerMinute: number | null; answersAtOnce: number | null; subAgentsAtOnce: number | null }) =>
       api<{ warning: string | null }>(`/api/admin/people/${p.id}/limits`, { method: 'PUT', body }),
     onSuccess: (r) => {
       if (r?.warning) toast.warning('Limits saved', { description: r.warning })
@@ -460,6 +461,15 @@ function RateLimitsCard({ p, limits, atOnce, maySet }: { p: Person; limits: KeyL
             {atOnce.value === null
               ? "the company's (Answers at once, per person) for the chat; none of their own for API keys"
               : `${atOnce.value === 0 ? 'no limit' : atOnce.value}, ${atOnce.from === 'person' ? 'their own' : `from ${atOnce.group}`}`}
+            {atOnce.subAgents && (
+              <>
+                <br />
+                <span className="text-muted-foreground">Sub-agents at once, per answer: </span>
+                {atOnce.subAgents.value === null
+                  ? "the company's (Sub-agents at once)"
+                  : `${atOnce.subAgents.value === 0 ? 'no limit' : atOnce.subAgents.value}, ${atOnce.subAgents.from === 'person' ? 'their own' : `from ${atOnce.subAgents.group}`}`}
+              </>
+            )}
           </p>
         )}
         {maySet && (
@@ -471,9 +481,10 @@ function RateLimitsCard({ p, limits, atOnce, maySet }: { p: Person; limits: KeyL
             const r = parseLimit(requests, maxRequests)
             const t = parseLimit(tokens, maxTokens)
             const a = parseLimit(running, 1000)
-            if (r === 'invalid' || t === 'invalid' || a === 'invalid')
-              setError(`Whole numbers: requests 0 to ${maxRequests.toLocaleString('en-US')}, tokens 0 to ${maxTokens.toLocaleString('en-US')}, at once 0 to 1,000. 0: no limit; empty: their groups' or the company's.`)
-            else save.mutate({ requestsPerMinute: r, tokensPerMinute: t, answersAtOnce: a })
+            const sa = parseLimit(agents, 256)
+            if (r === 'invalid' || t === 'invalid' || a === 'invalid' || sa === 'invalid')
+              setError(`Whole numbers: requests 0 to ${maxRequests.toLocaleString('en-US')}, tokens 0 to ${maxTokens.toLocaleString('en-US')}, at once 0 to 1,000, sub-agents 0 to 256. 0: no limit; empty: their groups' or the company's.`)
+            else save.mutate({ requestsPerMinute: r, tokensPerMinute: t, answersAtOnce: a, subAgentsAtOnce: sa })
           }}
         >
           <Field label="Requests a minute" className="w-40">
@@ -484,6 +495,9 @@ function RateLimitsCard({ p, limits, atOnce, maySet }: { p: Person; limits: KeyL
           </Field>
           <Field label="Requests at once" className="w-40">
             <Input inputMode="numeric" value={running} onChange={(e) => setRunning(e.target.value)} placeholder="from groups" />
+          </Field>
+          <Field label="Sub-agents at once" className="w-40">
+            <Input inputMode="numeric" value={agents} onChange={(e) => setAgents(e.target.value)} placeholder="from groups" />
           </Field>
           <Button type="submit" variant="outline" loading={save.isPending}>
             Set limits

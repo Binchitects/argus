@@ -31,6 +31,7 @@ export function GroupPoliciesCard({ group, maySet = true }: { group: GroupDetail
   const [tokens, setTokens] = useState(p.tokensPerMinute === null || p.tokensPerMinute === undefined ? '' : String(p.tokensPerMinute))
   const [twoFactor, setTwoFactor] = useState(p.requireTwoFactor ?? false)
   const [atOnce, setAtOnce] = useState(p.answersAtOnce === null || p.answersAtOnce === undefined ? '' : String(p.answersAtOnce))
+  const [agents, setAgents] = useState(p.subAgentsAtOnce === null || p.subAgentsAtOnce === undefined ? '' : String(p.subAgentsAtOnce))
   const [error, setError] = useState<string | null>(null)
   const save = useMutation({
     mutationFn: (body: GroupPolicies) => api(`/api/admin/groups/${group.id}/policies`, { method: 'PUT', body }),
@@ -54,6 +55,8 @@ export function GroupPoliciesCard({ group, maySet = true }: { group: GroupDetail
       return setError(`Limits are whole numbers: requests 0 to ${maxRequests.toLocaleString('en-US')}, tokens 0 to ${maxTokens.toLocaleString('en-US')} a minute. 0: no limit; empty: the company's setting.`)
     const a = parseLimit(atOnce, 1000)
     if (a === 'invalid') return setError("Requests at once are a whole number, 0 to 1,000. 0: no limit; empty: the company's setting.")
+    const sa = parseLimit(agents, 256)
+    if (sa === 'invalid') return setError("Sub-agents at once are a whole number, 0 to 256. 0: no limit; empty: the company's setting.")
     save.mutate({
       retentionDays: retention,
       credits: c as Credits,
@@ -63,6 +66,7 @@ export function GroupPoliciesCard({ group, maySet = true }: { group: GroupDetail
       tokensPerMinute: t,
       requireTwoFactor: twoFactor,
       answersAtOnce: a,
+      subAgentsAtOnce: sa,
     })
   }
   const spent = group.spentThisMonth
@@ -130,6 +134,9 @@ export function GroupPoliciesCard({ group, maySet = true }: { group: GroupDetail
         </div>
         <Field label="Requests at once, per member" hint="Each member's chat answers and API requests running together; more wait their turn. 0: no limit. Empty: the company's setting (Answers at once, per person) for the chat, none for API keys.">
           <Input inputMode="numeric" value={atOnce} onChange={(e) => setAtOnce(e.target.value)} placeholder="the company's setting" className="sm:w-1/2" />
+        </Field>
+        <Field label="Sub-agents at once, per answer" hint="Sub-agents one answer of a member runs side by side, in the web chat and Code Arena; the rest wait their turn inside the answer. 0: no limit (as many as the model serves at once). Empty: the company's setting (Sub-agents at once).">
+          <Input inputMode="numeric" value={agents} onChange={(e) => setAgents(e.target.value)} placeholder="the company's setting" className="sm:w-1/2" />
         </Field>
         <p className="text-xs text-muted-foreground">A person in several groups gets the highest limit of the groups that set one (0, no limit, is the highest); their own (Admin → People) replaces it. The chat is not limited by the rate limits, only by requests at once.</p>
         <div className="flex items-start gap-3">
