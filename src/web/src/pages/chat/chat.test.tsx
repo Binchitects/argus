@@ -423,7 +423,10 @@ describe('chat', () => {
     renderApp('/chat')
     await userEvent.click(await screen.findByRole('button', { name: 'Tools: 2 of 2 on' }))
     const argus = await screen.findByRole('switch', { name: /Argus/ })
-    expect(screen.getByText('Asks you before each call')).toBeInTheDocument()
+    // How a tool asks is a mark on its row; its details are behind its info button.
+    expect(screen.getByLabelText('Asks you before each call')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'About Calculator' }))
+    expect(screen.getByText('Asks you before each call.')).toBeInTheDocument()
     await userEvent.click(argus)
     expect(screen.getByRole('button', { name: 'Tools: 1 of 2 on' })).toBeInTheDocument()
     await userEvent.keyboard('{Escape}')

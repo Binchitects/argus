@@ -71,7 +71,7 @@ import {
   type AgainBody,
 } from './api'
 import { chatBridge, pieceLabel, type Piece } from './bridge'
-import { ConfigureToolsButton } from './tools-dialog'
+import { ToolsDialog } from './tools-dialog'
 import { codeContext, contextEvent } from './context'
 import { CodeContextSheet } from './context-view'
 import { useEditor } from './editor-state'
@@ -433,6 +433,7 @@ export function Thread({
   onEvent?: (e: CodeEvent) => void
   onTurnEnd?: () => void
 }) {
+  const [customizing, setCustomizing] = useState(false)
   const queryClient = useQueryClient()
   const session = useQuery(sessionQuery)
   // Lines of the folder's files to go with the next message (from the editor: Add to chat), and a nudge to the box.
@@ -1022,9 +1023,14 @@ export function Thread({
         <ProvidersButton />
         {model?.thinking && <ThinkingPicker config={config} value={state.thinking} onChange={(level) => void settings({ thinking: level })} />}
         {model?.tools !== false && state.toolGroups && (
-          <ToolsPicker tools={state.toolGroups} value={state.toolGroups.filter((g) => g.on).map((g) => g.id)} onChange={(tools) => void settings({ tools })} />
+          <ToolsPicker
+            tools={state.toolGroups}
+            value={state.toolGroups.filter((g) => g.on).map((g) => g.id)}
+            onChange={(tools) => void settings({ tools })}
+            onCustomize={() => setCustomizing(true)}
+          />
         )}
-        {model?.tools !== false && <ConfigureToolsButton />}
+        <ToolsDialog open={customizing} onOpenChange={setCustomizing} />
         <span className="ml-auto" />
         {state.arenaChats && <ProjectPicker project={state.workProject} />}
         <SyncStatus sync={state.sync} />

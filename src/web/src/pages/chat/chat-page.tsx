@@ -435,7 +435,12 @@ function Thread({ id, config, onAdopt, onOpenList, startIn }: { id?: string; con
 
   // While a screen is shared with a model that cannot see: the model to offer instead (loaded first, then one that loads on request).
   const seer = model?.vision ? null : (config.models.find((m) => m.vision && m.loaded) ?? config.models.find((m) => m.vision && m.onRequest))?.name ?? null
-  const toolsPicker = model?.tools === false ? null : <ToolsPicker tools={config.tools} value={toolsOnHere} onChange={(tools) => void change({ tools })} />
+  // Admins (who may read Admin → Tools) customize them there: who may use each, its description, its settings.
+  const mayCustomize = !!me?.permissions?.includes('tools.read') || !!me?.isAdmin
+  const toolsPicker =
+    model?.tools === false ? null : (
+      <ToolsPicker tools={config.tools} value={toolsOnHere} onChange={(tools) => void change({ tools })} onCustomize={mayCustomize ? () => void navigate('/admin/tools') : undefined} />
+    )
 
   /**
    * Streams one answer; false when the question never reached the server (it goes
