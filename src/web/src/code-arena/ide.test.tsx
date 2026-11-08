@@ -2217,9 +2217,11 @@ describe('Code Arena, the IDE', () => {
     await userEvent.click(within(answer).getByRole('button', { name: 'Open src/lib/cart.ts:4 in the editor' }))
     await waitFor(() => expect(within(tabs()).getByRole('tab', { name: 'cart.ts' })).toHaveAttribute('aria-selected', 'true'))
     await waitFor(() => expect(editor().selection?.startLineNumber).toBe(4))
-    // A path in a tool's output opens too (grep's rows).
+    // A path in a tool's output opens too (grep's rows): the turn's tools are one folded line, then grep's card.
+    const run = within(answer).getAllByRole('button', { expanded: false }).find((b) => /^Used \d+ tools/.test(b.textContent ?? ''))
+    if (run) await userEvent.click(run)
     const cards = within(answer).getAllByRole('button', { expanded: false })
-    await userEvent.click(cards.find((b) => /grep|search/i.test(b.textContent ?? ''))!)
+    await userEvent.click(cards.find((b) => /grep|search/i.test(b.textContent ?? '') && !/^Used/.test(b.textContent ?? ''))!)
     await userEvent.click(await within(answer).findByRole('link', { name: 'src/app.ts:2' }))
     await waitFor(() => expect(editor().selection).toEqual({ startLineNumber: 2, startColumn: 1, endLineNumber: 2, endColumn: 1 }))
 

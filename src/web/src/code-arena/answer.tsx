@@ -1,4 +1,4 @@
-import { Check, ChevronRight, CircleSlash, CircleX, Copy, FileDiff as FileDiffIcon, FileSymlink, History, Network, ShieldQuestion, Square, TextQuote } from 'lucide-react'
+import { Check, ChevronRight, CircleSlash, CircleX, Copy, FileDiff as FileDiffIcon, FileSymlink, History, Network, ShieldQuestion, Square, TextQuote, Wrench } from 'lucide-react'
 import { memo, useEffect, useMemo, useState } from 'react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -98,6 +98,59 @@ export function SubAgentLine({ callId, args, result, live, work, onOpen }: {
         </span>
         {onOpen && <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
       </button>
+    </div>
+  )
+}
+
+type ToolCall = NonNullable<Message['toolCalls']>[number]
+
+/** A message's tool calls in runs: the sub-agents started one after another, and the other calls between them. */
+export function runsOf(calls: ToolCall[]): { kind: 'task' | 'tools'; calls: ToolCall[] }[] {
+  const runs: { kind: 'task' | 'tools'; calls: ToolCall[] }[] = []
+  for (const c of calls) {
+    const kind = c.function.name === 'task' ? 'task' : 'tools'
+    const last = runs[runs.length - 1]
+    if (last && last.kind === kind) last.calls.push(c)
+    else runs.push({ kind, calls: [c] })
+  }
+  return runs
+}
+
+/** "Used 5 tools · read_file ×3, grep, run_shell": the tools a run called, the most called first. */
+export function toolsSummary(names: string[]): string {
+  const counts = new Map<string, number>()
+  for (const n of names) counts.set(n, (counts.get(n) ?? 0) + 1)
+  const parts = [...counts].sort((a, b) => b[1] - a[1]).map(([n, c]) => (c > 1 ? `${n} ×${c}` : n))
+  return `Used ${names.length} tools · ${parts.join(', ')}`
+}
+
+/** "3 sub-agents · 2 working", or "3 sub-agents · done" once each has reported. */
+export function subAgentsSummary(done: boolean[], n: number): string {
+  const left = done.filter((d) => !d).length
+  return `${n} sub-agent${n === 1 ? '' : 's'} · ${left === 0 ? 'done' : `${left} working`}`
+}
+
+/**
+ * Several tool calls (or sub-agents) as one line that folds, as Claude's apps show them: open while they run, folded to
+ * their summary once done (the person's choice kept); forced open while one waits for the person.
+ */
+function ToolRun({ icon, summary, working, forceOpen, children }: { icon: 'tools' | 'agents'; summary: string; working: boolean; forceOpen: boolean; children: React.ReactNode }) {
+  const [chosen, setChosen] = useState<boolean | null>(null)
+  const open = forceOpen || (chosen ?? working)
+  const Icon = icon === 'agents' ? Network : Wrench
+  return (
+    <div className="my-1.5 min-w-0">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setChosen(!open)}
+        className="flex w-full min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs text-muted-foreground outline-none hover:bg-accent/50 hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring"
+      >
+        <ChevronRight className={cn('size-3.5 shrink-0 transition-transform duration-150', open && 'rotate-90')} aria-hidden="true" />
+        {working ? <Spinner className="size-3.5 shrink-0 text-primary-ink" /> : <Icon className="size-3.5 shrink-0" aria-hidden="true" />}
+        <span className={cn('min-w-0 truncate', working && 'text-shimmer')}>{summary}</span>
+      </button>
+      {open && <div className="ml-3 border-l pl-3">{children}</div>}
     </div>
   )
 }
@@ -495,22 +548,61 @@ export const CodeAnswer = memo(function CodeAnswer({ answer, live, thinkingSince
               </div>
             )}
             {live && isLast && a.content && <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse rounded-sm bg-primary align-middle" aria-hidden="true" />}
-            {a.toolCalls?.map((t) => {
-              const result = results.get(t.id)
-              const asking = live && waiting.includes(t.id)
-              const diff = result ? diffs[result.id] : undefined
+            {runsOf(a.toolCalls ?? []).map((run) => {
+              const working = live && isLast
+              if (run.kind === 'task') {
+                // Sub-agents started together: one card, open while they work (their steps are in the Tasks panel).
+                const rows = run.calls.map((t) => ({ t, result: results.get(t.id), work: workOf(results.get(t.id), agents?.[t.id]?.[0]) }))
+                if (rows.length === 1) {
+                  const { t, result, work } = rows[0]!
+                  return <SubAgentLine key={t.id} callId={t.id} args={t.function.arguments} result={result} live={live} work={work} onOpen={onOpenTask} />
+                }
+                return (
+                  <ToolRun
+                    key={run.calls[0]!.id}
+                    icon="agents"
+                    working={working && rows.some((r) => !r.result)}
+                    summary={subAgentsSummary(rows.map((r) => !!r.result), rows.length)}
+                    forceOpen={false}
+                  >
+                    {rows.map(({ t, result, work }) => (
+                      <SubAgentLine key={t.id} callId={t.id} args={t.function.arguments} result={result} live={live} work={work} onOpen={onOpenTask} />
+                    ))}
+                  </ToolRun>
+                )
+              }
+              const asking = run.calls.some((t) => live && waiting.includes(t.id))
+              const body = run.calls.map((t) => {
+                const result = results.get(t.id)
+                const waitingHere = live && waiting.includes(t.id)
+                return <ToolCard key={t.id} call={t} result={result} live={live} waiting={waitingHere} progress={calls?.[t.id]} agents={agents?.[t.id]} />
+              })
+              // What the person acts on or reads stays out of the fold: the file a call opened or wrote, what it made
+              // (pictures, sounds), the changed lines of each edit, and an approval.
+              const after = run.calls.map((t) => {
+                const result = results.get(t.id)
+                const diff = result ? diffs[result.id] : undefined
+                const waitingHere = live && waiting.includes(t.id)
+                const done = result && result.status === 'complete'
+                return done || diff || waitingHere ? (
+                  <div key={`after-${t.id}`}>
+                    {done && !result.error && <OpenFile name={t.function.name} args={t.function.arguments} diff={diff} said={result.content} />}
+                    {done && <MadeMedia said={result.content} />}
+                    {diff && <DiffView diff={diff} live={live} />}
+                    {waitingHere && <Approval name={t.function.name} always={always[t.id]} risk={risks?.[t.id]} onDecide={(answer) => onDecide(t.id, answer)} />}
+                  </div>
+                ) : null
+              })
               return (
-                <div key={t.id}>
-                  {t.function.name === 'task' ? (
-                    // A sub-agent: one line here, its steps in the Tasks panel.
-                    <SubAgentLine callId={t.id} args={t.function.arguments} result={result} live={live} work={workOf(result, agents?.[t.id]?.[0])} onOpen={onOpenTask} />
+                <div key={run.calls[0]!.id}>
+                  {run.calls.length === 1 ? (
+                    body
                   ) : (
-                    <ToolCard call={t} result={result} live={live} waiting={asking} progress={calls?.[t.id]} agents={agents?.[t.id]} />
+                    <ToolRun icon="tools" working={working && run.calls.some((t) => !results.get(t.id))} summary={toolsSummary(run.calls.map((t) => toolTitle(t.function.name)))} forceOpen={asking}>
+                      {body}
+                    </ToolRun>
                   )}
-                  {result && result.status === 'complete' && !result.error && <OpenFile name={t.function.name} args={t.function.arguments} diff={diff} said={result.content} />}
-                  {result && result.status === 'complete' && <MadeMedia said={result.content} />}
-                  {diff && <DiffView diff={diff} live={live} />}
-                  {asking && <Approval name={t.function.name} always={always[t.id]} risk={risks?.[t.id]} onDecide={(answer) => onDecide(t.id, answer)} />}
+                  {after}
                 </div>
               )
             })}
