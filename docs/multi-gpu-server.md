@@ -278,6 +278,14 @@ vLLM serves **one model per process** and has no router mode. Keep the pattern t
 - **Valkey/Redis:** a single instance with AOF on compose; Sentinel or replicas on Kubernetes. It is a cache and router state, so losing it is survivable.
 
 ### 5.4 Queueing, backpressure, fair scheduling
+- **People at once decides the GPUs' load.** A vLLM model answers at most its *people at once* a copy
+  (`--max-num-seqs`), and the app and the gateway let no more than that through to it. Since 7.10 the
+  advisor counts them at a conversation's usual length (16K tokens, `VllmAdvisor.TypicalTokens`), not at the
+  whole window: vLLM pages its cache, so a conversation holds only the tokens it has, and one that outgrows its
+  share is preempted and resumed. Counted at the whole 262K window, a 27B model on an H200 was given two or three
+  people at once and the GPU stood mostly idle while the rest queued. Admin → Models warns when a model is set to
+  a quarter or less of what its cache holds ("the others wait in its line while the GPUs have room to spare");
+  the recommended settings use the full count, up to 256 a copy.
 - The chat already has a fair queue (`AnswerGate`: priority, then fewest-running, then served longest ago).
 - **Extend the same gate to API keys** through the existing pre-call guardrail (`/internal/guardrail`). The gate:
   - holds a request until a place is free, up to a limit;

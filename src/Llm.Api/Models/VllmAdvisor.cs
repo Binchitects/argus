@@ -333,6 +333,12 @@ public static class VllmAdvisor
     /// <summary>The token cache one person's whole context takes, and the state their answer keeps.</summary>
     public static long PersonCache(VllmProfile p, int context, string kvType) => ((long)Math.Min(context, p.TrainedContext) * PerToken(p, kvType)) + p.StatePerSequence;
 
+    /// <summary>
+    /// The tokens a conversation usually holds (its prompt, files and answers so far), which people at once are counted at:
+    /// most are far below the model's window, and the few that are not wait their turn (vLLM preempts and resumes them).
+    /// </summary>
+    public const int TypicalTokens = 16_384;
+
     /// <summary>How many people at once a copy's cache of <paramref name="room"/> bytes holds, each with the whole context.</summary>
     public static int PeopleThatFit(VllmProfile p, long room, int context, string kvType) => (int)Math.Clamp(room / Math.Max(1, PersonCache(p, context, kvType)), 0, 1024);
 
@@ -571,6 +577,13 @@ public static class VllmAdvisor
         }
         else
         {
+            // Far fewer people at once than the cache holds: the GPUs wait while people queue for them.
+            var usual = PeopleThatFit(p, room, Math.Min(context, TypicalTokens), m.KvType);
+            if (m.Parallel * 4 <= usual && m.Parallel < 64)
+            {
+                problems.Add(new("parallel", string.Create(inv,
+                    $"Only {m.Parallel} {(m.Parallel == 1 ? "person" : "people")} at once a copy, and its cache holds about {Math.Min(usual, 256)} at a conversation's usual length ({Math.Min(context, TypicalTokens):N0} tokens): the others wait in its line while the GPUs have room to spare. Choose about {Math.Min(usual, 256)} people at once for the most answers a second (the recommended settings do)."), false));
+            }
             if (room < MinCache(copies.Min(c => c.Sum(d => (long)(d.Total * utilization)))))
             {
                 problems.Add(new("memory", $"Only {G(room)} is left for its token cache: few answers fit at once. Give it more GPUs or a larger share.", false));
@@ -580,16 +593,16 @@ public static class VllmAdvisor
             {
                 problems.Add(new("context", string.Create(inv, $"One answer at {context:N0} tokens needs {G(need)} of cache, and a copy has {G(room)}: at most {Math.Max(0, (room - state) / perToken):N0} tokens fit.") + SharesFit(shares), true));
             }
-            else if (need * m.Parallel > room)
+            else if ((((long)Math.Min(context, TypicalTokens) * perToken) + state) * m.Parallel > room)
             {
-                // Each person at once may hold the whole context: the cache is sized for all of them, or the rest wait.
-                var held = PeopleThatFit(p, room, context, m.KvType);
+                // At a conversation's usual length the cache does not hold them all: the rest wait or are preempted.
+                var held = PeopleThatFit(p, room, Math.Min(context, TypicalTokens), m.KvType);
                 var also = m.KvType.StartsWith("fp8", StringComparison.Ordinal) ? "" : string.Create(inv, $", {PeopleThatFit(p, room, context, "fp8")} at fp8");
                 var fitting = gpus.Count % replicas == 0
                     ? Shares(p, [.. copies.Select(c => (IReadOnlyList<GpuDevice>)c)], context, m.KvType, others, m.Parallel)
                     : null;
                 problems.Add(new("parallel", string.Create(inv,
-                    $"{m.Parallel} people at once at {context:N0} tokens each need {G(need * m.Parallel)} of token cache, and a copy has {G(room)}. It holds {held} at the full window at {m.KvType}{also}: {label} queues or preempts the rest. ")
+                    $"{m.Parallel} people at once at {Math.Min(context, TypicalTokens):N0} tokens each (a conversation's usual length) need {G((((long)Math.Min(context, TypicalTokens) * perToken) + state) * m.Parallel)} of token cache, and a copy has {G(room)}. It holds {held} at that length at {m.KvType}{also}: {label} queues or preempts the rest. ")
                     + (fitting is var (least, _) ? string.Create(inv, $"A share of {least:0.00} of each GPU holds all {m.Parallel}.") : string.Create(inv, $"Choose at most {held} people at once a copy, a shorter context per person, more GPUs or copies.")), false));
             }
         }
@@ -625,8 +638,10 @@ public static class VllmAdvisor
         var perToken = PerToken(p, kv);
         var state = p.StatePerSequence;
         var context = (int)Math.Min(p.TrainedContext, Math.Max(0, (room - state) / perToken));
-        // As many people at once as the cache holds with the whole context each.
-        var parallel = Math.Clamp(PeopleThatFit(p, room, context, kv), 1, 256);
+        // As many people at once as the cache holds at a conversation's usual length: vLLM pages its cache, so each holds the
+        // tokens it has, not its whole window (one that grows past its share is preempted and goes on later). Counted at the
+        // whole window, an H200 with a 27B model served two or three people while its compute stood idle.
+        var parallel = Math.Clamp(PeopleThatFit(p, room, Math.Min(context, TypicalTokens), kv), 1, 256);
         var maxOutput = ModelCatalog.DefaultMaxOutput(context);
         return new ModelRecommendation(context, maxOutput, parallel, kv, null, p.MtpLayers > 0, null, 3, null, true, true)
         {
