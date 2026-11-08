@@ -50,6 +50,12 @@ chat tools too, with the same key: [Arena MCP](mcp.md) at `https://DOMAIN/mcp`.
   and the rest of that answer, after tool calls too, thinks no more. For every
   answer of a chat to be quick, choose a lighter thinking level or *No
   thinking*.
+- **A model stuck in a loop is stopped.** A model that repeats one word,
+  phrase or line over and over (a few hundred characters of it) is stopped
+  there instead of filling the context: stuck in its thinking, the thinking is
+  cut as Answer now cuts it and it answers without; stuck in its answer, the
+  answer ends there. What came before the loop is kept, and the chat says what
+  it repeated. Sub-agents and Code Arena's sessions are stopped the same way.
 - **Instructions and parameters.** Per chat: your own instructions (sent after
   the app's), temperature, top-p, and the **Longest answer**. Empty means the
   model's default. The longest answer is at most the model's own and half its

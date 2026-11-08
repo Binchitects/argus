@@ -682,6 +682,11 @@ public sealed partial class ChatService(
                 for (var pass = 0; ; pass++)
                 {
                 var cut = false;
+                // A model stuck repeating itself: in its thinking, the thinking is cut and the round asked again without it
+                // (as Answer now does); in its answer, the answer stops there. Either way the person is told.
+                var loopedThinking = new Llm.Core.Chat.RepetitionGuard();
+                var loopedAnswer = new Llm.Core.Chat.RepetitionGuard();
+                var looped = false;
                 await foreach (var e in gateway.StreamAsync(request, email, conversation.Id, ct))
                 {
                     timing.Saw(e);
@@ -695,6 +700,19 @@ public sealed partial class ChatService(
                             thoughtFrom ??= clock.Elapsed;
                             reasoning.Append(r.Text);
                             await emit(new { type = "reasoning", text = r.Text, at = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() });
+                            if (loopedThinking.Add(r.Text))
+                            {
+                                reasoning.Length = (int)Math.Min(reasoning.Length, loopedThinking.LoopStart + loopedThinking.Piece!.Length);
+                                await emit(new { type = "notice", kind = "loop", text = loopedThinking.Notice("thinking") + (pass == 0 && content.Length == 0 && calls.Count == 0 ? " It answers now, without thinking." : "") });
+                                if (pass == 0 && content.Length == 0 && calls.Count == 0)
+                                {
+                                    cut = true;
+                                }
+                                else
+                                {
+                                    looped = true;
+                                }
+                            }
                             break;
                         case ContentDelta c:
                             if (thoughtFrom is not null && msg.ThinkingMs is null)
@@ -704,6 +722,13 @@ public sealed partial class ChatService(
                             }
                             content.Append(c.Text);
                             await emit(new { type = "content", text = c.Text });
+                            if (loopedAnswer.Add(c.Text))
+                            {
+                                content.Length = (int)Math.Min(content.Length, loopedAnswer.LoopStart + loopedAnswer.Piece!.Length);
+                                await emit(new { type = "notice", kind = "loop", text = loopedAnswer.Notice("answer") });
+                                looped = true;
+                                finish = "stop";
+                            }
                             if (watchAnswers && content.Length - checkedAt >= 200 && await GuardAsync(final: false))
                             {
                                 withheld = true;
@@ -724,12 +749,12 @@ public sealed partial class ChatService(
                             finish = f.Reason;
                             break;
                     }
-                    if (cut || withheld)
+                    if (cut || withheld || looped)
                     {
                         break;
                     }
                 }
-                if (!cut || withheld)
+                if (!cut || withheld || looped)
                 {
                     break;
                 }
@@ -1575,6 +1600,10 @@ public sealed partial class ChatService(
             var pending = new SortedDictionary<int, (string? Id, string? Name, StringBuilder Args)>();
             var timing = new ModelTiming();
             UsageReport? roundUsage = null;
+            // A sub-agent stuck repeating itself is stopped there, its loop cut off (it reports what came before).
+            var loopedThinking = new Llm.Core.Chat.RepetitionGuard();
+            var loopedAnswer = new Llm.Core.Chat.RepetitionGuard();
+            string? looped = null;
             try
             {
                 await foreach (var e in gateway.StreamAsync(request, kit.Email, holder, ct))
@@ -1585,10 +1614,20 @@ public sealed partial class ChatService(
                         case ReasoningDelta r:
                             reasoning.Append(r.Text);
                             await step(new AgentStep("reasoning", r.Text));
+                            if (loopedThinking.Add(r.Text))
+                            {
+                                reasoning.Length = (int)Math.Min(reasoning.Length, loopedThinking.LoopStart + loopedThinking.Piece!.Length);
+                                looped = loopedThinking.Notice("thinking");
+                            }
                             break;
                         case ContentDelta c:
                             text.Append(c.Text);
                             await step(new AgentStep("content", c.Text));
+                            if (loopedAnswer.Add(c.Text))
+                            {
+                                text.Length = (int)Math.Min(text.Length, loopedAnswer.LoopStart + loopedAnswer.Piece!.Length);
+                                looped = loopedAnswer.Notice("answer");
+                            }
                             break;
                         case ToolCallDelta t:
                             var slot = pending.TryGetValue(t.Index, out var existing) ? existing : (null, null, new StringBuilder());
@@ -1600,6 +1639,10 @@ public sealed partial class ChatService(
                             budget.Learn(sent, u.Prompt);
                             break;
                     }
+                    if (looped is not null)
+                    {
+                        break;
+                    }
                 }
             }
             catch (ChatGatewayException ex)
@@ -1607,6 +1650,11 @@ public sealed partial class ChatService(
                 return new AgentRun(text.ToString().Trim(), reasoning.ToString(), steps, ex.Message, made, used, timed) { Cost = Cost() };
             }
             timed.Add(timing, roundUsage?.Prompt, roundUsage?.Cached, roundUsage?.Completion);
+            if (looped is not null)
+            {
+                await step(new AgentStep("notice", looped));
+                return new AgentRun(text.ToString().Trim(), reasoning.ToString(), steps, null, made, used, timed) { Cost = Cost() };
+            }
             if (pending.Count == 0)
             {
                 return new AgentRun(text.ToString().Trim(), reasoning.ToString(), steps, null, made, used, timed) { Cost = Cost() };

@@ -11,7 +11,7 @@ COPY global.json Directory.Build.props VERSION ./
 COPY src/CodeArena/ src/CodeArena/
 COPY skills/ skills/
 # The files Code Arena shares with the app (linked in its project): how a context refusal reads, and how earlier messages are found by their words.
-COPY src/Llm.Core/Chat/ContextOverflow.cs src/Llm.Core/Chat/HistoryWords.cs src/Llm.Core/Chat/ContextWindow.cs src/Llm.Core/Chat/ResultCondenser.cs src/Llm.Core/Chat/ToolCallRepair.cs src/Llm.Core/Chat/
+COPY src/Llm.Core/Chat/ContextOverflow.cs src/Llm.Core/Chat/HistoryWords.cs src/Llm.Core/Chat/ContextWindow.cs src/Llm.Core/Chat/ResultCondenser.cs src/Llm.Core/Chat/ToolCallRepair.cs src/Llm.Core/Chat/RepetitionGuard.cs src/Llm.Core/Chat/
 COPY src/Argus/Util/CodeText.cs src/Argus/Util/
 # The arena module a run_code program imports (code mode), the sandbox's own, embedded.
 COPY deploy/services/sandbox/arena/__init__.py deploy/services/sandbox/arena/

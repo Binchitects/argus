@@ -15,6 +15,8 @@ namespace Llm.Tests;
 ///   [slow]      streams 400 small pieces, 25 ms apart (for stop)
 ///   [steady]    streams 60 small pieces, 25 ms apart (for leaving the page mid-answer)
 ///   [ponder]    thinks in 400 small pieces, 25 ms apart, then answers; with thinking off, answers "Quick answer." at once
+///   [loop]      its thinking repeats "wait, " 3,000 times; with thinking off, answers "Unstuck answer."
+///   [loop-answer] its answer repeats "again and " 3,000 times
 /// Asked to compact a chat (the summarizer's system prompt), it answers
 /// "Summary of N characters." (N: the length of what it was given). Asked to sort a question
 /// for Auto, it answers the kind a [kind:X] marker names (lookup without one; [kind:?] is not
@@ -541,6 +543,19 @@ public sealed class FakeModel : HttpMessageHandler
                 ? [Delta(new JsonObject { ["content"] = "Quick answer." }), Finish("stop")]
                 : [.. Enumerable.Range(0, 400).Select(i => Delta(new JsonObject { ["reasoning_content"] = $"t{i} " })), Delta(new JsonObject { ["content"] = "Slow answer." }), Finish("stop")];
             delay = off ? TimeSpan.Zero : TimeSpan.FromMilliseconds(25);
+        }
+        else if (lastUser.Contains("[loop]", StringComparison.Ordinal))
+        {
+            // Stuck: its thinking repeats one word until the window would fill; with thinking off it answers.
+            var off = body["chat_template_kwargs"]?["enable_thinking"]?.GetValue<bool>() == false;
+            chunks = off
+                ? [Delta(new JsonObject { ["content"] = "Unstuck answer." }), Finish("stop")]
+                : [Delta(new JsonObject { ["reasoning_content"] = "Let me check. " }), .. Enumerable.Range(0, 3000).Select(_ => Delta(new JsonObject { ["reasoning_content"] = "wait, " })),
+                    Delta(new JsonObject { ["content"] = "Never reached." }), Finish("stop")];
+        }
+        else if (lastUser.Contains("[loop-answer]", StringComparison.Ordinal))
+        {
+            chunks = [Delta(new JsonObject { ["content"] = "The fix: " }), .. Enumerable.Range(0, 3000).Select(_ => Delta(new JsonObject { ["content"] = "again and " })), Finish("stop")];
         }
         else if (lastUser.Contains("[steady]", StringComparison.Ordinal))
         {

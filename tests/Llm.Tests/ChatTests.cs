@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -419,6 +420,35 @@ public sealed class ChatTests(AppFixture app)
         Assert.Equal("What is in the notes?".Length + 2, kept.GetProperty("you").GetInt32());
         Assert.True(kept.GetProperty("tools").GetInt32() > 0, kept.GetRawText());
         Assert.Equal(0, kept.GetProperty("summary").GetInt32());
+    }
+
+    [Fact]
+    public async Task A_model_whose_thinking_loops_is_cut_off_told_and_answers_without_thinking()
+    {
+        var (b, _) = await PersonAsync();
+        var id = await NewChatAsync(b, new { useArgus = false, thinking = "xhigh" });
+        var events = await SendAsync(b, id, "Why does it fail? [loop]");
+        Assert.Contains(events, e => e.GetProperty("type").GetString() == "notice" && e.GetProperty("kind").GetString() == "loop"
+            && e.GetProperty("text").GetString()!.Contains("repeating itself in its thinking", StringComparison.Ordinal));
+        var last = await LastOnceAsync(b, id, "complete");
+        Assert.Equal("Unstuck answer.", last.GetProperty("content").GetString());
+        // What it thought is kept up to its loop, not 3,000 repeats of it.
+        var reasoning = last.GetProperty("reasoning").GetString()!;
+        Assert.StartsWith("Let me check. ", reasoning, StringComparison.Ordinal);
+        Assert.True(reasoning.Length < 200, reasoning.Length.ToString(CultureInfo.InvariantCulture));
+    }
+
+    [Fact]
+    public async Task An_answer_that_loops_is_stopped_there_and_kept_up_to_its_loop()
+    {
+        var (b, _) = await PersonAsync();
+        var id = await NewChatAsync(b, new { useArgus = false });
+        var events = await SendAsync(b, id, "Fix it [loop-answer]");
+        Assert.Contains(events, e => e.GetProperty("type").GetString() == "notice" && e.GetProperty("kind").GetString() == "loop");
+        var last = await LastOnceAsync(b, id, "complete");
+        var content = last.GetProperty("content").GetString()!;
+        Assert.StartsWith("The fix: again and", content, StringComparison.Ordinal);
+        Assert.True(content.Length < 100, content);
     }
 
     [Fact]

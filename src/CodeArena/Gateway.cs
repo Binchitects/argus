@@ -458,6 +458,10 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
         var ended = false;
         // Anthropic's events, read into what chat completions would have said.
         var claude = anthropic ? new Providers.AnthropicStream() : null;
+        // A model stuck repeating itself (in its thinking or its answer) is stopped there, not left to fill the window.
+        var loopedThinking = new Llm.Core.Chat.RepetitionGuard();
+        var loopedText = new Llm.Core.Chat.RepetitionGuard();
+        string? looped = null;
         await using var stream = await res.Content.ReadAsStreamAsync(ct);
         try
         {
@@ -469,6 +473,14 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
                 if (Event(ev.Data))
                 {
                     ended = true;
+                    break;
+                }
+                if (looped is not null)
+                {
+                    // Its loop cut off: what came before it, and a word for the person; the request ends here.
+                    Retrying?.Invoke(looped);
+                    ended = true;
+                    finish ??= "stop";
                     break;
                 }
             }
@@ -489,6 +501,17 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
             return new Completion(Assistant(text.ToString(), null, thought.ToString()), usage, Interrupted);
         }
 
+        // A loop found: the text kept up to its first repeat, and what the person is told.
+        void Loop(Llm.Core.Chat.RepetitionGuard guard, StringBuilder kept, string piece, string where)
+        {
+            if (looped is null && guard.Add(piece))
+            {
+                looped = guard.Notice(where);
+                var keep = (int)Math.Min(kept.Length, guard.LoopStart + guard.Piece!.Length);
+                kept.Length = Math.Max(0, keep);
+            }
+        }
+
         // One event of the stream; true at its end.
         bool Event(string data)
         {
@@ -500,12 +523,14 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
                     said = true;
                     thought.Append(th);
                     sink.Reasoning(th);
+                    Loop(loopedThinking, thought, th, "thinking");
                 }
                 if (t is { Length: > 0 })
                 {
                     said = true;
                     text.Append(t);
                     sink.Text(t);
+                    Loop(loopedText, text, t, "answer");
                 }
                 finish = claude.Finish ?? finish;
                 usage = claude.Usage;
@@ -545,12 +570,14 @@ internal sealed partial class GatewayClient(HttpClient http, string baseUrl, str
                 said = true;
                 thought.Append(reasoning);
                 sink.Reasoning(reasoning);
+                Loop(loopedThinking, thought, reasoning, "thinking");
             }
             if (delta.Str("content") is { Length: > 0 } content)
             {
                 said = true;
                 text.Append(content);
                 sink.Text(content);
+                Loop(loopedText, text, content, "answer");
             }
             if (delta?["tool_calls"] is JsonArray calls)
             {
