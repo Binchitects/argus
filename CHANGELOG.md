@@ -15,6 +15,29 @@ Sections used:
   makes weaker (gone, a clause or a check dropped, fewer tests), by its id,
   and why ([compliance](docs/compliance/README.md#when-a-change-weakens-a-control))
 
+## v7.9.1 (2026-11-08)
+
+A hotfix for offline installs: a bundle can carry every model but the chat
+models, the media studio's models with them.
+
+### :sparkles: New features & Enhancements
+
+- **`--no-chat-models`.** `./arenactl bundle --models --no-chat-models` packs
+  every model the stack reads but the chat models the app registered: the
+  picture, video, embedding, decision and studio models go in, the chat
+  models stay out (each site adds its own under Admin → Models), and no chat
+  model is named for the other host's `.env`.
+
+### :bug: Bugs fixed
+
+- **The media studio's models never went into a bundle.** Its music, voice,
+  cutout and upscaling models (`studio/`, `image/upscale/`) were left out
+  even with `--models`, so a host with no network could not use the studio.
+  They are packed whole now.
+- **Code Arena left out the exit code an interpreter ended with** (its pipe
+  closed a moment before the system said it had exited); and two tests are no
+  longer tied to a fast machine (CI).
+
 ## v7.9.0 (2026-11-08)
 
 Argus answers who calls what, Code Arena works with other providers' models,

@@ -6,6 +6,8 @@
 #   ./scripts/airgap.sh load [--into DIR] BUNDLE.tar    on the host with no network
 #
 #   --models          pack: copy the models too (without it the bundle lists them)
+#   --no-chat-models  pack: leave out the chat models the app registered (each site brings its own); the
+#                     picture, video, embedding, decision and studio models are packed as ever
 #   --models-dir DIR  the model library (default: MODELS_DIR in .env, else ./models)
 #   --into DIR        load: where deploy/ goes (default ./arena, so ./arena/deploy)
 #   --podman          Podman's images and volumes in place of Docker's
@@ -73,6 +75,12 @@ decision laya/multilingual/tokenizer/tokenizer.json
 decision laya/multilingual/tokenizer/tokenizer_config.json
 "
 
+# The media studio's (services/studio) and the upscaler's folders, read whole: every file under each that is there.
+MEDIA_DIRS="
+studio studio
+picture image/upscale
+"
+
 ACTION="${1:-}"
 [[ $# -gt 0 ]] && shift
 case "$ACTION" in
@@ -81,10 +89,11 @@ case "$ACTION" in
   "") usage_error "say pack or load" ;;
   *) usage_error "unknown action: $ACTION" ;;
 esac
-ENGINE=docker; WITH_MODELS=0; DRY=0; INTO=""; MODELS_ARG=""; TARGET=""; STAGE_ARG=""; IN_ENGINE=0
+ENGINE=docker; WITH_MODELS=0; DRY=0; INTO=""; MODELS_ARG=""; TARGET=""; STAGE_ARG=""; IN_ENGINE=0; CHAT_MODELS=1
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --models) WITH_MODELS=1 ;;
+    --no-chat-models) CHAT_MODELS=0 ;;
     --podman) ENGINE=podman ;;
     --dry-run) DRY=1 ;;
     --into) [[ $# -gt 1 ]] || usage_error "--into needs a directory"; INTO="$2"; shift ;;
@@ -218,10 +227,14 @@ if [[ $ACTION == pack ]]; then
       else
         printf '%s\t%s\n' "$kind" "$path"
       fi
-    done < <(grep -E '^[[:space:]]*(model|mmproj|model-draft)[[:space:]]*=' <<<"$ini")
+    done < <([[ $CHAT_MODELS -eq 1 ]] && grep -E '^[[:space:]]*(model|mmproj|model-draft)[[:space:]]*=' <<<"$ini")
     while read -r kind path; do
       [[ -n "$path" && -f "$MODELS_DIR/$path" ]] && printf '%s\t%s\n' "$kind" "$path"
     done <<<"$MEDIA_FILES"
+    while read -r kind dir; do
+      [[ -n "$dir" && -d "$MODELS_DIR/$dir" ]] || continue
+      (cd "$MODELS_DIR" && find "$dir" -type f ! -name '*.part' ! -name '.*' | LC_ALL=C sort) | while IFS= read -r path; do printf '%s\t%s\n' "$kind" "$path"; done
+    done <<<"$MEDIA_DIRS"
   }
 
   # MODEL for the other host's .env: the first model kept loaded, else the first listed.
@@ -248,7 +261,7 @@ if [[ $ACTION == pack ]]; then
       if "$ENGINE" image inspect "$ref" >/dev/null 2>&1; then say "    $ref"; else say "    $ref   NOT ON THIS HOST: build or pull it first"; fi
     done
     say "  deploy/: ${#FILES[@]} files (left out: .env, backups, models, certs/, signing/ and config/traefik/certificate.yml)"
-    say "  models: the files in $MODELS_DIR the app registered (the ${PROJECT}_engine volume's models.ini) and the picture, video, embedding and decision files there,"
+    say "  models: the files in $MODELS_DIR the app registered (the ${PROJECT}_engine volume's models.ini) and the picture, video, embedding, decision and studio files there$([[ $CHAT_MODELS -eq 0 ]] && echo " (no chat models: --no-chat-models)"),"
     if [[ $WITH_MODELS -eq 1 ]]; then say "    copied into the bundle (--models)"; else say "    listed in models/MODELS (--models copies them)"; fi
     if "$ENGINE" volume inspect "${PROJECT}_audio" >/dev/null 2>&1; then say "  audio: the ${PROJECT}_audio volume (the speech server's models)"; else say "  audio: no ${PROJECT}_audio volume: the bundle will have no speech models"; fi
     say "  then MANIFEST, SHA256SUMS and $(basename "$OUT").sha256"
@@ -370,6 +383,8 @@ PY
   KEPT=""; [[ $IN_ENGINE -eq 1 ]] || KEPT="$(engine_file keep | head -n1)" || KEPT=""
   [[ -n "$INI" || $IN_ENGINE -eq 1 ]] || say "  the app has registered no chat model (no models.ini in ${PROJECT}_engine)"
   FIRST="$(first_model "$INI" "$KEPT")"
+  # No chat model goes with it: none named for the other host's .env (its admin adds the site's own).
+  if [[ $CHAT_MODELS -eq 0 ]]; then FIRST=""; say "  the chat models are left out (--no-chat-models): the other host adds its own (Admin -> Models)"; fi
   printf 'kind\tbytes\tpath\n' > "$B/models/MODELS"
   n=0; total=0; missing=0
   while IFS=$'\t' read -r kind path; do

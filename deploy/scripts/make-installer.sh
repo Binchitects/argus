@@ -11,6 +11,7 @@
 #   --project NAME     the compose project whose images and volumes it takes (default arena):
 #                      the release's own images are NAME-app, NAME-web... as compose built them
 #   --podman           from Podman's store in place of Docker's
+#   --no-chat-models   with --models: every model but the chat models (airgap.sh --no-chat-models)
 #   --models           the models too (airgap.sh --models); without it they are listed, and
 #                      only the embedding model goes in (small, and the embedding server
 #                      waits for it)
@@ -89,7 +90,7 @@ vercmp() {
   elif [[ "$(printf '%s\n%s\n' "$ap" "$bp" | sort -V | head -n1)" == "$ap" ]]; then echo -1; else echo 1; fi
 }
 
-OUT_ARG="" VERSION_ARG="" PROJECT=arena ENGINE=docker WITH_MODELS=0 MODELS_ARG="" PACKS=0 CA_ARG="" WITHOUT="" LEAVE="" DRY=0
+OUT_ARG="" VERSION_ARG="" PROJECT=arena ENGINE=docker WITH_MODELS=0 NO_CHAT=0 MODELS_ARG="" PACKS=0 CA_ARG="" WITHOUT="" LEAVE="" DRY=0
 DEPS_ARG="" NO_KNOWN=0 IN_ENGINE=0 STAGE_ONLY="" CACHE_ARG="" NO_CACHE=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -98,6 +99,7 @@ while [[ $# -gt 0 ]]; do
     --project) [[ $# -gt 1 ]] || usage_error "--project needs a name"; PROJECT="$2"; shift ;;
     --podman) ENGINE=podman ;;
     --models) WITH_MODELS=1 ;;
+    --no-chat-models) NO_CHAT=1 ;;
     --models-dir) [[ $# -gt 1 ]] || usage_error "--models-dir needs a folder"; MODELS_ARG="$2"; shift ;;
     --packs) PACKS=1 ;;
     --code-arena) [[ $# -gt 1 ]] || usage_error "--code-arena needs a folder"; CA_ARG="$2"; shift ;;
@@ -191,6 +193,7 @@ if [[ $NO_CACHE -eq 0 && $IN_ENGINE -eq 0 && $DRY -eq 0 ]]; then
   AIRGAP_ENV+=(ARENA_IMAGE_CACHE="$CACHE")
 fi
 [[ $WITH_MODELS -eq 1 ]] && AIRGAP+=(--models)
+[[ $NO_CHAT -eq 1 ]] && AIRGAP+=(--no-chat-models)
 [[ -n "$MODELS_ARG" ]] && AIRGAP+=(--models-dir "$MODELS_ARG")
 # Code Arena's packages of this release (older ones in dist/ stay out); made here when there are none and they
 # come from dist/: the .NET packs fetched at the SDK's version, then every system published and packed.

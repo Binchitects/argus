@@ -291,7 +291,7 @@ class BundleTests(unittest.TestCase):
         arenactl.run = lambda cmd, **k: made.append(cmd) or 0
         args = arenactl.argparse.Namespace(podman=False, engine="docker", dry_run=False, no_build=False, without=without,
                                            code_arena="dist", with_deps=False, out=None, models_dir=None, image_cache=None,
-                                           models=False, packs=False, no_image_cache=False)
+                                           models=False, no_chat_models=False, packs=False, no_image_cache=False)
         return arenactl, made, args
 
     def test_a_feature_whose_image_failed_is_left_out(self):

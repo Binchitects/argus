@@ -160,6 +160,25 @@ class AirgapTests(unittest.TestCase):
         self.assertNotIn("arena-airgap/models/library/unregistered/Other.gguf", self.members())
         self.assertIn("models: copied (5 files", self.read("MANIFEST"))
 
+    def test_Without_chat_models_every_other_model_goes_in_the_studio_s_folders_too(self):
+        models = self.s.deploy / "models"
+        self.s.write("studio/chatterbox/conds.pt", "voices", base=models)
+        self.s.write("studio/ace-step/umt5-base/config.json", "{}", base=models)
+        self.s.write("image/upscale/RealESRGAN_x4plus.safetensors", "upscale", base=models)
+        self.s.write("studio/chatterbox/half.part", "a download not finished", base=models)
+        self.pack("--models", "--no-chat-models")
+        rows = [line.split("\t") for line in self.read("models/MODELS").splitlines()[1:]]
+        self.assertEqual([(k, p) for k, _, p in rows], [
+            ("embedding", "embed/nomic-embed-text-v1.5.f16.gguf"),
+            ("studio", "studio/ace-step/umt5-base/config.json"),
+            ("studio", "studio/chatterbox/conds.pt"),
+            ("picture", "image/upscale/RealESRGAN_x4plus.safetensors"),
+        ])
+        self.assertEqual(self.read("models/library/studio/chatterbox/conds.pt"), "voices")
+        self.assertNotIn("arena-airgap/models/library/big/Big-00001-of-00002.gguf", self.members())
+        # No chat model is named for the other host's .env: its admin adds the site's own.
+        self.assertNotIn("model: big/", self.read("MANIFEST"))
+
     def test_The_speech_models_come_from_the_audio_volume(self):
         self.pack()
         self.assertIn("arena-airgap/audio/audio.tar.gz", self.members())

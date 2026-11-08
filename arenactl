@@ -888,7 +888,7 @@ def cmd_bundle(a) -> int:
                         ("--image-cache", a.image_cache)):
         if value:
             cmd += [flag, value]
-    cmd += (["--models"] if a.models else []) + (["--packs"] if a.packs else []) + (["--no-known"] if no_known else []) + (["--dry-run"] if a.dry_run else [])
+    cmd += (["--models"] if a.models else []) + (["--no-chat-models"] if a.no_chat_models else []) + (["--packs"] if a.packs else []) + (["--no-known"] if no_known else []) + (["--dry-run"] if a.dry_run else [])
     cmd += ["--no-image-cache"] if a.no_image_cache else []
     if deps_dir:
         cmd += ["--deps", str(deps_dir)]
@@ -1208,6 +1208,7 @@ def main(argv: list[str]) -> int:
     s = sub.add_parser("bundle", help="the offline installer, dist/argus-arena-VERSION-offline.run")
     s.add_argument("--with-deps", action="store_true", help="Docker, Compose and NVIDIA's toolkit inside it, installed from it where missing")
     s.add_argument("--models", action="store_true", help="the models too")
+    s.add_argument("--no-chat-models", action="store_true", help="with --models: every model but the chat models (each site brings its own)")
     s.add_argument("--models-dir")
     s.add_argument("--packs", action="store_true", help="the knowledge packs in packs/")
     s.add_argument("--without", help="features left out of the bundle")

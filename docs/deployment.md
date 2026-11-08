@@ -1073,7 +1073,8 @@ On a Linux machine with this checkout. It builds every feature's images first
 
 | option | what |
 |---|---|
-| `--models`, `--models-dir DIR` | the models too, as `airgap.sh --models`; without it they are listed, and only the embedding model goes in |
+| `--models`, `--models-dir DIR` | the models too, as `airgap.sh --models`: the chat models the app registered, and the picture, video, embedding, decision and studio models; without it they are listed, and only the embedding model goes in |
+| `--no-chat-models` | with `--models`: every model but the chat models (each site adds its own under Admin → Models) |
 | `--packs` | the knowledge packs in `packs/` |
 | `--code-arena DIR` | Code Arena's packages (default `dist/`, which `./arenactl code-arena` fills, and this when it is empty) |
 | `--without A,B` | features whose images stay out: a smaller file for hosts without them (`chat-models,pictures,video,gpu-monitoring,power-limits` for hosts with no GPU); the installer then cannot turn them on |
